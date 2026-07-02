@@ -8,19 +8,19 @@ import base64
 
 import pytest
 
-from src.modules.iris.rules.spf import check_spf
-from src.modules.iris.rules.suspicious_tld import check_suspicious_tld
-from src.modules.iris.rules.url_in_subject import check_url_in_subject
-from src.modules.iris.rules.domain_alignment import check_domain_alignment
-from src.modules.iris.rules.lookalike_domain import check_lookalike_domain
-from src.modules.iris.rules.reply_to_free_provider import check_reply_to_free_provider
-from src.modules.iris.rules.reply_to import check_reply_to
-from src.modules.iris.rules.msgid_domain import check_msgid_domain
-from src.modules.iris.rules.list_unsubscribe import check_list_unsubscribe
-from src.modules.iris.rules.alarming_keywords import check_alarming_keywords
-from src.modules.iris.rules.misspelled_brands import check_misspelled_brands
-from src.modules.iris.rules.content_type_check import check_content_type
-from src.modules.iris.rules.registry import RuleResult
+from src.modules.iris.services.rules.spf import check_spf
+from src.modules.iris.services.rules.suspicious_tld import check_suspicious_tld
+from src.modules.iris.services.rules.url_in_subject import check_url_in_subject
+from src.modules.iris.services.rules.domain_alignment import check_domain_alignment
+from src.modules.iris.services.rules.lookalike_domain import check_lookalike_domain
+from src.modules.iris.services.rules.reply_to_free_provider import check_reply_to_free_provider
+from src.modules.iris.services.rules.reply_to import check_reply_to
+from src.modules.iris.services.rules.msgid_domain import check_msgid_domain
+from src.modules.iris.services.rules.list_unsubscribe import check_list_unsubscribe
+from src.modules.iris.services.rules.alarming_keywords import check_alarming_keywords
+from src.modules.iris.services.rules.misspelled_brands import check_misspelled_brands
+from src.modules.iris.services.rules.content_type_check import check_content_type
+from src.modules.iris.services.registry import RuleResult
 from src.modules.iris.managers import IrisManager
 
 pytestmark = pytest.mark.unit

@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import pytest
 
-from src.modules.iris.services.message_parser import parse_raw_message, MessageContext, Attachment
-from src.modules.iris.rules.received_chain import check_received_chain
-from src.modules.iris.rules.body_links import check_body_links
-from src.modules.iris.rules.body_content import check_body_content
-from src.modules.iris.rules.suspicious_attachments import check_suspicious_attachments
+from src.modules.iris.services.parsers import parse_raw_message, MessageContext, Attachment
+from src.modules.iris.services.rules.received_chain import check_received_chain
+from src.modules.iris.services.rules.body_links import check_body_links
+from src.modules.iris.services.rules.body_content import check_body_content
+from src.modules.iris.services.rules.suspicious_attachments import check_suspicious_attachments
 
 pytestmark = pytest.mark.unit
 
@@ -169,6 +169,101 @@ def test_body_links_passes_when_clean():
     raw = (
         "From: a@b.com\r\nSubject: Hi\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
         "<a href=\"https://some-business.com/notes\">Ver notas</a>\r\n"
+    )
+    ctx = parse_raw_message(raw)
+    result = check_body_links(ctx)
+    assert result.verdict == "pass"
+
+
+# ------------------------------------------------------- Body links deep URL heuristics (D2)
+
+def test_body_links_flags_userinfo_credential_lure():
+    # http://paypal.com@evil.io/ — everything before '@' is attacker text;
+    # the browser only ever navigates to the real host after it.
+    raw = (
+        "From: a@b.com\r\nSubject: Hi\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
+        "<a href=\"http://paypal.com@evil.io/login\">Sign in</a>\r\n"
+    )
+    ctx = parse_raw_message(raw)
+    result = check_body_links(ctx)
+    assert result.verdict == "fail"
+    assert "userinfo_credential_lure" in result.details["types"]
+
+
+def test_body_links_flags_data_uri_link():
+    raw = (
+        "From: a@b.com\r\nSubject: Hi\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
+        "<a href=\"data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==\">Open</a>\r\n"
+    )
+    ctx = parse_raw_message(raw)
+    result = check_body_links(ctx)
+    assert result.verdict == "fail"
+    assert "data_uri_link" in result.details["types"]
+
+
+def test_body_links_flags_excessive_subdomains():
+    raw = (
+        "From: a@b.com\r\nSubject: Hi\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
+        "<a href=\"https://click.email.notices.secure-portal-x7.info/x\">Open</a>\r\n"
+    )
+    ctx = parse_raw_message(raw)
+    result = check_body_links(ctx)
+    assert result.verdict == "fail"
+    assert "excessive_subdomains" in result.details["types"]
+
+
+def test_body_links_flags_dense_percent_encoding():
+    obfuscated = "https://sketchy-host.tk/" + "%2e" * 20
+    raw = (
+        "From: a@b.com\r\nSubject: Hi\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
+        f"<a href=\"{obfuscated}\">Open</a>\r\n"
+    )
+    ctx = parse_raw_message(raw)
+    result = check_body_links(ctx)
+    assert result.verdict == "fail"
+    assert "dense_encoding" in result.details["types"]
+
+
+def test_body_links_flags_insecure_credential_page():
+    # http (not https) + a credential-harvest keyword on a third-party host.
+    raw = (
+        "From: a@b.com\r\nSubject: Hi\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
+        "<a href=\"http://random-host.tk/account/verify\">Verify now</a>\r\n"
+    )
+    ctx = parse_raw_message(raw)
+    result = check_body_links(ctx)
+    assert result.verdict == "fail"
+    assert "insecure_credential_page" in result.details["types"]
+
+
+def test_body_links_flags_credential_harvest_path_over_https():
+    raw = (
+        "From: a@b.com\r\nSubject: Hi\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
+        "<a href=\"https://random-host.tk/account/login\">Log in</a>\r\n"
+    )
+    ctx = parse_raw_message(raw)
+    result = check_body_links(ctx)
+    assert result.verdict == "fail"
+    assert "credential_harvest_path" in result.details["types"]
+
+
+def test_body_links_does_not_flag_login_on_senders_own_domain():
+    # A company legitimately linking to its own login page must not be
+    # penalised just for containing "login" in the path.
+    raw = (
+        "From: Acme <notices@acme.com>\r\nSubject: Hi\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n\r\n"
+        "<a href=\"https://acme.com/account/login\">Log in</a>\r\n"
+    )
+    ctx = parse_raw_message(raw)
+    result = check_body_links(ctx)
+    assert result.verdict == "pass"
+
+
+def test_body_links_does_not_flag_login_on_known_brand_domain():
+    raw = (
+        "From: a@b.com\r\nSubject: Hi\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
+        "<a href=\"https://paypal.com/signin\">Sign in to PayPal</a>\r\n"
     )
     ctx = parse_raw_message(raw)
     result = check_body_links(ctx)

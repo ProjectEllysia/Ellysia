@@ -31,10 +31,10 @@ from .exceptions import (
 )
 from .model import IrisAnalysis, IrisDocument, IrisRuleResult
 from .repositories import IrisAnalysisRepository, IrisReportRepository, IrisRuleResultRepository
-from .rules import iris_rules, RuleResult
-from .rules.display_name_spoof import FREE_PROVIDER_DOMAINS
+from .services.rules import iris_rules, RuleResult
+from .services.shared import is_free_provider
 from .services import parse_raw_headers, parse_raw_message
-from .services.received_parser import build_path
+from .services.parsers import build_path
 from .services.reports import IrisPDFCreator
 
 
@@ -54,14 +54,6 @@ _VERDICT_SEVERITY = {v: i for i, v in enumerate(_VERDICT_ORDER)}
 # DMARC pass, etc.) buried a few strong phishing signals — a clean-auth BEC
 # from Gmail used to net *positive* despite a -23 risk payload underneath.
 _CEILING = 100.0
-
-
-def _is_free_provider(domain: Optional[str]) -> bool:
-    """True when *domain* is (a subdomain of) a known free webmail provider."""
-    if not domain:
-        return False
-    domain = domain.lower()
-    return any(domain == d or domain.endswith("." + d) for d in FREE_PROVIDER_DOMAINS)
 
 
 class IrisManager(TaskTrackingMixin):
@@ -85,8 +77,13 @@ class IrisManager(TaskTrackingMixin):
     # PUBLIC API
     # =========================================================================
 
-    def analyze(self, raw_headers: str | None, user_id: int, title: str | None = None,
-                raw_message: str | None = None) -> int:
+    def analyze(
+        self,
+        raw_headers: str | None,
+        user_id: int,
+        title: str | None = None,
+        raw_message: str | None = None
+    ) -> int:
         """Submit raw email headers (or a full message) for background analysis.
 
         Creates an IrisAnalysis record in ``pending`` state and enqueues
@@ -124,6 +121,9 @@ class IrisManager(TaskTrackingMixin):
         self._validate_headers_pre(raw_input)
         analysis_id = self._create_analysis_record(raw_input, user_id, title=title)
         logger.info(f"Iris analysis {analysis_id} created for user {user_id}")
+
+        if self.TASK_CATEGORY is None:
+            raise IrisExecutionError("Task category is not defined for IrisManager.")
 
         self._tq.submit(
             func=IrisManager.execute_iris_analysis,
@@ -598,8 +598,8 @@ class IrisManager(TaskTrackingMixin):
         # pattern — it passes SPF/DKIM/DMARC trivially, so only the body and
         # the free-provider tell give it away.
         bec_free = bec_fail and (
-            _is_free_provider(bec.details.get("from_domain"))
-            or _is_free_provider(bec.details.get("reply_domain"))
+            is_free_provider(bec.details.get("from_domain"))
+            or is_free_provider(bec.details.get("reply_domain"))
         )
 
         body_links = res("Body Links")

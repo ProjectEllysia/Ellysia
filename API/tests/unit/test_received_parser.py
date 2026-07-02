@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.modules.iris.services.received_parser import (
+from src.modules.iris.services.parsers import (
     parse_received_line,
     build_path,
 )
