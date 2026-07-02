@@ -410,3 +410,27 @@ def test_attachments_passes_on_benign_pdf():
     ])
     result = check_suspicious_attachments(ctx)
     assert result.verdict == "pass"
+
+
+def test_attachments_includes_sha256_and_md5_when_content_present():
+    # D8: flagged attachments carry hashes so they're pivotable as IOCs.
+    import hashlib
+    content = b"MZ\x00\x00fake-exe-content"
+    ctx = MessageContext(headers={}, attachments=[
+        Attachment(filename="invoice.exe", content_type="application/octet-stream",
+                   size=len(content), content=content),
+    ])
+    result = check_suspicious_attachments(ctx)
+    finding = result.details["findings"][0]
+    assert finding["sha256"] == hashlib.sha256(content).hexdigest()
+    assert finding["md5"] == hashlib.md5(content).hexdigest()
+
+
+def test_attachments_no_hash_keys_when_content_empty():
+    ctx = MessageContext(headers={}, attachments=[
+        Attachment(filename="invoice.exe", content_type="application/octet-stream", size=0),
+    ])
+    result = check_suspicious_attachments(ctx)
+    finding = result.details["findings"][0]
+    assert "sha256" not in finding
+    assert "md5" not in finding

@@ -13,6 +13,7 @@ submission, where individual parts cannot be inspected.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import re
 import zipfile
@@ -59,6 +60,18 @@ def _zip_contains_executable(content: bytes) -> bool:
             return any(_get_extension(name) in dangerous_extensions() for name in zf.namelist())
     except (zipfile.BadZipFile, OSError, RuntimeError):
         return False
+
+
+def _content_hashes(content: bytes) -> dict[str, str] | None:
+    """SHA256 + MD5 of an attachment's bytes, for pivoting in threat-intel
+    tools (VirusTotal, internal blocklists). ``None`` when there is no
+    content to hash (e.g. an empty part)."""
+    if not content:
+        return None
+    return {
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "md5": hashlib.md5(content).hexdigest(),
+    }
 
 
 def _inspect_real_attachment(att) -> dict | None:
@@ -171,7 +184,15 @@ def check_suspicious_attachments(context) -> RuleResult:
     if not attachments:
         return _check_headers_fallback(context.headers)
 
-    findings = [f for att in attachments if (f := _inspect_real_attachment(att))]
+    findings: list[dict] = []
+    for att in attachments:
+        finding = _inspect_real_attachment(att)
+        if not finding:
+            continue
+        hashes = _content_hashes(att.content)
+        if hashes:
+            finding.update(hashes)
+        findings.append(finding)
 
     if not findings:
         return RuleResult(score=0, verdict="pass", details={"attachment_count": len(attachments)})

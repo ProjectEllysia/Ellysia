@@ -115,17 +115,26 @@ limitando el total. 8 tests nuevos en `test_iris_message_parser.py`
 (incluyendo dos negativos: marca propia y dominio del remitente no se
 penalizan por tener "login" en el path).
 
-### `[ ]` O1 · Export de IOCs — **A/Q**
-Endpoint `GET /iris/results/<id>/iocs?format=json|csv|stix`. **Idea:** servicio
-`services/iocs.py` que recolecta de los `details` ya persistidos: dominios
-(From/Reply-To/Return-Path), hosts de links, IPs del Received, hashes de
-adjuntos (cuando exista D8), remitentes. STIX 2.1 como bundle simple de
-indicators.
+### `[x]` O1 · Export de IOCs — **A/Q**
+**Hecho**, con un scope algo distinto al esbozo original: en vez de un
+servicio `iocs.py` que escarba los `details` heterogéneos ya persistidos
+(un dict distinto por regla, frágil ante cambios futuros), `IrisManager.
+get_analysis_iocs` re-parsea `raw_headers` con `parse_raw_message` (mismo
+patrón que `get_analysis_path`, sin columna nueva en BD) y extrae
+dominios/emails de From-Reply-To-Return-Path, hosts+URLs de los links del
+cuerpo, e IPs de la cadena Received — consistente aunque cambien las
+reglas. Endpoint `GET /iris/results/<id>/iocs`
+(`AnalysisIocsResponseSchema`). Export **CSV** generado en el cliente desde
+los datos ya cargados (sin round-trip extra). **Diferido:** STIX 2.1 (mucho
+más esfuerzo del que justifica un "quick win") y hashes de adjuntos (depende
+de D8, no implementado aún).
 
-### `[ ]` O2 · Render defanged en la UI — **A/Q**
-Frontend puro: helper `defang(url)` (`hxxp://`, `[.]`) en un composable
-(`web/app/src/composables/useDefang.js`) aplicado en `IrisReportViewer.vue` a
-todo dominio/URL/IP de los details. Toggle para ver el valor real + copiar.
+### `[x]` O2 · Render defanged en la UI — **A/Q**
+**Hecho**: helper `defang()` inline en `IrisReportViewer.vue` (`hxxp://`,
+`[.]`, `[at]`) aplicado a las 4 categorías del panel de IOCs. Sin toggle
+"ver valor real": el texto plano no es clicable en ningún caso, así que
+mostrar siempre la forma defanged es el default más seguro y no hacía falta
+la complejidad de un composable aparte ni de un toggle.
 
 ### `[ ]` I2 · Desanidar `.eml` adjunto (message/rfc822) — **S/M**
 El botón "reportar phishing" de Outlook/Gmail adjunta el correo original como
@@ -136,23 +145,37 @@ El botón "reportar phishing" de Outlook/Gmail adjunta el correo original como
 contexto). Decisión de UX: analizar el interno automáticamente y señalarlo en
 el informe.
 
-### `[ ]` D8 · Hashes de adjuntos como IOC — **B/Q**
-`Attachment` ya lleva `content: bytes`. **Idea:** calcular SHA256 (y MD5) en
-`suspicious_attachments` y añadirlos a `details.findings[*].sha256`; consumidos
-por O1.
+### `[x]` D8 · Hashes de adjuntos como IOC — **B/Q**
+**Hecho**, con más alcance del sugerido: además de SHA256+MD5 en
+`details.findings[*]` de `suspicious_attachments` (solo adjuntos ya
+marcados sospechosos), `IrisManager.get_analysis_iocs` (O1) calcula SHA256
+de **todos** los adjuntos con contenido, sin importar si alguna regla los
+marcó — un analista pivotando a VirusTotal quiere el hash exista o no un
+hallazgo. Nueva categoría `hashes` en el endpoint de IOCs, el schema y el
+panel del frontend.
 
-### `[ ]` D4 · RLO/bidi + confusables Unicode — **B/Q**
-Nueva regla `services/rules/unicode_evasion.py`: detectar `U+202E` (RLO) y demás
-controles bidi en Subject/From/filenames (spoofing de extensión
-`invoice[U+202E]fdp.exe`), y caracteres de rangos confusables (cirílico/griego
-mezclado con latino) en display name y dominio. Los rangos son lógica (código);
-no requiere config.
+### `[x]` D4 · RLO/bidi + confusables Unicode — **B/Q**
+**Hecho**: nueva regla `services/rules/unicode_evasion.py`. Detecta
+controles bidi (`U+202E` RLO y 10 más) en Subject/From/nombres de adjunto
+— spoofing de extensión (`invoice[RLO]fdp.exe`) — y mezcla de scripts
+confusables (cirílico/griego + latino) en display name/subject/dominio.
+Los codepoints se construyen con `chr(0x202E)` etc. en vez de glifos
+literales en el fuente (embeber el propio carácter RLO en código es
+exactamente el patrón "Trojan Source" / CVE-2021-42574 que la regla
+existe para detectar — los tests hacen lo mismo por la misma razón). Solo
+flagea mezcla de scripts, nunca texto 100% no-latino (evita penalizar
+correo multilingüe legítimo).
 
-### `[ ]` D5 · Abuso de encoded-words (RFC 2047) — **B/Q**
-Nueva regla `services/rules/encoded_word_abuse.py`: múltiples bloques `=?charset?...?=`
-encadenados en Subject/From, charsets exóticos (`utf-7`, mezclas), encoded-words
-que decodifican a contenido con URLs o keywords alarmantes (evasión de
-filtros). Reutiliza `services/parsers.decode_mime_words`.
+### `[x]` D5 · Abuso de encoded-words (RFC 2047) — **B/Q**
+**Hecho**: nueva regla `services/rules/encoded_word_abuse.py`. Detecta
+bloques `=?charset?...?=` atomizados (muchos bloques cortos encadenados,
+heurística: ≥4 bloques con longitud media decodificada <8 — evita
+falsos positivos en subjects internacionales largos y legítimos que
+generan pocos bloques largos), charset `utf-7`/variantes (nuevo dataset
+`iris.data.exotic_charsets`, deliberadamente sin incluir charsets
+regionales legítimos como shift-jis/iso-2022-jp), charsets mezclados en
+la misma cabecera, y URLs que solo aparecen tras decodificar (invisibles
+en la cabecera cruda). Reutiliza `services/parsers.decode_mime_words`.
 
 ### `[ ]` D7 · Cadena ARC — **B/Q**
 Nueva regla `services/rules/arc_chain.py`: presencia y validez *declarada* de

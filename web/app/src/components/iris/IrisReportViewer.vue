@@ -169,6 +169,41 @@
         </p>
       </div>
 
+      <!-- IOCs (collapsible, cargados bajo demanda) -->
+      <div v-if="status === 'finished'" class="rv-raw">
+        <button type="button" class="raw-toggle" @click="toggleIocs">
+          <svg :class="{ rotated: iocsOpen }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="toggle-chevron"><polyline points="6 9 12 15 18 9"/></svg>
+          Indicadores de compromiso (IOCs)
+        </button>
+        <Transition name="raw-reveal">
+          <div v-if="iocsOpen" class="ioc-panel">
+            <div v-if="iocsLoading" class="rv-path-loading">
+              <div class="spinner spinner--sm"></div>
+              <span>Extrayendo IOCs…</span>
+            </div>
+            <template v-else-if="iocsData">
+              <p class="ioc-hint">
+                Valores <em>defanged</em> para pegar de forma segura sin activar enlaces.
+              </p>
+              <div v-for="cat in iocCategories" :key="cat.key" class="ioc-category">
+                <div class="ioc-category-header">
+                  <span class="ioc-category-title">{{ cat.label }} ({{ iocsData[cat.key].length }})</span>
+                </div>
+                <ul v-if="iocsData[cat.key].length" class="ioc-list">
+                  <li v-for="(val, i) in iocsData[cat.key]" :key="i" class="ioc-item">{{ defang(val) }}</li>
+                </ul>
+                <p v-else class="ioc-empty">Ninguno detectado.</p>
+              </div>
+              <button type="button" class="btn-export-csv" @click="exportIocsCsv">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Exportar CSV
+              </button>
+            </template>
+            <p v-else class="rv-path-empty">No se pudieron cargar los IOCs.</p>
+          </div>
+        </Transition>
+      </div>
+
       <!-- Raw headers (collapsible) -->
       <div class="rv-raw">
         <button type="button" class="raw-toggle" @click="rawOpen = !rawOpen">
@@ -281,6 +316,62 @@ const pathVisible = computed(() => {
     pathData.value || pathLoading.value
   )
 })
+
+/* ── IOCs (O1: export, O2: defanged rendering) ── */
+const iocsOpen = ref(false)
+const iocCategories = [
+  { key: 'domains', label: 'Dominios' },
+  { key: 'urls', label: 'URLs' },
+  { key: 'ips', label: 'IPs' },
+  { key: 'emails', label: 'Emails' },
+  { key: 'hashes', label: 'Hashes (SHA256)' },
+]
+
+const iocsData = computed(() => {
+  if (!props.reportId) return null
+  const cached = irisStore.iocsCache.get(props.reportId)
+  if (cached) return cached
+  return irisStore.currentIocs?.data?.analysisId === props.reportId
+    ? irisStore.currentIocs.data
+    : null
+})
+const iocsLoading = computed(() => {
+  if (!props.reportId) return false
+  return irisStore.currentIocs?.loading && irisStore.currentIocs?.data?.analysisId !== props.reportId
+})
+
+function toggleIocs() {
+  iocsOpen.value = !iocsOpen.value
+  if (iocsOpen.value && !iocsData.value) irisStore.iocsFor(props.reportId)
+}
+
+// Neutraliza dominios/URLs/IPs/emails para que no se conviertan en enlaces
+// clicables ni resuelvan accidentalmente al pegarlos en otra herramienta.
+function defang(value) {
+  return String(value)
+    .replace(/https?/gi, (m) => m.replace(/^http/i, 'hxxp'))
+    .replace(/\./g, '[.]')
+    .replace(/@/g, '[at]')
+}
+
+function exportIocsCsv() {
+  if (!iocsData.value) return
+  const rows = [['type', 'value']]
+  for (const cat of iocCategories) {
+    for (const val of iocsData.value[cat.key]) {
+      rows.push([cat.key, val])
+    }
+  }
+  const csv = rows.map(r => r.map(f => `"${String(f).replace(/"/g, '""')}"`).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `iris_iocs_${props.reportId}.csv`
+  document.body.appendChild(a)
+  a.click()
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove() }, 1000)
+}
 
 /* ── Informes PDF ── */
 const generatingDocument = ref(false)
@@ -1035,5 +1126,83 @@ watch(
   font-size: 0.88rem;
   font-family: var(--font-mono);
   text-align: center;
+}
+
+/* IOCs */
+.ioc-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0.2rem 0 0.6rem;
+}
+
+.ioc-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.ioc-category-header {
+  margin-bottom: 0.4rem;
+}
+
+.ioc-category-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ioc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.ioc-item {
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border-solid);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.ioc-empty {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.btn-export-csv {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-export-csv:hover {
+  opacity: 0.85;
+}
+
+.btn-export-csv svg {
+  width: 16px;
+  height: 16px;
 }
 </style>

@@ -166,6 +166,22 @@ class ReceivedPathResponseSchema(Schema):
     reason = fields.String(load_default=None)
 
 
+class AnalysisIocsResponseSchema(Schema):
+    """Response for ``GET /iris/results/<id>/iocs`` (O1).
+
+    Each field is a sorted, deduplicated list of pivotable indicators
+    derived from the analyzed message — empty lists (not null) when a
+    category yields nothing (e.g. no body links in a headers-only
+    submission).
+    """
+    analysisId = fields.Integer()
+    domains = fields.List(fields.String())
+    urls = fields.List(fields.String())
+    ips = fields.List(fields.String())
+    emails = fields.List(fields.String())
+    hashes = fields.List(fields.String())
+
+
 class GenerateDocumentResponseSchema(Schema):
     """Response returned immediately after queuing PDF generation."""
     message = fields.String()

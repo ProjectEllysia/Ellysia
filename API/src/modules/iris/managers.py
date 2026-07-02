@@ -11,7 +11,9 @@ Coordinates the analysis lifecycle:
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import logging
 from dataclasses import replace
 from datetime import datetime
@@ -26,15 +28,16 @@ from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixi
 from .exceptions import (
     IrisAnalysisNotFoundError,
     IrisAnalysisNotReadyError,
+    IrisExecutionError,
     IrisInvalidInputError,
     IrisInvalidStateError,
 )
 from .model import IrisAnalysis, IrisDocument, IrisRuleResult
 from .repositories import IrisAnalysisRepository, IrisReportRepository, IrisRuleResultRepository
 from .services.rules import iris_rules, RuleResult
-from .services.shared import is_free_provider
+from .services.shared import extract_domain, is_free_provider, url_host
 from .services import parse_raw_headers, parse_raw_message
-from .services.parsers import build_path
+from .services.parsers import build_path, parse_received_line
 from .services.reports import IrisPDFCreator
 
 
@@ -276,6 +279,71 @@ class IrisManager(TaskTrackingMixin):
         return {
             "analysisId": analysis.id,
             **build_path(context.received_headers),
+        }
+
+    _EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+")
+
+    def get_analysis_iocs(self, analysis_id: int, user_id: int) -> Dict[str, Any]:
+        """Extract Indicators of Compromise (IOCs) from an analysis.
+
+        Derived on demand from ``raw_headers`` (same approach as
+        ``get_analysis_path`` — no extra column needed) by re-parsing the
+        message rather than scraping each rule's ad-hoc ``details`` dict:
+        the parsed ``MessageContext`` already gives a uniform view of
+        headers, body links and the Received chain regardless of which
+        rules fired, so this stays correct as rules are added/changed.
+
+        Returns:
+            A dict with ``domains``, ``urls``, ``ips``, ``emails`` and
+            ``hashes`` (SHA256 of every attachment, not just ones a rule
+            flagged — an analyst pivoting to a threat-intel lookup wants
+            the hash regardless of whether a heuristic fired) — each a
+            sorted, deduplicated list of strings pivotable in an external
+            tool (SIEM, threat-intel lookup, blocklist).
+        """
+        analysis = self.assert_analysis_ownership(analysis_id, user_id)
+        context = parse_raw_message(analysis.raw_headers or "")
+
+        domains: set[str] = set()
+        emails: set[str] = set()
+        urls: set[str] = set()
+        ips: set[str] = set()
+        hashes: set[str] = set()
+
+        for header_name in ("from", "reply-to", "return-path"):
+            raw_value = context.headers.get(header_name, "")
+            domain = extract_domain(raw_value)
+            if domain:
+                domains.add(domain)
+            email_match = self._EMAIL_RE.search(raw_value)
+            if email_match:
+                emails.add(email_match.group(0).lower())
+
+        for link in context.links:
+            href = (link.href or "").strip()
+            if not href:
+                continue
+            urls.add(href)
+            host = url_host(href)
+            if host:
+                domains.add(host)
+
+        for line in context.received_headers:
+            hop = parse_received_line(line)
+            if hop.get("fromIp"):
+                ips.add(hop["fromIp"])
+
+        for att in context.attachments:
+            if att.content:
+                hashes.add(hashlib.sha256(att.content).hexdigest())
+
+        return {
+            "analysisId": analysis.id,
+            "domains": sorted(domains),
+            "urls": sorted(urls),
+            "ips": sorted(ips),
+            "emails": sorted(emails),
+            "hashes": sorted(hashes),
         }
 
     def cancel_analysis(self, analysis_id: int, user_id: int) -> bool:
@@ -554,7 +622,7 @@ class IrisManager(TaskTrackingMixin):
         try:
             with UnitOfWork() as uow:
                 repo = IrisRuleResultRepository(uow)
-                rr = IrisRuleResult(
+                result = IrisRuleResult(
                     analysis_id=analysis_id,
                     rule_name=rule_def["name"],
                     category=rule_def["category"],
@@ -564,7 +632,7 @@ class IrisManager(TaskTrackingMixin):
                     recommendation=result.recommendation,
                     position=position,
                 )
-                repo.save(rr)
+                repo.save(result)
         except Exception as e:
             logger.error(f"Failed to persist rule result for analysis {analysis_id}: {e}", exc_info=True)
 

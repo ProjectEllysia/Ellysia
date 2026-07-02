@@ -19,6 +19,8 @@ export const useIrisStore = defineStore('iris', () => {
   const currentStatus = reactive({ polling: false, status: null, progress: null })
   const pathCache = reactive(new Map())
   const currentPath = reactive({ loading: false, data: null })
+  const iocsCache = reactive(new Map())
+  const currentIocs = reactive({ loading: false, data: null })
 
   const documents = ref([])
   const documentsLoading = ref(false)
@@ -150,6 +152,31 @@ export const useIrisStore = defineStore('iris', () => {
     }
   }
 
+  /** Indicadores de compromiso (O1): dominios/URLs/IPs/emails extraídos bajo demanda. */
+  async function iocsFor(id) {
+    if (!id) return null
+    if (iocsCache.has(id)) {
+      currentIocs.loading = false
+      currentIocs.data = iocsCache.get(id)
+      return currentIocs.data
+    }
+    currentIocs.loading = true
+    currentIocs.data = null
+    try {
+      const res = await apiFetch(`/iris/results/${id}/iocs`)
+      if (!res?.ok) {
+        currentIocs.loading = false
+        return null
+      }
+      const data = await res.json()
+      iocsCache.set(id, data)
+      currentIocs.data = data
+      return data
+    } finally {
+      currentIocs.loading = false
+    }
+  }
+
   function startPolling(id) {
     stopPolling()
     currentStatus.polling = true
@@ -205,10 +232,12 @@ export const useIrisStore = defineStore('iris', () => {
     }
     toast.show('An\u00e1lisis eliminado.', 'success')
     pathCache.delete(id)
+    iocsCache.delete(id)
     if (currentId.value === id) {
       currentId.value = null
       currentReport.data = null
       currentPath.data = null
+      currentIocs.data = null
     }
     await fetchResults()
     return true
@@ -219,6 +248,7 @@ export const useIrisStore = defineStore('iris', () => {
     stopPolling()
     currentReport.data = null
     currentPath.data = null
+    currentIocs.data = null
     if (id === null) {
       currentId.value = null
       currentStatus.status = null
@@ -334,8 +364,9 @@ export const useIrisStore = defineStore('iris', () => {
   return {
     analyses, loading, submitting, totalCount, page, perPage, loadingMore, hasMore,
     currentId, currentReport, currentStatus, currentPath, pathCache,
+    currentIocs, iocsCache,
     documents, documentsLoading,
-    submitAnalysis, fetchResults, fetchMoreResults, getReport, getStatus, pathFor,
+    submitAnalysis, fetchResults, fetchMoreResults, getReport, getStatus, pathFor, iocsFor,
     cancelAnalysis, deleteAnalysis, selectAnalysis, goToPage,
     startPolling, stopPolling,
     generateDocument, fetchDocuments, getDocumentStatus, downloadDocument, deleteDocument,

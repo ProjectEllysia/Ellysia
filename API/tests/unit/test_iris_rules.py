@@ -423,3 +423,82 @@ def test_aggregate_score_clean_message_stays_at_ceiling():
 def test_aggregate_score_floored_at_zero():
     results = [RuleResult(score=-80, verdict="fail", details={}) for _ in range(3)]
     assert IrisManager._aggregate_score(results) == 0
+
+
+# ----------------------------------------------------------- IOC extraction (O1)
+
+def _iocs_for(monkeypatch, raw_message):
+    from types import SimpleNamespace
+    fake_analysis = SimpleNamespace(id=42, raw_headers=raw_message)
+    monkeypatch.setattr(
+        IrisManager, "assert_analysis_ownership",
+        classmethod(lambda cls, analysis_id, user_id: fake_analysis),
+    )
+    return IrisManager().get_analysis_iocs(analysis_id=42, user_id=1)
+
+
+def test_iocs_extracts_domains_emails_from_headers(monkeypatch):
+    raw = (
+        "From: Attacker <phisher@evil-domain.tk>\r\n"
+        "Reply-To: reply@another-evil.io\r\n"
+        "Subject: Hi\r\n\r\n"
+    )
+    result = _iocs_for(monkeypatch, raw)
+    assert result["analysisId"] == 42
+    assert "evil-domain.tk" in result["domains"]
+    assert "another-evil.io" in result["domains"]
+    assert "phisher@evil-domain.tk" in result["emails"]
+    assert "reply@another-evil.io" in result["emails"]
+    assert result["urls"] == []
+    assert result["ips"] == []
+
+
+def test_iocs_extracts_urls_and_hosts_from_body_links(monkeypatch):
+    raw = (
+        "From: a@b.com\r\nSubject: Hi\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
+        "<a href=\"http://sketchy-host.tk/login\">click</a>\r\n"
+    )
+    result = _iocs_for(monkeypatch, raw)
+    assert "http://sketchy-host.tk/login" in result["urls"]
+    assert "sketchy-host.tk" in result["domains"]
+
+
+def test_iocs_extracts_ips_from_received_chain(monkeypatch):
+    raw = (
+        "From: a@b.com\r\nSubject: Hi\r\n"
+        "Received: from mail.evil.tk (mail.evil.tk [203.0.113.9])\r\n"
+        "    by mx.example.com with ESMTP id abc123;\r\n"
+        "    Wed, 25 Jun 2026 10:00:00 +0000\r\n\r\n"
+    )
+    result = _iocs_for(monkeypatch, raw)
+    assert "203.0.113.9" in result["ips"]
+
+
+def test_iocs_empty_lists_when_headers_only_and_clean(monkeypatch):
+    raw = "From: a@trusted.com\r\nSubject: Hi\r\n\r\n"
+    result = _iocs_for(monkeypatch, raw)
+    assert result["domains"] == ["trusted.com"]
+    assert result["urls"] == []
+    assert result["ips"] == []
+    assert result["emails"] == ["a@trusted.com"]
+    assert result["hashes"] == []
+
+
+def test_iocs_includes_attachment_sha256(monkeypatch):
+    # D8: every attachment's hash is surfaced as an IOC, not just ones a
+    # rule flagged as suspicious.
+    import base64
+    import hashlib
+    content = b"fake-attachment-bytes"
+    encoded = base64.b64encode(content).decode()
+    raw = (
+        "From: a@b.com\r\nSubject: Hi\r\n"
+        "Content-Type: multipart/mixed; boundary=\"BOUND\"\r\n\r\n"
+        "--BOUND\r\nContent-Type: text/plain\r\n\r\nhello\r\n"
+        "--BOUND\r\nContent-Type: application/octet-stream\r\n"
+        "Content-Disposition: attachment; filename=\"file.bin\"\r\n"
+        "Content-Transfer-Encoding: base64\r\n\r\n"
+        f"{encoded}\r\n--BOUND--\r\n"
+    )
+    result = _iocs_for(monkeypatch, raw)
+    assert result["hashes"] == [hashlib.sha256(content).hexdigest()]

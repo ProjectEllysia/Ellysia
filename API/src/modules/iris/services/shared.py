@@ -359,6 +359,15 @@ _DEFAULTS: dict[str, Any] = {
         "invoice", "wallet", "suspended",
     ],
 
+    # Charsets RFC 2047 casi nunca legítimos en correo moderno (todo lo
+    # multilingüe genuino usa UTF-8 hoy) y con historial de uso como vector
+    # de evasión de filtros/XSS. Deliberadamente NO incluye charsets
+    # regionales legítimos (shift-jis, iso-2022-jp, koi8-r…) para no
+    # penalizar correo internacional real.
+    "exotic_charsets": [
+        "utf-7", "unicode-1-1-utf-7", "csunicode11utf7", "x-unicode-2-0-utf-7",
+    ],
+
     # Patrones de destinatarios ocultos en el To.
     "undisclosed_patterns": [
         "undisclosed", "undisclosed-recipients", "undisclosed recipients",
@@ -449,6 +458,9 @@ def undisclosed_patterns() -> tuple[str, ...]:
 
 def url_phishing_keywords() -> tuple[str, ...]:
     return _cached_tuple("url_phishing_keywords")
+
+def exotic_charsets() -> tuple[str, ...]:
+    return _cached_tuple("exotic_charsets")
 
 
 @lru_cache(maxsize=None)

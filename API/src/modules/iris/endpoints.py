@@ -46,6 +46,7 @@ from .schemas import (
     AnalysisDeleteResponseSchema,
     AnalysisCancelResponseSchema,
     ReceivedPathResponseSchema,
+    AnalysisIocsResponseSchema,
     ResultsQuerySchema,
     GenerateDocumentResponseSchema,
     DocumentStatusQuerySchema,
@@ -198,6 +199,23 @@ def get_analysis_path(analysis_id: int):
 
     manager = IrisManager()
     return manager.get_analysis_path(analysis_id, user.id)
+
+
+@iris_blp.get("/results/<int:analysis_id>/iocs")
+@iris_blp.response(200, AnalysisIocsResponseSchema, description="Extracted IOCs")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
+def get_analysis_iocs(analysis_id: int):
+    """Indicadores de compromiso (dominios, URLs, IPs, emails) del analisis"""
+    user = get_current_user()
+
+    manager = IrisManager()
+    return manager.get_analysis_iocs(analysis_id, user.id)
 
 
 @iris_blp.post("/analyze/<int:analysis_id>/cancel")
