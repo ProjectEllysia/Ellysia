@@ -26,7 +26,6 @@ from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixi
 from .exceptions import (
     IrisAnalysisNotFoundError,
     IrisAnalysisNotReadyError,
-    IrisExecutionError,
     IrisInvalidInputError,
     IrisInvalidStateError,
 )

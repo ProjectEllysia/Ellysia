@@ -19,8 +19,6 @@ runtime analysis, but the *combination* of:
 is enough to add a soft signal — the analyst can investigate further.
 """
 
-import re
-
 from urllib.parse import urlparse, parse_qs
 
 from .registry import iris_rules, RuleResult

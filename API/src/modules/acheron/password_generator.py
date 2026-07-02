@@ -14,20 +14,20 @@ _SYMBOLS = "!@#$%^&*()-_=+[]{};:,.<>?"
 
 def generate_password(
     length: int,
-    uppercase: bool,
-    lowercase: bool,
-    digits: bool,
-    symbols: bool,
+    use_uppercase: bool,
+    use_lowercase: bool,
+    use_digits: bool,
+    use_symbols: bool,
     exclude_ambiguous: bool,
 ) -> str:
     pools = []
-    if uppercase:
+    if use_uppercase:
         pools.append(string.ascii_uppercase)
-    if lowercase:
+    if use_lowercase:
         pools.append(string.ascii_lowercase)
-    if digits:
+    if use_digits:
         pools.append(string.digits)
-    if symbols:
+    if use_symbols:
         pools.append(_SYMBOLS)
 
     if exclude_ambiguous:
