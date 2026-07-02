@@ -36,7 +36,10 @@ import uuid
 import psutil
 
 from rq import Queue, SimpleWorker
+from rq.registry import BaseRegistry
 from rq.timeouts import TimerDeathPenalty
+
+BaseRegistry.death_penalty_class = TimerDeathPenalty
 
 import src.modules.system.config_reading as CR
 from src.modules.system.logging import configure_logging
