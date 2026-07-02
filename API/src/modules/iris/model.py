@@ -33,6 +33,9 @@ class IrisAnalysis(Base):
         total_score: Sum of all rule scores once the analysis completes.
         verdict: Overall classification — "Legitimate", "Suspicious",
                  or "Phishing".
+        gate_reasons: List of human-readable reasons for the
+                 high-confidence gates that fired (empty when the verdict
+                 comes purely from the numeric score).
         started_at: Timestamp when the analysis was created.
         finished_at: Timestamp when the analysis reached a terminal state.
         user_id: Foreign key to the owning User.
@@ -47,6 +50,7 @@ class IrisAnalysis(Base):
     status = Column(String(20), nullable=False, default="pending")
     total_score = Column(Float, nullable=True)
     verdict = Column(String(20), nullable=True)
+    gate_reasons = Column(JSONB, nullable=True)
     started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

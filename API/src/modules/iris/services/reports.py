@@ -351,6 +351,30 @@ class IrisPDFCreator:
         elements.append(hero)
         elements.append(Spacer(1, 0.25 * inch))
 
+    def append_gate_reasons(self, elements: list, theme: IrisReportTheme) -> None:
+        """Señales de alta confianza que fijaron el veredicto (S1).
+
+        Solo aparece cuando algún gate se disparó — explica el "por qué"
+        del veredicto más allá de la puntuación numérica.
+        """
+        reasons = self.report.get("gateReasons") or []
+        if not reasons:
+            return
+
+        verdict = self.report.get("verdict") or "Suspicious"
+        risk_color = _VERDICT_COLORS.get(verdict, colors.HexColor("#757575"))
+
+        elements.extend(theme.section_header("Por qué este veredicto", "SEÑALES CLAVE"))
+        elements.append(Spacer(1, 0.08 * inch))
+
+        reason_style = ParagraphStyle(
+            "IrisGateReason", parent=theme.body,
+            textColor=risk_color,
+        )
+        for reason in reasons:
+            elements.append(Paragraph(f"• {_esc(reason)}", reason_style))
+        elements.append(Spacer(1, 0.2 * inch))
+
     def append_rules(self, elements: list, theme: IrisReportTheme) -> None:
         rules = self.report.get("rules") or []
         elements.extend(theme.section_header("Reglas Aplicadas", "VERIFICACIONES"))
@@ -559,6 +583,7 @@ class IrisPDFCreator:
 
         self.append_cover_page(elements, theme)
         self.append_verdict_hero(elements, theme)
+        self.append_gate_reasons(elements, theme)
         self.append_rules(elements, theme)
         self.append_recommendations(elements, theme)
         self.append_path(elements, theme)

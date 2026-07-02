@@ -75,12 +75,41 @@
         </div>
       </div>
 
+      <!-- Gate reasons: señales de alta confianza que fijaron el veredicto -->
+      <div v-if="reportData.gateReasons && reportData.gateReasons.length" class="rv-gates">
+        <h3 class="section-title">Por qué este veredicto</h3>
+        <ul class="gate-list">
+          <li v-for="(reason, i) in reportData.gateReasons" :key="i" class="gate-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="gate-bullet"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            {{ reason }}
+          </li>
+        </ul>
+      </div>
+
+      <!-- Top signals: reglas que más penalizaron el score -->
+      <div v-if="reportData.topSignals && reportData.topSignals.length" class="rv-top-signals">
+        <h3 class="section-title">Principales señales</h3>
+        <div class="signal-list">
+          <button
+            type="button"
+            v-for="signal in reportData.topSignals"
+            :key="signal.index"
+            class="signal-chip"
+            @click="jumpToRule(signal.index)"
+          >
+            <span class="signal-name">{{ signal.ruleName }}</span>
+            <span class="signal-score">{{ signal.score }}</span>
+          </button>
+        </div>
+      </div>
+
       <!-- Rule cards -->
-      <div class="rv-rules">
+      <div class="rv-rules" ref="rulesSection">
         <h3 class="section-title">Reglas aplicadas</h3>
         <div
           v-for="(rule, i) in reportData.rules"
           :key="i"
+          :ref="el => setRuleCardRef(el, i)"
           class="rule-card"
           :class="{ 'rule-card--expanded': expandedRule === i }"
         >
@@ -189,9 +218,21 @@ defineEmits(['cancel', 'delete'])
 
 const expandedRule = ref(null)
 const rawOpen = ref(false)
+let ruleCardEls = []
 
 function toggleRule(i) {
   expandedRule.value = expandedRule.value === i ? null : i
+}
+
+function setRuleCardRef(el, i) {
+  if (el) ruleCardEls[i] = el
+}
+
+// Salta a la card de la regla señalada en "Principales señales", la expande
+// y la desplaza a la vista (llamado desde los chips de topSignals).
+function jumpToRule(i) {
+  expandedRule.value = i
+  ruleCardEls[i]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
 function sign(s) {
@@ -575,6 +616,48 @@ watch(
   letter-spacing: 0.04em;
 }
 
+/* Top signals */
+.rv-top-signals {
+  display: flex;
+  flex-direction: column;
+}
+
+.signal-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.signal-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.15s;
+  font-family: var(--font-body);
+}
+
+.signal-chip:hover {
+  border-color: var(--danger);
+  transform: translateY(-1px);
+}
+
+.signal-name {
+  font-weight: 600;
+}
+
+.signal-score {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--danger);
+}
+
 /* Rule cards */
 .rv-rules {
   display: flex;
@@ -783,6 +866,42 @@ watch(
   max-height: 0;
   padding-top: 0;
   padding-bottom: 0;
+}
+
+/* Gate reasons (por qué este veredicto) */
+.rv-gates {
+  display: flex;
+  flex-direction: column;
+}
+
+.gate-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.gate-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 6%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border));
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.gate-bullet {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--danger);
 }
 
 /* Recommendations */

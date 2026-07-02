@@ -66,6 +66,14 @@ class RuleResultSchema(Schema):
     recommendation = fields.String(load_default=None)
 
 
+class TopSignalSchema(Schema):
+    """One of the highest-penalty rules for a finished analysis (S2)."""
+    ruleName = fields.String()
+    category = fields.String(load_default=None)
+    score = fields.Float()
+    index = fields.Integer()
+
+
 class AnalysisDetailResponseSchema(Schema):
     """Full analysis report: headers, per-rule results, verdict."""
     analysisId = fields.Integer()
@@ -74,6 +82,8 @@ class AnalysisDetailResponseSchema(Schema):
     rawHeaders = fields.String()
     totalScore = fields.Float(load_default=None)
     verdict = fields.String(load_default=None)
+    gateReasons = fields.List(fields.String(), load_default=None)
+    topSignals = fields.List(fields.Nested(TopSignalSchema), load_default=None)
     startedAt = fields.String(load_default=None)
     finishedAt = fields.String(load_default=None)
     user = fields.String()

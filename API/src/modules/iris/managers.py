@@ -69,6 +69,7 @@ class IrisManager(TaskTrackingMixin):
 
     EXTERNAL_ID_PREFIX = "iris-analysis:"
     TASK_CATEGORY = "iris.analyze"
+    _TOP_SIGNALS_LIMIT = 5
 
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
@@ -227,12 +228,40 @@ class IrisManager(TaskTrackingMixin):
             "rawHeaders": analysis.raw_headers,
             "totalScore": analysis.total_score,
             "verdict": analysis.verdict,
+            "gateReasons": analysis.gate_reasons or [],
+            "topSignals": self._top_signals(rules_data),
             "startedAt": analysis.started_at.isoformat() if analysis.started_at else None,
             "finishedAt": analysis.finished_at.isoformat() if analysis.finished_at else None,
             "user": username,
             "rules": rules_data,
             "recommendations": recommendations,
         }
+
+    @classmethod
+    def _top_signals(cls, rules_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Rank the rules that contributed the most to the penalty.
+
+        The subtractive model already stores a signed score per rule (0 or
+        negative — see ``_run_analysis``'s clamp), so "most impactful" is
+        simply "most negative". Surfaces the top N as ``{ruleName, category,
+        score, index}`` so the report/UI can lead with what actually drove
+        the verdict instead of making the analyst scan every rule. ``index``
+        is the rule's position in ``rules_data`` so the UI can jump straight
+        to its detail card.
+        """
+        negative = [
+            (idx, r) for idx, r in enumerate(rules_data) if (r.get("score") or 0) < 0
+        ]
+        negative.sort(key=lambda pair: pair[1]["score"])
+        return [
+            {
+                "ruleName": r["ruleName"],
+                "category": r.get("category"),
+                "score": r["score"],
+                "index": idx,
+            }
+            for idx, r in negative[:cls._TOP_SIGNALS_LIMIT]
+        ]
 
     def get_analysis_path(self, analysis_id: int, user_id: int) -> Dict[str, Any]:
         """Return the parsed Received-chain path for an analysis.
@@ -495,7 +524,7 @@ class IrisManager(TaskTrackingMixin):
 
             total_score = self._aggregate_score(results)
             base_verdict = self._determine_verdict(total_score)
-            verdict = self._apply_verdict_gates(base_verdict, named_results)
+            verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
 
             try:
                 with UnitOfWork() as uow:
@@ -505,6 +534,7 @@ class IrisManager(TaskTrackingMixin):
                         fresh.status = "finished" # type: ignore
                         fresh.total_score = total_score # type: ignore
                         fresh.verdict = verdict # type: ignore
+                        fresh.gate_reasons = gate_reasons # type: ignore
                         fresh.finished_at = datetime.now() # type: ignore
                         repo.update(fresh)
             except Exception as e:
@@ -698,7 +728,7 @@ class IrisManager(TaskTrackingMixin):
 
     @classmethod
     def _apply_verdict_gates(cls, base_verdict: str,
-                             named_results: Dict[str, RuleResult]) -> str:
+                             named_results: Dict[str, RuleResult]) -> tuple[str, list[str]]:
         """Override the additive verdict when high-confidence signals fire.
 
         The additive sum can be dominated by many small positive checks (and,
@@ -712,14 +742,16 @@ class IrisManager(TaskTrackingMixin):
             named_results: Map of rule name -> its RuleResult.
 
         Returns:
-            The final verdict after applying all gates.
+            Tuple of (final verdict, human-readable triggered gate reasons).
+            The reasons list is persisted with the analysis so the report can
+            explain WHY the verdict is what it is.
         """
         signals = cls._extract_verdict_signals(named_results)
         final, triggered = cls._evaluate_gates(base_verdict, signals)
 
         if triggered and final != base_verdict:
             logger.info("Verdict gated %s -> %s (%s)", base_verdict, final, "; ".join(triggered))
-        return final
+        return final, triggered
 
     def _fail_analysis(self, analysis_id: int) -> None:
         """Mark an analysis as ``failed`` with a finished timestamp."""

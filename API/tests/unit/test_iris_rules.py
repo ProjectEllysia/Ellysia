@@ -292,6 +292,12 @@ def _rr(verdict, **details):
     return RuleResult(score=0, verdict=verdict, details=details)
 
 
+def _gated(base_verdict, named):
+    """Final verdict of the gates (ignores the reasons list)."""
+    verdict, _ = IrisManager._apply_verdict_gates(base_verdict, named)
+    return verdict
+
+
 def test_gating_forces_phishing_on_free_provider_brand_spoof():
     # Authenticated Gmail phishing impersonating PayPal: additive score may be
     # positive, but gating must override it to Phishing.
@@ -300,23 +306,23 @@ def test_gating_forces_phishing_on_free_provider_brand_spoof():
         "SPF": _rr("pass"),
         "DKIM": _rr("pass"),
     }
-    assert IrisManager._apply_verdict_gates("Legitimate", named) == "Phishing"
+    assert _gated("Legitimate", named) == "Phishing"
 
 
 def test_gating_forces_phishing_on_lookalike_domain():
     named = {"Lookalike Sender Domain": _rr("fail")}
-    assert IrisManager._apply_verdict_gates("Legitimate", named) == "Phishing"
+    assert _gated("Legitimate", named) == "Phishing"
 
 
 def test_gating_caps_at_suspicious_on_domain_misalignment():
     named = {"Domain Alignment": _rr("fail")}
-    assert IrisManager._apply_verdict_gates("Legitimate", named) == "Suspicious"
+    assert _gated("Legitimate", named) == "Suspicious"
 
 
 def test_gating_never_improves_verdict():
     # A clean result set must not upgrade a Phishing baseline.
     named = {"SPF": _rr("pass"), "DKIM": _rr("pass"), "DMARC": _rr("pass")}
-    assert IrisManager._apply_verdict_gates("Phishing", named) == "Phishing"
+    assert _gated("Phishing", named) == "Phishing"
 
 
 def test_gating_forces_phishing_on_bec_from_free_provider():
@@ -326,13 +332,13 @@ def test_gating_forces_phishing_on_bec_from_free_provider():
         "BEC Wire Transfer Pattern": _rr("fail", from_domain="gmail.com", reply_domain=None),
         "SPF": _rr("pass"), "DKIM": _rr("pass"), "DMARC": _rr("pass"),
     }
-    assert IrisManager._apply_verdict_gates("Legitimate", named) == "Phishing"
+    assert _gated("Legitimate", named) == "Phishing"
 
 
 def test_gating_caps_at_suspicious_on_corporate_bec():
     # A BEC from a corporate (non-free) sender is at least Suspicious.
     named = {"BEC Wire Transfer Pattern": _rr("fail", from_domain="acme.com", reply_domain="acme.com")}
-    assert IrisManager._apply_verdict_gates("Legitimate", named) == "Suspicious"
+    assert _gated("Legitimate", named) == "Suspicious"
 
 
 def test_gating_forces_phishing_on_link_brand_impersonation():
@@ -342,7 +348,57 @@ def test_gating_forces_phishing_on_link_brand_impersonation():
         "Body Links": _rr("fail", types=["brand_impersonation"]),
         "SPF": _rr("pass"), "DKIM": _rr("pass"), "DMARC": _rr("pass"),
     }
-    assert IrisManager._apply_verdict_gates("Legitimate", named) == "Phishing"
+    assert _gated("Legitimate", named) == "Phishing"
+
+
+def test_gating_returns_human_readable_reasons():
+    # S1: the reasons that fired must be surfaced (not just logged) so the
+    # report can explain WHY the verdict was gated.
+    named = {"Lookalike Sender Domain": _rr("fail")}
+    verdict, reasons = IrisManager._apply_verdict_gates("Legitimate", named)
+    assert verdict == "Phishing"
+    assert reasons and any("lookalike" in r for r in reasons)
+
+
+def test_gating_returns_empty_reasons_when_clean():
+    named = {"SPF": _rr("pass"), "DKIM": _rr("pass")}
+    verdict, reasons = IrisManager._apply_verdict_gates("Legitimate", named)
+    assert verdict == "Legitimate"
+    assert reasons == []
+
+
+# --------------------------------------------------------------- Top signals (S2)
+
+def _rd(rule_name, score, category="header_analysis"):
+    return {"ruleName": rule_name, "category": category, "score": score,
+            "verdict": "fail" if score < 0 else "pass", "details": {},
+            "recommendation": None}
+
+
+def test_top_signals_ranks_most_negative_first():
+    rules_data = [
+        _rd("SPF", -20),
+        _rd("Lookalike Sender Domain", -15),
+        _rd("Display Name Spoofing", 0),
+        _rd("Body Links", -25),
+    ]
+    signals = IrisManager._top_signals(rules_data)
+    assert [s["ruleName"] for s in signals] == ["Body Links", "SPF", "Lookalike Sender Domain"]
+    assert [s["score"] for s in signals] == [-25, -20, -15]
+
+
+def test_top_signals_excludes_passing_rules():
+    rules_data = [_rd("SPF", 0), _rd("DKIM", 5)]
+    assert IrisManager._top_signals(rules_data) == []
+
+
+def test_top_signals_caps_at_limit_and_keeps_original_index():
+    rules_data = [_rd(f"Rule{i}", -1 * (i + 1)) for i in range(8)]
+    signals = IrisManager._top_signals(rules_data)
+    assert len(signals) == IrisManager._TOP_SIGNALS_LIMIT
+    # Rule7 has the most negative score (-8) and sits at index 7 in rules_data.
+    assert signals[0]["ruleName"] == "Rule7"
+    assert signals[0]["index"] == 7
 
 
 # ----------------------------------------------------- Subtractive scoring model
