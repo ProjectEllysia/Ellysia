@@ -169,6 +169,7 @@
       "logdir": "..",
       "tempdir": "./tmp/secapp"
     },
+    "publicUrl": "http://localhost:5173",
     "taskqueue": {
       "history_max_items": 200,
       "history_ttl_seconds": 3600,
@@ -1136,6 +1137,11 @@
       "memory_cost": 65536,
       "parallelism": 4,
       "time_cost": 3
+    },
+    "jwt": {
+      "algorithm": "HS256",
+      "access_token_expiry_minutes": 30,
+      "refresh_token_expiry_days": 7
     }
   },
   "sentinel": {
