@@ -374,6 +374,58 @@ def get_ai_strategy_for(module: str | None = None) -> str:
 
 
 # =============================================================================
+# CONFIGURACIÓN DE CORREO (herald)
+# =============================================================================
+
+@_lazy_load
+def get_email_config() -> dict:
+    """Devuelve el bloque 'email' de SecOpsConfig.json (puede estar vacío)."""
+    return _require_configs().get("email", {})
+
+
+@_lazy_load
+def get_email_strategy_for(module: str | None = None) -> str:
+    """Resuelve la estrategia de correo para un módulo.
+
+    Busca primero un override por módulo en ``email.modules.<module>`` y, si
+    no existe, devuelve ``email.defaultStrategy`` (o 'smtp' como último
+    recurso). Espejo de ``get_ai_strategy_for``.
+
+    Args:
+        module: Nombre del módulo consumidor ('aegis', …).
+
+    Returns:
+        Nombre de la estrategia ('smtp' | …).
+    """
+    email_cfg = get_email_config()
+    default = email_cfg.get("defaultStrategy", "smtp")
+    if module:
+        return email_cfg.get("modules", {}).get(module, default)
+    return default
+
+
+def get_smtp_environment() -> dict[str, str]:
+    """Credenciales SMTP desde variables de entorno.
+
+    Returns:
+        dict con 'username' y 'password'.
+
+    Raises:
+        ValueError: Si falta alguna de las dos.
+    """
+    username = os.getenv("SMTP_USERNAME")
+    password = os.getenv("SMTP_PASSWORD")
+
+    if not username or not password:
+        raise ValueError(
+            "Faltan las variables de entorno SMTP_USERNAME / SMTP_PASSWORD. "
+            "Defínelas en el archivo .env junto a las demás credenciales."
+        )
+
+    return {"username": username, "password": password}
+
+
+# =============================================================================
 # CONFIGURACIÓN DE SENTINEL
 # =============================================================================
 

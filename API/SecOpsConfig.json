@@ -149,6 +149,21 @@
   "database": {
     "isolation_level": "READ COMMITTED"
   },
+  "email": {
+    "defaultStrategy": "smtp",
+    "strategies": {
+      "smtp": {
+        "fromAddress": "noreply@tudominio.com",
+        "fromName": "SeQ Awareness",
+        "host": "smtp-relay.brevo.com",
+        "port": 587,
+        "useTls": true
+      }
+    },
+    "modules": {
+      "aegis": "smtp"
+    }
+  },
   "general": {
     "directories": {
       "logdir": "..",

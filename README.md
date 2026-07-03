@@ -45,7 +45,7 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
                 ┌─────────────────────────────────────────────────────────┐
                 │                    SeQ API (Flask)                      │
                 │  system · oauth · users · sentinel · acheron · iris ·   │
-                │                     aegis · scribe · pages              │
+                │              aegis · scribe · herald · pages            │
                 │  ┌──────────────────────────────────────────────────┐   │
                 │  │  APScheduler ──► TaskQueue (RQ + Redis)          │   │
    Web SPA ────►│  │               ┌────────────────────────────┤     │   │
@@ -72,6 +72,7 @@ SeQ/
 │   │   ├── aegis/               # Awareness pills + CVE alerts
 │   │   ├── acheron/             # Encrypted credential vault
 │   │   ├── scribe/              # AI generation abstraction layer
+│   │   ├── herald/              # Email sending abstraction layer
 │   │   ├── infrastructure/      # ORM plumbing (UnitOfWork, repos)
 │   │   ├── shared/              # Base models, exceptions, schemas
 │   │   └── pages/               # Legacy static pages
@@ -94,6 +95,7 @@ SeQ/
 | **Acheron** | Client-encrypted credential vault with granular sync, export/import, and Android app. | Operational |
 | **Aegis** | AI-generated security awareness pills across 73 topics with real-time CVE alerts from 19 tracked brands. | Operational |
 | **Scribe** | Abstraction layer for AI generation — pluggable strategies (Ollama, OpenAI) per module. | Operational |
+| **Herald** | Abstraction layer for email sending — pluggable strategies (SMTP relay) per module, transversal like Scribe. | Operational |
 | **SeQ Web** | Vue 3 SPA with hub dashboard, scan management, analysis viewer, vault client, and admin panel. | Operational |
 | **AcheronMobile** | Android app with Jetpack Compose UI, Material 3 design, and Java crypto core for offline vault operations. | Operational |
 
@@ -361,6 +363,44 @@ OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=llama3.2
 OPENAI_API_KEY=sk-...        # only needed if a module uses "openai"
 OPENAI_MODEL=gpt-4o-mini
+```
+
+### Email configuration (herald module)
+
+Transversal module for sending email — same philosophy as `scribe`: any module builds a message
+and hands it to `herald`, which delegates to an injectable strategy chosen per module in
+`API/SecOpsConfig.json`. `herald` has no knowledge of its consumers (Aegis, …).
+
+```json
+"email": {
+  "defaultStrategy": "smtp",
+  "strategies": {
+    "smtp": {
+      "host": "smtp-relay.brevo.com",
+      "port": 587,
+      "useTls": true,
+      "fromAddress": "noreply@tudominio.com",
+      "fromName": "SeQ Awareness"
+    }
+  },
+  "modules": { "aegis": "smtp" }
+}
+```
+
+| Strategy | Transport | Use case |
+|---|---|---|
+| `smtp` | SMTP relay (TLS) | Works with any provider that exposes an SMTP endpoint — Brevo, SES, Postmark, or a self-hosted relay. |
+
+Recommended provider for teams without existing infrastructure: **Brevo** (EU-based, RGPD-friendly,
+free tier around 300 emails/day, allows list/broadcast sending) via its SMTP relay
+(`smtp-relay.brevo.com:587`). Amazon SES is the cheaper option once volume grows, at the cost of
+AWS account setup and domain verification.
+
+Environment variables (in `API/.env`, credentials only — never in `SecOpsConfig.json`):
+
+```
+SMTP_USERNAME=your-smtp-login
+SMTP_PASSWORD=your-smtp-key
 ```
 
 ## Technology stack
