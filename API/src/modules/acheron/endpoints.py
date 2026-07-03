@@ -132,10 +132,10 @@ def generate_password(query):
     """Generar una contrasena aleatoria segura. Endpoint publico, no requiere autenticacion."""
     password = generate_password_util(
         length=query["length"],
-        uppercase=query["uppercase"],
-        lowercase=query["lowercase"],
-        digits=query["digits"],
-        symbols=query["symbols"],
+        use_uppercase=query["uppercase"],
+        use_lowercase=query["lowercase"],
+        use_digits=query["digits"],
+        use_symbols=query["symbols"],
         exclude_ambiguous=query["excludeAmbiguous"],
     )
     logger.info("Password generado (length=%s) | ip=%s", query["length"], request.remote_addr)
