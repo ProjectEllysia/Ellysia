@@ -1,17 +1,36 @@
+"""
+Iris detection rules, grouped by category (one file per concern):
+
+- ``auth_rules``: SPF, DKIM, DMARC, Domain Alignment.
+- ``sender_identity_rules``: From header, display-name spoofing, lookalike
+  domains, subdomain impersonation, misspelled brands, suspicious TLDs.
+- ``reply_path_rules``: Reply-To / Return-Path mismatches and triangulation.
+- ``thread_rules``: fake reply chains, self-referencing threading, Message-ID.
+- ``recipient_rules``: undisclosed/BCC-only recipients.
+- ``received_timing_rules``: Date header and Received-chain anomalies.
+- ``content_trust_rules``: Content-Type reporting, List-Unsubscribe.
+- ``body_content_rules``: Subject/body keyword, BEC, greeting, Unicode and
+  encoded-word evasion checks.
+- ``body_links_rules``: hyperlink cloaking/evasion and compromised domains.
+- ``attachment_media_rules``: external image tracking, image-only email,
+  suspicious attachments.
+
+Importing this package triggers every rule module's ``@iris_rules.register``
+decorators, populating the registry — see ``registry.py``.
+"""
+
 from ..registry import iris_rules, RuleResult
 from . import (
-    spf, dkim, dmarc, domain_alignment, reply_to, reply_to_free_provider,
-    return_path_mismatch, message_id_check, msgid_domain, content_type_check,
-    from_header_check, alarming_keywords, display_name_spoof, lookalike_domain,
-    suspicious_tld, url_in_subject, date_anomaly, misspelled_brands,
-    fake_reply_chain, undisclosed_recipients, suspicious_attachments,
-    list_unsubscribe, received_chain, body_links, body_content,
-    display_name_email_mismatch, subdomain_impersonation,
-    compromised_legitimate_domain, bare_url_bec_pattern, generic_greeting,
-    reply_to_path_mismatch, image_only_email,
-    received_chain_temporal_inconsistency, in_reply_to_self_reference,
-    body_external_image_tracking, received_path_anomaly, unicode_evasion,
-    encoded_word_abuse,
+    attachment_media_rules,
+    auth_rules,
+    body_content_rules,
+    body_links_rules,
+    content_trust_rules,
+    received_timing_rules,
+    recipient_rules,
+    reply_path_rules,
+    sender_identity_rules,
+    thread_rules,
 )
 
 __all__ = ["iris_rules", "RuleResult"]

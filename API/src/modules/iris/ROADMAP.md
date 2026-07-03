@@ -23,6 +23,16 @@ Estado: `[ ]` pendiente · `[~]` en curso · `[x]` hecho.
    dominio, levenshtein, homóglifos, `find_brand_in_subdomain`, `url_host`,
    `strip_html`, `is_free_provider`, accessors de datos…). Una regla nunca
    importa de otra regla.
+3. **Un fichero por categoría, no por regla.** Desde 2026-07-03,
+   `services/rules/` agrupa las reglas en 10 ficheros temáticos en vez de
+   un fichero por regla (`auth_rules.py`, `sender_identity_rules.py`,
+   `reply_path_rules.py`, `thread_rules.py`, `recipient_rules.py`,
+   `received_timing_rules.py`, `content_trust_rules.py`,
+   `body_content_rules.py`, `body_links_rules.py`,
+   `attachment_media_rules.py`). Al añadir una regla nueva, se registra en
+   el fichero de su categoría (o se crea uno nuevo si de verdad no encaja
+   en ninguno); `services/rules/__init__.py` importa los 10 módulos para
+   disparar el registro de `@iris_rules.register`.
 
 ---
 
@@ -76,6 +86,21 @@ Se quedan en código: regex compilados, prefijos RFC1918, `ZIP_EXTENSIONS`/
 **Verificación:** suite pytest de iris (unit + integration) vía WSL sin cambios
 de comportamiento.
 
+**0c · Reagrupar en ficheros por categoría (2026-07-03).** Los 38 ficheros
+de una regla cada uno (más `registry.py`/`shared.py`) se consolidaron en los
+10 ficheros temáticos de la regla transversal 3. De paso, revisión de
+correctitud fichero a fichero: se eliminó una variable muerta
+(`display_words` en lo que era `display_name_spoof.py`), un `_SRC_RE` sin
+usar (`body_external_image_tracking.py`), tres regex idénticas
+consolidadas en una (`in_reply_to_self_reference.py`), un helper
+`_extract_display_name` duplicado de `shared.extract_display_name` con un
+bug de cobertura menor (`alarming_keywords.py` no manejaba el caso de
+display-name sin `@`), y una lista de TLDs sospechosos hardcodeada e
+inline en `url_in_subject.py` que había quedado desincronizada del
+dataset canónico `suspicious_tlds` (24 vs 37 entradas) — ahora se
+construye dinámicamente desde `iris.data.suspicious_tlds`. Se añadieron
+tests unitarios para DKIM y DMARC, que no tenían cobertura directa.
+
 ---
 
 ## Tramo 1 — Sweet spot (valor alto × esfuerzo bajo)
@@ -98,7 +123,7 @@ del listado de reglas en `IrisReportViewer.vue` — al pulsar un chip expande y
 hace scroll a la card de esa regla.
 
 ### `[x]` D2 · Heurísticas de URL profundas — **A/Q**
-**Hecho.** `services/rules/body_links.py` extendido con 5 nuevos tipos de finding:
+**Hecho.** `services/rules/body_links_rules.py` extendido con 5 nuevos tipos de finding:
 - `userinfo_credential_lure`: `@` en el netloc (`http://paypal.com@evil.io`).
 - `data_uri_link`: href con esquema `data:`.
 - `excessive_subdomains`: host con más de 4 labels.
@@ -136,14 +161,23 @@ de D8, no implementado aún).
 mostrar siempre la forma defanged es el default más seguro y no hacía falta
 la complejidad de un composable aparte ni de un toggle.
 
-### `[ ]` I2 · Desanidar `.eml` adjunto (message/rfc822) — **S/M**
-El botón "reportar phishing" de Outlook/Gmail adjunta el correo original como
-`message/rfc822`; hoy Iris analiza el **envoltorio**. **Idea:** en
-`services/parsers.py`, si el mensaje contiene una parte
-`message/rfc822`, extraerla y analizar ésa (con metadato
-`details.unwrapped_from_forward = true` y el envoltorio guardado como
-contexto). Decisión de UX: analizar el interno automáticamente y señalarlo en
-el informe.
+### `[x]` I2 · Desanidar `.eml` adjunto (message/rfc822) — **S/M**
+**Hecho**, con la UX decidida: se analiza el interno automáticamente y se
+señala en el informe. `parsers._find_nested_forward` detecta la parte
+`message/rfc822` (antes invisible: `Message.is_multipart()` es `True`
+también para estas partes, así que el bucle existente las saltaba en
+silencio junto con los multipart reales) y `parse_raw_message` devuelve
+el `MessageContext` del mensaje **interno**, con
+`unwrapped_from_forward=True` y `wrapper_from`/`wrapper_subject` del
+envoltorio. Bug encontrado y corregido en el camino: leer el envoltorio
+con `parse_raw_headers(raw)` (el parser de líneas de todo el texto, sin
+noción de límites MIME) devolvía el From/Subject del mensaje **interno**
+en vez del externo, porque sigue "leyendo cabeceras" más allá de la
+primera línea en blanco; se lee del objeto `Message` ya parseado
+(`msg.get("from")`) en su lugar. `managers._run_analysis` ahora deriva
+`headers` de `context.headers` (antes eran dos parseos independientes del
+mismo `raw_input`, una inconsistencia latente que este caso exponía).
+Banner "Correo reenviado como adjunto detectado" en `IrisReportViewer.vue`.
 
 ### `[x]` D8 · Hashes de adjuntos como IOC — **B/Q**
 **Hecho**, con más alcance del sugerido: además de SHA256+MD5 en
@@ -155,7 +189,7 @@ hallazgo. Nueva categoría `hashes` en el endpoint de IOCs, el schema y el
 panel del frontend.
 
 ### `[x]` D4 · RLO/bidi + confusables Unicode — **B/Q**
-**Hecho**: nueva regla `services/rules/unicode_evasion.py`. Detecta
+**Hecho**: nueva regla `services/rules/body_content_rules.py`. Detecta
 controles bidi (`U+202E` RLO y 10 más) en Subject/From/nombres de adjunto
 — spoofing de extensión (`invoice[RLO]fdp.exe`) — y mezcla de scripts
 confusables (cirílico/griego + latino) en display name/subject/dominio.
@@ -167,7 +201,7 @@ flagea mezcla de scripts, nunca texto 100% no-latino (evita penalizar
 correo multilingüe legítimo).
 
 ### `[x]` D5 · Abuso de encoded-words (RFC 2047) — **B/Q**
-**Hecho**: nueva regla `services/rules/encoded_word_abuse.py`. Detecta
+**Hecho**: nueva regla `services/rules/body_content_rules.py`. Detecta
 bloques `=?charset?...?=` atomizados (muchos bloques cortos encadenados,
 heurística: ≥4 bloques con longitud media decodificada <8 — evita
 falsos positivos en subjects internacionales largos y legítimos que
@@ -177,46 +211,84 @@ regionales legítimos como shift-jis/iso-2022-jp), charsets mezclados en
 la misma cabecera, y URLs que solo aparecen tras decodificar (invisibles
 en la cabecera cruda). Reutiliza `services/parsers.decode_mime_words`.
 
-### `[ ]` D7 · Cadena ARC — **B/Q**
-Nueva regla `services/rules/arc_chain.py`: presencia y validez *declarada* de
-`ARC-Seal`/`ARC-Message-Signature`/`ARC-Authentication-Results` (`cv=pass|fail`).
-Con `cv=pass`, el correo reenviado legítimo no debe ser penalizado por
-SPF/alignment; con `cv=fail`, señal negativa. Se integra como señal en
-`_extract_verdict_signals` para suavizar el gate de auth en reenvíos.
+### `[x]` D7 · Cadena ARC — **B/Q**
+**Hecho**: nueva regla `check_arc_chain` en `services/rules/auth_rules.py`.
+Lee `cv=` de `ARC-Seal`/`ARC-Authentication-Results` (validez *declarada*,
+sin re-verificar firmas ARC — misma limitación aceptada que SPF/DKIM/DMARC).
+`cv=pass` (+2) suaviza `spf_fail`/`dmarc_fail`/`align_fail` en
+`_extract_verdict_signals` (un reenvío legítimo por lista de correo/
+forwarder rompe SPF/alineación como efecto secundario esperado);
+`cv=fail` (-8) es su propio gate a Suspicious; `cv=none` (primer salto,
+nada que decir) y ausencia total de ARC son neutrales, no penalizan.
 
-### `[ ]` O5 · Botón re-analizar — **C/Q**
-Endpoint `POST /iris/results/<id>/reanalyze` que re-lanza `manager.analyze` con
-el `raw_headers` guardado (nuevo análisis enlazado; opcional
-`reanalyzed_from_id`). Botón en `IrisHistoryStrip`/`IrisReportViewer`.
+### `[x]` O5 · Botón re-analizar — **C/Q**
+**Hecho**, sin `reanalyzed_from_id` persistido (marcado opcional en la
+idea original; se descartó la columna nueva para mantener esto como
+quick win — el título del nuevo análisis, `"<título> (reanálisis)"`, es
+la única traza de la relación). Endpoint `POST /iris/results/<id>/
+reanalyze` re-lanza `manager.analyze` con el `raw_headers` almacenado
+(que ya contiene el `.eml` completo cuando lo hubo, no solo cabeceras).
+Botón "↻" en `IrisReportViewer.vue`, visible solo si el análisis está
+`finished`.
 
 ---
 
 ## Tramo 2 — Alto impacto, esfuerzo medio
 
-### `[ ]` D1 · Quishing (códigos QR) — **S/M**
-**Idea:** dependencia de decodificación QR (p.ej. `pyzbar`+`Pillow` o `qreader`;
-evaluar peso de la dependencia). En `message_parser`, extraer imágenes inline y
-adjuntas (png/jpg/gif); nueva regla `services/rules/qr_code_links.py`
-(`needs_context=True`) que decodifica QRs y pasa las URLs por la misma batería
-de chequeos de `body_links` (helpers compartidos en `shared.py` — extraer la
-lógica de análisis de URL de `body_links` a `shared.analyze_url()` para
-reutilizarla). Gate nuevo: QR con URL sospechosa → Phishing.
+### `[x]` D1 · Quishing (códigos QR) — **S/M**
+**Hecho.** Dependencia elegida: `opencv-python-headless` (~80MB con numpy,
+pero wheel autocontenido sin librería nativa de sistema — decisión
+consultada con el usuario frente a `pyzbar`+`libzbar0`, que habría sido
+más ligera pero frágil entre entornos). `check_qr_code_links` en
+`services/rules/body_links_rules.py` (`needs_context=True`): decodifica
+cualquier QR en `context.attachments` cuyo `content_type` empiece por
+`image/` (cubre inline y adjuntos reales — ambos ya caían en
+`attachments` porque el parser exige solo un `filename`, no
+`Content-Disposition: attachment`) vía `cv2.QRCodeDetector().
+detectAndDecodeMulti()`, filtra a payloads que parezcan URL (un QR puede
+codificar vCards/WiFi/texto plano, irrelevante aquí), y pasa cada URL por
+`shared.analyze_url()` — la lógica de heurísticas por URL de Body Links
+extraída a una función reutilizable como pedía la idea original (misma
+batería de chequeos: cloaking solo aplica cuando hay `visible_text`, que
+un QR no tiene). Gate nuevo en `managers.py`: `QR Code Links` en `fail` →
+Phishing directo. Tests generan QRs reales con la librería `qrcode`
+(solo dev/test, en `requirements-dev.txt`; producción solo *decodifica*,
+nunca genera).
 
-### `[ ]` IA1 · IrisAIWriter (narrativa IA) — **S/M**
-Seguir el patrón `sentinel/services/analyzers.py`. **Idea:** nuevo
-`services/ai_writer.py` con `IrisAIWriter(generator: AIGenerator)`: prompt de
-sistema (analista anti-phishing calibrado, JSON estricto) + user prompt con el
-informe completo (reglas falladas, gates, score). Salida: `executive_summary`,
-`attacker_intent`, `recommendations[]`, `confidence`. Prompts en
-`SecOpsConfig.json` bloque `iris.prompts` (como hace sentinel). Estrategia vía
-`get_ai_strategy_for("iris")`. Endpoint `POST /iris/results/<id>/ai-summary`
-asíncrono (TaskQueue) + persistencia (tabla o columna JSONB `ai_summary`) +
-`is_ai_generated=1` cuando el PDF lo incluya. Degradación limpia si no hay
-backend de IA.
+### `[x]` IA1 · IrisAIWriter (narrativa IA) — **S/M**
+**Hecho**, siguiendo el patrón de `sentinel/services/analyzers.py`:
+`services/ai_writer.py` con `IrisAIWriter(generator: AIGenerator)` —
+prompt de sistema (analista anti-phishing calibrado, "explica lo que ya
+se detectó, no inventes nada nuevo") + user prompt con veredicto/score/
+gate reasons/reglas falladas (nombre, categoría, penalización,
+recomendación — solo las que restaron puntos). Salida JSON:
+`executive_summary`, `attacker_intent`, `recommendations[]`,
+`confidence` (ALTA/MEDIA/BAJA, normalizado si el modelo devuelve algo
+fuera de rango). Prompts en `SecOpsConfig.json` bloque `iris.prompts.
+summary` (nuevo getter `get_iris_prompts()` en `config_reading.py` —
+`get_prompts_config()` existente está hardcodeado al bloque `sentinel`,
+no es genérico pese al nombre). Estrategia vía `get_ai_strategy_for
+("iris")`, reutilizado sin cambios. Endpoint `POST /iris/results/<id>/
+ai-summary` asíncrono (TaskQueue, categoría `iris.ai_summary`) +
+columna JSONB `ai_summary` en `IrisAnalysis` (migración `e5f6a7b8c9d0`).
+
+Diferencia deliberada con el patrón de sentinel: allí la narrativa IA se
+genera *inline* al construir el PDF y nunca se persiste por separado
+(sentinel no tiene visor de informe web, solo PDF). El visor de Iris
+(`IrisReportViewer.vue`) es una vista JSON en vivo, así que la narrativa
+se genera bajo demanda vía su propio endpoint y se persiste en la columna
+para sobrevivir independientemente de cualquier exportación a PDF. Sin
+endpoint de estado propio: el frontend simplemente sondea `GET /iris/
+results/<id>` cada 3s hasta que aparece `aiSummary` (mismo enfoque que
+gate reasons/top signals: un campo más del informe principal). Degradación
+limpia: `execute_ai_summary_generation` captura cualquier fallo del backend
+de IA (backend no configurado, circuit breaker abierto, respuesta
+malformada) y deja `ai_summary` en `NULL` sin tumbar el análisis ya
+finalizado al que está adjunto.
 
 ### `[ ]` D6 · Provenance de Authentication-Results — **S/M**
 Endurece la autenticación **sin criptografía** (el límite de DKIM cripto es
-aceptado). **Idea:** nueva regla `services/rules/auth_results_provenance.py` +
+aceptado). **Idea:** nueva regla `services/rules/auth_rules.py` (nueva funcion `check_auth_results_provenance`) +
 helper en `shared.py` que parsea el/los `Authentication-Results`: (1) si hay
 **múltiples** A-R con `authserv-id` distintos y resultados contradictorios →
 posible inyección; (2) si el `authserv-id` no es coherente con el último hop
@@ -256,7 +328,7 @@ multipart (nuevo endpoint o campo base64), ya que el parseo binario no puede
 hacerse en el navegador con `parseEml`.
 
 ### `[ ]` IA2 · Clasificación de intención por LLM — **B/M**
-Regla opcional `services/rules/ai_intent.py` (activable por config `iris.ai_intent_enabled`):
+Regla opcional `services/rules/body_content_rules.py` (nueva funcion `check_ai_intent`) (activable por config `iris.ai_intent_enabled`):
 clasifica el cuerpo en `credential_harvest|payment_fraud|delivery_scam|...` con
 `scribe.AIGenerator`. Solo aporta señal (score bajo) — nunca gate por sí sola.
 Cachear por hash del cuerpo. Apagada por defecto para no meter latencia/coste.

@@ -607,3 +607,157 @@ def find_brand_in_subdomain(domain: str) -> Optional[dict]:
             if token in brands:
                 return {"brand": token, "label": lbl}
     return None
+
+
+# =============================================================================
+# URL analysis (shared by rules/body_links_rules.py's Body Links, over real
+# HTML anchors, and its QR Code Links, over URLs decoded from an embedded
+# QR image — a bare decoded URL has no "visible text" to compare against,
+# hence the optional ``visible_text`` parameter).
+# =============================================================================
+
+_URL_DOMAIN_IN_TEXT_RE = re.compile(
+    r"\b((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})\b",
+    re.IGNORECASE,
+)
+_URL_IP_HOST_RE = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
+_URL_PERCENT_ENCODED_RE = re.compile(r"%[0-9A-Fa-f]{2}")
+
+# More than this many labels in a host is structurally unusual for a
+# legitimate sender (``click.email.notices.secure-portal-x7.info``) — kept
+# as a low-weight signal since deep-but-legitimate infra hosts do exist.
+URL_MAX_NORMAL_HOST_LABELS = 4
+
+# Below this many percent-encoded triplets we don't even bother checking the
+# ratio — a couple of ``%20``s in a query string is completely normal.
+URL_MIN_ENCODED_TRIPLETS = 4
+# Share of the URL's length made up of percent-encoded triplets (each worth
+# 3 characters) above which the encoding looks like deliberate obfuscation
+# rather than ordinary query-string escaping.
+URL_DENSE_ENCODING_RATIO = 0.3
+
+
+def _has_dense_encoding(href: str) -> bool:
+    count = len(_URL_PERCENT_ENCODED_RE.findall(href))
+    if count < URL_MIN_ENCODED_TRIPLETS:
+        return False
+    return (count * 3) / max(len(href), 1) >= URL_DENSE_ENCODING_RATIO
+
+
+def analyze_url(href: str, sender_domain: Optional[str] = None,
+                 visible_text: str = "") -> tuple[list[dict], int]:
+    """Run the full battery of per-URL phishing heuristics against *href*.
+
+    Checks: ``data:`` payloads, userinfo-as-lure (``user@host``), brand
+    impersonation via subdomain trick, punycode/IDN, IP-literal hosts,
+    known shorteners, visible-text-vs-href cloaking (only when
+    *visible_text* is given — a QR-decoded URL has none), excessive
+    subdomains, dense percent-encoding, and credential-harvesting
+    keywords in the path/query of a non-sender/non-brand host.
+
+    Returns:
+        ``(findings, score)`` — *findings* is a list of per-URL finding
+        dicts; *score* is the (negative) total penalty for this single
+        URL, **not** floored — callers accumulate across multiple URLs
+        and apply their own rule-level floor.
+    """
+    findings: list[dict] = []
+    score = 0
+
+    try:
+        parsed = urlparse(href)
+    except ValueError:
+        return findings, score
+
+    # A ``data:`` URI as a clickable link target has no host to inspect
+    # and is itself unusual enough to flag on sight — legitimate mail
+    # essentially never links to an inline data payload.
+    if parsed.scheme == "data":
+        findings.append({"type": "data_uri_link", "href": href[:120]})
+        score -= 10
+        return findings, score
+
+    # Userinfo-as-lure: ``http://paypal.com@evil.io/`` — the text before
+    # ``@`` is attacker-controlled and can be *any* string designed to
+    # look like the real destination, while the browser only ever
+    # navigates to the host after it.
+    if parsed.scheme in ("http", "https") and "@" in parsed.netloc:
+        findings.append({"type": "userinfo_credential_lure", "href": href})
+        score -= 15
+
+    host = url_host(href)
+    if not host:
+        return findings, score
+
+    brands = canonical_brands()
+    phishing_keywords = url_phishing_keywords()
+
+    # Brand-as-subdomain impersonation: a known brand (or the sender's own
+    # domain) appears as a left-hand label while the real registrable
+    # domain is someone else's — e.g. ``github.com.sessions-security.com``.
+    brand_hit = find_brand_in_subdomain(host)
+    host_reg = registrable_domain(host)
+    sender_impersonation = bool(
+        sender_domain
+        and host_reg != sender_domain
+        and ("." + sender_domain + ".") in ("." + host + ".")
+    )
+    if brand_hit or sender_impersonation:
+        findings.append({
+            "type": "brand_impersonation",
+            "href": href,
+            "host": host,
+            "real_domain": host_reg,
+            "impersonates": (brand_hit or {}).get("brand") or sender_domain,
+        })
+        score -= 20
+
+    if any(label.startswith("xn--") for label in host.split(".")):
+        findings.append({"type": "punycode", "href": href})
+        score -= 8
+
+    if _URL_IP_HOST_RE.match(host):
+        findings.append({"type": "ip_literal", "href": href})
+        score -= 6
+
+    if host in shortener_domains():
+        findings.append({"type": "shortener", "href": href})
+        score -= 4
+
+    text_domain_match = _URL_DOMAIN_IN_TEXT_RE.search(visible_text or "")
+    if text_domain_match:
+        claimed = text_domain_match.group(1).lower()
+        if claimed != host and not host.endswith("." + claimed) and claimed not in host:
+            findings.append({
+                "type": "cloaked_link",
+                "visible_text": visible_text.strip(),
+                "actual_href": href,
+            })
+            score -= 12
+
+    # Unusually deep host — structurally weird even when no single label
+    # matches a known brand. Low weight: legitimate deep CDN/infra
+    # subdomains do exist, this is a soft additive signal, not a gate.
+    if len(host.split(".")) > URL_MAX_NORMAL_HOST_LABELS:
+        findings.append({"type": "excessive_subdomains", "href": href, "host": host})
+        score -= 5
+
+    if _has_dense_encoding(href):
+        findings.append({"type": "dense_encoding", "href": href})
+        score -= 6
+
+    # Credential-harvesting keywords in the path/query — only counted
+    # against a host that is neither the sender's own domain nor a known
+    # brand's domain, since "login"/"verify"/"account" are completely
+    # normal on a company's own site. An insecure (http) page asking for
+    # credentials on top of that is the textbook harvesting-page pattern.
+    if host_reg != sender_domain and registrable_label(host) not in brands:
+        path_and_query = f"{parsed.path} {parsed.query}".lower()
+        kw_hits = [kw for kw in phishing_keywords if kw in path_and_query]
+        if kw_hits:
+            is_insecure = parsed.scheme == "http"
+            finding_type = "insecure_credential_page" if is_insecure else "credential_harvest_path"
+            findings.append({"type": finding_type, "href": href, "keywords": kw_hits})
+            score -= 10 if is_insecure else 6
+
+    return findings, score

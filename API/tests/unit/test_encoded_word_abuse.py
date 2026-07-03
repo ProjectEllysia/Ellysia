@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.modules.iris.services.rules.encoded_word_abuse import check_encoded_word_abuse
+from src.modules.iris.services.rules.body_content_rules import check_encoded_word_abuse
 
 pytestmark = pytest.mark.unit
 

@@ -8,18 +8,19 @@ import base64
 
 import pytest
 
-from src.modules.iris.services.rules.spf import check_spf
-from src.modules.iris.services.rules.suspicious_tld import check_suspicious_tld
-from src.modules.iris.services.rules.url_in_subject import check_url_in_subject
-from src.modules.iris.services.rules.domain_alignment import check_domain_alignment
-from src.modules.iris.services.rules.lookalike_domain import check_lookalike_domain
-from src.modules.iris.services.rules.reply_to_free_provider import check_reply_to_free_provider
-from src.modules.iris.services.rules.reply_to import check_reply_to
-from src.modules.iris.services.rules.msgid_domain import check_msgid_domain
-from src.modules.iris.services.rules.list_unsubscribe import check_list_unsubscribe
-from src.modules.iris.services.rules.alarming_keywords import check_alarming_keywords
-from src.modules.iris.services.rules.misspelled_brands import check_misspelled_brands
-from src.modules.iris.services.rules.content_type_check import check_content_type
+from src.modules.iris.services.rules.auth_rules import (
+    check_spf, check_dkim, check_dmarc, check_domain_alignment, check_arc_chain,
+)
+from src.modules.iris.services.rules.sender_identity_rules import check_suspicious_tld
+from src.modules.iris.services.rules.body_content_rules import check_url_in_subject
+from src.modules.iris.services.rules.sender_identity_rules import check_lookalike_domain
+from src.modules.iris.services.rules.reply_path_rules import check_reply_to_free_provider
+from src.modules.iris.services.rules.reply_path_rules import check_reply_to
+from src.modules.iris.services.rules.thread_rules import check_msgid_domain
+from src.modules.iris.services.rules.content_trust_rules import check_list_unsubscribe
+from src.modules.iris.services.rules.body_content_rules import check_alarming_keywords
+from src.modules.iris.services.rules.sender_identity_rules import check_misspelled_brands
+from src.modules.iris.services.rules.content_trust_rules import check_content_type
 from src.modules.iris.services.registry import RuleResult
 from src.modules.iris.managers import IrisManager
 
@@ -63,6 +64,88 @@ def test_spf_pass_bonus_is_small():
 def test_spf_reads_received_spf_header():
     result = check_spf({"received-spf": "pass (google.com: domain of a@b.com)"})
     assert result.verdict == "pass"
+
+
+# -------------------------------------------------------------------------- DKIM
+# (previously untested at the unit level -- gap found while regrouping
+# rules into auth_rules.py)
+
+def test_dkim_pass_is_positive():
+    result = check_dkim({"authentication-results": "mx; dkim=pass header.d=example.com"})
+    assert result.verdict == "pass"
+    assert 0 < result.score <= 5
+
+
+def test_dkim_fail_is_strongly_negative():
+    result = check_dkim({"authentication-results": "mx; dkim=fail header.d=example.com"})
+    assert result.verdict == "fail"
+    assert result.score <= -15
+
+
+def test_dkim_missing_signature_is_neutral():
+    result = check_dkim({})
+    assert result.verdict == "missing"
+    assert result.score == 0
+
+
+def test_dkim_present_but_status_unknown_is_neutral():
+    result = check_dkim({"dkim-signature": "v=1; a=rsa-sha256; d=example.com; s=s1"})
+    assert result.verdict == "neutral"
+    assert result.score == 0
+
+
+# ------------------------------------------------------------------------- DMARC
+# (previously untested at the unit level -- same gap as DKIM above)
+
+def test_dmarc_pass_is_positive():
+    result = check_dmarc({"authentication-results": "mx; dmarc=pass"})
+    assert result.verdict == "pass"
+    assert 0 < result.score <= 5
+
+
+def test_dmarc_fail_is_strongly_negative():
+    result = check_dmarc({"authentication-results": "mx; dmarc=fail"})
+    assert result.verdict == "fail"
+    assert result.score <= -20
+
+
+def test_dmarc_none_policy_is_mildly_negative():
+    result = check_dmarc({"authentication-results": "mx; dmarc=none"})
+    assert result.verdict == "none"
+    assert -5 < result.score < 0
+
+
+def test_dmarc_missing_is_neutral():
+    result = check_dmarc({})
+    assert result.verdict == "missing"
+    assert result.score == 0
+
+
+# -------------------------------------------------------------------- ARC (D7)
+
+def test_arc_missing_is_neutral_missing_verdict():
+    result = check_arc_chain({})
+    assert result.verdict == "missing"
+    assert result.score == 0
+
+
+def test_arc_cv_pass_is_positive():
+    result = check_arc_chain({"arc-seal": "i=1; a=rsa-sha256; cv=pass; d=example.com; s=s1; b=xyz"})
+    assert result.verdict == "pass"
+    assert result.score > 0
+
+
+def test_arc_cv_fail_is_negative():
+    result = check_arc_chain({"arc-seal": "i=1; a=rsa-sha256; cv=fail; d=example.com; s=s1; b=xyz"})
+    assert result.verdict == "fail"
+    assert result.score < 0
+
+
+def test_arc_cv_none_is_neutral_first_hop():
+    # cv=none just means "I'm the first ARC seal in the chain" -- not suspicious.
+    result = check_arc_chain({"arc-seal": "i=1; a=rsa-sha256; cv=none; d=example.com; s=s1; b=xyz"})
+    assert result.verdict == "neutral"
+    assert result.score == 0
 
 
 # ------------------------------------------------------------------ Suspicious TLD
@@ -319,6 +402,32 @@ def test_gating_caps_at_suspicious_on_domain_misalignment():
     assert _gated("Legitimate", named) == "Suspicious"
 
 
+def test_gating_arc_pass_softens_spf_dmarc_alignment_gates():
+    # D7: a legitimate forward validated by ARC (cv=pass) must not trip
+    # the SPF/DMARC/alignment gates that exist to catch spoofing --
+    # mailing lists/forwarders routinely break raw SPF/alignment as a
+    # side effect of legitimate relaying.
+    named = {
+        "SPF": _rr("fail"),
+        "DMARC": _rr("fail"),
+        "Domain Alignment": _rr("fail"),
+        "ARC Chain": _rr("pass"),
+    }
+    assert _gated("Legitimate", named) == "Legitimate"
+
+
+def test_gating_arc_fail_escalates_to_suspicious():
+    named = {"ARC Chain": _rr("fail")}
+    assert _gated("Legitimate", named) == "Suspicious"
+
+
+def test_gating_spf_fail_without_arc_still_gates_as_before():
+    # No ARC header at all (the common case) must behave exactly as
+    # before D7 -- SPF/DMARC failure alone still gates to Suspicious.
+    named = {"SPF": _rr("fail")}
+    assert _gated("Legitimate", named) == "Suspicious"
+
+
 def test_gating_never_improves_verdict():
     # A clean result set must not upgrade a Phishing baseline.
     named = {"SPF": _rr("pass"), "DKIM": _rr("pass"), "DMARC": _rr("pass")}
@@ -346,6 +455,16 @@ def test_gating_forces_phishing_on_link_brand_impersonation():
     # subdomain trick (github.com.evil.com) must be gated to Phishing.
     named = {
         "Body Links": _rr("fail", types=["brand_impersonation"]),
+        "SPF": _rr("pass"), "DKIM": _rr("pass"), "DMARC": _rr("pass"),
+    }
+    assert _gated("Legitimate", named) == "Phishing"
+
+
+def test_gating_forces_phishing_on_suspicious_qr_code():
+    # D1: a QR code decoding to a suspicious URL is a strong evasion
+    # signal on its own -- it never appears as text/link anywhere.
+    named = {
+        "QR Code Links": _rr("fail"),
         "SPF": _rr("pass"), "DKIM": _rr("pass"), "DMARC": _rr("pass"),
     }
     assert _gated("Legitimate", named) == "Phishing"
@@ -502,3 +621,101 @@ def test_iocs_includes_attachment_sha256(monkeypatch):
     )
     result = _iocs_for(monkeypatch, raw)
     assert result["hashes"] == [hashlib.sha256(content).hexdigest()]
+
+
+# ------------------------------------------------------------- Reanalyze (O5)
+
+class _FakeTaskQueue:
+    def __init__(self):
+        self.submitted = None
+
+    def submit(self, **kwargs):
+        self.submitted = kwargs
+
+
+def test_reanalyze_submits_the_same_stored_raw_input(monkeypatch):
+    from types import SimpleNamespace
+
+    raw = "From: a@b.com\r\nSubject: Hi\r\n\r\n"
+    fake_analysis = SimpleNamespace(id=5, title="Correo sospechoso", raw_headers=raw)
+    monkeypatch.setattr(
+        IrisManager, "assert_analysis_ownership",
+        classmethod(lambda cls, analysis_id, user_id: fake_analysis),
+    )
+    monkeypatch.setattr(IrisManager, "_create_analysis_record", lambda self, r, uid, title=None: 99)
+    monkeypatch.setattr(IrisManager, "_validate_headers_pre", staticmethod(lambda r: None))
+
+    fake_queue = _FakeTaskQueue()
+    new_id = IrisManager(task_queue=fake_queue).reanalyze(analysis_id=5, user_id=1)
+
+    assert new_id == 99
+    assert fake_queue.submitted["args"] == (99, raw)
+
+
+def test_reanalyze_title_references_the_original():
+    from types import SimpleNamespace
+
+    captured_titles = []
+
+    class _Manager(IrisManager):
+        def _create_analysis_record(self, raw, uid, title=None):
+            captured_titles.append(title)
+            return 100
+
+        @staticmethod
+        def _validate_headers_pre(raw):
+            return None
+
+    fake_analysis = SimpleNamespace(id=7, title="Factura pendiente", raw_headers="From: a@b.com\r\n\r\n")
+    _Manager.assert_analysis_ownership = classmethod(lambda cls, analysis_id, user_id: fake_analysis)
+
+    _Manager(task_queue=_FakeTaskQueue()).reanalyze(analysis_id=7, user_id=1)
+
+    assert captured_titles == ["Factura pendiente (reanálisis)"]
+
+
+# ------------------------------------------------------- AI summary (IA1)
+
+def test_generate_ai_summary_rejects_unfinished_analysis(monkeypatch):
+    from types import SimpleNamespace
+    fake_analysis = SimpleNamespace(id=9, status="running")
+    monkeypatch.setattr(
+        IrisManager, "assert_analysis_ownership",
+        classmethod(lambda cls, analysis_id, user_id: fake_analysis),
+    )
+    from src.modules.iris.exceptions import IrisAnalysisNotReadyError
+    with pytest.raises(IrisAnalysisNotReadyError):
+        IrisManager(task_queue=_FakeTaskQueue()).generate_ai_summary(analysis_id=9, user_id=1)
+
+
+def test_generate_ai_summary_submits_task_for_finished_analysis(monkeypatch):
+    from types import SimpleNamespace
+    fake_analysis = SimpleNamespace(id=10, status="finished")
+    monkeypatch.setattr(
+        IrisManager, "assert_analysis_ownership",
+        classmethod(lambda cls, analysis_id, user_id: fake_analysis),
+    )
+    fake_queue = _FakeTaskQueue()
+    IrisManager(task_queue=fake_queue).generate_ai_summary(analysis_id=10, user_id=1)
+    assert fake_queue.submitted["args"] == (10,)
+    assert fake_queue.submitted["category"] == "iris.ai_summary"
+
+
+def test_execute_ai_summary_generation_degrades_cleanly_on_ai_failure(monkeypatch):
+    # The AI backend failing (misconfigured/unreachable/circuit-breaker open)
+    # must not raise -- it's a background task attached to an already
+    # finished analysis; failing loudly would be worse than just leaving
+    # ai_summary unset.
+    monkeypatch.setattr(
+        IrisManager, "get_analysis_results",
+        lambda self, analysis_id: {"verdict": "Phishing", "totalScore": 10, "gateReasons": [], "rules": []},
+    )
+
+    class _BrokenWriter:
+        def generate(self, report):
+            raise RuntimeError("AI backend unavailable")
+
+    monkeypatch.setattr("src.modules.iris.managers.IrisAIWriter", _BrokenWriter)
+
+    # Should not raise.
+    IrisManager.execute_ai_summary_generation(analysis_id=11)

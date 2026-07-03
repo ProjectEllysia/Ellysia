@@ -57,9 +57,26 @@
           <button type="button" class="action-btn" title="Cancelar" @click="$emit('cancel')" v-if="status === 'running' || status === 'pending'">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
           </button>
+          <button type="button" class="action-btn" title="Reanalizar con las reglas actuales" @click="irisStore.reanalyzeAnalysis(reportData.analysisId)" v-if="reportData && reportData.status === 'finished'">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3.51-7.14"/><polyline points="21 3 21 9 15 9"/></svg>
+          </button>
           <button type="button" class="action-btn action-btn--danger" title="Eliminar" @click="$emit('delete', reportData.analysisId)" v-if="reportData && reportData.status !== 'running' && reportData.status !== 'pending'">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
           </button>
+        </div>
+      </div>
+
+      <!-- Aviso: el mensaje enviado era un reenvío que envolvía el correo -->
+      <!-- original como adjunto .eml; se analizó el interno, no el envoltorio -->
+      <div v-if="reportData.unwrappedFromForward" class="rv-unwrap-notice">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="unwrap-icon"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
+        <div class="unwrap-text">
+          <strong>Correo reenviado como adjunto detectado.</strong>
+          Se analizó el mensaje original adjunto (.eml), no el envoltorio del reenvío.
+          <span v-if="reportData.wrapperFrom || reportData.wrapperSubject" class="unwrap-wrapper-info">
+            Envoltorio: <template v-if="reportData.wrapperFrom">de {{ reportData.wrapperFrom }}</template>
+            <template v-if="reportData.wrapperSubject">— «{{ reportData.wrapperSubject }}»</template>
+          </span>
         </div>
       </div>
 
@@ -101,6 +118,32 @@
             <span class="signal-score">{{ signal.score }}</span>
           </button>
         </div>
+      </div>
+
+      <!-- Resumen ejecutivo IA (IA1) -->
+      <div v-if="status === 'finished'" class="rv-ai-summary">
+        <h3 class="section-title">Resumen ejecutivo (IA)</h3>
+        <div v-if="reportData.aiSummary" class="ai-summary-card">
+          <p class="ai-summary-text">{{ reportData.aiSummary.executive_summary }}</p>
+          <div class="ai-summary-row">
+            <span class="ai-summary-label">Intención probable del atacante</span>
+            <p class="ai-summary-text">{{ reportData.aiSummary.attacker_intent }}</p>
+          </div>
+          <ul v-if="reportData.aiSummary.recommendations && reportData.aiSummary.recommendations.length" class="ai-summary-recs">
+            <li v-for="(rec, i) in reportData.aiSummary.recommendations" :key="i">{{ rec }}</li>
+          </ul>
+          <span class="ai-summary-confidence" :class="`confidence--${(reportData.aiSummary.confidence || '').toLowerCase()}`">
+            Confianza: {{ reportData.aiSummary.confidence }}
+          </span>
+        </div>
+        <div v-else-if="irisStore.aiSummaryLoading" class="rv-path-loading">
+          <div class="spinner spinner--sm"></div>
+          <span>Generando narrativa con IA…</span>
+        </div>
+        <button v-else type="button" class="btn-export-csv" @click="irisStore.generateAiSummary(reportData.analysisId)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.2H22l-6 4.4 2.4 7.2L12 16.4l-6.4 4.4 2.4-7.2-6-4.4h7.6z"/></svg>
+          Generar resumen ejecutivo con IA
+        </button>
       </div>
 
       <!-- Rule cards -->
@@ -713,6 +756,78 @@ watch(
   flex-direction: column;
 }
 
+/* AI executive summary (IA1) */
+.rv-ai-summary {
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1rem 1.1rem;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-solid);
+}
+
+.ai-summary-text {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.ai-summary-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.ai-summary-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ai-summary-recs {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+}
+
+.ai-summary-confidence {
+  align-self: flex-start;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: var(--border);
+  color: var(--text-dim);
+}
+
+.ai-summary-confidence.confidence--alta {
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
+}
+
+.ai-summary-confidence.confidence--media {
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  color: var(--warn);
+}
+
+.ai-summary-confidence.confidence--baja {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
+}
+
 .signal-list {
   display: flex;
   flex-wrap: wrap;
@@ -957,6 +1072,39 @@ watch(
   max-height: 0;
   padding-top: 0;
   padding-bottom: 0;
+}
+
+/* Unwrapped-forward notice */
+.rv-unwrap-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.unwrap-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.unwrap-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.unwrap-wrapper-info {
+  font-size: 0.82rem;
+  color: var(--text-dim);
 }
 
 /* Gate reasons (por qué este veredicto) */

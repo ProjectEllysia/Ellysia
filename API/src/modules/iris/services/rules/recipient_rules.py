@@ -1,18 +1,22 @@
 """
-Undisclosed Recipients rule — flags emails where the To header is empty
-or set to "undisclosed-recipients", indicating the email was sent via
-BCC (common in phishing blasts).
+Recipient rules — who was this message actually addressed to?
 
-While legitimate newsletters may use BCC, legitimate business or
-transactional emails typically address the recipient directly.
+- **Undisclosed Recipients**: the To header is empty or set to
+  "undisclosed-recipients", indicating the email was sent via BCC
+  (common in phishing blasts, though also used by legitimate
+  newsletters — this is a soft signal, not a strong one).
 """
+
+from __future__ import annotations
 
 from ..registry import iris_rules, RuleResult
 from ..shared import undisclosed_patterns
 
 
-@iris_rules.register(name="Undisclosed Recipients", category="header_analysis",
-                     description="Detecta si el campo To está vacío o contiene destinatarios no revelados (BCC)")
+@iris_rules.register(
+    name="Undisclosed Recipients", category="header_analysis",
+    description="Detecta si el campo To está vacío o contiene destinatarios no revelados (BCC)",
+)
 def check_undisclosed_recipients(headers: dict) -> RuleResult:
     to_addr = headers.get("to", "")
     cc_addr = headers.get("cc", "")

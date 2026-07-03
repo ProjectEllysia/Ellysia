@@ -1,14 +1,19 @@
 """
-Suspicious Attachment Inspection rule.
+Image and attachment rules — content smuggled in non-text form, which
+plain-text keyword scanners can't inspect directly.
 
-When the full message is available (Fase 2), inspects every real MIME
-part discovered by the message parser: dangerous filename extensions,
-double extensions, macro-enabled Office documents, HTML parts (potential
-HTML smuggling), and ZIP archives that bundle an executable.
-
-Falls back to the original Content-Type/Content-Disposition header
-heuristic when no real MIME parts are available — i.e. a headers-only
-submission, where individual parts cannot be inspected.
+- **External Image Tracking**: HTML body pulls images from a domain that
+  is neither the From domain nor a known ESP — a tracking-pixel /
+  address-confirmation pattern, or a credential-harvesting page rendered
+  as a screenshot.
+- **Image-Only Email**: the entire visible content is a single embedded
+  image with essentially no real text — the classic anti-scanner trick
+  where the payload lives in the image, not the (empty) text the scanner
+  actually inspects.
+- **Suspicious Attachments**: dangerous filename extensions, double
+  extensions, macro-enabled Office documents, HTML parts (potential HTML
+  smuggling), and ZIP archives bundling an executable — plus a SHA256/MD5
+  hash of any flagged attachment for threat-intel pivoting.
 """
 
 from __future__ import annotations
@@ -19,7 +24,150 @@ import re
 import zipfile
 
 from ..registry import iris_rules, RuleResult
-from ..shared import dangerous_extensions, macro_extensions, suspicious_mime_types
+from ..shared import (
+    dangerous_extensions, esp_tracker_domains, extract_domain,
+    macro_extensions, registrable_domain, strip_html,
+    suspicious_mime_types, url_host,
+)
+
+_IMG_SRC_RE = re.compile(r'<img\b[^>]*src\s*=\s*["\']([^"\']+)["\']',
+                          re.IGNORECASE)
+
+
+@iris_rules.register(
+    name="External Image Tracking",
+    category="content_analysis",
+    description=(
+        "Detecta imágenes (u otros recursos) embebidos desde un dominio "
+        "externo que no es el From ni un ESP/marketing conocido. Patrón "
+        "de tracking pixel y de phishing con payload en imagen."
+    ),
+    needs_context=True,
+)
+def check_external_image_tracking(context) -> RuleResult:
+    body_html = context.body_html or ""
+    if not body_html:
+        return RuleResult(score=0, verdict="neutral", details={"reason": "no html body"})
+
+    from_domain = registrable_domain(extract_domain(context.headers.get("from", "")))
+
+    sources = [m.group(1) for m in _IMG_SRC_RE.finditer(body_html)]
+
+    esp_domains = esp_tracker_domains()
+
+    findings: list[dict] = []
+    for src in sources:
+        if not src.startswith(("http://", "https://")):
+            continue
+        host = url_host(src)
+        if not host:
+            continue
+        reg = registrable_domain(host)
+        if from_domain and reg == from_domain:
+            continue
+        if reg in esp_domains or host in esp_domains:
+            continue
+        findings.append({"src": src, "host": host, "registrable": reg})
+
+    if not findings:
+        return RuleResult(
+            score=0, verdict="pass",
+            details={"from_domain": from_domain, "external_image_count": 0},
+            recommendation=None,
+        )
+
+    unique_hosts = {f["registrable"] for f in findings if f["registrable"]}
+    score = -5 if len(unique_hosts) == 1 else -8
+
+    return RuleResult(
+        score=score, verdict="fail",
+        details={
+            "from_domain": from_domain,
+            "external_image_count": len(findings),
+            "external_image_hosts": sorted(unique_hosts),
+            "findings": findings,
+        },
+        recommendation=(
+            f"El cuerpo carga imágenes desde {len(unique_hosts)} dominio(s) "
+            f"externo(s) no-ESP ({', '.join(sorted(unique_hosts))}). Esto es "
+            "compatible con un tracking pixel de confirmación de dirección "
+            "activa o con un payload de phishing renderizado como imagen. "
+            "Bloquea la carga automática de imágenes en tu cliente hasta "
+            "verificar el remitente."
+        ),
+    )
+
+
+_IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+_SRC_RE = re.compile(r'src\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+
+
+@iris_rules.register(
+    name="Image-Only Email",
+    category="content_analysis",
+    description=(
+        "Detecta correos cuyo contenido visible es esencialmente una sola "
+        "imagen (técnica típica anti-scanner: el payload está en la imagen "
+        "y el texto extraído es vacío)."
+    ),
+    needs_context=True,
+)
+def check_image_only_email(context) -> RuleResult:
+    body_html = context.body_html or ""
+    body_text = context.body_text or ""
+
+    if not body_html and not body_text:
+        return RuleResult(score=0, verdict="neutral", details={"reason": "no body"})
+
+    text_visible = strip_html(body_html).strip()
+    text_length = len(text_visible.split())
+
+    img_tags = _IMG_TAG_RE.findall(body_html)
+    img_count = len(img_tags)
+
+    external_img_count = 0
+    for tag in img_tags:
+        src_match = _SRC_RE.search(tag)
+        if src_match and src_match.group(1).startswith(("http://", "https://", "data:image")):
+            external_img_count += 1
+
+    if img_count == 0:
+        return RuleResult(
+            score=0, verdict="pass",
+            details={"img_count": 0, "text_length": text_length},
+            recommendation=None,
+        )
+
+    is_image_only = (
+        text_length < 10
+        and img_count >= 1
+        and (external_img_count == img_count or external_img_count >= 1)
+    )
+
+    if not is_image_only:
+        return RuleResult(
+            score=0, verdict="pass",
+            details={"img_count": img_count, "text_length": text_length},
+            recommendation=None,
+        )
+
+    return RuleResult(
+        score=-10, verdict="fail",
+        details={
+            "img_count": img_count,
+            "external_img_count": external_img_count,
+            "text_length": text_length,
+        },
+        recommendation=(
+            f"El cuerpo del correo es esencialmente una imagen "
+            f"({img_count} <img>, texto extraído de {text_length} palabras). "
+            "Esta es una técnica conocida de evasión de filtros: la imagen "
+            "renderiza el payload (logo falso, formulario, captcha) que el "
+            "scanner de texto no puede leer. Trata con sospecha cualquier "
+            "correo cuyo contenido visible no sea texto real."
+        ),
+    )
+
 
 ZIP_EXTENSIONS = {".zip"}
 ZIP_MIME_TYPES = {"application/zip", "application/x-zip-compressed"}

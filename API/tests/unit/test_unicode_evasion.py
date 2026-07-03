@@ -17,7 +17,7 @@ from __future__ import annotations
 import pytest
 
 from src.modules.iris.services.parsers import Attachment, MessageContext
-from src.modules.iris.services.rules.unicode_evasion import check_unicode_evasion
+from src.modules.iris.services.rules.body_content_rules import check_unicode_evasion
 
 pytestmark = pytest.mark.unit
 

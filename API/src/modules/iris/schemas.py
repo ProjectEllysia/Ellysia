@@ -74,6 +74,14 @@ class TopSignalSchema(Schema):
     index = fields.Integer()
 
 
+class AiSummarySchema(Schema):
+    """AI-generated executive narrative for a finished analysis (IA1)."""
+    executive_summary = fields.String()
+    attacker_intent = fields.String()
+    recommendations = fields.List(fields.String())
+    confidence = fields.String()
+
+
 class AnalysisDetailResponseSchema(Schema):
     """Full analysis report: headers, per-rule results, verdict."""
     analysisId = fields.Integer()
@@ -84,6 +92,10 @@ class AnalysisDetailResponseSchema(Schema):
     verdict = fields.String(load_default=None)
     gateReasons = fields.List(fields.String(), load_default=None)
     topSignals = fields.List(fields.Nested(TopSignalSchema), load_default=None)
+    aiSummary = fields.Nested(AiSummarySchema, load_default=None, allow_none=True)
+    unwrappedFromForward = fields.Boolean(load_default=False)
+    wrapperFrom = fields.String(load_default=None, allow_none=True)
+    wrapperSubject = fields.String(load_default=None, allow_none=True)
     startedAt = fields.String(load_default=None)
     finishedAt = fields.String(load_default=None)
     user = fields.String()
@@ -189,6 +201,18 @@ class GenerateDocumentResponseSchema(Schema):
     analysisId = fields.Integer()
     status = fields.String()
     downloadUrl = fields.String(load_default=None)
+
+
+class GenerateAiSummaryResponseSchema(Schema):
+    """Response returned immediately after queuing AI summary generation (IA1).
+
+    There is no separate status to poll: the caller re-fetches
+    ``GET /iris/results/<id>`` (``aiSummary``) to see the result once the
+    background task finishes.
+    """
+    message = fields.String()
+    analysisId = fields.Integer()
+    status = fields.String()
 
 
 class DocumentStatusQuerySchema(Schema):

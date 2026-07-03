@@ -153,6 +153,14 @@ class MessageContext:
     ``parse_raw_headers``). Rules registered with ``needs_context=True``
     receive this object instead — see ``services/registry.py`` and the
     dispatch logic in ``managers.IrisManager._run_analysis``.
+
+    When the submitted message is a "report phishing" forward (Outlook/
+    Gmail attach the original email as a ``message/rfc822`` MIME part
+    rather than quoting it inline), every field above describes the
+    *unwrapped original* — the message that actually matters for
+    analysis — not the forwarding envelope. ``unwrapped_from_forward``
+    and the ``wrapper_*`` fields preserve just enough of the outer
+    message's identity for the report to say so.
     """
     headers: Dict[str, str]
     body_text: str = ""
@@ -160,6 +168,9 @@ class MessageContext:
     links: List[Link] = field(default_factory=list)
     attachments: List[Attachment] = field(default_factory=list)
     received_headers: List[str] = field(default_factory=list)
+    unwrapped_from_forward: bool = False
+    wrapper_from: str = ""
+    wrapper_subject: str = ""
 
 
 def _decode_payload(part: Message) -> str:
@@ -196,20 +207,37 @@ def _extract_bare_urls(text: str) -> List[Link]:
     return [Link(href=u, text=u) for u in _BARE_URL_RE.findall(text)]
 
 
-def parse_raw_message(raw: str) -> MessageContext:
-    """Parse a full raw RFC 5322 / MIME message into a ``MessageContext``.
+def _find_nested_forward(msg: Message) -> Optional[Message]:
+    """Find the first ``message/rfc822`` part in *msg*, if any.
 
-    Args:
-        raw: The full raw message text (headers + body), or just a
-             headers block — both are accepted.
-
-    Returns:
-        A ``MessageContext`` with whatever could be extracted. Body,
-        links and attachments are empty lists/strings when *raw* has no
-        body (headers-only input).
+    This is how Outlook/Gmail's "report phishing" button attaches the
+    original email: as a nested full message, not quoted inline. The
+    stdlib email parser represents such a part's payload as a
+    single-element list containing the nested ``Message`` object (which
+    is also why ``Message.is_multipart()`` is True for it — walking the
+    tree and skipping multipart parts, as the body/attachment loop below
+    does, silently ignores it otherwise).
     """
-    msg = message_from_string(raw)
-    headers = parse_raw_headers(raw)
+    if not msg.is_multipart():
+        return None
+    for part in msg.walk():
+        if part.get_content_type() == "message/rfc822":
+            payload = part.get_payload()
+            if isinstance(payload, list) and payload:
+                return payload[0]
+    return None
+
+
+def _message_context_from(msg: Message, raw_for_headers: str) -> MessageContext:
+    """Build a ``MessageContext`` from an already-parsed ``Message`` object.
+
+    ``raw_for_headers`` is passed through ``parse_raw_headers`` separately
+    from *msg* because the header-folding rules there operate on raw
+    text, not a ``Message`` object; for the top-level message this is the
+    original ``raw`` input, for an unwrapped nested message it's the
+    nested part's own ``.as_string()``.
+    """
+    headers = parse_raw_headers(raw_for_headers)
 
     body_text = ""
     body_html = ""
@@ -258,6 +286,47 @@ def parse_raw_message(raw: str) -> MessageContext:
         attachments=attachments,
         received_headers=received_headers,
     )
+
+
+def parse_raw_message(raw: str) -> MessageContext:
+    """Parse a full raw RFC 5322 / MIME message into a ``MessageContext``.
+
+    Args:
+        raw: The full raw message text (headers + body), or just a
+             headers block — both are accepted.
+
+    Returns:
+        A ``MessageContext`` with whatever could be extracted. Body,
+        links and attachments are empty lists/strings when *raw* has no
+        body (headers-only input).
+
+        When *raw* is a "report phishing" forward carrying the original
+        email as a ``message/rfc822`` part, the returned context
+        describes that *nested original* instead of the forwarding
+        envelope — analyzing the wrapper would score the wrong message
+        entirely. ``unwrapped_from_forward`` is set, and ``wrapper_from``/
+        ``wrapper_subject`` retain the forwarding envelope's identity for
+        the report to reference.
+    """
+    msg = message_from_string(raw)
+
+    nested = _find_nested_forward(msg)
+    if nested is not None:
+        # NOTE: deliberately read the wrapper's From/Subject via the
+        # already-parsed ``msg`` object, not ``parse_raw_headers(raw)``.
+        # That line-based parser has no concept of a MIME boundary — fed
+        # the *entire* raw multipart text, it happily keeps "reading
+        # headers" past the blank-line separator and into the nested
+        # part's own header block, so its last "From:"/"Subject:" match
+        # ends up being the *inner* message's, silently defeating the
+        # whole point of capturing the wrapper's identity.
+        context = _message_context_from(nested, nested.as_string())
+        context.unwrapped_from_forward = True
+        context.wrapper_from = decode_mime_words(msg.get("from", "") or "")
+        context.wrapper_subject = decode_mime_words(msg.get("subject", "") or "")
+        return context
+
+    return _message_context_from(msg, raw)
 
 
 # =============================================================================

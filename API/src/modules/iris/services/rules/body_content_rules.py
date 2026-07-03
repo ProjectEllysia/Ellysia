@@ -1,0 +1,559 @@
+"""
+Message content rules — the text of the email itself (Subject, From
+display name, and body) is scanned for the language, structure and
+encoding patterns typical of phishing.
+
+- **Alarming Keywords**: urgent/pressuring language in Subject/From.
+- **Body Content**: credential/payment phrases in the body, plus evasive
+  hidden-text techniques (zero font-size, display:none) that hide a link
+  or phrase from the victim while dodging plain-text scanners.
+- **BEC Wire Transfer Pattern**: the classic Business Email Compromise
+  payload (wire transfer, gift cards, crypto, banking-detail change)
+  weighted against sender-domain legitimacy.
+- **Generic Greeting**: the mass-phishing combo of a generic greeting
+  ("Dear customer") *and* a risky action verb ("verify", "confirm") —
+  either alone is weak, the combination is the strong signal.
+- **URL in Subject**: URLs embedded directly in the Subject line.
+- **Unicode Evasion**: RLO/bidi control characters (filename/extension
+  spoofing) and mixed-script (Cyrillic/Greek + Latin) confusable text.
+- **Encoded-Word Abuse**: RFC 2047 encoded-word chaining, exotic
+  charsets, or content that only reveals a URL once decoded — all ways
+  to evade scanners that only match cleartext substrings.
+"""
+
+from __future__ import annotations
+
+import re
+
+from ..registry import iris_rules, RuleResult
+from ..shared import (
+    action_verbs, alarming_emojis, bec_phrases, credential_phrases,
+    exotic_charsets, extract_display_name, extract_domain,
+    generic_greetings, high_signal_keywords, low_signal_keywords,
+    registrable_domain, strip_html, suspicious_tlds,
+)
+from ..parsers import decode_mime_words
+
+
+def _score_by_weight(weight: int) -> tuple[float, str, str | None]:
+    """Map a weighted keyword score to (score, severity, recommendation).
+
+    ``weight`` counts each high-signal hit as 2 and each low-signal hit
+    (and alarming emoji) as 1.
+    """
+    if weight >= 5:
+        return (-15, "high", "El asunto y/o nombre del remitente contiene múltiples palabras o frases "
+                         "alarmantes que son características de campañas de phishing con alta urgencia.")
+    if weight >= 3:
+        return (-10, "medium", "Se detectaron varias palabras o frases alarmantes en el asunto o "
+                         "nombre del remitente. Esto es común en correos de phishing que buscan "
+                         "provocar una reacción impulsiva.")
+    if weight >= 1:
+        return (-5, "low", "Se detectó lenguaje de urgencia en el asunto o nombre del remitente. "
+                         "Podría ser legítimo (marketing), pero merece atención.")
+    return (0, "pass", None)
+
+
+@iris_rules.register(
+    name="Alarming Keywords", category="content_analysis",
+    description="Detecta palabras y frases alarmantes en el asunto y nombre del remitente (inglés/español)",
+)
+def check_alarming_keywords(headers: dict) -> RuleResult:
+    subject = decode_mime_words(headers.get("subject", ""))
+    from_addr = decode_mime_words(headers.get("from", ""))
+    display_name = extract_display_name(from_addr)
+
+    combined = (subject + " " + display_name).lower()
+
+    high_found = [kw for kw in high_signal_keywords() if kw in combined]
+    low_found = [kw for kw in low_signal_keywords() if kw in combined]
+    emoji_found = [repr(e) for e in alarming_emojis() if e in combined]
+
+    weight = 2 * len(high_found) + len(low_found) + len(emoji_found)
+    score, severity, recommendation = _score_by_weight(weight)
+
+    found_keywords = high_found + low_found + emoji_found
+
+    if severity == "pass":
+        return RuleResult(
+            score=1, verdict="pass",
+            details={"subject": subject, "display_name": display_name, "alarming_keywords_found": []},
+            recommendation=None,
+        )
+
+    return RuleResult(
+        score=score, verdict=f"alarming_{severity}",
+        details={
+            "subject": subject,
+            "display_name": display_name,
+            "alarming_keywords_found": found_keywords,
+            "high_signal": high_found,
+            "low_signal": low_found,
+            "weight": weight,
+        },
+        recommendation=recommendation,
+    )
+
+
+_STYLE_BLOCK_RE = re.compile(r"<style\b[^>]*>.*?</style>", re.IGNORECASE | re.DOTALL)
+
+# Tags whose opening attributes carry an inline hidden-text style, captured
+# together with their content so we can judge *what* is being hidden.
+_HIDDEN_TAG_RE = re.compile(
+    r'<(?P<tag>\w+)\b(?P<attrs>[^>]*?style\s*=\s*"[^"]*'
+    r"(?:display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?:px)?\b|opacity\s*:\s*0\b)"
+    r'[^"]*"[^>]*)>(?P<inner>.*?)</\1>',
+    re.IGNORECASE | re.DOTALL,
+)
+
+_HIDDEN_LINK_RE = re.compile(r"<a\b[^>]*\bhref\s*=", re.IGNORECASE)
+
+
+def _strip_style_blocks(html: str) -> str:
+    """Remove ``<style>...</style>`` blocks.
+
+    Responsive HTML emails define show/hide breakpoints as plain CSS rules
+    (``.mobile-hidden { display: none !important; }``). Those are stylesheet
+    *definitions*, not evasive hidden text, and must not feed the hidden-text
+    heuristic below — only inline ``style="..."`` on actual content should.
+    """
+    return _STYLE_BLOCK_RE.sub(" ", html)
+
+
+def _has_evasive_hidden_text(body_html: str) -> bool:
+    """Detect inline-hidden tags that hide *malicious* content.
+
+    Hiding markup is not, by itself, a phishing signal — virtually every
+    marketing email does it: the inbox preview/preheader snippet and its
+    zero-width-space spacer are wrapped in ``display:none``, responsive
+    layouts toggle ``display:none`` per breakpoint, and tracking pixels are
+    sized to zero. Flagging any hidden text produced constant false
+    positives on legitimate ESP mail.
+
+    So we only treat hidden content as evasive when it hides something that
+    matters: a **hyperlink** (a hidden link the victim can't see is a real
+    cloaking technique) or a **credential/payment phrase** (keyword-stuffed
+    or scanner-evading body text). Hidden prose, whitespace, ZWNJ padding or
+    images alone are ignored.
+    """
+    for match in _HIDDEN_TAG_RE.finditer(body_html):
+        inner = match.group("inner")
+        if _HIDDEN_LINK_RE.search(inner):
+            return True
+        inner_text = strip_html(inner).lower()
+        if any(phrase in inner_text for phrase in credential_phrases()):
+            return True
+    return False
+
+
+@iris_rules.register(
+    name="Body Content", category="content_analysis",
+    description=(
+        "Escanea el cuerpo del correo en busca de frases de phishing "
+        "(credenciales/pago) y técnicas de texto oculto."
+    ),
+    needs_context=True,
+)
+def check_body_content(context) -> RuleResult:
+    body_html = context.body_html or ""
+    text = (context.body_text or "") + " " + strip_html(body_html)
+    text_lower = text.lower()
+
+    if not text_lower.strip():
+        return RuleResult(score=0, verdict="neutral", details={"reason": "empty body"})
+
+    found = [p for p in credential_phrases() if p in text_lower]
+    hidden = _has_evasive_hidden_text(_strip_style_blocks(body_html))
+
+    if not found and not hidden:
+        return RuleResult(score=0, verdict="pass", details={})
+
+    score = 0
+    if found:
+        score -= 5 * min(len(found), 3)
+    if hidden:
+        score -= 10
+
+    return RuleResult(
+        score=score, verdict="fail",
+        details={"phrases_found": found, "hidden_text": hidden},
+        recommendation=(
+            "El cuerpo del correo contiene frases típicas de phishing"
+            + (" y texto oculto." if hidden else ".")
+        ),
+    )
+
+
+@iris_rules.register(
+    name="BEC Wire Transfer Pattern",
+    category="content_analysis",
+    description=(
+        "Detecta el patrón típico de BEC (Business Email Compromise): "
+        "remitente con dominio corporativo y cuerpo pidiendo wire transfer, "
+        "cripto, tarjetas de regalo, o cambio de cuenta bancaria."
+    ),
+    needs_context=True,
+)
+def check_bec_wire_pattern(context) -> RuleResult:
+    headers = context.headers
+    body_html = context.body_html or ""
+    body_text = context.body_text or ""
+    text = (body_text + " " + strip_html(body_html)).lower()
+
+    from_domain = registrable_domain(extract_domain(headers.get("from", "")))
+    reply_domain = registrable_domain(extract_domain(headers.get("reply-to", "")))
+
+    if not from_domain:
+        return RuleResult(score=0, verdict="neutral", details={}, recommendation=None)
+
+    matches = [p for p in bec_phrases() if p in text]
+
+    if not matches:
+        return RuleResult(score=0, verdict="neutral",
+                          details={"from_domain": from_domain, "matches": []}, recommendation=None)
+
+    suspicious_redirect = (
+        reply_domain and reply_domain != from_domain
+    )
+
+    base = -15
+    if len(matches) >= 2:
+        base -= 6
+    if suspicious_redirect:
+        base -= 4
+
+    return RuleResult(
+        score=base, verdict="fail",
+        details={
+            "from_domain": from_domain,
+            "reply_domain": reply_domain,
+            "matches": matches,
+            "redirect_to_external_reply": suspicious_redirect,
+        },
+        recommendation=(
+            f"El cuerpo contiene {len(matches)} frase(s) típica(s) de fraude BEC "
+            f"({', '.join(matches[:3])}). El remitente usa un dominio "
+            f"corporativo ({from_domain}), lo que hace este patrón especialmente "
+            "peligroso: si el dominio es legítimo, la cuenta puede estar "
+            "comprometida; si es suplantado, es un ataque dirigido. Verifica "
+            "por un canal alternativo (teléfono, en persona) ANTES de "
+            "realizar cualquier pago o cambio de datos bancarios."
+        ),
+    )
+
+
+@iris_rules.register(
+    name="Generic Greeting",
+    category="content_analysis",
+    description=(
+        "Detecta el patrón clásico de phishing masivo: saludo genérico "
+        "('Dear customer') combinado con un verbo de acción sospechoso "
+        "('verify', 'confirm', 'update') en el cuerpo del correo."
+    ),
+    needs_context=True,
+)
+def check_generic_greeting(context) -> RuleResult:
+    body_html = context.body_html or ""
+    body_text = context.body_text or ""
+    text = (body_text + " " + strip_html(body_html)).lower()
+    if not text.strip():
+        return RuleResult(score=0, verdict="neutral", details={"reason": "empty body"})
+
+    first_chunk = text[:600]
+
+    greeting_hits = [g for g in generic_greetings() if g in first_chunk]
+    action_hits = [v for v in action_verbs() if v in text]
+
+    if not greeting_hits or not action_hits:
+        return RuleResult(
+            score=0, verdict="neutral",
+            details={"greeting_hits": greeting_hits, "action_hits": action_hits},
+            recommendation=None,
+        )
+
+    score = -8
+    if len(action_hits) >= 2:
+        score -= 3
+
+    return RuleResult(
+        score=score, verdict="fail",
+        details={
+            "greeting_hits": greeting_hits,
+            "action_hits": action_hits,
+        },
+        recommendation=(
+            "El correo usa un saludo genérico "
+            f"('{greeting_hits[0]}') y un verbo de acción sospechoso "
+            f"('{action_hits[0]}'). Esta combinación es típica del phishing "
+            "masivo: los remitentes legítimos que tienen tu dirección suelen "
+            "personalizar el saludo. Verifica la legitimidad antes de actuar."
+        ),
+    )
+
+
+def _contains_url(text: str) -> list[str]:
+    # The third pattern (bare domain + suspicious TLD, no scheme/www) is
+    # built from the shared ``suspicious_tlds`` dataset rather than a
+    # separately hardcoded list, so it can't drift out of sync with the
+    # canonical TLD list used everywhere else (found duplicated verbatim
+    # during this refactor -- Suspicious TLD's own list had since grown to
+    # 37 entries while this one was stuck at 24).
+    tld_alternation = "|".join(re.escape(t.lstrip(".")) for t in suspicious_tlds())
+    patterns = [
+        r"https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+(?::\d+)?(?:/[\w\-./?%&+=~#!@]*)?",
+        r"(?:www\.)[\w\-]+(?:\.[\w\-]+)+(?::\d+)?(?:/[\w\-./?%&+=~#!@]*)?",
+        rf"[\w\-.]+\.(?:{tld_alternation})(?:/[\w\-./?%&+=~#!@]*)?",
+    ]
+    urls: list[str] = []
+    for pattern in patterns:
+        urls.extend(re.findall(pattern, text, re.IGNORECASE))
+    return urls
+
+
+@iris_rules.register(
+    name="URL in Subject", category="content_analysis",
+    description="Detecta si el asunto del correo contiene URLs (común en phishing)",
+)
+def check_url_in_subject(headers: dict) -> RuleResult:
+    subject = decode_mime_words(headers.get("subject", ""))
+
+    if not subject:
+        return RuleResult(
+            score=0, verdict="neutral",
+            details={"subject": ""},
+            recommendation=None,
+        )
+
+    urls_found = _contains_url(subject)
+
+    if not urls_found:
+        return RuleResult(
+            score=1, verdict="pass",
+            details={"subject": subject, "urls_found": []},
+            recommendation=None,
+        )
+
+    count = len(urls_found)
+
+    return RuleResult(
+        score=-5 * min(count, 2),
+        verdict="fail",
+        details={
+            "subject": subject,
+            "urls_found": urls_found,
+            "url_count": count,
+        },
+        recommendation=(
+            "El asunto del correo contiene enlaces (URLs). "
+            "Los correos legítimos rara vez incluyen URLs en el asunto; "
+            "esta es una táctica común en phishing para atraer clics compulsivos. "
+            "No hagas clic en enlaces del asunto sin verificar antes la legitimidad del correo."
+        ),
+    )
+
+
+_UNICODE_EVASION_SCORE_FLOOR = -30
+
+# Bidirectional format/override control characters. U+202E (RLO) is the
+# one abused for filename spoofing; the rest are included because any of
+# them appearing in a Subject/From/filename is equally suspicious --
+# legitimate mail essentially never uses directional overrides. Built from
+# ``chr(codepoint)`` rather than embedding the (invisible) glyphs directly
+# in source, since those render as nothing and are unsafe to eyeball/diff.
+_BIDI_CONTROLS = {
+    chr(0x200E): "LRM", chr(0x200F): "RLM",
+    chr(0x202A): "LRE", chr(0x202B): "RLE", chr(0x202C): "PDF",
+    chr(0x202D): "LRO", chr(0x202E): "RLO",
+    chr(0x2066): "LRI", chr(0x2067): "RLI", chr(0x2068): "FSI", chr(0x2069): "PDI",
+}
+
+
+def _find_bidi_controls(text: str) -> list[str]:
+    return sorted({_BIDI_CONTROLS[ch] for ch in text if ch in _BIDI_CONTROLS})
+
+
+# Script ranges used to detect mixed-script (homograph) text. Only the
+# scripts most commonly abused for Latin lookalikes are checked -- CJK,
+# Arabic, etc. mixed with Latin is usually just multilingual content, not
+# a spoofing pattern, and would create noisy false positives.
+_LATIN_RE = re.compile(r"[A-Za-zÀ-ÿ]")
+_CYRILLIC_RE = re.compile(r"[Ѐ-ӿ]")
+_GREEK_RE = re.compile(r"[Ͱ-Ͽ]")
+
+
+def _mixed_script(text: str) -> str | None:
+    """Return the confusable script name when *text* mixes Latin with it."""
+    if not text or not _LATIN_RE.search(text):
+        return None
+    if _CYRILLIC_RE.search(text):
+        return "cyrillic"
+    if _GREEK_RE.search(text):
+        return "greek"
+    return None
+
+
+@iris_rules.register(
+    name="Unicode Evasion", category="content_analysis",
+    description=(
+        "Detecta caracteres de control bidireccional (RLO/LRO - spoofing de "
+        "extension de archivo) y mezcla de scripts confusables (cirilico/"
+        "griego con latino) en Subject, remitente, dominio y adjuntos."
+    ),
+    needs_context=True,
+)
+def check_unicode_evasion(context) -> RuleResult:
+    headers = context.headers
+    subject = decode_mime_words(headers.get("subject", ""))
+    from_header = decode_mime_words(headers.get("from", ""))
+    display_name = extract_display_name(from_header)
+    domain = extract_domain(from_header) or ""
+
+    findings: list[dict] = []
+    score = 0
+
+    for field_name, value in (("subject", subject), ("from", from_header)):
+        controls = _find_bidi_controls(value)
+        if controls:
+            findings.append({"type": "bidi_control", "field": field_name, "controls": controls})
+            score -= 15
+
+    for att in context.attachments:
+        filename = att.filename or ""
+        controls = _find_bidi_controls(filename)
+        if controls:
+            findings.append({
+                "type": "bidi_control", "field": "filename",
+                "filename": filename, "controls": controls,
+            })
+            score -= 15
+
+    for field_name, value in (("display_name", display_name), ("subject", subject)):
+        script = _mixed_script(value)
+        if script:
+            findings.append({"type": "mixed_script", "field": field_name, "script": script, "value": value})
+            score -= 10
+
+    domain_script = _mixed_script(domain)
+    if domain_script:
+        findings.append({"type": "mixed_script", "field": "domain", "script": domain_script, "value": domain})
+        score -= 12
+
+    if not findings:
+        return RuleResult(score=1, verdict="pass", details={})
+
+    types = sorted({f["type"] for f in findings})
+    return RuleResult(
+        score=max(score, _UNICODE_EVASION_SCORE_FLOOR), verdict="fail",
+        details={"findings": findings, "types": types},
+        recommendation=(
+            "Se detectaron caracteres Unicode sospechosos (controles de "
+            "override direccional o mezcla de alfabetos) - tecnica usada para "
+            "disfrazar la extension real de un archivo o falsificar visualmente "
+            "un nombre de dominio/remitente. Verifica con atencion el nombre "
+            "real del archivo o dominio antes de confiar en el."
+        ),
+    )
+
+
+_ENCODED_WORD_SCORE_FLOOR = -30
+
+# ``=?charset?B|Q?encoded-text?=`` per RFC 2047 §2.
+_ENCODED_WORD_RE = re.compile(r"=\?([^?]+)\?([bBqQ])\?([^?]*)\?=")
+
+_URL_RE = re.compile(r"https?://", re.IGNORECASE)
+
+# Below this many blocks we don't even consider "chaining" — a couple of
+# encoded-words for a genuinely long international subject is normal.
+_MIN_BLOCKS_FOR_CHAINING = 4
+# Average decoded length (in raw encoded characters, a rough but cheap
+# proxy) below which many small blocks look like deliberate atomization
+# rather than natural line-wrapping of one continuous phrase.
+_CHAIN_AVG_LEN_THRESHOLD = 8
+
+
+def _encoded_word_matches(header_value: str) -> list[re.Match]:
+    return list(_ENCODED_WORD_RE.finditer(header_value or ""))
+
+
+def _is_suspiciously_chained(matches: list[re.Match]) -> bool:
+    if len(matches) < _MIN_BLOCKS_FOR_CHAINING:
+        return False
+    avg_len = sum(len(m.group(3)) for m in matches) / len(matches)
+    return avg_len < _CHAIN_AVG_LEN_THRESHOLD
+
+
+def _inspect_encoded_header(field_name: str, raw_value: str) -> list[dict]:
+    matches = _encoded_word_matches(raw_value)
+    if not matches:
+        return []
+
+    findings: list[dict] = []
+
+    if _is_suspiciously_chained(matches):
+        findings.append({
+            "type": "chained_encoded_words", "field": field_name,
+            "block_count": len(matches),
+        })
+
+    charsets_used = {m.group(1).lower() for m in matches}
+    exotic = charsets_used & set(exotic_charsets())
+    if exotic:
+        findings.append({
+            "type": "exotic_charset", "field": field_name,
+            "charsets": sorted(exotic),
+        })
+
+    if len(charsets_used) > 1:
+        findings.append({
+            "type": "mixed_charsets", "field": field_name,
+            "charsets": sorted(charsets_used),
+        })
+
+    decoded = decode_mime_words(raw_value)
+    if not _URL_RE.search(raw_value) and _URL_RE.search(decoded):
+        findings.append({
+            "type": "decoded_reveals_url", "field": field_name,
+            "decoded_preview": decoded[:200],
+        })
+
+    return findings
+
+
+_ENCODED_WORD_FINDING_SCORES = {
+    "chained_encoded_words": -8,
+    "exotic_charset": -10,
+    "mixed_charsets": -6,
+    "decoded_reveals_url": -12,
+}
+
+
+@iris_rules.register(
+    name="Encoded-Word Abuse", category="content_analysis",
+    description=(
+        "Detecta abuso de encoded-words RFC 2047 en Subject/From: bloques "
+        "encadenados para evadir filtros de keywords, charsets exoticos "
+        "(UTF-7), y URLs que solo aparecen tras decodificar."
+    ),
+)
+def check_encoded_word_abuse(headers: dict) -> RuleResult:
+    findings: list[dict] = []
+    for field_name in ("subject", "from"):
+        findings.extend(_inspect_encoded_header(field_name, headers.get(field_name, "")))
+
+    if not findings:
+        return RuleResult(score=1, verdict="pass", details={})
+
+    score = sum(_ENCODED_WORD_FINDING_SCORES[f["type"]] for f in findings)
+    types = sorted({f["type"] for f in findings})
+
+    return RuleResult(
+        score=max(score, _ENCODED_WORD_SCORE_FLOOR), verdict="fail",
+        details={"findings": findings, "types": types},
+        recommendation=(
+            "El correo usa codificacion RFC 2047 (encoded-words) de forma "
+            "atipica en Subject/From -- bloques fragmentados, charsets "
+            "raramente legitimos, o contenido que solo se revela al "
+            "decodificar. Es una tecnica conocida para evadir filtros "
+            "automaticos; revisa el contenido decodificado con atencion."
+        ),
+    )
