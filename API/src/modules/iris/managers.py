@@ -11,7 +11,9 @@ Coordinates the analysis lifecycle:
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import logging
 from dataclasses import replace
 from datetime import datetime
@@ -26,16 +28,18 @@ from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixi
 from .exceptions import (
     IrisAnalysisNotFoundError,
     IrisAnalysisNotReadyError,
+    IrisExecutionError,
     IrisInvalidInputError,
     IrisInvalidStateError,
 )
 from .model import IrisAnalysis, IrisDocument, IrisRuleResult
 from .repositories import IrisAnalysisRepository, IrisReportRepository, IrisRuleResultRepository
-from .rules import iris_rules, RuleResult
-from .rules.display_name_spoof import FREE_PROVIDER_DOMAINS
-from .services import parse_raw_headers, parse_raw_message
-from .services.received_parser import build_path
+from .services.rules import iris_rules, RuleResult
+from .services.shared import extract_domain, is_free_provider, url_host
+from .services import parse_raw_message
+from .services.parsers import build_path, parse_received_line
 from .services.reports import IrisPDFCreator
+from .services.ai_writer import IrisAIWriter
 
 
 logger = logging.getLogger(__name__)
@@ -56,14 +60,6 @@ _VERDICT_SEVERITY = {v: i for i, v in enumerate(_VERDICT_ORDER)}
 _CEILING = 100.0
 
 
-def _is_free_provider(domain: Optional[str]) -> bool:
-    """True when *domain* is (a subdomain of) a known free webmail provider."""
-    if not domain:
-        return False
-    domain = domain.lower()
-    return any(domain == d or domain.endswith("." + d) for d in FREE_PROVIDER_DOMAINS)
-
-
 class IrisManager(TaskTrackingMixin):
     """Orchestrates the lifecycle of an Iris email-header analysis.
 
@@ -77,6 +73,7 @@ class IrisManager(TaskTrackingMixin):
 
     EXTERNAL_ID_PREFIX = "iris-analysis:"
     TASK_CATEGORY = "iris.analyze"
+    _TOP_SIGNALS_LIMIT = 5
 
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
@@ -85,8 +82,13 @@ class IrisManager(TaskTrackingMixin):
     # PUBLIC API
     # =========================================================================
 
-    def analyze(self, raw_headers: str | None, user_id: int, title: str | None = None,
-                raw_message: str | None = None) -> int:
+    def analyze(
+        self,
+        raw_headers: str | None,
+        user_id: int,
+        title: str | None = None,
+        raw_message: str | None = None
+    ) -> int:
         """Submit raw email headers (or a full message) for background analysis.
 
         Creates an IrisAnalysis record in ``pending`` state and enqueues
@@ -124,6 +126,9 @@ class IrisManager(TaskTrackingMixin):
         self._validate_headers_pre(raw_input)
         analysis_id = self._create_analysis_record(raw_input, user_id, title=title)
         logger.info(f"Iris analysis {analysis_id} created for user {user_id}")
+
+        if self.TASK_CATEGORY is None:
+            raise IrisExecutionError("Task category is not defined for IrisManager.")
 
         self._tq.submit(
             func=IrisManager.execute_iris_analysis,
@@ -220,6 +225,12 @@ class IrisManager(TaskTrackingMixin):
         user = UserManager().get_user_by_id(analysis.user_id)
         username = user.username if user else "unknown"
 
+        # Re-parsed on demand (same no-extra-column pattern as
+        # get_analysis_path/get_analysis_iocs) purely to surface whether
+        # this analysis unwrapped a "report phishing" forward — the
+        # persisted rule results already reflect the unwrapped original.
+        context = parse_raw_message(analysis.raw_headers or "")
+
         return {
             "analysisId": analysis.id,
             "title": analysis.title,
@@ -227,12 +238,62 @@ class IrisManager(TaskTrackingMixin):
             "rawHeaders": analysis.raw_headers,
             "totalScore": analysis.total_score,
             "verdict": analysis.verdict,
+            "gateReasons": analysis.gate_reasons or [],
+            "topSignals": self._top_signals(rules_data),
+            "aiSummary": analysis.ai_summary,
+            "unwrappedFromForward": context.unwrapped_from_forward,
+            "wrapperFrom": context.wrapper_from or None,
+            "wrapperSubject": context.wrapper_subject or None,
             "startedAt": analysis.started_at.isoformat() if analysis.started_at else None,
             "finishedAt": analysis.finished_at.isoformat() if analysis.finished_at else None,
             "user": username,
             "rules": rules_data,
             "recommendations": recommendations,
         }
+
+    @classmethod
+    def _top_signals(cls, rules_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Rank the rules that contributed the most to the penalty.
+
+        The subtractive model already stores a signed score per rule (0 or
+        negative — see ``_run_analysis``'s clamp), so "most impactful" is
+        simply "most negative". Surfaces the top N as ``{ruleName, category,
+        score, index}`` so the report/UI can lead with what actually drove
+        the verdict instead of making the analyst scan every rule. ``index``
+        is the rule's position in ``rules_data`` so the UI can jump straight
+        to its detail card.
+        """
+        negative = [
+            (idx, r) for idx, r in enumerate(rules_data) if (r.get("score") or 0) < 0
+        ]
+        negative.sort(key=lambda pair: pair[1]["score"])
+        return [
+            {
+                "ruleName": r["ruleName"],
+                "category": r.get("category"),
+                "score": r["score"],
+                "index": idx,
+            }
+            for idx, r in negative[:cls._TOP_SIGNALS_LIMIT]
+        ]
+
+    def reanalyze(self, analysis_id: int, user_id: int) -> int:
+        """Re-run analysis on a previously submitted email with the current ruleset.
+
+        Rules added or changed after the original analysis never
+        retroactively re-score it — this submits the *same* stored raw
+        input (``analysis.raw_headers``, which holds the full ``.eml``
+        text when one was originally provided, not just header lines) as
+        a brand-new analysis. Deliberately not linked by a DB column back
+        to the original (the ROADMAP marks that optional); the new
+        title's suffix is the only trace of the relationship.
+
+        Returns:
+            The new IrisAnalysis primary key.
+        """
+        analysis = self.assert_analysis_ownership(analysis_id, user_id)
+        title = f"{analysis.title} (reanálisis)" if analysis.title else f"Reanálisis de #{analysis_id}"
+        return self.analyze(analysis.raw_headers, user_id, title=title)
 
     def get_analysis_path(self, analysis_id: int, user_id: int) -> Dict[str, Any]:
         """Return the parsed Received-chain path for an analysis.
@@ -248,6 +309,121 @@ class IrisManager(TaskTrackingMixin):
             "analysisId": analysis.id,
             **build_path(context.received_headers),
         }
+
+    _EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+")
+
+    def get_analysis_iocs(self, analysis_id: int, user_id: int) -> Dict[str, Any]:
+        """Extract Indicators of Compromise (IOCs) from an analysis.
+
+        Derived on demand from ``raw_headers`` (same approach as
+        ``get_analysis_path`` — no extra column needed) by re-parsing the
+        message rather than scraping each rule's ad-hoc ``details`` dict:
+        the parsed ``MessageContext`` already gives a uniform view of
+        headers, body links and the Received chain regardless of which
+        rules fired, so this stays correct as rules are added/changed.
+
+        Returns:
+            A dict with ``domains``, ``urls``, ``ips``, ``emails`` and
+            ``hashes`` (SHA256 of every attachment, not just ones a rule
+            flagged — an analyst pivoting to a threat-intel lookup wants
+            the hash regardless of whether a heuristic fired) — each a
+            sorted, deduplicated list of strings pivotable in an external
+            tool (SIEM, threat-intel lookup, blocklist).
+        """
+        analysis = self.assert_analysis_ownership(analysis_id, user_id)
+        context = parse_raw_message(analysis.raw_headers or "")
+
+        domains: set[str] = set()
+        emails: set[str] = set()
+        urls: set[str] = set()
+        ips: set[str] = set()
+        hashes: set[str] = set()
+
+        for header_name in ("from", "reply-to", "return-path"):
+            raw_value = context.headers.get(header_name, "")
+            domain = extract_domain(raw_value)
+            if domain:
+                domains.add(domain)
+            email_match = self._EMAIL_RE.search(raw_value)
+            if email_match:
+                emails.add(email_match.group(0).lower())
+
+        for link in context.links:
+            href = (link.href or "").strip()
+            if not href:
+                continue
+            urls.add(href)
+            host = url_host(href)
+            if host:
+                domains.add(host)
+
+        for line in context.received_headers:
+            hop = parse_received_line(line)
+            if hop.get("fromIp"):
+                ips.add(hop["fromIp"])
+
+        for att in context.attachments:
+            if att.content:
+                hashes.add(hashlib.sha256(att.content).hexdigest())
+
+        return {
+            "analysisId": analysis.id,
+            "domains": sorted(domains),
+            "urls": sorted(urls),
+            "ips": sorted(ips),
+            "emails": sorted(emails),
+            "hashes": sorted(hashes),
+        }
+
+    def generate_ai_summary(self, analysis_id: int, user_id: int) -> None:
+        """Trigger async generation of the AI executive narrative (IA1).
+
+        Fire-and-forget: submits a TaskQueue job and returns immediately.
+        The caller re-fetches ``get_analysis_results`` (``aiSummary``) to
+        see the result once ``execute_ai_summary_generation`` finishes —
+        there is no separate status to poll, matching how gate reasons
+        and top signals are already just part of the main report.
+
+        Raises:
+            IrisAnalysisNotFoundError: If *analysis_id* does not exist or
+                does not belong to *user_id*.
+            IrisAnalysisNotReadyError: If the analysis is not ``finished``.
+        """
+        analysis = self.assert_analysis_ownership(analysis_id, user_id)
+        if analysis.status != "finished":
+            raise IrisAnalysisNotReadyError(analysis_id, analysis.status)
+
+        self._tq.submit(
+            func=IrisManager.execute_ai_summary_generation,
+            args=(analysis_id,),
+            name=f"AISummary-Analysis-{analysis_id}",
+            category="iris.ai_summary",
+            external_id=f"iris-ai-summary:{analysis_id}",
+        )
+
+    @staticmethod
+    def execute_ai_summary_generation(analysis_id: int) -> None:
+        """Entry point submitted to the TaskQueue for background AI narrative generation.
+
+        Degrades cleanly on any failure (missing/misconfigured AI backend,
+        circuit breaker open, malformed model response): logs the error
+        and leaves ``ai_summary`` as ``NULL`` rather than failing the
+        already-finished analysis it's attached to.
+        """
+        try:
+            report = IrisManager().get_analysis_results(analysis_id)
+            summary = IrisAIWriter().generate(report)
+
+            with UnitOfWork() as uow:
+                repo = IrisAnalysisRepository(uow)
+                fresh = repo.get_by_id(analysis_id)
+                if fresh:
+                    fresh.ai_summary = summary  # type: ignore
+                    repo.update(fresh)
+
+            logger.info(f"AI summary generado para analysis {analysis_id}")
+        except Exception as e:
+            logger.error(f"Error generando AI summary para analysis {analysis_id}: {e}", exc_info=True)
 
     def cancel_analysis(self, analysis_id: int, user_id: int) -> bool:
         """Cancel a running or pending analysis.
@@ -452,9 +628,15 @@ class IrisManager(TaskTrackingMixin):
                 self._fail_analysis(analysis_id)
                 return
 
-            headers = parse_raw_headers(raw_input)
-            self._validate_headers_parsed(headers)
+            # A single parse feeds both header-only and needs_context rules:
+            # when raw_input is a "report phishing" forward (message/rfc822
+            # attachment), context.headers already describes the *unwrapped
+            # original*, not the forwarding envelope — a separate
+            # parse_raw_headers(raw_input) here would silently re-introduce
+            # the envelope's headers and analyze the wrong message.
             context = parse_raw_message(raw_input)
+            headers = context.headers
+            self._validate_headers_parsed(headers)
 
             rules_defs = iris_rules.get_rules()
             total_rules = len(rules_defs)
@@ -495,7 +677,7 @@ class IrisManager(TaskTrackingMixin):
 
             total_score = self._aggregate_score(results)
             base_verdict = self._determine_verdict(total_score)
-            verdict = self._apply_verdict_gates(base_verdict, named_results)
+            verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
 
             try:
                 with UnitOfWork() as uow:
@@ -505,6 +687,7 @@ class IrisManager(TaskTrackingMixin):
                         fresh.status = "finished" # type: ignore
                         fresh.total_score = total_score # type: ignore
                         fresh.verdict = verdict # type: ignore
+                        fresh.gate_reasons = gate_reasons # type: ignore
                         fresh.finished_at = datetime.now() # type: ignore
                         repo.update(fresh)
             except Exception as e:
@@ -524,7 +707,7 @@ class IrisManager(TaskTrackingMixin):
         try:
             with UnitOfWork() as uow:
                 repo = IrisRuleResultRepository(uow)
-                rr = IrisRuleResult(
+                result = IrisRuleResult(
                     analysis_id=analysis_id,
                     rule_name=rule_def["name"],
                     category=rule_def["category"],
@@ -534,7 +717,7 @@ class IrisManager(TaskTrackingMixin):
                     recommendation=result.recommendation,
                     position=position,
                 )
-                repo.save(rr)
+                repo.save(result)
         except Exception as e:
             logger.error(f"Failed to persist rule result for analysis {analysis_id}: {e}", exc_info=True)
 
@@ -583,9 +766,29 @@ class IrisManager(TaskTrackingMixin):
             r = res(name)
             return r is not None and r.verdict in verdicts
 
-        spf_fail = verdict_is("SPF", "fail", "hardfail")
-        dmarc_fail = verdict_is("DMARC", "fail")
-        align_fail = verdict_is("Domain Alignment", "fail")
+        # ARC (RFC 8617): a legitimate forwarding intermediary (mailing
+        # list, forwarder) that validated ("cv=pass") the original
+        # SPF/DKIM/DMARC results before its own relaying broke them.
+        # Genuine ARC-validated forwards must not trip the SPF/DMARC/
+        # alignment gates that exist to catch spoofing — that's exactly
+        # what those three signals are suppressed for below. "cv=fail"
+        # (the chain itself declares a prior hop broken) is its own gate,
+        # see D7 in ROADMAP.md.
+        arc = res("ARC Chain")
+        arc_pass = arc is not None and arc.verdict == "pass"
+        arc_fail = arc is not None and arc.verdict == "fail"
+
+        spf_fail = verdict_is("SPF", "fail", "hardfail") and not arc_pass
+        dmarc_fail = verdict_is("DMARC", "fail") and not arc_pass
+        align_fail = verdict_is("Domain Alignment", "fail") and not arc_pass
+
+        # D1 (quishing): a QR code that decodes to a suspicious URL is a
+        # high-confidence signal on its own -- a QR is specifically a way
+        # to smuggle a URL past every text/link-based check, so if one
+        # still trips the same shared.analyze_url() heuristics as a real
+        # body link would, that's deliberate evasion, not noise.
+        qr_links = res("QR Code Links")
+        qr_suspicious = qr_links is not None and qr_links.verdict == "fail"
 
         spoof = res("Display Name Spoofing")
         spoof_any = spoof is not None and spoof.verdict == "spoof"
@@ -598,8 +801,8 @@ class IrisManager(TaskTrackingMixin):
         # pattern — it passes SPF/DKIM/DMARC trivially, so only the body and
         # the free-provider tell give it away.
         bec_free = bec_fail and (
-            _is_free_provider(bec.details.get("from_domain"))
-            or _is_free_provider(bec.details.get("reply_domain"))
+            is_free_provider(bec.details.get("from_domain"))
+            or is_free_provider(bec.details.get("reply_domain"))
         )
 
         body_links = res("Body Links")
@@ -619,6 +822,8 @@ class IrisManager(TaskTrackingMixin):
             "spf_fail": spf_fail,
             "dmarc_fail": dmarc_fail,
             "align_fail": align_fail,
+            "arc_fail": arc_fail,
+            "qr_suspicious": qr_suspicious,
             "lookalike": verdict_is("Lookalike Sender Domain", "fail"),
             "attach": verdict_is("Suspicious Attachments", "fail"),
             "replyfree": verdict_is("Reply-To Free Provider", "fail"),
@@ -670,6 +875,7 @@ class IrisManager(TaskTrackingMixin):
         gate(signals["spoof_free"], "Phishing", "brand impersonation from free provider")
         gate(signals["cloaked_link_any"], "Phishing", "cloaked body link (visible domain differs from href)")
         gate(signals["link_impersonation"], "Phishing", "body link impersonates a brand/sender via subdomain trick")
+        gate(signals["qr_suspicious"], "Phishing", "QR code decodes to a suspicious URL (quishing)")
         gate(spoof_any, "Suspicious", "display-name brand spoofing")
         gate(align_fail, "Suspicious", "SPF/DKIM not aligned with From")
         gate(attach, "Suspicious", "dangerous attachment")
@@ -679,6 +885,7 @@ class IrisManager(TaskTrackingMixin):
         gate(signals["body_content_fail"], "Suspicious", "phishing phrasing or hidden text in body")
         gate(signals["received_chain_fail"], "Suspicious", "Received chain anomaly")
         gate(signals["bec_fail"], "Suspicious", "BEC financial-action request in body")
+        gate(signals["arc_fail"], "Suspicious", "ARC chain declares a previous hop's authentication broken (cv=fail)")
 
         # Combinations that escalate to Phishing.
         gate(signals["bec_free"], "Phishing",
@@ -698,7 +905,7 @@ class IrisManager(TaskTrackingMixin):
 
     @classmethod
     def _apply_verdict_gates(cls, base_verdict: str,
-                             named_results: Dict[str, RuleResult]) -> str:
+                             named_results: Dict[str, RuleResult]) -> tuple[str, list[str]]:
         """Override the additive verdict when high-confidence signals fire.
 
         The additive sum can be dominated by many small positive checks (and,
@@ -712,14 +919,16 @@ class IrisManager(TaskTrackingMixin):
             named_results: Map of rule name -> its RuleResult.
 
         Returns:
-            The final verdict after applying all gates.
+            Tuple of (final verdict, human-readable triggered gate reasons).
+            The reasons list is persisted with the analysis so the report can
+            explain WHY the verdict is what it is.
         """
         signals = cls._extract_verdict_signals(named_results)
         final, triggered = cls._evaluate_gates(base_verdict, signals)
 
         if triggered and final != base_verdict:
             logger.info("Verdict gated %s -> %s (%s)", base_verdict, final, "; ".join(triggered))
-        return final
+        return final, triggered
 
     def _fail_analysis(self, analysis_id: int) -> None:
         """Mark an analysis as ``failed`` with a finished timestamp."""

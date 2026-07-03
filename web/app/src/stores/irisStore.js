@@ -19,6 +19,9 @@ export const useIrisStore = defineStore('iris', () => {
   const currentStatus = reactive({ polling: false, status: null, progress: null })
   const pathCache = reactive(new Map())
   const currentPath = reactive({ loading: false, data: null })
+  const iocsCache = reactive(new Map())
+  const currentIocs = reactive({ loading: false, data: null })
+  const aiSummaryLoading = ref(false)
 
   const documents = ref([])
   const documentsLoading = ref(false)
@@ -150,6 +153,31 @@ export const useIrisStore = defineStore('iris', () => {
     }
   }
 
+  /** Indicadores de compromiso (O1): dominios/URLs/IPs/emails extraídos bajo demanda. */
+  async function iocsFor(id) {
+    if (!id) return null
+    if (iocsCache.has(id)) {
+      currentIocs.loading = false
+      currentIocs.data = iocsCache.get(id)
+      return currentIocs.data
+    }
+    currentIocs.loading = true
+    currentIocs.data = null
+    try {
+      const res = await apiFetch(`/iris/results/${id}/iocs`)
+      if (!res?.ok) {
+        currentIocs.loading = false
+        return null
+      }
+      const data = await res.json()
+      iocsCache.set(id, data)
+      currentIocs.data = data
+      return data
+    } finally {
+      currentIocs.loading = false
+    }
+  }
+
   function startPolling(id) {
     stopPolling()
     currentStatus.polling = true
@@ -184,6 +212,54 @@ export const useIrisStore = defineStore('iris', () => {
     currentStatus.polling = false
   }
 
+  /** Re-lanza el análisis con el ruleset actual sobre el mismo correo original. */
+  async function reanalyzeAnalysis(id) {
+    const res = await apiFetch(`/iris/results/${id}/reanalyze`, { method: 'POST' })
+    if (!res?.ok) {
+      const data = await res?.json().catch(() => ({}))
+      toast.show(data.error_description || data.message || 'No se pudo relanzar el análisis.', 'error')
+      return null
+    }
+    const data = await res.json()
+    toast.show(`Reanálisis iniciado (ID: ${data.analysisId})`, 'success')
+    await fetchResults()
+    selectAnalysis(data.analysisId)
+    return data.analysisId
+  }
+
+  /**
+   * Solicita la narrativa ejecutiva IA (IA1) y sondea el informe hasta que
+   * aparece `aiSummary` — no hay endpoint de estado propio, la narrativa es
+   * simplemente un campo más del informe principal una vez generada.
+   */
+  async function generateAiSummary(id) {
+    const res = await apiFetch(`/iris/results/${id}/ai-summary`, { method: 'POST' })
+    if (!res?.ok) {
+      const data = await res?.json().catch(() => ({}))
+      toast.show(data.error_description || data.message || 'No se pudo generar el resumen IA.', 'error')
+      return false
+    }
+    toast.show('Generando resumen ejecutivo con IA…', 'success')
+    aiSummaryLoading.value = true
+    pollAiSummary(id, 0)
+    return true
+  }
+
+  function pollAiSummary(id, attempt) {
+    const maxAttempts = 20 // ~60s a intervalos de 3s
+    setTimeout(async () => {
+      const data = await getReport(id)
+      if (data?.aiSummary || attempt >= maxAttempts) {
+        aiSummaryLoading.value = false
+        if (!data?.aiSummary && attempt >= maxAttempts) {
+          toast.show('El resumen IA está tardando más de lo esperado. Vuelve a intentarlo en un momento.', 'error')
+        }
+        return
+      }
+      pollAiSummary(id, attempt + 1)
+    }, 3000)
+  }
+
   async function cancelAnalysis(id) {
     const res = await apiFetch(`/iris/analyze/${id}/cancel`, { method: 'POST' })
     if (!res?.ok) {
@@ -205,10 +281,12 @@ export const useIrisStore = defineStore('iris', () => {
     }
     toast.show('An\u00e1lisis eliminado.', 'success')
     pathCache.delete(id)
+    iocsCache.delete(id)
     if (currentId.value === id) {
       currentId.value = null
       currentReport.data = null
       currentPath.data = null
+      currentIocs.data = null
     }
     await fetchResults()
     return true
@@ -219,6 +297,7 @@ export const useIrisStore = defineStore('iris', () => {
     stopPolling()
     currentReport.data = null
     currentPath.data = null
+    currentIocs.data = null
     if (id === null) {
       currentId.value = null
       currentStatus.status = null
@@ -334,9 +413,11 @@ export const useIrisStore = defineStore('iris', () => {
   return {
     analyses, loading, submitting, totalCount, page, perPage, loadingMore, hasMore,
     currentId, currentReport, currentStatus, currentPath, pathCache,
+    currentIocs, iocsCache, aiSummaryLoading,
     documents, documentsLoading,
-    submitAnalysis, fetchResults, fetchMoreResults, getReport, getStatus, pathFor,
-    cancelAnalysis, deleteAnalysis, selectAnalysis, goToPage,
+    submitAnalysis, fetchResults, fetchMoreResults, getReport, getStatus, pathFor, iocsFor,
+    generateAiSummary,
+    cancelAnalysis, deleteAnalysis, reanalyzeAnalysis, selectAnalysis, goToPage,
     startPolling, stopPolling,
     generateDocument, fetchDocuments, getDocumentStatus, downloadDocument, deleteDocument,
   }

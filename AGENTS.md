@@ -44,23 +44,23 @@ Facts:
 - `TaskQueue.get_instance().submit(func, name=, category=, external_id=, args=, timeout=)`
 - **No callback parameters** — `on_cancel`, `on_complete`, `on_error` were removed
 - Cancellation: sets a Redis key `taskqueue:cancel:{job_id}` checked cooperatively by workers
-- Each module has its own `services/rq_tasks.py` with standalone entry-point functions:
-  - `sentinel/services/rq_tasks.py` → `execute_nmap_scan`, `execute_nikto_scan`, `execute_openvas_scan`, `execute_report_generation`
-  - `aegis/services/rq_tasks.py` → `execute_aegis_generation`
-  - `iris/services/rq_tasks.py` → `execute_iris_analysis`
-- Categories: `"sentinel.scan"`, `"sentinel.report"`, `"aegis.generate"`, `"iris.analyze"`
-- External IDs: `f"scan:{scan_id}"`, `f"sentinel-doc:{doc_id}"`, `f"aegis-doc:{doc_id}"`, `f"iris-analysis:{analysis_id}"`
+- Entry points are `@staticmethod` on each module's manager class (inline in `managers.py`, not separate `services/rq_tasks.py` files) — picklable by reference with no bound instance state; they instantiate a fresh manager inside the worker:
+  - `sentinel/managers.py` → `TracerouteManager.execute_traceroute`, `NmapScanManager.execute_nmap_scan`, `NiktoScanManager.execute_nikto_scan`, `OpenVASScanManager.execute_openvas_scan`, `SentinelReportManager.execute_report_generation`
+  - `aegis/managers.py` → `AegisManager.execute_aegis_generation`
+  - `iris/managers.py` → `IrisManager.execute_iris_analysis`, `IrisReportManager.execute_report_generation`
+- Categories: `"sentinel.scan"`, `"sentinel.report"`, `"sentinel.traceroute"`, `"aegis.generate"`, `"iris.analyze"`, `"iris.report"`
+- External IDs: `f"scan:{scan_id}"`, `f"sentinel-doc:{doc_id}"`, `f"sentinel-traceroute:{key}"`, `f"aegis-doc:{doc_id}"`, `f"iris-analysis:{analysis_id}"`, `f"iris-doc:{doc_id}"`
 - REST API (admin-only, `/system/tasks/*`): status, list tasks, detail, cancel
-- Workers listen on category-specific queues: `sentinel.scan`, `sentinel.report`, `aegis.generate`, `iris.analyze`, `default`
+- Workers listen on category-specific queues: `sentinel.scan`, `sentinel.report`, `sentinel.traceroute`, `aegis.generate`, `iris.analyze`, `iris.report`, `default`
 - Separate `TaskStatus` enum exists in `sentinel/services/tasks.py` — not the same as `taskqueue.TaskStatus`
 
 ### RQ Task Execution Pattern
 
-Standalone module-level functions (not methods) are submitted to the queue. These:
-1. Are serializable by pickle (module-level, simple args)
-2. Reconstruct manager/task objects inside the worker
-3. Periodically check `TaskQueue.is_cancelled(job_id)` via `_Task.wait(cancel_check=...)`
-4. Report progress via `_Task(progress_callback=...)` → `job.meta["progress"]`
+Standalone `@staticmethod` entry points on the manager classes (e.g. `NmapScanManager.execute_nmap_scan`), submitted by reference — picklable with no bound instance state. These:
+1. Are picklable by attribute reference (`Manager.execute_*`) with simple positional args
+2. Instantiate a fresh manager inside the worker and call its instance method (the `execute_*` seam → `_run_*` body pattern)
+3. Periodically check `TaskQueue.is_cancelled(job_id)` via `_Task.wait(cancel_check=...)` / `job.cancelled()`
+4. Report progress via `_Task(progress_callback=...)` / `job.progress(...)` → `job.meta["progress"]`
 5. Workers run with Flask app context pushed at startup (DB sessions work)
 
 ## Config System

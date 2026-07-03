@@ -580,6 +580,27 @@ def get_iris_min_headers() -> int:
     cfg = get_iris_config()
     return int(cfg.get("min_headers", 2))
 
+@_lazy_load
+def get_iris_data(key: str):
+    """Dataset de detección de Iris desde ``iris.data.<key>`` (o None si falta).
+
+    Los datasets (marcas, dominios, keywords, extensiones…) viven en el bloque
+    ``iris.data`` de SecOpsConfig.json; los defaults de respaldo están en
+    ``src/modules/iris/services/shared.py``, que es el único consumidor previsto.
+    """
+    cfg = get_iris_config()
+    return cfg.get("data", {}).get(key)
+
+@_lazy_load
+def get_iris_prompts() -> dict:
+    """Prompts de IrisAIWriter (IA1) desde ``iris.prompts.<key>``.
+
+    Espejo de ``get_prompts_config()`` (que solo mira el bloque ``sentinel``)
+    para el módulo Iris: ``iris.prompts.summary.{system,userTemplate}``.
+    """
+    cfg = get_iris_config()
+    return cfg.get("prompts", {})
+
 
 # =============================================================================
 # VERSI�N DE LA APLICACI�N

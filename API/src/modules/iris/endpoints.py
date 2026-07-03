@@ -46,8 +46,10 @@ from .schemas import (
     AnalysisDeleteResponseSchema,
     AnalysisCancelResponseSchema,
     ReceivedPathResponseSchema,
+    AnalysisIocsResponseSchema,
     ResultsQuerySchema,
     GenerateDocumentResponseSchema,
+    GenerateAiSummaryResponseSchema,
     DocumentStatusQuerySchema,
     IrisDocumentStatusResponseSchema,
     IrisDocumentListResponseSchema,
@@ -198,6 +200,72 @@ def get_analysis_path(analysis_id: int):
 
     manager = IrisManager()
     return manager.get_analysis_path(analysis_id, user.id)
+
+
+@iris_blp.get("/results/<int:analysis_id>/iocs")
+@iris_blp.response(200, AnalysisIocsResponseSchema, description="Extracted IOCs")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
+def get_analysis_iocs(analysis_id: int):
+    """Indicadores de compromiso (dominios, URLs, IPs, emails) del analisis"""
+    user = get_current_user()
+
+    manager = IrisManager()
+    return manager.get_analysis_iocs(analysis_id, user.id)
+
+
+@iris_blp.post("/results/<int:analysis_id>/reanalyze")
+@iris_blp.response(201, AnalyzeResponseSchema, description="New analysis started")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_CREATE])
+@limiter.limit("20 per hour; 100 per day")
+@handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
+def reanalyze_analysis(analysis_id: int):
+    """Re-lanzar el analisis con el ruleset actual sobre el mismo correo original"""
+    user = get_current_user()
+
+    manager = IrisManager()
+    new_analysis_id = manager.reanalyze(analysis_id, user.id)
+
+    logger.info(f"Analysis {analysis_id} re-analyzed as {new_analysis_id} by user {user.username}")
+    return {
+        "message": "Reanalisis iniciado correctamente",
+        "analysisId": new_analysis_id,
+        "status": "pending",
+    }, 201
+
+
+@iris_blp.post("/results/<int:analysis_id>/ai-summary")
+@iris_blp.response(202, GenerateAiSummaryResponseSchema, description="AI summary generation started")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Analysis not finished")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_CREATE])
+@limiter.limit("20 per hour; 100 per day")
+@handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
+def generate_ai_summary(analysis_id: int):
+    """Solicitar la generacion asincrona de la narrativa ejecutiva IA (IrisAIWriter)"""
+    user = get_current_user()
+
+    manager = IrisManager()
+    manager.generate_ai_summary(analysis_id, user.id)
+
+    logger.info(f"AI summary solicitado para analysis {analysis_id} por usuario {user.username}")
+    return {
+        "message": "Generacion de resumen ejecutivo IA iniciada",
+        "analysisId": analysis_id,
+        "status": "running",
+    }, 202
 
 
 @iris_blp.post("/analyze/<int:analysis_id>/cancel")

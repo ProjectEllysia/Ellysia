@@ -57,9 +57,26 @@
           <button type="button" class="action-btn" title="Cancelar" @click="$emit('cancel')" v-if="status === 'running' || status === 'pending'">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
           </button>
+          <button type="button" class="action-btn" title="Reanalizar con las reglas actuales" @click="irisStore.reanalyzeAnalysis(reportData.analysisId)" v-if="reportData && reportData.status === 'finished'">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3.51-7.14"/><polyline points="21 3 21 9 15 9"/></svg>
+          </button>
           <button type="button" class="action-btn action-btn--danger" title="Eliminar" @click="$emit('delete', reportData.analysisId)" v-if="reportData && reportData.status !== 'running' && reportData.status !== 'pending'">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
           </button>
+        </div>
+      </div>
+
+      <!-- Aviso: el mensaje enviado era un reenvío que envolvía el correo -->
+      <!-- original como adjunto .eml; se analizó el interno, no el envoltorio -->
+      <div v-if="reportData.unwrappedFromForward" class="rv-unwrap-notice">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="unwrap-icon"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg>
+        <div class="unwrap-text">
+          <strong>Correo reenviado como adjunto detectado.</strong>
+          Se analizó el mensaje original adjunto (.eml), no el envoltorio del reenvío.
+          <span v-if="reportData.wrapperFrom || reportData.wrapperSubject" class="unwrap-wrapper-info">
+            Envoltorio: <template v-if="reportData.wrapperFrom">de {{ reportData.wrapperFrom }}</template>
+            <template v-if="reportData.wrapperSubject">— «{{ reportData.wrapperSubject }}»</template>
+          </span>
         </div>
       </div>
 
@@ -75,12 +92,67 @@
         </div>
       </div>
 
+      <!-- Gate reasons: señales de alta confianza que fijaron el veredicto -->
+      <div v-if="reportData.gateReasons && reportData.gateReasons.length" class="rv-gates">
+        <h3 class="section-title">Por qué este veredicto</h3>
+        <ul class="gate-list">
+          <li v-for="(reason, i) in reportData.gateReasons" :key="i" class="gate-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="gate-bullet"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            {{ reason }}
+          </li>
+        </ul>
+      </div>
+
+      <!-- Top signals: reglas que más penalizaron el score -->
+      <div v-if="reportData.topSignals && reportData.topSignals.length" class="rv-top-signals">
+        <h3 class="section-title">Principales señales</h3>
+        <div class="signal-list">
+          <button
+            type="button"
+            v-for="signal in reportData.topSignals"
+            :key="signal.index"
+            class="signal-chip"
+            @click="jumpToRule(signal.index)"
+          >
+            <span class="signal-name">{{ signal.ruleName }}</span>
+            <span class="signal-score">{{ signal.score }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Resumen ejecutivo IA (IA1) -->
+      <div v-if="status === 'finished'" class="rv-ai-summary">
+        <h3 class="section-title">Resumen ejecutivo (IA)</h3>
+        <div v-if="reportData.aiSummary" class="ai-summary-card">
+          <p class="ai-summary-text">{{ reportData.aiSummary.executive_summary }}</p>
+          <div class="ai-summary-row">
+            <span class="ai-summary-label">Intención probable del atacante</span>
+            <p class="ai-summary-text">{{ reportData.aiSummary.attacker_intent }}</p>
+          </div>
+          <ul v-if="reportData.aiSummary.recommendations && reportData.aiSummary.recommendations.length" class="ai-summary-recs">
+            <li v-for="(rec, i) in reportData.aiSummary.recommendations" :key="i">{{ rec }}</li>
+          </ul>
+          <span class="ai-summary-confidence" :class="`confidence--${(reportData.aiSummary.confidence || '').toLowerCase()}`">
+            Confianza: {{ reportData.aiSummary.confidence }}
+          </span>
+        </div>
+        <div v-else-if="irisStore.aiSummaryLoading" class="rv-path-loading">
+          <div class="spinner spinner--sm"></div>
+          <span>Generando narrativa con IA…</span>
+        </div>
+        <button v-else type="button" class="btn-export-csv" @click="irisStore.generateAiSummary(reportData.analysisId)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.2H22l-6 4.4 2.4 7.2L12 16.4l-6.4 4.4 2.4-7.2-6-4.4h7.6z"/></svg>
+          Generar resumen ejecutivo con IA
+        </button>
+      </div>
+
       <!-- Rule cards -->
-      <div class="rv-rules">
+      <div class="rv-rules" ref="rulesSection">
         <h3 class="section-title">Reglas aplicadas</h3>
         <div
           v-for="(rule, i) in reportData.rules"
           :key="i"
+          :ref="el => setRuleCardRef(el, i)"
           class="rule-card"
           :class="{ 'rule-card--expanded': expandedRule === i }"
         >
@@ -140,6 +212,41 @@
         </p>
       </div>
 
+      <!-- IOCs (collapsible, cargados bajo demanda) -->
+      <div v-if="status === 'finished'" class="rv-raw">
+        <button type="button" class="raw-toggle" @click="toggleIocs">
+          <svg :class="{ rotated: iocsOpen }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="toggle-chevron"><polyline points="6 9 12 15 18 9"/></svg>
+          Indicadores de compromiso (IOCs)
+        </button>
+        <Transition name="raw-reveal">
+          <div v-if="iocsOpen" class="ioc-panel">
+            <div v-if="iocsLoading" class="rv-path-loading">
+              <div class="spinner spinner--sm"></div>
+              <span>Extrayendo IOCs…</span>
+            </div>
+            <template v-else-if="iocsData">
+              <p class="ioc-hint">
+                Valores <em>defanged</em> para pegar de forma segura sin activar enlaces.
+              </p>
+              <div v-for="cat in iocCategories" :key="cat.key" class="ioc-category">
+                <div class="ioc-category-header">
+                  <span class="ioc-category-title">{{ cat.label }} ({{ iocsData[cat.key].length }})</span>
+                </div>
+                <ul v-if="iocsData[cat.key].length" class="ioc-list">
+                  <li v-for="(val, i) in iocsData[cat.key]" :key="i" class="ioc-item">{{ defang(val) }}</li>
+                </ul>
+                <p v-else class="ioc-empty">Ninguno detectado.</p>
+              </div>
+              <button type="button" class="btn-export-csv" @click="exportIocsCsv">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Exportar CSV
+              </button>
+            </template>
+            <p v-else class="rv-path-empty">No se pudieron cargar los IOCs.</p>
+          </div>
+        </Transition>
+      </div>
+
       <!-- Raw headers (collapsible) -->
       <div class="rv-raw">
         <button type="button" class="raw-toggle" @click="rawOpen = !rawOpen">
@@ -189,9 +296,21 @@ defineEmits(['cancel', 'delete'])
 
 const expandedRule = ref(null)
 const rawOpen = ref(false)
+let ruleCardEls = []
 
 function toggleRule(i) {
   expandedRule.value = expandedRule.value === i ? null : i
+}
+
+function setRuleCardRef(el, i) {
+  if (el) ruleCardEls[i] = el
+}
+
+// Salta a la card de la regla señalada en "Principales señales", la expande
+// y la desplaza a la vista (llamado desde los chips de topSignals).
+function jumpToRule(i) {
+  expandedRule.value = i
+  ruleCardEls[i]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
 function sign(s) {
@@ -240,6 +359,62 @@ const pathVisible = computed(() => {
     pathData.value || pathLoading.value
   )
 })
+
+/* ── IOCs (O1: export, O2: defanged rendering) ── */
+const iocsOpen = ref(false)
+const iocCategories = [
+  { key: 'domains', label: 'Dominios' },
+  { key: 'urls', label: 'URLs' },
+  { key: 'ips', label: 'IPs' },
+  { key: 'emails', label: 'Emails' },
+  { key: 'hashes', label: 'Hashes (SHA256)' },
+]
+
+const iocsData = computed(() => {
+  if (!props.reportId) return null
+  const cached = irisStore.iocsCache.get(props.reportId)
+  if (cached) return cached
+  return irisStore.currentIocs?.data?.analysisId === props.reportId
+    ? irisStore.currentIocs.data
+    : null
+})
+const iocsLoading = computed(() => {
+  if (!props.reportId) return false
+  return irisStore.currentIocs?.loading && irisStore.currentIocs?.data?.analysisId !== props.reportId
+})
+
+function toggleIocs() {
+  iocsOpen.value = !iocsOpen.value
+  if (iocsOpen.value && !iocsData.value) irisStore.iocsFor(props.reportId)
+}
+
+// Neutraliza dominios/URLs/IPs/emails para que no se conviertan en enlaces
+// clicables ni resuelvan accidentalmente al pegarlos en otra herramienta.
+function defang(value) {
+  return String(value)
+    .replace(/https?/gi, (m) => m.replace(/^http/i, 'hxxp'))
+    .replace(/\./g, '[.]')
+    .replace(/@/g, '[at]')
+}
+
+function exportIocsCsv() {
+  if (!iocsData.value) return
+  const rows = [['type', 'value']]
+  for (const cat of iocCategories) {
+    for (const val of iocsData.value[cat.key]) {
+      rows.push([cat.key, val])
+    }
+  }
+  const csv = rows.map(r => r.map(f => `"${String(f).replace(/"/g, '""')}"`).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `iris_iocs_${props.reportId}.csv`
+  document.body.appendChild(a)
+  a.click()
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove() }, 1000)
+}
 
 /* ── Informes PDF ── */
 const generatingDocument = ref(false)
@@ -575,6 +750,120 @@ watch(
   letter-spacing: 0.04em;
 }
 
+/* Top signals */
+.rv-top-signals {
+  display: flex;
+  flex-direction: column;
+}
+
+/* AI executive summary (IA1) */
+.rv-ai-summary {
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1rem 1.1rem;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-solid);
+}
+
+.ai-summary-text {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.ai-summary-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.ai-summary-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ai-summary-recs {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+}
+
+.ai-summary-confidence {
+  align-self: flex-start;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: var(--border);
+  color: var(--text-dim);
+}
+
+.ai-summary-confidence.confidence--alta {
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
+}
+
+.ai-summary-confidence.confidence--media {
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  color: var(--warn);
+}
+
+.ai-summary-confidence.confidence--baja {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
+}
+
+.signal-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.signal-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.15s;
+  font-family: var(--font-body);
+}
+
+.signal-chip:hover {
+  border-color: var(--danger);
+  transform: translateY(-1px);
+}
+
+.signal-name {
+  font-weight: 600;
+}
+
+.signal-score {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--danger);
+}
+
 /* Rule cards */
 .rv-rules {
   display: flex;
@@ -785,6 +1074,75 @@ watch(
   padding-bottom: 0;
 }
 
+/* Unwrapped-forward notice */
+.rv-unwrap-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.unwrap-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.unwrap-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.unwrap-wrapper-info {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+/* Gate reasons (por qué este veredicto) */
+.rv-gates {
+  display: flex;
+  flex-direction: column;
+}
+
+.gate-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.gate-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 6%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border));
+  font-size: 0.92rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.gate-bullet {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--danger);
+}
+
 /* Recommendations */
 .rv-recommendations {
   display: flex;
@@ -916,5 +1274,83 @@ watch(
   font-size: 0.88rem;
   font-family: var(--font-mono);
   text-align: center;
+}
+
+/* IOCs */
+.ioc-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0.2rem 0 0.6rem;
+}
+
+.ioc-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.ioc-category-header {
+  margin-bottom: 0.4rem;
+}
+
+.ioc-category-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ioc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.ioc-item {
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border-solid);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
+.ioc-empty {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.btn-export-csv {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-export-csv:hover {
+  opacity: 0.85;
+}
+
+.btn-export-csv svg {
+  width: 16px;
+  height: 16px;
 }
 </style>

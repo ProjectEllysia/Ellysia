@@ -66,6 +66,22 @@ class RuleResultSchema(Schema):
     recommendation = fields.String(load_default=None)
 
 
+class TopSignalSchema(Schema):
+    """One of the highest-penalty rules for a finished analysis (S2)."""
+    ruleName = fields.String()
+    category = fields.String(load_default=None)
+    score = fields.Float()
+    index = fields.Integer()
+
+
+class AiSummarySchema(Schema):
+    """AI-generated executive narrative for a finished analysis (IA1)."""
+    executive_summary = fields.String()
+    attacker_intent = fields.String()
+    recommendations = fields.List(fields.String())
+    confidence = fields.String()
+
+
 class AnalysisDetailResponseSchema(Schema):
     """Full analysis report: headers, per-rule results, verdict."""
     analysisId = fields.Integer()
@@ -74,6 +90,12 @@ class AnalysisDetailResponseSchema(Schema):
     rawHeaders = fields.String()
     totalScore = fields.Float(load_default=None)
     verdict = fields.String(load_default=None)
+    gateReasons = fields.List(fields.String(), load_default=None)
+    topSignals = fields.List(fields.Nested(TopSignalSchema), load_default=None)
+    aiSummary = fields.Nested(AiSummarySchema, load_default=None, allow_none=True)
+    unwrappedFromForward = fields.Boolean(load_default=False)
+    wrapperFrom = fields.String(load_default=None, allow_none=True)
+    wrapperSubject = fields.String(load_default=None, allow_none=True)
     startedAt = fields.String(load_default=None)
     finishedAt = fields.String(load_default=None)
     user = fields.String()
@@ -156,6 +178,22 @@ class ReceivedPathResponseSchema(Schema):
     reason = fields.String(load_default=None)
 
 
+class AnalysisIocsResponseSchema(Schema):
+    """Response for ``GET /iris/results/<id>/iocs`` (O1).
+
+    Each field is a sorted, deduplicated list of pivotable indicators
+    derived from the analyzed message — empty lists (not null) when a
+    category yields nothing (e.g. no body links in a headers-only
+    submission).
+    """
+    analysisId = fields.Integer()
+    domains = fields.List(fields.String())
+    urls = fields.List(fields.String())
+    ips = fields.List(fields.String())
+    emails = fields.List(fields.String())
+    hashes = fields.List(fields.String())
+
+
 class GenerateDocumentResponseSchema(Schema):
     """Response returned immediately after queuing PDF generation."""
     message = fields.String()
@@ -163,6 +201,18 @@ class GenerateDocumentResponseSchema(Schema):
     analysisId = fields.Integer()
     status = fields.String()
     downloadUrl = fields.String(load_default=None)
+
+
+class GenerateAiSummaryResponseSchema(Schema):
+    """Response returned immediately after queuing AI summary generation (IA1).
+
+    There is no separate status to poll: the caller re-fetches
+    ``GET /iris/results/<id>`` (``aiSummary``) to see the result once the
+    background task finishes.
+    """
+    message = fields.String()
+    analysisId = fields.Integer()
+    status = fields.String()
 
 
 class DocumentStatusQuerySchema(Schema):
