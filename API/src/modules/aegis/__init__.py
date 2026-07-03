@@ -12,20 +12,33 @@ from src.modules.system.taskqueue import QueueRegistry
 from .model import (
     AegisDocument,
     AegisDocumentAlert,
+    AegisQuizQuestion,
     AegisTip,
+    Campaign,
+    CampaignAnswer,
+    CampaignRecipient,
+    DistributionList,
+    Recipient,
     Topic,
 )
-from .managers import AegisManager
+from .managers import AegisManager, CampaignManager
 from .endpoints import aegis_blp
 
-# Registro de la categoría de cola de este módulo (OCP).
-QueueRegistry.register("aegis.generate")
+# Registro de las categorías de cola de este módulo (OCP).
+QueueRegistry.register("aegis.generate", "aegis.campaign")
 
 __all__ = [
     "AegisDocument",
     "AegisDocumentAlert",
+    "AegisQuizQuestion",
     "AegisTip",
+    "Campaign",
+    "CampaignAnswer",
+    "CampaignRecipient",
+    "DistributionList",
+    "Recipient",
     "Topic",
     "AegisManager",
+    "CampaignManager",
     "aegis_blp",
 ]

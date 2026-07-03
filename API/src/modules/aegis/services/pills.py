@@ -71,6 +71,12 @@ FALLBACK_BRANDS: list[str] = [
     "Juniper", "IBM", "Linux", "Android", "Chrome",
 ]
 
+COMPANY_SIZE_LABELS: dict[str, str] = {
+    "micro":    "microempresa (menos de 10 empleados)",
+    "pequeña":  "pequeña empresa (10-50 empleados)",
+    "mediana":  "empresa mediana (50-250 empleados)",
+}
+
 FEW_SHOT_EXAMPLES = """
 Ejemplo de output válido para tema "Phishing Empresarial":
 
@@ -124,6 +130,35 @@ class AegisTipData:
                 raise AegisValidationError("cada link debe ser un dict con 'text' y 'url'", field="links")
 
 
+@dataclass(frozen=True)
+class AegisQuizData:
+    """
+    Pregunta de quiz individual inmutable y validada.
+
+    Se crea a partir de la respuesta del modelo, se valida en __post_init__
+    y se descarta tras la persistencia en BD. No es un modelo ORM. Espejo de
+    AegisTipData.
+    """
+
+    prompt:        str
+    options:       list[str]
+    correct_index: int
+
+    def __post_init__(self) -> None:
+        if not self.prompt or len(self.prompt) > 300:
+            raise AegisValidationError("prompt debe tener entre 1 y 300 caracteres", field="prompt")
+        if not (2 <= len(self.options) <= 4):
+            raise AegisValidationError("options debe tener entre 2 y 4 elementos", field="options")
+        if not all(isinstance(opt, str) and opt for opt in self.options):
+            raise AegisValidationError("cada option debe ser un string no vacío", field="options")
+        if not (0 <= self.correct_index < len(self.options)):
+            raise AegisValidationError(
+                "correct_index debe apuntar a una opción válida",
+                field="correct_index",
+                value=str(self.correct_index),
+            )
+
+
 @dataclass
 class AegisContent:
     """
@@ -146,6 +181,7 @@ class AegisContent:
     tips:          list[AegisTipData] = field(default_factory=list)
     closing:       str           = ""
     contact_email: str           = ""
+    questions:     list[AegisQuizData] = field(default_factory=list)
 
     def to_json_dict(self, document_id: int, alerts: list[AegisAlert]) -> dict:
         """
@@ -180,6 +216,15 @@ class AegisContent:
                 ],
                 "closing":      self.closing,
                 "contactEmail": self.contact_email,
+                "questions": [
+                    {
+                        "position":     i + 1,
+                        "prompt":       q.prompt,
+                        "options":      q.options,
+                        "correctIndex": q.correct_index,
+                    }
+                    for i, q in enumerate(self.questions)
+                ],
             },
             "alerts": [
                 {
@@ -621,6 +666,45 @@ class AegisAIWriter:
         prompts = CR.get_aegis_prompts()
         return prompts.get("system", "")
 
+    def _build_intro_context(self, tweaks: dict[str, Any]) -> str:
+        """
+        Construye el bloque de contexto adicional a partir de los tweaks de
+        empresa (tamaño, jurisdicción, modelo de trabajo, incidente reciente).
+
+        Rellena el placeholder ``{{intro_context}}`` de userTemplate. Cada
+        campo tiene un fallback razonable cuando el tweak no se especifica.
+        """
+        employee_count = tweaks.get("employeeCount")
+        company_size_bucket = tweaks.get("companySize", "")
+        if employee_count:
+            company_size = f"una empresa de aproximadamente {employee_count} empleados"
+        elif company_size_bucket:
+            company_size = f"una {COMPANY_SIZE_LABELS.get(company_size_bucket, company_size_bucket)}"
+        else:
+            company_size = "una empresa de tamaño no especificado"
+
+        jurisdiction = tweaks.get("jurisdiction", "") or "el marco legal general aplicable (RGPD si procede)"
+        work_model = {
+            "remoto":      "trabajo remoto",
+            "híbrido":     "trabajo híbrido (presencial y remoto)",
+            "presencial":  "trabajo presencial",
+        }.get(tweaks.get("workModel", ""), "un modelo de trabajo mixto")
+
+        context = (
+            f"Contexto adicional de la empresa destinataria: {company_size}, "
+            f"con {work_model}, sujeta a {jurisdiction}."
+        )
+
+        recent_incident = tweaks.get("recentIncident", "")
+        if recent_incident:
+            context += (
+                f" La empresa sufrió recientemente el siguiente incidente, "
+                f"que puedes usar como contexto (sin inventar detalles adicionales): "
+                f"{recent_incident}"
+            )
+
+        return context
+
     def _build_user_prompt(
         self,
         topic:              Topic | None,
@@ -649,7 +733,9 @@ class AegisAIWriter:
 
         topic_title = topic.title if topic else "Ciberseguridad General"
         topic_description = getattr(topic, 'description', 'No disponible') if topic else f"Genérico para sector {sector}"
-        
+
+        intro_context = self._build_intro_context(tweaks)
+
         replacements = {
             "company": company,
             "sector": sector,
@@ -664,6 +750,7 @@ class AegisAIWriter:
             "focus": focus,
             "verified_resources": verified_resources[:2000],
             "tips_amount": str(CR.get_aegis_tips_amount()),
+            "intro_context": intro_context,
         }
         
         result = user_template
@@ -761,6 +848,23 @@ class AegisAIWriter:
             except AegisValidationError as exc:
                 logger.warning(f"Tip {i + 1} descartado: {exc}")
 
+        # Construcción y validación del quiz
+        questions: list[AegisQuizData] = []
+        for i, q_data in enumerate(data.get("questions", [])):
+            if not isinstance(q_data, dict):
+                continue
+            try:
+                options = [
+                    str(opt)[:200] for opt in (q_data.get("options") or [])
+                    if isinstance(opt, (str, int, float))
+                ][:4]
+                questions.append(AegisQuizData(
+                    prompt        = str(q_data.get("prompt", f"Pregunta {i + 1}"))[:300],
+                    options       = options,
+                    correct_index = int(q_data.get("correctIndex", 0)),
+                ))
+            except (AegisValidationError, ValueError, TypeError) as exc:
+                logger.warning(f"Pregunta {i + 1} descartada: {exc}")
 
         return AegisContent(
             topic_id      = resolved_topic_id,
@@ -774,4 +878,5 @@ class AegisAIWriter:
             tips          = tips,
             closing       = str(data.get("closing", ""))[:500],
             contact_email = str(data.get("contactEmail", ""))[:100],
+            questions     = questions,
         )

@@ -2,10 +2,15 @@
 Repositories for the Aegis security awareness module.
 
 Provides typed data access for AegisDocument and its related entities
-(Tips, Alerts, Topics).
+(Tips, Alerts, Topics, quiz questions), and for the awareness-campaign
+feature built on top of it (distribution lists, campaigns, per-recipient
+tracking). All Aegis repositories live in this single file by convention.
 
 Classes:
     AegisDocumentRepository: Repository for AegisDocument.
+    DistributionListRepository: CRUD for lists and their recipients.
+    CampaignRepository: Campaign lifecycle, per-recipient tracking, and
+        the public-quiz token lookup.
 
 Usage:
     with UnitOfWork() as uow:
@@ -16,11 +21,23 @@ Usage:
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from src.modules.aegis.model import AegisDocument, AegisDocumentAlert, AegisTip, Topic
+from src.modules.aegis.model import (
+    AegisDocument,
+    AegisDocumentAlert,
+    AegisQuizQuestion,
+    AegisTip,
+    Campaign,
+    CampaignAnswer,
+    CampaignRecipient,
+    DistributionList,
+    Recipient,
+    Topic,
+)
 from src.modules.infrastructure import BaseRepository, UnitOfWork
 
 
@@ -247,6 +264,32 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
                 links_json=links_value,
             ))
 
+    def save_questions(self, doc_id: int, questions_data: list[dict]) -> None:
+        """
+        Replace all quiz questions for a document with new ones.
+
+        Deletes existing questions and inserts new ones in a single
+        transaction. Mirrors save_tips.
+
+        Args:
+            doc_id: Primary key of the document.
+            questions_data: List of question dictionaries with keys:
+                             prompt, options, correct_index.
+        """
+        self._session.query(AegisQuizQuestion).filter(
+            AegisQuizQuestion.document_id == doc_id
+        ).delete()
+        self._session.flush()
+
+        for i, q_data in enumerate(questions_data, 1):
+            self._session.add(AegisQuizQuestion(
+                document_id=doc_id,
+                position=i,
+                prompt=q_data["prompt"],
+                options=q_data["options"],
+                correct_index=q_data["correct_index"],
+            ))
+
     def save_alerts(
         self,
         doc_id: int,
@@ -320,3 +363,216 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
         self._session.flush()
         self._session.refresh(doc)
         return doc
+
+
+class DistributionListRepository(BaseRepository[DistributionList]):
+    """Repository for DistributionList and its Recipient rows."""
+
+    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
+        super().__init__(DistributionList, uow=uow, session=session)
+
+    def get_lists_by_user(self, user_id: int) -> List[DistributionList]:
+        """Retrieve all distribution lists owned by a user, newest first."""
+        return (
+            self._session.query(DistributionList)
+            .filter(DistributionList.user_id == user_id)
+            .order_by(DistributionList.created_at.desc())
+            .all()
+        )
+
+    def create_list(self, user_id: int, name: str) -> DistributionList:
+        """Create a new, empty distribution list."""
+        dist_list = DistributionList(user_id=user_id, name=name)
+        self._session.add(dist_list)
+        self._session.flush()
+        self._session.refresh(dist_list)
+        return dist_list
+
+    def add_recipients(self, list_id: int, recipients_data: list[dict]) -> List[Recipient]:
+        """
+        Add recipients to a list, skipping emails already present.
+
+        Args:
+            list_id: Primary key of the DistributionList.
+            recipients_data: List of dicts with keys: email, name.
+
+        Returns:
+            The newly created Recipient instances (excludes skipped duplicates).
+        """
+        existing_emails = {
+            email for (email,) in
+            self._session.query(Recipient.email).filter(Recipient.list_id == list_id).all()
+        }
+
+        created: list[Recipient] = []
+        for data in recipients_data:
+            email = data["email"].strip().lower()
+            if email in existing_emails:
+                continue
+            recipient = Recipient(list_id=list_id, email=email, name=data.get("name") or None)
+            self._session.add(recipient)
+            existing_emails.add(email)
+            created.append(recipient)
+
+        self._session.flush()
+        for recipient in created:
+            self._session.refresh(recipient)
+        return created
+
+    def get_recipients(self, list_id: int) -> List[Recipient]:
+        """Retrieve all recipients belonging to a list."""
+        return (
+            self._session.query(Recipient)
+            .filter(Recipient.list_id == list_id)
+            .order_by(Recipient.id)
+            .all()
+        )
+
+    def remove_recipient(self, list_id: int, recipient_id: int) -> bool:
+        """Remove a single recipient from a list. Returns False if not found."""
+        recipient = (
+            self._session.query(Recipient)
+            .filter(Recipient.id == recipient_id, Recipient.list_id == list_id)
+            .one_or_none()
+        )
+        if recipient is None:
+            return False
+        self._session.delete(recipient)
+        self._session.flush()
+        return True
+
+
+class CampaignRepository(BaseRepository[Campaign]):
+    """Repository for Campaign, CampaignRecipient, and CampaignAnswer."""
+
+    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
+        super().__init__(Campaign, uow=uow, session=session)
+
+    # =========================================================================
+    # CAMPAIGN
+    # =========================================================================
+
+    def get_campaigns_by_user(self, user_id: int) -> List[Campaign]:
+        """Retrieve all campaigns owned by a user, newest first."""
+        return (
+            self._session.query(Campaign)
+            .filter(Campaign.user_id == user_id)
+            .order_by(Campaign.created_at.desc())
+            .all()
+        )
+
+    def create_campaign(
+        self, user_id: int, document_id: int, list_id: int, name: str,
+    ) -> Campaign:
+        """Create a new campaign in 'draft' status (not yet launched)."""
+        campaign = Campaign(
+            user_id=user_id,
+            document_id=document_id,
+            list_id=list_id,
+            name=name,
+            status="draft",
+        )
+        self._session.add(campaign)
+        self._session.flush()
+        self._session.refresh(campaign)
+        return campaign
+
+    def launch_campaign(
+        self,
+        campaign_id: int,
+        questions_snapshot: list[dict],
+        recipients: list[CampaignRecipient],
+    ) -> Optional[Campaign]:
+        """
+        Mark a campaign as launched: attach the questions snapshot and the
+        already-built CampaignRecipient rows (with their tokens), and set
+        launched_at. Does not send any email — that's the RQ job's job.
+        """
+        campaign = self._session.get(Campaign, campaign_id)
+        if campaign is None:
+            return None
+
+        campaign.questions_snapshot = questions_snapshot
+        campaign.launched_at = datetime.utcnow()
+        campaign.status = "sending"
+        for recipient in recipients:
+            recipient.campaign_id = campaign_id
+            self._session.add(recipient)
+
+        self._session.flush()
+        return campaign
+
+    def mark_campaign_status(self, campaign_id: int, status: str) -> None:
+        """Update a campaign's status (e.g. 'sending' -> 'sent')."""
+        campaign = self._session.get(Campaign, campaign_id)
+        if campaign is not None:
+            campaign.status = status
+            self._session.flush()
+
+    # =========================================================================
+    # CAMPAIGN RECIPIENT
+    # =========================================================================
+
+    def get_recipients(self, campaign_id: int) -> List[CampaignRecipient]:
+        """Retrieve all tracking rows for a campaign."""
+        return (
+            self._session.query(CampaignRecipient)
+            .filter(CampaignRecipient.campaign_id == campaign_id)
+            .order_by(CampaignRecipient.id)
+            .all()
+        )
+
+    def get_recipient_by_token(self, token: str) -> Optional[CampaignRecipient]:
+        """
+        Look up the sole identity of the public quiz page: the recipient
+        row owning this opaque token. Returns None if the token is unknown.
+        """
+        return (
+            self._session.query(CampaignRecipient)
+            .filter(CampaignRecipient.token == token)
+            .one_or_none()
+        )
+
+    def mark_sent(self, recipient_id: int) -> None:
+        """Record the timestamp an email was actually dispatched."""
+        recipient = self._session.get(CampaignRecipient, recipient_id)
+        if recipient is not None:
+            recipient.sent_at = datetime.utcnow()
+            self._session.flush()
+
+    def mark_opened(self, recipient_id: int) -> None:
+        """Mark the first GET on the public quiz page (idempotent)."""
+        recipient = self._session.get(CampaignRecipient, recipient_id)
+        if recipient is not None and recipient.status == "sent":
+            recipient.status = "opened"
+            recipient.opened_at = datetime.utcnow()
+            self._session.flush()
+
+    def mark_completed(
+        self, recipient_id: int, score: int, answers: list[dict],
+    ) -> Optional[CampaignRecipient]:
+        """
+        Persist the graded answers and mark the recipient's quiz as
+        completed. Callers MUST verify the recipient isn't already
+        completed before calling this (the no-repeat rule lives in the
+        manager/endpoint layer, which holds the authoritative status check).
+        """
+        recipient = self._session.get(CampaignRecipient, recipient_id)
+        if recipient is None:
+            return None
+
+        for answer in answers:
+            self._session.add(CampaignAnswer(
+                campaign_recipient_id=recipient_id,
+                question_position=answer["question_position"],
+                selected_index=answer["selected_index"],
+                is_correct=answer["is_correct"],
+            ))
+
+        recipient.status = "completed"
+        recipient.completed_at = datetime.utcnow()
+        recipient.score = score
+
+        self._session.flush()
+        self._session.refresh(recipient)
+        return recipient

@@ -9,11 +9,19 @@ from src.modules.shared._exceptions import ValidationError
 from src.modules.shared.schemas import ErrorSchema
 from src.modules.users import require_oauth_token, require_attributes, AttributeType, UserManager, get_current_user
 
-from .managers import AegisManager
+from .managers import AegisManager, CampaignManager
 from .exceptions import (
     DocumentError,
     DocumentNotFoundError,
     DocumentNotReadyError,
+    CampaignAlreadyLaunchedError,
+    CampaignEmptyListError,
+    CampaignError,
+    CampaignNoQuestionsError,
+    CampaignNotFoundError,
+    DistributionListNotFoundError,
+    QuizAlreadyCompletedError,
+    QuizTokenInvalidError,
 )
 from .services import (
     ExportData,
@@ -36,6 +44,11 @@ from .schemas import (
     BrandsCatalogResponseSchema,
     ExportFormatsResponseSchema,
     ExportResultResponseSchema,
+    DistributionListCreateSchema,
+    RecipientsAddSchema,
+    CampaignCreateSchema,
+    QuizTokenQuerySchema,
+    QuizSubmitSchema,
 )
 
 
@@ -490,3 +503,246 @@ def quick_export_markdown(args, doc_id):
             "Content-Length": str(result.size_bytes),
         },
     )
+
+
+# ============================================================================
+# DISTRIBUTION LISTS (autenticado, propietario)
+# ============================================================================
+
+
+@aegis_blp.post("/lists")
+@aegis_blp.arguments(DistributionListCreateSchema)
+@aegis_blp.response(201, description="Distribution list created")
+@aegis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@limiter.limit("30 per hour; 100 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_CREATE])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def create_distribution_list(data):
+    """Crear una lista de distribución vacía"""
+    user = get_current_user()
+    mgr = CampaignManager(user)
+    dist_list = mgr.create_list(data["name"])
+    logger.info(f"Lista {dist_list['id']} creada | user={current_actor()}")
+    return dist_list, 201
+
+
+@aegis_blp.get("/lists")
+@aegis_blp.response(200, description="Distribution lists owned by the authenticated user")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@limiter.limit("60 per hour; 300 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_READ])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def list_distribution_lists():
+    """Listar las listas de distribución del usuario autenticado"""
+    user = get_current_user()
+    mgr = CampaignManager(user)
+    lists = mgr.list_lists()
+    return {"count": len(lists), "lists": lists}
+
+
+@aegis_blp.get("/lists/<int:list_id>")
+@aegis_blp.response(200, description="Distribution list detail")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@aegis_blp.alt_response(404, schema=ErrorSchema, description="List not found")
+@limiter.limit("60 per hour; 300 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_READ])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def get_distribution_list(list_id):
+    """Obtener el detalle de una lista de distribución"""
+    user = get_current_user()
+    mgr = CampaignManager(user)
+    return mgr.get_list(list_id)
+
+
+@aegis_blp.delete("/lists/<int:list_id>")
+@aegis_blp.response(200, description="List deleted")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@aegis_blp.alt_response(404, schema=ErrorSchema, description="List not found")
+@limiter.limit("30 per hour; 100 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_DELETE])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def delete_distribution_list(list_id):
+    """Eliminar una lista de distribución y sus destinatarios"""
+    user = get_current_user()
+    mgr = CampaignManager(user)
+    mgr.delete_list(list_id)
+    logger.info(f"Lista {list_id} eliminada | user={current_actor()}")
+    return {"message": "Lista eliminada correctamente", "listId": list_id}
+
+
+@aegis_blp.post("/lists/<int:list_id>/recipients")
+@aegis_blp.arguments(RecipientsAddSchema)
+@aegis_blp.response(201, description="Recipients added")
+@aegis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@aegis_blp.alt_response(404, schema=ErrorSchema, description="List not found")
+@limiter.limit("30 per hour; 100 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_CREATE])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def add_list_recipients(data, list_id):
+    """Añadir destinatarios a una lista (los emails duplicados se ignoran)"""
+    user = get_current_user()
+    mgr = CampaignManager(user)
+    created = mgr.add_recipients(list_id, data["recipients"])
+    logger.info(f"{len(created)} destinatarios añadidos a lista {list_id} | user={current_actor()}")
+    return {"count": len(created), "recipients": created}, 201
+
+
+@aegis_blp.get("/lists/<int:list_id>/recipients")
+@aegis_blp.response(200, description="Recipients of a distribution list")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@aegis_blp.alt_response(404, schema=ErrorSchema, description="List not found")
+@limiter.limit("60 per hour; 300 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_READ])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def get_list_recipients(list_id):
+    """Listar los destinatarios de una lista"""
+    user = get_current_user()
+    mgr = CampaignManager(user)
+    recipients = mgr.get_recipients(list_id)
+    return {"count": len(recipients), "recipients": recipients}
+
+
+@aegis_blp.delete("/lists/<int:list_id>/recipients/<int:recipient_id>")
+@aegis_blp.response(200, description="Recipient removed")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@aegis_blp.alt_response(404, schema=ErrorSchema, description="List not found")
+@limiter.limit("30 per hour; 100 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_DELETE])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def delete_list_recipient(list_id, recipient_id):
+    """Eliminar un destinatario de una lista"""
+    user = get_current_user()
+    mgr = CampaignManager(user)
+    mgr.remove_recipient(list_id, recipient_id)
+    logger.info(f"Destinatario {recipient_id} eliminado de lista {list_id} | user={current_actor()}")
+    return {"message": "Destinatario eliminado correctamente"}
+
+
+# ============================================================================
+# CAMPAIGNS (autenticado, propietario)
+# ============================================================================
+
+
+@aegis_blp.post("/campaigns")
+@aegis_blp.arguments(CampaignCreateSchema)
+@aegis_blp.response(201, description="Campaign created (draft)")
+@aegis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@aegis_blp.alt_response(404, schema=ErrorSchema, description="Document or list not found")
+@limiter.limit("20 per hour; 60 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_CREATE])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def create_campaign(data):
+    """Crear una campaña en borrador (píldora + lista, aún sin lanzar)"""
+    user = get_current_user()
+    mgr = CampaignManager(user)
+    campaign = mgr.create_campaign(data["documentId"], data["listId"], data["name"])
+    logger.info(f"Campaña {campaign['id']} creada (draft) | user={current_actor()}")
+    return campaign, 201
+
+
+@aegis_blp.get("/campaigns")
+@aegis_blp.response(200, description="Campaigns owned by the authenticated user")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@limiter.limit("60 per hour; 300 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_READ])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def list_campaigns():
+    """Listar las campañas del usuario autenticado"""
+    user = get_current_user()
+    mgr = CampaignManager(user)
+    campaigns = mgr.list_campaigns()
+    return {"count": len(campaigns), "campaigns": campaigns}
+
+
+@aegis_blp.get("/campaigns/<int:campaign_id>")
+@aegis_blp.response(200, description="Campaign detail including per-recipient tracking")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@aegis_blp.alt_response(404, schema=ErrorSchema, description="Campaign not found")
+@limiter.limit("60 per hour; 300 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_READ])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def get_campaign(campaign_id):
+    """Obtener el detalle de una campaña, incluyendo el tracking por destinatario"""
+    user = get_current_user()
+    mgr = CampaignManager(user)
+    return mgr.get_campaign(campaign_id)
+
+
+@aegis_blp.post("/campaigns/<int:campaign_id>/launch")
+@aegis_blp.response(200, description="Campaign launched — sending in background")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@aegis_blp.alt_response(404, schema=ErrorSchema, description="Campaign not found")
+@aegis_blp.alt_response(409, schema=ErrorSchema, description="Campaign already launched")
+@limiter.limit("10 per hour; 30 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_UPDATE])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def launch_campaign(campaign_id):
+    """Lanzar una campaña: congela el quiz, genera tokens y encola el envío"""
+    user = get_current_user()
+    mgr = CampaignManager(user)
+    campaign = mgr.launch_campaign(campaign_id)
+    logger.info(f"Campaña {campaign_id} lanzada | user={current_actor()}")
+    return {"message": "Campaña lanzada correctamente", "campaign": campaign}
+
+
+# ============================================================================
+# PUBLIC QUIZ — SIN AUTENTICACIÓN (el token es la única identidad)
+# ============================================================================
+#
+# Deliberadamente sin @require_oauth_token / @require_attributes: el
+# destinatario de una campaña nunca tiene cuenta en SeQ. El token opaco de
+# CampaignRecipient (nunca derivado del email) es la única credencial, y su
+# estado ('completed' es inmutable) impone la regla de no-repetición.
+
+
+@aegis_blp.get("/quiz")
+@aegis_blp.arguments(QuizTokenQuerySchema, location="query")
+@aegis_blp.response(200, description="Quiz content for this token (never includes correct answers)")
+@aegis_blp.alt_response(404, schema=ErrorSchema, description="Invalid or unknown token")
+@limiter.limit("30 per hour")
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def get_public_quiz(args):
+    """Obtener el contenido del quiz asociado a un token de campaña (sin login)"""
+    return CampaignManager.get_public_quiz(args["t"])
+
+
+@aegis_blp.post("/quiz")
+@aegis_blp.arguments(QuizTokenQuerySchema, location="query")
+@aegis_blp.arguments(QuizSubmitSchema)
+@aegis_blp.response(200, description="Quiz graded and recorded")
+@aegis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@aegis_blp.alt_response(404, schema=ErrorSchema, description="Invalid or unknown token")
+@aegis_blp.alt_response(409, schema=ErrorSchema, description="Quiz already completed")
+@limiter.limit("10 per hour")
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def submit_public_quiz(args, data):
+    """Enviar las respuestas del quiz asociado a un token (sin login, no repetible)"""
+    token = args["t"]
+    result = CampaignManager.submit_public_quiz(token, data["answers"])
+    logger.info(f"Quiz completado | token=***{token[-6:]} score={result['score']}/{result['total']}")
+    return result

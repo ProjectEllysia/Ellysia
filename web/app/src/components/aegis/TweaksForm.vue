@@ -59,6 +59,52 @@
       <input id="tw-focus" v-model="store.tweaks.topicFocus" type="text" maxlength="120" class="input" placeholder="Ej: phishing por QR" />
     </div>
 
+    <div class="form-divider">Contexto adicional</div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label for="tw-size">Tamaño de empresa</label>
+        <select id="tw-size" v-model="store.tweaks.companySize" class="input select">
+          <option value="">Sin especificar</option>
+          <option value="micro">Micro (&lt;10)</option>
+          <option value="pequeña">Pequeña (10-50)</option>
+          <option value="mediana">Mediana (50-250)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="tw-employees">Nº empleados</label>
+        <input id="tw-employees" v-model.number="store.tweaks.employeeCount" type="number" min="1" class="input" placeholder="Opcional" />
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label for="tw-jurisdiction">Jurisdicción</label>
+        <input id="tw-jurisdiction" v-model="store.tweaks.jurisdiction" type="text" maxlength="256" class="input" placeholder="Ej: España (RGPD)" />
+      </div>
+      <div class="form-group">
+        <label for="tw-workmodel">Modelo de trabajo</label>
+        <select id="tw-workmodel" v-model="store.tweaks.workModel" class="input select">
+          <option value="">Sin especificar</option>
+          <option value="remoto">Remoto</option>
+          <option value="híbrido">Híbrido</option>
+          <option value="presencial">Presencial</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="tw-incident">Incidente reciente</label>
+      <textarea
+        id="tw-incident"
+        v-model="store.tweaks.recentIncident"
+        maxlength="500"
+        rows="2"
+        class="input textarea"
+        placeholder="Opcional — ej: intento de phishing a Contabilidad la semana pasada"
+      ></textarea>
+    </div>
+
     <TopicGrid :topics="store.topics" :selected-topic-id="store.selectedTopicId" @select="store.selectedTopicId = $event" />
 
     <button type="button" class="btn-generate" :disabled="!store.selectedTopicId || store.generating" @click="store.generate()">
@@ -85,9 +131,14 @@ function removeBrand(brand) { store.selectedBrands = store.selectedBrands.filter
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
 .form-group { display: flex; flex-direction: column; gap: 0.25rem; }
 .form-group label { font-size: 0.72rem; font-weight: 600; color: var(--text-dim); }
-.input { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 6px; padding: 0.4rem 0.55rem; color: var(--text); font-size: 0.8rem; outline: none; width: 100%; box-sizing: border-box; transition: border-color 0.2s; }
+.input { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 6px; padding: 0.4rem 0.55rem; color: var(--text); font-size: 0.8rem; outline: none; width: 100%; box-sizing: border-box; transition: border-color 0.2s; font-family: inherit; }
 .input:focus { border-color: var(--accent); }
 .select { cursor: pointer; appearance: auto; }
+.input[type=number]::-webkit-inner-spin-button,
+.input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.input[type=number] { -moz-appearance: textfield; }
+.textarea { resize: vertical; min-height: 2.4rem; line-height: 1.4; }
+.form-divider { margin: 0.3rem 0 -0.15rem; padding-top: 0.6rem; border-top: 1px solid var(--border); font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
 .selected-brands { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.3rem; }
 .brand-tag { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.15rem 0.4rem; font-size: 0.7rem; font-weight: 600; background: var(--accent); color: #0b0c10; border-radius: 4px; }
 .brand-remove { background: none; border: none; color: inherit; cursor: pointer; font-size: 0.9rem; padding: 0; line-height: 1; opacity: 0.7; }

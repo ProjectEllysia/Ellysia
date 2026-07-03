@@ -1,5 +1,5 @@
 <template>
-  <div class="aegis-page">
+  <div class="aegis-page" data-module="aegis">
     <StarBackground />
     <Topbar title="Aegis" badge="Generación de Píldoras" />
 
@@ -23,6 +23,7 @@
           @export="(fmt) => store.downloadExport(store.currentDocId, fmt)"
           @preview="() => store.previewMarkdown(store.currentDocId)"
           @edit="store.startEdit()"
+          @campaign="store.openCampaignModal()"
         />
       </section>
 
@@ -41,6 +42,12 @@
       </aside>
     </div>
 
+    <CampaignModal
+      v-if="store.campaignModalOpen && store.viewerDoc.data"
+      :doc="store.viewerDoc.data"
+      @close="store.closeCampaignModal()"
+    />
+
     <AppToast />
   </div>
 </template>
@@ -55,6 +62,7 @@ import TweaksForm from '@/components/aegis/TweaksForm.vue'
 import DocumentViewer from '@/components/aegis/DocumentViewer.vue'
 import DocumentEditor from '@/components/aegis/DocumentEditor.vue'
 import HistoryPanel from '@/components/aegis/HistoryPanel.vue'
+import CampaignModal from '@/components/aegis/CampaignModal.vue'
 
 const store = useAegisStore()
 onMounted(async () => { await Promise.all([store.loadTopics(), store.loadBrands()]); await store.loadHistory() })
