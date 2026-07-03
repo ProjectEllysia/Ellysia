@@ -8,6 +8,8 @@ conexión, cabeceras y cuerpo sin depender de un proveedor cloud.
 
 from __future__ import annotations
 
+import email
+import email.policy
 import socket
 
 import pytest
@@ -35,17 +37,35 @@ def _free_port() -> int:
 
 
 class _CapturingHandler:
-    """Acepta cualquier mensaje y lo guarda para inspección."""
+    """Acepta cualquier mensaje y lo guarda para inspección.
+
+    Decodifica el MIME de verdad (en vez de comparar contra los bytes crudos
+    del wire): el Content-Transfer-Encoding elegido por el generador
+    (8bit/quoted-printable/base64) depende del contenido y no es estable,
+    así que solo los campos parseados ('headers'/'html'/'text') son fiables
+    para hacer aserciones.
+    """
 
     def __init__(self) -> None:
         self.messages: list[dict] = []
 
     async def handle_DATA(self, server, session, envelope):
+        parsed = email.message_from_bytes(envelope.content, policy=email.policy.default)
+        html, text = "", ""
+        for part in parsed.walk():
+            if part.get_content_type() == "text/html":
+                html = part.get_content()
+            elif part.get_content_type() == "text/plain":
+                text = part.get_content()
+
         self.messages.append(
             {
                 "mail_from": envelope.mail_from,
                 "rcpt_tos": list(envelope.rcpt_tos),
                 "content": envelope.content.decode("utf-8", errors="replace"),
+                "headers": parsed,
+                "html": html,
+                "text": text,
             }
         )
         return "250 Message accepted for delivery"
@@ -105,8 +125,9 @@ def test_smtp_strategy_sends_message_to_local_server(smtp_server):
     received = handler.messages[0]
     assert received["mail_from"] == "noreply@seq.test"
     assert received["rcpt_tos"] == ["empleado@empresa.test"]
-    assert "Contenido de la píldora" in received["content"]
-    assert "Reply-To: seguridad@empresa.test" in received["content"]
+    assert "Contenido de la píldora" in received["html"]
+    assert "Contenido de la píldora" in received["text"]
+    assert received["headers"]["Reply-To"] == "seguridad@empresa.test"
 
 
 def test_smtp_strategy_raises_connection_error_when_server_unreachable():

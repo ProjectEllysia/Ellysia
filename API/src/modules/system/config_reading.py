@@ -607,6 +607,23 @@ def get_taskqueue_config() -> dict:
 
     return cfg
 
+
+@_lazy_load
+def get_public_web_url() -> str:
+    """Base URL pública del frontend (SPA), usada para construir enlaces
+    en emails salientes (p. ej. el enlace del quiz de una campaña Aegis).
+
+    ``PUBLIC_WEB_URL`` en .env tiene prioridad sobre ``general.publicUrl``
+    en SecOpsConfig.json; sin ninguno de los dos, cae al valor de desarrollo
+    de Vite. Sin barra final.
+    """
+    env_override = os.getenv("PUBLIC_WEB_URL")
+    if env_override:
+        return env_override.rstrip("/")
+
+    cfg = _require_configs().get("general", {})
+    return str(cfg.get("publicUrl", "http://localhost:5173")).rstrip("/")
+
 # =============================================================================
 # CONFIGURACIÓN DE IRIS
 # =============================================================================
