@@ -10,3 +10,7 @@ pytest-mock>=3.12.0
 # dependencia de producción, Iris solo *decodifica* QRs (opencv-python-headless
 # en requirements.txt).
 qrcode>=8.0
+
+# Servidor SMTP local para los tests de herald (SmtpStrategy) -- no es una
+# dependencia de producción, herald solo envía correo vía smtplib (stdlib).
+aiosmtpd>=1.4.6
