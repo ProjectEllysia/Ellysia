@@ -57,4 +57,5 @@ def build_mailer(module: Optional[str] = None) -> Mailer:
     """
     strategy_name = CR.get_email_strategy_for(module)
     logger.info("[herald] módulo=%s → estrategia=%s", module, strategy_name)
-    return Mailer(_build_strategy(strategy_name))
+    strategy = _build_strategy(strategy_name)
+    return Mailer(strategy=strategy)

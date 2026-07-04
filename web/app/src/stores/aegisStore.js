@@ -49,10 +49,30 @@ export const useAegisStore = defineStore('aegis', () => {
     mentionContact: '',
     sector: '',
     topicFocus: '',
+    companySize: '',
+    employeeCount: null,
+    jurisdiction: '',
+    workModel: '',
+    recentIncident: '',
   })
 
   /** Estado del documento en el visor */
   const viewerDoc = reactive({ loading: false, data: null })
+
+  /* ── CAMPAÑAS ── */
+
+  /** Modal de campaña abierto/cerrado */
+  const campaignModalOpen = ref(false)
+  /** Listas de distribución del usuario (cacheadas para el modal) */
+  const distributionLists = ref([])
+  /** Carga de listas en curso */
+  const loadingLists = ref(false)
+  /** Campañas ya lanzadas para la píldora abierta en el modal */
+  const campaignsForDoc = ref([])
+  /** Creación de una lista nueva en curso */
+  const creatingList = ref(false)
+  /** Lanzamiento de campaña en curso */
+  const launchingCampaign = ref(false)
 
   /* ── CARGA INICIAL ── */
 
@@ -131,6 +151,11 @@ export const useAegisStore = defineStore('aegis', () => {
           associatedBrands: [...selectedBrands.value],
           sector: tweaks.sector,
           topicFocus: tweaks.topicFocus,
+          companySize: tweaks.companySize,
+          employeeCount: tweaks.employeeCount || null,
+          jurisdiction: tweaks.jurisdiction,
+          workModel: tweaks.workModel,
+          recentIncident: tweaks.recentIncident,
         },
       }
       const res = await apiFetch('/aegis/generate', { method: 'POST', body: JSON.stringify(payload) })
@@ -284,11 +309,121 @@ export const useAegisStore = defineStore('aegis', () => {
     setTimeout(() => { URL.revokeObjectURL(url); a.remove() }, 1000)
   }
 
+  /* ── CAMPAÑAS ── */
+
+  /**
+   * Abre el modal de campaña para la píldora actualmente en el visor y
+   * precarga las listas de distribución + las campañas ya lanzadas para ella.
+   */
+  async function openCampaignModal() {
+    campaignModalOpen.value = true
+    await Promise.all([
+      loadDistributionLists(),
+      currentDocId.value ? loadCampaignsForDocument(currentDocId.value) : Promise.resolve(),
+    ])
+  }
+
+  /** Cierra el modal de campaña */
+  function closeCampaignModal() {
+    campaignModalOpen.value = false
+  }
+
+  /** Carga las listas de distribución del usuario desde GET /aegis/lists */
+  async function loadDistributionLists() {
+    loadingLists.value = true
+    try {
+      const res = await apiFetch('/aegis/lists')
+      if (!res?.ok) { distributionLists.value = []; return }
+      const data = await res.json()
+      distributionLists.value = [...(data.lists ?? [])]
+    } finally { loadingLists.value = false }
+  }
+
+  /**
+   * Carga las campañas ya lanzadas para una píldora concreta.
+   * GET /aegis/campaigns no filtra por documento: se filtra en cliente.
+   * @param {number|string} documentId
+   */
+  async function loadCampaignsForDocument(documentId) {
+    try {
+      const res = await apiFetch('/aegis/campaigns')
+      if (!res?.ok) { campaignsForDoc.value = []; return }
+      const data = await res.json()
+      campaignsForDoc.value = (data.campaigns ?? []).filter(c => c.documentId === documentId)
+    } catch { campaignsForDoc.value = [] }
+  }
+
+  /**
+   * Crea una lista de distribución nueva con destinatarios y la añade a
+   * distributionLists. Devuelve la lista creada, o null si falló.
+   * @param {string} name
+   * @param {Array<{email: string, name?: string}>} recipients
+   */
+  async function createDistributionListWithRecipients(name, recipients) {
+    creatingList.value = true
+    try {
+      const res = await apiFetch('/aegis/lists', { method: 'POST', body: JSON.stringify({ name }) })
+      const list = await res?.json().catch(() => null)
+      if (!res?.ok || !list?.id) {
+        toast.show(list?.message || 'No se pudo crear la lista.', 'error')
+        return null
+      }
+      if (recipients.length) {
+        const recRes = await apiFetch(`/aegis/lists/${list.id}/recipients`, {
+          method: 'POST',
+          body: JSON.stringify({ recipients }),
+        })
+        if (!recRes?.ok) {
+          toast.show('Lista creada, pero no se pudieron añadir los destinatarios.', 'warn')
+        }
+      }
+      await loadDistributionLists()
+      const created = distributionLists.value.find(l => l.id === list.id) || { ...list, recipientCount: recipients.length }
+      return created
+    } finally { creatingList.value = false }
+  }
+
+  /**
+   * Crea una campaña (draft) y la lanza inmediatamente: congela el quiz,
+   * genera un token por destinatario y encola el envío en segundo plano.
+   * @param {{documentId: number, listId: number, name: string}} params
+   * @returns {Promise<boolean>}
+   */
+  async function launchNewCampaign({ documentId, listId, name }) {
+    launchingCampaign.value = true
+    try {
+      const createRes = await apiFetch('/aegis/campaigns', {
+        method: 'POST',
+        body: JSON.stringify({ documentId, listId, name }),
+      })
+      const campaign = await createRes?.json().catch(() => null)
+      if (!createRes?.ok || !campaign?.id) {
+        toast.show(campaign?.message || 'No se pudo crear la campaña.', 'error')
+        return false
+      }
+
+      const launchRes = await apiFetch(`/aegis/campaigns/${campaign.id}/launch`, { method: 'POST' })
+      const launchData = await launchRes?.json().catch(() => ({}))
+      if (!launchRes?.ok) {
+        toast.show(launchData.message || 'No se pudo lanzar la campaña.', 'error')
+        return false
+      }
+
+      toast.show('Campaña lanzada. El envío continúa en segundo plano.', 'success')
+      await loadCampaignsForDocument(documentId)
+      return true
+    } finally { launchingCampaign.value = false }
+  }
+
   return {
     topics, brands, documents, selectedTopicId, currentDocId, sortMode, selectedBrands,
     generating, loading, editing, saving, tweaks, viewerDoc,
     loadTopics, loadBrands, loadHistory, sortedDocuments, generate,
     loadDocument, closeViewer, deleteDocument, downloadExport, previewMarkdown,
     startEdit, cancelEdit, savePill,
+    campaignModalOpen, distributionLists, loadingLists, campaignsForDoc,
+    creatingList, launchingCampaign,
+    openCampaignModal, closeCampaignModal, loadDistributionLists,
+    createDistributionListWithRecipients, launchNewCampaign,
   }
 })

@@ -32,6 +32,15 @@
             class="toolbar-btn"
             @click="emit('edit')"
           >Editar</button>
+          <button
+            v-if="viewerDoc.data.status === 'done'"
+            type="button"
+            class="toolbar-btn toolbar-btn--campaign"
+            @click="emit('campaign')"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            Lanzar campaña
+          </button>
           <button type="button" class="toolbar-btn toolbar-close" @click="emit('close')">&times;</button>
         </div>
 
@@ -88,7 +97,7 @@ import { useUtils } from '@/composables/useUtils'
 
 const { formatDate } = useUtils()
 defineProps({ viewerDoc: { type: Object, default: () => ({ loading: false, data: null }) } })
-const emit = defineEmits(['close', 'export', 'preview', 'edit'])
+const emit = defineEmits(['close', 'export', 'preview', 'edit', 'campaign'])
 const exportOpen = ref(false)
 
 const sevIcons = { critica: '🔴', alta: '🟠', media: '🟡', baja: '🟢', informativa: '🔵' }
@@ -109,6 +118,8 @@ function emitExport(fmt) { exportOpen.value = false; emit('export', fmt) }
 .toolbar-spacer { flex: 1; }
 .toolbar-btn { padding: 0.25rem 0.6rem; font-size: 0.68rem; font-weight: 600; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer; transition: all 0.2s; }
 .toolbar-btn:hover { background: var(--accent); color: #0b0c10; border-color: var(--accent); }
+.toolbar-btn--campaign { display: inline-flex; align-items: center; gap: 0.3rem; background: var(--accent-dim); border-color: var(--accent); color: var(--accent-bright); }
+.toolbar-btn--campaign:hover { background: var(--accent); color: #0b0c10; border-color: var(--accent); box-shadow: 0 0 14px var(--accent-dim); }
 .toolbar-close { border: none; background: none; font-size: 1.1rem; padding: 0 0.25rem; line-height: 1; }
 .toolbar-close:hover { background: none; color: var(--danger); }
 .export-dropdown { position: relative; }

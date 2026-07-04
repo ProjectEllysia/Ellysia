@@ -147,19 +147,30 @@ def get_openai_environment() -> dict[str, str]:
     return {"api_key": api_key, "model": model, "base_url": base_url}
 
 
+@_lazy_load
 def get_oauth_config() -> tuple[float, float, Optional[str], Optional[str]]:
-    """Solo variables de entorno."""
-    secret      = os.getenv("JWT_SECRET_KEY")
-    algorithm   = os.getenv("JWT_ALGORITHM")
-    access      = os.getenv("ACCESS_TOKEN_EXPIRY_MINUTES") or ""
-    refresh     = os.getenv("REFRESH_TOKEN_EXPIRY_DAYS") or ""
+    """Configuración OAuth/JWT.
 
-    if not all([secret, algorithm, access, refresh]):
+    El secreto (``JWT_SECRET_KEY``) vive exclusivamente en .env.
+    ``algorithm``, ``access_token_expiry_minutes`` y
+    ``refresh_token_expiry_days`` provienen de ``security.jwt`` en
+    SecOpsConfig.json; las env vars ``JWT_ALGORITHM``,
+    ``ACCESS_TOKEN_EXPIRY_MINUTES`` y ``REFRESH_TOKEN_EXPIRY_DAYS``
+    sobreescriben la config si están presentes (override útil para
+    contenedores / 12-factor).
+    """
+    secret = os.getenv("JWT_SECRET_KEY")
+    if not secret:
         raise ValueError(
-            "Faltan variables de entorno para OAuth. "
-            "Asegúrate de definir JWT_SECRET_KEY, JWT_ALGORITHM, "
-            "ACCESS_TOKEN_EXPIRY_MINUTES y REFRESH_TOKEN_EXPIRY_DAYS."
+            "Falta la variable de entorno JWT_SECRET_KEY. "
+            "Defínela en el archivo .env (es un secreto, no va en "
+            "SecOpsConfig.json)."
         )
+
+    jwt_cfg = _require_configs().get("security", {}).get("jwt", {})
+    algorithm = os.getenv("JWT_ALGORITHM") or str(jwt_cfg.get("algorithm", "HS256"))
+    access    = os.getenv("ACCESS_TOKEN_EXPIRY_MINUTES") or jwt_cfg.get("access_token_expiry_minutes", 30)
+    refresh   = os.getenv("REFRESH_TOKEN_EXPIRY_DAYS") or jwt_cfg.get("refresh_token_expiry_days", 7)
 
     return (float(access), float(refresh), secret, algorithm)
 
@@ -606,6 +617,23 @@ def get_taskqueue_config() -> dict:
         cfg["max_workers"] = int(max_workers_env)
 
     return cfg
+
+
+@_lazy_load
+def get_public_web_url() -> str:
+    """Base URL pública del frontend (SPA), usada para construir enlaces
+    en emails salientes (p. ej. el enlace del quiz de una campaña Aegis).
+
+    ``PUBLIC_WEB_URL`` en .env tiene prioridad sobre ``general.publicUrl``
+    en SecOpsConfig.json; sin ninguno de los dos, cae al valor de desarrollo
+    de Vite. Sin barra final.
+    """
+    env_override = os.getenv("PUBLIC_WEB_URL")
+    if env_override:
+        return env_override.rstrip("/")
+
+    cfg = _require_configs().get("general", {})
+    return str(cfg.get("publicUrl", "http://localhost:5173")).rstrip("/")
 
 # =============================================================================
 # CONFIGURACIÓN DE IRIS

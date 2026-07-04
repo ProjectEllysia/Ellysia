@@ -216,8 +216,13 @@ Iris applies 37 rules across authentication (SPF, DKIM, DMARC), header anomalies
 | `GET` | `/aegis/download_as_pdf?id=` | Export as PDF |
 | `GET` | `/aegis/topics` | List available topics |
 | `GET/DELETE` | `/aegis/documents[/<id>]` | List / detail / delete |
+| `POST/GET/DELETE` | `/aegis/lists[/<id>]` | Distribution lists (owner) |
+| `POST/GET/DELETE` | `/aegis/lists/<id>/recipients[/<id>]` | Recipients within a list (owner) |
+| `POST/GET` | `/aegis/campaigns[/<id>]` | Create/list/detail a campaign (owner) |
+| `POST` | `/aegis/campaigns/<id>/launch` | Launch: snapshots the quiz, mints one opaque token per recipient, queues sending |
+| `GET/POST` | `/aegis/quiz?t=<token>` | **Public, no auth** — serve/grade the quiz for one recipient. One-shot: a completed token always 409s on resubmission |
 
-Aegis combines AI-generated awareness content with current CVE alerts from INCIBE-CERT and CIRCL/NVD, tracking 19 major technology brands.
+Aegis combines AI-generated awareness content with current CVE alerts from INCIBE-CERT and CIRCL/NVD, tracking 19 major technology brands. Each generated pill also gets a 2-3 question multiple-choice quiz; a **campaign** sends the pill + quiz to a distribution list, tracking `sent → opened → completed` per recipient via `herald`.
 
 ### Acheron — credential vault
 
@@ -258,11 +263,12 @@ queue.submit(func, name="Scan 192.168.1.1", category="sentinel.scan", external_i
 | `sentinel.scan` | Sentinel | `services/rq_tasks.execute_nmap_scan` |
 | `sentinel.report` | Sentinel | `services/rq_tasks.execute_report_generation` |
 | `aegis.generate` | Aegis | `services/rq_tasks.execute_aegis_generation` |
+| `aegis.campaign` | Aegis | `campaign_managers.CampaignManager.execute_campaign_send` |
 | `iris.analyze` | Iris | `services/rq_tasks.execute_iris_analysis` |
 
 - **Progress reporting**: workers update `job.meta["progress"]` via `_Task(progress_callback=...)`.
 - **Cooperative cancellation**: set Redis key `taskqueue:cancel:{job_id}`; workers check via `_Task.wait(cancel_check=...)`.
-- **External IDs** follow the pattern `scan:<id>`, `sentinel-doc:<id>`, `aegis-doc:<id>`, `iris-analysis:<id>`.
+- **External IDs** follow the pattern `scan:<id>`, `sentinel-doc:<id>`, `aegis-doc:<id>`, `aegis-campaign:<id>`, `iris-analysis:<id>`.
 
 > [!WARNING]
 > Workers must be running for async tasks: `python -m src.modules.system.taskqueue.worker`. They listen on category-specific queues + `default`.
