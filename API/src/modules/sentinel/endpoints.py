@@ -469,7 +469,7 @@ def retrieve_scan_by_id(scan_id: int):
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def get_scan_traceroute(scan_id: int):
-    """Traceroute (cacheado) desde el servidor SeQ hasta el objetivo del escaneo."""
+    """Traceroute (cacheado) desde el servidor Ellysia hasta el objetivo del escaneo."""
     user = get_current_user()
     payload = TracerouteManager().get_for_scan(scan_id, user.id)  # type: ignore
     payload["message"] = "Traceroute obtenido correctamente"

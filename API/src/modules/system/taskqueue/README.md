@@ -2,7 +2,7 @@
 
 ## Visión General
 
-`TaskQueue` es el subsistema de colas de tareas de SeQ. Coordina la **ejecución asincrónica** de operaciones costosas (análisis, escaneos, generación de documentos) usando **Redis** como backend persistente y **RQ** (Redis Queue) para orquestación. Las tareas sobreviven a reinicios de la API, se monitorean en tiempo real y soportan cancelación cooperativa.
+`TaskQueue` es el subsistema de colas de tareas de Ellysia. Coordina la **ejecución asincrónica** de operaciones costosas (análisis, escaneos, generación de documentos) usando **Redis** como backend persistente y **RQ** (Redis Queue) para orquestación. Las tareas sobreviven a reinicios de la API, se monitorean en tiempo real y soportan cancelación cooperativa.
 
 ### Características clave
 - **Persistencia**: tareas almacenadas en Redis (no se pierden al reiniciar).

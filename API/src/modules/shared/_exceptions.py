@@ -345,7 +345,7 @@ class ExceptionHandler:
             )
 
         if "Timeout" in exc_type or "timeout" in exc_message.lower():
-            return TimeoutError(
+            return OperationTimeoutError(
                 message=f"Timeout: {exc_message}",
                 original_exception=exc
             )
@@ -383,7 +383,7 @@ class ExceptionHandler:
         return secops_exc
 
 
-class TimeoutError(SecOpsException):
+class OperationTimeoutError(SecOpsException):
     default_code = ErrorCode.SCAN_TIMEOUT
     default_status_code = 408
     default_severity = ErrorSeverity.MEDIUM

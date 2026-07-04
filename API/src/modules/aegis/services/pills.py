@@ -497,108 +497,127 @@ class AegisAlertFetcher:
             if brand_counts[brand] >= max_per_brand:
                 continue
 
-            vendor, product = self._brand_slugs.get(brand, (brand.lower().replace(" ", ""), ""))
-            url = (
-                f"https://cve.circl.lu/api/search/{vendor}/{product}"
-                if product else 
-                f"https://cve.circl.lu/api/search/{vendor}"
-            )
-
-            try:
-                req = urllib.request.Request(
-                    url,
-                    headers={"User-Agent": "AegisAlertFetcher/2.0", "Accept": "application/json"},
-                )
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = json.loads(resp.read())
-            except Exception as e:
-                logger.warning(f"CIRCL error para '{brand}': {e}")
+            cve_list = self._circl_fetch_cve_list(brand)
+            if cve_list is None:
                 continue
 
-            results = data.get("results", {}) if isinstance(data, dict) else {}
-            cve_list = results.get("cvelistv5", []) if isinstance(results, dict) else []
-            
-            if not isinstance(cve_list, list):
-                continue
-
-            def extract_date(entry):
-                try:
-                    if isinstance(entry, (list, tuple)) and len(entry) > 1:
-                        return entry[1].get("cveMetadata", {}).get("datePublished", "")
-                    return ""
-                except Exception:
-                    return ""
-
-            sorted_entries = sorted(cve_list, key=extract_date, reverse=True)
+            sorted_entries = sorted(cve_list, key=self._circl_extract_date, reverse=True)
 
             for entry in sorted_entries:
                 if brand_counts[brand] >= max_per_brand:
                     break
 
-                try:
-                    if not isinstance(entry, (list, tuple)) or len(entry) < 2:
-                        continue
-                        
-                    cve_id = entry[0].upper()
-                    meta = entry[1]
-                    
-                    if not isinstance(meta, dict):
-                        continue
-
-                    # Extraer metadata
-                    cve_metadata = meta.get("cveMetadata", {})
-                    pub_raw = cve_metadata.get("datePublished", "")[:10]
-                    
-                    if not self._is_recent(pub_raw):
-                        continue
-
-                    containers = meta.get("containers", {})
-                    cna = containers.get("cna", {})
-                    descriptions = cna.get("descriptions", [])
-                    
-                    desc = next(
-                        (d["value"] for d in descriptions if d.get("lang", "").startswith("es")),
-                        next((d["value"] for d in descriptions if d.get("lang", "").startswith("en")), "")
-                    ) if descriptions else ""
-
-                    severity = ""
-                    metrics = cna.get("metrics", [])
-                    for metric in metrics:
-                        for key in ("cvssV3_1", "cvssV3_0", "cvssV3"):
-                            cvss = metric.get(key, {})
-                            if cvss:
-                                base = cvss.get("baseSeverity", "").upper()
-                                severity = {
-                                    "CRITICAL": "crítica", "HIGH": "alta",
-                                    "MEDIUM": "media", "LOW": "baja"
-                                }.get(base, "")
-                                break
-                        if severity:
-                            break
-
-                    affected = cna.get("affected", [])
-                    product_name = affected[0].get("product", "") if affected else ""
-                    title = f"{cve_id}" + (f" — {product_name}" if product_name else "")
-
-                    alerts.append(AegisAlert(
-                        title=title[:200],
-                        description=(desc[:400] + "…" if len(desc) > 400 else desc) if desc else f"Vulnerabilidad en {brand}",
-                        url=f"https://cve.circl.lu/cve/{cve_id}",
-                        source=AlertSource.CIRCL,
-                        published=pub_raw,
-                        severity=severity,
-                        brands=[brand],
-                    ))
+                alert = self._circl_parse_entry(entry, brand)
+                if alert is not None:
+                    alerts.append(alert)
                     brand_counts[brand] += 1
-
-                except Exception as e:
-                    logger.debug(f"Entrada CIRCL malformada: {e}")
-                    continue
 
             time.sleep(0.2)
 
         self._set_cached(cache_key, alerts)
         return alerts
+
+    def _circl_fetch_cve_list(self, brand: str) -> list | None:
+        """Consulta la API de CIRCL para ``brand``; devuelve la lista ``cvelistv5``
+        o None si la petición falla o la respuesta no tiene el formato esperado."""
+        vendor, product = self._brand_slugs.get(brand, (brand.lower().replace(" ", ""), ""))
+        url = (
+            f"https://cve.circl.lu/api/search/{vendor}/{product}"
+            if product else
+            f"https://cve.circl.lu/api/search/{vendor}"
+        )
+
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "AegisAlertFetcher/2.0", "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+        except Exception as e:
+            logger.warning(f"CIRCL error para '{brand}': {e}")
+            return None
+
+        results = data.get("results", {}) if isinstance(data, dict) else {}
+        cve_list = results.get("cvelistv5", []) if isinstance(results, dict) else []
+
+        if not isinstance(cve_list, list):
+            return None
+        return cve_list
+
+    @staticmethod
+    def _circl_extract_date(entry) -> str:
+        """Fecha de publicación de una entrada cvelistv5, usada como clave de orden."""
+        try:
+            if isinstance(entry, (list, tuple)) and len(entry) > 1:
+                return entry[1].get("cveMetadata", {}).get("datePublished", "")
+            return ""
+        except Exception:
+            return ""
+
+    def _circl_parse_entry(self, entry, brand: str) -> Optional[AegisAlert]:
+        """Convierte una entrada cvelistv5 de CIRCL en un AegisAlert.
+
+        Devuelve None si la entrada está malformada, no es reciente
+        (``_is_recent``), o cualquier otro filtro descarta el CVE.
+        """
+        try:
+            if not isinstance(entry, (list, tuple)) or len(entry) < 2:
+                return None
+
+            cve_id = entry[0].upper()
+            meta = entry[1]
+
+            if not isinstance(meta, dict):
+                return None
+
+            # Extraer metadata
+            cve_metadata = meta.get("cveMetadata", {})
+            pub_raw = cve_metadata.get("datePublished", "")[:10]
+
+            if not self._is_recent(pub_raw):
+                return None
+
+            containers = meta.get("containers", {})
+            cna = containers.get("cna", {})
+            descriptions = cna.get("descriptions", [])
+
+            desc = next(
+                (d["value"] for d in descriptions if d.get("lang", "").startswith("es")),
+                next((d["value"] for d in descriptions if d.get("lang", "").startswith("en")), "")
+            ) if descriptions else ""
+
+            severity = ""
+            metrics = cna.get("metrics", [])
+            for metric in metrics:
+                for key in ("cvssV3_1", "cvssV3_0", "cvssV3"):
+                    cvss = metric.get(key, {})
+                    if cvss:
+                        base = cvss.get("baseSeverity", "").upper()
+                        severity = {
+                            "CRITICAL": "crítica", "HIGH": "alta",
+                            "MEDIUM": "media", "LOW": "baja"
+                        }.get(base, "")
+                        break
+                if severity:
+                    break
+
+            affected = cna.get("affected", [])
+            product_name = affected[0].get("product", "") if affected else ""
+            title = f"{cve_id}" + (f" — {product_name}" if product_name else "")
+
+            return AegisAlert(
+                title=title[:200],
+                description=(desc[:400] + "…" if len(desc) > 400 else desc) if desc else f"Vulnerabilidad en {brand}",
+                url=f"https://cve.circl.lu/cve/{cve_id}",
+                source=AlertSource.CIRCL,
+                published=pub_raw,
+                severity=severity,
+                brands=[brand],
+            )
+        except Exception as e:
+            logger.debug(f"Entrada CIRCL malformada: {e}")
+            return None
 
     def fetch_alerts(
         self,

@@ -1,7 +1,7 @@
 """
 tests/conftest.py
 ═════════════════
-Infraestructura compartida para toda la suite de tests de la API SeQ.
+Infraestructura compartida para toda la suite de tests de la API Ellysia.
 
 Decisiones de diseño (ver el plan de tests):
 
@@ -184,7 +184,7 @@ def _initialized_db(_sqlite_url):
 
 @pytest.fixture(scope="session")
 def app(_initialized_db):
-    """Crea la app SeQ apuntando a SQLite, sin scheduler ni Redis real."""
+    """Crea la app Ellysia apuntando a SQLite, sin scheduler ni Redis real."""
     import run  # import diferido: ya hay entorno y engines listos
 
     # ``redis.Redis(...).ping()`` se ejecuta dentro de create_app; lo
@@ -251,7 +251,7 @@ def make_user(app):
         counter["n"] += 1
         suffix = counter["n"]
         username = f"user{suffix}"
-        email = f"user{suffix}@seq.test"
+        email = f"user{suffix}@ellysia.test"
 
         with app.app_context():
             salt = generate_salt()

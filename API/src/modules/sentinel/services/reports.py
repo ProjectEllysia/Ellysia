@@ -511,7 +511,7 @@ class PrintingStrategy(ABC):
         inteligencia artificial y se basa en el análisis automático de los datos del escaneo.
         Si bien se ha diseñado para proporcionar una evaluación de seguridad objetiva, los
         resultados deben ser interpretados por un profesional cualificado, pues Sentinel no cuenta
-        con todo el contexto en el que se encuentran los hosts escaneados. SeQ no garantiza
+        con todo el contexto en el que se encuentran los hosts escaneados. Ellysia no garantiza
         la exactitud, completitud o aplicabilidad de las recomendaciones generadas. Este análisis con
         inteligencia artificial no sustituye —sino complementa— una auditoría de seguridad manual o la evaluación
         detallada por parte de un experto en ciberseguridad.
@@ -739,9 +739,9 @@ class PDFCreator:
         started = getattr(scan, "started_at", None)
         date_str = started.strftime("%d/%m/%Y") if started else datetime.now().strftime("%d/%m/%Y")
         doc.title = f"Informe de Seguridad - {scan.id}"
-        doc.author = "SeQ Security Team"
+        doc.author = "Ellysia Security Team"
         doc.subject = f"Análisis de seguridad realizado el {date_str}"
-        doc.creator = "SeQ PDF Generator v2.0"
+        doc.creator = "Ellysia PDF Generator v2.0"
 
     def _on_page(self, canv, doc):
         """Callback for rendering page elements (header, footer, sidebar, small logo).
@@ -762,7 +762,7 @@ class PDFCreator:
 
         canv.setFont("Helvetica-Bold", 12)
         canv.setFillColor(dark)
-        canv.drawString(40, height - 30, "SeQ Security Report")
+        canv.drawString(40, height - 30, "Ellysia Security Report")
 
         canv.setStrokeColor(colors.HexColor("#e0e0e0"))
         canv.setLineWidth(0.5)
@@ -1280,97 +1280,13 @@ class OpenVASPrintingStrategy(PrintingStrategy):
             elements: List of flowable elements to append to.
             ai_report: Whether to include AI-generated analysis.
         """
-        scan = self.scan
-        palette = self.color_palette
-        main = colors.HexColor(palette[ColorType.MAIN])
-        dark = colors.HexColor(palette[ColorType.DARK])
-        white = colors.HexColor(palette[ColorType.WHITE])
+        results = getattr(self.scan, "results", []) or []
 
-        elements.append(Paragraph("Informe de Escaneo OpenVAS", theme.title))
-        elements.append(Spacer(1, 0.1 * inch))
-
-        if getattr(scan, "host", None):
-            host = scan.host
-            host_info = [
-                ["Host analizado:", str(getattr(host, "ip_address", ""))],
-                ["Nombre de host:", str(getattr(host, "hostname", ""))],
-            ]
-            host_table = theme.kv_table(host_info, col_widths=[2 * inch, 4 * inch])
-            elements.append(host_table)
-            elements.append(Spacer(1, 0.1 * inch))
-
-        started = getattr(scan, "started_at", None)
-        started_str = started.strftime("%d/%m/%Y %H:%M:%S") if started else "N/A"
-        results = getattr(scan, "results", []) or []
-
-        scan_info = [
-            ["ID del escaneo:", str(getattr(scan, "id", ""))],
-            ["Task ID:", str(getattr(scan, "task_id", ""))],
-            ["Report ID:", str(getattr(scan, "report_id", ""))],
-            ["Fecha de inicio:", started_str],
-            ["Total de vulnerabilidades:", str(len(results))],
-        ]
-        if getattr(scan, "scan_config_name", None):
-            scan_info.append(["Configuración:", str(scan.scan_config_name)])
-        if getattr(scan, "scanner_name", None):
-            scan_info.append(["Scanner:", str(scan.scanner_name)])
-
-        info_table = theme.kv_table(scan_info, col_widths=[2 * inch, 4 * inch])
-        elements.append(info_table)
-        elements.append(Spacer(1, 0.3 * inch))
+        self._append_ov_header(theme, elements, results)
 
         # Resumen de severidad
         if results:
-            elements.append(Paragraph("Resumen de severidad", theme.subtitle))
-            elements.append(Spacer(1, 0.1 * inch))
-
-            severity_counts: Dict[str, int] = {}
-            scores_by_severity: Dict[str, list] = {}
-
-            for result in results:
-                vuln = result.vulnerability
-                sev_raw = getattr(vuln, "severity_class", None) or "UNKNOWN"
-                severity = str(sev_raw).upper()
-
-                severity_counts[severity] = severity_counts.get(severity, 0) + 1
-
-                score = getattr(vuln, "severity_score", None)
-                if score is not None:
-                    scores_by_severity.setdefault(severity, []).append(float(score))
-
-            header = ["Severidad", "Cantidad", "Score promedio"]
-            data = [header]
-
-            severity_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "LOG", "UNKNOWN"]
-            for sev in severity_order:
-                if sev not in severity_counts:
-                    continue
-                count = severity_counts[sev]
-                scores = scores_by_severity.get(sev, [])
-                avg = sum(scores) / len(scores) if scores else 0.0
-                data.append([sev, str(count), f"{avg:.1f}"])
-
-            table = Table(data, colWidths=[2.5 * inch, 1.3 * inch, 2.2 * inch], repeatRows=1)
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), main),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, 0), 10),
-                ("TOPPADDING", (0, 0), (-1, 0), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-                ("BACKGROUND", (0, 1), (-1, -1), white),
-                ("TEXTCOLOR", (0, 1), (-1, -1), dark),
-                ("ALIGN", (0, 1), (0, -1), "CENTER"),
-                ("ALIGN", (1, 1), (-1, -1), "CENTER"),
-                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                ("FONTSIZE", (0, 1), (-1, -1), 9),
-                ("TOPPADDING", (0, 1), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
-                ("GRID", (0, 0), (-1, -1), 0.4, dark),
-            ]))
-            elements.append(table)
-            elements.append(Spacer(1, 0.3 * inch))
+            self._append_ov_severity_summary(theme, elements, results)
 
             # Detalle de vulnerabilidades
             elements.append(PageBreak())
@@ -1417,157 +1333,269 @@ class OpenVASPrintingStrategy(PrintingStrategy):
         )
 
         for idx, result in enumerate(sorted_results, start=1):
-            elements.append(CondPageBreak(3 * inch))
-
-            vuln = result.vulnerability
-            sev_raw = getattr(vuln, "severity_class", None) or "UNKNOWN"
-            severity = str(sev_raw).upper()
-
-            bgcolor = severity_bg.get(severity, severity_bg["UNKNOWN"])
-            cvss = getattr(vuln, "cvss_base_score", None)
-            score_text = f"CVSS: {cvss:.1f}" if cvss is not None else "CVSS: N/A"
-
-            # Cabecera
-            header_table = theme.severity_header_table(
-                left_text=f"Vulnerabilidad #{idx}",
-                right_text=f"Severidad: {severity} | {score_text}",
-                bg_color=bgcolor,
-            )
-            elements.append(header_table)
-
-            # Nombre de la vulnerabilidad en una banda de color principal
-            name_para = Paragraph(str(getattr(vuln, "name", "")), ParagraphStyle(
-                "OVName",
-                parent=theme.styles["Normal"],
-                fontName="Helvetica-Bold",
-                fontSize=10,
-                textColor=colors.whitesmoke,
-                alignment=TA_LEFT,
-            ))
-            name_table = Table([[name_para]], colWidths=[6 * inch])
-            name_table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), main),
-                ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                ("BOX", (0, 0), (-1, -1), 0.6, dark),
-            ]))
-            elements.append(name_table)
-
-            # Detalles técnicos
-            details = [
-                ["NVT OID:", str(getattr(vuln, "nvt_oid", ""))],
-                ["Host:", str(getattr(result.host, "ip_address", ""))],
-            ]
-            detected = getattr(result, "detected_at", None)
-            if detected:
-                details.append(["Detectado:", detected.strftime("%d/%m/%Y %H:%M:%S")])
-            if getattr(vuln, "family", None):
-                details.append(["Familia:", str(vuln.family)])
-            if getattr(vuln, "cvss_vector", None):
-                details.append(["Vector CVSS:", str(vuln.cvss_vector)])
-            if getattr(vuln, "qod_value", None) is not None:
-                qod_type = getattr(vuln, "qod_type", None) or "N/A"
-                details.append(["QoD:", f"{vuln.qod_value}% ({qod_type})"])
-
-            details_table = Table(details, colWidths=[1.7 * inch, 4.3 * inch])
-            details_table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f9f9f9")),
-                ("ALIGN", (0, 0), (0, -1), "LEFT"),
-                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-            ]))
-            elements.append(details_table)
-
-            # Resumen
-            summary = getattr(vuln, "summary", None)
-            if summary:
-                text = summary[:500] + ("..." if len(summary) > 500 else "")
-                para = Paragraph(f"Resumen: {text}", description_style)
-                table = Table([[para]], colWidths=[6 * inch])
-                table.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.white),
-                    ("TOPPADDING", (0, 0), (-1, -1), 8),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                    ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-                ]))
-                elements.append(table)
-
-            # Impacto
-            impact = getattr(vuln, "impact", None)
-            if impact:
-                text = impact[:400] + ("..." if len(impact) > 400 else "")
-                para = Paragraph(f"Impacto: {text}", description_style)
-                table = Table([[para]], colWidths=[6 * inch])
-                table.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fff0f0")),
-                    ("TOPPADDING", (0, 0), (-1, -1), 8),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                    ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-                ]))
-                elements.append(table)
-
-            # Solución
-            solution = getattr(vuln, "solution", None)
-            if solution:
-                text = solution[:400] + ("..." if len(solution) > 400 else "")
-                stype = getattr(vuln, "solution_type", None)
-                stype_txt = f" ({stype})" if stype else ""
-                para = Paragraph(f"Solución{stype_txt}: {text}", description_style)
-                table = Table([[para]], colWidths=[6 * inch])
-                table.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, -1), white),
-                    ("TOPPADDING", (0, 0), (-1, -1), 8),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                    ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-                ]))
-                elements.append(table)
-
-            # Referencias
-            refs_parts = []
-            if getattr(vuln, "cve_ids", None):
-                refs_parts.append(f"CVE: {vuln.cve_ids}")
-            if getattr(vuln, "cert_refs", None):
-                refs_parts.append(f"CERT: {vuln.cert_refs}")
-            if getattr(vuln, "bugtraq_ids", None):
-                refs_parts.append(f"BugTraq: {vuln.bugtraq_ids}")
-            if getattr(vuln, "other_refs", None):
-                refs_parts.append(f"Otros: {vuln.other_refs}")
-
-            if refs_parts:
-                full = " | ".join(refs_parts)
-                text = full[:400] + ("..." if len(full) > 400 else "")
-                para = Paragraph(f"Referencias: {text}", description_style)
-                table = Table([[para]], colWidths=[6 * inch])
-                table.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f0f8ff")),
-                    ("TOPPADDING", (0, 0), (-1, -1), 8),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                    ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-                ]))
-                elements.append(table)
-
-            elements.append(Spacer(1, 0.2 * inch))
+            self._append_ov_vulnerability_card(theme, elements, result, idx, severity_bg, description_style)
 
         if ai_report:
             self._append_ai_analysis(elements, theme)
 
         self._append_history_stats(elements, theme)
+
+    def _append_ov_header(self, theme: "ReportTheme", elements: list, results: list) -> None:
+        """Cabecera del informe: título, tabla de host y tabla de resumen del escaneo."""
+        scan = self.scan
+
+        elements.append(Paragraph("Informe de Escaneo OpenVAS", theme.title))
+        elements.append(Spacer(1, 0.1 * inch))
+
+        if getattr(scan, "host", None):
+            host = scan.host
+            host_info = [
+                ["Host analizado:", str(getattr(host, "ip_address", ""))],
+                ["Nombre de host:", str(getattr(host, "hostname", ""))],
+            ]
+            host_table = theme.kv_table(host_info, col_widths=[2 * inch, 4 * inch])
+            elements.append(host_table)
+            elements.append(Spacer(1, 0.1 * inch))
+
+        started = getattr(scan, "started_at", None)
+        started_str = started.strftime("%d/%m/%Y %H:%M:%S") if started else "N/A"
+
+        scan_info = [
+            ["ID del escaneo:", str(getattr(scan, "id", ""))],
+            ["Task ID:", str(getattr(scan, "task_id", ""))],
+            ["Report ID:", str(getattr(scan, "report_id", ""))],
+            ["Fecha de inicio:", started_str],
+            ["Total de vulnerabilidades:", str(len(results))],
+        ]
+        if getattr(scan, "scan_config_name", None):
+            scan_info.append(["Configuración:", str(scan.scan_config_name)])
+        if getattr(scan, "scanner_name", None):
+            scan_info.append(["Scanner:", str(scan.scanner_name)])
+
+        info_table = theme.kv_table(scan_info, col_widths=[2 * inch, 4 * inch])
+        elements.append(info_table)
+        elements.append(Spacer(1, 0.3 * inch))
+
+    def _append_ov_severity_summary(self, theme: "ReportTheme", elements: list, results: list) -> None:
+        """Tabla resumen: cantidad y score CVSS promedio por severidad."""
+        palette = self.color_palette
+        main = colors.HexColor(palette[ColorType.MAIN])
+        dark = colors.HexColor(palette[ColorType.DARK])
+        white = colors.HexColor(palette[ColorType.WHITE])
+
+        elements.append(Paragraph("Resumen de severidad", theme.subtitle))
+        elements.append(Spacer(1, 0.1 * inch))
+
+        severity_counts: Dict[str, int] = {}
+        scores_by_severity: Dict[str, list] = {}
+
+        for result in results:
+            vuln = result.vulnerability
+            sev_raw = getattr(vuln, "severity_class", None) or "UNKNOWN"
+            severity = str(sev_raw).upper()
+
+            severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+            score = getattr(vuln, "severity_score", None)
+            if score is not None:
+                scores_by_severity.setdefault(severity, []).append(float(score))
+
+        header = ["Severidad", "Cantidad", "Score promedio"]
+        data = [header]
+
+        severity_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "LOG", "UNKNOWN"]
+        for sev in severity_order:
+            if sev not in severity_counts:
+                continue
+            count = severity_counts[sev]
+            scores = scores_by_severity.get(sev, [])
+            avg = sum(scores) / len(scores) if scores else 0.0
+            data.append([sev, str(count), f"{avg:.1f}"])
+
+        table = Table(data, colWidths=[2.5 * inch, 1.3 * inch, 2.2 * inch], repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), main),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 10),
+            ("TOPPADDING", (0, 0), (-1, 0), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+            ("BACKGROUND", (0, 1), (-1, -1), white),
+            ("TEXTCOLOR", (0, 1), (-1, -1), dark),
+            ("ALIGN", (0, 1), (0, -1), "CENTER"),
+            ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 1), (-1, -1), 9),
+            ("TOPPADDING", (0, 1), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+            ("GRID", (0, 0), (-1, -1), 0.4, dark),
+        ]))
+        elements.append(table)
+        elements.append(Spacer(1, 0.3 * inch))
+
+    def _append_ov_vulnerability_card(
+        self,
+        theme: "ReportTheme",
+        elements: list,
+        result,
+        idx: int,
+        severity_bg: dict,
+        description_style: ParagraphStyle,
+    ) -> None:
+        """Tarjeta de una vulnerabilidad: cabecera, nombre, detalles técnicos,
+        resumen, impacto, solución y referencias (bloques opcionales según datos)."""
+        palette = self.color_palette
+        main = colors.HexColor(palette[ColorType.MAIN])
+        dark = colors.HexColor(palette[ColorType.DARK])
+        white = colors.HexColor(palette[ColorType.WHITE])
+
+        elements.append(CondPageBreak(3 * inch))
+
+        vuln = result.vulnerability
+        sev_raw = getattr(vuln, "severity_class", None) or "UNKNOWN"
+        severity = str(sev_raw).upper()
+
+        bgcolor = severity_bg.get(severity, severity_bg["UNKNOWN"])
+        cvss = getattr(vuln, "cvss_base_score", None)
+        score_text = f"CVSS: {cvss:.1f}" if cvss is not None else "CVSS: N/A"
+
+        # Cabecera
+        header_table = theme.severity_header_table(
+            left_text=f"Vulnerabilidad #{idx}",
+            right_text=f"Severidad: {severity} | {score_text}",
+            bg_color=bgcolor,
+        )
+        elements.append(header_table)
+
+        # Nombre de la vulnerabilidad en una banda de color principal
+        name_para = Paragraph(str(getattr(vuln, "name", "")), ParagraphStyle(
+            "OVName",
+            parent=theme.styles["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=10,
+            textColor=colors.whitesmoke,
+            alignment=TA_LEFT,
+        ))
+        name_table = Table([[name_para]], colWidths=[6 * inch])
+        name_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), main),
+            ("LEFTPADDING", (0, 0), (-1, -1), 10),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("BOX", (0, 0), (-1, -1), 0.6, dark),
+        ]))
+        elements.append(name_table)
+
+        # Detalles técnicos
+        details = [
+            ["NVT OID:", str(getattr(vuln, "nvt_oid", ""))],
+            ["Host:", str(getattr(result.host, "ip_address", ""))],
+        ]
+        detected = getattr(result, "detected_at", None)
+        if detected:
+            details.append(["Detectado:", detected.strftime("%d/%m/%Y %H:%M:%S")])
+        if getattr(vuln, "family", None):
+            details.append(["Familia:", str(vuln.family)])
+        if getattr(vuln, "cvss_vector", None):
+            details.append(["Vector CVSS:", str(vuln.cvss_vector)])
+        if getattr(vuln, "qod_value", None) is not None:
+            qod_type = getattr(vuln, "qod_type", None) or "N/A"
+            details.append(["QoD:", f"{vuln.qod_value}% ({qod_type})"])
+
+        details_table = Table(details, colWidths=[1.7 * inch, 4.3 * inch])
+        details_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f9f9f9")),
+            ("ALIGN", (0, 0), (0, -1), "LEFT"),
+            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+            ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
+        ]))
+        elements.append(details_table)
+
+        # Resumen
+        summary = getattr(vuln, "summary", None)
+        if summary:
+            text = summary[:500] + ("..." if len(summary) > 500 else "")
+            para = Paragraph(f"Resumen: {text}", description_style)
+            table = Table([[para]], colWidths=[6 * inch])
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
+            ]))
+            elements.append(table)
+
+        # Impacto
+        impact = getattr(vuln, "impact", None)
+        if impact:
+            text = impact[:400] + ("..." if len(impact) > 400 else "")
+            para = Paragraph(f"Impacto: {text}", description_style)
+            table = Table([[para]], colWidths=[6 * inch])
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fff0f0")),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
+            ]))
+            elements.append(table)
+
+        # Solución
+        solution = getattr(vuln, "solution", None)
+        if solution:
+            text = solution[:400] + ("..." if len(solution) > 400 else "")
+            stype = getattr(vuln, "solution_type", None)
+            stype_txt = f" ({stype})" if stype else ""
+            para = Paragraph(f"Solución{stype_txt}: {text}", description_style)
+            table = Table([[para]], colWidths=[6 * inch])
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), white),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
+            ]))
+            elements.append(table)
+
+        # Referencias
+        refs_parts = []
+        if getattr(vuln, "cve_ids", None):
+            refs_parts.append(f"CVE: {vuln.cve_ids}")
+        if getattr(vuln, "cert_refs", None):
+            refs_parts.append(f"CERT: {vuln.cert_refs}")
+        if getattr(vuln, "bugtraq_ids", None):
+            refs_parts.append(f"BugTraq: {vuln.bugtraq_ids}")
+        if getattr(vuln, "other_refs", None):
+            refs_parts.append(f"Otros: {vuln.other_refs}")
+
+        if refs_parts:
+            full = " | ".join(refs_parts)
+            text = full[:400] + ("..." if len(full) > 400 else "")
+            para = Paragraph(f"Referencias: {text}", description_style)
+            table = Table([[para]], colWidths=[6 * inch])
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f0f8ff")),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
+            ]))
+            elements.append(table)
+
+        elements.append(Spacer(1, 0.2 * inch))
 
     def get_filename_suffix(self) -> str:
         """Get the PDF filename suffix.
@@ -1633,81 +1661,13 @@ class NiktoPrintingStrategy(PrintingStrategy):
         }
 
     def append_body(self, theme: "ReportTheme", elements: list, ai_report: bool = False) -> None:
-        scan = self.scan
-        palette = self.color_palette
-        main = colors.HexColor(palette[ColorType.MAIN])
-        dark = colors.HexColor(palette[ColorType.DARK])
-        white = colors.HexColor(palette[ColorType.WHITE])
+        incidents = getattr(self.scan, "incidents", []) or []
 
-        # Título interno
-        elements.append(Paragraph("Informe de Escaneo Nikto", theme.title))
-        elements.append(Spacer(1, 0.1 * inch))
-
-        # Host
-        if getattr(scan, "host", None):
-            host = scan.host
-            host_info = [
-                ["Host analizado:", str(getattr(host, "ip_address", ""))],
-                ["Nombre de host:", str(getattr(host, "hostname", ""))],
-            ]
-            host_table = theme.kv_table(host_info, col_widths=[2 * inch, 4 * inch])
-            elements.append(host_table)
-            elements.append(Spacer(1, 0.1 * inch))
-
-        # Info escaneo
-        started = getattr(scan, "started_at", None)
-        started_str = started.strftime("%d/%m/%Y %H:%M:%S") if started else "N/A"
-        incidents = getattr(scan, "incidents", []) or []
-
-        scan_info = [
-            ["ID del escaneo:", str(getattr(scan, "id", ""))],
-            ["Fecha de inicio:", started_str],
-            ["Total de incidentes:", str(len(incidents))],
-        ]
-        info_table = theme.kv_table(scan_info, col_widths=[2 * inch, 4 * inch])
-        elements.append(info_table)
-        elements.append(Spacer(1, 0.3 * inch))
+        self._append_nikto_header(theme, elements, incidents)
 
         # Resumen de severidad
         if incidents:
-            elements.append(Paragraph("Resumen de severidad", theme.subtitle))
-            elements.append(Spacer(1, 0.1 * inch))
-
-            severity_counts: Dict[str, int] = {}
-            for inc in incidents:
-                sev_raw = getattr(inc, "severity", None) or "UNKNOWN"
-                severity = str(sev_raw).upper()
-                severity_counts[severity] = severity_counts.get(severity, 0) + 1
-
-            header = ["Severidad", "Cantidad"]
-            data = [header]
-
-            severity_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO", "UNKNOWN"]
-            for sev in severity_order:
-                if sev not in severity_counts:
-                    continue
-                data.append([sev, str(severity_counts[sev])])
-
-            table = Table(data, colWidths=[3 * inch, 2 * inch], repeatRows=1)
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(palette[ColorType.SECONDARY])),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-                ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, 0), 10),
-                ("TOPPADDING", (0, 0), (-1, 0), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-                ("BACKGROUND", (0, 1), (-1, -1), white),
-                ("TEXTCOLOR", (0, 1), (-1, -1), dark),
-                ("ALIGN", (0, 1), (-1, -1), "CENTER"),
-                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                ("FONTSIZE", (0, 1), (-1, -1), 9),
-                ("TOPPADDING", (0, 1), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
-                ("GRID", (0, 0), (-1, -1), 0.4, dark),
-            ]))
-            elements.append(table)
-            elements.append(Spacer(1, 0.3 * inch))
+            self._append_nikto_severity_summary(theme, elements, incidents)
 
         # Detalle de incidentes
         elements.append(Paragraph("Incidentes de seguridad detectados", theme.subtitle))
@@ -1753,104 +1713,197 @@ class NiktoPrintingStrategy(PrintingStrategy):
             parent=theme.styles["Normal"],
             fontName="Helvetica",
             fontSize=9,
-            textColor=colors.HexColor(palette[ColorType.BLACK]),
+            textColor=colors.HexColor(self.color_palette[ColorType.BLACK]),
             wordWrap="CJK",
             alignment=TA_LEFT,
         )
 
         for idx, incident in enumerate(sorted_incidents, start=1):
-            elements.append(CondPageBreak(2.5 * inch))
-
-            sev_raw = getattr(incident, "severity", None) or "UNKNOWN"
-            severity = str(sev_raw).upper()
-            bgcolor = severity_bg.get(severity, severity_bg["UNKNOWN"])
-
-            # Cabecera simple
-            header = Table(
-                [[f"Incidente #{idx}", f"Severidad: {severity}"]],
-                colWidths=[3 * inch, 3 * inch],
+            self._append_nikto_incident_card(
+                theme, elements, incident, idx, severity_bg, description_style, url_style
             )
-            header.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), bgcolor),
-                ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor(palette[ColorType.BLACK])),
-                ("ALIGN", (0, 0), (0, -1), "LEFT"),
-                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-                ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
-                ("TOPPADDING", (0, 0), (-1, -1), 6),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                ("BOX", (0, 0), (-1, -1), 0.8, white),
-            ]))
-            elements.append(header)
-
-            # Detalles
-            details = []
-            if getattr(incident, "osvdb_id", None):
-                details.append(["OSVDB ID:", str(incident.osvdb_id)])
-            if getattr(incident, "method", None):
-                details.append(["Método:", str(incident.method)])
-            if getattr(incident, "url", None):
-                details.append(["URL:", Paragraph(str(incident.url), url_style)])
-            if getattr(incident, "port", None):
-                details.append(["Puerto:", str(incident.port)])
-            if getattr(incident, "discovered_at", None):
-                discovered = incident.discovered_at.strftime("%d/%m/%Y %H:%M:%S")
-                details.append(["Detectado:", discovered])
-
-            if details:
-                details_table = Table(details, colWidths=[1.6 * inch, 4.4 * inch])
-                details_table.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f9f9f9")),
-                    ("ALIGN", (0, 0), (0, -1), "LEFT"),
-                    ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                    ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 9),
-                    ("TOPPADDING", (0, 0), (-1, -1), 4),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-                ]))
-                elements.append(details_table)
-
-            # Descripción
-            desc = getattr(incident, "description", None)
-            if desc:
-                text = desc[:500] + ("..." if len(desc) > 500 else "")
-                para = Paragraph(f"Descripción: {text}", description_style)
-                table = Table([[para]], colWidths=[6 * inch])
-                table.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.white),
-                    ("TOPPADDING", (0, 0), (-1, -1), 8),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                    ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-                ]))
-                elements.append(table)
-
-            # Referencias
-            refs = getattr(incident, "references", None)
-            if refs:
-                text = refs[:300] + ("..." if len(refs) > 300 else "")
-                para = Paragraph(f"Referencias: {text}", description_style)
-                table = Table([[para]], colWidths=[6 * inch])
-                table.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f0f8ff")),
-                    ("TOPPADDING", (0, 0), (-1, -1), 8),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                    ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-                ]))
-                elements.append(table)
-
-            elements.append(Spacer(1, 0.2 * inch))
 
         if ai_report:
             self._append_ai_analysis(elements, theme)
 
         self._append_history_stats(elements, theme)
+
+    def _append_nikto_header(self, theme: "ReportTheme", elements: list, incidents: list) -> None:
+        """Cabecera del informe: título, tabla de host y tabla de resumen del escaneo."""
+        scan = self.scan
+
+        elements.append(Paragraph("Informe de Escaneo Nikto", theme.title))
+        elements.append(Spacer(1, 0.1 * inch))
+
+        if getattr(scan, "host", None):
+            host = scan.host
+            host_info = [
+                ["Host analizado:", str(getattr(host, "ip_address", ""))],
+                ["Nombre de host:", str(getattr(host, "hostname", ""))],
+            ]
+            host_table = theme.kv_table(host_info, col_widths=[2 * inch, 4 * inch])
+            elements.append(host_table)
+            elements.append(Spacer(1, 0.1 * inch))
+
+        started = getattr(scan, "started_at", None)
+        started_str = started.strftime("%d/%m/%Y %H:%M:%S") if started else "N/A"
+
+        scan_info = [
+            ["ID del escaneo:", str(getattr(scan, "id", ""))],
+            ["Fecha de inicio:", started_str],
+            ["Total de incidentes:", str(len(incidents))],
+        ]
+        info_table = theme.kv_table(scan_info, col_widths=[2 * inch, 4 * inch])
+        elements.append(info_table)
+        elements.append(Spacer(1, 0.3 * inch))
+
+    def _append_nikto_severity_summary(self, theme: "ReportTheme", elements: list, incidents: list) -> None:
+        """Tabla resumen: cantidad de incidentes por severidad."""
+        palette = self.color_palette
+        dark = colors.HexColor(palette[ColorType.DARK])
+        white = colors.HexColor(palette[ColorType.WHITE])
+
+        elements.append(Paragraph("Resumen de severidad", theme.subtitle))
+        elements.append(Spacer(1, 0.1 * inch))
+
+        severity_counts: Dict[str, int] = {}
+        for inc in incidents:
+            sev_raw = getattr(inc, "severity", None) or "UNKNOWN"
+            severity = str(sev_raw).upper()
+            severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+        header = ["Severidad", "Cantidad"]
+        data = [header]
+
+        severity_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO", "UNKNOWN"]
+        for sev in severity_order:
+            if sev not in severity_counts:
+                continue
+            data.append([sev, str(severity_counts[sev])])
+
+        table = Table(data, colWidths=[3 * inch, 2 * inch], repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(palette[ColorType.SECONDARY])),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 10),
+            ("TOPPADDING", (0, 0), (-1, 0), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+            ("BACKGROUND", (0, 1), (-1, -1), white),
+            ("TEXTCOLOR", (0, 1), (-1, -1), dark),
+            ("ALIGN", (0, 1), (-1, -1), "CENTER"),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 1), (-1, -1), 9),
+            ("TOPPADDING", (0, 1), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+            ("GRID", (0, 0), (-1, -1), 0.4, dark),
+        ]))
+        elements.append(table)
+        elements.append(Spacer(1, 0.3 * inch))
+
+    def _append_nikto_incident_card(
+        self,
+        theme: "ReportTheme",
+        elements: list,
+        incident,
+        idx: int,
+        severity_bg: dict,
+        description_style: ParagraphStyle,
+        url_style: ParagraphStyle,
+    ) -> None:
+        """Tarjeta de un incidente: cabecera, detalles, descripción y
+        referencias (bloques opcionales según datos disponibles)."""
+        palette = self.color_palette
+        white = colors.HexColor(palette[ColorType.WHITE])
+
+        elements.append(CondPageBreak(2.5 * inch))
+
+        sev_raw = getattr(incident, "severity", None) or "UNKNOWN"
+        severity = str(sev_raw).upper()
+        bgcolor = severity_bg.get(severity, severity_bg["UNKNOWN"])
+
+        # Cabecera simple
+        header = Table(
+            [[f"Incidente #{idx}", f"Severidad: {severity}"]],
+            colWidths=[3 * inch, 3 * inch],
+        )
+        header.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), bgcolor),
+            ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor(palette[ColorType.BLACK])),
+            ("ALIGN", (0, 0), (0, -1), "LEFT"),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("BOX", (0, 0), (-1, -1), 0.8, white),
+        ]))
+        elements.append(header)
+
+        # Detalles
+        details = []
+        if getattr(incident, "osvdb_id", None):
+            details.append(["OSVDB ID:", str(incident.osvdb_id)])
+        if getattr(incident, "method", None):
+            details.append(["Método:", str(incident.method)])
+        if getattr(incident, "url", None):
+            details.append(["URL:", Paragraph(str(incident.url), url_style)])
+        if getattr(incident, "port", None):
+            details.append(["Puerto:", str(incident.port)])
+        if getattr(incident, "discovered_at", None):
+            discovered = incident.discovered_at.strftime("%d/%m/%Y %H:%M:%S")
+            details.append(["Detectado:", discovered])
+
+        if details:
+            details_table = Table(details, colWidths=[1.6 * inch, 4.4 * inch])
+            details_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f9f9f9")),
+                ("ALIGN", (0, 0), (0, -1), "LEFT"),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
+            ]))
+            elements.append(details_table)
+
+        # Descripción
+        desc = getattr(incident, "description", None)
+        if desc:
+            text = desc[:500] + ("..." if len(desc) > 500 else "")
+            para = Paragraph(f"Descripción: {text}", description_style)
+            table = Table([[para]], colWidths=[6 * inch])
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
+            ]))
+            elements.append(table)
+
+        # Referencias
+        refs = getattr(incident, "references", None)
+        if refs:
+            text = refs[:300] + ("..." if len(refs) > 300 else "")
+            para = Paragraph(f"Referencias: {text}", description_style)
+            table = Table([[para]], colWidths=[6 * inch])
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f0f8ff")),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
+            ]))
+            elements.append(table)
+
+        elements.append(Spacer(1, 0.2 * inch))
 
     def get_filename_suffix(self) -> str:
         return "_Nikto.pdf"

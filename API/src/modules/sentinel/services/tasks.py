@@ -603,9 +603,9 @@ class OpenVASTask(_Task):
         # Crear uno básico si no existe ninguno
         logger.info("Creando port_list predeterminado")
         response = gmp.create_port_list(
-            name="SeQ Default",
+            name="Ellysia Default",
             port_range="T:1-1024,U:1-1024",
-            comment="Port list creado automáticamente por SeQ"
+            comment="Port list creado automáticamente por Ellysia"
         )
         port_list_id = self._extract_id_from_response(response, 'port_list')
         if not port_list_id:
@@ -658,14 +658,14 @@ class OpenVASTask(_Task):
 
     def _create_and_start_task(self, gmp: Gmp, target_id: str, scanner_id: str) -> None:
         scan_config_id = self._get_default_scan_config(gmp)
-        task_name = f"SeQ_Scan_{self.target}_{int(time.time())}"
+        task_name = f"Ellysia_Scan_{self.target}_{int(time.time())}"
 
         task_response = gmp.create_task(
             name=task_name,
             config_id=scan_config_id,
             target_id=target_id,
             scanner_id=scanner_id,
-            comment=f"Escaneo de {self.target} iniciado por SeQ"
+            comment=f"Escaneo de {self.target} iniciado por Ellysia"
         )
 
         self.task_id = self._extract_id_from_response(task_response, 'task')

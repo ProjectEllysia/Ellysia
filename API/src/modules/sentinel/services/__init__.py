@@ -33,6 +33,8 @@ from .csv_logger import (
 
 from .scheduling import Scheduler
 
+from .parsing import validate_ip, validate_port
+
 from .history import HistoryStatsService
 
 from .traceroute import TracerouteService
@@ -59,5 +61,7 @@ __all__ = [
     NiktoScanLogger,
     OpenVASScanLogger,
     Scheduler,
+    validate_ip,
+    validate_port,
     TracerouteService,
 ]

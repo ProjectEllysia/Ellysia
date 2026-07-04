@@ -230,9 +230,9 @@ class IrisPDFCreator:
     def _set_pdf_metadata(self, doc) -> None:
         analysis_id = self.report.get("analysisId")
         doc.title = f"Informe de Análisis Iris - {analysis_id}"
-        doc.author = "SeQ Security Team"
+        doc.author = "Ellysia Security Team"
         doc.subject = "Análisis de cabeceras de correo (anti-phishing)"
-        doc.creator = "SeQ PDF Generator v2.0"
+        doc.creator = "Ellysia PDF Generator v2.0"
 
     def _on_page(self, canv, doc):
         canv.saveState()

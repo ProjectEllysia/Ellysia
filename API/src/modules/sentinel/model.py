@@ -144,7 +144,7 @@ class Host(Base):
 
 class Traceroute(Base):
     """
-    Cached network path (traceroute) from the SeQ server to a scan target.
+    Cached network path (traceroute) from the Ellysia server to a scan target.
 
     The hops are a property of the *route to the destination*, not of any
     individual scan, and change slowly over time. We therefore cache one row

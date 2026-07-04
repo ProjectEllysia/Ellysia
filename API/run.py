@@ -1,5 +1,5 @@
 """
-run.py — Punto de entrada de la API SeQ
+run.py — Punto de entrada de la API Ellysia
 ═══════════════════════════════════════
 Responsabilidades de este fiche:
     1. Crear la aplicación Flask.
@@ -14,6 +14,7 @@ el frontend con proxy inverso al backend. La API no sirve contenido
 estático.
 """
 
+import json
 import os
 import re
 import signal
@@ -49,7 +50,6 @@ from src.modules.sentinel   import sentinel_blp
 from src.modules.acheron    import acheron_blp
 from src.modules.aegis      import aegis_blp
 from src.modules.iris       import iris_blp
-from src.modules.pages      import pages_bp
 
 import src.modules.system.config_reading as CR
 
@@ -178,7 +178,7 @@ def _graceful_shutdown(signum, *args) -> None:
 
 def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_migrations: bool = True) -> Flask:
     """
-    Factory de la aplicación Flask SeQ.
+    Factory de la aplicación Flask Ellysia.
 
     Configura todos los componentes necesarios para servir la API REST.
 
@@ -195,7 +195,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
 
     app = Flask(__name__)
 
-    _logger.info("Inicializando la aplicación SeQ...")
+    _logger.info("Inicializando la aplicación Ellysia...")
     _logger.info("Inicializando CORS...")
     raw     = os.environ.get("ALLOWED_ORIGINS", "http://localhost:8080")
     origins = [o.strip() for o in raw.split(",") if o.strip()]
@@ -206,7 +206,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     limiter.init_app(app)
 
     _logger.info("Inicializando documentación OpenAPI...")
-    app.config["API_TITLE"]             = "SeQ API"
+    app.config["API_TITLE"]             = "Ellysia API"
     app.config["API_VERSION"]           = CR.get_app_version()
     app.config["OPENAPI_VERSION"]       = "3.0.3"
     app.config["OPENAPI_URL_PREFIX"]    = "/api-docs"
@@ -222,7 +222,6 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     flask_smorest_api.register_blueprint(acheron_blp,  url_prefix="/acheron")
     flask_smorest_api.register_blueprint(aegis_blp,    url_prefix="/aegis")
     flask_smorest_api.register_blueprint(iris_blp,     url_prefix="/iris")
-    app.register_blueprint(pages_bp,    url_prefix="/pages")
 
     _logger.info("Registrando manejadores de error globales...")
     _register_error_handlers(app)
@@ -280,7 +279,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     except Exception as e:
         _logger.warning("Redis no disponible — la cola de tareas no funcionara: %s", e)
 
-    _logger.info("Aplicación SeQ iniciada correctamente")
+    _logger.info("Aplicación Ellysia iniciada correctamente")
     return app
 
 def _register_error_handlers(app: Flask) -> None:
@@ -380,7 +379,7 @@ def _register_request_audit(app: Flask) -> None:
     Args:
         app: Instancia de la aplicación Flask.
     """
-    audit_logger = logging.getLogger("seq.audit")
+    audit_logger = logging.getLogger("ellysia.audit")
 
     @app.before_request
     def _audit_start():
@@ -430,7 +429,7 @@ def _run_migrations() -> None:
 
 def _init_db() -> None:
     """
-    Inicializa la base de datos completa de SeQ desde cero.
+    Inicializa la base de datos completa de Ellysia desde cero.
 
     Este proceso destructivo elimina cualquier base de datos existente
     y la recrea con la estructura y datos iniciales:
@@ -497,7 +496,7 @@ def _init_db() -> None:
             text(
                 'INSERT INTO "User" '
                 "(username, first_name, last_name, password_hash, password_salt, email, created_at, role) "
-                "VALUES ('root', 'Gabe', 'Joe', :pwdhash, '', 'gjoe@seq.com', CURRENT_DATE, 'role_root');"
+                "VALUES ('root', 'Gabe', 'Joe', :pwdhash, '', 'gjoe@ellysia.com', CURRENT_DATE, 'role_root');"
             ),
             {"pwdhash": root_password_hash},
         )
@@ -509,104 +508,20 @@ def _init_db() -> None:
                 {"attr": attr},
             )
 
-        conn.execute(text(("""
-        INSERT INTO "Topic" (title) VALUES
-            -- Ingeniería Social
-            ('Phishing y suplantación de identidad'),
-            ('Spear phishing: ataques dirigidos'),
-            ('Smishing: fraude por SMS'),
-            ('Vishing: fraude por llamada telefónica'),
-            ('Pretexting: manipulación por contexto falso'),
-            ('Baiting: señuelos físicos y digitales'),
-            ('Quid pro quo: intercambio fraudulento'),
-            -- Contraseñas y Autenticación
-            ('Contraseñas robustas: cómo crearlas'),
-            ('Gestores de contraseñas corporativos'),
-            ('Autenticación de doble factor (2FA)'),
-            ('Riesgos de reutilizar contraseñas'),
-            ('Ataques de fuerza bruta y diccionario'),
-            ('Passkeys: el futuro sin contraseñas'),
-            -- Correo Electrónico
-            ('Uso seguro del correo corporativo'),
-            ('Cómo identificar un correo fraudulento'),
-            ('Riesgos de archivos adjuntos maliciosos'),
-            ('Email spoofing: correos falsificados'),
-            ('BEC: fraude al CEO por correo'),
-            -- Malware
-            ('Ransomware: secuestro de datos'),
-            ('Troyanos: software disfrazado'),
-            ('Spyware: espionaje silencioso'),
-            ('Adware y PUPs: software no deseado'),
-            ('Keyloggers: robo de pulsaciones'),
-            ('Rootkits: control oculto del sistema'),
-            ('Fileless malware: ataques sin fichero'),
-            -- Navegación y Web
-            ('Navegación segura por Internet'),
-            ('Riesgos de las extensiones de navegador'),
-            ('Verificación de URLs y certificados HTTPS'),
-            ('Descargas desde fuentes no confiables'),
-            ('Drive-by download: infección al navegar'),
-            ('Inyección SQL: riesgo en formularios web'),
-            ('Cross-Site Scripting (XSS)'),
-            -- Redes y Conectividad
-            ('Riesgos de redes Wi-Fi públicas'),
-            ('VPN: qué es y cuándo usarla'),
-            ('Ataques Man-in-the-Middle (MitM)'),
-            ('Seguridad en redes domésticas'),
-            ('Riesgos del Bluetooth activo'),
-            ('DNS spoofing: redirección maliciosa'),
-            -- Dispositivos y Endpoints
-            ('Actualización de software y parches'),
-            ('Seguridad en dispositivos móviles'),
-            ('Riesgos del BYOD en la empresa'),
-            ('Bloqueo de pantalla y sesiones'),
-            ('Cifrado de disco en portátiles'),
-            ('Seguridad en impresoras y periféricos'),
-            ('Riesgos de los dispositivos USB'),
-            -- Datos e Información
-            ('Borrado seguro de información'),
-            ('Metadatos ocultos en documentos'),
-            ('Clasificación de la información'),
-            ('Política de escritorio limpio'),
-            ('Fugas de información no intencionadas'),
-            ('Protección de datos personales (RGPD)'),
-            -- Copias de Seguridad
-            ('Copias de seguridad: por qué y cómo'),
-            ('Estrategia 3-2-1 de backups'),
-            ('Recuperación ante desastres'),
-            ('Verificación de restauraciones'),
-            -- Cloud y Servicios Online
-            ('Seguridad en servicios en la nube'),
-            ('Riesgos de compartir documentos en cloud'),
-            ('Shadow IT: apps no autorizadas'),
-            ('Configuraciones inseguras en cloud'),
-            ('OAuth y permisos de aplicaciones terceras'),
-            -- Trabajo Remoto
-            ('Teletrabajo seguro'),
-            ('Riesgos del acceso remoto (RDP)'),
-            ('Seguridad en videoconferencias'),
-            ('Entornos de trabajo híbrido'),
-            -- Amenazas Avanzadas
-            ('APT: amenazas persistentes avanzadas'),
-            ('Ataques a la cadena de suministro'),
-            ('Zero-day: vulnerabilidades sin parche'),
-            ('Lateral movement: movimiento en red interna'),
-            ('Exfiltración de datos corporativos'),
-            -- Concienciación General
-            ('Ingeniería social en redes sociales'),
-            ('Sobrexposición en redes sociales'),
-            ('Fraude en compras online'),
-            ('Ciberseguridad en vacaciones'),
-            ('Reporte de incidentes de seguridad'),
-            ('El factor humano en ciberseguridad'),
-            ('Cultura de seguridad en la empresa');"""
-        )))
+        topics_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "topics_seed.json")
+        with open(topics_path, encoding="utf-8") as f:
+            topics_by_category = json.load(f)
+        topic_titles = [title for titles in topics_by_category.values() for title in titles]
+        conn.execute(
+            text('INSERT INTO "Topic" (title) VALUES (:title);'),
+            [{"title": title} for title in topic_titles],
+        )
         conn.commit()
 
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="SeQ API server")
+    parser = argparse.ArgumentParser(description="Ellysia API server")
     parser.add_argument("--with-worker", action="store_true", help="Start RQ worker as subprocess")
     _args, _ = parser.parse_known_args()
 

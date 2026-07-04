@@ -1,14 +1,14 @@
 """
 Traceroute service for the Sentinel module.
 
-Runs a single traceroute from the SeQ server to a target host and parses the
+Runs a single traceroute from the Ellysia server to a target host and parses the
 output into a normalized list of hops. This is invoked on demand (the first
 time a user opens a scan detail for a given target) and the result is cached
 in the database by ``TracerouteManager`` so the probe is not repeated on every
 view.
 
 The parser is platform-aware:
-    - POSIX (the SeQ production server): ``traceroute``.
+    - POSIX (the Ellysia production server): ``traceroute``.
     - Windows (developer machines): ``tracert`` as a best-effort fallback.
 
 A hop is a dict::

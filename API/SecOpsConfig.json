@@ -154,7 +154,7 @@
     "strategies": {
       "smtp": {
         "fromAddress": "noreply@tudominio.com",
-        "fromName": "SeQ Awareness",
+        "fromName": "Ellysia Awareness",
         "host": "smtp-relay.brevo.com",
         "port": 587,
         "useTls": true
