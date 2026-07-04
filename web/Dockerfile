@@ -9,8 +9,6 @@ RUN pnpm build
 # Stage 2: Serve with Nginx
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
-# Legacy files for backward compatibility during migration
-COPY pages/ /usr/share/nginx/html/pages/
 COPY resources/ /usr/share/nginx/html/resources/
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
