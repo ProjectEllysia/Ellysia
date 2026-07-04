@@ -2,7 +2,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: PostgresSeQ
+    container_name: PostgresEllysia
     restart: unless-stopped
     env_file:
       - .env
@@ -23,7 +23,7 @@ services:
       -c effective_cache_size=256MB
       -c log_min_duration_statement=200
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-SecOps} -d $${POSTGRES_DB:-SeQ}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-SecOps} -d $${POSTGRES_DB:-Ellysia}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -41,7 +41,7 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    container_name: OllamaSeQ
+    container_name: OllamaEllysia
     env_file:
       - .env
     ports:
@@ -76,7 +76,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: RedisSeQ
+    container_name: RedisEllysia
     restart: unless-stopped
     env_file:
       - .env
@@ -134,11 +134,11 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  seq:
+  ellysia:
     build:
       context: ./API
       dockerfile: Dockerfile
-    container_name: SeQ-API
+    container_name: Ellysia-API
     restart: unless-stopped
     # traceroute (y el chequeo ICMP de alcanzabilidad) necesitan raw sockets
     # para leer las respuestas ICMP TTL-exceeded.
@@ -167,7 +167,7 @@ services:
       LOG_DIR: /app/logs
       OUTPUT_DIR: /app/data
     volumes:
-      - seq_data:/app/data
+      - ellysia_data:/app/data
       - scan_temp:/app/temp
       - scan_logs:/app/logs
     networks:
@@ -180,11 +180,11 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  seq-worker:
+  ellysia-worker:
     build:
       context: ./API
       dockerfile: Dockerfile
-    container_name: SeQ-Worker
+    container_name: Ellysia-Worker
     restart: unless-stopped
     # traceroute necesita raw sockets para leer las respuestas ICMP TTL-exceeded.
     cap_add:
@@ -209,7 +209,7 @@ services:
       LOG_DIR: /app/logs
       OUTPUT_DIR: /app/data
     volumes:
-      - seq_data:/app/data
+      - ellysia_data:/app/data
       - scan_temp:/app/temp
       - scan_logs:/app/logs
     networks:
@@ -226,12 +226,12 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
-    container_name: SeQ-Web
+    container_name: Ellysia-Web
     restart: unless-stopped
     ports:
       - "80:80"
     depends_on:
-      - seq
+      - ellysia
     networks:
       - secops-net
     profiles:
@@ -248,7 +248,7 @@ volumes:
   redis_data:
   ollama_models:
   openvas_data:
-  seq_data:
+  ellysia_data:
   scan_temp:
   scan_logs:
 
