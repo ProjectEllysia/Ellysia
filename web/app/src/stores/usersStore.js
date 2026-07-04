@@ -85,24 +85,32 @@ export const useUsersStore = defineStore('users', () => {
     } catch { return [] }
   }
 
+  /** PUT/DELETE /users/{id}/attributes — comparten cuerpo salvo método y mensajes */
+  async function _updateAttributes(userId, attrs, method, { errorMsg, successMsg }) {
+    const res = await apiFetch(`/users/${userId}/attributes`, {
+      method,
+      body: JSON.stringify({ attributes: attrs }),
+    })
+    if (!res?.ok) {
+      const data = await res?.json().catch(() => ({}))
+      toast.show(data.message || errorMsg, 'error')
+      return false
+    }
+    toast.show(successMsg, 'success')
+    return true
+  }
+
   /**
    * Añade atributos a un usuario vía PUT /users/{id}/attributes.
    * @param {number|string} userId - ID del usuario
    * @param {string[]} attrs - Lista de nombres de atributos a añadir
    * @returns {Promise<boolean>}
    */
-  async function addAttributes(userId, attrs) {
-    const res = await apiFetch(`/users/${userId}/attributes`, {
-      method: 'PUT',
-      body: JSON.stringify({ attributes: attrs }),
+  function addAttributes(userId, attrs) {
+    return _updateAttributes(userId, attrs, 'PUT', {
+      errorMsg: 'Error al añadir atributos.',
+      successMsg: 'Atributos actualizados.',
     })
-    if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.message || 'Error al añadir atributos.', 'error')
-      return false
-    }
-    toast.show('Atributos actualizados.', 'success')
-    return true
   }
 
   /**
@@ -111,18 +119,11 @@ export const useUsersStore = defineStore('users', () => {
    * @param {string[]} attrs - Lista de nombres de atributos a eliminar
    * @returns {Promise<boolean>}
    */
-  async function removeAttributes(userId, attrs) {
-    const res = await apiFetch(`/users/${userId}/attributes`, {
-      method: 'DELETE',
-      body: JSON.stringify({ attributes: attrs }),
+  function removeAttributes(userId, attrs) {
+    return _updateAttributes(userId, attrs, 'DELETE', {
+      errorMsg: 'Error al eliminar atributos.',
+      successMsg: 'Atributo eliminado.',
     })
-    if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.message || 'Error al eliminar atributos.', 'error')
-      return false
-    }
-    toast.show('Atributo eliminado.', 'success')
-    return true
   }
 
   return { users, loading, grouped, loadUsers, createUser, loadUserAttributes, addAttributes, removeAttributes }

@@ -34,10 +34,6 @@ class Role(Enum):
     ADMIN = "role_admin"
     USER  = "role_user"
 
-    # Ordered from lowest to highest privilege.
-    # Used by require_role() for hierarchy comparisons.
-    _HIERARCHY = ["role_user", "role_admin", "role_root"]
-
     @property
     def db_name(self) -> str:
         return self.value # type: ignore

@@ -150,6 +150,68 @@ def test_metadata_version_starts_at_one_and_bumps_on_password_change(client, mak
     assert second["metadataVersion"] == 2
 
 
+# ── Storables: los 7 kinds soportados (cobertura del registro storable_specs) ─
+
+
+def test_all_storable_kinds_add_update_and_export_roundtrip(client, make_user, auth_headers):
+    """Todos los kinds pasan por add_storable_to_vault, update_storable y
+    export_vault_to_json: guarda contra typos en el registro storable_specs
+    (un solo test de account no detectaría un mapeo mal escrito en, p. ej.,
+    bankaccount o identity)."""
+    user = make_user(role="role_user", attributes=["acheron_create", "acheron_update"])
+    headers = auth_headers(user)
+
+    created = client.post("/acheron/vault", headers=headers, json=_vault_payload())
+    assert created.status_code in (200, 201)
+
+    creates = [
+        {"kind": "account", "internalId": "k-account", "username": "u", "domain": "d", "password": "p"},
+        {"kind": "creditcard", "internalId": "k-cc", "cardHolderName": "Jane", "cardNumber": "4111",
+         "expirationDate": "12/30", "postalCode": "00000", "cvv": "123"},
+        {"kind": "securenote", "internalId": "k-note", "content": "secret note"},
+        {"kind": "identity", "internalId": "k-id", "fullName": "Jane Doe", "email": "j@x.com",
+         "phone": "123", "address": "addr", "city": "city", "country": "country", "documentId": "doc1"},
+        {"kind": "bankaccount", "internalId": "k-bank", "bankName": "Bank", "holder": "Jane",
+         "iban": "ES00", "swiftBic": "BIC", "accountNumber": "0001"},
+        {"kind": "wifi", "internalId": "k-wifi", "ssid": "myssid", "password": "wifipass",
+         "securityType": "WPA2"},
+        {"kind": "license", "internalId": "k-lic", "product": "prod", "licenseKey": "key",
+         "licensedTo": "Jane", "version": "1.0"},
+    ]
+    for body in creates:
+        resp = client.post("/acheron/storables", headers=headers, json=body)
+        assert resp.status_code == 201, (body["kind"], resp.get_json())
+
+    got = client.get("/acheron/vault", headers=headers)
+    assert got.status_code == 200
+    body = got.get_json()
+
+    def _by_id(items, internal_id):
+        return next(item for item in items if item["id"] == internal_id)
+
+    assert _by_id(body["accounts"], "k-account")["username"] == "u"
+    assert _by_id(body["creditcards"], "k-cc")["cardHolderName"] == "Jane"
+    assert _by_id(body["securenotes"], "k-note")["content"] == "secret note"
+    assert _by_id(body["identities"], "k-id")["documentId"] == "doc1"
+    assert _by_id(body["bankaccounts"], "k-bank")["swiftBic"] == "BIC"
+    assert _by_id(body["wifinetworks"], "k-wifi")["securityType"] == "WPA2"
+    assert _by_id(body["licenses"], "k-lic")["licensedTo"] == "Jane"
+
+    bulk = client.patch("/acheron/storables", headers=headers, json=[
+        {"internalId": "k-bank", "changes": {"holder": "New Holder"}},
+        {"internalId": "k-wifi", "changes": {"ssid": "newssid"}},
+    ])
+    assert bulk.status_code == 200
+    statuses = {r["internalId"]: r["status"] for r in bulk.get_json()["results"]}
+    assert statuses["k-bank"] == "updated"
+    assert statuses["k-wifi"] == "updated"
+
+    got2 = client.get("/acheron/vault", headers=headers)
+    body2 = got2.get_json()
+    assert _by_id(body2["bankaccounts"], "k-bank")["holder"] == "New Holder"
+    assert _by_id(body2["wifinetworks"], "k-wifi")["ssid"] == "newssid"
+
+
 # ── GET /generate-password (endpoint público) ────────────────────────────────
 
 

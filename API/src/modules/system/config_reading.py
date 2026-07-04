@@ -70,20 +70,12 @@ def _lazy_load(func):
         if _configs is None:
             if _configs_path is None:
                 this_file = Path(__file__).resolve()
-                candidates = [
-                    this_file.parent.parent.parent.parent / "SecOpsConfig.json",
-                    this_file.parent.parent.parent.parent / "SecConfig.json",
-                    this_file.parent.parent.parent / "SecOpsConfig.json",
-                    this_file.parent.parent.parent / "SecConfig.json",
-                    this_file.parent.parent / "SecOpsConfig.json",
-                    this_file.parent.parent / "SecConfig.json",
-                    this_file.parent / "SecOpsConfig.json",
-                    this_file.parent / "SecConfig.json",
-                ]
-                for candidate in candidates:
-                    if candidate.exists():
-                        _configs_path = candidate
-                        break
+                candidates = (
+                    parent / name
+                    for parent in reversed(this_file.parents[:4])
+                    for name in ("SecOpsConfig.json", "SecConfig.json")
+                )
+                _configs_path = next((c for c in candidates if c.exists()), None)
                 if _configs_path is None:
                     raise FileNotFoundError("No se encontró ningún archivo de configuración.")
             with open(_configs_path, "r", encoding="utf-8") as f:
@@ -112,6 +104,22 @@ def _require_configs() -> dict:
     if _configs is None:
         raise IllegalStateError("'_configs' detectado como nulo")
     return _configs
+
+
+def _cfg(path: str, default=None, cast=None):
+    """Lee un valor anidado de la config por ruta con puntos.
+
+    ``_cfg("sentinel.traceroute.cacheHours", 24, float)`` es el equivalente de
+    ``_require_configs().get("sentinel", {}).get("traceroute", {}).get("cacheHours", 24)``
+    convertido a ``float``. Requiere llamarse desde una función decorada con
+    ``@_lazy_load`` (o después de que la config ya esté cargada).
+    """
+    node = _require_configs()
+    for key in path.split("."):
+        if not isinstance(node, dict) or key not in node:
+            return default
+        node = node[key]
+    return cast(node) if cast else node
 
 
 # =============================================================================
@@ -331,27 +339,23 @@ def get_directory_of(directory_type) -> str:
 
 @_lazy_load
 def get_aegis_config() -> dict:
-    return _require_configs().get("aegis", {})
+    return _cfg("aegis", {})
 
 @_lazy_load
 def get_aegis_tips_amount() -> int:
-    cfg = _require_configs().get("aegis", {})
-    return int(cfg.get("tipsAmount", 7))
+    return _cfg("aegis.tipsAmount", 7, int)
 
 @_lazy_load
 def get_aegis_vulnerabilities_antiquity() -> int:
-    cfg = _require_configs().get("aegis", {})
-    return int(cfg.get("vulnerabilitiesAntiquity", 5))
+    return _cfg("aegis.vulnerabilitiesAntiquity", 5, int)
 
 @_lazy_load
 def get_aegis_brands() -> list[dict]:
-    cfg = _require_configs().get("aegis", {})
-    return list(cfg.get("brands", []))
+    return _cfg("aegis.brands", [], list)
 
 @_lazy_load
 def get_aegis_prompts() -> dict:
-    aegis = _require_configs().get("aegis", {})
-    return aegis.get("prompts", {})
+    return _cfg("aegis.prompts", {})
 
 
 # =============================================================================
@@ -361,7 +365,7 @@ def get_aegis_prompts() -> dict:
 @_lazy_load
 def get_ai_config() -> dict:
     """Devuelve el bloque 'ai' de SecOpsConfig.json (puede estar vacío)."""
-    return _require_configs().get("ai", {})
+    return _cfg("ai", {})
 
 
 @_lazy_load
@@ -391,7 +395,7 @@ def get_ai_strategy_for(module: str | None = None) -> str:
 @_lazy_load
 def get_email_config() -> dict:
     """Devuelve el bloque 'email' de SecOpsConfig.json (puede estar vacío)."""
-    return _require_configs().get("email", {})
+    return _cfg("email", {})
 
 
 @_lazy_load
@@ -442,7 +446,7 @@ def get_smtp_environment() -> dict[str, str]:
 
 @_lazy_load
 def get_sentinel_config() -> dict:
-    return _require_configs().get("sentinel", {})
+    return _cfg("sentinel", {})
 
 @_lazy_load
 def get_prompts_config() -> dict:
@@ -461,7 +465,6 @@ def get_tool_prompts(tool: str) -> dict:
 
 @_lazy_load
 def get_tool_color_palette(tool) -> dict:
-    from src.modules.sentinel.services.reports import SentinelTool
     sentinel = _require_configs().get("sentinel", {})
 
     tool_key = tool
@@ -473,12 +476,7 @@ def get_tool_color_palette(tool) -> dict:
 
 @_lazy_load
 def are_local_ips_allowed() -> bool:
-    sentinel = _require_configs().get("sentinel", {})
-    are_allowed = sentinel.get("areLocalIpsAllowed", None)
-
-    if are_allowed is None:
-        return False
-    return are_allowed is True or str(are_allowed).lower() == "true"
+    return _as_bool(_cfg("sentinel.areLocalIpsAllowed", False))
 
 @_lazy_load
 def get_openvas_scan_configs() -> dict[str, str]:
@@ -492,22 +490,15 @@ def get_openvas_port_list() -> dict[str, str]:
 
 @_lazy_load
 def is_host_reachability_check_enabled() -> bool:
-    sentinel = _configs.get("sentinel", {}) if _configs else {}
-    check_cfg = sentinel.get("hostReachabilityCheck", {})
-    enabled = check_cfg.get("enabled", True)
-    return enabled is True or str(enabled).lower() == "true"
+    return _as_bool(_cfg("sentinel.hostReachabilityCheck.enabled", True))
 
 @_lazy_load
 def get_host_reachability_check_timeout() -> float:
-    sentinel = _configs.get("sentinel", {}) if _configs else {}
-    check_cfg = sentinel.get("hostReachabilityCheck", {})
-    return float(check_cfg.get("timeout", 3.0))
+    return _cfg("sentinel.hostReachabilityCheck.timeout", 3.0, float)
 
 @_lazy_load
 def get_host_reachability_check_port() -> int:
-    sentinel = _configs.get("sentinel", {}) if _configs else {}
-    check_cfg = sentinel.get("hostReachabilityCheck", {})
-    return int(check_cfg.get("port", 80))
+    return _cfg("sentinel.hostReachabilityCheck.port", 80, int)
 
 @_lazy_load
 def get_sentinel_csv_dir() -> str:
@@ -517,38 +508,31 @@ def get_sentinel_csv_dir() -> str:
 @_lazy_load
 def get_sentinel_default_folder_name() -> str:
     """Devuelve el nombre mostrado para la carpeta virtual de escaneos sueltos."""
-    sentinel = _require_configs().get("sentinel", {})
-    return sentinel.get("folders", {}).get("defaultFolderName", "Sin carpeta")
+    return _cfg("sentinel.folders.defaultFolderName", "Sin carpeta")
 
 
 @_lazy_load
 def get_sentinel_history_size() -> int:
     """Número de escaneos recientes a considerar en las estadísticas históricas."""
-    sentinel = _configs.get("sentinel", {}) if _configs else {}
-    return int(sentinel.get("history", {}).get("maxScans", 5))
-
-
-def _traceroute_cfg() -> dict:
-    sentinel = _configs.get("sentinel", {}) if _configs else {}
-    return sentinel.get("traceroute", {})
+    return _cfg("sentinel.history.maxScans", 5, int)
 
 
 @_lazy_load
 def get_sentinel_traceroute_cache_hours() -> float:
     """Horas que una ruta cacheada se considera válida antes de recalcularse."""
-    return float(_traceroute_cfg().get("cacheHours", 24))
+    return _cfg("sentinel.traceroute.cacheHours", 24, float)
 
 
 @_lazy_load
 def get_sentinel_traceroute_max_hops() -> int:
     """Número máximo de saltos a sondear (``-m`` en traceroute)."""
-    return int(_traceroute_cfg().get("maxHops", 30))
+    return _cfg("sentinel.traceroute.maxHops", 30, int)
 
 
 @_lazy_load
 def get_sentinel_traceroute_timeout() -> float:
     """Tiempo máximo total (segundos) para el comando traceroute."""
-    return float(_traceroute_cfg().get("timeout", 60))
+    return _cfg("sentinel.traceroute.timeout", 60, float)
 
 
 @_lazy_load
@@ -558,7 +542,7 @@ def get_sentinel_traceroute_retry_failed_minutes() -> float:
     Mucho más corto que ``cacheHours``: evita re-sondear un host inalcanzable en
     cada apertura del detalle, pero permite reintentar pronto (o de inmediato con
     el botón de refresco)."""
-    return float(_traceroute_cfg().get("retryFailedMinutes", 15))
+    return _cfg("sentinel.traceroute.retryFailedMinutes", 15, float)
 
 
 # =============================================================================
@@ -582,7 +566,7 @@ def save_full_config(new_config: dict) -> dict:
 
 
 # =============================================================================
-# CONFIGURACI�N DE TASKQUEUE
+# CONFIGURACIÓN DE TASKQUEUE
 # =============================================================================
 
 @_lazy_load
@@ -594,7 +578,7 @@ def get_redis_config() -> dict:
     REDIS_PASSWORD. Las env vars REDIS_HOST/PORT/DB sobreescriben la config si
     están presentes (útil en contenedores).
     """
-    cfg = _require_configs().get("redis", {})
+    cfg = _cfg("redis", {})
     host    = os.getenv("REDIS_HOST", str(cfg.get("host", "localhost")))
     port    = int(os.getenv("REDIS_PORT", str(cfg.get("port", 6379))))
     db      = int(os.getenv("REDIS_DB",   str(cfg.get("db", 0))))
@@ -611,7 +595,7 @@ def get_redis_config() -> dict:
 
 @_lazy_load
 def get_taskqueue_config() -> dict:
-    cfg = _require_configs().get("general", {}).get("taskqueue", {})
+    cfg = _cfg("general.taskqueue", {})
     max_workers_env = os.getenv("TASKQUEUE_MAX_WORKERS")
     if max_workers_env is not None:
         cfg["max_workers"] = int(max_workers_env)
@@ -632,8 +616,7 @@ def get_public_web_url() -> str:
     if env_override:
         return env_override.rstrip("/")
 
-    cfg = _require_configs().get("general", {})
-    return str(cfg.get("publicUrl", "http://localhost:5173")).rstrip("/")
+    return _cfg("general.publicUrl", "http://localhost:5173", str).rstrip("/")
 
 # =============================================================================
 # CONFIGURACIÓN DE IRIS
@@ -641,24 +624,21 @@ def get_public_web_url() -> str:
 
 @_lazy_load
 def get_iris_config() -> dict:
-    return _require_configs().get("iris", {})
+    return _cfg("iris", {})
 
 @_lazy_load
 def get_iris_legitimate_threshold() -> float:
     # 0–100 subtractive scale: >= 80 is Legitimate (see IrisManager._aggregate_score).
-    cfg = get_iris_config()
-    return float(cfg.get("legitimate_threshold", 80))
+    return _cfg("iris.legitimate_threshold", 80, float)
 
 @_lazy_load
 def get_iris_suspicious_threshold() -> float:
     # 0–100 subtractive scale: >= 55 is Suspicious, below is Phishing.
-    cfg = get_iris_config()
-    return float(cfg.get("suspicious_threshold", 55))
+    return _cfg("iris.suspicious_threshold", 55, float)
 
 @_lazy_load
 def get_iris_min_headers() -> int:
-    cfg = get_iris_config()
-    return int(cfg.get("min_headers", 2))
+    return _cfg("iris.min_headers", 2, int)
 
 @_lazy_load
 def get_iris_data(key: str):
@@ -668,8 +648,7 @@ def get_iris_data(key: str):
     ``iris.data`` de SecOpsConfig.json; los defaults de respaldo están en
     ``src/modules/iris/services/shared.py``, que es el único consumidor previsto.
     """
-    cfg = get_iris_config()
-    return cfg.get("data", {}).get(key)
+    return _cfg(f"iris.data.{key}")
 
 @_lazy_load
 def get_iris_prompts() -> dict:
@@ -678,28 +657,27 @@ def get_iris_prompts() -> dict:
     Espejo de ``get_prompts_config()`` (que solo mira el bloque ``sentinel``)
     para el módulo Iris: ``iris.prompts.summary.{system,userTemplate}``.
     """
-    cfg = get_iris_config()
-    return cfg.get("prompts", {})
+    return _cfg("iris.prompts", {})
 
 
 # =============================================================================
-# VERSI�N DE LA APLICACI�N
+# VERSIÓN DE LA APLICACIÓN
 # =============================================================================
 
 @_lazy_load
 def get_app_version() -> str:
-    """Versi�n de la aplicaci�n desde SecOpsConfig.json."""
-    return str(_require_configs().get("appVersion", "0.0.0"))
+    """Versión de la aplicación desde SecOpsConfig.json."""
+    return _cfg("appVersion", "0.0.0", str)
 
 
 # =============================================================================
-# CONFIGURACI�N DE BASE DE DATOS (no secretos)
+# CONFIGURACIÓN DE BASE DE DATOS (no secretos)
 # =============================================================================
 
 @_lazy_load
 def get_db_isolation_level() -> str:
     """Devuelve el isolation level de SQLAlchemy desde SecOpsConfig.json."""
-    return _require_configs().get("database", {}).get("isolation_level", "READ COMMITTED")
+    return _cfg("database.isolation_level", "READ COMMITTED")
 
 
 @_lazy_load
@@ -709,12 +687,10 @@ def get_db_pool_config() -> dict:
     Claves: pool_size, max_overflow, pool_timeout. Aplica defaults sensatos si
     faltan, de modo que el sistema arranca aunque el bloque no esté completo.
     """
-    defaults = {"pool_size": 10, "max_overflow": 20, "pool_timeout": 30}
-    db_cfg = _require_configs().get("database", {})
     return {
-        "pool_size": int(db_cfg.get("pool_size", defaults["pool_size"])),
-        "max_overflow": int(db_cfg.get("max_overflow", defaults["max_overflow"])),
-        "pool_timeout": int(db_cfg.get("pool_timeout", defaults["pool_timeout"])),
+        "pool_size": _cfg("database.pool_size", 10, int),
+        "max_overflow": _cfg("database.max_overflow", 20, int),
+        "pool_timeout": _cfg("database.pool_timeout", 30, int),
     }
 
 
@@ -726,7 +702,7 @@ def get_db_pool_config() -> dict:
 def get_argon2_config() -> dict:
     """Devuelve los parámetros de Argon2id para hashing de contraseñas."""
     defaults = {"time_cost": 3, "memory_cost": 65536, "parallelism": 4}
-    return {**defaults, **_require_configs().get("security", {}).get("argon2", {})}
+    return {**defaults, **_cfg("security.argon2", {})}
 
 
 # =============================================================================

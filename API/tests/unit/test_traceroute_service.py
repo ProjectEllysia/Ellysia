@@ -1,7 +1,7 @@
 """Tests unitarios del parser de TracerouteService (sin red ni BD).
 
 Se ejercita ``_parse`` con salida real de ``traceroute`` (Linux, el servidor
-SeQ) y ``tracert`` (Windows, máquinas de desarrollo), incluyendo saltos sin
+Ellysia) y ``tracert`` (Windows, máquinas de desarrollo), incluyendo saltos sin
 respuesta, resolución de nombres e IPv6.
 """
 

@@ -1,9 +1,9 @@
-# SeQ — Motor propio de análisis de vulnerabilidades
+# Ellysia — Motor propio de análisis de vulnerabilidades
 
 > Plan a largo plazo para construir un motor de detección de vulnerabilidades nativo
 > dentro del módulo **Sentinel**, de forma que Nikto y OpenVAS/Greenbone pasen de ser
 > dependencias a ser **complementos opcionales** que corroboran los hallazgos del motor
-> propio (al que en este documento llamamos provisionalmente **SeQ Engine**).
+> propio (al que en este documento llamamos provisionalmente **Ellysia Engine**).
 >
 > Documento de diseño. No describe código existente, sino el camino para llegar a él.
 
@@ -70,7 +70,7 @@ nuevo tipo de escaneo de primera clase que encaja en tus abstracciones actuales:
 ScanType.NMAP     → NmapScanTask     → NmapResultProcessor     → NmapScanManager
 ScanType.NIKTO    → NiktoScanTask    → NiktoResultProcessor    → NiktoScanManager
 ScanType.OPENVAS  → OpenVASTask      → OpenVASResultProcessor  → OpenVASScanManager
-ScanType.SEQ  (★) → SeQEngineTask    → SeQResultProcessor      → SeQEngineManager   ← NUEVO
+ScanType.ELLYSIA (★) → EllysiaEngineTask → EllysiaResultProcessor → EllysiaEngineManager   ← NUEVO
 ```
 
 Así, el motor hereda "gratis": cancelación cooperativa, progreso, persistencia, programación,
@@ -354,14 +354,14 @@ fase N−1. El orden está pensado para maximizar valor por unidad de esfuerzo.
 - **Capturar y persistir el CPE de Nmap (ver §2.1).** Es el **primer cambio de código del
   proyecto**: columna `cpe` en `OpenPort` + propagarlo en `_parse_nmap_structure`/`process` +
   guardarlo en `persist_nmap_results`. Sin esto, la Fase 1 no tiene de dónde leer el CPE.
-- Añadir `ScanType.SEQ = "seq"` en `sentinel/model.py`.
+- Añadir `ScanType.ELLYSIA = "seq"` en `sentinel/model.py`.
 - Crear el modelo `Finding` y su migración Alembic (`alembic revision --autogenerate`).
-- Esqueleto `SeQEngineTask(_Task)` en `tasks.py` que de momento sólo envuelva una llamada a Nmap
+- Esqueleto `EllysiaEngineTask(_Task)` en `tasks.py` que de momento sólo envuelva una llamada a Nmap
   ya existente y devuelva sus puertos (sin detección aún).
-- `SeQEngineManager(ScanManager)` registrado con `@ScanManager.register(ScanType.SEQ)`.
+- `EllysiaEngineManager(ScanManager)` registrado con `@ScanManager.register(ScanType.ELLYSIA)`.
 - Endpoint `POST /sentinel/seq` (espejo de `/sentinel/nmap`).
 
-**Definición de hecho:** puedes lanzar un "escaneo SeQ" que internamente hace un Nmap y persiste
+**Definición de hecho:** puedes lanzar un "escaneo Ellysia" que internamente hace un Nmap y persiste
 `Finding`s informativos (un finding "puerto abierto" por servicio). Cero detección real todavía,
 pero toda la fontanería funciona end-to-end.
 
@@ -414,7 +414,7 @@ confirmado". La Fase 3 (comprobación activa) es la que sube ese hallazgo a `con
 `qod=99`. Esta distinción es exactamente la filosofía "Controls, Not Counts" que ya aplicas en
 `analyzers.py`.
 
-**Definición de hecho:** un escaneo SeQ sobre un host con software desactualizado produce findings
+**Definición de hecho:** un escaneo Ellysia sobre un host con software desactualizado produce findings
 con CVEs reales y CVSS, visibles en la SPA y en el PDF.
 
 ---
@@ -543,7 +543,7 @@ la Fase 1 (lees la versión real del paquete, no el banner).
 **Objetivo:** convertir "listas de hallazgos por escaneo" en "estado de vulnerabilidad por activo a
 lo largo del tiempo". Aquí el producto se vuelve claramente superior a lanzar herramientas sueltas.
 
-- **Deduplicación multi-fuente:** si SeQ Engine, Nikto y OpenVAS reportan la misma CVE en el mismo
+- **Deduplicación multi-fuente:** si Ellysia Engine, Nikto y OpenVAS reportan la misma CVE en el mismo
   `host:puerto`, fusionar en un `Finding` con `source` múltiple y `qod` consolidado (varias fuentes
   ⇒ mayor confianza). Esta es la razón de ser del modelo `Finding` unificado de la sección 2.
 - **Ciclo de vida** sobre el historial que **ya tienes** (`ScanHistoryManager`): comparar el escaneo
@@ -563,11 +563,11 @@ lo largo del tiempo". Aquí el producto se vuelve claramente superior a lanzar h
 ```
 CVE-2021-41773 en 10.0.0.5:80
   CVSS 9.8 · EPSS 0.97 · KEV=sí · exposición=pública · confirmado=sí
-  → Prioridad SeQ: CRÍTICA-INMEDIATA (parchear hoy)
+  → Prioridad Ellysia: CRÍTICA-INMEDIATA (parchear hoy)
 
 CVE-2019-XXXX en 192.168.1.50:443
   CVSS 7.5 · EPSS 0.02 · KEV=no · exposición=LAN privada · confirmado=no(versión)
-  → Prioridad SeQ: MEDIA (planificar; posible falso positivo por backport)
+  → Prioridad Ellysia: MEDIA (planificar; posible falso positivo por backport)
 ```
 
 ---
@@ -578,7 +578,7 @@ CVE-2019-XXXX en 192.168.1.50:443
 OpenVAS son corroboradores opcionales.
 
 ```
-SeQ Scan (pipeline)
+Ellysia Scan (pipeline)
   1. Descubrimiento    → Nmap (servicios + versión + CPE)        [ya lo tienes]
   2. Detección pasiva  → matcher CPE→CVE contra KB local         [Fase 1+2]
   3. Confirmación      → checks activos sobre servicios vivos    [Fase 3]
@@ -588,7 +588,7 @@ SeQ Scan (pipeline)
 ```
 
 El paso 4 es lo que materializa tu objetivo: **"que Nikto y OpenVAS sean complementos de mi propio
-motor"**. El usuario lanza un "SeQ Scan"; por defecto corre el motor nativo (rápido, sin
+motor"**. El usuario lanza un "Ellysia Scan"; por defecto corre el motor nativo (rápido, sin
 dependencias externas pesadas) y, si marca "análisis profundo", se añaden Nikto/OpenVAS como una
 segunda opinión que se fusiona en los mismos `Finding`s.
 
@@ -619,8 +619,8 @@ segunda opinión que se fusiona en los mismos `Finding`s.
 Si quieres un primer resultado tangible con el mínimo esfuerzo, este es el camino crítico:
 
 1. **Fase 0 ligera, empezando por el CPE:** primero el refactor de §2.1 (capturar/persistir el CPE
-   de Nmap — 4 toques). Luego `ScanType.SEQ`, el modelo `Finding` + migración, y un
-   `SeQEngineManager` que reutilice tu `NmapScanTask` existente.
+   de Nmap — 4 toques). Luego `ScanType.ELLYSIA`, el modelo `Finding` + migración, y un
+   `EllysiaEngineManager` que reutilice tu `NmapScanTask` existente.
 2. **Fase 1 ligera, sin KB propia todavía:** para cada servicio con versión, consulta la API de
    CIRCL que **ya usas en Aegis** (`cve.circl.lu`) y crea `Finding`s con las CVEs. Esto te da un
    motor de detección funcionando en días, reutilizando código existente.
@@ -637,7 +637,7 @@ un proceso incremental, no en un big-bang.
 
 | Fase | Entregable | Independencia lograda |
 |---|---|---|
-| 0 | Captura de CPE (§2.1) + `ScanType.SEQ` + modelo `Finding` + fontanería end-to-end | — |
+| 0 | Captura de CPE (§2.1) + `ScanType.ELLYSIA` + modelo `Finding` + fontanería end-to-end | — |
 | 1 | Matcher CPE→CVE (detección por versión) | Detección de vulns **propia** (vía CVE) |
 | 2 | KB local (NVD + KEV + EPSS + CPE dict) con sync programado | Independiente de feeds externos en runtime |
 | 3 | Framework de checks activos (decl. + Python) | **Reemplaza a Nikto** en tu caso de uso |

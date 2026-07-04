@@ -94,5 +94,20 @@ export function useUtils() {
     return result
   }
 
-  return { formatDate, getInitials, flatten, unflatten, deepMerge }
+  /**
+   * Descarga un blob como archivo, liberando la URL temporal tras el click.
+   * @param {Blob} blob - Contenido a descargar
+   * @param {string} filename - Nombre de archivo sugerido
+   */
+  function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove() }, 1000)
+  }
+
+  return { formatDate, getInitials, flatten, unflatten, deepMerge, triggerDownload }
 }

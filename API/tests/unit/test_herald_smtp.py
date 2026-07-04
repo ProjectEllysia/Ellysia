@@ -104,8 +104,8 @@ def test_smtp_strategy_sends_message_to_local_server(smtp_server):
     strategy = SmtpStrategy(
         host=controller.hostname,
         port=controller.port,
-        from_address="noreply@seq.test",
-        from_name="SeQ Awareness",
+        from_address="noreply@ellysia.test",
+        from_name="Ellysia Awareness",
         use_tls=False,
     )
     message = EmailMessage(
@@ -123,7 +123,7 @@ def test_smtp_strategy_sends_message_to_local_server(smtp_server):
     assert len(handler.messages) == 1
 
     received = handler.messages[0]
-    assert received["mail_from"] == "noreply@seq.test"
+    assert received["mail_from"] == "noreply@ellysia.test"
     assert received["rcpt_tos"] == ["empleado@empresa.test"]
     assert "Contenido de la píldora" in received["html"]
     assert "Contenido de la píldora" in received["text"]
@@ -134,7 +134,7 @@ def test_smtp_strategy_raises_connection_error_when_server_unreachable():
     strategy = SmtpStrategy(
         host="127.0.0.1",
         port=1,  # puerto reservado, sin listener
-        from_address="noreply@seq.test",
+        from_address="noreply@ellysia.test",
         use_tls=False,
         timeout=2,
     )
@@ -150,7 +150,7 @@ def test_smtp_strategy_raises_connection_error_when_tls_required_but_unsupported
     strategy = SmtpStrategy(
         host=controller.hostname,
         port=controller.port,
-        from_address="noreply@seq.test",
+        from_address="noreply@ellysia.test",
         use_tls=True,
     )
     message = EmailMessage(to="a@b.com", subject="hola", html_body="<p>hi</p>")
@@ -164,7 +164,7 @@ def test_smtp_strategy_raises_send_error_when_recipient_rejected(rejecting_smtp_
     strategy = SmtpStrategy(
         host=controller.hostname,
         port=controller.port,
-        from_address="noreply@seq.test",
+        from_address="noreply@ellysia.test",
         use_tls=False,
     )
     message = EmailMessage(to="ghost@empresa.test", subject="hola", html_body="<p>hi</p>")

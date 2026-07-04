@@ -60,7 +60,7 @@ def hello():
 def system_info():
     """Metainformacion de la aplicacion: version, entorno, etc."""
     return {
-        "name": "SeQ",
+        "name": "Ellysia",
         "version": CR.get_app_version(),
         "environment": "development" if CR.is_development() else "production",
         "pythonVersion": sys.version,

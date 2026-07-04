@@ -26,7 +26,7 @@
         <span class="tr-ttl"></span>
         <span class="tr-dot"></span>
         <div class="tr-body">
-          <span class="tr-host">Servidor SeQ</span>
+          <span class="tr-host">Servidor Ellysia</span>
           <span class="tr-sub">Origen</span>
         </div>
       </li>

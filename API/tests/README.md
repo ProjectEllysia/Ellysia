@@ -1,4 +1,4 @@
-# Tests de la API SeQ
+# Tests de la API Ellysia
 
 Suite de tests con `pytest`. No requiere PostgreSQL, Redis ni herramientas de
 escaneo: la base de datos se levanta en **SQLite** en un fichero temporal y los

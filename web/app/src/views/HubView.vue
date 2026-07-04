@@ -31,7 +31,7 @@
         :style="{ animationDelay: n.delay + 's' }"
       />
     </svg>
-    <div class="watermark" aria-hidden="true"><span>SeQ</span></div>
+    <div class="watermark" aria-hidden="true"><span>Ellysia</span></div>
     <div class="spotlight" aria-hidden="true"></div>
 
     <!-- Profile trigger -->
@@ -87,11 +87,11 @@
       <section class="hub-left" style="animation-delay: 0.1s">
         <div class="hero-block">
           <div class="hero-head">
-            <img :src="seqLogo" alt="SeQ" class="hero-logo-img" />
+            <img :src="ellysiaLogo" alt="Ellysia" class="hero-logo-img" />
             <div class="hero-head-body">
               <div class="hero-logo">
                 <span class="hero-bracket">[</span>
-                <span class="hero-text" :class="{ glitch: glitching }" data-text="SeQ">SeQ</span>
+                <span class="hero-text" :class="{ glitch: glitching }" data-text="Ellysia">Ellysia</span>
                 <span class="hero-bracket">]</span>
                 <span class="hero-shield" aria-hidden="true">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
@@ -126,14 +126,14 @@
         </div>
 
         <div class="hub-quickstats" style="animation-delay: 0.3s">
-          <a href="https://github.com/gamustea/SeQ" target="_blank" rel="noopener noreferrer" class="stat-tile stat-tile--link">
+          <a href="https://github.com/ProjectEllysia/Ellysia" target="_blank" rel="noopener noreferrer" class="stat-tile stat-tile--link">
             <div class="stat-icon stat-icon--github">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                 <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
               </svg>
             </div>
             <div class="stat-body">
-              <span class="stat-value">gamustea/SeQ</span>
+              <span class="stat-value">ProjectEllysia/Ellysia</span>
               <span class="stat-label">GitHub</span>
             </div>
           </a>
@@ -254,7 +254,7 @@
 
     <footer class="hub-footer">
       <span class="foot-pulse"><i></i>Enlace cifrado activo</span>
-      <span class="foot-text">SeQ Platform — Security Operations Suite</span>
+      <span class="foot-text">Ellysia Platform — Security Operations Suite</span>
     </footer>
   </div>
 </template>
@@ -266,10 +266,10 @@ import { useProfileStore } from '@/stores/profileStore'
 import SignalStream from '@/components/shared/SignalStream.vue'
 
 import sentinelIcon from '@/assets/images/sentinel/Sentinel-Turqoise-BgN.png'
-import aegisIcon from '@/assets/images/aegis/SeQ-Aegis-Blue-BgN.png'
+import aegisIcon from '@/assets/images/aegis/Ellysia-Aegis-Blue-BgN.png'
 import irisIcon from '@/assets/images/iris/Iris-Red-BgN.png'
 import acheronIcon from '@/assets/images/acheron/Acheron-Purple-BgN.png'
-import seqLogo from '@/assets/images/seq/SeQ-BgN.png'
+import ellysiaLogo from '@/assets/images/ellysia/Ellysia-BgN.png'
 
 const auth = useAuthStore()
 const profileStore = useProfileStore()

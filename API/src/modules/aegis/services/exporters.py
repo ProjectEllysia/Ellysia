@@ -17,6 +17,7 @@ alimentar los exportadores desde managers y endpoints.
 
 from __future__ import annotations
 
+import html
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -24,6 +25,7 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from src.modules.aegis.exceptions import (
     ExporterError,
@@ -354,7 +356,7 @@ class MarkdownExporter(AegisExporter):
         ]
         contact_email = data.contact_email
         if contact_email:
-            contact_info = "el responsable de SeQ en tu empresa." if (contact_email == "seguridad@empresa.com") else contact_email
+            contact_info = "el responsable de Ellysia en tu empresa." if (contact_email == "seguridad@empresa.com") else contact_email
             lines.append(f"*Para más información, contacta con {contact_info}*")
         lines.append("")
         lines.append(f"*ID del documento: {data.document_id}*")
@@ -371,6 +373,27 @@ class HTMLExporter(AegisExporter):
 
     def __init__(self) -> None:
         super().__init__()
+
+    def _esc(self, text: str | None) -> str:
+        """Sanitiza y escapa texto para inserción segura en HTML.
+
+        ``_sanitize`` (heredado, compartido con MarkdownExporter) solo recorta
+        longitud — no protege de HTML/script embebido. Este documento se
+        genera con contenido de un LLM y de feeds externos (INCIBE/CIRCL), así
+        que todo texto insertado en el HTML pasa por aquí antes de usarse.
+        """
+        return html.escape(self._sanitize(text))
+
+    def _safe_url(self, url: str | None, fallback: str = "#") -> str:
+        """Valida el esquema de una URL (solo http/https) y la escapa para
+        un atributo href. Cualquier otro esquema (``javascript:``, ``data:``,
+        ``vbscript:``...) cae al fallback en vez de insertarse."""
+        if not url:
+            return fallback
+        url = str(url).strip()
+        if urlparse(url).scheme.lower() not in ("http", "https"):
+            return fallback
+        return html.escape(url, quote=True)
 
     def export(self, data: ExportData, output_path: Path | None = None) -> ExportResult:
         content       = self._generate_content(data)
@@ -398,11 +421,11 @@ class HTMLExporter(AegisExporter):
 
     def _html_header(self, data: ExportData) -> str:
         return f"""<!DOCTYPE html>
-        <html lang="{data.language}">
+        <html lang="{html.escape(data.language, quote=True)}">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{self._sanitize(data.subtitle)}</title>
+            <title>{self._esc(data.subtitle)}</title>
             <style>
                 body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; color: #333; }}
                 h1 {{ color: #1a365d; border-bottom: 2px solid #38bdf8; padding-bottom: 10px; }}
@@ -422,25 +445,34 @@ class HTMLExporter(AegisExporter):
 
     def _html_body(self, data: ExportData) -> str:
         parts = [
-            f"<h1>{self._sanitize(data.subtitle)}</h1>",
+            f"<h1>{self._esc(data.subtitle)}</h1>",
             f"<div class='meta'>",
             f"<p><strong>Píldora de Concienciación en Ciberseguridad</strong></p>",
-            f"<p>Empresa: {self._sanitize(data.company)}</p>",
+            f"<p>Empresa: {self._esc(data.company)}</p>",
             f"<p>Fecha de generación: {self._format_datetime(data.generated_at)}</p>",
             f"</div>",
         ]
+        parts.extend(self._html_intro(data))
+        parts.extend(self._html_tips(data))
+        parts.extend(self._html_alerts(data))
+        parts.extend(self._html_closing(data))
+        return "\n".join(parts)
 
+    def _html_intro(self, data: ExportData) -> list[str]:
+        parts: list[str] = []
         if data.intro:
-            intro_paragraphs = data.intro.split("\n\n")
-            for p in intro_paragraphs:
+            for p in data.intro.split("\n\n"):
                 if p.strip():
-                    parts.append(f"<p>{p.strip()}</p>")
+                    parts.append(f"<p>{self._esc(p.strip())}</p>")
+        return parts
 
+    def _html_tips(self, data: ExportData) -> list[str]:
+        parts: list[str] = []
         if data.tips:
             parts.append("<h2>Consejos Prácticos</h2>")
             for tip in data.tips:
-                headline = self._sanitize(tip.get("headline", ""))
-                body = self._sanitize(tip.get("body", ""))
+                headline = self._esc(tip.get("headline", ""))
+                body = self._esc(tip.get("body", ""))
                 parts.append("<div class='tip'>")
                 if headline:
                     parts.append(f"<h3>{headline}</h3>")
@@ -452,19 +484,22 @@ class HTMLExporter(AegisExporter):
                 if links:
                     parts.append("<p><strong>Recursos relacionados:</strong></p>")
                     for link in links:
-                        text = self._sanitize(link.get("text", "Enlace"))
-                        url = link.get("url", "#")
+                        text = self._esc(link.get("text", "Enlace"))
+                        url = self._safe_url(link.get("url"))
                         parts.append(f"<p><a href='{url}'>{text}</a></p>")
                 parts.append("</div>")
+        return parts
 
+    def _html_alerts(self, data: ExportData) -> list[str]:
+        parts: list[str] = []
         if data.alerts:
             parts.append("<h2>Alertas de Seguridad Recientes</h2>")
             for alert in data.alerts:
-                title = self._sanitize(alert.get("title", "Alerta"))
-                description = self._sanitize(alert.get("description", ""))
-                source = alert.get("sourceLabel", "Fuente desconocida")
+                title = self._esc(alert.get("title", "Alerta"))
+                description = self._esc(alert.get("description", ""))
+                source = self._esc(alert.get("sourceLabel", "Fuente desconocida"))
                 severity = alert.get("severity", "").lower()
-                
+
                 alert_class = "alert"
                 if severity in ["alta", "high"]:
                     alert_class += " alert-high"
@@ -472,25 +507,27 @@ class HTMLExporter(AegisExporter):
                     alert_class += " alert-medium"
                 elif severity in ["baja", "low"]:
                     alert_class += " alert-low"
-                
+
                 parts.append(f"<div class='{alert_class}'>")
                 parts.append(f"<h3>{title}</h3>")
                 parts.append(f"<p><strong>Fuente:</strong> {source}</p>")
                 if severity:
-                    parts.append(f"<p><strong>Severidad:</strong> {severity.upper()}</p>")
+                    parts.append(f"<p><strong>Severidad:</strong> {html.escape(severity.upper())}</p>")
                 if description:
                     parts.append(f"<p>{description}</p>")
-                url = alert.get("url", "#")
+                url = self._safe_url(alert.get("url"))
                 parts.append(f"<p><a href='{url}'>Ver detalle completo</a></p>")
                 parts.append("</div>")
+        return parts
 
+    def _html_closing(self, data: ExportData) -> list[str]:
+        parts: list[str] = []
         if data.closing:
             parts.append("<h2>Conclusión</h2>")
             for p in data.closing.split("\n"):
                 if p.strip():
-                    parts.append(f"<p>{p.strip()}</p>")
-
-        return "\n".join(parts)
+                    parts.append(f"<p>{self._esc(p.strip())}</p>")
+        return parts
 
     def _html_footer(self, data: ExportData) -> str:
         footer = [
@@ -501,9 +538,9 @@ class HTMLExporter(AegisExporter):
         contact_email = data.contact_email
         if contact_email:
             if contact_email == "seguridad@empresa.com":
-                contact_text = "el responsable de SeQ en tu empresa."
+                contact_text = "el responsable de Ellysia en tu empresa."
             else:
-                contact_text = contact_email
+                contact_text = self._esc(contact_email)
             footer.append(f"<p>Para más información, contacta con {contact_text}</p>")
         footer.append(f"<p>ID del documento: {data.document_id}</p>")
         footer.append("</div>")

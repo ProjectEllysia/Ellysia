@@ -103,8 +103,8 @@ def local_email_config(monkeypatch, smtp_catcher):
                 "host": controller.hostname,
                 "port": controller.port,
                 "useTls": False,
-                "fromAddress": "noreply@seq.test",
-                "fromName": "SeQ Test",
+                "fromAddress": "noreply@ellysia.test",
+                "fromName": "Ellysia Test",
             }
         },
         "modules": {"aegis": "smtp"},

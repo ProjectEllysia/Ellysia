@@ -63,7 +63,7 @@ USER_MANAGER = UserManager()
 
 def _get_document_checked(manager, doc_id: int, user_id: int) -> dict:
     doc = manager.get_document(doc_id)
-    if not doc or doc.get("userId") != user_id:
+    if doc.get("userId") != user_id:
         logger.warning(
             "Documento %s no encontrado o acceso denegado | user=%s (userId=%s)",
             doc_id, current_actor(), user_id
@@ -158,8 +158,6 @@ def aegis_get_document(args):
     mgr.assert_document_ownership(doc_id)
 
     doc_info = mgr.get_document(doc_id)
-    if not doc_info:
-        raise DocumentNotFoundError(doc_id)
     if doc_info["status"] != "done":
         raise DocumentNotReadyError(doc_id, doc_info["status"])
 
@@ -212,9 +210,6 @@ def aegis_download(args):
     mgr.assert_document_ownership(doc_id)
 
     doc_info = mgr.get_document(doc_id)
-    if not doc_info:
-        raise DocumentNotFoundError(doc_id)
-
     if doc_info["status"] != "done":
         raise DocumentNotReadyError(doc_id, doc_info["status"])
 
@@ -715,7 +710,7 @@ def launch_campaign(campaign_id):
 # ============================================================================
 #
 # Deliberadamente sin @require_oauth_token / @require_attributes: el
-# destinatario de una campaña nunca tiene cuenta en SeQ. El token opaco de
+# destinatario de una campaña nunca tiene cuenta en Ellysia. El token opaco de
 # CampaignRecipient (nunca derivado del email) es la única credencial, y su
 # estado ('completed' es inmutable) impone la regla de no-repetición.
 

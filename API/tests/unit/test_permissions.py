@@ -15,6 +15,15 @@ def test_role_hierarchy_order():
     assert Role.USER.rank() < Role.ADMIN.rank() < Role.ROOT.rank()
 
 
+def test_role_enum_has_exactly_three_members():
+    """Regresión: un miembro _HIERARCHY (pensado como constante interna, no
+    excluido por el mecanismo de Enum al no ser un nombre "sunder") se colaba
+    como un cuarto Role real con .value siendo una lista en vez de un string."""
+    assert len(list(Role)) == 3
+    assert {r.name for r in Role} == {"ROOT", "ADMIN", "USER"}
+    assert all(isinstance(r.value, str) for r in Role)
+
+
 def test_role_db_name_matches_value():
     assert Role.ADMIN.db_name == "role_admin"
     assert Role.ROOT.db_name == "role_root"

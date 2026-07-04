@@ -106,7 +106,7 @@ class AegisManager:
 
         return document_id
 
-    def get_document(self, doc_id: int) -> dict | None:
+    def get_document(self, doc_id: int) -> dict:
         session = get_db_session()
         repo = AegisDocumentRepository(session=session)
         doc = repo.get_by_id(doc_id)

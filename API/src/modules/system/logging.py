@@ -1,5 +1,5 @@
 """
-system/logging.py — Configuración central del logging de SeQ.
+system/logging.py — Configuración central del logging de Ellysia.
 
 Convención (estilo stdlib):
     * Los handlers se configuran UNA sola vez al arrancar cada proceso

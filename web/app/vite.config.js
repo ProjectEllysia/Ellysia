@@ -3,7 +3,7 @@ import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 
 /**
- * Configuración de Vite para la SPA de SeQ.
+ * Configuración de Vite para la SPA de Ellysia.
  *
  * Plugins:
  * - @vitejs/plugin-vue: compila archivos .vue (SFC).

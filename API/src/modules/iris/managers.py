@@ -414,12 +414,7 @@ class IrisManager(TaskTrackingMixin):
             report = IrisManager().get_analysis_results(analysis_id)
             summary = IrisAIWriter().generate(report)
 
-            with UnitOfWork() as uow:
-                repo = IrisAnalysisRepository(uow)
-                fresh = repo.get_by_id(analysis_id)
-                if fresh:
-                    fresh.ai_summary = summary  # type: ignore
-                    repo.update(fresh)
+            IrisManager()._update_analysis(analysis_id, ai_summary=summary)
 
             logger.info(f"AI summary generado para analysis {analysis_id}")
         except Exception as e:
@@ -458,13 +453,7 @@ class IrisManager(TaskTrackingMixin):
 
         cancelled = self._tq.cancel(sq_task.id)
         if cancelled:
-            with UnitOfWork() as uow:
-                repo = IrisAnalysisRepository(uow)
-                fresh = repo.get_by_id(analysis_id)
-                if fresh:
-                    fresh.status = "cancelled"
-                    fresh.finished_at = datetime.now()
-                    repo.update(fresh)
+            self._update_analysis(analysis_id, status="cancelled", finished_at=datetime.now())
             logger.info(f"Analysis {analysis_id} cancelled by user {user_id}")
         return cancelled
 
@@ -616,13 +605,7 @@ class IrisManager(TaskTrackingMixin):
             logger.info(f"Starting analysis {analysis_id}")
 
             try:
-                with UnitOfWork() as uow:
-                    repo = IrisAnalysisRepository(uow)
-                    fresh = repo.get_by_id(analysis_id)
-                    if fresh:
-                        fresh.status = "running" # type: ignore
-                        fresh.started_at = datetime.now() # type: ignore
-                        repo.update(fresh)
+                self._update_analysis(analysis_id, status="running", started_at=datetime.now())
             except Exception as e:
                 logger.error(f"Failed to mark analysis {analysis_id} as running: {e}", exc_info=True)
                 self._fail_analysis(analysis_id)
@@ -680,16 +663,14 @@ class IrisManager(TaskTrackingMixin):
             verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
 
             try:
-                with UnitOfWork() as uow:
-                    repo = IrisAnalysisRepository(uow)
-                    fresh = repo.get_by_id(analysis_id)
-                    if fresh:
-                        fresh.status = "finished" # type: ignore
-                        fresh.total_score = total_score # type: ignore
-                        fresh.verdict = verdict # type: ignore
-                        fresh.gate_reasons = gate_reasons # type: ignore
-                        fresh.finished_at = datetime.now() # type: ignore
-                        repo.update(fresh)
+                self._update_analysis(
+                    analysis_id,
+                    status="finished",
+                    total_score=total_score,
+                    verdict=verdict,
+                    gate_reasons=gate_reasons,
+                    finished_at=datetime.now(),
+                )
             except Exception as e:
                 logger.error(f"Failed to finalise analysis {analysis_id}: {e}", exc_info=True)
                 self._fail_analysis(analysis_id)
@@ -930,16 +911,28 @@ class IrisManager(TaskTrackingMixin):
             logger.info("Verdict gated %s -> %s (%s)", base_verdict, final, "; ".join(triggered))
         return final, triggered
 
+    def _update_analysis(self, analysis_id: int, **fields: Any) -> bool:
+        """Aplica ``fields`` sobre el IrisAnalysis si aún existe y persiste.
+
+        Encapsula el patrón UnitOfWork + get_by_id + setattr + update que
+        cada transición de estado del análisis (running/finished/failed/
+        cancelled/ai_summary) repetía por separado. Devuelve True si el
+        registro existía y se actualizó, False si ya no existe.
+        """
+        with UnitOfWork() as uow:
+            repo = IrisAnalysisRepository(uow)
+            fresh = repo.get_by_id(analysis_id)
+            if fresh is None:
+                return False
+            for attr, value in fields.items():
+                setattr(fresh, attr, value)
+            repo.update(fresh)
+            return True
+
     def _fail_analysis(self, analysis_id: int) -> None:
         """Mark an analysis as ``failed`` with a finished timestamp."""
         try:
-            with UnitOfWork() as uow:
-                repo = IrisAnalysisRepository(uow)
-                fresh = repo.get_by_id(analysis_id)
-                if fresh:
-                    fresh.status = "failed" # type: ignore
-                    fresh.finished_at = datetime.now() # type: ignore
-                    repo.update(fresh)
+            self._update_analysis(analysis_id, status="failed", finished_at=datetime.now())
         except Exception as e:
             logger.error(f"Failed to mark analysis {analysis_id} as failed: {e}", exc_info=True)
 

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { reactive, ref } from 'vue'
 import { useApi } from '@/composables/useApi'
 import { useCache } from '@/composables/useCache'
+import { useUtils } from '@/composables/useUtils'
 import { useToastStore } from '@/stores/toastStore'
 
 /**
@@ -13,6 +14,7 @@ import { useToastStore } from '@/stores/toastStore'
 export const useAegisStore = defineStore('aegis', () => {
   const { apiFetch } = useApi()
   const toast = useToastStore()
+  const { triggerDownload } = useUtils()
 
   /** Caché de documentos del visor (evita re-fetch al navegar entre documentos ya vistos) */
   const docCache = useCache({ keyPrefix: 'aegis:doc:', maxSize: 50 })
@@ -143,19 +145,9 @@ export const useAegisStore = defineStore('aegis', () => {
       const payload = {
         topicId: selectedTopicId.value,
         tweaks: {
-          company: tweaks.company,
-          language: tweaks.language,
-          tone: tweaks.tone,
-          audienceLevel: tweaks.audienceLevel,
-          mentionContact: tweaks.mentionContact,
+          ...tweaks,
           associatedBrands: [...selectedBrands.value],
-          sector: tweaks.sector,
-          topicFocus: tweaks.topicFocus,
-          companySize: tweaks.companySize,
           employeeCount: tweaks.employeeCount || null,
-          jurisdiction: tweaks.jurisdiction,
-          workModel: tweaks.workModel,
-          recentIncident: tweaks.recentIncident,
         },
       }
       const res = await apiFetch('/aegis/generate', { method: 'POST', body: JSON.stringify(payload) })
@@ -174,7 +166,7 @@ export const useAegisStore = defineStore('aegis', () => {
 
   /**
    * Carga un documento en el visor central desde GET /aegis/document?id=<id>.
-   * Si el documento ya est� en cach�, lo sirve instant�neamente sin re-fetch.
+   * Si el documento ya está en caché, lo sirve instantáneamente sin re-fetch.
    * @param {number|string} id - ID del documento
    */
   async function loadDocument(id) {
@@ -247,7 +239,7 @@ export const useAegisStore = defineStore('aegis', () => {
   /* ── ACCIONES SOBRE DOCUMENTOS ── */
 
   /**
-   * Elimina un documento v�a DELETE /aegis/document?id=<id>.
+   * Elimina un documento vía DELETE /aegis/document?id=<id>.
    * @param {number|string} id - ID del documento
    * @returns {Promise<boolean>}
    */
@@ -276,7 +268,7 @@ export const useAegisStore = defineStore('aegis', () => {
       const blob = await res.blob()
       const cd = res.headers.get('Content-Disposition') ?? ''
       const name = cd.match(/filename="?([^";\n]+)"?/i)?.[1] ?? `documento_${docId}.${format}`
-      _triggerDownload(blob, name)
+      triggerDownload(blob, name)
       toast.show('Documento descargado.', 'success')
       return true
     } catch { toast.show('Error al descargar.', 'error'); return false }
@@ -296,17 +288,6 @@ export const useAegisStore = defineStore('aegis', () => {
         w.document.write(`<pre style="padding:2rem;white-space:pre-wrap;font-family:monospace;line-height:1.6">${text.replace(/</g, '&lt;')}</pre>`)
       }
     } catch { toast.show('Error al previsualizar.', 'error') }
-  }
-
-  /** Descarga un blob como archivo */
-  function _triggerDownload(blob, filename) {
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    setTimeout(() => { URL.revokeObjectURL(url); a.remove() }, 1000)
   }
 
   /* ── CAMPAÑAS ── */
