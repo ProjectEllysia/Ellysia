@@ -48,7 +48,7 @@ export function useApi() {
     try {
       res = await fetch(path, { ...options, headers })
     } catch (e) {
-      console.error('[SeQ] apiFetch error:', e)
+      console.error('[Ellysia] apiFetch error:', e)
       return null
     }
 

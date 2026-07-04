@@ -1,6 +1,6 @@
 # Sync the landing site sources in landing/ to the root of the
 # gh-pages branch, which GitHub Pages serves at
-# https://gamustea.github.io/SeQ
+# https://projectellysia.github.io/Ellysia
 #
 # Keeps landing as reviewable source on the default branch and
 # gh-pages as a thin publishing branch with only rendered files.

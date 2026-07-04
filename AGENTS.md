@@ -1,4 +1,4 @@
-# SeQ — Agent Guide
+# Ellysia — Agent Guide
 
 ## Architecture
 

@@ -40,7 +40,7 @@
 
     <!-- Giant watermark -->
     <div class="watermark" aria-hidden="true">
-      <span class="watermark-text">SeQ</span>
+      <span class="watermark-text">Ellysia</span>
       <span class="watermark-sub">SECURITY · OPERATIONS · CLEARANCE</span>
     </div>
 
@@ -54,7 +54,7 @@
         <span class="term-dots" aria-hidden="true">
           <i class="d d-r"></i><i class="d d-y"></i><i class="d d-g"></i>
         </span>
-        <span class="term-path">seq://clearance/access</span>
+        <span class="term-path">ellysia://clearance/access</span>
         <span class="term-clock">{{ clock }}</span>
       </header>
 
@@ -73,7 +73,7 @@
       <div class="console-body" :inert="booting || granted">
         <div class="brand">
           <span class="brand-bracket">[</span>
-          <span class="brand-mark" :class="{ glitch: glitching }" data-text="SeQ">SeQ</span>
+          <span class="brand-mark" :class="{ glitch: glitching }" data-text="Ellysia">Ellysia</span>
           <span class="brand-bracket">]</span>
           <span class="brand-shield" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
@@ -208,7 +208,7 @@
 
         <footer class="console-foot">
           <span class="foot-pulse"><i></i>Enlace cifrado activo</span>
-          <span class="foot-ver">build 2.6.0 · SeQ © 2026</span>
+          <span class="foot-ver">build 2.6.0 · Ellysia © 2026</span>
         </footer>
       </div>
     </div>

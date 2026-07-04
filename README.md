@@ -1,9 +1,9 @@
 <!-- prettier-ignore -->
 <div align="center">
 
-<img src="./API/resources/images/seq/SeQ-BgN.png" alt="SeQ" height="110" />
+<img src="./API/resources/images/ellysia/Ellysia-BgN.png" alt="Ellysia" height="110" />
 
-# SeQ — Security Operations Platform
+# Ellysia — Security Operations Platform
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org)
 [![Flask 3.0](https://img.shields.io/badge/Flask-3.0-000?style=flat-square&logo=flask)](https://flask.palletsprojects.com)
@@ -21,7 +21,7 @@
 
 ## Overview
 
-**SeQ** is a modular security operations platform that combines vulnerability scanning, anti-phishing email analysis, encrypted credential management, and AI-powered security awareness training into a single server — with web and mobile interfaces.
+**Ellysia** is a modular security operations platform that combines vulnerability scanning, anti-phishing email analysis, encrypted credential management, and AI-powered security awareness training into a single server — with web and mobile interfaces.
 
 The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Redis** queues, while local AI (Ollama) generates reports, awareness pills, and contextual verdicts. All modules share an OAuth 2.0 authentication layer with fine-grained attribute-based access control.
 
@@ -43,7 +43,7 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
 
 ```
                 ┌─────────────────────────────────────────────────────────┐
-                │                    SeQ API (Flask)                      │
+                │                    Ellysia API (Flask)                  │
                 │  system · oauth · users · sentinel · acheron · iris ·   │
                 │              aegis · scribe · herald · pages            │
                 │  ┌──────────────────────────────────────────────────┐   │
@@ -61,7 +61,7 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
 ```
 
 ```
-SeQ/
+Ellysia/
 ├── API/        # Flask backend (run.py → create_app())
 │   ├── alembic/                 # Schema migrations (versioned)
 │   ├── src/modules/
@@ -96,7 +96,7 @@ SeQ/
 | **Aegis** | AI-generated security awareness pills across 73 topics with real-time CVE alerts from 19 tracked brands. | Operational |
 | **Scribe** | Abstraction layer for AI generation — pluggable strategies (Ollama, OpenAI) per module. | Operational |
 | **Herald** | Abstraction layer for email sending — pluggable strategies (SMTP relay) per module, transversal like Scribe. | Operational |
-| **SeQ Web** | Vue 3 SPA with hub dashboard, scan management, analysis viewer, vault client, and admin panel. | Operational |
+| **Ellysia Web** | Vue 3 SPA with hub dashboard, scan management, analysis viewer, vault client, and admin panel. | Operational |
 | **AcheronMobile** | Android app with Jetpack Compose UI, Material 3 design, and Java crypto core for offline vault operations. | Operational |
 
 ## Quick start
@@ -106,8 +106,8 @@ SeQ/
 
 ```bash
 # 1. Clone
-git clone https://github.com/gamustea/SeQ.git
-cd SeQ
+git clone https://github.com/ProjectEllysia/Ellysia.git
+cd Ellysia
 
 # 2. Start infrastructure (PostgreSQL 15432, Redis, Ollama, OpenVAS)
 docker compose --profile dev up -d
@@ -121,7 +121,7 @@ POSTGRES_USER=SecOps
 POSTGRES_PASSWORD=<from .env root>
 POSTGRES_HOST=localhost
 POSTGRES_PORT=15432
-POSTGRES_DB=SeQ
+POSTGRES_DB=Ellysia
 CREATE_DATABASE=True
 EOF
 
@@ -137,7 +137,7 @@ python -m src.modules.system.taskqueue.worker
 
 ### Authentication
 
-SeQ uses OAuth 2.0 with `grant_type: password` and refresh tokens (JWT signed with PyJWT). JSON keys use **camelCase**.
+Ellysia uses OAuth 2.0 with `grant_type: password` and refresh tokens (JWT signed with PyJWT). JSON keys use **camelCase**.
 
 ```http
 POST /oauth/token
@@ -275,7 +275,7 @@ queue.submit(func, name="Scan 192.168.1.1", category="sentinel.scan", external_i
 
 ## Database Migrations
 
-SeQ uses **Alembic** for schema versioning — replacing the previous `Base.metadata.create_all()` approach that could only create new tables.
+Ellysia uses **Alembic** for schema versioning — replacing the previous `Base.metadata.create_all()` approach that could only create new tables.
 
 ### How it works
 
@@ -329,7 +329,7 @@ docker compose -f docker-compose.yml -f docker-compose.gpu-nvidia.yml --profile 
 
 ### GPU support
 
-SeQ ships overlay files for GPU-accelerated local AI:
+Ellysia ships overlay files for GPU-accelerated local AI:
 
 - `docker-compose.gpu-nvidia.yml`
 - `docker-compose.gpu-intel.yml`
@@ -386,7 +386,7 @@ and hands it to `herald`, which delegates to an injectable strategy chosen per m
       "port": 587,
       "useTls": true,
       "fromAddress": "noreply@tudominio.com",
-      "fromName": "SeQ Awareness"
+      "fromName": "Ellysia Awareness"
     }
   },
   "modules": { "aegis": "smtp" }
@@ -432,7 +432,7 @@ SMTP_PASSWORD=your-smtp-key
 
 ## Configuration
 
-SeQ uses a layered configuration system (`API/src/modules/system/config_reading.py`):
+Ellysia uses a layered configuration system (`API/src/modules/system/config_reading.py`):
 
 1. **`API/SecOpsConfig.json`** — base configuration (prompts, directories, task queue defaults)
 2. **`API/.env`** — environment variables that **override** JSON values (required for JWT secret, DB credentials, API keys)

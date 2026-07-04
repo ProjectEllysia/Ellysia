@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, reactive } from 'vue'
 import { useApi } from '@/composables/useApi'
+import { useUtils } from '@/composables/useUtils'
 import { useToastStore } from '@/stores/toastStore'
 
 /**
@@ -13,6 +14,7 @@ import { useToastStore } from '@/stores/toastStore'
 export const useSentinelStore = defineStore('sentinel', () => {
   const { apiFetch } = useApi()
   const toast = useToastStore()
+  const { triggerDownload } = useUtils()
 
   /* ════════════════════════════════ TABS ═══════════════════════════════ */
   const activeTab = ref('nmap')
@@ -415,7 +417,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
       const blob = await res.blob()
       const cd = res.headers.get('Content-Disposition') ?? ''
       const name = cd.match(/filename="?([^";\n]+)"?/i)?.[1] ?? `scan_${docId}.pdf`
-      _triggerDownload(blob, name)
+      triggerDownload(blob, name)
       toast.show('Documento descargado.', 'success')
       return true
     } catch (e) {
@@ -714,17 +716,6 @@ export const useSentinelStore = defineStore('sentinel', () => {
     moveScan.show = false
     moveScan.scanId = null
     moveScan.folderId = null
-  }
-
-  /* ── UTIL ── */
-  function _triggerDownload(blob, filename) {
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    setTimeout(() => { URL.revokeObjectURL(url); a.remove() }, 1000)
   }
 
   return {

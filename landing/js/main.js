@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// SeQ landing — vanilla JS
+// Ellysia landing — vanilla JS
 // Boot log typing → glitch → ambient constellation → hairline draw
 // → live clock. Everything honors prefers-reduced-motion.
 // ═══════════════════════════════════════════════════════════════
@@ -10,7 +10,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── Boot log ──────────────────────────────────────────────────
 const BOOT_LINES = [
-  { prefix: '> initializing seq',                       tail: 'ok', cls: 'mod' },
+  { prefix: '> initializing ellysia',                       tail: 'ok', cls: 'mod' },
   { prefix: '> loading sentinel · nmap/nikto/openvas',   tail: 'ok', cls: 'mod' },
   { prefix: '> loading aegis · 73 topics · 19 brands',   tail: 'ok', cls: 'mod' },
   { prefix: '> loading iris · 37 header rules',          tail: 'ok', cls: 'mod' },
@@ -41,7 +41,7 @@ async function typeBoot() {
   const cur = log.querySelector('.cursor');
   if (cur) cur.remove();
 
-  // Subtle glitch on the [SeQ] title once boot completes
+  // Subtle glitch on the [Ellysia] title once boot completes
   const title = document.getElementById('heroText');
   if (title) {
     await sleep(220);
