@@ -60,7 +60,15 @@ from .model import (
     ScanType,
     SentinelDocument,
 )
-from .ellysia import EllysiaEngine, services_from_open_ports
+from .ellysia import (
+    EllysiaEngine,
+    services_from_open_ports,
+    compute_dedup_key,
+    merge_findings,
+    apply_lifecycle,
+    classify_exposure,
+    score_finding,
+)
 from .services import (
     NiktoResultProcessor,
     NmapResultProcessor,
@@ -79,6 +87,7 @@ from .services import (
 from .services import parsing
 from .exceptions import (
     ScanNotFoundError,
+    FindingNotFoundError,
     InvalidProgramedTaskArgumentError,
     ProgramedScanNotFoundError,
     FolderNotFoundError,
@@ -1884,8 +1893,8 @@ class EllysiaEngineManager(ScanManager):
         try:
             self.update_scan_status(scan_id, ScanStatus.RUNNING)
 
-            # Phase 1 — read services and run version/informational detection with
-            # the KB in-session (no network, so one transaction is fine).
+            # Phase 1 — read services, run version/informational detection with
+            # the KB in-session, and load the previous scan for lifecycle.
             with UnitOfWork() as uow:
                 scan_repo = ScanRepository(uow)
                 kb_repo = KbRepository(uow)
@@ -1895,6 +1904,10 @@ class EllysiaEngineManager(ScanManager):
                 source_host_id = source.host_id if source else None
                 source_target = source.target if source else None
                 services = services_from_open_ports(open_ports)
+
+                ellysia_scan = scan_repo.get_by_id(scan_id)
+                user_id = ellysia_scan.user_id if ellysia_scan else None
+                previous_map = self._previous_findings_map(scan_repo, user_id, source_target, scan_id)
 
                 engine = EllysiaEngine(
                     cve_lookup=kb_repo.cves_for_cpe,
@@ -1908,8 +1921,12 @@ class EllysiaEngineManager(ScanManager):
             if source_target and CR.is_ellysia_active_checks_enabled():
                 findings_data.extend(self._run_active_checks(source_target, services))
 
+            # Phase 2.5 — correlation: key, merge duplicates/sources, set lifecycle.
             for finding in findings_data:
                 finding["host_id"] = source_host_id
+                finding["dedup_key"] = compute_dedup_key(finding)
+            findings_data = merge_findings(findings_data)
+            findings_data = apply_lifecycle(findings_data, previous_map)
 
             # Phase 3 — persist everything.
             with UnitOfWork() as uow:
@@ -1945,6 +1962,50 @@ class EllysiaEngineManager(ScanManager):
             logger.exception("Ellysia active checks failed for %s", target)
             return []
 
+    def _previous_findings_map(self, scan_repo, user_id, target, exclude_scan_id) -> dict:
+        """Build ``dedup_key -> {state, snapshot}`` from the previous Ellysia scan
+        of this target, for lifecycle comparison."""
+        if not user_id or not target:
+            return {}
+        result: dict = {}
+        for pf in scan_repo.get_previous_ellysia_findings(user_id, target, exclude_scan_id):
+            snapshot = self._finding_snapshot(pf)
+            key = pf.dedup_key or compute_dedup_key(snapshot)
+            snapshot["dedup_key"] = key
+            result[key] = {"state": pf.state or "open", "snapshot": snapshot}
+        return result
+
+    @staticmethod
+    def _finding_snapshot(f) -> dict:
+        """Plain-dict copy of a Finding's columns (to recreate a 'fixed' ghost)."""
+        return {
+            "host_id": f.host_id, "title": f.title, "category": f.category,
+            "port": f.port, "service": f.service, "cpe": f.cpe, "cve_ids": f.cve_ids,
+            "cvss_score": f.cvss_score, "cvss_vector": f.cvss_vector,
+            "epss_score": f.epss_score, "in_kev": f.in_kev,
+            "exploit_maturity": f.exploit_maturity, "source": f.source,
+            "check_id": f.check_id, "feed_version": f.feed_version,
+            "dedup_key": f.dedup_key, "qod": f.qod, "confirmed": f.confirmed,
+        }
+
+    def set_finding_state(self, finding_id: int, user_id: int, state: str):
+        """Set a finding's lifecycle state (e.g. mark a risk as ``accepted``).
+
+        Scoped to the owner: a finding of another user's scan is reported as not
+        found. Returns the updated finding.
+        """
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            finding = repo.get_finding(finding_id)
+            if finding is None:
+                raise FindingNotFoundError(finding_id)
+            scan = repo.get_by_id(finding.scan_id)
+            if scan is None or scan.user_id != user_id:
+                raise FindingNotFoundError(finding_id)
+            finding.state = state  # type: ignore
+            repo.update(finding)
+            return finding
+
     def _create_scan_record(self, target: str, user_id: int, source_scan_id: int) -> EllysiaScan:  # pylint: disable=arguments-differ
         """Create and persist an EllysiaScan row linked to its source Nmap scan."""
         scan = EllysiaScan(
@@ -1968,12 +2029,21 @@ class EllysiaEngineManager(ScanManager):
 
         session = get_db_session()
         findings = ScanRepository(session=session).get_findings_by_scan(scan_id)
+        exposure = classify_exposure(scan.target)
+
+        def _priority(f):
+            return score_finding(
+                {"cvss_score": f.cvss_score, "in_kev": f.in_kev,
+                 "epss_score": f.epss_score, "confirmed": f.confirmed},
+                exposure,
+            )
 
         result = {
             "id": scan.id,
             "scanType": "ellysia",
             "target": scan.target,
             "sourceScanId": scan.source_scan_id,
+            "exposure": exposure,
             "status": getattr(scan, "status", "unknown"),
             "startedAt": scan.started_at.isoformat(),
             "finishedAt": scan.finished_at.isoformat() if scan.finished_at else None,  # type: ignore
@@ -1993,11 +2063,15 @@ class EllysiaEngineManager(ScanManager):
                     "confirmed": f.confirmed,
                     "source": f.source,
                     "state": f.state,
+                    "dedupKey": f.dedup_key,
+                    "priority": _priority(f),
                 }
                 for f in findings
             ],
             "totalFindings": len(findings),
             "vulnerableFindings": sum(1 for f in findings if f.category == "outdated_software"),
+            "openFindings": sum(1 for f in findings if f.state == "open"),
+            "fixedFindings": sum(1 for f in findings if f.state == "fixed"),
         }
         self._append_document_info(scan, result)
         return result

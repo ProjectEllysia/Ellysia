@@ -27,8 +27,8 @@ _PORTS = [
 ]
 
 
-def _seed_nmap_scan(app, user_id: int) -> int:
-    """Persist a finished Nmap scan with two open ports; return its id."""
+def _seed_nmap_scan(app, user_id: int, ports=None) -> int:
+    """Persist a finished Nmap scan with the given open ports; return its id."""
     with app.app_context():
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
@@ -36,7 +36,7 @@ def _seed_nmap_scan(app, user_id: int) -> int:
                             started_at=datetime.now(), status=ScanStatus.FINISHED.value)
             repo.save(scan)
             host = repo.get_or_create_host("10.0.0.5", "10.0.0.5")
-            repo.persist_nmap_results(scan, host, _PORTS)
+            repo.persist_nmap_results(scan, host, ports if ports is not None else _PORTS)
             scan_id = scan.id
     return scan_id
 
@@ -189,6 +189,66 @@ def test_ellysia_active_check_persists_confirmed_finding(app, admin_user, monkey
     assert active[0].qod == 99
     assert active[0].confirmed is True
     assert active[0].category == "exposed_path"
+
+
+def test_ellysia_lifecycle_marks_fixed_when_cve_gone(app, admin_user):
+    _seed_kb_apache_cve(app)
+
+    # Scan 1 — vulnerable Apache 2.4.49.
+    nmap1 = _seed_nmap_scan(app, admin_user.id)
+    with app.app_context():
+        mgr = EllysiaEngineManager()
+        e1 = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap1)
+        mgr._run_ellysia(e1.id, nmap1)
+
+    # Scan 2 — patched Apache 2.4.51 (no CVE match in the KB).
+    patched = [dict(_PORTS[0], version="2.4.51", cpe="cpe:/a:apache:http_server:2.4.51"), _PORTS[1]]
+    nmap2 = _seed_nmap_scan(app, admin_user.id, patched)
+    with app.app_context():
+        mgr = EllysiaEngineManager()
+        e2 = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap2)
+        mgr._run_ellysia(e2.id, nmap2)
+        with UnitOfWork() as uow:
+            findings2 = ScanRepository(uow).get_findings_by_scan(e2.id)
+
+    # The CVE that disappeared is recorded as fixed; the open ports persist as open.
+    fixed = [f for f in findings2 if f.state == "fixed" and f.cve_ids == ["CVE-2021-41773"]]
+    assert len(fixed) == 1
+    assert any(f.category == "open_port" and f.state == "open" for f in findings2)
+
+
+def _run_scan_and_get_cve_finding_id(app, user_id, nmap_id):
+    mgr = EllysiaEngineManager()
+    escan = mgr._create_scan_record(target="10.0.0.5", user_id=user_id, source_scan_id=nmap_id)
+    mgr._run_ellysia(escan.id, nmap_id)
+    with UnitOfWork() as uow:
+        findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+        return next(f.id for f in findings if f.cve_ids)
+
+
+def test_accept_finding_via_endpoint(client, app, admin_user, auth_headers):
+    _seed_kb_apache_cve(app)
+    nmap_id = _seed_nmap_scan(app, admin_user.id)
+    with app.app_context():
+        finding_id = _run_scan_and_get_cve_finding_id(app, admin_user.id, nmap_id)
+
+    resp = client.patch(f"/sentinel/findings/{finding_id}",
+                       headers=auth_headers(admin_user), json={"state": "accepted"})
+    assert resp.status_code == 200
+    assert resp.get_json()["state"] == "accepted"
+
+
+def test_accept_finding_requires_update_attribute(client, app, regular_user, auth_headers):
+    # role_user lacks sentinel_update.
+    resp = client.patch("/sentinel/findings/1", headers=auth_headers(regular_user),
+                       json={"state": "accepted"})
+    assert resp.status_code == 403
+
+
+def test_accept_nonexistent_finding_is_404(client, admin_user, auth_headers):
+    resp = client.patch("/sentinel/findings/999999",
+                       headers=auth_headers(admin_user), json={"state": "accepted"})
+    assert resp.status_code == 404
 
 
 def test_ellysia_scan_surfaces_in_results_endpoint(client, app, admin_user, auth_headers):

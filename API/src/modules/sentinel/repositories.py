@@ -546,6 +546,28 @@ class ScanRepository(BaseRepository[Scan]):
             .all()
         )
 
+    def get_finding(self, finding_id: int) -> Optional[Finding]:
+        """Return a single finding by id (or None)."""
+        return self._session.get(Finding, finding_id)
+
+    def get_previous_ellysia_findings(
+        self, user_id: int, target: str, exclude_scan_id: int
+    ) -> List[Finding]:
+        """Return the findings of the user's previous finished Ellysia scan of a
+        target (for lifecycle comparison), or an empty list if there is none."""
+        prev = (
+            self._session.query(EllysiaScan)
+            .filter(
+                EllysiaScan.user_id == user_id,
+                EllysiaScan.target == target,
+                EllysiaScan.status == ScanStatus.FINISHED.value,
+                EllysiaScan.id != exclude_scan_id,
+            )
+            .order_by(EllysiaScan.started_at.desc())
+            .first()
+        )
+        return self.get_findings_by_scan(prev.id) if prev else []
+
 
 class SentinelReportRepository(BaseRepository[SentinelDocument]):
     """

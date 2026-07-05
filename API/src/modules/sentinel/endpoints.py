@@ -37,6 +37,7 @@ from .exceptions import (
     ScanError,
     ScanExecutionError,
     ScanNotFoundError,
+    FindingNotFoundError,
     IPValidationError,
     MaxHostsExceededError,
     PortValidationError,
@@ -53,6 +54,8 @@ from .schemas import (
     NiktoScanRequestSchema,
     OpenVASScanRequestSchema,
     EllysiaScanRequestSchema,
+    FindingStateRequestSchema,
+    FindingStateResponseSchema,
     ResultsQuerySchema,
     GeneratePdfRequestSchema,
     DocumentStatusQuerySchema,
@@ -340,6 +343,30 @@ def start_ellysia_scan(data):
         "message": "Escaneo Ellysia iniciado correctamente",
         "scanId": scan_id,
         "scanType": "ellysia",
+        "user": user.username,
+    }
+
+
+@sentinel_blp.patch("/findings/<int:finding_id>")
+@sentinel_blp.arguments(FindingStateRequestSchema)
+@sentinel_blp.response(200, FindingStateResponseSchema, description="Finding state updated")
+@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Finding not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.SENTINEL_UPDATE])
+@limiter.limit("120 per hour; 400 per day")
+@handle_exceptions(default_exception=FindingNotFoundError, logger=logger)
+def update_finding_state(data, finding_id: int):
+    """Marcar el estado de un hallazgo (p. ej. aceptar un riesgo)."""
+    user = get_current_user()
+    finding = EllysiaEngineManager().set_finding_state(finding_id, user.id, data["state"])
+    logger.info(f"Hallazgo {finding_id} marcado como '{data['state']}' por {user.username}")
+    return {
+        "message": "Estado del hallazgo actualizado correctamente",
+        "findingId": finding.id,
+        "state": finding.state,
         "user": user.username,
     }
 

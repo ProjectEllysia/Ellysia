@@ -26,6 +26,17 @@ class EllysiaScanRequestSchema(Schema):
     timeout = fields.Integer(load_default=120, validate=validate.Range(min=1))
 
 
+class FindingStateRequestSchema(Schema):
+    state = fields.String(required=True, validate=validate.OneOf(["accepted", "open"]))
+
+
+class FindingStateResponseSchema(Schema):
+    message = fields.String()
+    findingId = fields.Integer()
+    state = fields.String()
+    user = fields.String()
+
+
 class ResultsQuerySchema(Schema):
     type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "openvas", "ellysia", "all"]))
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))

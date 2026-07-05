@@ -37,6 +37,14 @@ from .checks import (
     CHECKS_FEED_VERSION,
     QOD_CONFIRMED,
 )
+from .correlation import (
+    classify_exposure,
+    compute_dedup_key,
+    merge_findings,
+    apply_lifecycle,
+    score_finding,
+    PRIORITY_LADDER,
+)
 
 __all__ = [
     "EllysiaEngine",
@@ -61,4 +69,10 @@ __all__ = [
     "is_http_service",
     "CHECKS_FEED_VERSION",
     "QOD_CONFIRMED",
+    "classify_exposure",
+    "compute_dedup_key",
+    "merge_findings",
+    "apply_lifecycle",
+    "score_finding",
+    "PRIORITY_LADDER",
 ]

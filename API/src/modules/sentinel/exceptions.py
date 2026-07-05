@@ -39,6 +39,21 @@ class ScanNotFoundError(ScanError):
         )
 
 
+class FindingNotFoundError(ScanError):
+    """Hallazgo (Finding) no encontrado o no perteneciente al usuario."""
+
+    default_code = ErrorCode.SCAN_NOT_FOUND
+    default_status_code = 404
+    default_severity = ErrorSeverity.LOW
+
+    def __init__(self, finding_id: int):
+        super().__init__(
+            message=f"Hallazgo con ID {finding_id} no encontrado",
+            details={"finding_id": finding_id},
+            user_message=f"El hallazgo #{finding_id} no existe."
+        )
+
+
 class ScanAlreadyRunningError(ScanError):
     """Ya existe un escaneo en ejecución para el objetivo dado."""
 
