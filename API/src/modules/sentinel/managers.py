@@ -1827,7 +1827,6 @@ class EllysiaEngineManager(ScanManager):
 
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         super().__init__(task_queue)
-        self._engine = EllysiaEngine()
 
     def run_scan(self, source_scan_id: int, user_id: int, timeout: int = 120) -> int:  # pylint: disable=arguments-differ
         """
@@ -1885,20 +1884,28 @@ class EllysiaEngineManager(ScanManager):
         try:
             self.update_scan_status(scan_id, ScanStatus.RUNNING)
 
+            # One UnitOfWork: the KB lookups query the same session while the
+            # engine matches, then the findings are persisted. No network here
+            # (the KB is local), so holding one transaction is fine.
             with UnitOfWork() as uow:
-                repo = ScanRepository(uow)
-                open_ports = repo.get_open_ports_for_scan(source_scan_id)
-                source = repo.get_by_id(source_scan_id)
+                scan_repo = ScanRepository(uow)
+                kb_repo = KbRepository(uow)
+
+                open_ports = scan_repo.get_open_ports_for_scan(source_scan_id)
+                source = scan_repo.get_by_id(source_scan_id)
                 source_host_id = source.host_id if source else None
                 services = services_from_open_ports(open_ports)
 
-            findings_data = self._engine.analyze(services)
-            for finding in findings_data:
-                finding["host_id"] = source_host_id
+                engine = EllysiaEngine(
+                    cve_lookup=kb_repo.cves_for_cpe,
+                    kev_lookup=lambda cve_id: kb_repo.get_kev(cve_id) is not None,
+                    epss_lookup=lambda cve_id: getattr(kb_repo.get_epss(cve_id), "score", None),
+                )
+                findings_data = engine.analyze(services)
+                for finding in findings_data:
+                    finding["host_id"] = source_host_id
 
-            with UnitOfWork() as uow:
-                repo = ScanRepository(uow)
-                scan = repo.get_by_id(scan_id)
+                scan = scan_repo.get_by_id(scan_id)
                 scan.host_id = source_host_id
                 self._persist_scan_results(uow, scan, findings_data)
                 scan.status = ScanStatus.FINISHED.value  # type: ignore
@@ -1950,6 +1957,10 @@ class EllysiaEngineManager(ScanManager):
                     "port": f.port,
                     "service": f.service,
                     "cpe": f.cpe,
+                    "cveIds": f.cve_ids,
+                    "cvssScore": f.cvss_score,
+                    "epssScore": f.epss_score,
+                    "inKev": f.in_kev,
                     "qod": f.qod,
                     "confirmed": f.confirmed,
                     "source": f.source,
@@ -1958,6 +1969,7 @@ class EllysiaEngineManager(ScanManager):
                 for f in findings
             ],
             "totalFindings": len(findings),
+            "vulnerableFindings": sum(1 for f in findings if f.category == "outdated_software"),
         }
         self._append_document_info(scan, result)
         return result

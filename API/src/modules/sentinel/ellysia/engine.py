@@ -17,12 +17,37 @@ rather than leaking into the manager.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
+from typing import Callable, Iterable, List, Optional
+
+from .kb import normalize_cpe_to_23, parse_cpe23
 
 
 # Quality of Detection for a bare "the port is open" observation: low, because it
 # asserts nothing about vulnerability. Detection checks raise this in later phases.
 QOD_OPEN_PORT = 30
+
+# Version-based detection (matched a known-vulnerable version by banner/CPE):
+# reliable but not actively confirmed — a hypothesis, not a fact (backports).
+QOD_VERSION_MATCH = 70
+
+
+# Nmap product string (lowercased) -> (cpe vendor, cpe product). Seed of the
+# override table from the roadmap (§2.1); grows one line per false negative seen
+# in production. Consulted only when Nmap did not emit a usable <cpe> itself.
+CPE_PRODUCT_OVERRIDES: dict[str, tuple[str, str]] = {
+    "apache httpd":        ("apache", "http_server"),
+    "openssh":             ("openbsd", "openssh"),
+    "nginx":               ("nginx", "nginx"),
+    "microsoft iis httpd": ("microsoft", "internet_information_services"),
+    "mysql":               ("mysql", "mysql"),
+    "mariadb":             ("mariadb", "mariadb"),
+    "vsftpd":              ("vsftpd_project", "vsftpd"),
+    "proftpd":             ("proftpd", "proftpd"),
+    "postfix smtpd":       ("postfix", "postfix"),
+    "dovecot imapd":       ("dovecot", "dovecot"),
+    "pure-ftpd":           ("pureftpd", "pure-ftpd"),
+    "exim smtpd":          ("exim", "exim"),
+}
 
 
 @dataclass(frozen=True)
@@ -54,11 +79,31 @@ class Service:
 class EllysiaEngine:
     """Turns discovered services into normalized findings.
 
-    Fase 0: one informational finding per service. The public surface
-    (:meth:`analyze`) stays stable as real detection is added underneath.
+    Emits one informational "open port" finding per service, plus — when a CVE
+    lookup is wired (Fase 1) — one version-match finding per known CVE affecting
+    the service's product/version. The lookups are injected so the engine stays
+    free of the ORM and is trivially testable; the manager passes the KB
+    repository's methods.
+
+    Args:
+        cve_lookup: ``(vendor, product, version) -> iterable`` of CVE rows (each
+            with ``cve_id``/``cvss_score``/``cvss_vector``/``severity``). None
+            disables version detection (informational-only, as in Fase 0).
+        kev_lookup: ``(cve_id) -> bool``, whether the CVE is in CISA KEV.
+        epss_lookup: ``(cve_id) -> float | None``, the EPSS score.
     """
 
     FEED_VERSION = "ellysia-0"
+
+    def __init__(
+        self,
+        cve_lookup: Optional[Callable[[str, str, str], Iterable]] = None,
+        kev_lookup: Optional[Callable[[str], bool]] = None,
+        epss_lookup: Optional[Callable[[str], Optional[float]]] = None,
+    ) -> None:
+        self._cve_lookup = cve_lookup
+        self._kev_lookup = kev_lookup
+        self._epss_lookup = epss_lookup
 
     def analyze(self, services: Iterable[Service]) -> List[dict]:
         """Return Finding-data dicts for the given services.
@@ -70,7 +115,45 @@ class EllysiaEngine:
             A list of dicts with ``Finding`` column values (no scan_id; the
             repository sets it when persisting).
         """
-        return [self._informational_finding(service) for service in services]
+        findings: List[dict] = []
+        for service in services:
+            findings.append(self._informational_finding(service))
+            if self._cve_lookup is not None:
+                findings.extend(self._version_findings(service))
+        return findings
+
+    def _version_findings(self, service: Service) -> List[dict]:
+        """Version-based detection: emit a finding per CVE affecting the service."""
+        resolved = _resolve_cpe(service)
+        if resolved is None:
+            return []
+        vendor, product, version, cpe23 = resolved
+
+        findings: List[dict] = []
+        for cve in self._cve_lookup(vendor, product, version):  # type: ignore[misc]
+            findings.append(self._version_finding(service, cve, cpe23))
+        return findings
+
+    def _version_finding(self, service: Service, cve, cpe23: str) -> dict:
+        cve_id = cve.cve_id
+        return {
+            "title":        f"{service.label} — {cve_id}",
+            "category":     "outdated_software",
+            "port":         service.port,
+            "service":      service.name or None,
+            "cpe":          cpe23,
+            "cve_ids":      [cve_id],
+            "cvss_score":   cve.cvss_score,
+            "cvss_vector":  cve.cvss_vector,
+            "epss_score":   self._epss_lookup(cve_id) if self._epss_lookup else None,
+            "in_kev":       self._kev_lookup(cve_id) if self._kev_lookup else False,
+            "source":       "ellysia",
+            "check_id":     "ellysia:version-match@1",
+            "feed_version": self.FEED_VERSION,
+            "qod":          QOD_VERSION_MATCH,
+            "confirmed":    False,   # version match is a hypothesis; Fase R confirms actively
+            "state":        "open",
+        }
 
     def _informational_finding(self, service: Service) -> dict:
         """Build the "open port" informational finding for one service."""
@@ -121,3 +204,37 @@ def _split_protocol(protocol: str) -> tuple[Optional[int], str]:
         return int(port_str), (proto or "tcp")
     except ValueError:
         return None, (proto or "tcp")
+
+
+def _concrete_version(version: str) -> Optional[str]:
+    """Return a usable version string, or None for wildcard/empty placeholders."""
+    version = (version or "").strip()
+    return version if version and version not in ("*", "-") else None
+
+
+def _resolve_cpe(service: Service) -> Optional[tuple[str, str, str, str]]:
+    """Resolve a service to (vendor, product, version, cpe_2_3) for KB matching.
+
+    Two layers, highest confidence first: the CPE Nmap emitted, then the manual
+    override table keyed on the product string. Returns None when neither yields
+    a concrete vendor/product/version — we never invent a CPE (§2.1). The CPE
+    Dictionary token index (roadmap layer 2) is deferred until it is mirrored.
+    """
+    # 1) Nmap gave a CPE — trust it, falling back to the banner version if the
+    #    CPE itself left the version as a wildcard.
+    if service.cpe:
+        parsed = parse_cpe23(service.cpe)
+        if parsed and parsed["vendor"] and parsed["product"]:
+            version = _concrete_version(parsed["version"]) or _concrete_version(service.version)
+            if version:
+                return parsed["vendor"], parsed["product"], version, normalize_cpe_to_23(service.cpe)
+
+    # 2) Override table keyed on the Nmap product string.
+    key = (service.product or "").strip().lower()
+    version = _concrete_version(service.version)
+    if key in CPE_PRODUCT_OVERRIDES and version:
+        vendor, product = CPE_PRODUCT_OVERRIDES[key]
+        cpe23 = f"cpe:2.3:a:{vendor}:{product}:{version}:*:*:*:*:*:*:*"
+        return vendor, product, version, cpe23
+
+    return None

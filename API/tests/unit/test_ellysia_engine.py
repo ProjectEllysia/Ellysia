@@ -119,3 +119,76 @@ def test_nmap_processor_keeps_cpe_in_ports_data():
     assert by_proto["80/tcp"]["version"] == "2.4.49"
     # No <cpe> element -> empty string (persistence coerces to NULL).
     assert by_proto["22/tcp"]["cpe"] == ""
+
+
+# ------------------------------------------------ version matcher (Fase 1)
+
+def _fake_cve(cve_id="CVE-2021-41773"):
+    return types.SimpleNamespace(
+        cve_id=cve_id, cvss_score=7.5, cvss_vector="CVSS:3.1/AV:N", severity="HIGH",
+    )
+
+
+def _lookup_for(expected_vendor_product, calls=None):
+    """A cve_lookup that returns one CVE only for the expected (vendor, product)."""
+    def lookup(vendor, product, version):
+        if calls is not None:
+            calls.append((vendor, product, version))
+        return [_fake_cve()] if (vendor, product) == expected_vendor_product else []
+    return lookup
+
+
+def test_no_cve_lookup_means_informational_only():
+    # Fase 0 behaviour preserved when no lookup is wired.
+    engine = EllysiaEngine()
+    findings = engine.analyze([Service(80, "tcp", "http", "Apache httpd", "2.4.49",
+                                       "cpe:/a:apache:http_server:2.4.49")])
+    assert [f["category"] for f in findings] == ["open_port"]
+
+
+def test_version_finding_from_nmap_cpe():
+    calls = []
+    engine = EllysiaEngine(
+        cve_lookup=_lookup_for(("apache", "http_server"), calls),
+        kev_lookup=lambda cid: True,
+        epss_lookup=lambda cid: 0.97,
+    )
+    service = Service(80, "tcp", "http", "Apache httpd", "2.4.49",
+                      "cpe:/a:apache:http_server:2.4.49")
+
+    findings = engine.analyze([service])
+
+    # The CPE resolved to (vendor, product, version) for the lookup.
+    assert calls == [("apache", "http_server", "2.4.49")]
+    categories = [f["category"] for f in findings]
+    assert categories == ["open_port", "outdated_software"]
+
+    vuln = findings[1]
+    assert vuln["cve_ids"] == ["CVE-2021-41773"]
+    assert vuln["cvss_score"] == 7.5
+    assert vuln["qod"] == 70
+    assert vuln["confirmed"] is False
+    assert vuln["in_kev"] is True
+    assert vuln["epss_score"] == 0.97
+    assert vuln["check_id"] == "ellysia:version-match@1"
+    assert vuln["cpe"] == "cpe:2.3:a:apache:http_server:2.4.49:*:*:*:*:*:*:*"
+
+
+def test_version_finding_via_override_when_no_cpe():
+    # No CPE from Nmap; product string resolves through the override table.
+    calls = []
+    engine = EllysiaEngine(cve_lookup=_lookup_for(("openbsd", "openssh"), calls))
+    findings = engine.analyze([Service(22, "tcp", "ssh", "OpenSSH", "7.4", None)])
+
+    assert calls == [("openbsd", "openssh", "7.4")]
+    assert findings[1]["cpe"] == "cpe:2.3:a:openbsd:openssh:7.4:*:*:*:*:*:*:*"
+
+
+def test_no_version_finding_without_a_concrete_version():
+    calls = []
+    engine = EllysiaEngine(cve_lookup=_lookup_for(("apache", "http_server"), calls))
+    # Unknown product + wildcard version -> nothing to match, lookup not called.
+    findings = engine.analyze([Service(80, "tcp", "http", "weird-server", "*", None)])
+
+    assert calls == []
+    assert [f["category"] for f in findings] == ["open_port"]
