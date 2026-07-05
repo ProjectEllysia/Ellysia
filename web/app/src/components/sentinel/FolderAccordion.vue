@@ -97,7 +97,7 @@ function formatDate(iso) {
 .accordion { border-bottom: 1px solid var(--border); }
 .accordion:last-child { border-bottom: none; }
 .accordion-header { width: 100%; display: flex; align-items: center; gap: 0.6rem; padding: 0.75rem 1.1rem; background: none; border: none; color: var(--text); font-size: 0.85rem; cursor: pointer; text-align: left; }
-.accordion-header:hover { background: rgba(255,255,255,0.015); }
+.accordion-header:hover { background: var(--surface-2); }
 .folder-icon { width: 18px; height: 18px; color: var(--accent); flex-shrink: 0; }
 .is-default .folder-icon { color: var(--text-muted); }
 .folder-name { flex: 1; font-weight: 500; }
@@ -112,7 +112,7 @@ function formatDate(iso) {
 table { width: 100%; border-collapse: collapse; }
 th { padding: 0.5rem 0.7rem; text-align: left; font-size: 0.65rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; background: var(--surface-2); }
 td { padding: 0.5rem 0.7rem; font-size: 0.78rem; border-top: 1px solid var(--border); color: var(--text); }
-tr:hover td { background: rgba(255,255,255,0.012); }
+tr:hover td { background: var(--surface-2); }
 .type { text-transform: uppercase; font-size: 0.7rem; }
 .target { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .date { font-size: 0.72rem; color: var(--text-dim); white-space: nowrap; }
