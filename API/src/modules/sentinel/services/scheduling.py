@@ -137,7 +137,15 @@ class Scheduler:
             return
         # timezone=UTC para alinear los tiempos internos de APScheduler (incluido
         # job.next_run_time) con las columnas DateTime naive-UTC de la BD.
-        cls._scheduler = _BgScheduler(timezone=timezone.utc)
+        # job_defaults.misfire_grace_time: APScheduler por defecto es 1 segundo.
+        # Con eso, cualquier retraso mínimo del hilo del scheduler (otro scan
+        # corriendo, GIL ocupado) hace que el disparo se descarte en vez de
+        # ejecutarse tarde — el WARNING "Run time... was missed" y el escaneo
+        # que nunca se lanza. 60s da margen sin arriesgar solapes reales.
+        cls._scheduler = _BgScheduler(
+            timezone=timezone.utc,
+            job_defaults={"misfire_grace_time": 60},
+        )
         cls._scheduler.start()
         logger.info("Scheduler started")
         cls._sync_from_db()
