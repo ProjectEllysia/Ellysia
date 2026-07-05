@@ -207,10 +207,10 @@ por falta de acceso raw, simplemente ir más despacio.
 
 Cada fase es entregable y aporta valor por sí sola, así que en lugar de una lista lineal conviene verlo
 como dos pistas de trabajo que corren a la vez y terminan uniéndose. La regla de oro que las gobierna a
-ambas es que **no se arranca por Nmap.** Se lidera con el runtime de detección sobre el Nmap que ya
-existe —lo que nos da identidad en días— y el transporte y el fingerprinting propios se van
-construyendo al lado, usando Nmap como oráculo, hasta el momento en que podemos invertir el valor por
-defecto.
+ambas es que **no se arranca por Nmap, pero sí se arranca con datos de Nmap.** Se lidera con el runtime
+de detección sobre los servicios que ya conocemos —lo que nos da identidad en días— y el transporte y el
+fingerprinting propios se van construyendo al lado, usando Nmap como oráculo, hasta el momento en que
+Ellysia es completamente autónomo.
 
 La primera pista, la de **correlación**, es la columna vertebral: va de la Fase 0 (cimientos) a la
 Fase 1 (el matcher de versión), sigue por la Fase 2 (la base de conocimiento local) y culmina en la
@@ -234,10 +234,19 @@ dos pistas entrelazadas.
 **El objetivo** de esta fase es puramente estructural: conseguir que "el motor" sea una fila más de la
 tabla del apartado 3.1 y que persista sus `Finding`, todavía sin ninguna lógica de detección real.
 
-El primer trabajo, y el primer cambio de código de todo el proyecto, es **capturar y persistir el CPE
-que Nmap ya nos entrega**. Hoy hay una fuga silenciosa que conviene entender: Nmap corre con `-sV`, y
-eso hace que emita el elemento `<cpe>` de cada servicio que reconoce; nuestro parser incluso lo lee
-correctamente (en `processors.py:226-230`). El problema es que, un par de pasos más adelante, al
+**Una nota importante sobre la arquitectura en estas fases.** Mientras Ellysia no tenga su propio
+transporte de red (lo que llega en la Fase T), recibe como entrada una lista de servicios ya
+identificados. Esa lista puede venir de un escaneo Nmap anterior del usuario, de parámetros directos,
+o de cualquier otra fuente. Ellysia no descubre puertos por su cuenta en estas fases; recibe los
+servicios y los analiza. Esto tiene dos ventajas claras: simplifica la arquitectura (no hay capas
+internas invisibles) y mantiene el historial de escaneos limpio (Nmap es un escaneo, Ellysia es otro
+escaneo independiente, ambos visibles en la BD). El descubrimiento propio de Ellysia llega en la Fase
+T, cuando tenga su propio transporte.
+
+Dado esto, el primer trabajo, y el primer cambio de código de todo el proyecto, es **capturar y persistir
+el CPE que Nmap ya nos entrega**. Hoy hay una fuga silenciosa que conviene entender: Nmap corre con
+`-sV`, y eso hace que emita el elemento `<cpe>` de cada servicio que reconoce; nuestro parser incluso lo
+lee correctamente (en `processors.py:226-230`). El problema es que, un par de pasos más adelante, al
 re-estructurar los datos en una tupla de seis campos, el CPE se cae por el camino, y aunque no se
 cayera, tampoco habría columna donde guardarlo. Recogemos el dato en la mano y lo tiramos justo antes
 de llegar a la base de datos. El arreglo es pequeño y muy localizado, cuatro toques:
@@ -262,26 +271,32 @@ una lista en lugar de quedarnos con el primero.
 
 El resto de la fase es fontanería: añadir `ScanType.ELLYSIA = "ellysia"` como nuevo valor del enum y
 su `polymorphic_identity`; crear el modelo `Finding` del apartado 3.3 con su migración; escribir un
-`EllysiaEngineTask` que de momento se limite a envolver una llamada a Nmap y devolver sus puertos; un
-`EllysiaEngineManager` registrado con el decorador; y un endpoint `POST /sentinel/ellysia` que sea el
-espejo del de Nmap.
+`EllysiaEngineTask` que reciba como parámetros un host, puerto, protocolo, servicio, versión y CPE (la
+información del puerto ya descubierto); un `EllysiaEngineManager` registrado con el decorador; y un
+endpoint `POST /sentinel/ellysia` que acepte esos parámetros y lance el escaneo.
 
-**Damos la fase por hecha cuando** podemos lanzar un "escaneo Ellysia" que por dentro ejecuta un Nmap y
-persiste `Finding` informativos (uno de tipo "puerto abierto" por cada servicio). Todavía no detecta
-absolutamente nada, pero toda la fontanería funciona de extremo a extremo.
+La entrada a un escaneo Ellysia en estas fases es una lista de servicios con sus detalles. El usuario
+puede obtenerla de un Nmap Scan anterior (leyendo sus `OpenPort`), o proporcionarla manualmente, o desde
+otra fuente. Ellysia recibirá esa entrada y la procesará.
+
+**Damos la fase por hecha cuando** podemos lanzar un "escaneo Ellysia" proporcionándole una lista de
+servicios, y el motor persiste `Finding` informativos (uno de tipo "puerto abierto" por cada servicio
+recibido). Todavía no detecta ninguna vulnerabilidad, pero toda la fontanería de persistencia y
+correlación funciona de extremo a extremo.
 
 ### Fase 1 — Detección por versión: el matcher de CPE a CVE · pista de correlación
 
 **El objetivo** es dar el primer paso de detección real: dado un servicio con su producto y su versión
-—que Nmap ya nos da—, decir qué CVEs conocidas le afectan y con qué gravedad. Conceptualmente es lo que
-hace una buena parte de OpenVAS. (Más adelante, en la Fase R, este matcher no será una pieza aparte
-sino un tipo de comprobación más dentro del runtime; lo describimos por separado aquí porque es el
-producto mínimo viable de la correlación y se puede montar antes que el runtime completo.)
+—que ya hemos recibido como entrada—, decir qué CVEs conocidas le afectan y con qué gravedad.
+Conceptualmente es lo que hace una buena parte de OpenVAS. (Más adelante, en la Fase R, este matcher no
+será una pieza aparte sino un tipo de comprobación más dentro del runtime; lo describimos por separado
+aquí porque es el producto mínimo viable de la correlación y se puede montar antes que el runtime
+completo.)
 
-El flujo es directo. Nmap detecta el servicio; normalizamos su producto y versión a un CPE en formato
-2.3; consultamos la base de conocimiento local (que construiremos en la Fase 2) respetando los rangos
-de versión que NVD define; y por cada CVE aplicable emitimos un `Finding` con `qod=70` y
-`confirmed=false`.
+El flujo es directo. Tomamos el servicio que ya tenemos de entrada; normalizamos su producto y versión a
+un CPE en formato 2.3; consultamos la base de conocimiento local (que construiremos en la Fase 2)
+respetando los rangos de versión que NVD define; y por cada CVE aplicable emitimos un `Finding` con
+`qod=70` y `confirmed=false`.
 
 El punto delicado es esa normalización a CPE cuando Nmap no nos da uno limpio. La tentación de escribir
 a mano un `if "Apache" in product` gigantesco hay que resistirla: se vuelve inmantenible y, peor,
@@ -326,8 +341,8 @@ hallazgos con CVEs reales y su CVSS, visibles tanto en la interfaz web como en e
 Esta es la capa de identidad, la L2, y por tanto la más importante de todo el plan. Es lo que convierte
 a Ellysia de un simple correlacionador en un motor con criterio propio de detección. La idea es un
 runtime único de comprobaciones —versionado, extensible y reproducible— que, dado el conjunto de
-servicios de un host, decide qué comprobar y produce `Finding` normalizados, todo ello sin depender de
-Nikto.
+servicios que ya hemos recibido, decide qué comprobar y produce `Finding` normalizados, todo ello sin
+depender de Nikto.
 
 El runtime maneja cinco tipos de comprobación, pero todos bajo el mismo motor:
 
@@ -491,8 +506,10 @@ respaldo, no motor.
 
 ### Fase T — El transporte propio · pista de bajo nivel
 
-**El objetivo** es descubrir los puertos con una implementación propia, sin el motor de descubrimiento
-de Nmap. Son, siguiendo la metáfora, las manos del motor.
+**El objetivo** es que Ellysia descubra los puertos por su cuenta, con una implementación propia, en
+lugar de recibirlos como entrada. Son, siguiendo la metáfora, las manos del motor. Cuando esta fase esté
+lista, un escaneo Ellysia puede recibir solo el host objetivo y hacer todo el trabajo: descubrir,
+fingerprinting, detección.
 
 La base siempre disponible es un scanner por conexión (`connect-scan`) sobre `asyncio`, que no requiere
 privilegios. Por encima de él, cuando el worker tiene la capability `CAP_NET_RAW`, se activa un camino
@@ -586,23 +603,35 @@ navegador headless ni soporte de autenticación de aplicación compleja.
 ### Fase 6 — La orquestación: el motor como pipeline por defecto · el punto de convergencia
 
 **El objetivo** final es unir todas las piezas en un único flujo donde el motor propio es el
-protagonista y las herramientas externas son corroboradores opcionales:
+protagonista. La forma exacta del pipeline depende de en qué fase nos encontremos.
+
+**En Fases 0 a T-1** (antes de tener transporte propio), el usuario lanza un Ellysia Scan proporcionando
+una lista de servicios ya conocidos (de un Nmap Scan anterior, o proporcionados manualmente):
 
 ```
-Ellysia Scan (pipeline)
-  1. Descubrimiento   → Transporte propio (L0), con Nmap como respaldo          [Fase T]
-  2. Fingerprinting   → Dissectors propios (L1), con "nmap -sV" como oráculo     [Fase F]
-  3. Detección        → Runtime de checks (L2): por versión y activa            [Fase R + 1/2]
-  4. (opcional) Deep  → lanzar Nmap/Nikto/OpenVAS y fusionar sus hallazgos       [corroboración]
-  5. Correlación      → dedup, ciclo de vida y scoring                          [Fase 5]
-  6. Enriquecimiento  → scribe/IA genera el análisis y el PDF                   [ya existe]
+Ellysia Scan (Fases 0–T-1: analizador de vulnerabilidades)
+  1. Entrada        → lista de servicios (host, puerto, servicio, versión, CPE)
+  2. Detección      → Runtime de checks (L2): por versión y activa         [Fase R + 1/2]
+  3. Correlación    → dedup, ciclo de vida y scoring                       [Fase 5]
+  4. (opcional) Deep → lanzar Nmap/Nikto/OpenVAS y fusionar sus hallazgos  [corroboración]
+  5. Enriquecimiento → scribe/IA genera el análisis y el PDF               [ya existe]
 ```
 
-El paso 4 es el que materializa el objetivo declarado del proyecto. El usuario lanza un "Ellysia Scan";
-por defecto corre el motor propio, sin dependencias externas pesadas, y solo si marca la opción de
-análisis profundo se añaden las herramientas externas como una segunda opinión que se fusiona en los
-mismos `Finding`. Así es como Nmap, Nikto y OpenVAS terminan siendo complementos de nuestro motor, y no
-al revés.
+**A partir de Fase T** (con transporte propio), el pipeline es completo y autónomo:
+
+```
+Ellysia Scan (Fase T+: escáner completo)
+  1. Descubrimiento   → Transporte propio (L0)                               [Fase T]
+  2. Fingerprinting   → Dissectors propios (L1)                              [Fase F]
+  3. Detección        → Runtime de checks (L2): por versión y activa         [Fase R + 1/2]
+  4. Correlación      → dedup, ciclo de vida y scoring                       [Fase 5]
+  5. (opcional) Deep  → lanzar Nmap/Nikto/OpenVAS y fusionar sus hallazgos   [corroboración]
+  6. Enriquecimiento  → scribe/IA genera el análisis y el PDF                [ya existe]
+```
+
+El paso de "análisis profundo" es opcional en ambos casos: si el usuario lo solicita, se lanzan las
+herramientas externas como una segunda opinión que se fusiona en los mismos `Finding`. Así es como
+Nmap, Nikto y OpenVAS terminan siendo complementos de nuestro motor, y no al revés.
 
 ---
 
@@ -697,17 +726,22 @@ local con la señal de explotabilidad, y el banco de pruebas con integración co
 
 Si quieres un primer resultado tangible con el mínimo esfuerzo, este es el camino crítico. Empieza por
 una Fase 0 ligera: el refactor del CPE (los cuatro toques), luego `ScanType.ELLYSIA`, el modelo
-`Finding` con su migración, y un `EllysiaEngineManager` que reutilice el `NmapScanTask` que ya
-existe. A continuación monta una Fase R en pequeño, con un solo check declarativo —por ejemplo el de
+`Finding` con su migración, y un `EllysiaEngineManager` que acepte como entrada una lista de servicios
+(host, puerto, servicio, versión, CPE). No lances Nmap internamente; recibe los servicios como
+parámetro. El usuario puede obtenerlos de un Nmap Scan anterior.
+
+A continuación monta una Fase R en pequeño, con un solo check declarativo —por ejemplo el de
 `.git/config` expuesto— y un check de versión que, de momento, consulte la API de CIRCL que ya usa
 Aegis. Con eso tienes un motor propio de detección funcionando en cuestión de días, reutilizando código
-existente y montado sobre el Nmap actual.
+existente, sin descubrimiento propio aún.
 
-Demuéstralo contra `vulhub/httpd:2.4.49` para el check de versión y contra una imagen con `.git`
-expuesto para el check activo. Y solo entonces invierte en la Fase 2 (la base de conocimiento local,
-que quita la dependencia de red), en las Fases F y T (el fingerprint y el transporte propios, con Nmap
-como oráculo) y en ampliar el conjunto de checks. Esa secuencia te da un MVP defendible muy pronto y
-convierte la independencia de Nmap, Nikto y OpenVAS en un proceso incremental, no en un big-bang.
+Demuéstralo contra servicios conocidos: toma `vulhub/httpd:2.4.49`, haz un Nmap para obtener el CPE,
+luego lanza un Ellysia Scan pasando esos servicios de entrada, y valida que detecta la CVE-2021-41773.
+Toma una imagen con `.git` expuesto, haz lo mismo, y valida que el check activo lo encuentra. Y solo
+entonces invierte en la Fase 2 (la base de conocimiento local, que quita la dependencia de red), en las
+Fases F y T (el fingerprint y el transporte propios, con Nmap como oráculo) y en ampliar el conjunto de
+checks. Esa secuencia te da un MVP defendible muy pronto y convierte la independencia de Nmap, Nikto y
+OpenVAS en un proceso incremental, no en un big-bang.
 
 ---
 
