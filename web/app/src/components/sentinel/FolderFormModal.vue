@@ -80,7 +80,7 @@ function submit() {
 .btn-secondary, .btn-primary { padding: 0.45rem 0.9rem; border-radius: 6px; font-size: 0.78rem; font-weight: 500; cursor: pointer; transition: all 0.2s; }
 .btn-secondary { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim); }
 .btn-secondary:hover:not(:disabled) { border-color: var(--text-muted); color: var(--text); }
-.btn-primary { background: var(--accent); border: 1px solid var(--accent); color: #fff; }
+.btn-primary { background: var(--accent); border: 1px solid var(--accent); color: var(--on-accent); }
 .btn-primary:hover:not(:disabled) { opacity: 0.9; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 

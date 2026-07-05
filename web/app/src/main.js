@@ -13,8 +13,12 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
+import { applyStoredTheme } from '@/stores/themeStore'
 
-import '../../resources/css/shared.css'
+import './assets/css/shared.css'
+
+// Aplica la iluminación (dusk/dawn) antes de montar para evitar destellos.
+applyStoredTheme()
 
 const app = createApp(App)
 app.use(createPinia())

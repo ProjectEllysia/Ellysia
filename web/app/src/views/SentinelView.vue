@@ -210,7 +210,7 @@ async function handleDeleteScheduled(id) { await store.deleteScheduledScan(id) }
   .fade-swap-enter-active, .fade-swap-leave-active { transition: none !important; }
 }
 
-.batch-btn { display: flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.6rem; background: var(--accent); border: 1px solid var(--accent); border-radius: 6px; color: #fff; font-size: 0.75rem; cursor: pointer; transition: all 0.2s; }
+.batch-btn { display: flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.6rem; background: var(--accent); border: 1px solid var(--accent); border-radius: 6px; color: var(--on-accent); font-size: 0.75rem; cursor: pointer; transition: all 0.2s; }
 .batch-btn:hover { opacity: 0.9; }
 .batch-btn svg { width: 11px; height: 11px; }
 .batch-btn.danger { background: var(--danger); border-color: var(--danger); }

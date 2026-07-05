@@ -99,7 +99,7 @@ function formatDate(iso) { if (!iso) return '—'; return new Date(iso).toLocale
 table { width: 100%; border-collapse: collapse; }
 th { padding: 0.55rem 0.85rem; text-align: left; font-size: 0.68rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; background: var(--surface-2); }
 td { padding: 0.55rem 0.85rem; font-size: 0.82rem; border-top: 1px solid var(--border); color: var(--text); }
-tr:hover td { background: rgba(255,255,255,0.012); }
+tr:hover td { background: var(--surface-2); }
 tr.selected td { background: rgba(99,102,241,0.06); }
 .chk-col { width: 32px; text-align: center; vertical-align: middle; }
 .chk-col input {

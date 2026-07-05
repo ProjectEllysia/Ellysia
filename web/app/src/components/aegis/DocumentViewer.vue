@@ -117,15 +117,15 @@ function emitExport(fmt) { exportOpen.value = false; emit('export', fmt) }
 .doc-id, .doc-topic { font-weight: 600; color: var(--text-dim); font-family: var(--font-mono); font-size: 0.75rem; }
 .toolbar-spacer { flex: 1; }
 .toolbar-btn { padding: 0.25rem 0.6rem; font-size: 0.68rem; font-weight: 600; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer; transition: all 0.2s; }
-.toolbar-btn:hover { background: var(--accent); color: #0b0c10; border-color: var(--accent); }
+.toolbar-btn:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .toolbar-btn--campaign { display: inline-flex; align-items: center; gap: 0.3rem; background: var(--accent-dim); border-color: var(--accent); color: var(--accent-bright); }
-.toolbar-btn--campaign:hover { background: var(--accent); color: #0b0c10; border-color: var(--accent); box-shadow: 0 0 14px var(--accent-dim); }
+.toolbar-btn--campaign:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); box-shadow: 0 0 14px var(--accent-dim); }
 .toolbar-close { border: none; background: none; font-size: 1.1rem; padding: 0 0.25rem; line-height: 1; }
 .toolbar-close:hover { background: none; color: var(--danger); }
 .export-dropdown { position: relative; }
 .export-menu { position: absolute; right: 0; top: 100%; margin-top: 3px; z-index: 20; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; overflow: hidden; min-width: 100px; }
 .export-menu button { display: block; width: 100%; text-align: left; padding: 0.35rem 0.6rem; font-size: 0.72rem; background: none; border: none; color: var(--text-dim); cursor: pointer; transition: background 0.15s; }
-.export-menu button:hover { background: var(--accent); color: #0b0c10; }
+.export-menu button:hover { background: var(--accent); color: var(--on-accent); }
 .pill-body { padding: 1.25rem; overflow-y: auto; flex: 1; }
 .pill-title { font-size: 1.3rem; font-weight: 800; color: var(--text); margin: 0 0 0.2rem; font-family: var(--font-display); }
 .pill-subtitle { font-size: 0.85rem; color: var(--text-dim); margin: 0 0 1.25rem; }
@@ -133,7 +133,7 @@ function emitExport(fmt) { exportOpen.value = false; emit('export', fmt) }
 .pill-section h3 { font-size: 0.95rem; font-weight: 700; color: var(--accent); margin: 0 0 0.65rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--border); font-family: var(--font-display); }
 .pill-intro, .pill-closing { font-size: 0.85rem; line-height: 1.6; color: var(--text); white-space: pre-wrap; }
 .pill-tip { display: flex; gap: 0.65rem; margin-bottom: 0.85rem; }
-.tip-num { width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0; background: var(--accent); color: #0b0c10; font-size: 0.72rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.tip-num { width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0; background: var(--accent); color: var(--on-accent); font-size: 0.72rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 .tip-body { flex: 1; min-width: 0; }
 .tip-body h4 { font-size: 0.88rem; font-weight: 700; color: var(--text); margin: 0 0 0.15rem; }
 .tip-body p { font-size: 0.8rem; line-height: 1.5; color: var(--text-dim); margin: 0 0 0.3rem; white-space: pre-wrap; }

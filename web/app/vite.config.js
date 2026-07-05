@@ -19,6 +19,7 @@ import { fileURLToPath, URL } from 'node:url'
  *   distintos.
  */
 export default defineConfig({
+  appType: 'spa',
   plugins: [vue()],
   resolve: {
     alias: {
@@ -29,12 +30,19 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/oauth':     { target: 'http://localhost:5000', changeOrigin: true },
-      '/sentinel':  { target: 'http://localhost:5000', changeOrigin: true },
-      '/aegis':     { target: 'http://localhost:5000', changeOrigin: true },
-      '/users':     { target: 'http://localhost:5000', changeOrigin: true },
+      '/sentinel':  { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
+      '/aegis':     { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
+      '/users':     { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
       '/system':    { target: 'http://localhost:5000', changeOrigin: true },
-      '/acheron':   { target: 'http://localhost:5000', changeOrigin: true },
-      '/iris':      { target: 'http://localhost:5000', changeOrigin: true },
+      '/acheron':   { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
+      '/iris':      { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
     }
   }
 })
+
+function proxyBypass(req) {
+  const url = req.url.split('?')[0]
+  if (req.method !== 'GET') return
+  if (/\.\w+$/.test(url)) return
+  if (/^\/[^/]+\/?$/.test(url)) return '/'
+}
