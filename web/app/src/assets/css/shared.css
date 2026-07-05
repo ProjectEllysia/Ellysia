@@ -107,24 +107,26 @@
   --accent-bright:#7a5a1e;
   --on-accent:    #f5f0e3;
 
-  --sky-1:        #d3e3ec;
-  --sky-2:        #e8dfc4;
-  --sky-3:        #edcf95;
-  --sun-core:     #fff3d4;
+  --sky-1:        #a9cbe0;
+  --sky-2:        #bcd7e2;
+  --sky-3:        #e8cf95;
+  --sun-core:     #f6c463;
   --sun-glow:     rgba(224,178,96,0.45);
-  --veil:         rgba(250,235,200,0.45);
-  --veil-core:    rgba(255,246,220,0.60);
+  --veil:         rgba(250,232,190,0.40);
+  --veil-core:    rgba(255,240,205,0.70);
   --lake-horizon: #e0cd9c;
   --lake-1:       #8fb3ca;
   --lake-2:       #4f7ba0;
-  --lake-shine:   rgba(255,240,200,0.70);
+  --lake-shine:   rgba(246,196,99,0.65);
 
   /* ornamentos de la escena elísea — en amanecer, estrellas ocultas;
-     motas y niebla más tenues sobre cielo claro. */
+     el resto se satura hacia el dorado para no fundirse con el fondo
+     crema (el cielo/fondo son pálidos; sol, velas y motas necesitan
+     más peso cromático que un crema-casi-blanco para destacar). */
   --star:         rgba(255,246,220,0.90);
   --star-dim:     rgba(255,246,220,0.25);
-  --mote:         rgba(255,246,220,0.40);
-  --mist:         rgba(255,240,200,0.22);
+  --mote:         rgba(212,160,74,0.55);
+  --mist:         rgba(210,222,232,0.35);
   --temple:       var(--accent);
 }
 

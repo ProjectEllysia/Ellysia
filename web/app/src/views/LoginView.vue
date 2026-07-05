@@ -1,6 +1,6 @@
 <template>
   <div class="gate-stage">
-    <ElysianScene sun-top="16%" />
+    <ElysianScene sun-top="16%" variant="minimal" />
 
     <!-- Cambio de iluminación (dusk / dawn) -->
     <button
@@ -269,7 +269,7 @@ onBeforeUnmount(() => {})
 
 /* ═══════════ El umbral ═══════════ */
 .portal {
-  position: relative; z-index: 2; width: 100%; max-width: 400px;
+  position: relative; z-index: 10; width: 100%; max-width: 400px;
   background: var(--surface);
   border: 1px solid var(--border-med);
   border-radius: 14px;

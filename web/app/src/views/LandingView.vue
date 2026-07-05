@@ -78,33 +78,60 @@
       </button>
     </section>
 
+    <!-- ═══════════ FRISO — banda dorada entre el hero y las estelas ═══════════ -->
+    <div class="greek-banner" aria-hidden="true">
+      <div class="banner-rule"></div>
+      <div class="banner-emblem">
+        <span class="emblem-ring emblem-ring--inner"></span>
+        <span class="emblem-ring emblem-ring--outer"></span>
+      </div>
+      <div class="banner-rule"></div>
+    </div>
+
     <!-- ═══════════ HERRAMIENTAS — estelas ═══════════ -->
     <section id="tools" class="stelae">
-      <article
-        v-for="t in tools"
-        :key="t.id"
-        :id="t.id"
-        class="stele"
-        :data-module="t.id"
-        ref="steleRefs"
-      >
-        <div class="stele-medallion">
-          <img :src="t.icon" :alt="t.name" />
-        </div>
-        <div class="stele-body">
-          <span class="stele-kicker">{{ t.name }}</span>
-          <p class="stele-myth">{{ t.myth }}</p>
-          <h2 class="stele-title">{{ t.title }}</h2>
-          <p class="stele-desc">{{ t.desc }}</p>
-          <ul class="stele-chips">
-            <li v-for="c in t.chips" :key="c">{{ c }}</li>
-          </ul>
-          <router-link :to="auth.isAuthenticated ? t.route : '/login'" class="stele-cta">
-            {{ auth.isAuthenticated ? 'Abrir ' + t.name : 'Entrar para usar ' + t.name }}
-            <span aria-hidden="true">→</span>
-          </router-link>
-        </div>
-      </article>
+      <!-- Cabecera de sección -->
+      <div class="stelae-intro">
+        <h2 class="stelae-title">Las cuatro herramientas</h2>
+        <p class="stelae-bajada">Cada una guarda un aspecto de tu seguridad.</p>
+        <div class="horizon-divider"></div>
+      </div>
+
+      <template v-for="(t, index) in tools" :key="t.id">
+        <article
+          :id="t.id"
+          class="stele"
+          :data-module="t.id"
+          :data-numeral="t.numeral"
+          ref="steleRefs"
+        >
+          <div class="stele-medallion">
+            <span class="medallion-ring" aria-hidden="true"></span>
+            <img :src="t.icon" :alt="t.name" />
+          </div>
+          <div class="stele-body">
+            <span class="stele-kicker">{{ t.numeral }} · {{ t.name }}</span>
+            <p class="stele-myth">{{ t.myth }}</p>
+            <span class="stele-epigraph">{{ t.epigraph }}</span>
+            <h2 class="stele-title">{{ t.title }}</h2>
+            <p class="stele-desc">{{ t.desc }}</p>
+            <ul class="stele-chips">
+              <li v-for="c in t.chips" :key="c">{{ c }}</li>
+            </ul>
+            <router-link :to="auth.isAuthenticated ? t.route : '/login'" class="stele-cta">
+              {{ auth.isAuthenticated ? 'Abrir ' + t.name : 'Entrar para usar ' + t.name }}
+              <span aria-hidden="true">→</span>
+            </router-link>
+          </div>
+        </article>
+
+        <!-- Divisor «horizonte» entre estelas -->
+        <div
+          v-if="index < tools.length - 1"
+          class="horizon-divider stele-divider"
+          aria-hidden="true"
+        ></div>
+      </template>
     </section>
 
     <!-- ═══════════ PLACA ═══════════ -->
@@ -156,6 +183,8 @@ const reduceMotion =
 const tools = [
   {
     id: 'sentinel',
+    numeral: 'I',
+    epigraph: 'VIGILANTIA',
     name: 'Sentinel',
     icon: sentinelIcon,
     route: '/sentinel',
@@ -166,6 +195,8 @@ const tools = [
   },
   {
     id: 'aegis',
+    numeral: 'II',
+    epigraph: 'PRAESIDIO',
     name: 'Aegis',
     icon: aegisIcon,
     route: '/aegis',
@@ -176,6 +207,8 @@ const tools = [
   },
   {
     id: 'iris',
+    numeral: 'III',
+    epigraph: 'VERITAS',
     name: 'Iris',
     icon: irisIcon,
     route: '/iris',
@@ -186,6 +219,8 @@ const tools = [
   },
   {
     id: 'acheron',
+    numeral: 'IV',
+    epigraph: 'CUSTODIA',
     name: 'Acheron',
     icon: acheronIcon,
     route: '/acheron',
@@ -402,7 +437,7 @@ onUnmounted(() => {
   position: relative; z-index: 10;
   text-align: center;
   padding: 0 1.5rem;
-  margin-top: -6vh;
+  margin-top: -10vh;
   animation: hero-rise 1.1s ease-out both;
 }
 @keyframes hero-rise {
@@ -415,7 +450,7 @@ onUnmounted(() => {
   font-size: 0.86rem; font-weight: 500;
   letter-spacing: 0.42em; text-transform: uppercase;
   color: var(--accent);
-  margin-bottom: 1.4rem;
+  margin-top: 2.5rem;
 }
 .hero-title {
   font-family: var(--font-epic);
@@ -431,7 +466,6 @@ onUnmounted(() => {
   font-style: italic;
   font-size: clamp(1.45rem, 3.2vw, 2rem);
   color: var(--text-dim);
-  margin-top: 1.1rem;
   letter-spacing: 0.04em;
 }
 .lede {
@@ -458,14 +492,14 @@ onUnmounted(() => {
 }
 .cta--solid:hover { background: var(--accent-bright); border-color: var(--accent-bright); box-shadow: 0 0 26px var(--sun-glow); }
 .cta--line {
-  color: var(--text-dim);
-  border: 1px solid var(--border-med);
-  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--accent);
+  background: var(--accent-dim);
 }
-.cta--line:hover { color: var(--text); border-color: var(--accent); }
+.cta--line:hover { background: var(--accent); color: var(--surface); border-color: var(--accent-bright); box-shadow: 0 0 20px var(--sun-glow); }
 
 .scroll-cue {
-  position: absolute; bottom: calc(24vh + 2rem); left: 50%;
+  position: absolute; bottom: calc(20vh + 2rem); left: 50%;
   transform: translateX(-50%);
   z-index: 10;
   width: 30px; height: 48px;
@@ -483,29 +517,110 @@ onUnmounted(() => {
   100% { transform: scaleY(0); transform-origin: bottom; }
 }
 
+/* ═══════════ Friso — banda dorada entre el hero y las estelas ═══════════ */
+.greek-banner {
+  position: relative;
+  height: 36px;
+  display: flex; align-items: center;
+  background: var(--accent);
+  z-index: 5;
+  overflow: hidden;
+}
+.banner-rule {
+  height: 2px; width: 100%;
+  background: var(--bg);
+}
+
+/* Emblema central — sol de doble anillo */
+.banner-emblem {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: 18px; height: 18px;
+  background: var(--accent);
+  display: grid; place-items: center;
+  z-index: 2;
+}
+.emblem-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid var(--bg);
+}
+.emblem-ring--inner { width: 7px; height: 7px; }
+.emblem-ring--outer {
+  width: 18px; height: 18px;
+  border-style: dashed;
+}
+
 /* ═══════════ Estelas ═══════════ */
 .stelae {
-  max-width: 1080px;
+  max-width: 1320px;
   margin: 0 auto;
-  padding: 5rem 2rem 3rem;
-  display: flex; flex-direction: column; gap: 6.5rem;
+  padding: 4rem 3rem 3rem;
+  display: flex; flex-direction: column; gap: 4.5rem;
 }
+
+/* ── Cabecera de sección ── */
+.stelae-intro {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+.stelae-title {
+  font-family: var(--font-epic);
+  font-size: clamp(1.9rem, 4.2vw, 2.8rem);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.stelae-bajada {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 1.45rem;
+  color: var(--text-muted);
+  margin-top: 0.8rem;
+  padding-bottom: 2.5rem;
+}
+
+/* ── Estela ── */
 .stele {
+  position: relative;
   display: grid;
-  grid-template-columns: 220px 1fr;
-  gap: 3.5rem;
+  grid-template-columns: 240px 1fr;
+  gap: 4.5rem;
   align-items: center;
   opacity: 0;
   transform: translateY(26px);
-  transition: opacity 0.8s ease, transform 0.8s ease;
+  transition: opacity 0.8s ease, transform 0.4s ease;
 }
 .stele.revealed { opacity: 1; transform: translateY(0); }
-.stele:nth-child(even) { grid-template-columns: 1fr 220px; }
-.stele:nth-child(even) .stele-medallion { order: 2; }
-.stele:nth-child(even) .stele-body { order: 1; text-align: right; }
-.stele:nth-child(even) .stele-chips { justify-content: flex-end; }
+.stele:nth-of-type(even) { grid-template-columns: 1fr 240px; }
+.stele:nth-of-type(even) .stele-medallion { order: 2; }
+.stele:nth-of-type(even) .stele-body { order: 1; text-align: right; }
+.stele:nth-of-type(even) .stele-chips { justify-content: flex-end; }
 
+/* Numeral gigante — marca de agua al fondo de la estela */
+.stele::before {
+  content: attr(data-numeral);
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-epic);
+  font-size: clamp(8rem, 22vw, 16rem);
+  font-weight: 700;
+  color: var(--text);
+  opacity: 0.05;
+  pointer-events: none;
+  z-index: 0;
+  line-height: 1;
+  user-select: none;
+}
+.stele:nth-of-type(even)::before { left: 50%; }
+
+/* ── Medallón ── */
 .stele-medallion {
+  position: relative;
   width: 200px; height: 200px;
   margin: 0 auto;
   border-radius: 50%;
@@ -514,37 +629,72 @@ onUnmounted(() => {
   border: 1px solid var(--accent);
   box-shadow: 0 0 0 7px var(--bg), 0 0 0 8px var(--border-med), 0 18px 50px rgba(0,0,0,0.18);
   transition: box-shadow 0.4s ease;
+  animation: medallion-bob 6s ease-in-out infinite;
+  z-index: 1;
 }
 .stele-medallion img { width: 58%; height: 58%; object-fit: contain; }
 
+/* Anillo rotatorio externo — eco del sol del hero */
+.medallion-ring {
+  position: absolute;
+  inset: -12px;
+  border: 1px dashed var(--accent);
+  border-radius: 50%;
+  opacity: 0.35;
+  animation: ring-turn 240s linear infinite;
+  pointer-events: none;
+}
+.stele:hover .medallion-ring { opacity: 0.6; }
+
+@keyframes ring-turn { to { transform: rotate(360deg); } }
+@keyframes medallion-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-1.5px); }
+}
+
+/* ── Cuerpo ── */
+.stele-body { position: relative; z-index: 1; }
 .stele-kicker {
   font-family: var(--font-epic);
-  font-size: 0.72rem; font-weight: 600;
+  font-size: 0.95rem; font-weight: 600;
   letter-spacing: 0.34em; text-transform: uppercase;
   color: var(--accent);
 }
 .stele-myth {
   font-family: var(--font-display);
   font-style: italic;
-  font-size: 1.15rem;
+  font-size: 1.5rem;
   color: var(--text-muted);
   margin-top: 0.5rem;
+  text-shadow: 0 1px 0 var(--bg);
 }
+
+/* Epígrafe latino — inscripción cincelada */
+.stele-epigraph {
+  display: block;
+  font-family: var(--font-epic);
+  font-size: 0.92rem; font-weight: 600;
+  letter-spacing: 0.4em; text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.6;
+  margin-top: 0.6rem;
+}
+
 .stele-title {
   font-family: var(--font-display);
-  font-size: clamp(1.7rem, 3.4vw, 2.3rem);
+  font-size: clamp(2rem, 4vw, 2.9rem);
   font-weight: 600;
   line-height: 1.2;
   color: var(--text);
   margin-top: 0.7rem;
 }
 .stele-desc {
-  font-size: 1rem;
+  font-size: 1.2rem;
   color: var(--text-dim);
   margin-top: 0.8rem;
-  max-width: 56ch;
+  max-width: 72ch;
 }
-.stele:nth-child(even) .stele-desc { margin-left: auto; }
+.stele:nth-of-type(even) .stele-desc { margin-left: auto; }
 .stele-chips {
   display: flex; flex-wrap: wrap; gap: 0.5rem;
   list-style: none;
@@ -552,18 +702,19 @@ onUnmounted(() => {
 }
 .stele-chips li {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.86rem;
   color: var(--accent);
-  padding: 0.28rem 0.7rem;
+  padding: 0.32rem 0.85rem;
   border: 1px solid var(--border-med);
   border-radius: 3px;
   background: var(--accent-dim);
+  transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 .stele-cta {
   display: inline-flex; align-items: center; gap: 0.5rem;
   margin-top: 1.5rem;
   font-family: var(--font-epic);
-  font-size: 0.74rem; font-weight: 600;
+  font-size: 0.92rem; font-weight: 600;
   letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--accent);
   padding-bottom: 0.3rem;
@@ -571,6 +722,32 @@ onUnmounted(() => {
   transition: all var(--transition);
 }
 .stele-cta:hover { color: var(--accent-bright); border-color: var(--accent); gap: 0.8rem; }
+
+/* ── Hover: estela entera se eleva ── */
+.stele.revealed:hover { transform: translateY(-4px); }
+
+/* ── Hover: halo glow del medallón ── */
+.stele:hover .stele-medallion {
+  box-shadow:
+    0 0 0 7px var(--bg),
+    0 0 0 8px var(--accent),
+    0 0 30px var(--accent-dim),
+    0 18px 50px rgba(0,0,0,0.18);
+}
+
+/* ── Hover: chips se iluminan ── */
+.stele:hover .stele-chips li {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
+
+/* ── Divisor entre estelas ── */
+.stele-divider {
+  max-width: 560px;
+  margin: 0 auto;
+  opacity: 0.4;
+}
 
 /* ═══════════ Placa ═══════════ */
 .plaque {
@@ -631,23 +808,33 @@ onUnmounted(() => {
 }
 @media (max-width: 860px) {
   .stele,
-  .stele:nth-child(even) { grid-template-columns: 1fr; gap: 1.8rem; }
-  .stele:nth-child(even) .stele-medallion { order: 0; }
-  .stele:nth-child(even) .stele-body { order: 1; text-align: left; }
-  .stele:nth-child(even) .stele-chips { justify-content: flex-start; }
-  .stele:nth-child(even) .stele-desc { margin-left: 0; }
+  .stele:nth-of-type(even) { grid-template-columns: 1fr; gap: 1.8rem; }
+  .stele:nth-of-type(even) .stele-medallion { order: 0; }
+  .stele:nth-of-type(even) .stele-body { order: 1; text-align: left; }
+  .stele:nth-of-type(even) .stele-chips { justify-content: flex-start; }
+  .stele:nth-of-type(even) .stele-desc { margin-left: 0; }
   .stele-medallion { width: 150px; height: 150px; margin: 0; }
-  .stelae { gap: 4.5rem; padding-top: 3.5rem; }
+  .stelae { gap: 3.5rem; padding: 3.5rem 1.5rem 3rem; }
+  .stele::before { font-size: clamp(6rem, 18vw, 10rem); opacity: 0.04; }
+  .stele-epigraph { letter-spacing: 0.28em; }
 }
 @media (max-width: 640px) {
   .wordmark-text { letter-spacing: 0.24em; font-size: 0.95rem; }
   .columns { width: 34vw; }
   .hero-actions .cta { padding: 0.8rem 1.5rem; }
+  .stelae-title { letter-spacing: 0.1em; }
+  .stelae-bajada { font-size: 1.15rem; padding-bottom: 1.8rem; }
+  .stele-epigraph { letter-spacing: 0.2em; font-size: 0.8rem; }
+  .stele-divider { max-width: 320px; }
+  .stelae { padding: 3rem 1.2rem 2.5rem; }
+  .greek-banner { height: 28px; }
 }
 
 /* ═══════════ Movimiento reducido ═══════════ */
 @media (prefers-reduced-motion: reduce) {
   .scroll-cue span, .hero-copy { animation: none !important; }
   .stele { opacity: 1; transform: none; transition: none; }
+  .stele.revealed:hover { transform: none !important; }
+  .stele-medallion, .medallion-ring { animation: none !important; }
 }
 </style>

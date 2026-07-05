@@ -36,7 +36,7 @@
 
     <!-- Sol con doble circunferencia y rayos -->
     <div class="sun-wrap" :style="{ top: sunTop }">
-      <svg class="god-rays" viewBox="0 0 360 360">
+      <svg v-if="!isMinimal" class="god-rays" viewBox="0 0 360 360">
         <g class="god-ray-group">
           <line
             v-for="a in 12"
@@ -59,11 +59,11 @@
         <circle cx="180" cy="180" r="80" class="ring ring--inner" />
         <circle cx="180" cy="180" r="118" class="ring ring--outer" />
       </svg>
-      <span class="sun-halo"></span>
+      <span v-if="!isMinimal" class="sun-halo"></span>
     </div>
 
     <!-- Templo clásico en el horizonte — columnata con frontón -->
-    <svg class="horizon-temple" viewBox="0 0 1200 140" preserveAspectRatio="xMidYMax meet">
+    <svg v-if="!isMinimal" class="horizon-temple" viewBox="0 0 1200 140" preserveAspectRatio="xMidYMax meet">
       <!-- Frontón triangular -->
       <polygon points="600,8 740,46 460,46" class="temple-stroke" />
       <!-- Arquitrabe -->
@@ -94,7 +94,7 @@
       </div>
       <span class="reflection"></span>
       <!-- Niebla baja que se desplaza sobre el agua -->
-      <span class="lake-mist"></span>
+      <span v-if="!isMinimal" class="lake-mist"></span>
     </div>
     <div class="horizon-line"></div>
   </div>
@@ -107,10 +107,13 @@ import { useThemeStore } from '@/stores/themeStore'
 const props = defineProps({
   /** Posición vertical del sol; permite subirlo o bajarlo según la vista. */
   sunTop: { type: String, default: '24%' },
+  /** 'full' = todas las capas (landing); 'minimal' = sin god-rays, halo, templo, niebla (login) */
+  variant: { type: String, default: 'full' },
 })
 
 const themeStore = useThemeStore()
 const isDusk = computed(() => themeStore.theme === 'dusk')
+const isMinimal = computed(() => props.variant === 'minimal')
 
 /* ── Conteos responsivos ── */
 const isSmall = typeof window !== 'undefined' && window.innerWidth < 640
@@ -287,6 +290,7 @@ function templeColX(c) {
 /* Sol de doble circunferencia con rayos */
 .sun-wrap {
   position: absolute;
+  top: 0% !important;
   left: 50%;
   z-index: 4;
   width: min(42vmin, 380px); height: min(42vmin, 380px);
@@ -343,7 +347,7 @@ function templeColX(c) {
   pointer-events: none;
   filter: drop-shadow(0 0 8px var(--sun-glow));
 }
-.temple-stroke { stroke: var(--temple); stroke-width: 0.8; fill: none; }
+.temple-stroke { stroke: var(--temple); stroke-width: 1.6; fill: none; }
 .temple-fill   { fill: var(--temple); }
 @keyframes temple-breathe {
   0%, 100% { opacity: 0.16; }
