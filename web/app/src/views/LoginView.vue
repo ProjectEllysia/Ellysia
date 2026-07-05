@@ -150,12 +150,13 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 import ElysianScene from '@/components/shared/ElysianScene.vue'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const themeStore = useThemeStore()
 
@@ -209,8 +210,12 @@ async function handleSubmit() {
   try {
     await auth.login(un, pw)
     granted.value = true
+    const redirect = route.query.redirect
+    const target = typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')
+      ? redirect
+      : '/'
     const delay = reduceMotion ? 300 : 1500
-    setTimeout(() => router.push('/'), delay)
+    setTimeout(() => router.push(target), delay)
   } catch (err) {
     showAlert(err.message || 'Error desconocido.', 'error')
     if (err.message?.includes('Credenciales')) {

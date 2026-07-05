@@ -118,7 +118,7 @@
             <ul class="stele-chips">
               <li v-for="c in t.chips" :key="c">{{ c }}</li>
             </ul>
-            <router-link :to="auth.isAuthenticated ? t.route : '/login'" class="stele-cta">
+            <router-link :to="auth.isAuthenticated ? t.route : { path: '/login', query: { redirect: t.route } }" class="stele-cta">
               {{ auth.isAuthenticated ? 'Abrir ' + t.name : 'Entrar para usar ' + t.name }}
               <span aria-hidden="true">→</span>
             </router-link>
