@@ -251,6 +251,48 @@ def test_accept_nonexistent_finding_is_404(client, admin_user, auth_headers):
     assert resp.status_code == 404
 
 
+def test_ellysia_fingerprinting_records_agreement_with_nmap(app, admin_user, monkeypatch):
+    # Enable fingerprinting and stub the HTTP probe (no real network).
+    import src.modules.system.config_reading as CR
+    from src.modules.sentinel.ellysia.checks import HttpProbe, Response
+
+    monkeypatch.setattr(CR, "is_ellysia_fingerprinting_enabled", lambda: True)
+
+    def fake_fetch(self, host, port, method, path):
+        return Response(200, "<html><title>It works</title></html>",
+                        {"server": "Apache/2.4.49 (Unix)"})
+    monkeypatch.setattr(HttpProbe, "fetch", fake_fetch)
+    monkeypatch.setattr(HttpProbe, "fetch_bytes", lambda self, host, port, path: None)
+
+    nmap_id = _seed_nmap_scan(app, admin_user.id)  # port 80 = Apache httpd 2.4.49 (matches)
+    with app.app_context():
+        mgr = EllysiaEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
+        mgr._run_ellysia(escan.id, nmap_id)
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    fingerprints = [f for f in findings if f.category == "fingerprint"]
+    assert len(fingerprints) == 1
+    assert fingerprints[0].qod == 20
+    assert fingerprints[0].confirmed is False
+    assert "concuerda con Nmap" in fingerprints[0].title
+    assert "no concuerda" not in fingerprints[0].title
+
+
+def test_ellysia_fingerprinting_disabled_by_default(app, admin_user):
+    nmap_id = _seed_nmap_scan(app, admin_user.id)
+    with app.app_context():
+        mgr = EllysiaEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
+        mgr._run_ellysia(escan.id, nmap_id)
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    assert not any(f.category == "fingerprint" for f in findings)
+
+
 def test_ellysia_scan_surfaces_in_results_endpoint(client, app, admin_user, auth_headers):
     nmap_id = _seed_nmap_scan(app, admin_user.id)
     with app.app_context():

@@ -539,6 +539,15 @@ def is_ellysia_active_checks_enabled() -> bool:
     return _as_bool(_cfg("sentinel.ellysia.activeChecks", False))
 
 
+# --- Ellysia own fingerprinting (Fase F) ---
+
+@_lazy_load
+def is_ellysia_fingerprinting_enabled() -> bool:
+    # Opt-in like active checks: it touches the target (HTTP/SSH probes) for
+    # calibration against Nmap, ahead of the authorized-targets register.
+    return _as_bool(_cfg("sentinel.ellysia.fingerprintingEnabled", False))
+
+
 @_lazy_load
 def get_sentinel_default_folder_name() -> str:
     """Devuelve el nombre mostrado para la carpeta virtual de escaneos sueltos."""

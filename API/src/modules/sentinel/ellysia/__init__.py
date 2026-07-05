@@ -45,6 +45,19 @@ from .correlation import (
     score_finding,
     PRIORITY_LADDER,
 )
+from .fingerprint import (
+    fingerprint_http,
+    fingerprint_ssh,
+    parse_ssh_banner,
+    parse_kexinit,
+    compute_hassh_server,
+    SshProbe,
+    HttpFingerprint,
+    SshFingerprint,
+    agrees_with_nmap,
+    concordance_rate,
+    QOD_FINGERPRINT,
+)
 
 __all__ = [
     "EllysiaEngine",
@@ -75,4 +88,15 @@ __all__ = [
     "apply_lifecycle",
     "score_finding",
     "PRIORITY_LADDER",
+    "fingerprint_http",
+    "fingerprint_ssh",
+    "parse_ssh_banner",
+    "parse_kexinit",
+    "compute_hassh_server",
+    "SshProbe",
+    "HttpFingerprint",
+    "SshFingerprint",
+    "agrees_with_nmap",
+    "concordance_rate",
+    "QOD_FINGERPRINT",
 ]

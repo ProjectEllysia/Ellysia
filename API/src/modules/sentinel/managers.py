@@ -1921,6 +1921,10 @@ class EllysiaEngineManager(ScanManager):
             if source_target and CR.is_ellysia_active_checks_enabled():
                 findings_data.extend(self._run_active_checks(source_target, services))
 
+            # Phase 2.3 — own fingerprinting (Fase F), calibrated against Nmap.
+            if source_target and CR.is_ellysia_fingerprinting_enabled():
+                findings_data.extend(self._run_fingerprinting(source_target, services))
+
             # Phase 2.5 — correlation: key, merge duplicates/sources, set lifecycle.
             for finding in findings_data:
                 finding["host_id"] = source_host_id
@@ -1961,6 +1965,68 @@ class EllysiaEngineManager(ScanManager):
         except Exception:
             logger.exception("Ellysia active checks failed for %s", target)
             return []
+
+    def _run_fingerprinting(self, target: str, services) -> list:
+        """Run Ellysia's own HTTP/SSH dissectors and record agreement with Nmap.
+
+        Informational only (Fase F): a fingerprint finding never feeds
+        vulnerability confidence — it exists to accumulate the concordance
+        evidence the roadmap's Definition of Done requires before Nmap `-sV`
+        can be demoted to a fallback for a service family. Best-effort per
+        service; a probe failure just skips that service.
+        """
+        from .ellysia import (
+            HttpProbe, SshProbe, HostRateLimiter, is_http_service,
+            fingerprint_http, fingerprint_ssh,
+        )
+        http_probe = HttpProbe()
+        ssh_probe = SshProbe()
+        rate_limiter = HostRateLimiter()
+        findings = []
+
+        for service in services:
+            try:
+                if is_http_service(service):
+                    rate_limiter.acquire(target)
+                    resp = http_probe.fetch(target, service.port, "GET", "/")
+                    if resp is None:
+                        continue
+                    rate_limiter.acquire(target)
+                    favicon = http_probe.fetch_bytes(target, service.port, "/favicon.ico")
+                    fp = fingerprint_http(resp, favicon)
+                    findings.append(self._fingerprint_finding(service, fp.product, fp.version, "HTTP"))
+                elif (service.name or "").lower() == "ssh" or service.port == 22:
+                    rate_limiter.acquire(target)
+                    probed = ssh_probe.fetch(target, service.port or 22)
+                    if probed is None:
+                        continue
+                    banner, kexinit_payload = probed
+                    fp = fingerprint_ssh(banner, kexinit_payload)
+                    findings.append(self._fingerprint_finding(service, fp.product, fp.version, "SSH"))
+            except Exception:
+                logger.debug("Fingerprinting failed for %s:%s", target, service.port, exc_info=True)
+        return findings
+
+    @staticmethod
+    def _fingerprint_finding(service, product: Optional[str], version: Optional[str], label: str) -> dict:
+        """Build an informational Finding comparing our fingerprint to Nmap's."""
+        from .ellysia import agrees_with_nmap, QOD_FINGERPRINT
+        agrees = agrees_with_nmap(product, version, service.product, service.version)
+        own = f"{product or '?'} {version or ''}".strip()
+        nmap = f"{service.product or '?'} {service.version or ''}".strip()
+        verdict = "concuerda con Nmap" if agrees else "no concuerda con Nmap"
+        return {
+            "title":        f"Fingerprint propio ({label}): {own} — {verdict} (Nmap: {nmap})",
+            "category":     "fingerprint",
+            "port":         service.port,
+            "service":      service.name or None,
+            "source":       "ellysia",
+            "check_id":     "ellysia:fingerprint@1",
+            "feed_version": "ellysia-fingerprint-1",
+            "qod":          QOD_FINGERPRINT,
+            "confirmed":    False,
+            "state":        "open",
+        }
 
     def _previous_findings_map(self, scan_repo, user_id, target, exclude_scan_id) -> dict:
         """Build ``dedup_key -> {state, snapshot}`` from the previous Ellysia scan

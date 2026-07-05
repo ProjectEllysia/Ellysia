@@ -1174,7 +1174,8 @@
       }
     },
     "ellysia": {
-      "activeChecks": false
+      "activeChecks": false,
+      "fingerprintingEnabled": false
     },
     "nikto": {
       "colorPalette": {

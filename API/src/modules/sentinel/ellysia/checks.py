@@ -274,6 +274,24 @@ class HttpProbe:
         self._max_bytes = max_bytes
 
     def fetch(self, host: str, port: Optional[int], method: str, path: str) -> Optional[Response]:
+        result = self._request(host, port, method, path)
+        if result is None:
+            return None
+        status, body, headers = result
+        return self._to_response(status, body, headers)
+
+    def fetch_bytes(self, host: str, port: Optional[int], path: str) -> Optional[bytes]:
+        """Raw GET for binary content (e.g. a favicon). Text-decoding a binary
+        payload (as ``fetch`` does for Response.body) would corrupt it, so this
+        returns the untouched bytes. None on any non-200 or transport failure —
+        the caller only cares about the file actually being there."""
+        result = self._request(host, port, "GET", path)
+        if result is None:
+            return None
+        status, body, _headers = result
+        return body if status == 200 else None
+
+    def _request(self, host: str, port: Optional[int], method: str, path: str) -> Optional[tuple]:
         scheme = "https" if port in _TLS_PORTS else "http"
         netloc = f"{host}:{port}" if port else host
         url = f"{scheme}://{netloc}{path}"
@@ -281,10 +299,10 @@ class HttpProbe:
         try:
             req = urllib.request.Request(url, method=method, headers={"User-Agent": "Ellysia/1.0"})
             with urllib.request.urlopen(req, timeout=self._timeout, context=context) as resp:
-                return self._to_response(resp.status, resp.read(self._max_bytes), resp.headers)
+                return resp.status, resp.read(self._max_bytes), dict(resp.headers)
         except urllib.error.HTTPError as err:
             body = err.read(self._max_bytes) if hasattr(err, "read") else b""
-            return self._to_response(err.code, body, err.headers or {})
+            return err.code, body, dict(err.headers or {})
         except Exception as err:  # noqa: BLE001 - transport failure: abandon this check
             logger.debug("HTTP probe failed for %s: %s", url, err)
             return None
