@@ -505,6 +505,31 @@ def get_sentinel_csv_dir() -> str:
     return get_directory_of(DirectoryType.CSV_SENTINEL)
 
 
+# --- Ellysia knowledge base (local NVD/KEV/EPSS mirror) ---
+
+@_lazy_load
+def is_kb_sync_enabled() -> bool:
+    return _as_bool(_cfg("sentinel.kb.enabled", False))
+
+@_lazy_load
+def get_kb_sources() -> dict:
+    return _cfg("sentinel.kb.sources", {})
+
+@_lazy_load
+def get_kb_sync_cron() -> str:
+    return _cfg("sentinel.kb.syncCron", "0 3 * * *")
+
+@_lazy_load
+def get_kb_nvd_window_days() -> int:
+    return _cfg("sentinel.kb.nvdWindowDays", 8, int)
+
+@_lazy_load
+def get_kb_nvd_api_key():
+    # Secret → prefer the environment, per the config convention.
+    import os
+    return os.environ.get("NVD_API_KEY") or (_cfg("sentinel.kb.nvdApiKey", "") or None)
+
+
 @_lazy_load
 def get_sentinel_default_folder_name() -> str:
     """Devuelve el nombre mostrado para la carpeta virtual de escaneos sueltos."""

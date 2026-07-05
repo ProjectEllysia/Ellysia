@@ -37,6 +37,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Table,
@@ -823,6 +824,99 @@ class Finding(Base):
 
     def __repr__(self):
         return f"<Finding(id={self.id}, scan_id={self.scan_id}, category='{self.category}', title='{self.title[:40]}')>"
+
+
+# =========================================================================
+# KNOWLEDGE BASE (the "Ellysia Feed": local mirror of NVD/KEV/EPSS)
+# =========================================================================
+
+class CveEntry(Base):
+    """A single CVE mirrored from NVD, the core of the local knowledge base.
+
+    Stored so version→CVE correlation (Fase 1) runs against the local DB instead
+    of hitting cve.circl.lu per target. ``cpe_matches`` holds the applicability
+    rows (which products/version ranges the CVE affects).
+    """
+    __tablename__ = "CveEntry"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    cve_id        = Column(String(32), unique=True, nullable=False, index=True)
+    published     = Column(DateTime)
+    last_modified = Column(DateTime)
+    cvss_score    = Column(Float)
+    cvss_vector   = Column(String(255))
+    severity      = Column(String(16))   # CRITICAL | HIGH | MEDIUM | LOW | NONE
+    description   = Column(Text)
+    cwe_ids       = Column(JSONB)
+    source        = Column(String(16), default="nvd")
+
+    cpe_matches = relationship("CpeMatch", back_populates="cve", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<CveEntry(cve_id='{self.cve_id}', cvss={self.cvss_score})>"
+
+
+class CpeMatch(Base):
+    """One applicability rule of a CVE: a vendor/product and a version range.
+
+    NVD expresses "which versions are affected" with up to four bounds
+    (``versionStartIncluding`` etc.); a CPE that pins one version uses
+    ``exact_version`` instead. The matcher filters by (vendor, product) and then
+    applies ``version_in_range`` (see ellysia/kb.py).
+    """
+    __tablename__ = "CpeMatch"
+
+    id      = Column(Integer, primary_key=True, autoincrement=True)
+    cve_id  = Column(Integer, ForeignKey("CveEntry.id", ondelete="CASCADE"), nullable=False, index=True)
+    vendor  = Column(String(128), nullable=False)
+    product = Column(String(128), nullable=False)
+
+    version_start_including = Column(String(64))
+    version_start_excluding = Column(String(64))
+    version_end_including   = Column(String(64))
+    version_end_excluding   = Column(String(64))
+    exact_version           = Column(String(64))  # set when the CPE pins a single version
+
+    cve = relationship("CveEntry", back_populates="cpe_matches")
+
+    __table_args__ = (
+        Index("ix_CpeMatch_vendor_product", "vendor", "product"),
+    )
+
+    def __repr__(self):
+        return f"<CpeMatch(cve_id={self.cve_id}, {self.vendor}:{self.product})>"
+
+
+class KevEntry(Base):
+    """A CVE present in CISA's Known Exploited Vulnerabilities catalogue.
+
+    Presence here is a strong "actively exploited in the wild" signal that
+    drives contextual prioritization (Fase 5).
+    """
+    __tablename__ = "KevEntry"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    cve_id           = Column(String(32), unique=True, nullable=False, index=True)
+    date_added       = Column(DateTime)
+    due_date         = Column(DateTime)
+    known_ransomware = Column(Boolean, default=False)
+
+    def __repr__(self):
+        return f"<KevEntry(cve_id='{self.cve_id}')>"
+
+
+class EpssScore(Base):
+    """FIRST/EPSS probability that a CVE will be exploited in the next 30 days."""
+    __tablename__ = "EpssScore"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    cve_id     = Column(String(32), unique=True, nullable=False, index=True)
+    score      = Column(Float)
+    percentile = Column(Float)
+    scored_at  = Column(DateTime)
+
+    def __repr__(self):
+        return f"<EpssScore(cve_id='{self.cve_id}', score={self.score})>"
 
 
 # =========================================================================

@@ -15,10 +15,32 @@ from .engine import (
     services_from_open_ports,
     QOD_OPEN_PORT,
 )
+from .kb import (
+    version_compare,
+    version_in_range,
+    normalize_cpe_to_23,
+    parse_cpe23,
+    ingest_nvd_cve,
+    ingest_kev,
+    parse_epss_rows,
+    fetch_kev,
+    fetch_epss,
+    iter_nvd_pages,
+)
 
 __all__ = [
     "EllysiaEngine",
     "Service",
     "services_from_open_ports",
     "QOD_OPEN_PORT",
+    "version_compare",
+    "version_in_range",
+    "normalize_cpe_to_23",
+    "parse_cpe23",
+    "ingest_nvd_cve",
+    "ingest_kev",
+    "parse_epss_rows",
+    "fetch_kev",
+    "fetch_epss",
+    "iter_nvd_pages",
 ]

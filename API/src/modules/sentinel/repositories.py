@@ -31,9 +31,13 @@ from sqlalchemy.orm import Session, joinedload
 from src.modules.infrastructure import BaseRepository, UnitOfWork
 
 from .model import (
+    CpeMatch,
+    CveEntry,
     EllysiaScan,
+    EpssScore,
     Finding,
     Host,
+    KevEntry,
     NiktoIncident,
     NiktoScan,
     NmapScan,
@@ -661,6 +665,101 @@ class TracerouteRepository(BaseRepository[Traceroute]):
             hop_count=len(hops),
         )
         return self.save(trace)
+
+
+class KbRepository(BaseRepository[CveEntry]):
+    """Repository for the local vulnerability knowledge base (the Ellysia Feed).
+
+    Persists the mirrored NVD/KEV/EPSS data and answers the matcher's central
+    question via :meth:`cves_for_cpe`. All upserts are keyed by ``cve_id`` so a
+    re-sync updates in place instead of duplicating.
+    """
+
+    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
+        super().__init__(CveEntry, uow=uow, session=session)
+
+    # =========================================================================
+    # MATCHER QUERY
+    # =========================================================================
+
+    def cves_for_cpe(self, vendor: str, product: str, version: str) -> List[CveEntry]:
+        """Return the CVEs affecting ``vendor:product`` at ``version``.
+
+        Filters candidate applicability rows by (vendor, product) in SQL, then
+        applies the version-range logic in Python (see ``ellysia.kb``). Results
+        are de-duplicated by CVE.
+        """
+        from .ellysia import version_in_range
+
+        candidates = (
+            self._session.query(CpeMatch)
+            .filter(CpeMatch.vendor == vendor, CpeMatch.product == product)
+            .options(joinedload(CpeMatch.cve))
+            .all()
+        )
+        seen: set[int] = set()
+        result: List[CveEntry] = []
+        for match in candidates:
+            if version_in_range(version, match) and match.cve_id not in seen:
+                seen.add(match.cve_id)
+                result.append(match.cve)
+        return result
+
+    def get_kev(self, cve_id: str) -> Optional[KevEntry]:
+        return self._session.query(KevEntry).filter(KevEntry.cve_id == cve_id).one_or_none()
+
+    def get_epss(self, cve_id: str) -> Optional[EpssScore]:
+        return self._session.query(EpssScore).filter(EpssScore.cve_id == cve_id).one_or_none()
+
+    def counts(self) -> dict:
+        """Row counts per KB table (for the sync summary / health checks)."""
+        return {
+            "cves": self._session.query(CveEntry).count(),
+            "cpeMatches": self._session.query(CpeMatch).count(),
+            "kev": self._session.query(KevEntry).count(),
+            "epss": self._session.query(EpssScore).count(),
+        }
+
+    # =========================================================================
+    # UPSERTS (keyed by cve_id; a re-sync updates in place)
+    # =========================================================================
+
+    def upsert_cve(self, cve_row: dict, cpe_matches: List[dict]) -> CveEntry:
+        """Insert or update a CVE and replace its applicability rows."""
+        cve = self._session.query(CveEntry).filter(CveEntry.cve_id == cve_row["cve_id"]).one_or_none()
+        if cve is None:
+            cve = CveEntry(**cve_row)
+            self._session.add(cve)
+        else:
+            for key, value in cve_row.items():
+                setattr(cve, key, value)
+            for old in list(cve.cpe_matches):
+                self._session.delete(old)
+        self._session.flush()
+
+        for match_row in cpe_matches:
+            self._session.add(CpeMatch(cve_id=cve.id, **match_row))
+        return cve
+
+    def upsert_kev(self, kev_row: dict) -> KevEntry:
+        kev = self._session.query(KevEntry).filter(KevEntry.cve_id == kev_row["cve_id"]).one_or_none()
+        if kev is None:
+            kev = KevEntry(**kev_row)
+            self._session.add(kev)
+        else:
+            for key, value in kev_row.items():
+                setattr(kev, key, value)
+        return kev
+
+    def upsert_epss(self, epss_row: dict) -> EpssScore:
+        epss = self._session.query(EpssScore).filter(EpssScore.cve_id == epss_row["cve_id"]).one_or_none()
+        if epss is None:
+            epss = EpssScore(**epss_row)
+            self._session.add(epss)
+        else:
+            for key, value in epss_row.items():
+                setattr(epss, key, value)
+        return epss
 
 
 class ProgramedScanRepository(BaseRepository[ProgramedScan]):

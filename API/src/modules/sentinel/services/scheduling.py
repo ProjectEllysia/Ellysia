@@ -149,6 +149,7 @@ class Scheduler:
         cls._scheduler.start()
         logger.info("Scheduler started")
         cls._sync_from_db()
+        cls._schedule_kb_sync()
 
     @classmethod
     def stop(cls) -> None:
@@ -206,6 +207,28 @@ class Scheduler:
     # =========================================================================
     # INTERNALS
     # =========================================================================
+
+    @classmethod
+    def _schedule_kb_sync(cls) -> None:
+        """Register the nightly Ellysia KB sync job, if enabled in config.
+
+        Deferred imports avoid a circular dependency (managers import this
+        module transitively). The job is a plain recurring cron, independent of
+        the per-user ProgramedScan jobs.
+        """
+        import src.modules.system.config_reading as CR
+        if not CR.is_kb_sync_enabled():
+            return
+        from ..managers import KbSyncManager
+        cls._scheduler.add_job(  # type: ignore[union-attr]
+            func=KbSyncManager.execute_kb_sync,
+            trigger=CronTrigger.from_crontab(CR.get_kb_sync_cron(), timezone=timezone.utc),
+            id="ellysia_kb_sync",
+            replace_existing=True,
+            max_instances=1,
+            name="Ellysia KB sync",
+        )
+        logger.info("Scheduled Ellysia KB sync (%s)", CR.get_kb_sync_cron())
 
     @classmethod
     def _sync_from_db(cls) -> None:
