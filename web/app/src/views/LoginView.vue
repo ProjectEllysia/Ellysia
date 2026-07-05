@@ -1,104 +1,38 @@
 <template>
-  <div
-    class="login-stage"
-    :class="{ booting, granted }"
-    @mousemove="onPointerMove"
-    @mouseleave="resetTilt"
-  >
-    <!-- ───────── Ambient background ───────── -->
-    <div class="bg-orbs" aria-hidden="true">
-      <span class="orb orb--gold"></span>
-      <span class="orb orb--green"></span>
-      <span class="orb orb--blue"></span>
-    </div>
-    <div class="bg-grid" aria-hidden="true"></div>
-    <div class="bg-radar" aria-hidden="true"><span class="radar-sweep"></span></div>
-    <div class="bg-scanlines" aria-hidden="true"></div>
+  <div class="gate-stage">
+    <ElysianScene sun-top="16%" />
 
-    <!-- Constellation of drifting nodes -->
-    <svg class="bg-constellation" aria-hidden="true" preserveAspectRatio="none">
-      <line
-        v-for="(l, i) in links"
-        :key="'l' + i"
-        :x1="nodes[l[0]].x + '%'"
-        :y1="nodes[l[0]].y + '%'"
-        :x2="nodes[l[1]].x + '%'"
-        :y2="nodes[l[1]].y + '%'"
-      />
-      <circle
-        v-for="(n, i) in nodes"
-        :key="'n' + i"
-        :cx="n.x + '%'"
-        :cy="n.y + '%'"
-        :r="n.r"
-        :style="{ animationDelay: n.delay + 's' }"
-      />
-    </svg>
+    <!-- Cambio de iluminación (dusk / dawn) -->
+    <button
+      class="theme-toggle"
+      @click="themeStore.toggleTheme()"
+      :aria-label="themeStore.theme === 'dusk' ? 'Cambiar a Amanecer' : 'Cambiar a Ocaso'"
+      :title="themeStore.theme === 'dusk' ? 'Amanecer' : 'Ocaso'"
+    >
+      <svg v-if="themeStore.theme === 'dusk'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+        <circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="8" opacity="0.45" />
+      </svg>
+      <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+      </svg>
+    </button>
 
-    <!-- Cursor spotlight -->
-    <div class="spotlight" aria-hidden="true"></div>
+    <!-- ───────── El umbral ───────── -->
+    <div class="portal">
+      <div class="portal-body" :inert="granted">
+        <router-link to="/" class="wordmark" aria-label="Ellysia — inicio">
+          <span class="wordmark-glyph" aria-hidden="true"></span>
+          <span class="wordmark-text">Ellysia</span>
+        </router-link>
 
-    <!-- Giant watermark -->
-    <div class="watermark" aria-hidden="true">
-      <span class="watermark-text">Ellysia</span>
-      <span class="watermark-sub">SECURITY · OPERATIONS · CLEARANCE</span>
-    </div>
+        <h1 class="title">El umbral</h1>
+        <p class="subtitle">Identifícate para cruzar</p>
 
-    <!-- ───────── Clearance console card ───────── -->
-    <div class="console" :style="cardStyle">
-      <div class="console-sheen" aria-hidden="true"></div>
-      <div class="console-edge" aria-hidden="true"></div>
+        <div class="title-rule" aria-hidden="true"></div>
 
-      <!-- Terminal bar -->
-      <header class="term-bar">
-        <span class="term-dots" aria-hidden="true">
-          <i class="d d-r"></i><i class="d d-y"></i><i class="d d-g"></i>
-        </span>
-        <span class="term-path">ellysia://clearance/access</span>
-        <span class="term-clock">{{ clock }}</span>
-      </header>
-
-      <!-- Boot diagnostics overlay -->
-      <transition name="boot">
-        <div v-if="booting" class="boot" aria-hidden="true">
-          <p v-for="(line, i) in bootShown" :key="i" class="boot-line">
-            <span class="boot-mark">›</span>{{ line }}
-            <span class="boot-ok">OK</span>
-          </p>
-          <p class="boot-cursor"><span class="boot-mark">›</span><span class="caret">▌</span></p>
-        </div>
-      </transition>
-
-      <!-- Body -->
-      <div class="console-body" :inert="booting || granted">
-        <div class="brand">
-          <span class="brand-bracket">[</span>
-          <span class="brand-mark" :class="{ glitch: glitching }" data-text="Ellysia">Ellysia</span>
-          <span class="brand-bracket">]</span>
-          <span class="brand-shield" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-              <path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5l8-3z" />
-              <path d="M9 12l2 2 4-4" stroke-width="2" />
-            </svg>
-          </span>
-        </div>
-
-        <h1 class="title">
-          <span class="title-main">Security Operations</span>
-          <span class="title-tag">Acceso restringido</span>
-        </h1>
-        <p class="subtitle">
-          Verificación de identidad requerida para continuar
-        </p>
-
-        <!-- Alert -->
+        <!-- Aviso -->
         <transition name="alert">
-          <div
-            v-if="alertMsg"
-            class="alert"
-            :class="'alert-' + alertType"
-            role="alert"
-          >
+          <div v-if="alertMsg" class="alert" :class="'alert-' + alertType" role="alert">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <template v-if="alertType === 'error' || alertType === 'warning'">
                 <circle cx="12" cy="12" r="10" />
@@ -115,12 +49,9 @@
         </transition>
 
         <form novalidate @submit.prevent="handleSubmit">
-          <!-- Username -->
-          <div class="field" :class="{ focused: focus === 'user', filled: username }">
-            <label for="username">
-              <span>Identificador</span>
-              <span class="field-cursor">_</span>
-            </label>
+          <!-- Identificador -->
+          <div class="field" :class="{ focused: focus === 'user' }">
+            <label for="username">Identificador</label>
             <div class="field-box">
               <svg class="field-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                 <circle cx="12" cy="8" r="4" />
@@ -130,7 +61,7 @@
                 id="username"
                 v-model="username"
                 type="text"
-                placeholder="nombre_de_usuario"
+                placeholder="nombre de usuario"
                 autocomplete="username"
                 spellcheck="false"
                 required
@@ -142,11 +73,10 @@
             </div>
           </div>
 
-          <!-- Password -->
-          <div class="field" :class="{ focused: focus === 'pass', filled: password }">
+          <!-- Clave -->
+          <div class="field" :class="{ focused: focus === 'pass' }">
             <label for="password">
               <span>Clave de acceso</span>
-              <span class="field-cursor">_</span>
               <transition name="caps">
                 <span v-if="capsOn" class="caps-warn" role="status">⇪ Mayúsculas activas</span>
               </transition>
@@ -167,7 +97,6 @@
                 :disabled="loading"
                 @focus="focus = 'pass'"
                 @blur="focus = ''"
-                @input="scramble"
                 @keyup="checkCaps"
                 @keydown="checkCaps"
               />
@@ -188,51 +117,31 @@
                 </svg>
               </button>
             </div>
-
-            <!-- Live encryption cipher strip -->
-            <div class="cipher" :class="{ active: password.length }" aria-hidden="true">
-              <span class="cipher-tag">
-                <span class="cipher-lock"></span>{{ password.length ? 'AES-256 · CIFRANDO' : 'EN ESPERA' }}
-              </span>
-              <span class="cipher-stream">{{ cipherText }}</span>
-            </div>
           </div>
 
           <button type="submit" class="submit" :class="{ loading }" :disabled="loading">
-            <span class="submit-label">{{ loading ? 'Autorizando…' : 'Solicitar acceso' }}</span>
+            <span class="submit-label">{{ loading ? 'Cruzando…' : 'Cruzar el umbral' }}</span>
             <span class="submit-arrow" aria-hidden="true">→</span>
-            <span class="submit-shine" aria-hidden="true"></span>
             <span class="submit-spin" aria-hidden="true"></span>
           </button>
         </form>
 
-        <footer class="console-foot">
+        <footer class="portal-foot">
           <span class="foot-pulse"><i></i>Enlace cifrado activo</span>
-          <span class="foot-ver">build 2.6.0 · Ellysia © 2026</span>
+          <span class="foot-ver">Ellysia © 2026</span>
         </footer>
       </div>
     </div>
 
-    <!-- ───────── Access granted overlay ───────── -->
+    <!-- ───────── Umbral cruzado ───────── -->
     <transition name="grant">
       <div v-if="granted" class="grant-screen" aria-live="assertive">
-        <svg class="grant-shield" viewBox="0 0 120 120" fill="none">
-          <path
-            class="grant-shield-body"
-            d="M60 8l40 15v30c0 25-17.5 42.5-40 55C37.5 95.5 20 78 20 53V23L60 8z"
-            stroke="var(--accent-bright)"
-            stroke-width="2.5"
-          />
-          <path
-            class="grant-check"
-            d="M42 60l13 13 24-26"
-            stroke="var(--accent-bright)"
-            stroke-width="4"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
+        <svg class="grant-sun" viewBox="0 0 120 120" fill="none">
+          <circle class="grant-ring grant-ring--in" cx="60" cy="60" r="30" stroke="var(--accent-bright)" stroke-width="2" />
+          <circle class="grant-ring grant-ring--out" cx="60" cy="60" r="46" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="3 7" />
+          <path class="grant-check" d="M46 60l10 10 20-22" stroke="var(--accent-bright)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
-        <p class="grant-title">ACCESO CONCEDIDO</p>
+        <p class="grant-title">Bienvenido</p>
         <p class="grant-sub">Estableciendo sesión segura…</p>
       </div>
     </transition>
@@ -240,14 +149,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
+import { useThemeStore } from '@/stores/themeStore'
+import ElysianScene from '@/components/shared/ElysianScene.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
+const themeStore = useThemeStore()
 
-/* ── reactive form state ── */
+/* ── estado del formulario ── */
 const username = ref('')
 const password = ref('')
 const showPassword = ref(false)
@@ -264,114 +176,14 @@ const reduceMotion =
   typeof window !== 'undefined' &&
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
-/* ── live clock in the terminal bar ── */
-const clock = ref('')
-let clockTimer = null
-function tick() {
-  clock.value = new Date().toLocaleTimeString('es-ES', { hour12: false })
-}
-
-/* ── boot diagnostics sequence ── */
-const bootLines = [
-  'init secure channel',
-  'handshake TLS 1.3',
-  'vault integrity check',
-  'identity module ready',
-]
-const booting = ref(!reduceMotion)
-const bootShown = ref([])
-let bootTimers = []
-
-/* ── brand glitch tease ── */
-const glitching = ref(false)
-let glitchTimer = null
-
-/* ── cursor parallax tilt + spotlight ── */
-const tilt = reactive({ rx: 0, ry: 0, mx: 50, my: 50 })
-let rafId = null
-function onPointerMove(e) {
-  if (reduceMotion) return
-  const { innerWidth: w, innerHeight: h } = window
-  const nx = e.clientX / w - 0.5
-  const ny = e.clientY / h - 0.5
-  if (rafId) cancelAnimationFrame(rafId)
-  rafId = requestAnimationFrame(() => {
-    tilt.ry = nx * 9
-    tilt.rx = -ny * 9
-    tilt.mx = (e.clientX / w) * 100
-    tilt.my = (e.clientY / h) * 100
-  })
-}
-function resetTilt() {
-  tilt.rx = 0
-  tilt.ry = 0
-}
-const cardStyle = computed(() => ({
-  '--rx': tilt.rx + 'deg',
-  '--ry': tilt.ry + 'deg',
-  '--mx': tilt.mx + '%',
-  '--my': tilt.my + '%',
-}))
-
-/* ── live encryption visualization ──
-   Derives a deterministic 24-char hex digest from the password, then
-   briefly scrambles before settling — evokes real-time encryption. */
-const HEX = '0123456789abcdef'
-const cipherText = ref('— — — — — — — —'.replace(/ /g, ''))
-let scrambleRaf = null
-let scrambleFrames = 0
-
-function digest(str) {
-  // simple, fast rolling hash → 24 hex chars (visual only, never sent)
-  const out = []
-  let h = 0x811c9dc5
-  for (let i = 0; i < 24; i++) {
-    const c = str.charCodeAt(i % Math.max(str.length, 1)) || (i * 7 + 13)
-    h ^= c + i * 31
-    h = (h * 0x01000193) >>> 0
-    out.push(HEX[(h >>> (i % 24)) & 15])
-  }
-  return out.join('')
-}
-
-function renderCipher() {
-  if (!password.value.length) {
-    cipherText.value = '························'
-    return
-  }
-  const target = digest(password.value)
-  if (reduceMotion || scrambleFrames <= 0) {
-    cipherText.value = target
-    return
-  }
-  // scramble: random hex blended toward the settled digest
-  const progress = 1 - scrambleFrames / 8
-  cipherText.value = target
-    .split('')
-    .map((ch, i) => (Math.random() < progress ? ch : HEX[(Math.random() * 16) | 0]))
-    .join('')
-  scrambleFrames--
-  scrambleRaf = requestAnimationFrame(renderCipher)
-}
-
-function scramble() {
-  if (reduceMotion) {
-    renderCipher()
-    return
-  }
-  if (scrambleRaf) cancelAnimationFrame(scrambleRaf)
-  scrambleFrames = 8
-  renderCipher()
-}
-
-/* ── caps lock detection ── */
+/* ── detección de Bloq Mayús ── */
 function checkCaps(e) {
   if (typeof e.getModifierState === 'function') {
     capsOn.value = e.getModifierState('CapsLock')
   }
 }
 
-/* ── submit ── */
+/* ── envío ── */
 async function handleSubmit() {
   alertMsg.value = ''
   usernameError.value = false
@@ -398,14 +210,13 @@ async function handleSubmit() {
     await auth.login(un, pw)
     granted.value = true
     const delay = reduceMotion ? 300 : 1500
-    setTimeout(() => router.push('/hub'), delay)
+    setTimeout(() => router.push('/'), delay)
   } catch (err) {
     showAlert(err.message || 'Error desconocido.', 'error')
     if (err.message?.includes('Credenciales')) {
       usernameError.value = true
       passwordError.value = true
       password.value = ''
-      renderCipher()
     }
     loading.value = false
   }
@@ -416,12 +227,8 @@ function showAlert(msg, type = 'error') {
   alertType.value = type
 }
 
-/* ── lifecycle ── */
+/* ── ciclo de vida ── */
 onMounted(() => {
-  tick()
-  clockTimer = setInterval(tick, 1000)
-  renderCipher()
-
   // Si la sesión terminó por un cambio de contraseña, avisar de forma destacada.
   if (auth.takeSessionEndReason() === 'password_changed') {
     showAlert(
@@ -429,54 +236,15 @@ onMounted(() => {
       'warning',
     )
   }
-
-  if (booting.value) {
-    bootLines.forEach((line, i) => {
-      bootTimers.push(
-        setTimeout(() => bootShown.value.push(line), 180 + i * 230)
-      )
-    })
-    bootTimers.push(
-      setTimeout(() => {
-        booting.value = false
-        document.getElementById('username')?.focus()
-      }, 180 + bootLines.length * 230 + 280)
-    )
-  }
-
-  // periodic, subtle brand glitch
-  if (!reduceMotion) {
-    glitchTimer = setInterval(() => {
-      glitching.value = true
-      setTimeout(() => (glitching.value = false), 320)
-    }, 6500)
-  }
+  if (!reduceMotion) document.getElementById('username')?.focus()
 })
 
-onBeforeUnmount(() => {
-  clearInterval(clockTimer)
-  clearInterval(glitchTimer)
-  bootTimers.forEach(clearTimeout)
-  if (rafId) cancelAnimationFrame(rafId)
-  if (scrambleRaf) cancelAnimationFrame(scrambleRaf)
-})
-
-/* ── decorative constellation (computed once) ── */
-const nodes = Array.from({ length: 9 }, () => ({
-  x: 8 + Math.random() * 84,
-  y: 8 + Math.random() * 84,
-  r: 1.2 + Math.random() * 1.8,
-  delay: Math.random() * 4,
-}))
-const links = [
-  [0, 1], [1, 2], [2, 4], [4, 3], [3, 0],
-  [4, 5], [5, 6], [6, 7], [7, 8], [8, 5],
-]
+onBeforeUnmount(() => {})
 </script>
 
 <style scoped>
-/* ════════ Stage ════════ */
-.login-stage {
+/* ═══════════ Escenario ═══════════ */
+.gate-stage {
   position: relative;
   min-height: 100vh;
   display: flex;
@@ -484,287 +252,109 @@ const links = [
   justify-content: center;
   padding: 1.5rem;
   overflow: hidden;
-  background:
-    radial-gradient(ellipse at 50% 0%, #14130f 0%, var(--bg) 55%);
-  perspective: 1400px;
+  background: var(--bg);
 }
 
-/* ════════ Ambient orbs ════════ */
-.bg-orbs { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
-.orb {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(140px);
-  animation: orb-drift 26s ease-in-out infinite;
-}
-.orb--gold {
-  width: 640px; height: 640px; top: -22%; left: -14%;
-  background: radial-gradient(circle, rgba(212,160,74,0.18) 0%, transparent 70%);
-}
-.orb--green {
-  width: 480px; height: 480px; bottom: -18%; right: -10%;
-  background: radial-gradient(circle, rgba(76,183,130,0.10) 0%, transparent 70%);
-  animation-delay: -10s;
-}
-.orb--blue {
-  width: 420px; height: 420px; top: 40%; left: 58%;
-  background: radial-gradient(circle, rgba(96,128,224,0.08) 0%, transparent 70%);
-  animation-delay: -18s;
-}
-@keyframes orb-drift {
-  0%, 100% { transform: translate(0,0) scale(1); }
-  33%      { transform: translate(38px,-26px) scale(1.07); }
-  66%      { transform: translate(-26px,30px) scale(0.95); }
-}
-
-/* ════════ Perspective grid ════════ */
-.bg-grid {
-  position: fixed; inset: -50%; z-index: 0; pointer-events: none;
-  background-image:
-    linear-gradient(rgba(212,160,74,0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(212,160,74,0.04) 1px, transparent 1px);
-  background-size: 58px 58px;
-  transform: perspective(620px) rotateX(62deg);
-  animation: grid-drift 22s linear infinite;
-  mask-image: radial-gradient(ellipse at center, #000 12%, transparent 68%);
-}
-@keyframes grid-drift {
-  from { transform: perspective(620px) rotateX(62deg) translateY(0); }
-  to   { transform: perspective(620px) rotateX(62deg) translateY(58px); }
-}
-
-/* ════════ Radar ════════ */
-.bg-radar {
-  position: fixed; inset: 0; z-index: 0; pointer-events: none;
-  display: flex; align-items: center; justify-content: center;
-}
-.radar-sweep {
-  width: 130vmax; height: 130vmax; border-radius: 50%;
-  border: 1px solid rgba(212,160,74,0.04);
-  position: relative;
-  animation: radar-rotate 14s linear infinite;
-}
-.radar-sweep::before {
-  content: ''; position: absolute; inset: 0; border-radius: 50%;
-  background: conic-gradient(from 0deg, rgba(212,160,74,0.10), transparent 22%);
-}
-.radar-sweep::after {
-  content: ''; position: absolute; inset: 22%; border-radius: 50%;
-  border: 1px solid rgba(212,160,74,0.04);
-}
-@keyframes radar-rotate { to { transform: rotate(360deg); } }
-
-/* ════════ Scanlines ════════ */
-.bg-scanlines {
-  position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0.35;
-  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.16) 2px, rgba(0,0,0,0.16) 4px);
-}
-
-/* ════════ Constellation ════════ */
-.bg-constellation {
-  position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none;
-}
-.bg-constellation line { stroke: rgba(212,160,74,0.07); stroke-width: 1; }
-.bg-constellation circle {
-  fill: rgba(232,188,106,0.55);
-  animation: node-twinkle 4s ease-in-out infinite;
-}
-@keyframes node-twinkle {
-  0%, 100% { opacity: 0.2; }
-  50%      { opacity: 0.9; }
-}
-
-/* ════════ Cursor spotlight ════════ */
-.spotlight {
-  position: fixed; inset: 0; z-index: 1; pointer-events: none;
-  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), rgba(212,160,74,0.06), transparent 65%);
-  transition: background 0.18s ease-out;
-}
-
-/* ════════ Watermark ════════ */
-.watermark {
-  position: fixed; top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 0; pointer-events: none; text-align: center; user-select: none;
-}
-.watermark-text {
-  display: block; font-family: var(--font-display);
-  font-size: clamp(11rem, 34vw, 27rem); font-weight: 800; line-height: 0.82;
-  letter-spacing: -0.04em; color: transparent;
-  -webkit-text-stroke: 1px rgba(212,160,74,0.06);
-  opacity: 0.4; animation: breathe 7s ease-in-out infinite;
-}
-.watermark-sub {
-  display: block; font-family: var(--font-mono);
-  font-size: clamp(0.6rem, 1vw, 0.9rem); letter-spacing: 0.85em;
-  color: rgba(212,160,74,0.09); margin-top: 1rem; text-indent: 0.85em;
-}
-@keyframes breathe {
-  0%, 100% { opacity: 0.28; transform: translate(-50%,-50%) scale(1); }
-  50%      { opacity: 0.46; transform: translate(-50%,-50%) scale(1.025); }
-}
-
-/* ════════ Console card ════════ */
-.console {
-  position: relative; z-index: 2; width: 100%; max-width: 440px;
-  background: rgba(17, 18, 24, 0.72);
-  border: 1px solid var(--border-solid);
-  border-radius: 16px; overflow: hidden;
-  backdrop-filter: blur(26px) saturate(1.25);
-  box-shadow:
-    0 40px 90px rgba(0,0,0,0.55),
-    0 0 0 1px rgba(255,255,255,0.03) inset,
-    0 1px 0 rgba(255,255,255,0.05) inset;
-  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
-  transform-style: preserve-3d;
-  transition: transform 0.3s cubic-bezier(0.16,1,0.3,1);
-  animation: console-enter 1s cubic-bezier(0.16,1,0.3,1) both;
-}
-@keyframes console-enter {
-  from { opacity: 0; transform: translateY(34px) scale(0.96) rotateX(8deg); }
-  to   { opacity: 1; transform: translateY(0) scale(1) rotateX(var(--rx,0)) rotateY(var(--ry,0)); }
-}
-
-/* moving sheen that follows cursor */
-.console-sheen {
-  position: absolute; inset: 0; z-index: 3; pointer-events: none; border-radius: 16px;
-  background: radial-gradient(300px circle at var(--mx,50%) var(--my,50%), rgba(232,188,106,0.08), transparent 60%);
-  opacity: 0.9; mix-blend-mode: screen;
-}
-/* animated gradient edge */
-.console-edge {
-  position: absolute; inset: -1px; z-index: 1; border-radius: 16px; padding: 1px;
-  pointer-events: none;
-  background: linear-gradient(135deg, rgba(212,160,74,0.5), transparent 30%, transparent 70%, rgba(212,160,74,0.5));
-  background-size: 300% 300%;
-  animation: edge-flow 7s ease infinite;
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor; mask-composite: exclude;
-  opacity: 0.55;
-}
-@keyframes edge-flow {
-  0%, 100% { background-position: 0% 50%; }
-  50%      { background-position: 100% 50%; }
-}
-
-/* ════════ Terminal bar ════════ */
-.term-bar {
-  position: relative; z-index: 4;
-  display: flex; align-items: center; gap: 0.7rem;
-  padding: 0.65rem 1rem;
-  background: rgba(255,255,255,0.018);
-  border-bottom: 1px solid var(--border-solid);
-}
-.term-dots { display: flex; gap: 5px; }
-.d { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 7px currentColor; }
-.d-r { background: #d96c6c; color: #d96c6c; }
-.d-y { background: #d4a04a; color: #d4a04a; }
-.d-g { background: #4cb782; color: #4cb782; }
-.term-path { flex: 1; font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-dim); }
-.term-clock {
-  font-family: var(--font-mono); font-size: 0.68rem; color: var(--accent);
-  letter-spacing: 0.06em; opacity: 0.75;
-  font-variant-numeric: tabular-nums;
-}
-
-/* ════════ Boot diagnostics ════════ */
-.boot {
-  position: absolute; inset: 0; z-index: 6;
-  background: rgba(13,14,18,0.94);
-  backdrop-filter: blur(8px);
-  padding: 3.2rem 2rem; display: flex; flex-direction: column; gap: 0.55rem;
-  font-family: var(--font-mono); font-size: 0.78rem;
-}
-.boot-line, .boot-cursor {
-  display: flex; align-items: center; gap: 0.55rem; color: var(--text-dim);
-  animation: boot-in 0.3s ease both;
-}
-.boot-mark { color: var(--accent); }
-.boot-ok {
-  margin-left: auto; color: var(--success);
-  font-size: 0.62rem; letter-spacing: 0.15em;
-}
-.boot-cursor .caret { color: var(--accent); animation: blink 1s step-end infinite; }
-@keyframes boot-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
-.boot-leave-active { transition: opacity 0.4s ease, transform 0.4s ease; }
-.boot-leave-to { opacity: 0; transform: scale(1.02); }
-
-/* ════════ Body ════════ */
-.console-body { position: relative; z-index: 2; padding: 2.4rem 2.25rem 1.7rem; }
-
-/* Brand */
-.brand {
-  display: flex; align-items: center; justify-content: center; gap: 0.35rem;
-  margin-bottom: 1.1rem;
-  animation: fade-up 0.7s 0.15s cubic-bezier(0.16,1,0.3,1) both;
-}
-.brand-bracket { color: var(--accent); font-size: 1.8rem; font-weight: 300; opacity: 0.45; font-family: var(--font-mono); }
-.brand-mark {
-  position: relative; color: var(--text);
-  font-family: var(--font-display); font-size: 2.1rem; font-weight: 800; letter-spacing: 2px;
-}
-.brand-mark::after {
-  content: attr(data-text); position: absolute; left: 0; top: 0; color: transparent;
-  -webkit-text-stroke: 1px rgba(212,160,74,0.18); transform: translate(2px,2px); pointer-events: none;
-}
-.brand-mark.glitch { animation: glitch 0.32s steps(2) both; }
-@keyframes glitch {
-  0%   { text-shadow: 2px 0 #d96c6c, -2px 0 #4cb782; transform: translateX(0); }
-  25%  { text-shadow: -2px 0 #d96c6c, 2px 0 #6080e0; transform: translateX(1px); }
-  50%  { text-shadow: 2px 0 #4cb782, -2px 0 #d4a04a; transform: translateX(-1px); }
-  100% { text-shadow: none; transform: none; }
-}
-.brand-shield {
-  color: var(--accent); width: 22px; height: 22px; margin-left: 0.4rem; opacity: 0.8;
-  filter: drop-shadow(0 0 6px rgba(212,160,74,0.4));
-}
-
-/* Title */
-.title { text-align: center; font-family: var(--font-display); margin-bottom: 0.4rem; animation: fade-up 0.7s 0.25s cubic-bezier(0.16,1,0.3,1) both; }
-.title-main { display: block; font-size: 1.05rem; font-weight: 600; color: var(--text); letter-spacing: 0.03em; }
-.title-tag {
-  display: inline-block; margin-top: 0.45rem; font-family: var(--font-mono);
-  font-size: 0.6rem; font-weight: 500; letter-spacing: 0.28em; text-transform: uppercase;
+.theme-toggle {
+  position: fixed; top: 1.4rem; right: 1.6rem; z-index: 20;
+  width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center;
   color: var(--accent);
-  padding: 0.2rem 0.6rem; border: 1px solid rgba(212,160,74,0.22); border-radius: 100px;
-  background: rgba(212,160,74,0.05);
+  border: 1px solid var(--border-med);
+  background: var(--surface);
+  transition: all var(--transition);
+}
+.theme-toggle:hover { border-color: var(--accent); box-shadow: 0 0 14px var(--accent-dim); }
+.theme-toggle svg { width: 17px; height: 17px; }
+
+/* ═══════════ El umbral ═══════════ */
+.portal {
+  position: relative; z-index: 2; width: 100%; max-width: 400px;
+  background: var(--surface);
+  border: 1px solid var(--border-med);
+  border-radius: 14px;
+  box-shadow:
+    0 30px 70px rgba(0,0,0,0.28),
+    0 0 0 1px var(--border) inset;
+  overflow: hidden;
+  animation: portal-rise 0.9s cubic-bezier(0.16,1,0.3,1) both;
+}
+/* filo de oro superior, como la línea del horizonte */
+.portal::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent) 25%, var(--accent-bright) 50%, var(--accent) 75%, transparent);
+  opacity: 0.7;
+}
+@keyframes portal-rise {
+  from { opacity: 0; transform: translateY(26px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.portal-body { padding: 2.6rem 2.3rem 1.8rem; }
+
+/* Marca */
+.wordmark {
+  display: flex; align-items: center; justify-content: center; gap: 0.7rem;
+  margin-bottom: 1.6rem;
+}
+.wordmark-glyph {
+  width: 11px; height: 11px; border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  box-shadow: 0 0 0 3.5px var(--surface), 0 0 0 4.5px var(--accent-dim), 0 0 12px var(--sun-glow);
+}
+.wordmark-text {
+  font-family: var(--font-epic);
+  font-size: 1.05rem; font-weight: 600;
+  letter-spacing: 0.34em; text-transform: uppercase;
+  color: var(--text);
+}
+
+/* Título */
+.title {
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 2.4rem; font-weight: 600;
+  color: var(--text); letter-spacing: 0.02em;
+  line-height: 1.1;
 }
 .subtitle {
-  text-align: center; font-size: 0.8rem; color: var(--text-dim);
-  margin: 0.4rem 0 1.6rem; animation: fade-up 0.7s 0.35s cubic-bezier(0.16,1,0.3,1) both;
+  text-align: center;
+  font-family: var(--font-display); font-style: italic;
+  font-size: 1.1rem; color: var(--text-dim);
+  margin-top: 0.25rem;
 }
-@keyframes fade-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.title-rule {
+  width: 54px; height: 1px; margin: 1.3rem auto 1.6rem;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.6;
+}
 
-/* ════════ Alert ════════ */
+/* ═══════════ Aviso ═══════════ */
 .alert {
   display: flex; align-items: flex-start; gap: 0.5rem;
-  border-radius: 9px; padding: 0.7rem 0.9rem; font-size: 0.8rem;
+  border-radius: 9px; padding: 0.7rem 0.9rem; font-size: 0.85rem;
   margin-bottom: 1.1rem; font-family: var(--font-body);
 }
-.alert svg { flex-shrink: 0; margin-top: 1px; }
-.alert-error { background: rgba(217,108,108,0.07); border: 1px solid rgba(217,108,108,0.22); color: #e09090; box-shadow: 0 0 22px rgba(217,108,108,0.07); }
-.alert-success { background: rgba(76,183,130,0.07); border: 1px solid rgba(76,183,130,0.22); color: #6ed9a0; box-shadow: 0 0 22px rgba(76,183,130,0.07); }
-.alert-warning { background: rgba(212,160,74,0.08); border: 1px solid rgba(212,160,74,0.28); color: #e0b060; box-shadow: 0 0 22px rgba(212,160,74,0.08); }
+.alert svg { flex-shrink: 0; margin-top: 2px; }
+.alert-error   { background: var(--danger-dim);  border: 1px solid var(--danger);  color: var(--danger); }
+.alert-success { background: var(--success-dim); border: 1px solid var(--success); color: var(--success); }
+.alert-warning { background: var(--warn-dim);    border: 1px solid var(--warn);    color: var(--warn); }
 .alert-enter-active { transition: opacity 0.35s ease, transform 0.35s ease; }
 .alert-enter-from { opacity: 0; transform: translateY(-6px); }
 
-/* ════════ Fields ════════ */
-form { animation: fade-up 0.7s 0.45s cubic-bezier(0.16,1,0.3,1) both; }
+/* ═══════════ Campos ═══════════ */
 .field { margin-bottom: 1.15rem; }
 .field label {
   display: flex; align-items: center; gap: 0.25rem;
-  font-size: 0.68rem; font-weight: 600; color: var(--text-dim);
-  margin-bottom: 0.45rem; text-transform: uppercase; letter-spacing: 0.1em;
-  transition: color 0.25s ease; font-family: var(--font-mono);
+  font-family: var(--font-epic);
+  font-size: 0.66rem; font-weight: 600; color: var(--text-dim);
+  margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.18em;
+  transition: color 0.25s ease;
 }
 .field.focused label { color: var(--accent); }
-.field-cursor { color: var(--accent); opacity: 0; }
-.field.focused .field-cursor { opacity: 1; animation: blink 1s step-end infinite; }
-@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
-
 .caps-warn {
-  margin-left: auto; font-size: 0.58rem; letter-spacing: 0.06em;
-  color: #e0b060; text-transform: none; font-family: var(--font-mono);
+  margin-left: auto; font-size: 0.62rem; letter-spacing: 0.04em;
+  color: var(--warn); text-transform: none; font-family: var(--font-body);
 }
 .caps-enter-active, .caps-leave-active { transition: opacity 0.2s ease; }
 .caps-enter-from, .caps-leave-to { opacity: 0; }
@@ -777,23 +367,22 @@ form { animation: fade-up 0.7s 0.45s cubic-bezier(0.16,1,0.3,1) both; }
 .field.focused .field-ico { color: var(--accent); }
 .field-box input {
   width: 100%; padding: 0.82rem 2.7rem 0.82rem 2.5rem;
-  background: rgba(27, 29, 38, 0.6);
-  border: 1px solid var(--border-solid); border-radius: 11px;
-  color: var(--text); font-size: 0.92rem; font-family: var(--font-body); outline: none;
+  background: var(--surface-2);
+  border: 1px solid var(--border-solid); border-radius: 10px;
+  color: var(--text); font-size: 0.95rem; font-family: var(--font-body); outline: none;
   transition: border-color 0.3s, box-shadow 0.3s, background 0.3s;
 }
-.field-box input::placeholder { color: var(--text-muted); opacity: 0.3; }
+.field-box input::placeholder { color: var(--text-muted); opacity: 0.6; }
 .field-box input:focus {
-  border-color: rgba(212,160,74,0.45);
-  background: rgba(27,29,38,0.9);
-  box-shadow: 0 0 0 3px rgba(212,160,74,0.09), 0 6px 22px rgba(0,0,0,0.25);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 .field-box input.has-error {
-  border-color: rgba(217,108,108,0.55);
-  box-shadow: 0 0 0 3px rgba(217,108,108,0.09);
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-dim);
   animation: shake 0.4s ease-in-out;
 }
-.field-box input:disabled { opacity: 0.4; cursor: not-allowed; }
+.field-box input:disabled { opacity: 0.5; cursor: not-allowed; }
 @keyframes shake {
   0%,100% { transform: translateX(0); }
   20% { transform: translateX(-5px); } 40% { transform: translateX(5px); }
@@ -804,129 +393,94 @@ form { animation: fade-up 0.7s 0.45s cubic-bezier(0.16,1,0.3,1) both; }
   background: none; border: none; color: var(--text-muted); cursor: pointer;
   border-radius: 7px; transition: color 0.2s, background 0.2s;
 }
-.reveal:hover:not(:disabled) { color: var(--accent); background: rgba(212,160,74,0.08); }
+.reveal:hover:not(:disabled) { color: var(--accent); background: var(--accent-dim); }
 .reveal:disabled { cursor: not-allowed; opacity: 0.4; }
 
-/* ════════ Cipher strip ════════ */
-.cipher {
-  display: flex; align-items: center; gap: 0.6rem;
-  margin-top: 0.5rem; padding: 0 0.2rem;
-  font-family: var(--font-mono); font-size: 0.62rem;
-  opacity: 0.5; transition: opacity 0.3s ease;
-}
-.cipher.active { opacity: 1; }
-.cipher-tag {
-  display: inline-flex; align-items: center; gap: 0.35rem;
-  color: var(--text-muted); letter-spacing: 0.08em; white-space: nowrap;
-  transition: color 0.3s ease;
-}
-.cipher.active .cipher-tag { color: var(--success); }
-.cipher-lock {
-  width: 5px; height: 5px; border-radius: 50%; background: var(--text-muted);
-  transition: background 0.3s ease;
-}
-.cipher.active .cipher-lock {
-  background: var(--success); box-shadow: 0 0 7px var(--success);
-  animation: live-pulse 1.6s ease-in-out infinite;
-}
-.cipher-stream {
-  flex: 1; overflow: hidden; text-overflow: clip; white-space: nowrap;
-  color: rgba(212,160,74,0.55); letter-spacing: 0.18em;
-  mask-image: linear-gradient(90deg, #000 78%, transparent);
-}
-@keyframes live-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.7); } }
-
-/* ════════ Submit ════════ */
+/* ═══════════ Botón ═══════════ */
 .submit {
   position: relative; overflow: hidden;
-  width: 100%; margin-top: 0.7rem; padding: 0.9rem;
+  width: 100%; margin-top: 0.8rem; padding: 0.95rem;
   display: flex; align-items: center; justify-content: center; gap: 0.5rem;
-  background: linear-gradient(135deg, var(--accent), #c08a30);
-  color: #0b0c10; font-weight: 700; font-size: 0.9rem; letter-spacing: 0.03em;
-  font-family: var(--font-body); border: none; border-radius: 11px; cursor: pointer;
-  box-shadow: 0 6px 24px rgba(212,160,74,0.28), 0 0 0 1px rgba(212,160,74,0.18) inset;
-  transition: transform 0.25s cubic-bezier(0.16,1,0.3,1), box-shadow 0.25s, opacity 0.2s;
+  background: var(--accent);
+  color: var(--surface);
+  font-family: var(--font-epic); font-weight: 600;
+  font-size: 0.82rem; letter-spacing: 0.16em; text-transform: uppercase;
+  border: none; border-radius: 10px; cursor: pointer;
+  box-shadow: 0 6px 20px var(--accent-dim);
+  transition: transform 0.25s cubic-bezier(0.16,1,0.3,1), box-shadow 0.25s, background 0.25s, opacity 0.2s;
 }
-.submit:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 34px rgba(212,160,74,0.4), 0 0 0 1px rgba(212,160,74,0.25) inset; }
+.submit:hover:not(:disabled) {
+  background: var(--accent-bright);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px var(--sun-glow);
+}
 .submit:hover:not(:disabled) .submit-arrow { transform: translateX(4px); }
 .submit:active:not(:disabled) { transform: translateY(0); }
-.submit:disabled { opacity: 0.55; cursor: not-allowed; }
+.submit:disabled { opacity: 0.6; cursor: not-allowed; }
 .submit-label, .submit-arrow { position: relative; z-index: 1; }
 .submit-arrow { transition: transform 0.25s ease; }
 .submit.loading .submit-label, .submit.loading .submit-arrow { opacity: 0; }
-.submit-shine {
-  position: absolute; top: 0; left: -100%; width: 55%; height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
-  transform: skewX(-20deg);
-}
-.submit:hover:not(:disabled) .submit-shine { animation: shine 0.85s ease forwards; }
-@keyframes shine { to { left: 160%; } }
 .submit-spin {
   position: absolute; width: 20px; height: 20px;
-  border: 2.5px solid rgba(11,12,16,0.18); border-top-color: #0b0c10; border-radius: 50%;
+  border: 2.5px solid rgba(0,0,0,0.18); border-top-color: var(--surface); border-radius: 50%;
   opacity: 0; animation: seq-spin 0.7s linear infinite;
 }
 .submit.loading .submit-spin { opacity: 1; }
 @keyframes seq-spin { to { transform: rotate(360deg); } }
 
-/* ════════ Footer ════════ */
-.console-foot {
+/* ═══════════ Pie ═══════════ */
+.portal-foot {
   display: flex; align-items: center; justify-content: space-between;
-  margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border);
-  font-family: var(--font-mono); font-size: 0.62rem; color: var(--text-muted);
-  animation: fade-up 0.7s 0.6s cubic-bezier(0.16,1,0.3,1) both;
+  margin-top: 1.6rem; padding-top: 1rem; border-top: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 0.64rem; color: var(--text-muted);
 }
 .foot-pulse { display: inline-flex; align-items: center; gap: 0.4rem; }
 .foot-pulse i {
   width: 5px; height: 5px; border-radius: 50%; background: var(--success);
   box-shadow: 0 0 6px var(--success); animation: live-pulse 2s ease-in-out infinite;
 }
-.foot-ver { opacity: 0.7; letter-spacing: 0.04em; }
+@keyframes live-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.7); } }
+.foot-ver { opacity: 0.8; letter-spacing: 0.04em; }
 
-/* ════════ Access granted overlay ════════ */
+/* ═══════════ Umbral cruzado ═══════════ */
 .grant-screen {
-  position: fixed; inset: 0; z-index: 20;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.4rem;
-  background: radial-gradient(ellipse at center, rgba(20,19,15,0.97), rgba(11,12,16,0.99));
-  backdrop-filter: blur(10px);
+  position: fixed; inset: 0; z-index: 30;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.3rem;
+  background: var(--bg);
 }
-.grant-shield { width: 132px; height: 132px; filter: drop-shadow(0 0 24px rgba(212,160,74,0.5)); }
-.grant-shield-body { stroke-dasharray: 360; stroke-dashoffset: 360; animation: draw 0.7s ease forwards; }
-.grant-check { stroke-dasharray: 80; stroke-dashoffset: 80; animation: draw 0.4s 0.55s ease forwards; }
+.grant-sun { width: 128px; height: 128px; filter: drop-shadow(0 0 26px var(--sun-glow)); }
+.grant-ring { fill: none; transform-origin: center; }
+.grant-ring--in  { stroke-dasharray: 190; stroke-dashoffset: 190; animation: draw 0.7s ease forwards; }
+.grant-ring--out { opacity: 0; animation: ring-fade 0.6s 0.5s ease forwards, ring-turn 200s linear infinite; }
+.grant-check { stroke-dasharray: 60; stroke-dashoffset: 60; animation: draw 0.4s 0.6s ease forwards; }
 @keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes ring-fade { to { opacity: 1; } }
+@keyframes ring-turn { to { transform: rotate(360deg); } }
 .grant-title {
-  margin-top: 0.8rem; font-family: var(--font-display); font-weight: 800;
-  font-size: 1.5rem; letter-spacing: 0.16em; color: var(--accent-bright);
+  margin-top: 1rem; font-family: var(--font-display); font-weight: 600;
+  font-size: 1.9rem; letter-spacing: 0.04em; color: var(--text);
   opacity: 0; animation: fade-up 0.5s 0.85s ease forwards;
-  text-shadow: 0 0 28px rgba(212,160,74,0.5);
 }
 .grant-sub {
-  font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-dim); letter-spacing: 0.1em;
+  font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-dim); letter-spacing: 0.08em;
   opacity: 0; animation: fade-up 0.5s 1.05s ease forwards;
 }
+@keyframes fade-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 .grant-enter-active { transition: opacity 0.35s ease; }
 .grant-enter-from { opacity: 0; }
 .grant-leave-active { transition: opacity 0.4s ease; }
 .grant-leave-to { opacity: 0; }
 
-/* ════════ Responsive ════════ */
+/* ═══════════ Responsive ═══════════ */
 @media (max-width: 640px) {
-  .login-stage { padding: 1rem; }
-  .console { max-width: 100%; }
-  .console-body { padding: 2rem 1.5rem 1.6rem; }
-  .watermark-text { font-size: 9rem; opacity: 0.16; }
-  .watermark-sub { display: none; }
+  .gate-stage { padding: 1rem; }
+  .portal { max-width: 100%; }
+  .portal-body { padding: 2.1rem 1.6rem 1.6rem; }
 }
 
-/* ════════ Reduced motion ════════ */
+/* ═══════════ Movimiento reducido ═══════════ */
 @media (prefers-reduced-motion: reduce) {
-  .orb, .bg-grid, .radar-sweep, .radar-sweep::before, .watermark-text,
-  .console-edge, .bg-constellation circle, .brand-mark.glitch,
-  .cipher.active .cipher-lock, .foot-pulse i, .submit-shine, .status-pulse {
-    animation: none !important;
-  }
-  .console { animation: none !important; transform: none !important; }
-  .spotlight, .console-sheen { display: none; }
-  * { scroll-behavior: auto; }
+  .portal, .grant-ring--out { animation: none !important; }
+  .foot-pulse i, .submit-spin { animation: none !important; }
 }
 </style>

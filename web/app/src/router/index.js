@@ -14,19 +14,16 @@ import { useAuthStore } from '@/stores/authStore'
 const routes = [
   {
     path: '/',
-    redirect: '/hub',
+    name: 'Landing',
+    component: () => import('@/views/LandingView.vue'),
+    // Pública: es la portada de ellysia.es. Si hay sesión, muestra los
+    // accesos directos a las herramientas; si no, invita a entrar.
   },
   {
     path: '/login',
     name: 'Login',
     component: () => import('@/views/LoginView.vue'),
     meta: { guest: true },
-  },
-  {
-    path: '/hub',
-    name: 'Hub',
-    component: () => import('@/views/HubView.vue'),
-    meta: { requiresAuth: true },
   },
   {
     path: '/sentinel',
@@ -80,7 +77,7 @@ const routes = [
 
 /**
  * Instancia del router con historial HTML5 (sin # en las URLs).
- * Usa createWebHistory para rutas limpias: /hub, /sentinel, etc.
+ * Usa createWebHistory para rutas limpias: /, /sentinel, etc.
  */
 const router = createRouter({
   history: createWebHistory(),
@@ -91,7 +88,7 @@ const router = createRouter({
  * Guard de navegación global.
  *
  * - Si la ruta requiere auth y no hay sesión → redirige a /login.
- * - Si la ruta es de invitado (login) y ya hay sesión → redirige a /hub.
+ * - Si la ruta es de invitado (login) y ya hay sesión → redirige a la landing.
  * - En cualquier otro caso, deja pasar la navegación.
  */
 router.beforeEach((to) => {
@@ -99,7 +96,7 @@ router.beforeEach((to) => {
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return '/login'
   } else if (to.meta.guest && auth.isAuthenticated) {
-    return '/hub'
+    return '/'
   }
 })
 

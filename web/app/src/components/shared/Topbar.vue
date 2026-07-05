@@ -1,11 +1,11 @@
 <template>
   <nav class="topbar">
     <div class="topbar-left">
-      <router-link to="/hub" class="back-link">
+      <router-link to="/" class="back-link">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M19 12H5M12 5l-7 7 7 7"/>
         </svg>
-        Hub
+        Inicio
       </router-link>
       <span class="topbar-sep">/</span>
       <span class="topbar-title">{{ title }}</span>

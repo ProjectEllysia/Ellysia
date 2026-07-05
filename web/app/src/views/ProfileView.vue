@@ -25,7 +25,7 @@
               <div class="form-group"><label for="profile-username">Usuario</label><input id="profile-username" type="text" :value="store.profile.username" disabled class="inp inp--disabled" /></div>
             </div>
             <div class="form-actions">
-              <button type="button" class="btn btn--secondary" @click="$router.push('/hub')">Cancelar</button>
+              <button type="button" class="btn btn--secondary" @click="$router.push('/')">Cancelar</button>
               <button type="submit" class="btn btn--primary" :disabled="savingProfile">{{ savingProfile ? 'Guardando…' : 'Guardar Cambios' }}</button>
             </div>
           </form>
@@ -97,7 +97,7 @@ async function handlePasswordSubmit() {
 .profile-page { min-height: 100vh; background: var(--bg); padding-top: var(--topbar-h); position: relative; }
 .main { max-width: 600px; margin: 0 auto; padding: 1.75rem 1.1rem; position: relative; z-index: 1; }
 .profile-header { text-align: center; margin-bottom: 2rem; }
-.profile-avatar { width: 72px; height: 72px; border-radius: 50%; background: var(--accent); color: #0b0c10; font-size: 1.6rem; font-weight: 700; font-family: var(--font-display); display: flex; align-items: center; justify-content: center; margin: 0 auto 0.75rem; }
+.profile-avatar { width: 72px; height: 72px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 1.6rem; font-weight: 700; font-family: var(--font-display); display: flex; align-items: center; justify-content: center; margin: 0 auto 0.75rem; }
 .profile-display-name { font-size: 1.25rem; font-weight: 700; color: var(--text); margin: 0 0 0.2rem; font-family: var(--font-display); }
 .profile-username { font-size: 0.82rem; color: var(--text-muted); margin: 0; }
 .profile-section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.1rem; }

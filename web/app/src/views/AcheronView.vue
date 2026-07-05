@@ -668,7 +668,7 @@ onBeforeUnmount(() => {
 .unlock-card {
   width: 100%;
   max-width: 420px;
-  background: rgba(17, 18, 24, 0.7);
+  background: var(--surface);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   border: 1px solid rgba(160, 122, 192, 0.22);
@@ -843,7 +843,7 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
 }
 .entry-card {
-  background: rgba(17, 18, 24, 0.6);
+  background: var(--surface);
   border: 1px solid var(--border); border-radius: 12px;
   padding: 1.1rem 1.2rem; transition: border-color 0.2s ease;
 }
