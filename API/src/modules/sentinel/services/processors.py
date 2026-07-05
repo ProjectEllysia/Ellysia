@@ -58,16 +58,9 @@ class NmapResultProcessor(ScanResultProcessor):
             'mac_address': parsed['host']['addresses']['mac']
         }
 
-        ports_data = []
-        for port_protocol, state, reason, product, version, given_use in parsed['ports']:
-            ports_data.append({
-                'protocol': port_protocol,
-                'state': state,
-                'reason': reason,
-                'product': product,
-                'version': version,
-                'given_use': given_use
-            })
+        # parsed['ports'] are already dicts (see _parse_nmap_structure); the cpe
+        # rides along so it reaches persistence instead of being dropped here.
+        ports_data = [dict(port) for port in parsed['ports']]
 
         return host_data, ports_data
 
@@ -116,15 +109,15 @@ class NmapResultProcessor(ScanResultProcessor):
         tcp_ports = scan_data.get("tcp", {})
         ports = []
         for port_number, port_info in tcp_ports.items():
-            port_tuple = (
-                f"{port_number}/tcp",
-                port_info.get("state", "unknown"),
-                port_info.get("reason", ""),
-                port_info.get("product", ""),
-                port_info.get("version", ""),
-                port_info.get("name", "")
-            )
-            ports.append(port_tuple)
+            ports.append({
+                "protocol":  f"{port_number}/tcp",
+                "state":     port_info.get("state", "unknown"),
+                "reason":    port_info.get("reason", ""),
+                "product":   port_info.get("product", ""),
+                "version":   port_info.get("version", ""),
+                "given_use": port_info.get("name", ""),
+                "cpe":       port_info.get("cpe", ""),
+            })
 
         return {
             'command': result.get("nmap", {}).get("command_line", ""),

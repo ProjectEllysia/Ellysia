@@ -48,6 +48,7 @@ from .repositories import (
     ProgramedScanRepository,
     TracerouteRepository)
 from .model import (
+    EllysiaScan,
     NiktoScan,
     NmapScan,
     OpenVASScan,
@@ -58,6 +59,7 @@ from .model import (
     ScanType,
     SentinelDocument,
 )
+from .ellysia import EllysiaEngine, services_from_open_ports
 from .services import (
     NiktoResultProcessor,
     NmapResultProcessor,
@@ -1794,6 +1796,174 @@ class OpenVASScanManager(ScanManager):
     def append_csv_data(self, data: dict, scan: Scan, task: "_Task") -> None:
         data["scan_config"] = getattr(scan, "scan_config_name", "")
         data["skip_normalize"] = getattr(scan, "skip_normalize", False)
+
+
+# =============================================================================
+# ELLYSIA ENGINE
+# =============================================================================
+
+@ScanManager.register(ScanType.ELLYSIA)
+class EllysiaEngineManager(ScanManager):
+    """
+    Manager for Ellysia's own vulnerability engine.
+
+    Unlike the other scanners it launches no external subprocess: in the current
+    phase (Fase 0) it takes the services discovered by a previous Nmap scan
+    (``source_scan_id``) and produces normalized :class:`Finding` rows through the
+    :class:`EllysiaEngine`. Because that work is a fast, in-memory pass (no
+    network), it does not go through the base ``_execute_scan`` (built for
+    long-running subprocess tasks); the body lives in ``_run_ellysia`` and the
+    worker entry point ``execute_ellysia_scan`` just wraps it in ``job_context``.
+
+    Example:
+    >>> manager = EllysiaEngineManager()
+    >>> scan_id = manager.run_scan(source_scan_id=42, user_id=1)
+    """
+
+    SCAN_TYPE = ScanType.ELLYSIA
+    _MODEL = EllysiaScan
+    _strategy_class = None  # ponytail: no PDF for Ellysia yet; wire a strategy when reports land
+
+    def __init__(self, task_queue: ITaskQueue | None = None) -> None:
+        super().__init__(task_queue)
+        self._engine = EllysiaEngine()
+
+    def run_scan(self, source_scan_id: int, user_id: int, timeout: int = 120) -> int:  # pylint: disable=arguments-differ
+        """
+        Start an Ellysia engine scan over a previous Nmap scan's services.
+
+        Ownership and the source scan's type are validated by the caller
+        (the endpoint) before this runs.
+
+        Args:
+            source_scan_id: The Nmap scan whose discovered services to analyse.
+            user_id:        Owner user primary key.
+            timeout:        Job timeout margin in seconds.
+
+        Returns:
+            Primary key of the created EllysiaScan record.
+        """
+        with UnitOfWork() as uow:
+            source = ScanRepository(uow).get_by_id(source_scan_id)
+            if not source:
+                raise ScanNotFoundError(source_scan_id)
+            target = source.target
+
+        scan = self._create_scan_record(
+            target=target,
+            user_id=user_id,
+            source_scan_id=source_scan_id,
+        )
+        scan_id = scan.id
+
+        self._tq.submit(
+            func=EllysiaEngineManager.execute_ellysia_scan,
+            args=(scan_id, source_scan_id),
+            name=f"EllysiaScan-{scan_id}",
+            category=self.TASK_CATEGORY,
+            external_id=self.external_id_for(scan_id),
+            timeout=timeout + self._scan_timeout_margin,
+        )
+
+        logger.info(f"Escaneo Ellysia {scan_id} iniciado (fuente: Nmap {source_scan_id})")
+        return scan_id  # type: ignore
+
+    @staticmethod
+    def execute_ellysia_scan(scan_id: int, source_scan_id: int) -> None:
+        """Entry point submitted to the TaskQueue. Runs the engine in the worker."""
+        with job_context():
+            EllysiaEngineManager()._run_ellysia(scan_id, source_scan_id)
+
+    def _run_ellysia(self, scan_id: int, source_scan_id: int) -> None:
+        """Read the source scan's services, produce findings, and persist them.
+
+        This is the testable body of the scan (the ``execute_* seam → _run_*``
+        pattern). Runs synchronously; safe to call directly in tests without a
+        worker.
+        """
+        try:
+            self.update_scan_status(scan_id, ScanStatus.RUNNING)
+
+            with UnitOfWork() as uow:
+                repo = ScanRepository(uow)
+                open_ports = repo.get_open_ports_for_scan(source_scan_id)
+                source = repo.get_by_id(source_scan_id)
+                source_host_id = source.host_id if source else None
+                services = services_from_open_ports(open_ports)
+
+            findings_data = self._engine.analyze(services)
+            for finding in findings_data:
+                finding["host_id"] = source_host_id
+
+            with UnitOfWork() as uow:
+                repo = ScanRepository(uow)
+                scan = repo.get_by_id(scan_id)
+                scan.host_id = source_host_id
+                self._persist_scan_results(uow, scan, findings_data)
+                scan.status = ScanStatus.FINISHED.value  # type: ignore
+                scan.finished_at = datetime.now()  # type: ignore
+
+            logger.info(f"Escaneo Ellysia {scan_id} completado: {len(findings_data)} hallazgos")
+
+        except Exception as e:
+            logger.error(f"Error en escaneo Ellysia {scan_id}: {e}", exc_info=True)
+            self.update_scan_status(scan_id, ScanStatus.FAILED)
+
+    def _create_scan_record(self, target: str, user_id: int, source_scan_id: int) -> EllysiaScan:  # pylint: disable=arguments-differ
+        """Create and persist an EllysiaScan row linked to its source Nmap scan."""
+        scan = EllysiaScan(
+            target=target,
+            user_id=user_id,
+            started_at=datetime.now(),
+            source_scan_id=source_scan_id,
+        )
+        with UnitOfWork() as uow:
+            ScanRepository(uow).save(scan)
+        return scan
+
+    def _persist_scan_results(self, uow, scan, domain_data) -> None:
+        """Persist the engine's findings (``domain_data`` is a list of dicts)."""
+        ScanRepository(uow).persist_findings(scan, domain_data)
+
+    def format_scan(self, scan_id: int) -> dict:
+        scan = self.get_scan_by_id(scan_id)
+        if not scan:
+            raise ScanNotFoundError(scan_id)
+
+        session = get_db_session()
+        findings = ScanRepository(session=session).get_findings_by_scan(scan_id)
+
+        result = {
+            "id": scan.id,
+            "scanType": "ellysia",
+            "target": scan.target,
+            "sourceScanId": scan.source_scan_id,
+            "status": getattr(scan, "status", "unknown"),
+            "startedAt": scan.started_at.isoformat(),
+            "finishedAt": scan.finished_at.isoformat() if scan.finished_at else None,  # type: ignore
+            "findings": [
+                {
+                    "id": f.id,
+                    "title": f.title,
+                    "category": f.category,
+                    "port": f.port,
+                    "service": f.service,
+                    "cpe": f.cpe,
+                    "qod": f.qod,
+                    "confirmed": f.confirmed,
+                    "source": f.source,
+                    "state": f.state,
+                }
+                for f in findings
+            ],
+            "totalFindings": len(findings),
+        }
+        self._append_document_info(scan, result)
+        return result
+
+    def append_csv_data(self, data: dict, scan: Scan, task: "_Task") -> None:
+        """No-op: Ellysia does not use the base CSV-logging execution path."""
+        pass
 
 
 # =============================================================================

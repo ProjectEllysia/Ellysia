@@ -100,10 +100,12 @@ class ScanType(str, Enum):
         NMAP:    Nmap network and port scanner.
         NIKTO:   Nikto web server vulnerability scanner.
         OPENVAS: OpenVAS comprehensive vulnerability manager.
+        ELLYSIA: Ellysia's own vulnerability engine (native detection).
     """
     NMAP    = "nmap"
     NIKTO   = "nikto"
     OPENVAS = "openvas"
+    ELLYSIA = "ellysia"
 
 
 # =========================================================================
@@ -464,6 +466,11 @@ class OpenPort(Base):
         product: Detected service product name.
         version: Detected service version.
         given_use: Nmap service detection result.
+        cpe: Common Platform Enumeration string Nmap emits with ``-sV`` when it
+            recognises the service (2.2 URI form, e.g.
+            ``cpe:/a:apache:http_server:2.4.49``). Nullable: many services do
+            not yield a CPE. It is the entry point the Ellysia engine reads to
+            correlate versions to CVEs (see the vuln-engine roadmap).
 
     Relationships:
         port: Port entity.
@@ -477,6 +484,7 @@ class OpenPort(Base):
     product      = Column(String(255))
     version      = Column(String(64))
     given_use    = Column(String(255))
+    cpe          = Column(String(255), nullable=True)
 
     port     = relationship("Port",     back_populates="open_port_entries")
     nmap_scan = relationship("NmapScan", back_populates="open_ports_relation")
@@ -719,6 +727,102 @@ class OpenVASScanResult(Base):
     openvas_scan  = relationship("OpenVASScan",          back_populates="results")
     vulnerability = relationship("OpenVASVulnerability",  back_populates="scan_results")
     host          = relationship("Host")
+
+
+# =========================================================================
+# ELLYSIA ENGINE MODELS
+# =========================================================================
+
+class EllysiaScan(Scan):
+    """Scan produced by Ellysia's own vulnerability engine.
+
+    In the current phase (Fase 0) Ellysia has no network transport of its own,
+    so a scan takes its services from a previous Nmap scan of the same target
+    (``source_scan_id``) and produces normalized :class:`Finding` rows. When the
+    engine gains its own transport (Fase T) ``source_scan_id`` becomes optional.
+
+    Attributes:
+        id: Primary key (foreign key to Scan.id).
+        source_scan_id: The Nmap Scan whose discovered services were analysed.
+            Nullable so a future self-discovering scan can leave it empty.
+    """
+    __tablename__ = "EllysiaScan"
+
+    id             = Column(Integer, ForeignKey("Scan.id"), primary_key=True)
+    source_scan_id = Column(Integer, ForeignKey("Scan.id"), nullable=True)
+
+    __mapper_args__ = {
+        "polymorphic_identity": ScanType.ELLYSIA,
+        "inherit_condition":    id == Scan.id,
+    }
+
+    def __repr__(self):
+        return f"<EllysiaScan(id={self.id}, target='{self.target}', source={self.source_scan_id})>"
+
+
+class Finding(Base):
+    """Normalized security finding, independent of the scanner that produced it.
+
+    The unified finding model that lets Ellysia, Nikto and OpenVAS results live
+    in one table and be correlated (dedup by ``dedup_key``). See the vuln-engine
+    roadmap (§3.3) for the full design. In Fase 0 only informational
+    "open port" findings are written (``category="open_port"``, ``qod=30``); the
+    detection columns (``cve_ids``, ``cvss_score``…) stay empty until later
+    phases fill them.
+
+    Attributes:
+        id: Primary key.
+        scan_id: The Scan that produced this finding (any scan type).
+        host_id: Host the finding refers to (nullable).
+        title: Human-readable one-line description.
+        category: Finding family ("open_port" | "outdated_software" | "tls" ...).
+        port / service / cpe: The affected service.
+        cve_ids / cvss_score / cvss_vector / epss_score / in_kev /
+            exploit_maturity: Vulnerability correlation (filled from Fase 1 on).
+        source: Which scanner produced it ("ellysia" | "nikto" | "openvas" | "nmap").
+        check_id: Which own check produced it ("ellysia:git-config-exposure@3").
+        feed_version: KB/checks version used (reproducibility).
+        dedup_key: hash(host, port, cpe|check_id, cve) for multi-source merge.
+        qod: Quality of Detection 0-100.
+        confirmed: Actively confirmed vs version-only deduction.
+        first_seen_at / last_seen_at / state: Lifecycle (open|fixed|regressed|accepted).
+    """
+    __tablename__ = "Finding"
+
+    id       = Column(Integer, primary_key=True, autoincrement=True)
+    scan_id  = Column(Integer, ForeignKey("Scan.id", ondelete="CASCADE"), nullable=False, index=True)
+    host_id  = Column(Integer, ForeignKey("Host.id"), nullable=True, index=True)
+
+    # What was found
+    title    = Column(Text, nullable=False)
+    category = Column(String(64))
+    port     = Column(Integer)
+    service  = Column(String(128))
+    cpe      = Column(String(255), index=True)
+
+    # Vulnerability correlation (filled from Fase 1 onwards)
+    cve_ids          = Column(JSONB)
+    cvss_score       = Column(Float)
+    cvss_vector      = Column(String(255))
+    epss_score       = Column(Float)
+    in_kev           = Column(Boolean, default=False)
+    exploit_maturity = Column(String(16))   # none|poc|functional|weaponized|in_the_wild
+
+    # Quality / provenance
+    source       = Column(String(32), index=True)
+    check_id     = Column(String(128))
+    feed_version = Column(String(32))
+    dedup_key    = Column(String(64), index=True)
+    qod          = Column(Integer)
+    confirmed    = Column(Boolean, default=False)
+
+    # Lifecycle
+    first_seen_at = Column(DateTime, default=datetime.utcnow)
+    last_seen_at  = Column(DateTime, default=datetime.utcnow)
+    state         = Column(String(20), default="open")
+
+    def __repr__(self):
+        return f"<Finding(id={self.id}, scan_id={self.scan_id}, category='{self.category}', title='{self.title[:40]}')>"
 
 
 # =========================================================================

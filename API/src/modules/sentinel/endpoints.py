@@ -25,6 +25,7 @@ from .managers import (
     NmapScanManager,
     NiktoScanManager,
     OpenVASScanManager,
+    EllysiaEngineManager,
     ProgramedScanManager,
     SentinelReportManager,
     ScanFolderManager,
@@ -51,6 +52,7 @@ from .schemas import (
     NmapScanRequestSchema,
     NiktoScanRequestSchema,
     OpenVASScanRequestSchema,
+    EllysiaScanRequestSchema,
     ResultsQuerySchema,
     GeneratePdfRequestSchema,
     DocumentStatusQuerySchema,
@@ -301,6 +303,47 @@ def start_openvas_scan(data):
     }
 
 
+@sentinel_blp.post("/ellysia")
+@sentinel_blp.arguments(EllysiaScanRequestSchema)
+@sentinel_blp.response(201, ScanResponseSchema, description="Ellysia engine scan started")
+@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Source scan not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.SENTINEL_CREATE])
+@limiter.limit("20 per hour; 100 per day")
+@handle_exceptions(default_exception=ScanExecutionError, logger=logger)
+def start_ellysia_scan(data):
+    """Lanzar un escaneo Ellysia sobre los servicios de un Nmap previo"""
+    source_scan_id = data["sourceScanId"]
+    timeout = data["timeout"]
+    user = get_current_user()
+
+    # El escaneo fuente debe existir, ser del usuario y ser un Nmap (la fase
+    # actual de Ellysia analiza los servicios que Nmap ya descubrió).
+    source_scan = ScanManager.assert_scan_ownership(source_scan_id, user.id)
+    if source_scan.scan_type != ScanType.NMAP.value:
+        raise ValidationError(
+            field="sourceScanId",
+            message="El escaneo fuente debe ser un escaneo Nmap",
+            value=source_scan_id,
+        )
+
+    scan_id = EllysiaEngineManager().run_scan(
+        source_scan_id=source_scan_id,
+        user_id=user.id,
+        timeout=timeout,
+    )
+    logger.info(f"Ellysia lanzado: ID={scan_id} fuente={source_scan_id} user={user.username}")
+    return {
+        "message": "Escaneo Ellysia iniciado correctamente",
+        "scanId": scan_id,
+        "scanType": "ellysia",
+        "user": user.username,
+    }
+
+
 @sentinel_blp.get("/results")
 @sentinel_blp.arguments(ResultsQuerySchema, location="query")
 @sentinel_blp.response(200, ResultsResponseSchema, description="Scan results")
@@ -323,6 +366,7 @@ def retrieve_all_scans(args):
         "nmap": NmapScanManager(),
         "nikto": NiktoScanManager(),
         "openvas": OpenVASScanManager(),
+        "ellysia": EllysiaEngineManager(),
     }
 
     if scan_type != "all":

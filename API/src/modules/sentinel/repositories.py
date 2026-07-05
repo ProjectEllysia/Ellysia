@@ -31,6 +31,8 @@ from sqlalchemy.orm import Session, joinedload
 from src.modules.infrastructure import BaseRepository, UnitOfWork
 
 from .model import (
+    EllysiaScan,
+    Finding,
     Host,
     NiktoIncident,
     NiktoScan,
@@ -199,7 +201,7 @@ class ScanRepository(BaseRepository[Scan]):
             .group_by(Scan.scan_type)
             .all()
         )
-        counts = {"nmap": 0, "nikto": 0, "openvas": 0}
+        counts = {"nmap": 0, "nikto": 0, "openvas": 0, "ellysia": 0}
         for scan_type_val, count in results:
             key = scan_type_val.value if hasattr(scan_type_val, "value") else str(scan_type_val)
             if key in counts:
@@ -463,6 +465,7 @@ class ScanRepository(BaseRepository[Scan]):
                 product      = port_info["product"],
                 version      = port_info["version"],
                 given_use    = port_info["given_use"],
+                cpe          = port_info.get("cpe") or None,
             )
             self._session.add(open_port)
 
@@ -489,6 +492,55 @@ class ScanRepository(BaseRepository[Scan]):
                 host_id          = host.id,
             )
             self._session.add(scan_result)
+
+    # =========================================================================
+    # ELLYSIA ENGINE
+    # =========================================================================
+
+    def get_ellysia_rich(self, scan_id: int) -> Optional[EllysiaScan]:
+        """[Background thread] Retrieve an EllysiaScan by id.
+
+        No relationships are eager-loaded because Findings are queried
+        separately via ``get_findings_by_scan`` (they are not modelled as an
+        ORM relationship on the scan).
+        """
+        return (
+            self._session.query(EllysiaScan)
+            .filter(EllysiaScan.id == scan_id)
+            .one_or_none()
+        )
+
+    def get_open_ports_for_scan(self, nmap_scan_id: int) -> List[OpenPort]:
+        """Return the OpenPort rows of an Nmap scan (the services Ellysia reads).
+
+        Eager-loads the related Port so the caller can read ``protocol`` after
+        the session closes (Ellysia runs in a background worker).
+        """
+        return (
+            self._session.query(OpenPort)
+            .filter(OpenPort.nmap_scan_id == nmap_scan_id)
+            .options(joinedload(OpenPort.port))
+            .all()
+        )
+
+    def persist_findings(self, scan: Scan, findings_data: List[dict]) -> None:
+        """Persist a batch of normalized Finding rows for a scan.
+
+        Args:
+            scan: The scan that produced the findings (its id is used as scan_id).
+            findings_data: List of dicts with Finding column values.
+        """
+        for data in findings_data:
+            self._session.add(Finding(scan_id=scan.id, **data))
+
+    def get_findings_by_scan(self, scan_id: int) -> List[Finding]:
+        """Return all findings of a scan, newest first."""
+        return (
+            self._session.query(Finding)
+            .filter(Finding.scan_id == scan_id)
+            .order_by(Finding.id.asc())
+            .all()
+        )
 
 
 class SentinelReportRepository(BaseRepository[SentinelDocument]):

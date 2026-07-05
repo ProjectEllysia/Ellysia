@@ -21,8 +21,13 @@ class OpenVASScanRequestSchema(Schema):
     scanConfig = fields.String(load_default="full_fast", validate=validate.OneOf(["full_fast", "full_deep", "full_ultimate"]))
 
 
+class EllysiaScanRequestSchema(Schema):
+    sourceScanId = fields.Integer(required=True)
+    timeout = fields.Integer(load_default=120, validate=validate.Range(min=1))
+
+
 class ResultsQuerySchema(Schema):
-    type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "openvas", "all"]))
+    type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "openvas", "ellysia", "all"]))
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))
     per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
 
