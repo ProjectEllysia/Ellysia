@@ -58,6 +58,13 @@
   --lake-2:       #0b0f1a;
   --lake-shine:   rgba(240,205,130,0.22);
 
+  /* ornamentos de la escena elísea */
+  --star:         rgba(248,226,180,0.90);
+  --star-dim:     rgba(248,226,180,0.25);
+  --mote:         rgba(248,226,180,0.55);
+  --mist:         rgba(240,205,130,0.16);
+  --temple:       var(--accent);
+
   /* tipografía */
   --font-epic:    'Cinzel', 'Times New Roman', serif;          /* inscripciones: wordmark, héroes */
   --font-display: 'Cormorant Garamond', Georgia, serif;        /* títulos de vistas y tarjetas */
@@ -111,6 +118,14 @@
   --lake-1:       #8fb3ca;
   --lake-2:       #4f7ba0;
   --lake-shine:   rgba(255,240,200,0.70);
+
+  /* ornamentos de la escena elísea — en amanecer, estrellas ocultas;
+     motas y niebla más tenues sobre cielo claro. */
+  --star:         rgba(255,246,220,0.90);
+  --star-dim:     rgba(255,246,220,0.25);
+  --mote:         rgba(255,246,220,0.40);
+  --mist:         rgba(255,240,200,0.22);
+  --temple:       var(--accent);
 }
 
 /* Acentos por módulo — cada herramienta conserva su color, recalibrado
