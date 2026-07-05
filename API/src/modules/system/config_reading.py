@@ -530,6 +530,15 @@ def get_kb_nvd_api_key():
     return os.environ.get("NVD_API_KEY") or (_cfg("sentinel.kb.nvdApiKey", "") or None)
 
 
+# --- Ellysia active detection checks (Fase R) ---
+
+@_lazy_load
+def is_ellysia_active_checks_enabled() -> bool:
+    # Opt-in: active checks touch the target and await the authorized-targets
+    # register (roadmap §6), so they are off unless explicitly enabled.
+    return _as_bool(_cfg("sentinel.ellysia.activeChecks", False))
+
+
 @_lazy_load
 def get_sentinel_default_folder_name() -> str:
     """Devuelve el nombre mostrado para la carpeta virtual de escaneos sueltos."""

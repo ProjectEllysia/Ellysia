@@ -1884,9 +1884,8 @@ class EllysiaEngineManager(ScanManager):
         try:
             self.update_scan_status(scan_id, ScanStatus.RUNNING)
 
-            # One UnitOfWork: the KB lookups query the same session while the
-            # engine matches, then the findings are persisted. No network here
-            # (the KB is local), so holding one transaction is fine.
+            # Phase 1 — read services and run version/informational detection with
+            # the KB in-session (no network, so one transaction is fine).
             with UnitOfWork() as uow:
                 scan_repo = ScanRepository(uow)
                 kb_repo = KbRepository(uow)
@@ -1894,6 +1893,7 @@ class EllysiaEngineManager(ScanManager):
                 open_ports = scan_repo.get_open_ports_for_scan(source_scan_id)
                 source = scan_repo.get_by_id(source_scan_id)
                 source_host_id = source.host_id if source else None
+                source_target = source.target if source else None
                 services = services_from_open_ports(open_ports)
 
                 engine = EllysiaEngine(
@@ -1902,9 +1902,18 @@ class EllysiaEngineManager(ScanManager):
                     epss_lookup=lambda cve_id: getattr(kb_repo.get_epss(cve_id), "score", None),
                 )
                 findings_data = engine.analyze(services)
-                for finding in findings_data:
-                    finding["host_id"] = source_host_id
 
+            # Phase 2 — active checks over the network, outside any transaction.
+            # Opt-in (they touch the target; see roadmap §6 authorized targets).
+            if source_target and CR.is_ellysia_active_checks_enabled():
+                findings_data.extend(self._run_active_checks(source_target, services))
+
+            for finding in findings_data:
+                finding["host_id"] = source_host_id
+
+            # Phase 3 — persist everything.
+            with UnitOfWork() as uow:
+                scan_repo = ScanRepository(uow)
                 scan = scan_repo.get_by_id(scan_id)
                 scan.host_id = source_host_id
                 self._persist_scan_results(uow, scan, findings_data)
@@ -1916,6 +1925,25 @@ class EllysiaEngineManager(ScanManager):
         except Exception as e:
             logger.error(f"Error en escaneo Ellysia {scan_id}: {e}", exc_info=True)
             self.update_scan_status(scan_id, ScanStatus.FAILED)
+
+    def _run_active_checks(self, target: str, services) -> list:
+        """Run the declarative check runtime against the target's HTTP services.
+
+        Best-effort: a runtime failure (unreachable host, etc.) yields no active
+        findings rather than failing the whole scan. Safe mode only.
+        """
+        from .ellysia import load_checks, CheckRuntime, HttpProbe, HostRateLimiter
+        try:
+            runtime = CheckRuntime(
+                load_checks(),
+                HttpProbe().fetch,
+                mode="safe",
+                rate_limiter=HostRateLimiter(),
+            )
+            return runtime.run(target, services)
+        except Exception:
+            logger.exception("Ellysia active checks failed for %s", target)
+            return []
 
     def _create_scan_record(self, target: str, user_id: int, source_scan_id: int) -> EllysiaScan:  # pylint: disable=arguments-differ
         """Create and persist an EllysiaScan row linked to its source Nmap scan."""

@@ -1173,6 +1173,9 @@
         "epss": "https://epss.cyentia.com/epss_scores-current.csv.gz"
       }
     },
+    "ellysia": {
+      "activeChecks": false
+    },
     "nikto": {
       "colorPalette": {
         "black": "#4b2500",

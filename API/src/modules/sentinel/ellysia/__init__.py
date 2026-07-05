@@ -27,6 +27,16 @@ from .kb import (
     fetch_epss,
     iter_nvd_pages,
 )
+from .checks import (
+    load_checks,
+    CheckRuntime,
+    HttpProbe,
+    HostRateLimiter,
+    Response,
+    is_http_service,
+    CHECKS_FEED_VERSION,
+    QOD_CONFIRMED,
+)
 
 __all__ = [
     "EllysiaEngine",
@@ -43,4 +53,12 @@ __all__ = [
     "fetch_kev",
     "fetch_epss",
     "iter_nvd_pages",
+    "load_checks",
+    "CheckRuntime",
+    "HttpProbe",
+    "HostRateLimiter",
+    "Response",
+    "is_http_service",
+    "CHECKS_FEED_VERSION",
+    "QOD_CONFIRMED",
 ]

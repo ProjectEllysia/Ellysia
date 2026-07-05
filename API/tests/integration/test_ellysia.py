@@ -159,6 +159,38 @@ def test_ellysia_version_match_produces_cve_finding(app, admin_user):
     assert sum(1 for f in findings if f.category == "open_port") == 2
 
 
+def test_ellysia_active_check_persists_confirmed_finding(app, admin_user, monkeypatch):
+    # Enable active checks and stub the HTTP probe so no real network is hit.
+    import src.modules.system.config_reading as CR
+    from src.modules.sentinel.ellysia import checks as checks_mod
+    from src.modules.sentinel.ellysia.checks import Response
+
+    monkeypatch.setattr(CR, "is_ellysia_active_checks_enabled", lambda: True)
+
+    def fake_fetch(self, host, port, method, path):
+        if path == "/.git/config":
+            return Response(200, "[core]\n\trepositoryformatversion = 0\n", {})
+        return Response(404, "", {})
+    monkeypatch.setattr(checks_mod.HttpProbe, "fetch", fake_fetch)
+
+    nmap_id = _seed_nmap_scan(app, admin_user.id)  # http service on port 80
+    with app.app_context():
+        mgr = EllysiaEngineManager()
+        escan = mgr._create_scan_record(
+            target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id,
+        )
+        mgr._run_ellysia(escan.id, nmap_id)
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    active = [f for f in findings if f.check_id == "ellysia:git-config-exposure@1"]
+    assert len(active) == 1
+    assert active[0].qod == 99
+    assert active[0].confirmed is True
+    assert active[0].category == "exposed_path"
+
+
 def test_ellysia_scan_surfaces_in_results_endpoint(client, app, admin_user, auth_headers):
     nmap_id = _seed_nmap_scan(app, admin_user.id)
     with app.app_context():
