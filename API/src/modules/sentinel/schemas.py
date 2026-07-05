@@ -22,8 +22,17 @@ class OpenVASScanRequestSchema(Schema):
 
 
 class EllysiaScanRequestSchema(Schema):
-    sourceScanId = fields.Integer(required=True)
+    # Two modes: analyse a prior Nmap scan (sourceScanId) OR self-discover a
+    # target's ports (target [+ optional ports]). Exactly one must be provided.
+    sourceScanId = fields.Integer()
+    target = fields.String()
+    ports = fields.String()
     timeout = fields.Integer(load_default=120, validate=validate.Range(min=1))
+
+    @validates_schema
+    def _require_one_mode(self, data, **kwargs):
+        if not data.get("sourceScanId") and not data.get("target"):
+            raise ValidationError("sourceScanId or target is required")
 
 
 class FindingStateRequestSchema(Schema):

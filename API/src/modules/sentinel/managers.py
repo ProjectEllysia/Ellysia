@@ -63,6 +63,7 @@ from .model import (
 from .ellysia import (
     EllysiaEngine,
     services_from_open_ports,
+    services_from_discovered_ports,
     compute_dedup_key,
     merge_findings,
     apply_lifecycle,
@@ -1870,54 +1871,60 @@ class EllysiaEngineManager(ScanManager):
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         super().__init__(task_queue)
 
-    def run_scan(self, source_scan_id: int, user_id: int, timeout: int = 120) -> int:  # pylint: disable=arguments-differ
+    def run_scan(self, user_id: int, source_scan_id: Optional[int] = None,  # pylint: disable=arguments-differ
+                 target: Optional[str] = None, discover_ports: Optional[list] = None,
+                 timeout: int = 120) -> int:
         """
-        Start an Ellysia engine scan over a previous Nmap scan's services.
+        Start an Ellysia engine scan in one of two modes.
 
-        Ownership and the source scan's type are validated by the caller
-        (the endpoint) before this runs.
-
-        Args:
-            source_scan_id: The Nmap scan whose discovered services to analyse.
-            user_id:        Owner user primary key.
-            timeout:        Job timeout margin in seconds.
+        - **Over a prior Nmap scan** (``source_scan_id``): analyse the services
+          that scan already discovered. Ownership/type validated by the caller.
+        - **Self-discovery** (``target``, optional ``discover_ports``): Ellysia
+          discovers the open ports itself with its own connect scan (Fase T),
+          no Nmap needed. The caller validates the target (reject private, etc.).
 
         Returns:
             Primary key of the created EllysiaScan record.
         """
-        with UnitOfWork() as uow:
-            source = ScanRepository(uow).get_by_id(source_scan_id)
-            if not source:
-                raise ScanNotFoundError(source_scan_id)
-            target = source.target
+        if source_scan_id is not None:
+            with UnitOfWork() as uow:
+                source = ScanRepository(uow).get_by_id(source_scan_id)
+                if not source:
+                    raise ScanNotFoundError(source_scan_id)
+                scan_target = source.target
+        elif target is not None:
+            scan_target = target
+        else:
+            raise ValueError("run_scan requires source_scan_id or target")
 
         scan = self._create_scan_record(
-            target=target,
-            user_id=user_id,
-            source_scan_id=source_scan_id,
+            target=scan_target, user_id=user_id, source_scan_id=source_scan_id,
         )
         scan_id = scan.id
 
         self._tq.submit(
             func=EllysiaEngineManager.execute_ellysia_scan,
-            args=(scan_id, source_scan_id),
+            args=(scan_id, source_scan_id, discover_ports),
             name=f"EllysiaScan-{scan_id}",
             category=self.TASK_CATEGORY,
             external_id=self.external_id_for(scan_id),
             timeout=timeout + self._scan_timeout_margin,
         )
 
-        logger.info(f"Escaneo Ellysia {scan_id} iniciado (fuente: Nmap {source_scan_id})")
+        mode = f"fuente Nmap {source_scan_id}" if source_scan_id else "descubrimiento propio"
+        logger.info(f"Escaneo Ellysia {scan_id} iniciado ({mode})")
         return scan_id  # type: ignore
 
     @staticmethod
-    def execute_ellysia_scan(scan_id: int, source_scan_id: int) -> None:
+    def execute_ellysia_scan(scan_id: int, source_scan_id: Optional[int] = None,
+                             discover_ports: Optional[list] = None) -> None:
         """Entry point submitted to the TaskQueue. Runs the engine in the worker."""
         with job_context():
-            EllysiaEngineManager()._run_ellysia(scan_id, source_scan_id)
+            EllysiaEngineManager()._run_ellysia(scan_id, source_scan_id, discover_ports)
 
-    def _run_ellysia(self, scan_id: int, source_scan_id: int) -> None:
-        """Read the source scan's services, produce findings, and persist them.
+    def _run_ellysia(self, scan_id: int, source_scan_id: Optional[int] = None,
+                     discover_ports: Optional[list] = None) -> None:
+        """Resolve services (from Nmap or own discovery), detect, and persist.
 
         This is the testable body of the scan (the ``execute_* seam → _run_*``
         pattern). Runs synchronously; safe to call directly in tests without a
@@ -1926,20 +1933,35 @@ class EllysiaEngineManager(ScanManager):
         try:
             self.update_scan_status(scan_id, ScanStatus.RUNNING)
 
-            # Phase 1 — read services, run version/informational detection with
-            # the KB in-session, and load the previous scan for lifecycle.
+            # Read the scan's own target + owner once (both modes need them).
+            with UnitOfWork() as uow:
+                ellysia_scan = ScanRepository(uow).get_by_id(scan_id)
+                scan_target = ellysia_scan.target if ellysia_scan else None
+                user_id = ellysia_scan.user_id if ellysia_scan else None
+
+            # Phase 0 — self-discovery (network) happens outside any transaction.
+            discovered_ports = None
+            if source_scan_id is None and scan_target:
+                discovered_ports = self._discover_ports(scan_target, discover_ports)
+
+            # Phase 1 — resolve services, then version/informational detection
+            # with the KB in-session, and load the previous scan for lifecycle.
             with UnitOfWork() as uow:
                 scan_repo = ScanRepository(uow)
                 kb_repo = KbRepository(uow)
 
-                open_ports = scan_repo.get_open_ports_for_scan(source_scan_id)
-                source = scan_repo.get_by_id(source_scan_id)
-                source_host_id = source.host_id if source else None
-                source_target = source.target if source else None
-                services = services_from_open_ports(open_ports)
+                if source_scan_id is not None:
+                    open_ports = scan_repo.get_open_ports_for_scan(source_scan_id)
+                    source = scan_repo.get_by_id(source_scan_id)
+                    source_host_id = source.host_id if source else None
+                    source_target = source.target if source else scan_target
+                    services = services_from_open_ports(open_ports)
+                else:
+                    source_target = scan_target
+                    host = scan_repo.get_or_create_host(hostname=scan_target, ip_address=scan_target) if scan_target else None
+                    source_host_id = host.id if host else None
+                    services = services_from_discovered_ports(discovered_ports or [])
 
-                ellysia_scan = scan_repo.get_by_id(scan_id)
-                user_id = ellysia_scan.user_id if ellysia_scan else None
                 previous_map = self._previous_findings_map(scan_repo, user_id, source_target, scan_id)
 
                 engine = EllysiaEngine(
@@ -1979,6 +2001,19 @@ class EllysiaEngineManager(ScanManager):
         except Exception as e:
             logger.error(f"Error en escaneo Ellysia {scan_id}: {e}", exc_info=True)
             self.update_scan_status(scan_id, ScanStatus.FAILED)
+
+    def _discover_ports(self, target: str, discover_ports) -> list:
+        """Discover open ports with Ellysia's own connect scan (Fase T).
+
+        Best-effort: a discovery failure yields no ports rather than failing the
+        scan (the detection pipeline then simply has nothing to analyse).
+        """
+        from .ellysia import scan_ports_sync
+        try:
+            return scan_ports_sync(target, discover_ports)
+        except Exception:
+            logger.exception("Ellysia port discovery failed for %s", target)
+            return []
 
     def _run_active_checks(self, target: str, services) -> list:
         """Run the declarative check runtime against the target's HTTP services.

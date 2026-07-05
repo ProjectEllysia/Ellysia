@@ -70,6 +70,35 @@ def test_ellysia_source_scan_not_found(client, admin_user, auth_headers):
     assert resp.status_code == 404
 
 
+def test_ellysia_requires_a_mode(client, admin_user, auth_headers):
+    # Neither sourceScanId nor target -> schema rejects it.
+    resp = client.post("/sentinel/ellysia", headers=auth_headers(admin_user), json={})
+    assert resp.status_code in (400, 422)
+
+
+def test_ellysia_self_discovery_produces_open_port_findings(app, admin_user, monkeypatch):
+    # Stub the connect scan so no real network is touched; the rest of the
+    # self-discovery pipeline runs for real.
+    monkeypatch.setattr(EllysiaEngineManager, "_discover_ports",
+                        lambda self, target, ports: [80, 22])
+
+    with app.app_context():
+        mgr = EllysiaEngineManager()
+        escan = mgr._create_scan_record(target="8.8.8.8", user_id=admin_user.id, source_scan_id=None)
+        mgr._run_ellysia(escan.id, source_scan_id=None, discover_ports=None)
+
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            findings = repo.get_findings_by_scan(escan.id)
+            escan = repo.get_by_id(escan.id)
+
+    assert escan.status == ScanStatus.FINISHED.value
+    open_ports = [f for f in findings if f.category == "open_port"]
+    assert {f.port for f in open_ports} == {80, 22}
+    # Self-discovery creates a Host for the target, so findings are anchored.
+    assert all(f.host_id is not None for f in findings)
+
+
 def test_ellysia_rejects_non_nmap_source(client, app, admin_user, auth_headers):
     nikto_id = _seed_nikto_scan(app, admin_user.id)
     resp = client.post("/sentinel/ellysia", headers=auth_headers(admin_user),

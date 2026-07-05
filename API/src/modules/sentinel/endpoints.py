@@ -318,27 +318,36 @@ def start_openvas_scan(data):
 @limiter.limit("20 per hour; 100 per day")
 @handle_exceptions(default_exception=ScanExecutionError, logger=logger)
 def start_ellysia_scan(data):
-    """Lanzar un escaneo Ellysia sobre los servicios de un Nmap previo"""
-    source_scan_id = data["sourceScanId"]
+    """Lanzar un escaneo Ellysia: sobre un Nmap previo, o autodescubriendo."""
     timeout = data["timeout"]
+    source_scan_id = data.get("sourceScanId")
     user = get_current_user()
+    manager = EllysiaEngineManager()
 
-    # El escaneo fuente debe existir, ser del usuario y ser un Nmap (la fase
-    # actual de Ellysia analiza los servicios que Nmap ya descubrió).
-    source_scan = ScanManager.assert_scan_ownership(source_scan_id, user.id)
-    if source_scan.scan_type != ScanType.NMAP.value:
-        raise ValidationError(
-            field="sourceScanId",
-            message="El escaneo fuente debe ser un escaneo Nmap",
-            value=source_scan_id,
-        )
+    if source_scan_id:
+        # El escaneo fuente debe existir, ser del usuario y ser un Nmap.
+        source_scan = ScanManager.assert_scan_ownership(source_scan_id, user.id)
+        if source_scan.scan_type != ScanType.NMAP.value:
+            raise ValidationError(
+                field="sourceScanId",
+                message="El escaneo fuente debe ser un escaneo Nmap",
+                value=source_scan_id,
+            )
+        scan_id = manager.run_scan(user_id=user.id, source_scan_id=source_scan_id, timeout=timeout)
+        logger.info(f"Ellysia lanzado: ID={scan_id} fuente={source_scan_id} user={user.username}")
+    else:
+        # Autodescubrimiento: valida el objetivo (rechaza IPs privadas, etc.)
+        # igual que un escaneo Nmap, ya que el transporte propio toca el objetivo.
+        target = validate_targets(data["target"], max_hosts=1)[0]
+        discover_ports = None
+        if data.get("ports"):
+            try:
+                discover_ports = ScanManager.validate_port(data["ports"])
+            except PortValidationError as exc:
+                raise ValidationError(field="ports", message=str(exc), value=data["ports"]) from exc
+        scan_id = manager.run_scan(user_id=user.id, target=target, discover_ports=discover_ports, timeout=timeout)
+        logger.info(f"Ellysia lanzado: ID={scan_id} autodescubrimiento target={target} user={user.username}")
 
-    scan_id = EllysiaEngineManager().run_scan(
-        source_scan_id=source_scan_id,
-        user_id=user.id,
-        timeout=timeout,
-    )
-    logger.info(f"Ellysia lanzado: ID={scan_id} fuente={source_scan_id} user={user.username}")
     return {
         "message": "Escaneo Ellysia iniciado correctamente",
         "scanId": scan_id,

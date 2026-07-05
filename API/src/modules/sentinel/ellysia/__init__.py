@@ -62,6 +62,14 @@ from .adapters import (
     nikto_incident_to_finding,
     openvas_result_to_finding,
 )
+from .transport import (
+    AsyncConnectScanner,
+    scan_ports_sync,
+    services_from_discovered_ports,
+    port_concordance,
+    DEFAULT_PORTS,
+    WELL_KNOWN_PORTS,
+)
 
 __all__ = [
     "EllysiaEngine",
@@ -105,4 +113,10 @@ __all__ = [
     "QOD_FINGERPRINT",
     "nikto_incident_to_finding",
     "openvas_result_to_finding",
+    "AsyncConnectScanner",
+    "scan_ports_sync",
+    "services_from_discovered_ports",
+    "port_concordance",
+    "DEFAULT_PORTS",
+    "WELL_KNOWN_PORTS",
 ]
