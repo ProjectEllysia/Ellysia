@@ -204,9 +204,9 @@ function save() {
 .doc-id { font-weight: 600; color: var(--text-dim); font-family: var(--font-mono); font-size: 0.75rem; }
 .toolbar-spacer { flex: 1; }
 .toolbar-btn { padding: 0.25rem 0.7rem; font-size: 0.68rem; font-weight: 600; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer; transition: all 0.2s; }
-.toolbar-btn:hover:not(:disabled) { background: var(--accent); color: #0b0c10; border-color: var(--accent); }
+.toolbar-btn:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .toolbar-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.toolbar-save { background: var(--accent); color: #0b0c10; border-color: var(--accent); }
+.toolbar-save { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 
 .editor-body { padding: 1.25rem; overflow-y: auto; flex: 1; }
 .editor-section { margin-bottom: 1.5rem; }
@@ -221,15 +221,15 @@ function save() {
 .field-error { color: var(--danger); font-size: 0.7rem; margin: 0.25rem 0 0; }
 
 .add-btn { padding: 0.25rem 0.6rem; font-size: 0.68rem; font-weight: 600; border-radius: 5px; border: 1px solid var(--accent); background: none; color: var(--accent); cursor: pointer; transition: all 0.15s; }
-.add-btn:hover { background: var(--accent); color: #0b0c10; }
+.add-btn:hover { background: var(--accent); color: var(--on-accent); }
 .add-btn--sm { font-size: 0.64rem; padding: 0.15rem 0.45rem; }
-.add-btn--primary { background: var(--accent); color: #0b0c10; border-color: var(--accent); font-size: 0.8rem; font-weight: 700; padding: 0.45rem 1rem; border-radius: 7px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
-.add-btn--primary:hover { background: var(--accent); filter: brightness(1.1); color: #0b0c10; }
+.add-btn--primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-size: 0.8rem; font-weight: 700; padding: 0.45rem 1rem; border-radius: 7px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+.add-btn--primary:hover { background: var(--accent); filter: brightness(1.1); color: var(--on-accent); }
 .empty-hint { font-size: 0.76rem; color: var(--text-muted); padding: 0.5rem 0; }
 
 .tip-card { border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.85rem; background: var(--surface); }
 .tip-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; }
-.tip-num { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #0b0c10; font-size: 0.7rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.tip-num { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 0.7rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 .tip-card-actions { display: flex; gap: 0.25rem; }
 .icon-btn { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text-dim); cursor: pointer; transition: all 0.15s; }
 .icon-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }

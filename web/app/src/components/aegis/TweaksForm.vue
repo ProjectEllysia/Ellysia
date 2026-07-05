@@ -140,11 +140,11 @@ function removeBrand(brand) { store.selectedBrands = store.selectedBrands.filter
 .textarea { resize: vertical; min-height: 2.4rem; line-height: 1.4; }
 .form-divider { margin: 0.3rem 0 -0.15rem; padding-top: 0.6rem; border-top: 1px solid var(--border); font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
 .selected-brands { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.3rem; }
-.brand-tag { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.15rem 0.4rem; font-size: 0.7rem; font-weight: 600; background: var(--accent); color: #0b0c10; border-radius: 4px; }
+.brand-tag { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.15rem 0.4rem; font-size: 0.7rem; font-weight: 600; background: var(--accent); color: var(--on-accent); border-radius: 4px; }
 .brand-remove { background: none; border: none; color: inherit; cursor: pointer; font-size: 0.9rem; padding: 0; line-height: 1; opacity: 0.7; }
 .brand-remove:hover { opacity: 1; }
-.btn-generate { margin-top: 0.4rem; padding: 0.6rem; font-size: 0.85rem; font-weight: 700; border-radius: 7px; border: none; cursor: pointer; background: var(--accent); color: #0b0c10; transition: opacity 0.2s; display: flex; align-items: center; justify-content: center; gap: 0.4rem; }
+.btn-generate { margin-top: 0.4rem; padding: 0.6rem; font-size: 0.85rem; font-weight: 700; border-radius: 7px; border: none; cursor: pointer; background: var(--accent); color: var(--on-accent); transition: opacity 0.2s; display: flex; align-items: center; justify-content: center; gap: 0.4rem; }
 .btn-generate:hover:not(:disabled) { opacity: 0.85; }
 .btn-generate:disabled { opacity: 0.4; cursor: not-allowed; }
-.spinner { width: 14px; height: 14px; border: 2px solid rgba(0,0,0,0.15); border-top-color: #0b0c10; border-radius: 50%; animation: seq-spin .6s linear infinite; }
+.spinner { width: 14px; height: 14px; border: 2px solid rgba(0,0,0,0.15); border-top-color: var(--on-accent); border-radius: 50%; animation: seq-spin .6s linear infinite; }
 </style>

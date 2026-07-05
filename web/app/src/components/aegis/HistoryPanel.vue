@@ -91,7 +91,7 @@ function doDelete() { emit('delete', deleteTarget.value); deleteTarget.value = n
 .input:focus { border-color: var(--accent); }
 .select { cursor: pointer; }
 .btn-icon { width: 28px; height: 28px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0; }
-.btn-icon:hover { background: var(--accent); color: #0b0c10; border-color: var(--accent); }
+.btn-icon:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .btn-icon.spinning svg { animation: seq-spin 0.7s linear infinite; }
 .history-list { flex: 1; overflow-y: auto; padding: 0.4rem; }
 .history-empty { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.8rem; }
@@ -111,7 +111,7 @@ function doDelete() { emit('delete', deleteTarget.value); deleteTarget.value = n
 .action-btn--danger:hover { color: var(--danger); border-color: rgba(217,108,108,0.3); }
 .export-mini-menu { position: absolute; right: 2.2rem; z-index: 25; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; overflow: hidden; display: flex; }
 .export-mini-menu button { padding: 0.2rem 0.4rem; font-size: 0.62rem; font-weight: 600; background: none; border: none; color: var(--text-dim); cursor: pointer; }
-.export-mini-menu button:hover { background: var(--accent); color: #0b0c10; }
+.export-mini-menu button:hover { background: var(--accent); color: var(--on-accent); }
 </style>
 
 <style>
