@@ -194,7 +194,7 @@ function handleSubmit() {
   border: none;
   cursor: pointer;
   background: var(--accent);
-  color: #0b0c10;
+  color: var(--on-accent);
   transition: opacity 0.2s, transform 0.15s;
   font-family: var(--font-body);
 }
@@ -220,7 +220,7 @@ function handleSubmit() {
   width: 18px;
   height: 18px;
   border: 2px solid rgba(0, 0, 0, 0.15);
-  border-top-color: #0b0c10;
+  border-top-color: var(--on-accent);
   border-radius: 50%;
   animation: seq-spin 0.6s linear infinite;
 }

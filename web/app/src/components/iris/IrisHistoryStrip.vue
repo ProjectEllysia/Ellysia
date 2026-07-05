@@ -486,7 +486,7 @@ function verdictClass(v) {
 
 .confirm-yes:hover {
   background: var(--danger);
-  color: #0b0c10;
+  color: var(--on-accent);
 }
 
 .confirm-no {
