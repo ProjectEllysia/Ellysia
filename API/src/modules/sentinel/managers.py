@@ -68,6 +68,8 @@ from .ellysia import (
     apply_lifecycle,
     classify_exposure,
     score_finding,
+    nikto_incident_to_finding,
+    openvas_result_to_finding,
 )
 from .services import (
     NiktoResultProcessor,
@@ -1569,6 +1571,19 @@ class NiktoScanManager(ScanManager):
 
         scan_repo.persist_nikto_results(scan, host, incidents_data)
 
+        # Additive: also record each incident as a normalized Finding, so a
+        # future cross-scanner correlation pass (Fase 6) has something to fuse
+        # against Ellysia/OpenVAS findings on the same host. Does not replace
+        # the NiktoIncident write above — the PDF report and history charts
+        # still read that (see ellysia/adapters.py for why).
+        findings = []
+        for inc_data in incidents_data:
+            finding = nikto_incident_to_finding(inc_data)
+            finding["host_id"] = host.id
+            finding["dedup_key"] = compute_dedup_key(finding)
+            findings.append(finding)
+        scan_repo.persist_findings(scan, findings)
+
     def format_scan(self, scan_id: int) -> dict:
         scan = self.get_scan_by_id(scan_id)
         if not scan:
@@ -1763,6 +1778,24 @@ class OpenVASScanManager(ScanManager):
             vulnerability_map[vuln.nvt_oid] = vuln
 
         scan_repo.persist_openvas_results(scan, scan_results_data, vulnerability_map)
+
+        # Additive: also record each result as a normalized Finding (see
+        # ellysia/adapters.py). Does not replace the OpenVASScanResult write
+        # above — the PDF report and history charts still read that.
+        host_cache: dict = {}
+        findings = []
+        for result_data in scan_results_data:
+            vuln = vulnerability_map.get(result_data["nvt_oid"])
+            if vuln is None:
+                continue
+            host_ip = result_data["host_ip"]
+            if host_ip not in host_cache:
+                host_cache[host_ip] = scan_repo.get_or_create_host(hostname=host_ip, ip_address=host_ip)
+            finding = openvas_result_to_finding(vuln, result_data)
+            finding["host_id"] = host_cache[host_ip].id
+            finding["dedup_key"] = compute_dedup_key(finding)
+            findings.append(finding)
+        scan_repo.persist_findings(scan, findings)
 
     def format_scan(self, scan_id: int) -> dict:
         scan = self.get_scan_by_id(scan_id)

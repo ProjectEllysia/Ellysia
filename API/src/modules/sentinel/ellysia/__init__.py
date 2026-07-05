@@ -58,6 +58,10 @@ from .fingerprint import (
     concordance_rate,
     QOD_FINGERPRINT,
 )
+from .adapters import (
+    nikto_incident_to_finding,
+    openvas_result_to_finding,
+)
 
 __all__ = [
     "EllysiaEngine",
@@ -99,4 +103,6 @@ __all__ = [
     "agrees_with_nmap",
     "concordance_rate",
     "QOD_FINGERPRINT",
+    "nikto_incident_to_finding",
+    "openvas_result_to_finding",
 ]
