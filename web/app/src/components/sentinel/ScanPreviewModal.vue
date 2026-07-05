@@ -181,7 +181,7 @@ function fmtDate(iso) { if (!iso) return ''; return new Date(iso).toLocaleDateSt
 .pv-checkbox input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
 .pv-checkbox input[type="checkbox"]:checked::after { content: ''; position: absolute; top: 1px; left: 2px; width: 3px; height: 6px; border: solid var(--surface-1); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
 .pv-gen-btn { display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; font-size: 0.75rem; font-weight: 600; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 6px; color: var(--accent-bright); cursor: pointer; transition: all var(--transition); }
-.pv-gen-btn:hover { background: var(--accent); color: #0b0c10; }
+.pv-gen-btn:hover { background: var(--accent); color: var(--on-accent); }
 .pv-gen-icon { width: 12px; height: 12px; }
 .spin { animation: seq-spin 0.8s linear infinite; }
 @media (max-width: 560px) { .pv-stats-row { flex-direction: column; gap: 0.3rem; } .pv-gen-bar { flex-direction: column; align-items: stretch; gap: 0.4rem; } .pv-gen-btn { justify-content: center; } }

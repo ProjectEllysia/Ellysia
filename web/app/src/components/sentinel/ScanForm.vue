@@ -132,7 +132,7 @@ function handleLaunch() {
 .no-spin::-webkit-outer-spin-button, .no-spin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .no-spin { -moz-appearance: textfield; }
 .btn-launch { height: 34px; padding: 0 1.15rem; margin-bottom: 0; background: var(--accent-dim); border: 1px solid var(--accent); color: var(--accent-bright); font-weight: 600; font-size: 0.8rem; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 0.35rem; transition: all 0.2s; white-space: nowrap; position: relative; }
-.btn-launch:hover:not(:disabled) { background: var(--accent); color: #0b0c10; }
+.btn-launch:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
 .btn-launch:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-launch.loading .btn-label { opacity: 0; }
 .btn-launch.loading .btn-spin { display: block; }

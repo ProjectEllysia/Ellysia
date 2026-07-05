@@ -54,7 +54,7 @@ defineEmits(['refresh', 'create-folder', 'preview', 'cancel', 'delete', 'rename-
 .toolbar-title { font-size: 0.82rem; font-weight: 600; color: var(--text-dim); }
 .toolbar-actions { display: flex; gap: 0.5rem; }
 .btn-new, .btn-refresh { display: flex; align-items: center; gap: 0.3rem; padding: 0.35rem 0.7rem; border-radius: 6px; font-size: 0.75rem; font-weight: 500; cursor: pointer; transition: all 0.2s; }
-.btn-new { background: var(--accent); border: 1px solid var(--accent); color: #fff; }
+.btn-new { background: var(--accent); border: 1px solid var(--accent); color: var(--on-accent); }
 .btn-new:hover { opacity: 0.9; }
 .btn-refresh { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted); }
 .btn-refresh:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
