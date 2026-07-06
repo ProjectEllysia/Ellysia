@@ -179,6 +179,14 @@ class User(Base):
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
     vaults         = relationship("Vault",        back_populates="user", cascade="all, delete-orphan")
 
+    mfa_totp_credential = relationship(
+        "MFATotpCredential", back_populates="user",
+        uselist=False, cascade="all, delete-orphan",
+    )
+    mfa_recovery_codes = relationship(
+        "MFARecoveryCode", back_populates="user", cascade="all, delete-orphan",
+    )
+
     analyses = relationship(
         "IrisAnalysis",
         back_populates="user",
@@ -243,3 +251,100 @@ class UserAttribute(Base):
 
     def __repr__(self):
         return f"<UserAttribute(user_id={self.user_id}, attribute_name='{self.attribute_name}')>"
+
+
+# =========================================================================
+# MFA (TOTP) MODELS
+# =========================================================================
+
+
+class MFATotpCredential(Base):
+    """
+    TOTP (Time-based One-Time Password) credential for a user.
+
+    One row per user (unique ``user_id``). ``secret_encrypted`` holds the
+    shared TOTP secret, encrypted at rest with a server-side key — unlike
+    Acheron this is NOT zero-knowledge, since the server must be able to
+    compute the current code to verify a login attempt.
+
+    ``confirmed_at`` is NULL until the user proves control of the secret by
+    submitting a valid code during setup; MFA only counts as "enabled" once
+    confirmed (see MFAManager.is_enabled).
+
+    Attributes:
+        user_id: Foreign key to User.id (unique — one credential per user).
+        secret_encrypted: Fernet-encrypted Base32 TOTP secret.
+        confirmed_at: When the user confirmed enrollment (None = pending).
+        created_at: When the credential was created (setup started).
+    """
+    __tablename__ = "MFATotpCredential"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id"), nullable=False, unique=True)
+    secret_encrypted = Column(String(512), nullable=False)
+    confirmed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="mfa_totp_credential")
+
+    def __repr__(self) -> str:
+        return f"<MFATotpCredential user_id={self.user_id} confirmed={self.confirmed_at is not None}>"
+
+
+class MFARecoveryCode(Base):
+    """
+    One-time recovery code for MFA, used when the user loses their TOTP device.
+
+    Attributes:
+        user_id: Foreign key to User.id.
+        code_hash: Argon2id hash of the recovery code (same hasher as passwords).
+        used_at: When the code was consumed (None = still usable).
+        created_at: Batch creation timestamp.
+    """
+    __tablename__ = "MFARecoveryCode"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
+    code_hash = Column(String(512), nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="mfa_recovery_codes")
+
+    def __repr__(self) -> str:
+        return f"<MFARecoveryCode id={self.id} user_id={self.user_id} used={self.used_at is not None}>"
+
+
+class MFAChallenge(Base):
+    """
+    Short-lived challenge issued after a successful password grant when the
+    user has MFA enabled; exchanged for real tokens at POST /oauth/mfa/verify.
+
+    Unlike AccessToken/RefreshToken, tracks ``attempts`` so failed TOTP/recovery
+    guesses can be capped server-side — a 6-digit TOTP code is brute-forceable
+    online, unlike Acheron's client-side-only vault checker.
+
+    Attributes:
+        token: Opaque random string handed to the client (not a JWT).
+        user_id: Foreign key to User.id.
+        expires_at: Short expiry (minutes, see config_reading.get_mfa_config).
+        attempts: Number of failed verification attempts so far.
+        created_at: Issuance timestamp.
+    """
+    __tablename__ = "MFAChallenge"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    token = Column(String(512), unique=True, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    user = relationship("User")
+
+    def is_valid(self, max_attempts: int) -> bool:
+        """True if the challenge is under the allowed attempt count and not expired."""
+        return self.attempts < max_attempts and datetime.utcnow() < self.expires_at
+
+    def __repr__(self) -> str:
+        return f"<MFAChallenge id={self.id} user_id={self.user_id} attempts={self.attempts}>"
