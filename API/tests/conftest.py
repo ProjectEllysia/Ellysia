@@ -41,6 +41,9 @@ if str(_API_DIR) not in sys.path:
 
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-not-for-production"
 os.environ.setdefault("JWT_ALGORITHM", "HS256")
+# Clave Fernet válida (32 bytes urlsafe-base64) solo para tests — ver
+# users.services.secrets.encrypt_totp_secret / config_reading.get_mfa_config().
+os.environ.setdefault("MFA_ENCRYPTION_KEY", "oZrC9aq99vdSaSW5nk55KNJFr9flChUBjs16fNhpfuU=")
 os.environ.setdefault("ACCESS_TOKEN_EXPIRY_MINUTES", "30")
 os.environ.setdefault("REFRESH_TOKEN_EXPIRY_DAYS", "7")
 os.environ.setdefault("FLASK_ENV", "development")
