@@ -183,11 +183,20 @@
       <div v-if="reportData.recommendations && reportData.recommendations.length" class="rv-recommendations">
         <h3 class="section-title">Recomendaciones</h3>
         <ul class="rec-list">
-          <li v-for="(rec, i) in reportData.recommendations" :key="i" class="rec-item">
+          <li v-for="(rec, i) in visibleRecommendations" :key="i" class="rec-item">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="rec-bullet"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             {{ rec }}
           </li>
         </ul>
+        <button
+          v-if="reportData.recommendations.length > RECS_PREVIEW_COUNT"
+          type="button"
+          class="raw-toggle"
+          @click="recsExpanded = !recsExpanded"
+        >
+          <svg :class="{ rotated: recsExpanded }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="toggle-chevron"><polyline points="6 9 12 15 18 9"/></svg>
+          {{ recsExpanded ? 'Mostrar menos' : `Mostrar ${reportData.recommendations.length - RECS_PREVIEW_COUNT} más` }}
+        </button>
       </div>
 
       <!-- Email path (Received chain) -->
@@ -415,6 +424,14 @@ function exportIocsCsv() {
   a.click()
   setTimeout(() => { URL.revokeObjectURL(url); a.remove() }, 1000)
 }
+
+/* ── Recomendaciones (recorte con "mostrar más") ── */
+const RECS_PREVIEW_COUNT = 4
+const recsExpanded = ref(false)
+const visibleRecommendations = computed(() => {
+  const all = props.reportData?.recommendations ?? []
+  return recsExpanded.value ? all : all.slice(0, RECS_PREVIEW_COUNT)
+})
 
 /* ── Informes PDF ── */
 const generatingDocument = ref(false)
