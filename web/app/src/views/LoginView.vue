@@ -32,7 +32,7 @@
 
         <!-- Aviso -->
         <transition name="alert">
-          <div v-if="alertMsg" class="alert" :class="'alert-' + alertType" role="alert">
+          <div v-if="alertMsg" class="gate-alert" :class="'gate-alert-' + alertType" role="alert">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <template v-if="alertType === 'error' || alertType === 'warning'">
                 <circle cx="12" cy="12" r="10" />
@@ -48,7 +48,7 @@
           </div>
         </transition>
 
-        <form novalidate @submit.prevent="handleSubmit">
+        <form v-if="!mfaStep" novalidate @submit.prevent="handleSubmit">
           <!-- Identificador -->
           <div class="field" :class="{ focused: focus === 'user' }">
             <label for="username">Identificador</label>
@@ -126,6 +126,46 @@
           </button>
         </form>
 
+        <!-- ───────── Segundo factor (MFA) ───────── -->
+        <form v-else novalidate @submit.prevent="handleMfaSubmit">
+          <div class="field focused">
+            <label for="mfa-code">{{ useRecovery ? 'Código de recuperación' : 'Código de verificación' }}</label>
+            <div class="field-box">
+              <svg class="field-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <rect x="3" y="11" width="18" height="10" rx="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                <circle cx="12" cy="16" r="1.5" />
+              </svg>
+              <input
+                id="mfa-code"
+                v-model="mfaCode"
+                type="text"
+                :placeholder="useRecovery ? 'XXXX-XXXX' : '123456'"
+                :inputmode="useRecovery ? 'text' : 'numeric'"
+                autocomplete="one-time-code"
+                autofocus
+                required
+                :disabled="loading"
+              />
+            </div>
+          </div>
+
+          <button type="submit" class="submit" :class="{ loading }" :disabled="loading">
+            <span class="submit-label">{{ loading ? 'Verificando…' : 'Verificar' }}</span>
+            <span class="submit-arrow" aria-hidden="true">→</span>
+            <span class="submit-spin" aria-hidden="true"></span>
+          </button>
+
+          <div class="mfa-links">
+            <button type="button" class="link-btn" :disabled="loading" @click="toggleRecoveryMode">
+              {{ useRecovery ? 'Usar código de la app' : '¿Perdiste el acceso? Usar código de recuperación' }}
+            </button>
+            <button type="button" class="link-btn" :disabled="loading" @click="resetToCredentials">
+              ← Volver
+            </button>
+          </div>
+        </form>
+
         <footer class="portal-foot">
           <span class="foot-pulse"><i></i>Enlace cifrado activo</span>
           <span class="foot-ver">Ellysia © 2026</span>
@@ -173,6 +213,12 @@ const focus = ref('')
 const capsOn = ref(false)
 const granted = ref(false)
 
+/* ── segundo factor (MFA) ── */
+const mfaStep = ref(false)
+const mfaChallengeToken = ref('')
+const mfaCode = ref('')
+const useRecovery = ref(false)
+
 const reduceMotion =
   typeof window !== 'undefined' &&
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -208,14 +254,14 @@ async function handleSubmit() {
 
   loading.value = true
   try {
-    await auth.login(un, pw)
-    granted.value = true
-    const redirect = route.query.redirect
-    const target = typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')
-      ? redirect
-      : '/'
-    const delay = reduceMotion ? 300 : 1500
-    setTimeout(() => router.push(target), delay)
+    const step = await auth.login(un, pw)
+    if (step.mfaRequired) {
+      mfaChallengeToken.value = step.challengeToken
+      mfaStep.value = true
+      loading.value = false
+      return
+    }
+    completeLogin()
   } catch (err) {
     showAlert(err.message || 'Error desconocido.', 'error')
     if (err.message?.includes('Credenciales')) {
@@ -225,6 +271,54 @@ async function handleSubmit() {
     }
     loading.value = false
   }
+}
+
+/* ── envío del segundo factor (MFA) ── */
+async function handleMfaSubmit() {
+  alertMsg.value = ''
+  const value = mfaCode.value.trim()
+  if (!value) {
+    showAlert('Introduce el código.', 'error')
+    return
+  }
+
+  loading.value = true
+  try {
+    await auth.verifyMfa(
+      mfaChallengeToken.value,
+      useRecovery.value ? { recoveryCode: value } : { code: value },
+    )
+    completeLogin()
+  } catch (err) {
+    showAlert(err.message || 'Error desconocido.', 'error')
+    mfaCode.value = ''
+    loading.value = false
+  }
+}
+
+function toggleRecoveryMode() {
+  useRecovery.value = !useRecovery.value
+  mfaCode.value = ''
+  alertMsg.value = ''
+}
+
+function resetToCredentials() {
+  mfaStep.value = false
+  mfaChallengeToken.value = ''
+  mfaCode.value = ''
+  useRecovery.value = false
+  alertMsg.value = ''
+  password.value = ''
+}
+
+function completeLogin() {
+  granted.value = true
+  const redirect = route.query.redirect
+  const target = typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')
+    ? redirect
+    : '/'
+  const delay = reduceMotion ? 300 : 1500
+  setTimeout(() => router.push(target), delay)
 }
 
 function showAlert(msg, type = 'error') {
@@ -335,15 +429,15 @@ onBeforeUnmount(() => {})
 }
 
 /* ═══════════ Aviso ═══════════ */
-.alert {
+.gate-alert {
   display: flex; align-items: flex-start; gap: 0.5rem;
   border-radius: 9px; padding: 0.7rem 0.9rem; font-size: 0.85rem;
   margin-bottom: 1.1rem; font-family: var(--font-body);
 }
-.alert svg { flex-shrink: 0; margin-top: 2px; }
-.alert-error   { background: var(--danger-dim);  border: 1px solid var(--danger);  color: var(--danger); }
-.alert-success { background: var(--success-dim); border: 1px solid var(--success); color: var(--success); }
-.alert-warning { background: var(--warn-dim);    border: 1px solid var(--warn);    color: var(--warn); }
+.gate-alert svg { flex-shrink: 0; margin-top: 2px; }
+.gate-alert-error   { background: var(--danger-dim);  border: 1px solid var(--danger);  color: var(--danger); }
+.gate-alert-success { background: var(--success-dim); border: 1px solid var(--success); color: var(--success); }
+.gate-alert-warning { background: var(--warn-dim);    border: 1px solid var(--warn);    color: var(--warn); }
 .alert-enter-active { transition: opacity 0.35s ease, transform 0.35s ease; }
 .alert-enter-from { opacity: 0; transform: translateY(-6px); }
 
@@ -432,6 +526,20 @@ onBeforeUnmount(() => {})
 }
 .submit.loading .submit-spin { opacity: 1; }
 @keyframes seq-spin { to { transform: rotate(360deg); } }
+
+/* ═══════════ Segundo factor (MFA) ═══════════ */
+.mfa-links {
+  display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+  margin-top: 1.1rem;
+}
+.link-btn {
+  background: none; border: none; cursor: pointer; padding: 0.2rem;
+  font-family: var(--font-body); font-size: 0.78rem; color: var(--text-dim);
+  text-decoration: underline; text-underline-offset: 2px;
+  transition: color 0.2s ease;
+}
+.link-btn:hover:not(:disabled) { color: var(--accent); }
+.link-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ═══════════ Pie ═══════════ */
 .portal-foot {
