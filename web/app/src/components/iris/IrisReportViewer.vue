@@ -54,6 +54,10 @@
           <span class="report-date" v-if="reportData.finishedAt">{{ formatDate(reportData.finishedAt) }}</span>
         </div>
         <div class="rv-actions">
+          <button type="button" class="action-btn" title="Informes PDF" @click="docsModalOpen = true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="15" x2="15" y2="15"/><line x1="9" y1="11" x2="13" y2="11"/></svg>
+            <span v-if="irisStore.documents.length" class="action-btn-badge">{{ irisStore.documents.length }}</span>
+          </button>
           <button type="button" class="action-btn" title="Cancelar" @click="$emit('cancel')" v-if="status === 'running' || status === 'pending'">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
           </button>
@@ -262,19 +266,21 @@
         </Transition>
       </div>
 
-      <!-- Informes PDF -->
-      <IrisDocumentsPanel
-        :documents="irisStore.documents"
-        :loading="irisStore.documentsLoading"
-        :generating="generatingDocument"
-        :can-generate="reportData.status === 'finished'"
-        @refresh="refreshDocuments"
-        @generate="handleGenerateDocument"
-        @download="handleDownloadDocument"
-        @delete="handleDeleteDocument"
-      />
     </div>
 
+    <!-- Informes PDF (modal, fuera del flujo de scroll del informe) -->
+    <IrisDocumentsModal
+      :show="docsModalOpen"
+      :documents="irisStore.documents"
+      :loading="irisStore.documentsLoading"
+      :generating="generatingDocument"
+      :can-generate="reportData?.status === 'finished'"
+      @close="docsModalOpen = false"
+      @refresh="refreshDocuments"
+      @generate="handleGenerateDocument"
+      @download="handleDownloadDocument"
+      @delete="handleDeleteDocument"
+    />
   </div>
 </template>
 
@@ -283,7 +289,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useUtils } from '@/composables/useUtils'
 import { useIrisStore } from '@/stores/irisStore'
 import IrisEmailPath from '@/components/iris/IrisEmailPath.vue'
-import IrisDocumentsPanel from '@/components/iris/IrisDocumentsPanel.vue'
+import IrisDocumentsModal from '@/components/iris/IrisDocumentsModal.vue'
 import IrisRuleCard from '@/components/iris/IrisRuleCard.vue'
 
 const { formatDate } = useUtils()
@@ -434,6 +440,7 @@ const visibleRecommendations = computed(() => {
 })
 
 /* ── Informes PDF ── */
+const docsModalOpen = ref(false)
 const generatingDocument = ref(false)
 
 function refreshDocuments() {
@@ -654,6 +661,7 @@ watch(
 }
 
 .action-btn {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -682,6 +690,25 @@ watch(
   border-color: var(--danger);
   color: var(--danger);
   background: var(--danger-dim);
+}
+
+.action-btn-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  line-height: 1;
 }
 
 /* Hero */
