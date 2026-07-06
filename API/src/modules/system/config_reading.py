@@ -5,6 +5,7 @@ Carga lazy (solo al primer acceso) desde SecOpsConfig.json o variables de entorn
 """
 
 import json
+import logging
 import os
 
 from enum import Enum
@@ -18,6 +19,8 @@ from typing import Optional
 from src.modules.shared._exceptions import IllegalStateError
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # ESTADO DEL MÓDULO
@@ -147,6 +150,7 @@ def get_openai_environment() -> dict[str, str]:
     base_url = os.getenv("OPENAI_BASE_URL", "")
 
     if not api_key:
+        logger.error("Falta la variable de entorno OPENAI_API_KEY")
         raise ValueError(
             "Falta la variable de entorno OPENAI_API_KEY. "
             "Defínela en el archivo .env junto a las credenciales de Ollama."
@@ -169,6 +173,7 @@ def get_oauth_config() -> tuple[float, float, Optional[str], Optional[str]]:
     """
     secret = os.getenv("JWT_SECRET_KEY")
     if not secret:
+        logger.error("Falta la variable de entorno JWT_SECRET_KEY")
         raise ValueError(
             "Falta la variable de entorno JWT_SECRET_KEY. "
             "Defínela en el archivo .env (es un secreto, no va en "
@@ -195,6 +200,7 @@ def get_mfa_config() -> dict:
     """
     encryption_key = os.getenv("MFA_ENCRYPTION_KEY")
     if not encryption_key:
+        logger.error("Falta la variable de entorno MFA_ENCRYPTION_KEY")
         raise ValueError(
             "Falta la variable de entorno MFA_ENCRYPTION_KEY. "
             "Defínela en el archivo .env (clave Fernet: "
