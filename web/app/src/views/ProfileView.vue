@@ -59,6 +59,7 @@
                 <li v-for="c in recoveryCodes" :key="c"><code>{{ c }}</code></li>
               </ul>
               <div class="form-actions">
+                <button type="button" class="btn btn--secondary" @click="downloadRecoveryCodes">Descargar .txt</button>
                 <button type="button" class="btn btn--primary" @click="recoveryCodes = []">Ya los guardé</button>
               </div>
             </div>
@@ -178,6 +179,19 @@ async function handleDisableMfa() {
   const ok = await mfa.disableTotp(payload)
   disabling.value = false
   if (ok) disableCode.value = ''
+}
+
+function downloadRecoveryCodes() {
+  const content = `CÓDIGOS DE RECUPERACIÓN MFA - ELLYSIA\n\nGuarda estos códigos en un lugar seguro. Cada uno sirve para un solo inicio de sesión de emergencia si pierdes tu app autenticadora.\n\n${recoveryCodes.value.join('\n')}\n\nNota: Estos códigos no se volverán a mostrar. Si los pierdes, deberás desactivar y reconfigurar MFA.`
+  const blob = new Blob([content], { type: 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `ellysia-recovery-codes-${new Date().toISOString().split('T')[0]}.txt`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }
 </script>
 
