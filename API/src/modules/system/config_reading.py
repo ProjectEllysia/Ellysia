@@ -5,6 +5,7 @@ Carga lazy (solo al primer acceso) desde SecOpsConfig.json o variables de entorn
 """
 
 import json
+import logging
 import os
 
 from enum import Enum
@@ -18,6 +19,8 @@ from typing import Optional
 from src.modules.shared._exceptions import IllegalStateError
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # ESTADO DEL MÓDULO
@@ -147,6 +150,7 @@ def get_openai_environment() -> dict[str, str]:
     base_url = os.getenv("OPENAI_BASE_URL", "")
 
     if not api_key:
+        logger.error("Falta la variable de entorno OPENAI_API_KEY")
         raise ValueError(
             "Falta la variable de entorno OPENAI_API_KEY. "
             "Defínela en el archivo .env junto a las credenciales de Ollama."
@@ -169,6 +173,7 @@ def get_oauth_config() -> tuple[float, float, Optional[str], Optional[str]]:
     """
     secret = os.getenv("JWT_SECRET_KEY")
     if not secret:
+        logger.error("Falta la variable de entorno JWT_SECRET_KEY")
         raise ValueError(
             "Falta la variable de entorno JWT_SECRET_KEY. "
             "Defínela en el archivo .env (es un secreto, no va en "
@@ -181,6 +186,35 @@ def get_oauth_config() -> tuple[float, float, Optional[str], Optional[str]]:
     refresh   = os.getenv("REFRESH_TOKEN_EXPIRY_DAYS") or jwt_cfg.get("refresh_token_expiry_days", 7)
 
     return (float(access), float(refresh), secret, algorithm)
+
+
+@_lazy_load
+def get_mfa_config() -> dict:
+    """Configuración de MFA (TOTP + códigos de recuperación).
+
+    ``MFA_ENCRYPTION_KEY`` (clave Fernet para cifrar en reposo el secreto TOTP)
+    vive exclusivamente en .env, igual que ``JWT_SECRET_KEY`` — a diferencia del
+    resto de secretos de Acheron, el servidor SÍ necesita poder leer este valor
+    para poder calcular el código TOTP vigente y verificarlo. El resto de
+    parámetros provienen de ``security.mfa`` en SecOpsConfig.json.
+    """
+    encryption_key = os.getenv("MFA_ENCRYPTION_KEY")
+    if not encryption_key:
+        logger.error("Falta la variable de entorno MFA_ENCRYPTION_KEY")
+        raise ValueError(
+            "Falta la variable de entorno MFA_ENCRYPTION_KEY. "
+            "Defínela en el archivo .env (clave Fernet: "
+            "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\")."
+        )
+
+    mfa_cfg = _require_configs().get("security", {}).get("mfa", {})
+    return {
+        "encryption_key": encryption_key,
+        "issuer": str(mfa_cfg.get("issuer", "Ellysia")),
+        "challenge_expiry_minutes": int(mfa_cfg.get("challenge_expiry_minutes", 5)),
+        "max_challenge_attempts": int(mfa_cfg.get("max_challenge_attempts", 5)),
+        "recovery_codes_count": int(mfa_cfg.get("recovery_codes_count", 10)),
+    }
 
 
 def get_openvas_environment() -> dict[str, str]:

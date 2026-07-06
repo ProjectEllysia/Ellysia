@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from typing import Any
 
 from flask import request
@@ -14,8 +15,13 @@ from src.modules.shared._exceptions import (
 from src.modules.shared.schemas import ErrorSchema
 
 from .services import Role, require_oauth_token, require_role
-from .managers import ACCESS_TOKEN_EXPIRE_MINUTES, UserManager, OAuthTokenManager
-from .exceptions import InvalidCredentialsError, PasswordChangedError
+from .managers import ACCESS_TOKEN_EXPIRE_MINUTES, UserManager, OAuthTokenManager, MFAManager
+from .exceptions import (
+    InvalidCredentialsError,
+    PasswordChangedError,
+    MfaChallengeInvalidError,
+    InvalidMfaCodeError,
+)
 from .model import User
 from .schemas import (
     TokenRequestSchema,
@@ -33,6 +39,12 @@ from .schemas import (
     UserAttributesResponseSchema,
     AttributeOperationResponseSchema,
     RevokeResponseSchema,
+    MfaVerifyRequestSchema,
+    MfaTotpSetupResponseSchema,
+    MfaTotpConfirmRequestSchema,
+    MfaTotpConfirmResponseSchema,
+    MfaDisableRequestSchema,
+    MfaStatusResponseSchema,
 )
 
 
@@ -43,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 USER_MANAGER = UserManager()
 OAUTH_MANAGER = OAuthTokenManager()
+MFA_MANAGER = MFAManager()
 
 
 def get_current_user() -> "User":
@@ -102,6 +115,19 @@ def oauth_token(data: dict[str, Any]):
             raise InvalidCredentialsError()
 
         user = USER_MANAGER.get_user_by_id(uid)
+
+        # MFA activado: en vez de tokens reales, se emite un challenge de corta
+        # duración que el cliente debe canjear en POST /oauth/mfa/verify tras
+        # aportar el segundo factor. Cuentas sin MFA no ven ningún cambio.
+        if MFA_MANAGER.is_enabled(uid):
+            challenge_token = OAUTH_MANAGER.create_mfa_challenge(uid)
+            logger.info(f"MFA requerido para: {username}")
+            return {
+                "mfaRequired": True,
+                "challengeToken": challenge_token,
+                "methods": ["totp"],
+            }
+
         access_token = OAUTH_MANAGER.create_access_token(
             user_id=uid, username=username,
             role=user.role if user else "role_user",
@@ -173,6 +199,53 @@ def oauth_revoke_all():
     user = get_current_user()
     OAUTH_MANAGER.revoke_all_user_tokens(user.id)
     return {"message": "All tokens revoked successfully"}
+
+
+@oauth_blp.post("/mfa/verify")
+@oauth_blp.arguments(MfaVerifyRequestSchema)
+@oauth_blp.response(200, TokenResponseSchema, description="MFA verified, tokens issued")
+@oauth_blp.alt_response(400, schema=ErrorSchema, description="Invalid parameters")
+@oauth_blp.alt_response(401, schema=ErrorSchema, description="Invalid code or challenge")
+@limiter.limit("10 per minute; 30 per hour")
+def oauth_mfa_verify(data: dict[str, Any]):
+    """Verificar el segundo factor (TOTP o codigo de recuperacion) y emitir tokens"""
+    challenge_token = data["challengeToken"]
+
+    uid = OAUTH_MANAGER.verify_mfa_challenge(challenge_token)
+    if uid is None:
+        raise MfaChallengeInvalidError()
+
+    user = USER_MANAGER.get_user_by_id(uid)
+    if user is None:
+        raise MfaChallengeInvalidError()
+
+    verified = MFA_MANAGER.verify_totp_or_recovery(
+        uid, code=data.get("code"), recovery_code=data.get("recoveryCode"),
+    )
+    if not verified:
+        OAUTH_MANAGER.register_mfa_challenge_failure(challenge_token)
+        logger.warning(f"Codigo MFA invalido para: {user.username}")
+        raise InvalidMfaCodeError()
+
+    OAUTH_MANAGER.consume_mfa_challenge(challenge_token)
+
+    access_token = OAUTH_MANAGER.create_access_token(
+        user_id=uid, username=user.username, role=user.role,
+        password_changed_at=user.password_changed_at,
+        mfa_at=datetime.utcnow(),
+    )
+    refresh_token = OAUTH_MANAGER.create_refresh_token(uid)
+    user_attrs = USER_MANAGER.get_user_attributes(uid)
+
+    logger.info(f"MFA verificado, tokens emitidos para: {user.username}")
+    return {
+        "access_token": access_token,
+        "token_type": "Bearer",
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "refresh_token": refresh_token,
+        "role": user.role,
+        "attributes": user_attrs,
+    }
 
 
 # =========================================================================
@@ -393,3 +466,67 @@ def remove_user_attribute(data: dict[str, Any], target_user_id: int):
 
     logger.info(f"Atributos {attrs_to_remove} eliminados del usuario {target_user_id}")
     return {"message": "Attributes removed", "attributes": attrs_to_remove}
+
+
+# =========================================================================
+# MFA (TOTP) ENDPOINTS
+# =========================================================================
+
+
+@users_blp.get("/mfa")
+@users_blp.response(200, MfaStatusResponseSchema, description="MFA status")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@require_oauth_token
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def get_mfa_status():
+    """Consultar si el usuario autenticado tiene MFA (TOTP) activado"""
+    return MFA_MANAGER.get_status(get_current_user().id)
+
+
+@users_blp.post("/mfa/totp/setup")
+@users_blp.response(200, MfaTotpSetupResponseSchema, description="TOTP setup started")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@users_blp.alt_response(409, schema=ErrorSchema, description="MFA already enabled")
+@require_oauth_token
+@limiter.limit("10 per hour; 20 per day")
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def setup_totp():
+    """Generar un secreto TOTP y su URI de aprovisionamiento (para el QR)"""
+    user = get_current_user()
+    result = MFA_MANAGER.setup_totp(user.id, user.username)
+    logger.info(f"Setup de TOTP iniciado para: {user.username}")
+    return result
+
+
+@users_blp.post("/mfa/totp/confirm")
+@users_blp.arguments(MfaTotpConfirmRequestSchema)
+@users_blp.response(200, MfaTotpConfirmResponseSchema, description="TOTP confirmed")
+@users_blp.alt_response(400, schema=ErrorSchema, description="TOTP setup not started")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Invalid code")
+@require_oauth_token
+@limiter.limit("10 per hour; 30 per day")
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def confirm_totp(data: dict[str, Any]):
+    """Confirmar el primer codigo TOTP y obtener los codigos de recuperacion"""
+    user = get_current_user()
+    recovery_codes = MFA_MANAGER.confirm_totp(user.id, data["code"])
+    logger.info(f"MFA (TOTP) activado para: {user.username}")
+    return {
+        "message": "MFA activado correctamente. Guarda tus codigos de recuperacion en un lugar seguro.",
+        "recoveryCodes": recovery_codes,
+    }
+
+
+@users_blp.delete("/mfa/totp")
+@users_blp.arguments(MfaDisableRequestSchema)
+@users_blp.response(200, RevokeResponseSchema, description="TOTP disabled")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Invalid code or not authenticated")
+@require_oauth_token
+@limiter.limit("10 per hour; 20 per day")
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def disable_totp(data: dict[str, Any]):
+    """Desactivar MFA (TOTP). Requiere un codigo TOTP o de recuperacion vigente."""
+    user = get_current_user()
+    MFA_MANAGER.disable_totp(user.id, code=data.get("code"), recovery_code=data.get("recoveryCode"))
+    logger.info(f"MFA (TOTP) desactivado para: {user.username}")
+    return {"message": "MFA desactivado correctamente"}

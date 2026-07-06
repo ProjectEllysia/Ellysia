@@ -114,3 +114,51 @@ class ProfileUpdateError(AuthenticationError):
             message=message,
             user_message="No se pudo actualizar el perfil. Intente de nuevo."
         )
+
+
+class MfaAlreadyEnabledError(AuthenticationError):
+    """El usuario ya tiene un método TOTP confirmado; no se puede re-inscribir
+    sin desactivarlo antes."""
+    default_code = ErrorCode.MFA_ALREADY_ENABLED
+    default_status_code = 409
+
+    def __init__(self):
+        super().__init__(
+            message="El usuario ya tiene MFA (TOTP) activado y confirmado",
+            user_message="Ya tienes la verificación en dos pasos activada.",
+        )
+
+
+class MfaNotEnabledError(AuthenticationError):
+    """No existe una inscripción TOTP (confirmada o pendiente) para el usuario."""
+    default_code = ErrorCode.MFA_NOT_ENABLED
+    default_status_code = 400
+
+    def __init__(self):
+        super().__init__(
+            message="El usuario no tiene MFA (TOTP) activado",
+            user_message="No tienes la verificación en dos pasos activada.",
+        )
+
+
+class InvalidMfaCodeError(AuthenticationError):
+    """El código TOTP o de recuperación no coincide."""
+    default_code = ErrorCode.INVALID_MFA_CODE
+
+    def __init__(self):
+        super().__init__(
+            message="Código MFA o de recuperación inválido",
+            user_message="El código introducido no es válido.",
+        )
+
+
+class MfaChallengeInvalidError(AuthenticationError):
+    """El challenge de ``POST /oauth/mfa/verify`` no existe, expiró o agotó sus
+    intentos — el cliente debe reiniciar el login desde cero."""
+    default_code = ErrorCode.MFA_CHALLENGE_INVALID
+
+    def __init__(self):
+        super().__init__(
+            message="El challenge de MFA es inválido, expiró o agotó sus intentos",
+            user_message="La verificación ha expirado. Inicia sesión de nuevo.",
+        )
