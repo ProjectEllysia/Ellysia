@@ -51,61 +51,54 @@
         <section class="profile-section">
           <h2>Verificación en dos pasos (MFA)</h2>
 
-          <!-- Códigos de recuperación: se muestran una sola vez tras confirmar -->
-          <div v-if="recoveryCodes.length" class="mfa-recovery-codes">
-            <p class="mfa-recovery-warning">Guarda estos códigos en un lugar seguro: cada uno sirve para un solo inicio de sesión de emergencia si pierdes tu app autenticadora. No se volverán a mostrar.</p>
-            <ul class="mfa-recovery-list">
-              <li v-for="c in recoveryCodes" :key="c"><code>{{ c }}</code></li>
-            </ul>
-            <div class="form-actions">
-              <button type="button" class="btn btn--primary" @click="recoveryCodes = []">Ya los guardé</button>
-            </div>
-          </div>
-
-          <!-- Activado -->
-          <template v-else-if="mfa.status.enabled && !mfa.pendingSetup.secret">
-            <p class="mfa-status-text mfa-status-text--on">✓ Verificación en dos pasos activada.</p>
-            <form class="profile-form" @submit.prevent="handleDisableMfa">
-              <div class="form-row form-row--single">
-                <div class="form-group">
-                  <label for="disable-code">Código de la app o de recuperación</label>
-                  <input id="disable-code" v-model="disableCode" type="text" class="inp" placeholder="123456 o XXXX-XXXX" required />
-                </div>
-              </div>
+          <Transition name="mfa-fade" mode="out-in">
+            <!-- Códigos de recuperación: se muestran una sola vez tras confirmar -->
+            <div v-if="recoveryCodes.length" key="recovery" class="mfa-recovery-codes">
+              <p class="mfa-recovery-warning">Guarda estos códigos en un lugar seguro: cada uno sirve para un solo inicio de sesión de emergencia si pierdes tu app autenticadora. No se volverán a mostrar.</p>
+              <ul class="mfa-recovery-list">
+                <li v-for="c in recoveryCodes" :key="c"><code>{{ c }}</code></li>
+              </ul>
               <div class="form-actions">
-                <button type="submit" class="btn btn--danger" :disabled="disabling">{{ disabling ? 'Desactivando…' : 'Desactivar MFA' }}</button>
+                <button type="button" class="btn btn--primary" @click="recoveryCodes = []">Ya los guardé</button>
               </div>
-            </form>
-          </template>
-
-          <!-- Inscripción en curso: mostrar el secreto para escanear/copiar -->
-          <template v-else-if="mfa.pendingSetup.secret">
-            <p>Añade esta clave a tu app autenticadora (Google Authenticator, Authy, 1Password…) y confirma con el código que genere:</p>
-            <code class="mfa-secret">{{ mfa.pendingSetup.secret }}</code>
-            <form class="profile-form" @submit.prevent="handleConfirmMfa">
-              <div class="form-row form-row--single">
-                <div class="form-group">
-                  <label for="confirm-code">Código de la app</label>
-                  <input id="confirm-code" v-model="confirmCode" type="text" class="inp" placeholder="123456" required />
-                </div>
-              </div>
-              <div class="form-actions">
-                <button type="button" class="btn btn--secondary" @click="mfa.cancelSetup()">Cancelar</button>
-                <button type="submit" class="btn btn--primary" :disabled="confirming">{{ confirming ? 'Confirmando…' : 'Confirmar' }}</button>
-              </div>
-            </form>
-          </template>
-
-          <!-- Sin activar -->
-          <template v-else>
-            <p class="mfa-status-text">No tienes la verificación en dos pasos activada.</p>
-            <div class="form-actions">
-              <button type="button" class="btn btn--primary" :disabled="startingSetup" @click="handleStartSetup">{{ startingSetup ? 'Generando…' : 'Activar MFA' }}</button>
             </div>
-          </template>
+
+            <!-- Activado -->
+            <div v-else-if="mfa.status.enabled" key="enabled">
+              <p class="mfa-status-text mfa-status-text--on">✓ Verificación en dos pasos activada.</p>
+              <form class="profile-form" @submit.prevent="handleDisableMfa">
+                <div class="form-row form-row--single">
+                  <div class="form-group">
+                    <label for="disable-code">Código de la app o de recuperación</label>
+                    <input id="disable-code" v-model="disableCode" type="text" class="inp" placeholder="123456 o XXXX-XXXX" required />
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="btn btn--danger" :disabled="disabling">{{ disabling ? 'Desactivando…' : 'Desactivar MFA' }}</button>
+                </div>
+              </form>
+            </div>
+
+            <!-- Sin activar -->
+            <div v-else key="disabled">
+              <p class="mfa-status-text">No tienes la verificación en dos pasos activada.</p>
+              <div class="form-actions">
+                <button type="button" class="btn btn--primary" :disabled="startingSetup" @click="handleStartSetup">{{ startingSetup ? 'Generando…' : 'Activar MFA' }}</button>
+              </div>
+            </div>
+          </Transition>
         </section>
       </template>
     </main>
+
+    <MfaSetupModal
+      :open="!!mfa.pendingSetup.secret"
+      :secret="mfa.pendingSetup.secret"
+      :provisioning-uri="mfa.pendingSetup.provisioningUri"
+      :confirming="confirming"
+      @confirm="handleConfirmMfa"
+      @cancel="mfa.cancelSetup()"
+    />
 
     <AppToast />
   </div>
@@ -117,6 +110,7 @@ import { useRouter } from 'vue-router'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
 import AppToast from '@/components/shared/AppToast.vue'
+import MfaSetupModal from '@/components/shared/MfaSetupModal.vue'
 import { useProfileStore } from '@/stores/profileStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useMfaStore } from '@/stores/mfaStore'
@@ -139,7 +133,6 @@ const initials = computed(() => getInitials(store.profile.first_name, store.prof
 
 /* ── MFA (TOTP) ── */
 const startingSetup = ref(false)
-const confirmCode = ref('')
 const confirming = ref(false)
 const disableCode = ref('')
 const disabling = ref(false)
@@ -170,12 +163,11 @@ async function handleStartSetup() {
   startingSetup.value = false
 }
 
-async function handleConfirmMfa() {
-  if (!confirmCode.value.trim()) return
+async function handleConfirmMfa(code) {
   confirming.value = true
-  const codes = await mfa.confirmTotp(confirmCode.value.trim())
+  const codes = await mfa.confirmTotp(code)
   confirming.value = false
-  if (codes) { recoveryCodes.value = codes; confirmCode.value = '' }
+  if (codes) recoveryCodes.value = codes
 }
 
 async function handleDisableMfa() {
@@ -210,12 +202,9 @@ async function handleDisableMfa() {
 .form-actions { display: flex; gap: 0.6rem; justify-content: flex-end; padding-top: 0.35rem; }
 .mfa-status-text { font-size: 0.85rem; color: var(--text-dim); margin: 0 0 0.85rem; }
 .mfa-status-text--on { color: var(--success, #2e9c5b); }
-.mfa-secret {
-  display: block; margin: 0.6rem 0 1rem; padding: 0.6rem 0.75rem;
-  background: var(--bg); border: 1px solid var(--border-solid); border-radius: 6px;
-  font-family: monospace; font-size: 0.85rem; letter-spacing: 0.05em; word-break: break-all;
-  color: var(--text);
-}
+.mfa-fade-enter-active, .mfa-fade-leave-active { transition: opacity 0.18s ease, transform 0.18s ease; }
+.mfa-fade-enter-from { opacity: 0; transform: translateY(4px); }
+.mfa-fade-leave-to { opacity: 0; transform: translateY(-4px); }
 .mfa-recovery-warning { font-size: 0.8rem; color: var(--text-dim); margin: 0 0 0.75rem; }
 .mfa-recovery-list {
   display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem 1rem;
