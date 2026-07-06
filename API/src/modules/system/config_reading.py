@@ -183,6 +183,34 @@ def get_oauth_config() -> tuple[float, float, Optional[str], Optional[str]]:
     return (float(access), float(refresh), secret, algorithm)
 
 
+@_lazy_load
+def get_mfa_config() -> dict:
+    """Configuración de MFA (TOTP + códigos de recuperación).
+
+    ``MFA_ENCRYPTION_KEY`` (clave Fernet para cifrar en reposo el secreto TOTP)
+    vive exclusivamente en .env, igual que ``JWT_SECRET_KEY`` — a diferencia del
+    resto de secretos de Acheron, el servidor SÍ necesita poder leer este valor
+    para poder calcular el código TOTP vigente y verificarlo. El resto de
+    parámetros provienen de ``security.mfa`` en SecOpsConfig.json.
+    """
+    encryption_key = os.getenv("MFA_ENCRYPTION_KEY")
+    if not encryption_key:
+        raise ValueError(
+            "Falta la variable de entorno MFA_ENCRYPTION_KEY. "
+            "Defínela en el archivo .env (clave Fernet: "
+            "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\")."
+        )
+
+    mfa_cfg = _require_configs().get("security", {}).get("mfa", {})
+    return {
+        "encryption_key": encryption_key,
+        "issuer": str(mfa_cfg.get("issuer", "SeQ")),
+        "challenge_expiry_minutes": int(mfa_cfg.get("challenge_expiry_minutes", 5)),
+        "max_challenge_attempts": int(mfa_cfg.get("max_challenge_attempts", 5)),
+        "recovery_codes_count": int(mfa_cfg.get("recovery_codes_count", 10)),
+    }
+
+
 def get_openvas_environment() -> dict[str, str]:
     """Solo variables de entorno."""
     hostname    = os.getenv("OPENVAS_HOST")
