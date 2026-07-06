@@ -210,7 +210,7 @@ def get_mfa_config() -> dict:
     mfa_cfg = _require_configs().get("security", {}).get("mfa", {})
     return {
         "encryption_key": encryption_key,
-        "issuer": str(mfa_cfg.get("issuer", "SeQ")),
+        "issuer": str(mfa_cfg.get("issuer", "Ellysia")),
         "challenge_expiry_minutes": int(mfa_cfg.get("challenge_expiry_minutes", 5)),
         "max_challenge_attempts": int(mfa_cfg.get("max_challenge_attempts", 5)),
         "recovery_codes_count": int(mfa_cfg.get("recovery_codes_count", 10)),
