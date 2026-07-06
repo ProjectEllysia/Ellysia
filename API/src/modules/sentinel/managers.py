@@ -1940,9 +1940,33 @@ class EllysiaEngineManager(ScanManager):
                 user_id = ellysia_scan.user_id if ellysia_scan else None
 
             # Phase 0 — self-discovery (network) happens outside any transaction.
-            discovered_ports = None
+            #
+            # A failed/unreachable probe must NEVER be treated as "scanned
+            # cleanly, found nothing" — apply_lifecycle would then mark every
+            # previously-open finding as "fixed" (false remediation). So this
+            # mode bails out early (scan -> FAILED, no detection/lifecycle at
+            # all) whenever we can't trust an empty result. The Nmap-source mode
+            # doesn't need this: an empty OpenPort set there already reflects a
+            # decision Nmap's own _execute_scan made independently.
+            discovered_ports: list = []
             if source_scan_id is None and scan_target:
-                discovered_ports = self._discover_ports(scan_target, discover_ports)
+                if CR.is_host_reachability_check_enabled() and not self.is_host_reachable(
+                    scan_target,
+                    port=CR.get_host_reachability_check_port(),
+                    timeout=CR.get_host_reachability_check_timeout(),
+                ):
+                    logger.warning(
+                        f"Host '{scan_target}' inalcanzable. Marcando escaneo Ellysia {scan_id} como FAILED"
+                    )
+                    self.update_scan_status(scan_id, ScanStatus.FAILED)
+                    return
+
+                discovered = self._discover_ports(scan_target, discover_ports)
+                if discovered is None:
+                    logger.error(f"Descubrimiento de puertos fallido para el escaneo Ellysia {scan_id}")
+                    self.update_scan_status(scan_id, ScanStatus.FAILED)
+                    return
+                discovered_ports = discovered
 
             # Phase 1 — resolve services, then version/informational detection
             # with the KB in-session, and load the previous scan for lifecycle.
@@ -1958,9 +1982,16 @@ class EllysiaEngineManager(ScanManager):
                     services = services_from_open_ports(open_ports)
                 else:
                     source_target = scan_target
-                    host = scan_repo.get_or_create_host(hostname=scan_target, ip_address=scan_target) if scan_target else None
+                    host = None
+                    if scan_target:
+                        # Reuse a Host another scanner already created for this
+                        # IP (e.g. Nmap, which may know a resolved hostname)
+                        # instead of creating a duplicate keyed by the bare IP.
+                        host = scan_repo.get_host_by_ip(scan_target) or scan_repo.get_or_create_host(
+                            hostname=scan_target, ip_address=scan_target,
+                        )
                     source_host_id = host.id if host else None
-                    services = services_from_discovered_ports(discovered_ports or [])
+                    services = services_from_discovered_ports(discovered_ports)
 
                 previous_map = self._previous_findings_map(scan_repo, user_id, source_target, scan_id)
 
@@ -2002,18 +2033,21 @@ class EllysiaEngineManager(ScanManager):
             logger.error(f"Error en escaneo Ellysia {scan_id}: {e}", exc_info=True)
             self.update_scan_status(scan_id, ScanStatus.FAILED)
 
-    def _discover_ports(self, target: str, discover_ports) -> list:
+    def _discover_ports(self, target: str, discover_ports) -> Optional[list]:
         """Discover open ports with Ellysia's own connect scan (Fase T).
 
-        Best-effort: a discovery failure yields no ports rather than failing the
-        scan (the detection pipeline then simply has nothing to analyse).
+        Returns ``None`` (not ``[]``) when discovery itself failed unexpectedly,
+        as opposed to running cleanly and finding zero open ports. The caller
+        must not conflate the two: treating a failed probe as "everything is
+        closed" would falsely mark previously-open findings as fixed once
+        lifecycle correlation runs.
         """
         from .ellysia import scan_ports_sync
         try:
             return scan_ports_sync(target, discover_ports)
         except Exception:
             logger.exception("Ellysia port discovery failed for %s", target)
-            return []
+            return None
 
     def _run_active_checks(self, target: str, services) -> list:
         """Run the declarative check runtime against the target's HTTP services.
@@ -2077,14 +2111,25 @@ class EllysiaEngineManager(ScanManager):
 
     @staticmethod
     def _fingerprint_finding(service, product: Optional[str], version: Optional[str], label: str) -> dict:
-        """Build an informational Finding comparing our fingerprint to Nmap's."""
+        """Build an informational Finding comparing our fingerprint to Nmap's.
+
+        Nmap-sourced services carry a product/version to compare against; a
+        self-discovered service (Fase T, no Nmap involved) has neither, and
+        ``agrees_with_nmap`` would flatly return False for lack of a baseline —
+        which reads as "we disagree with Nmap" even though there is nothing to
+        compare. That case gets its own honest phrasing instead.
+        """
         from .ellysia import agrees_with_nmap, QOD_FINGERPRINT
-        agrees = agrees_with_nmap(product, version, service.product, service.version)
         own = f"{product or '?'} {version or ''}".strip()
-        nmap = f"{service.product or '?'} {service.version or ''}".strip()
-        verdict = "concuerda con Nmap" if agrees else "no concuerda con Nmap"
+        if service.product:
+            agrees = agrees_with_nmap(product, version, service.product, service.version)
+            nmap = f"{service.product or '?'} {service.version or ''}".strip()
+            verdict = "concuerda con Nmap" if agrees else "no concuerda con Nmap"
+            title = f"Fingerprint propio ({label}): {own} — {verdict} (Nmap: {nmap})"
+        else:
+            title = f"Fingerprint propio ({label}): {own} (sin datos de Nmap para comparar)"
         return {
-            "title":        f"Fingerprint propio ({label}): {own} — {verdict} (Nmap: {nmap})",
+            "title":        title,
             "category":     "fingerprint",
             "port":         service.port,
             "service":      service.name or None,

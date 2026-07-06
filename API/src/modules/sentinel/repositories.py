@@ -405,6 +405,23 @@ class ScanRepository(BaseRepository[Scan]):
 
         return self._session.query(Host).filter(Host.hostname == hostname).first()
 
+    def get_host_by_ip(self, ip_address: str) -> Optional[Host]:
+        """Return any existing Host row for this IP, regardless of hostname.
+
+        Used by callers that only know a bare IP (e.g. Ellysia's self-discovery
+        mode) so they reuse the Host record another scanner already created for
+        the same physical target — Nmap, say, which may know a resolved
+        hostname — instead of creating a duplicate keyed by the bare IP (Host
+        is unique on ``hostname``, so "10.0.0.5" and "server.example.com" would
+        otherwise become two rows for the same machine).
+        """
+        return (
+            self._session.query(Host)
+            .filter(Host.ip_address == ip_address)
+            .order_by(Host.id.asc())
+            .first()
+        )
+
     def get_or_create_port(self, protocol: str) -> Port:
         """Get or create a Port row by its protocol string."""
         port = self._session.query(Port).filter(Port.protocol == protocol).one_or_none()

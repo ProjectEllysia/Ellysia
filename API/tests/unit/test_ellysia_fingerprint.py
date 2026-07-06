@@ -21,6 +21,8 @@ from src.modules.sentinel.ellysia import (
 )
 from src.modules.sentinel.ellysia.checks import Response
 from src.modules.sentinel.ellysia.fingerprint import SSH_MSG_KEXINIT
+from src.modules.sentinel.ellysia.engine import Service
+from src.modules.sentinel.managers import EllysiaEngineManager
 
 pytestmark = pytest.mark.unit
 
@@ -245,3 +247,28 @@ def test_concordance_rate():
 
 def test_concordance_rate_empty_is_zero_not_perfect():
     assert concordance_rate([]) == 0.0
+
+
+# ================================= _fingerprint_finding title honesty (manager)
+
+def test_fingerprint_finding_reports_agreement_when_nmap_baseline_exists():
+    service = Service(port=80, protocol="tcp", name="http", product="Apache httpd", version="2.4.49")
+    finding = EllysiaEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
+    assert "concuerda con Nmap" in finding["title"]
+    assert "no concuerda" not in finding["title"]
+
+
+def test_fingerprint_finding_reports_disagreement_when_nmap_baseline_differs():
+    service = Service(port=80, protocol="tcp", name="http", product="nginx", version="1.18")
+    finding = EllysiaEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
+    assert "no concuerda con Nmap" in finding["title"]
+
+
+def test_fingerprint_finding_no_nmap_baseline_is_honest_not_a_false_disagreement():
+    """Self-discovered services carry no Nmap product/version at all — the
+    title must not claim disagreement when there is nothing to compare against."""
+    service = Service(port=80, protocol="tcp", name="http", product="", version="")
+    finding = EllysiaEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
+    assert "no concuerda" not in finding["title"]
+    assert "concuerda con Nmap" not in finding["title"]
+    assert "sin datos de Nmap para comparar" in finding["title"]

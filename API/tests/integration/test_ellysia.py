@@ -14,7 +14,7 @@ import pytest
 from src.modules.infrastructure import UnitOfWork
 from src.modules.sentinel.model import NmapScan, NiktoScan, ScanStatus
 from src.modules.sentinel.repositories import ScanRepository, KbRepository
-from src.modules.sentinel.managers import EllysiaEngineManager
+from src.modules.sentinel.managers import EllysiaEngineManager, ScanManager
 
 pytestmark = pytest.mark.integration
 
@@ -77,8 +77,9 @@ def test_ellysia_requires_a_mode(client, admin_user, auth_headers):
 
 
 def test_ellysia_self_discovery_produces_open_port_findings(app, admin_user, monkeypatch):
-    # Stub the connect scan so no real network is touched; the rest of the
+    # Stub reachability (no real socket) and the connect scan; the rest of the
     # self-discovery pipeline runs for real.
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(EllysiaEngineManager, "_discover_ports",
                         lambda self, target, ports: [80, 22])
 
@@ -97,6 +98,95 @@ def test_ellysia_self_discovery_produces_open_port_findings(app, admin_user, mon
     assert {f.port for f in open_ports} == {80, 22}
     # Self-discovery creates a Host for the target, so findings are anchored.
     assert all(f.host_id is not None for f in findings)
+
+
+def test_ellysia_self_discovery_unreachable_host_fails_without_false_fixed(app, admin_user, monkeypatch):
+    """An unreachable host must never look like 'scanned clean, nothing open':
+    that would mark every previously-open finding as falsely fixed."""
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: False))
+
+    with app.app_context():
+        mgr = EllysiaEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.99", user_id=admin_user.id, source_scan_id=None)
+        mgr._run_ellysia(escan.id, source_scan_id=None, discover_ports=None)
+
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            findings = repo.get_findings_by_scan(escan.id)
+            escan = repo.get_by_id(escan.id)
+
+    assert escan.status == ScanStatus.FAILED.value
+    assert findings == []          # no misleading findings persisted at all
+
+
+def test_ellysia_self_discovery_probe_failure_fails_without_false_fixed(app, admin_user, monkeypatch):
+    """Host is reachable, but the connect scan itself blows up unexpectedly:
+    must also fail the scan rather than silently proceed with zero findings."""
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(EllysiaEngineManager, "_discover_ports",
+                        lambda self, target, ports: None)
+
+    with app.app_context():
+        mgr = EllysiaEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=None)
+        mgr._run_ellysia(escan.id, source_scan_id=None, discover_ports=None)
+
+        with UnitOfWork() as uow:
+            escan = ScanRepository(uow).get_by_id(escan.id)
+
+    assert escan.status == ScanStatus.FAILED.value
+
+
+def test_ellysia_self_discovery_genuine_zero_ports_still_marks_fixed(app, admin_user, monkeypatch):
+    """Discovery running cleanly and finding nothing IS legitimate evidence:
+    a previously-open finding on this target should still be marked fixed."""
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(EllysiaEngineManager, "_discover_ports",
+                        lambda self, target, ports: [80])
+
+    with app.app_context():
+        mgr = EllysiaEngineManager()
+        # First scan: port 80 open.
+        e1 = mgr._create_scan_record(target="10.0.0.7", user_id=admin_user.id, source_scan_id=None)
+        mgr._run_ellysia(e1.id, source_scan_id=None, discover_ports=None)
+
+    # Second scan: discovery ran cleanly and genuinely found nothing open.
+    monkeypatch.setattr(EllysiaEngineManager, "_discover_ports",
+                        lambda self, target, ports: [])
+    with app.app_context():
+        mgr = EllysiaEngineManager()
+        e2 = mgr._create_scan_record(target="10.0.0.7", user_id=admin_user.id, source_scan_id=None)
+        mgr._run_ellysia(e2.id, source_scan_id=None, discover_ports=None)
+        with UnitOfWork() as uow:
+            findings2 = ScanRepository(uow).get_findings_by_scan(e2.id)
+            e2 = ScanRepository(uow).get_by_id(e2.id)
+
+    assert e2.status == ScanStatus.FINISHED.value
+    assert any(f.state == "fixed" and f.category == "open_port" for f in findings2)
+
+
+def test_ellysia_self_discovery_reuses_host_created_by_nmap(app, admin_user):
+    """Self-discovery must not create a second Host row for an IP another
+    scanner already resolved to a hostname."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            ScanRepository(uow).get_or_create_host(hostname="server.example.com", ip_address="10.0.0.42")
+
+        mgr = EllysiaEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.42", user_id=admin_user.id, source_scan_id=None)
+
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            found = repo.get_host_by_ip("10.0.0.42")
+            assert found is not None and found.hostname == "server.example.com"
+
+            host = repo.get_host_by_ip(escan.target) or repo.get_or_create_host(
+                hostname=escan.target, ip_address=escan.target,
+            )
+            all_hosts = uow.session.query(type(host)).filter(type(host).ip_address == "10.0.0.42").all()
+
+        assert host.hostname == "server.example.com"   # reused, not a fresh "10.0.0.42" row
+        assert len(all_hosts) == 1                       # no duplicate
 
 
 def test_ellysia_rejects_non_nmap_source(client, app, admin_user, auth_headers):
@@ -138,8 +228,9 @@ def test_ellysia_engine_persists_informational_findings(app, admin_user):
             assert len(findings) == 2
             assert {f.category for f in findings} == {"open_port"}
             assert all(f.source == "ellysia" and f.qod == 30 for f in findings)
-            # The CPE captured from Nmap rode all the way into the finding.
-            assert "cpe:/a:apache:http_server:2.4.49" in {f.cpe for f in findings}
+            # The CPE captured from Nmap rode all the way into the finding,
+            # normalized to 2.3 (consistent with version-match findings).
+            assert "cpe:2.3:a:apache:http_server:2.4.49:*:*:*:*:*:*:*" in {f.cpe for f in findings}
 
 
 def _seed_kb_apache_cve(app):

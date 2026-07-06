@@ -163,7 +163,10 @@ class EllysiaEngine:
             "category":     "open_port",
             "port":         service.port,
             "service":      service.name or None,
-            "cpe":          service.cpe or None,
+            # Normalized to 2.3 (like the version-match finding's cpe) so a
+            # consumer grouping findings by cpe sees one consistent format
+            # instead of Nmap's raw 2.2 URI here and 2.3 elsewhere.
+            "cpe":          normalize_cpe_to_23(service.cpe) if service.cpe else None,
             "source":       "ellysia",
             "check_id":     "ellysia:open-port@1",
             "feed_version": self.FEED_VERSION,

@@ -43,7 +43,9 @@ def test_analyze_emits_one_informational_finding_per_service():
     # Title carries where + what, and the CPE is preserved for later phases.
     assert "80/tcp" in http["title"]
     assert "Apache httpd 2.4.49" in http["title"]
-    assert http["cpe"] == "cpe:/a:apache:http_server:2.4.49"
+    # Normalized to 2.3, consistent with the version-match finding's cpe (a
+    # consumer grouping by cpe should see one format, not Nmap's raw 2.2 here).
+    assert http["cpe"] == "cpe:2.3:a:apache:http_server:2.4.49:*:*:*:*:*:*:*"
     # A service without a CPE stores None, not "".
     assert findings[1]["cpe"] is None
 
