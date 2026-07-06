@@ -3,10 +3,13 @@ from .model import (
     AccessToken,
     RefreshToken,
     UserAttribute,
+    MFATotpCredential,
+    MFARecoveryCode,
+    MFAChallenge,
 )
 from .services import require_oauth_token, require_attributes, require_role, AttributeType
 from .endpoints import oauth_blp, users_blp, get_current_user
-from .managers import UserManager, OAuthTokenManager
+from .managers import UserManager, OAuthTokenManager, MFAManager
 from src.modules.acheron.model import Vault
 
 
@@ -46,8 +49,12 @@ __all__ = [
     "AccessToken",
     "RefreshToken",
     "UserAttribute",
+    "MFATotpCredential",
+    "MFARecoveryCode",
+    "MFAChallenge",
     "UserManager",
     "OAuthTokenManager",
+    "MFAManager",
     "users_blp",
     "oauth_blp",
     "require_oauth_token",
