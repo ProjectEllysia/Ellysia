@@ -125,7 +125,7 @@
       </div>
 
       <!-- Resumen ejecutivo IA (IA1) -->
-      <div v-if="status === 'finished'" class="rv-ai-summary">
+      <div v-if="reportData.status === 'finished'" class="rv-ai-summary">
         <h3 class="section-title">Resumen ejecutivo (IA)</h3>
         <div v-if="reportData.aiSummary" class="ai-summary-card">
           <p class="ai-summary-text">{{ reportData.aiSummary.executive_summary }}</p>
@@ -221,7 +221,7 @@
       </div>
 
       <!-- IOCs (collapsible, cargados bajo demanda) -->
-      <div v-if="status === 'finished'" class="rv-raw">
+      <div v-if="reportData.status === 'finished'" class="rv-raw">
         <button type="button" class="raw-toggle" @click="toggleIocs">
           <svg :class="{ rotated: iocsOpen }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="toggle-chevron"><polyline points="6 9 12 15 18 9"/></svg>
           Indicadores de compromiso (IOCs)
@@ -370,7 +370,7 @@ const pathLoading = computed(() => {
   return irisStore.currentPath?.loading && irisStore.currentPath?.data?.analysisId !== props.reportId
 })
 const pathVisible = computed(() => {
-  return props.status === 'finished' && !!props.reportId && (
+  return props.reportData?.status === 'finished' && !!props.reportId && (
     pathData.value || pathLoading.value
   )
 })
