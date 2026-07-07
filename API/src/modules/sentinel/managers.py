@@ -1425,6 +1425,8 @@ class NmapScanManager(ScanManager):
         scan = NmapScan(target=target, user_id=user_id, started_at=datetime.now(), programed_scan_id=programed_scan_id)
         with UnitOfWork() as uow:
             ScanRepository(uow).save(scan)
+            # Durable antes de encolar: el worker corre en otro proceso.
+            uow.commit_for_handoff()
         return scan
 
     def _persist_scan_results(self, uow, scan, domain_data) -> None:
@@ -1541,6 +1543,8 @@ class NiktoScanManager(ScanManager):
         scan = NiktoScan(target=target, user_id=user_id, started_at=datetime.now(), programed_scan_id=programed_scan_id)
         with UnitOfWork() as uow:
             ScanRepository(uow).save(scan)
+            # Durable antes de encolar: el worker corre en otro proceso.
+            uow.commit_for_handoff()
         return scan
 
     def _persist_scan_results(self, uow, scan, domain_data) -> None:
@@ -1702,6 +1706,8 @@ class OpenVASScanManager(ScanManager):
         )
         with UnitOfWork() as uow:
             ScanRepository(uow).save(scan)
+            # Durable antes de encolar: el worker corre en otro proceso.
+            uow.commit_for_handoff()
         return scan
 
     def _execute_scan(
@@ -1829,6 +1835,8 @@ class SentinelReportManager:
                 is_ai_generated = 1 if ai_report else 0,
             )
             SentinelReportRepository(uow).save(document)
+            # Durable antes de encolar: el worker corre en otro proceso.
+            uow.commit_for_handoff()
 
         return document.id  # type: ignore
 
@@ -1947,7 +1955,8 @@ class SentinelReportManager:
     @staticmethod
     def execute_report_generation(doc_id: int, scan_id: int, ai_report: bool) -> None:
         """Entry point submitted to the TaskQueue for background PDF generation."""
-        SentinelReportManager()._generate_pdf_async(doc_id, scan_id, ai_report)
+        with job_context():
+            SentinelReportManager()._generate_pdf_async(doc_id, scan_id, ai_report)
 
     def _generate_pdf_async(
         self,
@@ -1970,12 +1979,17 @@ class SentinelReportManager:
 
             logger.info(f"PDF generado exitosamente para documento {document_id}")
 
-        except (OSError, RuntimeError) as e:
+        except Exception as e:
             logger.error(
                 f"Error generando PDF para documento {document_id}: {e}",
                 exc_info=True
             )
             self._update_document_status(document_id, "error")
+            # Re-lanzar: sin esto el job termina "con éxito" y el callback de RQ
+            # lo registra como COMPLETED pese a que el documento quedó en error.
+            # Al propagar, RQ lo marca FAILED y estado de tarea y documento
+            # coinciden.
+            raise
 
     def _update_document_status(self, document_id: int, status: str) -> None:
         """Update document status in database."""

@@ -369,13 +369,8 @@ def retrieve_all_scans(args):
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def get_scan_stats():
     """Contadores de escaneos por tipo"""
-    from src.modules.infrastructure.session import get_db_session
-    from .repositories import ScanRepository as _ScanRepo
     user = get_current_user()
-    session = get_db_session()
-    repo = _ScanRepo(session=session)
-    stats = repo.get_stats(user.id)
-    return stats
+    return ScanHistoryManager().get_stats(user.id)  # type: ignore
 
 
 @sentinel_blp.get("/history/hosts")

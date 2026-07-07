@@ -635,6 +635,15 @@ class TaskQueue:
             queue.enqueue(func, args, ...)
         """
         name = QueueRegistry.resolve_queue_name(category)
+        if category and category != DEFAULT_QUEUE and name == DEFAULT_QUEUE:
+            # Fallback silencioso = bug invisible: un typo en category= (o un
+            # módulo que olvidó QueueRegistry.register(...)) haría correr el job
+            # en la cola equivocada sin ningún aviso.
+            logger.warning(
+                "Categoría de cola '%s' no registrada; el job irá a '%s'. "
+                "¿Typo en category= o falta QueueRegistry.register(...)?",
+                category, DEFAULT_QUEUE,
+            )
         queue = self._queue_cache.get(name)
         if queue is None:
             queue = rq.Queue(name=name, connection=self._redis, default_timeout=_DEFAULT_TIMEOUT)

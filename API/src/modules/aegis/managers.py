@@ -594,6 +594,8 @@ class AegisManager:
         with UnitOfWork() as uow:
             repo = AegisDocumentRepository(uow)
             saved_doc = repo.save(doc)
+            # Durable antes de encolar: el worker corre en otro proceso.
+            uow.commit_for_handoff()
 
         return saved_doc.id # type: ignore
 
@@ -619,8 +621,11 @@ class CampaignManager:
     """
     Gestiona listas de distribución y campañas de concienciación.
 
-    Toda la persistencia se realiza a través de los repositorios usando
-    UnitOfWork. El manager no gestiona sesiones directamente.
+    Sigue la convención del proyecto para el acceso a datos: las **lecturas**
+    usan la sesión ambiental de la request (``get_db_session()`` inyectada en
+    el repositorio) y las **escrituras** van dentro de un ``UnitOfWork``. El
+    manager nunca crea ni cierra sesiones — de eso se encargan los bordes
+    (``teardown_request`` en HTTP, ``job_context`` en el worker).
     """
 
     def __init__(self, user: User, task_queue: ITaskQueue | None = None) -> None:
@@ -747,6 +752,9 @@ class CampaignManager:
         with UnitOfWork() as uow:
             repo = CampaignRepository(uow)
             repo.launch_campaign(campaign_id, questions_snapshot, campaign_recipients)
+            # Durable antes de encolar: el worker corre en otro proceso y debe
+            # ver el snapshot + los tokens ya persistidos.
+            uow.commit_for_handoff()
 
         self._tq.submit(
             func=CampaignManager.execute_campaign_send,
@@ -833,8 +841,12 @@ class CampaignManager:
                 job.progress(int(100 * (i + 1) / total))
 
             if not cancelled:
+                # No mentir sobre el resultado: si ningún envío tuvo éxito la
+                # campaña no se "envió". Solo se marca 'sent' cuando al menos un
+                # destinatario recibió el correo.
+                final_status = "sent" if sent_count > 0 else "failed"
                 with UnitOfWork() as uow:
-                    CampaignRepository(uow).mark_campaign_status(campaign_id, "sent")
+                    CampaignRepository(uow).mark_campaign_status(campaign_id, final_status)
 
             logger.info(
                 f"Campaña {campaign_id} procesada: {sent_count}/{total} enviados"

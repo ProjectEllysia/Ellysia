@@ -268,6 +268,27 @@ class UnitOfWork:
             logger.error("Commit failed", exc_info=True)
             raise SQLAlchemyError(f"Commit failed: {e}") from e
 
+    def commit_for_handoff(self) -> None:
+        """
+        Commit *now* so a separate process can see the rows just written.
+
+        In a request the commit is normally deferred to ``teardown_request``,
+        so the whole request is a single transaction (that's why ``__exit__``
+        is a no-op there). But when the rows written in this block are about to
+        be handed to a background worker — the manager enqueues a TaskQueue job
+        whose worker runs in **another process with its own session** — they
+        must be durable *before* the job is enqueued. Otherwise the worker can
+        dequeue and query them before the request teardown commits (an
+        "enqueue-before-commit" race), or find they never committed at all if
+        the teardown later rolls back.
+
+        Use this right before ``TaskQueue.submit(...)`` in the create-then-
+        enqueue flows (report/scan/analysis/campaign creation). It is safe in a
+        background context too: the surrounding block would commit on exit
+        anyway, so this only moves that commit slightly earlier.
+        """
+        self.commit()
+
     def rollback(self) -> None:
         """
         Roll back the current transaction.
