@@ -36,7 +36,7 @@ import logging
 
 from flask import g, has_request_context
 
-from .unit_of_work import get_session, close_all
+from .engine import get_session, close_all
 
 logger = logging.getLogger(__name__)
 

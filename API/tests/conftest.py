@@ -74,6 +74,7 @@ from sqlalchemy.dialects.postgresql import JSONB  # noqa: E402
 from sqlalchemy.orm import scoped_session, sessionmaker  # noqa: E402
 
 from src.modules.shared import Base  # noqa: E402
+from src.modules.infrastructure import engine as engine_module  # noqa: E402
 from src.modules.infrastructure import unit_of_work  # noqa: E402
 from src.modules.users.model import User, UserAttribute  # noqa: E402
 from src.modules.users.repositories import (  # noqa: E402
@@ -141,13 +142,13 @@ def _sqlite_url(tmp_path_factory) -> str:
 
 @pytest.fixture(scope="session")
 def _initialized_db(_sqlite_url):
-    """Crea un engine SQLite e inyecta el singleton de ``unit_of_work``.
+    """Crea un engine SQLite e inyecta el singleton de ``infrastructure.engine``.
 
-    No se puede usar ``unit_of_work.initialize`` directamente porque fija
+    No se puede usar ``engine.initialize`` directamente porque fija
     ``isolation_level="READ COMMITTED"`` (válido en PostgreSQL, rechazado por
     SQLite — ver IMPROVEMENTS.md). En su lugar construimos aquí un engine
     compatible con SQLite y lo asignamos a los globales de
-    ``infrastructure.unit_of_work``; como su función de init es idempotente
+    ``infrastructure.engine``; como su función de init es idempotente
     (``if ENGINE is None``), después reutilizará este engine.
     """
     # Importar run arrastra todos los blueprints y, con ellos, TODOS los modelos
@@ -172,8 +173,12 @@ def _initialized_db(_sqlite_url):
         )
     )
 
-    unit_of_work.ENGINE = engine
-    unit_of_work.SESSION_FACTORY = session_factory
+    # The engine/session-factory singletons live in infrastructure.engine now,
+    # and get_session()/close_all() read them from *that* module's namespace, so
+    # the injection must target engine_module — reassigning unit_of_work.* (a
+    # re-exported copy) would have no effect on what those functions see.
+    engine_module.ENGINE = engine
+    engine_module.SESSION_FACTORY = session_factory
 
     Base.metadata.create_all(engine)
     yield engine
