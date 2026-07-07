@@ -1142,6 +1142,12 @@
       "algorithm": "HS256",
       "access_token_expiry_minutes": 30,
       "refresh_token_expiry_days": 7
+    },
+    "mfa": {
+      "issuer": "Ellysia",
+      "challenge_expiry_minutes": 5,
+      "max_challenge_attempts": 5,
+      "recovery_codes_count": 10
     }
   },
   "sentinel": {

@@ -10,12 +10,72 @@ import logging
 
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import Callable, List, Type
 
 logger = logging.getLogger(__name__)
 
 from src.modules.shared import Document
 from src.modules.infrastructure import UnitOfWork
+
+
+# =========================================================================
+# GENERACIÓN DE INFORMES EN SEGUNDO PLANO (Sentinel / Iris)
+# =========================================================================
+
+
+def run_report_generation(
+    document_id: int,
+    repo_cls: Type,
+    render: Callable[[], str],
+) -> None:
+    """Renderiza un informe PDF y sincroniza el estado de su documento.
+
+    Patrón común a Sentinel e Iris (antes duplicado en ambos managers):
+
+    1. ``render()`` produce el PDF y devuelve su ruta.
+    2. El documento se marca ``done`` con esa ruta y ``generated_at``.
+    3. Ante **cualquier** fallo el documento se marca ``error`` y se **re-lanza**
+       la excepción: así el job de la cola termina como FAILED y el estado de la
+       tarea coincide con el del documento (sin esto, el callback de éxito de RQ
+       registraría COMPLETED pese al error).
+
+    Se ejecuta dentro del worker (contexto background), por lo que cada
+    ``UnitOfWork`` confirma su propia transacción al salir del bloque.
+
+    Args:
+        document_id: PK del documento a actualizar.
+        repo_cls:    Clase de repositorio del documento (recibe un ``UnitOfWork``).
+        render:      Callable sin argumentos que genera el PDF y devuelve su ruta.
+    """
+    try:
+        pdf_path = render()
+        with UnitOfWork() as uow:
+            doc = repo_cls(uow).get_by_id(document_id)
+            if doc:
+                doc.filename = pdf_path
+                doc.status = "done"
+                doc.generated_at = datetime.utcnow()
+        logger.info("PDF generado exitosamente para documento %s", document_id)
+    except Exception:
+        logger.error("Error generando PDF para documento %s", document_id, exc_info=True)
+        _set_document_status_safe(document_id, repo_cls, "error")
+        raise
+
+
+def _set_document_status_safe(document_id: int, repo_cls: Type, status: str) -> None:
+    """Actualiza el estado de un documento sin propagar fallos secundarios.
+
+    Best-effort: se usa en el camino de error de ``run_report_generation``, donde
+    la excepción original ya se re-lanza; un fallo al marcar el estado no debe
+    ocultarla.
+    """
+    try:
+        with UnitOfWork() as uow:
+            doc = repo_cls(uow).get_by_id(document_id)
+            if doc:
+                doc.status = status
+    except Exception:
+        logger.exception("Error updating document status for document %s", document_id)
 
 
 # =========================================================================

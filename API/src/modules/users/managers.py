@@ -33,17 +33,34 @@ from src.modules.users.exceptions import (
     PermissionsError,
     ProfileUpdateError,
     UserBindingError,
+    MfaAlreadyEnabledError,
+    MfaNotEnabledError,
+    InvalidMfaCodeError,
 )
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import get_db_session
 
-from .model import AccessToken, RefreshToken, User, UserAttribute
-from .repositories import TokenRepository, UserRepository, AttributeRepository
+from .model import (
+    AccessToken,
+    RefreshToken,
+    User,
+    UserAttribute,
+    MFATotpCredential,
+    MFARecoveryCode,
+    MFAChallenge,
+)
+from .repositories import TokenRepository, UserRepository, AttributeRepository, MFARepository
 from .services import (
     generate_salt,
     hash_password,
     hash_password_with_salt,
-    verify_password
+    verify_password,
+    encrypt_totp_secret,
+    decrypt_totp_secret,
+    generate_totp_secret,
+    totp_provisioning_uri,
+    verify_totp_code,
+    generate_recovery_codes,
 )
 
 logger = logging.getLogger(__name__)
@@ -535,6 +552,7 @@ class OAuthTokenManager:
         username: str,
         role: str = "role_user",
         password_changed_at: Optional[datetime] = None,
+        mfa_at: Optional[datetime] = None,
     ) -> str:
         """
         Create and persist a signed JWT access token.
@@ -547,6 +565,11 @@ class OAuthTokenManager:
                 change, embedded as the ``pwd_at`` claim (UTC epoch seconds).
                 Lets clients reason about password-change state. ``None`` when
                 the password has never been changed.
+            mfa_at: Timestamp at which the second factor was verified for this
+                session, embedded as the ``mfa_at`` claim (UTC epoch seconds).
+                ``None`` when the user doesn't have MFA enabled — possession of
+                an access token with ``mfa_at`` set implies MFA was satisfied,
+                so no per-endpoint guard is needed.
 
         Returns:
             Signed JWT string.
@@ -562,6 +585,7 @@ class OAuthTokenManager:
             "type":     "access",
             "role":     role,
             "pwd_at":   _to_utc_epoch(password_changed_at),
+            "mfa_at":   _to_utc_epoch(mfa_at),
         }
         token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
@@ -762,19 +786,270 @@ class OAuthTokenManager:
         logger.info(f"Todos los tokens revocados para usuario {user_id}")
 
     # =========================================================================
+    # MFA CHALLENGE
+    # =========================================================================
+
+    def create_mfa_challenge(self, user_id: int) -> str:
+        """
+        Issue a short-lived opaque challenge after a password grant succeeds
+        for a user with MFA enabled. Exchanged for real tokens at
+        POST /oauth/mfa/verify once the user proves the second factor.
+
+        Args:
+            user_id: User primary key.
+
+        Returns:
+            Opaque challenge token string (not a JWT).
+        """
+        cfg = CR.get_mfa_config()
+        token = secrets.token_urlsafe(48)
+        expires_at = datetime.utcnow() + timedelta(minutes=cfg["challenge_expiry_minutes"])
+
+        with UnitOfWork() as uow:
+            MFARepository(uow).save_challenge(
+                MFAChallenge(token=token, user_id=user_id, expires_at=expires_at)
+            )
+
+        return token
+
+    def verify_mfa_challenge(self, token: str) -> Optional[int]:
+        """
+        Return the user_id for a still-valid MFA challenge (not expired, under
+        the max attempt count), or None otherwise.
+
+        Does NOT consume the challenge — callers must call
+        consume_mfa_challenge() on success or register_mfa_challenge_failure()
+        on a failed code attempt.
+
+        Args:
+            token: Opaque challenge token string.
+
+        Returns:
+            User primary key if valid, None otherwise.
+        """
+        cfg = CR.get_mfa_config()
+        session = get_db_session()
+        challenge = MFARepository(session=session).get_challenge(token)
+        if challenge is None or not challenge.is_valid(cfg["max_challenge_attempts"]):
+            return None
+        return challenge.user_id
+
+    def register_mfa_challenge_failure(self, token: str) -> None:
+        """Increment the failed-attempt counter for an MFA challenge."""
+        with UnitOfWork() as uow:
+            MFARepository(uow).increment_challenge_attempts(token)
+
+    def consume_mfa_challenge(self, token: str) -> None:
+        """Delete an MFA challenge after it has been successfully verified."""
+        with UnitOfWork() as uow:
+            MFARepository(uow).delete_challenge(token)
+
+    # =========================================================================
     # MAINTENANCE
     # =========================================================================
 
     def cleanup_expired_tokens(self) -> None:
         """
-        Delete all expired access and refresh tokens from the database.
+        Delete all expired access/refresh tokens and MFA challenges from the
+        database.
 
         Intended to be called from a periodic maintenance task.
         """
         with UnitOfWork() as uow:
             access_deleted, refresh_deleted = TokenRepository(uow).cleanup_expired_tokens()
+            challenges_deleted = MFARepository(uow).delete_expired_challenges(datetime.utcnow())
 
         logger.info(
             f"Tokens expirados eliminados: "
-            f"{access_deleted} access, {refresh_deleted} refresh"
+            f"{access_deleted} access, {refresh_deleted} refresh, "
+            f"{challenges_deleted} mfa challenges"
         )
+
+
+class MFAManager:
+    """
+    Manages TOTP enrollment/confirmation, disabling, and verification, plus
+    the recovery-code fallback.
+
+    All database access goes through UnitOfWork + MFARepository. The TOTP
+    secret is encrypted at rest (services.encrypt_totp_secret) since, unlike
+    Acheron, the server must be able to compute the current code to verify
+    it — this is NOT zero-knowledge.
+
+    Example:
+    >>> manager = MFAManager()
+    >>> setup = manager.setup_totp(user_id=1, username="johnd")
+    >>> codes = manager.confirm_totp(user_id=1, code="123456")
+    """
+
+    def __init__(self) -> None:
+        pass
+
+    # =========================================================================
+    # STATUS
+    # =========================================================================
+
+    def is_enabled(self, user_id: int) -> bool:
+        """True if the user has a confirmed TOTP credential."""
+        session = get_db_session()
+        cred = MFARepository(session=session).get_totp_credential(user_id)
+        return cred is not None and cred.confirmed_at is not None
+
+    def get_status(self, user_id: int) -> dict:
+        """Return {'enabled': bool, 'confirmedAt': datetime|None} for a user."""
+        session = get_db_session()
+        cred = MFARepository(session=session).get_totp_credential(user_id)
+        return {
+            "enabled": cred is not None and cred.confirmed_at is not None,
+            "confirmedAt": cred.confirmed_at if cred else None,
+        }
+
+    # =========================================================================
+    # ENROLLMENT
+    # =========================================================================
+
+    def setup_totp(self, user_id: int, username: str) -> dict:
+        """
+        Start TOTP enrollment: generate a secret and its provisioning URI.
+
+        Overwrites any previous *unconfirmed* attempt (the user can re-scan a
+        fresh QR if they abandoned setup). Raises if TOTP is already confirmed.
+
+        Args:
+            user_id:  User primary key.
+            username: Username, embedded in the provisioning URI label.
+
+        Returns:
+            dict with 'secret' (manual entry) and 'provisioningUri' (QR).
+
+        Raises:
+            MfaAlreadyEnabledError: if TOTP is already confirmed for this user.
+        """
+        secret = generate_totp_secret()
+
+        with UnitOfWork() as uow:
+            repo = MFARepository(uow)
+            existing = repo.get_totp_credential(user_id)
+            if existing is not None and existing.confirmed_at is not None:
+                raise MfaAlreadyEnabledError()
+
+            if existing is not None:
+                existing.secret_encrypted = encrypt_totp_secret(secret)
+            else:
+                repo.save_totp_credential(
+                    MFATotpCredential(user_id=user_id, secret_encrypted=encrypt_totp_secret(secret))
+                )
+
+        return {
+            "secret": secret,
+            "provisioningUri": totp_provisioning_uri(secret, username),
+        }
+
+    def confirm_totp(self, user_id: int, code: str) -> List[str]:
+        """
+        Confirm TOTP enrollment by verifying the first code, then generate and
+        persist a fresh batch of recovery codes.
+
+        Args:
+            user_id: User primary key.
+            code:    6-digit TOTP code from the authenticator app.
+
+        Returns:
+            The plaintext recovery codes (shown to the user exactly once).
+
+        Raises:
+            MfaNotEnabledError: if setup_totp() was never called.
+            InvalidMfaCodeError: if the code doesn't match.
+        """
+        with UnitOfWork() as uow:
+            repo = MFARepository(uow)
+            cred = repo.get_totp_credential(user_id)
+            if cred is None:
+                raise MfaNotEnabledError()
+
+            secret = decrypt_totp_secret(cred.secret_encrypted)
+            if not verify_totp_code(secret, code):
+                raise InvalidMfaCodeError()
+
+            cred.confirmed_at = datetime.utcnow()
+
+            repo.delete_recovery_codes(user_id)
+            cfg = CR.get_mfa_config()
+            plaintext_codes = generate_recovery_codes(cfg["recovery_codes_count"])
+            repo.save_recovery_codes([
+                MFARecoveryCode(user_id=user_id, code_hash=hash_password(plain))
+                for plain in plaintext_codes
+            ])
+
+        logger.info(f"MFA (TOTP) confirmado para usuario {user_id}")
+        return plaintext_codes
+
+    def disable_totp(
+        self, user_id: int, code: Optional[str] = None, recovery_code: Optional[str] = None,
+    ) -> None:
+        """
+        Disable TOTP MFA for a user.
+
+        Requires proving current possession of the second factor (a valid TOTP
+        code or an unused recovery code) so that a stolen session token alone
+        can't silently turn off 2FA.
+
+        Args:
+            user_id: User primary key.
+            code: Current TOTP code, if using that method to confirm.
+            recovery_code: An unused recovery code, if using that method instead.
+
+        Raises:
+            InvalidMfaCodeError: if neither the code nor the recovery code verify.
+        """
+        if not self.verify_totp_or_recovery(user_id, code=code, recovery_code=recovery_code):
+            raise InvalidMfaCodeError()
+
+        with UnitOfWork() as uow:
+            repo = MFARepository(uow)
+            repo.delete_recovery_codes(user_id)
+            repo.delete_totp_credential(user_id)
+
+        logger.info(f"MFA (TOTP) desactivado para usuario {user_id}")
+
+    # =========================================================================
+    # VERIFICATION
+    # =========================================================================
+
+    def verify_totp_or_recovery(
+        self, user_id: int, code: Optional[str] = None, recovery_code: Optional[str] = None,
+    ) -> bool:
+        """
+        Verify a TOTP code or, failing that, an unused recovery code.
+
+        A matching recovery code is marked as used (one-time only) as a side
+        effect of a successful verification.
+
+        Args:
+            user_id: User primary key.
+            code: 6-digit TOTP code to try, if provided.
+            recovery_code: Recovery code to try, if provided (and code fails/absent).
+
+        Returns:
+            True if either factor verified successfully.
+        """
+        session = get_db_session()
+        repo = MFARepository(session=session)
+
+        if code:
+            cred = repo.get_totp_credential(user_id)
+            if cred is not None and cred.confirmed_at is not None:
+                secret = decrypt_totp_secret(cred.secret_encrypted)
+                if verify_totp_code(secret, code):
+                    return True
+
+        if recovery_code:
+            for stored in repo.get_recovery_codes(user_id, only_unused=True):
+                is_valid, _ = verify_password(stored.code_hash, recovery_code)
+                if is_valid:
+                    with UnitOfWork() as uow:
+                        MFARepository(uow).mark_recovery_code_used(stored.id)
+                    logger.warning(f"Código de recuperación MFA usado por usuario {user_id}")
+                    return True
+
+        return False

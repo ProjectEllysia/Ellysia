@@ -410,15 +410,16 @@ class IrisManager(TaskTrackingMixin):
         and leaves ``ai_summary`` as ``NULL`` rather than failing the
         already-finished analysis it's attached to.
         """
-        try:
-            report = IrisManager().get_analysis_results(analysis_id)
-            summary = IrisAIWriter().generate(report)
+        with job_context():
+            try:
+                report = IrisManager().get_analysis_results(analysis_id)
+                summary = IrisAIWriter().generate(report)
 
-            IrisManager()._update_analysis(analysis_id, ai_summary=summary)
+                IrisManager()._update_analysis(analysis_id, ai_summary=summary)
 
-            logger.info(f"AI summary generado para analysis {analysis_id}")
-        except Exception as e:
-            logger.error(f"Error generando AI summary para analysis {analysis_id}: {e}", exc_info=True)
+                logger.info(f"AI summary generado para analysis {analysis_id}")
+            except Exception as e:
+                logger.error(f"Error generando AI summary para analysis {analysis_id}: {e}", exc_info=True)
 
     def cancel_analysis(self, analysis_id: int, user_id: int) -> bool:
         """Cancel a running or pending analysis.
@@ -547,6 +548,8 @@ class IrisManager(TaskTrackingMixin):
         with UnitOfWork() as uow:
             repo = IrisAnalysisRepository(uow)
             repo.save(analysis)
+            # Durable antes de encolar: el worker corre en otro proceso.
+            uow.commit_for_handoff()
         return analysis.id # type: ignore
 
     @staticmethod
@@ -982,6 +985,8 @@ class IrisReportManager:
                 is_ai_generated=0,
             )
             IrisReportRepository(uow).save(document)
+            # Durable antes de encolar: el worker corre en otro proceso.
+            uow.commit_for_handoff()
         return document.id  # type: ignore
 
     def get_document_by_id(self, document_id: int) -> Optional[IrisDocument]:
@@ -1071,7 +1076,8 @@ class IrisReportManager:
     @staticmethod
     def execute_report_generation(doc_id: int, analysis_id: int) -> None:
         """Entry point submitted to the TaskQueue for background PDF generation."""
-        IrisReportManager()._generate_pdf_async(doc_id, analysis_id)
+        with job_context():
+            IrisReportManager()._generate_pdf_async(doc_id, analysis_id)
 
     def _generate_pdf_async(self, document_id: int, analysis_id: int) -> None:
         """Generate the PDF in a background thread and update document status."""
@@ -1100,6 +1106,11 @@ class IrisReportManager:
         except Exception as e:
             logger.error(f"Error generando PDF para documento {document_id}: {e}", exc_info=True)
             self._update_document_status(document_id, "error")
+            # Re-lanzar: sin esto el job termina "con éxito" y el callback de RQ
+            # lo registra como COMPLETED pese a que el documento quedó en error.
+            # Al propagar, RQ lo marca FAILED y estado de tarea y documento
+            # coinciden.
+            raise
 
     def _update_document_status(self, document_id: int, status: str) -> None:
         """Update document status in database."""

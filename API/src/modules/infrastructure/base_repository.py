@@ -167,11 +167,13 @@ class BaseRepository(Generic[T]):
         Returns:
             True if at least one matching record exists.
         """
+        # ``first()`` aplica LIMIT 1 y para en la primera fila; ``count()``
+        # recorrería todas las coincidencias solo para compararlas con 0.
         return (
             self._session.query(self._model)
             .filter(getattr(self._model, field) == value)
-            .count()
-        ) > 0
+            .first()
+        ) is not None
 
     def get_children(self, foreign_key: str, parent_id: Any) -> List[T]:
         """

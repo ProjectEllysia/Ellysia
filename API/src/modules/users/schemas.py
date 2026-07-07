@@ -20,12 +20,17 @@ class TokenRequestSchema(Schema):
 
 
 class TokenResponseSchema(Schema):
-    access_token = fields.String()
-    token_type = fields.String()
-    expires_in = fields.Integer()
+    access_token = fields.String(required=False)
+    token_type = fields.String(required=False)
+    expires_in = fields.Integer(required=False)
     refresh_token = fields.String(required=False)
-    role = fields.String()
-    attributes = fields.List(fields.String())
+    role = fields.String(required=False)
+    attributes = fields.List(fields.String(), required=False)
+    # Presentes en vez de los anteriores cuando el usuario tiene MFA activado:
+    # el grant 'password' devuelve un challenge en lugar de tokens reales.
+    mfaRequired = fields.Boolean(required=False)
+    challengeToken = fields.String(required=False)
+    methods = fields.List(fields.String(), required=False)
 
 
 class SignUpRequestSchema(Schema):
@@ -111,3 +116,48 @@ class AttributeOperationResponseSchema(Schema):
 
 class RevokeResponseSchema(Schema):
     message = fields.String()
+
+
+# =========================================================================
+# MFA (TOTP) SCHEMAS
+# =========================================================================
+
+
+class MfaVerifyRequestSchema(Schema):
+    challengeToken = fields.String(required=True)
+    code = fields.String(allow_none=True)
+    recoveryCode = fields.String(allow_none=True)
+
+    @validates_schema
+    def validate_code_or_recovery(self, data, **kwargs):
+        if not data.get("code") and not data.get("recoveryCode"):
+            raise ValidationError("Se requiere 'code' o 'recoveryCode'")
+
+
+class MfaTotpSetupResponseSchema(Schema):
+    secret = fields.String()
+    provisioningUri = fields.String()
+
+
+class MfaTotpConfirmRequestSchema(Schema):
+    code = fields.String(required=True)
+
+
+class MfaTotpConfirmResponseSchema(Schema):
+    message = fields.String()
+    recoveryCodes = fields.List(fields.String())
+
+
+class MfaDisableRequestSchema(Schema):
+    code = fields.String(allow_none=True)
+    recoveryCode = fields.String(allow_none=True)
+
+    @validates_schema
+    def validate_code_or_recovery(self, data, **kwargs):
+        if not data.get("code") and not data.get("recoveryCode"):
+            raise ValidationError("Se requiere 'code' o 'recoveryCode'")
+
+
+class MfaStatusResponseSchema(Schema):
+    enabled = fields.Boolean()
+    confirmedAt = fields.DateTime(format="iso", allow_none=True)

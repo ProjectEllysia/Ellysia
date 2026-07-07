@@ -112,12 +112,18 @@ export const useAuthStore = defineStore('auth', () => {
   /**
    * Autentica al usuario contra /oauth/token con grant_type password.
    * En caso de éxito, persiste los tokens en sessionStorage y actualiza
-   * el estado reactivo del store.
+   * el estado reactivo del store. Si la cuenta tiene MFA activado, el
+   * servidor no devuelve tokens todavía: devuelve un `challengeToken` que
+   * hay que canjear con verifyMfa() tras introducir el código TOTP.
    * @param {string} username - Nombre de usuario
    * @param {string} password - Contraseña
+   * @returns {Promise<{mfaRequired: boolean, challengeToken?: string, methods?: string[]}>}
+   *          mfaRequired=false si el login se completó (tokens ya guardados);
+   *          mfaRequired=true si falta el segundo factor.
    * @throws {Error} Si las credenciales son inválidas, hay rate-limit, o el servidor devuelve error
    * @example
-   * try { await auth.login('root', 'admin') } catch (e) { console.error(e.message) }
+   * const step = await auth.login('root', 'admin')
+   * if (step.mfaRequired) { await auth.verifyMfa(step.challengeToken, code) }
    */
   async function login(username, password) {
     const res = await fetch('/oauth/token', {
@@ -131,6 +137,40 @@ export const useAuthStore = defineStore('auth', () => {
       if (res.status === 429) throw new Error('Demasiados intentos. Espera unos minutos.')
       throw new Error(data.error_description || `Error del servidor (${res.status})`)
     }
+
+    if (data.mfaRequired) {
+      return { mfaRequired: true, challengeToken: data.challengeToken, methods: data.methods || [] }
+    }
+
+    _applyTokens(data)
+    return { mfaRequired: false }
+  }
+
+  /**
+   * Canjea un challenge de MFA (emitido por login() cuando mfaRequired=true)
+   * por los tokens reales, aportando un código TOTP o un código de recuperación.
+   * @param {string} challengeToken - Token devuelto por login()
+   * @param {{code?: string, recoveryCode?: string}} secondFactor - Uno de los dos
+   * @throws {Error} Si el código es inválido, el challenge expiró, o hay rate-limit
+   * @example await auth.verifyMfa(step.challengeToken, { code: '123456' })
+   */
+  async function verifyMfa(challengeToken, { code, recoveryCode } = {}) {
+    const res = await fetch('/oauth/mfa/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challengeToken, code, recoveryCode }),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      if (res.status === 401) throw new Error(data.error_description || 'Código inválido o verificación expirada.')
+      if (res.status === 429) throw new Error('Demasiados intentos. Espera unos minutos.')
+      throw new Error(data.error_description || `Error del servidor (${res.status})`)
+    }
+    _applyTokens(data)
+  }
+
+  /** Vuelca la respuesta de tokens (login directo o tras verifyMfa) al estado reactivo. */
+  function _applyTokens(data) {
     accessToken.value = data.access_token
     refreshToken.value = data.refresh_token
     expiresAt.value = Date.now() + data.expires_in * 1000
@@ -233,6 +273,6 @@ export const useAuthStore = defineStore('auth', () => {
     accessToken, refreshToken, expiresAt, role, sessionEndReason,
     isAuthenticated, isAdmin, isRoot,
     username, loadFromStorage, saveToStorage,
-    login, getToken, logout, refreshAccessToken, endSession, takeSessionEndReason,
+    login, verifyMfa, getToken, logout, refreshAccessToken, endSession, takeSessionEndReason,
   }
 })

@@ -133,4 +133,4 @@ GPU: `-f docker-compose.gpu-nvidia.yml / .gpu-intel.yml / .gpu-amd.yml`
 - `SecOpsConfig.json` values are lazily cached — changes require app restart unless written via `PUT /system` endpoint.
 - `sentinel/services/tasks.py` has its own `TaskStatus` enum separate from `taskqueue.TaskStatus`.
 - RQ workers must be running for background tasks to execute. Launch with `python -m src.modules.system.taskqueue.worker`.
-- API version is **3.2** (not from config, hardcoded in `create_app()`).
+- API version is read from config (`appVersion` in `SecOpsConfig.json`, currently `4.2`) via `CR.get_app_version()` in `create_app()` — not hardcoded.
