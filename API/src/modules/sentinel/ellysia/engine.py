@@ -1,17 +1,22 @@
-"""Ellysia's own vulnerability engine.
+"""The detection core — turns discovered services into normalized findings.
 
-This is the L2 "detection runtime" seam described in the vuln-engine roadmap.
-In Fase 0 it does no detection yet: given the services discovered for a host it
-emits one informational "open port" :class:`Finding` per service, so the whole
-persistence/correlation plumbing works end to end. Version matching (Fase 1) and
-active checks (Fase R) plug into :meth:`EllysiaEngine.analyze` later without the
-manager or the persistence layer changing.
+This is the L2 "detection runtime" of the roadmap. Given the services found on a
+host, the engine produces :class:`Finding`-shaped dicts: always an informational
+"this port is open" finding, and — when a CVE lookup is wired in — one finding
+per known vulnerability that affects the service's product and version.
 
-The engine is deliberately ORM-free: it takes plain :class:`Service` values and
-returns plain dicts ready to build ``Finding`` rows. ``services_from_open_ports``
-is the only place that touches the (duck-typed) ``OpenPort`` rows, so the mapping
-from Nmap's data model into the engine's lives here, in the ellysia package,
-rather than leaking into the manager.
+Two design choices keep this module easy to reason about and to test:
+
+* It is **ORM-free**. The engine works with plain :class:`Service` values and
+  returns plain dicts; it never touches the database. The lookups it needs
+  (CVE / KEV / EPSS) are passed in as callables, so a test can hand it fakes and
+  a caller can hand it the real repository methods.
+* The mapping from Nmap's data model into the engine's lives *here*, in
+  :func:`services_from_open_ports`, rather than leaking into the manager.
+
+The persistence, correlation and network phases all happen around the engine, in
+the manager; the engine itself is a pure transformation from services to
+findings.
 """
 
 from __future__ import annotations
@@ -22,18 +27,23 @@ from typing import Callable, Iterable, List, Optional
 from .kb import normalize_cpe_to_23, parse_cpe23
 
 
-# Quality of Detection for a bare "the port is open" observation: low, because it
-# asserts nothing about vulnerability. Detection checks raise this in later phases.
+# Quality of Detection for a bare "the port is open" observation. It is low
+# because it asserts nothing about vulnerability; the real detection checks in
+# later phases earn a much higher score.
 QOD_OPEN_PORT = 30
 
-# Version-based detection (matched a known-vulnerable version by banner/CPE):
-# reliable but not actively confirmed — a hypothesis, not a fact (backports).
+# Quality of Detection for a version-based match: we recognised a known-vulnerable
+# version from the banner or CPE. Reliable, but not actively confirmed — it stays
+# a hypothesis rather than a fact, because a distro may have back-ported the fix
+# without changing the version number.
 QOD_VERSION_MATCH = 70
 
 
-# Nmap product string (lowercased) -> (cpe vendor, cpe product). Seed of the
-# override table from the roadmap (§2.1); grows one line per false negative seen
-# in production. Consulted only when Nmap did not emit a usable <cpe> itself.
+# Maps an Nmap product string (lowercased) to the (vendor, product) pair CPE
+# uses. It is consulted only when Nmap did not already emit a usable CPE of its
+# own. This is a small, hand-curated seed; it grows by one line each time a real
+# scan turns up a product we do not yet map. The alternative — guessing a CPE —
+# is worse, because a CPE that does not exist in NVD silently matches nothing.
 CPE_PRODUCT_OVERRIDES: dict[str, tuple[str, str]] = {
     "apache httpd":        ("apache", "http_server"),
     "openssh":             ("openbsd", "openssh"),
@@ -52,15 +62,16 @@ CPE_PRODUCT_OVERRIDES: dict[str, tuple[str, str]] = {
 
 @dataclass(frozen=True)
 class Service:
-    """A single discovered service, the engine's unit of input.
+    """One discovered network service — the engine's unit of input.
 
     Attributes:
-        port: TCP/UDP port number, or None if it could not be parsed.
-        protocol: Transport protocol ("tcp" / "udp").
-        name: Service name as identified (e.g. "http", "ssh"). May be empty.
-        product: Product name (e.g. "Apache httpd"). May be empty.
-        version: Product version (e.g. "2.4.49"). May be empty.
-        cpe: CPE string if known, else None.
+        port: The TCP/UDP port number, or ``None`` if it could not be parsed.
+        protocol: The transport protocol, ``"tcp"`` or ``"udp"``.
+        name: The service name as identified, e.g. ``"http"`` or ``"ssh"``. May
+            be empty when unknown.
+        product: The product name, e.g. ``"Apache httpd"``. May be empty.
+        version: The product version, e.g. ``"2.4.49"``. May be empty.
+        cpe: A CPE string for the service if one is known, else ``None``.
     """
     port: Optional[int]
     protocol: str
@@ -71,26 +82,35 @@ class Service:
 
     @property
     def label(self) -> str:
-        """Best human-readable name for the service ("Apache httpd 2.4.49")."""
+        """A human-readable name for the service.
+
+        Prefers "product version" (e.g. "Apache httpd 2.4.49"), falls back to the
+        service name, and finally to a generic placeholder.
+        """
         product_version = " ".join(p for p in (self.product, self.version) if p)
         return product_version or self.name or "servicio desconocido"
 
 
 class EllysiaEngine:
-    """Turns discovered services into normalized findings.
+    """Produces normalized findings from a host's discovered services.
 
-    Emits one informational "open port" finding per service, plus — when a CVE
-    lookup is wired (Fase 1) — one version-match finding per known CVE affecting
-    the service's product/version. The lookups are injected so the engine stays
-    free of the ORM and is trivially testable; the manager passes the KB
-    repository's methods.
+    For every service the engine emits one informational "open port" finding.
+    When a CVE lookup has been supplied, it also emits one finding per known CVE
+    affecting the service's product and version.
+
+    The lookups are injected rather than imported so the engine stays free of the
+    ORM and is trivially testable — the manager passes the knowledge-base
+    repository's methods, while a test passes stubs.
 
     Args:
-        cve_lookup: ``(vendor, product, version) -> iterable`` of CVE rows (each
-            with ``cve_id``/``cvss_score``/``cvss_vector``/``severity``). None
-            disables version detection (informational-only, as in Fase 0).
-        kev_lookup: ``(cve_id) -> bool``, whether the CVE is in CISA KEV.
-        epss_lookup: ``(cve_id) -> float | None``, the EPSS score.
+        cve_lookup: A callable ``(vendor, product, version) -> iterable`` of CVE
+            rows, each exposing ``cve_id`` / ``cvss_score`` / ``cvss_vector``.
+            Passing ``None`` disables version detection, leaving only the
+            informational findings.
+        kev_lookup: A callable ``(cve_id) -> bool`` telling whether the CVE is in
+            CISA's Known Exploited Vulnerabilities catalogue.
+        epss_lookup: A callable ``(cve_id) -> float | None`` returning the CVE's
+            EPSS exploitation-probability score.
     """
 
     FEED_VERSION = "ellysia-0"
@@ -106,14 +126,14 @@ class EllysiaEngine:
         self._epss_lookup = epss_lookup
 
     def analyze(self, services: Iterable[Service]) -> List[dict]:
-        """Return Finding-data dicts for the given services.
+        """Produce the findings for a set of services.
 
         Args:
-            services: The services discovered for the host.
+            services: The services discovered on the host.
 
         Returns:
-            A list of dicts with ``Finding`` column values (no scan_id; the
-            repository sets it when persisting).
+            A list of dicts holding ``Finding`` column values. The ``scan_id`` is
+            not set here — the repository fills it in at persist time.
         """
         findings: List[dict] = []
         for service in services:
@@ -123,7 +143,12 @@ class EllysiaEngine:
         return findings
 
     def _version_findings(self, service: Service) -> List[dict]:
-        """Version-based detection: emit a finding per CVE affecting the service."""
+        """Emit a finding for each known CVE affecting one service.
+
+        Resolves the service to a CPE, queries the CVE lookup, and builds a
+        finding per hit. Returns an empty list when the service cannot be
+        resolved to a concrete vendor/product/version.
+        """
         resolved = _resolve_cpe(service)
         if resolved is None:
             return []
@@ -135,6 +160,7 @@ class EllysiaEngine:
         return findings
 
     def _version_finding(self, service: Service, cve, cpe23: str) -> dict:
+        """Build a single version-match finding for a service and one CVE."""
         cve_id = cve.cve_id
         return {
             "title":        f"{service.label} — {cve_id}",
@@ -151,7 +177,7 @@ class EllysiaEngine:
             "check_id":     "ellysia:version-match@1",
             "feed_version": self.FEED_VERSION,
             "qod":          QOD_VERSION_MATCH,
-            "confirmed":    False,   # version match is a hypothesis; Fase R confirms actively
+            "confirmed":    False,   # a version match is a hypothesis; Fase R confirms it actively
             "state":        "open",
         }
 
@@ -163,9 +189,9 @@ class EllysiaEngine:
             "category":     "open_port",
             "port":         service.port,
             "service":      service.name or None,
-            # Normalized to 2.3 (like the version-match finding's cpe) so a
-            # consumer grouping findings by cpe sees one consistent format
-            # instead of Nmap's raw 2.2 URI here and 2.3 elsewhere.
+            # Normalized to 2.3 to match the version-match finding's cpe, so a
+            # consumer that groups findings by cpe sees one consistent format
+            # rather than Nmap's raw 2.2 URI here and the 2.3 form elsewhere.
             "cpe":          normalize_cpe_to_23(service.cpe) if service.cpe else None,
             "source":       "ellysia",
             "check_id":     "ellysia:open-port@1",
@@ -179,10 +205,17 @@ class EllysiaEngine:
 def services_from_open_ports(open_ports: Iterable) -> List[Service]:
     """Map Nmap ``OpenPort`` rows into engine :class:`Service` values.
 
-    Duck-typed on purpose (reads ``op.port.protocol``, ``op.product`` ...) so the
-    engine package does not depend on the ORM model. ``op.port.protocol`` is the
-    Nmap "80/tcp" form; anything malformed degrades to ``port=None`` rather than
-    raising, so one odd row never sinks a whole scan.
+    Reads the rows by duck typing (``op.port.protocol``, ``op.product`` and so
+    on) so the engine package does not depend on the ORM model. Anything
+    malformed — a bad protocol string, say — degrades gracefully to ``port=None``
+    instead of raising, so a single odd row never sinks a whole scan.
+
+    Args:
+        open_ports: An iterable of ``OpenPort`` rows (or anything exposing the
+            same attributes).
+
+    Returns:
+        The corresponding list of :class:`Service` values.
     """
     services: List[Service] = []
     for op in open_ports:
@@ -199,7 +232,17 @@ def services_from_open_ports(open_ports: Iterable) -> List[Service]:
 
 
 def _split_protocol(protocol: str) -> tuple[Optional[int], str]:
-    """Parse Nmap's "80/tcp" into (80, "tcp"); tolerate malformed input."""
+    """Split Nmap's "80/tcp" form into a ``(port, protocol)`` pair.
+
+    Tolerates malformed input by returning ``port=None`` rather than raising.
+
+    Args:
+        protocol: A protocol string such as ``"80/tcp"``.
+
+    Returns:
+        A ``(port_number_or_None, protocol_string)`` tuple, defaulting the
+        protocol to ``"tcp"``.
+    """
     if not protocol:
         return None, "tcp"
     port_str, _, proto = protocol.partition("/")
@@ -210,18 +253,38 @@ def _split_protocol(protocol: str) -> tuple[Optional[int], str]:
 
 
 def _concrete_version(version: str) -> Optional[str]:
-    """Return a usable version string, or None for wildcard/empty placeholders."""
+    """Return a usable version string, or ``None`` for wildcard/empty placeholders.
+
+    Args:
+        version: A raw version string, possibly ``"*"``, ``"-"`` or empty.
+
+    Returns:
+        The stripped version, or ``None`` if it is a wildcard or blank.
+    """
     version = (version or "").strip()
     return version if version and version not in ("*", "-") else None
 
 
 def _resolve_cpe(service: Service) -> Optional[tuple[str, str, str, str]]:
-    """Resolve a service to (vendor, product, version, cpe_2_3) for KB matching.
+    """Resolve a service to a ``(vendor, product, version, cpe_2_3)`` for matching.
 
-    Two layers, highest confidence first: the CPE Nmap emitted, then the manual
-    override table keyed on the product string. Returns None when neither yields
-    a concrete vendor/product/version — we never invent a CPE (§2.1). The CPE
-    Dictionary token index (roadmap layer 2) is deferred until it is mirrored.
+    Two strategies are tried, highest confidence first:
+
+    1. Trust the CPE Nmap emitted, if any — falling back to the banner version
+       when the CPE itself left the version as a wildcard.
+    2. Look the product name up in :data:`CPE_PRODUCT_OVERRIDES`.
+
+    If neither yields a concrete vendor, product and version, this returns
+    ``None`` rather than inventing a CPE — a fabricated CPE that NVD does not know
+    would silently match nothing. (The token-based CPE Dictionary lookup, the
+    roadmap's third strategy, is deferred until that dictionary is mirrored.)
+
+    Args:
+        service: The service to resolve.
+
+    Returns:
+        A ``(vendor, product, version, cpe_2_3)`` tuple, or ``None`` if the
+        service cannot be resolved with confidence.
     """
     # 1) Nmap gave a CPE — trust it, falling back to the banner version if the
     #    CPE itself left the version as a wildcard.
@@ -232,7 +295,7 @@ def _resolve_cpe(service: Service) -> Optional[tuple[str, str, str, str]]:
             if version:
                 return parsed["vendor"], parsed["product"], version, normalize_cpe_to_23(service.cpe)
 
-    # 2) Override table keyed on the Nmap product string.
+    # 2) Fall back to the override table, keyed on the Nmap product string.
     key = (service.product or "").strip().lower()
     version = _concrete_version(service.version)
     if key in CPE_PRODUCT_OVERRIDES and version:

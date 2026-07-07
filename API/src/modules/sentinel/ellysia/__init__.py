@@ -1,10 +1,45 @@
-"""Ellysia's own vulnerability engine (native detection).
+"""Ellysia's own vulnerability engine — the code that makes it a scanner.
 
-Home for everything that makes Ellysia a scanner in its own right rather than an
-orchestrator of Nmap/Nikto/OpenVAS. Managers live in ``sentinel/managers.py`` and
-repositories in ``sentinel/repositories.py`` by project convention; the detection
-logic (the engine, and in later phases the dissectors, checks and transport)
-lives here.
+This package holds everything that makes Ellysia a scanner in its own right,
+rather than an orchestrator that just runs Nmap, Nikto and OpenVAS. By project
+convention the managers live in ``sentinel/managers.py`` and the repositories in
+``sentinel/repositories.py``; the detection logic lives here.
+
+A scan flows down through the engine's layers, and each module here owns one of
+them:
+
+``transport``
+    Discovers which ports are open (the L0 layer) — an unprivileged asyncio
+    connect scan.
+
+``fingerprint``
+    Identifies what is running on a port (L1) — HTTP and SSH dissectors,
+    calibrated against Nmap.
+
+``engine``
+    The detection core (L2): turns discovered services into findings, including
+    version-based CVE matches.
+
+``checks``
+    The active-detection runtime (also L2): runs declarative checks to *confirm*
+    a vulnerability rather than merely infer it.
+
+``kb``
+    The local knowledge base (L3): a mirror of NVD/KEV/EPSS plus the version and
+    CPE logic the matcher relies on.
+
+``correlation``
+    Deduplication, lifecycle and contextual scoring (L3): turns per-scan findings
+    into vulnerability state on an asset over time.
+
+``adapters``
+    Bridges Nikto and OpenVAS results into the shared ``Finding`` model, so every
+    scanner can be correlated together.
+
+Everything here is deliberately free of the ORM and of network side effects
+where it can be: pure functions take plain values and return plain dicts, and the
+few pieces that must touch the network (the probes and fetchers) take injectable
+callables so they can be tested without it.
 """
 
 from __future__ import annotations

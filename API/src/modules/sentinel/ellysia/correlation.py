@@ -1,17 +1,29 @@
-"""Correlation, deduplication, lifecycle and contextual scoring (Fase 5).
+"""Correlation, deduplication, lifecycle and contextual scoring.
 
-Turns per-scan finding lists into "state of a vulnerability on an asset over
-time". All pure functions over finding dicts, so they are unit-tested without a
-DB and work regardless of which scanner produced the finding — which is exactly
-what lets multiple sources fold into one finding once Nikto/OpenVAS also write
-to the Finding table.
+This is what turns a flat list of per-scan findings into "the state of a
+vulnerability on an asset, over time" — the part of the product that is more than
+just running three scanners and reading three reports.
 
-* ``compute_dedup_key`` / ``merge_findings`` — collapse the same issue reported
-  more than once (or by more than one source) into a single finding.
-* ``apply_lifecycle`` — set ``open`` / ``fixed`` / ``regressed`` / ``accepted``
-  by comparing against the previous scan of the same target.
-* ``classify_exposure`` / ``score_finding`` — contextual priority beyond raw
-  CVSS (EPSS + KEV escalate; a private LAN caps the ceiling).
+Everything here is a pure function over finding dicts, so it can be unit-tested
+without a database and works no matter which scanner produced a finding. That
+scanner-independence is exactly what lets several sources fold into a single
+finding once Nikto and OpenVAS also write to the shared ``Finding`` table.
+
+The module covers three concerns:
+
+Deduplication
+    :func:`compute_dedup_key` and :func:`merge_findings` collapse the same issue,
+    reported more than once or by more than one scanner, into a single finding.
+
+Lifecycle
+    :func:`apply_lifecycle` assigns each finding a state — ``open``, ``fixed``,
+    ``regressed`` or ``accepted`` — by comparing this scan against the previous
+    one of the same target.
+
+Contextual scoring
+    :func:`classify_exposure` and :func:`score_finding` produce a priority that
+    goes beyond raw CVSS: real-world exploitation signals push it up, and a
+    private (LAN) target caps it.
 """
 
 from __future__ import annotations
@@ -20,7 +32,8 @@ import hashlib
 import ipaddress
 from typing import Dict, List, Optional
 
-# Kept in one place so scoring and any future consumer agree on the ladder.
+# The severity ladder, kept in one place so scoring and any future consumer agree
+# on the ordering.
 PRIORITY_LADDER = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 
 _PRIVATE_SUFFIXES = (".local", ".lan", ".internal", ".intranet", ".corp", ".home")
@@ -31,10 +44,18 @@ _PRIVATE_SUFFIXES = (".local", ".lan", ".internal", ".intranet", ".corp", ".home
 # =========================================================================
 
 def classify_exposure(target: str) -> str:
-    """Return "private" (LAN) or "public" for a target.
+    """Classify a target as internal (LAN) or internet-facing.
 
-    Mirrors ``analyzers._classify_network_context`` private-address detection,
-    duplicated as a few lines here to avoid building the (heavy) AI writer.
+    Mirrors the private-address detection in
+    ``analyzers._classify_network_context``; it is duplicated here as a handful of
+    lines to avoid pulling in that module's much heavier AI-writer dependency.
+
+    Args:
+        target: An IP address or hostname.
+
+    Returns:
+        ``"private"`` for a LAN/loopback/link-local address or an internal-looking
+        hostname, otherwise ``"public"``.
     """
     try:
         addr = ipaddress.ip_address(target.strip())
@@ -50,10 +71,20 @@ def classify_exposure(target: str) -> str:
 # =========================================================================
 
 def compute_dedup_key(finding: dict) -> str:
-    """Stable, scanner-independent key for the same issue on the same service.
+    """Compute a stable key identifying the same issue on the same service.
 
-    Keyed on host + port + vulnerability identity: the CVE set if present (so any
-    scanner reporting that CVE merges), else the producing check, else category.
+    The key is deliberately scanner-independent so that two scanners reporting
+    the same vulnerability produce the same key and get merged. It is built from
+    the host and port plus a "vulnerability identity", chosen in order of
+    preference: the CVE set if present (so any scanner naming that CVE merges),
+    otherwise the producing check, otherwise the finding's category.
+
+    Args:
+        finding: A finding dict, expected to carry ``host_id``, ``port`` and one
+            of ``cve_ids`` / ``check_id`` / ``category``.
+
+    Returns:
+        A 32-character hexadecimal digest.
     """
     host = finding.get("host_id")
     port = finding.get("port")
@@ -68,17 +99,28 @@ def compute_dedup_key(finding: dict) -> str:
 
 
 def _union_cves(a: Optional[list], b: Optional[list]) -> Optional[list]:
+    """Merge two CVE-id lists into a sorted, de-duplicated list (or ``None``)."""
     combined = sorted(set((a or []) + (b or [])))
     return combined or None
 
 
 def merge_findings(findings: List[dict]) -> List[dict]:
-    """Collapse findings sharing a dedup_key, keeping the strongest signal.
+    """Collapse findings that share a dedup key into one, keeping the best signal.
 
-    The merged finding takes the highest ``qod`` (and that finding's title/CVSS),
-    is ``confirmed``/``in_kev`` if any input was, unions the CVE ids, and joins
-    the distinct sources into ``source`` ("ellysia,openvas"). Output dicts only
-    contain Finding columns, so they persist directly.
+    When several findings describe the same issue, the merged result keeps the
+    highest ``qod`` (along with that finding's title and CVSS score), is marked
+    ``confirmed`` / ``in_kev`` if *any* input was, unions the CVE ids, and joins
+    the distinct sources into ``source`` (e.g. ``"ellysia,openvas"``). This is the
+    mechanism behind both within-scan dedup and the read-time fusion of
+    corroborator scans.
+
+    Args:
+        findings: Findings to merge. Each may already carry a ``dedup_key``; any
+            that do not get one computed on the fly.
+
+    Returns:
+        One finding per distinct dedup key. Every dict contains only ``Finding``
+        columns, so the result can be persisted or displayed directly.
     """
     merged: Dict[str, dict] = {}
     sources: Dict[str, list] = {}
@@ -115,16 +157,30 @@ def merge_findings(findings: List[dict]) -> List[dict]:
 # =========================================================================
 
 def apply_lifecycle(current: List[dict], previous: Dict[str, dict]) -> List[dict]:
-    """Set each current finding's ``state`` vs the previous scan and carry over
-    now-fixed findings.
+    """Assign each finding a lifecycle state relative to the previous scan.
+
+    Each current finding is labelled by comparing it against the previous scan of
+    the same target:
+
+    * Not seen before → ``open`` (a new finding).
+    * Seen before and marked ``accepted`` → stays ``accepted`` (the user's
+      decision is sticky).
+    * Seen before as ``fixed`` and back now → ``regressed``.
+    * Otherwise (still present since last time) → ``open``.
+
+    In addition, any issue that *was* present last time but is absent now is
+    carried forward once as a ``fixed`` finding, so the timeline records the
+    remediation. An already-``fixed`` issue is not carried again, which keeps this
+    bounded.
 
     Args:
-        current: This scan's findings (each already has ``dedup_key``).
-        previous: ``dedup_key -> {"state", "snapshot"}`` from the previous scan.
+        current: This scan's findings. Each must already have a ``dedup_key``.
+        previous: A map ``dedup_key -> {"state", "snapshot"}`` describing the
+            previous scan's findings.
 
     Returns:
-        ``current`` (states set) plus one ``fixed`` finding for each key that was
-        present-and-not-yet-fixed before and is absent now (recorded once).
+        The ``current`` findings with their ``state`` set, plus one ``fixed``
+        finding for each issue that has just disappeared.
     """
     current_keys = set()
     for f in current:
@@ -134,9 +190,9 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict]) -> List[dict
         if prev is None:
             f["state"] = "open"
         elif prev["state"] == "accepted":
-            f["state"] = "accepted"            # user decision is sticky
+            f["state"] = "accepted"            # the user's decision is sticky
         elif prev["state"] == "fixed":
-            f["state"] = "regressed"           # was gone, came back
+            f["state"] = "regressed"           # was gone, has come back
         else:
             f["state"] = "open"
 
@@ -154,6 +210,7 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict]) -> List[dict
 # =========================================================================
 
 def _cvss_band(cvss: float) -> int:
+    """Map a CVSS base score onto an index into :data:`PRIORITY_LADDER`."""
     if cvss >= 9.0:
         return 4  # CRITICAL
     if cvss >= 7.0:
@@ -166,11 +223,25 @@ def _cvss_band(cvss: float) -> int:
 
 
 def score_finding(finding: dict, exposure: str) -> str:
-    """Contextual priority label (one of :data:`PRIORITY_LADDER`).
+    """Assign a finding a contextual priority label.
 
-    Beyond raw CVSS: real-world exploitation signal (KEV, or EPSS ≥ 0.5)
-    escalates one band; an actively-confirmed finding without a CVSS floors at
-    MEDIUM; a private-LAN target caps the ceiling at HIGH.
+    Starts from the CVSS band, then adjusts for real-world context:
+
+    * A real exploitation signal — the CVE is in KEV, or its EPSS score is at
+      least 0.5 — pushes the priority up one band.
+    * An actively-confirmed finding with no CVSS (e.g. an exposed path) is floored
+      at MEDIUM, so a confirmed issue never reads as merely informational.
+    * A private-LAN target caps the priority at HIGH, since it is not exposed to
+      the internet.
+
+    Args:
+        finding: A finding dict, read for ``cvss_score`` / ``in_kev`` /
+            ``epss_score`` / ``confirmed``.
+        exposure: ``"private"`` or ``"public"``, as returned by
+            :func:`classify_exposure`.
+
+    Returns:
+        One of the labels in :data:`PRIORITY_LADDER`.
     """
     cvss = finding.get("cvss_score") or 0.0
     band = _cvss_band(cvss)

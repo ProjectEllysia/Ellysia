@@ -1,20 +1,23 @@
-"""Ellysia's own port discovery (Fase T, the L0 layer).
+"""Ellysia's own port discovery — the transport layer.
 
-The **always-available base** of the roadmap's transport plan: an unprivileged
-``connect`` scan built on asyncio. It lets an Ellysia scan discover open ports
-by itself, dropping the dependency on a prior Nmap scan's ``OpenPort`` rows.
+This is the always-available foundation of the roadmap's transport plan: an
+unprivileged TCP ``connect`` scan built on asyncio. It lets an Ellysia scan find
+open ports for itself, so a scan no longer has to be handed the ports from a
+prior Nmap run.
 
-Deliberately NOT built here (would need ``CAP_NET_RAW`` / raw sockets, cannot be
-tested in this environment, and the roadmap itself marks them as later
-optimizations gated on measured throughput need): the stateless SYN fast-path,
-UDP probes, AIMD loss-based rate control, and the native probe repo. The
-connect scan below is what the roadmap calls the base that is *always* present;
-raw is only ever a faster path over the same result, and Nmap stays the oracle.
+Several faster or lower-level techniques are deliberately *not* built here — a
+stateless SYN fast-path, UDP probes, AIMD (loss-based) rate control and a native
+probe library. They would all need raw-socket privileges (``CAP_NET_RAW``),
+cannot be exercised in this test environment, and the roadmap itself treats them
+as later optimizations to reach for only once measured throughput demands them.
+The connect scan below is the base that is always present; a raw path would only
+ever be a faster route to the same result, with Nmap still available as the
+oracle to check against.
 
-The event loop is created and destroyed inside :func:`scan_ports_sync` — the
-"asyncio island" (roadmap §2.2): it lives entirely within the sync RQ worker
-call, never touching the Flask process or the ORM session. ``open_connection``
-is injectable so the scanner is tested without real sockets.
+The event loop is created and torn down entirely inside :func:`scan_ports_sync`
+— the "asyncio island". It lives within a single synchronous worker call and
+never touches the Flask process or an ORM session. The connection opener is
+injectable, so the scanner can be tested without opening real sockets.
 """
 
 from __future__ import annotations
@@ -28,8 +31,9 @@ from .engine import Service
 logger = logging.getLogger(__name__)
 
 
-# Well-known TCP ports -> service name, used to label a discovered port when we
-# have no banner yet (fingerprinting, Fase F, refines this when enabled).
+# Maps a well-known TCP port to its conventional service name. Used to label a
+# freshly discovered port before we have a banner for it; fingerprinting (Fase F)
+# refines the label when it is enabled.
 WELL_KNOWN_PORTS = {
     21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "domain", 80: "http",
     110: "pop3", 111: "rpcbind", 135: "msrpc", 139: "netbios-ssn", 143: "imap",
@@ -40,9 +44,10 @@ WELL_KNOWN_PORTS = {
     8443: "https-alt", 8888: "http-alt", 9200: "elasticsearch", 27017: "mongodb",
 }
 
-# Curated default sweep when the caller gives no explicit port list. The common,
-# high-signal services — not a full 1-65535 range (that belongs to the raw
-# fast-path we are not building here).
+# The ports swept when the caller does not specify a list: the common,
+# high-signal services, plus a handful of extras. This is intentionally not a
+# full 1-65535 range — sweeping everything belongs to the raw fast-path, which
+# this module does not implement.
 DEFAULT_PORTS: tuple = tuple(sorted(WELL_KNOWN_PORTS)) + (
     20, 69, 123, 137, 138, 512, 513, 514, 873, 1080, 1723, 2181, 3000, 3268,
     4444, 5000, 5060, 5601, 6667, 7001, 8000, 8008, 8081, 8088, 8181, 9000,
@@ -51,28 +56,48 @@ DEFAULT_PORTS: tuple = tuple(sorted(WELL_KNOWN_PORTS)) + (
 
 
 class AsyncConnectScanner:
-    """Concurrent TCP connect scanner. Unprivileged; bounded concurrency.
+    """A concurrent, unprivileged TCP connect scanner.
+
+    Attempts a real TCP connection to each port and treats a successful connect
+    (or a connection *refused*, which still proves the host is up) as evidence
+    the port is open. Concurrency is bounded so a scan cannot open an unlimited
+    number of sockets at once.
 
     Args:
-        concurrency: Max simultaneous connection attempts.
-        timeout: Per-port connect timeout (seconds).
-        opener: ``async (host, port) -> (reader, writer)`` — defaults to
-            ``asyncio.open_connection``; injected in tests.
+        concurrency: The maximum number of connection attempts in flight at once.
+        timeout: The per-port connect timeout, in seconds.
+        opener: An ``async (host, port) -> (reader, writer)`` callable. Defaults
+            to ``asyncio.open_connection``; a test injects a fake here to avoid
+            real sockets.
     """
 
-    def __init__(self, concurrency: int = 200, timeout: float = 2.0,
-                 opener: Optional[Callable] = None) -> None:
+    def __init__(
+        self,
+        concurrency: int = 200,
+        timeout: float = 2.0,
+        opener: Optional[Callable] = None
+    ) -> None:
         self._concurrency = concurrency
         self._timeout = timeout
         self._opener = opener or asyncio.open_connection
 
-    async def scan(self, host: str, ports: Iterable[int],
-                   cancel_check: Optional[Callable[[], bool]] = None) -> List[int]:
-        """Return the sorted list of open ports among ``ports``."""
-        # ponytail: one task per port bounded by a semaphore is fine for the
-        # curated default set (~90 ports). For full 1-65535 ranges, chunk the
-        # ports so we don't materialize 65k coroutines — belongs with the raw
-        # fast-path, which isn't built here.
+    async def scan(
+        self,
+        host: str,
+        ports: Iterable[int],
+        cancel_check: Optional[Callable[[], bool]] = None
+    ) -> List[int]:
+        """Scan a host's ports and return which ones are open.
+
+        Args:
+            host: The target host (IP or hostname).
+            ports: The ports to probe.
+            cancel_check: An optional callable polled before each probe; if it
+                returns ``True`` the remaining probes are skipped.
+
+        Returns:
+            The open ports, sorted ascending.
+        """
         semaphore = asyncio.Semaphore(self._concurrency)
         open_ports: List[int] = []
 
@@ -87,29 +112,50 @@ class AsyncConnectScanner:
         return sorted(open_ports)
 
     async def _is_open(self, host: str, port: int) -> bool:
+        """Return whether a single port accepts a connection, closing it cleanly.
+
+        Any connection error or timeout is taken to mean "closed"; the socket is
+        always closed afterwards on a best-effort basis.
+        """
         try:
-            reader, writer = await asyncio.wait_for(self._opener(host, port), self._timeout)
+            _, writer = await asyncio.wait_for(self._opener(host, port), self._timeout)
         except (OSError, asyncio.TimeoutError):
             return False
         except Exception as err:  # noqa: BLE001 - unexpected opener error: treat as closed
             logger.debug("connect probe error for %s:%s: %s", host, port, err)
             return False
-        try:
-            writer.close()
-            await writer.wait_closed()
-        except Exception:  # noqa: BLE001 - close is best-effort
-            pass
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:  # noqa: BLE001 - close is best-effort
+                pass
         return True
 
 
-def scan_ports_sync(host: str, ports: Optional[Iterable[int]] = None,
-                    concurrency: int = 200, timeout: float = 2.0,
-                    opener: Optional[Callable] = None,
-                    cancel_check: Optional[Callable[[], bool]] = None) -> List[int]:
-    """Synchronous entry point: run a connect scan on its own event loop.
+def scan_ports_sync(
+    host: str,
+    ports: Optional[Iterable[int]] = None,
+    concurrency: int = 200,
+    timeout: float = 2.0,
+    opener: Optional[Callable] = None,
+    cancel_check: Optional[Callable[[], bool]] = None
+) -> List[int]:
+    """Run a connect scan synchronously, on a fresh event loop of its own.
 
-    This is the asyncio-island boundary — safe to call from the sync RQ worker.
-    ``ports`` defaults to :data:`DEFAULT_PORTS`.
+    This is the boundary of the "asyncio island": it wraps the async scanner in
+    ``asyncio.run``, so it is safe to call from an ordinary synchronous worker.
+
+    Args:
+        host: The target host.
+        ports: The ports to probe; defaults to :data:`DEFAULT_PORTS`.
+        concurrency: The maximum number of connection attempts in flight at once.
+        timeout: The per-port connect timeout, in seconds.
+        opener: An injectable connection opener (see :class:`AsyncConnectScanner`).
+        cancel_check: An optional cancellation callable.
+
+    Returns:
+        The open ports, sorted ascending.
     """
     port_list = list(ports) if ports is not None else list(DEFAULT_PORTS)
     scanner = AsyncConnectScanner(concurrency=concurrency, timeout=timeout, opener=opener)
@@ -117,11 +163,18 @@ def scan_ports_sync(host: str, ports: Optional[Iterable[int]] = None,
 
 
 def services_from_discovered_ports(open_ports: Iterable[int]) -> List[Service]:
-    """Build engine :class:`Service` values from discovered port numbers.
+    """Build engine :class:`Service` values from a list of discovered ports.
 
-    No product/version yet (connect scan sees only that the port answered);
-    fingerprinting (Fase F) fills those when enabled. The service name is the
-    well-known guess, so HTTP checks still select the right ports.
+    A connect scan only learns *that* a port answered, not what is behind it, so
+    these services carry no product or version — fingerprinting (Fase F) fills
+    those in when it runs. Each service is labelled with its well-known name so
+    that, for example, HTTP checks still select the right ports.
+
+    Args:
+        open_ports: The discovered open port numbers.
+
+    Returns:
+        One :class:`Service` per port.
     """
     return [
         Service(port=port, protocol="tcp", name=WELL_KNOWN_PORTS.get(port, ""),
@@ -131,11 +184,20 @@ def services_from_discovered_ports(open_ports: Iterable[int]) -> List[Service]:
 
 
 def port_concordance(own_ports: Iterable[int], nmap_ports: Iterable[int]) -> float:
-    """Jaccard agreement between our discovered ports and Nmap's (the oracle).
+    """Measure how well our discovered ports agree with Nmap's.
 
-    The number the roadmap's Fase T Definition of Done thresholds at 0.95 before
-    the connect scan can become the default over Nmap for discovery. Both empty
-    counts as full agreement (nothing to disagree on).
+    Computes the Jaccard index (size of the intersection over size of the union)
+    between the two port sets. This is the number the roadmap's Definition of
+    Done thresholds at 0.95 before the connect scan may become the default over
+    Nmap for discovery. Two empty sets count as full agreement — there is nothing
+    to disagree about.
+
+    Args:
+        own_ports: The ports Ellysia's connect scan found.
+        nmap_ports: The ports Nmap found (the oracle).
+
+    Returns:
+        A value in ``[0.0, 1.0]``, where 1.0 is perfect agreement.
     """
     own, nmap = set(own_ports), set(nmap_ports)
     union = own | nmap
