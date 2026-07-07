@@ -1871,9 +1871,14 @@ class EllysiaEngineManager(ScanManager):
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         super().__init__(task_queue)
 
-    def run_scan(self, user_id: int, source_scan_id: Optional[int] = None,  # pylint: disable=arguments-differ
-                 target: Optional[str] = None, discover_ports: Optional[list] = None,
-                 timeout: int = 120) -> int:
+    def run_scan(self,
+        user_id: int,
+        source_scan_id: Optional[int] = None,  # pylint: disable=arguments-differ
+        target: Optional[str] = None,
+        discover_ports: Optional[list] = None,
+        deep: bool = False,
+        timeout: int = 120
+    ) -> int:
         """
         Start an Ellysia engine scan in one of two modes.
 
@@ -1882,6 +1887,11 @@ class EllysiaEngineManager(ScanManager):
         - **Self-discovery** (``target``, optional ``discover_ports``): Ellysia
           discovers the open ports itself with its own connect scan (Fase T),
           no Nmap needed. The caller validates the target (reject private, etc.).
+
+        Args:
+            deep: Fase 6 "análisis profundo" — also launch Nmap/Nikto/OpenVAS as
+                independent corroborator scans (fire-and-forget; their Finding
+                rows merge in at read time, see ``format_scan``).
 
         Returns:
             Primary key of the created EllysiaScan record.
@@ -1898,13 +1908,15 @@ class EllysiaEngineManager(ScanManager):
             raise ValueError("run_scan requires source_scan_id or target")
 
         scan = self._create_scan_record(
-            target=scan_target, user_id=user_id, source_scan_id=source_scan_id,
+            target=scan_target,
+            user_id=user_id,
+            source_scan_id=source_scan_id, # type: ignore
         )
         scan_id = scan.id
 
         self._tq.submit(
             func=EllysiaEngineManager.execute_ellysia_scan,
-            args=(scan_id, source_scan_id, discover_ports),
+            args=(scan_id, source_scan_id, discover_ports, deep),
             name=f"EllysiaScan-{scan_id}",
             category=self.TASK_CATEGORY,
             external_id=self.external_id_for(scan_id),
@@ -1912,18 +1924,19 @@ class EllysiaEngineManager(ScanManager):
         )
 
         mode = f"fuente Nmap {source_scan_id}" if source_scan_id else "descubrimiento propio"
+        mode += " + análisis profundo" if deep else ""
         logger.info(f"Escaneo Ellysia {scan_id} iniciado ({mode})")
         return scan_id  # type: ignore
 
     @staticmethod
     def execute_ellysia_scan(scan_id: int, source_scan_id: Optional[int] = None,
-                             discover_ports: Optional[list] = None) -> None:
+                             discover_ports: Optional[list] = None, deep: bool = False) -> None:
         """Entry point submitted to the TaskQueue. Runs the engine in the worker."""
         with job_context():
-            EllysiaEngineManager()._run_ellysia(scan_id, source_scan_id, discover_ports)
+            EllysiaEngineManager()._run_ellysia(scan_id, source_scan_id, discover_ports, deep)
 
     def _run_ellysia(self, scan_id: int, source_scan_id: Optional[int] = None,
-                     discover_ports: Optional[list] = None) -> None:
+                     discover_ports: Optional[list] = None, deep: bool = False) -> None:
         """Resolve services (from Nmap or own discovery), detect, and persist.
 
         This is the testable body of the scan (the ``execute_* seam → _run_*``
@@ -2011,6 +2024,14 @@ class EllysiaEngineManager(ScanManager):
             if source_target and CR.is_ellysia_fingerprinting_enabled():
                 findings_data.extend(self._run_fingerprinting(source_target, services))
 
+            # Phase 2.7 — deep analysis (Fase 6): launch Nmap/Nikto/OpenVAS as
+            # independent corroborator scans. Fire-and-forget — their Finding
+            # rows are merged in only at read time (format_scan), never written
+            # into this scan's own findings_data.
+            deep_scan_ids: list = []
+            if deep and source_target:
+                deep_scan_ids = self._launch_deep_corroborators(user_id, source_target, source_scan_id, services)
+
             # Phase 2.5 — correlation: key, merge duplicates/sources, set lifecycle.
             for finding in findings_data:
                 finding["host_id"] = source_host_id
@@ -2023,6 +2044,7 @@ class EllysiaEngineManager(ScanManager):
                 scan_repo = ScanRepository(uow)
                 scan = scan_repo.get_by_id(scan_id)
                 scan.host_id = source_host_id
+                scan.deep_scan_ids = deep_scan_ids or None  # type: ignore
                 self._persist_scan_results(uow, scan, findings_data)
                 scan.status = ScanStatus.FINISHED.value  # type: ignore
                 scan.finished_at = datetime.now()  # type: ignore
@@ -2141,6 +2163,53 @@ class EllysiaEngineManager(ScanManager):
             "state":        "open",
         }
 
+    def _launch_deep_corroborators(self, user_id: int, target: str,
+                                   source_scan_id: Optional[int], services) -> list:
+        """Fire off Nmap/Nikto/OpenVAS as independent corroborator scans (Fase 6).
+
+        Necessarily non-blocking: OpenVAS alone can take up to 4 hours (see its
+        own ``run_scan`` timeout), so this cannot be awaited inside this job.
+        Each corroborator becomes an ordinary, independently-tracked ``Scan`` —
+        visible, cancellable and pollable exactly like a user-launched one. The
+        returned ids are stored on the Ellysia scan so ``format_scan`` can later
+        merge in whichever corroborator ``Finding`` rows are ready.
+
+        - Nmap only when ``source_scan_id`` is None (self-discovery mode) — a
+          fresh Nmap run is redundant when Ellysia already has Nmap-sourced
+          ports for this scan.
+        - Nikto only if at least one HTTP-like service was found.
+        - OpenVAS always.
+
+        Best-effort per corroborator: a launch failure for one does not affect
+        the others or the Ellysia scan itself.
+        """
+        from .ellysia import is_http_service, DEFAULT_PORTS
+        ids: list = []
+
+        if source_scan_id is None:
+            try:
+                ports_str = ",".join(str(p) for p in sorted(set(DEFAULT_PORTS)))
+                ids.append(NmapScanManager().run_scan(
+                    target_host=target, target_ports=ports_str, user_id=user_id,
+                ))
+            except Exception:
+                logger.exception("Análisis profundo: fallo al lanzar Nmap corroborador para %s", target)
+
+        if any(is_http_service(s) for s in services):
+            try:
+                ids.append(NiktoScanManager().run_scan(target_domain=target, user_id=user_id))
+            except Exception:
+                logger.exception("Análisis profundo: fallo al lanzar Nikto corroborador para %s", target)
+
+        try:
+            ids.append(OpenVASScanManager().run_scan(target=target, user_id=user_id))
+        except Exception:
+            logger.exception("Análisis profundo: fallo al lanzar OpenVAS corroborador para %s", target)
+
+        if ids:
+            logger.info("Análisis profundo: lanzados %d escaneos corroboradores para %s", len(ids), target)
+        return ids
+
     def _previous_findings_map(self, scan_repo, user_id, target, exclude_scan_id) -> dict:
         """Build ``dedup_key -> {state, snapshot}`` from the previous Ellysia scan
         of this target, for lifecycle comparison."""
@@ -2156,7 +2225,14 @@ class EllysiaEngineManager(ScanManager):
 
     @staticmethod
     def _finding_snapshot(f) -> dict:
-        """Plain-dict copy of a Finding's columns (to recreate a 'fixed' ghost)."""
+        """Plain-dict copy of a Finding's columns (to recreate a 'fixed' ghost).
+
+        Deliberately excludes ``id``/``state``: this dict gets handed to
+        ``persist_findings`` (``Finding(scan_id=..., **data)``) when carrying a
+        lifecycle ghost forward — an explicit ``id`` there would collide with an
+        existing primary key on flush. Use :meth:`_finding_view_dict` for
+        anything display-only (never persisted).
+        """
         return {
             "host_id": f.host_id, "title": f.title, "category": f.category,
             "port": f.port, "service": f.service, "cpe": f.cpe, "cve_ids": f.cve_ids,
@@ -2166,6 +2242,16 @@ class EllysiaEngineManager(ScanManager):
             "check_id": f.check_id, "feed_version": f.feed_version,
             "dedup_key": f.dedup_key, "qod": f.qod, "confirmed": f.confirmed,
         }
+
+    @staticmethod
+    def _finding_view_dict(f) -> dict:
+        """``_finding_snapshot`` plus ``id``/``state``, for display only (Fase 6
+        read-time deep merge in ``format_scan``) — never pass this to
+        ``persist_findings``."""
+        d = EllysiaEngineManager._finding_snapshot(f)
+        d["id"] = f.id
+        d["state"] = f.state
+        return d
 
     def set_finding_state(self, finding_id: int, user_id: int, state: str):
         """Set a finding's lifecycle state (e.g. mark a risk as ``accepted``).
@@ -2207,13 +2293,32 @@ class EllysiaEngineManager(ScanManager):
             raise ScanNotFoundError(scan_id)
 
         session = get_db_session()
-        findings = ScanRepository(session=session).get_findings_by_scan(scan_id)
+        repo = ScanRepository(session=session)
+        own_findings = [self._finding_view_dict(f) for f in repo.get_findings_by_scan(scan_id)]
+
+        # Fase 6 "análisis profundo": merge in the corroborator scans' own
+        # Finding rows at READ time — never persisted here. merge_findings
+        # (Fase 5) already groups by dedup_key regardless of which scan wrote
+        # each row, so this is the same fusion logic used within a single scan,
+        # just applied across scan_ids. A corroborator still mid-run simply has
+        # no Finding rows yet and contributes nothing until it finishes.
+        deep_scan_ids = scan.deep_scan_ids or []
+        if deep_scan_ids:
+            corroborator_findings = [
+                self._finding_view_dict(f)
+                for corroborator_id in deep_scan_ids
+                for f in repo.get_findings_by_scan(corroborator_id)
+            ]
+            display_findings = merge_findings(own_findings + corroborator_findings)
+        else:
+            display_findings = own_findings
+
         exposure = classify_exposure(scan.target)
 
-        def _priority(f):
+        def _priority(f: dict) -> str:
             return score_finding(
-                {"cvss_score": f.cvss_score, "in_kev": f.in_kev,
-                 "epss_score": f.epss_score, "confirmed": f.confirmed},
+                {"cvss_score": f.get("cvss_score"), "in_kev": f.get("in_kev"),
+                 "epss_score": f.get("epss_score"), "confirmed": f.get("confirmed")},
                 exposure,
             )
 
@@ -2222,35 +2327,37 @@ class EllysiaEngineManager(ScanManager):
             "scanType": "ellysia",
             "target": scan.target,
             "sourceScanId": scan.source_scan_id,
+            "deep": bool(deep_scan_ids),
+            "deepScanIds": deep_scan_ids,
             "exposure": exposure,
             "status": getattr(scan, "status", "unknown"),
             "startedAt": scan.started_at.isoformat(),
             "finishedAt": scan.finished_at.isoformat() if scan.finished_at else None,  # type: ignore
             "findings": [
                 {
-                    "id": f.id,
-                    "title": f.title,
-                    "category": f.category,
-                    "port": f.port,
-                    "service": f.service,
-                    "cpe": f.cpe,
-                    "cveIds": f.cve_ids,
-                    "cvssScore": f.cvss_score,
-                    "epssScore": f.epss_score,
-                    "inKev": f.in_kev,
-                    "qod": f.qod,
-                    "confirmed": f.confirmed,
-                    "source": f.source,
-                    "state": f.state,
-                    "dedupKey": f.dedup_key,
+                    "id": f.get("id"),
+                    "title": f.get("title"),
+                    "category": f.get("category"),
+                    "port": f.get("port"),
+                    "service": f.get("service"),
+                    "cpe": f.get("cpe"),
+                    "cveIds": f.get("cve_ids"),
+                    "cvssScore": f.get("cvss_score"),
+                    "epssScore": f.get("epss_score"),
+                    "inKev": f.get("in_kev"),
+                    "qod": f.get("qod"),
+                    "confirmed": f.get("confirmed"),
+                    "source": f.get("source"),
+                    "state": f.get("state"),
+                    "dedupKey": f.get("dedup_key"),
                     "priority": _priority(f),
                 }
-                for f in findings
+                for f in display_findings
             ],
-            "totalFindings": len(findings),
-            "vulnerableFindings": sum(1 for f in findings if f.category == "outdated_software"),
-            "openFindings": sum(1 for f in findings if f.state == "open"),
-            "fixedFindings": sum(1 for f in findings if f.state == "fixed"),
+            "totalFindings": len(display_findings),
+            "vulnerableFindings": sum(1 for f in display_findings if f.get("category") == "outdated_software"),
+            "openFindings": sum(1 for f in display_findings if f.get("state") == "open"),
+            "fixedFindings": sum(1 for f in display_findings if f.get("state") == "fixed"),
         }
         self._append_document_info(scan, result)
         return result

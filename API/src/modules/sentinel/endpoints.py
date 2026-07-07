@@ -320,6 +320,7 @@ def start_openvas_scan(data):
 def start_ellysia_scan(data):
     """Lanzar un escaneo Ellysia: sobre un Nmap previo, o autodescubriendo."""
     timeout = data["timeout"]
+    deep = data.get("deep", False)
     source_scan_id = data.get("sourceScanId")
     user = get_current_user()
     manager = EllysiaEngineManager()
@@ -333,8 +334,8 @@ def start_ellysia_scan(data):
                 message="El escaneo fuente debe ser un escaneo Nmap",
                 value=source_scan_id,
             )
-        scan_id = manager.run_scan(user_id=user.id, source_scan_id=source_scan_id, timeout=timeout)
-        logger.info(f"Ellysia lanzado: ID={scan_id} fuente={source_scan_id} user={user.username}")
+        scan_id = manager.run_scan(user_id=user.id, source_scan_id=source_scan_id, deep=deep, timeout=timeout)
+        logger.info(f"Ellysia lanzado: ID={scan_id} fuente={source_scan_id} deep={deep} user={user.username}")
     else:
         # Autodescubrimiento: valida el objetivo (rechaza IPs privadas, etc.)
         # igual que un escaneo Nmap, ya que el transporte propio toca el objetivo.
@@ -345,8 +346,9 @@ def start_ellysia_scan(data):
                 discover_ports = ScanManager.validate_port(data["ports"])
             except PortValidationError as exc:
                 raise ValidationError(field="ports", message=str(exc), value=data["ports"]) from exc
-        scan_id = manager.run_scan(user_id=user.id, target=target, discover_ports=discover_ports, timeout=timeout)
-        logger.info(f"Ellysia lanzado: ID={scan_id} autodescubrimiento target={target} user={user.username}")
+        scan_id = manager.run_scan(user_id=user.id, target=target, discover_ports=discover_ports,
+                                   deep=deep, timeout=timeout)
+        logger.info(f"Ellysia lanzado: ID={scan_id} autodescubrimiento target={target} deep={deep} user={user.username}")
 
     return {
         "message": "Escaneo Ellysia iniciado correctamente",

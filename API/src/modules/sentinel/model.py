@@ -746,11 +746,17 @@ class EllysiaScan(Scan):
         id: Primary key (foreign key to Scan.id).
         source_scan_id: The Nmap Scan whose discovered services were analysed.
             Nullable so a future self-discovering scan can leave it empty.
+        deep_scan_ids: Fase 6 "análisis profundo" — ids of the Nmap/Nikto/OpenVAS
+            corroborator scans launched alongside this one. Fire-and-forget:
+            each is an ordinary, independently-tracked Scan; their Finding rows
+            are merged in only at read time (see EllysiaEngineManager.format_scan),
+            never copied into this scan's own Finding rows.
     """
     __tablename__ = "EllysiaScan"
 
     id             = Column(Integer, ForeignKey("Scan.id"), primary_key=True)
     source_scan_id = Column(Integer, ForeignKey("Scan.id"), nullable=True)
+    deep_scan_ids  = Column(JSONB, nullable=True)
 
     __mapper_args__ = {
         "polymorphic_identity": ScanType.ELLYSIA,

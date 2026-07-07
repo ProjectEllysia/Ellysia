@@ -27,6 +27,9 @@ class EllysiaScanRequestSchema(Schema):
     sourceScanId = fields.Integer()
     target = fields.String()
     ports = fields.String()
+    # Fase 6 "análisis profundo": also launch Nmap/Nikto/OpenVAS as independent
+    # corroborator scans, fused with Ellysia's own findings when read.
+    deep = fields.Boolean(load_default=False)
     timeout = fields.Integer(load_default=120, validate=validate.Range(min=1))
 
     @validates_schema
