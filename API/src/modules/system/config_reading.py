@@ -159,6 +159,28 @@ def get_openai_environment() -> dict[str, str]:
     return {"api_key": api_key, "model": model, "base_url": base_url}
 
 
+def get_google_environment() -> dict[str, str]:
+    """Credenciales de Google Gemini desde variables de entorno.
+
+    Returns:
+        dict con 'api_key' y 'model'.
+
+    Raises:
+        ValueError: Si falta GOOGLE_API_KEY.
+    """
+    api_key = os.getenv("GOOGLE_API_KEY")
+    model = os.getenv("GOOGLE_MODEL", "gemini-2.0-flash")
+
+    if not api_key:
+        logger.error("Falta la variable de entorno GOOGLE_API_KEY")
+        raise ValueError(
+            "Falta la variable de entorno GOOGLE_API_KEY. "
+            "Defínela en el archivo .env junto a las credenciales de OpenAI."
+        )
+
+    return {"api_key": api_key, "model": model}
+
+
 @_lazy_load
 def get_oauth_config() -> tuple[float, float, Optional[str], Optional[str]]:
     """Configuración OAuth/JWT.

@@ -15,7 +15,7 @@ Uso típico:
 """
 
 from .inputs import AIInput, AIResult, Example
-from .strategies import ModelStrategy, OllamaStrategy, OpenAIStrategy, ToolExecutor
+from .strategies import ModelStrategy, OllamaStrategy, OpenAIStrategy, GoogleStrategy, ToolExecutor
 from .generator import AIGenerator
 from .factory import build_generator
 from .tools import web_search, WEB_SEARCH_TOOL
@@ -34,6 +34,7 @@ __all__ = [
     "ModelStrategy",
     "OllamaStrategy",
     "OpenAIStrategy",
+    "GoogleStrategy",
     "ToolExecutor",
     "AIGenerator",
     "build_generator",

@@ -18,7 +18,7 @@ import src.modules.system.config_reading as CR
 
 from .exceptions import AIStrategyConfigurationError
 from .generator import AIGenerator
-from .strategies import ModelStrategy, OllamaStrategy, OpenAIStrategy
+from .strategies import ModelStrategy, OllamaStrategy, OpenAIStrategy, GoogleStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,13 @@ def _build_strategy(name: str) -> ModelStrategy:
             api_key=env["api_key"],
             model=overrides.get("model") or env["model"],
             base_url=env.get("base_url"),
+        )
+
+    if name == "google":
+        env = CR.get_google_environment()
+        return GoogleStrategy(
+            api_key=env["api_key"],
+            model=overrides.get("model") or env["model"],
         )
 
     raise AIStrategyConfigurationError(f"estrategia desconocida: '{name}'")

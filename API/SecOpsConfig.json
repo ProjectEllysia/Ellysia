@@ -140,6 +140,11 @@
   },
   "ai": {
     "defaultStrategy": "openai",
+    "strategies": {
+      "google": {
+        "model": null
+      }
+    },
     "modules": {
       "aegis": "openai",
       "sentinel": "openai"
