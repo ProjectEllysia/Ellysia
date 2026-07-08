@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 import src.modules.system.config_reading as CR
 from src.modules.aegis.exceptions import DocumentNotFoundError
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.session import get_db_session
+from src.modules.infrastructure.session import read_repo
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
 
 from .exceptions import (
@@ -147,8 +147,7 @@ class IrisManager(TaskTrackingMixin):
         exist, which lets callers distinguish "not found" from
         "not ready".
         """
-        session = get_db_session()
-        return IrisAnalysisRepository(session=session).get_by_id(analysis_id)
+        return read_repo(IrisAnalysisRepository).get_by_id(analysis_id)
 
     def get_analysis_status(self, analysis_id: int) -> Optional[str]:
         """Return the current lifecycle status string of an analysis.
@@ -193,16 +192,14 @@ class IrisManager(TaskTrackingMixin):
             IrisAnalysisNotReadyError: If the analysis is not yet
                 ``finished`` (callers should poll ``/status`` first).
         """
-        session = get_db_session()
-        analysis = IrisAnalysisRepository(session=session).get_by_id(analysis_id)
+        analysis = read_repo(IrisAnalysisRepository).get_by_id(analysis_id)
         if not analysis:
             raise IrisAnalysisNotFoundError(analysis_id)
 
         if analysis.status != "finished":
             raise IrisAnalysisNotReadyError(analysis_id, analysis.status)
 
-        rules_repo = IrisRuleResultRepository(session=session)
-        rules = rules_repo.get_by_analysis(analysis_id)
+        rules = read_repo(IrisRuleResultRepository).get_by_analysis(analysis_id)
 
         rules_data = [
             {
@@ -501,8 +498,7 @@ class IrisManager(TaskTrackingMixin):
         Returns:
             Tuple of (formatted_results: list[dict], total_count: int).
         """
-        session = get_db_session()
-        items, total = IrisAnalysisRepository(session=session).get_by_user_paginated(
+        items, total = read_repo(IrisAnalysisRepository).get_by_user_paginated(
             user_id, page, per_page
         )
         results = [
@@ -527,8 +523,7 @@ class IrisManager(TaskTrackingMixin):
         exist or the ownership check fails (same error for both cases
         to prevent ID enumeration).
         """
-        session = get_db_session()
-        analysis = IrisAnalysisRepository(session=session).get_by_id(analysis_id)
+        analysis = read_repo(IrisAnalysisRepository).get_by_id(analysis_id)
         if not analysis or analysis.user_id != user_id:
             raise IrisAnalysisNotFoundError(analysis_id)
         return analysis
@@ -991,23 +986,19 @@ class IrisReportManager:
 
     def get_document_by_id(self, document_id: int) -> Optional[IrisDocument]:
         """Retrieve an IrisDocument by its primary key."""
-        session = get_db_session()
-        return IrisReportRepository(session=session).get_by_id(document_id)
+        return read_repo(IrisReportRepository).get_by_id(document_id)
 
     def get_latest_document_by_analysis_id(self, analysis_id: int) -> Optional[IrisDocument]:
         """Retrieve the most recently created document for an analysis."""
-        session = get_db_session()
-        return IrisReportRepository(session=session).get_latest_document(analysis_id)
+        return read_repo(IrisReportRepository).get_latest_document(analysis_id)
 
     def get_documents_for_user(self, user_id: int) -> List[IrisDocument]:
         """Retrieve all documents belonging to a user."""
-        session = get_db_session()
-        return IrisReportRepository(session=session).get_documents_by_user(user_id)
+        return read_repo(IrisReportRepository).get_documents_by_user(user_id)
 
     def get_documents_by_analysis_id(self, analysis_id: int) -> List[IrisDocument]:
         """Retrieve all documents generated for a specific analysis."""
-        session = get_db_session()
-        return IrisReportRepository(session=session).get_documents_by_analysis(analysis_id)
+        return read_repo(IrisReportRepository).get_documents_by_analysis(analysis_id)
 
     def delete_document(self, document_id: int) -> bool:
         """Delete a document and its associated file on disk.
@@ -1037,8 +1028,7 @@ class IrisReportManager:
             DocumentNotFoundError: If document not found or not owned by
                 user (same error for both cases to prevent ID enumeration).
         """
-        session = get_db_session()
-        doc = IrisReportRepository(session=session).get_by_id(document_id)
+        doc = read_repo(IrisReportRepository).get_by_id(document_id)
         if not doc or doc.user_id != user_id:  # type: ignore
             raise DocumentNotFoundError(document_id)
         return doc
@@ -1084,8 +1074,7 @@ class IrisReportManager:
         try:
             report = IrisManager().get_analysis_results(analysis_id)
 
-            session = get_db_session()
-            analysis = IrisAnalysisRepository(session=session).get_by_id(analysis_id)
+            analysis = read_repo(IrisAnalysisRepository).get_by_id(analysis_id)
             path = None
             if analysis is not None:
                 context = parse_raw_message(analysis.raw_headers or "")
