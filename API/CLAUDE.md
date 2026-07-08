@@ -28,5 +28,5 @@ Cross-cutting: `infrastructure/` (UnitOfWork, base repo, sessions), `shared/` (b
 ## Watch out
 - `CREATE_DATABASE=True` triggers a **destructive** `_init_db()` — first deploy only, then set to `False`.
 - Postgres is on port **15432** locally.
-- `sentinel/services/tasks.py` has its own `TaskStatus` enum, distinct from `taskqueue.TaskStatus`.
+- `themis/services/tasks.py` has its own `TaskStatus` enum, distinct from `taskqueue.TaskStatus`.
 - SQLite adaptation + mocks live only in `tests/`; never modify `src/` to accommodate tests. `xfail(strict=True)` marks known real bugs — remove the marker when it XPASSes.

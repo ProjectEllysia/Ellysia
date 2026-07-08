@@ -1,9 +1,9 @@
-# Ellysia Engine — Roadmap del motor propio de vulnerabilidades
+# Lybra Engine — Roadmap del motor propio de vulnerabilidades
 
 Este documento describe el plan para construir un motor de detección de vulnerabilidades propio dentro
-del módulo **Sentinel**. La meta a largo plazo es sencilla de enunciar y ambiciosa de cumplir: que
+del módulo **Themis**. La meta a largo plazo es sencilla de enunciar y ambiciosa de cumplir: que
 Nmap, Nikto y OpenVAS/Greenbone dejen de ser *el motor* de nuestros escaneos y pasen a ser
-*corroboradores opcionales*, herramientas externas que contrastan y refuerzan lo que Ellysia ya ha
+*corroboradores opcionales*, herramientas externas que contrastan y refuerzan lo que Lybra ya ha
 encontrado por su cuenta.
 
 No es un documento de análisis ni una lluvia de ideas: es un plan de ejecución. Cada fase dice qué hay
@@ -13,9 +13,9 @@ aparecen.
 
 ---
 
-## 1. La apuesta: en qué compite Ellysia (y en qué no)
+## 1. La apuesta: en qué compite Lybra (y en qué no)
 
-Conviene ser honestos desde el principio sobre una cosa: **Ellysia no puede competir en cantidad de
+Conviene ser honestos desde el principio sobre una cosa: **Lybra no puede competir en cantidad de
 comprobaciones, y no debe intentarlo.** OpenVAS acumula unos veinte años de ingeniería y más de cien
 mil plugins NASL; Nessus ofrece una amplitud pensada para grandes empresas; Nuclei se apoya en un feed
 comunitario gigantesco orientado a la web. Querer igualar ese volumen en solitario y en unos meses no
@@ -29,7 +29,7 @@ Ninguna razona de forma nativa sobre qué importa *en tu contexto y esta semana*
 estado de una vulnerabilidad a lo largo del tiempo por cada activo, y desde luego ninguna te lo
 explica en lenguaje natural.
 
-Ahí está la apuesta de Ellysia. **No competimos en volumen, competimos en síntesis.** El motor unifica
+Ahí está la apuesta de Lybra. **No competimos en volumen, competimos en síntesis.** El motor unifica
 descubrimiento, detección y contexto en un único hallazgo que sabe de dónde viene (su procedencia) y
 cómo ha evolucionado (su ciclo de vida), prioriza por riesgo real —combinando gravedad técnica,
 probabilidad de explotación, existencia de exploits y exposición del activo— y lo cuenta de forma
@@ -45,7 +45,7 @@ y donde los resultados son fáciles de medir. Una vez que ese primer vertical se
 se expande hacia el inventario de red y servidores (Fases 1 y 2) y, si el uso real lo pide, hacia el
 análisis activo de aplicaciones web.
 
-**Lo que Ellysia deliberadamente no será.** Para no perdernos, conviene dejar por escrito las
+**Lo que Lybra deliberadamente no será.** Para no perdernos, conviene dejar por escrito las
 tentaciones que vamos a rechazar: no será un clon de OpenVAS con un feed de cien mil comprobaciones;
 no competirá por número de checks; no mantendrá un catálogo de CVEs curado a mano; y no producirá otra
 lista plana de hallazgos más. Cada vez que una decisión nos empuje hacia una de esas cuatro cosas, es
@@ -61,13 +61,13 @@ referimos a **independencia de terceros en tiempo de ejecución**: que cada capa
 —descubrimiento, fingerprinting, detección, correlación— tenga una implementación *propia*, en lugar
 de limitarse a invocar el binario o el servicio de otra persona.
 
-Hoy Sentinel es esencialmente un orquestador: lanza Nmap, lanza Nikto, consulta la API de CIRCL en
-vivo. El objetivo de este plan es que Ellysia **posea sus primitivas**, y que esas herramientas
+Hoy Themis es esencialmente un orquestador: lanza Nmap, lanza Nikto, consulta la API de CIRCL en
+vivo. El objetivo de este plan es que Lybra **posea sus primitivas**, y que esas herramientas
 externas queden relegadas al papel de oráculos con los que comparar y a los que recurrir como
 respaldo. El lenguaje en el que se escriba todo eso es secundario. El motor se construye en **Python**,
 el stack que ya usamos, con una excepción bien acotada para la parte de red (una isla `asyncio` que se
 explica en el apartado 3.4). La posibilidad de un componente nativo en C o Rust —un repositorio
-hermano al estilo de `Ellysia-AcheronMobile`— existe, pero es una optimización futura y opcional
+hermano al estilo de `Lybra-AcheronMobile`— existe, pero es una optimización futura y opcional
 reservada a un único cuello de botella de rendimiento, no un cimiento del que dependa nada. Se detalla
 en la Fase T.
 
@@ -83,17 +83,17 @@ escribimos en ensamblador".
 La decisión de diseño más importante es también la menos glamurosa: no tratar el motor como algo
 aparte, sino como un tipo de escaneo más, de primera clase, que encaja en las abstracciones que ya
 tenemos. Hoy cada escáner sigue el mismo patrón de cuatro piezas —una tarea, un procesador de
-resultados y un gestor— y Ellysia se limita a añadir una fila a esa tabla:
+resultados y un gestor— y Lybra se limita a añadir una fila a esa tabla:
 
 ```
 ScanType.NMAP        → NmapScanTask        → NmapResultProcessor    → NmapScanManager
 ScanType.NIKTO       → NiktoScanTask       → NiktoResultProcessor   → NiktoScanManager
 ScanType.OPENVAS     → OpenVASTask         → OpenVASResultProcessor → OpenVASScanManager
-ScanType.ELLYSIA (★) → EllysiaEngineTask   → EllysiaResultProcessor → EllysiaEngineManager   ← NUEVO
+ScanType.LYBRA (★) → LybraEngineTask   → LybraResultProcessor → LybraEngineManager   ← NUEVO
 ```
 
 Añadir esa fila es un trámite mecánico gracias al registro por decorador
-(`@ScanManager.register(ScanType.ELLYSIA)`, en `managers.py:603`) montado sobre el modelo polimórfico
+(`@ScanManager.register(ScanType.LYBRA)`, en `managers.py:603`) montado sobre el modelo polimórfico
 (`polymorphic_on=scan_type`, en `model.py`). Y no es un trámite menor por lo que nos regala: el motor
 hereda sin escribir una línea la cancelación cooperativa, el reporte de progreso, la persistencia, la
 programación de escaneos, la organización en carpetas, la generación de PDF y el enriquecimiento con
@@ -101,7 +101,7 @@ IA. Toda esa fontanería ya funciona.
 
 ### 3.2 Dentro de esa fila, un stack vertical construido de abajo arriba
 
-La fila del `ScanType` es solo el envoltorio. La sustancia está en que, dentro de ella, Ellysia
+La fila del `ScanType` es solo el envoltorio. La sustancia está en que, dentro de ella, Lybra
 construye su propio stack por capas, y cada capa que completamos nos permite retirar una dependencia
 externa. Visto de abajo arriba:
 
@@ -125,7 +125,7 @@ Aquí está el corazón técnico de la apuesta del apartado 1. Hoy cada escáner
 su propia tabla: Nmap escribe puertos en `OpenPort`, Nikto sus incidencias en `NiktoIncident`, OpenVAS
 sus vulnerabilidades en la suya. El resultado es que tenemos tres escáneres devolviendo tres listas
 que no se hablan entre sí. Para un motor que aspira a *sintetizar*, eso no vale: necesitamos un modelo
-de hallazgo **normalizado**, común a todos los orígenes, que viva en `sentinel/model.py`:
+de hallazgo **normalizado**, común a todos los orígenes, que viva en `themis/model.py`:
 
 ```python
 class Finding(Base):
@@ -150,8 +150,8 @@ class Finding(Base):
     exploit_maturity  = Column(String(16))             # none|poc|functional|weaponized|in_the_wild (Fase 2)
 
     # Calidad y procedencia (lo que permite deduplicar y confiar)
-    source        = Column(String(32))       # "ellysia" | "nikto" | "openvas" | "nmap"
-    check_id      = Column(String(128))      # "ellysia:git-config-exposure@3" — trazabilidad del feed
+    source        = Column(String(32))       # "lybra" | "nikto" | "openvas" | "nmap"
+    check_id      = Column(String(128))      # "lybra:git-config-exposure@3" — trazabilidad del feed
     feed_version  = Column(String(32))       # qué versión de KB/checks lo produjo (reproducibilidad)
     dedup_key     = Column(String(64), index=True)  # hash(host,port,cpe|check_id,cve) para fusionar
     qod           = Column(Integer)          # Quality of Detection, 0–100
@@ -163,7 +163,7 @@ class Finding(Base):
     state         = Column(String(20), default="open")  # open | fixed | regressed | accepted
 ```
 
-Con este modelo, los hallazgos de Ellysia, de Nikto y de OpenVAS viven en la misma tabla, y eso lo
+Con este modelo, los hallazgos de Lybra, de Nikto y de OpenVAS viven en la misma tabla, y eso lo
 cambia todo. Si las tres fuentes detectan la misma CVE en el mismo host y puerto, dejan de ser tres
 entradas inconexas y pasan a ser **un solo `Finding`** con una procedencia múltiple y una confianza
 más alta, precisamente porque tres herramientas independientes coinciden. Ese es el salto cualitativo
@@ -180,7 +180,7 @@ con **encapsular** el asincronismo donde de verdad se necesita.
 
 El resto de la aplicación no se toca y sigue siendo síncrona. El motor introduce `asyncio` únicamente
 dentro del worker de RQ, y solo ahí. El punto de entrada del escaneo —el `@staticmethod`
-`EllysiaEngineManager.execute_ellysia_scan`, que corre en el worker— abre y cierra el event loop dentro
+`LybraEngineManager.execute_lybra_scan`, que corre en el worker— abre y cierra el event loop dentro
 de ese proceso aislado:
 
 ```python
@@ -210,7 +210,7 @@ como dos pistas de trabajo que corren a la vez y terminan uniéndose. La regla d
 ambas es que **no se arranca por Nmap, pero sí se arranca con datos de Nmap.** Se lidera con el runtime
 de detección sobre los servicios que ya conocemos —lo que nos da identidad en días— y el transporte y el
 fingerprinting propios se van construyendo al lado, usando Nmap como oráculo, hasta el momento en que
-Ellysia es completamente autónomo.
+Lybra es completamente autónomo.
 
 La primera pista, la de **correlación**, es la columna vertebral: va de la Fase 0 (cimientos) a la
 Fase 1 (el matcher de versión), sigue por la Fase 2 (la base de conocimiento local) y culmina en la
@@ -234,13 +234,13 @@ dos pistas entrelazadas.
 **El objetivo** de esta fase es puramente estructural: conseguir que "el motor" sea una fila más de la
 tabla del apartado 3.1 y que persista sus `Finding`, todavía sin ninguna lógica de detección real.
 
-**Una nota importante sobre la arquitectura en estas fases.** Mientras Ellysia no tenga su propio
+**Una nota importante sobre la arquitectura en estas fases.** Mientras Lybra no tenga su propio
 transporte de red (lo que llega en la Fase T), recibe como entrada una lista de servicios ya
 identificados. Esa lista puede venir de un escaneo Nmap anterior del usuario, de parámetros directos,
-o de cualquier otra fuente. Ellysia no descubre puertos por su cuenta en estas fases; recibe los
+o de cualquier otra fuente. Lybra no descubre puertos por su cuenta en estas fases; recibe los
 servicios y los analiza. Esto tiene dos ventajas claras: simplifica la arquitectura (no hay capas
-internas invisibles) y mantiene el historial de escaneos limpio (Nmap es un escaneo, Ellysia es otro
-escaneo independiente, ambos visibles en la BD). El descubrimiento propio de Ellysia llega en la Fase
+internas invisibles) y mantiene el historial de escaneos limpio (Nmap es un escaneo, Lybra es otro
+escaneo independiente, ambos visibles en la BD). El descubrimiento propio de Lybra llega en la Fase
 T, cuando tenga su propio transporte.
 
 Dado esto, el primer trabajo, y el primer cambio de código de todo el proyecto, es **capturar y persistir
@@ -269,17 +269,17 @@ que hay que convertir antes de casar contra el feed. Y tercero, un mismo servici
 `<cpe>` (el de la aplicación y el del sistema operativo), por lo que conviene usar `findall` y guardar
 una lista en lugar de quedarnos con el primero.
 
-El resto de la fase es fontanería: añadir `ScanType.ELLYSIA = "ellysia"` como nuevo valor del enum y
+El resto de la fase es fontanería: añadir `ScanType.LYBRA = "lybra"` como nuevo valor del enum y
 su `polymorphic_identity`; crear el modelo `Finding` del apartado 3.3 con su migración; escribir un
-`EllysiaEngineTask` que reciba como parámetros un host, puerto, protocolo, servicio, versión y CPE (la
-información del puerto ya descubierto); un `EllysiaEngineManager` registrado con el decorador; y un
-endpoint `POST /sentinel/ellysia` que acepte esos parámetros y lance el escaneo.
+`LybraEngineTask` que reciba como parámetros un host, puerto, protocolo, servicio, versión y CPE (la
+información del puerto ya descubierto); un `LybraEngineManager` registrado con el decorador; y un
+endpoint `POST /themis/lybra` que acepte esos parámetros y lance el escaneo.
 
-La entrada a un escaneo Ellysia en estas fases es una lista de servicios con sus detalles. El usuario
+La entrada a un escaneo Lybra en estas fases es una lista de servicios con sus detalles. El usuario
 puede obtenerla de un Nmap Scan anterior (leyendo sus `OpenPort`), o proporcionarla manualmente, o desde
-otra fuente. Ellysia recibirá esa entrada y la procesará.
+otra fuente. Lybra recibirá esa entrada y la procesará.
 
-**Damos la fase por hecha cuando** podemos lanzar un "escaneo Ellysia" proporcionándole una lista de
+**Damos la fase por hecha cuando** podemos lanzar un "escaneo Lybra" proporcionándole una lista de
 servicios, y el motor persiste `Finding` informativos (uno de tipo "puerto abierto" por cada servicio
 recibido). Todavía no detecta ninguna vulnerabilidad, pero toda la fontanería de persistencia y
 correlación funciona de extremo a extremo.
@@ -333,13 +333,13 @@ estar en realidad corregido. Por eso el `qod` es menor que 100 y el `confirmed` 
 por versión significa "potencialmente vulnerable", no "vulnerable confirmado". La Fase R es la que lo
 asciende a confirmado cuando lo comprueba activamente.
 
-**Damos la fase por hecha cuando** un escaneo Ellysia sobre un host con software desactualizado produce
+**Damos la fase por hecha cuando** un escaneo Lybra sobre un host con software desactualizado produce
 hallazgos con CVEs reales y su CVSS, visibles tanto en la interfaz web como en el PDF.
 
 ### Fase R — El runtime de detección propio · pista de bajo nivel · la que lidera
 
 Esta es la capa de identidad, la L2, y por tanto la más importante de todo el plan. Es lo que convierte
-a Ellysia de un simple correlacionador en un motor con criterio propio de detección. La idea es un
+a Lybra de un simple correlacionador en un motor con criterio propio de detección. La idea es un
 runtime único de comprobaciones —versionado, extensible y reproducible— que, dado el conjunto de
 servicios que ya hemos recibido, decide qué comprobar y produce `Finding` normalizados, todo ello sin
 depender de Nikto.
@@ -359,7 +359,7 @@ para ser razonablemente compatible con las plantillas de Nuclei. Así se lee un 
 
 ```yaml
 id: apache-2449-path-traversal
-version: 3                            # junto con el id forma el check_id "ellysia:apache-2449-path-traversal@3"
+version: 3                            # junto con el id forma el check_id "lybra:apache-2449-path-traversal@3"
 type: http
 category: exposed_path
 severity: HIGH
@@ -420,7 +420,7 @@ evaluamos. Las familias por las que conviene empezar, por su alta relación entr
 higiene de TLS/SSL, las cabeceras de seguridad HTTP, los paths sensibles expuestos, las credenciales por
 defecto y los confirmadores de las CVEs que la CISA marca como explotadas.
 
-Todo esto se distribuye como un feed propio y versionado —el formato "Ellysia Check" en `.yaml`— cuya
+Todo esto se distribuye como un feed propio y versionado —el formato "Lybra Check" en `.yaml`— cuya
 versión queda registrada en cada escaneo a través de `feed_version` y `check_id`. Esa reproducibilidad
 es exactamente lo que hace Greenbone con su NVT feed, y es una parte tangible de nuestra identidad.
 
@@ -432,7 +432,7 @@ las tres primeras familias, todo bajo el mismo runtime y con feed versionado, y 
 
 **El objetivo** es dejar de depender de consultas en vivo a `cve.circl.lu` y tener nuestro propio
 espejo local, rápido y consultable sin conexión: el equivalente a un NVT feed propio, que aquí llamamos
-el **Ellysia Feed**.
+el **Lybra Feed**.
 
 Las fuentes que reflejamos son todas públicas y gratuitas, y cada una aporta algo que las demás no
 tienen:
@@ -461,9 +461,9 @@ total: "este informe usó la KB del 4 de julio de 2026"), **firmada** (un hash y
 su integridad) y se actualiza con **deltas diarios** en lugar de descargas completas.
 
 La implementación reutiliza patrones que ya tenemos. Los modelos `CveEntry`, `CpeMatch`, `KevEntry` y
-`EpssScore` viven en un submódulo nuevo, `sentinel/services/kb/`, sobre el mismo `BaseRepository` y
+`EpssScore` viven en un submódulo nuevo, `themis/services/kb/`, sobre el mismo `BaseRepository` y
 `UnitOfWork` de siempre. El trabajo de sincronización es una tarea de RQ programada con APScheduler, en
-una categoría nueva `sentinel.kb`, y el fetcher puede calcarse del `AegisAlertFetcher` de `pills.py`,
+una categoría nueva `themis.kb`, y el fetcher puede calcarse del `AegisAlertFetcher` de `pills.py`,
 que ya resuelve el fetch concurrente, la caché con TTL, el reintento con backoff y el fallback entre
 fuentes. La consulta central del matcher es sencilla:
 
@@ -506,9 +506,9 @@ respaldo, no motor.
 
 ### Fase T — El transporte propio · pista de bajo nivel
 
-**El objetivo** es que Ellysia descubra los puertos por su cuenta, con una implementación propia, en
+**El objetivo** es que Lybra descubra los puertos por su cuenta, con una implementación propia, en
 lugar de recibirlos como entrada. Son, siguiendo la metáfora, las manos del motor. Cuando esta fase esté
-lista, un escaneo Ellysia puede recibir solo el host objetivo y hacer todo el trabajo: descubrir,
+lista, un escaneo Lybra puede recibir solo el host objetivo y hacer todo el trabajo: descubrir,
 fingerprinting, detección.
 
 La base siempre disponible es un scanner por conexión (`connect-scan`) sobre `asyncio`, que no requiere
@@ -559,7 +559,7 @@ cambiado la versión de un servicio", es decir, cambios de la superficie de ataq
 vulnerabilidades.
 
 Sobre esa base se apoyan las tres capacidades de la fase. La **deduplicación multi-fuente** usa el
-`dedup_key`: si Ellysia, Nikto y OpenVAS reportan la misma CVE en el mismo host y puerto, se funden en
+`dedup_key`: si Lybra, Nikto y OpenVAS reportan la misma CVE en el mismo host y puerto, se funden en
 un solo `Finding` con procedencia múltiple y un `qod` consolidado, más alto por el propio hecho de que
 varias fuentes coinciden. El **ciclo de vida**, apoyado en el `ScanHistoryManager` que ya existe,
 compara el escaneo actual con el anterior del mismo objetivo y etiqueta cada hallazgo como `open`
@@ -605,11 +605,11 @@ navegador headless ni soporte de autenticación de aplicación compleja.
 **El objetivo** final es unir todas las piezas en un único flujo donde el motor propio es el
 protagonista. La forma exacta del pipeline depende de en qué fase nos encontremos.
 
-**En Fases 0 a T-1** (antes de tener transporte propio), el usuario lanza un Ellysia Scan proporcionando
+**En Fases 0 a T-1** (antes de tener transporte propio), el usuario lanza un Lybra Scan proporcionando
 una lista de servicios ya conocidos (de un Nmap Scan anterior, o proporcionados manualmente):
 
 ```
-Ellysia Scan (Fases 0–T-1: analizador de vulnerabilidades)
+Lybra Scan (Fases 0–T-1: analizador de vulnerabilidades)
   1. Entrada        → lista de servicios (host, puerto, servicio, versión, CPE)
   2. Detección      → Runtime de checks (L2): por versión y activa         [Fase R + 1/2]
   3. Correlación    → dedup, ciclo de vida y scoring                       [Fase 5]
@@ -620,7 +620,7 @@ Ellysia Scan (Fases 0–T-1: analizador de vulnerabilidades)
 **A partir de Fase T** (con transporte propio), el pipeline es completo y autónomo:
 
 ```
-Ellysia Scan (Fase T+: escáner completo)
+Lybra Scan (Fase T+: escáner completo)
   1. Descubrimiento   → Transporte propio (L0)                               [Fase T]
   2. Fingerprinting   → Dissectors propios (L1)                              [Fase F]
   3. Detección        → Runtime de checks (L2): por versión y activa         [Fase R + 1/2]
@@ -725,8 +725,8 @@ local con la señal de explotabilidad, y el banco de pruebas con integración co
 ## 9. Por dónde empezar esta misma semana
 
 Si quieres un primer resultado tangible con el mínimo esfuerzo, este es el camino crítico. Empieza por
-una Fase 0 ligera: el refactor del CPE (los cuatro toques), luego `ScanType.ELLYSIA`, el modelo
-`Finding` con su migración, y un `EllysiaEngineManager` que acepte como entrada una lista de servicios
+una Fase 0 ligera: el refactor del CPE (los cuatro toques), luego `ScanType.LYBRA`, el modelo
+`Finding` con su migración, y un `LybraEngineManager` que acepte como entrada una lista de servicios
 (host, puerto, servicio, versión, CPE). No lances Nmap internamente; recibe los servicios como
 parámetro. El usuario puede obtenerlos de un Nmap Scan anterior.
 
@@ -736,7 +736,7 @@ Aegis. Con eso tienes un motor propio de detección funcionando en cuestión de 
 existente, sin descubrimiento propio aún.
 
 Demuéstralo contra servicios conocidos: toma `vulhub/httpd:2.4.49`, haz un Nmap para obtener el CPE,
-luego lanza un Ellysia Scan pasando esos servicios de entrada, y valida que detecta la CVE-2021-41773.
+luego lanza un Lybra Scan pasando esos servicios de entrada, y valida que detecta la CVE-2021-41773.
 Toma una imagen con `.git` expuesto, haz lo mismo, y valida que el check activo lo encuentra. Y solo
 entonces invierte en la Fase 2 (la base de conocimiento local, que quita la dependencia de red), en las
 Fases F y T (el fingerprint y el transporte propios, con Nmap como oráculo) y en ampliar el conjunto de
@@ -749,7 +749,7 @@ OpenVAS en un proceso incremental, no en un big-bang.
 
 | Fase | Pista       | Capa | Qué entrega                                                          | De qué nos independiza          |
 |------|-------------|------|---------------------------------------------------------------------|---------------------------------|
-| 0    | Correlación | —    | CPE persistido, `ScanType.ELLYSIA`, modelo `Finding`, fontanería completa | —                          |
+| 0    | Correlación | —    | CPE persistido, `ScanType.LYBRA`, modelo `Finding`, fontanería completa | —                          |
 | 1    | Correlación | L3   | El matcher de CPE a CVE (detección por versión)                     | La lógica de detección, ya propia |
 | R    | Bajo nivel  | L2   | El runtime de checks (declarativos y Python), con feed versionado   | **Nikto**                       |
 | 2    | Correlación | L3   | La KB local (NVD, KEV, EPSS, CPE, OSV/GHSA, explotabilidad), firmada | CIRCL/NVD en tiempo de escaneo  |
@@ -773,13 +773,12 @@ iguale en el laboratorio.
 
 Términos técnicos que aparecen en el documento, en orden aproximado de aparición.
 
-**Sentinel** — El módulo de la API encargado de los escaneos. Es donde vive el motor Ellysia.
+**Themis** — El módulo de la API encargado de los escaneos. Es donde vive el motor Lybra.
 
-**Ellysia Engine** — El nombre provisional del motor de detección de vulnerabilidades propio que
-describe este plan.
+**Lybra Engine** — El motor de detección de vulnerabilidades propio que describe este plan.
 
 **Orquestador** — Un sistema que se limita a invocar herramientas externas y recoger su salida, sin
-lógica de detección propia. Es lo que Sentinel es hoy, y lo que este plan pretende superar.
+lógica de detección propia. Es lo que Themis es hoy, y lo que este plan pretende superar.
 
 **Nmap** — Escáner de red estándar de la industria, usado para descubrir puertos y, con la opción
 `-sV`, identificar servicios y versiones.
@@ -840,9 +839,9 @@ comprobado). Va de la mano del `qod`.
 sobre la misma vulnerabilidad, host y puerto.
 
 **NVT feed** — El conjunto versionado de comprobaciones de OpenVAS/Greenbone. Nuestro equivalente propio
-es el "Ellysia Feed".
+es el "Lybra Feed".
 
-**Ellysia Feed** — Nuestro conjunto propio de checks y de base de conocimiento, versionado y firmado,
+**Lybra Feed** — Nuestro conjunto propio de checks y de base de conocimiento, versionado y firmado,
 tratado como un artefacto de producto.
 
 **Check declarativo** — Una comprobación escrita en YAML (petición más matchers), segura de ingerir de

@@ -42,7 +42,7 @@ alembic current / history
 ### Web SPA (Vue 3 + Vite) — run from `web/app/`
 ```bash
 npm install
-npm run dev            # dev server on :5173, proxies /oauth,/sentinel,/aegis,... to Flask :5000
+npm run dev            # dev server on :5173, proxies /oauth,/themis,/aegis,... to Flask :5000
 npm run build
 npm run test:acheron   # crypto interop + CRUD tests for the Acheron vault client (node)
 ```
@@ -62,7 +62,7 @@ Monorepo with three deliverables:
 - **`mobile/AcheronMobile/`** — Android/Kotlin + `AcheronCore` (Java crypto engine).
 
 ### Backend module layout (`API/src/modules/`)
-Each feature module (`sentinel`, `iris`, `aegis`, `acheron`, `users`, `system`) follows the same layering — respect it when adding code:
+Each feature module (`themis`, `iris`, `aegis`, `acheron`, `users`, `system`) follows the same layering — respect it when adding code:
 
 ```
 endpoints.py      # Flask-Smorest Blueprint; auth + schema validation only, no business logic
@@ -72,7 +72,7 @@ model.py          # SQLAlchemy models (base from shared/_model.py)
 schemas.py        # Marshmallow request/response schemas — JSON keys are camelCase
 services/         # module-internal helpers (scanners, parsers, scheduling, reports)
 ```
-Blueprints are registered in `run.py` (`/system`, `/oauth`, `/users`, `/sentinel`, `/acheron`, `/aegis`, `/iris`).
+Blueprints are registered in `run.py` (`/system`, `/oauth`, `/users`, `/themis`, `/acheron`, `/aegis`, `/iris`).
 
 **Cross-cutting modules:**
 - `infrastructure/` — `UnitOfWork` (transaction boundary), `base_repository`, engine/session singletons. UnitOfWork does **not** own sessions: lifecycle lives at the two edges — `teardown_request` for HTTP, `job_context`/`Scheduler.execute` for background work. In a request `__exit__` is a no-op (teardown commits, one atomic transaction); in a background context it commits on clean exit / rolls back on error. Never manage sessions directly outside repositories.
@@ -84,7 +84,7 @@ Blueprints are registered in `run.py` (`/system`, `/oauth`, `/users`, `/sentinel
 Replaces the legacy in-process queue. Jobs persist in Redis (survive API restarts) and run in **isolated OS worker processes**, not threads.
 - Submit: `TaskQueue.get_instance().submit(func, name=, category=, external_id=, args=, timeout=)`.
 - Entry points are `@staticmethod` on each module's manager class (e.g. `NmapScanManager.execute_nmap_scan`) — picklable by reference with no bound state; they instantiate a fresh manager inside the worker (`execute_*` seam → `_run_*` body).
-- Categories: `sentinel.scan`, `sentinel.report`, `sentinel.traceroute`, `aegis.generate`, `aegis.campaign`, `iris.analyze`, `iris.report` (+ `default`). Workers listen on category-specific queues.
+- Categories: `themis.scan`, `themis.report`, `themis.traceroute`, `aegis.generate`, `aegis.campaign`, `iris.analyze`, `iris.report` (+ `default`). Workers listen on category-specific queues.
 - **Cancellation** is cooperative: sets Redis key `taskqueue:cancel:{job_id}`; workers poll it. **Progress** via `job.meta["progress"]`. No `on_cancel`/`on_complete`/`on_error` callbacks (removed).
 - Admin REST surface at `/system/tasks/*`.
 
@@ -108,6 +108,6 @@ Changes to `SecOpsConfig.json` require an app restart (values are cached) unless
 - **First deploy only**: `CREATE_DATABASE=True` runs the destructive `_init_db()` (drops + recreates DB, seeds root user + Topic rows). Set it back to `False` afterward or you lose data on next restart. Subsequent schema changes go through Alembic (auto-applied on startup, non-destructive).
 - PostgreSQL is on port **15432** locally (container maps 5432→15432), not the standard 5432.
 - Async tasks silently never run if no RQ **worker** is up.
-- `sentinel/services/tasks.py` defines its **own** `TaskStatus` enum — distinct from `taskqueue.TaskStatus`. Don't conflate them.
+- `themis/services/tasks.py` defines its **own** `TaskStatus` enum — distinct from `taskqueue.TaskStatus`. Don't conflate them.
 - OpenVAS accepts **one host per scan** (no CIDR ranges) and takes ~15 min on first start (NVT feed).
 - API version is config-driven: `create_app()` reads it via `CR.get_app_version()` from `appVersion` in `SecOpsConfig.json` (currently `4.2`) — it is not hardcoded.

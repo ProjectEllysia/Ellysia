@@ -44,14 +44,14 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
 ```
                 ┌─────────────────────────────────────────────────────────┐
                 │                    Ellysia API (Flask)                  │
-                │  system · oauth · users · sentinel · acheron · iris ·   │
+                │  system · oauth · users · themis · acheron · iris ·   │
                 │              aegis · scribe · herald · pages            │
                 │  ┌──────────────────────────────────────────────────┐   │
                 │  │  APScheduler ──► TaskQueue (RQ + Redis)          │   │
    Web SPA ────►│  │               ┌────────────────────────────┤     │   │
   (Vue 3)       │  │               │ RQ Workers (isolated procs)│     │──►  Nmap / Nikto / OpenVAS
-                │  │               │   sentinel.scan            │     │──►  Ollama / OpenAI
-  Android  ────►│  │               │   sentinel.report          │     │──►  INCIBE-CERT · CIRCL · NVD
+                │  │               │   themis.scan            │     │──►  Ollama / OpenAI
+  Android  ────►│  │               │   themis.report          │     │──►  INCIBE-CERT · CIRCL · NVD
   (Kotlin)      │  │               │   aegis.generate           │     │
                 │  │               │   iris.analyze             │     │
                 │  │               └────────────────────────────┘     │   │
@@ -67,7 +67,7 @@ Ellysia/
 │   ├── src/modules/
 │   │   ├── system/              # Config, logging, task queue admin
 │   │   ├── users/               # OAuth 2.0 + JWT, user CRUD, ABAC
-│   │   ├── sentinel/            # Scan orchestration (Nmap/Nikto/OpenVAS)
+│   │   ├── themis/            # Scan orchestration (Nmap/Nikto/OpenVAS)
 │   │   ├── iris/                # Email header analysis (37 rules)
 │   │   ├── aegis/               # Awareness pills + CVE alerts
 │   │   ├── acheron/             # Encrypted credential vault
@@ -90,7 +90,7 @@ Ellysia/
 
 | Module | Description | Status |
 |---|---|---|
-| **Sentinel** | Nmap, Nikto, and OpenVAS scans with PDF reports, scheduled execution, AI enrichment, and traceroute tracing. | Operational |
+| **Themis** | Nmap, Nikto, and OpenVAS scans with PDF reports, scheduled execution, AI enrichment, and traceroute tracing. | Operational |
 | **Iris** | Phishing detection via 37 atomic email header analysis rules with subtractive risk scoring. | Operational |
 | **Acheron** | Client-encrypted credential vault with granular sync, export/import, and Android app. | Operational |
 | **Aegis** | AI-generated security awareness pills across 73 topics with real-time CVE alerts from 19 tracked brands. | Operational |
@@ -156,27 +156,27 @@ Content-Type: application/json
 
 ## API Reference
 
-### Sentinel — vulnerability scanning
+### Themis — vulnerability scanning
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/sentinel/nmap` | Port scan (supports CIDR ranges) |
-| `POST` | `/sentinel/nikto` | Web configuration / vulnerability scan |
-| `POST` | `/sentinel/openvas` | Full NVT scan (single host per scan) |
-| `GET` | `/sentinel/results` | List scans (filterable, paginated) |
-| `GET` | `/sentinel/results/<id>` | Scan detail |
-| `GET` | `/sentinel/scan-status?id=` | Status: pending / running / done / cancelled |
-| `POST` | `/sentinel/scans/<id>/cancel` | Cancel a running scan |
-| `DELETE` | `/sentinel/<id>` | Delete a scan |
-| `POST` | `/sentinel/generate-pdf` | Generate PDF report (`{ "id": <scanId>, "aiReport": true }`) |
-| `GET` | `/sentinel/document/<id>/download` | Download PDF |
-| `POST` | `/sentinel/scheduled-scans` | Create scheduled scan (cron/interval) |
-| `GET/DELETE` | `/sentinel/folders[/<id>]` | Organize scans in folders |
+| `POST` | `/themis/nmap` | Port scan (supports CIDR ranges) |
+| `POST` | `/themis/nikto` | Web configuration / vulnerability scan |
+| `POST` | `/themis/openvas` | Full NVT scan (single host per scan) |
+| `GET` | `/themis/results` | List scans (filterable, paginated) |
+| `GET` | `/themis/results/<id>` | Scan detail |
+| `GET` | `/themis/scan-status?id=` | Status: pending / running / done / cancelled |
+| `POST` | `/themis/scans/<id>/cancel` | Cancel a running scan |
+| `DELETE` | `/themis/<id>` | Delete a scan |
+| `POST` | `/themis/generate-pdf` | Generate PDF report (`{ "id": <scanId>, "aiReport": true }`) |
+| `GET` | `/themis/document/<id>/download` | Download PDF |
+| `POST` | `/themis/scheduled-scans` | Create scheduled scan (cron/interval) |
+| `GET/DELETE` | `/themis/folders[/<id>]` | Organize scans in folders |
 
 **Nmap scan example:**
 
 ```http
-POST /sentinel/nmap
+POST /themis/nmap
 Authorization: Bearer <token>
 Content-Type: application/json
 
@@ -253,22 +253,22 @@ Background jobs persist in Redis and survive API restarts. Workers are **isolate
 ```python
 from src.modules.system.taskqueue import TaskQueue
 queue = TaskQueue.get_instance()
-queue.submit(func, name="Scan 192.168.1.1", category="sentinel.scan", external_id="scan:42", args=[...])
+queue.submit(func, name="Scan 192.168.1.1", category="themis.scan", external_id="scan:42", args=[...])
 ```
 
 **Categories and entry points:**
 
 | Category | Module | Entry function |
 |---|---|---|
-| `sentinel.scan` | Sentinel | `services/rq_tasks.execute_nmap_scan` |
-| `sentinel.report` | Sentinel | `services/rq_tasks.execute_report_generation` |
+| `themis.scan` | Themis | `services/rq_tasks.execute_nmap_scan` |
+| `themis.report` | Themis | `services/rq_tasks.execute_report_generation` |
 | `aegis.generate` | Aegis | `services/rq_tasks.execute_aegis_generation` |
 | `aegis.campaign` | Aegis | `campaign_managers.CampaignManager.execute_campaign_send` |
 | `iris.analyze` | Iris | `services/rq_tasks.execute_iris_analysis` |
 
 - **Progress reporting**: workers update `job.meta["progress"]` via `_Task(progress_callback=...)`.
 - **Cooperative cancellation**: set Redis key `taskqueue:cancel:{job_id}`; workers check via `_Task.wait(cancel_check=...)`.
-- **External IDs** follow the pattern `scan:<id>`, `sentinel-doc:<id>`, `aegis-doc:<id>`, `aegis-campaign:<id>`, `iris-analysis:<id>`.
+- **External IDs** follow the pattern `scan:<id>`, `themis-doc:<id>`, `aegis-doc:<id>`, `aegis-campaign:<id>`, `iris-analysis:<id>`.
 
 > [!WARNING]
 > Workers must be running for async tasks: `python -m src.modules.system.taskqueue.worker`. They listen on category-specific queues + `default`.
@@ -353,7 +353,7 @@ AI generation uses an injectable strategy chosen in `API/SecOpsConfig.json`:
 "ai": {
   "defaultStrategy": "ollama",
   "strategies": { "ollama": {}, "openai": {} },
-  "modules": { "sentinel": "ollama", "aegis": "openai" }
+  "modules": { "themis": "ollama", "aegis": "openai" }
 }
 ```
 
@@ -449,5 +449,5 @@ All values are lazily loaded via `@_lazy_load`. Changes to `SecOpsConfig.json` r
 - `API/src/data/` and `docs/` are gitignored (scan outputs, generated PDFs).
 - OpenVAS accepts **one host per scan** (no CIDR ranges) and takes ~15 min for initial NVT feed setup.
 - PostgreSQL uses port **15432** locally (not standard 5432).
-- `sentinel/services/tasks.py` defines its own `TaskStatus` enum — distinct from `taskqueue.TaskStatus`.
+- `themis/services/tasks.py` defines its own `TaskStatus` enum — distinct from `taskqueue.TaskStatus`.
 - API version is declared as `appVersion` in `SecOpsConfig.json` (read by `CR.get_app_version()`).
