@@ -38,7 +38,7 @@ from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixi
 from src.modules.aegis.exceptions import DocumentError
 from src.modules.shared import Document
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.session import get_db_session
+from src.modules.infrastructure.session import read_repo
 from .services.csv_logger import ScanLoggerFactory
 
 from .repositories import (
@@ -158,8 +158,7 @@ class ScanManager(TaskTrackingMixin, ABC):
         Returns:
             Scan instance (typed to ``self._MODEL``), or None if not found.
         """
-        session = get_db_session()
-        scan = ScanRepository(session=session).get_by_id_and_type(self._MODEL, scan_id)
+        scan = read_repo(ScanRepository).get_by_id_and_type(self._MODEL, scan_id)
 
         if not scan:
             logger.warning(f"Escaneo {self.SCAN_TYPE.value if self.SCAN_TYPE else ''} {scan_id} no encontrado")
@@ -173,8 +172,7 @@ class ScanManager(TaskTrackingMixin, ABC):
         Returns:
             List of Scan instances ordered by start time descending.
         """
-        session = get_db_session()
-        scans = ScanRepository(session=session).get_by_type_and_user(self._MODEL, user_id)
+        scans = read_repo(ScanRepository).get_by_type_and_user(self._MODEL, user_id)
 
         logger.info(
             f"Se obtuvieron {len(scans)} escaneos {self.SCAN_TYPE.value if self.SCAN_TYPE else ''} para el usuario {user_id}"
@@ -198,8 +196,7 @@ class ScanManager(TaskTrackingMixin, ABC):
         """
         if self.SCAN_TYPE is None:
             raise NotImplementedError("SCAN_TYPE must be defined in subclass")
-        session = get_db_session()
-        repo = ScanRepository(session=session)
+        repo = read_repo(ScanRepository)
         items, total_count = repo.get_scans_by_type_paginated(
             user_id, self.SCAN_TYPE, page, per_page
         )
@@ -356,8 +353,7 @@ class ScanManager(TaskTrackingMixin, ABC):
         Raises:
             ScanNotFoundError: Si el escaneo no pertenece al usuario.
         """
-        session = get_db_session()
-        scan = ScanRepository(session=session).get_by_id(scan_id)
+        scan = read_repo(ScanRepository).get_by_id(scan_id)
         if not scan:
             raise ScanNotFoundError(scan_id)
 
@@ -2311,8 +2307,7 @@ class EllysiaEngineManager(ScanManager):
         if not scan:
             raise ScanNotFoundError(scan_id)
 
-        session = get_db_session()
-        repo = ScanRepository(session=session)
+        repo = read_repo(ScanRepository)
         own_findings = [self._finding_view_dict(f) for f in repo.get_findings_by_scan(scan_id)]
 
         # Fase 6 "análisis profundo": merge in the corroborator scans' own
@@ -2534,8 +2529,7 @@ class SentinelReportManager:
 
     def get_document_by_id(self, document_id: int) -> Optional[SentinelDocument]:
         """Retrieve a SentinelDocument by its primary key."""
-        session = get_db_session()
-        doc = SentinelReportRepository(session=session).get_by_id(document_id)
+        doc = read_repo(SentinelReportRepository).get_by_id(document_id)
 
         if not doc:
             logger.warning(f"Documento {document_id} no encontrado")
@@ -2544,23 +2538,20 @@ class SentinelReportManager:
 
     def get_latest_document_by_scan_id(self, scan_id: int) -> Optional[SentinelDocument]:
         """Retrieve the most recently created document for a scan."""
-        session = get_db_session()
-        doc = SentinelReportRepository(session=session).get_latest_document(scan_id)
+        doc = read_repo(SentinelReportRepository).get_latest_document(scan_id)
 
         return doc
 
     def get_documents_for_user(self, user_id: int) -> List[SentinelDocument]:
         """Retrieve all documents belonging to the active user."""
-        session = get_db_session()
-        docs = SentinelReportRepository(session=session).get_documents_by_user(user_id)  # type: ignore
+        docs = read_repo(SentinelReportRepository).get_documents_by_user(user_id)  # type: ignore
 
         logger.info(f"Se obtuvieron {len(docs)} documentos")
         return docs
 
     def get_documents_by_scan_id(self, scan_id: int) -> List[SentinelDocument]:
         """Retrieve all documents associated with a specific scan."""
-        session = get_db_session()
-        docs = SentinelReportRepository(session=session).get_documents_by_scan(scan_id)
+        docs = read_repo(SentinelReportRepository).get_documents_by_scan(scan_id)
 
         logger.info(f"Se obtuvieron {len(docs)} documentos para scan {scan_id}")
         return docs
@@ -2605,8 +2596,7 @@ class SentinelReportManager:
         Raises:
             DocumentError: If document not found or not owned by user.
         """
-        session = get_db_session()
-        doc_repo = SentinelReportRepository(session=session)
+        doc_repo = read_repo(SentinelReportRepository)
         doc = doc_repo.get_by_id(document_id)
         if not doc:
             raise DocumentError(f"Documento {document_id} no encontrado")
