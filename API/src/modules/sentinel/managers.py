@@ -1948,16 +1948,27 @@ class EllysiaEngineManager(ScanManager):
                              discover_ports: Optional[list] = None, deep: bool = False) -> None:
         """Entry point submitted to the TaskQueue. Runs the engine in the worker."""
         with job_context():
-            EllysiaEngineManager()._run_ellysia(scan_id, source_scan_id, discover_ports, deep)
+            EllysiaEngineManager()._run_ellysia(
+                scan_id,
+                source_scan_id,
+                discover_ports,
+                deep
+            )
 
-    def _run_ellysia(self, scan_id: int, source_scan_id: Optional[int] = None,
-                     discover_ports: Optional[list] = None, deep: bool = False) -> None:
+    def _run_ellysia(
+        self, scan_id: int,
+        source_scan_id: Optional[int] = None,
+        discover_ports: Optional[list] = None,
+        deep: bool = False
+    ) -> None:
         """Resolve services (from Nmap or own discovery), detect, and persist.
 
         This is the testable body of the scan (the ``execute_* seam → _run_*``
         pattern). Runs synchronously; safe to call directly in tests without a
         worker.
         """
+
+        uses_existing_source: bool = source_scan_id is not None
         try:
             self.update_scan_status(scan_id, ScanStatus.RUNNING)
 
@@ -1967,34 +1978,6 @@ class EllysiaEngineManager(ScanManager):
                 scan_target = ellysia_scan.target if ellysia_scan else None
                 user_id = ellysia_scan.user_id if ellysia_scan else None
 
-            # Phase 0 — self-discovery (network) happens outside any transaction.
-            #
-            # A failed/unreachable probe must NEVER be treated as "scanned
-            # cleanly, found nothing" — apply_lifecycle would then mark every
-            # previously-open finding as "fixed" (false remediation). So this
-            # mode bails out early (scan -> FAILED, no detection/lifecycle at
-            # all) whenever we can't trust an empty result. The Nmap-source mode
-            # doesn't need this: an empty OpenPort set there already reflects a
-            # decision Nmap's own _execute_scan made independently.
-            discovered_ports: list = []
-            if source_scan_id is None and scan_target:
-                if CR.is_host_reachability_check_enabled() and not self.is_host_reachable(
-                    scan_target,
-                    port=CR.get_host_reachability_check_port(),
-                    timeout=CR.get_host_reachability_check_timeout(),
-                ):
-                    logger.warning(
-                        f"Host '{scan_target}' inalcanzable. Marcando escaneo Ellysia {scan_id} como FAILED"
-                    )
-                    self.update_scan_status(scan_id, ScanStatus.FAILED)
-                    return
-
-                discovered = self._discover_ports(scan_target, discover_ports)
-                if discovered is None:
-                    logger.error(f"Descubrimiento de puertos fallido para el escaneo Ellysia {scan_id}")
-                    self.update_scan_status(scan_id, ScanStatus.FAILED)
-                    return
-                discovered_ports = discovered
 
             # Phase 1 — resolve services, then version/informational detection
             # with the KB in-session, and load the previous scan for lifecycle.
@@ -2002,19 +1985,41 @@ class EllysiaEngineManager(ScanManager):
                 scan_repo = ScanRepository(uow)
                 kb_repo = KbRepository(uow)
 
-                if source_scan_id is not None:
+                if uses_existing_source:
                     open_ports = scan_repo.get_open_ports_for_scan(source_scan_id)
                     source = scan_repo.get_by_id(source_scan_id)
                     source_host_id = source.host_id if source else None
                     source_target = source.target if source else scan_target
                     services = services_from_open_ports(open_ports)
                 else:
+                    # Phase 0 — self-discovery (network) happens outside any transaction.
+                    discovered_ports: list = []
+                    if not uses_existing_source and scan_target:
+                        check_reachability = CR.is_host_reachability_check_enabled()
+                        is_host_reacheable = self.is_host_reachable(
+                            scan_target,
+                            port=CR.get_host_reachability_check_port(),
+                            timeout=CR.get_host_reachability_check_timeout(),
+                        )
+
+                        if check_reachability and not is_host_reacheable:
+                            logger.warning(
+                                f"Host '{scan_target}' inalcanzable. Marcando escaneo Ellysia {scan_id} como FAILED"
+                            )
+                            self.update_scan_status(scan_id, ScanStatus.FAILED)
+                            return
+
+                        discovered = self._discover_ports(scan_target, discover_ports)
+                        if discovered is None:
+                            logger.error(f"Descubrimiento de puertos fallido para el escaneo Ellysia {scan_id}")
+                            self.update_scan_status(scan_id, ScanStatus.FAILED)
+                            return
+
+                        discovered_ports = discovered
+
                     source_target = scan_target
                     host = None
                     if scan_target:
-                        # Reuse a Host another scanner already created for this
-                        # IP (e.g. Nmap, which may know a resolved hostname)
-                        # instead of creating a duplicate keyed by the bare IP.
                         host = scan_repo.get_host_by_ip(scan_target) or scan_repo.get_or_create_host(
                             hostname=scan_target, ip_address=scan_target,
                         )
