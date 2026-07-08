@@ -1,10 +1,10 @@
 """NiktoScanManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
-from datetime import datetime
 from typing import Optional
 from src.modules.system.taskqueue import job_context
 from src.modules.infrastructure import UnitOfWork
+from src.modules.shared import utcnow_naive
 from ..repositories import ScanRepository
 from ..model import (
     NiktoScan,
@@ -96,7 +96,7 @@ class NiktoScanManager(ScanManager):
 
     def _create_scan_record(self, target: str, user_id: int, programed_scan_id: Optional[int] = None) -> NiktoScan: # pylint: disable=arguments-differ
         """Create and persist a NiktoScan row."""
-        scan = NiktoScan(target=target, user_id=user_id, started_at=datetime.now(), programed_scan_id=programed_scan_id)
+        scan = NiktoScan(target=target, user_id=user_id, started_at=utcnow_naive(), programed_scan_id=programed_scan_id)
         with UnitOfWork() as uow:
             ScanRepository(uow).save(scan)
             # Durable antes de encolar: el worker corre en otro proceso.

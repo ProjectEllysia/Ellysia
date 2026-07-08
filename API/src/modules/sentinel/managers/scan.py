@@ -3,13 +3,13 @@
 import logging
 import os
 from abc import ABC, abstractmethod
-from datetime import datetime
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urlparse
 import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import read_repo
+from src.modules.shared import utcnow_naive
 from ..services.csv_logger import ScanLoggerFactory
 from ..repositories import (
     ScanRepository,
@@ -471,7 +471,7 @@ class ScanManager(TaskTrackingMixin, ABC):
                 fresh_scan              = ScanRepository(uow).get_by_id(scan_id)
                 thread_manager._persist_scan_results(uow, fresh_scan, domain_data)
                 fresh_scan.status       = ScanStatus.FINISHED.value # type: ignore
-                fresh_scan.finished_at  = datetime.now() # type: ignore
+                fresh_scan.finished_at  = utcnow_naive() # type: ignore
 
             logger.info(f"Escaneo {scan_id} completado exitosamente")
             thread_manager._log_to_csv(scan_id, fresh_scan, task)

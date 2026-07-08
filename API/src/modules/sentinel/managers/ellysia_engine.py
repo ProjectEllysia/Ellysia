@@ -1,12 +1,12 @@
 """EllysiaEngineManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
-from datetime import datetime
 from typing import Optional
 import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import ITaskQueue, job_context
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import read_repo
+from src.modules.shared import utcnow_naive
 from ..repositories import (
     ScanRepository,
     KbRepository,
@@ -248,7 +248,7 @@ class EllysiaEngineManager(ScanManager):
                 scan.deep_scan_ids = deep_scan_ids or None  # type: ignore
                 self._persist_scan_results(uow, scan, findings_data)
                 scan.status = ScanStatus.FINISHED.value  # type: ignore
-                scan.finished_at = datetime.now()  # type: ignore
+                scan.finished_at = utcnow_naive()  # type: ignore
 
             logger.info(f"Escaneo Ellysia {scan_id} completado: {len(findings_data)} hallazgos")
 
@@ -477,7 +477,7 @@ class EllysiaEngineManager(ScanManager):
         scan = EllysiaScan(
             target=target,
             user_id=user_id,
-            started_at=datetime.now(),
+            started_at=utcnow_naive(),
             source_scan_id=source_scan_id,
         )
         with UnitOfWork() as uow:
