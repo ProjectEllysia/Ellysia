@@ -58,6 +58,7 @@ from src.modules.shared._documents import (
     update_document_status,
     serialize_document_list,
 )
+from src.modules.shared import assert_owned
 
 from .model import AegisDocument, Campaign, CampaignRecipient, DistributionList, Topic
 from .services import AegisAIWriter, AegisAlertFetcher, AlertSource, AegisAlert, AegisContent
@@ -331,23 +332,19 @@ class AegisManager:
 
         Args:
             document_id: id of the document to check
-            user_id: id of the user that potentially can own the document
 
         Returns:
-            True if the user with the given id owns \
-            the document with the given ID and false otherwise
+            The document, if owned by the current user.
 
         Raises:
-            DocumentError if the document was not found
+            DocumentError if the document was not found or belongs to
+            another user (same error for both cases to prevent ID
+            enumeration).
         """
-        doc_repo = read_repo(AegisDocumentRepository)
-        doc = doc_repo.get_by_id(document_id)
-        if not doc:
-            raise DocumentError(f"Documento {document_id} no encontrado")
-        if doc.user_id != self.user.id: # type: ignore
-            raise DocumentError(f"Documento {document_id} no encontrado")
-
-        return doc
+        return assert_owned(
+            AegisDocumentRepository, document_id, self.user.id,
+            lambda eid: DocumentError(f"Documento {eid} no encontrado"),
+        )
 
     # =========================================================================
     # WORKFLOW DE GENERACIÓN (privado)
@@ -674,11 +671,7 @@ class CampaignManager:
             repo.remove_recipient(list_id, recipient_id)
 
     def _assert_list_ownership(self, list_id: int) -> DistributionList:
-        repo = read_repo(DistributionListRepository)
-        dist_list = repo.get_by_id(list_id)
-        if dist_list is None or dist_list.user_id != self.user.id:
-            raise DistributionListNotFoundError(list_id)
-        return dist_list
+        return assert_owned(DistributionListRepository, list_id, self.user.id, DistributionListNotFoundError)
 
     # =========================================================================
     # CAMPAIGNS
@@ -760,11 +753,7 @@ class CampaignManager:
         return self.get_campaign(campaign_id)
 
     def _assert_campaign_ownership(self, campaign_id: int) -> Campaign:
-        repo = read_repo(CampaignRepository)
-        campaign = repo.get_by_id(campaign_id)
-        if campaign is None or campaign.user_id != self.user.id:
-            raise CampaignNotFoundError(campaign_id)
-        return campaign
+        return assert_owned(CampaignRepository, campaign_id, self.user.id, CampaignNotFoundError)
 
     # =========================================================================
     # WORKFLOW DE ENVÍO (privado, ejecutado en el worker RQ)

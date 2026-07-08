@@ -23,6 +23,7 @@ import src.modules.system.config_reading as CR
 from src.modules.aegis.exceptions import DocumentNotFoundError
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import read_repo
+from src.modules.shared import assert_owned
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
 
 from .exceptions import (
@@ -523,10 +524,7 @@ class IrisManager(TaskTrackingMixin):
         exist or the ownership check fails (same error for both cases
         to prevent ID enumeration).
         """
-        analysis = read_repo(IrisAnalysisRepository).get_by_id(analysis_id)
-        if not analysis or analysis.user_id != user_id:
-            raise IrisAnalysisNotFoundError(analysis_id)
-        return analysis
+        return assert_owned(IrisAnalysisRepository, analysis_id, user_id, IrisAnalysisNotFoundError)
 
     # =========================================================================
     # INTERNAL
@@ -1028,10 +1026,7 @@ class IrisReportManager:
             DocumentNotFoundError: If document not found or not owned by
                 user (same error for both cases to prevent ID enumeration).
         """
-        doc = read_repo(IrisReportRepository).get_by_id(document_id)
-        if not doc or doc.user_id != user_id:  # type: ignore
-            raise DocumentNotFoundError(document_id)
-        return doc
+        return assert_owned(IrisReportRepository, document_id, user_id, DocumentNotFoundError)
 
     def generate_report(self, analysis_id: int, user_id: int) -> int:
         """Create an IrisDocument and start async PDF generation.

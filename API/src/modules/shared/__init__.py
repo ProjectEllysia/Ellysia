@@ -22,6 +22,7 @@ from ._endpoints    import (
     require_arg,
     limiter
 )
+from ._ownership import assert_owned
 from .schemas import ErrorSchema, SuccessMessageSchema, PaginationQuerySchema
 
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     "require_str",
     "require_arg",
     "limiter",
+    "assert_owned",
     "ErrorSchema",
     "SuccessMessageSchema",
     "PaginationQuerySchema"

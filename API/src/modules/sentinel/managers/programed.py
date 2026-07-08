@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from typing import List
 from src.modules.infrastructure import UnitOfWork
+from src.modules.shared import assert_owned
 from ..repositories import ProgramedScanRepository
 from ..model import (
     ProgramedScan,
@@ -115,14 +116,7 @@ class ProgramedScanManager():
 
     @classmethod
     def assert_ownership(cls, ps_id: int, user_id: int) -> ProgramedScan:
-        with UnitOfWork() as uow:
-            repo = ProgramedScanRepository(uow)
-            ps = repo.get_by_id(ps_id)
-            if not ps:
-                raise ProgramedScanNotFoundError(ps_id)
-            if ps.user_id != user_id: # type: ignore
-                raise ProgramedScanNotFoundError(ps_id)
-            return ps
+        return assert_owned(ProgramedScanRepository, ps_id, user_id, ProgramedScanNotFoundError)
 
     @classmethod
     def get_scans_for_user(cls, user_id: int) -> List[ProgramedScan]:
@@ -157,8 +151,4 @@ class ProgramedScanManager():
                 raise ProgramedScanNotFoundError(ps_id)
             repo.delete(ps)
 
-
-# =============================================================================
-# SCAN FOLDERS
-# =============================================================================
 

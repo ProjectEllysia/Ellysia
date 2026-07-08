@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Optional
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, job_context
 from src.modules.aegis.exceptions import DocumentError
-from src.modules.shared import Document
+from src.modules.shared import Document, assert_owned
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import read_repo
 from ..repositories import SentinelReportRepository
@@ -122,15 +122,10 @@ class SentinelReportManager:
         Raises:
             DocumentError: If document not found or not owned by user.
         """
-        doc_repo = read_repo(SentinelReportRepository)
-        doc = doc_repo.get_by_id(document_id)
-        if not doc:
-            raise DocumentError(f"Documento {document_id} no encontrado")
-
-        if doc.user_id != user_id: # type: ignore
-            raise DocumentError(f"Documento {document_id} no encontrado")
-
-        return doc
+        return assert_owned(
+            SentinelReportRepository, document_id, user_id,
+            lambda eid: DocumentError(f"Documento {eid} no encontrado"),
+        )
 
     def generate_report(self, scan_id: int, ai_report: bool = False, strategy_class=None) -> int:
         """
