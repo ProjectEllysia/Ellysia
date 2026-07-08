@@ -162,8 +162,3 @@ class NiktoScanManager(ScanManager):
         data["target_domain"] = scan.target
         data["timeout_sec"] = getattr(scan, "timeout", task.timeout) if hasattr(scan, "timeout") else task.timeout
 
-
-# =============================================================================
-# OPENVAS
-# =============================================================================
-

@@ -148,8 +148,3 @@ class NmapScanManager(ScanManager):
         data["target_ports"] = getattr(task, "target_ports", "")
         data["timeout_sec"] = task.timeout
 
-
-# =============================================================================
-# NIKTO
-# =============================================================================
-

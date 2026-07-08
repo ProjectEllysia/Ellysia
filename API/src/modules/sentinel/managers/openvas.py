@@ -251,8 +251,3 @@ class OpenVASScanManager(ScanManager):
         data["scan_config"] = getattr(scan, "scan_config_name", "")
         data["skip_normalize"] = getattr(scan, "skip_normalize", False)
 
-
-# =============================================================================
-# ELLYSIA ENGINE
-# =============================================================================
-

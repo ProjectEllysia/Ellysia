@@ -151,4 +151,3 @@ class ProgramedScanManager():
                 raise ProgramedScanNotFoundError(ps_id)
             repo.delete(ps)
 
-

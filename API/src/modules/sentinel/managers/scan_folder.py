@@ -188,8 +188,3 @@ class ScanFolderManager:
         manager = ScanManager.resolve_manager(scan.id)
         return manager.format_scan(scan.id)
 
-
-# =============================================================================
-# NMAP
-# =============================================================================
-

@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import ITaskQueue, job_context
 from src.modules.infrastructure import UnitOfWork
@@ -565,9 +565,4 @@ class EllysiaEngineManager(ScanManager):
     def append_csv_data(self, data: dict, scan: Scan, task: "_Task") -> None:
         """No-op: Ellysia does not use the base CSV-logging execution path."""
         pass
-
-
-# =============================================================================
-# ELLYSIA KNOWLEDGE BASE SYNC
-# =============================================================================
 
