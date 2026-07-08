@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.unit_of_work import close_all
 from src.modules.infrastructure.retry import retry_on_transient
+from src.modules.shared import utcnow_naive
 
 from ..exceptions import InvalidProgramedTaskArgumentError
 from ..repositories import ProgramedScanRepository
@@ -346,7 +347,7 @@ class Scheduler:
             runner(ps_id, params["user_id"], params["arguments"])
 
             # Phase 3 — record the execution in a *fresh* session.
-            now = datetime.utcnow()
+            now = utcnow_naive()
             next_run = cls.calculate_next_run(
                 params["schedule_type"], params["schedule_config"], last_run=now
             )
@@ -374,10 +375,10 @@ class Scheduler:
     ) -> datetime:
         """Compute the next run time as a naive UTC datetime.
 
-        Naive UTC keeps it consistent with ``datetime.utcnow()`` used across the
+        Naive UTC keeps it consistent with ``utcnow_naive()`` used across the
         codebase and with the timezone-naive ``DateTime`` columns.
         """
-        reference = last_run if last_run is not None else datetime.utcnow()
+        reference = last_run if last_run is not None else utcnow_naive()
 
         if schedule_type == "interval":
             every = int(schedule_config["every"])

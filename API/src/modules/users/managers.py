@@ -38,6 +38,7 @@ from src.modules.users.exceptions import (
     InvalidMfaCodeError,
 )
 from src.modules.infrastructure import UnitOfWork
+from src.modules.shared import utcnow_naive
 from src.modules.infrastructure.session import read_repo
 
 from .model import (
@@ -74,7 +75,7 @@ logger = logging.getLogger(__name__)
 
 
 def _to_utc_epoch(dt: Optional[datetime]) -> Optional[int]:
-    """Convierte un datetime *naive en UTC* (como ``datetime.utcnow()``) a epoch
+    """Convierte un datetime *naive en UTC* (como ``utcnow_naive()``) a epoch
     en segundos, de forma consistente con cómo PyJWT codifica ``iat``/``exp``
     (siempre tratando el valor como UTC). Devuelve ``None`` si ``dt`` es ``None``.
     """
@@ -316,7 +317,7 @@ Raises:
 
             user.password_hash = hash_password(new_password)
             user.password_salt = ""
-            user.password_changed_at = datetime.utcnow()
+            user.password_changed_at = utcnow_naive()
 
         logger.info(f"Contraseña actualizada para usuario {user_id}")
 
@@ -569,13 +570,13 @@ class OAuthTokenManager:
         Returns:
             Signed JWT string.
         """
-        expires_at = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expires_at = utcnow_naive() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
         payload = {
             "sub":      str(user_id),
             "username": username,
             "exp":      expires_at,
-            "iat":      datetime.utcnow(),
+            "iat":      utcnow_naive(),
             "jti":      uuid4().hex,
             "type":     "access",
             "role":     role,
@@ -605,7 +606,7 @@ class OAuthTokenManager:
             Raw refresh token string (URL-safe base64, 64 bytes).
         """
         token      = secrets.token_urlsafe(64)
-        expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        expires_at = utcnow_naive() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
 
         with UnitOfWork() as uow:
             TokenRepository(uow).save_refresh_token(
@@ -794,7 +795,7 @@ class OAuthTokenManager:
         """
         cfg = CR.get_mfa_config()
         token = secrets.token_urlsafe(48)
-        expires_at = datetime.utcnow() + timedelta(minutes=cfg["challenge_expiry_minutes"])
+        expires_at = utcnow_naive() + timedelta(minutes=cfg["challenge_expiry_minutes"])
 
         with UnitOfWork() as uow:
             MFARepository(uow).save_challenge(
@@ -847,7 +848,7 @@ class OAuthTokenManager:
         """
         with UnitOfWork() as uow:
             access_deleted, refresh_deleted = TokenRepository(uow).cleanup_expired_tokens()
-            challenges_deleted = MFARepository(uow).delete_expired_challenges(datetime.utcnow())
+            challenges_deleted = MFARepository(uow).delete_expired_challenges(utcnow_naive())
 
         logger.info(
             f"Tokens expirados eliminados: "
@@ -959,7 +960,7 @@ class MFAManager:
             if not verify_totp_code(secret, code):
                 raise InvalidMfaCodeError()
 
-            cred.confirmed_at = datetime.utcnow()
+            cred.confirmed_at = utcnow_naive()
 
             repo.delete_recovery_codes(user_id)
             cfg = CR.get_mfa_config()

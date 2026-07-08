@@ -16,14 +16,13 @@ import os
 import re
 import logging
 from dataclasses import replace
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import src.modules.system.config_reading as CR
 from src.modules.aegis.exceptions import DocumentNotFoundError
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import read_repo
-from src.modules.shared import assert_owned
+from src.modules.shared import assert_owned, utcnow_naive
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
 
 from .exceptions import (
@@ -452,7 +451,7 @@ class IrisManager(TaskTrackingMixin):
 
         cancelled = self._tq.cancel(sq_task.id)
         if cancelled:
-            self._update_analysis(analysis_id, status="cancelled", finished_at=datetime.now())
+            self._update_analysis(analysis_id, status="cancelled", finished_at=utcnow_naive())
             logger.info(f"Analysis {analysis_id} cancelled by user {user_id}")
         return cancelled
 
@@ -601,7 +600,7 @@ class IrisManager(TaskTrackingMixin):
             logger.info(f"Starting analysis {analysis_id}")
 
             try:
-                self._update_analysis(analysis_id, status="running", started_at=datetime.now())
+                self._update_analysis(analysis_id, status="running", started_at=utcnow_naive())
             except Exception as e:
                 logger.error(f"Failed to mark analysis {analysis_id} as running: {e}", exc_info=True)
                 self._fail_analysis(analysis_id)
@@ -665,7 +664,7 @@ class IrisManager(TaskTrackingMixin):
                     total_score=total_score,
                     verdict=verdict,
                     gate_reasons=gate_reasons,
-                    finished_at=datetime.now(),
+                    finished_at=utcnow_naive(),
                 )
             except Exception as e:
                 logger.error(f"Failed to finalise analysis {analysis_id}: {e}", exc_info=True)
@@ -928,7 +927,7 @@ class IrisManager(TaskTrackingMixin):
     def _fail_analysis(self, analysis_id: int) -> None:
         """Mark an analysis as ``failed`` with a finished timestamp."""
         try:
-            self._update_analysis(analysis_id, status="failed", finished_at=datetime.now())
+            self._update_analysis(analysis_id, status="failed", finished_at=utcnow_naive())
         except Exception as e:
             logger.error(f"Failed to mark analysis {analysis_id} as failed: {e}", exc_info=True)
 
@@ -1083,7 +1082,7 @@ class IrisReportManager:
                 if doc:
                     doc.filename = pdf_path  # type: ignore
                     doc.status = "done"  # type: ignore
-                    doc.generated_at = datetime.utcnow()  # type: ignore
+                    doc.generated_at = utcnow_naive()  # type: ignore
 
             logger.info(f"PDF generado exitosamente para documento {document_id}")
 

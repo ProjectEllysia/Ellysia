@@ -15,10 +15,10 @@ Example:
 >>> Base.metadata.create_all(engine)
 """
 
-from datetime import datetime
-
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship, declarative_base
+
+from ._time import utcnow_naive
 
 
 Base = declarative_base()
@@ -75,7 +75,7 @@ class Document(Base):
     format        = Column(String(10),  nullable=False)
 
     status          = Column(String(20),  nullable=False, default="pending")
-    created_at      = Column(DateTime,    nullable=False, default=datetime.utcnow)
+    created_at      = Column(DateTime,    nullable=False, default=utcnow_naive)
     generated_at    = Column(DateTime,    nullable=True)
     is_ai_generated = Column(Integer,     nullable=False, default=1)
 

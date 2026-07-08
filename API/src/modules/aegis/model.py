@@ -24,8 +24,6 @@ Example:
     <AegisDocument(id=None, topic_id=1, status='pending')>
 """
 
-from datetime import datetime
-
 from sqlalchemy import (
     ARRAY,
     Boolean,
@@ -42,7 +40,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
-from src.modules.shared import Base, Document
+from src.modules.shared import Base, Document, utcnow_naive
 
 
 # =========================================================================
@@ -419,7 +417,7 @@ class DistributionList(Base):
     id         = Column(Integer,  primary_key=True, autoincrement=True)
     user_id    = Column(Integer,  ForeignKey("User.id"), nullable=False)
     name       = Column(String(128), nullable=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user = relationship("User")
     recipients = relationship(
@@ -513,7 +511,7 @@ class Campaign(Base):
     name               = Column(String(128), nullable=False)
     status             = Column(String(20), nullable=False, default="draft")
     questions_snapshot = Column(JSONB, nullable=True)
-    created_at         = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at         = Column(DateTime, nullable=False, default=utcnow_naive)
     launched_at        = Column(DateTime, nullable=True)
 
     user               = relationship("User")

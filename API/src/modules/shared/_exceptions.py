@@ -1,9 +1,10 @@
 from typing import Any, Dict, Optional, Type
-from datetime import datetime
 from enum import Enum
 from functools import wraps
 import traceback
 import sys
+
+from ._time import utcnow_naive
 
 
 class ErrorCode(Enum):
@@ -100,7 +101,7 @@ class SecOpsException(Exception):
         self.status_code = status_code or self.default_status_code
         self.user_message = user_message or self._generate_user_message()
 
-        self.timestamp = datetime.utcnow()
+        self.timestamp = utcnow_naive()
         self.traceback = self._capture_traceback()
 
     def _generate_user_message(self) -> str:

@@ -1,10 +1,11 @@
 """KbSyncManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import List, Optional
 import src.modules.system.config_reading as CR
 from src.modules.infrastructure import UnitOfWork
+from src.modules.shared import utcnow_naive
 from ..repositories import KbRepository
 
 
@@ -82,7 +83,7 @@ class KbSyncManager:
     def _nvd_window(days: int) -> tuple[str, str]:
         """NVD-formatted (lastModStartDate, lastModEndDate) for the last ``days``."""
         fmt = "%Y-%m-%dT%H:%M:%S.000"
-        end = datetime.utcnow()
+        end = utcnow_naive()
         start = end - timedelta(days=days)
         return start.strftime(fmt), end.strftime(fmt)
 

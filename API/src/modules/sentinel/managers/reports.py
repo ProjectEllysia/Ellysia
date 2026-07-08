@@ -2,11 +2,10 @@
 
 import logging
 import os
-from datetime import datetime
 from typing import List, Optional
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, job_context
 from src.modules.aegis.exceptions import DocumentError
-from src.modules.shared import Document, assert_owned
+from src.modules.shared import Document, assert_owned, utcnow_naive
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import read_repo
 from ..repositories import SentinelReportRepository
@@ -178,7 +177,7 @@ class SentinelReportManager:
                 if doc:
                     doc.filename     = pdf_path  # type: ignore
                     doc.status       = "done"  # type: ignore
-                    doc.generated_at = datetime.utcnow()  # type: ignore
+                    doc.generated_at = utcnow_naive()  # type: ignore
 
             logger.info(f"PDF generado exitosamente para documento {document_id}")
 

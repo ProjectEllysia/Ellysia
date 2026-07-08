@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 from src.modules.shared import Document
 from src.modules.infrastructure import UnitOfWork
+from ._time import utcnow_naive
 
 
 # =========================================================================
@@ -54,7 +55,7 @@ def run_report_generation(
             if doc:
                 doc.filename = pdf_path
                 doc.status = "done"
-                doc.generated_at = datetime.utcnow()
+                doc.generated_at = utcnow_naive()
         logger.info("PDF generado exitosamente para documento %s", document_id)
     except Exception:
         logger.error("Error generando PDF para documento %s", document_id, exc_info=True)
@@ -113,7 +114,7 @@ def update_document_status(
     if filename:
         doc.filename = filename[:128] # type: ignore
     if set_generated_at and status == "done":
-        doc.generated_at = datetime.utcnow() # type: ignore
+        doc.generated_at = utcnow_naive() # type: ignore
     if error and status == "error":
         doc.title = f"[ERR{doc.id}] {error[:50]}"[:64]
 

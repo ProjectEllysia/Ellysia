@@ -28,7 +28,6 @@ Example:
     NmapScan(id=None, target='192.168.1.1', puertos_abiertos=0, inicio=N/A)
 """
 
-from datetime import datetime
 from enum import Enum
 
 from sqlalchemy import (
@@ -47,7 +46,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
-from src.modules.shared import Base, Document
+from src.modules.shared import Base, Document, utcnow_naive
 
 
 # =========================================================================
@@ -178,8 +177,8 @@ class Traceroute(Base):
     target     = Column(String(255), nullable=False, index=True)
     hops       = Column(JSONB,       nullable=False)
     hop_count  = Column(Integer,     nullable=False, default=0)
-    created_at = Column(DateTime,    nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime,    nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime,    nullable=False, default=utcnow_naive)
+    updated_at = Column(DateTime,    nullable=False, default=utcnow_naive, onupdate=utcnow_naive)
 
     __table_args__ = (
         UniqueConstraint("user_id", "target", name="unique_user_target_trace"),
@@ -217,8 +216,8 @@ class ScanFolder(Base):
     id         = Column(Integer,    primary_key=True, autoincrement=True)
     user_id    = Column(Integer,    ForeignKey("User.id"), nullable=False)
     name       = Column(String(255), nullable=False)
-    created_at = Column(DateTime,   nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime,   nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime,   nullable=False, default=utcnow_naive)
+    updated_at = Column(DateTime,   nullable=False, default=utcnow_naive, onupdate=utcnow_naive)
 
     scans = relationship("Scan", back_populates="folder")
 
@@ -265,7 +264,7 @@ class Scan(Base):
 
     id          = Column(Integer,    primary_key=True, autoincrement=True)
     target      = Column(String(255), nullable=False)
-    started_at  = Column(DateTime,   nullable=False, default=datetime.utcnow)
+    started_at  = Column(DateTime,   nullable=False, default=utcnow_naive)
     status      = Column(String(20), nullable=False, default=ScanStatus.PENDING.value)
     user_id     = Column(Integer,    ForeignKey("User.id"), nullable=False)
     scan_type   = Column(String(50))
@@ -334,7 +333,7 @@ class ProgramedScan(Base):
     is_active       = Column(Boolean, default=True)
     last_run_at     = Column(DateTime, nullable=True)
     next_run_at     = Column(DateTime, nullable=True)
-    created_at      = Column(DateTime, default=datetime.utcnow)
+    created_at      = Column(DateTime, default=utcnow_naive)
 
     # Relación
     scans = relationship("Scan", back_populates="programed_scan")
@@ -566,7 +565,7 @@ class NiktoIncident(Base):
     severity     = Column(String(20), nullable=True)
     port         = Column(Integer,    nullable=True)
     references   = Column(Text,       nullable=True)
-    discovered_at = Column(DateTime,  nullable=False, default=datetime.utcnow)
+    discovered_at = Column(DateTime,  nullable=False, default=utcnow_naive)
 
     nikto_scans = relationship(
         "NiktoScan", secondary=ScanIncident, back_populates="incidents"
@@ -683,8 +682,8 @@ class OpenVASVulnerability(Base):
     qod_type          = Column(String(100))
     family            = Column(String(255))
     category          = Column(String(255))
-    created_at        = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at        = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at        = Column(DateTime, nullable=False, default=utcnow_naive)
+    updated_at        = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     scan_results = relationship("OpenVASScanResult", back_populates="vulnerability")
 
@@ -723,7 +722,7 @@ class OpenVASScanResult(Base):
     openvas_scan_id = Column(Integer, ForeignKey("OpenVASScan.id", ondelete="CASCADE"), nullable=False, index=True)
     vulnerability_id = Column(Integer, ForeignKey("OpenVASVulnerability.id"), nullable=False, index=True)
     host_id         = Column(Integer, ForeignKey("Host.id"), nullable=False, index=True)
-    detected_at     = Column(DateTime, nullable=False, default=datetime.utcnow)
+    detected_at     = Column(DateTime, nullable=False, default=utcnow_naive)
 
     openvas_scan  = relationship("OpenVASScan",          back_populates="results")
     vulnerability = relationship("OpenVASVulnerability",  back_populates="scan_results")
@@ -824,8 +823,8 @@ class Finding(Base):
     confirmed    = Column(Boolean, default=False)
 
     # Lifecycle
-    first_seen_at = Column(DateTime, default=datetime.utcnow)
-    last_seen_at  = Column(DateTime, default=datetime.utcnow)
+    first_seen_at = Column(DateTime, default=utcnow_naive)
+    last_seen_at  = Column(DateTime, default=utcnow_naive)
     state         = Column(String(20), default="open")
 
     def __repr__(self):

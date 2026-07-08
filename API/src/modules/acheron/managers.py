@@ -11,6 +11,7 @@ from .model import Storable, Vault
 from src.modules.users import User
 from src.modules.infrastructure.unit_of_work import UnitOfWork
 from src.modules.infrastructure.session import read_repo
+from src.modules.shared import utcnow_naive
 
 from .repositories import (
     VaultRepository,
@@ -45,7 +46,7 @@ class VaultManager:
     @staticmethod
     def _parse_dt(value: Optional[str]) -> datetime:
         if not value:
-            return datetime.now(timezone.utc).replace(tzinfo=None)
+            return utcnow_naive()
         try:
             dt = datetime.fromisoformat(value)
             if dt.tzinfo is not None:
@@ -53,7 +54,7 @@ class VaultManager:
             return dt
         except Exception as e:
             logger.warning("Failed to parse datetime value %r, defaulting to utcnow", value, exc_info=True)
-            return datetime.now(timezone.utc).replace(tzinfo=None)
+            return utcnow_naive()
 
     def _ensure_vault_ownership(self, vault: Vault) -> None:
         if vault.user_id != self.active_user.id:
@@ -302,7 +303,7 @@ class VaultManager:
         if spec is None:
             raise ValueError(f"Tipo de storable no soportado: {kind}")
 
-        created_at = created_at or datetime.now(timezone.utc).replace(tzinfo=None)
+        created_at = created_at or utcnow_naive()
         updated_at = updated_at or created_at
 
         st = spec.model(
@@ -366,7 +367,7 @@ class VaultManager:
                             changed = True
 
                 if changed:
-                    st.updated_at = datetime.utcnow()
+                    st.updated_at = utcnow_naive()
                     repo.update(st)
                     logger.info(f"Storable {st.id} actualizado correctamente")
                 else:

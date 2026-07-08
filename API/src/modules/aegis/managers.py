@@ -27,7 +27,7 @@ import logging
 import random
 import secrets
 import threading
-from datetime import date, datetime
+from datetime import date
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -58,7 +58,7 @@ from src.modules.shared._documents import (
     update_document_status,
     serialize_document_list,
 )
-from src.modules.shared import assert_owned
+from src.modules.shared import assert_owned, utcnow_naive
 
 from .model import AegisDocument, Campaign, CampaignRecipient, DistributionList, Topic
 from .services import AegisAIWriter, AegisAlertFetcher, AlertSource, AegisAlert, AegisContent
@@ -419,7 +419,7 @@ class AegisManager:
                 self._persist_alerts_atomic(document_id, alerts)
 
                 # 6. Escritura del archivo de archivo
-                ts       = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                ts       = utcnow_naive().strftime("%Y%m%d_%H%M%S")
                 filename = f"{ts}_{self.user.id}_{resolved_id}.json"
                 filepath = cfg["output_dir"] / filename
 
@@ -572,7 +572,7 @@ class AegisManager:
 
     def _create_pending_document(self, topic_id: int) -> int:
         """Crea un registro AegisDocument en estado 'pending' y devuelve su ID."""
-        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        ts = utcnow_naive().strftime("%Y%m%d_%H%M%S")
         placeholder = f"pending_{ts}_{self.user.id}_{topic_id}"
 
         doc = AegisDocument(

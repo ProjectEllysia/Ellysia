@@ -2,10 +2,11 @@
 
 import logging
 import hashlib
-from datetime import datetime, timedelta
+from datetime import timedelta
 import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
 from src.modules.infrastructure import UnitOfWork
+from src.modules.shared import utcnow_naive
 from ..repositories import TracerouteRepository
 from ..services import (
     TaskStatus,
@@ -126,7 +127,7 @@ class TracerouteManager(TaskTrackingMixin):
                 max_age = timedelta(hours=CR.get_sentinel_traceroute_cache_hours())
             else:
                 max_age = timedelta(minutes=CR.get_sentinel_traceroute_retry_failed_minutes())
-            if datetime.utcnow() - trace.created_at > max_age:
+            if utcnow_naive() - trace.created_at > max_age:
                 return None
             return self._format(trace, cached_hit=True)
 

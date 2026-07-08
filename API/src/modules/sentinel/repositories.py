@@ -29,6 +29,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session, joinedload
 from src.modules.infrastructure import BaseRepository, UnitOfWork
+from src.modules.shared import utcnow_naive
 
 from .model import (
     CpeMatch,
@@ -375,7 +376,7 @@ class ScanRepository(BaseRepository[Scan]):
 
         terminal = {ScanStatus.FINISHED, ScanStatus.FAILED, ScanStatus.CANCELLED}
         if status in terminal and scan.finished_at is None:
-            scan.finished_at = datetime.utcnow() # type: ignore
+            scan.finished_at = utcnow_naive() # type: ignore
 
         return self.update(scan)
 
@@ -694,7 +695,7 @@ class TracerouteRepository(BaseRepository[Traceroute]):
         if existing:
             existing.hops = hops
             existing.hop_count = len(hops)
-            existing.created_at = datetime.utcnow()
+            existing.created_at = utcnow_naive()
             return self.update(existing)
 
         trace = Traceroute(
