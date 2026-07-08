@@ -413,6 +413,49 @@ def test_ellysia_fingerprinting_disabled_by_default(app, admin_user):
     assert not any(f.category == "fingerprint" for f in findings)
 
 
+def test_ellysia_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, monkeypatch):
+    """The point of wiring fingerprint output into CPE resolution: a
+    self-discovered service (Fase T, no Nmap involved at all) must still be
+    able to match a CVE, using Ellysia's own HTTP fingerprint instead of an
+    Nmap-emitted CPE. Without this wiring the version matcher has nothing to
+    look up and a self-discovery-only scan finds zero CVEs, ever.
+    """
+    import src.modules.system.config_reading as CR
+    from src.modules.sentinel.ellysia.checks import HttpProbe, Response
+
+    _seed_kb_apache_cve(app)
+    monkeypatch.setattr(CR, "is_ellysia_fingerprinting_enabled", lambda: True)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(EllysiaEngineManager, "_discover_ports",
+                        lambda self, target, ports: [80])
+
+    def fake_fetch(self, host, port, method, path):
+        return Response(200, "<html><title>It works</title></html>",
+                        {"server": "Apache/2.4.49 (Unix)"})
+    monkeypatch.setattr(HttpProbe, "fetch", fake_fetch)
+    monkeypatch.setattr(HttpProbe, "fetch_bytes", lambda self, host, port, path: None)
+
+    with app.app_context():
+        mgr = EllysiaEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=None)
+        mgr._run_ellysia(escan.id, source_scan_id=None, discover_ports=None)
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vulns = [f for f in findings if f.category == "outdated_software"]
+    assert len(vulns) == 1
+    assert vulns[0].cve_ids == ["CVE-2021-41773"]
+    assert vulns[0].qod == 70            # hypothesis-tier, same as an Nmap-sourced match
+    assert vulns[0].confirmed is False
+    # The fingerprint finding is honest about having no Nmap baseline, but the
+    # CVE match went through regardless — that honesty and the detection are
+    # independent of each other.
+    fingerprints = [f for f in findings if f.category == "fingerprint"]
+    assert len(fingerprints) == 1
+    assert "sin datos de Nmap para comparar" in fingerprints[0].title
+
+
 def test_ellysia_scan_surfaces_in_results_endpoint(client, app, admin_user, auth_headers):
     nmap_id = _seed_nmap_scan(app, admin_user.id)
     with app.app_context():

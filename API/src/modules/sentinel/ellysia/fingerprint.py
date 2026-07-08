@@ -15,13 +15,24 @@ SSH
     ``SSH_MSG_KEXINIT`` packet. The packet is parsed straight from the raw
     protocol bytes off a socket, with no SSH library involved.
 
-The governing principle is that **Nmap stays the oracle**. Nothing here feeds a
-finding's confidence yet. Instead, :func:`agrees_with_nmap` and
-:func:`concordance_rate` turn "does our fingerprint match Nmap's?" into a
-measurable number — the roadmap's Definition of Done requires agreement to reach
-0.90 before Nmap could be demoted to a fallback. Actually running that
-measurement against a lab of real targets is an operational step for the user,
-much like the knowledge base's initial full download.
+The governing principle is that **Nmap stays the oracle**: when a service
+already carries a Nmap-sourced product/version, this module's own reading
+never overrides it. :func:`agrees_with_nmap` and :func:`concordance_rate` turn
+"does our fingerprint match Nmap's?" into a measurable number — the roadmap's
+Definition of Done requires agreement to reach 0.90 before Nmap could be
+demoted to a *fallback*. Actually running that measurement against a lab of
+real targets is an operational step for the user, much like the knowledge
+base's initial full download.
+
+That said, a service found by Ellysia's own transport (Fase T, no Nmap
+involved) never had a Nmap reading to defer to in the first place — it carries
+no product/version at all. For that case, and only that case,
+``EllysiaEngineManager._fingerprint_services`` uses this module's output to
+fill the gap: without it, the version matcher (Fase 1) would have nothing to
+look up and a self-discovery-only scan would never find a single CVE. The
+result still goes in at the same low-confidence, unconfirmed tier a Nmap CPE
+match would (``qod=70``) — this closes a blind spot, it does not raise
+confidence beyond what the matcher already assigns any version-based guess.
 
 Two techniques are deliberately left for later: TLS/JARM fingerprinting (a
 bit-exact ten-probe handshake that is too large and risky to ship without a live

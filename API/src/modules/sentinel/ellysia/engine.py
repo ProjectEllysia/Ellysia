@@ -39,13 +39,19 @@ QOD_OPEN_PORT = 30
 QOD_VERSION_MATCH = 70
 
 
-# Maps an Nmap product string (lowercased) to the (vendor, product) pair CPE
-# uses. It is consulted only when Nmap did not already emit a usable CPE of its
-# own. This is a small, hand-curated seed; it grows by one line each time a real
-# scan turns up a product we do not yet map. The alternative — guessing a CPE —
-# is worse, because a CPE that does not exist in NVD silently matches nothing.
+# Maps a product string (lowercased) to the (vendor, product) pair CPE uses.
+# Consulted whenever a service has no usable CPE of its own — whether the
+# product/version came from Nmap's own naming ("Apache httpd") or from
+# Ellysia's own HTTP/SSH fingerprint reading the Server header or SSH banner
+# directly ("Apache", "OpenSSH" — see ellysia.fingerprint). Both spellings for
+# the same product are kept as separate keys rather than normalized, since
+# that keeps this table a flat, auditable list. This is a small, hand-curated
+# seed; it grows by one line each time a real scan turns up a product we do
+# not yet map. The alternative — guessing a CPE — is worse, because a CPE that
+# does not exist in NVD silently matches nothing.
 CPE_PRODUCT_OVERRIDES: dict[str, tuple[str, str]] = {
     "apache httpd":        ("apache", "http_server"),
+    "apache":               ("apache", "http_server"),  # Server header says "Apache", Nmap says "Apache httpd"
     "openssh":             ("openbsd", "openssh"),
     "nginx":               ("nginx", "nginx"),
     "microsoft iis httpd": ("microsoft", "internet_information_services"),

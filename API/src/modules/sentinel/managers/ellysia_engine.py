@@ -1,6 +1,7 @@
 """EllysiaEngineManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
+from dataclasses import replace
 from typing import Optional
 import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import ITaskQueue, job_context
@@ -111,10 +112,10 @@ class EllysiaEngineManager(ScanManager):
         scan_id = scan.id
 
         self._tq.submit(
-            func=EllysiaEngineManager.execute_ellysia_scan,
+            func=EllysiaEngineManager.execute_ellysia_scan, # type: ignore
             args=(scan_id, source_scan_id, discover_ports, deep),
             name=f"EllysiaScan-{scan_id}",
-            category=self.TASK_CATEGORY,
+            category=self.TASK_CATEGORY, # type: ignore
             external_id=self.external_id_for(scan_id),
             timeout=timeout + self._scan_timeout_margin,
         )
@@ -129,7 +130,8 @@ class EllysiaEngineManager(ScanManager):
                              discover_ports: Optional[list] = None, deep: bool = False) -> None:
         """Entry point submitted to the TaskQueue. Runs the engine in the worker."""
         with job_context():
-            EllysiaEngineManager()._run_ellysia(
+            manager = EllysiaEngineManager()
+            manager._run_ellysia( # type: ignore
                 scan_id,
                 source_scan_id,
                 discover_ports,
@@ -207,6 +209,16 @@ class EllysiaEngineManager(ScanManager):
                     source_host_id = host.id if host else None
                     services = services_from_discovered_ports(discovered_ports)
 
+                # Phase 0.5 — own fingerprinting (Fase F), before the matcher runs.
+                # A self-discovered service (Fase T, no Nmap involved) carries no
+                # product/version at all; without this, the matcher below would
+                # have nothing to look up and a self-discovery-only scan would
+                # never find a single CVE. This never overrides a Nmap-sourced
+                # reading — see _fingerprint_services.
+                fingerprint_findings: list = []
+                if source_target and CR.is_ellysia_fingerprinting_enabled():
+                    services, fingerprint_findings = self._fingerprint_services(source_target, services)
+
                 previous_map = self._previous_findings_map(scan_repo, user_id, source_target, scan_id)
 
                 engine = EllysiaEngine(
@@ -215,15 +227,12 @@ class EllysiaEngineManager(ScanManager):
                     epss_lookup=lambda cve_id: getattr(kb_repo.get_epss(cve_id), "score", None),
                 )
                 findings_data = engine.analyze(services)
+                findings_data.extend(fingerprint_findings)
 
             # Phase 2 — active checks over the network, outside any transaction.
             # Opt-in (they touch the target; see roadmap §6 authorized targets).
             if source_target and CR.is_ellysia_active_checks_enabled():
                 findings_data.extend(self._run_active_checks(source_target, services))
-
-            # Phase 2.3 — own fingerprinting (Fase F), calibrated against Nmap.
-            if source_target and CR.is_ellysia_fingerprinting_enabled():
-                findings_data.extend(self._run_fingerprinting(source_target, services))
 
             # Phase 2.7 — deep analysis (Fase 6): launch Nmap/Nikto/OpenVAS as
             # independent corroborator scans. Fire-and-forget — their Finding
@@ -291,14 +300,30 @@ class EllysiaEngineManager(ScanManager):
             logger.exception("Ellysia active checks failed for %s", target)
             return []
 
-    def _run_fingerprinting(self, target: str, services) -> list:
-        """Run Ellysia's own HTTP/SSH dissectors and record agreement with Nmap.
+    def _fingerprint_services(self, target: str, services: list) -> tuple:
+        """Run Ellysia's own HTTP/SSH dissectors; fill identification gaps and
+        record agreement with Nmap.
 
-        Informational only (Fase F): a fingerprint finding never feeds
-        vulnerability confidence — it exists to accumulate the concordance
-        evidence the roadmap's Definition of Done requires before Nmap `-sV`
-        can be demoted to a fallback for a service family. Best-effort per
-        service; a probe failure just skips that service.
+        Fase F, two jobs at once:
+
+        - When a service already has a product/version (Nmap-sourced), our own
+          reading is never used to override it — it only feeds an informational
+          "agrees/disagrees with Nmap" finding, the concordance evidence the
+          roadmap's Definition of Done needs before Nmap `-sV` can be demoted
+          to a fallback for a service family.
+        - When a service has *no* product/version (self-discovered, Fase T, no
+          Nmap involved), our own reading fills that gap so the version matcher
+          (``EllysiaEngine._resolve_cpe``) has something to work with instead of
+          silently finding nothing. It goes in exactly as low-confidence as an
+          Nmap-sourced reading would (``qod=70`` in the matcher, same as
+          today) — nothing here inflates confidence, it only supplies input.
+
+        Best-effort per service; a probe failure just skips that service.
+
+        Returns:
+            A ``(services, findings)`` tuple: the service list with any newly
+            identified product/version filled in, and the informational
+            fingerprint findings.
         """
         from ..ellysia import (
             HttpProbe, SshProbe, HostRateLimiter, is_http_service,
@@ -308,29 +333,37 @@ class EllysiaEngineManager(ScanManager):
         ssh_probe = SshProbe()
         rate_limiter = HostRateLimiter()
         findings = []
+        updated: list = []
 
         for service in services:
+            fp, label = None, None
             try:
                 if is_http_service(service):
                     rate_limiter.acquire(target)
                     resp = http_probe.fetch(target, service.port, "GET", "/")
-                    if resp is None:
-                        continue
-                    rate_limiter.acquire(target)
-                    favicon = http_probe.fetch_bytes(target, service.port, "/favicon.ico")
-                    fp = fingerprint_http(resp, favicon)
-                    findings.append(self._fingerprint_finding(service, fp.product, fp.version, "HTTP"))
+                    if resp is not None:
+                        rate_limiter.acquire(target)
+                        favicon = http_probe.fetch_bytes(target, service.port, "/favicon.ico")
+                        fp, label = fingerprint_http(resp, favicon), "HTTP"
                 elif (service.name or "").lower() == "ssh" or service.port == 22:
                     rate_limiter.acquire(target)
                     probed = ssh_probe.fetch(target, service.port or 22)
-                    if probed is None:
-                        continue
-                    banner, kexinit_payload = probed
-                    fp = fingerprint_ssh(banner, kexinit_payload)
-                    findings.append(self._fingerprint_finding(service, fp.product, fp.version, "SSH"))
+                    if probed is not None:
+                        banner, kexinit_payload = probed
+                        fp, label = fingerprint_ssh(banner, kexinit_payload), "SSH"
             except Exception:
                 logger.debug("Fingerprinting failed for %s:%s", target, service.port, exc_info=True)
-        return findings
+
+            if fp is None:
+                updated.append(service)
+                continue
+
+            findings.append(self._fingerprint_finding(service, fp.product, fp.version, label))
+            if not service.product and fp.product and fp.version:
+                service = replace(service, product=fp.product, version=fp.version)
+            updated.append(service)
+
+        return updated, findings
 
     @staticmethod
     def _fingerprint_finding(service, product: Optional[str], version: Optional[str], label: str) -> dict:
