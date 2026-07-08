@@ -1,12 +1,12 @@
-"""Tests unitarios de sentinel.services.parsing (validate_ip / validate_port).
+"""Tests unitarios de themis.services.parsing (validate_ip / validate_port).
 
 Funciones puras sobre strings: no requieren BD ni app Flask.
 """
 
 import pytest
 
-from src.modules.sentinel.exceptions import IPValidationError, PortValidationError
-from src.modules.sentinel.services.parsing import validate_ip, validate_port
+from src.modules.themis.exceptions import IPValidationError, PortValidationError
+from src.modules.themis.services.parsing import validate_ip, validate_port
 
 pytestmark = pytest.mark.unit
 

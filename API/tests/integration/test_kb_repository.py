@@ -7,7 +7,7 @@ idempotency against the (SQLite) database, without any network.
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.sentinel.repositories import KbRepository
+from src.modules.themis.repositories import KbRepository
 
 pytestmark = pytest.mark.integration
 

@@ -1,6 +1,6 @@
 """
 Helper genérico para el patrón "assert ownership" repetido en varios módulos
-(acheron, iris, aegis, sentinel): obtener una entidad por ID y verificar que
+(acheron, iris, aegis, themis): obtener una entidad por ID y verificar que
 pertenece al usuario, lanzando la MISMA excepción tanto si no existe como si
 pertenece a otro usuario. Esto evita enumerar IDs ajenos por diferencia de
 respuesta (404 "no encontrado" vs 403 "no es tuyo").

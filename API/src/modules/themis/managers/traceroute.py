@@ -1,4 +1,4 @@
-"""TracerouteManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
+"""TracerouteManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
 import hashlib
@@ -45,8 +45,8 @@ class TracerouteManager(TaskTrackingMixin):
     from their own scans.
     """
 
-    EXTERNAL_ID_PREFIX = "sentinel-traceroute:"
-    TASK_CATEGORY = "sentinel.traceroute"
+    EXTERNAL_ID_PREFIX = "themis-traceroute:"
+    TASK_CATEGORY = "themis.traceroute"
 
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         """Initialize the manager.
@@ -101,7 +101,7 @@ class TracerouteManager(TaskTrackingMixin):
         be RQ-safe (letters, numbers, _, -); external_id can have other chars.
         """
         key = self._trace_key(user_id, target)
-        timeout = int(CR.get_sentinel_traceroute_timeout()) + 30
+        timeout = int(CR.get_themis_traceroute_timeout()) + 30
         self._tq.submit(
             func=TracerouteManager.execute_traceroute,
             args=(user_id, target),
@@ -124,9 +124,9 @@ class TracerouteManager(TaskTrackingMixin):
             if trace is None:
                 return None
             if trace.hops:
-                max_age = timedelta(hours=CR.get_sentinel_traceroute_cache_hours())
+                max_age = timedelta(hours=CR.get_themis_traceroute_cache_hours())
             else:
-                max_age = timedelta(minutes=CR.get_sentinel_traceroute_retry_failed_minutes())
+                max_age = timedelta(minutes=CR.get_themis_traceroute_retry_failed_minutes())
             if utcnow_naive() - trace.created_at > max_age:
                 return None
             return self._format(trace, cached_hit=True)

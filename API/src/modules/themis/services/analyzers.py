@@ -63,9 +63,9 @@ class NmapAIWriter:
 
         Args:
             generator: Optional scribe AIGenerator. If not provided, one is
-                built for the 'sentinel' module via ``build_generator``.
+                built for the 'themis' module via ``build_generator``.
         """
-        self._generator = generator or build_generator("sentinel")
+        self._generator = generator or build_generator("themis")
 
     def _classify_network_context(self, target: str) -> dict:
         """Classify target as private LAN or public network deterministically.
@@ -313,7 +313,7 @@ class NiktoAIWriter:
 
     def __init__(self, generator: Optional[AIGenerator] = None) -> None:
         """Initialize Nikto AI writer."""
-        self._generator = generator or build_generator("sentinel")
+        self._generator = generator or build_generator("themis")
 
     def _preprocess_incidents(self, incidents: list) -> dict:
         """Preprocess incidents by grouping them into security controls."""
@@ -540,7 +540,7 @@ class OpenVASAIWriter:
 
     def __init__(self, generator: Optional[AIGenerator] = None) -> None:
         """Initialize OpenVAS AI writer."""
-        self._generator = generator or build_generator("sentinel")
+        self._generator = generator or build_generator("themis")
 
     def _preprocess_vulnerabilities(self, vulnerabilities: list) -> dict:
         """Preprocess vulnerabilities by grouping them into security controls."""

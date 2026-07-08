@@ -53,8 +53,8 @@ class BaseScanLogger(ABC):
     @property
     def base_dir(self) -> Path:
         if self._base_dir is None:
-            from src.modules.system.config_reading import get_sentinel_csv_dir
-            self._base_dir = Path(get_sentinel_csv_dir())
+            from src.modules.system.config_reading import get_themis_csv_dir
+            self._base_dir = Path(get_themis_csv_dir())
             self._base_dir.mkdir(parents=True, exist_ok=True)
         return self._base_dir
 

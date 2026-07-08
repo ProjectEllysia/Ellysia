@@ -1,4 +1,4 @@
-"""OpenVASScanManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
+"""OpenVASScanManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
 import uuid
@@ -112,7 +112,7 @@ class OpenVASScanManager(ScanManager):
     def execute_openvas_scan(scan_id: int, target: str, scan_config_id: str, skip_normalize: bool) -> None:
         """Entry point submitted to the TaskQueue. Executes the OpenVAS scan with progress and cancellation support."""
         with job_context() as job:
-            from src.modules.sentinel.services.tasks import OpenVASTask
+            from src.modules.themis.services.tasks import OpenVASTask
 
             manager = OpenVASScanManager()
             task = OpenVASTask(

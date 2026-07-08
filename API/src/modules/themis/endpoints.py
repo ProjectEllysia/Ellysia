@@ -27,7 +27,7 @@ from .managers import (
     OpenVASScanManager,
     LybraEngineManager,
     ProgramedScanManager,
-    SentinelReportManager,
+    ThemisReportManager,
     ScanFolderManager,
     ScanHistoryManager,
     TracerouteManager,
@@ -91,8 +91,8 @@ from .schemas import (
 )
 
 
-sentinel_blp = SmorestBlueprint(
-    "sentinel", __name__,
+themis_blp = SmorestBlueprint(
+    "themis", __name__,
     description="Escaneos de seguridad (Nmap, Nikto, OpenVAS) y PDFs"
 )
 logger = logging.getLogger(__name__)
@@ -116,14 +116,14 @@ def validate_targets(raw: str, max_hosts: int = 10) -> list[str]:
         raise SecOpsException(str(exc.user_message or exc), status_code=403)
 
 
-@sentinel_blp.get("/scan-status")
-@sentinel_blp.arguments(ScanIdQuerySchema, location="query")
-@sentinel_blp.response(200, ScanStatusResponseSchema, description="Scan status")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
+@themis_blp.get("/scan-status")
+@themis_blp.arguments(ScanIdQuerySchema, location="query")
+@themis_blp.response(200, ScanStatusResponseSchema, description="Scan status")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def get_scan_status(args):
@@ -149,14 +149,14 @@ def get_scan_status(args):
     return response
 
 
-@sentinel_blp.post("/scans/<int:scan_id>/cancel")
-@sentinel_blp.response(200, ScanResponseSchema, description="Scan cancelled")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Invalid state")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(500, schema=ErrorSchema, description="Cancellation failed")
+@themis_blp.post("/scans/<int:scan_id>/cancel")
+@themis_blp.response(200, ScanResponseSchema, description="Scan cancelled")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Invalid state")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(500, schema=ErrorSchema, description="Cancellation failed")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_UPDATE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_UPDATE])
 @limiter.limit("60 per hour; 200 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def cancel_scan(scan_id: int):
@@ -191,14 +191,14 @@ def cancel_scan(scan_id: int):
     }
 
 
-@sentinel_blp.post("/nmap")
-@sentinel_blp.arguments(NmapScanRequestSchema)
-@sentinel_blp.response(201, NmapScanResponseSchema, description="Nmap scan started")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.post("/nmap")
+@themis_blp.arguments(NmapScanRequestSchema)
+@themis_blp.response(201, NmapScanResponseSchema, description="Nmap scan started")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_CREATE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_CREATE])
 @limiter.limit("20 per hour; 100 per day")
 @handle_exceptions(default_exception=ScanExecutionError, logger=logger)
 def start_nmap_scan(data: dict):
@@ -236,15 +236,15 @@ def start_nmap_scan(data: dict):
     }
 
 
-@sentinel_blp.post("/nikto")
-@sentinel_blp.arguments(NiktoScanRequestSchema)
-@sentinel_blp.response(201, ScanResponseSchema, description="Nikto scan started")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.post("/nikto")
+@themis_blp.arguments(NiktoScanRequestSchema)
+@themis_blp.response(201, ScanResponseSchema, description="Nikto scan started")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @limiter.limit("20 per hour; 100 per day")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_CREATE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_CREATE])
 @handle_exceptions(default_exception=ScanExecutionError, logger=logger)
 def start_nikto_scan(data):
     """Lanzar un escaneo Nikto"""
@@ -264,15 +264,15 @@ def start_nikto_scan(data):
     }
 
 
-@sentinel_blp.post("/openvas")
-@sentinel_blp.arguments(OpenVASScanRequestSchema)
-@sentinel_blp.response(201, ScanResponseSchema, description="OpenVAS scan started")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.post("/openvas")
+@themis_blp.arguments(OpenVASScanRequestSchema)
+@themis_blp.response(201, ScanResponseSchema, description="OpenVAS scan started")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @limiter.limit("10 per hour; 50 per day")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_CREATE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_CREATE])
 @handle_exceptions(default_exception=ScanExecutionError, logger=logger)
 def start_openvas_scan(data):
     """Lanzar un escaneo OpenVAS para un unico host"""
@@ -302,19 +302,19 @@ def start_openvas_scan(data):
         "target": target_ip,
         "scanConfig": scan_config,
         "user": user.username,
-        "note": "Use /sentinel/scan-status para verificar el progreso.",
+        "note": "Use /themis/scan-status para verificar el progreso.",
     }
 
 
-@sentinel_blp.post("/lybra")
-@sentinel_blp.arguments(LybraScanRequestSchema)
-@sentinel_blp.response(201, ScanResponseSchema, description="Lybra engine scan started")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Source scan not found")
+@themis_blp.post("/lybra")
+@themis_blp.arguments(LybraScanRequestSchema)
+@themis_blp.response(201, ScanResponseSchema, description="Lybra engine scan started")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Source scan not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_CREATE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_CREATE])
 @limiter.limit("20 per hour; 100 per day")
 @handle_exceptions(default_exception=ScanExecutionError, logger=logger)
 def start_lybra_scan(data):
@@ -358,15 +358,15 @@ def start_lybra_scan(data):
     }
 
 
-@sentinel_blp.patch("/findings/<int:finding_id>")
-@sentinel_blp.arguments(FindingStateRequestSchema)
-@sentinel_blp.response(200, FindingStateResponseSchema, description="Finding state updated")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Finding not found")
+@themis_blp.patch("/findings/<int:finding_id>")
+@themis_blp.arguments(FindingStateRequestSchema)
+@themis_blp.response(200, FindingStateResponseSchema, description="Finding state updated")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Finding not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_UPDATE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_UPDATE])
 @limiter.limit("120 per hour; 400 per day")
 @handle_exceptions(default_exception=FindingNotFoundError, logger=logger)
 def update_finding_state(data, finding_id: int):
@@ -382,13 +382,13 @@ def update_finding_state(data, finding_id: int):
     }
 
 
-@sentinel_blp.get("/results")
-@sentinel_blp.arguments(ResultsQuerySchema, location="query")
-@sentinel_blp.response(200, ResultsResponseSchema, description="Scan results")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.get("/results")
+@themis_blp.arguments(ResultsQuerySchema, location="query")
+@themis_blp.response(200, ResultsResponseSchema, description="Scan results")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=ScanError, logger=logger)
 def retrieve_all_scans(args):
@@ -441,12 +441,12 @@ def retrieve_all_scans(args):
     }
 
 
-@sentinel_blp.get("/stats")
-@sentinel_blp.response(200, description="Scan statistics")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.get("/stats")
+@themis_blp.response(200, description="Scan statistics")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def get_scan_stats():
@@ -455,12 +455,12 @@ def get_scan_stats():
     return ScanHistoryManager().get_stats(user.id)  # type: ignore
 
 
-@sentinel_blp.get("/history/hosts")
-@sentinel_blp.response(200, HistoryHostsResponseSchema, description="Scanned hosts")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.get("/history/hosts")
+@themis_blp.response(200, HistoryHostsResponseSchema, description="Scanned hosts")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def list_history_hosts():
@@ -474,14 +474,14 @@ def list_history_hosts():
     }
 
 
-@sentinel_blp.get("/history/stats")
-@sentinel_blp.arguments(HistoryStatsQuerySchema, location="query")
-@sentinel_blp.response(200, HistoryStatsResponseSchema, description="Host historical statistics")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.get("/history/stats")
+@themis_blp.arguments(HistoryStatsQuerySchema, location="query")
+@themis_blp.response(200, HistoryStatsResponseSchema, description="Host historical statistics")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def get_history_stats(args):
@@ -496,13 +496,13 @@ def get_history_stats(args):
     return payload
 
 
-@sentinel_blp.get("/results/<int:scan_id>")
-@sentinel_blp.response(200, ScanDetailResponseSchema, description="Scan detail")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
+@themis_blp.get("/results/<int:scan_id>")
+@themis_blp.response(200, ScanDetailResponseSchema, description="Scan detail")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def retrieve_scan_by_id(scan_id: int):
@@ -536,13 +536,13 @@ def retrieve_scan_by_id(scan_id: int):
     }
 
 
-@sentinel_blp.get("/scan/<int:scan_id>/traceroute")
-@sentinel_blp.response(200, TracerouteResponseSchema, description="Cached traceroute to the scan target")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
+@themis_blp.get("/scan/<int:scan_id>/traceroute")
+@themis_blp.response(200, TracerouteResponseSchema, description="Cached traceroute to the scan target")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def get_scan_traceroute(scan_id: int):
@@ -554,13 +554,13 @@ def get_scan_traceroute(scan_id: int):
     return payload
 
 
-@sentinel_blp.post("/scan/<int:scan_id>/traceroute/refresh")
-@sentinel_blp.response(200, TracerouteResponseSchema, description="Recomputed traceroute to the scan target")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
+@themis_blp.post("/scan/<int:scan_id>/traceroute/refresh")
+@themis_blp.response(200, TracerouteResponseSchema, description="Recomputed traceroute to the scan target")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
 @limiter.limit("60 per hour; 300 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def refresh_scan_traceroute(scan_id: int):
@@ -572,14 +572,14 @@ def refresh_scan_traceroute(scan_id: int):
     return payload
 
 
-@sentinel_blp.get("/is-finished")
-@sentinel_blp.arguments(ScanIdQuerySchema, location="query")
-@sentinel_blp.response(200, IsFinishedResponseSchema, description="Scan finished status")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
+@themis_blp.get("/is-finished")
+@themis_blp.arguments(ScanIdQuerySchema, location="query")
+@themis_blp.response(200, IsFinishedResponseSchema, description="Scan finished status")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def is_scan_finished(args):
@@ -598,14 +598,14 @@ def is_scan_finished(args):
     }
 
 
-@sentinel_blp.delete("/<int:scan_id>")
-@sentinel_blp.response(200, ScanResponseSchema, description="Scan deleted")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
-@sentinel_blp.alt_response(500, schema=ErrorSchema, description="Deletion failed")
+@themis_blp.delete("/<int:scan_id>")
+@themis_blp.response(200, ScanResponseSchema, description="Scan deleted")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
+@themis_blp.alt_response(500, schema=ErrorSchema, description="Deletion failed")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_DELETE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_DELETE])
 @limiter.limit("60 per hour; 200 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def delete_scan(scan_id: int):
@@ -634,14 +634,14 @@ def delete_scan(scan_id: int):
     }
 
 
-@sentinel_blp.delete("/scans")
-@sentinel_blp.arguments(BulkDeleteScansSchema)
-@sentinel_blp.response(200, BulkDeleteScansResponseSchema, description="Scans bulk deleted")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(500, schema=ErrorSchema, description="Deletion failed")
+@themis_blp.delete("/scans")
+@themis_blp.arguments(BulkDeleteScansSchema)
+@themis_blp.response(200, BulkDeleteScansResponseSchema, description="Scans bulk deleted")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(500, schema=ErrorSchema, description="Deletion failed")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_DELETE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_DELETE])
 @limiter.limit("30 per hour; 100 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def bulk_delete_scans(data):
@@ -658,14 +658,14 @@ def bulk_delete_scans(data):
     }
 
 
-@sentinel_blp.post("/generate-pdf")
-@sentinel_blp.arguments(GeneratePdfRequestSchema)
-@sentinel_blp.response(202, PdfGenerateResponseSchema, description="PDF generation started")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Scan not finished")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.post("/generate-pdf")
+@themis_blp.arguments(GeneratePdfRequestSchema)
+@themis_blp.response(202, PdfGenerateResponseSchema, description="PDF generation started")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Scan not finished")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_CREATE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_CREATE])
 @limiter.limit("30 per hour; 100 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def generate_pdf(args):
@@ -685,7 +685,7 @@ def generate_pdf(args):
             value=scan_id,
         )
 
-    doc_mgr = SentinelReportManager()
+    doc_mgr = ThemisReportManager()
     doc_id = doc_mgr.generate_report(
         scan_id=scan_id,
         ai_report=ai_report,
@@ -699,18 +699,18 @@ def generate_pdf(args):
         "scanId": scan_id,
         "status": "pending",
         "aiReport": ai_report,
-        "downloadUrl": f"/sentinel/document/{doc_id}/download",
+        "downloadUrl": f"/themis/document/{doc_id}/download",
     }
 
 
-@sentinel_blp.get("/document-status")
-@sentinel_blp.arguments(DocumentStatusQuerySchema, location="query")
-@sentinel_blp.response(200, DocumentStatusResponseSchema, description="Document status")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Document not found")
+@themis_blp.get("/document-status")
+@themis_blp.arguments(DocumentStatusQuerySchema, location="query")
+@themis_blp.response(200, DocumentStatusResponseSchema, description="Document status")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Document not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def get_document_status(args):
@@ -719,7 +719,7 @@ def get_document_status(args):
     document_id = args.get("document_id")
     scan_id = args.get("scan_id")
 
-    doc_mgr = SentinelReportManager()
+    doc_mgr = ThemisReportManager()
 
     doc = doc_mgr.get_document_by_id(document_id) if document_id else (
         doc_mgr.get_latest_document_by_scan_id(scan_id) if scan_id else None
@@ -734,7 +734,7 @@ def get_document_status(args):
     download_url = None
     is_done = doc.status == "done"
     if is_done and doc.filename: # type: ignore
-        download_url = f"/sentinel/document/{doc.id}/download"
+        download_url = f"/themis/document/{doc.id}/download"
 
     return {
         "documentId": doc.id,
@@ -747,13 +747,13 @@ def get_document_status(args):
     }
 
 
-@sentinel_blp.get("/documents")
-@sentinel_blp.arguments(DocumentsQuerySchema, location="query")
-@sentinel_blp.response(200, DocumentListResponseSchema, description="All documents")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.get("/documents")
+@themis_blp.arguments(DocumentsQuerySchema, location="query")
+@themis_blp.response(200, DocumentListResponseSchema, description="All documents")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=DocumentError, logger=logger)
 def get_all_documents(args):
@@ -761,7 +761,7 @@ def get_all_documents(args):
     user = get_current_user()
     scan_type_filter = args["scan_type"]
 
-    doc_mgr = SentinelReportManager()
+    doc_mgr = ThemisReportManager()
     documents = doc_mgr.get_documents_for_user(user.id) # type: ignore
 
     if scan_type_filter != "all":
@@ -772,7 +772,7 @@ def get_all_documents(args):
         download_url = None
         is_done = doc.status == "done"
         if is_done and doc.filename: # type: ignore
-            download_url = f"/sentinel/document/{doc.id}/download"
+            download_url = f"/themis/document/{doc.id}/download"
 
         docs_list.append({
             "documentId": doc.id,
@@ -792,20 +792,20 @@ def get_all_documents(args):
     }
 
 
-@sentinel_blp.get("/scan/<int:scan_id>/documents")
-@sentinel_blp.response(200, ScanDocumentsResponseSchema, description="Scan documents")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
+@themis_blp.get("/scan/<int:scan_id>/documents")
+@themis_blp.response(200, ScanDocumentsResponseSchema, description="Scan documents")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=DocumentError, logger=logger)
 def get_documents_by_scan(scan_id: int):
     """Obtener todos los documentos de un escaneo concreto"""
     user = get_current_user()
 
-    doc_mgr = SentinelReportManager()
+    doc_mgr = ThemisReportManager()
     scan_mgr = ScanManager.resolve_manager(scan_id)
 
     scan = scan_mgr.get_scan_by_id(scan_id)
@@ -819,7 +819,7 @@ def get_documents_by_scan(scan_id: int):
         download_url = None
         is_done = doc.status == "done"
         if is_done and doc.filename: # type: ignore
-            download_url = f"/sentinel/document/{doc.id}/download"
+            download_url = f"/themis/document/{doc.id}/download"
 
         docs_list.append({
             "documentId": doc.id,
@@ -839,14 +839,14 @@ def get_documents_by_scan(scan_id: int):
     }
 
 
-@sentinel_blp.get("/document/<int:document_id>/download")
-@sentinel_blp.response(200, description="PDF file download")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Document not ready")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Document not found")
+@themis_blp.get("/document/<int:document_id>/download")
+@themis_blp.response(200, description="PDF file download")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Document not ready")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Document not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
 @handle_exceptions(default_exception=DocumentError, logger=logger)
 def download_document(document_id: int):
     """Descargar un documento PDF generado"""
@@ -854,7 +854,7 @@ def download_document(document_id: int):
     uid = user.id
     logger.info(f"Download request for document {document_id} by user {uid}")
 
-    doc_mgr = SentinelReportManager()
+    doc_mgr = ThemisReportManager()
     doc_mgr.assert_document_ownership(document_id, uid) # type: ignore
 
     doc = doc_mgr.get_document_by_id(document_id)
@@ -875,13 +875,13 @@ def download_document(document_id: int):
     )
 
 
-@sentinel_blp.delete("/document/<int:document_id>")
-@sentinel_blp.response(200, DocumentDeleteResponseSchema, description="Document deleted")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Document not found")
+@themis_blp.delete("/document/<int:document_id>")
+@themis_blp.response(200, DocumentDeleteResponseSchema, description="Document deleted")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Document not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_DELETE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_DELETE])
 @limiter.limit("30 per hour; 100 per day")
 @handle_exceptions(default_exception=DocumentError, logger=logger)
 def delete_document(document_id: int):
@@ -889,21 +889,21 @@ def delete_document(document_id: int):
     user = get_current_user()
     uid = user.id
 
-    doc_mgr = SentinelReportManager()
+    doc_mgr = ThemisReportManager()
     doc_mgr.assert_document_ownership(document_id, uid) # type: ignore
     doc_mgr.delete_document(document_id)
     logger.info(f"Documento {document_id} eliminado por usuario {uid}")
     return {"message": "Documento eliminado correctamente", "documentId": document_id}
 
 
-@sentinel_blp.post("/scheduled-scans")
-@sentinel_blp.arguments(ScheduledScanRequestSchema)
-@sentinel_blp.response(201, ScheduledScanResponseSchema, description="Scheduled scan created")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.post("/scheduled-scans")
+@themis_blp.arguments(ScheduledScanRequestSchema)
+@themis_blp.response(201, ScheduledScanResponseSchema, description="Scheduled scan created")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_SCHEDULE_CREATE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_SCHEDULE_CREATE])
 @limiter.limit("30 per hour; 100 per day")
 @handle_exceptions(default_exception=ProgramedScanError, logger=logger)
 def schedule_scan(data):
@@ -940,13 +940,13 @@ def schedule_scan(data):
     }
 
 
-@sentinel_blp.delete("/scheduled-scans/<int:ps_id>")
-@sentinel_blp.response(200, ScheduledScanActionResponseSchema, description="Scheduled scan revoked")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Not found")
+@themis_blp.delete("/scheduled-scans/<int:ps_id>")
+@themis_blp.response(200, ScheduledScanActionResponseSchema, description="Scheduled scan revoked")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_SCHEDULE_DELETE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_SCHEDULE_DELETE])
 @limiter.limit("60 per hour; 200 per day")
 @handle_exceptions(default_exception=ProgramedScanNotFoundError, logger=logger)
 def revoke_scheduled_scan(ps_id: int):
@@ -963,13 +963,13 @@ def revoke_scheduled_scan(ps_id: int):
     }
 
 
-@sentinel_blp.delete("/scheduled-scans/<int:ps_id>/permanent")
-@sentinel_blp.response(200, ScheduledScanActionResponseSchema, description="Scheduled scan permanently deleted")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Not found")
+@themis_blp.delete("/scheduled-scans/<int:ps_id>/permanent")
+@themis_blp.response(200, ScheduledScanActionResponseSchema, description="Scheduled scan permanently deleted")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_SCHEDULE_DELETE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_SCHEDULE_DELETE])
 @limiter.limit("30 per hour; 100 per day")
 @handle_exceptions(default_exception=ProgramedScanNotFoundError, logger=logger)
 def delete_scheduled_scan(ps_id: int):
@@ -986,13 +986,13 @@ def delete_scheduled_scan(ps_id: int):
     }
 
 
-@sentinel_blp.get("/scheduled-scans")
-@sentinel_blp.response(200, ScheduledScanListResponseSchema, description="List of scheduled scans")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.get("/scheduled-scans")
+@themis_blp.response(200, ScheduledScanListResponseSchema, description="List of scheduled scans")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @limiter.limit("300 per hour; 2000 per day")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_SCHEDULE_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_SCHEDULE_READ])
 @handle_exceptions(default_exception=ProgramedScanError, logger=logger)
 def list_scheduled_scans():
     """Listar todos los escaneos programados del usuario"""
@@ -1024,14 +1024,14 @@ def list_scheduled_scans():
 # SCAN FOLDERS
 # =========================================================================
 
-@sentinel_blp.post("/folders")
-@sentinel_blp.arguments(CreateFolderSchema)
-@sentinel_blp.response(201, FolderActionResponseSchema, description="Folder created")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.post("/folders")
+@themis_blp.arguments(CreateFolderSchema)
+@themis_blp.response(201, FolderActionResponseSchema, description="Folder created")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_FOLDER_CREATE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_FOLDER_CREATE])
 @limiter.limit("60 per hour; 200 per day")
 @handle_exceptions(default_exception=FolderNameInvalidError, logger=logger)
 def create_folder(data):
@@ -1047,12 +1047,12 @@ def create_folder(data):
     }
 
 
-@sentinel_blp.get("/folders")
-@sentinel_blp.response(200, FolderListResponseSchema, description="User folders with scans")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.get("/folders")
+@themis_blp.response(200, FolderListResponseSchema, description="User folders with scans")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_FOLDER_READ])
+@require_attributes(at_least_one=[AttributeType.THEMIS_FOLDER_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=FolderNotFoundError, logger=logger)
 def list_folders():
@@ -1068,15 +1068,15 @@ def list_folders():
     }
 
 
-@sentinel_blp.put("/folders/<int:folder_id>")
-@sentinel_blp.arguments(RenameFolderSchema)
-@sentinel_blp.response(200, FolderActionResponseSchema, description="Folder renamed")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Folder not found")
+@themis_blp.put("/folders/<int:folder_id>")
+@themis_blp.arguments(RenameFolderSchema)
+@themis_blp.response(200, FolderActionResponseSchema, description="Folder renamed")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Folder not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_FOLDER_UPDATE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_FOLDER_UPDATE])
 @limiter.limit("60 per hour; 200 per day")
 @handle_exceptions(default_exception=FolderNotFoundError, logger=logger)
 def rename_folder(data, folder_id: int):
@@ -1092,13 +1092,13 @@ def rename_folder(data, folder_id: int):
     }
 
 
-@sentinel_blp.delete("/folders/<int:folder_id>")
-@sentinel_blp.response(200, FolderActionResponseSchema, description="Folder deleted")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Folder not found")
+@themis_blp.delete("/folders/<int:folder_id>")
+@themis_blp.response(200, FolderActionResponseSchema, description="Folder deleted")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Folder not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_FOLDER_DELETE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_FOLDER_DELETE])
 @limiter.limit("60 per hour; 200 per day")
 @handle_exceptions(default_exception=FolderNotFoundError, logger=logger)
 def delete_folder(folder_id: int):
@@ -1113,15 +1113,15 @@ def delete_folder(folder_id: int):
     }
 
 
-@sentinel_blp.post("/folders/<int:folder_id>/scans")
-@sentinel_blp.arguments(MoveScanToFolderSchema)
-@sentinel_blp.response(200, ScanFolderActionResponseSchema, description="Scan moved to folder")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Folder or scan not found")
+@themis_blp.post("/folders/<int:folder_id>/scans")
+@themis_blp.arguments(MoveScanToFolderSchema)
+@themis_blp.response(200, ScanFolderActionResponseSchema, description="Scan moved to folder")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Folder or scan not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_FOLDER_UPDATE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_FOLDER_UPDATE])
 @limiter.limit("120 per hour; 400 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def move_scan_to_folder(data, folder_id: int):
@@ -1137,15 +1137,15 @@ def move_scan_to_folder(data, folder_id: int):
     }
 
 
-@sentinel_blp.post("/folders/<int:folder_id>/scans/batch")
-@sentinel_blp.arguments(AddScansToFolderSchema)
-@sentinel_blp.response(200, ScanFolderActionResponseSchema, description="Scans added to folder")
-@sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Folder or scan not found")
+@themis_blp.post("/folders/<int:folder_id>/scans/batch")
+@themis_blp.arguments(AddScansToFolderSchema)
+@themis_blp.response(200, ScanFolderActionResponseSchema, description="Scans added to folder")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Folder or scan not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_FOLDER_UPDATE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_FOLDER_UPDATE])
 @limiter.limit("60 per hour; 200 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def add_scans_to_folder(data, folder_id: int):
@@ -1161,13 +1161,13 @@ def add_scans_to_folder(data, folder_id: int):
     }
 
 
-@sentinel_blp.delete("/folders/<int:folder_id>/scans/<int:scan_id>")
-@sentinel_blp.response(200, ScanFolderActionResponseSchema, description="Scan removed from folder")
-@sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@sentinel_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
+@themis_blp.delete("/folders/<int:folder_id>/scans/<int:scan_id>")
+@themis_blp.response(200, ScanFolderActionResponseSchema, description="Scan removed from folder")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
 @require_oauth_token
-@require_attributes(at_least_one=[AttributeType.SENTINEL_FOLDER_UPDATE])
+@require_attributes(at_least_one=[AttributeType.THEMIS_FOLDER_UPDATE])
 @limiter.limit("120 per hour; 400 per day")
 @handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
 def remove_scan_from_folder(folder_id: int, scan_id: int):

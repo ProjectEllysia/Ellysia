@@ -7,7 +7,7 @@ respuesta, resolución de nombres e IPv6.
 
 import pytest
 
-from src.modules.sentinel.services.traceroute import TracerouteService
+from src.modules.themis.services.traceroute import TracerouteService
 
 pytestmark = pytest.mark.unit
 

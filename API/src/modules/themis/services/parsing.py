@@ -1,8 +1,8 @@
 """
-sentinel.services.parsing
+themis.services.parsing
 ──────────────────────────
 Parsers y validadores de especificaciones de IP y puertos para escaneos
-Sentinel (Nmap/Nikto/OpenVAS). Aislado de managers.py: son funciones puras
+Themis (Nmap/Nikto/OpenVAS). Aislado de managers.py: son funciones puras
 sobre strings, sin sesión de BD ni TaskQueue de por medio.
 
 Formatos de IP soportados (``validate_ip``):

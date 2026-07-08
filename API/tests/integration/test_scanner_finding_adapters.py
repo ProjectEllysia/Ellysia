@@ -11,9 +11,9 @@ import pytest
 
 import src.modules.shared._endpoints as endpoints_mod
 from src.modules.infrastructure import UnitOfWork
-from src.modules.sentinel.model import NiktoScan, OpenVASScan
-from src.modules.sentinel.repositories import ScanRepository
-from src.modules.sentinel.managers import NiktoScanManager, OpenVASScanManager
+from src.modules.themis.model import NiktoScan, OpenVASScan
+from src.modules.themis.repositories import ScanRepository
+from src.modules.themis.managers import NiktoScanManager, OpenVASScanManager
 
 pytestmark = pytest.mark.integration
 

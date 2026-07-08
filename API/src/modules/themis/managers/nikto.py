@@ -1,4 +1,4 @@
-"""NiktoScanManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
+"""NiktoScanManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
 from typing import Optional
@@ -85,7 +85,7 @@ class NiktoScanManager(ScanManager):
     def execute_nikto_scan(scan_id: int, target_domain: str, timeout: int) -> None:
         """Entry point submitted to the TaskQueue. Executes the Nikto scan with progress and cancellation support."""
         with job_context() as job:
-            from src.modules.sentinel.services.tasks import NiktoScanTask
+            from src.modules.themis.services.tasks import NiktoScanTask
 
             task = NiktoScanTask(
                 target_domain=target_domain,

@@ -9,7 +9,7 @@ import struct
 
 import pytest
 
-from src.modules.sentinel.lybra import (
+from src.modules.themis.lybra import (
     fingerprint_http,
     fingerprint_ssh,
     parse_ssh_banner,
@@ -19,10 +19,10 @@ from src.modules.sentinel.lybra import (
     agrees_with_nmap,
     concordance_rate,
 )
-from src.modules.sentinel.lybra.checks import Response
-from src.modules.sentinel.lybra.fingerprint import SSH_MSG_KEXINIT
-from src.modules.sentinel.lybra.engine import Service
-from src.modules.sentinel.managers import LybraEngineManager
+from src.modules.themis.lybra.checks import Response
+from src.modules.themis.lybra.fingerprint import SSH_MSG_KEXINIT
+from src.modules.themis.lybra.engine import Service
+from src.modules.themis.managers import LybraEngineManager
 
 pytestmark = pytest.mark.unit
 

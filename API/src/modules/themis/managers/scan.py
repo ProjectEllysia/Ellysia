@@ -1,4 +1,4 @@
-"""ScanManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
+"""ScanManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
 import os
@@ -13,7 +13,7 @@ from src.modules.shared import utcnow_naive
 from ..services.csv_logger import ScanLoggerFactory
 from ..repositories import (
     ScanRepository,
-    SentinelReportRepository,
+    ThemisReportRepository,
 )
 from ..model import (
     Scan,
@@ -56,7 +56,7 @@ class ScanManager(TaskTrackingMixin, ABC):
     _MODEL: Optional[type] = None  # Concrete Scan subclass; set by each subclass.
 
     EXTERNAL_ID_PREFIX = "scan:"
-    TASK_CATEGORY = "sentinel.scan"
+    TASK_CATEGORY = "themis.scan"
 
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         """
@@ -196,7 +196,7 @@ class ScanManager(TaskTrackingMixin, ABC):
         try:
             with UnitOfWork() as uow:
                 scan_repo = ScanRepository(uow)
-                doc_repo = SentinelReportRepository(uow)
+                doc_repo = ThemisReportRepository(uow)
 
                 scan = scan_repo.get_by_id(scan_id)
                 if not scan:
@@ -627,8 +627,8 @@ class ScanManager(TaskTrackingMixin, ABC):
     @classmethod
     def _append_document_info(cls, scan, result: dict) -> None:
         """Append the latest document ID and status to a scan result dict."""
-        from .reports import SentinelReportManager
-        inst = SentinelReportManager()
+        from .reports import ThemisReportManager
+        inst = ThemisReportManager()
         doc = inst.get_latest_document_by_scan_id(scan.id)
         if doc:
             result["documentId"] = doc.id
@@ -638,7 +638,7 @@ class ScanManager(TaskTrackingMixin, ABC):
     def validate_ip(ips_str: str, max_hosts: int = 10) -> List[str]:
         """Valida y expande una especificación de IPs/rangos.
 
-        Ver ``sentinel.services.parsing.validate_ip`` para los formatos
+        Ver ``themis.services.parsing.validate_ip`` para los formatos
         soportados y las excepciones que puede lanzar.
         """
         return parsing.validate_ip(ips_str, max_hosts)
@@ -647,7 +647,7 @@ class ScanManager(TaskTrackingMixin, ABC):
     def validate_port(ports_str: str) -> List[int]:
         """Valida y expande una especificación de puertos.
 
-        Ver ``sentinel.services.parsing.validate_port`` para las reglas de
+        Ver ``themis.services.parsing.validate_port`` para las reglas de
         validación y las excepciones que puede lanzar.
         """
         return parsing.validate_port(ports_str)

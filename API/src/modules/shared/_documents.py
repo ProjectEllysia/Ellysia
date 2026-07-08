@@ -20,7 +20,7 @@ from ._time import utcnow_naive
 
 
 # =========================================================================
-# GENERACIÓN DE INFORMES EN SEGUNDO PLANO (Sentinel / Iris)
+# GENERACIÓN DE INFORMES EN SEGUNDO PLANO (Themis / Iris)
 # =========================================================================
 
 
@@ -31,7 +31,7 @@ def run_report_generation(
 ) -> None:
     """Renderiza un informe PDF y sincroniza el estado de su documento.
 
-    Patrón común a Sentinel e Iris (antes duplicado en ambos managers):
+    Patrón común a Themis e Iris (antes duplicado en ambos managers):
 
     1. ``render()`` produce el PDF y devuelve su ruta.
     2. El documento se marca ``done`` con esa ruta y ``generated_at``.
@@ -230,7 +230,7 @@ def get_documents_by_user(user_id: int, limit: int = 100, document_type: str | N
     Args:
         user_id: ID del usuario.
         limit: Número máximo de documentos a devolver (default: 100).
-        document_type: Tipo de documento a filtrar ('aegis', 'sentinel', etc.).
+        document_type: Tipo de documento a filtrar ('aegis', 'themis', etc.).
 
     Returns:
         Lista de diccionarios con los datos de los documentos.

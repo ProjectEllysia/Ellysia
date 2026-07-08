@@ -1,4 +1,4 @@
-"""KbSyncManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
+"""KbSyncManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
 from datetime import timedelta

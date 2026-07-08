@@ -9,13 +9,13 @@ import types
 
 import pytest
 
-from src.modules.sentinel.lybra import (
+from src.modules.themis.lybra import (
     LybraEngine,
     Service,
     services_from_open_ports,
     QOD_OPEN_PORT,
 )
-from src.modules.sentinel.services.processors import NmapResultProcessor
+from src.modules.themis.services.processors import NmapResultProcessor
 
 pytestmark = pytest.mark.unit
 

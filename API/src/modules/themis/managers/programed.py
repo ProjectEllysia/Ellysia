@@ -1,4 +1,4 @@
-"""ProgramedScanManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
+"""ProgramedScanManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
 from datetime import datetime

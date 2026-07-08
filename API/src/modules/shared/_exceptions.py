@@ -418,7 +418,7 @@ def handle_exceptions(
 
     Example:
     >>> from src.modules.shared import handle_exceptions
-    >>> from src.modules.sentinel.exceptions import ScanError
+    >>> from src.modules.themis.exceptions import ScanError
     >>> import logging
     >>> _logger = logging.getLogger(__name__)
     >>>

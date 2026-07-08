@@ -5,7 +5,7 @@ Construcción de ``AIGenerator`` por inyección de dependencias.
 
 ``build_generator(module)`` decide qué estrategia usar leyendo
 ``SecOpsConfig.json`` (bloque ``ai``) — permitiendo una estrategia distinta por
-módulo, p.ej. Ollama para Sentinel y OpenAI para Aegis — y la construye con las
+módulo, p.ej. Ollama para Themis y OpenAI para Aegis — y la construye con las
 credenciales del ``.env``. El modelo puede sobreescribirse desde la config.
 """
 
@@ -49,7 +49,7 @@ def build_generator(module: Optional[str] = None) -> AIGenerator:
     Construye un ``AIGenerator`` para el módulo dado.
 
     Args:
-        module: Nombre del módulo consumidor ('aegis', 'sentinel', …). Si la
+        module: Nombre del módulo consumidor ('aegis', 'themis', …). Si la
             config no define una estrategia para él, se usa ``defaultStrategy``.
 
     Returns:

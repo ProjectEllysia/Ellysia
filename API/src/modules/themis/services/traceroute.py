@@ -1,5 +1,5 @@
 """
-Traceroute service for the Sentinel module.
+Traceroute service for the Themis module.
 
 Runs a single traceroute from the Ellysia server to a target host and parses the
 output into a normalized list of hops. This is invoked on demand (the first
@@ -58,8 +58,8 @@ class TracerouteService:
             Ordered list of hop dicts (see module docstring). Empty list if the
             traceroute binary is unavailable or produced no parseable hops.
         """
-        max_hops = CR.get_sentinel_traceroute_max_hops()
-        timeout = CR.get_sentinel_traceroute_timeout()
+        max_hops = CR.get_themis_traceroute_max_hops()
+        timeout = CR.get_themis_traceroute_timeout()
 
         cmd = self._build_command(target, max_hops)
         if cmd is None:

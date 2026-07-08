@@ -19,10 +19,10 @@ from unittest import mock
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.sentinel.managers import NmapScanManager, ProgramedScanManager
-from src.modules.sentinel.model import NmapScan, ScanStatus, ScanType
-from src.modules.sentinel.repositories import ProgramedScanRepository, ScanRepository
-from src.modules.sentinel.services.scheduling import Scheduler
+from src.modules.themis.managers import NmapScanManager, ProgramedScanManager
+from src.modules.themis.model import NmapScan, ScanStatus, ScanType
+from src.modules.themis.repositories import ProgramedScanRepository, ScanRepository
+from src.modules.themis.services.scheduling import Scheduler
 
 pytestmark = pytest.mark.integration
 

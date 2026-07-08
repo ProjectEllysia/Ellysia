@@ -5,7 +5,7 @@ All pure functions over finding dicts — no DB, no network.
 
 import pytest
 
-from src.modules.sentinel.lybra import (
+from src.modules.themis.lybra import (
     classify_exposure,
     compute_dedup_key,
     merge_findings,

@@ -6,7 +6,7 @@ injected ``opener``, so no real sockets or privileges are involved.
 
 import pytest
 
-from src.modules.sentinel.lybra import (
+from src.modules.themis.lybra import (
     scan_ports_sync,
     services_from_discovered_ports,
     port_concordance,

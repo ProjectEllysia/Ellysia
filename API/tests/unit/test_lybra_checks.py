@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from src.modules.sentinel.lybra import (
+from src.modules.themis.lybra import (
     load_checks,
     CheckRuntime,
     Response,

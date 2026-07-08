@@ -1,17 +1,17 @@
 """
-Repositories for the Sentinel security scanning module.
+Repositories for the Themis security scanning module.
 
 Provides typed data access for Scan, its polymorphic subtypes
-(NmapScan, NiktoScan, OpenVASScan), and SentinelDocument.
+(NmapScan, NiktoScan, OpenVASScan), and ThemisDocument.
 
 Classes:
     ScanRepository:                Repository for Scan and its polymorphic subtypes.
-    SentinelReportRepository:    Repository for SentinelDocument (PDF reports).
+    ThemisReportRepository:    Repository for ThemisDocument (PDF reports).
 
 Usage:
     with UnitOfWork() as uow:
         scan_repo = ScanRepository(uow)
-        doc_repo  = SentinelReportRepository(uow)
+        doc_repo  = ThemisReportRepository(uow)
 
         scan = scan_repo.get_by_id(42)
         docs = doc_repo.get_documents_by_user(user_id=1)
@@ -52,7 +52,7 @@ from .model import (
     ScanFolder,
     ScanStatus,
     ScanType,
-    SentinelDocument,
+    ThemisDocument,
     Traceroute,
 )
 
@@ -62,7 +62,7 @@ class ScanRepository(BaseRepository[Scan]):
     Repository for the Scan entity and its polymorphic subtypes.
 
     Inherits all generic CRUD and query operations from BaseRepository[Scan]
-    and adds domain-specific query methods for the Sentinel module.
+    and adds domain-specific query methods for the Themis module.
 
     Polymorphism is handled transparently by SQLAlchemy: querying Scan
     returns instances of NmapScan, NiktoScan, or OpenVASScan depending
@@ -587,52 +587,52 @@ class ScanRepository(BaseRepository[Scan]):
         return self.get_findings_by_scan(prev.id) if prev else []
 
 
-class SentinelReportRepository(BaseRepository[SentinelDocument]):
+class ThemisReportRepository(BaseRepository[ThemisDocument]):
     """
-    Repository for the SentinelDocument entity (PDF reports).
+    Repository for the ThemisDocument entity (PDF reports).
 
     Attributes:
-        _model:  SentinelDocument (inherited from BaseRepository).
+        _model:  ThemisDocument (inherited from BaseRepository).
         _uow:    Active Unit of Work (inherited from BaseRepository).
 
     Example:
     >>> with UnitOfWork() as uow:
-    ...     repo = SentinelReportRepository(uow)
+    ...     repo = ThemisReportRepository(uow)
     ...     doc  = repo.get_by_id(1)
     ...     repo.delete(doc)
     """
 
     def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(SentinelDocument, uow=uow, session=session)
+        super().__init__(ThemisDocument, uow=uow, session=session)
 
-    def get_document(self, scan_id: int) -> Optional[SentinelDocument]:
+    def get_document(self, scan_id: int) -> Optional[ThemisDocument]:
         return (
-            self._session.query(SentinelDocument)
-            .filter(SentinelDocument.scan_id == scan_id)
+            self._session.query(ThemisDocument)
+            .filter(ThemisDocument.scan_id == scan_id)
             .one_or_none()
         )
 
-    def get_latest_document(self, scan_id: int) -> Optional[SentinelDocument]:
+    def get_latest_document(self, scan_id: int) -> Optional[ThemisDocument]:
         return (
-            self._session.query(SentinelDocument)
-            .filter(SentinelDocument.scan_id == scan_id)
-            .order_by(SentinelDocument.created_at.desc())
+            self._session.query(ThemisDocument)
+            .filter(ThemisDocument.scan_id == scan_id)
+            .order_by(ThemisDocument.created_at.desc())
             .first()
         )
 
-    def get_documents_by_user(self, user_id: int) -> List[SentinelDocument]:
+    def get_documents_by_user(self, user_id: int) -> List[ThemisDocument]:
         return (
-            self._session.query(SentinelDocument)
-            .filter(SentinelDocument.user_id == user_id)
-            .order_by(SentinelDocument.created_at.desc())
+            self._session.query(ThemisDocument)
+            .filter(ThemisDocument.user_id == user_id)
+            .order_by(ThemisDocument.created_at.desc())
             .all()
         )
 
-    def get_documents_by_scan(self, scan_id: int) -> List[SentinelDocument]:
+    def get_documents_by_scan(self, scan_id: int) -> List[ThemisDocument]:
         return (
-            self._session.query(SentinelDocument)
-            .filter(SentinelDocument.scan_id == scan_id)
-            .order_by(SentinelDocument.created_at.desc())
+            self._session.query(ThemisDocument)
+            .filter(ThemisDocument.scan_id == scan_id)
+            .order_by(ThemisDocument.created_at.desc())
             .all()
         )
 

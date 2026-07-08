@@ -5,7 +5,7 @@ Excepciones del módulo de generación con IA.
 
 Estas excepciones representan fallos en la capa de *model calling* (transporte
 hacia el modelo) y en el parseo de su respuesta. Son independientes del dominio
-que consume el generador (Aegis, Sentinel, …).
+que consume el generador (Aegis, Themis, …).
 
 Históricamente vivían en ``aegis.exceptions``; ahora son propiedad de ``scribe``
 y aquél las reexporta por retrocompatibilidad.

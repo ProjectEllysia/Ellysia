@@ -1,5 +1,5 @@
 """
-Excepciones específicas del módulo Sentinel (escaneos de seguridad).
+Excepciones específicas del módulo Themis (escaneos de seguridad).
 
 Grupos: Escaneo, Reportes, Escaneo Programado, Validación, Carpetas.
 

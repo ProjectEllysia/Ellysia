@@ -83,15 +83,15 @@ def test_admin_manages_user_attributes(client, admin_user, make_user, auth_heade
     headers = auth_headers(admin_user)
 
     add = client.put(f"/users/{target.id}/attributes", headers=headers, json={
-        "attributes": ["sentinel_create"],
+        "attributes": ["themis_create"],
     })
     assert add.status_code == 200
 
     listed = client.get(f"/users/{target.id}/attributes", headers=headers)
     assert listed.status_code == 200
-    assert "sentinel_create" in listed.get_json()["attributes"]
+    assert "themis_create" in listed.get_json()["attributes"]
 
     removed = client.delete(f"/users/{target.id}/attributes", headers=headers, json={
-        "attributes": ["sentinel_create"],
+        "attributes": ["themis_create"],
     })
     assert removed.status_code == 200

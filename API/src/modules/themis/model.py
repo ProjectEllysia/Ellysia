@@ -1,5 +1,5 @@
 """
-Database models for Sentinel security scanning module.
+Database models for Themis security scanning module.
 
 This module contains SQLAlchemy models for vulnerability scanning including:
 - Network hosts and port management
@@ -19,10 +19,10 @@ Classes:
     OpenVASScan: OpenVAS vulnerability scan results.
     OpenVASVulnerability: Stored vulnerability definition.
     OpenVASScanResult: Scan result linking scan to vulnerability.
-    SentinelDocument: Generated PDF report from scan.
+    ThemisDocument: Generated PDF report from scan.
 
 Example:
-    >>> from src.modules.sentinel.model import Scan, NmapScan
+    >>> from src.modules.themis.model import Scan, NmapScan
     >>> scan = NmapScan(target="192.168.1.1", user_id=1)
     >>> print(scan)
     NmapScan(id=None, target='192.168.1.1', puertos_abiertos=0, inicio=N/A)
@@ -250,7 +250,7 @@ class Scan(Base):
     Relationships:
         user: User who initiated the scan.
         host: Target host if resolved.
-        sentinel_document: Generated PDF report (one-to-one).
+        themis_document: Generated PDF report (one-to-one).
 
     Columnas:
         id (int): Identificador único del escaneo.
@@ -281,8 +281,8 @@ class Scan(Base):
     folder_id = Column(Integer, ForeignKey("ScanFolder.id"), nullable=True)
     folder = relationship("ScanFolder", back_populates="scans")
 
-    sentinel_document = relationship(
-        "SentinelDocument",
+    themis_document = relationship(
+        "ThemisDocument",
         back_populates="scan",
         uselist=False,
     )
@@ -928,9 +928,9 @@ class EpssScore(Base):
 # DOCUMENT MODEL
 # =========================================================================
 
-class SentinelDocument(Document):
+class ThemisDocument(Document):
     """
-    PDF report generated from a Sentinel security scan.
+    PDF report generated from a Themis security scan.
 
     Inherits from Document (shared model) and adds scan-specific fields.
     Stores the generated PDF path, scan type, and cached AI enrichment.
@@ -968,7 +968,7 @@ class SentinelDocument(Document):
         - scan_type field allows filtering without joining Scan table.
     """
 
-    __tablename__ = "SentinelDocument"
+    __tablename__ = "ThemisDocument"
 
     id        = Column(Integer, ForeignKey("Document.id"), primary_key=True)
     scan_id   = Column(Integer, ForeignKey("Scan.id", ondelete="CASCADE"), nullable=False)
@@ -976,10 +976,10 @@ class SentinelDocument(Document):
 
     enrichment_json = Column(JSONB, nullable=True)
 
-    scan = relationship("Scan", back_populates="sentinel_document")
+    scan = relationship("Scan", back_populates="themis_document")
 
     __mapper_args__ = {
-        "polymorphic_identity": "sentinel",
+        "polymorphic_identity": "themis",
     }
 
     @property
@@ -994,12 +994,12 @@ class SentinelDocument(Document):
 
     def __repr__(self) -> str:
         """
-        Return a debug representation of the SentinelDocument instance.
+        Return a debug representation of the ThemisDocument instance.
 
         Returns:
             String with id, scan_id, scan_type, and status.
         """
         return (
-            f"<SentinelDocument(id={self.id}, scan_id={self.scan_id}, "
+            f"<ThemisDocument(id={self.id}, scan_id={self.scan_id}, "
             f"scan_type='{self.scan_type}', status='{self.status}')>"
         )

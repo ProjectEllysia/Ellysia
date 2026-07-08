@@ -505,10 +505,10 @@ Raises:
         Return a list of all available attributes that can be assigned to users.
 
         These attributes correspond to the AttributeType enum values and represent
-        fine-grained ABAC capabilities across modules (Aegis, Sentinel, Acheron).
+        fine-grained ABAC capabilities across modules (Aegis, Themis, Acheron).
 
         Returns:
-            List of attribute name strings (e.g. ["aegis_create", "sentinel_read", ...]).
+            List of attribute name strings (e.g. ["aegis_create", "themis_read", ...]).
         """
         from .services.permissions import AttributeType
         return [attr.value for attr in AttributeType.__members__.values() if isinstance(attr.value, str)]

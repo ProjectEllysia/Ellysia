@@ -12,9 +12,9 @@ from datetime import datetime
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.sentinel.model import NmapScan, NiktoScan, ScanStatus
-from src.modules.sentinel.repositories import ScanRepository, KbRepository
-from src.modules.sentinel.managers import LybraEngineManager, ScanManager
+from src.modules.themis.model import NmapScan, NiktoScan, ScanStatus
+from src.modules.themis.repositories import ScanRepository, KbRepository
+from src.modules.themis.managers import LybraEngineManager, ScanManager
 
 pytestmark = pytest.mark.integration
 
@@ -54,25 +54,25 @@ def _seed_nikto_scan(app, user_id: int) -> int:
 # --------------------------------------------------------- endpoint boundary
 
 def test_lybra_requires_authentication(client):
-    assert client.post("/sentinel/lybra", json={"sourceScanId": 1}).status_code == 401
+    assert client.post("/themis/lybra", json={"sourceScanId": 1}).status_code == 401
 
 
 def test_lybra_requires_create_attribute(client, regular_user, auth_headers):
-    # role_user lacks sentinel_create (same baseline as the Nmap start endpoint).
-    resp = client.post("/sentinel/lybra", headers=auth_headers(regular_user),
+    # role_user lacks themis_create (same baseline as the Nmap start endpoint).
+    resp = client.post("/themis/lybra", headers=auth_headers(regular_user),
                        json={"sourceScanId": 1})
     assert resp.status_code == 403
 
 
 def test_lybra_source_scan_not_found(client, admin_user, auth_headers):
-    resp = client.post("/sentinel/lybra", headers=auth_headers(admin_user),
+    resp = client.post("/themis/lybra", headers=auth_headers(admin_user),
                        json={"sourceScanId": 999999})
     assert resp.status_code == 404
 
 
 def test_lybra_requires_a_mode(client, admin_user, auth_headers):
     # Neither sourceScanId nor target -> schema rejects it.
-    resp = client.post("/sentinel/lybra", headers=auth_headers(admin_user), json={})
+    resp = client.post("/themis/lybra", headers=auth_headers(admin_user), json={})
     assert resp.status_code in (400, 422)
 
 
@@ -191,7 +191,7 @@ def test_lybra_self_discovery_reuses_host_created_by_nmap(app, admin_user):
 
 def test_lybra_rejects_non_nmap_source(client, app, admin_user, auth_headers):
     nikto_id = _seed_nikto_scan(app, admin_user.id)
-    resp = client.post("/sentinel/lybra", headers=auth_headers(admin_user),
+    resp = client.post("/themis/lybra", headers=auth_headers(admin_user),
                        json={"sourceScanId": nikto_id})
     assert resp.status_code == 400
 
@@ -201,7 +201,7 @@ def test_lybra_rejects_another_users_source(client, app, make_user, auth_headers
     other = make_user(role="role_admin")
     nmap_id = _seed_nmap_scan(app, owner.id)
     # The source scan belongs to `owner`; `other` must not be able to use it.
-    resp = client.post("/sentinel/lybra", headers=auth_headers(other),
+    resp = client.post("/themis/lybra", headers=auth_headers(other),
                        json={"sourceScanId": nmap_id})
     assert resp.status_code == 404
 
@@ -282,8 +282,8 @@ def test_lybra_version_match_produces_cve_finding(app, admin_user):
 def test_lybra_active_check_persists_confirmed_finding(app, admin_user, monkeypatch):
     # Enable active checks and stub the HTTP probe so no real network is hit.
     import src.modules.system.config_reading as CR
-    from src.modules.sentinel.lybra import checks as checks_mod
-    from src.modules.sentinel.lybra.checks import Response
+    from src.modules.themis.lybra import checks as checks_mod
+    from src.modules.themis.lybra.checks import Response
 
     monkeypatch.setattr(CR, "is_lybra_active_checks_enabled", lambda: True)
 
@@ -352,21 +352,21 @@ def test_accept_finding_via_endpoint(client, app, admin_user, auth_headers):
     with app.app_context():
         finding_id = _run_scan_and_get_cve_finding_id(app, admin_user.id, nmap_id)
 
-    resp = client.patch(f"/sentinel/findings/{finding_id}",
+    resp = client.patch(f"/themis/findings/{finding_id}",
                        headers=auth_headers(admin_user), json={"state": "accepted"})
     assert resp.status_code == 200
     assert resp.get_json()["state"] == "accepted"
 
 
 def test_accept_finding_requires_update_attribute(client, app, regular_user, auth_headers):
-    # role_user lacks sentinel_update.
-    resp = client.patch("/sentinel/findings/1", headers=auth_headers(regular_user),
+    # role_user lacks themis_update.
+    resp = client.patch("/themis/findings/1", headers=auth_headers(regular_user),
                        json={"state": "accepted"})
     assert resp.status_code == 403
 
 
 def test_accept_nonexistent_finding_is_404(client, admin_user, auth_headers):
-    resp = client.patch("/sentinel/findings/999999",
+    resp = client.patch("/themis/findings/999999",
                        headers=auth_headers(admin_user), json={"state": "accepted"})
     assert resp.status_code == 404
 
@@ -374,7 +374,7 @@ def test_accept_nonexistent_finding_is_404(client, admin_user, auth_headers):
 def test_lybra_fingerprinting_records_agreement_with_nmap(app, admin_user, monkeypatch):
     # Enable fingerprinting and stub the HTTP probe (no real network).
     import src.modules.system.config_reading as CR
-    from src.modules.sentinel.lybra.checks import HttpProbe, Response
+    from src.modules.themis.lybra.checks import HttpProbe, Response
 
     monkeypatch.setattr(CR, "is_lybra_fingerprinting_enabled", lambda: True)
 
@@ -421,7 +421,7 @@ def test_lybra_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, mon
     look up and a self-discovery-only scan finds zero CVEs, ever.
     """
     import src.modules.system.config_reading as CR
-    from src.modules.sentinel.lybra.checks import HttpProbe, Response
+    from src.modules.themis.lybra.checks import HttpProbe, Response
 
     _seed_kb_apache_cve(app)
     monkeypatch.setattr(CR, "is_lybra_fingerprinting_enabled", lambda: True)
@@ -465,7 +465,7 @@ def test_lybra_scan_surfaces_in_results_endpoint(client, app, admin_user, auth_h
         )
         mgr._run_lybra(escan.id, nmap_id)
 
-    resp = client.get("/sentinel/results?type=lybra&page=1&per_page=10",
+    resp = client.get("/themis/results?type=lybra&page=1&per_page=10",
                      headers=auth_headers(admin_user))
     assert resp.status_code == 200
     body = resp.get_json()

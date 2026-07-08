@@ -220,22 +220,22 @@ class UserAttribute(Base):
     ABAC capability attributes assigned to a user.
 
     Each row represents a single fine-grained permission (e.g.
-    "sentinel_read", "aegis_create"). Role-level identity
+    "themis_read", "aegis_create"). Role-level identity
     (root / admin / user) is stored exclusively in User.role and
     must NEVER appear here.
 
     Attributes:
         user_id: Foreign key to User.id (part of composite PK).
         attribute_name: Attribute identifier matching a Permission enum value
-                        (e.g. "sentinel_read", "acheron_delete").
+                        (e.g. "themis_read", "acheron_delete").
 
     Relationships:
         user: User that owns this attribute assignment.
 
     Example:
-    >>> ua = UserAttribute(user_id=1, attribute_name="sentinel_read")
+    >>> ua = UserAttribute(user_id=1, attribute_name="themis_read")
     >>> print(ua)
-    'UserAttribute(user_id=1, attribute_name='sentinel_read')'
+    'UserAttribute(user_id=1, attribute_name='themis_read')'
     """
     __tablename__ = "UserAttribute"
 

@@ -142,7 +142,7 @@
     "defaultStrategy": "openai",
     "modules": {
       "aegis": "openai",
-      "sentinel": "openai"
+      "themis": "openai"
     }
   },
   "appVersion": "4.2",
@@ -1150,12 +1150,12 @@
       "recovery_codes_count": 10
     }
   },
-  "sentinel": {
+  "themis": {
     "areLocalIpsAllowed": true,
     "directories": {
-      "csv": "data/sentinel/csv",
-      "output": "data/sentinel/output",
-      "resources": "../resources/sentinel"
+      "csv": "data/themis/csv",
+      "output": "data/themis/output",
+      "resources": "../resources/themis"
     },
     "enabled": true,
     "folders": {

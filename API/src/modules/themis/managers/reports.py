@@ -1,4 +1,4 @@
-"""SentinelReportManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
+"""ThemisReportManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
 import os
@@ -8,8 +8,8 @@ from src.modules.aegis.exceptions import DocumentError
 from src.modules.shared import Document, assert_owned, utcnow_naive
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import read_repo
-from ..repositories import SentinelReportRepository
-from ..model import SentinelDocument
+from ..repositories import ThemisReportRepository
+from ..model import ThemisDocument
 from ..services import PDFCreator
 
 from .scan import ScanManager
@@ -18,9 +18,9 @@ from .scan import ScanManager
 logger = logging.getLogger(__name__)
 
 
-class SentinelReportManager:
+class ThemisReportManager:
     """
-    Manager for Sentinel document lifecycle and PDF report generation.
+    Manager for Themis document lifecycle and PDF report generation.
 
     Handles document CRUD operations, ownership verification, and async
     PDF generation for security scan reports.
@@ -34,49 +34,49 @@ class SentinelReportManager:
 
     @staticmethod
     def _create_document(scan, ai_report: bool) -> int:
-        """Create a SentinelDocument for a scan and return its ID."""
+        """Create a ThemisDocument for a scan and return its ID."""
         with UnitOfWork() as uow:
-            document = SentinelDocument(
+            document = ThemisDocument(
                 scan_id         = scan.id,
                 scan_type       = scan.scan_type,
-                document_type   = "sentinel",
+                document_type   = "themis",
                 filename        = "",
                 format          = "pdf",
                 status          = "running",
                 user_id         = scan.user_id,
                 is_ai_generated = 1 if ai_report else 0,
             )
-            SentinelReportRepository(uow).save(document)
+            ThemisReportRepository(uow).save(document)
             # Durable antes de encolar: el worker corre en otro proceso.
             uow.commit_for_handoff()
 
         return document.id  # type: ignore
 
-    def get_document_by_id(self, document_id: int) -> Optional[SentinelDocument]:
-        """Retrieve a SentinelDocument by its primary key."""
-        doc = read_repo(SentinelReportRepository).get_by_id(document_id)
+    def get_document_by_id(self, document_id: int) -> Optional[ThemisDocument]:
+        """Retrieve a ThemisDocument by its primary key."""
+        doc = read_repo(ThemisReportRepository).get_by_id(document_id)
 
         if not doc:
             logger.warning(f"Documento {document_id} no encontrado")
 
         return doc
 
-    def get_latest_document_by_scan_id(self, scan_id: int) -> Optional[SentinelDocument]:
+    def get_latest_document_by_scan_id(self, scan_id: int) -> Optional[ThemisDocument]:
         """Retrieve the most recently created document for a scan."""
-        doc = read_repo(SentinelReportRepository).get_latest_document(scan_id)
+        doc = read_repo(ThemisReportRepository).get_latest_document(scan_id)
 
         return doc
 
-    def get_documents_for_user(self, user_id: int) -> List[SentinelDocument]:
+    def get_documents_for_user(self, user_id: int) -> List[ThemisDocument]:
         """Retrieve all documents belonging to the active user."""
-        docs = read_repo(SentinelReportRepository).get_documents_by_user(user_id)  # type: ignore
+        docs = read_repo(ThemisReportRepository).get_documents_by_user(user_id)  # type: ignore
 
         logger.info(f"Se obtuvieron {len(docs)} documentos")
         return docs
 
-    def get_documents_by_scan_id(self, scan_id: int) -> List[SentinelDocument]:
+    def get_documents_by_scan_id(self, scan_id: int) -> List[ThemisDocument]:
         """Retrieve all documents associated with a specific scan."""
-        docs = read_repo(SentinelReportRepository).get_documents_by_scan(scan_id)
+        docs = read_repo(ThemisReportRepository).get_documents_by_scan(scan_id)
 
         logger.info(f"Se obtuvieron {len(docs)} documentos para scan {scan_id}")
         return docs
@@ -92,7 +92,7 @@ class SentinelReportManager:
             DocumentError: If the document was not found.
         """
         with UnitOfWork() as uow:
-            doc_repo = SentinelReportRepository(uow)
+            doc_repo = ThemisReportRepository(uow)
             doc = doc_repo.get_by_id(document_id)
 
             if not doc:
@@ -122,13 +122,13 @@ class SentinelReportManager:
             DocumentError: If document not found or not owned by user.
         """
         return assert_owned(
-            SentinelReportRepository, document_id, user_id,
+            ThemisReportRepository, document_id, user_id,
             lambda eid: DocumentError(f"Documento {eid} no encontrado"),
         )
 
     def generate_report(self, scan_id: int, ai_report: bool = False, strategy_class=None) -> int:
         """
-        Create a SentinelDocument and start async PDF generation.
+        Create a ThemisDocument and start async PDF generation.
 
         Args:
             scan_id:        Primary key of the scan.
@@ -136,7 +136,7 @@ class SentinelReportManager:
             strategy_class: Printing strategy class for the scan type.
 
         Returns:
-            Primary key of the created SentinelDocument.
+            Primary key of the created ThemisDocument.
         """
         scan_manager = ScanManager.resolve_manager(scan_id)
         scan = scan_manager.get_scan_by_id(scan_id)
@@ -146,11 +146,11 @@ class SentinelReportManager:
         doc_id = self._create_document(scan, ai_report)
 
         self._tq.submit(
-            func=SentinelReportManager.execute_report_generation,
+            func=ThemisReportManager.execute_report_generation,
             args=(doc_id, scan.id, ai_report),
             name=f"PDFGeneration-Scan-{scan.id}",
-            category="sentinel.report",
-            external_id=f"sentinel-doc:{doc_id}",
+            category="themis.report",
+            external_id=f"themis-doc:{doc_id}",
         )
         return doc_id  # type: ignore
 
@@ -158,7 +158,7 @@ class SentinelReportManager:
     def execute_report_generation(doc_id: int, scan_id: int, ai_report: bool) -> None:
         """Entry point submitted to the TaskQueue for background PDF generation."""
         with job_context():
-            SentinelReportManager()._generate_pdf_async(doc_id, scan_id, ai_report)
+            ThemisReportManager()._generate_pdf_async(doc_id, scan_id, ai_report)
 
     def _generate_pdf_async(
         self,
@@ -173,7 +173,7 @@ class SentinelReportManager:
             pdf_path = pdf_creator.print_pdf(ai_report=ai_report)
 
             with UnitOfWork() as uow:
-                doc = SentinelReportRepository(uow).get_by_id(document_id)
+                doc = ThemisReportRepository(uow).get_by_id(document_id)
                 if doc:
                     doc.filename     = pdf_path  # type: ignore
                     doc.status       = "done"  # type: ignore
@@ -197,7 +197,7 @@ class SentinelReportManager:
         """Update document status in database."""
         try:
             with UnitOfWork() as uow:
-                doc = SentinelReportRepository(uow).get_by_id(document_id)
+                doc = ThemisReportRepository(uow).get_by_id(document_id)
                 if doc:
                     doc.status = status  # type: ignore
         except (OSError, RuntimeError) as e:

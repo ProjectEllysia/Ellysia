@@ -53,8 +53,8 @@ from .analyzers import NmapAIWriter, NiktoAIWriter, OpenVASAIWriter
 
 
 
-class SentinelTool(Enum):
-    """Enumeración de herramientas disponibles en Sentinel"""
+class ThemisTool(Enum):
+    """Enumeración de herramientas disponibles en Themis"""
     NMAP    = "nmap"
     NIKTO   = "nikto"
     OPENVAS = "openvas"
@@ -510,7 +510,7 @@ class PrintingStrategy(ABC):
         <b>Nota:</b> El contenido de esta sección ha sido generado mediante
         inteligencia artificial y se basa en el análisis automático de los datos del escaneo.
         Si bien se ha diseñado para proporcionar una evaluación de seguridad objetiva, los
-        resultados deben ser interpretados por un profesional cualificado, pues Sentinel no cuenta
+        resultados deben ser interpretados por un profesional cualificado, pues Themis no cuenta
         con todo el contexto en el que se encuentran los hosts escaneados. Ellysia no garantiza
         la exactitud, completitud o aplicabilidad de las recomendaciones generadas. Este análisis con
         inteligencia artificial no sustituye —sino complementa— una auditoría de seguridad manual o la evaluación
@@ -725,7 +725,7 @@ class PDFCreator:
     """
 
     def __init__(self, scan_id: int) -> None:
-        self.directory = CR.get_directory_of(CR.DirectoryType.OUTPUT_SENTINEL)
+        self.directory = CR.get_directory_of(CR.DirectoryType.OUTPUT_THEMIS)
         self.printing_strategy = PrintingStrategy.resolve_printing_strategy(scan_id)
         self.scan = self.printing_strategy.scan
 
@@ -773,7 +773,7 @@ class PDFCreator:
         if page_num > 1:
             logo_path = getattr(self, "_header_logo_path", None)
             if logo_path is None:
-                directory_type = CR.DirectoryType.RESOURCES_SENTINEL
+                directory_type = CR.DirectoryType.RESOURCES_THEMIS
                 resource_directory = CR.get_directory_of(directory_type)
                 picture_name = self.printing_strategy.get_picture_name()
                 logo_path = os.path.join(resource_directory, picture_name)
@@ -897,7 +897,7 @@ class PDFCreator:
         Returns:
             A Table flowable (full-width, main-colored) with the logo centred inside.
         """
-        directory_type = CR.DirectoryType.RESOURCES_SENTINEL
+        directory_type = CR.DirectoryType.RESOURCES_THEMIS
         resource_directory = CR.get_directory_of(directory_type)
         picture_name = self.printing_strategy.get_picture_name()
         image_filename = os.path.join(resource_directory, picture_name)
@@ -1098,7 +1098,7 @@ class NmapPrintingStrategy(PrintingStrategy):
         super().__init__(scan)
         self.writer = NmapAIWriter()
 
-        palette_config = CR.get_tool_color_palette(SentinelTool.NMAP)
+        palette_config = CR.get_tool_color_palette(ThemisTool.NMAP)
 
         self.color_palette = {
             ColorType.BLACK: palette_config.get("black", "#121212"),
@@ -1227,7 +1227,7 @@ class NmapPrintingStrategy(PrintingStrategy):
         Returns:
             Logo filename.
         """
-        picture_name = "Sentinel-Blue-Bg"
+        picture_name = "Themis-Blue-Bg"
         return picture_name + "Dark.png" if dark else picture_name + "Light.png"
 
     def get_report_title(self) -> str:
@@ -1261,7 +1261,7 @@ class OpenVASPrintingStrategy(PrintingStrategy):
         super().__init__(scan)
         self.writer = OpenVASAIWriter()
 
-        palette_config = CR.get_tool_color_palette(SentinelTool.OPENVAS)
+        palette_config = CR.get_tool_color_palette(ThemisTool.OPENVAS)
 
         self.color_palette = {
             ColorType.BLACK: palette_config.get("black", "#0D2818"),
@@ -1614,7 +1614,7 @@ class OpenVASPrintingStrategy(PrintingStrategy):
         Returns:
             Logo filename.
         """
-        picture_name = "Sentinel-Green-Bg"
+        picture_name = "Themis-Green-Bg"
         return picture_name + "Dark.png" if dark else picture_name + "Light.png"
 
     def get_report_title(self) -> str:
@@ -1649,7 +1649,7 @@ class NiktoPrintingStrategy(PrintingStrategy):
         super().__init__(scan)
         self.writer = NiktoAIWriter()
 
-        palette_config = CR.get_tool_color_palette(SentinelTool.NIKTO)
+        palette_config = CR.get_tool_color_palette(ThemisTool.NIKTO)
 
         self.color_palette = {
             ColorType.BLACK: palette_config.get("black", "#4B2500"),
@@ -1909,7 +1909,7 @@ class NiktoPrintingStrategy(PrintingStrategy):
         return "_Nikto.pdf"
 
     def get_picture_name(self, dark: bool = False) -> str:
-        picture_name = "Sentinel-Salmon-Bg"
+        picture_name = "Themis-Salmon-Bg"
         return picture_name + "Dark.png" if dark else picture_name + "Light.png"
 
     def get_report_title(self) -> str:

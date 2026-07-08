@@ -953,7 +953,7 @@ class IrisManager(TaskTrackingMixin):
 class IrisReportManager:
     """Manager for IrisDocument lifecycle and async PDF report generation.
 
-    Mirrors ``SentinelReportManager``: creates an ``IrisDocument`` row in
+    Mirrors ``ThemisReportManager``: creates an ``IrisDocument`` row in
     ``running`` state, submits a TaskQueue job (category ``"iris.report"``)
     that renders the PDF via :class:`IrisPDFCreator`, and exposes the
     CRUD/ownership operations the endpoints need.

@@ -7,7 +7,7 @@ exercised here.
 
 import pytest
 
-from src.modules.sentinel.lybra import (
+from src.modules.themis.lybra import (
     version_compare,
     version_in_range,
     normalize_cpe_to_23,

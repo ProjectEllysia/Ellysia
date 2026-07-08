@@ -19,7 +19,7 @@ ScanManager no longer inherits from BaseManager.
 Fase 3 del refactor de estructura: este paquete sustituye al antiguo fichero
 monolítico ``managers.py`` (~2700 líneas). Cada clase vive en su propio
 módulo; este ``__init__.py`` reexporta los nombres públicos para que
-``from src.modules.sentinel.managers import X`` (y el registro de entry
+``from src.modules.themis.managers import X`` (y el registro de entry
 points de la TaskQueue, que referencia estos símbolos por atributo de
 módulo) sigan funcionando sin cambios.
 
@@ -41,7 +41,7 @@ from .nikto import NiktoScanManager
 from .openvas import OpenVASScanManager
 from .lybra_engine import LybraEngineManager
 from .kb import KbSyncManager
-from .reports import SentinelReportManager
+from .reports import ThemisReportManager
 
 __all__ = [
     "TaskQueue",
@@ -55,5 +55,5 @@ __all__ = [
     "OpenVASScanManager",
     "LybraEngineManager",
     "KbSyncManager",
-    "SentinelReportManager",
+    "ThemisReportManager",
 ]

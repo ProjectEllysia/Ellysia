@@ -1,4 +1,4 @@
-"""ScanHistoryManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
+"""ScanHistoryManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
 from typing import List
@@ -52,7 +52,7 @@ class ScanHistoryManager:
             JSON-serializable statistics payload (see HistoryStatsService.build).
         """
         scan_type = ScanType(scan_type)
-        limit = CR.get_sentinel_history_size()
+        limit = CR.get_themis_history_size()
         with UnitOfWork() as uow:
             scans = ScanRepository(uow).get_recent_finished(
                 user_id, target, scan_type, limit

@@ -19,14 +19,14 @@ from datetime import datetime
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.sentinel.model import NmapScan, NiktoScan, OpenVASScan, ScanStatus
-from src.modules.sentinel.repositories import ScanRepository, KbRepository
-from src.modules.sentinel.managers import (
+from src.modules.themis.model import NmapScan, NiktoScan, OpenVASScan, ScanStatus
+from src.modules.themis.repositories import ScanRepository, KbRepository
+from src.modules.themis.managers import (
     LybraEngineManager, ScanManager,
     NmapScanManager, NiktoScanManager, OpenVASScanManager,
 )
-from src.modules.sentinel.lybra import DEFAULT_PORTS
-from src.modules.sentinel.services.parsing import validate_port
+from src.modules.themis.lybra import DEFAULT_PORTS
+from src.modules.themis.services.parsing import validate_port
 
 pytestmark = pytest.mark.integration
 
@@ -265,7 +265,7 @@ def test_lybra_endpoint_accepts_deep_flag(client, app, admin_user, auth_headers,
         return 555
     monkeypatch.setattr(LybraEngineManager, "run_scan", fake_run_scan)
 
-    resp = client.post("/sentinel/lybra", headers=auth_headers(admin_user),
+    resp = client.post("/themis/lybra", headers=auth_headers(admin_user),
                        json={"sourceScanId": nmap_id, "deep": True})
 
     assert resp.status_code == 201
@@ -281,7 +281,7 @@ def test_lybra_endpoint_deep_defaults_to_false(client, app, admin_user, auth_hea
         return 556
     monkeypatch.setattr(LybraEngineManager, "run_scan", fake_run_scan)
 
-    resp = client.post("/sentinel/lybra", headers=auth_headers(admin_user),
+    resp = client.post("/themis/lybra", headers=auth_headers(admin_user),
                        json={"sourceScanId": nmap_id})
 
     assert resp.status_code == 201

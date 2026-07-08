@@ -153,7 +153,7 @@ def _initialized_db(_sqlite_url):
     """
     # Importar run arrastra todos los blueprints y, con ellos, TODOS los modelos
     # de cada módulo a Base.metadata. Debe ocurrir antes del shim para que se
-    # parcheen también las tablas de iris/sentinel/aegis.
+    # parcheen también las tablas de iris/themis/aegis.
     import run  # noqa: F401
 
     _patch_postgres_types()

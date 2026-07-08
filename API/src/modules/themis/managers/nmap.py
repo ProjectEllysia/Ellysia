@@ -1,4 +1,4 @@
-"""NmapScanManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
+"""NmapScanManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
 from typing import Optional
@@ -91,7 +91,7 @@ class NmapScanManager(ScanManager):
     def execute_nmap_scan(scan_id: int, target_host: str, target_ports: str, timeout: int) -> None:
         """Entry point submitted to the TaskQueue. Executes the Nmap scan with progress and cancellation support."""
         with job_context() as job:
-            from src.modules.sentinel.services.tasks import NmapScanTask
+            from src.modules.themis.services.tasks import NmapScanTask
 
             task = NmapScanTask(
                 target_host=target_host,

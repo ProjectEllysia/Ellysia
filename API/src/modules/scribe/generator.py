@@ -13,7 +13,7 @@ transversales comunes a todos los backends:
     — Ejecutor de herramientas por defecto (``web_search``).
 
 El generador no sabe nada del dominio: devuelve un ``AIResult`` con el texto
-crudo y deja el parseo/validación a quien lo consume (Aegis, Sentinel, …).
+crudo y deja el parseo/validación a quien lo consume (Aegis, Themis, …).
 """
 
 from __future__ import annotations

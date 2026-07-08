@@ -1,12 +1,12 @@
 """
-src.modules.sentinel - Módulo de escaneos de seguridad
+src.modules.themis - Módulo de escaneos de seguridad
 
 Exponente:
     - NmapScanManager: Escaneo de puertos
     - NiktoScanManager: Escaneo web
     - OpenVASScanManager: Escaneo de vulnerabilidades
     - Modelos: Scan, Host, Port, etc.
-    - Endpoints: sentinel_bp
+    - Endpoints: themis_bp
 """
 
 from src.modules.system.taskqueue import QueueRegistry
@@ -26,7 +26,7 @@ from .model import (
     ScanFolder,
     ScanIncident,
     ScanStatus,
-    SentinelDocument,
+    ThemisDocument,
     TargetPort,
 )
 
@@ -42,7 +42,7 @@ from .managers import (
 from .repositories import (
     ProgramedScanRepository,
     ScanRepository,
-    SentinelReportRepository,
+    ThemisReportRepository,
 )
 
 from .services import (
@@ -53,21 +53,21 @@ from .services import (
     Scheduler,
 )
 
-from .endpoints import sentinel_blp
+from .endpoints import themis_blp
 
 # Registro de las categorías de cola de este módulo (OCP).
-QueueRegistry.register("sentinel.scan", "sentinel.report", "sentinel.traceroute")
+QueueRegistry.register("themis.scan", "themis.report", "themis.traceroute")
 
 __all__ = [
     "Host", "NiktoIncident", "NiktoScan", "NmapScan", "OpenPort",
     "OpenVASScan", "OpenVASScanResult", "OpenVASVulnerability", "Port",
     "ProgramedScan", "Scan", "ScanFolder", "ScanIncident", "ScanStatus",
-    "SentinelDocument", "TargetPort",
+    "ThemisDocument", "TargetPort",
     "NmapScanManager", "NiktoScanManager", "OpenVASScanManager",
     "ProgramedScanManager", "ScanManager", "ScanFolderManager",
     "ProgramedScanRepository", "ScanRepository", "ScanFolderRepository",
-    "SentinelReportRepository",
-    "sentinel_blp",
+    "ThemisReportRepository",
+    "themis_blp",
     "PDFCreator", "NmapPrintingStrategy", "NiktoPrintingStrategy",
     "OpenVASPrintingStrategy",
     "Scheduler",

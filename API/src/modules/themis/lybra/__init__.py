@@ -2,8 +2,8 @@
 
 This package holds everything that makes Lybra a scanner in its own right,
 rather than an orchestrator that just runs Nmap, Nikto and OpenVAS. By project
-convention the managers live in ``sentinel/managers.py`` and the repositories in
-``sentinel/repositories.py``; the detection logic lives here.
+convention the managers live in ``themis/managers.py`` and the repositories in
+``themis/repositories.py``; the detection logic lives here.
 
 A scan flows down through the engine's layers, and each module here owns one of
 them:

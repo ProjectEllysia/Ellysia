@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.modules.sentinel.lybra import nikto_incident_to_finding, openvas_result_to_finding
+from src.modules.themis.lybra import nikto_incident_to_finding, openvas_result_to_finding
 
 pytestmark = pytest.mark.unit
 

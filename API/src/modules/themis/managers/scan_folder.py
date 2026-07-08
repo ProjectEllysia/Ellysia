@@ -1,4 +1,4 @@
-"""ScanFolderManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
+"""ScanFolderManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
 import re
@@ -150,7 +150,7 @@ class ScanFolderManager:
         Returns:
             Dict with keys ``folders`` (list) and ``unfoldered`` (dict).
         """
-        default_name = CR.get_sentinel_default_folder_name()
+        default_name = CR.get_themis_default_folder_name()
 
         with UnitOfWork() as uow:
             folder_repo = ScanFolderRepository(uow)

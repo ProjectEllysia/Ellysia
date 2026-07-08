@@ -1,5 +1,5 @@
 """
-Historical statistics for Sentinel scans.
+Historical statistics for Themis scans.
 
 This module computes the chart-ready payload that describes how a host has
 evolved across the user's last *N* scans. It is the single source of truth

@@ -1,4 +1,4 @@
-"""LybraEngineManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
+"""LybraEngineManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
 from dataclasses import replace
