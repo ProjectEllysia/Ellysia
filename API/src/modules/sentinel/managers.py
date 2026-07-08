@@ -1139,6 +1139,19 @@ class ScanHistoryManager:
         with UnitOfWork() as uow:
             return ScanRepository(uow).get_scanned_targets(user_id)
 
+    def get_stats(self, user_id: int) -> dict:
+        """Return the user's scan counts grouped by type.
+
+        Args:
+            user_id: Owner user primary key (scopes the counts to this user).
+
+        Returns:
+            A dict with per-type counts (``nmap``/``nikto``/``openvas``/
+            ``ellysia``) plus a ``total`` (see ``ScanRepository.get_stats``).
+        """
+        with UnitOfWork() as uow:
+            return ScanRepository(uow).get_stats(user_id)
+
     def get_host_history(self, user_id: int, target: str, scan_type: ScanType) -> dict:
         """Build the historical statistics payload for a host + tool.
 
