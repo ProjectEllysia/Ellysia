@@ -211,7 +211,7 @@ class Scheduler:
 
     @classmethod
     def _schedule_kb_sync(cls) -> None:
-        """Register the nightly Ellysia KB sync job, if enabled in config.
+        """Register the nightly Lybra KB sync job, if enabled in config.
 
         Deferred imports avoid a circular dependency (managers import this
         module transitively). The job is a plain recurring cron, independent of
@@ -224,12 +224,12 @@ class Scheduler:
         cls._scheduler.add_job(  # type: ignore[union-attr]
             func=KbSyncManager.execute_kb_sync,
             trigger=CronTrigger.from_crontab(CR.get_kb_sync_cron(), timezone=timezone.utc),
-            id="ellysia_kb_sync",
+            id="lybra_kb_sync",
             replace_existing=True,
             max_instances=1,
-            name="Ellysia KB sync",
+            name="Lybra KB sync",
         )
-        logger.info("Scheduled Ellysia KB sync (%s)", CR.get_kb_sync_cron())
+        logger.info("Scheduled Lybra KB sync (%s)", CR.get_kb_sync_cron())
 
     @classmethod
     def _sync_from_db(cls) -> None:

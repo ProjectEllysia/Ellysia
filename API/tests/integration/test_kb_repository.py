@@ -1,4 +1,4 @@
-"""Integration tests for the Ellysia KB repository (Fase 2).
+"""Integration tests for the Lybra KB repository (Fase 2).
 
 Exercises the matcher's central query (``cves_for_cpe``) and the upsert
 idempotency against the (SQLite) database, without any network.

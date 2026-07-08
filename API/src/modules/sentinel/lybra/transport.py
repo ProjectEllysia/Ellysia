@@ -1,7 +1,7 @@
-"""Ellysia's own port discovery — the transport layer.
+"""Lybra's own port discovery — the transport layer.
 
 This is the always-available foundation of the roadmap's transport plan: an
-unprivileged TCP ``connect`` scan built on asyncio. It lets an Ellysia scan find
+unprivileged TCP ``connect`` scan built on asyncio. It lets an Lybra scan find
 open ports for itself, so a scan no longer has to be handed the ports from a
 prior Nmap run.
 
@@ -193,7 +193,7 @@ def port_concordance(own_ports: Iterable[int], nmap_ports: Iterable[int]) -> flo
     to disagree about.
 
     Args:
-        own_ports: The ports Ellysia's connect scan found.
+        own_ports: The ports Lybra's connect scan found.
         nmap_ports: The ports Nmap found (the oracle).
 
     Returns:

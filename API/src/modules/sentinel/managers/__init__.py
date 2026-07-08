@@ -5,7 +5,7 @@ This package provides manager classes for coordinating security scans:
 - NmapScanManager: Network exploration and security scanning.
 - NiktoScanManager: Web server vulnerability scanning.
 - OpenVASScanManager: Comprehensive vulnerability management.
-- EllysiaEngineManager: self-built detection engine (Ellysia).
+- LybraEngineManager: self-built detection engine (Lybra).
 
 Each manager handles the complete lifecycle of a scan:
 - Creating scan records via ScanRepository.
@@ -39,7 +39,7 @@ from .traceroute import TracerouteManager
 from .nmap import NmapScanManager
 from .nikto import NiktoScanManager
 from .openvas import OpenVASScanManager
-from .ellysia_engine import EllysiaEngineManager
+from .lybra_engine import LybraEngineManager
 from .kb import KbSyncManager
 from .reports import SentinelReportManager
 
@@ -53,7 +53,7 @@ __all__ = [
     "NmapScanManager",
     "NiktoScanManager",
     "OpenVASScanManager",
-    "EllysiaEngineManager",
+    "LybraEngineManager",
     "KbSyncManager",
     "SentinelReportManager",
 ]

@@ -12,7 +12,7 @@ from ..model import (
     Scan,
     ScanType,
 )
-from ..ellysia import (
+from ..lybra import (
     compute_dedup_key,
     openvas_result_to_finding,
 )
@@ -191,7 +191,7 @@ class OpenVASScanManager(ScanManager):
         scan_repo.persist_openvas_results(scan, scan_results_data, vulnerability_map)
 
         # Additive: also record each result as a normalized Finding (see
-        # ellysia/adapters.py). Does not replace the OpenVASScanResult write
+        # lybra/adapters.py). Does not replace the OpenVASScanResult write
         # above — the PDF report and history charts still read that.
         host_cache: dict = {}
         findings = []

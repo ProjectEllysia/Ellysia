@@ -34,7 +34,7 @@ from src.modules.shared import utcnow_naive
 from .model import (
     CpeMatch,
     CveEntry,
-    EllysiaScan,
+    LybraScan,
     EpssScore,
     Finding,
     Host,
@@ -206,7 +206,7 @@ class ScanRepository(BaseRepository[Scan]):
             .group_by(Scan.scan_type)
             .all()
         )
-        counts = {"nmap": 0, "nikto": 0, "openvas": 0, "ellysia": 0}
+        counts = {"nmap": 0, "nikto": 0, "openvas": 0, "lybra": 0}
         for scan_type_val, count in results:
             key = scan_type_val.value if hasattr(scan_type_val, "value") else str(scan_type_val)
             if key in counts:
@@ -409,7 +409,7 @@ class ScanRepository(BaseRepository[Scan]):
     def get_host_by_ip(self, ip_address: str) -> Optional[Host]:
         """Return any existing Host row for this IP, regardless of hostname.
 
-        Used by callers that only know a bare IP (e.g. Ellysia's self-discovery
+        Used by callers that only know a bare IP (e.g. Lybra's self-discovery
         mode) so they reuse the Host record another scanner already created for
         the same physical target — Nmap, say, which may know a resolved
         hostname — instead of creating a duplicate keyed by the bare IP (Host
@@ -516,27 +516,27 @@ class ScanRepository(BaseRepository[Scan]):
             self._session.add(scan_result)
 
     # =========================================================================
-    # ELLYSIA ENGINE
+    # LYBRA ENGINE
     # =========================================================================
 
-    def get_ellysia_rich(self, scan_id: int) -> Optional[EllysiaScan]:
-        """[Background thread] Retrieve an EllysiaScan by id.
+    def get_lybra_rich(self, scan_id: int) -> Optional[LybraScan]:
+        """[Background thread] Retrieve an LybraScan by id.
 
         No relationships are eager-loaded because Findings are queried
         separately via ``get_findings_by_scan`` (they are not modelled as an
         ORM relationship on the scan).
         """
         return (
-            self._session.query(EllysiaScan)
-            .filter(EllysiaScan.id == scan_id)
+            self._session.query(LybraScan)
+            .filter(LybraScan.id == scan_id)
             .one_or_none()
         )
 
     def get_open_ports_for_scan(self, nmap_scan_id: int) -> List[OpenPort]:
-        """Return the OpenPort rows of an Nmap scan (the services Ellysia reads).
+        """Return the OpenPort rows of an Nmap scan (the services Lybra reads).
 
         Eager-loads the related Port so the caller can read ``protocol`` after
-        the session closes (Ellysia runs in a background worker).
+        the session closes (Lybra runs in a background worker).
         """
         return (
             self._session.query(OpenPort)
@@ -568,20 +568,20 @@ class ScanRepository(BaseRepository[Scan]):
         """Return a single finding by id (or None)."""
         return self._session.get(Finding, finding_id)
 
-    def get_previous_ellysia_findings(
+    def get_previous_lybra_findings(
         self, user_id: int, target: str, exclude_scan_id: int
     ) -> List[Finding]:
-        """Return the findings of the user's previous finished Ellysia scan of a
+        """Return the findings of the user's previous finished Lybra scan of a
         target (for lifecycle comparison), or an empty list if there is none."""
         prev = (
-            self._session.query(EllysiaScan)
+            self._session.query(LybraScan)
             .filter(
-                EllysiaScan.user_id == user_id,
-                EllysiaScan.target == target,
-                EllysiaScan.status == ScanStatus.FINISHED.value,
-                EllysiaScan.id != exclude_scan_id,
+                LybraScan.user_id == user_id,
+                LybraScan.target == target,
+                LybraScan.status == ScanStatus.FINISHED.value,
+                LybraScan.id != exclude_scan_id,
             )
-            .order_by(EllysiaScan.started_at.desc())
+            .order_by(LybraScan.started_at.desc())
             .first()
         )
         return self.get_findings_by_scan(prev.id) if prev else []
@@ -708,7 +708,7 @@ class TracerouteRepository(BaseRepository[Traceroute]):
 
 
 class KbRepository(BaseRepository[CveEntry]):
-    """Repository for the local vulnerability knowledge base (the Ellysia Feed).
+    """Repository for the local vulnerability knowledge base (the Lybra Feed).
 
     Persists the mirrored NVD/KEV/EPSS data and answers the matcher's central
     question via :meth:`cves_for_cpe`. All upserts are keyed by ``cve_id`` so a
@@ -726,10 +726,10 @@ class KbRepository(BaseRepository[CveEntry]):
         """Return the CVEs affecting ``vendor:product`` at ``version``.
 
         Filters candidate applicability rows by (vendor, product) in SQL, then
-        applies the version-range logic in Python (see ``ellysia.kb``). Results
+        applies the version-range logic in Python (see ``lybra.kb``). Results
         are de-duplicated by CVE.
         """
-        from .ellysia import version_in_range
+        from .lybra import version_in_range
 
         candidates = (
             self._session.query(CpeMatch)

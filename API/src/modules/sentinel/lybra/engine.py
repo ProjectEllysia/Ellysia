@@ -42,8 +42,8 @@ QOD_VERSION_MATCH = 70
 # Maps a product string (lowercased) to the (vendor, product) pair CPE uses.
 # Consulted whenever a service has no usable CPE of its own — whether the
 # product/version came from Nmap's own naming ("Apache httpd") or from
-# Ellysia's own HTTP/SSH fingerprint reading the Server header or SSH banner
-# directly ("Apache", "OpenSSH" — see ellysia.fingerprint). Both spellings for
+# Lybra's own HTTP/SSH fingerprint reading the Server header or SSH banner
+# directly ("Apache", "OpenSSH" — see lybra.fingerprint). Both spellings for
 # the same product are kept as separate keys rather than normalized, since
 # that keeps this table a flat, auditable list. This is a small, hand-curated
 # seed; it grows by one line each time a real scan turns up a product we do
@@ -97,7 +97,7 @@ class Service:
         return product_version or self.name or "servicio desconocido"
 
 
-class EllysiaEngine:
+class LybraEngine:
     """Produces normalized findings from a host's discovered services.
 
     For every service the engine emits one informational "open port" finding.
@@ -119,7 +119,7 @@ class EllysiaEngine:
             EPSS exploitation-probability score.
     """
 
-    FEED_VERSION = "ellysia-0"
+    FEED_VERSION = "lybra-0"
 
     def __init__(
         self,
@@ -179,8 +179,8 @@ class EllysiaEngine:
             "cvss_vector":  cve.cvss_vector,
             "epss_score":   self._epss_lookup(cve_id) if self._epss_lookup else None,
             "in_kev":       self._kev_lookup(cve_id) if self._kev_lookup else False,
-            "source":       "ellysia",
-            "check_id":     "ellysia:version-match@1",
+            "source":       "lybra",
+            "check_id":     "lybra:version-match@1",
             "feed_version": self.FEED_VERSION,
             "qod":          QOD_VERSION_MATCH,
             "confirmed":    False,   # a version match is a hypothesis; Fase R confirms it actively
@@ -199,8 +199,8 @@ class EllysiaEngine:
             # consumer that groups findings by cpe sees one consistent format
             # rather than Nmap's raw 2.2 URI here and the 2.3 form elsewhere.
             "cpe":          normalize_cpe_to_23(service.cpe) if service.cpe else None,
-            "source":       "ellysia",
-            "check_id":     "ellysia:open-port@1",
+            "source":       "lybra",
+            "check_id":     "lybra:open-port@1",
             "feed_version": self.FEED_VERSION,
             "qod":          QOD_OPEN_PORT,
             "confirmed":    False,

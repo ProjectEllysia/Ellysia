@@ -1,4 +1,4 @@
-"""EllysiaEngineManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
+"""LybraEngineManager — extraido de sentinel/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
 from dataclasses import replace
@@ -13,13 +13,13 @@ from ..repositories import (
     KbRepository,
 )
 from ..model import (
-    EllysiaScan,
+    LybraScan,
     Scan,
     ScanStatus,
     ScanType,
 )
-from ..ellysia import (
-    EllysiaEngine,
+from ..lybra import (
+    LybraEngine,
     services_from_open_ports,
     services_from_discovered_ports,
     compute_dedup_key,
@@ -43,27 +43,27 @@ from .openvas import OpenVASScanManager
 logger = logging.getLogger(__name__)
 
 
-@ScanManager.register(ScanType.ELLYSIA)
-class EllysiaEngineManager(ScanManager):
+@ScanManager.register(ScanType.LYBRA)
+class LybraEngineManager(ScanManager):
     """
-    Manager for Ellysia's own vulnerability engine.
+    Manager for Lybra's own vulnerability engine.
 
     Unlike the other scanners it launches no external subprocess: in the current
     phase (Fase 0) it takes the services discovered by a previous Nmap scan
     (``source_scan_id``) and produces normalized :class:`Finding` rows through the
-    :class:`EllysiaEngine`. Because that work is a fast, in-memory pass (no
+    :class:`LybraEngine`. Because that work is a fast, in-memory pass (no
     network), it does not go through the base ``_execute_scan`` (built for
-    long-running subprocess tasks); the body lives in ``_run_ellysia`` and the
-    worker entry point ``execute_ellysia_scan`` just wraps it in ``job_context``.
+    long-running subprocess tasks); the body lives in ``_run_lybra`` and the
+    worker entry point ``execute_lybra_scan`` just wraps it in ``job_context``.
 
     Example:
-    >>> manager = EllysiaEngineManager()
+    >>> manager = LybraEngineManager()
     >>> scan_id = manager.run_scan(source_scan_id=42, user_id=1)
     """
 
-    SCAN_TYPE = ScanType.ELLYSIA
-    _MODEL = EllysiaScan
-    _strategy_class = None  # ponytail: no PDF for Ellysia yet; wire a strategy when reports land
+    SCAN_TYPE = ScanType.LYBRA
+    _MODEL = LybraScan
+    _strategy_class = None  # ponytail: no PDF for Lybra yet; wire a strategy when reports land
 
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         super().__init__(task_queue)
@@ -77,11 +77,11 @@ class EllysiaEngineManager(ScanManager):
         timeout: int = 120
     ) -> int:
         """
-        Start an Ellysia engine scan in one of two modes.
+        Start an Lybra engine scan in one of two modes.
 
         - **Over a prior Nmap scan** (``source_scan_id``): analyse the services
           that scan already discovered. Ownership/type validated by the caller.
-        - **Self-discovery** (``target``, optional ``discover_ports``): Ellysia
+        - **Self-discovery** (``target``, optional ``discover_ports``): Lybra
           discovers the open ports itself with its own connect scan (Fase T),
           no Nmap needed. The caller validates the target (reject private, etc.).
 
@@ -91,7 +91,7 @@ class EllysiaEngineManager(ScanManager):
                 rows merge in at read time, see ``format_scan``).
 
         Returns:
-            Primary key of the created EllysiaScan record.
+            Primary key of the created LybraScan record.
         """
         if source_scan_id is not None:
             with UnitOfWork() as uow:
@@ -112,9 +112,9 @@ class EllysiaEngineManager(ScanManager):
         scan_id = scan.id
 
         self._tq.submit(
-            func=EllysiaEngineManager.execute_ellysia_scan, # type: ignore
+            func=LybraEngineManager.execute_lybra_scan, # type: ignore
             args=(scan_id, source_scan_id, discover_ports, deep),
-            name=f"EllysiaScan-{scan_id}",
+            name=f"LybraScan-{scan_id}",
             category=self.TASK_CATEGORY, # type: ignore
             external_id=self.external_id_for(scan_id),
             timeout=timeout + self._scan_timeout_margin,
@@ -122,23 +122,23 @@ class EllysiaEngineManager(ScanManager):
 
         mode = f"fuente Nmap {source_scan_id}" if source_scan_id else "descubrimiento propio"
         mode += " + análisis profundo" if deep else ""
-        logger.info(f"Escaneo Ellysia {scan_id} iniciado ({mode})")
+        logger.info(f"Escaneo Lybra {scan_id} iniciado ({mode})")
         return scan_id  # type: ignore
 
     @staticmethod
-    def execute_ellysia_scan(scan_id: int, source_scan_id: Optional[int] = None,
+    def execute_lybra_scan(scan_id: int, source_scan_id: Optional[int] = None,
                              discover_ports: Optional[list] = None, deep: bool = False) -> None:
         """Entry point submitted to the TaskQueue. Runs the engine in the worker."""
         with job_context():
-            manager = EllysiaEngineManager()
-            manager._run_ellysia( # type: ignore
+            manager = LybraEngineManager()
+            manager._run_lybra( # type: ignore
                 scan_id,
                 source_scan_id,
                 discover_ports,
                 deep
             )
 
-    def _run_ellysia(
+    def _run_lybra(
         self, scan_id: int,
         source_scan_id: Optional[int] = None,
         discover_ports: Optional[list] = None,
@@ -157,9 +157,9 @@ class EllysiaEngineManager(ScanManager):
 
             # Read the scan's own target + owner once (both modes need them).
             with UnitOfWork() as uow:
-                ellysia_scan = ScanRepository(uow).get_by_id(scan_id)
-                scan_target = ellysia_scan.target if ellysia_scan else None
-                user_id = ellysia_scan.user_id if ellysia_scan else None
+                lybra_scan = ScanRepository(uow).get_by_id(scan_id)
+                scan_target = lybra_scan.target if lybra_scan else None
+                user_id = lybra_scan.user_id if lybra_scan else None
 
 
             # Phase 1 — resolve services, then version/informational detection
@@ -187,14 +187,14 @@ class EllysiaEngineManager(ScanManager):
 
                         if check_reachability and not is_host_reacheable:
                             logger.warning(
-                                f"Host '{scan_target}' inalcanzable. Marcando escaneo Ellysia {scan_id} como FAILED"
+                                f"Host '{scan_target}' inalcanzable. Marcando escaneo Lybra {scan_id} como FAILED"
                             )
                             self.update_scan_status(scan_id, ScanStatus.FAILED)
                             return
 
                         discovered = self._discover_ports(scan_target, discover_ports)
                         if discovered is None:
-                            logger.error(f"Descubrimiento de puertos fallido para el escaneo Ellysia {scan_id}")
+                            logger.error(f"Descubrimiento de puertos fallido para el escaneo Lybra {scan_id}")
                             self.update_scan_status(scan_id, ScanStatus.FAILED)
                             return
 
@@ -216,12 +216,12 @@ class EllysiaEngineManager(ScanManager):
                 # never find a single CVE. This never overrides a Nmap-sourced
                 # reading — see _fingerprint_services.
                 fingerprint_findings: list = []
-                if source_target and CR.is_ellysia_fingerprinting_enabled():
+                if source_target and CR.is_lybra_fingerprinting_enabled():
                     services, fingerprint_findings = self._fingerprint_services(source_target, services)
 
                 previous_map = self._previous_findings_map(scan_repo, user_id, source_target, scan_id)
 
-                engine = EllysiaEngine(
+                engine = LybraEngine(
                     cve_lookup=kb_repo.cves_for_cpe,
                     kev_lookup=lambda cve_id: kb_repo.get_kev(cve_id) is not None,
                     epss_lookup=lambda cve_id: getattr(kb_repo.get_epss(cve_id), "score", None),
@@ -231,7 +231,7 @@ class EllysiaEngineManager(ScanManager):
 
             # Phase 2 — active checks over the network, outside any transaction.
             # Opt-in (they touch the target; see roadmap §6 authorized targets).
-            if source_target and CR.is_ellysia_active_checks_enabled():
+            if source_target and CR.is_lybra_active_checks_enabled():
                 findings_data.extend(self._run_active_checks(source_target, services))
 
             # Phase 2.7 — deep analysis (Fase 6): launch Nmap/Nikto/OpenVAS as
@@ -259,14 +259,14 @@ class EllysiaEngineManager(ScanManager):
                 scan.status = ScanStatus.FINISHED.value  # type: ignore
                 scan.finished_at = utcnow_naive()  # type: ignore
 
-            logger.info(f"Escaneo Ellysia {scan_id} completado: {len(findings_data)} hallazgos")
+            logger.info(f"Escaneo Lybra {scan_id} completado: {len(findings_data)} hallazgos")
 
         except Exception as e:
-            logger.error(f"Error en escaneo Ellysia {scan_id}: {e}", exc_info=True)
+            logger.error(f"Error en escaneo Lybra {scan_id}: {e}", exc_info=True)
             self.update_scan_status(scan_id, ScanStatus.FAILED)
 
     def _discover_ports(self, target: str, discover_ports) -> Optional[list]:
-        """Discover open ports with Ellysia's own connect scan (Fase T).
+        """Discover open ports with Lybra's own connect scan (Fase T).
 
         Returns ``None`` (not ``[]``) when discovery itself failed unexpectedly,
         as opposed to running cleanly and finding zero open ports. The caller
@@ -274,11 +274,11 @@ class EllysiaEngineManager(ScanManager):
         closed" would falsely mark previously-open findings as fixed once
         lifecycle correlation runs.
         """
-        from ..ellysia import scan_ports_sync
+        from ..lybra import scan_ports_sync
         try:
             return scan_ports_sync(target, discover_ports)
         except Exception:
-            logger.exception("Ellysia port discovery failed for %s", target)
+            logger.exception("Lybra port discovery failed for %s", target)
             return None
 
     def _run_active_checks(self, target: str, services) -> list:
@@ -287,7 +287,7 @@ class EllysiaEngineManager(ScanManager):
         Best-effort: a runtime failure (unreachable host, etc.) yields no active
         findings rather than failing the whole scan. Safe mode only.
         """
-        from ..ellysia import load_checks, CheckRuntime, HttpProbe, HostRateLimiter
+        from ..lybra import load_checks, CheckRuntime, HttpProbe, HostRateLimiter
         try:
             runtime = CheckRuntime(
                 load_checks(),
@@ -297,11 +297,11 @@ class EllysiaEngineManager(ScanManager):
             )
             return runtime.run(target, services)
         except Exception:
-            logger.exception("Ellysia active checks failed for %s", target)
+            logger.exception("Lybra active checks failed for %s", target)
             return []
 
     def _fingerprint_services(self, target: str, services: list) -> tuple:
-        """Run Ellysia's own HTTP/SSH dissectors; fill identification gaps and
+        """Run Lybra's own HTTP/SSH dissectors; fill identification gaps and
         record agreement with Nmap.
 
         Fase F, two jobs at once:
@@ -313,7 +313,7 @@ class EllysiaEngineManager(ScanManager):
           to a fallback for a service family.
         - When a service has *no* product/version (self-discovered, Fase T, no
           Nmap involved), our own reading fills that gap so the version matcher
-          (``EllysiaEngine._resolve_cpe``) has something to work with instead of
+          (``LybraEngine._resolve_cpe``) has something to work with instead of
           silently finding nothing. It goes in exactly as low-confidence as an
           Nmap-sourced reading would (``qod=70`` in the matcher, same as
           today) — nothing here inflates confidence, it only supplies input.
@@ -325,7 +325,7 @@ class EllysiaEngineManager(ScanManager):
             identified product/version filled in, and the informational
             fingerprint findings.
         """
-        from ..ellysia import (
+        from ..lybra import (
             HttpProbe, SshProbe, HostRateLimiter, is_http_service,
             fingerprint_http, fingerprint_ssh,
         )
@@ -375,7 +375,7 @@ class EllysiaEngineManager(ScanManager):
         which reads as "we disagree with Nmap" even though there is nothing to
         compare. That case gets its own honest phrasing instead.
         """
-        from ..ellysia import agrees_with_nmap, QOD_FINGERPRINT
+        from ..lybra import agrees_with_nmap, QOD_FINGERPRINT
         own = f"{product or '?'} {version or ''}".strip()
         if service.product:
             agrees = agrees_with_nmap(product, version, service.product, service.version)
@@ -389,9 +389,9 @@ class EllysiaEngineManager(ScanManager):
             "category":     "fingerprint",
             "port":         service.port,
             "service":      service.name or None,
-            "source":       "ellysia",
-            "check_id":     "ellysia:fingerprint@1",
-            "feed_version": "ellysia-fingerprint-1",
+            "source":       "lybra",
+            "check_id":     "lybra:fingerprint@1",
+            "feed_version": "lybra-fingerprint-1",
             "qod":          QOD_FINGERPRINT,
             "confirmed":    False,
             "state":        "open",
@@ -405,19 +405,19 @@ class EllysiaEngineManager(ScanManager):
         own ``run_scan`` timeout), so this cannot be awaited inside this job.
         Each corroborator becomes an ordinary, independently-tracked ``Scan`` —
         visible, cancellable and pollable exactly like a user-launched one. The
-        returned ids are stored on the Ellysia scan so ``format_scan`` can later
+        returned ids are stored on the Lybra scan so ``format_scan`` can later
         merge in whichever corroborator ``Finding`` rows are ready.
 
         - Nmap only when ``source_scan_id`` is None (self-discovery mode) — a
-          fresh Nmap run is redundant when Ellysia already has Nmap-sourced
+          fresh Nmap run is redundant when Lybra already has Nmap-sourced
           ports for this scan.
         - Nikto only if at least one HTTP-like service was found.
         - OpenVAS always.
 
         Best-effort per corroborator: a launch failure for one does not affect
-        the others or the Ellysia scan itself.
+        the others or the Lybra scan itself.
         """
-        from ..ellysia import is_http_service, DEFAULT_PORTS
+        from ..lybra import is_http_service, DEFAULT_PORTS
         ids: list = []
 
         if source_scan_id is None:
@@ -445,12 +445,12 @@ class EllysiaEngineManager(ScanManager):
         return ids
 
     def _previous_findings_map(self, scan_repo, user_id, target, exclude_scan_id) -> dict:
-        """Build ``dedup_key -> {state, snapshot}`` from the previous Ellysia scan
+        """Build ``dedup_key -> {state, snapshot}`` from the previous Lybra scan
         of this target, for lifecycle comparison."""
         if not user_id or not target:
             return {}
         result: dict = {}
-        for pf in scan_repo.get_previous_ellysia_findings(user_id, target, exclude_scan_id):
+        for pf in scan_repo.get_previous_lybra_findings(user_id, target, exclude_scan_id):
             snapshot = self._finding_snapshot(pf)
             key = pf.dedup_key or compute_dedup_key(snapshot)
             snapshot["dedup_key"] = key
@@ -482,7 +482,7 @@ class EllysiaEngineManager(ScanManager):
         """``_finding_snapshot`` plus ``id``/``state``, for display only (Fase 6
         read-time deep merge in ``format_scan``) — never pass this to
         ``persist_findings``."""
-        d = EllysiaEngineManager._finding_snapshot(f)
+        d = LybraEngineManager._finding_snapshot(f)
         d["id"] = f.id
         d["state"] = f.state
         return d
@@ -505,9 +505,9 @@ class EllysiaEngineManager(ScanManager):
             repo.update(finding)
             return finding
 
-    def _create_scan_record(self, target: str, user_id: int, source_scan_id: int) -> EllysiaScan:  # pylint: disable=arguments-differ
-        """Create and persist an EllysiaScan row linked to its source Nmap scan."""
-        scan = EllysiaScan(
+    def _create_scan_record(self, target: str, user_id: int, source_scan_id: int) -> LybraScan:  # pylint: disable=arguments-differ
+        """Create and persist an LybraScan row linked to its source Nmap scan."""
+        scan = LybraScan(
             target=target,
             user_id=user_id,
             started_at=utcnow_naive(),
@@ -557,7 +557,7 @@ class EllysiaEngineManager(ScanManager):
 
         result = {
             "id": scan.id,
-            "scanType": "ellysia",
+            "scanType": "lybra",
             "target": scan.target,
             "sourceScanId": scan.source_scan_id,
             "deep": bool(deep_scan_ids),
@@ -596,6 +596,6 @@ class EllysiaEngineManager(ScanManager):
         return result
 
     def append_csv_data(self, data: dict, scan: Scan, task: "_Task") -> None:
-        """No-op: Ellysia does not use the base CSV-logging execution path."""
+        """No-op: Lybra does not use the base CSV-logging execution path."""
         pass
 

@@ -1,11 +1,11 @@
-"""Unit tests for Ellysia correlation (Fase 5): dedup, merge, lifecycle, scoring.
+"""Unit tests for Lybra correlation (Fase 5): dedup, merge, lifecycle, scoring.
 
 All pure functions over finding dicts — no DB, no network.
 """
 
 import pytest
 
-from src.modules.sentinel.ellysia import (
+from src.modules.sentinel.lybra import (
     classify_exposure,
     compute_dedup_key,
     merge_findings,
@@ -44,7 +44,7 @@ def test_dedup_key_differs_by_port_and_identity():
     assert compute_dedup_key(base) != compute_dedup_key({**base, "port": 443})
     assert compute_dedup_key(base) != compute_dedup_key({"host_id": 1, "port": 80, "cve_ids": ["CVE-2"]})
     # No CVE -> keyed on check_id.
-    chk = {"host_id": 1, "port": 80, "check_id": "ellysia:git@1"}
+    chk = {"host_id": 1, "port": 80, "check_id": "lybra:git@1"}
     assert compute_dedup_key(chk) == compute_dedup_key({**chk, "source": "x"})
 
 
@@ -52,7 +52,7 @@ def test_dedup_key_differs_by_port_and_identity():
 
 def test_merge_combines_sources_and_keeps_strongest():
     findings = [
-        {"host_id": 1, "port": 80, "cve_ids": ["CVE-1"], "source": "ellysia",
+        {"host_id": 1, "port": 80, "cve_ids": ["CVE-1"], "source": "lybra",
          "qod": 70, "confirmed": False, "in_kev": False, "title": "by version"},
         {"host_id": 1, "port": 80, "cve_ids": ["CVE-1"], "source": "openvas",
          "qod": 99, "confirmed": True, "in_kev": True, "title": "confirmed"},
@@ -60,15 +60,15 @@ def test_merge_combines_sources_and_keeps_strongest():
     merged = merge_findings(findings)
     assert len(merged) == 1
     m = merged[0]
-    assert m["source"] == "ellysia,openvas"
+    assert m["source"] == "lybra,openvas"
     assert m["qod"] == 99 and m["confirmed"] is True and m["in_kev"] is True
     assert m["title"] == "confirmed"          # title follows the strongest qod
 
 
 def test_merge_keeps_distinct_keys():
     findings = [
-        {"host_id": 1, "port": 80, "cve_ids": ["CVE-1"], "source": "ellysia", "qod": 70},
-        {"host_id": 1, "port": 443, "cve_ids": ["CVE-1"], "source": "ellysia", "qod": 70},
+        {"host_id": 1, "port": 80, "cve_ids": ["CVE-1"], "source": "lybra", "qod": 70},
+        {"host_id": 1, "port": 443, "cve_ids": ["CVE-1"], "source": "lybra", "qod": 70},
     ]
     assert len(merge_findings(findings)) == 2
 

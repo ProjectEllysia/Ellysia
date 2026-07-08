@@ -1179,7 +1179,7 @@
         "epss": "https://epss.cyentia.com/epss_scores-current.csv.gz"
       }
     },
-    "ellysia": {
+    "lybra": {
       "activeChecks": false,
       "fingerprintingEnabled": false
     },

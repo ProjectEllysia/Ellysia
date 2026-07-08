@@ -35,7 +35,7 @@ class ScanHistoryManager:
 
         Returns:
             A dict with per-type counts (``nmap``/``nikto``/``openvas``/
-            ``ellysia``) plus a ``total`` (see ``ScanRepository.get_stats``).
+            ``lybra``) plus a ``total`` (see ``ScanRepository.get_stats``).
         """
         with UnitOfWork() as uow:
             return ScanRepository(uow).get_stats(user_id)

@@ -25,7 +25,7 @@ from .managers import (
     NmapScanManager,
     NiktoScanManager,
     OpenVASScanManager,
-    EllysiaEngineManager,
+    LybraEngineManager,
     ProgramedScanManager,
     SentinelReportManager,
     ScanFolderManager,
@@ -53,7 +53,7 @@ from .schemas import (
     NmapScanRequestSchema,
     NiktoScanRequestSchema,
     OpenVASScanRequestSchema,
-    EllysiaScanRequestSchema,
+    LybraScanRequestSchema,
     FindingStateRequestSchema,
     FindingStateResponseSchema,
     ResultsQuerySchema,
@@ -306,9 +306,9 @@ def start_openvas_scan(data):
     }
 
 
-@sentinel_blp.post("/ellysia")
-@sentinel_blp.arguments(EllysiaScanRequestSchema)
-@sentinel_blp.response(201, ScanResponseSchema, description="Ellysia engine scan started")
+@sentinel_blp.post("/lybra")
+@sentinel_blp.arguments(LybraScanRequestSchema)
+@sentinel_blp.response(201, ScanResponseSchema, description="Lybra engine scan started")
 @sentinel_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
 @sentinel_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @sentinel_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
@@ -317,13 +317,13 @@ def start_openvas_scan(data):
 @require_attributes(at_least_one=[AttributeType.SENTINEL_CREATE])
 @limiter.limit("20 per hour; 100 per day")
 @handle_exceptions(default_exception=ScanExecutionError, logger=logger)
-def start_ellysia_scan(data):
-    """Lanzar un escaneo Ellysia: sobre un Nmap previo, o autodescubriendo."""
+def start_lybra_scan(data):
+    """Lanzar un escaneo Lybra: sobre un Nmap previo, o autodescubriendo."""
     timeout = data["timeout"]
     deep = data.get("deep", False)
     source_scan_id = data.get("sourceScanId")
     user = get_current_user()
-    manager = EllysiaEngineManager()
+    manager = LybraEngineManager()
 
     if source_scan_id:
         # El escaneo fuente debe existir, ser del usuario y ser un Nmap.
@@ -335,7 +335,7 @@ def start_ellysia_scan(data):
                 value=source_scan_id,
             )
         scan_id = manager.run_scan(user_id=user.id, source_scan_id=source_scan_id, deep=deep, timeout=timeout)
-        logger.info(f"Ellysia lanzado: ID={scan_id} fuente={source_scan_id} deep={deep} user={user.username}")
+        logger.info(f"Lybra lanzado: ID={scan_id} fuente={source_scan_id} deep={deep} user={user.username}")
     else:
         # Autodescubrimiento: valida el objetivo (rechaza IPs privadas, etc.)
         # igual que un escaneo Nmap, ya que el transporte propio toca el objetivo.
@@ -348,12 +348,12 @@ def start_ellysia_scan(data):
                 raise ValidationError(field="ports", message=str(exc), value=data["ports"]) from exc
         scan_id = manager.run_scan(user_id=user.id, target=target, discover_ports=discover_ports,
                                    deep=deep, timeout=timeout)
-        logger.info(f"Ellysia lanzado: ID={scan_id} autodescubrimiento target={target} deep={deep} user={user.username}")
+        logger.info(f"Lybra lanzado: ID={scan_id} autodescubrimiento target={target} deep={deep} user={user.username}")
 
     return {
-        "message": "Escaneo Ellysia iniciado correctamente",
+        "message": "Escaneo Lybra iniciado correctamente",
         "scanId": scan_id,
-        "scanType": "ellysia",
+        "scanType": "lybra",
         "user": user.username,
     }
 
@@ -372,7 +372,7 @@ def start_ellysia_scan(data):
 def update_finding_state(data, finding_id: int):
     """Marcar el estado de un hallazgo (p. ej. aceptar un riesgo)."""
     user = get_current_user()
-    finding = EllysiaEngineManager().set_finding_state(finding_id, user.id, data["state"])
+    finding = LybraEngineManager().set_finding_state(finding_id, user.id, data["state"])
     logger.info(f"Hallazgo {finding_id} marcado como '{data['state']}' por {user.username}")
     return {
         "message": "Estado del hallazgo actualizado correctamente",
@@ -404,7 +404,7 @@ def retrieve_all_scans(args):
         "nmap": NmapScanManager(),
         "nikto": NiktoScanManager(),
         "openvas": OpenVASScanManager(),
-        "ellysia": EllysiaEngineManager(),
+        "lybra": LybraEngineManager(),
     }
 
     if scan_type != "all":

@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 class KbSyncManager:
-    """Populates and refreshes the local vulnerability KB (the Ellysia Feed).
+    """Populates and refreshes the local vulnerability KB (the Lybra Feed).
 
     Pulls NVD (incremental, by ``lastModified`` window), CISA-KEV and FIRST-EPSS
     and upserts them via :class:`KbRepository`. The fetch/ingest split lives in
-    ``ellysia.kb``; this manager only orchestrates and owns the DB transactions.
+    ``lybra.kb``; this manager only orchestrates and owns the DB transactions.
     NVD is written in batches so a large delta never becomes one giant
     transaction; the initial full backfill is an operational one-off (run
     ``sync_nvd`` with a wide window) rather than something the nightly job does.
@@ -27,7 +27,7 @@ class KbSyncManager:
 
     def sync_kev(self, url: str) -> int:
         """Mirror the CISA KEV catalogue. Returns the number of entries upserted."""
-        from ..ellysia import fetch_kev, ingest_kev
+        from ..lybra import fetch_kev, ingest_kev
         count = 0
         with UnitOfWork() as uow:
             repo = KbRepository(uow)
@@ -41,7 +41,7 @@ class KbSyncManager:
 
     def sync_epss(self, url: str) -> int:
         """Mirror the current EPSS scores. Returns the number of rows upserted."""
-        from ..ellysia import fetch_epss, parse_epss_rows
+        from ..lybra import fetch_epss, parse_epss_rows
         csv_text = fetch_epss(url)
         count = 0
         with UnitOfWork() as uow:
@@ -54,7 +54,7 @@ class KbSyncManager:
 
     def sync_nvd(self, base_url: str, window_days: int = 8, api_key: Optional[str] = None) -> int:
         """Mirror NVD CVEs modified in the last ``window_days``. Returns the count."""
-        from ..ellysia import iter_nvd_pages, ingest_nvd_cve
+        from ..lybra import iter_nvd_pages, ingest_nvd_cve
         last_start, last_end = self._nvd_window(window_days)
 
         count = 0

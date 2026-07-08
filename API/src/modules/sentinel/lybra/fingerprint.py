@@ -1,4 +1,4 @@
-"""Ellysia's own service fingerprinting — the identification layer.
+"""Lybra's own service fingerprinting — the identification layer.
 
 Instead of trusting ``nmap -sV`` blindly, this module identifies a service's
 product and version on its own terms. It ships two dissectors, chosen for the
@@ -24,10 +24,10 @@ demoted to a *fallback*. Actually running that measurement against a lab of
 real targets is an operational step for the user, much like the knowledge
 base's initial full download.
 
-That said, a service found by Ellysia's own transport (Fase T, no Nmap
+That said, a service found by Lybra's own transport (Fase T, no Nmap
 involved) never had a Nmap reading to defer to in the first place — it carries
 no product/version at all. For that case, and only that case,
-``EllysiaEngineManager._fingerprint_services`` uses this module's output to
+``LybraEngineManager._fingerprint_services`` uses this module's output to
 fill the gap: without it, the version matcher (Fase 1) would have nothing to
 look up and a self-discovery-only scan would never find a single CVE. The
 result still goes in at the same low-confidence, unconfirmed tier a Nmap CPE
@@ -453,7 +453,7 @@ class SshProbe:
             # RFC 4253 §4.2 requires us to send our own identification banner
             # before the server sends its KEXINIT, even though we only ever read
             # from here on (we never actually perform the key exchange).
-            sock.sendall(b"SSH-2.0-Ellysia_1.0\r\n")
+            sock.sendall(b"SSH-2.0-Lybra_1.0\r\n")
             payload = _read_kexinit_payload(sock)
             return banner, payload
         except (OSError, ValueError) as err:

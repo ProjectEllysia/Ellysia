@@ -11,7 +11,7 @@ from ..model import (
     Scan,
     ScanType,
 )
-from ..ellysia import (
+from ..lybra import (
     compute_dedup_key,
     nikto_incident_to_finding,
 )
@@ -119,9 +119,9 @@ class NiktoScanManager(ScanManager):
 
         # Additive: also record each incident as a normalized Finding, so a
         # future cross-scanner correlation pass (Fase 6) has something to fuse
-        # against Ellysia/OpenVAS findings on the same host. Does not replace
+        # against Lybra/OpenVAS findings on the same host. Does not replace
         # the NiktoIncident write above — the PDF report and history charts
-        # still read that (see ellysia/adapters.py for why).
+        # still read that (see lybra/adapters.py for why).
         findings = []
         for inc_data in incidents_data:
             finding = nikto_incident_to_finding(inc_data)

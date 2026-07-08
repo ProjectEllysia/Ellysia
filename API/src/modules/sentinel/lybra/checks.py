@@ -1,6 +1,6 @@
-"""Ellysia's active-detection runtime — the engine's identity layer.
+"""Lybra's active-detection runtime — the engine's identity layer.
 
-This is where Ellysia stops inferring vulnerabilities from a version number and
+This is where Lybra stops inferring vulnerabilities from a version number and
 starts actively *confirming* them. It runs declarative checks against a service
 and, when one fires, emits a finding marked confirmed with a high Quality of
 Detection — a real, observed problem rather than a suspicion.
@@ -42,7 +42,7 @@ from .engine import Service
 logger = logging.getLogger(__name__)
 
 # The version stamped onto every finding this runtime produces, for traceability.
-CHECKS_FEED_VERSION = "ellysia-checks-1"
+CHECKS_FEED_VERSION = "lybra-checks-1"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -189,8 +189,8 @@ class Check:
 
     @property
     def check_id(self) -> str:
-        """The fully-qualified, versioned check id, e.g. ``ellysia:git-config@1``."""
-        return f"ellysia:{self.id}@{self.version}"
+        """The fully-qualified, versioned check id, e.g. ``lybra:git-config@1``."""
+        return f"lybra:{self.id}@{self.version}"
 
 
 # =========================================================================
@@ -346,7 +346,7 @@ class CheckRuntime:
             "port":         service.port,
             "service":      service.name or "http",
             "cve_ids":      f.get("cve_ids"),
-            "source":       "ellysia",
+            "source":       "lybra",
             "check_id":     check.check_id,
             "feed_version": CHECKS_FEED_VERSION,
             "qod":          f.get("qod", QOD_CONFIRMED),
@@ -457,7 +457,7 @@ class HttpProbe:
         url = f"{scheme}://{netloc}{path}"
         context = ssl._create_unverified_context() if scheme == "https" else None
         try:
-            req = urllib.request.Request(url, method=method, headers={"User-Agent": "Ellysia/1.0"})
+            req = urllib.request.Request(url, method=method, headers={"User-Agent": "Lybra/1.0"})
             with urllib.request.urlopen(req, timeout=self._timeout, context=context) as resp:
                 return resp.status, resp.read(self._max_bytes), dict(resp.headers)
         except urllib.error.HTTPError as err:

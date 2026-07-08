@@ -100,12 +100,12 @@ class ScanType(str, Enum):
         NMAP:    Nmap network and port scanner.
         NIKTO:   Nikto web server vulnerability scanner.
         OPENVAS: OpenVAS comprehensive vulnerability manager.
-        ELLYSIA: Ellysia's own vulnerability engine (native detection).
+        LYBRA: Lybra's own vulnerability engine (native detection).
     """
     NMAP    = "nmap"
     NIKTO   = "nikto"
     OPENVAS = "openvas"
-    ELLYSIA = "ellysia"
+    LYBRA = "lybra"
 
 
 # =========================================================================
@@ -469,7 +469,7 @@ class OpenPort(Base):
         cpe: Common Platform Enumeration string Nmap emits with ``-sV`` when it
             recognises the service (2.2 URI form, e.g.
             ``cpe:/a:apache:http_server:2.4.49``). Nullable: many services do
-            not yield a CPE. It is the entry point the Ellysia engine reads to
+            not yield a CPE. It is the entry point the Lybra engine reads to
             correlate versions to CVEs (see the vuln-engine roadmap).
 
     Relationships:
@@ -730,13 +730,13 @@ class OpenVASScanResult(Base):
 
 
 # =========================================================================
-# ELLYSIA ENGINE MODELS
+# LYBRA ENGINE MODELS
 # =========================================================================
 
-class EllysiaScan(Scan):
-    """Scan produced by Ellysia's own vulnerability engine.
+class LybraScan(Scan):
+    """Scan produced by Lybra's own vulnerability engine.
 
-    In the current phase (Fase 0) Ellysia has no network transport of its own,
+    In the current phase (Fase 0) Lybra has no network transport of its own,
     so a scan takes its services from a previous Nmap scan of the same target
     (``source_scan_id``) and produces normalized :class:`Finding` rows. When the
     engine gains its own transport (Fase T) ``source_scan_id`` becomes optional.
@@ -748,28 +748,28 @@ class EllysiaScan(Scan):
         deep_scan_ids: Fase 6 "análisis profundo" — ids of the Nmap/Nikto/OpenVAS
             corroborator scans launched alongside this one. Fire-and-forget:
             each is an ordinary, independently-tracked Scan; their Finding rows
-            are merged in only at read time (see EllysiaEngineManager.format_scan),
+            are merged in only at read time (see LybraEngineManager.format_scan),
             never copied into this scan's own Finding rows.
     """
-    __tablename__ = "EllysiaScan"
+    __tablename__ = "LybraScan"
 
     id             = Column(Integer, ForeignKey("Scan.id"), primary_key=True)
     source_scan_id = Column(Integer, ForeignKey("Scan.id"), nullable=True)
     deep_scan_ids  = Column(JSONB, nullable=True)
 
     __mapper_args__ = {
-        "polymorphic_identity": ScanType.ELLYSIA,
+        "polymorphic_identity": ScanType.LYBRA,
         "inherit_condition":    id == Scan.id,
     }
 
     def __repr__(self):
-        return f"<EllysiaScan(id={self.id}, target='{self.target}', source={self.source_scan_id})>"
+        return f"<LybraScan(id={self.id}, target='{self.target}', source={self.source_scan_id})>"
 
 
 class Finding(Base):
     """Normalized security finding, independent of the scanner that produced it.
 
-    The unified finding model that lets Ellysia, Nikto and OpenVAS results live
+    The unified finding model that lets Lybra, Nikto and OpenVAS results live
     in one table and be correlated (dedup by ``dedup_key``). See the vuln-engine
     roadmap (§3.3) for the full design. In Fase 0 only informational
     "open port" findings are written (``category="open_port"``, ``qod=30``); the
@@ -785,8 +785,8 @@ class Finding(Base):
         port / service / cpe: The affected service.
         cve_ids / cvss_score / cvss_vector / epss_score / in_kev /
             exploit_maturity: Vulnerability correlation (filled from Fase 1 on).
-        source: Which scanner produced it ("ellysia" | "nikto" | "openvas" | "nmap").
-        check_id: Which own check produced it ("ellysia:git-config-exposure@3").
+        source: Which scanner produced it ("lybra" | "nikto" | "openvas" | "nmap").
+        check_id: Which own check produced it ("lybra:git-config-exposure@3").
         feed_version: KB/checks version used (reproducibility).
         dedup_key: hash(host, port, cpe|check_id, cve) for multi-source merge.
         qod: Quality of Detection 0-100.
@@ -832,7 +832,7 @@ class Finding(Base):
 
 
 # =========================================================================
-# KNOWLEDGE BASE (the "Ellysia Feed": local mirror of NVD/KEV/EPSS)
+# KNOWLEDGE BASE (the "Lybra Feed": local mirror of NVD/KEV/EPSS)
 # =========================================================================
 
 class CveEntry(Base):
@@ -867,7 +867,7 @@ class CpeMatch(Base):
     NVD expresses "which versions are affected" with up to four bounds
     (``versionStartIncluding`` etc.); a CPE that pins one version uses
     ``exact_version`` instead. The matcher filters by (vendor, product) and then
-    applies ``version_in_range`` (see ellysia/kb.py).
+    applies ``version_in_range`` (see lybra/kb.py).
     """
     __tablename__ = "CpeMatch"
 

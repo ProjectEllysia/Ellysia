@@ -1,4 +1,4 @@
-"""Unit tests for Ellysia's own port discovery (Fase T).
+"""Unit tests for Lybra's own port discovery (Fase T).
 
 The connect scanner runs on a real (test-thread) event loop but against an
 injected ``opener``, so no real sockets or privileges are involved.
@@ -6,7 +6,7 @@ injected ``opener``, so no real sockets or privileges are involved.
 
 import pytest
 
-from src.modules.sentinel.ellysia import (
+from src.modules.sentinel.lybra import (
     scan_ports_sync,
     services_from_discovered_ports,
     port_concordance,

@@ -1,5 +1,5 @@
 {
-  "feedVersion": "ellysia-checks-1",
+  "feedVersion": "lybra-checks-1",
   "checks": [
     {
       "id": "git-config-exposure",

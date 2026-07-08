@@ -1,4 +1,4 @@
-"""Unit tests for the Ellysia active-check runtime (Fase R).
+"""Unit tests for the Lybra active-check runtime (Fase R).
 
 Pure: an injected ``fetch`` returns crafted responses, so no network. Exercises
 the bundled feed, the matchers, HTTP-service selection and the safe/aggressive
@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from src.modules.sentinel.ellysia import (
+from src.modules.sentinel.lybra import (
     load_checks,
     CheckRuntime,
     Response,
@@ -42,7 +42,7 @@ def test_bundled_feed_loads():
     ids = {c.id for c in checks}
     assert {"git-config-exposure", "dotenv-exposure", "missing-hsts-header"} <= ids
     git = next(c for c in checks if c.id == "git-config-exposure")
-    assert git.check_id == "ellysia:git-config-exposure@1"
+    assert git.check_id == "lybra:git-config-exposure@1"
     assert git.finding["qod"] == 99
 
 
@@ -52,7 +52,7 @@ def test_git_config_exposure_confirmed():
     fetch = _fetcher({"/.git/config": Response(200, "[core]\n\trepositoryformatversion = 0\n", {})})
     findings = CheckRuntime(load_checks(), fetch).run("10.0.0.5", [_HTTP])
 
-    git = [f for f in findings if f["check_id"] == "ellysia:git-config-exposure@1"]
+    git = [f for f in findings if f["check_id"] == "lybra:git-config-exposure@1"]
     assert len(git) == 1
     assert git[0]["qod"] == 99 and git[0]["confirmed"] is True
     assert git[0]["category"] == "exposed_path"
@@ -63,25 +63,25 @@ def test_git_config_not_exposed_gives_no_finding():
     # 404 for /.git/config -> status matcher fails -> no finding.
     fetch = _fetcher({"/.git/config": Response(404, "Not Found", {})})
     findings = CheckRuntime(load_checks(), fetch).run("10.0.0.5", [_HTTP])
-    assert not any(f["check_id"].startswith("ellysia:git-config") for f in findings)
+    assert not any(f["check_id"].startswith("lybra:git-config") for f in findings)
 
 
 def test_missing_hsts_detected_and_absent_when_present():
     # No HSTS header on "/" -> negative header matcher fires.
     fetch_missing = _fetcher({"/": Response(200, "<html>", {})})
     missing = CheckRuntime(load_checks(), fetch_missing).run("h", [_HTTP])
-    assert any(f["check_id"] == "ellysia:missing-hsts-header@1" for f in missing)
+    assert any(f["check_id"] == "lybra:missing-hsts-header@1" for f in missing)
 
     # HSTS present -> negative matcher does not fire -> no finding.
     fetch_present = _fetcher({"/": Response(200, "<html>", {"strict-transport-security": "max-age=63072000"})})
     present = CheckRuntime(load_checks(), fetch_present).run("h", [_HTTP])
-    assert not any(f["check_id"] == "ellysia:missing-hsts-header@1" for f in present)
+    assert not any(f["check_id"] == "lybra:missing-hsts-header@1" for f in present)
 
 
 def test_dotenv_regex_matcher():
     fetch = _fetcher({"/.env": Response(200, "APP_KEY=base64:secret\nDB_PASSWORD=hunter2\n", {})})
     findings = CheckRuntime(load_checks(), fetch).run("h", [_HTTP])
-    assert any(f["check_id"] == "ellysia:dotenv-exposure@1" for f in findings)
+    assert any(f["check_id"] == "lybra:dotenv-exposure@1" for f in findings)
 
 
 # --------------------------------------------------------- service selection

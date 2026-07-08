@@ -1,4 +1,4 @@
-"""Unit tests for the Ellysia engine (Fase 0) and the Nmap CPE capture refactor.
+"""Unit tests for the Lybra engine (Fase 0) and the Nmap CPE capture refactor.
 
 Pure logic: no DB, no network. Verifies the two things Fase 0 introduces below
 the manager — the engine turning services into informational findings, and Nmap's
@@ -9,8 +9,8 @@ import types
 
 import pytest
 
-from src.modules.sentinel.ellysia import (
-    EllysiaEngine,
+from src.modules.sentinel.lybra import (
+    LybraEngine,
     Service,
     services_from_open_ports,
     QOD_OPEN_PORT,
@@ -29,17 +29,17 @@ def test_analyze_emits_one_informational_finding_per_service():
         Service(port=22, protocol="tcp", name="ssh", product="OpenSSH", version="7.4"),
     ]
 
-    findings = EllysiaEngine().analyze(services)
+    findings = LybraEngine().analyze(services)
 
     assert len(findings) == 2
     http = findings[0]
     assert http["category"] == "open_port"
     assert http["qod"] == QOD_OPEN_PORT == 30
-    assert http["source"] == "ellysia"
+    assert http["source"] == "lybra"
     assert http["confirmed"] is False
     assert http["state"] == "open"
-    assert http["feed_version"] == "ellysia-0"
-    assert http["check_id"] == "ellysia:open-port@1"
+    assert http["feed_version"] == "lybra-0"
+    assert http["check_id"] == "lybra:open-port@1"
     # Title carries where + what, and the CPE is preserved for later phases.
     assert "80/tcp" in http["title"]
     assert "Apache httpd 2.4.49" in http["title"]
@@ -51,7 +51,7 @@ def test_analyze_emits_one_informational_finding_per_service():
 
 
 def test_analyze_no_services_returns_empty():
-    assert EllysiaEngine().analyze([]) == []
+    assert LybraEngine().analyze([]) == []
 
 
 def test_service_label_falls_back_when_product_missing():
@@ -142,7 +142,7 @@ def _lookup_for(expected_vendor_product, calls=None):
 
 def test_no_cve_lookup_means_informational_only():
     # Fase 0 behaviour preserved when no lookup is wired.
-    engine = EllysiaEngine()
+    engine = LybraEngine()
     findings = engine.analyze([Service(80, "tcp", "http", "Apache httpd", "2.4.49",
                                        "cpe:/a:apache:http_server:2.4.49")])
     assert [f["category"] for f in findings] == ["open_port"]
@@ -150,7 +150,7 @@ def test_no_cve_lookup_means_informational_only():
 
 def test_version_finding_from_nmap_cpe():
     calls = []
-    engine = EllysiaEngine(
+    engine = LybraEngine(
         cve_lookup=_lookup_for(("apache", "http_server"), calls),
         kev_lookup=lambda cid: True,
         epss_lookup=lambda cid: 0.97,
@@ -172,14 +172,14 @@ def test_version_finding_from_nmap_cpe():
     assert vuln["confirmed"] is False
     assert vuln["in_kev"] is True
     assert vuln["epss_score"] == 0.97
-    assert vuln["check_id"] == "ellysia:version-match@1"
+    assert vuln["check_id"] == "lybra:version-match@1"
     assert vuln["cpe"] == "cpe:2.3:a:apache:http_server:2.4.49:*:*:*:*:*:*:*"
 
 
 def test_version_finding_via_override_when_no_cpe():
     # No CPE from Nmap; product string resolves through the override table.
     calls = []
-    engine = EllysiaEngine(cve_lookup=_lookup_for(("openbsd", "openssh"), calls))
+    engine = LybraEngine(cve_lookup=_lookup_for(("openbsd", "openssh"), calls))
     findings = engine.analyze([Service(22, "tcp", "ssh", "OpenSSH", "7.4", None)])
 
     assert calls == [("openbsd", "openssh", "7.4")]
@@ -188,7 +188,7 @@ def test_version_finding_via_override_when_no_cpe():
 
 def test_no_version_finding_without_a_concrete_version():
     calls = []
-    engine = EllysiaEngine(cve_lookup=_lookup_for(("apache", "http_server"), calls))
+    engine = LybraEngine(cve_lookup=_lookup_for(("apache", "http_server"), calls))
     # Unknown product + wildcard version -> nothing to match, lookup not called.
     findings = engine.analyze([Service(80, "tcp", "http", "weird-server", "*", None)])
 

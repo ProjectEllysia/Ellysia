@@ -539,7 +539,7 @@ def get_sentinel_csv_dir() -> str:
     return get_directory_of(DirectoryType.CSV_SENTINEL)
 
 
-# --- Ellysia knowledge base (local NVD/KEV/EPSS mirror) ---
+# --- Lybra knowledge base (local NVD/KEV/EPSS mirror) ---
 
 @_lazy_load
 def is_kb_sync_enabled() -> bool:
@@ -564,22 +564,22 @@ def get_kb_nvd_api_key():
     return os.environ.get("NVD_API_KEY") or (_cfg("sentinel.kb.nvdApiKey", "") or None)
 
 
-# --- Ellysia active detection checks (Fase R) ---
+# --- Lybra active detection checks (Fase R) ---
 
 @_lazy_load
-def is_ellysia_active_checks_enabled() -> bool:
+def is_lybra_active_checks_enabled() -> bool:
     # Opt-in: active checks touch the target and await the authorized-targets
     # register (roadmap §6), so they are off unless explicitly enabled.
-    return _as_bool(_cfg("sentinel.ellysia.activeChecks", False))
+    return _as_bool(_cfg("sentinel.lybra.activeChecks", False))
 
 
-# --- Ellysia own fingerprinting (Fase F) ---
+# --- Lybra own fingerprinting (Fase F) ---
 
 @_lazy_load
-def is_ellysia_fingerprinting_enabled() -> bool:
+def is_lybra_fingerprinting_enabled() -> bool:
     # Opt-in like active checks: it touches the target (HTTP/SSH probes) for
     # calibration against Nmap, ahead of the authorized-targets register.
-    return _as_bool(_cfg("sentinel.ellysia.fingerprintingEnabled", False))
+    return _as_bool(_cfg("sentinel.lybra.fingerprintingEnabled", False))
 
 
 @_lazy_load

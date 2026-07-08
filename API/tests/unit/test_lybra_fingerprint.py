@@ -1,4 +1,4 @@
-"""Unit tests for Ellysia's own fingerprinting (Fase F): HTTP/SSH dissectors,
+"""Unit tests for Lybra's own fingerprinting (Fase F): HTTP/SSH dissectors,
 raw SSH_MSG_KEXINIT parsing, the HASSH formula, and oracle concordance.
 
 Pure logic + a fake socket for SshProbe — no real network anywhere.
@@ -9,7 +9,7 @@ import struct
 
 import pytest
 
-from src.modules.sentinel.ellysia import (
+from src.modules.sentinel.lybra import (
     fingerprint_http,
     fingerprint_ssh,
     parse_ssh_banner,
@@ -19,10 +19,10 @@ from src.modules.sentinel.ellysia import (
     agrees_with_nmap,
     concordance_rate,
 )
-from src.modules.sentinel.ellysia.checks import Response
-from src.modules.sentinel.ellysia.fingerprint import SSH_MSG_KEXINIT
-from src.modules.sentinel.ellysia.engine import Service
-from src.modules.sentinel.managers import EllysiaEngineManager
+from src.modules.sentinel.lybra.checks import Response
+from src.modules.sentinel.lybra.fingerprint import SSH_MSG_KEXINIT
+from src.modules.sentinel.lybra.engine import Service
+from src.modules.sentinel.managers import LybraEngineManager
 
 pytestmark = pytest.mark.unit
 
@@ -210,7 +210,7 @@ def test_ssh_probe_reads_banner_and_kexinit_over_fake_socket():
     banner, payload = result
     assert banner == "SSH-2.0-OpenSSH_7.4"
     assert payload == _SAMPLE_KEXINIT
-    assert fake_sock.sent.startswith(b"SSH-2.0-Ellysia_")
+    assert fake_sock.sent.startswith(b"SSH-2.0-Lybra_")
     assert fake_sock.closed is True
 
 
@@ -253,14 +253,14 @@ def test_concordance_rate_empty_is_zero_not_perfect():
 
 def test_fingerprint_finding_reports_agreement_when_nmap_baseline_exists():
     service = Service(port=80, protocol="tcp", name="http", product="Apache httpd", version="2.4.49")
-    finding = EllysiaEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
+    finding = LybraEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
     assert "concuerda con Nmap" in finding["title"]
     assert "no concuerda" not in finding["title"]
 
 
 def test_fingerprint_finding_reports_disagreement_when_nmap_baseline_differs():
     service = Service(port=80, protocol="tcp", name="http", product="nginx", version="1.18")
-    finding = EllysiaEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
+    finding = LybraEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
     assert "no concuerda con Nmap" in finding["title"]
 
 
@@ -268,7 +268,7 @@ def test_fingerprint_finding_no_nmap_baseline_is_honest_not_a_false_disagreement
     """Self-discovered services carry no Nmap product/version at all — the
     title must not claim disagreement when there is nothing to compare against."""
     service = Service(port=80, protocol="tcp", name="http", product="", version="")
-    finding = EllysiaEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
+    finding = LybraEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
     assert "no concuerda" not in finding["title"]
     assert "concuerda con Nmap" not in finding["title"]
     assert "sin datos de Nmap para comparar" in finding["title"]

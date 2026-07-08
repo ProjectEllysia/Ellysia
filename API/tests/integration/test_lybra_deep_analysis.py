@@ -1,13 +1,13 @@
-"""Integration tests for Ellysia Fase 6 ("análisis profundo").
+"""Integration tests for Lybra Fase 6 ("análisis profundo").
 
 Two things to prove:
 1. Corroborator selection/launch: which of Nmap/Nikto/OpenVAS get fired given
    the scan's mode and discovered services, and that a launch failure for one
-   never breaks the Ellysia scan itself.
-2. Read-time merge: format_scan fuses Ellysia's own findings with the linked
+   never breaks the Lybra scan itself.
+2. Read-time merge: format_scan fuses Lybra's own findings with the linked
    corroborators' Finding rows (merge_findings, Fase 5) without persisting
    anything new — the actual payoff of the roadmap's "Nmap/Nikto/OpenVAS become
-   complements of Ellysia, not the other way around".
+   complements of Lybra, not the other way around".
 
 Corroborator managers' run_scan is always monkeypatched: it calls
 TaskQueue.submit (real RQ+Redis), which this suite never runs against (see
@@ -22,10 +22,10 @@ from src.modules.infrastructure import UnitOfWork
 from src.modules.sentinel.model import NmapScan, NiktoScan, OpenVASScan, ScanStatus
 from src.modules.sentinel.repositories import ScanRepository, KbRepository
 from src.modules.sentinel.managers import (
-    EllysiaEngineManager, ScanManager,
+    LybraEngineManager, ScanManager,
     NmapScanManager, NiktoScanManager, OpenVASScanManager,
 )
-from src.modules.sentinel.ellysia import DEFAULT_PORTS
+from src.modules.sentinel.lybra import DEFAULT_PORTS
 from src.modules.sentinel.services.parsing import validate_port
 
 pytestmark = pytest.mark.integration
@@ -55,7 +55,7 @@ def _seed_nmap_scan(app, user_id: int, ports=None) -> int:
 
 def _seed_openvas_cve_finding(app, user_id: int, cve_id="CVE-2021-41773", qod_value=99) -> int:
     """A finished OpenVAS scan whose additive Finding matches the CVE the
-    Ellysia KB matcher would find on the seeded Nmap scan's port 80."""
+    Lybra KB matcher would find on the seeded Nmap scan's port 80."""
     vulnerabilities_data = [{
         "nvt_oid": "1.3.6.1.4.1.25623.1.0.999", "name": "Apache Path Traversal",
         "severity_score": 9.8, "severity_class": "Critical", "cvss_base_score": 9.8,
@@ -116,13 +116,13 @@ def test_deep_self_discovery_launches_all_three_with_http_service(app, admin_use
     calls: dict = {}
     _patch_corroborators(monkeypatch, calls)
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
-    monkeypatch.setattr(EllysiaEngineManager, "_discover_ports",
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [80, 22])
 
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.9", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_ellysia(escan.id, source_scan_id=None, discover_ports=None, deep=True)
+        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None, deep=True)
 
         with UnitOfWork() as uow:
             escan = ScanRepository(uow).get_by_id(escan.id)
@@ -137,11 +137,11 @@ def test_deep_skips_nmap_when_source_scan_id_present(app, admin_user, monkeypatc
     nmap_id = _seed_nmap_scan(app, admin_user.id)  # already has HTTP + SSH ports
 
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_ellysia(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=True)
+        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=True)
 
-    # A fresh Nmap corroborator would be redundant: Ellysia already has Nmap ports.
+    # A fresh Nmap corroborator would be redundant: Lybra already has Nmap ports.
     assert "nmap" not in calls
     assert "nikto" in calls and "openvas" in calls
 
@@ -152,9 +152,9 @@ def test_deep_skips_nikto_without_http_service(app, admin_user, monkeypatch):
     nmap_id = _seed_nmap_scan(app, admin_user.id, ports=_SSH_ONLY_PORTS)
 
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_ellysia(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=True)
+        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=True)
 
     assert "nikto" not in calls
     assert "openvas" in calls          # unconditional
@@ -166,9 +166,9 @@ def test_deep_false_launches_nothing(app, admin_user, monkeypatch):
     nmap_id = _seed_nmap_scan(app, admin_user.id)
 
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_ellysia(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=False)
+        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=False)
 
         with UnitOfWork() as uow:
             escan = ScanRepository(uow).get_by_id(escan.id)
@@ -184,13 +184,13 @@ def test_deep_one_corroborator_failure_does_not_fail_the_scan(app, admin_user, m
     monkeypatch.setattr(NmapScanManager, "run_scan", lambda self, **k: 901)
     monkeypatch.setattr(OpenVASScanManager, "run_scan", lambda self, **k: 903)
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
-    monkeypatch.setattr(EllysiaEngineManager, "_discover_ports",
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [80])
 
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.9", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_ellysia(escan.id, source_scan_id=None, discover_ports=None, deep=True)
+        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None, deep=True)
 
         with UnitOfWork() as uow:
             escan = ScanRepository(uow).get_by_id(escan.id)
@@ -214,9 +214,9 @@ def test_format_scan_merges_corroborator_finding_without_double_counting(app, ad
     openvas_id = _seed_openvas_cve_finding(app, admin_user.id, qod_value=99)
 
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_ellysia(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=False)
+        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=False)
 
         # Simulate what _launch_deep_corroborators would have recorded.
         with UnitOfWork() as uow:
@@ -232,11 +232,11 @@ def test_format_scan_merges_corroborator_finding_without_double_counting(app, ad
     cve_findings = [f for f in result["findings"] if f["cveIds"] == ["CVE-2021-41773"]]
     assert len(cve_findings) == 1                        # merged, not duplicated
     merged = cve_findings[0]
-    assert set(merged["source"].split(",")) == {"ellysia", "openvas"}
+    assert set(merged["source"].split(",")) == {"lybra", "openvas"}
     assert merged["qod"] == 99                            # OpenVAS's stronger signal wins
     assert merged["confirmed"] is True                    # escalated by the OpenVAS side
 
-    # The two open_port informational findings (Ellysia-only) are untouched.
+    # The two open_port informational findings (Lybra-only) are untouched.
     assert sum(1 for f in result["findings"] if f["category"] == "open_port") == 2
 
 
@@ -244,9 +244,9 @@ def test_format_scan_without_deep_scan_ids_is_unaffected(app, admin_user):
     """Non-deep scans must format exactly as before the Fase 6 rewrite."""
     nmap_id = _seed_nmap_scan(app, admin_user.id)
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_ellysia(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=False)
+        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=False)
         result = mgr.format_scan(escan.id)
 
     assert result["deep"] is False
@@ -256,32 +256,32 @@ def test_format_scan_without_deep_scan_ids_is_unaffected(app, admin_user):
 
 # ------------------------------------------------------------ endpoint boundary
 
-def test_ellysia_endpoint_accepts_deep_flag(client, app, admin_user, auth_headers, monkeypatch):
+def test_lybra_endpoint_accepts_deep_flag(client, app, admin_user, auth_headers, monkeypatch):
     nmap_id = _seed_nmap_scan(app, admin_user.id)
     captured = {}
 
     def fake_run_scan(self, **kwargs):
         captured.update(kwargs)
         return 555
-    monkeypatch.setattr(EllysiaEngineManager, "run_scan", fake_run_scan)
+    monkeypatch.setattr(LybraEngineManager, "run_scan", fake_run_scan)
 
-    resp = client.post("/sentinel/ellysia", headers=auth_headers(admin_user),
+    resp = client.post("/sentinel/lybra", headers=auth_headers(admin_user),
                        json={"sourceScanId": nmap_id, "deep": True})
 
     assert resp.status_code == 201
     assert captured.get("deep") is True
 
 
-def test_ellysia_endpoint_deep_defaults_to_false(client, app, admin_user, auth_headers, monkeypatch):
+def test_lybra_endpoint_deep_defaults_to_false(client, app, admin_user, auth_headers, monkeypatch):
     nmap_id = _seed_nmap_scan(app, admin_user.id)
     captured = {}
 
     def fake_run_scan(self, **kwargs):
         captured.update(kwargs)
         return 556
-    monkeypatch.setattr(EllysiaEngineManager, "run_scan", fake_run_scan)
+    monkeypatch.setattr(LybraEngineManager, "run_scan", fake_run_scan)
 
-    resp = client.post("/sentinel/ellysia", headers=auth_headers(admin_user),
+    resp = client.post("/sentinel/lybra", headers=auth_headers(admin_user),
                        json={"sourceScanId": nmap_id})
 
     assert resp.status_code == 201

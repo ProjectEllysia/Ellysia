@@ -1,6 +1,6 @@
-"""Local mirror of the public vulnerability feeds — Ellysia's knowledge base.
+"""Local mirror of the public vulnerability feeds — Lybra's knowledge base.
 
-This module is what lets Ellysia answer "which CVEs affect this product at this
+This module is what lets Lybra answer "which CVEs affect this product at this
 version?" from its own database, without reaching out to the network once per
 scanned target. It mirrors three public feeds locally — NVD (the CVE catalogue),
 CISA-KEV (vulnerabilities known to be exploited in the wild) and FIRST-EPSS
@@ -449,7 +449,7 @@ def _http_get(url: str, timeout: int = 30, api_key: Optional[str] = None) -> byt
         Exception: The last error encountered, re-raised after all retries are
             exhausted.
     """
-    headers = {"User-Agent": "Ellysia-KB/1.0"}
+    headers = {"User-Agent": "Lybra-KB/1.0"}
     if api_key:
         headers["apiKey"] = api_key
     last_error: Optional[Exception] = None

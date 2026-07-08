@@ -21,14 +21,14 @@ class OpenVASScanRequestSchema(Schema):
     scanConfig = fields.String(load_default="full_fast", validate=validate.OneOf(["full_fast", "full_deep", "full_ultimate"]))
 
 
-class EllysiaScanRequestSchema(Schema):
+class LybraScanRequestSchema(Schema):
     # Two modes: analyse a prior Nmap scan (sourceScanId) OR self-discover a
     # target's ports (target [+ optional ports]). Exactly one must be provided.
     sourceScanId = fields.Integer()
     target = fields.String()
     ports = fields.String()
     # Fase 6 "análisis profundo": also launch Nmap/Nikto/OpenVAS as independent
-    # corroborator scans, fused with Ellysia's own findings when read.
+    # corroborator scans, fused with Lybra's own findings when read.
     deep = fields.Boolean(load_default=False)
     timeout = fields.Integer(load_default=120, validate=validate.Range(min=1))
 
@@ -50,7 +50,7 @@ class FindingStateResponseSchema(Schema):
 
 
 class ResultsQuerySchema(Schema):
-    type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "openvas", "ellysia", "all"]))
+    type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "openvas", "lybra", "all"]))
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))
     per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
 

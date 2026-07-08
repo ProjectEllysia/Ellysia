@@ -110,7 +110,7 @@ def merge_findings(findings: List[dict]) -> List[dict]:
     When several findings describe the same issue, the merged result keeps the
     highest ``qod`` (along with that finding's title and CVSS score), is marked
     ``confirmed`` / ``in_kev`` if *any* input was, unions the CVE ids, and joins
-    the distinct sources into ``source`` (e.g. ``"ellysia,openvas"``). This is the
+    the distinct sources into ``source`` (e.g. ``"lybra,openvas"``). This is the
     mechanism behind both within-scan dedup and the read-time fusion of
     corroborator scans.
 

@@ -1,4 +1,4 @@
-"""Unit tests for the Ellysia knowledge base logic (Fase 2).
+"""Unit tests for the Lybra knowledge base logic (Fase 2).
 
 Pure functions only — version comparison/ranges, CPE normalization, and feed
 ingest from decoded records. The network fetchers are the thin edge and are not
@@ -7,7 +7,7 @@ exercised here.
 
 import pytest
 
-from src.modules.sentinel.ellysia import (
+from src.modules.sentinel.lybra import (
     version_compare,
     version_in_range,
     normalize_cpe_to_23,

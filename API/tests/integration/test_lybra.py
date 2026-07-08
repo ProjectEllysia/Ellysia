@@ -1,9 +1,9 @@
-"""Integration tests for the Ellysia engine scan (Fase 0).
+"""Integration tests for the Lybra engine scan (Fase 0).
 
 Covers the endpoint's authorization/validation boundary and the engine pipeline
 end to end: given an Nmap scan's services, the engine persists informational
 findings and they surface through the results endpoint. The engine body is run
-directly (``_run_ellysia``) rather than through the task queue, mirroring how the
+directly (``_run_lybra``) rather than through the task queue, mirroring how the
 other scan tests avoid Redis/the worker.
 """
 
@@ -14,7 +14,7 @@ import pytest
 from src.modules.infrastructure import UnitOfWork
 from src.modules.sentinel.model import NmapScan, NiktoScan, ScanStatus
 from src.modules.sentinel.repositories import ScanRepository, KbRepository
-from src.modules.sentinel.managers import EllysiaEngineManager, ScanManager
+from src.modules.sentinel.managers import LybraEngineManager, ScanManager
 
 pytestmark = pytest.mark.integration
 
@@ -53,40 +53,40 @@ def _seed_nikto_scan(app, user_id: int) -> int:
 
 # --------------------------------------------------------- endpoint boundary
 
-def test_ellysia_requires_authentication(client):
-    assert client.post("/sentinel/ellysia", json={"sourceScanId": 1}).status_code == 401
+def test_lybra_requires_authentication(client):
+    assert client.post("/sentinel/lybra", json={"sourceScanId": 1}).status_code == 401
 
 
-def test_ellysia_requires_create_attribute(client, regular_user, auth_headers):
+def test_lybra_requires_create_attribute(client, regular_user, auth_headers):
     # role_user lacks sentinel_create (same baseline as the Nmap start endpoint).
-    resp = client.post("/sentinel/ellysia", headers=auth_headers(regular_user),
+    resp = client.post("/sentinel/lybra", headers=auth_headers(regular_user),
                        json={"sourceScanId": 1})
     assert resp.status_code == 403
 
 
-def test_ellysia_source_scan_not_found(client, admin_user, auth_headers):
-    resp = client.post("/sentinel/ellysia", headers=auth_headers(admin_user),
+def test_lybra_source_scan_not_found(client, admin_user, auth_headers):
+    resp = client.post("/sentinel/lybra", headers=auth_headers(admin_user),
                        json={"sourceScanId": 999999})
     assert resp.status_code == 404
 
 
-def test_ellysia_requires_a_mode(client, admin_user, auth_headers):
+def test_lybra_requires_a_mode(client, admin_user, auth_headers):
     # Neither sourceScanId nor target -> schema rejects it.
-    resp = client.post("/sentinel/ellysia", headers=auth_headers(admin_user), json={})
+    resp = client.post("/sentinel/lybra", headers=auth_headers(admin_user), json={})
     assert resp.status_code in (400, 422)
 
 
-def test_ellysia_self_discovery_produces_open_port_findings(app, admin_user, monkeypatch):
+def test_lybra_self_discovery_produces_open_port_findings(app, admin_user, monkeypatch):
     # Stub reachability (no real socket) and the connect scan; the rest of the
     # self-discovery pipeline runs for real.
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
-    monkeypatch.setattr(EllysiaEngineManager, "_discover_ports",
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [80, 22])
 
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="8.8.8.8", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_ellysia(escan.id, source_scan_id=None, discover_ports=None)
+        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
 
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
@@ -100,15 +100,15 @@ def test_ellysia_self_discovery_produces_open_port_findings(app, admin_user, mon
     assert all(f.host_id is not None for f in findings)
 
 
-def test_ellysia_self_discovery_unreachable_host_fails_without_false_fixed(app, admin_user, monkeypatch):
+def test_lybra_self_discovery_unreachable_host_fails_without_false_fixed(app, admin_user, monkeypatch):
     """An unreachable host must never look like 'scanned clean, nothing open':
     that would mark every previously-open finding as falsely fixed."""
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: False))
 
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.99", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_ellysia(escan.id, source_scan_id=None, discover_ports=None)
+        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
 
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
@@ -119,17 +119,17 @@ def test_ellysia_self_discovery_unreachable_host_fails_without_false_fixed(app, 
     assert findings == []          # no misleading findings persisted at all
 
 
-def test_ellysia_self_discovery_probe_failure_fails_without_false_fixed(app, admin_user, monkeypatch):
+def test_lybra_self_discovery_probe_failure_fails_without_false_fixed(app, admin_user, monkeypatch):
     """Host is reachable, but the connect scan itself blows up unexpectedly:
     must also fail the scan rather than silently proceed with zero findings."""
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
-    monkeypatch.setattr(EllysiaEngineManager, "_discover_ports",
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: None)
 
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_ellysia(escan.id, source_scan_id=None, discover_ports=None)
+        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
 
         with UnitOfWork() as uow:
             escan = ScanRepository(uow).get_by_id(escan.id)
@@ -137,26 +137,26 @@ def test_ellysia_self_discovery_probe_failure_fails_without_false_fixed(app, adm
     assert escan.status == ScanStatus.FAILED.value
 
 
-def test_ellysia_self_discovery_genuine_zero_ports_still_marks_fixed(app, admin_user, monkeypatch):
+def test_lybra_self_discovery_genuine_zero_ports_still_marks_fixed(app, admin_user, monkeypatch):
     """Discovery running cleanly and finding nothing IS legitimate evidence:
     a previously-open finding on this target should still be marked fixed."""
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
-    monkeypatch.setattr(EllysiaEngineManager, "_discover_ports",
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [80])
 
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         # First scan: port 80 open.
         e1 = mgr._create_scan_record(target="10.0.0.7", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_ellysia(e1.id, source_scan_id=None, discover_ports=None)
+        mgr._run_lybra(e1.id, source_scan_id=None, discover_ports=None)
 
     # Second scan: discovery ran cleanly and genuinely found nothing open.
-    monkeypatch.setattr(EllysiaEngineManager, "_discover_ports",
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [])
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         e2 = mgr._create_scan_record(target="10.0.0.7", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_ellysia(e2.id, source_scan_id=None, discover_ports=None)
+        mgr._run_lybra(e2.id, source_scan_id=None, discover_ports=None)
         with UnitOfWork() as uow:
             findings2 = ScanRepository(uow).get_findings_by_scan(e2.id)
             e2 = ScanRepository(uow).get_by_id(e2.id)
@@ -165,14 +165,14 @@ def test_ellysia_self_discovery_genuine_zero_ports_still_marks_fixed(app, admin_
     assert any(f.state == "fixed" and f.category == "open_port" for f in findings2)
 
 
-def test_ellysia_self_discovery_reuses_host_created_by_nmap(app, admin_user):
+def test_lybra_self_discovery_reuses_host_created_by_nmap(app, admin_user):
     """Self-discovery must not create a second Host row for an IP another
     scanner already resolved to a hostname."""
     with app.app_context():
         with UnitOfWork() as uow:
             ScanRepository(uow).get_or_create_host(hostname="server.example.com", ip_address="10.0.0.42")
 
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.42", user_id=admin_user.id, source_scan_id=None)
 
         with UnitOfWork() as uow:
@@ -189,35 +189,35 @@ def test_ellysia_self_discovery_reuses_host_created_by_nmap(app, admin_user):
         assert len(all_hosts) == 1                       # no duplicate
 
 
-def test_ellysia_rejects_non_nmap_source(client, app, admin_user, auth_headers):
+def test_lybra_rejects_non_nmap_source(client, app, admin_user, auth_headers):
     nikto_id = _seed_nikto_scan(app, admin_user.id)
-    resp = client.post("/sentinel/ellysia", headers=auth_headers(admin_user),
+    resp = client.post("/sentinel/lybra", headers=auth_headers(admin_user),
                        json={"sourceScanId": nikto_id})
     assert resp.status_code == 400
 
 
-def test_ellysia_rejects_another_users_source(client, app, make_user, auth_headers):
+def test_lybra_rejects_another_users_source(client, app, make_user, auth_headers):
     owner = make_user(role="role_admin")
     other = make_user(role="role_admin")
     nmap_id = _seed_nmap_scan(app, owner.id)
     # The source scan belongs to `owner`; `other` must not be able to use it.
-    resp = client.post("/sentinel/ellysia", headers=auth_headers(other),
+    resp = client.post("/sentinel/lybra", headers=auth_headers(other),
                        json={"sourceScanId": nmap_id})
     assert resp.status_code == 404
 
 
 # ------------------------------------------------------- engine end to end
 
-def test_ellysia_engine_persists_informational_findings(app, admin_user):
+def test_lybra_engine_persists_informational_findings(app, admin_user):
     nmap_id = _seed_nmap_scan(app, admin_user.id)
 
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(
             target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id,
         )
         escan_id = escan.id
-        mgr._run_ellysia(escan_id, nmap_id)
+        mgr._run_lybra(escan_id, nmap_id)
 
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
@@ -227,7 +227,7 @@ def test_ellysia_engine_persists_informational_findings(app, admin_user):
             assert escan.status == ScanStatus.FINISHED.value
             assert len(findings) == 2
             assert {f.category for f in findings} == {"open_port"}
-            assert all(f.source == "ellysia" and f.qod == 30 for f in findings)
+            assert all(f.source == "lybra" and f.qod == 30 for f in findings)
             # The CPE captured from Nmap rode all the way into the finding,
             # normalized to 2.3 (consistent with version-match findings).
             assert "cpe:2.3:a:apache:http_server:2.4.49:*:*:*:*:*:*:*" in {f.cpe for f in findings}
@@ -252,16 +252,16 @@ def _seed_kb_apache_cve(app):
                               "percentile": 0.99, "scored_at": None})
 
 
-def test_ellysia_version_match_produces_cve_finding(app, admin_user):
+def test_lybra_version_match_produces_cve_finding(app, admin_user):
     _seed_kb_apache_cve(app)
     nmap_id = _seed_nmap_scan(app, admin_user.id)  # port 80 = Apache 2.4.49 with CPE
 
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(
             target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id,
         )
-        mgr._run_ellysia(escan.id, nmap_id)
+        mgr._run_lybra(escan.id, nmap_id)
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
@@ -279,13 +279,13 @@ def test_ellysia_version_match_produces_cve_finding(app, admin_user):
     assert sum(1 for f in findings if f.category == "open_port") == 2
 
 
-def test_ellysia_active_check_persists_confirmed_finding(app, admin_user, monkeypatch):
+def test_lybra_active_check_persists_confirmed_finding(app, admin_user, monkeypatch):
     # Enable active checks and stub the HTTP probe so no real network is hit.
     import src.modules.system.config_reading as CR
-    from src.modules.sentinel.ellysia import checks as checks_mod
-    from src.modules.sentinel.ellysia.checks import Response
+    from src.modules.sentinel.lybra import checks as checks_mod
+    from src.modules.sentinel.lybra.checks import Response
 
-    monkeypatch.setattr(CR, "is_ellysia_active_checks_enabled", lambda: True)
+    monkeypatch.setattr(CR, "is_lybra_active_checks_enabled", lambda: True)
 
     def fake_fetch(self, host, port, method, path):
         if path == "/.git/config":
@@ -295,39 +295,39 @@ def test_ellysia_active_check_persists_confirmed_finding(app, admin_user, monkey
 
     nmap_id = _seed_nmap_scan(app, admin_user.id)  # http service on port 80
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(
             target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id,
         )
-        mgr._run_ellysia(escan.id, nmap_id)
+        mgr._run_lybra(escan.id, nmap_id)
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
 
-    active = [f for f in findings if f.check_id == "ellysia:git-config-exposure@1"]
+    active = [f for f in findings if f.check_id == "lybra:git-config-exposure@1"]
     assert len(active) == 1
     assert active[0].qod == 99
     assert active[0].confirmed is True
     assert active[0].category == "exposed_path"
 
 
-def test_ellysia_lifecycle_marks_fixed_when_cve_gone(app, admin_user):
+def test_lybra_lifecycle_marks_fixed_when_cve_gone(app, admin_user):
     _seed_kb_apache_cve(app)
 
     # Scan 1 — vulnerable Apache 2.4.49.
     nmap1 = _seed_nmap_scan(app, admin_user.id)
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         e1 = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap1)
-        mgr._run_ellysia(e1.id, nmap1)
+        mgr._run_lybra(e1.id, nmap1)
 
     # Scan 2 — patched Apache 2.4.51 (no CVE match in the KB).
     patched = [dict(_PORTS[0], version="2.4.51", cpe="cpe:/a:apache:http_server:2.4.51"), _PORTS[1]]
     nmap2 = _seed_nmap_scan(app, admin_user.id, patched)
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         e2 = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap2)
-        mgr._run_ellysia(e2.id, nmap2)
+        mgr._run_lybra(e2.id, nmap2)
         with UnitOfWork() as uow:
             findings2 = ScanRepository(uow).get_findings_by_scan(e2.id)
 
@@ -338,9 +338,9 @@ def test_ellysia_lifecycle_marks_fixed_when_cve_gone(app, admin_user):
 
 
 def _run_scan_and_get_cve_finding_id(app, user_id, nmap_id):
-    mgr = EllysiaEngineManager()
+    mgr = LybraEngineManager()
     escan = mgr._create_scan_record(target="10.0.0.5", user_id=user_id, source_scan_id=nmap_id)
-    mgr._run_ellysia(escan.id, nmap_id)
+    mgr._run_lybra(escan.id, nmap_id)
     with UnitOfWork() as uow:
         findings = ScanRepository(uow).get_findings_by_scan(escan.id)
         return next(f.id for f in findings if f.cve_ids)
@@ -371,12 +371,12 @@ def test_accept_nonexistent_finding_is_404(client, admin_user, auth_headers):
     assert resp.status_code == 404
 
 
-def test_ellysia_fingerprinting_records_agreement_with_nmap(app, admin_user, monkeypatch):
+def test_lybra_fingerprinting_records_agreement_with_nmap(app, admin_user, monkeypatch):
     # Enable fingerprinting and stub the HTTP probe (no real network).
     import src.modules.system.config_reading as CR
-    from src.modules.sentinel.ellysia.checks import HttpProbe, Response
+    from src.modules.sentinel.lybra.checks import HttpProbe, Response
 
-    monkeypatch.setattr(CR, "is_ellysia_fingerprinting_enabled", lambda: True)
+    monkeypatch.setattr(CR, "is_lybra_fingerprinting_enabled", lambda: True)
 
     def fake_fetch(self, host, port, method, path):
         return Response(200, "<html><title>It works</title></html>",
@@ -386,9 +386,9 @@ def test_ellysia_fingerprinting_records_agreement_with_nmap(app, admin_user, mon
 
     nmap_id = _seed_nmap_scan(app, admin_user.id)  # port 80 = Apache httpd 2.4.49 (matches)
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_ellysia(escan.id, nmap_id)
+        mgr._run_lybra(escan.id, nmap_id)
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
@@ -401,32 +401,32 @@ def test_ellysia_fingerprinting_records_agreement_with_nmap(app, admin_user, mon
     assert "no concuerda" not in fingerprints[0].title
 
 
-def test_ellysia_fingerprinting_disabled_by_default(app, admin_user):
+def test_lybra_fingerprinting_disabled_by_default(app, admin_user):
     nmap_id = _seed_nmap_scan(app, admin_user.id)
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_ellysia(escan.id, nmap_id)
+        mgr._run_lybra(escan.id, nmap_id)
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
 
     assert not any(f.category == "fingerprint" for f in findings)
 
 
-def test_ellysia_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, monkeypatch):
+def test_lybra_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, monkeypatch):
     """The point of wiring fingerprint output into CPE resolution: a
     self-discovered service (Fase T, no Nmap involved at all) must still be
-    able to match a CVE, using Ellysia's own HTTP fingerprint instead of an
+    able to match a CVE, using Lybra's own HTTP fingerprint instead of an
     Nmap-emitted CPE. Without this wiring the version matcher has nothing to
     look up and a self-discovery-only scan finds zero CVEs, ever.
     """
     import src.modules.system.config_reading as CR
-    from src.modules.sentinel.ellysia.checks import HttpProbe, Response
+    from src.modules.sentinel.lybra.checks import HttpProbe, Response
 
     _seed_kb_apache_cve(app)
-    monkeypatch.setattr(CR, "is_ellysia_fingerprinting_enabled", lambda: True)
+    monkeypatch.setattr(CR, "is_lybra_fingerprinting_enabled", lambda: True)
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
-    monkeypatch.setattr(EllysiaEngineManager, "_discover_ports",
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [80])
 
     def fake_fetch(self, host, port, method, path):
@@ -436,9 +436,9 @@ def test_ellysia_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, m
     monkeypatch.setattr(HttpProbe, "fetch_bytes", lambda self, host, port, path: None)
 
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_ellysia(escan.id, source_scan_id=None, discover_ports=None)
+        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
@@ -456,21 +456,21 @@ def test_ellysia_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, m
     assert "sin datos de Nmap para comparar" in fingerprints[0].title
 
 
-def test_ellysia_scan_surfaces_in_results_endpoint(client, app, admin_user, auth_headers):
+def test_lybra_scan_surfaces_in_results_endpoint(client, app, admin_user, auth_headers):
     nmap_id = _seed_nmap_scan(app, admin_user.id)
     with app.app_context():
-        mgr = EllysiaEngineManager()
+        mgr = LybraEngineManager()
         escan = mgr._create_scan_record(
             target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id,
         )
-        mgr._run_ellysia(escan.id, nmap_id)
+        mgr._run_lybra(escan.id, nmap_id)
 
-    resp = client.get("/sentinel/results?type=ellysia&page=1&per_page=10",
+    resp = client.get("/sentinel/results?type=lybra&page=1&per_page=10",
                      headers=auth_headers(admin_user))
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["totalCount"] == 1
     result = body["results"][0]
-    assert result["scanType"] == "ellysia"
+    assert result["scanType"] == "lybra"
     assert result["sourceScanId"] == nmap_id
     assert result["totalFindings"] == 2

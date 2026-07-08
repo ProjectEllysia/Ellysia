@@ -1,6 +1,6 @@
-"""Ellysia's own vulnerability engine — the code that makes it a scanner.
+"""Lybra's own vulnerability engine — the code that makes it a scanner.
 
-This package holds everything that makes Ellysia a scanner in its own right,
+This package holds everything that makes Lybra a scanner in its own right,
 rather than an orchestrator that just runs Nmap, Nikto and OpenVAS. By project
 convention the managers live in ``sentinel/managers.py`` and the repositories in
 ``sentinel/repositories.py``; the detection logic lives here.
@@ -45,7 +45,7 @@ callables so they can be tested without it.
 from __future__ import annotations
 
 from .engine import (
-    EllysiaEngine,
+    LybraEngine,
     Service,
     services_from_open_ports,
     QOD_OPEN_PORT,
@@ -107,7 +107,7 @@ from .transport import (
 )
 
 __all__ = [
-    "EllysiaEngine",
+    "LybraEngine",
     "Service",
     "services_from_open_ports",
     "QOD_OPEN_PORT",
