@@ -114,7 +114,7 @@ las migraciones de Alembic gestionan la evolución del esquema sin pérdida de d
 Las siguientes jerarquías usan herencia de tabla unida (polymorphic), que puede
 confundir al autogenerate:
 
-- `Document` → `AegisDocument`, `SentinelDocument`, `IrisDocument`
+- `Document` → `AegisDocument`, `ThemisDocument`, `IrisDocument`
 - `Scan` → `NmapScan`, `NiktoScan`, `OpenVASScan`
 - `Storable` → `Account`, `CreditCard`, `SecureNote`, `Identity`, `BankAccount`, `WifiNetwork`, `SoftwareLicense`
 
