@@ -4,6 +4,36 @@
     <Topbar title="Themis" badge="Escaneos de Vulnerabilidades" />
 
     <main class="main">
+      <!-- Toggle de dos mundos: el motor propio vs los escáneres externos -->
+      <div class="world-toggle" role="tablist" aria-label="Modo de Themis">
+        <button class="world-opt" :class="{ active: store.world === 'lybra' }" role="tab" :aria-selected="store.world === 'lybra'" @click="store.setWorld('lybra')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18M7 21h10M5 7h14M5 7l-2.5 5a3 3 0 0 0 5 0L5 7zM19 7l-2.5 5a3 3 0 0 0 5 0L19 7z"/></svg>
+          <span class="world-label">Motor Lybra</span>
+        </button>
+        <button class="world-opt" :class="{ active: store.world === 'external' }" role="tab" :aria-selected="store.world === 'external'" @click="store.setWorld('external')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+          <span class="world-label">Escáneres externos</span>
+        </button>
+      </div>
+
+      <Transition name="fade-swap" mode="out-in">
+      <!-- ═══════════ MUNDO: MOTOR LYBRA ═══════════ -->
+      <div v-if="store.world === 'lybra'" key="lybra" class="world-block">
+        <LybraLaunchPanel
+          :launching="store.launching"
+          :source-scans="store.sourceNmapScans.items"
+          :source-loading="store.sourceNmapScans.loading"
+          @launch="handleLaunchLybra"
+          @load-sources="store.loadSourceNmapScans()" />
+        <LybraResults
+          :scans="store.scans.lybra.results"
+          :loading="store.scans.lybra.loading"
+          @refresh="store.loadLybraScans()"
+          @delete="handleDeleteLybra" />
+      </div>
+
+      <!-- ═══════════ MUNDO: ESCÁNERES EXTERNOS ═══════════ -->
+      <div v-else key="external" class="world-block">
       <StatsRow :total="store.stats.total" :nmap="store.stats.nmap" :nikto="store.stats.nikto" :openvas="store.stats.openvas" />
       <ViewToggle :model-value="store.viewMode" @update:model-value="store.setViewMode" />
       <Transition name="fade-swap" mode="out-in" appear>
@@ -38,6 +68,8 @@
           @move-scan="handleOpenMoveScan"
           @remove-scan="handleRemoveScan" />
         <HistoryPanel v-else-if="store.viewMode === 'history'" key="history" />
+      </Transition>
+      </div>
       </Transition>
     </main>
 
@@ -121,6 +153,8 @@ import FolderFormModal from '@/components/themis/FolderFormModal.vue'
 import MoveScanModal from '@/components/themis/MoveScanModal.vue'
 import BatchActionModal from '@/components/themis/BatchActionModal.vue'
 import ScheduledScansPanel from '@/components/themis/ScheduledScansPanel.vue'
+import LybraLaunchPanel from '@/components/themis/lybra/LybraLaunchPanel.vue'
+import LybraResults from '@/components/themis/lybra/LybraResults.vue'
 import { useThemisStore } from '@/stores/themisStore'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 
@@ -137,6 +171,15 @@ const selectableFolders = computed(() =>
 )
 
 onMounted(() => { store.loadStats(); store.loadScans(store.activeTab); store.loadScheduledScans(); store.loadFolders() })
+
+// Carga la lista de Lybra la primera vez que se entra a su mundo.
+let lybraLoaded = false
+watch(() => store.world, (w) => {
+  if (w === 'lybra' && !lybraLoaded) { lybraLoaded = true; store.loadLybraScans() }
+}, { immediate: true })
+
+async function handleLaunchLybra(payload) { await store.launchLybra(payload) }
+async function handleDeleteLybra(id) { if (confirm('¿Eliminar este escaneo Lybra y sus hallazgos?')) await store.deleteLybraScan(id) }
 
 watch(activeBatchAction, (val) => {
   if (!val) { selectedFolderId.value = ''; batchSubmitting.value = false }
@@ -193,6 +236,19 @@ async function handleDeleteScheduled(id) { await store.deleteScheduledScan(id) }
 .themis-page { min-height: 100vh; padding-top: var(--topbar-h); position: relative; }
 .main { max-width: 1100px; margin: 0 auto; padding: 1.25rem; position: relative; z-index: 1; }
 @media (max-width: 768px) { .main { padding: 0.85rem; } }
+
+/* ── Toggle de dos mundos ── */
+.world-toggle { display: flex; gap: 0.3rem; margin-bottom: 1.1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.3rem; }
+.world-opt {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 0.45rem;
+  padding: 0.6rem 0.9rem; background: none; border: none; border-radius: 7px;
+  color: var(--text-muted); font-size: 0.85rem; font-weight: 500; cursor: pointer;
+  transition: all 0.2s ease;
+}
+.world-opt svg { width: 16px; height: 16px; }
+.world-opt:hover { color: var(--text-dim); }
+.world-opt.active { background: var(--accent-dim); color: var(--accent-bright); font-weight: 600; box-shadow: inset 0 0 0 1px var(--accent); }
+.world-block { display: block; }
 
 /* Staggered entrance on page load — mirrors the hub's fade-up language.
    Only the two static children get it; the switchable view-block below
