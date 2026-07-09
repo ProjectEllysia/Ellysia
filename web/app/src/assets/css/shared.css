@@ -132,7 +132,7 @@
 
 /* Acentos por módulo — cada herramienta conserva su color, recalibrado
    para contraste en cada iluminación. */
-[data-module="sentinel"] {
+[data-module="themis"] {
   --accent:       #7ca163;
   --accent-dim:   rgba(124,161,99,0.10);
   --accent-bright:#97bd7e;
@@ -160,7 +160,7 @@
   --border:       rgba(160,122,192,0.06);
   --border-med:   rgba(160,122,192,0.14);
 }
-[data-theme="dawn"] [data-module="sentinel"] {
+[data-theme="dawn"] [data-module="themis"] {
   --accent: #4f7a42; --accent-dim: rgba(79,122,66,0.12); --accent-bright: #3d6132;
   --border: rgba(79,122,66,0.10); --border-med: rgba(79,122,66,0.20);
 }

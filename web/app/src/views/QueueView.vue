@@ -94,7 +94,7 @@ const { formatDate } = useUtils()
 
 onMounted(() => { store.loadStatus(); store.loadTasks() })
 
-function categoryLabel(c) { const m = { 'sentinel.scan': 'Escaneo', 'sentinel.report': 'Informe PDF', 'aegis.generate': 'IA Aegis' }; return m[c] || c }
+function categoryLabel(c) { const m = { 'themis.scan': 'Escaneo', 'themis.report': 'Informe PDF', 'aegis.generate': 'IA Aegis' }; return m[c] || c }
 function statusLabel(s) { const m = { pending: 'Pendiente', running: 'En ejecución', completed: 'Completado', failed: 'Fallido', cancelled: 'Cancelado' }; return m[s] || s }
 async function handleCancel(id) { await store.cancelTask(id) }
 </script>

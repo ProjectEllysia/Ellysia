@@ -41,10 +41,10 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useSentinelStore } from '@/stores/sentinelStore'
-import HistoryChart from '@/components/sentinel/HistoryChart.vue'
+import { useThemisStore } from '@/stores/themisStore'
+import HistoryChart from '@/components/themis/HistoryChart.vue'
 
-const store = useSentinelStore()
+const store = useThemisStore()
 
 const TOOL_LABELS = { nmap: 'Nmap (red)', nikto: 'Nikto (web)', openvas: 'OpenVAS (vulnerabilidades)' }
 const TOOL_ORDER = ['nmap', 'nikto', 'openvas']

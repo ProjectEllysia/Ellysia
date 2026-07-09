@@ -102,8 +102,8 @@
                     <option v-for="s in aiStrategies" :key="s.value" :value="s.value">{{ s.label }}</option>
                   </select>
                 </div>
-                <div class="form-group"><label>Sentinel</label>
-                  <select v-model="store.configFlat['ai.modules.sentinel']" class="inp sel">
+                <div class="form-group"><label>Themis</label>
+                  <select v-model="store.configFlat['ai.modules.themis']" class="inp sel">
                     <option v-for="s in aiStrategies" :key="s.value" :value="s.value">{{ s.label }}</option>
                   </select>
                 </div>
@@ -128,51 +128,51 @@
             </div>
           </section>
 
-          <section id="section-sentinel" class="section">
-            <div class="section-head"><h2>Sentinel</h2><p class="section-desc">Escáner de red, análisis web y vulnerabilidades</p></div>
+          <section id="section-themis" class="section">
+            <div class="section-head"><h2>Themis</h2><p class="section-desc">Escáner de red, análisis web y vulnerabilidades</p></div>
             <div class="section-body">
-              <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['sentinel.enabled']" type="checkbox" class="toggle" /><span>Habilitado</span></label></div>
+              <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['themis.enabled']" type="checkbox" class="toggle" /><span>Habilitado</span></label></div>
               <div class="cfg-grid">
-                <div class="form-group"><label>Directorio de salida (PDFs)</label><input v-model="store.configFlat['sentinel.directories.output']" type="text" class="inp" /></div>
-                <div class="form-group"><label>Directorio CSV</label><input v-model="store.configFlat['sentinel.directories.csv']" type="text" class="inp" /></div>
-                <div class="form-group"><label>Directorio de recursos</label><input v-model="store.configFlat['sentinel.directories.resources']" type="text" class="inp" /></div>
+                <div class="form-group"><label>Directorio de salida (PDFs)</label><input v-model="store.configFlat['themis.directories.output']" type="text" class="inp" /></div>
+                <div class="form-group"><label>Directorio CSV</label><input v-model="store.configFlat['themis.directories.csv']" type="text" class="inp" /></div>
+                <div class="form-group"><label>Directorio de recursos</label><input v-model="store.configFlat['themis.directories.resources']" type="text" class="inp" /></div>
               </div>
-              <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['sentinel.areLocalIpsAllowed']" type="checkbox" class="toggle" /><span>Permitir IPs locales</span></label></div>
+              <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['themis.areLocalIpsAllowed']" type="checkbox" class="toggle" /><span>Permitir IPs locales</span></label></div>
               <div class="cfg-grid">
-                <div class="form-group"><label>Carpeta por defecto</label><input v-model="store.configFlat['sentinel.folders.defaultFolderName']" type="text" class="inp" /><span class="field-hint">Nombre de la carpeta virtual para escaneos sin agrupar</span></div>
-                <div class="form-group"><label>Escaneos en estadísticas</label><input v-model.number="store.configFlat['sentinel.history.maxScans']" type="number" min="1" max="100" class="inp" /><span class="field-hint">Escaneos recientes que se promedian en el histórico</span></div>
+                <div class="form-group"><label>Carpeta por defecto</label><input v-model="store.configFlat['themis.folders.defaultFolderName']" type="text" class="inp" /><span class="field-hint">Nombre de la carpeta virtual para escaneos sin agrupar</span></div>
+                <div class="form-group"><label>Escaneos en estadísticas</label><input v-model.number="store.configFlat['themis.history.maxScans']" type="number" min="1" max="100" class="inp" /><span class="field-hint">Escaneos recientes que se promedian en el histórico</span></div>
               </div>
               <h3 class="subsection-title">Verificación de accesibilidad del host</h3>
               <div class="cfg-grid">
-                <div class="form-group"><label class="toggle-row"><input v-model="store.configFlat['sentinel.hostReachabilityCheck.enabled']" type="checkbox" class="toggle" /><span>Habilitado</span></label></div>
-                <div class="form-group"><label>Timeout (s)</label><input v-model.number="store.configFlat['sentinel.hostReachabilityCheck.timeout']" type="number" step="0.5" min="0.5" class="inp" /></div>
-                <div class="form-group"><label>Puerto</label><input v-model.number="store.configFlat['sentinel.hostReachabilityCheck.port']" type="number" min="1" max="65535" class="inp" /></div>
+                <div class="form-group"><label class="toggle-row"><input v-model="store.configFlat['themis.hostReachabilityCheck.enabled']" type="checkbox" class="toggle" /><span>Habilitado</span></label></div>
+                <div class="form-group"><label>Timeout (s)</label><input v-model.number="store.configFlat['themis.hostReachabilityCheck.timeout']" type="number" step="0.5" min="0.5" class="inp" /></div>
+                <div class="form-group"><label>Puerto</label><input v-model.number="store.configFlat['themis.hostReachabilityCheck.port']" type="number" min="1" max="65535" class="inp" /></div>
               </div>
               <h3 class="subsection-title">Traceroute</h3>
               <div class="cfg-grid">
-                <div class="form-group"><label>Validez de caché (h)</label><input v-model.number="store.configFlat['sentinel.traceroute.cacheHours']" type="number" min="1" max="720" class="inp" /></div>
-                <div class="form-group"><label>Saltos máximos</label><input v-model.number="store.configFlat['sentinel.traceroute.maxHops']" type="number" min="1" max="64" class="inp" /></div>
-                <div class="form-group"><label>Timeout (s)</label><input v-model.number="store.configFlat['sentinel.traceroute.timeout']" type="number" min="1" max="600" class="inp" /></div>
-                <div class="form-group"><label>Reintento si falla (min)</label><input v-model.number="store.configFlat['sentinel.traceroute.retryFailedMinutes']" type="number" min="1" max="1440" class="inp" /></div>
+                <div class="form-group"><label>Validez de caché (h)</label><input v-model.number="store.configFlat['themis.traceroute.cacheHours']" type="number" min="1" max="720" class="inp" /></div>
+                <div class="form-group"><label>Saltos máximos</label><input v-model.number="store.configFlat['themis.traceroute.maxHops']" type="number" min="1" max="64" class="inp" /></div>
+                <div class="form-group"><label>Timeout (s)</label><input v-model.number="store.configFlat['themis.traceroute.timeout']" type="number" min="1" max="600" class="inp" /></div>
+                <div class="form-group"><label>Reintento si falla (min)</label><input v-model.number="store.configFlat['themis.traceroute.retryFailedMinutes']" type="number" min="1" max="1440" class="inp" /></div>
               </div>
             </div>
             <div class="scanner-grid">
-              <ScannerCard name="Nmap" icon="scan" :flat="store.configFlat" prefix="sentinel.nmap" />
-              <ScannerCard name="Nikto" icon="web" :flat="store.configFlat" prefix="sentinel.nikto" />
-              <ScannerCard name="OpenVAS" icon="vuln" :flat="store.configFlat" prefix="sentinel.openvas" />
+              <ScannerCard name="Nmap" icon="scan" :flat="store.configFlat" prefix="themis.nmap" />
+              <ScannerCard name="Nikto" icon="web" :flat="store.configFlat" prefix="themis.nikto" />
+              <ScannerCard name="OpenVAS" icon="vuln" :flat="store.configFlat" prefix="themis.openvas" />
             </div>
             <div class="section-body openvas-tool-configs">
               <h3 class="subsection-title">OpenVAS — Configuraciones de escaneo</h3>
               <div class="cfg-grid">
-                <div class="form-group"><label>Full Deep</label><input v-model="store.configFlat['sentinel.openvas.toolConfigs.scanConfigs.full_deep']" type="text" class="inp mono" /></div>
-                <div class="form-group"><label>Full Fast</label><input v-model="store.configFlat['sentinel.openvas.toolConfigs.scanConfigs.full_fast']" type="text" class="inp mono" /></div>
-                <div class="form-group"><label>Full Ultimate</label><input v-model="store.configFlat['sentinel.openvas.toolConfigs.scanConfigs.full_ultimate']" type="text" class="inp mono" /></div>
+                <div class="form-group"><label>Full Deep</label><input v-model="store.configFlat['themis.openvas.toolConfigs.scanConfigs.full_deep']" type="text" class="inp mono" /></div>
+                <div class="form-group"><label>Full Fast</label><input v-model="store.configFlat['themis.openvas.toolConfigs.scanConfigs.full_fast']" type="text" class="inp mono" /></div>
+                <div class="form-group"><label>Full Ultimate</label><input v-model="store.configFlat['themis.openvas.toolConfigs.scanConfigs.full_ultimate']" type="text" class="inp mono" /></div>
               </div>
               <h3 class="subsection-title">OpenVAS — Listas de puertos</h3>
               <div class="cfg-grid">
-                <div class="form-group"><label>TCP All</label><input v-model="store.configFlat['sentinel.openvas.toolConfigs.portList.tcp_all']" type="text" class="inp mono" /></div>
-                <div class="form-group"><label>TCP All + UDP Top 100</label><input v-model="store.configFlat['sentinel.openvas.toolConfigs.portList.tcp_all_udp_top100']" type="text" class="inp mono" /></div>
-                <div class="form-group"><label>TCP + UDP All</label><input v-model="store.configFlat['sentinel.openvas.toolConfigs.portList.tcp_udp_all']" type="text" class="inp mono" /></div>
+                <div class="form-group"><label>TCP All</label><input v-model="store.configFlat['themis.openvas.toolConfigs.portList.tcp_all']" type="text" class="inp mono" /></div>
+                <div class="form-group"><label>TCP All + UDP Top 100</label><input v-model="store.configFlat['themis.openvas.toolConfigs.portList.tcp_all_udp_top100']" type="text" class="inp mono" /></div>
+                <div class="form-group"><label>TCP + UDP All</label><input v-model="store.configFlat['themis.openvas.toolConfigs.portList.tcp_udp_all']" type="text" class="inp mono" /></div>
               </div>
             </div>
           </section>
@@ -225,7 +225,7 @@ const ICON = {
   taskqueue: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>',
   ai:        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="6" height="6" rx="1"/><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 15h3M1 9h3M1 15h3"/></svg>',
   iris:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>',
-  sentinel:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+  themis:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
   aegis:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
 }
 
@@ -240,7 +240,7 @@ const navGroups = [
   { label: 'Módulos', items: [
     { id: 'ai',       label: 'IA',       icon: ICON.ai },
     { id: 'iris',     label: 'Iris',     icon: ICON.iris },
-    { id: 'sentinel', label: 'Sentinel', icon: ICON.sentinel },
+    { id: 'themis', label: 'Themis', icon: ICON.themis },
     { id: 'aegis',    label: 'Aegis',    icon: ICON.aegis },
   ]},
 ]

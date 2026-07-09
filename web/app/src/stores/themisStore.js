@@ -5,13 +5,13 @@ import { useUtils } from '@/composables/useUtils'
 import { useToastStore } from '@/stores/toastStore'
 
 /**
- * Store de Sentinel — gestiona escaneos, estadísticas, modales y documentos.
+ * Store de Themis — gestiona escaneos, estadísticas, modales y documentos.
  *
- * Sustituye al estado disperso en sentinel.js (1,198 líneas de manipulación DOM
+ * Sustituye al estado disperso en themis.js (1,198 líneas de manipulación DOM
  * directa). Centraliza las listas de resultados por tipo (nmap, nikto, openvas),
  * la paginación, los modales de vista previa/detalle y los documentos asociados.
  */
-export const useSentinelStore = defineStore('sentinel', () => {
+export const useThemisStore = defineStore('themis', () => {
   const { apiFetch } = useApi()
   const toast = useToastStore()
   const { triggerDownload } = useUtils()
@@ -90,7 +90,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   async function loadStats() {
     loadingStats.value = true
     try {
-      const res = await apiFetch('/sentinel/stats')
+      const res = await apiFetch('/themis/stats')
       if (!res?.ok) return
       const data = await res.json()
       stats.nmap    = data.nmap    ?? 0
@@ -108,7 +108,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
     d.loading = true
     try {
       const params = new URLSearchParams({ type, page: d.page, per_page: d.perPage })
-      const res = await apiFetch(`/sentinel/results?${params}`)
+      const res = await apiFetch(`/themis/results?${params}`)
       if (!res?.ok) { d.results = []; return }
       const data = await res.json()
       d.results = data.results ?? []
@@ -140,15 +140,15 @@ export const useSentinelStore = defineStore('sentinel', () => {
   /* ════════════════════════════════ LANZAR ════════════════════════════ */
   /** Lanza un escaneo Nmap y refresca los datos.*/
   async function launchNmap(payload) {
-    return _launch('/sentinel/nmap', payload, 'nmap')
+    return _launch('/themis/nmap', payload, 'nmap')
   }
   /** Lanza un escaneo Nikto. */
   async function launchNikto(payload) {
-    return _launch('/sentinel/nikto', payload, 'nikto')
+    return _launch('/themis/nikto', payload, 'nikto')
   }
   /** Lanza un escaneo OpenVAS. */
   async function launchOpenvas(payload) {
-    return _launch('/sentinel/openvas', payload, 'openvas')
+    return _launch('/themis/openvas', payload, 'openvas')
   }
 
   async function _launch(endpoint, payload, type) {
@@ -174,7 +174,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   /* ════════════════════════════════ ACCIONES DE FILA ══════════════════ */
   /** Elimina un escaneo por ID. Actualiza el estado local sin refetch completo. */
   async function deleteScan(id) {
-    const res = await apiFetch(`/sentinel/${id}`, { method: 'DELETE' })
+    const res = await apiFetch(`/themis/${id}`, { method: 'DELETE' })
     if (!res?.ok) { toast.show('No se pudo eliminar el escaneo.', 'error'); return false }
 
     const hit = _findScanInFolders(id)
@@ -203,7 +203,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
 
   /** Cancela un escaneo en ejecución. Actualiza el badge local sin refetch. */
   async function cancelScan(id) {
-    const res = await apiFetch(`/sentinel/scans/${id}/cancel`, { method: 'POST' })
+    const res = await apiFetch(`/themis/scans/${id}/cancel`, { method: 'POST' })
     if (!res?.ok) {
       const data = await res?.json().catch(() => ({}))
       toast.show(data.message || 'No se pudo cancelar el escaneo.', 'error')
@@ -248,8 +248,8 @@ export const useSentinelStore = defineStore('sentinel', () => {
 
     try {
       const [scanRes, docsRes] = await Promise.all([
-        apiFetch(`/sentinel/results/${scanId}`),
-        apiFetch(`/sentinel/scan/${scanId}/documents`),
+        apiFetch(`/themis/results/${scanId}`),
+        apiFetch(`/themis/scan/${scanId}/documents`),
       ])
       if (scanRes?.ok) {
         const data = await scanRes.json()
@@ -286,7 +286,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
 
     if (force) {
       try {
-        const res = await apiFetch(`/sentinel/scan/${scanId}/traceroute/refresh`, { method: 'POST' })
+        const res = await apiFetch(`/themis/scan/${scanId}/traceroute/refresh`, { method: 'POST' })
         if (!res?.ok) toast.show('No se pudo recalcular el traceroute.', 'error')
       } catch {
         toast.show('Error al recalcular el traceroute.', 'error')
@@ -299,7 +299,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   async function pollPreviewTraceroute(scanId, gen, attempt) {
     if (gen !== tracePollGen || preview.scanId !== scanId) return
     try {
-      const res = await apiFetch(`/sentinel/scan/${scanId}/traceroute`)
+      const res = await apiFetch(`/themis/scan/${scanId}/traceroute`)
       if (gen !== tracePollGen || preview.scanId !== scanId) return
 
       if (res?.ok) {
@@ -338,7 +338,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
     if (!preview.scanId) return
     preview.docsLoading = true
     try {
-      const res = await apiFetch(`/sentinel/scan/${preview.scanId}/documents`)
+      const res = await apiFetch(`/themis/scan/${preview.scanId}/documents`)
       if (res?.ok) {
         const data = await res.json()
         preview.docs = data.documents ?? []
@@ -358,8 +358,8 @@ export const useSentinelStore = defineStore('sentinel', () => {
 
     try {
       const [scanRes, docsRes] = await Promise.all([
-        apiFetch(`/sentinel/results/${scanId}`),
-        apiFetch(`/sentinel/scan/${scanId}/documents`),
+        apiFetch(`/themis/results/${scanId}`),
+        apiFetch(`/themis/scan/${scanId}/documents`),
       ])
       if (scanRes?.ok) {
         const data = await scanRes.json()
@@ -385,7 +385,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
     if (!details.scanId) return
     details.docsLoading = true
     try {
-      const res = await apiFetch(`/sentinel/scan/${details.scanId}/documents`)
+      const res = await apiFetch(`/themis/scan/${details.scanId}/documents`)
       if (res?.ok) {
         const data = await res.json()
         details.docs = data.documents ?? []
@@ -396,7 +396,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   /* ════════════════════════════════ DOCUMENTOS PDF ════════════════════ */
   /** Solicita la generación de un PDF para un escaneo (opcionalmente con IA). */
   async function generatePdf(scanId, useAi = false) {
-    const res = await apiFetch('/sentinel/generate-pdf', {
+    const res = await apiFetch('/themis/generate-pdf', {
       method: 'POST',
       body: JSON.stringify({ id: scanId, aiReport: useAi }),
     })
@@ -412,7 +412,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   /** Descarga un documento PDF por ID. */
   async function downloadDocument(docId) {
     try {
-      const res = await apiFetch(`/sentinel/document/${docId}/download`)
+      const res = await apiFetch(`/themis/document/${docId}/download`)
       if (!res?.ok) { toast.show('No se pudo descargar el documento.', 'error'); return false }
       const blob = await res.blob()
       const cd = res.headers.get('Content-Disposition') ?? ''
@@ -428,7 +428,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
 
   /** Elimina un documento por ID. */
   async function deleteDocument(docId) {
-    const res = await apiFetch(`/sentinel/document/${docId}`, { method: 'DELETE' })
+    const res = await apiFetch(`/themis/document/${docId}`, { method: 'DELETE' })
     if (!res?.ok) {
       const err = await res?.json().catch(() => ({}))
       toast.show(err.error || 'No se pudo eliminar el documento.', 'error')
@@ -443,7 +443,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   async function loadScheduledScans() {
     scheduled.loading = true
     try {
-      const res = await apiFetch('/sentinel/scheduled-scans')
+      const res = await apiFetch('/themis/scheduled-scans')
       if (!res?.ok) { scheduled.scans = []; return }
       const data = await res.json()
       scheduled.scans = data.scheduledScans ?? []
@@ -454,7 +454,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   async function createScheduledScan(payload) {
     scheduling.submitting = true
     try {
-      const res = await apiFetch('/sentinel/scheduled-scans', { method: 'POST', body: JSON.stringify(payload) })
+      const res = await apiFetch('/themis/scheduled-scans', { method: 'POST', body: JSON.stringify(payload) })
       const data = await res?.json().catch(() => ({}))
       if (!res?.ok) {
         toast.show(data.error_description || data.message || 'Error al crear escaneo programado.', 'error')
@@ -472,7 +472,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
 
   /** Revoca (desactiva) un escaneo programado. */
   async function deactivateScheduledScan(id) {
-    const res = await apiFetch(`/sentinel/scheduled-scans/${id}`, { method: 'DELETE' })
+    const res = await apiFetch(`/themis/scheduled-scans/${id}`, { method: 'DELETE' })
     if (!res?.ok) { toast.show('No se pudo revocar el escaneo programado.', 'error'); return false }
     toast.show('Escaneo programado revocado.', 'success')
     await loadScheduledScans()
@@ -481,7 +481,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
 
   /** Elimina permanentemente un escaneo programado. */
   async function deleteScheduledScan(id) {
-    const res = await apiFetch(`/sentinel/scheduled-scans/${id}/permanent`, { method: 'DELETE' })
+    const res = await apiFetch(`/themis/scheduled-scans/${id}/permanent`, { method: 'DELETE' })
     if (!res?.ok) { toast.show('No se pudo eliminar el escaneo programado.', 'error'); return false }
     toast.show('Escaneo programado eliminado.', 'success')
     await loadScheduledScans()
@@ -497,7 +497,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   async function loadFolders() {
     folders.loading = true
     try {
-      const res = await apiFetch('/sentinel/folders')
+      const res = await apiFetch('/themis/folders')
       if (!res?.ok) { folders.items = []; return }
       const data = await res.json()
       folders.items = data.folders ?? []
@@ -523,7 +523,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   async function loadHistoryHosts({ force = false } = {}) {
     history.loading = true
     try {
-      const res = await apiFetch('/sentinel/history/hosts')
+      const res = await apiFetch('/themis/history/hosts')
       if (!res?.ok) { history.hosts = []; return }
       const data = await res.json()
       history.hosts = data.hosts ?? []
@@ -546,7 +546,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
     history.chart = null
     try {
       const params = new URLSearchParams({ target, type })
-      const res = await apiFetch(`/sentinel/history/stats?${params}`)
+      const res = await apiFetch(`/themis/history/stats?${params}`)
       if (!res?.ok) {
         const data = await res?.json().catch(() => ({}))
         toast.show(data?.error_description || data?.message || 'No se pudieron obtener las estadísticas.', 'error')
@@ -563,7 +563,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   async function createFolder(name) {
     folderForms.create.submitting = true
     try {
-      const res = await apiFetch('/sentinel/folders', { method: 'POST', body: JSON.stringify({ name }) })
+      const res = await apiFetch('/themis/folders', { method: 'POST', body: JSON.stringify({ name }) })
       const data = await res?.json().catch(() => ({}))
       if (!res?.ok) {
         toast.show(data.error_description || data.message || 'Error al crear la carpeta.', 'error')
@@ -584,7 +584,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   async function renameFolder(folderId, name) {
     folderForms.rename.submitting = true
     try {
-      const res = await apiFetch(`/sentinel/folders/${folderId}`, {
+      const res = await apiFetch(`/themis/folders/${folderId}`, {
         method: 'PUT',
         body: JSON.stringify({ name }),
       })
@@ -604,7 +604,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   }
 
   async function deleteFolder(folderId) {
-    const res = await apiFetch(`/sentinel/folders/${folderId}`, { method: 'DELETE' })
+    const res = await apiFetch(`/themis/folders/${folderId}`, { method: 'DELETE' })
     if (!res?.ok) { toast.show('No se pudo eliminar la carpeta.', 'error'); return false }
 
     const idx = folders.items.findIndex(f => f.id === folderId)
@@ -625,7 +625,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   async function moveScanToFolder(scanId, folderId) {
     moveScan.submitting = true
     try {
-      const res = await apiFetch(`/sentinel/folders/${folderId}/scans`, {
+      const res = await apiFetch(`/themis/folders/${folderId}/scans`, {
         method: 'POST',
         body: JSON.stringify({ scanId }),
       })
@@ -644,7 +644,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   }
 
   async function removeScanFromFolder(scanId, folderId) {
-    const res = await apiFetch(`/sentinel/folders/${folderId}/scans/${scanId}`, { method: 'DELETE' })
+    const res = await apiFetch(`/themis/folders/${folderId}/scans/${scanId}`, { method: 'DELETE' })
     if (!res?.ok) { toast.show('No se pudo quitar el escaneo de la carpeta.', 'error'); return false }
 
     const folder = _findFolder(folderId)
@@ -665,7 +665,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
 
   async function addScansToFolder(scanIds, folderId) {
     try {
-      const res = await apiFetch(`/sentinel/folders/${folderId}/scans/batch`, {
+      const res = await apiFetch(`/themis/folders/${folderId}/scans/batch`, {
         method: 'POST',
         body: JSON.stringify({ scanIds }),
       })
@@ -686,7 +686,7 @@ export const useSentinelStore = defineStore('sentinel', () => {
   /** Elimina multiples escaneos de forma masiva. */
   async function bulkDeleteScans(scanIds) {
     try {
-      const res = await apiFetch('/sentinel/scans', {
+      const res = await apiFetch('/themis/scans', {
         method: 'DELETE',
         body: JSON.stringify({ scanIds }),
       })

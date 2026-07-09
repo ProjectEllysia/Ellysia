@@ -1,7 +1,7 @@
 <template>
-  <div class="sentinel-page">
+  <div class="themis-page">
     <StarBackground />
-    <Topbar title="Sentinel" badge="Escaneos de Vulnerabilidades" />
+    <Topbar title="Themis" badge="Escaneos de Vulnerabilidades" />
 
     <main class="main">
       <StatsRow :total="store.stats.total" :nmap="store.stats.nmap" :nikto="store.stats.nikto" :openvas="store.stats.openvas" />
@@ -109,22 +109,22 @@
 import { onMounted, ref, computed, watch } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
-import StatsRow from '@/components/sentinel/StatsRow.vue'
-import ViewToggle from '@/components/sentinel/ViewToggle.vue'
-import ScanTabs from '@/components/sentinel/ScanTabs.vue'
-import ScanForm from '@/components/sentinel/ScanForm.vue'
-import ScanTable from '@/components/sentinel/ScanTable.vue'
-import ScanFolderView from '@/components/sentinel/ScanFolderView.vue'
-import HistoryPanel from '@/components/sentinel/HistoryPanel.vue'
-import ScanPreviewModal from '@/components/sentinel/ScanPreviewModal.vue'
-import FolderFormModal from '@/components/sentinel/FolderFormModal.vue'
-import MoveScanModal from '@/components/sentinel/MoveScanModal.vue'
-import BatchActionModal from '@/components/sentinel/BatchActionModal.vue'
-import ScheduledScansPanel from '@/components/sentinel/ScheduledScansPanel.vue'
-import { useSentinelStore } from '@/stores/sentinelStore'
+import StatsRow from '@/components/themis/StatsRow.vue'
+import ViewToggle from '@/components/themis/ViewToggle.vue'
+import ScanTabs from '@/components/themis/ScanTabs.vue'
+import ScanForm from '@/components/themis/ScanForm.vue'
+import ScanTable from '@/components/themis/ScanTable.vue'
+import ScanFolderView from '@/components/themis/ScanFolderView.vue'
+import HistoryPanel from '@/components/themis/HistoryPanel.vue'
+import ScanPreviewModal from '@/components/themis/ScanPreviewModal.vue'
+import FolderFormModal from '@/components/themis/FolderFormModal.vue'
+import MoveScanModal from '@/components/themis/MoveScanModal.vue'
+import BatchActionModal from '@/components/themis/BatchActionModal.vue'
+import ScheduledScansPanel from '@/components/themis/ScheduledScansPanel.vue'
+import { useThemisStore } from '@/stores/themisStore'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 
-const store = useSentinelStore()
+const store = useThemisStore()
 const { selectedIds: batchSelectedIds, selectedCount: batchSelectedCount, selectedArray: batchSelectedArray, toggle: batchToggle, selectAll: batchSelectAll, clear: batchClear } = useBatchSelection()
 const currentData = computed(() => store.scans[store.activeTab])
 
@@ -190,7 +190,7 @@ async function handleDeleteScheduled(id) { await store.deleteScheduledScan(id) }
 </script>
 
 <style scoped>
-.sentinel-page { min-height: 100vh; padding-top: var(--topbar-h); position: relative; }
+.themis-page { min-height: 100vh; padding-top: var(--topbar-h); position: relative; }
 .main { max-width: 1100px; margin: 0 auto; padding: 1.25rem; position: relative; z-index: 1; }
 @media (max-width: 768px) { .main { padding: 0.85rem; } }
 
