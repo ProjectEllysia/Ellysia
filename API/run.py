@@ -46,7 +46,7 @@ from src.modules.users      import (
     users_blp
 )
 from src.modules.users.services.secrets import hash_password as _hash_password
-from src.modules.sentinel   import sentinel_blp
+from src.modules.themis   import themis_blp
 from src.modules.acheron    import acheron_blp
 from src.modules.aegis      import aegis_blp
 from src.modules.iris       import iris_blp
@@ -129,7 +129,7 @@ def _run_shutdown_cleanup() -> None:
 
     _logger.info("[Shutdown] Deteniendo scheduler...")
     try:
-        from src.modules.sentinel.services.scheduling import Scheduler
+        from src.modules.themis.services.scheduling import Scheduler
         Scheduler.stop()
     except Exception as e:
         _logger.error(f"Error deteniendo scheduler: {e}")
@@ -189,7 +189,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     Returns:
         Flask: Aplicación completamente configurada y lista para servir.
     """
-    from src.modules.sentinel.services.scheduling import Scheduler
+    from src.modules.themis.services.scheduling import Scheduler
 
     configure_logging()
 
@@ -218,7 +218,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     flask_smorest_api.register_blueprint(system_blp,  url_prefix="/system")
     flask_smorest_api.register_blueprint(oauth_blp,   url_prefix="/oauth")
     flask_smorest_api.register_blueprint(users_blp,   url_prefix="/users")
-    flask_smorest_api.register_blueprint(sentinel_blp, url_prefix="/sentinel")
+    flask_smorest_api.register_blueprint(themis_blp, url_prefix="/themis")
     flask_smorest_api.register_blueprint(acheron_blp,  url_prefix="/acheron")
     flask_smorest_api.register_blueprint(aegis_blp,    url_prefix="/aegis")
     flask_smorest_api.register_blueprint(iris_blp,     url_prefix="/iris")
@@ -252,7 +252,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     if start_scheduler:
         _logger.info("Reconciliando escaneos huérfanos...")
         try:
-            from src.modules.sentinel.managers import ScanManager
+            from src.modules.themis.managers import ScanManager
             fixed = ScanManager.reconcile_orphaned_scans()
             if fixed:
                 _logger.info("Se marcaron %d escaneo(s) huérfano(s) como FAILED", fixed)

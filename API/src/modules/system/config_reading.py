@@ -41,9 +41,9 @@ class DirectoryType(Enum):
     STACK_AEGIS        = "aegis.stack"
     OUTPUT_AEGIS       = "aegis.output"
 
-    OUTPUT_SENTINEL    = "sentinel.output"
-    CSV_SENTINEL       = "sentinel.csv"
-    RESOURCES_SENTINEL = "sentinel.resources"
+    OUTPUT_THEMIS    = "themis.output"
+    CSV_THEMIS       = "themis.csv"
+    RESOURCES_THEMIS = "themis.resources"
 
     OUTPUT_IRIS        = "iris.output"
 
@@ -112,8 +112,8 @@ def _require_configs() -> dict:
 def _cfg(path: str, default=None, cast=None):
     """Lee un valor anidado de la config por ruta con puntos.
 
-    ``_cfg("sentinel.traceroute.cacheHours", 24, float)`` es el equivalente de
-    ``_require_configs().get("sentinel", {}).get("traceroute", {}).get("cacheHours", 24)``
+    ``_cfg("themis.traceroute.cacheHours", 24, float)`` es el equivalente de
+    ``_require_configs().get("themis", {}).get("traceroute", {}).get("cacheHours", 24)``
     convertido a ``float``. Requiere llamarse desde una función decorada con
     ``@_lazy_load`` (o después de que la config ya esté cargada).
     """
@@ -332,7 +332,7 @@ _DIRECTORY_ENV_MAPPING = {
     "logdir": "LOG_DIR",
     "output": "OUTPUT_DIR",
     "stack": "OUTPUT_DIR",
-    "sentinel.csv": "CSV_SENTINEL_DIR",
+    "themis.csv": "CSV_THEMIS_DIR",
 }
 
 
@@ -432,7 +432,7 @@ def get_ai_strategy_for(module: str | None = None) -> str:
     existe, devuelve ``ai.defaultStrategy`` (o 'ollama' como último recurso).
 
     Args:
-        module: Nombre del módulo consumidor ('aegis', 'sentinel', …).
+        module: Nombre del módulo consumidor ('aegis', 'themis', …).
 
     Returns:
         Nombre de la estrategia ('ollama' | 'openai' | …).
@@ -497,21 +497,21 @@ def get_smtp_environment() -> dict[str, str]:
 
 
 # =============================================================================
-# CONFIGURACIÓN DE SENTINEL
+# CONFIGURACIÓN DE THEMIS
 # =============================================================================
 
 @_lazy_load
-def get_sentinel_config() -> dict:
-    return _cfg("sentinel", {})
+def get_themis_config() -> dict:
+    return _cfg("themis", {})
 
 @_lazy_load
 def get_prompts_config() -> dict:
-    sentinel = _require_configs().get("sentinel", {})
+    themis = _require_configs().get("themis", {})
 
     return {
-        "nmap": sentinel.get("nmap", {}).get("prompts", {}),
-        "nikto": sentinel.get("nikto", {}).get("prompts", {}),
-        "openvas": sentinel.get("openvas", {}).get("prompts", {}),
+        "nmap": themis.get("nmap", {}).get("prompts", {}),
+        "nikto": themis.get("nikto", {}).get("prompts", {}),
+        "openvas": themis.get("openvas", {}).get("prompts", {}),
     }
 
 @_lazy_load
@@ -521,84 +521,127 @@ def get_tool_prompts(tool: str) -> dict:
 
 @_lazy_load
 def get_tool_color_palette(tool) -> dict:
-    sentinel = _require_configs().get("sentinel", {})
+    themis = _require_configs().get("themis", {})
 
     tool_key = tool
-    if tool_key not in sentinel:
+    if tool_key not in themis:
         return {}
 
-    tool_config = sentinel[tool_key]
+    tool_config = themis[tool_key]
     return tool_config.get("colorPalette", {})
 
 @_lazy_load
 def are_local_ips_allowed() -> bool:
-    return _as_bool(_cfg("sentinel.areLocalIpsAllowed", False))
+    return _as_bool(_cfg("themis.areLocalIpsAllowed", False))
 
 @_lazy_load
 def get_openvas_scan_configs() -> dict[str, str]:
-    configs = get_sentinel_config()
+    configs = get_themis_config()
     return configs["openvas"]["toolConfigs"]["scanConfigs"]
 
 @_lazy_load
 def get_openvas_port_list() -> dict[str, str]:
-    configs = get_sentinel_config()
+    configs = get_themis_config()
     return configs["openvas"]["toolConfigs"]["portList"]
 
 @_lazy_load
 def is_host_reachability_check_enabled() -> bool:
-    return _as_bool(_cfg("sentinel.hostReachabilityCheck.enabled", True))
+    return _as_bool(_cfg("themis.hostReachabilityCheck.enabled", True))
 
 @_lazy_load
 def get_host_reachability_check_timeout() -> float:
-    return _cfg("sentinel.hostReachabilityCheck.timeout", 3.0, float)
+    return _cfg("themis.hostReachabilityCheck.timeout", 3.0, float)
 
 @_lazy_load
 def get_host_reachability_check_port() -> int:
-    return _cfg("sentinel.hostReachabilityCheck.port", 80, int)
+    return _cfg("themis.hostReachabilityCheck.port", 80, int)
 
 @_lazy_load
-def get_sentinel_csv_dir() -> str:
-    return get_directory_of(DirectoryType.CSV_SENTINEL)
+def get_themis_csv_dir() -> str:
+    return get_directory_of(DirectoryType.CSV_THEMIS)
+
+
+# --- Lybra knowledge base (local NVD/KEV/EPSS mirror) ---
+
+@_lazy_load
+def is_kb_sync_enabled() -> bool:
+    return _as_bool(_cfg("themis.kb.enabled", False))
+
+@_lazy_load
+def get_kb_sources() -> dict:
+    return _cfg("themis.kb.sources", {})
+
+@_lazy_load
+def get_kb_sync_cron() -> str:
+    return _cfg("themis.kb.syncCron", "0 3 * * *")
+
+@_lazy_load
+def get_kb_nvd_window_days() -> int:
+    return _cfg("themis.kb.nvdWindowDays", 8, int)
+
+@_lazy_load
+def get_kb_nvd_api_key():
+    # Secret → prefer the environment, per the config convention.
+    import os
+    return os.environ.get("NVD_API_KEY") or (_cfg("themis.kb.nvdApiKey", "") or None)
+
+
+# --- Lybra active detection checks (Fase R) ---
+
+@_lazy_load
+def is_lybra_active_checks_enabled() -> bool:
+    # Opt-in: active checks touch the target and await the authorized-targets
+    # register (roadmap §6), so they are off unless explicitly enabled.
+    return _as_bool(_cfg("themis.lybra.activeChecks", False))
+
+
+# --- Lybra own fingerprinting (Fase F) ---
+
+@_lazy_load
+def is_lybra_fingerprinting_enabled() -> bool:
+    # Opt-in like active checks: it touches the target (HTTP/SSH probes) for
+    # calibration against Nmap, ahead of the authorized-targets register.
+    return _as_bool(_cfg("themis.lybra.fingerprintingEnabled", False))
 
 
 @_lazy_load
-def get_sentinel_default_folder_name() -> str:
+def get_themis_default_folder_name() -> str:
     """Devuelve el nombre mostrado para la carpeta virtual de escaneos sueltos."""
-    return _cfg("sentinel.folders.defaultFolderName", "Sin carpeta")
+    return _cfg("themis.folders.defaultFolderName", "Sin carpeta")
 
 
 @_lazy_load
-def get_sentinel_history_size() -> int:
+def get_themis_history_size() -> int:
     """Número de escaneos recientes a considerar en las estadísticas históricas."""
-    return _cfg("sentinel.history.maxScans", 5, int)
+    return _cfg("themis.history.maxScans", 5, int)
 
 
 @_lazy_load
-def get_sentinel_traceroute_cache_hours() -> float:
+def get_themis_traceroute_cache_hours() -> float:
     """Horas que una ruta cacheada se considera válida antes de recalcularse."""
-    return _cfg("sentinel.traceroute.cacheHours", 24, float)
+    return _cfg("themis.traceroute.cacheHours", 24, float)
 
 
 @_lazy_load
-def get_sentinel_traceroute_max_hops() -> int:
+def get_themis_traceroute_max_hops() -> int:
     """Número máximo de saltos a sondear (``-m`` en traceroute)."""
-    return _cfg("sentinel.traceroute.maxHops", 30, int)
+    return _cfg("themis.traceroute.maxHops", 30, int)
 
 
 @_lazy_load
-def get_sentinel_traceroute_timeout() -> float:
+def get_themis_traceroute_timeout() -> float:
     """Tiempo máximo total (segundos) para el comando traceroute."""
-    return _cfg("sentinel.traceroute.timeout", 60, float)
+    return _cfg("themis.traceroute.timeout", 60, float)
 
 
 @_lazy_load
-def get_sentinel_traceroute_retry_failed_minutes() -> float:
+def get_themis_traceroute_retry_failed_minutes() -> float:
     """Minutos que una ruta fallida (sin saltos) se cachea antes de reintentar.
 
     Mucho más corto que ``cacheHours``: evita re-sondear un host inalcanzable en
     cada apertura del detalle, pero permite reintentar pronto (o de inmediato con
     el botón de refresco)."""
-    return _cfg("sentinel.traceroute.retryFailedMinutes", 15, float)
+    return _cfg("themis.traceroute.retryFailedMinutes", 15, float)
 
 
 # =============================================================================
@@ -710,7 +753,7 @@ def get_iris_data(key: str):
 def get_iris_prompts() -> dict:
     """Prompts de IrisAIWriter (IA1) desde ``iris.prompts.<key>``.
 
-    Espejo de ``get_prompts_config()`` (que solo mira el bloque ``sentinel``)
+    Espejo de ``get_prompts_config()`` (que solo mira el bloque ``themis``)
     para el módulo Iris: ``iris.prompts.summary.{system,userTemplate}``.
     """
     return _cfg("iris.prompts", {})

@@ -75,7 +75,7 @@ const selectedAttrs = ref([])
 const canManage = computed(() => auth.isAdmin)
 const ALL_ATTRIBUTES = [
   { module: 'Aegis', attrs: [{ name: 'aegis_read', desc: 'Lectura' }, { name: 'aegis_write', desc: 'Escritura' }, { name: 'aegis_create', desc: 'Creación' }, { name: 'aegis_delete', desc: 'Eliminación' }] },
-  { module: 'Sentinel', attrs: [{ name: 'sentinel_read', desc: 'Lectura' }, { name: 'sentinel_write', desc: 'Escritura' }, { name: 'sentinel_create', desc: 'Creación' }, { name: 'sentinel_delete', desc: 'Eliminación' }] },
+  { module: 'Themis', attrs: [{ name: 'themis_read', desc: 'Lectura' }, { name: 'themis_write', desc: 'Escritura' }, { name: 'themis_create', desc: 'Creación' }, { name: 'themis_delete', desc: 'Eliminación' }] },
   { module: 'Acheron', attrs: [{ name: 'acheron_read', desc: 'Lectura' }, { name: 'acheron_write', desc: 'Escritura' }, { name: 'acheron_create', desc: 'Creación' }, { name: 'acheron_delete', desc: 'Eliminación' }] },
 ]
 

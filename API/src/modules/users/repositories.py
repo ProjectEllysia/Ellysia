@@ -40,6 +40,7 @@ from .model import (
 )
 
 from src.modules.infrastructure.base_repository import BaseRepository, UnitOfWork
+from src.modules.shared import utcnow_naive
 
 
 class UserRepository(BaseRepository[User]):
@@ -342,7 +343,7 @@ class TokenRepository(BaseRepository[AccessToken]):
         Returns:
             Tuple of (access_tokens_deleted, refresh_tokens_deleted).
         """
-        now = datetime.utcnow()
+        now = utcnow_naive()
         access_deleted  = self.delete_expired_access_tokens(now)
         refresh_deleted = self.delete_expired_refresh_tokens(now)
         return access_deleted, refresh_deleted
@@ -567,7 +568,7 @@ class MFARepository(BaseRepository[MFATotpCredential]):
         """Mark a recovery code as consumed so it can't be reused."""
         code = self._session.query(MFARecoveryCode).filter(MFARecoveryCode.id == code_id).one_or_none()
         if code is not None:
-            code.used_at = datetime.utcnow()
+            code.used_at = utcnow_naive()
             self._session.flush()
 
     # =========================================================================

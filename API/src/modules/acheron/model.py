@@ -2,8 +2,6 @@
 Database models for Acheron encrypted vault module.
 """
 
-from datetime import datetime, timezone
-
 from sqlalchemy import (
     Column,
     DateTime,
@@ -15,7 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
-from src.modules.shared import Base
+from src.modules.shared import Base, utcnow_naive
 
 
 # =========================================================================
@@ -120,12 +118,12 @@ class Storable(Base):
     internal_id = Column(String(128), nullable=True)
     title = Column(String(128), nullable=True)
 
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
     updated_at = Column(
         DateTime,
         nullable=False,
-        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
-        onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+        default=utcnow_naive,
+        onupdate=utcnow_naive,
     )
 
     vault_id = Column(Integer, ForeignKey("Vault.id"), nullable=False)

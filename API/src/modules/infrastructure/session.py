@@ -8,6 +8,9 @@ the session is not closed until the response is sent.
 
 Functions:
     get_db_session:             Return (or create) the request-scoped session.
+    read_repo:                  Build a repository bound to the ambient session,
+                                for reads (the explicit counterpart to UnitOfWork
+                                on the write side — see its docstring).
     init_request_session:       Flask before_request hook that opens the session.
     shutdown_request_session:   Flask teardown_request hook that commits/rolls
                                 back and closes the session.
@@ -21,24 +24,28 @@ Usage:
         app.before_request(init_request_session)
         app.teardown_request(shutdown_request_session)
 
-    In repositories or managers::
+    Reads, in repositories or managers::
 
-        from src.modules.infrastructure.session import get_db_session
+        from src.modules.infrastructure.session import read_repo
 
-        repo = ScanRepository(session=get_db_session())
-        scan = repo.get_by_id(42)
+        scan = read_repo(ScanRepository).get_by_id(42)
         print(scan.host.hostname)  # lazy load works
+
+    Writes go through ``UnitOfWork`` instead — see its module for the pattern.
 """
 
 from __future__ import annotations
 
 import logging
+from typing import Type, TypeVar
 
 from flask import g, has_request_context
 
-from .unit_of_work import get_session, close_all
+from .engine import get_session, close_all
 
 logger = logging.getLogger(__name__)
+
+R = TypeVar("R")
 
 
 def get_db_session():
@@ -67,6 +74,39 @@ def get_db_session():
             g.db_session = get_session()
         return g.db_session
     return get_session()
+
+
+def read_repo(repo_cls: Type[R]) -> R:
+    """
+    Build a repository bound to the ambient session, for the read path.
+
+    This is the explicit counterpart to ``with UnitOfWork() as uow: Repo(uow)``
+    on the write side. Where the implicit convention used to be "pass
+    ``session=get_db_session()`` directly when you only mean to read", this
+    makes that intent visible at the call site — a reviewer sees ``read_repo``
+    and knows no transaction is being demarcated here, so writing through the
+    returned repository would not be a deliberate choice.
+
+    The repository is bound to the same session ``UnitOfWork`` itself would
+    resolve (request-scoped or thread-local), but **this helper does not
+    demarcate a transaction**: any write made through the returned repository
+    is only as durable as whatever already governs the ambient session (the
+    request's ``teardown_request`` in a request, nothing in particular in a
+    background thread outside a ``UnitOfWork`` block). Writes must go through
+    ``UnitOfWork``.
+
+    Args:
+        repo_cls: A repository class whose constructor accepts a ``session``
+            keyword argument — every repository in this codebase does.
+
+    Returns:
+        An instance of ``repo_cls`` bound to the ambient session.
+
+    Example:
+    >>> scan = read_repo(ScanRepository).get_by_id(42)
+    """
+    return repo_cls(session=get_db_session())
+
 
 def init_request_session() -> None:
     """

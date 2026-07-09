@@ -1,0 +1,80 @@
+{
+  "feedVersion": "lybra-checks-1",
+  "checks": [
+    {
+      "id": "git-config-exposure",
+      "version": 1,
+      "type": "http",
+      "category": "exposed_path",
+      "severity": "HIGH",
+      "service": "http",
+      "mode": "safe",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/.git/config",
+          "matchers-condition": "and",
+          "matchers": [
+            { "type": "status", "value": [200] },
+            { "type": "word", "part": "body", "words": ["[core]", "repositoryformatversion"] }
+          ]
+        }
+      ],
+      "finding": {
+        "title": "Repositorio Git expuesto (.git/config accesible)",
+        "qod": 99,
+        "confirmed": true
+      }
+    },
+    {
+      "id": "dotenv-exposure",
+      "version": 1,
+      "type": "http",
+      "category": "exposed_path",
+      "severity": "HIGH",
+      "service": "http",
+      "mode": "safe",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/.env",
+          "matchers-condition": "and",
+          "matchers": [
+            { "type": "status", "value": [200] },
+            { "type": "regex", "part": "body", "regex": ["(?m)^[A-Z][A-Z0-9_]*="] }
+          ]
+        }
+      ],
+      "finding": {
+        "title": "Fichero .env expuesto (posibles secretos accesibles)",
+        "qod": 99,
+        "confirmed": true
+      }
+    },
+    {
+      "id": "missing-hsts-header",
+      "version": 1,
+      "type": "http",
+      "category": "security_header",
+      "severity": "MEDIUM",
+      "service": "http",
+      "mode": "safe",
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/",
+          "matchers-condition": "and",
+          "matchers": [
+            { "type": "status", "value": [200, 301, 302] },
+            { "type": "word", "part": "header", "words": ["strict-transport-security"], "negative": true }
+          ]
+        }
+      ],
+      "finding": {
+        "title": "Cabecera HSTS (Strict-Transport-Security) ausente",
+        "qod": 99,
+        "confirmed": true
+      }
+    }
+  ]
+}

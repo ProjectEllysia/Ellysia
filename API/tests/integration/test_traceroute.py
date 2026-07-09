@@ -1,4 +1,4 @@
-"""Tests de integración del traceroute (asíncrono) del módulo Sentinel.
+"""Tests de integración del traceroute (asíncrono) del módulo Themis.
 
 El traceroute se calcula en segundo plano (worker RQ): el endpoint encola el
 trabajo y responde ``status="pending"`` al instante; el resultado se sirve de la
@@ -21,7 +21,7 @@ import pytest
 
 from src.modules.system.taskqueue import Task, TaskStatus
 
-import src.modules.sentinel.managers as managers_mod
+import src.modules.themis.managers as managers_mod
 
 pytestmark = pytest.mark.integration
 
@@ -33,7 +33,7 @@ _HOPS = [
     {"ttl": 3, "ip": _TARGET, "hostname": None, "rtt_ms": 10.0},
 ]
 
-_TRACE_PATH = "src.modules.sentinel.services.traceroute.TracerouteService.trace"
+_TRACE_PATH = "src.modules.themis.services.traceroute.TracerouteService.trace"
 
 
 class _SyncTaskQueue:
@@ -81,8 +81,8 @@ def fake_queue():
 def _create_scan(app, user_id: int, target: str = _TARGET) -> int:
     """Persist a finished NmapScan owned by ``user_id`` and return its id."""
     from src.modules.infrastructure import unit_of_work as uow_mod
-    from src.modules.sentinel.repositories import ScanRepository
-    from src.modules.sentinel.model import NmapScan
+    from src.modules.themis.repositories import ScanRepository
+    from src.modules.themis.model import NmapScan
 
     with app.app_context():
         with uow_mod.UnitOfWork() as uow:
@@ -95,7 +95,7 @@ def _seed_trace(app, user_id: int, hops: list, target: str = _TARGET,
                 age: timedelta = timedelta(0)) -> None:
     """Seed a cached Traceroute row with a controllable ``created_at`` age."""
     from src.modules.infrastructure import unit_of_work as uow_mod
-    from src.modules.sentinel.repositories import TracerouteRepository
+    from src.modules.themis.repositories import TracerouteRepository
 
     with app.app_context():
         with uow_mod.UnitOfWork() as uow:
@@ -104,7 +104,7 @@ def _seed_trace(app, user_id: int, hops: list, target: str = _TARGET,
 
 
 def _url(scan_id: int) -> str:
-    return f"/sentinel/scan/{scan_id}/traceroute"
+    return f"/themis/scan/{scan_id}/traceroute"
 
 
 # ------------------------------------------------------------------ autorización
@@ -155,7 +155,7 @@ def test_pending_while_a_job_is_already_running(client, app, regular_user, auth_
     scan_id = _create_scan(app, regular_user.id)
     headers = auth_headers(regular_user)
     fake_queue.running_task = Task(
-        id="job", category="sentinel.traceroute", status=TaskStatus.RUNNING
+        id="job", category="themis.traceroute", status=TaskStatus.RUNNING
     )
 
     with mock.patch(_TRACE_PATH, return_value=_HOPS) as traced:
@@ -194,7 +194,7 @@ def test_empty_result_is_cached_as_failed(client, app, regular_user, auth_header
 
         # Hay fila vacía persistida.
         from src.modules.infrastructure import unit_of_work as uow_mod
-        from src.modules.sentinel.repositories import TracerouteRepository
+        from src.modules.themis.repositories import TracerouteRepository
         with app.app_context():
             with uow_mod.UnitOfWork() as uow:
                 row = TracerouteRepository(uow).get_by_user_and_target(regular_user.id, _TARGET)

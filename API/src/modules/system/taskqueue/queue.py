@@ -24,7 +24,7 @@ Cola de tareas asincrónica respaldada por RQ + Redis.
     - RQ Job: cola física en Redis
 
 **Relación QueueRegistry vs RQ Queue**:
-    - QueueRegistry: lista de NOMBRES ("sentinel.scan", "aegis.generate", ...)
+    - QueueRegistry: lista de NOMBRES ("themis.scan", "aegis.generate", ...)
     - RQ Queue: la cola FÍSICA en Redis con ese nombre
     - Workers: leen QueueRegistry.names() → crean RQ Queue para cada
     - TaskQueue._queue_for(): resuelve category → QueueRegistry.is_registered → RQ Queue
@@ -75,19 +75,19 @@ class QueueRegistry:
     """Registro central de colas (categorías) para la ejecución asincrónica.
 
     **Propósito (Open/Closed Principle)**:
-    Permite que cada módulo (sentinel, aegis, iris) registre sus propias
+    Permite que cada módulo (themis, aegis, iris) registre sus propias
     colas sin modificar el código core de TaskQueue. Los workers consultan
     este registro al arrancar para saber cuáles colas escuchar.
 
     **Flujo de inicialización**:
         1. API arranca (run.py)
-        2. Importa los módulos (aegis, iris, sentinel)
+        2. Importa los módulos (aegis, iris, themis)
         3. Cada módulo/__init__.py llama QueueRegistry.register("categoría")
         4. Workers arrancan, leen QueueRegistry.names(), crean RQ Queues
         5. Managers submit(category="categoría") → usa la cola registrada
 
     **Relación con RQ Queue**:
-        - QueueRegistry mantiene NOMBRES (strings: "sentinel.scan", etc)
+        - QueueRegistry mantiene NOMBRES (strings: "themis.scan", etc)
         - RQ Queue es la cola FÍSICA en Redis con ese nombre
         - Los workers crean una RQ Queue para cada nombre registrado
     """
@@ -103,7 +103,7 @@ class QueueRegistry:
 
         Típicamente llamado desde módulo/__init__.py:
             from src.modules.system.taskqueue import QueueRegistry
-            QueueRegistry.register("sentinel.scan", "sentinel.report")
+            QueueRegistry.register("themis.scan", "themis.report")
 
         Args:
             *names: Nombres de colas a registrar. Ej: "aegis.generate", "iris.analyze"
@@ -217,12 +217,12 @@ class ITaskQueue(Protocol):
                   Ej: func=NmapScanManager.execute_nmap_scan
             name: ID único del job en RQ (opcional). Si se repite, cancela el anterior.
             category: Categoría registrada en QueueRegistry. Si no está registrada,
-                     cae a "default". Ej: "sentinel.scan", "aegis.generate", "iris.analyze"
+                     cae a "default". Ej: "themis.scan", "aegis.generate", "iris.analyze"
             args: Argumentos posicionales para func().
             kwargs: Argumentos nombrados para func().
             external_id: ID lógico del dominio (scan_id, document_id, etc).
                         Permite consultar el job sin conocer el job_id de RQ.
-                        Formato típico: "sentinel-scan:123" (prefijo + entidad_id).
+                        Formato típico: "themis-scan:123" (prefijo + entidad_id).
             timeout: Segundos antes de que RQ mate el job si sigue corriendo.
 
         Returns:
@@ -365,9 +365,9 @@ class TaskQueue:
             self._tq.submit(
                 func=NmapScanManager.execute_nmap_scan,
                 name=f"scan-{scan_id}",
-                category="sentinel.scan",
+                category="themis.scan",
                 args=(scan_id, target_host, target_ports, timeout),
-                external_id=f"sentinel-scan:{scan_id}",
+                external_id=f"themis-scan:{scan_id}",
                 timeout=3600
             )
         """
@@ -505,7 +505,7 @@ class TaskQueue:
         """Consulta el estado de un job por su ID lógico del dominio.
 
         **Por qué external_id**: El manager no quiere saber del job_id interno de RQ.
-        Solo sabe que encoló un scan (external_id="sentinel-scan:123") y quiere saber
+        Solo sabe que encoló un scan (external_id="themis-scan:123") y quiere saber
         su estado sin recordar el job_id de RQ.
 
         **Flujo**:
@@ -624,13 +624,13 @@ class TaskQueue:
             - TaskQueue: crea/cachea las RQ Queues físicas (necesita self._redis)
 
         **Ejemplo**:
-            Manager: submit(category="sentinel.scan")
+            Manager: submit(category="themis.scan")
               ↓
-            _queue_for("sentinel.scan")
+            _queue_for("themis.scan")
               ↓
-            resolve_queue_name("sentinel.scan") → "sentinel.scan" (está registrada)
+            resolve_queue_name("themis.scan") → "themis.scan" (está registrada)
               ↓
-            Cachea RQ Queue("sentinel.scan", connection=redis)
+            Cachea RQ Queue("themis.scan", connection=redis)
               ↓
             queue.enqueue(func, args, ...)
         """

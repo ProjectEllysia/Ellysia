@@ -16,12 +16,10 @@ Example:
 'User(id=None, username='admin', role='role_user')'
 """
 
-from datetime import datetime
-
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
-from src.modules.shared import Base
+from src.modules.shared import Base, utcnow_naive
 
 
 # =========================================================================
@@ -57,7 +55,7 @@ class AccessToken(Base):
     token      = Column(String(512), unique=True, nullable=False, index=True)
     user_id    = Column(Integer,     ForeignKey("User.id"), nullable=False)
     expires_at = Column(DateTime,    nullable=False)
-    created_at = Column(DateTime,    nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime,    nullable=False, default=utcnow_naive)
     revoked    = Column(Integer,     default=0)  # 0=activo, 1=revocado
 
     user = relationship("User", back_populates="tokens")
@@ -69,7 +67,7 @@ class AccessToken(Base):
         Returns:
             True if token is not revoked and has not expired.
         """
-        return not self.revoked and datetime.utcnow() < self.expires_at
+        return not self.revoked and utcnow_naive() < self.expires_at
 
     def __str__(self):
         return f"AccessToken(id={self.id}, user_id={self.user_id}, expires_at={self.expires_at})"
@@ -104,7 +102,7 @@ class RefreshToken(Base):
     token      = Column(String(512), unique=True, nullable=False, index=True)
     user_id    = Column(Integer,     ForeignKey("User.id"), nullable=False)
     expires_at = Column(DateTime,    nullable=False)
-    created_at = Column(DateTime,    nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime,    nullable=False, default=utcnow_naive)
     revoked    = Column(Integer,     default=0)
 
     user = relationship("User", back_populates="refresh_tokens")
@@ -116,7 +114,7 @@ class RefreshToken(Base):
         Returns:
             True if token is not revoked and has not expired.
         """
-        return not self.revoked and datetime.utcnow() < self.expires_at  # type: ignore
+        return not self.revoked and utcnow_naive() < self.expires_at  # type: ignore
 
     def __str__(self):
         return f"RefreshToken(id={self.id}, user_id={self.user_id})"
@@ -166,7 +164,7 @@ class User(Base):
     first_name      = Column(String(64),    nullable=False)
     last_name       = Column(String(64),    nullable=False)
     role            = Column(String(32),    nullable=False, default="role_user")
-    created_at      = Column(DateTime,      nullable=False, default=datetime.utcnow)
+    created_at      = Column(DateTime,      nullable=False, default=utcnow_naive)
     password_hash   = Column(String(128),   nullable=False)
     password_salt   = Column(String(128),   nullable=False)
     # Marca de la última vez que se cambió la contraseña de acceso. Permite a los
@@ -222,22 +220,22 @@ class UserAttribute(Base):
     ABAC capability attributes assigned to a user.
 
     Each row represents a single fine-grained permission (e.g.
-    "sentinel_read", "aegis_create"). Role-level identity
+    "themis_read", "aegis_create"). Role-level identity
     (root / admin / user) is stored exclusively in User.role and
     must NEVER appear here.
 
     Attributes:
         user_id: Foreign key to User.id (part of composite PK).
         attribute_name: Attribute identifier matching a Permission enum value
-                        (e.g. "sentinel_read", "acheron_delete").
+                        (e.g. "themis_read", "acheron_delete").
 
     Relationships:
         user: User that owns this attribute assignment.
 
     Example:
-    >>> ua = UserAttribute(user_id=1, attribute_name="sentinel_read")
+    >>> ua = UserAttribute(user_id=1, attribute_name="themis_read")
     >>> print(ua)
-    'UserAttribute(user_id=1, attribute_name='sentinel_read')'
+    'UserAttribute(user_id=1, attribute_name='themis_read')'
     """
     __tablename__ = "UserAttribute"
 
@@ -283,7 +281,7 @@ class MFATotpCredential(Base):
     user_id = Column(Integer, ForeignKey("User.id"), nullable=False, unique=True)
     secret_encrypted = Column(String(512), nullable=False)
     confirmed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user = relationship("User", back_populates="mfa_totp_credential")
 
@@ -307,7 +305,7 @@ class MFARecoveryCode(Base):
     user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
     code_hash = Column(String(512), nullable=False)
     used_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user = relationship("User", back_populates="mfa_recovery_codes")
 
@@ -338,13 +336,13 @@ class MFAChallenge(Base):
     user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
     expires_at = Column(DateTime, nullable=False)
     attempts = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user = relationship("User")
 
     def is_valid(self, max_attempts: int) -> bool:
         """True if the challenge is under the allowed attempt count and not expired."""
-        return self.attempts < max_attempts and datetime.utcnow() < self.expires_at
+        return self.attempts < max_attempts and utcnow_naive() < self.expires_at
 
     def __repr__(self) -> str:
         return f"<MFAChallenge id={self.id} user_id={self.user_id} attempts={self.attempts}>"

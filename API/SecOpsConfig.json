@@ -147,7 +147,7 @@
     },
     "modules": {
       "aegis": "openai",
-      "sentinel": "openai"
+      "themis": "openai"
     }
   },
   "appVersion": "4.2",
@@ -1155,12 +1155,12 @@
       "recovery_codes_count": 10
     }
   },
-  "sentinel": {
+  "themis": {
     "areLocalIpsAllowed": true,
     "directories": {
-      "csv": "data/sentinel/csv",
-      "output": "data/sentinel/output",
-      "resources": "../resources/sentinel"
+      "csv": "data/themis/csv",
+      "output": "data/themis/output",
+      "resources": "../resources/themis"
     },
     "enabled": true,
     "folders": {
@@ -1173,6 +1173,20 @@
       "enabled": true,
       "port": 80,
       "timeout": 3
+    },
+    "kb": {
+      "enabled": false,
+      "syncCron": "0 3 * * *",
+      "nvdWindowDays": 8,
+      "sources": {
+        "nvd": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        "kev": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+        "epss": "https://epss.cyentia.com/epss_scores-current.csv.gz"
+      }
+    },
+    "lybra": {
+      "activeChecks": false,
+      "fingerprintingEnabled": false
     },
     "nikto": {
       "colorPalette": {

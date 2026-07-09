@@ -1,13 +1,13 @@
 """
 IrisAIWriter — AI-generated executive narrative for a finished Iris analysis.
 
-Follows the same pattern as ``sentinel/services/analyzers.py``'s
+Follows the same pattern as ``themis/services/analyzers.py``'s
 ``NmapAIWriter``/``NiktoAIWriter``/``OpenVASAIWriter``: model calling is
 delegated to an injected scribe ``AIGenerator``, prompts live in
 SecOpsConfig.json (``iris.prompts.summary``), and the strategy (Ollama/
 OpenAI) is resolved per module via ``get_ai_strategy_for("iris")``.
 
-Unlike Sentinel — where the AI narrative is generated inline while building
+Unlike Themis — where the AI narrative is generated inline while building
 the PDF and never persisted on its own — Iris's web report viewer is a live
 JSON view, not just a PDF, so the narrative is generated on demand via its
 own endpoint and persisted on ``IrisAnalysis.ai_summary`` (see
@@ -31,7 +31,7 @@ _VALID_CONFIDENCE = {"ALTA", "MEDIA", "BAJA"}
 def _extract_json_with_regex(raw: str) -> Optional[dict]:
     """Best-effort JSON recovery from a model response that failed ``json.loads``.
 
-    Same fallback as Sentinel's analyzers: a top-level ``{...}`` object or a
+    Same fallback as Themis's analyzers: a top-level ``{...}`` object or a
     fenced ```` ```json ```` block, first one that parses wins.
     """
     for pattern in [r'\{[\s\S]*?\}(?=\s*$)', r'```(?:json)?\s*([\s\S]*?)\s*```']:

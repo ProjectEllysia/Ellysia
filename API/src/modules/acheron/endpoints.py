@@ -12,6 +12,7 @@ from src.modules.shared._exceptions import (
 )
 from src.modules.shared._endpoints import limiter, current_actor
 from src.modules.shared.schemas import ErrorSchema
+from src.modules.shared import utcnow_naive
 from src.modules.acheron.exceptions import VaultError, VaultNotFoundError, StorableNotFoundError, StorableConflictError
 from src.modules.users import require_oauth_token, require_attributes, AttributeType, get_current_user
 from .managers import VaultManager
@@ -247,7 +248,7 @@ def delete_vault_storable(data):
 
 def _parse_dt(value):
     if not value:
-        return datetime.now(timezone.utc).replace(tzinfo=None)
+        return utcnow_naive()
     try:
         dt = datetime.fromisoformat(value)
         if dt.tzinfo is not None:
@@ -255,4 +256,4 @@ def _parse_dt(value):
         return dt
     except Exception:
         logger.warning("Failed to parse datetime value %r, defaulting to utcnow", value, exc_info=True)
-        return datetime.now(timezone.utc).replace(tzinfo=None)
+        return utcnow_naive()

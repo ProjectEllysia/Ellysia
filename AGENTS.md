@@ -18,7 +18,7 @@ run the entrypoint inside WSL or use `docker compose`. Scan subprocesses are lau
 
 `API/run.py` → `create_app()` factory. Does this in order:
 1. Register CORS, rate limiter, FlaskSmorest API
-2. Register blueprints (system, oauth, users, sentinel, acheron, aegis, iris, pages)
+2. Register blueprints (system, oauth, users, themis, acheron, aegis, iris, pages)
 3. Init DB engine + create tables
 4. **Start APScheduler** (`Scheduler.start()`) (API only, not workers)
 5. **Ping Redis** — health check (worker tasks require Redis to be available)
@@ -45,15 +45,15 @@ Facts:
 - **No callback parameters** — `on_cancel`, `on_complete`, `on_error` were removed
 - Cancellation: sets a Redis key `taskqueue:cancel:{job_id}` checked cooperatively by workers
 - Entry points are `@staticmethod` on each module's manager class (inline in `managers.py`, not separate `services/rq_tasks.py` files) — picklable by reference with no bound instance state; they instantiate a fresh manager inside the worker:
-  - `sentinel/managers.py` → `TracerouteManager.execute_traceroute`, `NmapScanManager.execute_nmap_scan`, `NiktoScanManager.execute_nikto_scan`, `OpenVASScanManager.execute_openvas_scan`, `SentinelReportManager.execute_report_generation`
+  - `themis/managers/` → `TracerouteManager.execute_traceroute`, `NmapScanManager.execute_nmap_scan`, `NiktoScanManager.execute_nikto_scan`, `OpenVASScanManager.execute_openvas_scan`, `ThemisReportManager.execute_report_generation`, `LybraEngineManager.execute_lybra_scan` (own-engine, `themis/managers/lybra_engine.py`)
   - `aegis/managers.py` → `AegisManager.execute_aegis_generation`
   - `aegis/campaign_managers.py` → `CampaignManager.execute_campaign_send` (sends via `herald`, not scribe)
   - `iris/managers.py` → `IrisManager.execute_iris_analysis`, `IrisReportManager.execute_report_generation`
-- Categories: `"sentinel.scan"`, `"sentinel.report"`, `"sentinel.traceroute"`, `"aegis.generate"`, `"aegis.campaign"`, `"iris.analyze"`, `"iris.report"`
-- External IDs: `f"scan:{scan_id}"`, `f"sentinel-doc:{doc_id}"`, `f"sentinel-traceroute:{key}"`, `f"aegis-doc:{doc_id}"`, `f"aegis-campaign:{campaign_id}"`, `f"iris-analysis:{analysis_id}"`, `f"iris-doc:{doc_id}"`
+- Categories: `"themis.scan"`, `"themis.report"`, `"themis.traceroute"`, `"aegis.generate"`, `"aegis.campaign"`, `"iris.analyze"`, `"iris.report"`
+- External IDs: `f"scan:{scan_id}"`, `f"themis-doc:{doc_id}"`, `f"themis-traceroute:{key}"`, `f"aegis-doc:{doc_id}"`, `f"aegis-campaign:{campaign_id}"`, `f"iris-analysis:{analysis_id}"`, `f"iris-doc:{doc_id}"`
 - REST API (admin-only, `/system/tasks/*`): status, list tasks, detail, cancel
-- Workers listen on category-specific queues: `sentinel.scan`, `sentinel.report`, `sentinel.traceroute`, `aegis.generate`, `aegis.campaign`, `iris.analyze`, `iris.report`, `default`
-- Separate `TaskStatus` enum exists in `sentinel/services/tasks.py` — not the same as `taskqueue.TaskStatus`
+- Workers listen on category-specific queues: `themis.scan`, `themis.report`, `themis.traceroute`, `aegis.generate`, `aegis.campaign`, `iris.analyze`, `iris.report`, `default`
+- Separate `TaskStatus` enum exists in `themis/services/tasks.py` — not the same as `taskqueue.TaskStatus`
 
 ### RQ Task Execution Pattern
 
@@ -90,13 +90,13 @@ Protected endpoints require `Authorization: Bearer <access_token>`. Roles checke
 - Models: SQLAlchemy, each module has `model.py`, base from `src.modules.shared`.
 - All DB ops use `UnitOfWork` + repository pattern. No direct session management outside repos.
 
-## Scan System (sentinel)
+## Scan System (themis)
 
-- `sentinel/services/tasks.py`: `_Task` base class → `NmapScanTask`, `NiktoScanTask`, `OpenVASTask`
-- Each scan manager (NmapScanManager, NiktoScanManager, OpenVASScanManager) submits to TaskQueue with `category="sentinel.scan"` and `external_id=f"scan:{scan_id}"`
+- `themis/services/tasks.py`: `_Task` base class → `NmapScanTask`, `NiktoScanTask`, `OpenVASTask`
+- Each scan manager (NmapScanManager, NiktoScanManager, OpenVASScanManager) submits to TaskQueue with `category="themis.scan"` and `external_id=f"scan:{scan_id}"`
 - Cancellation: RQ sets Redis key `taskqueue:cancel:{job_id}` → worker checks `_Task.wait(cancel_check=...)` → triggers `task.cancel()` (subprocess.terminate / GMP stop)
 - OpenVAS: GMP API (not CLI). Uses `python-gvm`. Targets, port lists, scan configs auto-managed.
-- Scheduled scans via APScheduler (`sentinel/services/scheduling.py`). `Scheduler` class with interval/cron triggers. Synced from DB.
+- Scheduled scans via APScheduler (`themis/services/scheduling.py`). `Scheduler` class with interval/cron triggers. Synced from DB.
 
 ## Aegis
 
@@ -131,6 +131,6 @@ GPU: `-f docker-compose.gpu-nvidia.yml / .gpu-intel.yml / .gpu-amd.yml`
 - `_init_db()` is destructive — drops and recreates everything.
 - OpenVAS only accepts a single host per scan (not CIDR ranges).
 - `SecOpsConfig.json` values are lazily cached — changes require app restart unless written via `PUT /system` endpoint.
-- `sentinel/services/tasks.py` has its own `TaskStatus` enum separate from `taskqueue.TaskStatus`.
+- `themis/services/tasks.py` has its own `TaskStatus` enum separate from `taskqueue.TaskStatus`.
 - RQ workers must be running for background tasks to execute. Launch with `python -m src.modules.system.taskqueue.worker`.
 - API version is read from config (`appVersion` in `SecOpsConfig.json`, currently `4.2`) via `CR.get_app_version()` in `create_app()` — not hardcoded.

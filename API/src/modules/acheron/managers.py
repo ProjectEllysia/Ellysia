@@ -10,7 +10,8 @@ from .model import Storable, Vault
 
 from src.modules.users import User
 from src.modules.infrastructure.unit_of_work import UnitOfWork
-from src.modules.infrastructure.session import get_db_session
+from src.modules.infrastructure.session import read_repo
+from src.modules.shared import utcnow_naive
 
 from .repositories import (
     VaultRepository,
@@ -45,7 +46,7 @@ class VaultManager:
     @staticmethod
     def _parse_dt(value: Optional[str]) -> datetime:
         if not value:
-            return datetime.now(timezone.utc).replace(tzinfo=None)
+            return utcnow_naive()
         try:
             dt = datetime.fromisoformat(value)
             if dt.tzinfo is not None:
@@ -53,7 +54,7 @@ class VaultManager:
             return dt
         except Exception as e:
             logger.warning("Failed to parse datetime value %r, defaulting to utcnow", value, exc_info=True)
-            return datetime.now(timezone.utc).replace(tzinfo=None)
+            return utcnow_naive()
 
     def _ensure_vault_ownership(self, vault: Vault) -> None:
         if vault.user_id != self.active_user.id:
@@ -62,8 +63,7 @@ class VaultManager:
             )
 
     def get_vault_by_id(self, vault_id: int) -> Optional[Vault]:
-        session = get_db_session()
-        repo = VaultRepository(session=session)
+        repo = read_repo(VaultRepository)
         vault = repo.get_by_id(vault_id)
         if vault is None:
             logger.warning(f"Vault {vault_id} no encontrado")
@@ -72,8 +72,7 @@ class VaultManager:
         return vault
 
     def get_vault_for_user(self, is_recovery: bool = False) -> Optional[Vault]:
-        session = get_db_session()
-        repo = VaultRepository(session=session)
+        repo = read_repo(VaultRepository)
         vault = repo.get_by_user(self.active_user.id)
         return vault
 
@@ -201,8 +200,7 @@ class VaultManager:
         return vault
 
     def export_vault_to_json(self, vault_id: int) -> Dict[str, Any]:
-        session = get_db_session()
-        repo = VaultRepository(session=session)
+        repo = read_repo(VaultRepository)
         vault = repo.get_by_id(vault_id)
         if vault is None:
             raise ValueError(f"Vault {vault_id} no encontrado")
@@ -249,8 +247,7 @@ class VaultManager:
             limit: Optional[int] = None,
             **filters: Any,
         ) -> List[Storable]:
-        session = get_db_session()
-        repo = StorableRepository(session=session)
+        repo = read_repo(StorableRepository)
 
         if vault_id is not None:
             vault = self.get_vault_by_id(vault_id)
@@ -306,7 +303,7 @@ class VaultManager:
         if spec is None:
             raise ValueError(f"Tipo de storable no soportado: {kind}")
 
-        created_at = created_at or datetime.now(timezone.utc).replace(tzinfo=None)
+        created_at = created_at or utcnow_naive()
         updated_at = updated_at or created_at
 
         st = spec.model(
@@ -370,7 +367,7 @@ class VaultManager:
                             changed = True
 
                 if changed:
-                    st.updated_at = datetime.utcnow()
+                    st.updated_at = utcnow_naive()
                     repo.update(st)
                     logger.info(f"Storable {st.id} actualizado correctamente")
                 else:

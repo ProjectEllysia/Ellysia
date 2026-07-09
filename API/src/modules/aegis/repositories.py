@@ -21,11 +21,11 @@ Usage:
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from src.modules.shared import utcnow_naive
 from src.modules.aegis.model import (
     AegisDocument,
     AegisDocumentAlert,
@@ -181,8 +181,6 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
         Returns:
             Updated AegisDocument instance, or None if not found.
         """
-        from datetime import datetime as dt
-
         doc = self._session.get(AegisDocument, doc_id)
         if doc is None:
             return None
@@ -193,7 +191,7 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
         if filename:
             doc.filename = filename[:128]
         if status == "done":
-            doc.generated_at = dt.utcnow()
+            doc.generated_at = utcnow_naive()
         if error and status == "error":
             doc.title = f"[ERR{doc_id}] {error[:50]}"[:64]
 
@@ -344,9 +342,7 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
         Returns:
             Created AegisDocument instance.
         """
-        from datetime import datetime as dt
-
-        ts = dt.utcnow().strftime("%Y%m%d_%H%M%S")
+        ts = utcnow_naive().strftime("%Y%m%d_%H%M%S")
         placeholder = f"pending_{ts}_{user_id}_{topic_id}"
 
         doc = AegisDocument(
@@ -493,7 +489,7 @@ class CampaignRepository(BaseRepository[Campaign]):
             return None
 
         campaign.questions_snapshot = questions_snapshot
-        campaign.launched_at = datetime.utcnow()
+        campaign.launched_at = utcnow_naive()
         campaign.status = "sending"
         for recipient in recipients:
             recipient.campaign_id = campaign_id
@@ -537,7 +533,7 @@ class CampaignRepository(BaseRepository[Campaign]):
         """Record the timestamp an email was actually dispatched."""
         recipient = self._session.get(CampaignRecipient, recipient_id)
         if recipient is not None:
-            recipient.sent_at = datetime.utcnow()
+            recipient.sent_at = utcnow_naive()
             self._session.flush()
 
     def mark_opened(self, recipient_id: int) -> None:
@@ -545,7 +541,7 @@ class CampaignRepository(BaseRepository[Campaign]):
         recipient = self._session.get(CampaignRecipient, recipient_id)
         if recipient is not None and recipient.status == "sent":
             recipient.status = "opened"
-            recipient.opened_at = datetime.utcnow()
+            recipient.opened_at = utcnow_naive()
             self._session.flush()
 
     def mark_completed(
@@ -570,7 +566,7 @@ class CampaignRepository(BaseRepository[Campaign]):
             ))
 
         recipient.status = "completed"
-        recipient.completed_at = datetime.utcnow()
+        recipient.completed_at = utcnow_naive()
         recipient.score = score
 
         self._session.flush()

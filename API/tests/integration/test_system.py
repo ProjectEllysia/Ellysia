@@ -17,7 +17,7 @@ class _FakeTaskQueue:
     """
 
     _HISTORY = [
-        {"id": "a", "status": "completed", "category": "sentinel.scan"},
+        {"id": "a", "status": "completed", "category": "themis.scan"},
         {"id": "b", "status": "failed", "category": "aegis.generate"},
     ]
 
@@ -81,7 +81,7 @@ def test_history_tab_returns_terminal_tasks(client, admin_user, auth_headers):
 def test_history_tab_respects_category_filter(client, admin_user, auth_headers):
     with mock.patch.object(TaskQueue, "get_instance", return_value=_FakeTaskQueue()):
         resp = client.get(
-            "/system/tasks?status=history&category=sentinel.scan",
+            "/system/tasks?status=history&category=themis.scan",
             headers=auth_headers(admin_user),
         )
     data = resp.get_json()

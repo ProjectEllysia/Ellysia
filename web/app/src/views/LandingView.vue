@@ -161,7 +161,7 @@ import { useProfileStore } from '@/stores/profileStore'
 import { useThemeStore } from '@/stores/themeStore'
 import ElysianScene from '@/components/shared/ElysianScene.vue'
 
-import sentinelIcon from '@/assets/images/sentinel/Sentinel-Turqoise-BgN.png'
+import themisIcon from '@/assets/images/themis/Themis-Turqoise-BgN.png'
 import aegisIcon from '@/assets/images/aegis/Ellysia-Aegis-Blue-BgN.png'
 import irisIcon from '@/assets/images/iris/Iris-Red-BgN.png'
 import acheronIcon from '@/assets/images/acheron/Acheron-Purple-BgN.png'
@@ -182,12 +182,12 @@ const reduceMotion =
 /** Las cuatro herramientas, con su epígrafe mitológico y su función real. */
 const tools = [
   {
-    id: 'sentinel',
+    id: 'themis',
     numeral: 'I',
     epigraph: 'VIGILANTIA',
-    name: 'Sentinel',
-    icon: sentinelIcon,
-    route: '/sentinel',
+    name: 'Themis',
+    icon: themisIcon,
+    route: '/themis',
     myth: 'El vigía que nunca aparta la mirada de la muralla.',
     title: 'Observa la red antes de que otros lo hagan',
     desc: 'Escaneo de red y análisis de vulnerabilidades con tres escáneres, e informes redactados por IA listos para entregar.',

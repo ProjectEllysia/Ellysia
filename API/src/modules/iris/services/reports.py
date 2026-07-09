@@ -4,8 +4,8 @@ PDF report generation for Iris email-header analyses.
 Renders the same information shown in the web report viewer (verdict,
 score, per-rule results, recommendations, Received-chain path and raw
 headers) into a downloadable PDF. Mirrors the visual conventions of
-``sentinel.services.reports`` (cover page, consent page, footer) but is
-self-contained: Iris analyses are not Sentinel scans, so this module
+``themis.services.reports`` (cover page, consent page, footer) but is
+self-contained: Iris analyses are not Themis scans, so this module
 does not depend on the ``PrintingStrategy`` registry.
 
 Classes:
@@ -39,7 +39,7 @@ import src.modules.system.config_reading as CR
 logger = logging.getLogger(__name__)
 
 
-# Iris brand palette (violet) — distinct from Sentinel's blue/green tools.
+# Iris brand palette (violet) — distinct from Themis's blue/green tools.
 PALETTE = {
     "black":     "#1A1330",
     "dark":      "#3B2768",

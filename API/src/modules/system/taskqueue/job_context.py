@@ -9,7 +9,7 @@ Helper para funciones ejecutadas en workers (DRY + garantías de cleanup).
     2. Revisar si fue solicitada cancelación → if job.cancelled(): break
     3. Limpiar la bandera de cancelación al terminar
 
-Antes, cada módulo (sentinel, aegis, iris) reimplementaba esto:
+Antes, cada módulo (themis, aegis, iris) reimplementaba esto:
     - get_current_job() manualmente
     - Queries a TaskQueue para is_cancelled()
     - Manejo manual de cleanup (y olvidaba en caminos de error)

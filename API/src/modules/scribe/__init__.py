@@ -2,7 +2,7 @@
 src.modules.scribe — Generación de contenido con IA.
 
 Módulo transversal que unifica todo el "digest" de la plataforma: cualquier
-módulo (Aegis, Sentinel, …) construye un ``AIInput`` y se lo pasa a un
+módulo (Aegis, Themis, …) construye un ``AIInput`` y se lo pasa a un
 ``AIGenerator``, que delega en una estrategia de *model calling* inyectada
 (Ollama en local o OpenAI en la nube). La estrategia se decide por módulo desde
 ``SecOpsConfig.json`` mediante ``build_generator``.

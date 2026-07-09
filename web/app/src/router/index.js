@@ -26,9 +26,9 @@ const routes = [
     meta: { guest: true },
   },
   {
-    path: '/sentinel',
-    name: 'Sentinel',
-    component: () => import('@/views/SentinelView.vue'),
+    path: '/themis',
+    name: 'Themis',
+    component: () => import('@/views/ThemisView.vue'),
     meta: { requiresAuth: true },
   },
   {
@@ -77,7 +77,7 @@ const routes = [
 
 /**
  * Instancia del router con historial HTML5 (sin # en las URLs).
- * Usa createWebHistory para rutas limpias: /, /sentinel, etc.
+ * Usa createWebHistory para rutas limpias: /, /themis, etc.
  */
 const router = createRouter({
   history: createWebHistory(),

@@ -27,7 +27,7 @@ import logging
 import random
 import secrets
 import threading
-from datetime import date, datetime
+from datetime import date
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -51,13 +51,14 @@ from src.modules.herald import EmailMessage, build_mailer
 from src.modules.users import User
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, job_context
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.session import get_db_session
+from src.modules.infrastructure.session import get_db_session, read_repo
 from src.modules.shared._documents import (
     get_document_by_id,
     delete_document_file,
     update_document_status,
     serialize_document_list,
 )
+from src.modules.shared import assert_owned, utcnow_naive
 
 from .model import AegisDocument, Campaign, CampaignRecipient, DistributionList, Topic
 from .services import AegisAIWriter, AegisAlertFetcher, AlertSource, AegisAlert, AegisContent
@@ -107,8 +108,7 @@ class AegisManager:
         return document_id
 
     def get_document(self, doc_id: int) -> dict:
-        session = get_db_session()
-        repo = AegisDocumentRepository(session=session)
+        repo = read_repo(AegisDocumentRepository)
         doc = repo.get_by_id(doc_id)
         if not doc:
             raise DocumentNotFoundError(doc_id)
@@ -320,8 +320,7 @@ class AegisManager:
 
     def get_topics(self) -> list[dict]:
         """Devuelve todos los temas disponibles ordenados por título."""
-        session = get_db_session()
-        repo = AegisDocumentRepository(session=session)
+        repo = read_repo(AegisDocumentRepository)
 
         topics = repo.get_topics()
         return [{"id": t.id, "title": t.title} for t in topics]
@@ -333,24 +332,19 @@ class AegisManager:
 
         Args:
             document_id: id of the document to check
-            user_id: id of the user that potentially can own the document
 
         Returns:
-            True if the user with the given id owns \
-            the document with the given ID and false otherwise
+            The document, if owned by the current user.
 
         Raises:
-            DocumentError if the document was not found
+            DocumentError if the document was not found or belongs to
+            another user (same error for both cases to prevent ID
+            enumeration).
         """
-        session = get_db_session()
-        doc_repo = AegisDocumentRepository(session=session)
-        doc = doc_repo.get_by_id(document_id)
-        if not doc:
-            raise DocumentError(f"Documento {document_id} no encontrado")
-        if doc.user_id != self.user.id: # type: ignore
-            raise DocumentError(f"Documento {document_id} no encontrado")
-
-        return doc
+        return assert_owned(
+            AegisDocumentRepository, document_id, self.user.id,
+            lambda eid: DocumentError(f"Documento {eid} no encontrado"),
+        )
 
     # =========================================================================
     # WORKFLOW DE GENERACIÓN (privado)
@@ -425,7 +419,7 @@ class AegisManager:
                 self._persist_alerts_atomic(document_id, alerts)
 
                 # 6. Escritura del archivo de archivo
-                ts       = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                ts       = utcnow_naive().strftime("%Y%m%d_%H%M%S")
                 filename = f"{ts}_{self.user.id}_{resolved_id}.json"
                 filepath = cfg["output_dir"] / filename
 
@@ -578,7 +572,7 @@ class AegisManager:
 
     def _create_pending_document(self, topic_id: int) -> int:
         """Crea un registro AegisDocument en estado 'pending' y devuelve su ID."""
-        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        ts = utcnow_naive().strftime("%Y%m%d_%H%M%S")
         placeholder = f"pending_{ts}_{self.user.id}_{topic_id}"
 
         doc = AegisDocument(
@@ -622,8 +616,8 @@ class CampaignManager:
     Gestiona listas de distribución y campañas de concienciación.
 
     Sigue la convención del proyecto para el acceso a datos: las **lecturas**
-    usan la sesión ambiental de la request (``get_db_session()`` inyectada en
-    el repositorio) y las **escrituras** van dentro de un ``UnitOfWork``. El
+    usan ``read_repo(RepoCls)`` (sesión ambiental de la request, sin demarcar
+    transacción) y las **escrituras** van dentro de un ``UnitOfWork``. El
     manager nunca crea ni cierra sesiones — de eso se encargan los bordes
     (``teardown_request`` en HTTP, ``job_context`` en el worker).
     """
@@ -643,8 +637,7 @@ class CampaignManager:
             return dist_list.to_dict()
 
     def list_lists(self) -> list[dict]:
-        session = get_db_session()
-        repo = DistributionListRepository(session=session)
+        repo = read_repo(DistributionListRepository)
         return [d.to_dict() for d in repo.get_lists_by_user(self.user.id)]
 
     def get_list(self, list_id: int) -> dict:
@@ -668,8 +661,7 @@ class CampaignManager:
 
     def get_recipients(self, list_id: int) -> list[dict]:
         self._assert_list_ownership(list_id)
-        session = get_db_session()
-        repo = DistributionListRepository(session=session)
+        repo = read_repo(DistributionListRepository)
         return [r.to_dict() for r in repo.get_recipients(list_id)]
 
     def remove_recipient(self, list_id: int, recipient_id: int) -> None:
@@ -679,19 +671,14 @@ class CampaignManager:
             repo.remove_recipient(list_id, recipient_id)
 
     def _assert_list_ownership(self, list_id: int) -> DistributionList:
-        session = get_db_session()
-        repo = DistributionListRepository(session=session)
-        dist_list = repo.get_by_id(list_id)
-        if dist_list is None or dist_list.user_id != self.user.id:
-            raise DistributionListNotFoundError(list_id)
-        return dist_list
+        return assert_owned(DistributionListRepository, list_id, self.user.id, DistributionListNotFoundError)
 
     # =========================================================================
     # CAMPAIGNS
     # =========================================================================
 
     def create_campaign(self, document_id: int, list_id: int, name: str) -> dict:
-        doc_repo = AegisDocumentRepository(session=get_db_session())
+        doc_repo = read_repo(AegisDocumentRepository)
         doc = doc_repo.get_by_id(document_id)
         if doc is None or doc.user_id != self.user.id:
             raise DocumentNotFoundError(document_id)
@@ -706,14 +693,12 @@ class CampaignManager:
             return campaign.to_dict()
 
     def list_campaigns(self) -> list[dict]:
-        session = get_db_session()
-        repo = CampaignRepository(session=session)
+        repo = read_repo(CampaignRepository)
         return [c.to_dict() for c in repo.get_campaigns_by_user(self.user.id)]
 
     def get_campaign(self, campaign_id: int) -> dict:
         campaign = self._assert_campaign_ownership(campaign_id)
-        session = get_db_session()
-        repo = CampaignRepository(session=session)
+        repo = read_repo(CampaignRepository)
         recipients = repo.get_recipients(campaign_id)
         result = campaign.to_dict()
         result["recipients"] = [r.to_dict() for r in recipients]
@@ -729,13 +714,13 @@ class CampaignManager:
         if campaign.status != "draft":
             raise CampaignAlreadyLaunchedError(campaign_id, campaign.status)
 
-        doc_repo = AegisDocumentRepository(session=get_db_session())
+        doc_repo = read_repo(AegisDocumentRepository)
         doc = doc_repo.get_by_id(campaign.document_id)
         questions_snapshot = [q.to_dict() for q in doc.questions] if doc else []
         if not questions_snapshot:
             raise CampaignNoQuestionsError(campaign.document_id)
 
-        list_repo = DistributionListRepository(session=get_db_session())
+        list_repo = read_repo(DistributionListRepository)
         recipients = list_repo.get_recipients(campaign.list_id)
         if not recipients:
             raise CampaignEmptyListError(campaign.list_id)
@@ -768,12 +753,7 @@ class CampaignManager:
         return self.get_campaign(campaign_id)
 
     def _assert_campaign_ownership(self, campaign_id: int) -> Campaign:
-        session = get_db_session()
-        repo = CampaignRepository(session=session)
-        campaign = repo.get_by_id(campaign_id)
-        if campaign is None or campaign.user_id != self.user.id:
-            raise CampaignNotFoundError(campaign_id)
-        return campaign
+        return assert_owned(CampaignRepository, campaign_id, self.user.id, CampaignNotFoundError)
 
     # =========================================================================
     # WORKFLOW DE ENVÍO (privado, ejecutado en el worker RQ)
@@ -793,8 +773,7 @@ class CampaignManager:
     def _run_campaign_send(self, campaign_id: int) -> None:
         """Envía el email de la campaña a cada destinatario pendiente."""
         with job_context() as job:
-            session = get_db_session()
-            camp_repo = CampaignRepository(session=session)
+            camp_repo = read_repo(CampaignRepository)
             campaign = camp_repo.get_by_id(campaign_id)
             if campaign is None:
                 logger.error(f"Campaña {campaign_id} no encontrada para envío")
@@ -866,8 +845,7 @@ class CampaignManager:
         única identidad. Si el test ya fue completado, devuelve el estado
         final (score) en vez de volver a servir las preguntas.
         """
-        session = get_db_session()
-        repo = CampaignRepository(session=session)
+        repo = read_repo(CampaignRepository)
         recipient = repo.get_recipient_by_token(token)
         if recipient is None:
             raise QuizTokenInvalidError()
@@ -909,8 +887,7 @@ class CampaignManager:
         mismo token (el segundo falla al hacer flush y se traduce al mismo
         409) — el token nunca puede completar el test dos veces.
         """
-        session = get_db_session()
-        repo = CampaignRepository(session=session)
+        repo = read_repo(CampaignRepository)
         recipient = repo.get_recipient_by_token(token)
         if recipient is None:
             raise QuizTokenInvalidError()

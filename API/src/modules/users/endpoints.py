@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 from typing import Any
 
 from flask import request
@@ -13,6 +12,7 @@ from src.modules.shared._exceptions import (
     SecOpsException,
 )
 from src.modules.shared.schemas import ErrorSchema
+from src.modules.shared import utcnow_naive
 
 from .services import Role, require_oauth_token, require_role
 from .managers import ACCESS_TOKEN_EXPIRE_MINUTES, UserManager, OAuthTokenManager, MFAManager
@@ -232,7 +232,7 @@ def oauth_mfa_verify(data: dict[str, Any]):
     access_token = OAUTH_MANAGER.create_access_token(
         user_id=uid, username=user.username, role=user.role,
         password_changed_at=user.password_changed_at,
-        mfa_at=datetime.utcnow(),
+        mfa_at=utcnow_naive(),
     )
     refresh_token = OAUTH_MANAGER.create_refresh_token(uid)
     user_attrs = USER_MANAGER.get_user_attributes(uid)

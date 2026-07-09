@@ -8,13 +8,11 @@ the output of every individual rule that was executed during the analysis.
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
-from src.modules.shared import Base, Document
+from src.modules.shared import Base, Document, utcnow_naive
 
 
 class IrisAnalysis(Base):
@@ -56,9 +54,9 @@ class IrisAnalysis(Base):
     verdict = Column(String(20), nullable=True)
     gate_reasons = Column(JSONB, nullable=True)
     ai_summary = Column(JSONB, nullable=True)
-    started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=False, default=utcnow_naive)
     finished_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
     user = relationship("User", back_populates="analyses")

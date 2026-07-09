@@ -4,7 +4,7 @@ taskqueue/tracking.py
 Mixin reutilizable para los managers que respaldan una entidad de dominio
 con una tarea en segundo plano (DRY).
 
-Antes, iris y sentinel repetían el mismo patrón "buscar la tarea por
+Antes, iris y themis repetían el mismo patrón "buscar la tarea por
 external_id y, si existe, leer estado/progreso". Este mixin lo centraliza y
 fija en un único lugar el formato del ``external_id`` y la categoría de cola.
 
@@ -24,7 +24,7 @@ from .task import Task
 class TaskTrackingMixin:
     """Acceso uniforme al estado/progreso de la tarea de una entidad (DRY).
 
-    **Propósito**: Iris y Sentinel repetían el mismo patrón:
+    **Propósito**: Iris y Themis repetían el mismo patrón:
         - external_id_for(entity_id) → construir el ID lógico
         - find_task(entity_id) → buscar el job en TaskQueue
         - task_status_of(entity_id) → obtener status (string)
@@ -35,8 +35,8 @@ class TaskTrackingMixin:
 
     **Cómo usarlo (ejemplo: ScanManager)**:
         class ScanManager(TaskTrackingMixin):
-            EXTERNAL_ID_PREFIX = "sentinel-scan:"  # ← define el prefijo
-            TASK_CATEGORY = "sentinel.scan"         # ← define la categoría de cola
+            EXTERNAL_ID_PREFIX = "themis-scan:"  # ← define el prefijo
+            TASK_CATEGORY = "themis.scan"         # ← define la categoría de cola
             _tq: ITaskQueue  # ← inyectable (singleton o fake en tests)
 
             def get_scan_status(self, scan_id: int) -> Optional[str]:
@@ -45,8 +45,8 @@ class TaskTrackingMixin:
     **Flujo**:
         1. Manager: get_scan_status(123)
         2. task_status_of(123) → find_task(123)
-        3. external_id_for(123) → "sentinel-scan:123"
-        4. TaskQueue.get_task_by_external_id("sentinel-scan:123", "sentinel.scan")
+        3. external_id_for(123) → "themis-scan:123"
+        4. TaskQueue.get_task_by_external_id("themis-scan:123", "themis.scan")
         5. ExternalIdStore busca el job_id de RQ
         6. Fetch del job desde Redis, convierte a Task
         7. Retorna status (PENDING/RUNNING/COMPLETED/FAILED/CANCELLED/TIMEOUT)
@@ -65,8 +65,8 @@ class TaskTrackingMixin:
     def external_id_for(self, entity_id) -> str:
         """Construye el external_id canónico para una entidad.
 
-        Ejemplo (ScanManager con EXTERNAL_ID_PREFIX="sentinel-scan:"):
-            external_id_for(123) → "sentinel-scan:123"
+        Ejemplo (ScanManager con EXTERNAL_ID_PREFIX="themis-scan:"):
+            external_id_for(123) → "themis-scan:123"
 
         Esto se usa como clave para mapear entidades de dominio a RQ jobs.
         """
