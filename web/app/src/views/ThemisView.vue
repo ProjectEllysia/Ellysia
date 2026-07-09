@@ -23,8 +23,12 @@
           :launching="store.launching"
           :source-scans="store.sourceNmapScans.items"
           :source-loading="store.sourceNmapScans.loading"
+          :authorized-targets="store.authorizedTargets.items"
+          :auth-targets-loading="store.authorizedTargets.loading"
           @launch="handleLaunchLybra"
-          @load-sources="store.loadSourceNmapScans()" />
+          @load-sources="store.loadSourceNmapScans()"
+          @add-authorized-target="handleAddAuthorizedTarget"
+          @remove-authorized-target="store.removeAuthorizedTarget" />
         <LybraResults
           :scans="store.scans.lybra.results"
           :loading="store.scans.lybra.loading"
@@ -172,14 +176,20 @@ const selectableFolders = computed(() =>
 
 onMounted(() => { store.loadStats(); store.loadScans(store.activeTab); store.loadScheduledScans(); store.loadFolders() })
 
-// Carga la lista de Lybra la primera vez que se entra a su mundo.
+// Carga la lista de Lybra y el registro de objetivos autorizados la primera
+// vez que se entra a su mundo.
 let lybraLoaded = false
 watch(() => store.world, (w) => {
-  if (w === 'lybra' && !lybraLoaded) { lybraLoaded = true; store.loadLybraScans() }
+  if (w === 'lybra' && !lybraLoaded) {
+    lybraLoaded = true
+    store.loadLybraScans()
+    store.loadAuthorizedTargets()
+  }
 }, { immediate: true })
 
 async function handleLaunchLybra(payload) { await store.launchLybra(payload) }
 async function handleDeleteLybra(id) { if (confirm('¿Eliminar este escaneo Lybra y sus hallazgos?')) await store.deleteLybraScan(id) }
+async function handleAddAuthorizedTarget({ target, label }) { await store.addAuthorizedTarget(target, label) }
 
 watch(activeBatchAction, (val) => {
   if (!val) { selectedFolderId.value = ''; batchSubmitting.value = false }

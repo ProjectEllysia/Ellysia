@@ -85,6 +85,11 @@
                 </li>
               </ul>
 
+              <div v-if="scan.status === 'finished' && scan.targetAuthorized === false" class="body-unauth-hint">
+                Objetivo no autorizado: el fingerprinting propio y las comprobaciones activas de Lybra no se
+                ejecutaron sobre '{{ scan.target }}'. Autorízalo en el panel de lanzamiento para un análisis más completo.
+              </div>
+
               <div class="body-actions">
                 <button class="btn-del" @click="$emit('delete', scan.id)">Eliminar escaneo</button>
               </div>
@@ -222,6 +227,8 @@ function fmtDate(iso) {
 .f-tag.state.regressed { color: var(--warn); background: var(--warn-dim); }
 .f-tag.state.accepted { color: var(--text-muted); }
 .f-tag.src { color: var(--info); background: var(--info-dim); }
+
+.body-unauth-hint { margin-top: 0.6rem; padding: 0.55rem 0.7rem; font-size: 0.76rem; line-height: 1.4; color: var(--warn); background: var(--warn-dim); border: 1px dashed var(--warn); border-radius: 7px; }
 
 .body-actions { margin-top: 0.7rem; display: flex; justify-content: flex-end; }
 .btn-del { font-size: 0.72rem; color: var(--danger); background: none; border: 1px solid var(--danger-dim); padding: 0.3rem 0.7rem; border-radius: 6px; cursor: pointer; transition: all 0.2s; }

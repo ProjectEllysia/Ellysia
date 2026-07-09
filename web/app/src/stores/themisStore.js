@@ -40,6 +40,11 @@ export const useThemisStore = defineStore('themis', () => {
   // Escaneos Nmap terminados, para el modo "analizar un Nmap existente" de Lybra.
   const sourceNmapScans = reactive({ items: [], loading: false })
 
+  // Registro de objetivos autorizados (roadmap §6): gate legal por-usuario que
+  // desbloquea el autodescubrimiento, el fingerprinting propio y las
+  // comprobaciones activas de Lybra sobre un objetivo concreto.
+  const authorizedTargets = reactive({ items: [], loading: false })
+
   const launching = ref(false)
 
   /* ════════════════════════════════ PROGRAMADOS ════════════════════════ */
@@ -184,6 +189,51 @@ export const useThemisStore = defineStore('themis', () => {
       sourceNmapScans.items = (data.results ?? []).filter(s => s.status === 'finished')
     } catch { sourceNmapScans.items = [] }
     finally { sourceNmapScans.loading = false }
+  }
+
+  /** Carga el registro de objetivos autorizados del usuario. */
+  async function loadAuthorizedTargets() {
+    authorizedTargets.loading = true
+    try {
+      const res = await apiFetch('/themis/authorized-targets')
+      if (!res?.ok) { authorizedTargets.items = []; return }
+      const data = await res.json()
+      authorizedTargets.items = data.targets ?? []
+    } catch { authorizedTargets.items = [] }
+    finally { authorizedTargets.loading = false }
+  }
+
+  /** Añade un objetivo (IP o CIDR) al registro de objetivos autorizados. */
+  async function addAuthorizedTarget(target, label = '') {
+    try {
+      const res = await apiFetch('/themis/authorized-targets', {
+        method: 'POST',
+        body: JSON.stringify({ target, label: label || undefined }),
+      })
+      const data = await res?.json().catch(() => ({}))
+      if (!res?.ok) {
+        toast.show(data.message || 'No se pudo añadir el objetivo autorizado.', 'error')
+        return false
+      }
+      authorizedTargets.items.unshift({
+        id: data.targetId, target: data.target, label: label || null, createdAt: new Date().toISOString(),
+      })
+      toast.show(`Objetivo '${data.target}' autorizado.`, 'success')
+      return true
+    } catch {
+      toast.show('No se pudo conectar con la API.', 'error')
+      return false
+    }
+  }
+
+  /** Elimina una entrada del registro de objetivos autorizados. */
+  async function removeAuthorizedTarget(id) {
+    const res = await apiFetch(`/themis/authorized-targets/${id}`, { method: 'DELETE' })
+    if (!res?.ok) { toast.show('No se pudo eliminar el objetivo autorizado.', 'error'); return false }
+    const idx = authorizedTargets.items.findIndex(t => t.id === id)
+    if (idx !== -1) authorizedTargets.items.splice(idx, 1)
+    toast.show('Objetivo autorizado eliminado.', 'success')
+    return true
   }
 
   /**
@@ -791,6 +841,7 @@ export const useThemisStore = defineStore('themis', () => {
 
   return {
     world, setWorld, sourceNmapScans,
+    authorizedTargets, loadAuthorizedTargets, addAuthorizedTarget, removeAuthorizedTarget,
     activeTab, stats, loadingStats, scans, launching,
     scheduled, scheduling,
     preview, details,
