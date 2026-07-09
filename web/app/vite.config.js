@@ -13,7 +13,7 @@ import { fileURLToPath, URL } from 'node:url'
  *
  * Server (solo desarrollo):
  * - Puerto 5173.
- * - Proxy inverso: cualquier ruta que empiece por /oauth, /sentinel, etc.
+ * - Proxy inverso: cualquier ruta que empiece por /oauth, /themis, etc.
  *   se redirige a Flask en :5000. Esto evita CORS en desarrollo y permite
  *   que el frontend de Vue (Vite) y el backend (Flask) convivan en puertos
  *   distintos.
@@ -30,7 +30,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/oauth':     { target: 'http://localhost:5000', changeOrigin: true },
-      '/sentinel':  { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
+      '/themis':    { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
       '/aegis':     { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
       '/users':     { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
       '/system':    { target: 'http://localhost:5000', changeOrigin: true },
