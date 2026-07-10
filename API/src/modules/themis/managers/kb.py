@@ -1,7 +1,8 @@
 """KbSyncManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
-from datetime import timedelta
+import time
+from datetime import datetime, timedelta
 from typing import List, Optional
 import src.modules.system.config_reading as CR
 from src.modules.infrastructure import UnitOfWork
@@ -40,52 +41,97 @@ class KbSyncManager:
         return count
 
     def sync_epss(self, url: str) -> int:
-        """Mirror the current EPSS scores. Returns the number of rows upserted."""
+        """Mirror the current EPSS scores. Returns the number of rows upserted.
+
+        The feed carries a score for essentially every known CVE (300k+ rows),
+        so this goes through ``bulk_upsert_epss`` rather than one row at a time.
+        """
         from ..lybra import fetch_epss, parse_epss_rows
         csv_text = fetch_epss(url)
-        count = 0
         with UnitOfWork() as uow:
-            repo = KbRepository(uow)
-            for row in parse_epss_rows(csv_text):
-                repo.upsert_epss(row)
-                count += 1
+            count = KbRepository(uow).bulk_upsert_epss(list(parse_epss_rows(csv_text)))
         logger.info("KB: EPSS sync upserted %d rows", count)
         return count
 
     def sync_nvd(self, base_url: str, window_days: int = 8, api_key: Optional[str] = None) -> int:
-        """Mirror NVD CVEs modified in the last ``window_days``. Returns the count."""
-        from ..lybra import iter_nvd_pages, ingest_nvd_cve
-        last_start, last_end = self._nvd_window(window_days)
+        """Mirror NVD CVEs modified in the last ``window_days``. Returns the count.
 
-        count = 0
-        batch: List[tuple] = []
-        for item in iter_nvd_pages(base_url, last_start, last_end, api_key):
-            parsed = ingest_nvd_cve(item)
-            if parsed:
-                batch.append(parsed)
-            if len(batch) >= self.NVD_BATCH_SIZE:
-                self._flush_cves(batch)
-                count += len(batch)
-                batch = []
-        if batch:
-            self._flush_cves(batch)
-            count += len(batch)
+        This is the incremental (delta) sync the nightly job runs — ``window_days``
+        is expected to stay well under NVD's 120-day per-request cap. For a wide
+        historical range, use :meth:`sync_nvd_backfill` instead, which chunks.
+        """
+        end = utcnow_naive()
+        start = end - timedelta(days=window_days)
+        count = self.sync_nvd_backfill(base_url, start, end, api_key=api_key)
         logger.info("KB: NVD sync upserted %d CVEs (window %dd)", count, window_days)
         return count
+
+    # NVD's CVE API 2.0 documents a 120-day cap on the lastModStartDate/
+    # lastModEndDate span (and does 404 past it) — but empirically or, unrelated
+    # to that documented cap, it also silently *drops* the date filter and
+    # returns the entire ~350k-CVE catalog once the span exceeds roughly 20-25
+    # days, with no error to signal it. Observed directly against the live API:
+    # 18 days -> 9397 results (sane), 25 days -> 346605 (the whole catalog).
+    # 14 days is comfortably inside the safe zone, so a wide backfill chunks
+    # there rather than at the documented-but-unsafe 120-day limit.
+    _NVD_MAX_WINDOW_DAYS = 14
+
+    def sync_nvd_backfill(
+        self, base_url: str, start: datetime, end: Optional[datetime] = None,
+        api_key: Optional[str] = None,
+    ) -> int:
+        """One-off historical mirror of every NVD CVE modified between ``start``
+        and ``end`` (default: now), chunked into ``_NVD_MAX_WINDOW_DAYS`` windows
+        to stay inside the range NVD actually filters correctly (see that
+        constant's docstring). Meant to be run manually/operationally once (see
+        the module docstring) — the nightly job only does small deltas.
+
+        Returns the total number of CVEs upserted across all chunks.
+        """
+        from ..lybra import iter_nvd_pages, ingest_nvd_cve
+        end = end or utcnow_naive()
+        fmt = "%Y-%m-%dT%H:%M:%S.000"
+
+        total = 0
+        chunk_start = start
+        first = True
+        while chunk_start < end:
+            if not first:
+                # A chunk with only one page never sleeps internally (no next
+                # page to wait for); without a pause here, two consecutive
+                # single-page chunks would fire back to back and risk a 429.
+                time.sleep(6.0)
+            first = False
+
+            chunk_end = min(chunk_start + timedelta(days=self._NVD_MAX_WINDOW_DAYS), end)
+            count = 0
+            batch: List[tuple] = []
+            for item in iter_nvd_pages(
+                base_url, chunk_start.strftime(fmt), chunk_end.strftime(fmt), api_key,
+            ):
+                parsed = ingest_nvd_cve(item)
+                if parsed:
+                    batch.append(parsed)
+                if len(batch) >= self.NVD_BATCH_SIZE:
+                    self._flush_cves(batch)
+                    count += len(batch)
+                    batch = []
+            if batch:
+                self._flush_cves(batch)
+                count += len(batch)
+            logger.info(
+                "KB: NVD backfill chunk %s -> %s upserted %d CVEs",
+                chunk_start.date(), chunk_end.date(), count,
+            )
+            total += count
+            chunk_start = chunk_end
+        return total
 
     def _flush_cves(self, batch: List[tuple]) -> None:
         with UnitOfWork() as uow:
             repo = KbRepository(uow)
             for cve_row, cpe_matches in batch:
                 repo.upsert_cve(cve_row, cpe_matches)
-
-    @staticmethod
-    def _nvd_window(days: int) -> tuple[str, str]:
-        """NVD-formatted (lastModStartDate, lastModEndDate) for the last ``days``."""
-        fmt = "%Y-%m-%dT%H:%M:%S.000"
-        end = utcnow_naive()
-        start = end - timedelta(days=days)
-        return start.strftime(fmt), end.strftime(fmt)
 
     def sync_all(self) -> dict:
         """Run every configured source once; return a per-source count summary."""

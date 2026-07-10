@@ -128,6 +128,59 @@ class MaxHostsExceededError(ScanError):
         )
 
 
+class TargetNotAuthorizedError(ScanError):
+    """El objetivo no está en el registro de objetivos autorizados del usuario.
+
+    Bloquea las operaciones de Lybra que tocan la red del objetivo
+    (autodescubrimiento, fingerprinting propio, comprobaciones activas) hasta
+    que el usuario lo declare explícitamente (roadmap §6).
+    """
+
+    default_code = ErrorCode.TARGET_NOT_AUTHORIZED
+    default_status_code = 403
+    default_severity = ErrorSeverity.LOW
+
+    def __init__(self, target: str):
+        super().__init__(
+            message=f"El objetivo '{target}' no está en el registro de objetivos autorizados",
+            details={"target": target},
+            user_message=(
+                f"'{target}' no está autorizado para operaciones activas de Lybra. "
+                "Añádelo al registro de objetivos autorizados antes de lanzar este escaneo."
+            ),
+        )
+
+
+class AuthorizedTargetNotFoundError(ScanError):
+    """La entrada del registro de objetivos autorizados no existe o no es del usuario."""
+
+    default_code = ErrorCode.AUTHORIZED_TARGET_NOT_FOUND
+    default_status_code = 404
+    default_severity = ErrorSeverity.LOW
+
+    def __init__(self, target_id: int):
+        super().__init__(
+            message=f"Objetivo autorizado con ID {target_id} no encontrado",
+            details={"target_id": target_id},
+            user_message=f"El objetivo autorizado #{target_id} no existe."
+        )
+
+
+class DuplicateAuthorizedTargetError(ScanError):
+    """El objetivo ya está en el registro del usuario."""
+
+    default_code = ErrorCode.AUTHORIZED_TARGET_ALREADY_EXISTS
+    default_status_code = 409
+    default_severity = ErrorSeverity.LOW
+
+    def __init__(self, target: str):
+        super().__init__(
+            message=f"El objetivo '{target}' ya está en el registro de objetivos autorizados",
+            details={"target": target},
+            user_message=f"'{target}' ya está en tu registro de objetivos autorizados."
+        )
+
+
 class ReportError(SecOpsException):
     """Excepción base para errores de reportes y documentos."""
 

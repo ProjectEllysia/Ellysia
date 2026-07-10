@@ -32,6 +32,7 @@ from src.modules.infrastructure import BaseRepository, UnitOfWork
 from src.modules.shared import utcnow_naive
 
 from .model import (
+    AuthorizedTarget,
     CpeMatch,
     CveEntry,
     LybraScan,
@@ -801,6 +802,32 @@ class KbRepository(BaseRepository[CveEntry]):
                 setattr(epss, key, value)
         return epss
 
+    def bulk_upsert_epss(self, rows: List[dict], chunk_size: int = 5000) -> int:
+        """Upsert many EPSS rows in one round-trip per chunk.
+
+        The EPSS feed carries a score for essentially every known CVE
+        (300k+ rows). ``upsert_epss`` does one SELECT-then-add per row, which
+        at that volume takes on the order of hours; a single ``INSERT ...
+        ON CONFLICT DO UPDATE`` per chunk is the same operation done at
+        Postgres speed instead of ORM speed.
+        """
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        total = 0
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i:i + chunk_size]
+            if not chunk:
+                continue
+            stmt = pg_insert(EpssScore).values(chunk)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["cve_id"],
+                set_={"score": stmt.excluded.score, "percentile": stmt.excluded.percentile,
+                      "scored_at": stmt.excluded.scored_at},
+            )
+            self._session.execute(stmt)
+            total += len(chunk)
+        return total
+
 
 class ProgramedScanRepository(BaseRepository[ProgramedScan]):
     """
@@ -964,3 +991,35 @@ class ProgramedScanRepository(BaseRepository[ProgramedScan]):
             next_run_at=next_run_at,
         )
         return self.save(ps)
+
+
+class AuthorizedTargetRepository(BaseRepository[AuthorizedTarget]):
+    """Repository for the AuthorizedTarget entity (roadmap §6 register)."""
+
+    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
+        super().__init__(AuthorizedTarget, uow=uow, session=session)
+
+    def get_by_user(self, user_id: int) -> List[AuthorizedTarget]:
+        """Return all authorized-target entries for a user, newest first."""
+        return (
+            self._session.query(AuthorizedTarget)
+            .filter(AuthorizedTarget.user_id == user_id)
+            .order_by(AuthorizedTarget.created_at.desc())
+            .all()
+        )
+
+    def get_by_id_and_user(self, target_id: int, user_id: int) -> Optional[AuthorizedTarget]:
+        """Return an entry only if it belongs to the given user."""
+        return (
+            self._session.query(AuthorizedTarget)
+            .filter(AuthorizedTarget.id == target_id, AuthorizedTarget.user_id == user_id)
+            .one_or_none()
+        )
+
+    def get_by_target_and_user(self, target: str, user_id: int) -> Optional[AuthorizedTarget]:
+        """Return the entry matching the exact normalized target string, if any."""
+        return (
+            self._session.query(AuthorizedTarget)
+            .filter(AuthorizedTarget.target == target, AuthorizedTarget.user_id == user_id)
+            .one_or_none()
+        )

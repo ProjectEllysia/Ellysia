@@ -49,6 +49,31 @@ class FindingStateResponseSchema(Schema):
     user = fields.String()
 
 
+class AddAuthorizedTargetSchema(Schema):
+    target = fields.String(required=True, validate=validate.Length(min=1, max=64))
+    label = fields.String(load_default=None, allow_none=True, validate=validate.Length(max=255))
+
+
+class AuthorizedTargetSchema(Schema):
+    id = fields.Integer()
+    target = fields.String()
+    label = fields.String(allow_none=True)
+    createdAt = fields.DateTime()
+
+
+class AuthorizedTargetListResponseSchema(Schema):
+    message = fields.String()
+    targets = fields.List(fields.Nested(AuthorizedTargetSchema))
+    user = fields.String()
+
+
+class AuthorizedTargetActionResponseSchema(Schema):
+    message = fields.String()
+    targetId = fields.Integer()
+    target = fields.String()
+    user = fields.String()
+
+
 class ResultsQuerySchema(Schema):
     type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "openvas", "lybra", "all"]))
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))

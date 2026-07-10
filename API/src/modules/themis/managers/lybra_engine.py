@@ -32,12 +32,14 @@ from ..services import _Task
 from ..exceptions import (
     ScanNotFoundError,
     FindingNotFoundError,
+    TargetNotAuthorizedError,
 )
 
 from .scan import ScanManager
 from .nmap import NmapScanManager
 from .nikto import NiktoScanManager
 from .openvas import OpenVASScanManager
+from .authorized_targets import AuthorizedTargetManager
 
 
 logger = logging.getLogger(__name__)
@@ -100,7 +102,12 @@ class LybraEngineManager(ScanManager):
                     raise ScanNotFoundError(source_scan_id)
                 scan_target = source.target
         elif target is not None:
+            # Self-discovery (Fase T) touches the target directly — requires
+            # an authorized-targets register entry (roadmap §6), unlike
+            # analysing a prior Nmap scan's already-collected services.
             scan_target = target
+            if not AuthorizedTargetManager.is_authorized(user_id, scan_target):
+                raise TargetNotAuthorizedError(scan_target)
         else:
             raise ValueError("run_scan requires source_scan_id or target")
 
@@ -209,6 +216,16 @@ class LybraEngineManager(ScanManager):
                     source_host_id = host.id if host else None
                     services = services_from_discovered_ports(discovered_ports)
 
+                # Fase F/R only run against a target the user has explicitly
+                # authorized (roadmap §6). Self-discovery mode already
+                # guarantees this at launch (see run_scan); this also covers
+                # the sourceScanId mode, where the target comes from a prior
+                # Nmap scan that was never itself gated by this register.
+                target_authorized = bool(
+                    user_id and source_target
+                    and AuthorizedTargetManager.is_authorized(user_id, source_target)
+                )
+
                 # Phase 0.5 — own fingerprinting (Fase F), before the matcher runs.
                 # A self-discovered service (Fase T, no Nmap involved) carries no
                 # product/version at all; without this, the matcher below would
@@ -216,7 +233,7 @@ class LybraEngineManager(ScanManager):
                 # never find a single CVE. This never overrides a Nmap-sourced
                 # reading — see _fingerprint_services.
                 fingerprint_findings: list = []
-                if source_target and CR.is_lybra_fingerprinting_enabled():
+                if source_target and target_authorized and CR.is_lybra_fingerprinting_enabled():
                     services, fingerprint_findings = self._fingerprint_services(source_target, services)
 
                 previous_map = self._previous_findings_map(scan_repo, user_id, source_target, scan_id)
@@ -231,7 +248,7 @@ class LybraEngineManager(ScanManager):
 
             # Phase 2 — active checks over the network, outside any transaction.
             # Opt-in (they touch the target; see roadmap §6 authorized targets).
-            if source_target and CR.is_lybra_active_checks_enabled():
+            if source_target and target_authorized and CR.is_lybra_active_checks_enabled():
                 findings_data.extend(self._run_active_checks(source_target, services))
 
             # Phase 2.7 — deep analysis (Fase 6): launch Nmap/Nikto/OpenVAS as
@@ -547,6 +564,9 @@ class LybraEngineManager(ScanManager):
             display_findings = own_findings
 
         exposure = classify_exposure(scan.target)
+        target_authorized = bool(
+            scan.target and AuthorizedTargetManager.is_authorized(scan.user_id, scan.target)
+        )
 
         def _priority(f: dict) -> str:
             return score_finding(
@@ -563,6 +583,7 @@ class LybraEngineManager(ScanManager):
             "deep": bool(deep_scan_ids),
             "deepScanIds": deep_scan_ids,
             "exposure": exposure,
+            "targetAuthorized": target_authorized,
             "status": getattr(scan, "status", "unknown"),
             "startedAt": scan.started_at.isoformat(),
             "finishedAt": scan.finished_at.isoformat() if scan.finished_at else None,  # type: ignore

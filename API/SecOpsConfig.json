@@ -1175,7 +1175,7 @@
       "timeout": 3
     },
     "kb": {
-      "enabled": false,
+      "enabled": true,
       "syncCron": "0 3 * * *",
       "nvdWindowDays": 8,
       "sources": {
@@ -1185,8 +1185,8 @@
       }
     },
     "lybra": {
-      "activeChecks": false,
-      "fingerprintingEnabled": false
+      "activeChecks": true,
+      "fingerprintingEnabled": true
     },
     "nikto": {
       "colorPalette": {

@@ -590,18 +590,22 @@ def get_kb_nvd_api_key():
 
 @_lazy_load
 def is_lybra_active_checks_enabled() -> bool:
-    # Opt-in: active checks touch the target and await the authorized-targets
-    # register (roadmap §6), so they are off unless explicitly enabled.
-    return _as_bool(_cfg("themis.lybra.activeChecks", False))
+    # Global switch, on by default: active checks touch the target, but the
+    # per-user authorized-targets register (roadmap §6, AuthorizedTargetManager)
+    # is the real gate — LybraEngineManager only runs these against a target the
+    # caller has explicitly authorized, regardless of this flag. This exists as
+    # an operator-level kill switch to disable the whole feature deployment-wide.
+    return _as_bool(_cfg("themis.lybra.activeChecks", True))
 
 
 # --- Lybra own fingerprinting (Fase F) ---
 
 @_lazy_load
 def is_lybra_fingerprinting_enabled() -> bool:
-    # Opt-in like active checks: it touches the target (HTTP/SSH probes) for
-    # calibration against Nmap, ahead of the authorized-targets register.
-    return _as_bool(_cfg("themis.lybra.fingerprintingEnabled", False))
+    # Same story as active checks: on by default now that the authorized-targets
+    # register (roadmap §6) gates it per-target; this flag is just the
+    # operator-level kill switch.
+    return _as_bool(_cfg("themis.lybra.fingerprintingEnabled", True))
 
 
 @_lazy_load

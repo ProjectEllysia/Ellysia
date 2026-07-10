@@ -766,6 +766,36 @@ class LybraScan(Scan):
         return f"<LybraScan(id={self.id}, target='{self.target}', source={self.source_scan_id})>"
 
 
+class AuthorizedTarget(Base):
+    """A target (IP or CIDR) a user has declared authorized for Lybra's
+    network-touching operations (roadmap §6): self-discovery (Fase T), own
+    fingerprinting (Fase F) and the active check runtime (Fase R). Analysing
+    services already known from a prior Nmap scan (Fase 1) does not need an
+    entry here, since it sends no new packets to the target.
+
+    Attributes:
+        id: Primary key.
+        user_id: Owner of this register entry.
+        target: Canonical IP or CIDR string, e.g. "10.0.0.5/32" or "10.0.0.0/24".
+        label: Optional free-text note (client name, authorization scope...).
+        created_at: When the entry was added.
+    """
+    __tablename__ = "AuthorizedTarget"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    user_id    = Column(Integer, ForeignKey("User.id"), nullable=False, index=True)
+    target     = Column(String(64), nullable=False)
+    label      = Column(String(255), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "target", name="uq_authorizedtarget_user_target"),
+    )
+
+    def __repr__(self):
+        return f"<AuthorizedTarget(id={self.id}, target='{self.target}', user_id={self.user_id})>"
+
+
 class Finding(Base):
     """Normalized security finding, independent of the scanner that produced it.
 
