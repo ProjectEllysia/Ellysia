@@ -727,10 +727,21 @@ class PDFCreator:
         scan: Source scan data.
     """
 
-    def __init__(self, scan_id: int) -> None:
+    def __init__(self, scan_id: int, document_id: Optional[int] = None) -> None:
+        """
+        Args:
+            scan_id: Primary key of the scan to report on.
+            document_id: Primary key of the ThemisDocument this PDF belongs to,
+                if any. Included in the output filename so two documents for
+                the same scan (e.g. one plain, one with AI, or a re-generated
+                one) never collide on disk — without it, a later generation
+                for the same scan silently overwrote the file every earlier
+                document row's `filename` still pointed to.
+        """
         self.directory = CR.get_directory_of(CR.DirectoryType.OUTPUT_THEMIS)
         self.printing_strategy = PrintingStrategy.resolve_printing_strategy(scan_id)
         self.scan = self.printing_strategy.scan
+        self.document_id = document_id
 
     def _set_pdf_metadata(self, doc) -> None:
         """Set PDF document metadata.
@@ -1042,9 +1053,12 @@ class PDFCreator:
         """
         os.makedirs(self.directory, exist_ok=True)
 
+        # Unique per document, not just per scan — two documents for the same
+        # scan (plain + AI, or a re-generation) must not share a file path.
+        stem = f"{self.scan.id}_{self.document_id}" if self.document_id else str(self.scan.id)
         filename = os.path.join(
             self.directory,
-            f"{self.scan.id}{self.printing_strategy.get_filename_suffix()}",
+            f"{stem}{self.printing_strategy.get_filename_suffix()}",
         )
 
         doc = SimpleDocTemplate(
