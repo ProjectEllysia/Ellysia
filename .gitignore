@@ -73,6 +73,7 @@ API/htmlcov/
 API/src/tmp
 .claude
 .codebase-memory
+.codegraph/
 
 # ============================================
 # Análisis interno

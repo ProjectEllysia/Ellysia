@@ -16,11 +16,17 @@ export const useThemisStore = defineStore('themis', () => {
   const toast = useToastStore()
   const { triggerDownload } = useUtils()
 
+  /* ════════════════════════════════ MUNDOS ═════════════════════════════ */
+  // Themis vive en dos mundos: el motor propio (Lybra) y los escáneres
+  // externos (Nmap/Nikto/OpenVAS). El toggle de ThemisView conmuta entre ellos.
+  const world = ref('external') // 'external' | 'lybra'
+  function setWorld(w) { world.value = w }
+
   /* ════════════════════════════════ TABS ═══════════════════════════════ */
   const activeTab = ref('nmap')
 
   /* ════════════════════════════════ STATS ══════════════════════════════ */
-  const stats = reactive({ total: 0, nmap: 0, nikto: 0, openvas: 0 })
+  const stats = reactive({ total: 0, nmap: 0, nikto: 0, openvas: 0, lybra: 0 })
   const loadingStats = ref(false)
 
   /* ════════════════════════════════ SCANS POR TIPO ═════════════════════ */
@@ -28,7 +34,16 @@ export const useThemisStore = defineStore('themis', () => {
     nmap:    { results: [], loading: false, page: 1, totalCount: 0, perPage: 10 },
     nikto:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10 },
     openvas: { results: [], loading: false, page: 1, totalCount: 0, perPage: 10 },
+    lybra:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10 },
   })
+
+  // Escaneos Nmap terminados, para el modo "analizar un Nmap existente" de Lybra.
+  const sourceNmapScans = reactive({ items: [], loading: false })
+
+  // Registro de objetivos autorizados (roadmap §6): gate legal por-usuario que
+  // desbloquea el autodescubrimiento, el fingerprinting propio y las
+  // comprobaciones activas de Lybra sobre un objetivo concreto.
+  const authorizedTargets = reactive({ items: [], loading: false })
 
   const launching = ref(false)
 
@@ -96,6 +111,7 @@ export const useThemisStore = defineStore('themis', () => {
       stats.nmap    = data.nmap    ?? 0
       stats.nikto   = data.nikto   ?? 0
       stats.openvas = data.openvas ?? 0
+      stats.lybra   = data.lybra   ?? 0
       stats.total   = data.total   ?? 0
     } catch { /* noop */ }
     finally { loadingStats.value = false }
@@ -149,6 +165,100 @@ export const useThemisStore = defineStore('themis', () => {
   /** Lanza un escaneo OpenVAS. */
   async function launchOpenvas(payload) {
     return _launch('/themis/openvas', payload, 'openvas')
+  }
+
+  /* ── LYBRA (el motor propio) ── */
+
+  /** Carga la lista de escaneos Lybra (cada uno ya trae sus findings). */
+  async function loadLybraScans() {
+    return loadScans('lybra')
+  }
+
+  /**
+   * Carga los escaneos Nmap TERMINADOS del usuario, para poblar el desplegable
+   * del modo "analizar un Nmap existente". Reutiliza el endpoint de resultados
+   * y filtra por estado finished (solo un Nmap acabado tiene puertos que analizar).
+   */
+  async function loadSourceNmapScans() {
+    sourceNmapScans.loading = true
+    try {
+      const params = new URLSearchParams({ type: 'nmap', page: 1, per_page: 100 })
+      const res = await apiFetch(`/themis/results?${params}`)
+      if (!res?.ok) { sourceNmapScans.items = []; return }
+      const data = await res.json()
+      sourceNmapScans.items = (data.results ?? []).filter(s => s.status === 'finished')
+    } catch { sourceNmapScans.items = [] }
+    finally { sourceNmapScans.loading = false }
+  }
+
+  /** Carga el registro de objetivos autorizados del usuario. */
+  async function loadAuthorizedTargets() {
+    authorizedTargets.loading = true
+    try {
+      const res = await apiFetch('/themis/authorized-targets')
+      if (!res?.ok) { authorizedTargets.items = []; return }
+      const data = await res.json()
+      authorizedTargets.items = data.targets ?? []
+    } catch { authorizedTargets.items = [] }
+    finally { authorizedTargets.loading = false }
+  }
+
+  /** Añade un objetivo (IP o CIDR) al registro de objetivos autorizados. */
+  async function addAuthorizedTarget(target, label = '') {
+    try {
+      const res = await apiFetch('/themis/authorized-targets', {
+        method: 'POST',
+        body: JSON.stringify({ target, label: label || undefined }),
+      })
+      const data = await res?.json().catch(() => ({}))
+      if (!res?.ok) {
+        toast.show(data.message || 'No se pudo añadir el objetivo autorizado.', 'error')
+        return false
+      }
+      authorizedTargets.items.unshift({
+        id: data.targetId, target: data.target, label: label || null, createdAt: new Date().toISOString(),
+      })
+      toast.show(`Objetivo '${data.target}' autorizado.`, 'success')
+      return true
+    } catch {
+      toast.show('No se pudo conectar con la API.', 'error')
+      return false
+    }
+  }
+
+  /** Elimina una entrada del registro de objetivos autorizados. */
+  async function removeAuthorizedTarget(id) {
+    const res = await apiFetch(`/themis/authorized-targets/${id}`, { method: 'DELETE' })
+    if (!res?.ok) { toast.show('No se pudo eliminar el objetivo autorizado.', 'error'); return false }
+    const idx = authorizedTargets.items.findIndex(t => t.id === id)
+    if (idx !== -1) authorizedTargets.items.splice(idx, 1)
+    toast.show('Objetivo autorizado eliminado.', 'success')
+    return true
+  }
+
+  /**
+   * Lanza un escaneo Lybra. El payload lleva UNO de los dos modos:
+   *   - { sourceScanId }         → analizar un Nmap previo
+   *   - { target, ports? }       → autodescubrimiento
+   * más flags comunes: { deep, timeout }.
+   */
+  async function launchLybra(payload) {
+    launching.value = true
+    try {
+      const res = await apiFetch('/themis/lybra', { method: 'POST', body: JSON.stringify(payload) })
+      const data = await res?.json().catch(() => ({}))
+      if (!res?.ok) {
+        toast.show(data.error_description || data.message || 'Error al lanzar el escaneo Lybra.', 'error')
+        return false
+      }
+      toast.show(`Motor Lybra iniciado (ID: ${data.scanId})`, 'success')
+      await loadLybraScans()
+      await loadStats()
+      return true
+    } catch {
+      toast.show('No se pudo conectar con la API.', 'error')
+      return false
+    } finally { launching.value = false }
   }
 
   async function _launch(endpoint, payload, type) {
@@ -718,13 +828,27 @@ export const useThemisStore = defineStore('themis', () => {
     moveScan.folderId = null
   }
 
+  /** Elimina un escaneo Lybra por ID y refresca la lista. */
+  async function deleteLybraScan(id) {
+    const res = await apiFetch(`/themis/${id}`, { method: 'DELETE' })
+    if (!res?.ok) { toast.show('No se pudo eliminar el escaneo.', 'error'); return false }
+    const d = scans.lybra
+    const idx = d.results.findIndex(s => s.id === id)
+    if (idx !== -1) { d.results.splice(idx, 1); d.totalCount = Math.max(0, d.totalCount - 1) }
+    await loadStats()
+    return true
+  }
+
   return {
+    world, setWorld, sourceNmapScans,
+    authorizedTargets, loadAuthorizedTargets, addAuthorizedTarget, removeAuthorizedTarget,
     activeTab, stats, loadingStats, scans, launching,
     scheduled, scheduling,
     preview, details,
     viewMode, folders, folderForms, moveScan,
     loadStats, loadScans, switchTab, refreshCurrent, goToPage,
     launchNmap, launchNikto, launchOpenvas,
+    launchLybra, loadLybraScans, loadSourceNmapScans, deleteLybraScan,
     deleteScan, cancelScan,
     loadScheduledScans, createScheduledScan, deactivateScheduledScan, deleteScheduledScan, toggleScheduledForm,
     openPreview, closePreview, refreshPreviewDocs, loadPreviewTraceroute,

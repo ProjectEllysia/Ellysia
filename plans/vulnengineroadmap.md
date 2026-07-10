@@ -229,7 +229,25 @@ dos pistas entrelazadas.
 
 ## 5. Las fases, una a una
 
-### Fase 0 — Los cimientos · pista de correlación
+El plan se organiza ahora en dos etapas. La **Etapa 1** agrupa las fases que construyen el motor
+nativo de un único host —descubrir, fingerprintear, detectar y correlacionar— y que ya están
+escritas en su mayor parte en `API/src/modules/themis/lybra/` (`engine.py`, `checks.py`, `kb.py`,
+`correlation.py`, `fingerprint.py`, `transport.py`, `adapters.py`) y en sus managers
+(`managers/lybra_engine.py`, `managers/kb.py`). La **Etapa 2**, al final de este apartado, recoge
+las capacidades nuevas que llevan a Lybra más allá del host único y más allá del escaneo activo:
+inteligencia pasiva, evidencia forense, correlación entre activos, verificación local de backports,
+exposición de APIs y cloud, respuesta accionable, re-escaneo inteligente y exportación a estándares.
+La regla de las dos pistas (correlación y bajo nivel) sigue vigente en ambas etapas; las fases de
+Etapa 2 añaden letras nuevas a la pista de bajo nivel (P, E, A, B, D…) y prolongan la de correlación
+(C, O, G, S, X).
+
+### Etapa 1 — El motor nativo: descubrir, fingerprintear, detectar y correlacionar un host
+
+Las fases de esta etapa son las que dan a Lybra identidad propia como escáner, capa a capa, y hacen
+que Nmap, Nikto y OpenVAS pasen a corroboradores opcionales. Su estado real en el código se indica
+en cada encabezado.
+
+### Fase 0 — Los cimientos · pista de correlación · ✓ implementada
 
 **El objetivo** de esta fase es puramente estructural: conseguir que "el motor" sea una fila más de la
 tabla del apartado 3.1 y que persista sus `Finding`, todavía sin ninguna lógica de detección real.
@@ -284,7 +302,7 @@ servicios, y el motor persiste `Finding` informativos (uno de tipo "puerto abier
 recibido). Todavía no detecta ninguna vulnerabilidad, pero toda la fontanería de persistencia y
 correlación funciona de extremo a extremo.
 
-### Fase 1 — Detección por versión: el matcher de CPE a CVE · pista de correlación
+### Fase 1 — Detección por versión: el matcher de CPE a CVE · pista de correlación · ✓ implementada
 
 **El objetivo** es dar el primer paso de detección real: dado un servicio con su producto y su versión
 —que ya hemos recibido como entrada—, decir qué CVEs conocidas le afectan y con qué gravedad.
@@ -336,7 +354,7 @@ asciende a confirmado cuando lo comprueba activamente.
 **Damos la fase por hecha cuando** un escaneo Lybra sobre un host con software desactualizado produce
 hallazgos con CVEs reales y su CVSS, visibles tanto en la interfaz web como en el PDF.
 
-### Fase R — El runtime de detección propio · pista de bajo nivel · la que lidera
+### Fase R — El runtime de detección propio · pista de bajo nivel · la que lidera · ◐ parcial
 
 Esta es la capa de identidad, la L2, y por tanto la más importante de todo el plan. Es lo que convierte
 a Lybra de un simple correlacionador en un motor con criterio propio de detección. La idea es un
@@ -428,7 +446,7 @@ es exactamente lo que hace Greenbone con su NVT feed, y es una parte tangible de
 las tres primeras familias, todo bajo el mismo runtime y con feed versionado, y el `qod` sube de 70 a
 99 en lo confirmado. En ese punto, Nikto deja de ser necesario para el caso web típico.
 
-### Fase 2 — La base de conocimiento local y la inteligencia de amenazas · pista de correlación
+### Fase 2 — La base de conocimiento local y la inteligencia de amenazas · pista de correlación · ✓ implementada
 
 **El objetivo** es dejar de depender de consultas en vivo a `cve.circl.lu` y tener nuestro propio
 espejo local, rápido y consultable sin conexión: el equivalente a un NVT feed propio, que aquí llamamos
@@ -479,7 +497,7 @@ objetivo, sino que consulta la base local, y un trabajo nocturno la mantiene al 
 verificados. En ese momento nos hemos independizado de CIRCL y NVD en tiempo de escaneo, que era
 justamente el objetivo declarado.
 
-### Fase F — El fingerprinting propio · pista de bajo nivel
+### Fase F — El fingerprinting propio · pista de bajo nivel · ◐ parcial
 
 **El objetivo** es identificar el servicio, su producto y su versión con criterio propio, sin depender
 de `nmap -sV`, y con una confianza que podamos medir. Es, por así decirlo, el ojo del motor.
@@ -504,7 +522,7 @@ de referencia en el laboratorio, y solo confiamos en nuestra firma allí donde c
 el de Nmap alcanza el 0,90 por familia de servicio. A partir de ahí, `nmap -sV` pasa a ser oráculo y
 respaldo, no motor.
 
-### Fase T — El transporte propio · pista de bajo nivel
+### Fase T — El transporte propio · pista de bajo nivel · ◐ parcial
 
 **El objetivo** es que Lybra descubra los puertos por su cuenta, con una implementación propia, en
 lugar de recibirlos como entrada. Son, siguiendo la metáfora, las manos del motor. Cuando esta fase esté
@@ -544,7 +562,7 @@ umbral, no se justifica, y por eso queda aparcado hasta tener evidencia de neces
 **Damos la fase por hecha cuando** la concordancia de puertos con Nmap alcanza el 0,95 y hemos probado
 que la degradación a `connect-scan` funciona sin la capability. Nmap queda como respaldo conmutable.
 
-### Fase 5 — Correlación, ciclo de vida y scoring · pista de correlación
+### Fase 5 — Correlación, ciclo de vida y scoring · pista de correlación · ◐ parcial
 
 **El objetivo** de esta fase es dar el salto de "listas de hallazgos por escaneo" a "estado de la
 vulnerabilidad de cada activo a lo largo del tiempo". Es aquí donde el producto se vuelve claramente
@@ -572,7 +590,7 @@ weaponizado y en KEV sobre una IP pública es una prioridad crítica e inmediata
 prueba de concepto conocida en una LAN aislada es una prioridad media que puede incluso ser un falso
 positivo por backport.
 
-### Fase 4 — El escaneo autenticado · pista de correlación · avanzado y opcional
+### Fase 4 — El escaneo autenticado · pista de correlación · avanzado y opcional · ○ planificada
 
 **El objetivo** es lo que OpenVAS llama *authenticated scan*: entrar en el host por SSH o WinRM para
 comprobar las versiones reales de los paquetes del sistema operativo, en lugar de fiarnos del banner.
@@ -586,7 +604,7 @@ como una familia de plugins Python de la Fase R, checks "locales" en vez de "rem
 nicho —muchos productos comerciales lo cobran aparte— así que conviene dejarlo para cuando el motor
 remoto esté maduro.
 
-### Análisis web activo (DAST-lite) · pista de bajo nivel · opcional
+### Análisis web activo (DAST-lite) · pista de bajo nivel · opcional · ○ planificada
 
 **El objetivo**, solo si el uso real es sobre todo web, es una comprobación activa ligera de la
 aplicación. Hay que ser claros con las expectativas: esto no pretende ser Burp ni ZAP, es un análisis
@@ -600,7 +618,7 @@ con un gate safe/aggressive fuerte, sin payloads destructivos, con límite de ta
 el registro de objetivos autorizados. El techo consciente es que al principio no habrá motor de
 navegador headless ni soporte de autenticación de aplicación compleja.
 
-### Fase 6 — La orquestación: el motor como pipeline por defecto · el punto de convergencia
+### Fase 6 — La orquestación: el motor como pipeline por defecto · el punto de convergencia · ◐ parcial
 
 **El objetivo** final es unir todas las piezas en un único flujo donde el motor propio es el
 protagonista. La forma exacta del pipeline depende de en qué fase nos encontremos.
@@ -632,6 +650,330 @@ Lybra Scan (Fase T+: escáner completo)
 El paso de "análisis profundo" es opcional en ambos casos: si el usuario lo solicita, se lanzan las
 herramientas externas como una segunda opinión que se fusiona en los mismos `Finding`. Así es como
 Nmap, Nikto y OpenVAS terminan siendo complementos de nuestro motor, y no al revés.
+
+---
+
+### Etapa 2 — Más allá del host único: nuevas capacidades del motor
+
+La Etapa 1 hace de Lybra un escáner propio y completo de un host. La Etapa 2 responde a una pregunta
+distinta: **¿qué sabe hacer Lybra que un escáner tradicional no hace, o no hace bien, una vez
+terminado el barrido de un solo objetivo?** Cada fase de esta etapa se construye sobre el código que
+ya existe en `themis/lybra/` y en sus managers, respetando las convenciones del proyecto
+(`UnitOfWork` + repositorios, managers en `themis/managers/`, endpoints en `endpoints.py` con
+`@require_oauth_token` y `@require_attributes`, tareas en RQ con `category` y `external_id`,
+configuración en `SecOpsConfig.json` bajo `themis.lybra.*`). La independencia de terceros sigue
+siendo el principio rector: estas capacidades se apoyan en las primitivas propias de Lybra
+(transporte, fingerprint, runtime de checks, KB) y, cuando consultan una fuente externa, la
+consultan para **enriquecer**, nunca para depender de ella en tiempo de ejecución.
+
+Los estados de esta etapa son todos **○ planificada**; se enumeran en orden de dependencia, no de
+prioridad. La prioridad la marca la superficie real de objetivos (§10 y §8 siguen vigentes).
+
+### Fase P — Inteligencia pasiva y enriquecimiento OSINT · pista de bajo nivel · ○ planificada
+
+**El objetivo** es que Lybra *sepa cosas* sobre el objetivo sin tocarlo. Hoy todo el motor es
+activo: descubre, fingerprintea y comprueba contra el host. La Fase P añade una pista **pasiva** que
+enriquece cada `Finding` y cada `Service` con señales que no requieren enviar un solo paquete al
+objetivo, reduciendo el riesgo legal (§6) y aportando contexto que el escaneo activo no ve.
+
+**Qué ya existe y qué falta.** La KB local (Fase 2, `kb.py`) ya es pasiva respecto al objetivo, pero
+solo refleja *vulnerabilidades* (NVD/KEV/EPSS), no *inteligencia del propio activo*. Falta un canal
+OSINT de activos. Las fuentes candidatas son todas públicas: **Certificate Transparency** logs
+(`crt.sh` / Google CT) para descubrir subdominios y historial de certificados; **Shodan / Censys**
+para la huella histórica del host (qué puertos tuvo abiertos hace meses, qué banners sirvió); y
+**SecurityTrails / DNSDB** para el historial de resoluciones DNS. Ninguna exige licencia para uso
+ligero, y todas exponen una API HTTP que se consume con el mismo `urllib` + backoff que ya usa
+`kb._http_get`.
+
+**Qué construir.** Un nuevo tipo de check, `type: passive`, en el runtime de la Fase R
+(`checks.py`), que en lugar de un `fetch` HTTP contra el objetivo llama a un *OSINT fetcher* inyectado
+(patrón idéntico al `cve_lookup` inyectable de `LybraEngine`). Los resultados se materializan de dos
+formas: (1) nuevos `Finding` de categoría `passive_exposure` (p. ej. "subdominio `vpn.example.com`
+no visto en escaneos activos previos" o "certificado emitido hace 2 días por una CA nueva"), y (2)
+enriquecimiento de `Service` existentes (un `Service` de la Fase T puede recibir un `cpe` sugerido
+por Shodan cuando el fingerprint propio no lo resolvió). La persistencia sigue el patrón de siempre:
+el manager genera los dicts en memoria y `ScanRepository.persist_findings` los escribe dentro de un
+`UnitOfWork`. Una tarea de RQ con `category="themis.osint"` y `external_id=f"osint:{host_id}"`
+refresca el cache OSINT de un activo periódicamente, calcada del `KbSyncManager`. Config:
+`themis.lybra.passive.osint` (toggle), `themis.lybra.passive.sources` (lista de URLs/keys) en
+`SecOpsConfig.json`. El gate de autorización (§6) **no** aplica a los checks pasivos, porque no tocan
+el objetivo —ese es precisamente su valor—; sí aplica el respeto a los términos de servicio de cada
+fuente y la caché con TTL para no exceder rate limits.
+
+**Damos la fase por hecha cuando** un escaneo Lybra, sin enviar tráfico al objetivo, produce
+hallazgos de exposición pasiva (subdominios nuevos, cambio de certificado, historial de puertos) y
+el `Service` de un puerto descubierto por la Fase T puede recibir un CPE sugerido por OSINT cuando el
+fingerprint propio no lo resolvió.
+
+### Fase E — Captura de evidencia y traza forense · pista de correlación · ○ planificada
+
+**El objetivo** es que cada `Finding` confirmado lleve detrás la **prueba cruda** de que existía, no
+solo la afirmación. Hoy el par `feed_version` + `check_id` da reproducibilidad lógica ("este
+informe usó la KB del 4 de julio"), pero no guarda *lo que el objetivo respondió*. Para un motor que
+aspira a sintetizar y priorizar, y cuyos hallazgos pueden terminar en una auditoría o en una
+decisión de aceptar un riesgo, la evidencia es lo que distingue "te lo creo" de "lo puedo demostrar".
+
+**Qué ya existe y qué falta.** El `HttpProbe` y el `SshProbe` ya construyen `Response`/bytes
+representativos; hoy se descartan en cuanto el matcher decide. El `CheckRuntime._finding` emite un
+dict sin la respuesta. Falta un *evidence store* que retenga la prueba, la asocie al `Finding` y la
+firme.
+
+**Qué construir.** Un modelo `FindingEvidence` (en `themis/model.py`) con `finding_id` FK, `kind`
+(`http_response` | `ssh_banner` | `tls_cert` | `probe_output`), `payload` (JSONB: status, headers,
+body truncado, bytes del banner, cert PEM), `captured_at` y `content_hash` (SHA-256 del payload para
+detectar manipulación). Un repositorio `FindingEvidenceRepository` (en `repositories.py`) sobre
+`BaseRepository`, escrito dentro del mismo `UnitOfWork` que el `Finding` al que pertenece. El
+`CheckRuntime` y los probes reciben un *evidence recorder* inyectable (un callable
+`(kind, payload) -> None`) que el manager conecta a una lista en memoria, volcada al repo en la fase
+de persistencia de `_run_lybra`. Para no inflar la base de datos, el body HTTP se trunca a un límite
+configurable (`themis.lybra.evidence.maxBodyBytes`, por defecto 8 KiB) y solo se guarda evidencia de
+hallazgos `confirmed=true` o de categoría `exposed_path`/`tls`. Un endpoint `GET
+/themis/findings/<id>/evidence` (autenticado, `THEMIS_READ`) devuelve la evidencia de un hallazgo
+del usuario. La firma del feed (Fase 2) se extiende a la evidencia: un hash agregado por escaneo se
+registra en `LybraScan` para que cualquier alteración posterior sea detectable.
+
+**Damos la fase por hecha cuando** un hallazgo confirmado expone su request/response (o banner/cert)
+a través del endpoint de evidencia, y un hash por escaneo permite verificar que la evidencia no ha
+sido modificada desde el escaneo.
+
+### Fase C — Correlación cross-host y riesgo de movimiento lateral · pista de correlación · ○ planificada
+
+**El objetivo** es dejar de razonar solo por host y empezar a razonar por **red**. La Fase 5
+correlaciona hallazgos en el tiempo de un mismo activo; la Fase C los correlaciona **en el espacio**,
+entre activos de la misma red, para detectar vectores de movimiento lateral y propagación. Un
+EternalBlue en un host aislado es grave; ese mismo EternalBlue en un host con SMB expuesto a otro
+host que corre un servicio crítico es *crítico y urgente*, porque el riesgo es de red, no de host.
+
+**Qué ya existe y qué falta.** `correlation.py` ya es puro sobre dicts y ya sabe fusionar por
+`dedup_key`, pero opera dentro de un solo `scan_id`. El `classify_exposure` distingue LAN/pública
+para *capar* la prioridad, no para *subirla* por propagación. Falta un modelo de agrupación de
+activos y un scorer de red.
+
+**Qué construir.** Un modelo `AssetGroup` (en `model.py`) que agrupa `Host` por red lógica
+(una `network` CIDR o una etiqueta declarada por el usuario en `SecOpsConfig.json` bajo
+`themis.lybra.assetGroups`), con su repositorio `AssetGroupRepository`. Un nuevo módulo
+`lybra/lateral.py` (puro, como `correlation.py`) que, dados los `Finding` de todos los hosts de un
+grupo, identifica patrones de propagación: (a) un servicio vulnerable + expuesto a la red
+(`SMB/RDP/WinRM` en un host y otro host del grupo alcanzable), (b) credenciales reutilizadas
+(cruzando con la Fase D), (c) un host pivot (multi-homed, detectable por traceroute —ya existe
+`TracerouteManager`). El resultado es un `Finding` especial con `category="lateral_risk"`,
+`host_id=NULL` y `port=NULL` (es un hallazgo de *red*, no de host), cuyo `score_finding` combina el
+CVSS del hallazgo base con un factor de propagación. Un endpoint `GET /themis/network-risk` devuelve
+el mapa de riesgo de los grupos del usuario. La correlación se ejecuta como un paso final de
+`format_scan` cuando el escaneo pertenece a un grupo, reutilizando `merge_findings` para no
+duplicar.
+
+**Damos la fase por hecha cuando** un escaneo sobre un host de un grupo produce al menos un
+hallazgo `lateral_risk` que referencia a los hallazgos de los hosts que lo alimentan, y el endpoint
+de red muestra el mapa de propagación.
+
+### Fase O — Verificación local de backports con feeds de distribución · pista de correlación · ○ planificada
+
+**El objetivo** es reducir los falsos positivos de la detección por versión **sin necesidad de
+entrar por SSH** (Fase 4). El problema de los backports —una distro parchea sin subir el número de
+versión visible— es la causa nº 1 de falsos positivos hoy; el `qod=70` y `confirmed=false` de la
+Fase 1 son un parche paliativo. La Fase O lo ataca de raíz consultando la *verdad del proveedor*:
+los avisos de seguridad de Debian (DSA/USN), Red Hat (RHSA) y SUSE, que dicen exactamente qué
+paquete y versión *ya está corregido* en cada distribución.
+
+**Qué ya existe y qué falta.** La Fase 2 ya mantiene un espejo de NVD/KEV/EPSS en `kb.py`, pero no
+de OVAL ni de advisories de distribución. La Fase 4 resuelve backports leyendo `dpkg -l` por SSH;
+la Fase O lo resuelve **sin tocar el host**, cruzando el CPE/version contra el feed del proveedor.
+
+**Qué construir.** Dos modelos nuevos en `model.py`: `DistroAdvisory` (un aviso: `advisory_id`
+como `DSA-1234`, `vendor`, `product`, `fixed_version`, `published`) y `DistroPkgStatus` (un estado
+de paquete: `vendor`, `release` —p. ej. `debian-12`—, `package`, `version_installed`, `fixed_in`,
+`status` —`fixed`|`vulnerable`|`unknown`—). Un ingestor `kb.py::ingest_oval` que parsea los feeds
+OVAL/CSAF de Debian/Red Hat (formato XML/JSON, mismo patrón que `ingest_nvd_cve`), y un
+`KbSyncManager.sync_oval` con su fuente en `themis.kb.sources.oval`. La consulta clave: dado un
+`Finding` de categoría `outdated_software` con un CPE resuelto y una versión, si el feed del
+proveedor marca esa `product@version` como `fixed` en la distribución inferida (a partir del
+fingerprint de OS de la Fase F, o de un campo explícito del `Service`), el hallazgo se *desciende* a
+`state="fixed"` y `confirmed=false` **sin re-escanear**, registrando `check_id="lybra:oval-backport"`
+y un `qod` adecuado. Si lo marca como `vulnerable`, el hallazgo *asciende* a `confirmed=true` y
+`qod=90`, porque ahora hay dos fuentes independientes (NVD + proveedor) que coinciden —exactamente el
+mismo mecanismo de fusión multi-fuente de `merge_findings`. El manager aplica este paso en
+`_run_lybra` tras `engine.analyze`, antes de persistir.
+
+**Damos la fase por hecha cuando** un hallazgo por versión sobre un paquete parcheado por backport
+se marca automáticamente como `fixed` sin escaneo autenticado, y la tasa de falsos positivos del
+banco de pruebas (§7) baja al menos un 40 % en imágenes Debian/RHEL.
+
+### Fase A — Detección de exposición de APIs · pista de bajo nivel · ○ planificada
+
+**El objetivo** es cubrir una superficie que los checks HTTP genéricos de la Fase R no alcanzan bien:
+las **APIs**. Una API GraphQL con introspección habilitada, un endpoint REST sin autenticación, una
+spec OpenAPI/Swagger expuesta, o un masivo *mass assignment* no son "paths peligrosos" genéricos;
+tienen estructura propia y patrones de abuso propios. La Fase A introduce una familia de checks
+específica que entiende de APIs, no solo de URLs.
+
+**Qué ya existe y qué falta.** El `CheckRuntime` (`checks.py`) ya es declarativo y ya sabe hacer
+peticiones HTTP con matchers; el feed ya incluye checks de `exposed_path`. Pero no hay checks que
+envíen *bodies* JSON, que interpreten un esquema GraphQL, ni que detecten mass assignment. La Fase R
+menciona los `payloads` (batteringram/pitchfork/clusterbomb) como base del fuzzing, pero están
+pendientes.
+
+**Qué construir.** Un subtipo `type: http` con `subtype: api` (o un `type: api` nuevo, si la
+complejidad lo pide) que extiende el `Request` con `body` (JSON), `headers` custom y un concepto de
+*variable de sesión* para encadenar login → endpoint. Familias iniciales, por relación valor/coste:
+(1) **GraphQL**: introspection query (`{__schema{types{name}}}`) y field suggestion; (2) **REST**:
+detección de endpoints sin auth (un 200 a `/api/users` sin `Authorization`), spec OpenAPI expuesta
+(`/openapi.json`, `/swagger.json`, `/api-docs`) que filtra la superficie completa; (3) **mass
+assignment**: envío de campos privilegiados (`role`, `isAdmin`) en un PUT/POST y match del refresco
+del recurso. Cada familia es un conjunto de checks en `checks_feed.json` con `category="api_exposure"`.
+El gate safe/aggressive de la Fase R se respeta: la introspección de GraphQL es `safe` (lectura), el
+mass assignment es `aggressive` (escribe). Un endpoint `GET /themis/scan/<id>/api-surface` resume la
+superficie API descubierta (endpoints, métodos, auth) como subproducto de los checks.
+
+**Damos la fase por hecha cuando** un escaneo sobre una app con GraphQL detecta la introspección
+habilitada y sobre una API REST detecta un endpoint sin auth y la spec expuesta, todo bajo el mismo
+`CheckRuntime` y con `qod=99` en lo confirmado.
+
+### Fase B — Detección de exposición cloud y SaaS · pista de bajo nivel · ○ planificada
+
+**El objetivo** es llevar la higiene de Lybra a la **superficie cloud**, que no vive en un puerto
+TCP sino en un proveedor. Un bucket S3 público, un contenedor de Azure Blob abierto, un proyecto
+Firebase con reglas permisivas, o un dominio con un registro CNAME a un servicio inexistente
+(*subdomain takeover*) son exposiciones de altísimo valor que Nmap, Nikto y OpenVAS no detectan
+bien —no son su terreno—. La Fase B las hace propias de Lybra, manteniendo el espíritu de
+independencia: los checks usan `urllib` y la API pública del proveedor, no una herramienta externa.
+
+**Qué ya existe y qué falta.** Nada de esto existe. El transporte (`transport.py`) descubre puertos;
+no hay concepto de "recurso cloud". Los checks HTTP pueden pedir una URL, pero no saben enumerar un
+bucket ni interpretar una respuesta XML de S3.
+
+**Qué construir.** Un tipo `type: cloud` en el runtime, con subtipos por proveedor (`s3`, `azure_blob`,
+`gcs`, `firebase`, `takeover`). Un `CloudProbe` (en `lybra/cloud.py`, paralelo a `HttpProbe`) que
+habla los protocolos de cada proveedor: listar objetos de un bucket S3 anónimo (`GET
+?list-type=2`), leer un contenedor Blob público, resolver un CNAME y comprobar si el servicio
+destino responde con la firma de un takeover (Heroku/Vercel/GitHub Pages). Los *targets* cloud no
+vienen de un escaneo de puertos: el usuario los declara (un nombre de bucket, un dominio) o se
+descubren por OSINT (Fase P: registros DNS, CT logs). El resultado son `Finding` con
+`category="cloud_exposure"`. Un `LybraScan` puede ejecutarse en modo `cloud` (sin `target` de host,
+con una lista de recursos) además de en los modos actuales; el endpoint `POST /themis/lybra` acepta
+un campo `cloudResources`. Config: `themis.lybra.cloud.providers` (lista de proveedores habilitados).
+
+**Damos la fase por hecha cuando** un escaneo Lybra en modo cloud detecta un bucket S3 público con
+lectura anónima y un subdominio vulnerable a takeover, sin Nmap de por medio.
+
+### Fase D — Motor de credenciales débiles y por defecto · pista de bajo nivel · ○ planificada
+
+**El objetivo** es elevar la "credenciales por defecto" —que la Fase R cita como una familia inicial—
+a un **subsystem propio** con criterio de seguridad. Probar `admin/admin` no es un check HTTP más: es
+una operación que *escribe* en el objetivo (intenta loguearse), que puede bloquear cuentas, que
+genera ruido en los logs del SIEM del objetivo y que exige un control de tasa y un presupuesto muy
+distintos a un GET de `.git/config`. Por eso merece su propia fase, no una entrada más del feed.
+
+**Qué ya existe y qué falta.** El `HostRateLimiter` ya existe y el gate safe/aggressive ya filtra, pero
+no hay nada que pruebe credenciales. La Fase R no contempla el riesgo de lockout ni un almacén de
+pares credenciales.
+
+**Qué construir.** Un `CredentialRuntime` (en `lybra/credentials.py`) que recibe un `Service` y un
+*credential pair set* versionado (`credentials_feed.json`, pares curados por servicio: Tomcat
+`tomcat/tomcat`, Jenkins admin, routers por defecto, FTP anónimo, paneles web comunes). Reglas de
+seguridad obligatorias: (1) solo corre en modo `aggressive` y contra objetivos del registro de
+autorización (§6); (2) máximo *N* intentos por servicio y por escaneo (`themis.lybra.credentials.maxAttempts`,
+por defecto 3) para no provocar lockout; (3) stop inmediato al primer éxito (no sigue probando);
+(4) reutiliza el `HostRateLimiter` con un intervalo mayor. Un éxito produce un `Finding` con
+`category="default_credentials"`, `confirmed=true`, `qod=99`, y dispara captura de evidencia (Fase E)
+que incluye *qué par* funcionó (sin persistir la contraseña en claro: se guarda el par como un hash
+con referencial, nunca el plaintext en el `payload`). Reutiliza el transporte de la Fase T para
+llegar a servicios no-HTTP (FTP, SSH, Telnet, bases de datos) con sondas propias por protocolo,
+manteniendo la independencia. Un manager `CredentialScanManager` o, más simple, un método en
+`LybraEngineManager._run_credential_checks` invocado tras los checks activos.
+
+**Damos la fase por hecha cuando** un escaneo agresivo autorizado detecta credenciales por defecto
+en un panel Tomcat/Jenkins de laboratorio, respeta el límite de intentos, y el plaintext de la
+credencial nunca aparece en la base de datos ni en la evidencia.
+
+### Fase G — Respuesta accionable: píldoras de Aegis y planes de remediación · pista de correlación · ○ planificada
+
+**El objetivo** es cerrar el bucle entre **detectar** y **actuar**. Hoy un `Finding` dice *qué* pasa;
+la Fase G hace que Lybra diga *qué hacer*, en dos vertientes complementarias. La primera es de
+**concienciación**: cuando un hallazgo es crítico (KEV + expuesto público, o `qod=99` confirmado),
+Lybra genera o recupera una *píldora* de Aegis que explica la vulnerabilidad en lenguaje humano y la
+envía al responsable del activo. La segunda es de **remediación técnica**: por cada hallazgo, Lybra
+produce una instrucción de arreglo concreta y ejecutable, no un "actualice el software" genérico.
+
+**Qué ya existe y qué falta.** `AegisManager` ya genera píldoras (`AegisDocument` + `AegisQuizQuestion`)
+y `CampaignManager` ya las envía por email vía `herald`. El `scribe` ya enriquece informes con IA.
+Pero nada conecta un `Finding` crítico con una píldora, ni produce un plan de remediación concreto.
+Hoy la detección y la formación viven en módulos separados que no se hablan.
+
+**Qué construir.** Dos piezas. (1) **Auto-pill**: en `LybraEngineManager._run_lybra`, tras la
+correlación, los hallazgos que superen un umbral (`in_kev=true` o `priority=CRITICAL` en un host
+`public`) disparan `AegisManager.run_scan` con un prompt derivado del `Finding` (CPE, CVE, categoría)
+si no existe ya una píldora para ese `cve_ids`/`check_id`; el `AegisDocument` resultante se referencia
+desde el `Finding` mediante una nueva columna `aegis_doc_id` (FK nullable) y, opcionalmente, se envía
+al responsable vía `CampaignManager` si el host tiene un `DistributionList` asociado. (2) **Remediation
+plan**: una nueva tabla `FindingRemediation` (`finding_id` FK, `command` —p. ej.
+`apt-get install -y openssh-server=1:9.2p1-2+deb12u1`—, `advisory_url`, `effort` —`low|medium|high`—,
+`aegis_doc_id`) generada por una llamada al `scribe` con un prompt estructurado por categoría, o
+derivada directamente del feed OVAL de la Fase O (que ya trae la `fixed_version` y el paquete). Un
+endpoint `GET /themis/findings/<id>/remediation` expone el plan. Todo va por `UnitOfWork` y
+repositorios; nada se hace fuera del patrón.
+
+**Damos la fase por hecha cuando** un hallazgo crítico KEV en un host público genera automáticamente
+una píldora de Aegis referenciada y un plan de remediación con el comando exacto de actualización,
+visibles ambos desde el endpoint del hallazgo.
+
+### Fase S — Re-escaneo inteligente y planificación por costo-beneficio · pista de correlación · ○ planificada
+
+**El objetivo** es que Lybra decida *qué no volver a comprobar*. Hoy un escaneo Lybra corre todos
+los checks aplicables contra todos los servicios, siempre. Para un activo que se escanea cada noche,
+eso es despilfarro: si la versión de OpenSSH no ha cambiado en tres escaneos, los confirmadores
+caros de esa CVE no aportan nada nuevo; si un path `.git/config` lleva diez escaneos devolviendo 404,
+volver a pedirlo es ruido. La Fase S introduce un **planificador** que usa el historial (Fase 5) para
+saltar checks redundantes, reduciendo tiempo de escaneo y carga sobre el objetivo —precisamente lo
+que el §6 pide respecto a no saturar al target.
+
+**Qué ya existe y qué falta.** El `apply_lifecycle` ya compara con el escaneo anterior y etiqueta
+estados, pero *después* de correr los checks. La Fase S mueve esa comparación *antes*: decide qué
+correr antes de gastar red. Falta un modelo de "estabilidad de servicio" y un presupuesto de checks.
+
+**Qué construir.** Un `CheckPlanner` (en `lybra/planner.py`, puro) que, dados los `Service` actuales
+y el mapa `dedup_key -> {state, last_seen_at, qod}` del escaneo anterior (ya construido por
+`_previous_findings_map`), produce un subconjunto de checks a ejecutar. Reglas: (a) un check
+`version` cuyo CPE+versión coincide con el escaneo anterior y cuyo hallazgo estaba `open` **no se
+re-corre** (se reemite el hallazgo anterior con `last_seen_at` actualizado y `state` heredado); (b)
+un check `http` confirmado (`qod=99`) sobre un path que sigue devolviendo 200 y cuyo servicio no ha
+cambiado de versión se re-corre a un ritmo reducido (p. ej. 1 de cada 4 escaneos); (c) los checks
+`aggressive` (Fase D, Fase A) solo se re-corren si la superficie cambió. Un presupuesto
+(`themis.lybra.planner.budget`, máximo de checks activos por escaneo) acota el trabajo. El planner se
+invoca en `_run_lybra` antes de `_run_active_checks` y filtra la lista de checks cargada por
+`load_checks`. Métrica de éxito: el §7 añade "relación de checks ejecutados vs. omitidos por
+estabilidad" y "tiempo de escaneo medio por host" al banco de pruebas.
+
+**Damos la fase por hecha cuando** un re-escaneo de un host sin cambios omite al menos el 50 % de los
+checks activos sin perder hallazgos, y el tiempo de escaneo se reduce proporcionalmente.
+
+### Fase X — Exportación a estándares (SARIF, STIX, OCSF) · pista de correlación · ○ planificada
+
+**El objetivo** es que los `Finding` de Lybra salgan del módulo Themis y entren en los pipelines y
+plataformas donde ya vive el resto del SOC, sin traducción manual. Hoy un hallazgo solo se consume
+por la web de Ellysia o por el PDF de `ThemisReportManager`. La Fase X lo exporta a tres formatos
+estándar: **SARIF** (para CI/CD y IDEs, el estándar de OASIS), **STIX 2.1** (para intercambio de
+threat intel entre plataformas SOC/TIP), y **OCSF** (el esquema unificado de AWS/IBM/Splunk que se
+está consolidando como lingua franca del SIEM).
+
+**Qué ya existe y qué falta.** El `format_scan` ya serializa findings a un dict camelCase propio. No
+hay ningún exportador estándar. El mapeo Finding→SARIF/STIX/OCSF es directo (cada campo del modelo
+tiene equivalente), pero hay que escribirlo.
+
+**Qué construir.** Un módulo `lybra/exporters.py` con tres funciones puras (`to_sarif(findings)`,
+`to_stix(findings)`, `to_ocsf(findings)`) que toman la lista de dicts de `format_scan` y devuelven el
+JSON del estándar —puras, testeables sin DB, como `correlation.py`. Tres endpoints en `endpoints.py`:
+`GET /themis/scan/<id>/export?format=sarif|stix|ocsf` (autenticados, `THEMIS_READ`), que reutilizan
+`format_scan` y el exportador, devolviendo el JSON con el `Content-Type` adecuado
+(`application/sarif+json`, etc.). SARIF encaja sobre todo en un futuro CI-gate (un Lybra scan en
+pipeline que rompe el build si hay `CRITICAL`); STIX permite publicar hallazgos a un TIP; OCSF los
+ingiere en un SIEM. Ninguno requiere cambiar el modelo: el `Finding` ya tiene `cve_ids`, `cvss`,
+`epss`, `in_kev`, `qod`, `confirmed`, `dedup_key`, todos mapeables. Un campo opcional
+`Finding.external_refs` (JSONB) podría añadir URLs de advisory/Metasploit para enriquecer STIX.
+
+**Damos la fase por hecha cuando** un escaneo exportado a SARIF pasa el validador oficial de
+SARIF (`sarif-tools`), un STIX se carga en MISP/OpenCTI sin errores, y un OCSF en un SIEM de
+laboratorio genera una alerta correlacionada.
 
 ---
 
@@ -759,6 +1101,21 @@ OpenVAS en un proceso incremental, no en un big-bang.
 | 4    | Correlación | L2   | El escaneo autenticado de paquetes del SO, vía el vault de Acheron   | Cubre los backports (nicho)     |
 | DAST | Bajo nivel  | L2   | El análisis web activo y acotado (crawl y sondas seguras)            | ZAP/Nikto para webapp (opcional) |
 | 6    | —           | L4   | El pipeline orquestado; Nmap/Nikto/OpenVAS como corroboradores       | **Objetivo cumplido**           |
+
+**Etapa 2 — más allá del host único**
+
+| Fase | Pista       | Capa | Qué entrega                                                          | De qué nos independiza          |
+|------|-------------|------|----------------------------------------------------------------------|----------------------------------|
+| P    | Bajo nivel  | L2+  | Checks pasivos OSINT (CT, Shodan, DNS history) + enriquecimiento    | Fuentes de intel del activo (sin tocarlo) |
+| E    | Correlación | L3   | Evidencia cruda firmada por hallazgo (`FindingEvidence`) + endpoint  | El "te lo creo" sin "lo demuestro" |
+| C    | Correlación | L3   | Correlación cross-host, riesgo de movimiento lateral (`AssetGroup`)  | El escaneo por host aislado      |
+| O    | Correlación | L3   | Verificación local de backports con feeds OVAL/CSAF de distro         | El SSH de la Fase 4 para backports |
+| A    | Bajo nivel  | L2   | Checks de exposición de APIs (GraphQL/REST/OpenAPI/mass assignment)   | DAST genérico para APIs          |
+| B    | Bajo nivel  | L2   | Checks de exposición cloud/SaaS (S3/Blob/takeover)                    | Escáneres de puertos para cloud  |
+| D    | Bajo nivel  | L2   | Motor de credenciales débiles con lockout-safe + evidencia sin plaintext | OpenVAS cred checks             |
+| G    | Correlación | L3   | Auto-píldoras Aegis + planes de remediación con comando exacto        | Detección sin acción formativa  |
+| S    | Correlación | L4   | Planificador de re-escaneo por estabilidad (omite checks redundantes) | Re-escaneo ciego siempre igual  |
+| X    | Correlación | —    | Exportación a SARIF / STIX / OCSF + endpoints                         | El silo de Ellysia frente al SOC |
 
 Este es un documento vivo. Ajusta el orden de las fases a tu superficie real de objetivos: si tu uso es
 sobre todo web, prioriza la Fase R y el análisis activo; si es sobre todo inventario de red y
@@ -917,3 +1274,34 @@ expuestos a Internet) antes de expandirnos.
 
 **Controls, Not Counts** — La filosofía, que ya aplicamos en `analyzers.py`, de valorar la comprobación
 confirmada sobre el mero recuento de hallazgos potenciales.
+
+---
+
+**Términos añadidos en Etapa 2**
+
+**OSINT pasivo** — Inteligencia sobre un activo recogida de fuentes públicas (Certificate
+Transparency, Shodan, Censys, DNS history) sin enviar tráfico al objetivo. La Fase P.
+
+**Evidencia forense** — La respuesta cruda (HTTP, banner, certificado) que demuestra un hallazgo,
+guardada firmada y asociada al `Finding`. La Fase E.
+
+**Movimiento lateral** — El riesgo de que una vulnerabilidad en un host permita propagarse a otros
+de la misma red. La Fase C lo correlaciona cross-host.
+
+**Backport** — Ver entrada anterior. La Fase O lo resuelve *sin* SSH, cruzando la versión contra los
+avisos (OVAL/CSAF) de la distribución.
+
+**OVAL / CSAF** — Formatos en que Debian, Red Hat y SUSE publican qué paquete y versión está
+realmente corregido en cada release. La fuente de verdad de la Fase O.
+
+**Mass assignment** — Vulnerabilidad de API donde un endpoint acepta campos privilegiados (`role`,
+`isAdmin`) que el cliente no debería poder fijar. Detectado por la Fase A.
+
+**Subdomain takeover** — Exposición cloud (Fase B) en la que un dominio apunta por CNAME a un
+servicio dado de baja, permitting a un atacante reclamarlo.
+
+**SARIF / STIX / OCSF** — Estándares de exportación de hallazgos: SARIF para CI/CD (OASIS), STIX
+para threat intel, OCSF como esquema unificado de SIEM. La Fase X.
+
+**Planificador de re-escaneo** — El componente de la Fase S que omite checks redundantes cuando un
+servicio no ha cambiado, ahorrando tiempo y carga sobre el objetivo.
