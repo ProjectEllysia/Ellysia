@@ -828,6 +828,45 @@ export const useThemisStore = defineStore('themis', () => {
     moveScan.folderId = null
   }
 
+  /**
+   * Documentos PDF por escaneo Lybra, indexados por scanId. A diferencia del
+   * modal de vista previa (un solo escaneo "seleccionado" a la vez), varias
+   * tarjetas de Lybra pueden estar expandidas simultáneamente, así que aquí
+   * cada una lleva su propia entrada `{ items, loading }`.
+   */
+  const lybraDocs = reactive({})
+
+  /** Carga (o refresca) los documentos de un escaneo Lybra concreto. */
+  async function loadLybraDocs(scanId) {
+    if (!lybraDocs[scanId]) lybraDocs[scanId] = reactive({ items: [], loading: false })
+    const d = lybraDocs[scanId]
+    d.loading = true
+    try {
+      const res = await apiFetch(`/themis/scan/${scanId}/documents`)
+      if (!res?.ok) { d.items = []; return }
+      const data = await res.json()
+      d.items = data.documents ?? []
+    } catch { d.items = [] }
+    finally { d.loading = false }
+  }
+
+  /** Genera un PDF para un escaneo Lybra y refresca su lista de documentos. */
+  async function generateLybraPdf(scanId, useAi = false) {
+    const ok = await generatePdf(scanId, useAi)
+    if (ok) {
+      await new Promise(r => setTimeout(r, 600))
+      await loadLybraDocs(scanId)
+    }
+    return ok
+  }
+
+  /** Elimina un documento de un escaneo Lybra y refresca su lista. */
+  async function deleteLybraDoc(scanId, docId) {
+    const ok = await deleteDocument(docId)
+    if (ok) await loadLybraDocs(scanId)
+    return ok
+  }
+
   /** Elimina un escaneo Lybra por ID y refresca la lista. */
   async function deleteLybraScan(id) {
     const res = await apiFetch(`/themis/${id}`, { method: 'DELETE' })
@@ -849,6 +888,7 @@ export const useThemisStore = defineStore('themis', () => {
     loadStats, loadScans, switchTab, refreshCurrent, goToPage,
     launchNmap, launchNikto, launchOpenvas,
     launchLybra, loadLybraScans, loadSourceNmapScans, deleteLybraScan,
+    lybraDocs, loadLybraDocs, generateLybraPdf, deleteLybraDoc,
     deleteScan, cancelScan,
     loadScheduledScans, createScheduledScan, deactivateScheduledScan, deleteScheduledScan, toggleScheduledForm,
     openPreview, closePreview, refreshPreviewDocs, loadPreviewTraceroute,

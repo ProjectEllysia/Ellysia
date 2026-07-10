@@ -32,8 +32,13 @@
         <LybraResults
           :scans="store.scans.lybra.results"
           :loading="store.scans.lybra.loading"
+          :docs-by-scan="store.lybraDocs"
           @refresh="store.loadLybraScans()"
-          @delete="handleDeleteLybra" />
+          @delete="handleDeleteLybra"
+          @load-docs="store.loadLybraDocs"
+          @generate-pdf="handleLybraGeneratePdf"
+          @download-doc="store.downloadDocument"
+          @delete-doc="handleLybraDeleteDoc" />
       </div>
 
       <!-- ═══════════ MUNDO: ESCÁNERES EXTERNOS ═══════════ -->
@@ -189,6 +194,8 @@ watch(() => store.world, (w) => {
 
 async function handleLaunchLybra(payload) { await store.launchLybra(payload) }
 async function handleDeleteLybra(id) { if (confirm('¿Eliminar este escaneo Lybra y sus hallazgos?')) await store.deleteLybraScan(id) }
+async function handleLybraGeneratePdf(scanId, useAi) { await store.generateLybraPdf(scanId, useAi) }
+async function handleLybraDeleteDoc(scanId, docId) { await store.deleteLybraDoc(scanId, docId) }
 async function handleAddAuthorizedTarget({ target, label }) { await store.addAuthorizedTarget(target, label) }
 
 watch(activeBatchAction, (val) => {

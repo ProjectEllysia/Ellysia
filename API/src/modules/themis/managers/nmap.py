@@ -29,6 +29,7 @@ class NmapScanManager(ScanManager):
     SCAN_TYPE = ScanType.NMAP
     _MODEL = NmapScan
     _strategy_class = NmapPrintingStrategy
+    _RICH_LOADER = "get_nmap_rich"
 
     """
     Manager for Nmap network security scans.

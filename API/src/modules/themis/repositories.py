@@ -752,6 +752,19 @@ class KbRepository(BaseRepository[CveEntry]):
     def get_epss(self, cve_id: str) -> Optional[EpssScore]:
         return self._session.query(EpssScore).filter(EpssScore.cve_id == cve_id).one_or_none()
 
+    def get_cves_with_matches(self, cve_ids: List[str]) -> List[CveEntry]:
+        """Bulk-fetch CveEntry rows (with their CpeMatch rows eager-loaded) for a
+        list of CVE ids. Used to enrich a report with description/CWE/fixed-version
+        context in one query instead of one per finding."""
+        if not cve_ids:
+            return []
+        return (
+            self._session.query(CveEntry)
+            .filter(CveEntry.cve_id.in_(cve_ids))
+            .options(joinedload(CveEntry.cpe_matches))
+            .all()
+        )
+
     def counts(self) -> dict:
         """Row counts per KB table (for the sync summary / health checks)."""
         return {

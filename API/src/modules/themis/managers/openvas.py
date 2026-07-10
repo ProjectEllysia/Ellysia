@@ -52,6 +52,7 @@ class OpenVASScanManager(ScanManager):
     SCAN_TYPE = ScanType.OPENVAS
     _MODEL = OpenVASScan
     _strategy_class = OpenVASPrintingStrategy
+    _RICH_LOADER = "get_openvas_rich"
 
     def __init__(self) -> None:
         super().__init__()

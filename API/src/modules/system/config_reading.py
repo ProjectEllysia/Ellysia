@@ -512,6 +512,7 @@ def get_prompts_config() -> dict:
         "nmap": themis.get("nmap", {}).get("prompts", {}),
         "nikto": themis.get("nikto", {}).get("prompts", {}),
         "openvas": themis.get("openvas", {}).get("prompts", {}),
+        "lybra": themis.get("lybra", {}).get("prompts", {}),
     }
 
 @_lazy_load
@@ -523,7 +524,11 @@ def get_tool_prompts(tool: str) -> dict:
 def get_tool_color_palette(tool) -> dict:
     themis = _require_configs().get("themis", {})
 
-    tool_key = tool
+    # Accepts a ThemisTool enum member or a plain string; without this, a
+    # dict lookup with an Enum instance against string keys always misses
+    # and silently returns {} (bug: every caller has been getting the
+    # hardcoded per-strategy fallback colors instead of SecOpsConfig's).
+    tool_key = tool.value if hasattr(tool, "value") else tool
     if tool_key not in themis:
         return {}
 

@@ -559,19 +559,28 @@ class ScanManager(TaskTrackingMixin, ABC):
             raise ScanNotFoundError(scan_id)
         return manager_class()
 
+    # Name of the ScanRepository method that eager-loads this manager's scan
+    # type for background-thread use (e.g. "get_nmap_rich"). None means the
+    # plain `get_by_id` row already fetched by `get_scan_rich` is enough —
+    # true for any scan type with no ORM relationships to eager-load, like
+    # LybraScan (see repositories.py). Set by subclasses that need it.
+    _RICH_LOADER: Optional[str] = None
+
     @classmethod
     def get_scan_rich(cls, scan_id: int) -> Scan:
         """Get scan with relationships eagerly loaded for background threads.
 
-        Uses UnitOfWork with eager-loading repository methods so that the
-        returned scan is fully populated before the session closes. Only
-        needed when lazy loading is unavailable (e.g. PDF generation thread).
+        Dispatches to whichever ``ScanRepository`` method the scan type's own
+        manager declares via ``_RICH_LOADER`` (looked up through the same
+        ``_registry`` that ``resolve_manager`` uses) — adding a new scan type
+        never requires touching this method, only setting `_RICH_LOADER` (or
+        leaving it unset) on the new manager class.
 
         Args:
             scan_id: Primary key of the scan.
 
         Returns:
-            Scan instance with all relationships loaded.
+            Scan instance, eager-loaded if its manager declares a loader.
 
         Raises:
             ScanNotFoundError: If scan_id not found or type not registered.
@@ -581,19 +590,16 @@ class ScanManager(TaskTrackingMixin, ABC):
             scan = repo.get_by_id(scan_id)
             if scan is None:
                 raise ScanNotFoundError(scan_id)
-            scan_type_raw = scan.scan_type
 
             try:
-                scan_type = ScanType(scan_type_raw)
+                scan_type = ScanType(scan.scan_type)
             except ValueError:
                 raise ScanNotFoundError(scan_id)
 
-            if scan_type == ScanType.NMAP:
-                scan =  repo.get_nmap_rich(scan_id)
-            elif scan_type == ScanType.NIKTO:
-                scan = repo.get_nikto_rich(scan_id)
-            else:
-                scan = repo.get_openvas_rich(scan_id)
+            manager_class = cls._registry.get(scan_type)
+            loader_name = getattr(manager_class, "_RICH_LOADER", None)
+            if loader_name:
+                scan = getattr(repo, loader_name)(scan_id)
 
         return scan
 

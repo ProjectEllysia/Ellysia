@@ -28,7 +28,7 @@ from ..lybra import (
     classify_exposure,
     score_finding,
 )
-from ..services import _Task
+from ..services import _Task, LybraPrintingStrategy
 from ..exceptions import (
     ScanNotFoundError,
     FindingNotFoundError,
@@ -65,7 +65,7 @@ class LybraEngineManager(ScanManager):
 
     SCAN_TYPE = ScanType.LYBRA
     _MODEL = LybraScan
-    _strategy_class = None  # ponytail: no PDF for Lybra yet; wire a strategy when reports land
+    _strategy_class = LybraPrintingStrategy
 
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         super().__init__(task_queue)

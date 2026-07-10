@@ -33,6 +33,7 @@ class NiktoScanManager(ScanManager):
     SCAN_TYPE = ScanType.NIKTO
     _MODEL = NiktoScan
     _strategy_class = NiktoPrintingStrategy
+    _RICH_LOADER = "get_nikto_rich"
 
     """
     Manager for Nikto web vulnerability scans.
