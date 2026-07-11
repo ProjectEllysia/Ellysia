@@ -27,6 +27,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session, joinedload
 from src.modules.infrastructure import BaseRepository, UnitOfWork
 from src.modules.shared import utcnow_naive
@@ -381,6 +382,34 @@ class ScanRepository(BaseRepository[Scan]):
             scan.finished_at = utcnow_naive() # type: ignore
 
         return self.update(scan)
+
+    def update_status_if(
+        self,
+        scan_id: int,
+        expected: set[ScanStatus],
+        status: ScanStatus,
+    ) -> bool:
+        """Compare-and-swap: transiciona el estado solo si sigue siendo uno de
+        ``expected``. Devuelve True si la transición ocurrió.
+
+        Cierra la carrera entre ``cancel_scan`` (API) y el worker terminando el
+        escaneo (proceso aparte): sin un UPDATE atómico con WHERE, la última
+        escritura gana sin importar cuál refleja la realidad — un escaneo con
+        resultados puede mostrarse como cancelado, o un cancelado puede
+        sobrescribirse silenciosamente a 'finished'.
+        """
+        values: dict = {"status": status.value}
+
+        terminal = {ScanStatus.FINISHED, ScanStatus.FAILED, ScanStatus.CANCELLED}
+        if status in terminal:
+            values["finished_at"] = utcnow_naive()
+
+        result = self._session.execute(
+            sa_update(Scan)
+            .where(Scan.id == scan_id, Scan.status.in_([s.value for s in expected]))
+            .values(**values)
+        )
+        return result.rowcount > 0
 
     def get_or_create_host(
         self,

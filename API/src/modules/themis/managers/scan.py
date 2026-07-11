@@ -9,7 +9,6 @@ import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import read_repo
-from src.modules.shared import utcnow_naive
 from ..services.csv_logger import ScanLoggerFactory
 from ..repositories import (
     ScanRepository,
@@ -365,10 +364,20 @@ class ScanManager(TaskTrackingMixin, ABC):
                 return False
 
             with UnitOfWork() as uow:
-                scan_repo = ScanRepository(uow)
-                fresh_scan = scan_repo.get_by_id(scan_id)
-                if fresh_scan:
-                    scan_repo.update_status(fresh_scan, ScanStatus.CANCELLED)
+                # CAS: si el worker ya terminó el escaneo (FINISHED/FAILED) en
+                # la ventana entre la señal cooperativa y esta escritura, no lo
+                # sobrescribimos a CANCELLED — evita mostrar resultados reales
+                # como si el escaneo se hubiera cancelado.
+                written = ScanRepository(uow).update_status_if(
+                    scan_id, {ScanStatus.PENDING, ScanStatus.RUNNING}, ScanStatus.CANCELLED
+                )
+
+            if not written:
+                logger.warning(
+                    f"Escaneo {scan_id} ya no estaba pending/running al cancelar "
+                    "(probablemente terminó justo antes)"
+                )
+                return False
 
             logger.info(f"Escaneo {scan_id} cancelado exitosamente")
             return True
@@ -478,12 +487,24 @@ class ScanManager(TaskTrackingMixin, ABC):
             domain_data = processor.process(task.results, scan.target) if scan_type == "nmap" else processor.process(task.results) # type: ignore
 
             with UnitOfWork() as uow:
-                fresh_scan              = ScanRepository(uow).get_by_id(scan_id)
+                scan_repo  = ScanRepository(uow)
+                fresh_scan = scan_repo.get_by_id(scan_id)
                 thread_manager._persist_scan_results(uow, fresh_scan, domain_data)
-                fresh_scan.status       = ScanStatus.FINISHED.value # type: ignore
-                fresh_scan.finished_at  = utcnow_naive() # type: ignore
+                # CAS: si cancel_scan ya escribió CANCELLED en la ventana entre
+                # que este worker terminó de escanear y esta transacción, no lo
+                # sobrescribimos a FINISHED — los resultados quedan igual
+                # persistidos, pero el estado respeta la cancelación pedida.
+                finished = scan_repo.update_status_if(
+                    scan_id, {ScanStatus.PENDING, ScanStatus.RUNNING}, ScanStatus.FINISHED
+                )
 
-            logger.info(f"Escaneo {scan_id} completado exitosamente")
+            if finished:
+                logger.info(f"Escaneo {scan_id} completado exitosamente")
+            else:
+                logger.info(
+                    f"Escaneo {scan_id} completó su procesamiento pero ya había "
+                    "sido cancelado; se conservan los resultados obtenidos"
+                )
             thread_manager._log_to_csv(scan_id, fresh_scan, task)
 
         except Exception as e:
