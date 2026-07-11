@@ -7,7 +7,7 @@ import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import ITaskQueue, job_context
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import read_repo
-from src.modules.shared import utcnow_naive
+from src.modules.shared import utcnow_naive, isoformat_utc
 from ..repositories import (
     ScanRepository,
     KbRepository,
@@ -672,8 +672,8 @@ class LybraEngineManager(ScanManager):
             "exposure": exposure,
             "targetAuthorized": target_authorized,
             "status": getattr(scan, "status", "unknown"),
-            "startedAt": scan.started_at.isoformat(),
-            "finishedAt": scan.finished_at.isoformat() if scan.finished_at else None,  # type: ignore
+            "startedAt": isoformat_utc(scan.started_at),
+            "finishedAt": isoformat_utc(scan.finished_at),  # type: ignore
             "findings": [
                 {
                     "id": f.get("id"),

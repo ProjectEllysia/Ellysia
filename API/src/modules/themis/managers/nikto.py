@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 from src.modules.system.taskqueue import job_context
 from src.modules.infrastructure import UnitOfWork
-from src.modules.shared import utcnow_naive
+from src.modules.shared import utcnow_naive, isoformat_utc
 from ..repositories import ScanRepository
 from ..model import (
     NiktoScan,
@@ -141,8 +141,8 @@ class NiktoScanManager(ScanManager):
             "scanType": "nikto",
             "target": scan.target,
             "status": getattr(scan, "status", "unknown"),
-            "startedAt": scan.started_at.isoformat(),
-            "finishedAt": scan.finished_at.isoformat() if scan.finished_at else None, # type: ignore
+            "startedAt": isoformat_utc(scan.started_at),
+            "finishedAt": isoformat_utc(scan.finished_at), # type: ignore
             "incidents": [
                 {
                     "osvdbId": i.osvdb_id,
@@ -150,7 +150,7 @@ class NiktoScanManager(ScanManager):
                     "url": i.url,
                     "description": i.description,
                     "severity": getattr(i, "severity", "UNKNOWN"),
-                    "discoveredAt": i.discovered_at.isoformat() if i.discovered_at else None,
+                    "discoveredAt": isoformat_utc(i.discovered_at),
                 }
                 for i in scan.incidents
             ],

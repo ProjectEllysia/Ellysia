@@ -6,6 +6,7 @@ from typing import Callable, Optional
 import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import job_context
 from src.modules.infrastructure import UnitOfWork
+from src.modules.shared import isoformat_utc
 from ..repositories import ScanRepository
 from ..model import (
     OpenVASScan,
@@ -221,8 +222,8 @@ class OpenVASScanManager(ScanManager):
             "taskId": scan.task_id,
             "reportId": scan.report_id,
             "status": getattr(scan, "status", "unknown"),
-            "startedAt": scan.started_at.isoformat(),
-            "finishedAt": scan.finished_at.isoformat() if scan.finished_at else None, # type: ignore
+            "startedAt": isoformat_utc(scan.started_at),
+            "finishedAt": isoformat_utc(scan.finished_at), # type: ignore
             "vulnerabilities": [
                 {
                     "nvtOid": r.vulnerability.nvt_oid,
