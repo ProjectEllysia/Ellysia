@@ -249,7 +249,12 @@ function handleRenameFolder(folder) { store.folderForms.rename = { show: true, f
 async function handleDeleteFolder(folderId) { if (confirm('¿Eliminar esta carpeta? Los escaneos no se borraran, solo quedaran sin carpeta.')) await store.deleteFolder(folderId) }
 function handleOpenMoveScan(scanId, folderId) { store.openMoveScan(scanId, folderId) }
 async function handleRemoveScan(scanId, folderId) { await store.removeScanFromFolder(scanId, folderId) }
-async function handlePreviewPdf(id, type, useAi) { await store.generatePdf(id, useAi); await new Promise(r => setTimeout(r, 600)); await store.refreshCurrent(); await store.refreshPreviewDocs() }
+async function handlePreviewPdf(id, type, useAi) {
+  const started = await store.generatePdf(id, useAi)
+  if (started) await store.waitForDocument(id)
+  await store.refreshCurrent()
+  await store.refreshPreviewDocs()
+}
 
 async function handleDeletePreviewDoc(docId) { await store.deleteDocument(docId); await store.refreshPreviewDocs() }
 

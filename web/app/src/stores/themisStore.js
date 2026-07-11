@@ -542,12 +542,28 @@ export const useThemisStore = defineStore('themis', () => {
       body: JSON.stringify({ id: scanId, aiReport: useAi }),
     })
     if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.message || 'Error al generar documento', 'error')
+      toast.show(await apiError(res, 'Error al generar documento'), 'error')
       return false
     }
     toast.show('Documento en generación...', 'success')
     return true
+  }
+
+  /**
+   * Sondea /themis/document-status hasta que el último documento del escaneo
+   * termine (done/error) o se agoten los intentos (B9: reemplaza un
+   * `setTimeout` fijo de 600ms, que asumía que la generación —encolada,
+   * asíncrona— siempre terminaba antes de ese plazo).
+   */
+  async function waitForDocument(scanId, { intervalMs = 1500, maxAttempts = 20 } = {}) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const res = await apiFetch(`/themis/document-status?scan_id=${scanId}`)
+      if (res?.ok) {
+        const data = await res.json()
+        if (data.status === 'done' || data.status === 'error') return
+      }
+      await new Promise(r => setTimeout(r, intervalMs))
+    }
   }
 
   /** Descarga un documento PDF por ID. */
@@ -919,7 +935,7 @@ export const useThemisStore = defineStore('themis', () => {
     loadScheduledScans, createScheduledScan, deactivateScheduledScan, deleteScheduledScan, toggleScheduledForm,
     openPreview, closePreview, refreshPreviewDocs, loadPreviewTraceroute,
     openDetails, closeDetails, refreshDetailsDocs,
-    generatePdf, downloadDocument, deleteDocument,
+    generatePdf, waitForDocument, downloadDocument, deleteDocument,
     setViewMode, loadFolders,
     history, loadHistoryHosts, loadHistoryStats,
     createFolder, renameFolder, deleteFolder,
