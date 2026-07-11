@@ -449,17 +449,23 @@ class ScanManager(TaskTrackingMixin, ABC):
         try:
             with UnitOfWork() as uow:
                 scan = ScanRepository(uow).get_by_id(scan_id)
-            if not scan:
-                logger.error(f"Escaneo {scan_id} no encontrado en el hilo")
-                return
+                if not scan:
+                    logger.error(f"Escaneo {scan_id} no encontrado en el hilo")
+                    return
+                # B7: leer estos atributos aquí, dentro de la sesión que los
+                # cargó, en vez de en instancia detached más abajo — antes
+                # solo funcionaba porque expire_on_commit=False lo permite
+                # implícitamente, no por contrato.
+                target    = scan.target
+                scan_type = scan.scan_type
 
             thread_manager.update_scan_status(scan_id, ScanStatus.RUNNING)
             logger.info(f"Iniciando escaneo {scan_id}")
 
             if CR.is_host_reachability_check_enabled():
-                raw_target = scan.target if "://" in scan.target else f"tcp://{scan.target}"
+                raw_target = target if "://" in target else f"tcp://{target}"
                 parsed_target = urlparse(url=raw_target) # type: ignore
-                host = parsed_target.hostname or scan.target
+                host = parsed_target.hostname or target
                 reachable_port = parsed_target.port or CR.get_host_reachability_check_port()
                 reachable_timeout = CR.get_host_reachability_check_timeout()
                 if not self.is_host_reachable(host=host, port=reachable_port, timeout=reachable_timeout): # type: ignore
@@ -489,8 +495,7 @@ class ScanManager(TaskTrackingMixin, ABC):
             logger.info(f"Procesando resultados de escaneo {scan_id}")
 
             processor  = thread_manager.result_processor # type: ignore
-            scan_type = scan.scan_type
-            domain_data = processor.process(task.results, scan.target) if scan_type == "nmap" else processor.process(task.results) # type: ignore
+            domain_data = processor.process(task.results, target) if scan_type == "nmap" else processor.process(task.results) # type: ignore
 
             with UnitOfWork() as uow:
                 scan_repo  = ScanRepository(uow)
