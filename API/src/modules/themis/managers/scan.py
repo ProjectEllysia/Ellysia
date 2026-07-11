@@ -249,7 +249,17 @@ class ScanManager(TaskTrackingMixin, ABC):
                     continue
 
                 if scan.status in ("pending", "running"):
-                    mgr.cancel_scan(scan_id, user_id)
+                    # Cooperativa: si la cancelación falla, el subproceso puede
+                    # seguir vivo. Borrar la fila igualmente lo dejaría huérfano
+                    # (ver el mismo guard en endpoints.delete_scan), así que este
+                    # escaneo se salta y se reporta como fallido en vez de forzar
+                    # la eliminación.
+                    if not mgr.cancel_scan(scan_id, user_id):
+                        results.append({
+                            "scanId": scan_id, "status": "error",
+                            "error": "no_se_pudo_cancelar",
+                        })
+                        continue
 
                 mgr.delete_scan(scan_id)
                 results.append({"scanId": scan_id, "status": "ok", "error": None})

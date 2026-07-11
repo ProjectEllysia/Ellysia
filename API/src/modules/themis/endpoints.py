@@ -690,7 +690,16 @@ def delete_scan(scan_id: int):
 
     if scan.status in CANCELLABLE_STATES:
         logger.info(f"Cancelando escaneo {scan_id} antes de eliminar")
-        manager.cancel_scan(scan_id, user.id) # type: ignore
+        # La cancelación es cooperativa (solo señaliza al worker, no mata el
+        # proceso — ver TaskQueue.cancel): si falla, el subproceso (nmap/nikto/
+        # openvas) puede seguir vivo. Borrar la fila igualmente lo dejaría
+        # huérfano y para siempre invisible para la app, así que no se procede.
+        if not manager.cancel_scan(scan_id, user.id): # type: ignore
+            raise ScanExecutionError(
+                scan_type=scan.scan_type,
+                target=scan.target,
+                reason="No se pudo cancelar el escaneo en curso; no se ha eliminado para evitar dejar el proceso huérfano",
+            )
 
     if not manager.delete_scan(scan_id):
         raise ScanExecutionError(
