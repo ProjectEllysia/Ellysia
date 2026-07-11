@@ -447,8 +447,12 @@ class OpenVASTask(_Task):
                 if deadline:
                     remaining = max(0.0, deadline - time.monotonic())
                     if remaining <= 0:
+                        logger.error("Timeout esperando finalización de OpenVAS; cancelando")
+                        # Sin esto, _wait_for_completion (hilo aparte) sigue
+                        # sondeando OpenVAS para siempre: nunca ve _cancel_event
+                        # y la tarea remota en GMP queda viva.
+                        self.cancel()
                         self.status = TaskStatus.TIMEOUT
-                        logger.error("Timeout esperando finalización de OpenVAS")
                         return False
                     self._finished.wait(min(granularity, remaining))
                 else:
