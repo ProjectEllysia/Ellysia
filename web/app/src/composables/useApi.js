@@ -1,6 +1,26 @@
 import { useAuthStore } from '@/stores/authStore'
 
 /**
+ * Extrae un mensaje de error legible de una respuesta fallida (D3/B11).
+ *
+ * Antes cada store repetía `const data = await res?.json().catch(() => ({}))`
+ * seguido de `data.error_description || data.message`: si `res` era `null`
+ * (apiFetch devuelve null en error de red o sesión caída), `res?.json()`
+ * cortocircuitaba TODA la cadena a `undefined` — `data` quedaba `undefined`
+ * y `data.message` lanzaba un `TypeError` silencioso (atrapado por el
+ * try/catch exterior, pero ocultando el mensaje real).
+ *
+ * @param {Response|null} res - Lo que devolvió `apiFetch` (puede ser null)
+ * @param {string} fallback - Mensaje a usar si no hay `res` o su cuerpo no trae uno
+ * @returns {Promise<string>}
+ */
+export async function apiError(res, fallback) {
+  if (!res) return fallback
+  const data = await res.json().catch(() => ({}))
+  return data.error_description || data.message || data.error || fallback
+}
+
+/**
  * Composable para llamadas autenticadas a la API REST.
  *
  * Inyecta automáticamente el header Authorization con el JWT vigente
@@ -83,5 +103,5 @@ export function useApi() {
     return res
   }
 
-  return { apiFetch }
+  return { apiFetch, apiError }
 }

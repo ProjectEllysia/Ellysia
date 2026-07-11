@@ -4,7 +4,7 @@ import { useApi } from '@/composables/useApi'
 import { useToastStore } from '@/stores/toastStore'
 
 export const useIrisStore = defineStore('iris', () => {
-  const { apiFetch } = useApi()
+  const { apiFetch, apiError } = useApi()
   const toast = useToastStore()
 
   const analyses = ref([])
@@ -216,8 +216,7 @@ export const useIrisStore = defineStore('iris', () => {
   async function reanalyzeAnalysis(id) {
     const res = await apiFetch(`/iris/results/${id}/reanalyze`, { method: 'POST' })
     if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.error_description || data.message || 'No se pudo relanzar el análisis.', 'error')
+      toast.show(await apiError(res, 'No se pudo relanzar el análisis.'), 'error')
       return null
     }
     const data = await res.json()
@@ -235,8 +234,7 @@ export const useIrisStore = defineStore('iris', () => {
   async function generateAiSummary(id) {
     const res = await apiFetch(`/iris/results/${id}/ai-summary`, { method: 'POST' })
     if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.error_description || data.message || 'No se pudo generar el resumen IA.', 'error')
+      toast.show(await apiError(res, 'No se pudo generar el resumen IA.'), 'error')
       return false
     }
     toast.show('Generando resumen ejecutivo con IA…', 'success')
@@ -330,8 +328,7 @@ export const useIrisStore = defineStore('iris', () => {
   async function generateDocument(analysisId) {
     const res = await apiFetch(`/iris/results/${analysisId}/document`, { method: 'POST' })
     if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.error_description || data.message || 'No se pudo generar el informe.', 'error')
+      toast.show(await apiError(res, 'No se pudo generar el informe.'), 'error')
       return null
     }
     const data = await res.json()

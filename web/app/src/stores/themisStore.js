@@ -12,7 +12,7 @@ import { useToastStore } from '@/stores/toastStore'
  * la paginación, los modales de vista previa/detalle y los documentos asociados.
  */
 export const useThemisStore = defineStore('themis', () => {
-  const { apiFetch } = useApi()
+  const { apiFetch, apiError } = useApi()
   const toast = useToastStore()
   const { triggerDownload } = useUtils()
 
@@ -242,11 +242,11 @@ export const useThemisStore = defineStore('themis', () => {
         method: 'POST',
         body: JSON.stringify({ target, label: label || undefined }),
       })
-      const data = await res?.json().catch(() => ({}))
       if (!res?.ok) {
-        toast.show(data.message || 'No se pudo añadir el objetivo autorizado.', 'error')
+        toast.show(await apiError(res, 'No se pudo añadir el objetivo autorizado.'), 'error')
         return false
       }
+      const data = await res.json()
       authorizedTargets.items.unshift({
         id: data.targetId, target: data.target, label: label || null, createdAt: new Date().toISOString(),
       })
@@ -278,11 +278,11 @@ export const useThemisStore = defineStore('themis', () => {
     launching.value = true
     try {
       const res = await apiFetch('/themis/lybra', { method: 'POST', body: JSON.stringify(payload) })
-      const data = await res?.json().catch(() => ({}))
       if (!res?.ok) {
-        toast.show(data.error_description || data.message || 'Error al lanzar el escaneo Lybra.', 'error')
+        toast.show(await apiError(res, 'Error al lanzar el escaneo Lybra.'), 'error')
         return false
       }
+      const data = await res.json()
       toast.show(`Motor Lybra iniciado (ID: ${data.scanId})`, 'success')
       await loadLybraScans()
       await loadStats()
@@ -297,11 +297,11 @@ export const useThemisStore = defineStore('themis', () => {
     launching.value = true
     try {
       const res = await apiFetch(endpoint, { method: 'POST', body: JSON.stringify(payload) })
-      const data = await res?.json().catch(() => ({}))
       if (!res?.ok) {
-        toast.show(data.error_description || data.message || 'Error al lanzar el escaneo.', 'error')
+        toast.show(await apiError(res, 'Error al lanzar el escaneo.'), 'error')
         return false
       }
+      const data = await res.json()
       const id = data.scanIds ? data.scanIds.join(', ') : data.scanId
       toast.show(`Escaneo ${type.toUpperCase()} iniciado (ID: ${id})`, 'success')
       await refreshCurrent()
@@ -347,8 +347,7 @@ export const useThemisStore = defineStore('themis', () => {
   async function cancelScan(id) {
     const res = await apiFetch(`/themis/scans/${id}/cancel`, { method: 'POST' })
     if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.message || 'No se pudo cancelar el escaneo.', 'error')
+      toast.show(await apiError(res, 'No se pudo cancelar el escaneo.'), 'error')
       return false
     }
 
@@ -572,8 +571,7 @@ export const useThemisStore = defineStore('themis', () => {
   async function deleteDocument(docId) {
     const res = await apiFetch(`/themis/document/${docId}`, { method: 'DELETE' })
     if (!res?.ok) {
-      const err = await res?.json().catch(() => ({}))
-      toast.show(err.error || 'No se pudo eliminar el documento.', 'error')
+      toast.show(await apiError(res, 'No se pudo eliminar el documento.'), 'error')
       return false
     }
     toast.show('Documento eliminado.', 'success')
@@ -597,11 +595,11 @@ export const useThemisStore = defineStore('themis', () => {
     scheduling.submitting = true
     try {
       const res = await apiFetch('/themis/scheduled-scans', { method: 'POST', body: JSON.stringify(payload) })
-      const data = await res?.json().catch(() => ({}))
       if (!res?.ok) {
-        toast.show(data.error_description || data.message || 'Error al crear escaneo programado.', 'error')
+        toast.show(await apiError(res, 'Error al crear escaneo programado.'), 'error')
         return false
       }
+      const data = await res.json()
       toast.show(`Escaneo programado creado (ID: ${data.programedScanId})`, 'success')
       await loadScheduledScans()
       scheduling.showForm = false
@@ -690,8 +688,7 @@ export const useThemisStore = defineStore('themis', () => {
       const params = new URLSearchParams({ target, type })
       const res = await apiFetch(`/themis/history/stats?${params}`)
       if (!res?.ok) {
-        const data = await res?.json().catch(() => ({}))
-        toast.show(data?.error_description || data?.message || 'No se pudieron obtener las estadísticas.', 'error')
+        toast.show(await apiError(res, 'No se pudieron obtener las estadísticas.'), 'error')
         return
       }
       const data = await res.json()
@@ -706,11 +703,11 @@ export const useThemisStore = defineStore('themis', () => {
     folderForms.create.submitting = true
     try {
       const res = await apiFetch('/themis/folders', { method: 'POST', body: JSON.stringify({ name }) })
-      const data = await res?.json().catch(() => ({}))
       if (!res?.ok) {
-        toast.show(data.error_description || data.message || 'Error al crear la carpeta.', 'error')
+        toast.show(await apiError(res, 'Error al crear la carpeta.'), 'error')
         return false
       }
+      const data = await res.json()
       const now = new Date().toISOString()
       folders.items.splice(folders.items.findIndex(f => f.id === null) + 1, 0, {
         id: data.folderId, name, scans: [], scanCount: 0, createdAt: now, updatedAt: now,
@@ -730,9 +727,8 @@ export const useThemisStore = defineStore('themis', () => {
         method: 'PUT',
         body: JSON.stringify({ name }),
       })
-      const data = await res?.json().catch(() => ({}))
       if (!res?.ok) {
-        toast.show(data.error_description || data.message || 'Error al renombrar la carpeta.', 'error')
+        toast.show(await apiError(res, 'Error al renombrar la carpeta.'), 'error')
         return false
       }
       const folder = _findFolder(folderId)
@@ -771,9 +767,8 @@ export const useThemisStore = defineStore('themis', () => {
         method: 'POST',
         body: JSON.stringify({ scanId }),
       })
-      const data = await res?.json().catch(() => ({}))
       if (!res?.ok) {
-        toast.show(data.error_description || data.message || 'Error al mover el escaneo.', 'error')
+        toast.show(await apiError(res, 'Error al mover el escaneo.'), 'error')
         return false
       }
       toast.show('Escaneo movido a la carpeta.', 'success')
@@ -811,9 +806,8 @@ export const useThemisStore = defineStore('themis', () => {
         method: 'POST',
         body: JSON.stringify({ scanIds }),
       })
-      const data = await res?.json().catch(() => ({}))
       if (!res?.ok) {
-        toast.show(data.error_description || data.message || 'Error al añadir escaneos a la carpeta.', 'error')
+        toast.show(await apiError(res, 'Error al añadir escaneos a la carpeta.'), 'error')
         return false
       }
       toast.show(`${scanIds.length} escaneo(s) añadido(s) a la carpeta.`, 'success')
@@ -832,11 +826,11 @@ export const useThemisStore = defineStore('themis', () => {
         method: 'DELETE',
         body: JSON.stringify({ scanIds }),
       })
-      const data = await res?.json().catch(() => ({}))
       if (!res?.ok) {
-        toast.show(data.error_description || data.message || 'Error al eliminar escaneos.', 'error')
+        toast.show(await apiError(res, 'Error al eliminar escaneos.'), 'error')
         return false
       }
+      const data = await res.json()
       toast.show(`${data.deletedCount ?? scanIds.length} escaneo(s) eliminado(s).`, 'success')
       await refreshCurrent()
       await loadFolders()

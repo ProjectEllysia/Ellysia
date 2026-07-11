@@ -12,7 +12,7 @@ import { useToastStore } from '@/stores/toastStore'
  * @module queueStore
  */
 export const useQueueStore = defineStore('queue', () => {
-  const { apiFetch } = useApi()
+  const { apiFetch, apiError } = useApi()
   const toast = useToastStore()
 
   /** Estado global de la cola (maxWorkers, aliveWorkers, counts) */
@@ -90,8 +90,7 @@ export const useQueueStore = defineStore('queue', () => {
         method: 'POST',
       })
       if (!res?.ok) {
-        const data = await res?.json().catch(() => ({}))
-        toast.show(data.error_description || 'Error al cancelar la tarea.', 'error')
+        toast.show(await apiError(res, 'Error al cancelar la tarea.'), 'error')
         return false
       }
       toast.show('Tarea cancelada.', 'success')
@@ -114,8 +113,7 @@ export const useQueueStore = defineStore('queue', () => {
         body: JSON.stringify({ max_workers: maxWorkers }),
       })
       if (!res?.ok) {
-        const data = await res?.json().catch(() => ({}))
-        toast.show(data.error_description || 'Error al actualizar configuracion.', 'error')
+        toast.show(await apiError(res, 'Error al actualizar configuracion.'), 'error')
         return false
       }
       toast.show(`Workers ajustados a ${maxWorkers}.`, 'success')

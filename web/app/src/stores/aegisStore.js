@@ -12,7 +12,7 @@ import { useToastStore } from '@/stores/toastStore'
  * temas, marcas, documentos, tweaks de generación, historial y visor.
  */
 export const useAegisStore = defineStore('aegis', () => {
-  const { apiFetch } = useApi()
+  const { apiFetch, apiError } = useApi()
   const toast = useToastStore()
   const { triggerDownload } = useUtils()
 
@@ -151,11 +151,11 @@ export const useAegisStore = defineStore('aegis', () => {
         },
       }
       const res = await apiFetch('/aegis/generate', { method: 'POST', body: JSON.stringify(payload) })
-      const data = await res?.json().catch(() => ({}))
       if (!res?.ok) {
-        toast.show(data.message || 'Error al generar la píldora.', 'error')
+        toast.show(await apiError(res, 'Error al generar la píldora.'), 'error')
         return false
       }
+      const data = await res.json()
       toast.show(`Píldora en generación (ID: ${data.documentId})`, 'success')
       await loadHistory()
       return true
@@ -222,11 +222,11 @@ export const useAegisStore = defineStore('aegis', () => {
         method: 'PUT',
         body: JSON.stringify(pillData),
       })
-      const data = await res?.json().catch(() => ({}))
       if (!res?.ok) {
-        toast.show(data.message || 'No se pudieron guardar los cambios.', 'error')
+        toast.show(await apiError(res, 'No se pudieron guardar los cambios.'), 'error')
         return false
       }
+      const data = await res.json()
       viewerDoc.data = data
       docCache.set(docId, data)
       editing.value = false

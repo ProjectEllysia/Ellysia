@@ -15,7 +15,7 @@ const PROFILE_TTL = 5 * 60 * 1000
  * Cachea GET /users/me con TTL de 5min para evitar peticiones redundantes.
  */
 export const useProfileStore = defineStore('profile', () => {
-  const { apiFetch } = useApi()
+  const { apiFetch, apiError } = useApi()
   const toast = useToastStore()
   const profileCache = useCache({ storage: 'session', keyPrefix: 'profile:', ttl: PROFILE_TTL, maxSize: 20 })
 
@@ -83,8 +83,7 @@ export const useProfileStore = defineStore('profile', () => {
       body: JSON.stringify({ first_name, last_name }),
     })
     if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.message || 'Error al actualizar el perfil.', 'error')
+      toast.show(await apiError(res, 'Error al actualizar el perfil.'), 'error')
       return false
     }
     profile.first_name = first_name
@@ -105,8 +104,7 @@ export const useProfileStore = defineStore('profile', () => {
       body: JSON.stringify({ newPassword }),
     })
     if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.message || 'Error al cambiar la contraseña.', 'error')
+      toast.show(await apiError(res, 'Error al cambiar la contraseña.'), 'error')
       return false
     }
     toast.show('Contraseña actualizada. Cerrando sesión…', 'success')

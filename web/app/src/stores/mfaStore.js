@@ -12,7 +12,7 @@ import { useToastStore } from '@/stores/toastStore'
  * de recuperación, que solo se muestran una vez).
  */
 export const useMfaStore = defineStore('mfa', () => {
-  const { apiFetch } = useApi()
+  const { apiFetch, apiError } = useApi()
   const toast = useToastStore()
 
   /** Estado de MFA del usuario autenticado */
@@ -40,8 +40,7 @@ export const useMfaStore = defineStore('mfa', () => {
   async function setupTotp() {
     const res = await apiFetch('/users/mfa/totp/setup', { method: 'POST' })
     if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.error_description || 'No se pudo iniciar la activación de MFA.', 'error')
+      toast.show(await apiError(res, 'No se pudo iniciar la activación de MFA.'), 'error')
       return false
     }
     const data = await res.json()
@@ -62,8 +61,7 @@ export const useMfaStore = defineStore('mfa', () => {
       body: JSON.stringify({ code }),
     })
     if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.error_description || 'Código inválido.', 'error')
+      toast.show(await apiError(res, 'Código inválido.'), 'error')
       return null
     }
     const data = await res.json()
@@ -87,8 +85,7 @@ export const useMfaStore = defineStore('mfa', () => {
       body: JSON.stringify({ code, recoveryCode }),
     })
     if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.error_description || 'Código inválido.', 'error')
+      toast.show(await apiError(res, 'Código inválido.'), 'error')
       return false
     }
     status.enabled = false

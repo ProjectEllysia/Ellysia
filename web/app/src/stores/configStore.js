@@ -13,7 +13,7 @@ import { useUtils } from '@/composables/useUtils'
  * se envía completo a PUT /system.
  */
 export const useConfigStore = defineStore('config', () => {
-  const { apiFetch } = useApi()
+  const { apiFetch, apiError } = useApi()
   const toast = useToastStore()
   const { flatten, unflatten, deepMerge } = useUtils()
 
@@ -59,8 +59,7 @@ export const useConfigStore = defineStore('config', () => {
         body: JSON.stringify(merged),
       })
       if (!res?.ok) {
-        const data = await res?.json().catch(() => ({}))
-        toast.show(data.message || 'Error al guardar la configuración.', 'error')
+        toast.show(await apiError(res, 'Error al guardar la configuración.'), 'error')
         return false
       }
       originalFlat = { ...configFlat }
