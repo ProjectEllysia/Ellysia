@@ -1,6 +1,34 @@
 # Sondeo de código — Ellysia (API Flask + SPA Vue)
 
-> Auditoría técnica realizada el 2026-07-10. Alcance: backend `API/` y SPA `web/app/` (módulo móvil fuera de alcance). Documento informativo — no incluye cambios de código.
+> Auditoría técnica realizada el 2026-07-10. Alcance: backend `API/` y SPA `web/app/` (módulo móvil fuera de alcance). El documento original era solo informativo; desde el 2026-07-11 se está ejecutando por fases (ver Progreso abajo) — cada ítem se reverifica contra el código actual antes de tocarlo, porque el código se ha seguido moviendo desde el sondeo.
+
+## Progreso de ejecución
+
+**Fase 1 — Quick wins críticos: hecha (2026-07-11), sin commitear.** Los 6 hallazgos se reverificaron contra el código actual (todos seguían presentes tal cual el sondeo los describía) y se corrigieron:
+
+- **B1** (`nmap.py`) — ahora `raise`a en el except en vez de devolver `scan_id` sin asignar, igual que Nikto/OpenVAS.
+- **B2** (`toastStore.js`) — el parámetro de `show()` ya no hace *shadowing* del ref `type`; se renombró a `variant` y se asigna `type.value`. Verificado con un script Node aislado (Pinia sin navegador): la variante cambia en cada llamada.
+- **B5** (`IrisView.vue`) — `onBeforeUnmount` ahora llama también a `store.stopPolling()`, no solo limpia `rejectTimer`.
+- **S1** (SSRF Nikto) — nuevo `validate_nikto_target()` en `endpoints.py`: resuelve el target a IP (`normalize_target`) y rechaza IPs privadas/loopback/metadata antes de encolar el escaneo. Nikto sigue aceptando hostname/URL (lo necesita para escanear por dominio); solo se valida la IP resuelta.
+- **S2** (`SecOpsConfig.json`) — `themis.areLocalIpsAllowed` pasó de `true` a `false`, alineado con el default en código.
+- **C3** (OpenVAS un host por escaneo) — la validación (resolución + rechazo de IP privada) se movió de "solo en el endpoint HTTP" a dentro de `OpenVASScanManager.run_scan()`, así que el flujo programado (`scheduling.py::_run_openvas_scan`) también queda cubierto sin duplicar lógica.
+
+Pieza compartida nueva: `parsing.reject_private_ip()` / `ScanManager.reject_private_ip()` — wrapper de una sola IP sobre el guard ya existente (`_reject_private_ips`), para callers que resuelven su propio hostname (Nikto, OpenVAS) en vez de expandir un rango vía `validate_ip`.
+
+**Tests:** suite completa de `API` verde (`pytest --no-cov -q`, WSL). Se ajustó `tests/unit/test_themis_parsing.py` (las pruebas de expansión de formato usaban IPs privadas como fixture y dependían implícitamente del `areLocalIpsAllowed: true` que S2 acaba de quitar; ahora mockean la política explícitamente) y se añadió cobertura nueva: `TestPrivateIpPolicy` (rechazo/permiso por defecto) y, en `tests/integration/test_themis.py`, regresión SSRF para Nikto (loopback + metadata cloud), Nmap (IP privada) y el flujo programado de OpenVAS. Esto cierra parcialmente **T1** para esta zona concreta (SSRF/IP privada); Themis en general ya tenía `test_themis.py` con cobertura de auth/carpetas — el sondeo original decía "sin tests de integración para Themis", lo cual ya no es exacto.
+
+**Fase 2 — Robustez operativa: hecha (2026-07-11), sin commitear.** Los 6 hallazgos se reverificaron (todos vigentes) y se corrigieron:
+
+- **B3** (`tasks.py::OpenVASTask.wait`) — el timeout ahora llama a `self.cancel()` antes de devolver `False`, así que `_wait_for_completion` (hilo aparte) ve `_cancel_event` en su próximo ciclo (≤60s) y llama `stop_task` en OpenVAS, en vez de sondear para siempre. El estado final reportado sigue siendo `TIMEOUT` (no `CANCELLED`), para no confundirlo con una cancelación pedida por el usuario.
+- **B4** (race `cancel_scan` vs worker) — nuevo `ScanRepository.update_status_if(scan_id, expected, status)`: UPDATE atómico con `WHERE status IN (...)`, devuelve si la transición ocurrió. `cancel_scan` y el path de finalización en `_execute_scan` ahora usan este CAS en vez de una escritura incondicional — quien pierde la carrera no sobrescribe al otro. Cubierto con tests nuevos (`test_update_status_if_*` en `test_themis.py`).
+- **B6** (`irisStore.js` timers de documentos huérfanos) — nueva `stopDocumentPolling()` (limpia todo `documentPollTimers`), llamada desde `onBeforeUnmount` de `IrisView.vue` (junto a B5) y desde `selectAnalysis()` al cambiar de análisis.
+- **C1** (sin reconciliación para Iris/Aegis) — nuevo `IrisManager.reconcile_orphaned_analyses()` (+ `IrisAnalysisRepository.get_active_analyses()`), espejo exacto de `ScanManager.reconcile_orphaned_scans`, llamado en `run.py` junto a la de Themis. **Aegis queda deliberadamente fuera de esta pasada**: no usa `TaskTrackingMixin` (construye su `external_id` a mano) y su modelo de campañas es más complejo que un simple pending/running — necesita su propio análisis, no una extensión mecánica de este patrón.
+- **C2** (Themis sin polling de estado) — mismo idioma que el polling de traceroute ya existente (`setTimeout` re-encadenado, no `setInterval`): `loadScans(type)` se reprograma a sí misma cada 4s mientras la pestaña activa tenga escaneos pending/running y siga visible (`_isTypeVisible`, cubre los 4 tipos incl. Lybra). `stopScanPolling()` nuevo, llamado desde `onBeforeUnmount` de `ThemisView.vue`. Verificado end-to-end en el navegador real (fetch mockeado): auto-poll mientras hay running, se auto-detiene al llegar a finished, y `stopScanPolling()` cancela el timer pendiente. **No cubre la vista de carpetas** (`ScanFolderView`, otra fuente de datos) — solo la vista 'full', que es donde se lanza y observa un escaneo recién creado.
+- **S3** (root/root hardcodeado) — `_init_db()` ahora genera una contraseña aleatoria (`secrets.token_urlsafe(18)`) para el usuario root en vez de `"root"` fijo, y la loguea una única vez (WARNING) al terminar el seed. No se implementó un flujo de "forzar cambio en primer login" (columna nueva + migración + gate en frontend) — se evaluó como una feature aparte, más grande que este fix puntual; la contraseña aleatoria ya cierra el riesgo real (credencial pública/adivinable). No verificable por tests (el path `fresh_db_init=True` solo corre contra Postgres real, la suite usa SQLite con `fresh_db_init=False`) — revisado por lectura + syntax-check.
+
+**Tests Fase 2:** suite completa verde. Nuevos: `test_update_status_if_*` (CAS de B4) y `tests/integration/test_iris_reconciliation.py` (3 tests para C1: huérfano sin tarea → failed, tarea aún pending → se deja, ya terminado → no se toca).
+
+**Pendiente:** Fase 3 (seguridad S4–S9/S11, correctness B7–B12, DRY D1–D3, Q1, T1) y el resto del documento.
 
 ## Contexto
 
@@ -155,8 +183,8 @@ Cuadrantes para decidir orden de ataque. Prioridad de arriba-izquierda (alto imp
 
 ## 9. Roadmap recomendado (secuencia sugerida)
 
-1. **Fase 1 — Quick wins críticos (⚡🔴, <1 día total):** B1, B2, B5, S1, S2, C3. Máximo retorno: cierran un SSRF, un bug que anula todo el feedback visual y dos fugas/enmascaramientos de error, casi todos de una línea a un puñado.
-2. **Fase 2 — Robustez operativa (🔧🔴):** B3, B4, B6, C1, C2 + S3. Aquí está la "coherencia con situaciones reales": escaneos que no se cuelgan, estado consistente entre procesos, reconciliación sin worker y feedback vivo en la UI.
+1. ✅ **Fase 1 — Quick wins críticos (⚡🔴, <1 día total):** B1, B2, B5, S1, S2, C3. Máximo retorno: cierran un SSRF, un bug que anula todo el feedback visual y dos fugas/enmascaramientos de error, casi todos de una línea a un puñado. **Hecha 2026-07-11** (ver Progreso de ejecución arriba).
+2. ✅ **Fase 2 — Robustez operativa (🔧🔴):** B3, B4, B6, C1, C2 + S3. Aquí está la "coherencia con situaciones reales": escaneos que no se cuelgan, estado consistente entre procesos, reconciliación sin worker y feedback vivo en la UI. **Hecha 2026-07-11** (C1 cubre Themis+Iris; Aegis queda fuera, ver Progreso de ejecución).
 3. **Fase 3 — Endurecimiento medio (🟠):** seguridad (S4–S9, S11), correctness restante (B7–B12), DRY de alto valor (D1–D3), estado de error en UI (Q1) y tests de Themis (T1).
 4. **Fase 4 — Refactors estructurales (🏗️):** A1/A2/A3 (dividir las tres "god-*"), D4 (pipeline común de tareas), Q3/Q4 (unificar `TaskStatus` y retirar `type: ignore`). Mayor esfuerzo, mejor hacerlo con tests de regresión ya en su sitio (Fase 3).
 5. **Fase 5 — Limpieza LEAN (🟡):** código muerto (Q12, T6, Q10), typos/docs (Q13, T2, T3), DRY menor del front (D5–D9) y unificaciones de UX (Q6–Q9).
