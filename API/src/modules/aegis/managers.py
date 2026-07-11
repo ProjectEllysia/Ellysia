@@ -40,7 +40,6 @@ from src.modules.aegis.exceptions import (
     CampaignNoQuestionsError,
     CampaignNotFoundError,
     DistributionListNotFoundError,
-    DocumentError,
     DocumentNotFoundError,
     DocumentNotReadyError,
     QuizAlreadyCompletedError,
@@ -337,13 +336,13 @@ class AegisManager:
             The document, if owned by the current user.
 
         Raises:
-            DocumentError if the document was not found or belongs to
-            another user (same error for both cases to prevent ID
+            DocumentNotFoundError if the document was not found or belongs
+            to another user (same error for both cases to prevent ID
             enumeration).
         """
         return assert_owned(
             AegisDocumentRepository, document_id, self.user.id,
-            lambda eid: DocumentError(f"Documento {eid} no encontrado"),
+            DocumentNotFoundError,
         )
 
     # =========================================================================
