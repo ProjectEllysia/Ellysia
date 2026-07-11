@@ -210,6 +210,11 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     CORS(app, origins=origins, supports_credentials=True)
 
     _logger.info("Inicializando rate limiting...")
+    redis_cfg = CR.get_redis_config()
+    redis_auth = f":{quote_plus(redis_cfg['password'])}@" if redis_cfg.get("password") else ""
+    app.config["RATELIMIT_STORAGE_URI"] = (
+        f"redis://{redis_auth}{redis_cfg['host']}:{redis_cfg['port']}/{redis_cfg['db']}"
+    )
     limiter.init_app(app)
 
     _logger.info("Inicializando documentación OpenAPI...")

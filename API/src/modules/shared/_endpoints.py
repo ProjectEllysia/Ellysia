@@ -116,11 +116,20 @@ def normalize_target(
 # =========================================================================
 # RATE LIMITING
 # =========================================================================
+# S4: el storage_uri por defecto es 'memory://' (por-proceso) — con varios
+# workers/gunicorn cada uno lleva su propio contador, multiplicando el
+# límite real (p. ej. fuerza bruta en /oauth/token) y reseteándolo en cada
+# reinicio. create_app() (run.py) sobreescribe esto a Redis-backed vía
+# app.config["RATELIMIT_STORAGE_URI"] antes de limiter.init_app(app) —
+# no se resuelve aquí porque importar config_reading en tiempo de carga de
+# este módulo crea un import circular (shared -> system -> users -> shared).
+# in_memory_fallback_enabled evita que un Redis caído tumbe el rate limiting.
 
 limiter = Limiter(
     get_remote_address,
     default_limits=[],
     storage_uri="memory://",
+    in_memory_fallback_enabled=True,
 )
 
 
