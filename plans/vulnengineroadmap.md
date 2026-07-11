@@ -519,8 +519,10 @@ apartado 7. El principio que gobierna esta capa es la calibración por oráculo:
 de referencia en el laboratorio, y solo confiamos en nuestra firma allí donde concuerda con Nmap.
 
 **Damos la fase por hecha cuando** para los servicios comunes la concordancia de nuestro fingerprint con
-el de Nmap alcanza el 0,90 por familia de servicio. A partir de ahí, `nmap -sV` pasa a ser oráculo y
-respaldo, no motor.
+el de Nmap alcanza el 0,90 por familia de servicio, medido tanto en el banco de laboratorio como en un
+conjunto de objetivos reales de Internet autorizados (paridad laboratorio/real, apartado 6) — no basta
+con igualar a Nmap en un host de laboratorio cómodo si en un objetivo real seguimos sin extraer
+producto y versión. A partir de ahí, `nmap -sV` pasa a ser oráculo y respaldo, no motor.
 
 ### Fase T — El transporte propio · pista de bajo nivel · ◐ parcial
 
@@ -559,7 +561,8 @@ un núcleo nativo en C o Rust, consumido por FFI, con el mismo patrón "núcleo 
 verificada" que ya usa Acheron y manteniendo siempre el fallback en Python puro. Por debajo de ese
 umbral, no se justifica, y por eso queda aparcado hasta tener evidencia de necesidad.
 
-**Damos la fase por hecha cuando** la concordancia de puertos con Nmap alcanza el 0,95 y hemos probado
+**Damos la fase por hecha cuando** la concordancia de puertos con Nmap alcanza el 0,95, verificado igual
+en laboratorio y en objetivos reales de Internet (paridad laboratorio/real, apartado 6), y hemos probado
 que la degradación a `connect-scan` funciona sin la capability. Nmap queda como respaldo conmutable.
 
 ### Fase 5 — Correlación, ciclo de vida y scoring · pista de correlación · ◐ parcial
@@ -994,10 +997,25 @@ safe/aggressive, el límite de tasa por host y la deuda consciente del sandbox p
 El cuarto es la **gestión de falsos positivos**, para la que el par `qod`/`confirmed` es la herramienta
 principal: el usuario puede marcar un hallazgo como `accepted` o como falso positivo, y el sistema lo
 recuerda entre escaneos a través del campo `state`. El quinto es el **versionado**, que a través de
-`feed_version` y `check_id` garantiza que cualquier informe sea reproducible. Y el sexto es el
+`feed_version` y `check_id` garantiza que cualquier informe sea reproducible. El sexto es el
 **rendimiento**: la concurrencia entre trabajos ya la resuelve RQ, la concurrencia de entrada/salida
 dentro de cada escaneo la da la isla asyncio, y tanto las comprobaciones activas como el transporte
 deben ir con un pool acotado por host para no saturar al objetivo.
+
+El séptimo, y no negociable para dar la Etapa 1 por cerrada, es la **paridad de descubrimiento entre
+laboratorio y objetivo real**. El banco de pruebas del apartado 7 usa imágenes vulnerables controladas
+(DVWA, Juice Shop, Metasploitable) porque son reproducibles y deterministas, pero eso no puede
+convertirse en la excusa de "el objetivo real es más difícil que el de laboratorio" cuando herramientas
+de referencia como Nmap ya identifican con soltura servicios en hosts públicos reales —routers
+domésticos, balanceadores, CDNs— sin necesitar que el objetivo sea "amigable". Por tanto, ningún umbral
+de las Fases F y T se da por cumplido solo con el banco de laboratorio: hay que repetir la misma
+medición contra un puñado de objetivos reales y autorizados de Internet (variados: con y sin CDN/WAF
+delante, con y sin TLS, con cabecera `Server` presente o suprimida), y la concordancia debe sostenerse
+igual de bien en ambos conjuntos. Si aparece un caso como "en localhost identificamos el producto y la
+versión, pero en un host público real solo vemos puertos abiertos", no es un resultado aceptable por
+ser "un objetivo más duro": es una brecha concreta de la Fase F o T (por ejemplo, falta de soporte
+TLS/HTTPS en el `HttpProbe`, o ausencia de un fallback de fingerprint cuando no hay cabecera `Server`)
+que hay que cerrar antes de dar la fase por terminada.
 
 ---
 
@@ -1023,18 +1041,20 @@ se calibran con datos de precisión y recall del laboratorio, no a ojo.
 El instrumento de medición es un **banco de pruebas con oráculo diferencial**, que además funciona como
 puerta de CI. Se monta con imágenes vulnerables conocidas —DVWA, OWASP Juice Shop, Metasploitable 2 y 3,
 imágenes de VulHub— y se escriben tests del tipo "el motor debe encontrar la CVE tal en la imagen cual".
-Las herramientas externas hacen de oráculo: Nmap es la verdad para el descubrimiento y el
-fingerprinting, OpenVAS lo es para la detección. La concordancia contra ese oráculo se expresa como
-aserciones numéricas, y son precisamente esos números los que deciden cuándo podemos invertir el valor
-por defecto en cada fase:
+Para las Fases F y T, el banco se complementa siempre con un segundo conjunto de objetivos reales y
+autorizados de Internet (paridad laboratorio/real, apartado 6): las imágenes controladas prueban que la
+lógica funciona, pero solo el objetivo real prueba que aguanta fuera del laboratorio. Las herramientas
+externas hacen de oráculo: Nmap es la verdad para el descubrimiento y el fingerprinting, OpenVAS lo es
+para la detección. La concordancia contra ese oráculo se expresa como aserciones numéricas, y son
+precisamente esos números los que deciden cuándo podemos invertir el valor por defecto en cada fase:
 
 | Fase | El número que la da por hecha                                                        |
 |------|--------------------------------------------------------------------------------------|
 | 1    | Al menos N CVEs reales con su CVSS correcto en el banco; el FP por backport, medido   |
 | R    | Las familias de TLS, cabeceras y paths con precisión ≥ 0,9; el `qod` sube de 70 a 99  |
 | 2    | Cero llamadas de red por objetivo en la detección por versión; delta diario verificado |
-| F    | Concordancia de fingerprint ≥ 0,90 con Nmap por familia; Nmap pasa a oráculo          |
-| T    | Concordancia de puertos ≥ 0,95 con Nmap; degradación sin `CAP_NET_RAW` probada        |
+| F    | Concordancia de fingerprint ≥ 0,90 con Nmap por familia, en laboratorio **y** en objetivos reales; Nmap pasa a oráculo |
+| T    | Concordancia de puertos ≥ 0,95 con Nmap, en laboratorio **y** en objetivos reales; degradación sin `CAP_NET_RAW` probada |
 
 Y las decisiones más grandes se toman igual, con un umbral y no con una fecha. ¿Retiramos Nikto? Solo
 cuando las tres primeras familias de la Fase R alcancen una precisión de 0,9. ¿Construimos el
@@ -1055,6 +1075,7 @@ Ningún plan ambicioso sobrevive sin nombrar sus riesgos y cómo pensamos mitiga
 | Deriva de alcance hacia "clonar OpenVAS"                  | Las anti-metas del apartado 1; el beachhead estrecho; la disciplina del 80/20 |
 | Coste del repositorio nativo                              | Aparcado hasta tener evidencia de rendimiento; el fallback en Python siempre presente |
 | Frescura del feed                                         | Deltas diarios y el `feed_version` registrado en cada escaneo             |
+| Sesgo de banco de laboratorio: las imágenes controladas ocultan huecos que solo aparecen en Internet real (p. ej. `HttpProbe` sin TLS, sin fallback cuando falta `Server`) | Paridad laboratorio/real obligatoria en las Fases F y T (apartado 6); ningún umbral se da por cumplido solo con el banco controlado |
 
 Y si en algún momento hubiera que recortar por falta de recursos, el orden de sacrificio sería este:
 primero el análisis web activo, luego el fingerprint de sistema operativo, después el transporte raw
