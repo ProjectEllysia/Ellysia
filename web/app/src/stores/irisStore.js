@@ -295,6 +295,7 @@ export const useIrisStore = defineStore('iris', () => {
   function selectAnalysis(id) {
     if (currentId.value === id) return
     stopPolling()
+    stopDocumentPolling()
     currentReport.data = null
     currentPath.data = null
     currentIocs.data = null
@@ -375,6 +376,13 @@ export const useIrisStore = defineStore('iris', () => {
     documentPollTimers.set(documentId, timer)
   }
 
+  /** Detiene todos los pollings de documentos activos (documento colgado,
+   * análisis borrado, o navegación fuera de la vista). */
+  function stopDocumentPolling() {
+    for (const timer of documentPollTimers.values()) clearInterval(timer)
+    documentPollTimers.clear()
+  }
+
   /** Descarga un documento PDF por ID. */
   async function downloadDocument(documentId) {
     try {
@@ -420,5 +428,6 @@ export const useIrisStore = defineStore('iris', () => {
     cancelAnalysis, deleteAnalysis, reanalyzeAnalysis, selectAnalysis, goToPage,
     startPolling, stopPolling,
     generateDocument, fetchDocuments, getDocumentStatus, downloadDocument, deleteDocument,
+    stopDocumentPolling,
   }
 })

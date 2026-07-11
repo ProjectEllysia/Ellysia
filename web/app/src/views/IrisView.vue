@@ -181,7 +181,11 @@ async function onDrop(e) {
   }
 }
 
-onBeforeUnmount(() => clearTimeout(rejectTimer))
+onBeforeUnmount(() => {
+  clearTimeout(rejectTimer)
+  store.stopPolling()
+  store.stopDocumentPolling()
+})
 
 const sortMode = computed({
   get: () => store.sortMode || 'date-desc',
