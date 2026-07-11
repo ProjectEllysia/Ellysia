@@ -405,6 +405,17 @@ class HttpProbe:
     def __init__(self, timeout: int = 8, max_bytes: int = 131072) -> None:
         self._timeout = timeout
         self._max_bytes = max_bytes
+        # We are scanning arbitrary hosts whose certificates we do not control,
+        # so every HTTPS leg — including one reached via a same-host redirect,
+        # e.g. a plain "http://" request answered with "Location: https://..." —
+        # must skip verification. A plain per-call context only covers the
+        # *initial* request; urllib's redirect handler opens the follow-up
+        # itself and falls back to the verifying default context, so a host
+        # that redirects HTTP to a self-signed HTTPS login page looked like a
+        # transport failure instead of a response to fingerprint.
+        self._opener = urllib.request.build_opener(
+            urllib.request.HTTPSHandler(context=ssl._create_unverified_context())
+        )
 
     def fetch(self, host: str, port: Optional[int], method: str, path: str) -> Optional[Response]:
         """Make a request and return it as a :class:`Response`.
@@ -455,10 +466,9 @@ class HttpProbe:
         scheme = "https" if port in _TLS_PORTS else "http"
         netloc = f"{host}:{port}" if port else host
         url = f"{scheme}://{netloc}{path}"
-        context = ssl._create_unverified_context() if scheme == "https" else None
         try:
             req = urllib.request.Request(url, method=method, headers={"User-Agent": "Lybra/1.0"})
-            with urllib.request.urlopen(req, timeout=self._timeout, context=context) as resp:
+            with self._opener.open(req, timeout=self._timeout) as resp:
                 return resp.status, resp.read(self._max_bytes), dict(resp.headers)
         except urllib.error.HTTPError as err:
             body = err.read(self._max_bytes) if hasattr(err, "read") else b""
