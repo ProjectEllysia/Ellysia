@@ -181,6 +181,9 @@ def get_google_environment() -> dict[str, str]:
     return {"api_key": api_key, "model": model}
 
 
+_ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
+
+
 @_lazy_load
 def get_oauth_config() -> tuple[float, float, Optional[str], Optional[str]]:
     """Configuración OAuth/JWT.
@@ -204,6 +207,16 @@ def get_oauth_config() -> tuple[float, float, Optional[str], Optional[str]]:
 
     jwt_cfg = _require_configs().get("security", {}).get("jwt", {})
     algorithm = os.getenv("JWT_ALGORITHM") or str(jwt_cfg.get("algorithm", "HS256"))
+    # S8: JWT_ALGORITHM es override por entorno sin validar — un typo o un
+    # despliegue mal configurado con "none" (o un algoritmo asimétrico que
+    # necesita un par de claves, no un secreto simétrico) rompería la
+    # verificación de tokens en producción. Firmamos con un único secreto
+    # simétrico, así que solo la familia HS* tiene sentido aquí.
+    if algorithm not in _ALLOWED_JWT_ALGORITHMS:
+        raise ValueError(
+            f"JWT_ALGORITHM '{algorithm}' no permitido. "
+            f"Debe ser uno de: {', '.join(sorted(_ALLOWED_JWT_ALGORITHMS))}."
+        )
     access    = os.getenv("ACCESS_TOKEN_EXPIRY_MINUTES") or jwt_cfg.get("access_token_expiry_minutes", 30)
     refresh   = os.getenv("REFRESH_TOKEN_EXPIRY_DAYS") or jwt_cfg.get("refresh_token_expiry_days", 7)
 
