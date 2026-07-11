@@ -446,6 +446,14 @@ es exactamente lo que hace Greenbone con su NVT feed, y es una parte tangible de
 las tres primeras familias, todo bajo el mismo runtime y con feed versionado, y el `qod` sube de 70 a
 99 en lo confirmado. En ese punto, Nikto deja de ser necesario para el caso web típico.
 
+**Estado (2026-07-11):** la mecánica está completa — 13 checks activos en 3 familias
+(`exposed_path` ×7, `security_header` ×3, `tls` ×3), todas bajo el mismo `CheckRuntime`, todas
+`confirmed=true`/`qod=99` cuando disparan, feed versionado (`lybra-checks-1`). Lo que falta para
+poder marcar la fase como hecha de verdad es la medición formal de precisión ≥0,9 del apartado 7: el
+banco de oráculo diferencial (`tests/oracle/`) ya existe y corre contra contenedores reales, pero hoy
+solo tiene 3 aserciones puntuales, no un run de precisión/recall contra un catálogo de imágenes
+vulnerables. Sigue en ◐ parcial por eso, no por falta de familias.
+
 ### Fase 2 — La base de conocimiento local y la inteligencia de amenazas · pista de correlación · ✓ implementada
 
 **El objetivo** es dejar de depender de consultas en vivo a `cve.circl.lu` y tener nuestro propio
@@ -524,6 +532,17 @@ conjunto de objetivos reales de Internet autorizados (paridad laboratorio/real, 
 con igualar a Nmap en un host de laboratorio cómodo si en un objetivo real seguimos sin extraer
 producto y versión. A partir de ahí, `nmap -sV` pasa a ser oráculo y respaldo, no motor.
 
+**Estado (2026-07-11):** medido, 1.00 de concordancia en 4 objetivos (127.0.0.1 de laboratorio,
+`scanme.nmap.org`, y dos objetivos reales de Internet autorizados), por encima del umbral — pero con
+N=4 es una muestra pequeña para un 0,90 robusto, no la cobertura del banco de laboratorio completo que
+pide el apartado 7. Dos bugs reales de fingerprinting se encontraron y arreglaron por el camino:
+`HttpProbe` fallaba en redirecciones HTTP→HTTPS por verificación de certificado, y la comparación de
+versión con Nmap era demasiado estricta. El dissector HTTP ya tiene firmas de tecnología tipo
+Wappalyzer, externalizadas en `tech_signatures.json` (15 firmas, incluyendo 10 fabricantes de red:
+SonicWall, pfSense, MikroTik, Fortinet, Cisco, Ubiquiti, Palo Alto, Netgear, TP-Link, Synology), con
+soporte para firmas que solo aparecen en la página de error (`error_body`), no en la portada. JARM
+completo y fingerprint de SO siguen aparcados, como estaba previsto.
+
 ### Fase T — El transporte propio · pista de bajo nivel · ◐ parcial
 
 **El objetivo** es que Lybra descubra los puertos por su cuenta, con una implementación propia, en
@@ -565,6 +584,12 @@ umbral, no se justifica, y por eso queda aparcado hasta tener evidencia de neces
 en laboratorio y en objetivos reales de Internet (paridad laboratorio/real, apartado 6), y hemos probado
 que la degradación a `connect-scan` funciona sin la capability. Nmap queda como respaldo conmutable.
 
+**Estado (2026-07-11):** medido, 1.00 de concordancia en los mismos 4 objetivos que la Fase F (mismo
+N=4, misma reserva). La degradación sin `CAP_NET_RAW` está satisfecha por construcción, no por rama de
+código: no existe ningún camino con socket raw en el repo, así que no hay nada de lo que degradar. El
+camino SYN sin estado sigue aparcado a propósito — sin evidencia de que el techo de Python no baste,
+que es justo el criterio que el propio roadmap exige antes de construirlo.
+
 ### Fase 5 — Correlación, ciclo de vida y scoring · pista de correlación · ◐ parcial
 
 **El objetivo** de esta fase es dar el salto de "listas de hallazgos por escaneo" a "estado de la
@@ -592,6 +617,20 @@ exploits (KEV y `exploit_maturity`) y la exposición del activo, que ya sabemos 
 weaponizado y en KEV sobre una IP pública es una prioridad crítica e inmediata; ese mismo CVSS sin
 prueba de concepto conocida en una LAN aislada es una prioridad media que puede incluso ser un falso
 positivo por backport.
+
+**Damos la fase por hecha cuando** la deduplicación multi-fuente, el ciclo de vida y el scoring
+contextual funcionan de extremo a extremo, y el cambio de sujeto Asset→Service→Finding permite avisar
+de un puerto nuevo o un cambio de versión sin que eso dependa de que coincida con una CVE conocida.
+
+**Estado (2026-07-11):** dedup, ciclo de vida y scoring ya funcionaban antes de esta ronda. Lo que
+faltaba —el cambio de sujeto— está resuelto de forma parcial: `HostService` (una fila por host+puerto,
+actualizada en cada escaneo) permite detectar "puerto nuevo" y "cambio de versión" como eventos de
+superficie independientes de cualquier CVE, que es el comportamiento que pedía el apartado. Sigue sin
+existir una entidad `Asset` de primera clase (hoy `Host` cumple ese papel de forma implícita); la
+inversión de modelo completa que describe el párrafo de arriba no se ha hecho literalmente, solo su
+consecuencia observable. Un bug de diseño real salió a la luz al construir esto: el ciclo de vida
+trataba eventos puntuales (fingerprint, cambio de superficie) como si fueran estado persistente de
+vulnerabilidad, duplicando avisos en re-escaneos sin cambios — ya arreglado.
 
 ### Fase 4 — El escaneo autenticado · pista de correlación · avanzado y opcional · ○ planificada
 
@@ -653,6 +692,16 @@ Lybra Scan (Fase T+: escáner completo)
 El paso de "análisis profundo" es opcional en ambos casos: si el usuario lo solicita, se lanzan las
 herramientas externas como una segunda opinión que se fusiona en los mismos `Finding`. Así es como
 Nmap, Nikto y OpenVAS terminan siendo complementos de nuestro motor, y no al revés.
+
+**Damos la fase por hecha cuando** el motor propio es la experiencia por defecto en todos los sentidos
+—el pipeline técnico y lo primero que ve el usuario— y Nmap/Nikto/OpenVAS quedan como segunda opinión
+explícitamente solicitada, nunca el punto de partida.
+
+**Estado (2026-07-11):** el pipeline técnico ya cumplía esto (autodescubrimiento por defecto,
+corroboradores externos apagados por defecto). Lo que no cumplía era la interfaz: Themis abría en la
+pestaña de escáneres externos, no en Lybra — contradiciendo el objetivo en el único sitio donde un
+usuario nuevo se forma una primera impresión. Corregido: el mundo por defecto de la SPA es ahora
+`'lybra'`.
 
 ---
 
@@ -1060,6 +1109,13 @@ Y las decisiones más grandes se toman igual, con un umbral y no con una fecha. 
 cuando las tres primeras familias de la Fase R alcancen una precisión de 0,9. ¿Construimos el
 repositorio nativo? Solo cuando el laboratorio demuestre el techo de rendimiento en Python. ¿Abrimos el
 análisis web activo? Solo si el uso real es web y existe el registro de autorización.
+
+**Estado de estos números (2026-07-11):** F y T ya tienen medición real —1.00 de concordancia en
+ambos, sobre 4 objetivos (laboratorio + `scanme.nmap.org` + 2 reales)—, pero con N tan pequeño el
+número es una prueba de que el mecanismo de medición funciona, no todavía la confianza de fondo que
+pide un 0,90/0,95 robusto. R tiene las 3 familias y el `qod` correcto, pero sin la precisión medida
+formalmente. El instrumento (`tests/oracle/`, `scripts/lybra_concordance_bench.py`) ya existe y corre
+contra infraestructura real (Docker + red real, nada mockeado); lo que falta es escala, no mecanismo.
 
 ---
 
