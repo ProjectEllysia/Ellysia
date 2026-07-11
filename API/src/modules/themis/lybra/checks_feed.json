@@ -75,6 +75,51 @@
         "qod": 99,
         "confirmed": true
       }
+    },
+    {
+      "id": "tls-self-signed-cert",
+      "version": 1,
+      "type": "tls",
+      "category": "tls",
+      "severity": "MEDIUM",
+      "service": "https",
+      "mode": "safe",
+      "tlsRule": "self_signed",
+      "finding": {
+        "title": "Certificado TLS autofirmado",
+        "qod": 99,
+        "confirmed": true
+      }
+    },
+    {
+      "id": "tls-expired-cert",
+      "version": 1,
+      "type": "tls",
+      "category": "tls",
+      "severity": "HIGH",
+      "service": "https",
+      "mode": "safe",
+      "tlsRule": "expired",
+      "finding": {
+        "title": "Certificado TLS caducado",
+        "qod": 99,
+        "confirmed": true
+      }
+    },
+    {
+      "id": "tls-deprecated-protocol",
+      "version": 1,
+      "type": "tls",
+      "category": "tls",
+      "severity": "MEDIUM",
+      "service": "https",
+      "mode": "safe",
+      "tlsRule": "deprecated_protocol",
+      "finding": {
+        "title": "Protocolo TLS obsoleto negociado (SSLv3/TLSv1.0/TLSv1.1)",
+        "qod": 99,
+        "confirmed": true
+      }
     }
   ]
 }

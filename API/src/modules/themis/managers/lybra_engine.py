@@ -299,18 +299,19 @@ class LybraEngineManager(ScanManager):
             return None
 
     def _run_active_checks(self, target: str, services) -> list:
-        """Run the declarative check runtime against the target's HTTP services.
+        """Run the declarative check runtime against the target's HTTP and TLS services.
 
         Best-effort: a runtime failure (unreachable host, etc.) yields no active
         findings rather than failing the whole scan. Safe mode only.
         """
-        from ..lybra import load_checks, CheckRuntime, HttpProbe, HostRateLimiter
+        from ..lybra import load_checks, CheckRuntime, HttpProbe, HostRateLimiter, TlsProbe
         try:
             runtime = CheckRuntime(
                 load_checks(),
                 HttpProbe().fetch,
                 mode="safe",
                 rate_limiter=HostRateLimiter(),
+                tls_fetch=TlsProbe().fetch,
             )
             return runtime.run(target, services)
         except Exception:
