@@ -102,6 +102,7 @@
 import { ref, computed } from 'vue'
 import StatusBadge from './StatusBadge.vue'
 import TracerouteGraph from './TracerouteGraph.vue'
+import { SCAN_TYPES } from '@/constants/scanTypes'
 
 const props = defineProps({
   show: Boolean,
@@ -115,8 +116,7 @@ const props = defineProps({
 defineEmits(['close', 'refresh-docs', 'download-doc', 'delete-doc', 'generate-pdf', 'refresh-traceroute'])
 
 const useAi = ref(false)
-const typeLabels = { nmap: 'Vista Previa — Nmap', nikto: 'Vista Previa — Nikto', openvas: 'Vista Previa — OpenVAS' }
-const typeLabel = computed(() => typeLabels[props.type] || '')
+const typeLabel = computed(() => SCAN_TYPES[props.type]?.previewLabel || '')
 function fmt(iso) { if (!iso || iso === 'null') return 'N/A'; return new Date(iso).toLocaleString() }
 function fmtDate(iso) { if (!iso) return ''; return new Date(iso).toLocaleDateString() }
 </script>
