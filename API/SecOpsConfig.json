@@ -1156,7 +1156,7 @@
     }
   },
   "themis": {
-    "areLocalIpsAllowed": true,
+    "areLocalIpsAllowed": false,
     "directories": {
       "csv": "data/themis/csv",
       "output": "data/themis/output",

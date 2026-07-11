@@ -180,6 +180,13 @@ def _reject_private_ips(lista_ips: List[str]) -> None:
             raise PrivateIPRequested(private_ips)
 
 
+def reject_private_ip(ip: str) -> None:
+    """Single-IP entry point for callers that resolve a hostname/URL
+    themselves (Nikto, OpenVAS) instead of expanding a CIDR/range spec via
+    ``validate_ip``."""
+    _reject_private_ips([ip])
+
+
 def validate_ip(ips_str: str, max_hosts: int = 10) -> List[str]:
     """
     Valida y expande una especificación de IPs/rangos.

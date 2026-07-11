@@ -5,8 +5,17 @@ Funciones puras sobre strings: no requieren BD ni app Flask.
 
 import pytest
 
-from src.modules.themis.exceptions import IPValidationError, PortValidationError
-from src.modules.themis.services.parsing import validate_ip, validate_port
+import src.modules.system.config_reading as CR
+from src.modules.themis.exceptions import (
+    IPValidationError,
+    PortValidationError,
+    PrivateIPRequested,
+)
+from src.modules.themis.services.parsing import (
+    validate_ip,
+    validate_port,
+    reject_private_ip,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -48,6 +57,14 @@ class TestValidatePortEmptyInput:
 
 
 class TestValidateIpFormats:
+    """Prueba solo la expansión de formatos (CIDR/rango/lista); usa IPs
+    privadas como datos de prueba, así que necesita 'areLocalIpsAllowed' en
+    true independientemente del valor real en SecOpsConfig.json."""
+
+    @pytest.fixture(autouse=True)
+    def _allow_local_ips(self, monkeypatch):
+        monkeypatch.setattr(CR, "are_local_ips_allowed", lambda: True)
+
     def test_single_ip(self):
         assert validate_ip("192.168.1.1") == ["192.168.1.1"]
 
@@ -84,3 +101,26 @@ class TestValidatePortFormats:
     def test_port_out_of_range_raises(self):
         with pytest.raises(PortValidationError):
             validate_port("70000")
+
+
+class TestPrivateIpPolicy:
+    """S2: 'areLocalIpsAllowed' debe rechazar IPs privadas por defecto (el
+    default de config_reading es False; SecOpsConfig.json debe coincidir)."""
+
+    def test_validate_ip_rejects_private_by_default(self, monkeypatch):
+        monkeypatch.setattr(CR, "are_local_ips_allowed", lambda: False)
+        with pytest.raises(PrivateIPRequested):
+            validate_ip("192.168.1.1")
+
+    def test_validate_ip_allows_private_when_configured(self, monkeypatch):
+        monkeypatch.setattr(CR, "are_local_ips_allowed", lambda: True)
+        assert validate_ip("192.168.1.1") == ["192.168.1.1"]
+
+    def test_reject_private_ip_rejects_private_by_default(self, monkeypatch):
+        monkeypatch.setattr(CR, "are_local_ips_allowed", lambda: False)
+        with pytest.raises(PrivateIPRequested):
+            reject_private_ip("10.0.0.5")
+
+    def test_reject_private_ip_allows_public(self, monkeypatch):
+        monkeypatch.setattr(CR, "are_local_ips_allowed", lambda: False)
+        reject_private_ip("8.8.8.8")  # no debe lanzar

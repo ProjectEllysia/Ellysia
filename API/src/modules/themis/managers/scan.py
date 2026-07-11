@@ -669,6 +669,15 @@ class ScanManager(TaskTrackingMixin, ABC):
         return parsing.validate_port(ports_str)
 
     @staticmethod
+    def reject_private_ip(ip: str) -> None:
+        """Lanza ``PrivateIPRequested`` si ``ip`` es privada y
+        'areLocalIpsAllowed' está en falso. Para llamantes que resuelven un
+        hostname/URL ellos mismos (Nikto, OpenVAS) en vez de expandir un
+        rango vía ``validate_ip``.
+        """
+        parsing.reject_private_ip(ip)
+
+    @staticmethod
     def is_host_reachable(host: str, port: int = 80, timeout: float = 3.0) -> bool:
         """
         Verifica conectividad básica con un host sin dependencias externas.

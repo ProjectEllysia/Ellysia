@@ -11,6 +11,7 @@ from src.modules.users import require_oauth_token, require_attributes, Attribute
 from src.modules.shared import (
     handle_exceptions,
     limiter,
+    normalize_target,
 )
 from src.modules.shared._exceptions import (
     ValidationError,
@@ -118,6 +119,23 @@ def validate_targets(raw: str, max_hosts: int = 10) -> list[str]:
         raise ValidationError(field="target", message=str(exc), value=raw) from exc
     except MaxHostsExceededError as exc:
         raise ValidationError(str(exc.user_message or exc))
+    except PrivateIPRequested as exc:
+        raise SecOpsException(str(exc.user_message or exc), status_code=403)
+
+
+def validate_nikto_target(raw: str) -> None:
+    """
+    Nikto escanea por hostname/URL, no por un spec de CIDR/rango, así que no
+    puede reusar ``validate_targets``. Resuelve el target a IP y rechaza esa
+    IP si es privada — cierra el hueco SSRF donde un hostname/DNS resuelve a
+    una dirección local o de metadata (127.0.0.1, 169.254.169.254, ...).
+    """
+    try:
+        ip, _ = normalize_target(raw)
+    except ValueError as exc:
+        raise ValidationError(field="target", message=str(exc), value=raw) from exc
+    try:
+        ScanManager.reject_private_ip(ip)
     except PrivateIPRequested as exc:
         raise SecOpsException(str(exc.user_message or exc), status_code=403)
 
@@ -257,6 +275,8 @@ def start_nikto_scan(data):
     target = data["target"]
     timeout = data["timeout"]
     user = get_current_user()
+
+    validate_nikto_target(target)
 
     nikto_manager = NiktoScanManager()
     scan_id = nikto_manager.run_scan(target, user_id=user.id, timeout=timeout) # type: ignore

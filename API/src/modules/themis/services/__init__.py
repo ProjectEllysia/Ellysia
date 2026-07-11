@@ -34,7 +34,7 @@ from .csv_logger import (
 
 from .scheduling import Scheduler
 
-from .parsing import validate_ip, validate_port
+from .parsing import validate_ip, validate_port, reject_private_ip
 
 from .history import HistoryStatsService
 
@@ -65,5 +65,6 @@ __all__ = [
     Scheduler,
     validate_ip,
     validate_port,
+    reject_private_ip,
     TracerouteService,
 ]
