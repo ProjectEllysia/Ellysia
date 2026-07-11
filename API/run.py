@@ -191,10 +191,16 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
         Flask: Aplicación completamente configurada y lista para servir.
     """
     from src.modules.themis.services.scheduling import Scheduler
+    from werkzeug.middleware.proxy_fix import ProxyFix
 
     configure_logging()
 
     app = Flask(__name__)
+    # S5: la app corre detrás de nginx (ver web/nginx.conf) — sin esto,
+    # request.remote_addr (y por tanto el rate limiter y los logs de
+    # auditoría) ven la IP del contenedor de nginx, no la del cliente real.
+    # x_for=1 confía en un único salto de X-Forwarded-For (el proxy inmediato).
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1) # type: ignore
 
     _logger.info("Inicializando la aplicación Ellysia...")
     _logger.info("Inicializando CORS...")
