@@ -253,23 +253,23 @@ export const useIrisStore = defineStore('iris', () => {
     }
     toast.show('Generando resumen ejecutivo con IA…', 'success')
     aiSummaryLoading.value = true
-    pollAiSummary(id, 0)
     return true
   }
 
-  function pollAiSummary(id, attempt) {
-    const maxAttempts = 20 // ~60s a intervalos de 3s
-    setTimeout(async () => {
-      const data = await getReport(id)
-      if (data?.aiSummary || attempt >= maxAttempts) {
-        aiSummaryLoading.value = false
-        if (!data?.aiSummary && attempt >= maxAttempts) {
-          toast.show('El resumen IA está tardando más de lo esperado. Vuelve a intentarlo en un momento.', 'error')
-        }
-        return
-      }
-      pollAiSummary(id, attempt + 1)
-    }, 3000)
+  /**
+   * Comprueba una vez si el resumen IA ya está listo. Sin polling automático
+   * a propósito: el usuario decide cuándo volver a preguntar, en vez de un
+   * setTimeout re-encadenado — deja el terreno listo para sustituir esto por
+   * un webhook/push más adelante sin tener que desmontar un poller primero.
+   */
+  async function checkAiSummary(id) {
+    const data = await getReport(id)
+    if (data?.aiSummary) {
+      aiSummaryLoading.value = false
+    } else {
+      toast.show('El resumen IA todavía se está generando. Vuelve a comprobar en unos segundos.', 'info')
+    }
+    return data
   }
 
   async function cancelAnalysis(id) {
@@ -435,7 +435,7 @@ export const useIrisStore = defineStore('iris', () => {
     currentIocs, iocsCache, aiSummaryLoading,
     documents, documentsLoading,
     submitAnalysis, fetchResults, fetchMoreResults, getReport, getStatus, pathFor, iocsFor,
-    generateAiSummary,
+    generateAiSummary, checkAiSummary,
     cancelAnalysis, deleteAnalysis, reanalyzeAnalysis, selectAnalysis, goToPage,
     startPolling, stopPolling,
     generateDocument, fetchDocuments, getDocumentStatus, downloadDocument, deleteDocument,

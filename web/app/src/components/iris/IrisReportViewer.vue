@@ -143,6 +143,9 @@
         <div v-else-if="irisStore.aiSummaryLoading" class="rv-path-loading">
           <div class="spinner spinner--sm"></div>
           <span>Generando narrativa con IA…</span>
+          <button type="button" class="btn-export-csv" @click="irisStore.checkAiSummary(reportData.analysisId)">
+            Comprobar estado
+          </button>
         </div>
         <button v-else type="button" class="btn-export-csv" @click="irisStore.generateAiSummary(reportData.analysisId)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.2H22l-6 4.4 2.4 7.2L12 16.4l-6.4 4.4 2.4-7.2-6-4.4h7.6z"/></svg>

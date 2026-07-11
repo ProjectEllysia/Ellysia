@@ -187,7 +187,12 @@ const selectableFolders = computed(() =>
   store.folders.items.filter(f => f.id !== null)
 )
 
-onMounted(() => { store.loadStats(); store.loadScans(store.activeTab); store.loadScheduledScans(); store.loadFolders() })
+// El store es un singleton de Pinia que sobrevive a la navegación dentro de
+// la SPA: si el usuario cambió a "escáneres externos" y vuelve a entrar a
+// Themis después, sin esto vería el mundo que dejó seleccionado la vez
+// anterior en vez de entrar siempre por Lybra (el motor propio, protagonista
+// del roadmap).
+onMounted(() => { store.setWorld('lybra'); store.loadStats(); store.loadScans(store.activeTab); store.loadScheduledScans(); store.loadFolders() })
 onBeforeUnmount(() => store.stopScanPolling())
 
 // Carga la lista de Lybra y el registro de objetivos autorizados la primera
@@ -294,9 +299,12 @@ async function handleDeleteScheduled(id) { await store.deleteScheduledScan(id) }
 .main > :nth-child(1) { animation: seq-fade-up 0.5s ease-out backwards; }
 .main > :nth-child(2) { animation: seq-fade-up 0.5s ease-out 0.06s backwards; }
 
-/* Crossfade between full / folders / history so switching modes reads as
-   one continuous view instead of a hard content swap. */
-.fade-swap-enter-active, .fade-swap-leave-active { transition: opacity 0.2s ease; }
+/* Crossfade between full / folders / history (and Lybra vs escáneres
+   externos) so switching modes reads as one continuous view instead of a
+   hard content swap. mode="out-in" makes this sequential (leave then
+   enter), so total wait is roughly double this duration — kept short so
+   toggling worlds doesn't feel sluggish. */
+.fade-swap-enter-active, .fade-swap-leave-active { transition: opacity 0.12s ease; }
 .fade-swap-enter-from, .fade-swap-leave-to { opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {
