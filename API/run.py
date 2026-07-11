@@ -259,6 +259,15 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
         except Exception as e:
             _logger.warning("No se pudo reconciliar escaneos huérfanos: %s", e)
 
+        _logger.info("Reconciliando análisis Iris huérfanos...")
+        try:
+            from src.modules.iris.managers import IrisManager
+            fixed_iris = IrisManager.reconcile_orphaned_analyses()
+            if fixed_iris:
+                _logger.info("Se marcaron %d análisis Iris huérfano(s) como failed", fixed_iris)
+        except Exception as e:
+            _logger.warning("No se pudo reconciliar análisis Iris huérfanos: %s", e)
+
         _logger.info("Arrancando scheduler de tareas programadas...")
         Scheduler.start()
 

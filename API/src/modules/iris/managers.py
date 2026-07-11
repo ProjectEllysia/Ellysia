@@ -924,6 +924,33 @@ class IrisManager(TaskTrackingMixin):
             repo.update(fresh)
             return True
 
+    @classmethod
+    def reconcile_orphaned_analyses(cls) -> int:
+        """Marca como ``failed`` los análisis huérfanos tras un apagado abrupto.
+
+        Espejo de ``ScanManager.reconcile_orphaned_scans`` (Themis): si el
+        proceso se mata mientras un análisis está en pending/running, no queda
+        tarea viva en TaskQueue que lo actualice tras reiniciar, y el registro
+        se queda así para siempre. Se llama una vez al arrancar la API.
+
+        Returns:
+            Número de análisis marcados como failed.
+        """
+        tq = TaskQueue.get_instance()
+        fixed = 0
+        with UnitOfWork() as uow:
+            repo = IrisAnalysisRepository(uow)
+            for analysis in repo.get_active_analyses():
+                external_id = f"{cls.EXTERNAL_ID_PREFIX}{analysis.id}"
+                task = tq.get_task_by_external_id(external_id, cls.TASK_CATEGORY)
+                if task is not None and str(task.status) == "pending":
+                    continue
+                analysis.status = "failed"
+                analysis.finished_at = utcnow_naive()
+                repo.update(analysis)
+                fixed += 1
+        return fixed
+
     def _fail_analysis(self, analysis_id: int) -> None:
         """Mark an analysis as ``failed`` with a finished timestamp."""
         try:

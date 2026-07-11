@@ -33,6 +33,15 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
             .all()
         )
 
+    def get_active_analyses(self) -> List[IrisAnalysis]:
+        """Analyses still pending/running — used to detect orphans after a restart."""
+        return (
+            self._session.query(IrisAnalysis)
+            .filter(IrisAnalysis.status.in_(["pending", "running"]))
+            .order_by(IrisAnalysis.started_at.asc())
+            .all()
+        )
+
     def get_by_user_paginated(self, user_id: int, page: int, per_page: int) -> Tuple[List[IrisAnalysis], int]:
         """Return a page of analyses for a user plus the total count.
 
