@@ -168,6 +168,29 @@ def test_update_status_if_noop_when_already_terminal(app, regular_user):
             assert ScanRepository(uow).get_by_id(scan_id).status == ScanStatus.FINISHED.value
 
 
+# ------------------------------------------------------------------------- B8
+# get_scan_status() debe usar el mismo vocabulario que scan.status ("finished"),
+# no el de TaskStatus ("completed"), cuando cae al fallback de BD (job ya no
+# está en TaskQueue).
+
+
+def test_get_scan_status_fallback_uses_finished_vocabulary(app, regular_user, monkeypatch):
+    import src.modules.themis.managers.scan as scan_mod
+
+    class _NoTaskQueue:
+        def get_task_by_external_id(self, external_id, category=None):
+            return None
+
+    monkeypatch.setattr(scan_mod.TaskQueue, "get_instance", lambda: _NoTaskQueue())
+
+    from src.modules.themis.managers import NmapScanManager
+
+    scan_id = _make_scan(app, regular_user.id, ScanStatus.FINISHED)
+    with app.app_context():
+        status = NmapScanManager().get_scan_status(scan_id)
+        assert status == "finished"
+
+
 def test_openvas_scheduled_flow_rejects_private_ip(app):
     # C3: la validación de host único/IP privada vivía solo en el endpoint
     # HTTP; el flujo programado (scheduling._run_openvas_scan) llamaba a

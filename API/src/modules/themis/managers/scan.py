@@ -158,11 +158,17 @@ class ScanManager(TaskTrackingMixin, ABC):
         Returns:
             Status string, or None if not found.
         """
+        # B8: cuando el job de TaskQueue ya no está (expiró de Redis, o el
+        # proceso se reinició), caemos al estado persistido en BD — que usa
+        # el vocabulario de ScanStatus ("finished"), no el de TaskStatus
+        # ("completed"). Antes esta rama devolvía "completed", así que el
+        # mismo escaneo podía verse como "finished" o "completed" según de
+        # dónde se leyera el estado.
         status = self.task_status_of(scan_id)
         if status is not None:
             return status
         if self.is_scan_finished(scan_id):
-            return str(TaskStatus.COMPLETED)
+            return ScanStatus.FINISHED.value
         return None
 
     def is_scan_finished(self, scan_id: int) -> bool:
