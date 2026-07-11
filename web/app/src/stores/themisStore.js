@@ -19,7 +19,9 @@ export const useThemisStore = defineStore('themis', () => {
   /* ════════════════════════════════ MUNDOS ═════════════════════════════ */
   // Themis vive en dos mundos: el motor propio (Lybra) y los escáneres
   // externos (Nmap/Nikto/OpenVAS). El toggle de ThemisView conmuta entre ellos.
-  const world = ref('external') // 'external' | 'lybra'
+  // Lybra es el mundo por defecto (roadmap Fase 6: el motor propio es el
+  // protagonista, Nmap/Nikto/OpenVAS quedan como segunda opinión opcional).
+  const world = ref('lybra') // 'external' | 'lybra'
   function setWorld(w) { world.value = w }
 
   /* ════════════════════════════════ TABS ═══════════════════════════════ */
