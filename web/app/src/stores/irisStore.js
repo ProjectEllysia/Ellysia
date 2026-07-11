@@ -183,30 +183,44 @@ export const useIrisStore = defineStore('iris', () => {
     currentStatus.polling = true
     currentStatus.status = 'pending'
     currentStatus.progress = 0
+    _pollStatus(id)
+  }
 
-    pollTimer = setInterval(async () => {
-      const st = await getStatus(id)
-      if (!st) return
+  // B10: setInterval con callback async no esperaba a que la petición anterior
+  // terminara — si getStatus/getReport tardaban más de 2s, podían dispararse
+  // varias peticiones solapadas. setTimeout re-encadenado (mismo idioma que
+  // traceroute/Themis) garantiza que el siguiente sondeo no arranca hasta que
+  // el actual termina. El chequeo de `currentStatus.polling` evita que un
+  // ciclo en vuelo se reprograme después de que stopPolling() ya corrió.
+  async function _pollStatus(id) {
+    const st = await getStatus(id)
+    if (!currentStatus.polling) return
 
-      currentStatus.status = st.status
-      currentStatus.progress = st.progress ?? null
+    if (!st) {
+      pollTimer = setTimeout(() => _pollStatus(id), 2000)
+      return
+    }
 
-      if (st.status === 'finished') {
-        await getReport(id)
-        await fetchResults()
-        stopPolling()
-      } else if (st.status === 'failed' || st.status === 'cancelled') {
-        currentReport.data = { status: st.status }
-        currentReport.loading = false
-        await fetchResults()
-        stopPolling()
-      }
-    }, 2000)
+    currentStatus.status = st.status
+    currentStatus.progress = st.progress ?? null
+
+    if (st.status === 'finished') {
+      await getReport(id)
+      await fetchResults()
+      stopPolling()
+    } else if (st.status === 'failed' || st.status === 'cancelled') {
+      currentReport.data = { status: st.status }
+      currentReport.loading = false
+      await fetchResults()
+      stopPolling()
+    } else {
+      pollTimer = setTimeout(() => _pollStatus(id), 2000)
+    }
   }
 
   function stopPolling() {
     if (pollTimer) {
-      clearInterval(pollTimer)
+      clearTimeout(pollTimer)
       pollTimer = null
     }
     currentStatus.polling = false
