@@ -1,5 +1,7 @@
 from marshmallow import Schema, fields, validate, validates_schema, ValidationError
 
+from src.modules.shared import UTCDateTime
+
 
 class TokenRequestSchema(Schema):
     grantType = fields.String(required=True, validate=validate.OneOf(["password", "refresh_token"]))
@@ -84,8 +86,8 @@ class UserProfileSchema(Schema):
     first_name = fields.String()
     last_name = fields.String()
     role = fields.String()
-    created_at = fields.DateTime(format="iso", allow_none=True)
-    password_changed_at = fields.DateTime(format="iso", allow_none=True)
+    created_at = UTCDateTime(allow_none=True)
+    password_changed_at = UTCDateTime(allow_none=True)
 
 
 class UserListItemSchema(Schema):
@@ -95,7 +97,7 @@ class UserListItemSchema(Schema):
     first_name = fields.String()
     last_name = fields.String()
     role = fields.String()
-    created_at = fields.DateTime(format="iso", allow_none=True)
+    created_at = UTCDateTime(allow_none=True)
     attributes = fields.List(fields.String())
 
 
@@ -160,4 +162,4 @@ class MfaDisableRequestSchema(Schema):
 
 class MfaStatusResponseSchema(Schema):
     enabled = fields.Boolean()
-    confirmedAt = fields.DateTime(format="iso", allow_none=True)
+    confirmedAt = UTCDateTime(allow_none=True)

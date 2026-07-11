@@ -94,12 +94,34 @@ def _run_openvas_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> No
     logger.info("OpenVAS scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
 
 
+def _run_lybra_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None:
+    _require_args(arguments, ["target"], "lybra")
+
+    logger.info("Launching Lybra scheduled scan #%d: %s", ps_id, arguments["target"])
+
+    from ..managers import LybraEngineManager
+
+    # Self-discovery mode (Fase T): a scheduled scan has no prior Nmap scan to
+    # analyse, so it always discovers its own ports. discover_ports/deep are
+    # optional, same knobs the manual launch panel exposes.
+    scan_id = LybraEngineManager().run_scan(
+        target=arguments["target"],
+        discover_ports=arguments.get("discover_ports"),
+        deep=bool(arguments.get("deep", False)),
+        user_id=user_id,
+        programed_scan_id=ps_id,
+    )
+
+    logger.info("Lybra scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
+
+
 class Scheduler:
 
     _TASK_MAPPING: dict[ScanType, Callable[[int, int, dict[str, Any]], None]] = {
         ScanType.NMAP:    _run_nmap_scan,
         ScanType.NIKTO:   _run_nikto_scan,
         ScanType.OPENVAS: _run_openvas_scan,
+        ScanType.LYBRA:   _run_lybra_scan,
     }
 
     _scheduler: Optional[_BgScheduler] = None

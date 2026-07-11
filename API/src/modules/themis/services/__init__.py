@@ -4,6 +4,7 @@ from .reports import (
     NmapPrintingStrategy,
     NiktoPrintingStrategy,
     OpenVASPrintingStrategy,
+    LybraPrintingStrategy,
     PDFCreator,
 )
 
@@ -43,6 +44,7 @@ __all__ = [
     NmapPrintingStrategy,
     NiktoPrintingStrategy,
     OpenVASPrintingStrategy,
+    LybraPrintingStrategy,
     PDFCreator,
     HistoryStatsService,
     NiktoResultProcessor,

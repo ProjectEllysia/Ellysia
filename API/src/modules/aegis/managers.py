@@ -58,7 +58,7 @@ from src.modules.shared._documents import (
     update_document_status,
     serialize_document_list,
 )
-from src.modules.shared import assert_owned, utcnow_naive
+from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc
 
 from .model import AegisDocument, Campaign, CampaignRecipient, DistributionList, Topic
 from .services import AegisAIWriter, AegisAlertFetcher, AlertSource, AegisAlert, AegisContent
@@ -130,7 +130,7 @@ class AegisManager:
                 "tips": [t.to_dict() for t in doc.tips],
             },
             "alerts": [a.to_dict() for a in doc.alerts],
-            "generatedAt": doc.generated_at.isoformat() if doc.generated_at else None, # type: ignore
+            "generatedAt": isoformat_utc(doc.generated_at), # type: ignore
         }
 
         if doc.status == "done": # type: ignore

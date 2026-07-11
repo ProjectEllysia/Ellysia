@@ -43,11 +43,9 @@
 import { computed } from 'vue'
 import { useThemisStore } from '@/stores/themisStore'
 import HistoryChart from '@/components/themis/HistoryChart.vue'
+import { SCAN_TYPES, SCAN_TYPE_ORDER } from '@/constants/scanTypes'
 
 const store = useThemisStore()
-
-const TOOL_LABELS = { nmap: 'Nmap (red)', nikto: 'Nikto (web)', openvas: 'OpenVAS (vulnerabilidades)' }
-const TOOL_ORDER = ['nmap', 'nikto', 'openvas']
 
 const selectedKey = computed(() => {
   const s = store.history.selected
@@ -59,9 +57,9 @@ const groupedHosts = computed(() => {
   for (const h of store.history.hosts) {
     (byType[h.scanType] ??= []).push(h)
   }
-  return TOOL_ORDER
+  return SCAN_TYPE_ORDER
     .filter(type => byType[type]?.length)
-    .map(type => ({ type, label: TOOL_LABELS[type] ?? type, hosts: byType[type] }))
+    .map(type => ({ type, label: SCAN_TYPES[type]?.fullLabel ?? type, hosts: byType[type] }))
 })
 
 function onSelect(event) {

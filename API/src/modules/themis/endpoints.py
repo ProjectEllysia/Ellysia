@@ -31,6 +31,7 @@ from .managers import (
     ScanFolderManager,
     ScanHistoryManager,
     TracerouteManager,
+    AuthorizedTargetManager,
 )
 from .model import ScanType
 from .exceptions import (
@@ -47,6 +48,8 @@ from .exceptions import (
     FolderNotFoundError,
     FolderNameInvalidError,
     ScanAlreadyInFolderError,
+    AuthorizedTargetNotFoundError,
+    DuplicateAuthorizedTargetError,
 )
 from .schemas import (
     ScanIdQuerySchema,
@@ -56,6 +59,9 @@ from .schemas import (
     LybraScanRequestSchema,
     FindingStateRequestSchema,
     FindingStateResponseSchema,
+    AddAuthorizedTargetSchema,
+    AuthorizedTargetListResponseSchema,
+    AuthorizedTargetActionResponseSchema,
     ResultsQuerySchema,
     GeneratePdfRequestSchema,
     DocumentStatusQuerySchema,
@@ -358,6 +364,74 @@ def start_lybra_scan(data):
     }
 
 
+@themis_blp.post("/authorized-targets")
+@themis_blp.arguments(AddAuthorizedTargetSchema)
+@themis_blp.response(201, AuthorizedTargetActionResponseSchema, description="Authorized target added")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(409, schema=ErrorSchema, description="Target already registered")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.THEMIS_CREATE])
+@limiter.limit("60 per hour; 200 per day")
+@handle_exceptions(default_exception=DuplicateAuthorizedTargetError, logger=logger)
+def add_authorized_target(data):
+    """Añadir un objetivo (IP o CIDR) al registro de objetivos autorizados (roadmap §6)."""
+    user = get_current_user()
+    entry = AuthorizedTargetManager().add(user.id, data["target"], data.get("label"))
+    logger.info(f"Objetivo autorizado {entry.id} ('{entry.target}') añadido por {user.username}")
+    return {
+        "message": "Objetivo autorizado añadido correctamente",
+        "targetId": entry.id,
+        "target": entry.target,
+        "user": user.username,
+    }
+
+
+@themis_blp.get("/authorized-targets")
+@themis_blp.response(200, AuthorizedTargetListResponseSchema, description="User's authorized targets")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=AuthorizedTargetNotFoundError, logger=logger)
+def list_authorized_targets():
+    """Listar el registro de objetivos autorizados del usuario."""
+    user = get_current_user()
+    entries = AuthorizedTargetManager().list(user.id)
+    return {
+        "message": "Objetivos autorizados obtenidos correctamente",
+        "targets": [
+            {"id": e.id, "target": e.target, "label": e.label, "createdAt": e.created_at}
+            for e in entries
+        ],
+        "user": user.username,
+    }
+
+
+@themis_blp.delete("/authorized-targets/<int:target_id>")
+@themis_blp.response(200, AuthorizedTargetActionResponseSchema, description="Authorized target removed")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Authorized target not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.THEMIS_DELETE])
+@limiter.limit("60 per hour; 200 per day")
+@handle_exceptions(default_exception=AuthorizedTargetNotFoundError, logger=logger)
+def delete_authorized_target(target_id: int):
+    """Eliminar una entrada del registro de objetivos autorizados."""
+    user = get_current_user()
+    AuthorizedTargetManager().remove(target_id, user.id)
+    logger.info(f"Objetivo autorizado {target_id} eliminado por {user.username}")
+    return {
+        "message": "Objetivo autorizado eliminado correctamente",
+        "targetId": target_id,
+        "target": "",
+        "user": user.username,
+    }
+
+
 @themis_blp.patch("/findings/<int:finding_id>")
 @themis_blp.arguments(FindingStateRequestSchema)
 @themis_blp.response(200, FindingStateResponseSchema, description="Finding state updated")
@@ -616,7 +690,16 @@ def delete_scan(scan_id: int):
 
     if scan.status in CANCELLABLE_STATES:
         logger.info(f"Cancelando escaneo {scan_id} antes de eliminar")
-        manager.cancel_scan(scan_id, user.id) # type: ignore
+        # La cancelación es cooperativa (solo señaliza al worker, no mata el
+        # proceso — ver TaskQueue.cancel): si falla, el subproceso (nmap/nikto/
+        # openvas) puede seguir vivo. Borrar la fila igualmente lo dejaría
+        # huérfano y para siempre invisible para la app, así que no se procede.
+        if not manager.cancel_scan(scan_id, user.id): # type: ignore
+            raise ScanExecutionError(
+                scan_type=scan.scan_type,
+                target=scan.target,
+                reason="No se pudo cancelar el escaneo en curso; no se ha eliminado para evitar dejar el proceso huérfano",
+            )
 
     if not manager.delete_scan(scan_id):
         raise ScanExecutionError(

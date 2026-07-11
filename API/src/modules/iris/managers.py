@@ -22,7 +22,7 @@ import src.modules.system.config_reading as CR
 from src.modules.aegis.exceptions import DocumentNotFoundError
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import read_repo
-from src.modules.shared import assert_owned, utcnow_naive
+from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
 
 from .exceptions import (
@@ -241,8 +241,8 @@ class IrisManager(TaskTrackingMixin):
             "unwrappedFromForward": context.unwrapped_from_forward,
             "wrapperFrom": context.wrapper_from or None,
             "wrapperSubject": context.wrapper_subject or None,
-            "startedAt": analysis.started_at.isoformat() if analysis.started_at else None,
-            "finishedAt": analysis.finished_at.isoformat() if analysis.finished_at else None,
+            "startedAt": isoformat_utc(analysis.started_at),
+            "finishedAt": isoformat_utc(analysis.finished_at),
             "user": username,
             "rules": rules_data,
             "recommendations": recommendations,
@@ -508,8 +508,8 @@ class IrisManager(TaskTrackingMixin):
                 "status": a.status,
                 "totalScore": a.total_score,
                 "verdict": a.verdict,
-                "startedAt": a.started_at.isoformat() if a.started_at else None, # type: ignore
-                "finishedAt": a.finished_at.isoformat() if a.finished_at else None, # type: ignore
+                "startedAt": isoformat_utc(a.started_at), # type: ignore
+                "finishedAt": isoformat_utc(a.finished_at), # type: ignore
             }
             for a in items
         ]

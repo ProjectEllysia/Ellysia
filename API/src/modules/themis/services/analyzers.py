@@ -5,6 +5,10 @@ This module provides AI-powered analysis classes for different scan types:
 - NmapAIWriter: Analyzes Nmap network scans
 - NiktoAIWriter: Analyzes Nikto web vulnerability scans
 - OpenVASAIWriter: Analyzes OpenVAS vulnerability scans
+- LybraAIWriter: Analyzes Lybra engine findings (already structured by the
+  engine itself — cve_ids/cvss/epss/qod/confirmed — so unlike the other three
+  writers it does not need a text-heuristic "bucket into security controls"
+  preprocessing step)
 
 Each writer delegates model calling to a scribe ``AIGenerator`` (Ollama or
 OpenAI strategy, chosen per module in SecOpsConfig.json) to produce security
@@ -20,7 +24,7 @@ import src.modules.system.config_reading as CR
 from src.modules.scribe import AIInput, AIGenerator, build_generator, WEB_SEARCH_TOOL
 from src.modules.scribe.exceptions import AIResponseError
 
-from ..model import NmapScan, NiktoScan, OpenVASScan
+from ..model import NmapScan, NiktoScan, OpenVASScan, LybraScan
 
 
 def _extract_json_with_regex(raw: str) -> Optional[dict]:
@@ -676,6 +680,146 @@ class OpenVASAIWriter:
             }
 
         prompt = self._build_user_prompt(scan_data, processed)
+
+        ai_input = AIInput(
+            system_prompt = self._build_system_prompt(),
+            user_prompt   = prompt,
+            tools         = [WEB_SEARCH_TOOL],
+            num_predict   = 2048,
+            temperature   = 0.1,
+            top_p         = 0.75,
+            repeat_penalty = 1.3,
+        )
+
+        result = self._generator.digest(ai_input)
+        return self._parse_response(result.text)
+
+    def _parse_response(self, raw: str, attempt: int = 0) -> dict:
+        """Parse the AI response JSON with validation."""
+        if not raw:
+            raise AIResponseError("Respuesta vacía", attempt=attempt)
+
+        try:
+            result = json.loads(raw)
+            valid = ["CRÍTICO", "ALTO", "MEDIO", "BAJO", "INFORMATIVO"]
+            risk_level = result.get("risk_level")
+            if risk_level is None or not isinstance(risk_level, str) or risk_level.upper() not in valid:
+                result["risk_level"] = "BAJO"
+
+            result.setdefault("executive_summary", "Análisis completado.")
+            result.setdefault("technical_analysis", "Análisis de vulnerabilidades completado.")
+            result.setdefault("recommendations", [])
+            result.setdefault("conclusions", "Continuar con el plan de remediación.")
+
+            return result
+        except json.JSONDecodeError:
+            recovered = _extract_json_with_regex(raw)
+            if recovered is not None:
+                return recovered
+            raise AIResponseError(f"Respuesta inválida: {raw[:200]}", attempt=attempt)
+
+
+class LybraAIWriter:
+    """AI writer for Lybra engine scan security analysis.
+
+    Unlike the other three writers, Lybra's own `Finding` rows already carry
+    CVE ids, CVSS, EPSS, KEV membership, QoD and the confirmed/hypothesis
+    distinction — the engine did that correlation, not free text needing a
+    heuristic "bucket into security controls" pass. This writer's job is
+    narrower: turn an already-structured, already-prioritized finding list
+    into a readable executive narrative. Model calling is delegated to an
+    injected ``AIGenerator`` (scribe).
+
+    The system prompt enforces:
+    - Never invent a CVE, CVSS or EPSS value beyond what is supplied
+    - Weigh `confirmed=true` findings above `confirmed=false` hypotheses
+    - Respect `in_kev` (actively exploited) as the strongest urgency signal
+
+    Attributes:
+        _generator: scribe AIGenerator used for model calling.
+    """
+
+    def __init__(self, generator: Optional[AIGenerator] = None) -> None:
+        """Initialize Lybra AI writer."""
+        self._generator = generator or build_generator("themis")
+
+    def _build_system_prompt(self) -> str:
+        prompts_config = CR.get_prompts_config()
+        return prompts_config.get("lybra", {}).get("system", "")
+
+    def _build_user_prompt(self, scan_data: dict, findings: list) -> str:
+        target = scan_data.get("target", "desconocido")
+        started = scan_data.get("started_at", "N/A")
+        exposure = scan_data.get("exposure", "unknown")
+
+        confirmed = [f for f in findings if f.get("confirmed")]
+        kev = [f for f in findings if f.get("in_kev")]
+
+        # Cap the payload to the highest-signal findings rather than dumping
+        # everything: confirmed + KEV first (never dropped), then a sample of
+        # the rest, so a host with hundreds of open-port entries doesn't drown
+        # the handful of real vulnerabilities in the prompt.
+        priority_ids = {id(f) for f in confirmed} | {id(f) for f in kev}
+        sample = confirmed + kev + [f for f in findings if id(f) not in priority_ids][:15]
+
+        findings_for_ai = [{
+            "titulo": f.get("title", "")[:160],
+            "categoria": f.get("category", ""),
+            "cve_ids": f.get("cve_ids") or [],
+            "cvss": f.get("cvss_score"),
+            "epss": f.get("epss_score"),
+            "en_kev": bool(f.get("in_kev")),
+            "confirmado": bool(f.get("confirmed")),
+            "qod": f.get("qod"),
+            "estado": f.get("state", "open"),
+        } for f in sample]
+
+        prompts_config = CR.get_prompts_config()
+        template = prompts_config.get("lybra", {}).get("userTemplate", "")
+
+        return template.replace("{{target}}", str(target)) \
+                    .replace("{{started}}", str(started)) \
+                    .replace("{{exposure}}", str(exposure)) \
+                    .replace("{{total_findings}}", str(len(findings))) \
+                    .replace("{{confirmed_count}}", str(len(confirmed))) \
+                    .replace("{{kev_count}}", str(len(kev))) \
+                    .replace("{{findings_json}}", json.dumps(findings_for_ai, indent=2, ensure_ascii=False))
+
+    def generate(self, scan: LybraScan) -> dict:
+        """Generate AI security analysis for a Lybra scan.
+
+        Reads the scan's own `Finding` rows directly via the repository —
+        `LybraScan` deliberately carries no ORM relationship to `Finding`
+        (see `repositories.py`), so this mirrors how the manager/report code
+        already fetches them rather than adding one just for this writer.
+        """
+        from src.modules.infrastructure.session import read_repo
+        from ..repositories import ScanRepository
+        from ..lybra import classify_exposure
+
+        scan_data = {
+            "target": scan.target,
+            "started_at": scan.started_at.isoformat() if getattr(scan, 'started_at', None) else "N/A",
+            "exposure": classify_exposure(scan.target),
+        }
+
+        rows = read_repo(ScanRepository).get_findings_by_scan(scan.id)
+        findings = [{
+            "title": f.title, "category": f.category, "cve_ids": f.cve_ids,
+            "cvss_score": f.cvss_score, "epss_score": f.epss_score, "in_kev": f.in_kev,
+            "confirmed": f.confirmed, "qod": f.qod, "state": f.state,
+        } for f in rows]
+
+        if not findings:
+            return {
+                "executive_summary": "El motor no ha producido hallazgos para este objetivo.",
+                "risk_level": "INFORMATIVO",
+                "technical_analysis": "Sin datos suficientes para un análisis.",
+                "recommendations": [],
+                "conclusions": "Continuar con monitoreo regular.",
+            }
+
+        prompt = self._build_user_prompt(scan_data, findings)
 
         ai_input = AIInput(
             system_prompt = self._build_system_prompt(),

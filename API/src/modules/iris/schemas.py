@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from marshmallow import Schema, ValidationError, fields, validate, validates_schema
 
+from src.modules.shared import UTCDateTime
+
 
 class AnalyzeRequestSchema(Schema):
     """Request body for ``POST /iris/analyze``.
@@ -239,8 +241,8 @@ class IrisDocumentStatusResponseSchema(Schema):
     analysisId = fields.Integer()
     status = fields.String()
     verdict = fields.String(allow_none=True)
-    createdAt = fields.DateTime(format="iso", allow_none=True)
-    generatedAt = fields.DateTime(format="iso", allow_none=True)
+    createdAt = UTCDateTime(allow_none=True)
+    generatedAt = UTCDateTime(allow_none=True)
     downloadUrl = fields.String(allow_none=True)
 
 
@@ -250,8 +252,8 @@ class IrisDocumentItemSchema(Schema):
     analysisId = fields.Integer()
     status = fields.String()
     verdict = fields.String(allow_none=True)
-    createdAt = fields.DateTime(format="iso", allow_none=True)
-    generatedAt = fields.DateTime(format="iso", allow_none=True)
+    createdAt = UTCDateTime(allow_none=True)
+    generatedAt = UTCDateTime(allow_none=True)
     downloadUrl = fields.String(allow_none=True)
 
 

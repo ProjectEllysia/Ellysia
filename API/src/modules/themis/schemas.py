@@ -1,5 +1,8 @@
 from marshmallow import Schema, fields, validate, validates_schema, ValidationError
 
+from src.modules.shared import UTCDateTime
+from .model import ScanType
+
 
 class ScanIdQuerySchema(Schema):
     id = fields.Integer(required=True)
@@ -49,6 +52,31 @@ class FindingStateResponseSchema(Schema):
     user = fields.String()
 
 
+class AddAuthorizedTargetSchema(Schema):
+    target = fields.String(required=True, validate=validate.Length(min=1, max=64))
+    label = fields.String(load_default=None, allow_none=True, validate=validate.Length(max=255))
+
+
+class AuthorizedTargetSchema(Schema):
+    id = fields.Integer()
+    target = fields.String()
+    label = fields.String(allow_none=True)
+    createdAt = UTCDateTime()
+
+
+class AuthorizedTargetListResponseSchema(Schema):
+    message = fields.String()
+    targets = fields.List(fields.Nested(AuthorizedTargetSchema))
+    user = fields.String()
+
+
+class AuthorizedTargetActionResponseSchema(Schema):
+    message = fields.String()
+    targetId = fields.Integer()
+    target = fields.String()
+    user = fields.String()
+
+
 class ResultsQuerySchema(Schema):
     type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "openvas", "lybra", "all"]))
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))
@@ -71,7 +99,9 @@ class DocumentStatusQuerySchema(Schema):
 
 
 class DocumentsQuerySchema(Schema):
-    scan_type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "openvas", "all"]))
+    # Derived from ScanType, not hand-listed: a new scan type is filterable
+    # here automatically, no schema edit needed.
+    scan_type = fields.String(load_default="all", validate=validate.OneOf([t.value for t in ScanType] + ["all"]))
 
 
 class ScheduledScanRequestSchema(Schema):
@@ -135,8 +165,8 @@ class DocumentStatusResponseSchema(Schema):
     scanId = fields.Integer()
     status = fields.String()
     aiReport = fields.Boolean()
-    createdAt = fields.DateTime(format="iso", allow_none=True)
-    generatedAt = fields.DateTime(format="iso", allow_none=True)
+    createdAt = UTCDateTime(allow_none=True)
+    generatedAt = UTCDateTime(allow_none=True)
     downloadUrl = fields.String(allow_none=True)
 
 
@@ -172,7 +202,7 @@ class ScheduledScanResponseSchema(Schema):
     scanType = fields.String()
     scheduleType = fields.String()
     scheduleConfig = fields.Dict()
-    nextRunAt = fields.DateTime(format="iso", allow_none=True)
+    nextRunAt = UTCDateTime(allow_none=True)
     user = fields.String()
 
 
@@ -183,9 +213,9 @@ class ScheduledScanListItemSchema(Schema):
     scheduleType = fields.String()
     scheduleConfig = fields.Dict()
     isActive = fields.Boolean()
-    lastRunAt = fields.DateTime(format="iso", allow_none=True)
-    nextRunAt = fields.DateTime(format="iso", allow_none=True)
-    createdAt = fields.DateTime(format="iso", allow_none=True)
+    lastRunAt = UTCDateTime(allow_none=True)
+    nextRunAt = UTCDateTime(allow_none=True)
+    createdAt = UTCDateTime(allow_none=True)
 
 
 class ScheduledScanListResponseSchema(Schema):
@@ -225,8 +255,8 @@ class AddScansToFolderSchema(Schema):
 class FolderSchema(Schema):
     id = fields.Integer(allow_none=True)
     name = fields.String()
-    createdAt = fields.DateTime(format="iso", allow_none=True)
-    updatedAt = fields.DateTime(format="iso", allow_none=True)
+    createdAt = UTCDateTime(allow_none=True)
+    updatedAt = UTCDateTime(allow_none=True)
     scanCount = fields.Integer()
     scans = fields.List(fields.Dict())
 
@@ -278,7 +308,7 @@ class HistoryHostItemSchema(Schema):
     target = fields.String()
     scanType = fields.String()
     scanCount = fields.Integer()
-    lastScannedAt = fields.DateTime(format="iso", allow_none=True)
+    lastScannedAt = UTCDateTime(allow_none=True)
 
 
 class HistoryHostsResponseSchema(Schema):

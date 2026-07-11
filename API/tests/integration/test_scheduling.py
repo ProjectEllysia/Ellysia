@@ -19,7 +19,8 @@ from unittest import mock
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.themis.managers import NmapScanManager, ProgramedScanManager
+from src.modules.themis.exceptions import InvalidProgramedTaskArgumentError
+from src.modules.themis.managers import LybraEngineManager, NmapScanManager, ProgramedScanManager
 from src.modules.themis.model import NmapScan, ScanStatus, ScanType
 from src.modules.themis.repositories import ProgramedScanRepository, ScanRepository
 from src.modules.themis.services.scheduling import Scheduler
@@ -160,6 +161,47 @@ def test_sync_from_db_refreshes_stale_next_run_on_restart(app, regular_user):
             assert abs((next_run - expected).total_seconds()) < 60
         finally:
             Scheduler.stop()
+
+
+def test_lybra_scan_type_is_schedulable(app, regular_user):
+    """Regresión: el endpoint validaba scan_type contra el enum ScanType
+    completo (que ya incluía LYBRA) pero _REQUIRED_ARGS y _TASK_MAPPING no
+    tenían entrada para Lybra, así que programar uno aceptaba la petición y
+    luego reventaba con un KeyError sin capturar dentro del manager."""
+    with app.app_context():
+        ps = ProgramedScanManager.register(
+            user_id=regular_user.id,
+            scan_type=ScanType.LYBRA,
+            arguments={"target": "127.0.0.1"},
+            schedule_type="interval",
+            schedule_config=_SCHEDULE_CONFIG,
+        )
+        ps_id = ps.id
+
+    with mock.patch.object(LybraEngineManager, "run_scan", return_value=999) as mock_run:
+        with app.app_context():
+            Scheduler.execute(ps_id)
+
+    mock_run.assert_called_once()
+    _, kwargs = mock_run.call_args
+    assert kwargs["target"] == "127.0.0.1"
+    assert kwargs["programed_scan_id"] == ps_id
+
+    assert _fetch(app, ps_id).last_run_at is not None
+
+
+def test_register_rejects_missing_required_argument_cleanly(app, regular_user):
+    """Un tipo soportado (está en _REQUIRED_ARGS) pero sin su argumento
+    obligatorio debe fallar con un 400 claro, no con una excepción distinta."""
+    with app.app_context():
+        with pytest.raises(InvalidProgramedTaskArgumentError):
+            ProgramedScanManager.register(
+                user_id=regular_user.id,
+                scan_type=ScanType.LYBRA,
+                arguments={},
+                schedule_type="interval",
+                schedule_config=_SCHEDULE_CONFIG,
+            )
 
 
 def test_build_trigger_uses_utc(app):

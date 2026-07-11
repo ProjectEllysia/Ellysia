@@ -25,7 +25,8 @@ class ProgramedScanManager():
     _REQUIRED_ARGS: dict[ScanType, List[str]] = {
         ScanType.NMAP:      ["target_host", "target_ports"],
         ScanType.NIKTO:     ["target_domain"],
-        ScanType.OPENVAS:   ["target"]
+        ScanType.OPENVAS:   ["target"],
+        ScanType.LYBRA:     ["target"],
     }
 
     @classmethod
@@ -71,7 +72,14 @@ class ProgramedScanManager():
 
     @classmethod
     def _assert_valid_arguments(cls, scan_type: ScanType, arguments: dict[str, str]):
-        required_list = cls._REQUIRED_ARGS[scan_type]
+        # .get(), not [] — a ScanType the endpoint's own enum-wide validation
+        # accepts but that has no entry here (e.g. a new tool not yet wired
+        # into scheduling) must fail as a clean 400, not an uncaught KeyError.
+        required_list = cls._REQUIRED_ARGS.get(scan_type)
+        if required_list is None:
+            raise InvalidProgramedTaskArgumentError(
+                scan_type, f"escaneos programados no soportan el tipo '{scan_type}'"
+            )
 
         for field in required_list:
             if arguments.get(field) is None:

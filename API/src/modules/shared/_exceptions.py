@@ -4,7 +4,7 @@ from functools import wraps
 import traceback
 import sys
 
-from ._time import utcnow_naive
+from ._time import utcnow_naive, isoformat_utc
 
 
 class ErrorCode(Enum):
@@ -39,6 +39,9 @@ class ErrorCode(Enum):
     PROGRAMED_SCAN_NOT_FOUND = 1309
     PROGRAMED_SCAN_ALREADY_ACTIVE = 1310
     PROGRAMED_SCAN_INVALID_ARGUMENT = 1311
+    TARGET_NOT_AUTHORIZED = 1312
+    AUTHORIZED_TARGET_NOT_FOUND = 1313
+    AUTHORIZED_TARGET_ALREADY_EXISTS = 1314
 
     REPORT_ERROR = 1400
     REPORT_GENERATION_ERROR = 1401
@@ -126,7 +129,7 @@ class SecOpsException(Exception):
             "error": self.__class__.__name__,
             "code": self.code.value,
             "message": self.user_message,
-            "timestamp": self.timestamp.isoformat(),
+            "timestamp": isoformat_utc(self.timestamp),
         }
 
         if self.details:

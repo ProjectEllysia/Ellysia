@@ -141,6 +141,56 @@ class Host(Base):
 
 
 # =========================================================================
+# HOST SERVICE (Lybra Fase 5 — the asset's attack surface, tracked over time)
+# =========================================================================
+
+class HostService(Base):
+    """A service Lybra has observed open on a host, tracked across scans.
+
+    Roadmap Fase 5's "cambio de sujeto": a ``Scan`` is one observation of a
+    host's attack surface at a point in time, not the surface itself. This
+    table is that surface — one row per ``(host, port, protocol)`` — so a new
+    scan can be diffed against it to notice a port opening for the first time
+    or a service's version changing, independently of whether that change
+    happens to also match a known CVE. Findings answer "is this vulnerable?";
+    this table answers "did the surface itself change?".
+
+    Populated by every Lybra scan of a target, whether its services came from
+    self-discovery or from a prior Nmap scan's already-collected ports — both
+    paths resolve the same ``Service`` shape before this table sees it. Only
+    Lybra writes here today; it is not yet a fusion of every scanner's view.
+
+    Attributes:
+        id: Primary key.
+        host_id: The asset this service belongs to.
+        port: The port number.
+        protocol: ``"tcp"`` or ``"udp"``.
+        name: The service's conventional name (``"http"``, ``"ssh"``...).
+        product: The identified product, or ``None`` if never resolved.
+        version: The identified version, or ``None``.
+        cpe: The CPE last resolved for this service, or ``None``.
+        first_seen_at: When this port was first observed open.
+        last_seen_at: When this port was last observed open (bumped every scan
+            that still finds it open — a stale row implies the port closed).
+    """
+    __tablename__ = "HostService"
+    __table_args__ = (
+        UniqueConstraint("host_id", "port", "protocol", name="uq_host_service_host_port_protocol"),
+    )
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    host_id       = Column(Integer, ForeignKey("Host.id", ondelete="CASCADE"), nullable=False, index=True)
+    port          = Column(Integer, nullable=False)
+    protocol      = Column(String(8), nullable=False, default="tcp")
+    name          = Column(String(64), nullable=True)
+    product       = Column(String(128), nullable=True)
+    version       = Column(String(64), nullable=True)
+    cpe           = Column(String(255), nullable=True)
+    first_seen_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    last_seen_at  = Column(DateTime, nullable=False, default=utcnow_naive)
+
+
+# =========================================================================
 # TRACEROUTE
 # =========================================================================
 
@@ -286,6 +336,12 @@ class Scan(Base):
         back_populates="scan",
         uselist=False,
     )
+
+    # viewonly: Finding rows are written via ScanRepository.persist_findings
+    # (plain inserts keyed by scan_id), never through this relationship. Read
+    # side only, e.g. LybraMetricExtractor (history.py) counting a scan's
+    # findings without a tool-specific query.
+    findings = relationship("Finding", viewonly=True)
 
     __mapper_args__ = {
         "polymorphic_identity": "scan",
@@ -764,6 +820,36 @@ class LybraScan(Scan):
 
     def __repr__(self):
         return f"<LybraScan(id={self.id}, target='{self.target}', source={self.source_scan_id})>"
+
+
+class AuthorizedTarget(Base):
+    """A target (IP or CIDR) a user has declared authorized for Lybra's
+    network-touching operations (roadmap §6): self-discovery (Fase T), own
+    fingerprinting (Fase F) and the active check runtime (Fase R). Analysing
+    services already known from a prior Nmap scan (Fase 1) does not need an
+    entry here, since it sends no new packets to the target.
+
+    Attributes:
+        id: Primary key.
+        user_id: Owner of this register entry.
+        target: Canonical IP or CIDR string, e.g. "10.0.0.5/32" or "10.0.0.0/24".
+        label: Optional free-text note (client name, authorization scope...).
+        created_at: When the entry was added.
+    """
+    __tablename__ = "AuthorizedTarget"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    user_id    = Column(Integer, ForeignKey("User.id"), nullable=False, index=True)
+    target     = Column(String(64), nullable=False)
+    label      = Column(String(255), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "target", name="uq_authorizedtarget_user_target"),
+    )
+
+    def __repr__(self):
+        return f"<AuthorizedTarget(id={self.id}, target='{self.target}', user_id={self.user_id})>"
 
 
 class Finding(Base):

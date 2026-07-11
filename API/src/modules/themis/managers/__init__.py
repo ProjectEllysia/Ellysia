@@ -41,6 +41,7 @@ from .nikto import NiktoScanManager
 from .openvas import OpenVASScanManager
 from .lybra_engine import LybraEngineManager
 from .kb import KbSyncManager
+from .authorized_targets import AuthorizedTargetManager
 from .reports import ThemisReportManager
 
 __all__ = [
@@ -55,5 +56,6 @@ __all__ = [
     "OpenVASScanManager",
     "LybraEngineManager",
     "KbSyncManager",
+    "AuthorizedTargetManager",
     "ThemisReportManager",
 ]

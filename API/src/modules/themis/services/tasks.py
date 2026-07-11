@@ -287,7 +287,7 @@ class NmapScanTask(_Task):
     def _build_command(self) -> List[str]:
         return [
             "sudo", "-n", "nmap",
-            "-sV", "-sT",
+            "-sV", "-sS", "-T4",
             "-p", self.target_ports,
             "-oX", str(self._output_file),
             self.target,

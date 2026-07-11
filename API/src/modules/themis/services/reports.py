@@ -48,8 +48,8 @@ from src.modules.shared._exceptions import IllegalStateError, ValidationError
 
 logger = logging.getLogger(__name__)
 
-from ..model import NmapScan, NiktoScan, Scan, Host, ScanType
-from .analyzers import NmapAIWriter, NiktoAIWriter, OpenVASAIWriter
+from ..model import NmapScan, NiktoScan, LybraScan, Scan, Host, ScanType
+from .analyzers import NmapAIWriter, NiktoAIWriter, OpenVASAIWriter, LybraAIWriter
 
 
 
@@ -58,6 +58,7 @@ class ThemisTool(Enum):
     NMAP    = "nmap"
     NIKTO   = "nikto"
     OPENVAS = "openvas"
+    LYBRA   = "lybra"
 
 
 class ColorType(Enum):
@@ -386,7 +387,9 @@ class PrintingStrategy(ABC):
         logger.info(f"[IA] Iniciando para scan {self.scan.id} ({scan_type})")
 
         prompts = CR.get_prompts_config()
-        tool_key = {'NmapScan': 'nmap', 'NiktoScan': 'nikto', 'OpenVASScan': 'openvas'}.get(scan_type, 'nmap')
+        tool_key = {
+            'NmapScan': 'nmap', 'NiktoScan': 'nikto', 'OpenVASScan': 'openvas', 'LybraScan': 'lybra',
+        }.get(scan_type, 'nmap')
         tool_prompts = prompts.get(tool_key, {})
 
         if not tool_prompts.get('system'):
@@ -724,10 +727,21 @@ class PDFCreator:
         scan: Source scan data.
     """
 
-    def __init__(self, scan_id: int) -> None:
+    def __init__(self, scan_id: int, document_id: Optional[int] = None) -> None:
+        """
+        Args:
+            scan_id: Primary key of the scan to report on.
+            document_id: Primary key of the ThemisDocument this PDF belongs to,
+                if any. Included in the output filename so two documents for
+                the same scan (e.g. one plain, one with AI, or a re-generated
+                one) never collide on disk — without it, a later generation
+                for the same scan silently overwrote the file every earlier
+                document row's `filename` still pointed to.
+        """
         self.directory = CR.get_directory_of(CR.DirectoryType.OUTPUT_THEMIS)
         self.printing_strategy = PrintingStrategy.resolve_printing_strategy(scan_id)
         self.scan = self.printing_strategy.scan
+        self.document_id = document_id
 
     def _set_pdf_metadata(self, doc) -> None:
         """Set PDF document metadata.
@@ -1039,9 +1053,12 @@ class PDFCreator:
         """
         os.makedirs(self.directory, exist_ok=True)
 
+        # Unique per document, not just per scan — two documents for the same
+        # scan (plain + AI, or a re-generation) must not share a file path.
+        stem = f"{self.scan.id}_{self.document_id}" if self.document_id else str(self.scan.id)
         filename = os.path.join(
             self.directory,
-            f"{self.scan.id}{self.printing_strategy.get_filename_suffix()}",
+            f"{stem}{self.printing_strategy.get_filename_suffix()}",
         )
 
         doc = SimpleDocTemplate(
@@ -1914,3 +1931,328 @@ class NiktoPrintingStrategy(PrintingStrategy):
 
     def get_report_title(self) -> str:
         return "Análisis de Vulnerabilidades Web"
+
+
+@PrintingStrategy.register(ScanType.LYBRA)
+class LybraPrintingStrategy(PrintingStrategy):
+    """Printing strategy for Lybra engine scan reports.
+
+    Unlike the other three strategies, the source data is the unified
+    `Finding` table rather than a tool-specific incident/vulnerability model,
+    fetched via the repository since `LybraScan` deliberately carries no ORM
+    relationship to it (see `repositories.py`). Cards are sorted by the same
+    `priority` ladder the web UI uses, computed the same way
+    (`score_finding`), so the PDF and the web view never disagree.
+
+    Color palette: Green theme, matching Lybra's own UI identity.
+
+    Attributes:
+        writer: LybraAIWriter instance for AI analysis.
+        color_palette: Green color palette for the report.
+    """
+
+    _PRIORITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+    _PRIORITY_LABEL = {"CRITICAL": "CRÍTICA", "HIGH": "ALTA", "MEDIUM": "MEDIA", "LOW": "BAJA", "INFO": "INFO"}
+    _STATE_LABEL = {"open": "Abierto", "fixed": "Corregido", "regressed": "Regresado", "accepted": "Aceptado"}
+
+    def __init__(self, scan: LybraScan) -> None:
+        """Initialize Lybra printing strategy.
+
+        Args:
+            scan: LybraScan instance to generate report from.
+        """
+        super().__init__(scan)
+        self.writer = LybraAIWriter()
+
+        palette_config = CR.get_tool_color_palette(ThemisTool.LYBRA)
+
+        self.color_palette = {
+            ColorType.BLACK: palette_config.get("black", "#1A2410"),
+            ColorType.DARK: palette_config.get("dark", "#4A6132"),
+            ColorType.MAIN: palette_config.get("main", "#7CA163"),
+            ColorType.SECONDARY: palette_config.get("secondary", "#A8C98F"),
+            ColorType.LIGHT: palette_config.get("light", "#D4E8C4"),
+            ColorType.WHITE: palette_config.get("white", "#F3F8EE"),
+        }
+
+    def append_body(self, theme: "ReportTheme", elements: list, ai_report: bool = False) -> None:
+        from src.modules.infrastructure.session import read_repo
+        from ..repositories import ScanRepository
+        from ..lybra import classify_exposure, score_finding
+
+        rows = read_repo(ScanRepository).get_findings_by_scan(self.scan.id)
+        exposure = classify_exposure(self.scan.target)
+
+        findings = [{
+            "title": f.title, "category": f.category, "port": f.port, "service": f.service,
+            "cpe": f.cpe, "cve_ids": f.cve_ids or [], "cvss_score": f.cvss_score,
+            "epss_score": f.epss_score, "in_kev": f.in_kev, "qod": f.qod, "confirmed": f.confirmed,
+            "source": f.source, "state": f.state,
+        } for f in rows]
+        for f in findings:
+            f["priority"] = score_finding(f, exposure)
+        self._enrich_with_cve_context(findings)
+
+        self._append_lybra_header(theme, elements, findings, exposure)
+
+        if findings:
+            self._append_lybra_summary(theme, elements, findings)
+
+        elements.append(Paragraph("Hallazgos", theme.subtitle))
+        elements.append(Spacer(1, 0.1 * inch))
+
+        if not findings:
+            elements.append(Paragraph("El motor no detectó ningún hallazgo para este objetivo.", theme.info))
+        else:
+            # Priority first (the contextual CVSS+EPSS+KEV+exposure synthesis that is
+            # Lybra's whole value proposition — see roadmap §1); raw CVSS only breaks
+            # ties *within* the same priority band, confirmed findings before hypotheses.
+            sorted_findings = sorted(
+                findings,
+                key=lambda f: (
+                    self._PRIORITY_ORDER.get(f["priority"], 5),
+                    not f["confirmed"],
+                    -(f["cvss_score"] or 0),
+                ),
+            )
+            for idx, f in enumerate(sorted_findings, start=1):
+                self._append_lybra_finding_card(theme, elements, f, idx)
+
+        if ai_report:
+            self._append_ai_analysis(elements, theme)
+
+        # ponytail: no per-target history chart for Lybra yet — _append_history_stats'
+        # tool_map only knows the Nmap/Nikto/OpenVAS scan classes, since it relies on
+        # a MetricExtractor for each; a Finding-based one for Lybra is separate scope
+        # from wiring the PDF itself. Add it when that's needed.
+
+    def _enrich_with_cve_context(self, findings: list) -> None:
+        """Attach CVE description/CWE/fixed-version context from the local KB.
+
+        One bulk query for every CVE referenced by this scan's findings — never
+        one query per finding. Nothing here is invented: `description`/`cwe_ids`
+        come straight from the mirrored NVD record, and `fixed_version` is only
+        set when NVD's own applicability data (the CpeMatch that matched this
+        finding's product) actually states an upper bound.
+        """
+        from src.modules.infrastructure.session import read_repo
+        from ..repositories import KbRepository
+        from ..lybra import parse_cpe23
+
+        cve_ids = sorted({cve for f in findings for cve in (f.get("cve_ids") or [])})
+        if not cve_ids:
+            return
+
+        entries = {e.cve_id: e for e in read_repo(KbRepository).get_cves_with_matches(cve_ids)}
+
+        for f in findings:
+            ids = f.get("cve_ids") or []
+            if not ids:
+                continue
+            entry = entries.get(ids[0])
+            if entry is None:
+                continue
+            f["description"] = entry.description
+            f["cwe_ids"] = entry.cwe_ids or []
+            f["fixed_version"] = self._find_fixed_version(entry, f.get("cpe"), parse_cpe23)
+
+    @staticmethod
+    def _find_fixed_version(entry, cpe, parse_cpe23) -> Optional[str]:
+        """Read the 'fixed in' version bound off the CpeMatch row for this
+        finding's own product, when NVD states one. Returns None rather than
+        guessing when no matching row has an upper bound."""
+        if not cpe:
+            return None
+        parsed = parse_cpe23(cpe)
+        if not parsed:
+            return None
+        for m in entry.cpe_matches:
+            if m.vendor == parsed["vendor"] and m.product == parsed["product"]:
+                if m.version_end_excluding:
+                    return m.version_end_excluding
+                if m.version_end_including:
+                    return m.version_end_including
+        return None
+
+    def _append_lybra_header(self, theme: "ReportTheme", elements: list, findings: list, exposure: str) -> None:
+        """Cabecera del informe: título y tablas de objetivo/escaneo."""
+        scan = self.scan
+
+        elements.append(Paragraph("Informe del Motor Lybra", theme.title))
+        elements.append(Spacer(1, 0.1 * inch))
+
+        exposure_label = "Pública" if exposure == "public" else "Privada" if exposure == "private" else "Desconocida"
+        target_info = [
+            ["Objetivo:", str(getattr(scan, "target", ""))],
+            ["Exposición:", exposure_label],
+        ]
+        if getattr(scan, "source_scan_id", None):
+            target_info.append(["Analiza escaneo Nmap:", f"#{scan.source_scan_id}"])
+        target_table = theme.kv_table(target_info, col_widths=[2 * inch, 4 * inch])
+        elements.append(target_table)
+        elements.append(Spacer(1, 0.1 * inch))
+
+        started = getattr(scan, "started_at", None)
+        started_str = started.strftime("%d/%m/%Y %H:%M:%S") if started else "N/A"
+        confirmed_count = sum(1 for f in findings if f["confirmed"])
+
+        scan_info = [
+            ["ID del escaneo:", str(getattr(scan, "id", ""))],
+            ["Fecha de inicio:", started_str],
+            ["Total de hallazgos:", str(len(findings))],
+            ["Confirmados activamente:", str(confirmed_count)],
+        ]
+        info_table = theme.kv_table(scan_info, col_widths=[2 * inch, 4 * inch])
+        elements.append(info_table)
+        elements.append(Spacer(1, 0.3 * inch))
+
+    def _append_lybra_summary(self, theme: "ReportTheme", elements: list, findings: list) -> None:
+        """Tabla resumen: cantidad de hallazgos por prioridad."""
+        palette = self.color_palette
+        dark = colors.HexColor(palette[ColorType.DARK])
+        white = colors.HexColor(palette[ColorType.WHITE])
+
+        elements.append(Paragraph("Resumen por prioridad", theme.subtitle))
+        elements.append(Spacer(1, 0.1 * inch))
+
+        counts: Dict[str, int] = {}
+        for f in findings:
+            counts[f["priority"]] = counts.get(f["priority"], 0) + 1
+
+        data = [["Prioridad", "Cantidad"]]
+        for prio in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+            if prio not in counts:
+                continue
+            data.append([self._PRIORITY_LABEL[prio], str(counts[prio])])
+
+        table = Table(data, colWidths=[3 * inch, 2 * inch], repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(palette[ColorType.SECONDARY])),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 10),
+            ("TOPPADDING", (0, 0), (-1, 0), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+            ("BACKGROUND", (0, 1), (-1, -1), white),
+            ("TEXTCOLOR", (0, 1), (-1, -1), dark),
+            ("ALIGN", (0, 1), (-1, -1), "CENTER"),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 1), (-1, -1), 9),
+            ("TOPPADDING", (0, 1), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+            ("GRID", (0, 0), (-1, -1), 0.4, dark),
+        ]))
+        elements.append(table)
+        elements.append(Spacer(1, 0.3 * inch))
+
+    def _append_lybra_finding_card(self, theme: "ReportTheme", elements: list, finding: dict, idx: int) -> None:
+        """Tarjeta de un hallazgo: cabecera de prioridad, nombre, detalles,
+        descripción y referencias (mismo lenguaje visual que Nmap/Nikto/OpenVAS:
+        cada bloque lleva su propio borde, no solo la cabecera)."""
+        severity_bg = {
+            "CRITICAL": colors.HexColor("#ffcccc"),
+            "HIGH": colors.HexColor("#ffe6cc"),
+            "MEDIUM": colors.HexColor("#fff4cc"),
+            "LOW": colors.HexColor("#e6f7ff"),
+            "INFO": colors.HexColor("#f0f0f0"),
+        }
+        palette = self.color_palette
+        main = colors.HexColor(palette[ColorType.MAIN])
+        dark = colors.HexColor(palette[ColorType.DARK])
+        border = colors.HexColor("#dddddd")
+        prio = finding["priority"]
+        bgcolor = severity_bg.get(prio, severity_bg["INFO"])
+
+        elements.append(CondPageBreak(2.5 * inch))
+
+        confirmed_text = "Comprobado" if finding["confirmed"] else "Potencial"
+        header = theme.severity_header_table(
+            left_text=f"Hallazgo #{idx}: {self._PRIORITY_LABEL.get(prio, prio)}",
+            right_text=confirmed_text,
+            bg_color=bgcolor,
+        )
+        elements.append(header)
+
+        # Título en banda de color principal, igual que el nombre de vulnerabilidad de OpenVAS.
+        title_para = Paragraph(finding["title"], ParagraphStyle(
+            "LybraFindingTitle", parent=theme.styles["Normal"], fontName="Helvetica-Bold",
+            fontSize=10, textColor=colors.whitesmoke, alignment=TA_LEFT,
+        ))
+        title_table = Table([[title_para]], colWidths=[6 * inch])
+        title_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), main),
+            ("LEFTPADDING", (0, 0), (-1, -1), 10),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("BOX", (0, 0), (-1, -1), 0.6, dark),
+        ]))
+        elements.append(title_table)
+
+        details = []
+        if finding.get("port"):
+            details.append(["Puerto/servicio:", f"{finding.get('service') or '?'}:{finding['port']}"])
+        if finding.get("cve_ids"):
+            details.append(["CVE:", ", ".join(finding["cve_ids"])])
+        if finding.get("cwe_ids"):
+            details.append(["CWE:", ", ".join(finding["cwe_ids"])])
+        if finding.get("cvss_score") is not None:
+            details.append(["CVSS:", str(finding["cvss_score"])])
+        if finding.get("epss_score") is not None:
+            details.append(["EPSS (30 días):", f"{finding['epss_score'] * 100:.1f}%"])
+        if finding.get("in_kev"):
+            details.append(["CISA KEV:", "Sí — explotada activamente"])
+        if finding.get("fixed_version"):
+            details.append(["Corregido en:", f"{finding['fixed_version']} o superior"])
+        if finding.get("state") and finding["state"] != "open":
+            details.append(["Estado:", self._STATE_LABEL.get(finding["state"], finding["state"])])
+        if finding.get("source") and finding["source"] != "lybra":
+            details.append(["Corroborado por:", finding["source"]])
+
+        if details:
+            detail_table = Table(details, colWidths=[1.7 * inch, 4.3 * inch])
+            detail_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f9f9f9")),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+                ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor(palette[ColorType.BLACK])),
+                ("ALIGN", (0, 0), (0, -1), "LEFT"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("GRID", (0, 0), (-1, -1), 0.4, border),
+            ]))
+            elements.append(detail_table)
+
+        description = finding.get("description")
+        if description:
+            text = description[:450] + ("..." if len(description) > 450 else "")
+            desc_style = ParagraphStyle(
+                "LybraFindingDesc", parent=theme.body, fontSize=8.5, leading=11.5,
+            )
+            para = Paragraph(f"Qué implica: {text}", desc_style)
+            desc_table = Table([[para]], colWidths=[6 * inch])
+            desc_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("BOX", (0, 0), (-1, -1), 0.4, border),
+            ]))
+            elements.append(desc_table)
+
+        elements.append(Spacer(1, 0.2 * inch))
+
+    def get_filename_suffix(self) -> str:
+        return "_Lybra.pdf"
+
+    def get_picture_name(self, dark: bool = False) -> str:
+        picture_name = "Themis-Green-Bg"
+        return picture_name + "Dark.png" if dark else picture_name + "Light.png"
+
+    def get_report_title(self) -> str:
+        return "Veredicto del Motor Lybra"

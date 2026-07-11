@@ -17,15 +17,10 @@
         </button>
         <transition name="form-fade">
           <div v-if="scheduling.showForm" class="create-form">
-            <div class="form-row" v-if="activeTab === 'nmap'">
-              <div class="field field-lg"><label>Host</label><input v-model="form.args.target_host" placeholder="192.168.1.0/24" /></div>
-              <div class="field field-md"><label>Puertos</label><input v-model="form.args.target_ports" placeholder="80,443 o 1-1000" /></div>
-            </div>
-            <div class="form-row" v-if="activeTab === 'nikto'">
-              <div class="field field-lg"><label>Dominio</label><input v-model="form.args.target_domain" placeholder="example.com" /></div>
-            </div>
-            <div class="form-row" v-if="activeTab === 'openvas'">
-              <div class="field field-lg"><label>Target (IP)</label><input v-model="form.args.target" placeholder="192.168.1.1" /></div>
+            <div class="form-row">
+              <div v-for="f in scheduleFields" :key="f.key" class="field" :class="`field-${f.size || 'lg'}`">
+                <label>{{ f.label }}</label><input v-model="form.args[f.key]" :placeholder="f.placeholder" />
+              </div>
             </div>
             <div class="form-row">
               <div class="field field-sm"><label>Programación</label>
@@ -79,6 +74,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
+import { SCAN_TYPES } from '@/constants/scanTypes'
 
 const props = defineProps({ scheduled: { type: Object, required: true }, scheduling: { type: Object, required: true }, activeTab: { type: String, required: true } })
 const emit = defineEmits(['create', 'deactivate', 'delete', 'toggleForm'])
@@ -87,9 +83,9 @@ const expanded = ref(false)
 const filtered = computed(() => props.scheduled.scans.filter(s => s.scanType === props.activeTab))
 const form = reactive({ args: {}, scheduleType: 'interval', scheduleConfig: { every: 60, unit: 'minutes' } })
 
-const ARGS_MAP = { nmap: { target_host: '', target_ports: '1-1000' }, nikto: { target_domain: '' }, openvas: { target: '' } }
+const scheduleFields = computed(() => SCAN_TYPES[props.activeTab]?.scheduleFields ?? [])
 watch(() => props.activeTab, (type) => {
-  form.args = { ...ARGS_MAP[type] }
+  form.args = { ...(SCAN_TYPES[type]?.defaultArgs ?? {}) }
   form.scheduleType = 'interval'
   form.scheduleConfig = { every: 60, unit: 'minutes' }
 }, { immediate: true })
@@ -98,11 +94,7 @@ function handleCreate() { emit('create', { scan_type: props.activeTab, arguments
 function handleDeactivate(id) { if (confirm('Desactivar este escaneo programado?')) emit('deactivate', id) }
 function handleDelete(id) { if (confirm('Eliminar permanentemente este escaneo programado?')) emit('delete', id) }
 function formatArgs(type, args) {
-  if (!args) return '—'
-  if (type === 'nmap') { const p = []; if (args.target_host) p.push(args.target_host); if (args.target_ports) p.push(`puertos ${args.target_ports}`); return p.length ? p.join(' · ') : '—' }
-  if (type === 'nikto') return args.target_domain || '—'
-  if (type === 'openvas') return args.target || '—'
-  return '—'
+  return SCAN_TYPES[type]?.formatArgs?.(args) ?? '—'
 }
 function formatSchedule(type, config) {
   if (!config) return '—'
@@ -161,6 +153,7 @@ function formatDate(iso) { if (!iso) return '—'; return new Date(iso).toLocale
 .type-badge.nmap { color: var(--success); background: var(--success-dim); }
 .type-badge.nikto { color: var(--warn); background: var(--warn-dim); }
 .type-badge.openvas { color: var(--danger); background: var(--danger-dim); }
+.type-badge.lybra { color: var(--accent-bright); background: var(--accent-dim); }
 .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 0.3rem; }
 .status-dot.active { background: var(--success); }
 .status-dot.revoked { background: var(--text-muted); }

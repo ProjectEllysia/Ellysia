@@ -32,12 +32,14 @@ from src.modules.infrastructure import BaseRepository, UnitOfWork
 from src.modules.shared import utcnow_naive
 
 from .model import (
+    AuthorizedTarget,
     CpeMatch,
     CveEntry,
     LybraScan,
     EpssScore,
     Finding,
     Host,
+    HostService,
     KevEntry,
     NiktoIncident,
     NiktoScan,
@@ -586,6 +588,48 @@ class ScanRepository(BaseRepository[Scan]):
         )
         return self.get_findings_by_scan(prev.id) if prev else []
 
+    def get_host_services(self, host_id: int) -> List[HostService]:
+        """Return a host's currently-tracked attack surface (Fase 5)."""
+        return (
+            self._session.query(HostService)
+            .filter(HostService.host_id == host_id)
+            .all()
+        )
+
+    def upsert_host_service(
+        self, host_id: int, port: int, protocol: str,
+        name: Optional[str], product: Optional[str], version: Optional[str], cpe: Optional[str],
+    ) -> None:
+        """Record a service as currently open, creating or refreshing its row.
+
+        Bumps ``last_seen_at`` and the identification fields (only when the new
+        scan actually resolved something — an unresolved rescan must not erase
+        a product/version a previous scan already found) on every call, so a
+        service's row always reflects its most recent observation.
+        """
+        existing = (
+            self._session.query(HostService)
+            .filter(
+                HostService.host_id == host_id,
+                HostService.port == port,
+                HostService.protocol == protocol,
+            )
+            .first()
+        )
+        now = utcnow_naive()
+        if existing is None:
+            self._session.add(HostService(
+                host_id=host_id, port=port, protocol=protocol, name=name,
+                product=product, version=version, cpe=cpe,
+                first_seen_at=now, last_seen_at=now,
+            ))
+            return
+        existing.last_seen_at = now
+        existing.name = name or existing.name
+        existing.product = product or existing.product
+        existing.version = version or existing.version
+        existing.cpe = cpe or existing.cpe
+
 
 class ThemisReportRepository(BaseRepository[ThemisDocument]):
     """
@@ -751,6 +795,19 @@ class KbRepository(BaseRepository[CveEntry]):
     def get_epss(self, cve_id: str) -> Optional[EpssScore]:
         return self._session.query(EpssScore).filter(EpssScore.cve_id == cve_id).one_or_none()
 
+    def get_cves_with_matches(self, cve_ids: List[str]) -> List[CveEntry]:
+        """Bulk-fetch CveEntry rows (with their CpeMatch rows eager-loaded) for a
+        list of CVE ids. Used to enrich a report with description/CWE/fixed-version
+        context in one query instead of one per finding."""
+        if not cve_ids:
+            return []
+        return (
+            self._session.query(CveEntry)
+            .filter(CveEntry.cve_id.in_(cve_ids))
+            .options(joinedload(CveEntry.cpe_matches))
+            .all()
+        )
+
     def counts(self) -> dict:
         """Row counts per KB table (for the sync summary / health checks)."""
         return {
@@ -800,6 +857,32 @@ class KbRepository(BaseRepository[CveEntry]):
             for key, value in epss_row.items():
                 setattr(epss, key, value)
         return epss
+
+    def bulk_upsert_epss(self, rows: List[dict], chunk_size: int = 5000) -> int:
+        """Upsert many EPSS rows in one round-trip per chunk.
+
+        The EPSS feed carries a score for essentially every known CVE
+        (300k+ rows). ``upsert_epss`` does one SELECT-then-add per row, which
+        at that volume takes on the order of hours; a single ``INSERT ...
+        ON CONFLICT DO UPDATE`` per chunk is the same operation done at
+        Postgres speed instead of ORM speed.
+        """
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        total = 0
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i:i + chunk_size]
+            if not chunk:
+                continue
+            stmt = pg_insert(EpssScore).values(chunk)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["cve_id"],
+                set_={"score": stmt.excluded.score, "percentile": stmt.excluded.percentile,
+                      "scored_at": stmt.excluded.scored_at},
+            )
+            self._session.execute(stmt)
+            total += len(chunk)
+        return total
 
 
 class ProgramedScanRepository(BaseRepository[ProgramedScan]):
@@ -964,3 +1047,35 @@ class ProgramedScanRepository(BaseRepository[ProgramedScan]):
             next_run_at=next_run_at,
         )
         return self.save(ps)
+
+
+class AuthorizedTargetRepository(BaseRepository[AuthorizedTarget]):
+    """Repository for the AuthorizedTarget entity (roadmap §6 register)."""
+
+    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
+        super().__init__(AuthorizedTarget, uow=uow, session=session)
+
+    def get_by_user(self, user_id: int) -> List[AuthorizedTarget]:
+        """Return all authorized-target entries for a user, newest first."""
+        return (
+            self._session.query(AuthorizedTarget)
+            .filter(AuthorizedTarget.user_id == user_id)
+            .order_by(AuthorizedTarget.created_at.desc())
+            .all()
+        )
+
+    def get_by_id_and_user(self, target_id: int, user_id: int) -> Optional[AuthorizedTarget]:
+        """Return an entry only if it belongs to the given user."""
+        return (
+            self._session.query(AuthorizedTarget)
+            .filter(AuthorizedTarget.id == target_id, AuthorizedTarget.user_id == user_id)
+            .one_or_none()
+        )
+
+    def get_by_target_and_user(self, target: str, user_id: int) -> Optional[AuthorizedTarget]:
+        """Return the entry matching the exact normalized target string, if any."""
+        return (
+            self._session.query(AuthorizedTarget)
+            .filter(AuthorizedTarget.target == target, AuthorizedTarget.user_id == user_id)
+            .one_or_none()
+        )

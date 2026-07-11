@@ -169,7 +169,7 @@ class ThemisReportManager:
         """Generate PDF in a background thread and update document status."""
 
         try:
-            pdf_creator = PDFCreator(scan_id)
+            pdf_creator = PDFCreator(scan_id, document_id)
             pdf_path = pdf_creator.print_pdf(ai_report=ai_report)
 
             with UnitOfWork() as uow:

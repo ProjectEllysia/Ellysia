@@ -1175,7 +1175,7 @@
       "timeout": 3
     },
     "kb": {
-      "enabled": false,
+      "enabled": true,
       "syncCron": "0 3 * * *",
       "nvdWindowDays": 8,
       "sources": {
@@ -1185,8 +1185,20 @@
       }
     },
     "lybra": {
-      "activeChecks": false,
-      "fingerprintingEnabled": false
+      "activeChecks": true,
+      "fingerprintingEnabled": true,
+      "colorPalette": {
+        "black": "#1a2410",
+        "dark": "#4a6132",
+        "main": "#7ca163",
+        "secondary": "#a8c98f",
+        "light": "#d4e8c4",
+        "white": "#f3f8ee"
+      },
+      "prompts": {
+        "system": "Eres un analista senior de seguridad ofensiva redactando la sección ejecutiva de un informe de pentest. Analizas la salida ya estructurada del motor de detección Lybra: cada hallazgo trae su CVE, CVSS, EPSS (probabilidad de explotación en 30 días), si está en la lista CISA KEV (explotación activa confirmada), y si fue 'confirmado' activamente o es una 'hipótesis' por versión de banner.\n\nREGLAS ABSOLUTAS:\n1. Generas EXCLUSIVAMENTE JSON válido, sin markdown, sin texto antes ni después.\n2. NUNCA inventas un CVE, CVSS o EPSS que no esté en los datos proporcionados. Si un hallazgo no trae CVSS, no le asignes uno.\n3. Un hallazgo 'confirmado=true' es un hecho verificado; uno 'confirmado=false' es una hipótesis por versión que puede ser un falso positivo (backport). Nunca los trates con el mismo nivel de certeza en el texto.\n4. 'en_kev=true' es la señal más fuerte de urgencia (se explota activamente en el mundo real) y debe mencionarse explícitamente si aparece en algún hallazgo.\n5. El 'risk_level' es un techo, no un promedio: si existe al menos un hallazgo confirmado o en KEV con CVSS alto, el nivel debe reflejarlo aunque el resto de hallazgos sean informativos.\n6. Las 'recommendations' deben ser accionables y concretas (qué actualizar, qué cerrar, qué comprobar), nunca genéricas tipo 'mejorar la seguridad'.\n7. Si prácticamente todos los hallazgos son de categoría 'open_port' sin CVEs, dilo explícitamente: es un mapa de superficie, no una lista de vulnerabilidades.\n\nFORMATO DE RESPUESTA (JSON estricto):\n{\n  \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n  \"executive_summary\": \"3-5 frases en español, para un lector no técnico: qué se encontró y por qué importa.\",\n  \"technical_analysis\": \"Análisis técnico más detallado, citando los CVEs/CVSS/EPSS concretos de los datos.\",\n  \"recommendations\": [\n    {\"title\": \"...\", \"description\": \"...\", \"priority\": \"ALTA|MEDIA|BAJA\", \"remediation\": \"acción concreta\", \"cve_refs\": [\"CVE-YYYY-NNNNN\"]}\n  ],\n  \"conclusions\": \"1-2 frases de cierre.\"\n}",
+        "userTemplate": "Escaneo Lybra sobre {{target}} (exposición: {{exposure}}), iniciado el {{started}}.\n\nTotal de hallazgos: {{total_findings}} | Confirmados activamente: {{confirmed_count}} | En CISA KEV: {{kev_count}}\n\nHallazgos (los confirmados y los de KEV van siempre incluidos; el resto es una muestra representativa):\n{{findings_json}}\n\nGenera el análisis en el formato JSON indicado en las instrucciones del sistema."
+      }
     },
     "nikto": {
       "colorPalette": {

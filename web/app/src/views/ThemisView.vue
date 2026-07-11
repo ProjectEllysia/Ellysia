@@ -19,21 +19,34 @@
       <Transition name="fade-swap" mode="out-in">
       <!-- ═══════════ MUNDO: MOTOR LYBRA ═══════════ -->
       <div v-if="store.world === 'lybra'" key="lybra" class="world-block">
-        <LybraLaunchPanel
-          :launching="store.launching"
-          :source-scans="store.sourceNmapScans.items"
-          :source-loading="store.sourceNmapScans.loading"
-          :authorized-targets="store.authorizedTargets.items"
-          :auth-targets-loading="store.authorizedTargets.loading"
-          @launch="handleLaunchLybra"
-          @load-sources="store.loadSourceNmapScans()"
-          @add-authorized-target="handleAddAuthorizedTarget"
-          @remove-authorized-target="store.removeAuthorizedTarget" />
-        <LybraResults
-          :scans="store.scans.lybra.results"
-          :loading="store.scans.lybra.loading"
-          @refresh="store.loadLybraScans()"
-          @delete="handleDeleteLybra" />
+        <button class="lybra-history-toggle" @click="store.setViewMode(store.viewMode === 'history' ? 'full' : 'history')">
+          {{ store.viewMode === 'history' ? '← Volver al motor' : 'Ver historial' }}
+        </button>
+        <HistoryPanel v-if="store.viewMode === 'history'" />
+        <template v-else>
+          <LybraLaunchPanel
+            :launching="store.launching"
+            :source-scans="store.sourceNmapScans.items"
+            :source-loading="store.sourceNmapScans.loading"
+            :authorized-targets="store.authorizedTargets.items"
+            :auth-targets-loading="store.authorizedTargets.loading"
+            @launch="handleLaunchLybra"
+            @load-sources="store.loadSourceNmapScans()"
+            @add-authorized-target="handleAddAuthorizedTarget"
+            @remove-authorized-target="store.removeAuthorizedTarget" />
+          <LybraResults
+            :scans="store.scans.lybra.results"
+            :loading="store.scans.lybra.loading"
+            :docs-by-scan="store.lybraDocs"
+            @refresh="store.loadLybraScans()"
+            @delete="handleDeleteLybra"
+            @load-docs="store.loadLybraDocs"
+            @generate-pdf="handleLybraGeneratePdf"
+            @download-doc="store.downloadDocument"
+            @delete-doc="handleLybraDeleteDoc" />
+          <ScheduledScansPanel :scheduled="store.scheduled" :scheduling="store.scheduling" active-tab="lybra"
+            @create="handleCreateScheduled" @deactivate="handleDeactivateScheduled" @delete="handleDeleteScheduled" @toggle-form="store.toggleScheduledForm()" />
+        </template>
       </div>
 
       <!-- ═══════════ MUNDO: ESCÁNERES EXTERNOS ═══════════ -->
@@ -189,6 +202,8 @@ watch(() => store.world, (w) => {
 
 async function handleLaunchLybra(payload) { await store.launchLybra(payload) }
 async function handleDeleteLybra(id) { if (confirm('¿Eliminar este escaneo Lybra y sus hallazgos?')) await store.deleteLybraScan(id) }
+async function handleLybraGeneratePdf(scanId, useAi) { await store.generateLybraPdf(scanId, useAi) }
+async function handleLybraDeleteDoc(scanId, docId) { await store.deleteLybraDoc(scanId, docId) }
 async function handleAddAuthorizedTarget({ target, label }) { await store.addAuthorizedTarget(target, label) }
 
 watch(activeBatchAction, (val) => {
@@ -259,6 +274,13 @@ async function handleDeleteScheduled(id) { await store.deleteScheduledScan(id) }
 .world-opt:hover { color: var(--text-dim); }
 .world-opt.active { background: var(--accent-dim); color: var(--accent-bright); font-weight: 600; box-shadow: inset 0 0 0 1px var(--accent); }
 .world-block { display: block; }
+
+.lybra-history-toggle {
+  display: block; margin: 0 0 0.85rem auto; padding: 0.45rem 0.8rem;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text-dim); font-size: 0.78rem; cursor: pointer; transition: all 0.2s;
+}
+.lybra-history-toggle:hover { border-color: var(--accent); color: var(--text); }
 
 /* Staggered entrance on page load — mirrors the hub's fade-up language.
    Only the two static children get it; the switchable view-block below

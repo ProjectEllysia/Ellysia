@@ -11,10 +11,12 @@ schema deliberately mirrors the shape of Nuclei's YAML templates, but is
 serialized as JSON so the feed needs no extra dependency; ingesting Nuclei's
 own YAML templates is left for a later phase.
 
-The scope of this layer, for now, is ``http`` checks covering the two
-highest-value, lowest-cost families — exposed paths (like ``/.git/config``) and
-missing security headers. TLS checks, request chaining, payloads/fuzzing and
-first-party script plugins are deliberate follow-ups.
+The scope of this layer covers the three highest-value, lowest-cost families the
+roadmap names first: exposed paths (like ``/.git/config``), missing security
+headers, and TLS/certificate hygiene (self-signed, expired, deprecated
+protocol — a ``type: "tls"`` check, evaluated against a handshake instead of an
+HTTP request/response). Request chaining, payloads/fuzzing and first-party
+script plugins are deliberate follow-ups.
 
 The runtime is pure given an injected ``fetch`` callable, so it can be
 unit-tested with hand-crafted responses and never touches the network in tests.
@@ -162,20 +164,24 @@ class Request:
 
 @dataclass(frozen=True)
 class Check:
-    """A declarative detection check (currently ``type: http`` only).
+    """A declarative detection check (``type: "http"`` or ``type: "tls"``).
 
     Attributes:
         id: The check's short identifier, e.g. ``"git-config-exposure"``.
         version: The check's version number.
-        type: The check kind (only ``"http"`` is implemented).
+        type: The check kind — ``"http"`` (request/matchers) or ``"tls"``
+            (hygiene rule evaluated against a handshake, see ``tls_rule``).
         category: The finding category to emit, e.g. ``"exposed_path"``.
         severity: A human-facing severity label.
         service: The service kind this check applies to, e.g. ``"http"``.
         mode: ``"safe"`` or ``"aggressive"`` — governs whether the runtime will
             run it in safe mode.
         requests: The requests the check makes; all must fire for it to match.
+            Unused by ``type: "tls"`` checks.
         finding: A template of finding fields (title, qod, confirmed, ...) merged
             into the emitted finding.
+        tls_rule: For ``type: "tls"`` checks, which hygiene rule to evaluate
+            (see ``_TLS_RULES``). Unused by ``type: "http"`` checks.
     """
     id: str
     version: int
@@ -186,6 +192,7 @@ class Check:
     mode: str
     requests: tuple
     finding: dict
+    tls_rule: Optional[str] = None
 
     @property
     def check_id(self) -> str:
@@ -245,6 +252,7 @@ def _parse_check(c: dict) -> Check:
         mode=c.get("mode", "safe"),
         requests=requests,
         finding=c.get("finding", {}),
+        tls_rule=c.get("tlsRule"),
     )
 
 
@@ -264,6 +272,33 @@ def is_http_service(service: Service) -> bool:
     return (service.name or "").lower() in _HTTP_SERVICE_NAMES or service.port in _HTTP_PORTS
 
 
+def is_tls_service(service: Service) -> bool:
+    """Return whether a service should be probed by TLS hygiene checks.
+
+    Args:
+        service: The service to test.
+
+    Returns:
+        ``True`` if the service's port is one we reach over TLS.
+    """
+    return service.port in _TLS_PORTS
+
+
+# Protocol versions considered deprecated/weak for a service exposed today.
+_WEAK_TLS_PROTOCOLS = {"SSLv2", "SSLv3", "TLSv1", "TLSv1.1"}
+
+# TLS hygiene rules a ``type: "tls"`` check can reference via ``tlsRule`` in the
+# feed. Each takes the ``TlsInfo`` a probe returned (duck-typed — this module
+# never imports the fingerprint module, to avoid a checks<->fingerprint
+# import cycle) and decides whether the check fires.
+_TLS_RULES: Dict[str, Callable] = {
+    "self_signed": lambda info: info.self_signed,
+    "expired": lambda info: info.expired,
+    "expiring_soon": lambda info: not info.expired and info.days_until_expiry is not None and info.days_until_expiry <= 30,
+    "deprecated_protocol": lambda info: info.protocol in _WEAK_TLS_PROTOCOLS,
+}
+
+
 class CheckRuntime:
     """Runs a set of checks against a host's HTTP services and emits findings.
 
@@ -278,6 +313,9 @@ class CheckRuntime:
             the check is abandoned rather than counted as a hit.
         mode: ``"safe"`` runs only checks marked safe; ``"aggressive"`` runs both.
         rate_limiter: An optional per-host limiter applied before each request.
+        tls_fetch: An optional ``(host, port) -> TlsInfo | None`` callable for
+            ``type: "tls"`` checks. When omitted, TLS checks are simply skipped
+            — callers that never wire a TLS probe pay nothing for this family.
     """
 
     def __init__(
@@ -286,41 +324,58 @@ class CheckRuntime:
         fetch: Callable[[str, Optional[int], str, str], Optional[Response]],
         mode: str = "safe",
         rate_limiter: Optional["HostRateLimiter"] = None,
+        tls_fetch: Optional[Callable[[str, int], object]] = None,
     ) -> None:
         self._checks = list(checks)
         self._fetch = fetch
         self._mode = mode
         self._rl = rate_limiter
+        self._tls_fetch = tls_fetch
 
     def run(self, host: str, services: Iterable[Service]) -> List[dict]:
-        """Run every applicable check against a host's HTTP services.
+        """Run every applicable check against a host's HTTP and TLS services.
 
         Args:
             host: The target host.
-            services: The host's discovered services (non-HTTP ones are skipped).
+            services: The host's discovered services (non-applicable ones are
+                skipped per check family).
 
         Returns:
             A finding dict for each check that fired.
         """
         findings: List[dict] = []
         for service in services:
-            if not is_http_service(service):
-                continue
-            for check in self._checks:
-                if not self._applies(check, service):
-                    continue
-                finding = self._run_check(check, host, service)
-                if finding is not None:
-                    findings.append(finding)
+            if is_http_service(service):
+                for check in self._checks:
+                    if not self._applies(check, service):
+                        continue
+                    finding = self._run_check(check, host, service)
+                    if finding is not None:
+                        findings.append(finding)
+            if self._tls_fetch is not None and is_tls_service(service):
+                for check in self._checks:
+                    if not self._applies_tls(check):
+                        continue
+                    finding = self._run_tls_check(check, host, service)
+                    if finding is not None:
+                        findings.append(finding)
         return findings
 
     def _applies(self, check: Check, service: Service) -> bool:
         """Return whether a check should run against a service in the current mode."""
         if check.type != "http":
             return False
-        if self._mode == "safe" and check.mode == "aggressive":
+        return self._applies_mode(check)
+
+    def _applies_tls(self, check: Check) -> bool:
+        """Return whether a TLS check should run in the current mode."""
+        if check.type != "tls" or check.tls_rule not in _TLS_RULES:
             return False
-        return True
+        return self._applies_mode(check)
+
+    def _applies_mode(self, check: Check) -> bool:
+        """Return whether ``check`` is allowed to run under the current safe/aggressive mode."""
+        return not (self._mode == "safe" and check.mode == "aggressive")
 
     def _run_check(self, check: Check, host: str, service: Service) -> Optional[dict]:
         """Run one check against one service, returning a finding if it fired.
@@ -335,6 +390,19 @@ class CheckRuntime:
             resp = self._fetch(host, service.port, request.method, request.path)
             if resp is None or not request.evaluate(resp):
                 return None
+        return self._finding(check, service)
+
+    def _run_tls_check(self, check: Check, host: str, service: Service) -> Optional[dict]:
+        """Run one TLS hygiene check against one service's handshake.
+
+        A transport failure (unreachable, handshake error) abandons the check —
+        no evidence means no finding, the same rule ``_run_check`` follows.
+        """
+        if self._rl is not None:
+            self._rl.acquire(host)
+        info = self._tls_fetch(host, service.port)
+        if info is None or not _TLS_RULES[check.tls_rule](info):
+            return None
         return self._finding(check, service)
 
     def _finding(self, check: Check, service: Service) -> dict:
@@ -405,6 +473,17 @@ class HttpProbe:
     def __init__(self, timeout: int = 8, max_bytes: int = 131072) -> None:
         self._timeout = timeout
         self._max_bytes = max_bytes
+        # We are scanning arbitrary hosts whose certificates we do not control,
+        # so every HTTPS leg — including one reached via a same-host redirect,
+        # e.g. a plain "http://" request answered with "Location: https://..." —
+        # must skip verification. A plain per-call context only covers the
+        # *initial* request; urllib's redirect handler opens the follow-up
+        # itself and falls back to the verifying default context, so a host
+        # that redirects HTTP to a self-signed HTTPS login page looked like a
+        # transport failure instead of a response to fingerprint.
+        self._opener = urllib.request.build_opener(
+            urllib.request.HTTPSHandler(context=ssl._create_unverified_context())
+        )
 
     def fetch(self, host: str, port: Optional[int], method: str, path: str) -> Optional[Response]:
         """Make a request and return it as a :class:`Response`.
@@ -455,10 +534,9 @@ class HttpProbe:
         scheme = "https" if port in _TLS_PORTS else "http"
         netloc = f"{host}:{port}" if port else host
         url = f"{scheme}://{netloc}{path}"
-        context = ssl._create_unverified_context() if scheme == "https" else None
         try:
             req = urllib.request.Request(url, method=method, headers={"User-Agent": "Lybra/1.0"})
-            with urllib.request.urlopen(req, timeout=self._timeout, context=context) as resp:
+            with self._opener.open(req, timeout=self._timeout) as resp:
                 return resp.status, resp.read(self._max_bytes), dict(resp.headers)
         except urllib.error.HTTPError as err:
             body = err.read(self._max_bytes) if hasattr(err, "read") else b""

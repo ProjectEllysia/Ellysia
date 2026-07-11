@@ -6,7 +6,7 @@ from datetime import timedelta
 import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
 from src.modules.infrastructure import UnitOfWork
-from src.modules.shared import utcnow_naive
+from src.modules.shared import utcnow_naive, isoformat_utc
 from ..repositories import TracerouteRepository
 from ..services import (
     TaskStatus,
@@ -211,7 +211,7 @@ class TracerouteManager(TaskTrackingMixin):
             "target": trace.target,
             "hops": trace.hops,
             "hopCount": trace.hop_count,
-            "computedAt": trace.created_at.isoformat() if trace.created_at else None,
+            "computedAt": isoformat_utc(trace.created_at),
             "cached": cached_hit,
             "status": "done" if trace.hops else "failed",
         }

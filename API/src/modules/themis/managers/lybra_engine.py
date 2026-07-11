@@ -7,7 +7,7 @@ import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import ITaskQueue, job_context
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import read_repo
-from src.modules.shared import utcnow_naive
+from src.modules.shared import utcnow_naive, isoformat_utc
 from ..repositories import (
     ScanRepository,
     KbRepository,
@@ -27,17 +27,20 @@ from ..lybra import (
     apply_lifecycle,
     classify_exposure,
     score_finding,
+    QOD_OPEN_PORT,
 )
-from ..services import _Task
+from ..services import _Task, LybraPrintingStrategy
 from ..exceptions import (
     ScanNotFoundError,
     FindingNotFoundError,
+    TargetNotAuthorizedError,
 )
 
 from .scan import ScanManager
 from .nmap import NmapScanManager
 from .nikto import NiktoScanManager
 from .openvas import OpenVASScanManager
+from .authorized_targets import AuthorizedTargetManager
 
 
 logger = logging.getLogger(__name__)
@@ -63,7 +66,11 @@ class LybraEngineManager(ScanManager):
 
     SCAN_TYPE = ScanType.LYBRA
     _MODEL = LybraScan
-    _strategy_class = None  # ponytail: no PDF for Lybra yet; wire a strategy when reports land
+    _strategy_class = LybraPrintingStrategy
+
+    # Categories that are point-in-time events, not persistent vulnerability
+    # state - excluded from lifecycle tracking (see Phase 2.5 in _run_lybra).
+    _EVENT_CATEGORIES = {"fingerprint", "surface_change"}
 
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         super().__init__(task_queue)
@@ -74,7 +81,8 @@ class LybraEngineManager(ScanManager):
         target: Optional[str] = None,
         discover_ports: Optional[list] = None,
         deep: bool = False,
-        timeout: int = 120
+        timeout: int = 120,
+        programed_scan_id: Optional[int] = None,
     ) -> int:
         """
         Start an Lybra engine scan in one of two modes.
@@ -89,6 +97,8 @@ class LybraEngineManager(ScanManager):
             deep: Fase 6 "análisis profundo" — also launch Nmap/Nikto/OpenVAS as
                 independent corroborator scans (fire-and-forget; their Finding
                 rows merge in at read time, see ``format_scan``).
+            programed_scan_id: Set when launched by the scheduler (Themis
+                scheduled scans), same convention as the other scan managers.
 
         Returns:
             Primary key of the created LybraScan record.
@@ -100,7 +110,12 @@ class LybraEngineManager(ScanManager):
                     raise ScanNotFoundError(source_scan_id)
                 scan_target = source.target
         elif target is not None:
+            # Self-discovery (Fase T) touches the target directly — requires
+            # an authorized-targets register entry (roadmap §6), unlike
+            # analysing a prior Nmap scan's already-collected services.
             scan_target = target
+            if not AuthorizedTargetManager.is_authorized(user_id, scan_target):
+                raise TargetNotAuthorizedError(scan_target)
         else:
             raise ValueError("run_scan requires source_scan_id or target")
 
@@ -108,6 +123,7 @@ class LybraEngineManager(ScanManager):
             target=scan_target,
             user_id=user_id,
             source_scan_id=source_scan_id, # type: ignore
+            programed_scan_id=programed_scan_id,
         )
         scan_id = scan.id
 
@@ -209,6 +225,16 @@ class LybraEngineManager(ScanManager):
                     source_host_id = host.id if host else None
                     services = services_from_discovered_ports(discovered_ports)
 
+                # Fase F/R only run against a target the user has explicitly
+                # authorized (roadmap §6). Self-discovery mode already
+                # guarantees this at launch (see run_scan); this also covers
+                # the sourceScanId mode, where the target comes from a prior
+                # Nmap scan that was never itself gated by this register.
+                target_authorized = bool(
+                    user_id and source_target
+                    and AuthorizedTargetManager.is_authorized(user_id, source_target)
+                )
+
                 # Phase 0.5 — own fingerprinting (Fase F), before the matcher runs.
                 # A self-discovered service (Fase T, no Nmap involved) carries no
                 # product/version at all; without this, the matcher below would
@@ -216,10 +242,18 @@ class LybraEngineManager(ScanManager):
                 # never find a single CVE. This never overrides a Nmap-sourced
                 # reading — see _fingerprint_services.
                 fingerprint_findings: list = []
-                if source_target and CR.is_lybra_fingerprinting_enabled():
+                if source_target and target_authorized and CR.is_lybra_fingerprinting_enabled():
                     services, fingerprint_findings = self._fingerprint_services(source_target, services)
 
                 previous_map = self._previous_findings_map(scan_repo, user_id, source_target, scan_id)
+
+                # Phase 0.7 — surface tracking (Fase 5's "cambio de sujeto"): a
+                # port opening for the first time, or a service's version
+                # changing, is an attack-surface event in its own right,
+                # independent of whether it happens to match a known CVE.
+                surface_findings: list = []
+                if source_host_id:
+                    surface_findings = self._detect_surface_changes(scan_repo, source_host_id, services)
 
                 engine = LybraEngine(
                     cve_lookup=kb_repo.cves_for_cpe,
@@ -228,10 +262,11 @@ class LybraEngineManager(ScanManager):
                 )
                 findings_data = engine.analyze(services)
                 findings_data.extend(fingerprint_findings)
+                findings_data.extend(surface_findings)
 
             # Phase 2 — active checks over the network, outside any transaction.
             # Opt-in (they touch the target; see roadmap §6 authorized targets).
-            if source_target and CR.is_lybra_active_checks_enabled():
+            if source_target and target_authorized and CR.is_lybra_active_checks_enabled():
                 findings_data.extend(self._run_active_checks(source_target, services))
 
             # Phase 2.7 — deep analysis (Fase 6): launch Nmap/Nikto/OpenVAS as
@@ -247,7 +282,23 @@ class LybraEngineManager(ScanManager):
                 finding["host_id"] = source_host_id
                 finding["dedup_key"] = compute_dedup_key(finding)
             findings_data = merge_findings(findings_data)
-            findings_data = apply_lifecycle(findings_data, previous_map)
+
+            # Lifecycle (open/fixed/regressed/accepted) models a vulnerability's
+            # persistent state - it does not fit a point-in-time event like a
+            # fingerprint reading or a surface_change notification. Carrying an
+            # event forward as "fixed" once it stops recurring would read as
+            # nonsense ("the new-port-opened event has been fixed") and, worse,
+            # re-emit the same finding on every later unchanged scan. Events
+            # always stay "open" and skip the carry-forward machinery entirely.
+            trackable = [f for f in findings_data if f.get("category") not in self._EVENT_CATEGORIES]
+            events = [f for f in findings_data if f.get("category") in self._EVENT_CATEGORIES]
+            for event in events:
+                event["state"] = "open"
+            trackable_previous = {
+                key: prev for key, prev in previous_map.items()
+                if prev["snapshot"].get("category") not in self._EVENT_CATEGORIES
+            }
+            findings_data = apply_lifecycle(trackable, trackable_previous) + events
 
             # Phase 3 — persist everything.
             with UnitOfWork() as uow:
@@ -282,18 +333,19 @@ class LybraEngineManager(ScanManager):
             return None
 
     def _run_active_checks(self, target: str, services) -> list:
-        """Run the declarative check runtime against the target's HTTP services.
+        """Run the declarative check runtime against the target's HTTP and TLS services.
 
         Best-effort: a runtime failure (unreachable host, etc.) yields no active
         findings rather than failing the whole scan. Safe mode only.
         """
-        from ..lybra import load_checks, CheckRuntime, HttpProbe, HostRateLimiter
+        from ..lybra import load_checks, CheckRuntime, HttpProbe, HostRateLimiter, TlsProbe
         try:
             runtime = CheckRuntime(
                 load_checks(),
                 HttpProbe().fetch,
                 mode="safe",
                 rate_limiter=HostRateLimiter(),
+                tls_fetch=TlsProbe().fetch,
             )
             return runtime.run(target, services)
         except Exception:
@@ -344,7 +396,13 @@ class LybraEngineManager(ScanManager):
                     if resp is not None:
                         rate_limiter.acquire(target)
                         favicon = http_probe.fetch_bytes(target, service.port, "/favicon.ico")
-                        fp, label = fingerprint_http(resp, favicon), "HTTP"
+                        rate_limiter.acquire(target)
+                        # Some vendors brand their error page more than their
+                        # homepage (a SonicWall's 404 body says so, its "/"
+                        # doesn't) — a deliberately nonexistent path lets the
+                        # tech-signature feed's error_body matchers see it.
+                        error_resp = http_probe.fetch(target, service.port, "GET", "/lybra-nonexistent-check")
+                        fp, label = fingerprint_http(resp, favicon, error_resp), "HTTP"
                 elif (service.name or "").lower() == "ssh" or service.port == 22:
                     rate_limiter.acquire(target)
                     probed = ssh_probe.fetch(target, service.port or 22)
@@ -394,6 +452,62 @@ class LybraEngineManager(ScanManager):
             "feed_version": "lybra-fingerprint-1",
             "qod":          QOD_FINGERPRINT,
             "confirmed":    False,
+            "state":        "open",
+        }
+
+    def _detect_surface_changes(self, scan_repo, host_id: int, services: list) -> list:
+        """Diff this scan's services against the host's tracked surface (Fase 5).
+
+        Emits an informational finding for a port opening for the first time,
+        or for a service's product/version changing since it was last seen —
+        attack-surface events in their own right, not vulnerability guesses.
+        Always upserts every current service afterwards, so the surface stays
+        current regardless of whether anything changed.
+        """
+        existing = {
+            (s.port, s.protocol): s for s in scan_repo.get_host_services(host_id)
+        }
+        # A host's very first Lybra scan establishes the baseline surface, not
+        # a change to it — every port would otherwise be "new" by definition,
+        # duplicating the open_port finding the matcher already emits for it.
+        had_baseline = bool(existing)
+        findings: list = []
+        for service in services:
+            protocol = service.protocol or "tcp"
+            prior = existing.get((service.port, protocol))
+            if prior is None:
+                if had_baseline:
+                    findings.append(self._surface_finding(
+                        service, f"Nuevo puerto abierto: {service.port}/{protocol} ({service.name or 'desconocido'})"
+                    ))
+            elif service.product and prior.product and (
+                service.product != prior.product or service.version != prior.version
+            ):
+                findings.append(self._surface_finding(
+                    service,
+                    f"Cambio de versión detectado en el puerto {service.port}: "
+                    f"{prior.product} {prior.version or ''} -> {service.product} {service.version or ''}".strip()
+                ))
+            scan_repo.upsert_host_service(
+                host_id=host_id, port=service.port, protocol=protocol,
+                name=service.name or None, product=service.product or None,
+                version=service.version or None, cpe=service.cpe or None,
+            )
+        return findings
+
+    @staticmethod
+    def _surface_finding(service, title: str) -> dict:
+        """Build an informational Finding for an attack-surface change (Fase 5)."""
+        return {
+            "title":        title,
+            "category":     "surface_change",
+            "port":         service.port,
+            "service":      service.name or None,
+            "source":       "lybra",
+            "check_id":     "lybra:surface-change@1",
+            "feed_version": "lybra-surface-1",
+            "qod":          QOD_OPEN_PORT,
+            "confirmed":    True,
             "state":        "open",
         }
 
@@ -505,13 +619,17 @@ class LybraEngineManager(ScanManager):
             repo.update(finding)
             return finding
 
-    def _create_scan_record(self, target: str, user_id: int, source_scan_id: int) -> LybraScan:  # pylint: disable=arguments-differ
+    def _create_scan_record(
+        self, target: str, user_id: int, source_scan_id: Optional[int] = None,
+        programed_scan_id: Optional[int] = None,
+    ) -> LybraScan:  # pylint: disable=arguments-differ
         """Create and persist an LybraScan row linked to its source Nmap scan."""
         scan = LybraScan(
             target=target,
             user_id=user_id,
             started_at=utcnow_naive(),
             source_scan_id=source_scan_id,
+            programed_scan_id=programed_scan_id,
         )
         with UnitOfWork() as uow:
             ScanRepository(uow).save(scan)
@@ -547,6 +665,9 @@ class LybraEngineManager(ScanManager):
             display_findings = own_findings
 
         exposure = classify_exposure(scan.target)
+        target_authorized = bool(
+            scan.target and AuthorizedTargetManager.is_authorized(scan.user_id, scan.target)
+        )
 
         def _priority(f: dict) -> str:
             return score_finding(
@@ -563,9 +684,10 @@ class LybraEngineManager(ScanManager):
             "deep": bool(deep_scan_ids),
             "deepScanIds": deep_scan_ids,
             "exposure": exposure,
+            "targetAuthorized": target_authorized,
             "status": getattr(scan, "status", "unknown"),
-            "startedAt": scan.started_at.isoformat(),
-            "finishedAt": scan.finished_at.isoformat() if scan.finished_at else None,  # type: ignore
+            "startedAt": isoformat_utc(scan.started_at),
+            "finishedAt": isoformat_utc(scan.finished_at),  # type: ignore
             "findings": [
                 {
                     "id": f.get("id"),

@@ -90,6 +90,48 @@
                 ejecutaron sobre '{{ scan.target }}'. Autorízalo en el panel de lanzamiento para un análisis más completo.
               </div>
 
+              <div v-if="scan.status === 'finished'" class="doc-section">
+                <div class="doc-head">
+                  <span class="doc-title">Documentos <span class="doc-count">{{ docsFor(scan.id).length }}</span></span>
+                  <button class="doc-refresh-btn" @click="$emit('load-docs', scan.id)" :disabled="docsLoading(scan.id)" title="Refrescar">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spin: docsLoading(scan.id) }"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                  </button>
+                </div>
+
+                <div v-if="docsLoading(scan.id) && !docsFor(scan.id).length" class="doc-empty">Cargando documentos…</div>
+                <div v-else-if="!docsFor(scan.id).length" class="doc-empty">Sin documentos generados</div>
+                <div v-else class="doc-list">
+                  <div v-for="doc in docsFor(scan.id)" :key="doc.documentId" class="doc-item">
+                    <div class="doc-left">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="doc-icon"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                      <span class="doc-name">PDF Lybra <span v-if="doc.isAiGenerated" class="doc-ai-pill">IA</span></span>
+                      <span v-if="doc.createdAt" class="doc-date">{{ fmtDate(doc.createdAt) }}</span>
+                    </div>
+                    <div class="doc-right">
+                      <template v-if="doc.status === 'done'">
+                        <button class="doc-icon-btn" @click="$emit('download-doc', doc.documentId)" title="Descargar">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        </button>
+                        <button class="doc-icon-btn danger" @click="$emit('delete-doc', scan.id, doc.documentId)" title="Eliminar">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                        </button>
+                      </template>
+                      <span v-else-if="doc.status === 'running'" class="doc-status running">Generando…</span>
+                      <span v-else-if="doc.status === 'pending'" class="doc-status pending">Pendiente</span>
+                      <span v-else-if="doc.status === 'error'" class="doc-status error">Error</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="doc-gen-bar">
+                  <label class="doc-checkbox"><input type="checkbox" v-model="aiFlags[scan.id]" /><span>Análisis IA</span></label>
+                  <button class="doc-gen-btn" @click="$emit('generate-pdf', scan.id, !!aiFlags[scan.id])">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    Generar PDF
+                  </button>
+                </div>
+              </div>
+
               <div class="body-actions">
                 <button class="btn-del" @click="$emit('delete', scan.id)">Eliminar escaneo</button>
               </div>
@@ -102,24 +144,36 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, reactive } from 'vue'
 import StatusBadge from '@/components/themis/StatusBadge.vue'
 
-defineProps({
+const props = defineProps({
   scans: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
+  docsByScan: { type: Object, default: () => ({}) },
 })
-defineEmits(['refresh', 'delete'])
+const emit = defineEmits(['refresh', 'delete', 'load-docs', 'generate-pdf', 'download-doc', 'delete-doc'])
 
 const LADDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 const PRIO_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 }
 const PRIO_LABEL = { CRITICAL: 'Crítica', HIGH: 'Alta', MEDIUM: 'Media', LOW: 'Baja', INFO: 'Info' }
 const STATE_LABEL = { fixed: 'Corregido', regressed: 'Regresado', accepted: 'Aceptado' }
 
+/** Casilla "Análisis IA" del generador de PDF, por escaneo. */
+const aiFlags = reactive({})
+
+function docsFor(scanId) { return props.docsByScan[scanId]?.items || [] }
+function docsLoading(scanId) { return !!props.docsByScan[scanId]?.loading }
+
 const expanded = ref(new Set())
 function toggle(id) {
   const s = new Set(expanded.value)
-  s.has(id) ? s.delete(id) : s.add(id)
+  if (s.has(id)) {
+    s.delete(id)
+  } else {
+    s.add(id)
+    if (!props.docsByScan[id]) emit('load-docs', id)
+  }
   expanded.value = s
 }
 
@@ -229,6 +283,42 @@ function fmtDate(iso) {
 .f-tag.src { color: var(--info); background: var(--info-dim); }
 
 .body-unauth-hint { margin-top: 0.6rem; padding: 0.55rem 0.7rem; font-size: 0.76rem; line-height: 1.4; color: var(--warn); background: var(--warn-dim); border: 1px dashed var(--warn); border-radius: 7px; }
+
+/* ── Documentos PDF ── */
+.doc-section { margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--border); }
+.doc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
+.doc-title { font-size: 0.78rem; color: var(--text-dim); font-weight: 600; display: flex; align-items: center; gap: 0.35rem; }
+.doc-count { font-size: 0.64rem; font-weight: 500; color: var(--text-muted); background: var(--surface-2); padding: 1px 6px; border-radius: 8px; }
+.doc-refresh-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 3px; border-radius: 5px; display: flex; }
+.doc-refresh-btn:hover:not(:disabled) { color: var(--accent-bright); }
+.doc-refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.doc-refresh-btn svg { width: 12px; height: 12px; }
+.doc-empty { font-size: 0.76rem; color: var(--text-muted); padding: 0.5rem 0; }
+.doc-list { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.6rem; }
+.doc-item { display: flex; align-items: center; justify-content: space-between; padding: 0.4rem 0.55rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+.doc-item:hover { border-color: var(--accent); }
+.doc-left { display: flex; align-items: center; gap: 0.4rem; min-width: 0; flex: 1; }
+.doc-icon { width: 13px; height: 13px; color: var(--text-muted); flex-shrink: 0; }
+.doc-name { font-size: 0.76rem; color: var(--text); font-weight: 500; white-space: nowrap; }
+.doc-ai-pill { font-size: 0.58rem; color: var(--accent-bright); background: var(--accent-dim); padding: 1px 4px; border-radius: 3px; margin-left: 3px; font-weight: 700; }
+.doc-date { font-size: 0.66rem; color: var(--text-muted); white-space: nowrap; }
+.doc-right { display: flex; gap: 0.2rem; align-items: center; flex-shrink: 0; }
+.doc-icon-btn { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; background: var(--surface-2); border: 1px solid var(--border-solid); border-radius: 5px; color: var(--text-muted); cursor: pointer; transition: all 0.2s; }
+.doc-icon-btn:hover { border-color: var(--accent); color: var(--accent-bright); }
+.doc-icon-btn.danger:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-dim); }
+.doc-icon-btn svg { width: 11px; height: 11px; }
+.doc-status { font-size: 0.62rem; padding: 2px 8px; border-radius: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
+.doc-status.running { background: var(--info-dim); color: var(--info); }
+.doc-status.pending { background: var(--warn-dim); color: var(--warn); }
+.doc-status.error   { background: var(--danger-dim); color: var(--danger); }
+.doc-gen-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+.doc-checkbox { display: flex; align-items: center; gap: 0.35rem; font-size: 0.74rem; color: var(--text-dim); cursor: pointer; user-select: none; }
+.doc-checkbox input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; padding: 0; border: 1.5px solid var(--text-muted); border-radius: 3px; background: transparent; cursor: pointer; margin: 0; flex-shrink: 0; position: relative; }
+.doc-checkbox input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+.doc-checkbox input[type="checkbox"]:checked::after { content: ''; position: absolute; top: 1px; left: 2px; width: 3px; height: 6px; border: solid var(--on-accent); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.doc-gen-btn { display: flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.7rem; font-size: 0.74rem; font-weight: 600; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 6px; color: var(--accent-bright); cursor: pointer; transition: all 0.2s; }
+.doc-gen-btn:hover { background: var(--accent); color: var(--on-accent); }
+.doc-gen-btn svg { width: 12px; height: 12px; }
 
 .body-actions { margin-top: 0.7rem; display: flex; justify-content: flex-end; }
 .btn-del { font-size: 0.72rem; color: var(--danger); background: none; border: 1px solid var(--danger-dim); padding: 0.3rem 0.7rem; border-radius: 6px; cursor: pointer; transition: all 0.2s; }

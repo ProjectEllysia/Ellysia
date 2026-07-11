@@ -37,9 +37,12 @@ import gzip
 import json
 import logging
 import re
+import socket
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Iterator, List, Optional, Tuple
 
@@ -429,12 +432,39 @@ def _epss_scored_at(csv_text: str) -> Optional[datetime]:
 # FETCH (the thin network edge: urllib + backoff)
 # =========================================================================
 
+@contextmanager
+def socket_timeout(seconds: float):
+    """Temporarily set the global default socket timeout.
+
+    Covers DNS resolution (``getaddrinfo``), which ``urlopen(timeout=...)``
+    does not reliably bound on its own — see the caller for why that matters.
+    Restores the previous default on exit so this does not leak into unrelated
+    code running in the same process.
+    """
+    previous = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(seconds)
+    try:
+        yield
+    finally:
+        socket.setdefaulttimeout(previous)
+
+
 _RETRIES = 3
 _BACKOFF_BASE = 1.5
+
+# NVD's public (no-key) tier allows 5 requests per rolling 30-second window;
+# a 429 needs to wait out that whole window, not the few-second exponential
+# backoff that is enough for a transient network blip.
+_RATE_LIMIT_WAIT = 30.0
 
 
 def _http_get(url: str, timeout: int = 30, api_key: Optional[str] = None) -> bytes:
     """GET a URL, retrying a few times with exponential backoff.
+
+    A 429 (rate limited) is retried after ``_RATE_LIMIT_WAIT`` seconds (or the
+    server's ``Retry-After`` header, if longer) instead of the short backoff
+    used for other errors — that backoff is too brief to clear a rolling
+    rate-limit window and would just burn through the retry budget failing.
 
     Args:
         url: The URL to fetch.
@@ -456,12 +486,21 @@ def _http_get(url: str, timeout: int = 30, api_key: Optional[str] = None) -> byt
     for attempt in range(_RETRIES):
         try:
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            # ``urlopen(timeout=...)`` bounds the socket read/connect, but not
+            # always the DNS resolution (``getaddrinfo``) ahead of it; a stalled
+            # resolver has been observed to hang well past that timeout. The
+            # global default socket timeout covers that phase too.
+            with socket_timeout(timeout), urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.read()
         except Exception as exc:  # noqa: BLE001 - retried, then re-raised
             last_error = exc
             if attempt < _RETRIES - 1:
-                time.sleep(_BACKOFF_BASE ** attempt)
+                if isinstance(exc, urllib.error.HTTPError) and exc.code == 429:
+                    retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                    wait = max(_RATE_LIMIT_WAIT, float(retry_after)) if retry_after else _RATE_LIMIT_WAIT
+                    time.sleep(wait)
+                else:
+                    time.sleep(_BACKOFF_BASE ** attempt)
     raise last_error  # type: ignore[misc]
 
 

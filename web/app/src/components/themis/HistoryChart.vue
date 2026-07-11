@@ -51,6 +51,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { SCAN_TYPES } from '@/constants/scanTypes'
 
 const props = defineProps({
   chart: { type: Object, required: true },
@@ -67,10 +68,7 @@ const metricLabel = computed(() => props.chart?.metricLabel ?? 'Hallazgos')
 const points = computed(() => props.chart?.series?.[0]?.points ?? [])
 const hasData = computed(() => points.value.length > 0)
 
-const barColor = computed(() => {
-  const map = { nmap: 'var(--info)', nikto: 'var(--warn)', openvas: 'var(--danger)' }
-  return map[props.chart?.scanType] ?? 'var(--accent)'
-})
+const barColor = computed(() => SCAN_TYPES[props.chart?.scanType]?.chartColor ?? 'var(--accent)')
 
 const step = computed(() => Math.max(1, props.chart?.axes?.y?.step ?? 1))
 const niceMax = computed(() => {
