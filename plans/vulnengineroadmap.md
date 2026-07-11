@@ -450,9 +450,16 @@ las tres primeras familias, todo bajo el mismo runtime y con feed versionado, y 
 (`exposed_path` ×7, `security_header` ×3, `tls` ×3), todas bajo el mismo `CheckRuntime`, todas
 `confirmed=true`/`qod=99` cuando disparan, feed versionado (`lybra-checks-1`). Lo que falta para
 poder marcar la fase como hecha de verdad es la medición formal de precisión ≥0,9 del apartado 7: el
-banco de oráculo diferencial (`tests/oracle/`) ya existe y corre contra contenedores reales, pero hoy
-solo tiene 3 aserciones puntuales, no un run de precisión/recall contra un catálogo de imágenes
-vulnerables. Sigue en ◐ parcial por eso, no por falta de familias.
+banco de oráculo diferencial (`tests/oracle/test_lybra_oracle_bench.py`) ya existe y corre contra
+contenedores Docker reales (no mockea nada), pero hoy solo tiene 4 aserciones puntuales cubriendo 2 de
+las 3 familias (`exposed_path`, `security_header`), no un run de precisión/recall contra un catálogo
+de imágenes vulnerables (DVWA, Juice Shop, Metasploitable, VulHub). La familia `tls` se quedó fuera del
+banco automatizado: el registro de objetivos autorizados (`AuthorizedTargetManager`) solo acepta
+IPs/CIDR, no hostnames, y validar contra un sitio real tipo `badssl.com` por IP rompería el SNI que
+hace falta para que sirva el certificado correcto — la vía limpia pendiente es un contenedor local con
+certificado autofirmado generado en el arranque (mismo patrón sin bind-mount que ya usa el contenedor
+de `.git/config` expuesto en ese mismo fichero). Sigue en ◐ parcial por la medición, no por falta de
+familias.
 
 ### Fase 2 — La base de conocimiento local y la inteligencia de amenazas · pista de correlación · ✓ implementada
 
