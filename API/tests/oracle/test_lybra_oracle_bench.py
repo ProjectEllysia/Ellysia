@@ -199,6 +199,21 @@ def test_git_config_exposure_detected_against_real_container(app, admin_user, gi
     assert exposed[0].check_id == "lybra:git-config-exposure@1"
 
 
+def test_missing_security_headers_detected_against_real_container(app, admin_user, git_exposed_port, monkeypatch):
+    """La familia security_header (Fase R) debe confirmarse contra un nginx real
+    que no manda ninguna de las tres cabeceras — vanilla nginx:alpine, sin nada
+    de configuración de seguridad."""
+    findings = _run_self_discovery(app, admin_user, "127.0.0.1", git_exposed_port, monkeypatch)
+
+    headers = {f.check_id for f in findings if f.category == "security_header"}
+    assert headers == {
+        "lybra:missing-hsts-header@1",
+        "lybra:missing-x-frame-options-header@1",
+        "lybra:missing-x-content-type-options-header@1",
+    }
+    assert all(f.confirmed and f.qod == 99 for f in findings if f.category == "security_header")
+
+
 @pytest.mark.skipif(_NMAP is None, reason="nmap no disponible")
 def test_port_discovery_agrees_with_nmap_oracle(httpd_2449_port):
     """Concordancia de puertos (Fase T) contra Nmap para un objetivo real, no mockeado."""
