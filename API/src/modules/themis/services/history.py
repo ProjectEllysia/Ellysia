@@ -16,6 +16,7 @@ Classes:
     NmapMetricExtractor:    Open ports as the metric.
     NiktoMetricExtractor:   Web incidents as the metric.
     OpenVASMetricExtractor: Vulnerabilities as the metric.
+    LybraMetricExtractor:   Findings as the metric.
     HistoryStatsService:    Builds the serializable chart payload from a scan list.
 """
 
@@ -25,7 +26,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Set, Type
 
-from ..model import NiktoScan, NmapScan, OpenVASScan, Scan, ScanType
+from ..model import LybraScan, NiktoScan, NmapScan, OpenVASScan, Scan, ScanType
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,19 @@ class OpenVASMetricExtractor(MetricExtractor):
             res.vulnerability.nvt_oid
             for res in (scan.results or [])
             if res.vulnerability is not None
+        }
+
+
+@MetricExtractor.register(ScanType.LYBRA)
+class LybraMetricExtractor(MetricExtractor):
+    """Metric: findings. Identity: dedup_key, or the row id for one without."""
+
+    metric_label = "Hallazgos"
+
+    def identities(self, scan: LybraScan) -> Set[str]:
+        return {
+            f.dedup_key or f"finding:{f.id}"
+            for f in (scan.findings or [])
         }
 
 

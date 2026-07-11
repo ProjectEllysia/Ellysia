@@ -1,6 +1,7 @@
 from marshmallow import Schema, fields, validate, validates_schema, ValidationError
 
 from src.modules.shared import UTCDateTime
+from .model import ScanType
 
 
 class ScanIdQuerySchema(Schema):
@@ -98,7 +99,9 @@ class DocumentStatusQuerySchema(Schema):
 
 
 class DocumentsQuerySchema(Schema):
-    scan_type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "openvas", "all"]))
+    # Derived from ScanType, not hand-listed: a new scan type is filterable
+    # here automatically, no schema edit needed.
+    scan_type = fields.String(load_default="all", validate=validate.OneOf([t.value for t in ScanType] + ["all"]))
 
 
 class ScheduledScanRequestSchema(Schema):

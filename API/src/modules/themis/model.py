@@ -337,6 +337,12 @@ class Scan(Base):
         uselist=False,
     )
 
+    # viewonly: Finding rows are written via ScanRepository.persist_findings
+    # (plain inserts keyed by scan_id), never through this relationship. Read
+    # side only, e.g. LybraMetricExtractor (history.py) counting a scan's
+    # findings without a tool-specific query.
+    findings = relationship("Finding", viewonly=True)
+
     __mapper_args__ = {
         "polymorphic_identity": "scan",
         "polymorphic_on":       scan_type,

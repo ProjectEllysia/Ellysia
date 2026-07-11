@@ -81,7 +81,8 @@ class LybraEngineManager(ScanManager):
         target: Optional[str] = None,
         discover_ports: Optional[list] = None,
         deep: bool = False,
-        timeout: int = 120
+        timeout: int = 120,
+        programed_scan_id: Optional[int] = None,
     ) -> int:
         """
         Start an Lybra engine scan in one of two modes.
@@ -96,6 +97,8 @@ class LybraEngineManager(ScanManager):
             deep: Fase 6 "análisis profundo" — also launch Nmap/Nikto/OpenVAS as
                 independent corroborator scans (fire-and-forget; their Finding
                 rows merge in at read time, see ``format_scan``).
+            programed_scan_id: Set when launched by the scheduler (Themis
+                scheduled scans), same convention as the other scan managers.
 
         Returns:
             Primary key of the created LybraScan record.
@@ -120,6 +123,7 @@ class LybraEngineManager(ScanManager):
             target=scan_target,
             user_id=user_id,
             source_scan_id=source_scan_id, # type: ignore
+            programed_scan_id=programed_scan_id,
         )
         scan_id = scan.id
 
@@ -615,13 +619,17 @@ class LybraEngineManager(ScanManager):
             repo.update(finding)
             return finding
 
-    def _create_scan_record(self, target: str, user_id: int, source_scan_id: int) -> LybraScan:  # pylint: disable=arguments-differ
+    def _create_scan_record(
+        self, target: str, user_id: int, source_scan_id: Optional[int] = None,
+        programed_scan_id: Optional[int] = None,
+    ) -> LybraScan:  # pylint: disable=arguments-differ
         """Create and persist an LybraScan row linked to its source Nmap scan."""
         scan = LybraScan(
             target=target,
             user_id=user_id,
             started_at=utcnow_naive(),
             source_scan_id=source_scan_id,
+            programed_scan_id=programed_scan_id,
         )
         with UnitOfWork() as uow:
             ScanRepository(uow).save(scan)
