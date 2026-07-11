@@ -82,11 +82,11 @@ class NmapScanManager(ScanManager):
             )
 
             logger.info(f"Escaneo Nmap {scan_id} iniciado")
+            return scan_id
 
         except (OSError, RuntimeError) as e:
             logger.error(f"Error iniciando escaneo Nmap: {e}", exc_info=True)
-
-        return scan_id # type: ignore
+            raise
 
     @staticmethod
     def execute_nmap_scan(scan_id: int, target_host: str, target_ports: str, timeout: int) -> None:
