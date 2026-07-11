@@ -31,7 +31,7 @@ from typing import Dict, List, Optional, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.modules.themis.lybra import (  # noqa: E402
-    scan_ports_sync, port_concordance,
+    scan_ports_sync, port_concordance, DEFAULT_PORTS,
     HttpProbe, SshProbe, is_http_service, Service,
     fingerprint_http, fingerprint_ssh, agrees_with_nmap, concordance_rate,
 )
@@ -45,14 +45,25 @@ class NmapService:
     version: Optional[str]
 
 
-def run_nmap_sv(host: str) -> Dict[int, NmapService]:
+def run_nmap_sv(host: str, ports: List[int]) -> Dict[int, NmapService]:
     """Run ``nmap -sV`` against a host and parse its per-port product/version.
+
+    Args:
+        host: The target host.
+        ports: The exact ports to scan. Nmap's own default (no ``-p``) sweeps
+            its own top-1000 list, which is *not* the same set as Lybra's
+            ``DEFAULT_PORTS`` (e.g. it excludes 6379/redis) — comparing two
+            different port universes would make Jaccard concordance measure
+            "do our default port lists agree" instead of "do we agree on the
+            state of the same ports", silently penalizing Lybra for ports
+            Nmap's default scan never even attempted.
 
     Returns:
         A ``{port: NmapService}`` map — the oracle reading for this host.
     """
+    port_arg = ",".join(str(p) for p in ports)
     result = subprocess.run(
-        ["nmap", "-sV", "-oX", "-", host],
+        ["nmap", "-sV", "-p", port_arg, "-oX", "-", host],
         capture_output=True, text=True, timeout=300, check=True,
     )
     root = ET.fromstring(result.stdout)
@@ -102,8 +113,9 @@ def fingerprint_own(host: str, ports: List[int]) -> Dict[int, Tuple[Optional[str
 def bench_host(host: str) -> None:
     print(f"\n=== {host} ===")
 
-    own_ports = scan_ports_sync(host)
-    nmap_services = run_nmap_sv(host)
+    ports = list(DEFAULT_PORTS)
+    own_ports = scan_ports_sync(host, ports)
+    nmap_services = run_nmap_sv(host, ports)
     nmap_ports = list(nmap_services.keys())
     port_score = port_concordance(own_ports, nmap_ports)
     print(f"Puertos propios:  {sorted(own_ports)}")
