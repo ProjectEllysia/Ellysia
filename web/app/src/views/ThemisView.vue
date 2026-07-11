@@ -155,7 +155,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
 import StatsRow from '@/components/themis/StatsRow.vue'
@@ -188,6 +188,7 @@ const selectableFolders = computed(() =>
 )
 
 onMounted(() => { store.loadStats(); store.loadScans(store.activeTab); store.loadScheduledScans(); store.loadFolders() })
+onBeforeUnmount(() => store.stopScanPolling())
 
 // Carga la lista de Lybra y el registro de objetivos autorizados la primera
 // vez que se entra a su mundo.

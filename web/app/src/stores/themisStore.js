@@ -120,6 +120,33 @@ export const useThemisStore = defineStore('themis', () => {
   }
 
   /* ════════════════════════════════ SCANS ═════════════════════════════ */
+  // C2: a diferencia de Iris, Themis no sondeaba el estado de un escaneo
+  // recién lanzado — se quedaba "running" en la UI hasta un refresco manual.
+  // Mismo idioma que el polling de traceroute (setTimeout re-encadenado, no
+  // setInterval): cada carga se reprograma a sí misma mientras la pestaña
+  // siga visible y queden escaneos pending/running.
+  const SCAN_POLL_INTERVAL_MS = 4000
+  const _scanPollTimers = {}
+
+  function _isTypeVisible(type) {
+    if (type === 'lybra') return world.value === 'lybra' && viewMode.value !== 'history'
+    return world.value === 'external' && activeTab.value === type && viewMode.value === 'full'
+  }
+
+  function _scheduleScanPoll(type) {
+    clearTimeout(_scanPollTimers[type])
+    delete _scanPollTimers[type]
+    const hasActive = _scandata(type).results.some(s => s.status === 'pending' || s.status === 'running')
+    if (!hasActive || !_isTypeVisible(type)) return
+    _scanPollTimers[type] = setTimeout(() => loadScans(type), SCAN_POLL_INTERVAL_MS)
+  }
+
+  /** Detiene el polling de escaneos activos: de un tipo concreto, o de todos. */
+  function stopScanPolling(type) {
+    const types = type ? [type] : Object.keys(_scanPollTimers)
+    for (const t of types) { clearTimeout(_scanPollTimers[t]); delete _scanPollTimers[t] }
+  }
+
   /** Carga una pagina de resultados para un tipo de escaneo. */
   async function loadScans(type) {
     const d = _scandata(type)
@@ -131,7 +158,10 @@ export const useThemisStore = defineStore('themis', () => {
       const data = await res.json()
       d.results = data.results ?? []
       d.totalCount = data.totalCount ?? 0
-    } finally { d.loading = false }
+    } finally {
+      d.loading = false
+      _scheduleScanPoll(type)
+    }
   }
 
   /** Cambia de pestana y carga los resultados desde pagina 1. */
@@ -887,7 +917,7 @@ export const useThemisStore = defineStore('themis', () => {
     scheduled, scheduling,
     preview, details,
     viewMode, folders, folderForms, moveScan,
-    loadStats, loadScans, switchTab, refreshCurrent, goToPage,
+    loadStats, loadScans, switchTab, refreshCurrent, goToPage, stopScanPolling,
     launchNmap, launchNikto, launchOpenvas,
     launchLybra, loadLybraScans, loadSourceNmapScans, deleteLybraScan,
     lybraDocs, loadLybraDocs, generateLybraPdf, deleteLybraDoc,
