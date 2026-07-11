@@ -68,6 +68,34 @@ def test_fingerprint_http_no_favicon_means_no_hash():
     assert fp.favicon_hash is None
 
 
+def test_fingerprint_http_vendor_signature_only_on_error_page():
+    """The real case that motivated error_body: a SonicWall's homepage says
+    only "Server: Web Server", but its 404 page names the vendor."""
+    home = Response(302, "<HTML>Page Redirecting</HTML>", {"server": "Web Server"})
+    error_404 = Response(404, "<p><span class='server'>SonicWall Server</span></p>", {"server": "Web Server"})
+
+    fp_without_error_page = fingerprint_http(home)
+    assert "SonicWall" not in fp_without_error_page.technologies
+
+    fp = fingerprint_http(home, error_resp=error_404)
+    assert "SonicWall" in fp.technologies
+    # product stays the (unhelpfully generic) header value, not the far more
+    # useful signature match — an explicit Server header always wins over an
+    # inferred technology name, vague or not. Known, accepted limitation.
+    assert fp.product == "Web"
+
+
+def test_fingerprint_http_vendor_signature_from_body():
+    fp = fingerprint_http(Response(200, "<html>MikroTik RouterOS</html>", {}))
+    assert "MikroTik RouterOS" in fp.technologies
+
+
+def test_load_tech_signatures_covers_known_vendors():
+    from src.modules.themis.lybra import load_tech_signatures
+    names = {s.name for s in load_tech_signatures()}
+    assert {"WordPress", "SonicWall", "pfSense", "Fortinet FortiGate", "Cisco IOS/ASA"} <= names
+
+
 # ================================================================ SSH banner
 
 @pytest.mark.parametrize("banner,product,version", [

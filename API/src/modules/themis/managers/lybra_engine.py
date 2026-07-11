@@ -392,7 +392,13 @@ class LybraEngineManager(ScanManager):
                     if resp is not None:
                         rate_limiter.acquire(target)
                         favicon = http_probe.fetch_bytes(target, service.port, "/favicon.ico")
-                        fp, label = fingerprint_http(resp, favicon), "HTTP"
+                        rate_limiter.acquire(target)
+                        # Some vendors brand their error page more than their
+                        # homepage (a SonicWall's 404 body says so, its "/"
+                        # doesn't) — a deliberately nonexistent path lets the
+                        # tech-signature feed's error_body matchers see it.
+                        error_resp = http_probe.fetch(target, service.port, "GET", "/lybra-nonexistent-check")
+                        fp, label = fingerprint_http(resp, favicon, error_resp), "HTTP"
                 elif (service.name or "").lower() == "ssh" or service.port == 22:
                     rate_limiter.acquire(target)
                     probed = ssh_probe.fetch(target, service.port or 22)

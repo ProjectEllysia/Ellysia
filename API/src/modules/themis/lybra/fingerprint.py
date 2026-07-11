@@ -6,8 +6,13 @@ best value-for-effort in the roadmap:
 
 HTTP
     Reads the ``Server`` / ``X-Powered-By`` headers, the page ``<title>``, a hash
-    of the favicon, and a small curated table of technology signatures
-    (WordPress, Drupal, and so on).
+    of the favicon, and a data-driven, Wappalyzer-style signature feed
+    (``tech_signatures.json``) covering both web CMS/software (WordPress,
+    Drupal...) and network-appliance vendors (SonicWall, pfSense, MikroTik...).
+    A signature can also match a deliberately-nonexistent path's error page —
+    some vendors brand their 404 more than their homepage, which is exactly
+    how the SonicWall entry was found in the first place (see ``error_body``
+    below).
 
 SSH
     Reads the banner (which gives product and version) and computes **HASSH** —
@@ -49,12 +54,14 @@ oracle-only — handled by Nmap — until picked up.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import socket
 import ssl
 import struct
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from cryptography import x509
@@ -96,16 +103,88 @@ class HttpFingerprint:
     confidence: float
 
 
-# A small, hand-curated table of technology signatures, Wappalyzer-style. It
-# grows as evidence accumulates and never claims a version — only a technology
-# name.
-_TECH_SIGNATURES: List[Tuple[str, Callable[[Response], bool]]] = [
-    ("WordPress", lambda r: "wp-content" in r.body or "wp-includes" in r.body),
-    ("Drupal", lambda r: "drupal.settings" in r.body.lower() or "x-generator" in r.headers and "drupal" in r.headers.get("x-generator", "").lower()),
-    ("Joomla", lambda r: "joomla" in r.body.lower()),
-    ("Apache Tomcat", lambda r: "coyote" in r.headers.get("server", "").lower() or "apache tomcat" in r.body.lower()),
-    ("phpMyAdmin", lambda r: "phpmyadmin" in (_extract_title(r.body) or "").lower()),
-]
+# The signature feed bundled alongside this module — see load_tech_signatures.
+_BUNDLED_TECH_SIGNATURES = Path(__file__).parent / "tech_signatures.json"
+
+
+@dataclass(frozen=True)
+class TechMatcher:
+    """One piece of evidence a :class:`TechSignature` can match against.
+
+    Attributes:
+        part: Which piece of evidence to search — ``"body"`` (the homepage),
+            ``"error_body"`` (a deliberately nonexistent path's response, if
+            fetched), ``"title"``, or ``"header:<name>"`` for a specific
+            response header.
+        words: Case-insensitive substrings; any one present is a match.
+    """
+    part: str
+    words: tuple
+
+
+@dataclass(frozen=True)
+class TechSignature:
+    """A named technology/vendor, identified by one or more :class:`TechMatcher`.
+
+    Matchers within a signature are OR'd — any single one firing identifies
+    the technology, the same "one piece of evidence is enough" model
+    Wappalyzer itself uses. Never claims a version, only a name.
+    """
+    name: str
+    matchers: tuple
+
+
+def load_tech_signatures(path: Optional[str] = None) -> List[TechSignature]:
+    """Load the technology/vendor signature feed.
+
+    Externalized as data (rather than a hand-written table of lambdas) so a
+    new signature — a CMS, a router/firewall vendor, whatever the next
+    unrecognised device turns out to be — is one JSON entry, not a code
+    change. Same "Lybra feed" philosophy as ``checks.load_checks``.
+
+    Args:
+        path: Path to a JSON feed file. Defaults to the feed bundled with this
+            module.
+
+    Returns:
+        The parsed signatures.
+    """
+    feed_path = Path(path) if path else _BUNDLED_TECH_SIGNATURES
+    data = json.loads(feed_path.read_text(encoding="utf-8"))
+    return [
+        TechSignature(
+            name=s["name"],
+            matchers=tuple(
+                TechMatcher(part=m["part"], words=tuple(m["words"]))
+                for m in s["matchers"]
+            ),
+        )
+        for s in data.get("signatures", [])
+    ]
+
+
+_TECH_SIGNATURES: List[TechSignature] = load_tech_signatures()
+
+
+def _tech_evidence(resp: Response, title: Optional[str], error_resp: Optional[Response]) -> Dict[str, str]:
+    """Assemble the named evidence parts a :class:`TechMatcher` can target."""
+    evidence = {
+        "body": resp.body,
+        "title": title or "",
+        "error_body": error_resp.body if error_resp else "",
+    }
+    for name, value in resp.headers.items():
+        evidence[f"header:{name}"] = value
+    return evidence
+
+
+def _signature_matches(signature: TechSignature, evidence: Dict[str, str]) -> bool:
+    """Return whether any of a signature's matchers fires against ``evidence``."""
+    for matcher in signature.matchers:
+        text = evidence.get(matcher.part, "").lower()
+        if any(word.lower() in text for word in matcher.words):
+            return True
+    return False
 
 
 def _extract_title(body: str) -> Optional[str]:
@@ -152,7 +231,11 @@ def _parse_server_header(server: str) -> Tuple[Optional[str], Optional[str]]:
     return token, None
 
 
-def fingerprint_http(resp: Response, favicon: Optional[bytes] = None) -> HttpFingerprint:
+def fingerprint_http(
+    resp: Response,
+    favicon: Optional[bytes] = None,
+    error_resp: Optional[Response] = None,
+) -> HttpFingerprint:
     """Fingerprint an HTTP service from a response and, optionally, its favicon.
 
     The confidence follows a simple three-tier scheme: a versioned ``Server``
@@ -162,16 +245,20 @@ def fingerprint_http(resp: Response, favicon: Optional[bytes] = None) -> HttpFin
     earn, because this layer has not yet been calibrated against the oracle.
 
     Args:
-        resp: The HTTP response to analyse.
+        resp: The HTTP response to analyse (a plain ``GET /``).
         favicon: The raw bytes of the site's favicon, if fetched.
+        error_resp: The response to a deliberately nonexistent path, if
+            fetched — lets an ``error_body`` signature match branding that
+            only shows up on a custom error page, not the homepage.
 
     Returns:
         An :class:`HttpFingerprint`.
     """
     server = resp.headers.get("server", "")
     product, version = _parse_server_header(server)
-    technologies = tuple(name for name, matcher in _TECH_SIGNATURES if matcher(resp))
     title = _extract_title(resp.body)
+    evidence = _tech_evidence(resp, title, error_resp)
+    technologies = tuple(sig.name for sig in _TECH_SIGNATURES if _signature_matches(sig, evidence))
     favicon_hash = hashlib.sha256(favicon).hexdigest() if favicon else None
 
     if not product and technologies:

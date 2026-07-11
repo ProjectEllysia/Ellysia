@@ -1,0 +1,102 @@
+{
+  "signatures": [
+    {
+      "name": "WordPress",
+      "matchers": [
+        { "part": "body", "words": ["wp-content", "wp-includes"] }
+      ]
+    },
+    {
+      "name": "Drupal",
+      "matchers": [
+        { "part": "body", "words": ["drupal.settings"] },
+        { "part": "header:x-generator", "words": ["drupal"] }
+      ]
+    },
+    {
+      "name": "Joomla",
+      "matchers": [
+        { "part": "body", "words": ["joomla"] }
+      ]
+    },
+    {
+      "name": "Apache Tomcat",
+      "matchers": [
+        { "part": "header:server", "words": ["coyote"] },
+        { "part": "body", "words": ["apache tomcat"] }
+      ]
+    },
+    {
+      "name": "phpMyAdmin",
+      "matchers": [
+        { "part": "title", "words": ["phpmyadmin"] }
+      ]
+    },
+    {
+      "name": "SonicWall",
+      "matchers": [
+        { "part": "body", "words": ["sonicwall", "sonicui"] },
+        { "part": "error_body", "words": ["sonicwall"] }
+      ]
+    },
+    {
+      "name": "pfSense",
+      "matchers": [
+        { "part": "body", "words": ["pfsense"] },
+        { "part": "error_body", "words": ["pfsense"] }
+      ]
+    },
+    {
+      "name": "MikroTik RouterOS",
+      "matchers": [
+        { "part": "body", "words": ["mikrotik", "routeros"] },
+        { "part": "header:server", "words": ["mikrotik"] }
+      ]
+    },
+    {
+      "name": "Fortinet FortiGate",
+      "matchers": [
+        { "part": "body", "words": ["fortinet", "fortigate"] },
+        { "part": "error_body", "words": ["fortinet", "fortigate"] }
+      ]
+    },
+    {
+      "name": "Cisco IOS/ASA",
+      "matchers": [
+        { "part": "body", "words": ["cisco systems", "cisco ios", "cisco adaptive security"] }
+      ]
+    },
+    {
+      "name": "Ubiquiti UniFi",
+      "matchers": [
+        { "part": "body", "words": ["ubiquiti", "unifi"] },
+        { "part": "header:server", "words": ["ubnt"] }
+      ]
+    },
+    {
+      "name": "Palo Alto Networks",
+      "matchers": [
+        { "part": "body", "words": ["palo alto networks", "pan-os"] }
+      ]
+    },
+    {
+      "name": "Netgear",
+      "matchers": [
+        { "part": "body", "words": ["netgear"] }
+      ]
+    },
+    {
+      "name": "TP-Link",
+      "matchers": [
+        { "part": "body", "words": ["tp-link"] }
+      ]
+    },
+    {
+      "name": "Synology DiskStation",
+      "matchers": [
+        { "part": "body", "words": ["synology", "diskstation"] },
+        { "part": "title", "words": ["diskstation"] }
+      ]
+    }
+  ]
+}
