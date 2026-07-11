@@ -36,10 +36,10 @@ export const useToastStore = defineStore('toast', () => {
    * @param {'success'|'error'|'warn'|'info'|''} [type='success'] - Variante visual
    * @param {number} [duration=3400] - Milisegundos antes de ocultarse
    */
-  function show(msg, type = 'success', duration = 3400) {
+  function show(msg, variant = 'success', duration = 3400) {
     clearTimeout(timer)
     message.value = msg
-    type = type || ''
+    type.value = variant || ''
     visible.value = true
     timer = setTimeout(() => { visible.value = false }, duration)
   }
