@@ -39,6 +39,7 @@ from .model import (
     EpssScore,
     Finding,
     Host,
+    HostService,
     KevEntry,
     NiktoIncident,
     NiktoScan,
@@ -586,6 +587,48 @@ class ScanRepository(BaseRepository[Scan]):
             .first()
         )
         return self.get_findings_by_scan(prev.id) if prev else []
+
+    def get_host_services(self, host_id: int) -> List[HostService]:
+        """Return a host's currently-tracked attack surface (Fase 5)."""
+        return (
+            self._session.query(HostService)
+            .filter(HostService.host_id == host_id)
+            .all()
+        )
+
+    def upsert_host_service(
+        self, host_id: int, port: int, protocol: str,
+        name: Optional[str], product: Optional[str], version: Optional[str], cpe: Optional[str],
+    ) -> None:
+        """Record a service as currently open, creating or refreshing its row.
+
+        Bumps ``last_seen_at`` and the identification fields (only when the new
+        scan actually resolved something — an unresolved rescan must not erase
+        a product/version a previous scan already found) on every call, so a
+        service's row always reflects its most recent observation.
+        """
+        existing = (
+            self._session.query(HostService)
+            .filter(
+                HostService.host_id == host_id,
+                HostService.port == port,
+                HostService.protocol == protocol,
+            )
+            .first()
+        )
+        now = utcnow_naive()
+        if existing is None:
+            self._session.add(HostService(
+                host_id=host_id, port=port, protocol=protocol, name=name,
+                product=product, version=version, cpe=cpe,
+                first_seen_at=now, last_seen_at=now,
+            ))
+            return
+        existing.last_seen_at = now
+        existing.name = name or existing.name
+        existing.product = product or existing.product
+        existing.version = version or existing.version
+        existing.cpe = cpe or existing.cpe
 
 
 class ThemisReportRepository(BaseRepository[ThemisDocument]):

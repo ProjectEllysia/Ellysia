@@ -270,6 +270,46 @@ def test_lybra_engine_persists_informational_findings(app, admin_user):
             assert "cpe:2.3:a:apache:http_server:2.4.49:*:*:*:*:*:*:*" in {f.cpe for f in findings}
 
 
+def test_lybra_surface_change_detects_new_port_and_version_bump(app, admin_user):
+    """Fase 5: a host's first Lybra scan sets a silent baseline; a later scan
+    with an extra port and a bumped Apache version reports both as
+    surface_change findings, without repeating on a third, unchanged scan."""
+    nmap_id = _seed_nmap_scan(app, admin_user.id)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+
+        baseline = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
+        mgr._run_lybra(baseline.id, nmap_id)
+        with UnitOfWork() as uow:
+            baseline_findings = ScanRepository(uow).get_findings_by_scan(baseline.id)
+        assert not any(f.category == "surface_change" for f in baseline_findings)
+
+        changed_ports = _PORTS + [
+            {"protocol": "3306/tcp", "reason": "syn-ack", "product": "MySQL",
+             "version": "8.0", "given_use": "mysql", "cpe": ""},
+        ]
+        changed_ports[0] = dict(changed_ports[0], version="2.4.51")  # Apache bump
+        nmap_id_2 = _seed_nmap_scan(app, admin_user.id, ports=changed_ports)
+
+        rescan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id_2)
+        mgr._run_lybra(rescan.id, nmap_id_2)
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(rescan.id)
+        surface = {f.title for f in findings if f.category == "surface_change"}
+        assert len(surface) == 2
+        assert any("Nuevo puerto abierto: 3306" in t for t in surface)
+        assert any("2.4.49 -> Apache httpd 2.4.51" in t for t in surface)
+
+        # A third, unchanged scan of the same (now-updated) surface stays quiet.
+        nmap_id_3 = _seed_nmap_scan(app, admin_user.id, ports=changed_ports)
+        stable = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id_3)
+        mgr._run_lybra(stable.id, nmap_id_3)
+        with UnitOfWork() as uow:
+            stable_findings = ScanRepository(uow).get_findings_by_scan(stable.id)
+        assert not any(f.category == "surface_change" for f in stable_findings)
+
+
 def _seed_kb_apache_cve(app):
     """Seed the KB with CVE-2021-41773 for apache http_server 2.4.49 (+KEV/EPSS)."""
     with app.app_context():

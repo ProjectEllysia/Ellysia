@@ -141,6 +141,56 @@ class Host(Base):
 
 
 # =========================================================================
+# HOST SERVICE (Lybra Fase 5 — the asset's attack surface, tracked over time)
+# =========================================================================
+
+class HostService(Base):
+    """A service Lybra has observed open on a host, tracked across scans.
+
+    Roadmap Fase 5's "cambio de sujeto": a ``Scan`` is one observation of a
+    host's attack surface at a point in time, not the surface itself. This
+    table is that surface — one row per ``(host, port, protocol)`` — so a new
+    scan can be diffed against it to notice a port opening for the first time
+    or a service's version changing, independently of whether that change
+    happens to also match a known CVE. Findings answer "is this vulnerable?";
+    this table answers "did the surface itself change?".
+
+    Populated by every Lybra scan of a target, whether its services came from
+    self-discovery or from a prior Nmap scan's already-collected ports — both
+    paths resolve the same ``Service`` shape before this table sees it. Only
+    Lybra writes here today; it is not yet a fusion of every scanner's view.
+
+    Attributes:
+        id: Primary key.
+        host_id: The asset this service belongs to.
+        port: The port number.
+        protocol: ``"tcp"`` or ``"udp"``.
+        name: The service's conventional name (``"http"``, ``"ssh"``...).
+        product: The identified product, or ``None`` if never resolved.
+        version: The identified version, or ``None``.
+        cpe: The CPE last resolved for this service, or ``None``.
+        first_seen_at: When this port was first observed open.
+        last_seen_at: When this port was last observed open (bumped every scan
+            that still finds it open — a stale row implies the port closed).
+    """
+    __tablename__ = "HostService"
+    __table_args__ = (
+        UniqueConstraint("host_id", "port", "protocol", name="uq_host_service_host_port_protocol"),
+    )
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    host_id       = Column(Integer, ForeignKey("Host.id", ondelete="CASCADE"), nullable=False, index=True)
+    port          = Column(Integer, nullable=False)
+    protocol      = Column(String(8), nullable=False, default="tcp")
+    name          = Column(String(64), nullable=True)
+    product       = Column(String(128), nullable=True)
+    version       = Column(String(64), nullable=True)
+    cpe           = Column(String(255), nullable=True)
+    first_seen_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    last_seen_at  = Column(DateTime, nullable=False, default=utcnow_naive)
+
+
+# =========================================================================
 # TRACEROUTE
 # =========================================================================
 

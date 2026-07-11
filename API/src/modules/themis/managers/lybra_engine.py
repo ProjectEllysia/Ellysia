@@ -27,6 +27,7 @@ from ..lybra import (
     apply_lifecycle,
     classify_exposure,
     score_finding,
+    QOD_OPEN_PORT,
 )
 from ..services import _Task, LybraPrintingStrategy
 from ..exceptions import (
@@ -66,6 +67,10 @@ class LybraEngineManager(ScanManager):
     SCAN_TYPE = ScanType.LYBRA
     _MODEL = LybraScan
     _strategy_class = LybraPrintingStrategy
+
+    # Categories that are point-in-time events, not persistent vulnerability
+    # state - excluded from lifecycle tracking (see Phase 2.5 in _run_lybra).
+    _EVENT_CATEGORIES = {"fingerprint", "surface_change"}
 
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         super().__init__(task_queue)
@@ -238,6 +243,14 @@ class LybraEngineManager(ScanManager):
 
                 previous_map = self._previous_findings_map(scan_repo, user_id, source_target, scan_id)
 
+                # Phase 0.7 — surface tracking (Fase 5's "cambio de sujeto"): a
+                # port opening for the first time, or a service's version
+                # changing, is an attack-surface event in its own right,
+                # independent of whether it happens to match a known CVE.
+                surface_findings: list = []
+                if source_host_id:
+                    surface_findings = self._detect_surface_changes(scan_repo, source_host_id, services)
+
                 engine = LybraEngine(
                     cve_lookup=kb_repo.cves_for_cpe,
                     kev_lookup=lambda cve_id: kb_repo.get_kev(cve_id) is not None,
@@ -245,6 +258,7 @@ class LybraEngineManager(ScanManager):
                 )
                 findings_data = engine.analyze(services)
                 findings_data.extend(fingerprint_findings)
+                findings_data.extend(surface_findings)
 
             # Phase 2 — active checks over the network, outside any transaction.
             # Opt-in (they touch the target; see roadmap §6 authorized targets).
@@ -264,7 +278,23 @@ class LybraEngineManager(ScanManager):
                 finding["host_id"] = source_host_id
                 finding["dedup_key"] = compute_dedup_key(finding)
             findings_data = merge_findings(findings_data)
-            findings_data = apply_lifecycle(findings_data, previous_map)
+
+            # Lifecycle (open/fixed/regressed/accepted) models a vulnerability's
+            # persistent state - it does not fit a point-in-time event like a
+            # fingerprint reading or a surface_change notification. Carrying an
+            # event forward as "fixed" once it stops recurring would read as
+            # nonsense ("the new-port-opened event has been fixed") and, worse,
+            # re-emit the same finding on every later unchanged scan. Events
+            # always stay "open" and skip the carry-forward machinery entirely.
+            trackable = [f for f in findings_data if f.get("category") not in self._EVENT_CATEGORIES]
+            events = [f for f in findings_data if f.get("category") in self._EVENT_CATEGORIES]
+            for event in events:
+                event["state"] = "open"
+            trackable_previous = {
+                key: prev for key, prev in previous_map.items()
+                if prev["snapshot"].get("category") not in self._EVENT_CATEGORIES
+            }
+            findings_data = apply_lifecycle(trackable, trackable_previous) + events
 
             # Phase 3 — persist everything.
             with UnitOfWork() as uow:
@@ -412,6 +442,62 @@ class LybraEngineManager(ScanManager):
             "feed_version": "lybra-fingerprint-1",
             "qod":          QOD_FINGERPRINT,
             "confirmed":    False,
+            "state":        "open",
+        }
+
+    def _detect_surface_changes(self, scan_repo, host_id: int, services: list) -> list:
+        """Diff this scan's services against the host's tracked surface (Fase 5).
+
+        Emits an informational finding for a port opening for the first time,
+        or for a service's product/version changing since it was last seen —
+        attack-surface events in their own right, not vulnerability guesses.
+        Always upserts every current service afterwards, so the surface stays
+        current regardless of whether anything changed.
+        """
+        existing = {
+            (s.port, s.protocol): s for s in scan_repo.get_host_services(host_id)
+        }
+        # A host's very first Lybra scan establishes the baseline surface, not
+        # a change to it — every port would otherwise be "new" by definition,
+        # duplicating the open_port finding the matcher already emits for it.
+        had_baseline = bool(existing)
+        findings: list = []
+        for service in services:
+            protocol = service.protocol or "tcp"
+            prior = existing.get((service.port, protocol))
+            if prior is None:
+                if had_baseline:
+                    findings.append(self._surface_finding(
+                        service, f"Nuevo puerto abierto: {service.port}/{protocol} ({service.name or 'desconocido'})"
+                    ))
+            elif service.product and prior.product and (
+                service.product != prior.product or service.version != prior.version
+            ):
+                findings.append(self._surface_finding(
+                    service,
+                    f"Cambio de versión detectado en el puerto {service.port}: "
+                    f"{prior.product} {prior.version or ''} -> {service.product} {service.version or ''}".strip()
+                ))
+            scan_repo.upsert_host_service(
+                host_id=host_id, port=service.port, protocol=protocol,
+                name=service.name or None, product=service.product or None,
+                version=service.version or None, cpe=service.cpe or None,
+            )
+        return findings
+
+    @staticmethod
+    def _surface_finding(service, title: str) -> dict:
+        """Build an informational Finding for an attack-surface change (Fase 5)."""
+        return {
+            "title":        title,
+            "category":     "surface_change",
+            "port":         service.port,
+            "service":      service.name or None,
+            "source":       "lybra",
+            "check_id":     "lybra:surface-change@1",
+            "feed_version": "lybra-surface-1",
+            "qod":          QOD_OPEN_PORT,
+            "confirmed":    True,
             "state":        "open",
         }
 
