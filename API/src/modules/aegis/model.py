@@ -40,7 +40,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
-from src.modules.shared import Base, Document, utcnow_naive
+from src.modules.shared import Base, Document, utcnow_naive, isoformat_utc
 
 
 # =========================================================================
@@ -436,7 +436,7 @@ class DistributionList(Base):
         return {
             "id":             self.id,
             "name":           self.name,
-            "createdAt":      self.created_at.isoformat() if self.created_at else None,
+            "createdAt":      isoformat_utc(self.created_at),
             "recipientCount": len(self.recipients),
         }
 
@@ -531,8 +531,8 @@ class Campaign(Base):
             "documentId":  self.document_id,
             "listId":      self.list_id,
             "status":      self.status,
-            "createdAt":   self.created_at.isoformat() if self.created_at else None,
-            "launchedAt":  self.launched_at.isoformat() if self.launched_at else None,
+            "createdAt":   isoformat_utc(self.created_at),
+            "launchedAt":  isoformat_utc(self.launched_at),
         }
 
     def __repr__(self) -> str:
@@ -590,9 +590,9 @@ class CampaignRecipient(Base):
             "email":       self.recipient_email,
             "name":        self.recipient_name or "",
             "status":      self.status,
-            "sentAt":      self.sent_at.isoformat() if self.sent_at else None,
-            "openedAt":    self.opened_at.isoformat() if self.opened_at else None,
-            "completedAt": self.completed_at.isoformat() if self.completed_at else None,
+            "sentAt":      isoformat_utc(self.sent_at),
+            "openedAt":    isoformat_utc(self.opened_at),
+            "completedAt": isoformat_utc(self.completed_at),
             "score":       self.score,
         }
 

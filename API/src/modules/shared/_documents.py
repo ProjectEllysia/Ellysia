@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 from src.modules.shared import Document
 from src.modules.infrastructure import UnitOfWork
-from ._time import utcnow_naive
+from ._time import utcnow_naive, isoformat_utc
 
 
 # =========================================================================
@@ -176,7 +176,7 @@ def serialize_document_list(
             if value is None:
                 item[output_name] = None
             elif isinstance(value, datetime):
-                item[output_name] = value.isoformat()
+                item[output_name] = isoformat_utc(value)
             else:
                 item[output_name] = value
         result.append(item)

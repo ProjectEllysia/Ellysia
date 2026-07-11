@@ -4,7 +4,7 @@ from functools import wraps
 import traceback
 import sys
 
-from ._time import utcnow_naive
+from ._time import utcnow_naive, isoformat_utc
 
 
 class ErrorCode(Enum):
@@ -129,7 +129,7 @@ class SecOpsException(Exception):
             "error": self.__class__.__name__,
             "code": self.code.value,
             "message": self.user_message,
-            "timestamp": self.timestamp.isoformat(),
+            "timestamp": isoformat_utc(self.timestamp),
         }
 
         if self.details:

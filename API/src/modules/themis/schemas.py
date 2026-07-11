@@ -1,5 +1,7 @@
 from marshmallow import Schema, fields, validate, validates_schema, ValidationError
 
+from src.modules.shared import UTCDateTime
+
 
 class ScanIdQuerySchema(Schema):
     id = fields.Integer(required=True)
@@ -58,7 +60,7 @@ class AuthorizedTargetSchema(Schema):
     id = fields.Integer()
     target = fields.String()
     label = fields.String(allow_none=True)
-    createdAt = fields.DateTime()
+    createdAt = UTCDateTime()
 
 
 class AuthorizedTargetListResponseSchema(Schema):
@@ -160,8 +162,8 @@ class DocumentStatusResponseSchema(Schema):
     scanId = fields.Integer()
     status = fields.String()
     aiReport = fields.Boolean()
-    createdAt = fields.DateTime(format="iso", allow_none=True)
-    generatedAt = fields.DateTime(format="iso", allow_none=True)
+    createdAt = UTCDateTime(allow_none=True)
+    generatedAt = UTCDateTime(allow_none=True)
     downloadUrl = fields.String(allow_none=True)
 
 
@@ -197,7 +199,7 @@ class ScheduledScanResponseSchema(Schema):
     scanType = fields.String()
     scheduleType = fields.String()
     scheduleConfig = fields.Dict()
-    nextRunAt = fields.DateTime(format="iso", allow_none=True)
+    nextRunAt = UTCDateTime(allow_none=True)
     user = fields.String()
 
 
@@ -208,9 +210,9 @@ class ScheduledScanListItemSchema(Schema):
     scheduleType = fields.String()
     scheduleConfig = fields.Dict()
     isActive = fields.Boolean()
-    lastRunAt = fields.DateTime(format="iso", allow_none=True)
-    nextRunAt = fields.DateTime(format="iso", allow_none=True)
-    createdAt = fields.DateTime(format="iso", allow_none=True)
+    lastRunAt = UTCDateTime(allow_none=True)
+    nextRunAt = UTCDateTime(allow_none=True)
+    createdAt = UTCDateTime(allow_none=True)
 
 
 class ScheduledScanListResponseSchema(Schema):
@@ -250,8 +252,8 @@ class AddScansToFolderSchema(Schema):
 class FolderSchema(Schema):
     id = fields.Integer(allow_none=True)
     name = fields.String()
-    createdAt = fields.DateTime(format="iso", allow_none=True)
-    updatedAt = fields.DateTime(format="iso", allow_none=True)
+    createdAt = UTCDateTime(allow_none=True)
+    updatedAt = UTCDateTime(allow_none=True)
     scanCount = fields.Integer()
     scans = fields.List(fields.Dict())
 
@@ -303,7 +305,7 @@ class HistoryHostItemSchema(Schema):
     target = fields.String()
     scanType = fields.String()
     scanCount = fields.Integer()
-    lastScannedAt = fields.DateTime(format="iso", allow_none=True)
+    lastScannedAt = UTCDateTime(allow_none=True)
 
 
 class HistoryHostsResponseSchema(Schema):

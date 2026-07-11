@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from src.modules.shared import utcnow_naive, isoformat_utc
 from src.modules.aegis.exceptions import (
     ExporterError,
     ExporterFormatError,
@@ -78,7 +79,7 @@ class ExportResult:
             "format":      self.format.value,
             "mimetype":    self.mimetype,
             "sizeBytes":   self.size_bytes,
-            "generatedAt": self.generated_at.isoformat(),
+            "generatedAt": isoformat_utc(self.generated_at),
         }
 
 
@@ -219,7 +220,7 @@ class MarkdownExporter(AegisExporter):
             mimetype     = self.mimetype,
             format       = self.format,
             size_bytes   = len(content_bytes),
-            generated_at = datetime.now(),
+            generated_at = utcnow_naive(),
         )
 
     # ── Generación por secciones ──────────────────────────────────────────────
@@ -409,7 +410,7 @@ class HTMLExporter(AegisExporter):
             mimetype     = self.mimetype,
             format       = self.format,
             size_bytes   = len(content_bytes),
-            generated_at = datetime.now(),
+            generated_at = utcnow_naive(),
         )
 
     def _generate_content(self, data: ExportData) -> str:
@@ -577,7 +578,7 @@ class JsonExporter(AegisExporter):
             mimetype     = self.mimetype,
             format       = self.format,
             size_bytes   = len(content_bytes),
-            generated_at = datetime.now(),
+            generated_at = utcnow_naive(),
         )
 
     def _to_dict(self, data: ExportData) -> dict:

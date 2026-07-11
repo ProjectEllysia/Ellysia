@@ -24,7 +24,7 @@ from ._endpoints    import (
 )
 from ._ownership import assert_owned
 from ._time import utcnow_naive, isoformat_utc
-from .schemas import ErrorSchema, SuccessMessageSchema, PaginationQuerySchema
+from .schemas import ErrorSchema, SuccessMessageSchema, PaginationQuerySchema, UTCDateTime
 
 __all__ = [
     "Base",
@@ -42,5 +42,6 @@ __all__ = [
     "isoformat_utc",
     "ErrorSchema",
     "SuccessMessageSchema",
-    "PaginationQuerySchema"
+    "PaginationQuerySchema",
+    "UTCDateTime"
 ]
