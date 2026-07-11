@@ -589,6 +589,20 @@ class TlsProbe:
 # ORACLE / CONCORDANCE (measuring agreement with Nmap)
 # =========================================================================
 
+def _versions_agree(version: str, nmap_version: str) -> bool:
+    """Return whether two version strings identify the same release.
+
+    Nmap often appends extra info after the bare version number — SSH banners
+    in particular come back as e.g. ``"6.6.1p1 Ubuntu 2ubuntu2.13"`` for our
+    plain ``"6.6.1p1"`` — so an exact-string comparison would call that a
+    disagreement when the version itself is identical. A prefix match on a
+    word boundary still counts as agreement; anything else does not.
+    """
+    if version == nmap_version:
+        return True
+    return nmap_version.startswith(version + " ") or version.startswith(nmap_version + " ")
+
+
 def agrees_with_nmap(
     product: Optional[str], version: Optional[str],
     nmap_product: Optional[str], nmap_version: Optional[str],
@@ -597,8 +611,9 @@ def agrees_with_nmap(
 
     Product names are compared by case-insensitive substring overlap, because the
     two tools name things differently ("Apache" versus "Apache httpd"). Versions
-    must match exactly, but only when both sides actually report one. This is the
-    per-service judgement that :func:`concordance_rate` aggregates.
+    are compared leniently (see :func:`_versions_agree`), but only when both
+    sides actually report one. This is the per-service judgement that
+    :func:`concordance_rate` aggregates.
 
     Args:
         product: Our identified product.
@@ -615,7 +630,7 @@ def agrees_with_nmap(
     p, np = product.lower(), nmap_product.lower()
     if p not in np and np not in p:
         return False
-    if version and nmap_version and version != nmap_version:
+    if version and nmap_version and not _versions_agree(version, nmap_version):
         return False
     return True
 
