@@ -127,11 +127,13 @@ def change_vault_metadata(data):
 @acheron_blp.get("/generate-password")
 @acheron_blp.arguments(GeneratePasswordQuerySchema, location="query")
 @acheron_blp.response(200, GeneratePasswordResponseSchema, description="Contrasena generada")
+@acheron_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @acheron_blp.alt_response(422, schema=ErrorSchema, description="Invalid parameters")
 @limiter.limit("30 per minute; 300 per hour")
+@require_oauth_token
 @handle_exceptions(default_exception=VaultError, logger=logger)
 def generate_password(query):
-    """Generar una contrasena aleatoria segura. Endpoint publico, no requiere autenticacion."""
+    """Generar una contrasena aleatoria segura."""
     password = generate_password_util(
         length=query["length"],
         use_uppercase=query["uppercase"],

@@ -212,41 +212,47 @@ def test_all_storable_kinds_add_update_and_export_roundtrip(client, make_user, a
     assert _by_id(body2["wifinetworks"], "k-wifi")["ssid"] == "newssid"
 
 
-# ── GET /generate-password (endpoint público) ────────────────────────────────
+# ── GET /generate-password ────────────────────────────────────────────────
+# S6: era el único endpoint fuera de /aegis/quiz sin autenticación, pese a no
+# tener ningún consumidor que lo necesite sin sesión — ahora exige JWT como
+# el resto de la API.
 
 
-def test_generate_password_no_auth_required(client):
-    resp = client.get("/acheron/generate-password")
-    assert resp.status_code == 200
-    assert isinstance(resp.get_json()["password"], str)
+def test_generate_password_requires_authentication(client):
+    assert client.get("/acheron/generate-password").status_code == 401
 
 
-def test_generate_password_default_length(client):
-    resp = client.get("/acheron/generate-password")
+def test_generate_password_default_length(client, regular_user, auth_headers):
+    resp = client.get("/acheron/generate-password", headers=auth_headers(regular_user))
     assert len(resp.get_json()["password"]) == 20
 
 
-def test_generate_password_respects_length(client):
-    resp = client.get("/acheron/generate-password?length=32")
+def test_generate_password_respects_length(client, regular_user, auth_headers):
+    resp = client.get("/acheron/generate-password?length=32", headers=auth_headers(regular_user))
     assert resp.status_code == 200
     assert len(resp.get_json()["password"]) == 32
 
 
-def test_generate_password_rejects_length_out_of_range(client):
-    assert client.get("/acheron/generate-password?length=200").status_code == 422
-    assert client.get("/acheron/generate-password?length=2").status_code == 422
+def test_generate_password_rejects_length_out_of_range(client, regular_user, auth_headers):
+    headers = auth_headers(regular_user)
+    assert client.get("/acheron/generate-password?length=200", headers=headers).status_code == 422
+    assert client.get("/acheron/generate-password?length=2", headers=headers).status_code == 422
 
 
-def test_generate_password_rejects_all_charsets_disabled(client):
+def test_generate_password_rejects_all_charsets_disabled(client, regular_user, auth_headers):
     resp = client.get(
         "/acheron/generate-password"
-        "?uppercase=false&lowercase=false&digits=false&symbols=false"
+        "?uppercase=false&lowercase=false&digits=false&symbols=false",
+        headers=auth_headers(regular_user),
     )
     assert resp.status_code == 422
 
 
-def test_generate_password_exclude_ambiguous(client):
-    resp = client.get("/acheron/generate-password?length=64&excludeAmbiguous=true")
+def test_generate_password_exclude_ambiguous(client, regular_user, auth_headers):
+    resp = client.get(
+        "/acheron/generate-password?length=64&excludeAmbiguous=true",
+        headers=auth_headers(regular_user),
+    )
     assert resp.status_code == 200
     password = resp.get_json()["password"]
     assert not set(password) & set("0O1lI")
