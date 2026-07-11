@@ -86,6 +86,16 @@ class OpenVASScanManager(ScanManager):
             Primary key of the created OpenVASScan record.
         """
         try:
+            if not skip_normalize:
+                # OpenVAS solo admite un host por escaneo: resolver aquí (en vez
+                # de confiar en el caller) cierra el hueco por el que el flujo
+                # programado lanzaba un target sin validar (multi-host o IP
+                # privada) — el endpoint HTTP ya validaba, este manager no.
+                from src.modules.shared import normalize_target
+                target, _ = normalize_target(target)
+                skip_normalize = True
+            ScanManager.reject_private_ip(target)
+
             config_id = self.SCAN_CONFIGS.get(scan_config, self.SCAN_CONFIGS["full_fast"])
             scan      = self._create_scan_record(
                 target=target,
