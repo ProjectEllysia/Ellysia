@@ -21,12 +21,8 @@ usuario, no como una puerta de cada commit.
 
 from __future__ import annotations
 
-import os
 import shutil
-import socket
 import subprocess
-import time
-from typing import Optional
 
 import pytest
 
@@ -36,48 +32,21 @@ from src.modules.themis.lybra import scan_ports_sync, port_concordance
 from src.modules.themis.managers import LybraEngineManager, AuthorizedTargetManager
 from src.modules.themis.repositories import ScanRepository, KbRepository
 
+from ._docker_helpers import resolve_docker, docker_run, docker_rm, wait_for_port, port_is_free
+
 pytestmark = [pytest.mark.oracle, pytest.mark.integration]
 
-
-def _working_docker(path: str) -> bool:
-    try:
-        return subprocess.run(
-            [path, "version", "--format", "{{.Server.Version}}"],
-            capture_output=True, timeout=10,
-        ).returncode == 0
-    except OSError:
-        return False
-
-
-def _resolve_docker() -> Optional[str]:
-    """Find a *working* ``docker`` client, including the WSL⇄Windows interop path.
-
-    ``shutil.which("docker")`` alone is not enough here: Docker Desktop installs
-    a thin shim at the front of ``PATH`` in every WSL distro (even ones without
-    its "WSL integration" enabled) that just prints a "not found, enable WSL
-    integration" message and exits 1 — a real, executable, on-PATH file that is
-    still not a working docker client. In this repo's dev setup that shim wins
-    over the real Windows-side binary, reachable via the ``/mnt/c/...`` interop
-    mount, unless it's actually invoked and checked. On a native Linux CI
-    runner none of this applies and the first candidate just works.
-    """
-    for candidate in (
-        shutil.which("docker"),
-        "/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe",
-    ):
-        if candidate and os.path.exists(candidate) and _working_docker(candidate):
-            return candidate
-    return None
-
-
-_DOCKER = _resolve_docker()
+_DOCKER = resolve_docker()
 _NMAP = shutil.which("nmap")
 
 pytestmark.append(pytest.mark.skipif(_DOCKER is None, reason="Docker no disponible"))
 
 
 def _docker(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run([_DOCKER, *args], capture_output=True, text=True, timeout=60, check=True)
+    return docker_run(_DOCKER, *args)
+
+
+_wait_for_port = wait_for_port
 
 
 # is_http_service() (checks.py) only recognises a fixed port set for HTTP
@@ -85,33 +54,58 @@ def _docker(*args: str) -> subprocess.CompletedProcess:
 # ephemeral port would be discovered (open_port) but never actually probed.
 # Picking a free port *from that set* keeps both true: recognised as HTTP,
 # and not hard-coded onto a port something else on the host might be using.
-_CANDIDATE_HTTP_PORTS = (8080, 8000, 8888, 8008, 8443)
+# 8443 is deliberately excluded: it is the only port besides 443 that
+# is_tls_service() (checks.py) recognises, and it is reserved below for the
+# TLS fixtures — a plain HTTP fixture claiming it first would starve them.
+_CANDIDATE_HTTP_PORTS = (8080, 8000, 8888, 8008)
 _claimed_ports: set = set()
+
+# Reserved exclusively for the TLS family fixtures (only one candidate exists,
+# so these fixtures are function-scoped and tear down their container before
+# the next one binds it — no persistent claim needed).
+_TLS_PORT = 8443
 
 
 def _free_http_port() -> int:
     for port in _CANDIDATE_HTTP_PORTS:
         if port in _claimed_ports:
             continue
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-        _claimed_ports.add(port)
-        return port
+        if port_is_free("127.0.0.1", port):
+            _claimed_ports.add(port)
+            return port
     raise RuntimeError(f"Ninguno de los puertos HTTP candidatos está libre: {_CANDIDATE_HTTP_PORTS}")
 
 
-def _wait_for_port(host: str, port: int, timeout: float = 30.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            with socket.create_connection((host, port), timeout=1.0):
-                return
-        except OSError:
-            time.sleep(0.3)
-    raise TimeoutError(f"{host}:{port} no respondió en {timeout}s")
+def _free_tls_port() -> int:
+    if not port_is_free("127.0.0.1", _TLS_PORT):
+        raise RuntimeError(f"Puerto TLS {_TLS_PORT} no está libre")
+    return _TLS_PORT
+
+
+def _tls_container_cmd(days: int, expired: bool) -> str:
+    """Shell command that generates a self-signed cert *inside* the container
+    at startup (no bind mount, same philosophy as ``git_exposed_port``) and
+    serves it over TLS with vanilla nginx.
+
+    When ``expired`` is set, cert generation runs under ``libfaketime`` with
+    the clock wound back to 2020 — the container's real clock is never
+    touched (no ``CAP_SYS_TIME``, which Docker does not grant by default),
+    only the ``openssl`` process sees a fake "now" while computing
+    ``notBefore``/``notAfter``. nginx serving the resulting cert later, under
+    the container's real clock, does not care that the file is "from the
+    past": TLS handshakes don't validate the server's own clock.
+    """
+    pkgs = "openssl libfaketime" if expired else "openssl"
+    prefix = "faketime '2020-01-01 00:00:00' " if expired else ""
+    return (
+        f"apk add --no-cache {pkgs} >/dev/null 2>&1 && "
+        + prefix +
+        "openssl req -x509 -nodes -days " + str(days) + " -newkey rsa:2048 "
+        "-keyout /etc/nginx/tls.key -out /etc/nginx/tls.crt -subj /CN=lybra-oracle-tls >/dev/null 2>&1 && "
+        "printf '%s' 'server { listen 443 ssl; ssl_certificate /etc/nginx/tls.crt; "
+        "ssl_certificate_key /etc/nginx/tls.key; location / { return 200; } }' "
+        "> /etc/nginx/conf.d/default.conf && nginx -g \"daemon off;\""
+    )
 
 
 @pytest.fixture(scope="module")
@@ -125,7 +119,7 @@ def httpd_2449_port():
         _wait_for_port("127.0.0.1", port)
         yield port
     finally:
-        subprocess.run([_DOCKER, "rm", "-f", name], capture_output=True, timeout=30)
+        docker_rm(_DOCKER, name)
 
 
 @pytest.fixture(scope="module")
@@ -148,7 +142,47 @@ def git_exposed_port():
         _wait_for_port("127.0.0.1", port)
         yield port
     finally:
-        subprocess.run([_DOCKER, "rm", "-f", name], capture_output=True, timeout=30)
+        docker_rm(_DOCKER, name)
+
+
+@pytest.fixture
+def tls_healthy_port():
+    """A self-signed cert that is otherwise healthy — valid for a year, modern
+    protocol. Closes the roadmap's Fase R gap ("la familia tls se quedó fuera
+    del banco automatizado"): a local container with a self-signed cert
+    generated at startup, avoiding both the bind-mount friction the
+    ``.git/config`` fixture already sidesteps and the SNI/IP mismatch a real
+    ``badssl.com``-style target would hit through ``AuthorizedTargetManager``
+    (IP/CIDR only, no hostnames).
+
+    Also a negative control: it must NOT trip ``tls-expired-cert`` or
+    ``tls-deprecated-protocol``, the other two checks in the same family.
+    """
+    port = _free_tls_port()
+    name = f"lybra-oracle-tls-healthy-{port}"
+    _docker("run", "-d", "--name", name, "-p", f"{port}:443", "nginx:alpine",
+            "sh", "-c", _tls_container_cmd(days=365, expired=False))
+    try:
+        _wait_for_port("127.0.0.1", port)
+        yield port
+    finally:
+        docker_rm(_DOCKER, name)
+
+
+@pytest.fixture
+def tls_expired_port():
+    """Same container, but the cert is generated under ``libfaketime`` with
+    the clock wound back to 2020, so it is already expired against any real
+    clock. Also self-signed, like every cert this fixture family produces."""
+    port = _free_tls_port()
+    name = f"lybra-oracle-tls-expired-{port}"
+    _docker("run", "-d", "--name", name, "-p", f"{port}:443", "nginx:alpine",
+            "sh", "-c", _tls_container_cmd(days=30, expired=True))
+    try:
+        _wait_for_port("127.0.0.1", port)
+        yield port
+    finally:
+        docker_rm(_DOCKER, name)
 
 
 def _run_self_discovery(app, admin_user, target: str, port: int, monkeypatch):
@@ -212,6 +246,29 @@ def test_missing_security_headers_detected_against_real_container(app, admin_use
         "lybra:missing-x-content-type-options-header@1",
     }
     assert all(f.confirmed and f.qod == 99 for f in findings if f.category == "security_header")
+
+
+def test_tls_self_signed_cert_detected_against_real_container(app, admin_user, tls_healthy_port, monkeypatch):
+    """La familia tls (Fase R) debe confirmar el autofirmado contra un
+    contenedor real, y no disparar en falso los otros dos checks de la misma
+    familia (caducidad, protocolo obsoleto) — el control negativo que hace
+    del número de precisión algo medido y no solo aspiracional."""
+    findings = _run_self_discovery(app, admin_user, "127.0.0.1", tls_healthy_port, monkeypatch)
+
+    tls_findings = {f.check_id for f in findings if f.category == "tls"}
+    assert tls_findings == {"lybra:tls-self-signed-cert@1"}
+    assert all(f.confirmed and f.qod == 99 for f in findings if f.category == "tls")
+
+
+def test_tls_expired_cert_detected_against_real_container(app, admin_user, tls_expired_port, monkeypatch):
+    """Certificado generado con el reloj adelantado a 2020 (``libfaketime``):
+    debe confirmar tanto el autofirmado como la caducidad contra un handshake
+    TLS real, sin mockear nada."""
+    findings = _run_self_discovery(app, admin_user, "127.0.0.1", tls_expired_port, monkeypatch)
+
+    tls_findings = {f.check_id for f in findings if f.category == "tls"}
+    assert tls_findings == {"lybra:tls-self-signed-cert@1", "lybra:tls-expired-cert@1"}
+    assert all(f.confirmed and f.qod == 99 for f in findings if f.category == "tls")
 
 
 @pytest.mark.skipif(_NMAP is None, reason="nmap no disponible")
