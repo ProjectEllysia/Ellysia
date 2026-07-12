@@ -207,6 +207,30 @@ export const useThemisStore = defineStore('themis', () => {
   }
 
   /**
+   * "Ver más": añade la siguiente página de escaneos Lybra a la lista ya
+   * cargada (en vez de reemplazarla, como hace loadScans/goToPage) — el
+   * listado de veredictos crece hacia abajo sin perder el scroll ni el
+   * estado expandido de las tarjetas ya visibles.
+   */
+  async function loadMoreLybraScans() {
+    const d = scans.lybra
+    if (d.loading || d.results.length >= d.totalCount) return
+    d.loading = true
+    try {
+      const nextPage = d.page + 1
+      const params = new URLSearchParams({ type: 'lybra', page: nextPage, per_page: d.perPage })
+      const res = await apiFetch(`/themis/results?${params}`)
+      if (!res?.ok) return
+      const data = await res.json()
+      d.results = [...d.results, ...(data.results ?? [])]
+      d.totalCount = data.totalCount ?? d.totalCount
+      d.page = nextPage
+    } finally {
+      d.loading = false
+    }
+  }
+
+  /**
    * Carga los escaneos Nmap TERMINADOS del usuario, para poblar el desplegable
    * del modo "analizar un Nmap existente". Reutiliza el endpoint de resultados
    * y filtra por estado finished (solo un Nmap acabado tiene puertos que analizar).
@@ -929,7 +953,7 @@ export const useThemisStore = defineStore('themis', () => {
     viewMode, folders, folderForms, moveScan,
     loadStats, loadScans, switchTab, refreshCurrent, goToPage, stopScanPolling,
     launchNmap, launchNikto, launchOpenvas,
-    launchLybra, loadLybraScans, loadSourceNmapScans, deleteLybraScan,
+    launchLybra, loadLybraScans, loadMoreLybraScans, loadSourceNmapScans, deleteLybraScan,
     lybraDocs, loadLybraDocs, generateLybraPdf, deleteLybraDoc,
     deleteScan, cancelScan,
     loadScheduledScans, createScheduledScan, deactivateScheduledScan, deleteScheduledScan, toggleScheduledForm,

@@ -16,7 +16,15 @@
         </button>
       </div>
 
-      <Transition name="fade-swap" mode="out-in">
+      <!-- Sin Transition envolvente aquí a propósito: es un cambio de "mundo"
+           completo (motor propio vs. escáneres externos), árboles grandes y
+           con formas muy distintas. mode="out-in" obligaba a esperar a que
+           el mundo saliente terminara de desvanecerse (~120ms) antes si
+           quiera de empezar a montar el entrante, sumando ambos tiempos y
+           haciendo el cambio notablemente lento. Un swap instantáneo aquí
+           se lee como cambiar de pestaña, no como una transición de
+           contenido — la animación se reserva para cambios más pequeños
+           dentro de un mismo mundo (view-block de abajo). -->
       <!-- ═══════════ MUNDO: MOTOR LYBRA ═══════════ -->
       <div v-if="store.world === 'lybra'" key="lybra" class="world-block">
         <button class="lybra-history-toggle" @click="store.setViewMode(store.viewMode === 'history' ? 'full' : 'history')">
@@ -37,8 +45,10 @@
           <LybraResults
             :scans="store.scans.lybra.results"
             :loading="store.scans.lybra.loading"
+            :total-count="store.scans.lybra.totalCount"
             :docs-by-scan="store.lybraDocs"
             @refresh="store.loadLybraScans()"
+            @load-more="store.loadMoreLybraScans()"
             @delete="handleDeleteLybra"
             @load-docs="store.loadLybraDocs"
             @generate-pdf="handleLybraGeneratePdf"
@@ -87,7 +97,6 @@
         <HistoryPanel v-else-if="store.viewMode === 'history'" key="history" />
       </Transition>
       </div>
-      </Transition>
     </main>
 
     <ScanPreviewModal :show="store.preview.show" :scan="store.preview.scan" :type="store.preview.type" :docs="store.preview.docs" :docs-loading="store.preview.docsLoading"

@@ -61,29 +61,49 @@
                 Ningún hallazgo. La superficie analizada está limpia.
               </div>
 
-              <ul v-else class="findings">
-                <li v-for="f in sortedFindings(scan)" :key="f.id" class="finding" :class="{ potential: !f.confirmed }">
-                  <span class="f-prio" :class="(f.priority || 'INFO').toLowerCase()">{{ PRIO_LABEL[f.priority] || f.priority }}</span>
-                  <div class="f-main">
-                    <div class="f-title-row">
-                      <span class="f-conf" :class="f.confirmed ? 'confirmed' : 'hypothesis'"
-                        :title="f.confirmed ? `Comprobado activamente (QoD ${f.qod})` : `Deducido por versión (QoD ${f.qod}) — potencial, sin confirmar`">
-                        {{ f.confirmed ? 'Comprobado' : 'Potencial' }}
-                      </span>
-                      <span class="f-title">{{ f.title }}</span>
-                    </div>
-                    <div class="f-meta">
-                      <span v-if="f.port" class="f-tag mono">{{ f.service || 'svc' }}:{{ f.port }}</span>
-                      <span v-for="cve in (f.cveIds || [])" :key="cve" class="f-tag cve">{{ cve }}</span>
-                      <span v-if="f.inKev" class="f-tag kev" title="En la lista CISA de vulnerabilidades explotadas activamente">KEV · explotada</span>
-                      <span v-if="f.epssScore != null" class="f-tag epss" :title="`Probabilidad de explotación en 30 días (EPSS)`">EPSS {{ Math.round(f.epssScore * 100) }}%</span>
-                      <span v-if="f.cvssScore != null" class="f-tag cvss">CVSS {{ f.cvssScore }}</span>
-                      <span v-if="f.state && f.state !== 'open'" class="f-tag state" :class="f.state">{{ STATE_LABEL[f.state] || f.state }}</span>
-                      <span v-if="f.source && f.source !== 'lybra'" class="f-tag src" :title="`Corroborado por ${f.source}`">+{{ f.source }}</span>
-                    </div>
-                  </div>
-                </li>
-              </ul>
+              <template v-else>
+                <!-- Acordeón anidado, colapsado por defecto: la cabecera de la tarjeta ya
+                     resume la severidad (pills de arriba), así que abrir un escaneo para
+                     generar su PDF o gestionar sus documentos no obliga a desplazarse
+                     primero por una lista de hallazgos que puede ser muy larga. -->
+                <button type="button" class="findings-toggle" @click="toggleFindings(scan.id)">
+                  <span class="chevron findings-chevron" :class="{ rot: findingsOpen.has(scan.id) }" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                  </span>
+                  {{ findingsOpen.has(scan.id) ? 'Ocultar hallazgos' : 'Mostrar hallazgos' }}
+                  <span class="findings-count">{{ sortedFindings(scan).length }}</span>
+                </button>
+
+                <div v-if="findingsOpen.has(scan.id)">
+                  <ul class="findings">
+                    <li v-for="f in visibleFindings(scan)" :key="f.id" class="finding" :class="{ potential: !f.confirmed }">
+                      <span class="f-prio" :class="(f.priority || 'INFO').toLowerCase()">{{ PRIO_LABEL[f.priority] || f.priority }}</span>
+                      <div class="f-main">
+                        <div class="f-title-row">
+                          <span class="f-conf" :class="f.confirmed ? 'confirmed' : 'hypothesis'"
+                            :title="f.confirmed ? `Comprobado activamente (QoD ${f.qod})` : `Deducido por versión (QoD ${f.qod}) — potencial, sin confirmar`">
+                            {{ f.confirmed ? 'Comprobado' : 'Potencial' }}
+                          </span>
+                          <span class="f-title">{{ f.title }}</span>
+                        </div>
+                        <div class="f-meta">
+                          <span v-if="f.port" class="f-tag mono">{{ f.service || 'svc' }}:{{ f.port }}</span>
+                          <span v-for="cve in (f.cveIds || [])" :key="cve" class="f-tag cve">{{ cve }}</span>
+                          <span v-if="f.inKev" class="f-tag kev" title="En la lista CISA de vulnerabilidades explotadas activamente">KEV · explotada</span>
+                          <span v-if="f.epssScore != null" class="f-tag epss" :title="`Probabilidad de explotación en 30 días (EPSS)`">EPSS {{ Math.round(f.epssScore * 100) }}%</span>
+                          <span v-if="f.cvssScore != null" class="f-tag cvss">CVSS {{ f.cvssScore }}</span>
+                          <span v-if="f.state && f.state !== 'open'" class="f-tag state" :class="f.state">{{ STATE_LABEL[f.state] || f.state }}</span>
+                          <span v-if="f.source && f.source !== 'lybra'" class="f-tag src" :title="`Corroborado por ${f.source}`">+{{ f.source }}</span>
+                        </div>
+                      </div>
+                    </li>
+                  </ul>
+
+                  <button v-if="visibleFindings(scan).length < sortedFindings(scan).length" type="button" class="load-more-findings" @click="showMoreFindings(scan.id)">
+                    Ver más ({{ visibleFindings(scan).length }} de {{ sortedFindings(scan).length }})
+                  </button>
+                </div>
+              </template>
 
               <div v-if="scan.status === 'finished' && scan.targetAuthorized === false" class="body-unauth-hint">
                 Objetivo no autorizado: el fingerprinting propio y las comprobaciones activas de Lybra no se
@@ -138,6 +158,10 @@
             </div>
           </Transition>
         </article>
+
+        <button v-if="scans.length < totalCount" class="load-more" :disabled="loading" @click="$emit('load-more')">
+          {{ loading ? 'Cargando…' : `Ver más (${scans.length} de ${totalCount})` }}
+        </button>
       </div>
     </Transition>
   </div>
@@ -150,9 +174,10 @@ import StatusBadge from '@/components/themis/StatusBadge.vue'
 const props = defineProps({
   scans: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
+  totalCount: { type: Number, default: 0 },
   docsByScan: { type: Object, default: () => ({}) },
 })
-const emit = defineEmits(['refresh', 'delete', 'load-docs', 'generate-pdf', 'download-doc', 'delete-doc'])
+const emit = defineEmits(['refresh', 'delete', 'load-docs', 'generate-pdf', 'download-doc', 'delete-doc', 'load-more'])
 
 const LADDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 const PRIO_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 }
@@ -175,6 +200,30 @@ function toggle(id) {
     if (!props.docsByScan[id]) emit('load-docs', id)
   }
   expanded.value = s
+}
+
+/** Acordeón anidado de hallazgos (colapsado por defecto) + "ver más" incremental. */
+const FINDINGS_PAGE = 10
+const findingsOpen = ref(new Set())
+const findingsLimit = reactive({})
+
+function toggleFindings(id) {
+  const s = new Set(findingsOpen.value)
+  if (s.has(id)) {
+    s.delete(id)
+  } else {
+    s.add(id)
+    if (!findingsLimit[id]) findingsLimit[id] = FINDINGS_PAGE
+  }
+  findingsOpen.value = s
+}
+
+function visibleFindings(scan) {
+  return sortedFindings(scan).slice(0, findingsLimit[scan.id] || FINDINGS_PAGE)
+}
+
+function showMoreFindings(id) {
+  findingsLimit[id] = (findingsLimit[id] || FINDINGS_PAGE) + FINDINGS_PAGE
 }
 
 /** Cuenta hallazgos por nivel de prioridad para el resumen de la cabecera. */
@@ -258,6 +307,25 @@ function fmtDate(iso) {
 .body-failed { color: var(--danger); }
 .body-clean { color: var(--success); }
 
+.findings-toggle {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0.4rem 0; margin-top: 0.2rem;
+  background: none; border: none; cursor: pointer;
+  font-size: 1.33rem; font-weight: 600; color: var(--text-dim);
+  transition: color 0.15s;
+}
+.findings-toggle:hover { color: var(--text); }
+.findings-chevron { display: grid; place-items: center; color: var(--text-muted); transition: transform 0.2s; }
+.findings-chevron svg { width: 12px; height: 12px; }
+.findings-chevron.rot { transform: rotate(90deg); }
+.findings-count { font-size: 1.12rem; font-weight: 700; color: var(--text-muted); background: var(--surface-2); padding: 0.05rem 0.45rem; border-radius: 8px; font-family: var(--font-mono); }
+.load-more-findings {
+  display: block; width: 100%; margin-top: 0.4rem; padding: 0.45rem;
+  background: none; border: 1px dashed var(--border-solid); border-radius: 7px;
+  color: var(--text-dim); font-size: 1.26rem; font-weight: 600; cursor: pointer;
+  transition: all 0.15s;
+}
+.load-more-findings:hover { border-color: var(--accent); color: var(--text); background: var(--surface-2); }
 .findings { list-style: none; display: flex; flex-direction: column; gap: 0.35rem; margin: 0.3rem 0 0; }
 .finding {
   display: flex; align-items: flex-start; gap: 0.6rem;
@@ -323,6 +391,15 @@ function fmtDate(iso) {
 .body-actions { margin-top: 0.7rem; display: flex; justify-content: flex-end; }
 .btn-del { font-size: 1.26rem; color: var(--danger); background: none; border: 1px solid var(--danger-dim); padding: 0.3rem 0.7rem; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
 .btn-del:hover { background: var(--danger-dim); }
+
+.load-more {
+  width: 100%; padding: 0.75rem; margin-top: -1px;
+  background: none; border: none; border-top: 1px solid var(--border);
+  color: var(--text-dim); font-size: 1.33rem; font-weight: 600; cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.load-more:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.load-more:disabled { cursor: not-allowed; opacity: 0.6; }
 
 @media (max-width: 700px) {
   .scan-head { flex-wrap: wrap; }
