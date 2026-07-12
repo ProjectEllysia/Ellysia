@@ -92,14 +92,14 @@ function scoreClass(s, v) {
 }
 
 .rule-name {
-  font-size: 1rem;
+  font-size: 1.35rem;
   font-weight: 600;
   color: var(--text);
   white-space: nowrap;
 }
 
 .rule-category {
-  font-size: 0.78rem;
+  font-size: 1.37rem;
   font-weight: 500;
   color: var(--text-muted);
   background: var(--surface-2);
@@ -116,7 +116,7 @@ function scoreClass(s, v) {
 }
 
 .rule-score {
-  font-size: 1.1rem;
+  font-size: 1.49rem;
   font-weight: 700;
   font-family: var(--font-mono);
   min-width: 3rem;
@@ -128,7 +128,7 @@ function scoreClass(s, v) {
 .score--neutral { color: var(--text-muted); }
 
 .rule-verdict {
-  font-size: 0.78rem;
+  font-size: 1.37rem;
   font-weight: 600;
   padding: 3px 9px;
   border-radius: 5px;
@@ -203,7 +203,7 @@ function scoreClass(s, v) {
 .detail-row {
   display: flex;
   gap: 0.5rem;
-  font-size: 0.88rem;
+  font-size: 1.54rem;
   line-height: 1.6;
 }
 
@@ -228,7 +228,7 @@ function scoreClass(s, v) {
   background: var(--warn-dim);
   border: 1px solid rgba(212, 160, 74, 0.12);
   color: var(--warn);
-  font-size: 0.88rem;
+  font-size: 1.54rem;
   line-height: 1.5;
 }
 

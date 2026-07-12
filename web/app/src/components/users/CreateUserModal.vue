@@ -80,15 +80,15 @@ defineExpose({ reset })
 .modal-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 1.5rem; backdrop-filter: blur(4px); }
 .modal-box { background: var(--surface); border: 1px solid var(--border-solid); border-radius: 12px; width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; padding: 1.5rem; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.1rem; }
-.modal-header h3 { font-size: 1.05rem; font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); }
+.modal-header h3 { font-size: 1.84rem; font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); }
 .modal-close { background: none; border: none; font-size: 1.4rem; color: var(--text-muted); cursor: pointer; padding: 0 0.2rem; line-height: 1; }
 .modal-close:hover { color: var(--text); }
 .modal-section { margin-bottom: 0.85rem; }
-.modal-section h4 { font-size: 0.8rem; font-weight: 600; color: var(--text-dim); margin: 0 0 0.4rem; }
+.modal-section h4 { font-size: 1.4rem; font-weight: 600; color: var(--text-dim); margin: 0 0 0.4rem; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
 .form-group { display: flex; flex-direction: column; gap: 0.25rem; }
-.form-group label { font-size: 0.72rem; font-weight: 600; color: var(--text-dim); margin-bottom: 0; }
-.inp { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 6px; padding: 0.45rem 0.6rem; color: var(--text); font-size: 0.82rem; outline: none; width: 100%; box-sizing: border-box; transition: border-color 0.2s; }
+.form-group label { font-size: 1.26rem; font-weight: 600; color: var(--text-dim); margin-bottom: 0; }
+.inp { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 6px; padding: 0.45rem 0.6rem; color: var(--text); font-size: 1.44rem; outline: none; width: 100%; box-sizing: border-box; transition: border-color 0.2s; }
 .inp:focus { border-color: var(--accent); }
 .select { cursor: pointer; appearance: auto; }
 .password-wrap { position: relative; }
@@ -101,7 +101,7 @@ defineExpose({ reset })
 .strength--weak .strength-fill { background: var(--danger); }
 .strength--medium .strength-fill { background: var(--warn); }
 .strength--strong .strength-fill { background: var(--success); }
-.strength-label { font-size: 0.68rem; font-weight: 600; color: var(--text-muted); min-width: 38px; }
-.form-error { color: var(--danger); font-size: 0.78rem; margin: 0.4rem 0; }
+.strength-label { font-size: 1.19rem; font-weight: 600; color: var(--text-muted); min-width: 38px; }
+.form-error { color: var(--danger); font-size: 1.37rem; margin: 0.4rem 0; }
 .modal-actions { display: flex; gap: 0.6rem; justify-content: flex-end; margin-top: 1.1rem; }
 </style>

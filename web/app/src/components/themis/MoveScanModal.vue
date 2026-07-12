@@ -71,14 +71,14 @@ function submit() {
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 1rem; }
 .modal { display: block; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; width: 100%; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); pointer-events: auto; opacity: 1; visibility: visible; transform: translateZ(0); }
 .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 0.85rem 1.1rem; border-bottom: 1px solid var(--border); }
-.modal-header h3 { margin: 0; font-size: 0.95rem; color: var(--text); }
-.close-btn { background: none; border: none; color: var(--text-muted); font-size: 1.4rem; cursor: pointer; }
+.modal-header h3 { margin: 0; font-size: 1.66rem; color: var(--text); }
+.close-btn { background: none; border: none; color: var(--text-muted); font-size: 1.89rem; cursor: pointer; }
 .modal-body { padding: 1rem 1.1rem; }
-.modal-body label { display: block; margin-bottom: 0.4rem; font-size: 0.78rem; color: var(--text-dim); }
-.modal-body select { width: 100%; padding: 0.55rem 0.75rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 0.85rem; }
+.modal-body label { display: block; margin-bottom: 0.4rem; font-size: 1.37rem; color: var(--text-dim); }
+.modal-body select { width: 100%; padding: 0.55rem 0.75rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 1.49rem; }
 .modal-body select:focus { outline: none; border-color: var(--accent); }
 .modal-footer { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 0.75rem 1.1rem; border-top: 1px solid var(--border); }
-.btn-secondary, .btn-primary { padding: 0.45rem 0.9rem; border-radius: 6px; font-size: 0.78rem; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+.btn-secondary, .btn-primary { padding: 0.45rem 0.9rem; border-radius: 6px; font-size: 1.37rem; font-weight: 500; cursor: pointer; transition: all 0.2s; }
 .btn-secondary { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim); }
 .btn-secondary:hover:not(:disabled) { border-color: var(--text-muted); color: var(--text); }
 .btn-primary { background: var(--accent); border: 1px solid var(--accent); color: var(--on-accent); }

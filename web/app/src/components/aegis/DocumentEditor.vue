@@ -200,10 +200,10 @@ function save() {
 
 <style scoped>
 .editor { height: 100%; display: flex; flex-direction: column; }
-.editor-toolbar { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.85rem; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 0.72rem; color: var(--text-muted); }
-.doc-id { font-weight: 600; color: var(--text-dim); font-family: var(--font-mono); font-size: 0.75rem; }
+.editor-toolbar { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.85rem; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 1.26rem; color: var(--text-muted); }
+.doc-id { font-weight: 600; color: var(--text-dim); font-family: var(--font-mono); font-size: 1.31rem; }
 .toolbar-spacer { flex: 1; }
-.toolbar-btn { padding: 0.25rem 0.7rem; font-size: 0.68rem; font-weight: 600; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer; transition: all 0.2s; }
+.toolbar-btn { padding: 0.25rem 0.7rem; font-size: 1.19rem; font-weight: 600; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer; transition: all 0.2s; }
 .toolbar-btn:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .toolbar-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .toolbar-save { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
@@ -212,26 +212,26 @@ function save() {
 .editor-section { margin-bottom: 1.5rem; }
 .section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
 
-.field-label { display: block; font-size: 0.78rem; font-weight: 700; color: var(--accent); margin-bottom: 0.4rem; font-family: var(--font-display); text-transform: uppercase; letter-spacing: 0.04em; }
-.field-sublabel { display: block; font-size: 0.7rem; font-weight: 600; color: var(--text-muted); margin: 0.5rem 0 0.25rem; }
-.field-input { width: 100%; box-sizing: border-box; padding: 0.5rem 0.65rem; font-size: 0.82rem; font-family: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; transition: border-color 0.15s; }
+.field-label { display: block; font-size: 1.37rem; font-weight: 700; color: var(--accent); margin-bottom: 0.4rem; font-family: var(--font-display); text-transform: uppercase; letter-spacing: 0.04em; }
+.field-sublabel { display: block; font-size: 1.22rem; font-weight: 600; color: var(--text-muted); margin: 0.5rem 0 0.25rem; }
+.field-input { width: 100%; box-sizing: border-box; padding: 0.5rem 0.65rem; font-size: 1.43rem; font-family: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; transition: border-color 0.15s; }
 .field-input:focus { outline: none; border-color: var(--accent); }
-.field-title { font-size: 1.05rem; font-weight: 700; font-family: var(--font-display); }
+.field-title { font-size: 1.42rem; font-weight: 700; font-family: var(--font-display); }
 .field-area { resize: vertical; line-height: 1.5; min-height: 3rem; }
-.field-error { color: var(--danger); font-size: 0.7rem; margin: 0.25rem 0 0; }
+.field-error { color: var(--danger); font-size: 1.22rem; margin: 0.25rem 0 0; }
 
-.add-btn { padding: 0.25rem 0.6rem; font-size: 0.68rem; font-weight: 600; border-radius: 5px; border: 1px solid var(--accent); background: none; color: var(--accent); cursor: pointer; transition: all 0.15s; }
+.add-btn { padding: 0.25rem 0.6rem; font-size: 1.19rem; font-weight: 600; border-radius: 5px; border: 1px solid var(--accent); background: none; color: var(--accent); cursor: pointer; transition: all 0.15s; }
 .add-btn:hover { background: var(--accent); color: var(--on-accent); }
-.add-btn--sm { font-size: 0.64rem; padding: 0.15rem 0.45rem; }
-.add-btn--primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-size: 0.8rem; font-weight: 700; padding: 0.45rem 1rem; border-radius: 7px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+.add-btn--sm { font-size: 1.12rem; padding: 0.15rem 0.45rem; }
+.add-btn--primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-size: 1.4rem; font-weight: 700; padding: 0.45rem 1rem; border-radius: 7px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
 .add-btn--primary:hover { background: var(--accent); filter: brightness(1.1); color: var(--on-accent); }
-.empty-hint { font-size: 0.76rem; color: var(--text-muted); padding: 0.5rem 0; }
+.empty-hint { font-size: 1.33rem; color: var(--text-muted); padding: 0.5rem 0; }
 
 .tip-card { border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.85rem; background: var(--surface); }
 .tip-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; }
-.tip-num { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 0.7rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.tip-num { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 1.22rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 .tip-card-actions { display: flex; gap: 0.25rem; }
-.icon-btn { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text-dim); cursor: pointer; transition: all 0.15s; }
+.icon-btn { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 1.31rem; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text-dim); cursor: pointer; transition: all 0.15s; }
 .icon-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .icon-danger:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }

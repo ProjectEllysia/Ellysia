@@ -286,7 +286,7 @@ function verdictClass(v) {
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-dim);
-  font-size: 0.85rem;
+  font-size: 1.49rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
@@ -396,7 +396,7 @@ function verdictClass(v) {
 }
 
 .card-label {
-  font-size: 0.7rem;
+  font-size: 1.22rem;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -405,7 +405,7 @@ function verdictClass(v) {
 }
 
 .card-value {
-  font-size: 0.8rem;
+  font-size: 1.4rem;
   font-weight: 500;
   color: var(--text-dim);
   text-align: right;
@@ -423,7 +423,7 @@ function verdictClass(v) {
 }
 
 .card-verdict {
-  font-size: 0.78rem;
+  font-size: 1.37rem;
   font-weight: 700;
   padding: 1px 7px;
   border-radius: 4px;
@@ -460,7 +460,7 @@ function verdictClass(v) {
 }
 
 .confirm-text {
-  font-size: 0.72rem;
+  font-size: 1.26rem;
   font-weight: 600;
   color: var(--danger);
   white-space: nowrap;
@@ -525,12 +525,12 @@ function verdictClass(v) {
 
 .strip-id {
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: 1.43rem;
 }
 
 .strip-title {
   font-family: var(--font-body);
-  font-size: 0.82rem;
+  font-size: 1.43rem;
   font-weight: 500;
   max-width: 160px;
   overflow: hidden;
@@ -540,7 +540,7 @@ function verdictClass(v) {
 
 .strip-verdict {
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: 1.4rem;
   font-weight: 700;
   margin-left: 0.15rem;
 }
@@ -550,7 +550,7 @@ function verdictClass(v) {
 .strip-verdict.verdict--phish { color: var(--danger); }
 
 .strip-status {
-  font-size: 0.75rem;
+  font-size: 1.31rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
@@ -617,7 +617,7 @@ function verdictClass(v) {
   width: 100%;
   text-align: left;
   padding: 0.5rem 0.8rem;
-  font-size: 0.82rem;
+  font-size: 1.43rem;
   background: none;
   border: none;
   color: var(--text-dim);
@@ -649,7 +649,7 @@ function verdictClass(v) {
   color: var(--text-dim);
   cursor: pointer;
   transition: all 0.15s;
-  font-size: 1.3rem;
+  font-size: 1.76rem;
   line-height: 1;
   flex-shrink: 0;
   padding: 0;
@@ -667,7 +667,7 @@ function verdictClass(v) {
   border-style: dashed;
   gap: 0.25rem;
   color: var(--text-muted);
-  font-size: 0.78rem;
+  font-size: 1.37rem;
 }
 .strip-item--load-more:hover {
   color: var(--accent);
@@ -682,7 +682,7 @@ function verdictClass(v) {
   gap: 0.35rem;
   pointer-events: none;
   color: var(--text-muted);
-  font-size: 0.78rem;
+  font-size: 1.37rem;
 }
 
 /* small spinner re-usable in this component scope */

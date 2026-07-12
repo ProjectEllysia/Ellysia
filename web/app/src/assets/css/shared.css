@@ -73,7 +73,7 @@
 
   --radius:      10px;
   --radius-sm:   6px;
-  --topbar-h:    52px;
+  --topbar-h:    64px;
   --transition:  0.2s ease;
 }
 
@@ -248,32 +248,32 @@ select option { background: var(--surface); color: var(--text); }
 .topbar-left, .topbar-right { display: flex; align-items: center; gap: 0.5rem; }
 .back-link {
   display: flex; align-items: center; gap: 0.3rem;
-  color: var(--text-muted); font-size: 0.8rem; font-weight: 500;
+  color: var(--text-muted); font-size: 1.4rem; font-weight: 500;
   transition: color var(--transition);
   padding: 0.3rem 0.5rem; border-radius: var(--radius-sm);
 }
 .back-link:hover { color: var(--text-dim); background: var(--surface-2); }
-.back-link svg { width: 13px; height: 13px; flex-shrink: 0; }
-.topbar-sep { color: var(--border-med); font-size: 0.7rem; user-select: none; }
+.back-link svg { width: 16px; height: 16px; flex-shrink: 0; }
+.topbar-sep { color: var(--border-med); font-size: 1.2rem; user-select: none; }
 .topbar-title {
-  font-size: 1.05rem; font-weight: 600; letter-spacing: 0.02em;
+  font-size: 1.4rem; font-weight: 600; letter-spacing: 0.02em;
   color: var(--text); font-family: var(--font-display);
 }
 .topbar-badge {
-  padding: 2px 7px; border-radius: 4px;
-  font-size: 0.62rem; font-weight: 600;
+  padding: 3px 9px; border-radius: 4px;
+  font-size: 1.1rem; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.06em;
   background: var(--accent-dim); color: var(--accent);
   border: 1px solid var(--border-med);
 }
 .session-pill {
   display: flex; align-items: center; gap: 0.35rem;
-  padding: 3px 9px; border-radius: 6px;
+  padding: 4px 10px; border-radius: 6px;
   background: var(--surface-2); border: 1px solid var(--border);
-  font-size: 0.75rem; color: var(--text-dim);
+  font-size: 1.3rem; color: var(--text-dim);
 }
 .session-dot {
-  width: 5px; height: 5px; border-radius: 50%;
+  width: 6px; height: 6px; border-radius: 50%;
   background: var(--success);
 }
 .btn-logout {
@@ -281,16 +281,16 @@ select option { background: var(--surface); color: var(--text); }
   background: transparent;
   border: none;
   color: var(--text-muted); border-radius: var(--radius-sm);
-  font-size: 0.75rem; font-weight: 500; padding: 5px 8px;
+  font-size: 1.3rem; font-weight: 500; padding: 5px 8px;
   cursor: pointer; transition: all var(--transition);
 }
 .btn-logout:hover { background: var(--danger-dim); color: var(--danger); }
-.btn-logout svg { width: 12px; height: 12px; }
+.btn-logout svg { width: 15px; height: 15px; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   padding: 8px 14px; border-radius: var(--radius-sm);
-  font-family: var(--font-body); font-size: 0.8rem; font-weight: 600;
+  font-family: var(--font-body); font-size: 1.2rem; font-weight: 600;
   letter-spacing: 0.02em; cursor: pointer;
   transition: all var(--transition);
   border: 1px solid transparent;
@@ -401,6 +401,9 @@ select option { background: var(--surface); color: var(--text); }
 @media (max-width: 680px) {
   .topbar { padding: 0 1rem; }
   .btn-logout span { display: none; }
+  /* Con la letra más grande, la pastilla de sesión y la insignia ya no caben
+     junto al resto en una topbar de móvil sin desbordarse. */
+  .topbar-badge, .session-pill { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

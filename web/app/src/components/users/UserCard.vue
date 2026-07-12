@@ -35,20 +35,20 @@ const roleLabel = computed(() => { const r = props.user.role || 'role_user'; if 
 .user-card--root  { border-left: 3px solid var(--danger); }
 .user-card--admin { border-left: 3px solid var(--warn); }
 .user-card--user  { border-left: 3px solid var(--info); }
-.card-avatar { width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 0.95rem; font-weight: 700; background: var(--accent-dim); color: var(--accent-bright); font-family: var(--font-mono); }
+.card-avatar { width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 1.66rem; font-weight: 700; background: var(--accent-dim); color: var(--accent-bright); font-family: var(--font-mono); }
 .user-card--root  .card-avatar { background: rgba(217,108,108,0.15); color: var(--danger); }
 .user-card--admin .card-avatar { background: rgba(212,160,74,0.15); color: var(--warn); }
 .user-card--user  .card-avatar { background: rgba(96,128,224,0.15); color: var(--info); }
 .card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
-.card-name { font-size: 0.92rem; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.card-username { font-size: 0.78rem; color: var(--text-dim); }
-.card-meta { display: flex; gap: 0.65rem; font-size: 0.74rem; color: var(--text-muted); }
+.card-name { font-size: 1.61rem; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-username { font-size: 1.37rem; color: var(--text-dim); }
+.card-meta { display: flex; gap: 0.65rem; font-size: 1.3rem; color: var(--text-muted); }
 .card-email { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
-.card-id { font-family: var(--font-mono); opacity: 0.6; font-size: 0.7rem; }
+.card-id { font-family: var(--font-mono); opacity: 0.6; font-size: 1.23rem; }
 .card-footer { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.15rem; }
-.card-role-badge { font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; padding: 0.1rem 0.4rem; border-radius: 4px; }
+.card-role-badge { font-size: 1.05rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; padding: 0.1rem 0.4rem; border-radius: 4px; }
 .role-badge--root  { background: rgba(217,108,108,0.15);  color: var(--danger); }
 .role-badge--admin { background: rgba(212,160,74,0.15); color: var(--warn); }
 .role-badge--user  { background: rgba(96,128,224,0.12); color: var(--info); }
-.card-date { font-size: 0.65rem; color: var(--text-muted); margin-left: auto; }
+.card-date { font-size: 1.14rem; color: var(--text-muted); margin-left: auto; }
 </style>

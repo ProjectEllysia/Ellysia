@@ -42,7 +42,7 @@ const strength = computed(() => scorePassword(props.password))
 }
 .strength-label {
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 1.09rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   white-space: nowrap;

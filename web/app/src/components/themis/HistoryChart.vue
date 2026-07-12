@@ -108,7 +108,7 @@ function legendClass(label) {
 
 <style scoped>
 .history-chart { width: 100%; animation: history-chart-in 0.45s ease-in; }
-.empty { padding: 2.5rem 1rem; text-align: center; color: var(--text-muted); font-size: 0.9rem; }
+.empty { padding: 2.5rem 1rem; text-align: center; color: var(--text-muted); font-size: 1.58rem; }
 
 @keyframes history-chart-in {
   from { opacity: 0; transform: translateY(8px) scale(0.98); }
@@ -118,19 +118,19 @@ function legendClass(label) {
 
 .gridline { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
 .axis { stroke: var(--border-med); stroke-width: 1.5; }
-.axis-label { fill: var(--text-muted); font-size: 11px; font-family: var(--font-mono); }
-.axis-title { fill: var(--text-dim); font-size: 11px; font-weight: 600; }
+.axis-label { fill: var(--text-muted); font-size: 19px; font-family: var(--font-mono); }
+.axis-title { fill: var(--text-dim); font-size: 19px; font-weight: 600; }
 .bar { transition: opacity 0.2s; }
 .bar:hover { opacity: 0.82; }
-.bar-value { fill: var(--text); font-size: 11px; font-weight: 700; font-family: var(--font-mono); }
-.x-label { fill: var(--text-muted); font-size: 7.5px; }
+.bar-value { fill: var(--text); font-size: 19px; font-weight: 700; font-family: var(--font-mono); }
+.x-label { fill: var(--text-muted); font-size: 13px; }
 
 .legend { display: flex; gap: 0.75rem; justify-content: center; margin-top: 1.1rem; flex-wrap: wrap; }
 .legend-item { display: flex; flex-direction: column; align-items: center; min-width: 92px; padding: 0.6rem 0.9rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
-.legend-value { font-size: 1.45rem; font-weight: 800; font-family: var(--font-mono); line-height: 1.1; }
-.legend-label { font-size: 0.72rem; color: var(--text-dim); margin-top: 0.15rem; }
+.legend-value { font-size: 1.96rem; font-weight: 800; font-family: var(--font-mono); line-height: 1.1; }
+.legend-label { font-size: 1.26rem; color: var(--text-dim); margin-top: 0.15rem; }
 .legend-item.new .legend-value { color: var(--success); }
 .legend-item.same .legend-value { color: var(--info); }
 .legend-item.gone .legend-value { color: var(--danger); }
-.legend-caption { text-align: center; font-size: 0.72rem; color: var(--text-muted); margin: 0.6rem 0 0; }
+.legend-caption { text-align: center; font-size: 1.26rem; color: var(--text-muted); margin: 0.6rem 0 0; }
 </style>

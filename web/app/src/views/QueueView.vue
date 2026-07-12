@@ -103,20 +103,20 @@ async function handleCancel(id) { await store.cancelTask(id) }
 .queue-page { min-height: 100vh; background: var(--bg); padding-top: var(--topbar-h); position: relative; }
 .main { max-width: 960px; margin: 0 auto; padding: 1.75rem 1.1rem 4rem; position: relative; z-index: 1; }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.85rem; }
-.page-header h1 { font-size: 1.4rem; font-weight: 800; color: var(--text); margin: 0; font-family: var(--font-display); }
-.subtitle { font-size: 0.82rem; color: var(--text-dim); margin: 0.2rem 0 0; }
+.page-header h1 { font-size: 2.45rem; font-weight: 800; color: var(--text); margin: 0; font-family: var(--font-display); }
+.subtitle { font-size: 1.44rem; color: var(--text-dim); margin: 0.2rem 0 0; }
 .status-bar { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; padding: 0.85rem 1.1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 1.25rem; }
 .stat-item { display: flex; flex-direction: column; gap: 0.1rem; min-width: 90px; }
-.stat-label { font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.02em; font-weight: 600; }
-.stat-value { font-size: 1.1rem; font-weight: 700; color: var(--text); font-family: var(--font-mono); }
+.stat-label { font-size: 1.19rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.02em; font-weight: 600; }
+.stat-value { font-size: 1.93rem; font-weight: 700; color: var(--text); font-family: var(--font-mono); }
 .stat-item--running .stat-value { color: var(--info); }
 .stat-item--pending .stat-value { color: var(--warn); }
 .stat-item--history .stat-value { color: var(--text-dim); }
 .tab-bar { display: flex; gap: 0.25rem; margin-bottom: 1.1rem; border-bottom: 1px solid var(--border); padding-bottom: 0; }
-.tab-btn { padding: 0.5rem 0.85rem; border: none; background: none; color: var(--text-dim); font-size: 0.82rem; font-weight: 600; cursor: pointer; border-radius: 6px 6px 0 0; border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 0.35rem; transition: all 0.2s ease; }
+.tab-btn { padding: 0.5rem 0.85rem; border: none; background: none; color: var(--text-dim); font-size: 1.44rem; font-weight: 600; cursor: pointer; border-radius: 6px 6px 0 0; border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 0.35rem; transition: all 0.2s ease; }
 .tab-btn:hover { color: var(--text); }
 .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
-.tab-count { font-size: 0.65rem; padding: 0.1rem 0.4rem; border-radius: 8px; background: var(--surface-2); font-family: var(--font-mono); }
+.tab-count { font-size: 1.14rem; padding: 0.1rem 0.4rem; border-radius: 8px; background: var(--surface-2); font-family: var(--font-mono); }
 .task-list { display: flex; flex-direction: column; gap: 0.4rem; }
 .task-row { display: flex; align-items: center; gap: 0.85rem; padding: 0.85rem 1.1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; transition: border-color 0.2s; flex-wrap: wrap; }
 .task-row:hover { border-color: var(--border-med); }
@@ -133,27 +133,27 @@ async function handleCancel(id) { await store.cancelTask(id) }
 .task-icon--failed { background: var(--danger-dim); border-color: var(--danger); color: var(--danger); }
 .task-icon--cancelled { background: var(--surface-2); border-color: var(--border); color: var(--text-muted); }
 .task-info { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; min-width: 160px; }
-.task-name { font-weight: 700; color: var(--text); font-size: 0.85rem; }
-.task-category { font-size: 0.68rem; color: var(--text-muted); font-family: var(--font-mono); }
-.task-status-badge { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; width: fit-content; }
+.task-name { font-weight: 700; color: var(--text); font-size: 1.49rem; }
+.task-category { font-size: 1.19rem; color: var(--text-muted); font-family: var(--font-mono); }
+.task-status-badge { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 4px; font-size: 1.14rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; width: fit-content; }
 .status--pending { background: var(--warn-dim); color: var(--warn); }
 .status--running { background: var(--info-dim); color: var(--info); }
 .status--completed { background: var(--success-dim); color: var(--success); }
 .status--failed { background: var(--danger-dim); color: var(--danger); }
 .status--cancelled { background: var(--surface-2); color: var(--text-muted); }
 .task-times { display: flex; flex-direction: column; gap: 0.05rem; flex: 1.2; min-width: 140px; }
-.task-time { font-size: 0.68rem; color: var(--text-dim); font-family: var(--font-mono); }
-.task-error { font-size: 0.65rem; color: var(--danger); margin-top: 0.15rem; word-break: break-word; max-width: 260px; }
+.task-time { font-size: 1.19rem; color: var(--text-dim); font-family: var(--font-mono); }
+.task-error { font-size: 1.14rem; color: var(--danger); margin-top: 0.15rem; word-break: break-word; max-width: 260px; }
 .task-progress { display: flex; align-items: center; gap: 0.4rem; width: 110px; flex-shrink: 0; }
 .progress-track { flex: 1; height: 3px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--info); border-radius: 2px; transition: width 0.6s ease; }
-.progress-text { font-size: 0.65rem; color: var(--text-muted); font-family: var(--font-mono); min-width: 28px; text-align: right; }
-.btn-cancel { padding: 0.35rem 0.7rem; border-radius: 6px; border: 1px solid var(--danger); background: var(--danger-dim); color: var(--danger); font-size: 0.7rem; font-weight: 600; cursor: pointer; transition: all 0.2s ease; flex-shrink: 0; }
+.progress-text { font-size: 1.14rem; color: var(--text-muted); font-family: var(--font-mono); min-width: 28px; text-align: right; }
+.btn-cancel { padding: 0.35rem 0.7rem; border-radius: 6px; border: 1px solid var(--danger); background: var(--danger-dim); color: var(--danger); font-size: 1.23rem; font-weight: 600; cursor: pointer; transition: all 0.2s ease; flex-shrink: 0; }
 .btn-cancel:hover { background: var(--danger); color: #fff; }
 .loading-block { display: flex; flex-direction: column; gap: 0.4rem; padding: 1.5rem 0; }
 .skeleton { background: var(--surface); border-radius: 8px; animation: pulse 1.4s ease-in-out infinite; }
 .skeleton--row { width: 100%; height: 56px; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-.empty-state { text-align: center; padding: 3.5rem 0; color: var(--text-muted); font-size: 0.9rem; }
+.empty-state { text-align: center; padding: 3.5rem 0; color: var(--text-muted); font-size: 1.58rem; }
 @media (max-width: 768px) { .status-bar { gap: 0.4rem; } .stat-item { min-width: 60px; } .task-row { flex-direction: column; align-items: flex-start; gap: 0.4rem; } .task-progress { width: 100%; } .btn-cancel { align-self: flex-end; } }
 </style>

@@ -67,17 +67,17 @@ async function handleCreateUser(userData) { const ok = await store.createUser(us
 .users-page { min-height: 100vh; background: var(--bg); padding-top: var(--topbar-h); position: relative; }
 .main { max-width: 920px; margin: 0 auto; padding: 1.75rem 1.1rem 4rem; position: relative; z-index: 1; }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 1.75rem; flex-wrap: wrap; gap: 0.85rem; }
-.page-header h1 { font-size: 1.4rem; font-weight: 800; color: var(--text); margin: 0; font-family: var(--font-display); }
-.subtitle { font-size: 0.82rem; color: var(--text-dim); margin: 0.2rem 0 0; }
+.page-header h1 { font-size: 2.45rem; font-weight: 800; color: var(--text); margin: 0; font-family: var(--font-display); }
+.subtitle { font-size: 1.44rem; color: var(--text-dim); margin: 0.2rem 0 0; }
 .header-right { display: flex; align-items: center; gap: 0.85rem; }
-.user-count { font-size: 0.78rem; color: var(--text-muted); font-family: var(--font-mono); }
+.user-count { font-size: 1.37rem; color: var(--text-muted); font-family: var(--font-mono); }
 .role-section { margin-bottom: 1.75rem; }
-.role-heading { font-size: 0.88rem; font-weight: 700; margin: 0 0 0.65rem; text-transform: uppercase; letter-spacing: 0.03em; font-family: var(--font-display); }
+.role-heading { font-size: 1.54rem; font-weight: 700; margin: 0 0 0.65rem; text-transform: uppercase; letter-spacing: 0.03em; font-family: var(--font-display); }
 .role-heading--root  { color: var(--danger); }
 .role-heading--admin { color: var(--warn); }
 .role-heading--user  { color: var(--info); }
 .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.65rem; }
-.empty-state { text-align: center; padding: 3.5rem 0; color: var(--text-muted); font-size: 0.9rem; }
+.empty-state { text-align: center; padding: 3.5rem 0; color: var(--text-muted); font-size: 1.58rem; }
 .loading-block { display: flex; flex-direction: column; gap: 0.65rem; padding: 1.5rem 0; }
 .skeleton { background: var(--surface); border-radius: 8px; animation: pulse 1.4s ease-in-out infinite; }
 .skeleton--card { width: 100%; height: 64px; }

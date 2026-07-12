@@ -51,9 +51,9 @@ defineEmits(['refresh', 'create-folder', 'preview', 'cancel', 'delete', 'rename-
 <style scoped>
 .folder-view { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 1.1rem; }
 .folder-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1.1rem; border-bottom: 1px solid var(--border); }
-.toolbar-title { font-size: 0.82rem; font-weight: 600; color: var(--text-dim); }
+.toolbar-title { font-size: 1.43rem; font-weight: 600; color: var(--text-dim); }
 .toolbar-actions { display: flex; gap: 0.5rem; }
-.btn-new, .btn-refresh { display: flex; align-items: center; gap: 0.3rem; padding: 0.35rem 0.7rem; border-radius: 6px; font-size: 0.75rem; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+.btn-new, .btn-refresh { display: flex; align-items: center; gap: 0.3rem; padding: 0.35rem 0.7rem; border-radius: 6px; font-size: 1.31rem; font-weight: 500; cursor: pointer; transition: all 0.2s; }
 .btn-new { background: var(--accent); border: 1px solid var(--accent); color: var(--on-accent); }
 .btn-new:hover { opacity: 0.9; }
 .btn-refresh { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted); }
@@ -61,7 +61,7 @@ defineEmits(['refresh', 'create-folder', 'preview', 'cancel', 'delete', 'rename-
 .btn-refresh:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-new svg, .btn-refresh svg { width: 12px; height: 12px; }
 .folder-list { display: flex; flex-direction: column; }
-.empty-state { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; padding: 2.5rem 1rem; color: var(--text-muted); font-size: 0.82rem; text-align: center; }
+.empty-state { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; padding: 2.5rem 1rem; color: var(--text-muted); font-size: 1.43rem; text-align: center; }
 .empty-state svg { opacity: 0.2; }
 .spin { animation: seq-spin 0.8s linear infinite; }
 </style>

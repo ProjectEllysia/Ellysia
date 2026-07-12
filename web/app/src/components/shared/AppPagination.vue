@@ -55,7 +55,7 @@ const visiblePages = computed(() => {
   width: 30px; height: 30px; display: flex; align-items: center;
   justify-content: center; border-radius: 6px;
   background: var(--surface-2); border: 1px solid var(--border);
-  color: var(--text-dim); font-size: 0.78rem; font-weight: 500;
+  color: var(--text-dim); font-size: 1.37rem; font-weight: 500;
   cursor: pointer; transition: all 0.15s ease;
 }
 .page-btn:hover:not(:disabled):not(.active) {
@@ -65,7 +65,7 @@ const visiblePages = computed(() => {
 .page-btn:disabled { opacity: 0.3; cursor: default; }
 .page-btn svg { width: 14px; height: 14px; }
 .page-count {
-  margin-left: 0.5rem; font-size: 0.72rem; color: var(--text-muted);
+  margin-left: 0.5rem; font-size: 1.26rem; color: var(--text-muted);
   font-family: var(--font-mono);
 }
 </style>

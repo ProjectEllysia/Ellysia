@@ -21,7 +21,7 @@ const tabs = [
 
 <style scoped>
 .tabs { display: flex; gap: 0.2rem; margin-bottom: 1.1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.25rem; }
-.tab { flex: 1; padding: 0.5rem 0.85rem; background: none; border: none; border-radius: 6px; color: var(--text-muted); font-size: 0.82rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.35rem; transition: all 0.2s ease; }
+.tab { flex: 1; padding: 0.5rem 0.85rem; background: none; border: none; border-radius: 6px; color: var(--text-muted); font-size: 1.43rem; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 0.35rem; transition: all 0.2s ease; }
 .tab:hover { color: var(--text-dim); }
 .tab.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
 .tab-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }

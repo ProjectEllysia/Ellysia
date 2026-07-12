@@ -96,36 +96,36 @@ function formatDate(iso) {
 <style scoped>
 .accordion { border-bottom: 1px solid var(--border); }
 .accordion:last-child { border-bottom: none; }
-.accordion-header { width: 100%; display: flex; align-items: center; gap: 0.6rem; padding: 0.75rem 1.1rem; background: none; border: none; color: var(--text); font-size: 0.85rem; cursor: pointer; text-align: left; }
+.accordion-header { width: 100%; display: flex; align-items: center; gap: 0.6rem; padding: 0.75rem 1.1rem; background: none; border: none; color: var(--text); font-size: 1.49rem; cursor: pointer; text-align: left; }
 .accordion-header:hover { background: var(--surface-2); }
 .folder-icon { width: 18px; height: 18px; color: var(--accent); flex-shrink: 0; }
 .is-default .folder-icon { color: var(--text-muted); }
 .folder-name { flex: 1; font-weight: 500; }
-.folder-count { font-size: 0.75rem; color: var(--text-muted); background: var(--surface-2); padding: 0.15rem 0.45rem; border-radius: 10px; }
+.folder-count { font-size: 1.31rem; color: var(--text-muted); background: var(--surface-2); padding: 0.15rem 0.45rem; border-radius: 10px; }
 .chevron { width: 16px; height: 16px; color: var(--text-muted); transition: transform 0.2s ease; flex-shrink: 0; }
 .expanded .chevron { transform: rotate(180deg); }
 .accordion-collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
 .accordion-collapse.expanded { grid-template-rows: 1fr; }
 .accordion-collapse-inner { overflow: hidden; min-height: 0; }
 .accordion-body { padding: 0 1.1rem 0.75rem; }
-.empty-folder { padding: 1rem 0; text-align: center; color: var(--text-muted); font-size: 0.8rem; }
+.empty-folder { padding: 1rem 0; text-align: center; color: var(--text-muted); font-size: 1.4rem; }
 table { width: 100%; border-collapse: collapse; }
-th { padding: 0.5rem 0.7rem; text-align: left; font-size: 0.65rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; background: var(--surface-2); }
-td { padding: 0.5rem 0.7rem; font-size: 0.78rem; border-top: 1px solid var(--border); color: var(--text); }
+th { padding: 0.5rem 0.7rem; text-align: left; font-size: 1.14rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; background: var(--surface-2); }
+td { padding: 0.5rem 0.7rem; font-size: 1.37rem; border-top: 1px solid var(--border); color: var(--text); }
 tr:hover td { background: var(--surface-2); }
-.type { text-transform: uppercase; font-size: 0.7rem; }
+.type { text-transform: uppercase; font-size: 1.22rem; }
 .target { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.date { font-size: 0.72rem; color: var(--text-dim); white-space: nowrap; }
+.date { font-size: 1.26rem; color: var(--text-dim); white-space: nowrap; }
 .actions { display: flex; gap: 0.25rem; }
 .act-btn { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); cursor: pointer; transition: all 0.15s; }
 .act-btn:hover { border-color: var(--accent); color: var(--accent); }
 .act-btn svg { width: 11px; height: 11px; }
 .act-btn.warn:hover { border-color: var(--warn); color: var(--warn); }
 .act-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
-.load-more { width: 100%; margin-top: 0.5rem; padding: 0.45rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-dim); font-size: 0.75rem; cursor: pointer; transition: all 0.2s; }
+.load-more { width: 100%; margin-top: 0.5rem; padding: 0.45rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-dim); font-size: 1.31rem; cursor: pointer; transition: all 0.2s; }
 .load-more:hover { border-color: var(--accent); color: var(--accent); }
 .accordion-footer { display: flex; gap: 0.5rem; padding: 0 1.1rem 0.75rem; }
-.footer-btn { display: flex; align-items: center; gap: 0.3rem; padding: 0.35rem 0.6rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); font-size: 0.72rem; cursor: pointer; transition: all 0.2s; }
+.footer-btn { display: flex; align-items: center; gap: 0.3rem; padding: 0.35rem 0.6rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); font-size: 1.26rem; cursor: pointer; transition: all 0.2s; }
 .footer-btn:hover { border-color: var(--accent); color: var(--accent); }
 .footer-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
 .footer-btn svg { width: 11px; height: 11px; }

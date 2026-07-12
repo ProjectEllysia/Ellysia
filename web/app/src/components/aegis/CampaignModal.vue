@@ -181,45 +181,45 @@ function statusBadgeClass(status) { return statusBadges[status] || 'badge--pendi
 .campaign-header { display: flex; align-items: flex-start; gap: 0.75rem; padding: 1.1rem 1.25rem 0.9rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .campaign-header-icon { width: 34px; height: 34px; border-radius: 9px; background: var(--accent-dim); color: var(--accent-bright); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .campaign-header-text { flex: 1; min-width: 0; }
-.campaign-header-text h2 { font-size: 1.02rem; font-weight: 800; color: var(--text); margin: 0 0 0.15rem; font-family: var(--font-display); }
-.campaign-header-text p { font-size: 0.78rem; color: var(--text-dim); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0.1rem 0.3rem; flex-shrink: 0; border-radius: 5px; transition: all 0.15s; }
+.campaign-header-text h2 { font-size: 1.38rem; font-weight: 800; color: var(--text); margin: 0 0 0.15rem; font-family: var(--font-display); }
+.campaign-header-text p { font-size: 1.37rem; color: var(--text-dim); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.76rem; line-height: 1; cursor: pointer; padding: 0.1rem 0.3rem; flex-shrink: 0; border-radius: 5px; transition: all 0.15s; }
 .modal-close:hover { color: var(--text); background: var(--bg); }
 
 .campaign-body { padding: 1.1rem 1.25rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.85rem; }
 
-.quiz-status { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.65rem; border-radius: 7px; background: var(--success-dim); color: var(--success); font-size: 0.76rem; font-weight: 600; }
+.quiz-status { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.65rem; border-radius: 7px; background: var(--success-dim); color: var(--success); font-size: 1.33rem; font-weight: 600; }
 .quiz-status svg { flex-shrink: 0; }
 .quiz-status--warn { background: var(--warn-dim); color: var(--warn); }
 
 .form-group { display: flex; flex-direction: column; gap: 0.3rem; }
-.form-group label { font-size: 0.72rem; font-weight: 600; color: var(--text-dim); }
-.input { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 6px; padding: 0.45rem 0.6rem; color: var(--text); font-size: 0.82rem; outline: none; width: 100%; box-sizing: border-box; transition: border-color 0.2s; font-family: inherit; }
+.form-group label { font-size: 1.26rem; font-weight: 600; color: var(--text-dim); }
+.input { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 6px; padding: 0.45rem 0.6rem; color: var(--text); font-size: 1.43rem; outline: none; width: 100%; box-sizing: border-box; transition: border-color 0.2s; font-family: inherit; }
 .input:focus { border-color: var(--accent); }
 .select { cursor: pointer; }
-.textarea { resize: vertical; min-height: 3.6rem; line-height: 1.5; font-family: var(--font-mono); font-size: 0.76rem; }
+.textarea { resize: vertical; min-height: 3.6rem; line-height: 1.5; font-family: var(--font-mono); font-size: 1.33rem; }
 
-.hint { font-size: 0.78rem; color: var(--text-muted); margin: 0; }
+.hint { font-size: 1.37rem; color: var(--text-muted); margin: 0; }
 
-.recipient-count { font-size: 0.72rem; font-weight: 600; color: var(--accent-bright); }
+.recipient-count { font-size: 1.26rem; font-weight: 600; color: var(--accent-bright); }
 .recipient-count--empty { color: var(--text-muted); }
 
 .list-source-toggle { display: flex; gap: 0.3rem; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 3px; }
-.list-source-toggle button { flex: 1; padding: 0.4rem 0.5rem; font-size: 0.74rem; font-weight: 600; border-radius: 6px; border: none; background: none; color: var(--text-muted); cursor: pointer; transition: all 0.15s; }
+.list-source-toggle button { flex: 1; padding: 0.4rem 0.5rem; font-size: 1.3rem; font-weight: 600; border-radius: 6px; border: none; background: none; color: var(--text-muted); cursor: pointer; transition: all 0.15s; }
 .list-source-toggle button.active { background: var(--accent-dim); color: var(--accent-bright); }
 
 .past-campaigns { margin-top: 0.2rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
-.past-campaigns-label { display: block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 0.5rem; }
-.past-campaign-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0; font-size: 0.78rem; }
+.past-campaigns-label { display: block; font-size: 1.19rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 0.5rem; }
+.past-campaign-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0; font-size: 1.37rem; }
 .past-campaign-name { flex: 1; min-width: 0; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.past-campaign-date { color: var(--text-muted); font-size: 0.7rem; font-family: var(--font-mono); flex-shrink: 0; }
+.past-campaign-date { color: var(--text-muted); font-size: 1.22rem; font-family: var(--font-mono); flex-shrink: 0; }
 
 .campaign-footer { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 0.9rem 1.25rem; border-top: 1px solid var(--border); flex-shrink: 0; }
 .btn-spin-inline { width: 12px; height: 12px; border: 2px solid rgba(0,0,0,0.2); border-top-color: currentColor; border-radius: 50%; animation: seq-spin 0.6s linear infinite; }
 
 .campaign-success { padding: 2.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.5rem; color: var(--success); }
-.campaign-success h3 { font-size: 1rem; font-weight: 700; color: var(--text); margin: 0.4rem 0 0; font-family: var(--font-display); }
-.campaign-success p { font-size: 0.82rem; color: var(--text-dim); margin: 0; max-width: 300px; line-height: 1.5; }
+.campaign-success h3 { font-size: 1.35rem; font-weight: 700; color: var(--text); margin: 0.4rem 0 0; font-family: var(--font-display); }
+.campaign-success p { font-size: 1.43rem; color: var(--text-dim); margin: 0; max-width: 300px; line-height: 1.5; }
 
 .campaign-fade-enter-active, .campaign-fade-leave-active { transition: opacity 0.2s ease; }
 .campaign-fade-enter-from, .campaign-fade-leave-to { opacity: 0; }

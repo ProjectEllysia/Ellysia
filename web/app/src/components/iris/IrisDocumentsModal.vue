@@ -196,7 +196,7 @@ function verdictClass(v) {
   align-items: center;
   gap: 0.5rem;
   padding: 0.55rem 1.1rem;
-  font-size: 0.88rem;
+  font-size: 1.54rem;
   font-weight: 600;
   border-radius: 8px;
   border: 1px solid var(--accent);
@@ -223,14 +223,14 @@ function verdictClass(v) {
 
 .docs-hint {
   margin: 0 0 0.9rem;
-  font-size: 0.85rem;
+  font-size: 1.49rem;
   color: var(--text-muted);
 }
 
 .docs-empty {
   padding: 1rem;
   text-align: center;
-  font-size: 0.88rem;
+  font-size: 1.54rem;
   color: var(--text-muted);
   border: 1px dashed var(--border);
   border-radius: 8px;
@@ -265,7 +265,7 @@ function verdictClass(v) {
 }
 
 .doc-status {
-  font-size: 0.74rem;
+  font-size: 1.3rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -290,12 +290,12 @@ function verdictClass(v) {
 
 .doc-id {
   font-family: var(--font-mono);
-  font-size: 0.85rem;
+  font-size: 1.49rem;
   color: var(--text-dim);
 }
 
 .doc-verdict {
-  font-size: 0.78rem;
+  font-size: 1.37rem;
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 5px;
@@ -306,7 +306,7 @@ function verdictClass(v) {
 .verdict--phish { color: var(--danger); background: var(--danger-dim); }
 
 .doc-date {
-  font-size: 0.8rem;
+  font-size: 1.4rem;
   color: var(--text-muted);
 }
 

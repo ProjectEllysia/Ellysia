@@ -83,10 +83,10 @@ function doDelete() { emit('delete', deleteTarget.value); deleteTarget.value = n
 <style scoped>
 .history-panel { display: flex; flex-direction: column; height: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .history-header { display: flex; align-items: baseline; justify-content: space-between; padding: 0.85rem 1.1rem 0.4rem; }
-.history-header h2 { font-size: 1rem; font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); }
-.history-count { font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono); }
+.history-header h2 { font-size: 1.35rem; font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); }
+.history-count { font-size: 1.22rem; color: var(--text-muted); font-family: var(--font-mono); }
 .history-controls { display: flex; align-items: center; gap: 0.4rem; padding: 0 1.1rem 0.65rem; border-bottom: 1px solid var(--border); }
-.sort { flex: 1; padding: 0.3rem 0.45rem; font-size: 0.75rem; }
+.sort { flex: 1; padding: 0.3rem 0.45rem; font-size: 1.31rem; }
 .input { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 5px; color: var(--text); outline: none; }
 .input:focus { border-color: var(--accent); }
 .select { cursor: pointer; }
@@ -94,14 +94,14 @@ function doDelete() { emit('delete', deleteTarget.value); deleteTarget.value = n
 .btn-icon:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .btn-icon.spinning svg { animation: seq-spin 0.7s linear infinite; }
 .history-list { flex: 1; overflow-y: auto; padding: 0.4rem; }
-.history-empty { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 0.8rem; }
+.history-empty { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: 1.4rem; }
 .history-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.55rem 0.65rem; border-radius: 7px; cursor: default; transition: background 0.15s; margin-bottom: 2px; position: relative; }
 .history-item:hover { background: var(--bg); }
 .history-item.active { background: var(--bg); border: 1px solid var(--accent); padding: calc(0.55rem - 1px) calc(0.65rem - 1px); }
 .item-info { flex: 1; min-width: 0; cursor: pointer; }
-.item-title { font-size: 0.82rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.item-meta { display: flex; align-items: center; gap: 0.35rem; margin-top: 0.1rem; font-size: 0.68rem; color: var(--text-muted); }
-.item-status { padding: 0.1rem 0.3rem; border-radius: 3px; font-weight: 600; font-size: 0.62rem; text-transform: uppercase; }
+.item-title { font-size: 1.43rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item-meta { display: flex; align-items: center; gap: 0.35rem; margin-top: 0.1rem; font-size: 1.19rem; color: var(--text-muted); }
+.item-status { padding: 0.1rem 0.3rem; border-radius: 3px; font-weight: 600; font-size: 1.09rem; text-transform: uppercase; }
 .status--done    { background: rgba(76,183,130,0.15); color: var(--success); }
 .status--pending { background: rgba(212,160,74,0.15); color: var(--warn); }
 .status--error   { background: rgba(217,108,108,0.15); color: var(--danger); }
@@ -110,16 +110,16 @@ function doDelete() { emit('delete', deleteTarget.value); deleteTarget.value = n
 .action-btn:hover { background: var(--bg); border-color: var(--border); color: var(--text); }
 .action-btn--danger:hover { color: var(--danger); border-color: rgba(217,108,108,0.3); }
 .export-mini-menu { position: absolute; right: 2.2rem; z-index: 25; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; overflow: hidden; display: flex; }
-.export-mini-menu button { padding: 0.2rem 0.4rem; font-size: 0.62rem; font-weight: 600; background: none; border: none; color: var(--text-dim); cursor: pointer; }
+.export-mini-menu button { padding: 0.2rem 0.4rem; font-size: 1.09rem; font-weight: 600; background: none; border: none; color: var(--text-dim); cursor: pointer; }
 .export-mini-menu button:hover { background: var(--accent); color: var(--on-accent); }
 </style>
 
 <style>
 .modal-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 1.5rem; backdrop-filter: blur(4px); }
 .modal--confirm { background: var(--surface); border: 1px solid var(--border-solid); border-radius: 10px; padding: 1.25rem; max-width: 340px; width: 100%; }
-.modal--confirm p { font-size: 0.85rem; color: var(--text); margin: 0 0 0.85rem; }
+.modal--confirm p { font-size: 1.49rem; color: var(--text); margin: 0 0 0.85rem; }
 .modal-actions { display: flex; gap: 0.45rem; justify-content: flex-end; }
-.btn { padding: 0.45rem 1.1rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600; border: 1px solid transparent; cursor: pointer; transition: background 0.2s; }
+.btn { padding: 0.45rem 1.1rem; border-radius: 6px; font-size: 1.4rem; font-weight: 600; border: 1px solid transparent; cursor: pointer; transition: background 0.2s; }
 .btn--secondary { background: transparent; color: var(--text-dim); border-color: var(--border); }
 .btn--secondary:hover { background: var(--surface-2); color: var(--text); }
 .btn--danger { background: var(--danger); color: #fff; }

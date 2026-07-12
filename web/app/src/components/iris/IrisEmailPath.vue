@@ -148,7 +148,7 @@ function formatTime(iso) {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem 0.7rem;
-  font-size: 0.78rem;
+  font-size: 1.37rem;
   color: var(--text-muted);
   font-family: var(--font-mono);
   letter-spacing: 0.04em;
@@ -168,7 +168,7 @@ function formatTime(iso) {
 
 .legend-arrow {
   color: var(--accent);
-  font-size: 0.9rem;
+  font-size: 1.58rem;
 }
 
 .legend-dot {
@@ -187,7 +187,7 @@ function formatTime(iso) {
   padding: 1.25rem 0.5rem;
   text-align: center;
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: 1.58rem;
   border: 1px dashed var(--border);
   border-radius: 8px;
   font-family: var(--font-mono);
@@ -248,13 +248,13 @@ function formatTime(iso) {
 
 .iep-node-num {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 1.26rem;
   color: var(--text-muted);
   letter-spacing: 0.06em;
 }
 
 .iep-node-by {
-  font-size: 0.95rem;
+  font-size: 1.66rem;
   font-weight: 700;
   font-family: var(--font-mono);
   color: var(--text);
@@ -266,19 +266,19 @@ function formatTime(iso) {
 
 .iep-node-ip {
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 1.37rem;
   color: var(--text-dim);
 }
 
 .iep-node-tls {
-  font-size: 0.85rem;
+  font-size: 1.49rem;
 }
 
 .iep-node-tls.off { opacity: 0.55; }
 
 .iep-node-time {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 1.26rem;
   color: var(--text-muted);
 }
 
@@ -289,7 +289,7 @@ function formatTime(iso) {
   padding: 0 0.35rem;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 1.37rem;
   min-width: 64px;
   justify-content: center;
 }
@@ -298,7 +298,7 @@ function formatTime(iso) {
 .iep-edge--bad .iep-edge-arrow { color: var(--danger); }
 .iep-edge--bad { color: var(--danger); }
 
-.iep-edge-arrow { font-size: 0.9rem; }
+.iep-edge-arrow { font-size: 1.58rem; }
 .iep-edge-delay { white-space: nowrap; }
 
 .iep-detail {
@@ -326,7 +326,7 @@ function formatTime(iso) {
   background: none;
   border: none;
   color: var(--text-muted);
-  font-size: 1.3rem;
+  font-size: 1.76rem;
   line-height: 1;
   cursor: pointer;
   padding: 0 0.3rem;
@@ -338,13 +338,13 @@ function formatTime(iso) {
   grid-template-columns: max-content 1fr;
   gap: 0.25rem 0.85rem;
   margin: 0 0 0.4rem;
-  font-size: 0.85rem;
+  font-size: 1.49rem;
 }
 
 .iep-detail-grid dt {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 1.37rem;
 }
 
 .iep-detail-grid dd {
@@ -352,7 +352,7 @@ function formatTime(iso) {
   margin: 0;
   word-break: break-word;
   font-family: var(--font-mono);
-  font-size: 0.85rem;
+  font-size: 1.49rem;
 }
 
 .iep-flag {
@@ -361,7 +361,7 @@ function formatTime(iso) {
   padding: 1px 6px;
   border-radius: 4px;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 1.26rem;
   background: color-mix(in srgb, var(--danger) 18%, transparent);
   color: var(--danger);
   border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
@@ -370,7 +370,7 @@ function formatTime(iso) {
 .iep-detail-raw summary {
   cursor: pointer;
   color: var(--text-dim);
-  font-size: 0.82rem;
+  font-size: 1.43rem;
   margin-top: 0.4rem;
 }
 
@@ -381,7 +381,7 @@ function formatTime(iso) {
   border: 1px solid var(--border);
   border-radius: 6px;
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 1.37rem;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;

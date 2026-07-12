@@ -98,7 +98,7 @@ function handleSubmit() {
 }
 
 .form-header h2 {
-  font-size: 1.5rem;
+  font-size: 2.03rem;
   font-weight: 700;
   color: var(--text);
   font-family: var(--font-display);
@@ -106,7 +106,7 @@ function handleSubmit() {
 }
 
 .form-hint {
-  font-size: 0.92rem;
+  font-size: 1.61rem;
   color: var(--text-dim);
   line-height: 1.5;
   margin: 0;
@@ -123,7 +123,7 @@ function handleSubmit() {
   width: 100%;
   padding: 0.7rem 0.85rem;
   font-family: var(--font-body);
-  font-size: 0.9rem;
+  font-size: 1.58rem;
   background: var(--surface);
   border: 1px solid var(--border-solid);
   border-radius: 8px;
@@ -147,7 +147,7 @@ function handleSubmit() {
   min-height: 320px;
   resize: vertical;
   font-family: var(--font-mono);
-  font-size: 0.88rem;
+  font-size: 1.54rem;
   line-height: 1.7;
   padding: 1.1rem;
   background: var(--surface);
@@ -167,7 +167,7 @@ function handleSubmit() {
   color: var(--text-muted);
   opacity: 0.35;
   font-family: var(--font-mono);
-  font-size: 0.82rem;
+  font-size: 1.43rem;
 }
 
 .form-footer {
@@ -178,7 +178,7 @@ function handleSubmit() {
 }
 
 .char-count {
-  font-size: 0.85rem;
+  font-size: 1.49rem;
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
@@ -188,7 +188,7 @@ function handleSubmit() {
   align-items: center;
   gap: 0.55rem;
   padding: 0.75rem 1.5rem;
-  font-size: 0.95rem;
+  font-size: 1.66rem;
   font-weight: 700;
   border-radius: 10px;
   border: none;
