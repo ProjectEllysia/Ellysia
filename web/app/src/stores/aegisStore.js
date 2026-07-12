@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useApi } from '@/composables/useApi'
 import { useCache } from '@/composables/useCache'
 import { useUtils } from '@/composables/useUtils'
@@ -9,7 +9,8 @@ import { useToastStore } from '@/stores/toastStore'
  * Store de Aegis — generación de píldoras de concienciación con IA.
  *
  * Sustituye la lógica dispersa en aegis.js (521 líneas). Centraliza los
- * temas, marcas, documentos, tweaks de generación, historial y visor.
+ * temas, marcas, documentos, tweaks de generación, historial, visor y el
+ * perfil de organización (valores estables precargados en cada generación).
  */
 export const useAegisStore = defineStore('aegis', () => {
   const { apiFetch, apiError } = useApi()
@@ -41,6 +42,10 @@ export const useAegisStore = defineStore('aegis', () => {
   const editing = ref(false)
   /** Guardado de edición en curso */
   const saving = ref(false)
+  /** Carga del perfil de organización en curso */
+  const loadingOrgProfile = ref(false)
+  /** Guardado del perfil de organización en curso */
+  const savingOrgProfile = ref(false)
 
   /** Parámetros de generación (tweaks) */
   const tweaks = reactive({
@@ -60,6 +65,14 @@ export const useAegisStore = defineStore('aegis', () => {
 
   /** Estado del documento en el visor */
   const viewerDoc = reactive({ loading: false, data: null })
+
+  /**
+   * Si el perfil de organización ya tiene datos (heurística: 'company'
+   * relleno, el único campo obligatorio al generar). Sirve para que el
+   * panel de perfil arranque colapsado cuando ya no hay nada que revisar,
+   * y expandido la primera vez.
+   */
+  const orgProfileConfigured = computed(() => !!tweaks.company)
 
   /* ── CAMPAÑAS ── */
 
@@ -99,6 +112,62 @@ export const useAegisStore = defineStore('aegis', () => {
         brands.value = raw.map(b => (typeof b === 'string' ? b : (b.name || b.label || b.value || String(b))))
       }
     } catch { /* noop */ }
+  }
+
+  /**
+   * Carga el perfil de organización desde GET /aegis/org-profile y precarga
+   * los campos estables de `tweaks` (y las marcas habituales) con sus
+   * valores — para que el usuario no tenga que reintroducirlos cada vez.
+   * Si no hay perfil guardado, el backend devuelve los mismos defaults con
+   * los que `tweaks` ya arranca, así que no hace falta distinguir el caso.
+   */
+  async function loadOrgProfile() {
+    loadingOrgProfile.value = true
+    try {
+      const res = await apiFetch('/aegis/org-profile')
+      if (!res?.ok) return
+      const data = await res.json()
+      tweaks.company        = data.company ?? ''
+      tweaks.mentionContact = data.mentionContact ?? ''
+      tweaks.tone           = data.tone || 'profesional'
+      tweaks.companySize    = data.companySize ?? ''
+      tweaks.jurisdiction   = data.jurisdiction ?? ''
+      tweaks.language       = data.language || 'es'
+      tweaks.sector         = data.sector ?? ''
+      tweaks.workModel      = data.workModel ?? ''
+      tweaks.employeeCount  = data.employeeCount ?? null
+      selectedBrands.value  = [...(data.associatedBrands ?? [])]
+    } finally { loadingOrgProfile.value = false }
+  }
+
+  /**
+   * Guarda (crea o actualiza) el perfil de organización vía
+   * PUT /aegis/org-profile, con los valores estables actuales de `tweaks`.
+   * @returns {Promise<boolean>}
+   */
+  async function saveOrgProfile() {
+    savingOrgProfile.value = true
+    try {
+      const payload = {
+        company:          tweaks.company,
+        mentionContact:   tweaks.mentionContact,
+        tone:             tweaks.tone,
+        companySize:      tweaks.companySize,
+        jurisdiction:     tweaks.jurisdiction,
+        language:         tweaks.language,
+        sector:           tweaks.sector,
+        workModel:        tweaks.workModel,
+        employeeCount:    tweaks.employeeCount || null,
+        associatedBrands: [...selectedBrands.value],
+      }
+      const res = await apiFetch('/aegis/org-profile', { method: 'PUT', body: JSON.stringify(payload) })
+      if (!res?.ok) {
+        toast.show(await apiError(res, 'No se pudo guardar el perfil de organización.'), 'error')
+        return false
+      }
+      toast.show('Perfil de organización guardado.', 'success')
+      return true
+    } finally { savingOrgProfile.value = false }
   }
 
   /* ── HISTORIAL ── */
@@ -399,7 +468,8 @@ export const useAegisStore = defineStore('aegis', () => {
   return {
     topics, brands, documents, selectedTopicId, currentDocId, sortMode, selectedBrands,
     generating, loading, editing, saving, tweaks, viewerDoc,
-    loadTopics, loadBrands, loadHistory, sortedDocuments, generate,
+    loadingOrgProfile, savingOrgProfile, orgProfileConfigured,
+    loadTopics, loadBrands, loadOrgProfile, saveOrgProfile, loadHistory, sortedDocuments, generate,
     loadDocument, closeViewer, deleteDocument, downloadExport, previewMarkdown,
     startEdit, cancelEdit, savePill,
     campaignModalOpen, distributionLists, loadingLists, campaignsForDoc,
