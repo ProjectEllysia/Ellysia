@@ -1,8 +1,13 @@
 """
 aegis_managers.py
 ─────────────────
-Managers de operaciones Aegis: generación de píldoras y campañas de
-concienciación. Ambos managers viven en este único fichero por convención.
+Managers de operaciones Aegis: generación de píldoras, campañas de
+concienciación y el perfil de organización. Todos viven en este único
+fichero por convención.
+
+Responsabilidades de AegisOrgProfileManager:
+    — Devolver el perfil de organización guardado (o defaults si no existe).
+    — Crear o actualizar (upsert) el perfil.
 
 Responsabilidades de AegisManager:
     — Crear documentos pendientes y lanzar el workflow de generación en thread
@@ -59,9 +64,14 @@ from src.modules.shared._documents import (
 )
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc
 
-from .model import AegisDocument, Campaign, CampaignRecipient, DistributionList, Topic
+from .model import AegisDocument, AegisOrgProfile, Campaign, CampaignRecipient, DistributionList, Topic
 from .services import AegisAIWriter, AegisAlertFetcher, AlertSource, AegisAlert, AegisContent
-from .repositories import AegisDocumentRepository, CampaignRepository, DistributionListRepository
+from .repositories import (
+    AegisDocumentRepository,
+    AegisOrgProfileRepository,
+    CampaignRepository,
+    DistributionListRepository,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -608,6 +618,65 @@ class AegisManager:
 
         set_generated_at = status == "done"
         update_document_status(doc, status, title, filename, error, set_generated_at)
+
+
+# Defaults del perfil de organización cuando el usuario aún no ha guardado
+# ninguno — mismos valores por defecto que AegisTweaksSchema para que el
+# formulario de generación arranque igual con o sin perfil guardado.
+_ORG_PROFILE_DEFAULTS: dict[str, Any] = {
+    "company": "",
+    "mentionContact": "",
+    "tone": "profesional",
+    "companySize": "",
+    "jurisdiction": "",
+    "language": "es",
+    "sector": "",
+    "workModel": "",
+    "employeeCount": None,
+    "associatedBrands": [],
+}
+
+
+class AegisOrgProfileManager:
+    """
+    Gestiona el perfil de organización de Aegis: los valores estables de
+    generación (empresa, contacto, tono, tamaño, jurisdicción, marcas
+    habituales) que se guardan una vez y se precargan en cada generación,
+    en vez de reintroducirse cada vez.
+    """
+
+    def __init__(self, user: User) -> None:
+        self.user = user
+
+    def get_or_default(self) -> dict:
+        """Devuelve el perfil guardado, o los defaults si aún no existe."""
+        repo = read_repo(AegisOrgProfileRepository)
+        profile = repo.get_by_user_id(self.user.id)
+        if profile is None:
+            return dict(_ORG_PROFILE_DEFAULTS)
+        return profile.to_dict()
+
+    def upsert(self, data: dict) -> dict:
+        """Crea o actualiza el perfil de organización del usuario actual."""
+        with UnitOfWork() as uow:
+            repo = AegisOrgProfileRepository(uow)
+            profile = repo.get_by_user_id(self.user.id)
+            if profile is None:
+                profile = AegisOrgProfile(user_id=self.user.id)
+
+            profile.company = data["company"]
+            profile.contact_email = data["mentionContact"]
+            profile.tone = data["tone"]
+            profile.company_size = data["companySize"]
+            profile.jurisdiction = data["jurisdiction"]
+            profile.language = data["language"]
+            profile.sector = data["sector"]
+            profile.work_model = data["workModel"]
+            profile.employee_count = data["employeeCount"]
+            profile.associated_brands = data["associatedBrands"]
+
+            saved = repo.save(profile)
+            return saved.to_dict()
 
 
 class CampaignManager:

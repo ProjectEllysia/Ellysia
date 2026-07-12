@@ -7,6 +7,7 @@ alerts from external sources like INCIBE and NVD.
 
 Classes:
     Topic: Category/topic for organizing awareness documents.
+    AegisOrgProfile: Stable per-user defaults for pill generation.
     AegisDocument: Security awareness pill (polymorphic from Document).
     AegisTip: Individual security tip within a document.
     AegisDocumentAlert: Vulnerability alert from external sources.
@@ -64,6 +65,81 @@ class Topic(Base):
     title = Column(String(128),  nullable=False)
 
     documents = relationship("AegisDocument", back_populates="topic")
+
+
+# =========================================================================
+# ORGANIZATION PROFILE
+# =========================================================================
+
+class AegisOrgProfile(Base):
+    """
+    Stable per-user defaults for Aegis pill generation.
+
+    Data like company name, contact email, tone, size, jurisdiction and
+    habitual brands rarely changes between generations — this is the
+    persisted default so the user doesn't retype it every time they generate
+    a pill. Per-generation fields (topic, topicFocus, recentIncident,
+    audienceLevel) stay in the generation request, not here.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        user_id: Foreign key to User.id (one profile per user).
+        company: Company/organization name.
+        contact_email: Contact email shown in generated pills.
+        tone: Writing tone ('profesional' | 'formal' | 'cercano' | 'tecnico').
+        company_size: Size bucket ('' | 'micro' | 'pequeña' | 'mediana').
+        jurisdiction: Regulatory jurisdiction (free text, e.g. 'España').
+        language: Generation language code (e.g. 'es', 'en').
+        sector: Industry sector (free text).
+        work_model: Work model ('' | 'remoto' | 'híbrido' | 'presencial').
+        employee_count: Approximate headcount.
+        associated_brands: JSONB list of brand names the org tracks by default.
+        created_at: Creation timestamp.
+    """
+
+    __tablename__ = "AegisOrgProfile"
+
+    id                = Column(Integer,     primary_key=True, autoincrement=True)
+    user_id           = Column(Integer,     ForeignKey("User.id"), nullable=False, unique=True)
+    company           = Column(String(128), nullable=True)
+    contact_email     = Column(String(128), nullable=True)
+    tone              = Column(String(32),  nullable=True)
+    company_size      = Column(String(16),  nullable=True)
+    jurisdiction      = Column(String(128), nullable=True)
+    language          = Column(String(8),   nullable=True)
+    sector            = Column(String(128), nullable=True)
+    work_model        = Column(String(16),  nullable=True)
+    employee_count    = Column(Integer,     nullable=True)
+    associated_brands = Column(JSONB,       nullable=True)
+    created_at        = Column(DateTime,    nullable=False, default=utcnow_naive)
+
+    user = relationship("User")
+
+    def to_dict(self) -> dict:
+        """
+        Serialize the profile for API responses.
+
+        Returns:
+            Dictionary using the same camelCase keys as AegisTweaksSchema,
+            so the frontend can merge profile + per-generation tweaks
+            without translating field names.
+        """
+        return {
+            "company":          self.company or "",
+            "mentionContact":   self.contact_email or "",
+            "tone":             self.tone or "",
+            "companySize":      self.company_size or "",
+            "jurisdiction":     self.jurisdiction or "",
+            "language":         self.language or "",
+            "sector":           self.sector or "",
+            "workModel":        self.work_model or "",
+            "employeeCount":    self.employee_count,
+            "associatedBrands": self.associated_brands or [],
+        }
+
+    def __repr__(self) -> str:
+        """Return a debug representation of the AegisOrgProfile instance."""
+        return f"<AegisOrgProfile(id={self.id}, user_id={self.user_id})>"
 
 
 # =========================================================================

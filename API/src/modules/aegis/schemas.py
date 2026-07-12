@@ -34,6 +34,29 @@ class AegisTweaksSchema(Schema):
     recentIncident    = fields.String(load_default="", validate=validate.Length(max=500))
 
 
+class AegisOrgProfileSchema(Schema):
+    """
+    Perfil de organización de Aegis: valores estables que casi nunca cambian
+    entre generaciones (empresa, contacto, tono, tamaño, jurisdicción, marcas
+    habituales). Comparte nombres de campo con AegisTweaksSchema para que el
+    frontend pueda precargar el formulario de generación sin traducirlos.
+    """
+    company           = fields.String(load_default="", validate=validate.Length(max=128))
+    mentionContact    = fields.String(load_default="", validate=validate.Length(max=128))
+    tone              = fields.String(load_default="profesional", validate=validate.Length(max=64))
+    companySize       = fields.String(
+        load_default="", validate=validate.OneOf(["", "micro", "pequeña", "mediana"]),
+    )
+    jurisdiction      = fields.String(load_default="", validate=validate.Length(max=256))
+    language          = fields.String(load_default="es", validate=validate.Length(max=8))
+    sector            = fields.String(load_default="", validate=validate.Length(max=128))
+    workModel         = fields.String(
+        load_default="", validate=validate.OneOf(["", "remoto", "híbrido", "presencial"]),
+    )
+    employeeCount     = fields.Integer(load_default=None, allow_none=True, validate=validate.Range(min=1))
+    associatedBrands  = fields.List(fields.String(), load_default=list)
+
+
 class AegisGenerateRequestSchema(Schema):
     topicId = fields.Integer(required=True)
     tweaks = fields.Nested(AegisTweaksSchema, load_default=dict)

@@ -8,6 +8,7 @@ tracking). All Aegis repositories live in this single file by convention.
 
 Classes:
     AegisDocumentRepository: Repository for AegisDocument.
+    AegisOrgProfileRepository: Repository for the per-user org profile.
     DistributionListRepository: CRUD for lists and their recipients.
     CampaignRepository: Campaign lifecycle, per-recipient tracking, and
         the public-quiz token lookup.
@@ -29,6 +30,7 @@ from src.modules.shared import utcnow_naive
 from src.modules.aegis.model import (
     AegisDocument,
     AegisDocumentAlert,
+    AegisOrgProfile,
     AegisQuizQuestion,
     AegisTip,
     Campaign,
@@ -359,6 +361,21 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
         self._session.flush()
         self._session.refresh(doc)
         return doc
+
+
+class AegisOrgProfileRepository(BaseRepository[AegisOrgProfile]):
+    """
+    Repository for AegisOrgProfile (stable per-user generation defaults).
+
+    One row per user; inherits generic CRUD from BaseRepository.
+    """
+
+    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
+        super().__init__(AegisOrgProfile, uow=uow, session=session)
+
+    def get_by_user_id(self, user_id: int) -> Optional[AegisOrgProfile]:
+        """Retrieve the org profile for a user, or None if not set up yet."""
+        return self.get_by_field("user_id", user_id)
 
 
 class DistributionListRepository(BaseRepository[DistributionList]):

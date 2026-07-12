@@ -9,7 +9,7 @@ from src.modules.shared._exceptions import ValidationError
 from src.modules.shared.schemas import ErrorSchema
 from src.modules.users import require_oauth_token, require_attributes, AttributeType, UserManager, get_current_user
 
-from .managers import AegisManager, CampaignManager
+from .managers import AegisManager, AegisOrgProfileManager, CampaignManager
 from .exceptions import (
     DocumentError,
     DocumentNotFoundError,
@@ -22,6 +22,7 @@ from .exceptions import (
     DistributionListNotFoundError,
     QuizAlreadyCompletedError,
     QuizTokenInvalidError,
+    SecOpsException,
 )
 from .services import (
     ExportData,
@@ -33,6 +34,7 @@ from .services import (
 )
 from .schemas import (
     AegisGenerateRequestSchema,
+    AegisOrgProfileSchema,
     AegisPillUpdateSchema,
     DocumentIdQuerySchema,
     ExportRequestBodySchema,
@@ -188,6 +190,45 @@ def aegis_update_document(args, data):
 
     logger.info("Aegis doc %s actualizado | user=%s", doc_id, current_actor())
     return updated
+
+
+# ============================================================================
+# ORGANIZATION PROFILE
+# ============================================================================
+
+
+@aegis_blp.get("/org-profile")
+@aegis_blp.response(200, AegisOrgProfileSchema, description="Perfil de organización (o defaults si no existe)")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@limiter.limit("120 per hour; 500 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_READ])
+@handle_exceptions(default_exception=SecOpsException, logger=logger)
+def aegis_get_org_profile():
+    """Obtener el perfil de organización del usuario actual (o defaults)"""
+    user = get_current_user()
+    mgr = AegisOrgProfileManager(user)
+    return mgr.get_or_default()
+
+
+@aegis_blp.put("/org-profile")
+@aegis_blp.arguments(AegisOrgProfileSchema)
+@aegis_blp.response(200, AegisOrgProfileSchema, description="Perfil guardado")
+@aegis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@limiter.limit("30 per hour; 100 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_UPDATE])
+@handle_exceptions(default_exception=SecOpsException, logger=logger)
+def aegis_save_org_profile(data):
+    """Crear o actualizar (upsert) el perfil de organización del usuario actual"""
+    user = get_current_user()
+    mgr = AegisOrgProfileManager(user)
+    saved = mgr.upsert(data)
+    logger.info("Perfil de organización de Aegis guardado | user=%s", current_actor())
+    return saved
 
 
 @aegis_blp.get("/download")
