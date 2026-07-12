@@ -1,7 +1,7 @@
 <template>
   <div class="acheron-page" data-module="acheron">
     <StarBackground />
-    <Topbar title="Acheron" badge="Bóveda cifrada" />
+    <Topbar title="Acheron" badge="Bóveda cifrada" back-to="/acheron" back-label="Volver" />
 
     <main class="acheron-main">
       <Transition name="view-fade" mode="out-in">
@@ -685,13 +685,13 @@ onBeforeUnmount(() => {
   color: #c4a0e0;
 }
 .unlock-icon svg { width: 26px; height: 26px; }
-.unlock-title { font-family: var(--font-display); font-size: 1.5rem; color: var(--text); margin-bottom: 0.5rem; }
-.unlock-sub { font-size: 0.85rem; color: var(--text-dim); line-height: 1.5; margin-bottom: 1.5rem; }
+.unlock-title { font-family: var(--font-display); font-size: 2.03rem; color: var(--text); margin-bottom: 0.5rem; }
+.unlock-sub { font-size: 1.49rem; color: var(--text-dim); line-height: 1.5; margin-bottom: 1.5rem; }
 .unlock-sub strong { color: #c4a0e0; font-weight: 600; }
 
 .field { display: block; text-align: left; margin-bottom: 1rem; }
 .field-label {
-  display: block; font-family: var(--font-mono); font-size: 0.66rem;
+  display: block; font-family: var(--font-mono); font-size: 1.16rem;
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted);
   margin-bottom: 0.4rem;
 }
@@ -699,7 +699,7 @@ onBeforeUnmount(() => {
 .field-input input {
   width: 100%; padding: 0.7rem 2.6rem 0.7rem 0.85rem;
   background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-med);
-  border-radius: 9px; color: var(--text); font-size: 0.95rem;
+  border-radius: 9px; color: var(--text); font-size: 1.66rem;
   font-family: var(--font-mono); transition: border-color 0.2s ease;
 }
 .field-input input:focus { outline: none; border-color: rgba(160, 122, 192, 0.55); }
@@ -721,14 +721,14 @@ onBeforeUnmount(() => {
 .gen-btn svg { width: 17px; height: 17px; }
 
 .unlock-error {
-  color: var(--danger); font-size: 0.82rem; margin-bottom: 0.9rem;
+  color: var(--danger); font-size: 1.43rem; margin-bottom: 0.9rem;
   background: var(--danger-dim); border: 1px solid rgba(217, 108, 108, 0.25);
   border-radius: 8px; padding: 0.55rem 0.7rem;
 }
 .unlock-btn {
   width: 100%; padding: 0.8rem; border: none; border-radius: 9px;
   background: linear-gradient(135deg, #a07ac0, #7d5aa0); color: #fff;
-  font-size: 0.95rem; font-weight: 600; cursor: pointer;
+  font-size: 1.66rem; font-weight: 600; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
   transition: filter 0.2s ease, opacity 0.2s ease;
 }
@@ -802,16 +802,16 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 1.75rem; gap: 1rem; flex-wrap: wrap;
 }
-.vault-title { font-family: var(--font-display); font-size: 1.7rem; color: var(--text); }
+.vault-title { font-family: var(--font-display); font-size: 2.3rem; color: var(--text); }
 .vault-count {
-  font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted);
+  font-family: var(--font-mono); font-size: 1.26rem; color: var(--text-muted);
   letter-spacing: 0.04em;
 }
 .vault-head-actions { display: flex; gap: 0.6rem; }
 .add-btn, .lock-btn {
   display: inline-flex; align-items: center; gap: 0.45rem;
   padding: 0.55rem 1rem; border-radius: 9px; cursor: pointer;
-  font-size: 0.82rem; font-weight: 600; transition: filter 0.2s ease, background 0.2s ease;
+  font-size: 1.43rem; font-weight: 600; transition: filter 0.2s ease, background 0.2s ease;
 }
 .add-btn {
   background: linear-gradient(135deg, #a07ac0, #7d5aa0); border: none; color: #fff;
@@ -823,19 +823,19 @@ onBeforeUnmount(() => {
 .lock-btn:hover { background: rgba(160, 122, 192, 0.18); }
 .add-btn svg, .lock-btn svg { width: 15px; height: 15px; }
 
-.vault-empty { color: var(--text-dim); font-size: 0.95rem; text-align: center; padding: 3rem 0; }
+.vault-empty { color: var(--text-dim); font-size: 1.66rem; text-align: center; padding: 3rem 0; }
 .vault-empty strong { color: #c4a0e0; }
 
 .vault-section { margin-bottom: 2rem; }
 .section-title {
   display: flex; align-items: center; gap: 0.55rem;
-  font-family: var(--font-mono); font-size: 0.78rem; text-transform: uppercase;
+  font-family: var(--font-mono); font-size: 1.37rem; text-transform: uppercase;
   letter-spacing: 0.1em; color: #c4a0e0; margin-bottom: 0.9rem;
   padding-bottom: 0.5rem; border-bottom: 1px solid rgba(160, 122, 192, 0.15);
 }
 .section-count {
   background: rgba(160, 122, 192, 0.15); color: #c4a0e0;
-  border-radius: 20px; padding: 0.05rem 0.5rem; font-size: 0.68rem;
+  border-radius: 20px; padding: 0.05rem 0.5rem; font-size: 1.19rem;
 }
 
 .cards-grid {
@@ -852,18 +852,18 @@ onBeforeUnmount(() => {
   display: flex; align-items: baseline; justify-content: space-between;
   gap: 0.5rem; margin-bottom: 0.8rem;
 }
-.entry-title { font-size: 1.05rem; font-weight: 600; color: var(--text); }
+.entry-title { font-size: 1.42rem; font-weight: 600; color: var(--text); }
 .entry-actions { display: flex; gap: 0.15rem; flex-shrink: 0; }
 
 .entry-fields { display: flex; flex-direction: column; gap: 0.55rem; }
 .entry-field { display: flex; flex-direction: column; gap: 0.15rem; }
 .entry-field dt {
-  font-family: var(--font-mono); font-size: 0.6rem; text-transform: uppercase;
+  font-family: var(--font-mono); font-size: 1.05rem; text-transform: uppercase;
   letter-spacing: 0.06em; color: var(--text-muted);
 }
 .entry-field dd { display: flex; align-items: center; gap: 0.4rem; }
 .field-value {
-  font-size: 0.88rem; color: var(--text); word-break: break-all;
+  font-size: 1.54rem; color: var(--text); word-break: break-all;
   font-family: var(--font-mono); flex: 1;
 }
 .icon-btn {
@@ -879,7 +879,7 @@ onBeforeUnmount(() => {
 .notice {
   position: fixed; left: 50%; bottom: 1.5rem; transform: translateX(-50%);
   z-index: 120; padding: 0.65rem 1.1rem; border-radius: 10px;
-  background: rgba(160, 122, 192, 0.95); color: #fff; font-size: 0.85rem; font-weight: 500;
+  background: rgba(160, 122, 192, 0.95); color: #fff; font-size: 1.49rem; font-weight: 500;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
 }
 .notice--error { background: rgba(200, 70, 70, 0.95); }

@@ -8,7 +8,7 @@
     @drop="onDrop"
   >
     <StarBackground />
-    <Topbar title="Iris" badge="Análisis de Cabeceras" />
+    <Topbar title="Iris" badge="Análisis de Cabeceras" back-to="/iris" back-label="Volver" />
 
     <!-- Intake de evidencia: visor que aparece al arrastrar un .eml -->
     <Transition name="intake-fade">
@@ -355,7 +355,7 @@ function handleSort(mode) {
 .intake-eyebrow {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 1.26rem;
   letter-spacing: 0.28em;
   text-transform: uppercase;
   color: var(--intake-color);
@@ -365,7 +365,7 @@ function handleSort(mode) {
 .intake-title {
   margin: 0.1rem 0 0.6rem;
   font-family: var(--font-display);
-  font-size: 1.3rem;
+  font-size: 1.76rem;
   font-weight: 700;
   line-height: 1.25;
   text-align: center;
@@ -375,7 +375,7 @@ function handleSort(mode) {
 
 .intake-chip {
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 1.37rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   padding: 0.25rem 0.7rem;
@@ -436,6 +436,6 @@ function handleSort(mode) {
 
 @media (max-width: 540px) {
   .intake-frame { padding: 2.5rem 1.5rem 2.25rem; }
-  .intake-title { font-size: 1.1rem; }
+  .intake-title { font-size: 1.49rem; }
 }
 </style>

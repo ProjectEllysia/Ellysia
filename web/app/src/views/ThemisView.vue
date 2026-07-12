@@ -1,7 +1,7 @@
 <template>
-  <div class="themis-page">
+  <div class="themis-page" data-module="themis">
     <StarBackground />
-    <Topbar title="Themis" badge="Escaneos de Vulnerabilidades" />
+    <Topbar title="Themis" badge="Escaneos de Vulnerabilidades" back-to="/themis" back-label="Volver" />
 
     <main class="main">
       <!-- Toggle de dos mundos: el motor propio vs los escáneres externos -->
@@ -172,9 +172,11 @@ import BatchActionModal from '@/components/themis/BatchActionModal.vue'
 import ScheduledScansPanel from '@/components/themis/ScheduledScansPanel.vue'
 import LybraLaunchPanel from '@/components/themis/lybra/LybraLaunchPanel.vue'
 import LybraResults from '@/components/themis/lybra/LybraResults.vue'
+import { useRoute } from 'vue-router'
 import { useThemisStore } from '@/stores/themisStore'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 
+const route = useRoute()
 const store = useThemisStore()
 const { selectedIds: batchSelectedIds, selectedCount: batchSelectedCount, selectedArray: batchSelectedArray, toggle: batchToggle, selectAll: batchSelectAll, clear: batchClear } = useBatchSelection()
 const currentData = computed(() => store.scans[store.activeTab])
@@ -191,8 +193,13 @@ const selectableFolders = computed(() =>
 // la SPA: si el usuario cambió a "escáneres externos" y vuelve a entrar a
 // Themis después, sin esto vería el mundo que dejó seleccionado la vez
 // anterior en vez de entrar siempre por Lybra (el motor propio, protagonista
-// del roadmap).
-onMounted(() => { store.setWorld('lybra'); store.loadStats(); store.loadScans(store.activeTab); store.loadScheduledScans(); store.loadFolders() })
+// del roadmap). El hub de Themis puede forzar un mundo/vista concretos vía
+// query params (?world=external&view=history) para sus atajos rápidos.
+onMounted(() => {
+  store.setWorld(route.query.world === 'external' ? 'external' : 'lybra')
+  if (route.query.view === 'history' || route.query.view === 'folders') store.setViewMode(route.query.view)
+  store.loadStats(); store.loadScans(store.activeTab); store.loadScheduledScans(); store.loadFolders()
+})
 onBeforeUnmount(() => store.stopScanPolling())
 
 // Carga la lista de Lybra y el registro de objetivos autorizados la primera
@@ -278,7 +285,7 @@ async function handleDeleteScheduled(id) { await store.deleteScheduledScan(id) }
 .world-opt {
   flex: 1; display: flex; align-items: center; justify-content: center; gap: 0.45rem;
   padding: 0.6rem 0.9rem; background: none; border: none; border-radius: 7px;
-  color: var(--text-muted); font-size: 0.85rem; font-weight: 500; cursor: pointer;
+  color: var(--text-muted); font-size: 1.49rem; font-weight: 500; cursor: pointer;
   transition: all 0.2s ease;
 }
 .world-opt svg { width: 16px; height: 16px; }
@@ -289,7 +296,7 @@ async function handleDeleteScheduled(id) { await store.deleteScheduledScan(id) }
 .lybra-history-toggle {
   display: block; margin: 0 0 0.85rem auto; padding: 0.45rem 0.8rem;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
-  color: var(--text-dim); font-size: 0.78rem; cursor: pointer; transition: all 0.2s;
+  color: var(--text-dim); font-size: 1.37rem; cursor: pointer; transition: all 0.2s;
 }
 .lybra-history-toggle:hover { border-color: var(--accent); color: var(--text); }
 
@@ -309,19 +316,23 @@ async function handleDeleteScheduled(id) { await store.deleteScheduledScan(id) }
 
 @media (prefers-reduced-motion: reduce) {
   .main > :nth-child(1), .main > :nth-child(2) { animation: none !important; }
-  .fade-swap-enter-active, .fade-swap-leave-active { transition: none !important; }
+  /* No "none": con mode="out-in", Vue espera un transitionend real para
+     montar el bloque entrante. "none" nunca lo dispara y el contenido
+     saliente se queda pegado en pantalla. Una transición casi instantánea
+     sigue sin animación perceptible pero deja que Vue detecte el final. */
+  .fade-swap-enter-active, .fade-swap-leave-active { transition: opacity 0.01s linear !important; }
 }
 
-.batch-btn { display: flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.6rem; background: var(--accent); border: 1px solid var(--accent); border-radius: 6px; color: var(--on-accent); font-size: 0.75rem; cursor: pointer; transition: all 0.2s; }
+.batch-btn { display: flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.6rem; background: var(--accent); border: 1px solid var(--accent); border-radius: 6px; color: var(--on-accent); font-size: 1.31rem; cursor: pointer; transition: all 0.2s; }
 .batch-btn:hover { opacity: 0.9; }
 .batch-btn svg { width: 11px; height: 11px; }
 .batch-btn.danger { background: var(--danger); border-color: var(--danger); }
 .batch-btn.danger:hover { opacity: 0.85; }
 
-.batch-warning { font-size: 0.82rem; color: var(--text); margin: 0 0 0.5rem; }
-.batch-warning-sub { font-size: 0.75rem; color: var(--text-dim); margin: 0; }
+.batch-warning { font-size: 1.43rem; color: var(--text); margin: 0 0 0.5rem; }
+.batch-warning-sub { font-size: 1.31rem; color: var(--text-dim); margin: 0; }
 
-label { display: block; margin-bottom: 0.4rem; font-size: 0.78rem; color: var(--text-dim); }
-select { width: 100%; padding: 0.55rem 0.75rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 0.85rem; }
+label { display: block; margin-bottom: 0.4rem; font-size: 1.37rem; color: var(--text-dim); }
+select { width: 100%; padding: 0.55rem 0.75rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 1.49rem; }
 select:focus { outline: none; border-color: var(--accent); }
 </style>
