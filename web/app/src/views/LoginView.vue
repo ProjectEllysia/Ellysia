@@ -21,7 +21,7 @@
     <div class="portal">
       <div class="portal-body" :inert="granted">
         <router-link to="/" class="wordmark" aria-label="Ellysia — inicio">
-          <span class="wordmark-glyph" aria-hidden="true"></span>
+          <img class="wordmark-mark" :src="ellysiaIcon" alt="" aria-hidden="true" />
           <span class="wordmark-text">Ellysia</span>
         </router-link>
 
@@ -194,6 +194,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 import ElysianScene from '@/components/shared/ElysianScene.vue'
+import ellysiaIcon from '@/assets/images/ellysia/Ellysia-BgN.png'
 
 const router = useRouter()
 const route = useRoute()
@@ -396,10 +397,11 @@ onBeforeUnmount(() => {})
   display: flex; align-items: center; justify-content: center; gap: 0.7rem;
   margin-bottom: 1.6rem;
 }
-.wordmark-glyph {
-  width: 11px; height: 11px; border-radius: 50%;
-  border: 1.5px solid var(--accent);
-  box-shadow: 0 0 0 3.5px var(--surface), 0 0 0 4.5px var(--accent-dim), 0 0 12px var(--sun-glow);
+.wordmark-mark {
+  width: 22px; height: 22px; object-fit: contain;
+  filter: drop-shadow(0 0 7px var(--sun-glow));
+  /* Alineación óptica con las mayúsculas del wordmark. */
+  transform: translateY(-1px);
 }
 .wordmark-text {
   font-family: var(--font-epic);

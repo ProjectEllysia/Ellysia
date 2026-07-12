@@ -15,6 +15,11 @@
       <span class="shooting-star" :style="shootingStyle"></span>
     </div>
 
+    <!-- Lucero — la estrella del alba y del ocaso (Venus), la única visible en
+         ambas iluminaciones. Su brillo recorre despacio los colores de las
+         cuatro herramientas: cuatro herramientas bajo un mismo cielo. -->
+    <div class="lucero"><span class="lucero-core"></span></div>
+
     <!-- Velos que descienden del cielo -->
     <div class="veils">
       <span class="veil veil--1"></span>
@@ -196,6 +201,15 @@ function templeColX(c) {
   transition: background 0.4s ease;
 }
 
+/* Amanecer: tonos de herramienta más oscuros para que el lucero contraste
+   sobre el cielo claro. */
+[data-theme="dawn"] .scene {
+  --tool-themis:  #4f7a42;
+  --tool-aegis:   #33648c;
+  --tool-iris:    #b05a3e;
+  --tool-acheron: #7a5296;
+}
+
 /* ── Estrellas ── */
 .stars {
   position: absolute; inset: 0;
@@ -233,6 +247,50 @@ function templeColX(c) {
   0%, 88%, 100% { opacity: 0; transform: rotate(28deg) translateX(0); }
   90%           { opacity: 1; }
   94%           { opacity: 0; transform: rotate(28deg) translateX(40vw); }
+}
+
+/* ── Lucero — estrella del alba y del ocaso ──
+   Colores de las cuatro herramientas, por iluminación (los de Amanecer son
+   más oscuros para conservar contraste sobre el cielo claro). */
+.scene {
+  --tool-themis:  #7ca163;
+  --tool-aegis:   #6fa3c7;
+  --tool-iris:    #e07a5f;
+  --tool-acheron: #a07ac0;
+}
+.lucero {
+  position: absolute;
+  top: 15%; left: 80%;
+  z-index: 3;
+  width: 4px; height: 4px;
+  color: var(--tool-aegis);
+  pointer-events: none;
+  animation: lucero-hue 52s linear infinite, lucero-twinkle 6.5s ease-in-out infinite;
+}
+/* Los dos ejes del destello (4 picos, guiño a las 4 herramientas) */
+.lucero::before, .lucero::after {
+  content: '';
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+}
+.lucero::before { width: 1px; height: 26px; background: linear-gradient(to bottom, transparent, currentColor 50%, transparent); }
+.lucero::after  { width: 26px; height: 1px; background: linear-gradient(to right, transparent, currentColor 50%, transparent); }
+.lucero-core {
+  position: absolute; left: 50%; top: 50%;
+  width: 5px; height: 5px; border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: currentColor;
+  filter: drop-shadow(0 0 4px currentColor) drop-shadow(0 0 10px currentColor);
+}
+@keyframes lucero-hue {
+  0%, 100% { color: var(--tool-themis); }
+  25%      { color: var(--tool-aegis); }
+  50%      { color: var(--tool-iris); }
+  75%      { color: var(--tool-acheron); }
+}
+@keyframes lucero-twinkle {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
 }
 
 /* Velos — cortinas de luz que nacen del cielo y caen hacia el horizonte.
@@ -464,9 +522,11 @@ function templeColX(c) {
 @media (prefers-reduced-motion: reduce) {
   .veil, .ring--outer, .sun-halo, .reflection, .lake-shimmer,
   .star, .shooting-star, .mote, .god-rays, .god-ray-group,
-  .ripple, .lake-mist, .horizon-temple {
+  .ripple, .lake-mist, .horizon-temple, .lucero {
     animation: none !important;
   }
+  /* Sin parpadeo ni deriva de color: se queda en un tono de herramienta fijo. */
+  .lucero { opacity: 0.9; }
   .star { opacity: var(--star-base, 0.6); }
   .mote { opacity: 0.4; }
   .ripple { display: none; }
