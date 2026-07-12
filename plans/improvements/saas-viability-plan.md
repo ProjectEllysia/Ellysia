@@ -55,7 +55,7 @@ Estimación: 2–4 semanas de trabajo técnico, en paralelo con la Fase 1 (no so
 Como el backend de campañas ya existe, esta fase es de pulido y go-to-market, no de construcción desde cero:
 
 1. UX de campaña end-to-end en `web/app`: crear lista de distribución → lanzar campaña → ver tasa de completitud/resultados del quiz.
-2. **Hub de Aegis** (ver sección 3) — primera landing intermedia del producto, sirve de plantilla para los demás módulos.
+2. ~~Hub de Aegis~~ **Hubs de los 4 módulos — HECHO (2026-07-11), rediseñados como landings públicas**: componente compartido `components/shared/ModuleHub.vue` + `AegisHubView`/`ThemisHubView`/`IrisHubView`/`AcheronHubView`, cada uno en `/<módulo>`. **Son PÚBLICOS** (sin `requiresAuth`): la carta de presentación de cada herramienta, para que quien busque "Acheron" aterrice en su hub sin login — `LandingView` (`/`) es el meta-hub que las reúne. Diseño "carta de presentación" estilo NordSecurity con la identidad Elysium: hero benefit-led, placa dual (actividad real si hay sesión / dato de producto `highlight` si es visita anónima), capacidades editoriales, cross-sell "el resto del panteón", banda CTA final. La herramienta de trabajo vive en `/<módulo>/<subruta>` (p. ej. `/aegis/generador`) y **sí** requiere sesión. Cabecera/pie públicos compartidos: `components/shared/SiteHeader.vue` + `SiteFooter.vue` (este último también en `LandingView`). El fetch de métricas se salta cuando no hay sesión (evita el rebote a login). Páginas informativas públicas nuevas: `/sobre`, `/privacidad`, `/terminos` (`AboutView`/`PrivacyView`/`TermsView` vía `InfoPage.vue`) — legal marcado como preliminar, pendiente de completar antes del lanzamiento comercial.
 3. **Nudge de MFA + recordatorio programado** (ver sección 4) — barato, y una plataforma de ciberseguridad que cobra dinero sin empujar su propio 2FA es una contradicción que un cliente exigente notará.
 4. Landing + pricing enfocados **solo en Aegis**: "cumple con la concienciación obligatoria de ENS/GDPR sin contratar a nadie."
 5. Tier único de lanzamiento (hipótesis: ~29€/mes, píldoras + campañas sin límite agresivo, sin Themis/Iris todavía). Validar que alguien paga antes de tocar precio.
@@ -65,7 +65,7 @@ Como el backend de campañas ya existe, esta fase es de pulido y go-to-market, n
 ### Fase 2 — Expansión (tras validar Fase 1)
 
 1. Iris e Themis como add-ons sobre el mismo pricing.
-2. **Hubs de Themis, Iris y Acheron** reusando la plantilla construida en Fase 1 (ver sección 3) — cada uno con su propia métrica, atajos y recursos.
+2. ~~Hubs de Themis, Iris y Acheron~~ — adelantado a Fase 1, ver arriba.
 3. Iris: IMAP polling (`imaplib` + `email` stdlib) — la apuesta funcional de mayor valor pendiente, convierte Iris de demo a hábito diario.
 4. Themis: seguir el roadmap Lybra ya escrito — prioriza Fase G (cierre de bucle detección→remediación con comando exacto, ej. `apt-get install -y openssh-server=...`) y el dashboard de superficie de ataque en el tiempo (`first_seen_at`/`last_seen_at`). Este dashboard es también el primer candidato natural para un segundo tipo de recordatorio programado (sección 4): "esta semana se abrió un puerto nuevo en tu servidor".
 5. Extender los recordatorios programados de la sección 4 a otros eventos de confianza/retención (aviso de fin de trial, fallo de cobro) según se vayan necesitando.
@@ -162,12 +162,26 @@ No es una nueva clase "extensión del mailer" — la pieza que faltaba nunca fue
 
 **Días 30–60 (lanzamiento Aegis):**
 - [ ] UX de campaña completa en frontend
-- [ ] Hub de Aegis (plantilla reusable) + landing/pricing enfocados en Aegis
+- [x] Hubs de los 4 módulos (plantilla reusable) — hecho 2026-07-11; falta landing/pricing enfocados en Aegis
 - [ ] Nudge de MFA en login + job de recordatorio programado (reusando `APScheduler`)
-- [ ] 5–10 conversaciones con consultoras IT
-- [ ] Primer cliente de pago real (validación, no vanidad)
+- [ ] 5–8 conversaciones selectivas con consultoras IT (no cold — LinkedIn, recomendación, INCIBE)
 
-**Días 60–90 (decisión de expansión):**
-- [ ] Revisar métricas: conversaciones/semana, activación, churn temprano
-- [ ] Si Aegis valida: hubs de Themis/Iris/Acheron, empezar IMAP polling de Iris y/o siguiente fase de Lybra
-- [ ] Si Aegis no valida: diagnosticar mensaje/canal antes de tocar producto
+**Días 60–90 (validación de mercado — punto de decisión crítico):**
+
+**Umbral de éxito en septiembre:** al menos **1 consultora que diga "me interesa, cuéntame más"** (no necesariamente pagando aún). Si esto ocurre, el plan tiene justificación para octubre–noviembre; si no, el mensaje/canal/producto están rotos.
+
+Checklist:
+- [ ] ≥1 consultora en conversación seria (no vaga, con detalles específicos sobre su caso)
+- [ ] Feedback claro sobre precio, diferenciadores, qué falta
+- [ ] Landing + hub puntuales, pricing testada en conversación real
+- [ ] LinkedIn/contenido técnico establécido como rutina (1 post/semana mínimo)
+
+**Octubre (transición post-validación):**
+
+| Resultado septiembre | Decisión octubre |
+|---|---|
+| **≥1 consultora interesada** | Renegocia trabajo (30h/semana) o parte-time. Ellysia es prioridad 1 Oct–Nov. Máster sigue pero segundo plano. |
+| **3–5 "maybes" en trial pero sin decisión clara** | Sigue side-project 10–15h/semana. Máster es prioritario. Enero (fin máster) es siguiente punto de decisión. |
+| **Ningún interés real** | Acepta feedback negativo. Side-project a 5–10h/semana. Diagnostica en enero: ¿pivotear o cerrar? |
+
+**Nota importante:** no es "fallo" terminar en octubre con Ellysia en side-project. Es reconocer que el runway de septiembre fue para *validar*, no para *convertir*. Si validaste que el mercado existe, has ganado.
