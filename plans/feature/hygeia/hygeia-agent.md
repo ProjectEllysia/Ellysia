@@ -68,6 +68,13 @@ puertos de red (solo hace peticiones salientes → funciona detrás de NAT sin e
 > Empieza por el núcleo. Las señales de seguridad aportan mucho, pero solo tienen sentido
 > cuando el flujo base ya funciona.
 
+**Inventario de software (opcional, sinergia con Themis/Lybra — ver §10):**
+
+- Paquetes instalados (nombre, versión) vía el gestor nativo del SO: `dpkg -l`/`rpm -qa` en
+  Linux, `winget list` o registro en Windows, `brew list` en macOS.
+- A diferencia de todo lo anterior, **no es telemetría de heartbeat** — cambia poco y se
+  envía por su propio camino, no cada `intervalSec`. Detalle completo en §10.
+
 ---
 
 ## 4. Arquitectura interna
@@ -135,6 +142,7 @@ Cross-compilación desde un solo `GOOS/GOARCH` — sin toolchains por plataforma
 | **2** | Red + procesos (top-N) + buffer en disco con reintento/backoff. |
 | **3** | Servicio del SO (systemd/Windows/launchd) + releases firmadas. |
 | **4** (opcional) | Señales de seguridad (puertos nuevos, cryptominer, logins fallidos). |
+| **5** (opcional, ver §10) | Colector de inventario de software (paquetes instalados) + envío diferencial a `/hygeia/inventory`. |
 
 **Rebanada mínima:** Fase 0 (Python) contra las Fases 0+1 del backend → ves un heartbeat
 entrando en la DB. Luego Fase 1 en Go para el artefacto real.
@@ -195,3 +203,52 @@ Respuesta del backend (úsala para auto-ajustar el intervalo sin re-desplegar):
 - La identidad del activo la determina la **clave**, nunca un `assetId` del payload.
 - Versiona el payload con `agentVersion`; congela el esquema pronto y evoluciona por
   extensión (campos nuevos opcionales), no por ruptura.
+
+---
+
+## 10. Inventario de software — sinergia con Themis/Lybra (opcional)
+
+> Sección hermana de la §14 del plan de backend
+> (`plans/feature/hygeia/hygeia-backend.md`). Ahí está el porqué completo: Themis/Lybra ve
+> el activo desde la red (fingerprinting inferido, sujeto a backports); Hygeia, al vivir
+> dentro del host, puede darle al matcher CPE→CVE de Lybra la versión **real** del paquete
+> instalado, sin necesidad de que Lybra abra una sesión SSH con credencial de Acheron (la
+> Fase 4 del roadmap del motor, "escaneo autenticado"). Esta sección cubre solo la parte que
+> vive en el agente.
+
+**Qué recolecta el colector nuevo** (mismo principio del §1: el agente es tonto, solo junta
+datos — no decide qué es vulnerable, eso es trabajo del matcher en el backend):
+
+- Listado de paquetes instalados vía el gestor nativo: `dpkg -l`/`rpm -qa` en Linux,
+  `winget list`/registro en Windows, `brew list` en macOS. Por paquete: nombre y versión
+  (el `vendor`/CPE lo resuelve el backend, igual que hace hoy con los servicios de red —
+  no dupliques esa lógica de normalización aquí).
+- Versión de kernel/SO — ya viaja en el bloque `host` del contrato de ingesta (§9); no hace
+  falta duplicarla.
+
+**Ruta y cadencia — distinta de la del heartbeat:**
+
+- No es telemetría de intervalo corto. Un endpoint propio, `POST {serverUrl}/inventory`, con
+  la misma cabecera `Authorization: Bearer <agentKey>` del heartbeat (§8) — mismo mecanismo
+  de identidad, sin JWT, sin superficie nueva de auth.
+- **Envío diferencial.** El agente calcula un hash del listado de paquetes y solo lo reenvía
+  si cambió desde el último envío (o, como tope, una vez al día aunque no cambie, para que el
+  backend sepa que el agente sigue vivo y su vista de inventario no está simplemente
+  desactualizada). Evita mandar varios MB de listado de paquetes cada 15 s por nada —el
+  mismo motivo por el que el bucle principal (§4) no toca este colector.
+
+```jsonc
+// POST {serverUrl}/inventory
+{
+  "agentVersion": "1.0.0",
+  "collectedAt": "2026-07-13T10:00:00Z",
+  "packages": [
+    { "name": "openssl", "version": "1.1.1f" },
+    { "name": "apache2", "version": "2.4.49" }
+  ]
+}
+```
+
+> **ponytail: no construyas esto antes de que el flujo base (Fases 0-2) esté probado en
+> producción.** Es una extensión, no un prerrequisito — el agente sin este colector sigue
+> siendo completamente útil para su propósito original (monitorización de salud).

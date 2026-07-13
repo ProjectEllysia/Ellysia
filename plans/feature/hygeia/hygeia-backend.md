@@ -425,6 +425,7 @@ Cada fase es útil por sí sola (como el roadmap del motor).
 | **4** | Notificación por correo (`herald`) en anomalía crítica | Aviso proactivo al dueño |
 | **5** | Consulta de series (`/assets/{id}/metrics`) para el dashboard de la SPA | Visualización histórica |
 | **6** (opcional) | Baseline estadístico, resumen IA (`scribe`), downsampling, señales de seguridad | Menos falsos positivos, valor diferencial |
+| **H0-H3** (opcional, ver §14) | Inventario de software del agente como entrada del matcher CPE→CVE de Lybra | Cobertura de CVE por host, sin fingerprinting remoto ni SSH |
 
 **Rebanada mínima para esta semana:** Fases 0+1 → un activo empujando métricas que se ven
 en la DB. A partir de ahí, Fase 2 es la que convierte "datos" en "alertas".
@@ -449,5 +450,113 @@ en la DB. A partir de ahí, Fase 2 es la que convierte "datos" en "alertas".
 
 ---
 
+## 14. Integración con Themis/Lybra — el inventario de software como entrada del matcher CPE→CVE
+
+> Sección añadida a partir de una conversación de diseño (2026-07-13): Hygeia y Themis miran
+> el mismo activo desde ángulos opuestos — Themis desde la red (lo que un atacante ve desde
+> fuera: puertos, banners, fingerprinting inferido); Hygeia desde dentro del host (lo que hay
+> realmente instalado). Esta sección explora la sinergia: que el **descubrimiento** de uno
+> alimente el **análisis** del otro.
+
+### 14.1 Por qué es viable — no es una capacidad nueva de Lybra, es un origen nuevo del dato
+
+Lybra ya separa "de dónde sale la lista de servicios" de "qué hace con ella". Su Fase 1 —
+el matcher CPE→CVE (`normalize_product_to_cpe` + `cves_for_cpe`, `vulnengineroadmap.md`
+§Fase 1, **ya implementada**) — toma como entrada una lista de `(host, puerto, producto,
+versión)` y no le importa si esa lista la generó Nmap, un `LybraEngineTask` manual, o —lo
+que proponemos aquí— el propio agente Hygeia leyendo paquetes instalados.
+
+Más aún: el roadmap del motor **ya había anticipado exactamente este problema**, solo que
+por otra vía. Su **Fase 4 — "el escaneo autenticado"** (`vulnengineroadmap.md` §Fase 4,
+*avanzada y opcional, planificada*) propone entrar por SSH con una credencial del vault de
+Acheron para leer `dpkg -l`/`rpm -qa` y así resolver de raíz el problema de los backports
+(un banner de versión no siempre coincide con el paquete real instalado — la causa nº 1 de
+falsos positivos del matcher). Si el activo ya tiene un agente Hygeia corriendo, **ese
+problema está resuelto de antemano**: el agente ya vive dentro del host, ya lee el sistema
+de paquetes localmente, y no necesita abrir una sesión SSH ni que Acheron guarde una
+credencial de acceso remoto. Para hosts *con* agente Hygeia, esta integración vuelve
+innecesaria la Fase 4; para hosts *sin* agente, la Fase 4 sigue siendo el camino (siguen
+siendo dos vías al mismo destino, no una que sustituye a la otra en todos los casos).
+
+> **ponytail: no dupliques el motor de detección.** Lo único nuevo de verdad aquí es (a) un
+> colector de paquetes en el agente y (b) un adaptador que traduce ese inventario a la forma
+> `(host, producto, versión)` que Lybra ya consume. El matcher CPE→CVE, la correlación, el
+> dedup y el scoring — todo eso ya existe y no se toca.
+
+### 14.2 Qué hay que construir
+
+**En el agente (`Ellysia - Hygeia`, repo hermano):** un colector más, en la línea de los que
+ya describe su README (§3): lista de paquetes instalados vía el gestor nativo de cada SO
+(`dpkg -l` / `rpm -qa` en Linux, `winget list` / registro en Windows, `brew list` en macOS),
+más versión de kernel/SO que ya se recolecta como parte de `host` en el contrato de ingesta
+(§11). A diferencia de CPU/memoria, esto **no cambia cada 15 s** — no tiene sentido mandarlo
+en cada heartbeat.
+
+**En el backend (este módulo):**
+
+1. **Endpoint y cadencia propios.** `POST /hygeia/inventory` (misma auth `require_agent_key`
+   que `/hygeia/ingest`, §5), disparado por el agente con mucha menor frecuencia (p. ej. una
+   vez al día, o al detectar que el listado de paquetes cambió desde el último envío — un
+   hash del listado basta para decidirlo del lado del agente). Reutiliza la misma frontera de
+   confianza del §13: valida y limita tamaño, rate-limit por clave de agente.
+2. **Identidad de activo compartida con Themis.** El roadmap del motor ya resolvió este
+   mismo problema para el caso Nmap-vs-Nmap: `ScanRepository.get_host_by_ip` evita que un
+   mismo dispositivo físico se duplique en dos filas de `Host` cuando se le ve por IP y por
+   hostname (`vulnengineroadmap.md`, decisión de diseño del 2026-07-11, §Fase 5). Al dar de
+   alta un `MonitoredAsset` (§5, `POST /hygeia/assets`), hay que resolver o crear el `Host`
+   de Themis correspondiente (por IP conocida o por hostname) y guardar esa referencia
+   (`MonitoredAsset.host_id`, nullable — no todo activo Hygeia tiene por qué tener un `Host`
+   de Themis todavía). Sin este vínculo, el inventario de Hygeia y los hallazgos de red de
+   Themis viven en dos árboles separados y no se benefician de nada de la Fase 5 del motor.
+3. **Adaptador inventario → servicios.** Una función de traducción, simétrica a los
+   adaptadores que ya existen para Nikto/OpenVAS (`themis/lybra/adapters.py`), que convierte
+   cada paquete del inventario en la forma `Service` que consume `LybraEngineTask`. Diferencia
+   clave frente al caso de red: aquí el **puerto es opcional** — una librería vulnerable no
+   tiene por qué escuchar en ningún puerto. El modelo de `Finding` ya lo contempla en la
+   práctica: la categoría `outdated_software` (`vulnengineroadmap.md` §Modelo de datos, línea
+   139) no depende conceptualmente de un puerto, solo de un CPE resuelto y una versión.
+4. **Disparo del análisis.** Tras persistir un inventario nuevo (o distinto del anterior),
+   encolar una tarea en `system/taskqueue` que invoque `LybraEngineManager.execute_lybra_scan`
+   pasándole como entrada la lista de servicios ya traducida — el mismo punto de entrada que
+   hoy usa un Lybra Scan alimentado por Nmap (§Fase 6 del roadmap, "Fases 0–T-1"). Los
+   `Finding` resultantes caen en el mismo `Host` que Themis, así que heredan gratis dedup
+   multi-fuente, ciclo de vida (`open`/`fixed`/`regressed`) y scoring contextual — no hay que
+   reimplementar nada de la Fase 5.
+
+### 14.3 Qué gana cada lado
+
+- **Themis/Lybra** deja de depender solo de fingerprinting remoto (inferido, sujeto a
+  backports) para los hosts que además corren Hygeia: obtiene la versión real del paquete sin
+  SSH ni credenciales nuevas en Acheron. También gana cobertura donde el fingerprinting de red
+  no llega — un host detrás de NAT sin puertos expuestos, que Themis nunca podría escanear,
+  igual reporta su inventario vía Hygeia (push saliente, sin abrir nada).
+- **Hygeia** gana valor de seguridad real más allá de la monitorización de salud: hoy solo
+  detecta anomalías de rendimiento (CPU, memoria, disco); con esto, el mismo agente que ya
+  está instalado empieza a alimentar hallazgos de CVE con severidad y CVSS, sin construir un
+  motor de detección propio — se apoya en el que ya existe en Lybra.
+- **Lo que ninguno gana del otro:** Hygeia nunca podrá ver la superficie de ataque *externa*
+  (qué expone el host a Internet, TLS mal configurado, un path expuesto) — eso sigue siendo
+  terreno exclusivo de Themis. Son complementarios, no intercambiables; no colapsar ambas
+  señales en un único score sin distinguir "vulnerable por inventario" de "vulnerable y
+  expuesto en red" (ver la advertencia ya hecha sobre este mismo punto en la conversación de
+  diseño que originó esta sección).
+
+### 14.4 Fases (opcionales, posteriores a la Fase 2 de este documento)
+
+| Fase | Entregable | Estado que habilita |
+|---|---|---|
+| **H0** | Colector de paquetes instalados en el agente + `POST /hygeia/inventory` | El backend recibe listados de software por activo |
+| **H1** | `MonitoredAsset.host_id` — resolución/creación del `Host` de Themis al dar de alta el activo | Un `MonitoredAsset` y un `Host` de Themis son la misma entidad de identidad |
+| **H2** | Adaptador inventario→servicios + disparo de `LybraEngineManager.execute_lybra_scan` con esa entrada | Hallazgos CVE por inventario, visibles en el mismo árbol Host→Service→Finding que Themis |
+| **H3** (opcional) | Envío diferencial (solo cuando el hash del inventario cambia) | Menos tráfico/ruido; no reprocesar un inventario idéntico |
+
+> **ponytail: no antes de que Hygeia y Lybra estén ambos estables por separado.** Esta
+> integración acopla dos módulos que hoy son independientes; hacerlo antes de que cada uno
+> tenga su Fase 0-2 asentada multiplicaría la superficie de debugging sin necesidad. Es la
+> extensión natural una vez ambos lados existen, no un prerrequisito de ninguno de los dos.
+
+---
+
 *Documento vivo. El acoplamiento con el otro repo se limita a §11: si el contrato de
-ingesta se mantiene estable, agente y backend evolucionan por separado.*
+ingesta se mantiene estable, agente y backend evolucionan por separado. El acoplamiento con
+Themis/Lybra (§14) es opcional y unidireccional: Hygeia puede vivir sin él.*
