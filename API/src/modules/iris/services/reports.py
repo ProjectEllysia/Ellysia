@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import logging
 from datetime import datetime
+from email.utils import parseaddr
 from typing import Any, Dict, Optional
 
 from reportlab.lib import colors
@@ -35,6 +36,7 @@ from reportlab.platypus import (
 )
 
 import src.modules.system.config_reading as CR
+from .parsers import parse_raw_headers, decode_mime_words
 
 logger = logging.getLogger(__name__)
 
@@ -351,6 +353,105 @@ class IrisPDFCreator:
         elements.append(hero)
         elements.append(Spacer(1, 0.25 * inch))
 
+    def append_email_preview(self, elements: list, theme: IrisReportTheme) -> None:
+        """Vista previa del correo: De / Para / Responder-a / Asunto / Fecha.
+
+        Va de las primeras secciones del informe (justo tras el veredicto)
+        para dar contexto inmediato de "qué correo es este" antes de entrar
+        en el detalle de reglas y evidencia. El contraste De vs. Responder-a
+        se resalta porque una discrepancia entre ambos es una señal clásica
+        de fraude BEC (el atacante quiere que las respuestas vayan a un
+        buzón distinto del remitente que se ve a simple vista).
+        """
+        raw = self.report.get("rawHeaders")
+        if not raw:
+            return
+
+        headers = parse_raw_headers(raw)
+
+        def _get(name: str) -> Optional[str]:
+            value = headers.get(name)
+            return decode_mime_words(value) if value else None
+
+        subject = _get("subject")
+        from_ = _get("from")
+        to = _get("to")
+        reply_to = _get("reply-to")
+        return_path = _get("return-path")
+        date = _get("date")
+
+        if not any([subject, from_, to, reply_to, return_path, date]):
+            return
+
+        elements.extend(theme.section_header("Vista Previa del Correo", "CONTENIDO"))
+        elements.append(Spacer(1, 0.1 * inch))
+
+        main = colors.HexColor(theme.palette["main"])
+        dark = colors.HexColor(theme.palette["dark"])
+        white = colors.HexColor(theme.palette["white"])
+        light = colors.HexColor(theme.palette["light"])
+        alert = colors.HexColor("#d32f2f")
+
+        value_style = ParagraphStyle(
+            "IrisPreviewValue", parent=theme.styles["Normal"],
+            fontSize=9, leading=12, textColor=dark,
+            alignment=TA_LEFT, wordWrap="CJK",
+        )
+        mismatch_style = ParagraphStyle(
+            "IrisPreviewMismatch", parent=value_style,
+            textColor=alert, fontName="Helvetica-Bold",
+        )
+
+        rows: list = []
+        if subject:
+            rows.append(["Asunto:", Paragraph(_esc(subject), value_style)])
+        if from_:
+            rows.append(["De:", Paragraph(_esc(from_), value_style)])
+        if to:
+            rows.append(["Para:", Paragraph(_esc(to), value_style)])
+        if reply_to:
+            # Compara solo la dirección (sin el nombre visible) para no
+            # marcar como discrepancia un simple cambio de formato.
+            mismatch = bool(from_) and parseaddr(reply_to)[1].lower() != parseaddr(from_)[1].lower()
+            if mismatch:
+                text = f"{_esc(reply_to)}  [!] distinto del remitente (De:)"
+                rows.append(["Responder a:", Paragraph(text, mismatch_style)])
+            else:
+                rows.append(["Responder a:", Paragraph(_esc(reply_to), value_style)])
+        if return_path:
+            rows.append(["Return-Path:", Paragraph(_esc(return_path), value_style)])
+        if date:
+            rows.append(["Fecha:", Paragraph(_esc(date), value_style)])
+
+        preview_table = Table(rows, colWidths=[1.3 * inch, 5.1 * inch])
+        preview_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, -1), white),
+            ("BACKGROUND", (1, 0), (1, -1), colors.white),
+            ("TEXTCOLOR", (0, 0), (0, -1), main),
+            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("GRID", (0, 0), (-1, -1), 0.4, light),
+        ]))
+        elements.append(preview_table)
+
+        if self.report.get("unwrappedFromForward"):
+            elements.append(Spacer(1, 0.1 * inch))
+            wrapper_from = self.report.get("wrapperFrom")
+            wrapper_subject = self.report.get("wrapperSubject")
+            note = "Este análisis corresponde al correo original reenviado"
+            if wrapper_from:
+                note += f" por {_esc(wrapper_from)}"
+            if wrapper_subject:
+                note += f" (asunto del reenvío: «{_esc(wrapper_subject)}»)"
+            note += "."
+            elements.append(Paragraph(note, theme.body))
+
+        elements.append(Spacer(1, 0.22 * inch))
+
     def append_gate_reasons(self, elements: list, theme: IrisReportTheme) -> None:
         """Señales de alta confianza que fijaron el veredicto (S1).
 
@@ -372,7 +473,7 @@ class IrisPDFCreator:
             textColor=colors.HexColor(theme.palette["black"]),
             spaceAfter=4,
         )
-        reason_paras = [Paragraph(f"‣  {_esc(reason)}", reason_style) for reason in reasons]
+        reason_paras = [Paragraph(f"•  {_esc(reason)}", reason_style) for reason in reasons]
 
         card = Table([[reason_paras]], colWidths=[6.4 * inch])
         card.setStyle(TableStyle([
@@ -595,6 +696,7 @@ class IrisPDFCreator:
 
         self.append_cover_page(elements, theme)
         self.append_verdict_hero(elements, theme)
+        self.append_email_preview(elements, theme)
         self.append_gate_reasons(elements, theme)
         self.append_rules(elements, theme)
         self.append_recommendations(elements, theme)
