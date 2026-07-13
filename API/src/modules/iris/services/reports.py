@@ -365,15 +365,27 @@ class IrisPDFCreator:
         risk_color = _VERDICT_COLORS.get(verdict, colors.HexColor("#757575"))
 
         elements.extend(theme.section_header("Por qué este veredicto", "SEÑALES CLAVE"))
-        elements.append(Spacer(1, 0.08 * inch))
+        elements.append(Spacer(1, 0.1 * inch))
 
         reason_style = ParagraphStyle(
             "IrisGateReason", parent=theme.body,
-            textColor=risk_color,
+            textColor=colors.HexColor(theme.palette["black"]),
+            spaceAfter=4,
         )
-        for reason in reasons:
-            elements.append(Paragraph(f"• {_esc(reason)}", reason_style))
-        elements.append(Spacer(1, 0.2 * inch))
+        reason_paras = [Paragraph(f"‣  {_esc(reason)}", reason_style) for reason in reasons]
+
+        card = Table([[reason_paras]], colWidths=[6.4 * inch])
+        card.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FAFAFA")),
+            ("LINEBEFORE", (0, 0), (0, -1), 3, risk_color),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E0E0E0")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 14),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 14),
+            ("TOPPADDING", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ]))
+        elements.append(card)
+        elements.append(Spacer(1, 0.22 * inch))
 
     def append_rules(self, elements: list, theme: IrisReportTheme) -> None:
         rules = self.report.get("rules") or []
