@@ -123,7 +123,7 @@ function handleSubmit() {
   width: 100%;
   padding: 0.7rem 0.85rem;
   font-family: var(--font-body);
-  font-size: 1.58rem;
+  font-size: 1.4rem;
   background: var(--surface);
   border: 1px solid var(--border-solid);
   border-radius: 8px;
@@ -147,7 +147,7 @@ function handleSubmit() {
   min-height: 320px;
   resize: vertical;
   font-family: var(--font-mono);
-  font-size: 1.54rem;
+  font-size: 1.2rem;
   line-height: 1.7;
   padding: 1.1rem;
   background: var(--surface);
@@ -167,7 +167,7 @@ function handleSubmit() {
   color: var(--text-muted);
   opacity: 0.35;
   font-family: var(--font-mono);
-  font-size: 1.43rem;
+  font-size: 0.75rem;
 }
 
 .form-footer {
