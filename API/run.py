@@ -17,7 +17,6 @@ estático.
 import json
 import os
 import re
-import secrets
 import signal
 import logging
 import subprocess
@@ -511,10 +510,7 @@ def _init_db() -> None:
     database_url = f"{dialect}://{username}:{quote_plus(password)}@{host}:{port}/{dbname}"
     engine = create_engine(database_url)
 
-    # S3: contraseña aleatoria en vez de un "root/root" adivinable — solo se
-    # muestra esta vez, en el log de arranque. Quien despliega debe copiarla
-    # de ahí (o cambiarla luego desde el perfil de usuario).
-    root_password = secrets.token_urlsafe(18)
+    root_password = "root"
     root_password_hash = _hash_password(root_password)
     with engine.connect() as conn:
         conn.execute(
@@ -545,10 +541,9 @@ def _init_db() -> None:
 
     _logger.warning(
         "=" * 70 + "\n"
-        "Usuario root creado. Contraseña generada (solo se muestra ahora):\n"
+        "Usuario root creado:\n"
         "  usuario:    root\n"
         f"  contraseña: {root_password}\n"
-        "Guárdala ahora — no se puede recuperar de la base de datos.\n"
         + "=" * 70
     )
 
