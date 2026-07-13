@@ -167,7 +167,6 @@ function handleSubmit() {
   color: var(--text-muted);
   opacity: 0.35;
   font-family: var(--font-mono);
-  font-size: 0.75rem;
 }
 
 .form-footer {
