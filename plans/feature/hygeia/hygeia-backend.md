@@ -106,7 +106,8 @@ class MonitoredAsset(Base):
     labels        = Column(JSONB)                 # etiquetas libres: env, rol, ubicación…
 
     # Identidad del agente (ver §4)
-    agent_key_hash = Column(String(255), nullable=False)   # Argon2id de la clave de agente
+    agent_key_id   = Column(String(32), unique=True, index=True, nullable=False)  # prefijo público; permite el lookup O(1)
+    agent_key_hash = Column(String(255), nullable=False)   # Argon2id del secreto (nunca el secreto en claro)
     agent_version  = Column(String(32))
 
     # Estado de presencia
@@ -200,27 +201,44 @@ Los agentes son máquinas no interactivas: necesitan su propia identidad. Decisi
 simple que es correcta):
 
 **Clave de agente por activo (bearer opaco), emitida en el alta y hasheada con Argon2id**
-(el mismo hashing que ya usáis para contraseñas — cero dependencias nuevas).
+(el mismo hashing que ya usáis para contraseñas — cero dependencias nuevas). La clave tiene
+**dos partes**, `<keyId>.<secreto>` (estilo token de GitHub/Stripe):
+
+- `keyId` — prefijo corto, **público**, indexado en claro (`agent_key_id`). No es secreto:
+  su único trabajo es localizar por índice qué activo intenta autenticarse.
+- `secreto` — la parte de alta entropía (`secrets.token_urlsafe(32)`); de esto se guarda
+  **solo** el hash Argon2id (`agent_key_hash`). Nunca se persiste en claro.
 
 Flujo de alta (*enrollment*):
 
-1. Un **usuario autenticado** da de alta un activo: `POST /hygeia/assets`. El backend
-   genera una clave aleatoria de alta entropía (`secrets.token_urlsafe`), guarda **solo su
-   hash Argon2id** en `MonitoredAsset.agent_key_hash`, y **devuelve la clave en claro una
-   sola vez** (patrón "recovery codes" de MFA, que ya existe en el repo).
+1. Un **usuario autenticado** da de alta un activo: `POST /hygeia/assets`. El backend genera
+   `keyId` + `secreto`, guarda `keyId` en claro y **solo el hash Argon2id del secreto**, y
+   **devuelve la clave completa (`keyId.secreto`) en claro una sola vez** (patrón "recovery
+   codes" de MFA, que ya existe en el repo).
 2. El operador configura esa clave en el agente (fichero de config del otro repo).
-3. Cada heartbeat viaja con `Authorization: Bearer <agentKey>` (o cabecera `X-Agent-Key`).
+3. Cada heartbeat viaja con `Authorization: Bearer <keyId.secreto>` (o cabecera `X-Agent-Key`).
 
-Verificación en el endpoint de ingesta: un decorador nuevo `require_agent_key` (en
-`services/enrollment.py`) resuelve el activo, verifica el hash Argon2 y deja el
-`MonitoredAsset` en el contexto de la request. **No emite JWT** — el agente no necesita
-sesión, solo probar su clave en cada push.
+Verificación en el endpoint de ingesta (`require_agent_key`, en `services/enrollment.py`):
+parte la clave por el separador, **localiza el activo por `keyId`** (índice → O(1), una sola
+fila) y verifica el `secreto` contra su `agent_key_hash` con Argon2. Deja el `MonitoredAsset`
+en el contexto de la request. **No emite JWT** — el agente no necesita sesión, solo probar su
+clave en cada push.
+
+> **Por qué el `keyId` no es opcional:** con un bearer opaco "de una sola pieza" no hay forma
+> de saber **qué** activo lo emitió sin verificar el Argon2 de *todos* los activos uno a uno
+> — cada hash tiene su propia sal, así que no se puede indexar por el secreto. Eso sería
+> O(nº activos) verificaciones Argon2 (caras a propósito) **por cada heartbeat**: inviable y,
+> de paso, un vector de DoS. El `keyId` reduce el lookup a una fila y una sola verificación.
+> La respuesta uniforme ante un `keyId` inexistente se detalla en §16.6.
 
 > **ponytail: bearer + Argon2, no mTLS ni client_credentials.** mTLS y un grant OAuth
 > `client_credentials` son más robustos pero triplican el trabajo (PKI / rotación / nuevo
-> flujo OAuth) y no aportan nada en beta. Techo: si más adelante quieres rotación
-> automática o revocación fina, añade `agent_key_id` + expiración a `MonitoredAsset` — un
-> par de columnas, no un rediseño. TLS lo aporta el reverse proxy, como el resto de la API.
+> flujo OAuth) y no aportan nada en beta. Techo: la **revocación** ya sale gratis (borra o
+> marca la fila del activo por su `keyId`, y `POST /hygeia/assets/{id}/rotate-key` reemite);
+> si más adelante quieres **rotación con solape** o expiración, añade una columna
+> `agent_key_expires_at` y admite dos `keyId` vivos por activo durante la ventana de rotación
+> — sigue siendo un par de columnas, no un rediseño. TLS lo aporta el reverse proxy, como el
+> resto de la API.
 
 **Aislamiento de datos:** un agente solo puede escribir sobre **su** activo (el que
 resuelve su clave). Nunca aceptar `assetId` del payload como fuente de identidad — la
@@ -292,6 +310,28 @@ Reglas mínimas del beta: `cpu_spike`, `mem_high`, `swap_thrash`, `disk_full`, `
 `config_reading.py`), los umbrales por defecto van en un bloque `hygeia` del JSON (§9); los
 overrides por activo, en la columna/tabla de thresholds vía `PUT /hygeia/assets/{id}/thresholds`.
 
+> **ponytail: síncrono ahora, pero con techo definido — no lo dejes crecer sin límite.**
+> Comparar umbrales estáticos contra un único snapshot son microsegundos: no justifica RQ.
+> Pero hay tres señales concretas de que la evaluación se ha vuelto demasiado pesada para
+> vivir dentro de la transacción de ingesta: **(1)** una regla necesita I/O externo (consulta
+> a un feed de reputación, inferencia de un modelo) — nunca bloquees la respuesta al agente
+> por una llamada de red que no controlas; **(2)** una regla necesita una consulta histórica
+> (el *baseline* móvil ya mencionado arriba) cuyo coste deja de ser despreciable frente al
+> presupuesto de latencia del endpoint caliente; **(3)** aparece correlación entre varios
+> activos (una campaña de anomalías simultáneas), que por definición no cabe en "evaluar un
+> snapshot aislado". Cuando aparezca cualquiera de las tres, **no conviertas sin más cada
+> heartbeat en un job de RQ**: el estado de histéresis de una `Anomaly` (abrir al N-ésimo
+> cruce sostenido, resolver al volver por debajo) depende de que las evaluaciones de un mismo
+> activo se procesen **en orden**, y una cola genérica no lo garantiza si dos heartbeats del
+> mismo activo caen en workers distintos. La vía segura: mantener el chequeo de umbral ligero
+> y síncrono (barato, con orden garantizado por vivir en la misma request) y mover solo el
+> trabajo pesado — el que dispara (1)/(2)/(3) — a una tarea de enriquecimiento asíncrona
+> **posterior al commit** (mismo patrón que ya usa el correo de §8: encolar tras confirmar la
+> transacción, no dentro de ella). Si de verdad hace falta que la detección en sí sea
+> asíncrona, serializa por activo (lock de Redis por `asset_id`, o un job keyed que RQ no
+> empiece el siguiente heartbeat de ese activo hasta que el anterior termine) — no lo dejes
+> a la suerte del orden de llegada a la cola.
+
 ---
 
 ## 7. Tareas de fondo (RQ + APScheduler)
@@ -299,13 +339,63 @@ overrides por activo, en la columna/tabla de thresholds vía `PUT /hygeia/assets
 Dos jobs recurrentes, con el patrón de `sentinel/services/scheduling.py`. Categorías RQ
 nuevas: `hygeia.maintenance`.
 
-- **Detector de presencia (host caído).** Cada minuto: marca `stale`/`offline` los activos
-  cuyo `last_seen_at` supere `N × intervalo`, y abre una `Anomaly(kind="host_down")`. Al
-  volver un heartbeat, la ingesta la resuelve. Esto cubre "el activo dejó de responder",
-  que la ingesta por sí sola no puede detectar (no llega nada que evaluar).
-- **Poda/retención.** Diaria: borra `AssetSnapshot` más antiguos que `retentionDays`
-  (config). Opcional: **downsampling** — antes de borrar, agregar a resolución horaria en
-  una tabla `AssetSnapshotHourly`. Para el beta, borrar basta; el downsampling es el techo.
+### 7.1 Detector de presencia (host caído)
+
+Job periódico (cada minuto, vía APScheduler). Su única entrada es el reloj — no evalúa
+métricas, solo silencio:
+
+1. **Selecciona candidatos.** Consulta `MonitoredAsset` cuyo `status` sea `online` o `stale`
+   (nunca reprocesa uno que ya está `offline`) y cuyo `last_seen_at` sea anterior a
+   `now - offlineAfterMissed × heartbeatIntervalSec` — o al intervalo específico de ese
+   activo si el agente se auto-ajustó a un `nextIntervalSec` distinto del global (§11): el
+   umbral de "lleva demasiado callado" debe compararse contra lo que el propio activo tiene
+   configurado, no contra el valor por defecto de `SecOpsConfig.json`.
+2. **Transición en dos escalones, no en uno.** `online → stale` en el primer corte (dejar
+   ver "algo va mal" en el listado de activos antes de declarar la caída); `stale → offline`
+   en un segundo corte, más permisivo. **Solo** la transición a `offline` abre
+   `Anomaly(kind="host_down")` — `stale` es una señal visual (`GET /hygeia/assets`, §5), no
+   una incidencia.
+3. **Apertura idempotente.** Antes de crear la `Anomaly`, comprobar que no exista ya una
+   `open` del mismo `kind="host_down"` para ese activo. Un job que corre cada minuto no debe
+   abrir una anomalía nueva cada vez que se ejecuta mientras el activo sigue caído.
+4. **A salvo de la carrera con un heartbeat que llega a la vez.** No hagas "leer
+   `last_seen_at`, decidir en Python, escribir" en dos pasos: si un heartbeat entra justo
+   cuando el job está evaluando, esa lectura pudo quedar obsoleta un instante después. Haz el
+   corte con una escritura condicional atómica (`UPDATE ... WHERE last_seen_at < :umbral AND
+   status != 'offline'`, vía el repositorio) para que sea Postgres, no el job, quien decida
+   si el activo seguía realmente inactivo **en el momento de escribir**.
+
+### 7.2 Resolución — no la hace el job, la hace la ingesta
+
+Aquí vale la pena dejar explícita una asimetría: **`host_down` es la única `Anomaly` cuya
+apertura y cierre viven en sitios distintos del código.** Las demás (`cpu_spike`,
+`mem_high`...) se abren y se cierran ambas dentro de `HygeiaIngestManager.evaluate()` porque
+ambas transiciones dependen de examinar un snapshot que llegó. `host_down` es lo contrario:
+se abre por **ausencia** de snapshot (solo el job periódico puede detectar eso — la ingesta
+nunca "ve" un silencio, porque si no llega nada, no hay request que dispare nada) y se cierra
+por **presencia** de uno (recibir un heartbeat).
+
+Por tanto, en `HygeiaIngestManager`, el primer paso al recibir un heartbeat — antes incluso
+de evaluar los umbrales de métricas del propio snapshot (§6) — es:
+
+1. Actualizar `MonitoredAsset.last_seen_at` y `status = "online"`, sea cual sea el estado
+   previo (`stale` u `offline`): el heartbeat que acaba de llegar ya es la prueba de que el
+   activo volvió.
+2. Buscar una `Anomaly(asset_id=this, kind="host_down", state="open")`. Si existe, resolverla
+   (`state="resolved"`, `resolved_at=now`) — no hace falta ninguna otra condición: recibir el
+   heartbeat **es** la condición de resolución para este tipo concreto de anomalía.
+3. Solo entonces, evaluar los umbrales de CPU/memoria/disco sobre los datos que trae el
+   payload (§6), igual que en cualquier otro heartbeat.
+
+El job de presencia (§7.1) solo abre; la ingesta (§7.2) solo cierra. Ambos actúan sobre el
+mismo `asset_id` pero en transacciones separadas — no hace falta coordinarlos más allá de la
+escritura condicional del punto 7.1.4, que ya evita que se pisen.
+
+### 7.3 Poda/retención
+
+Diaria: borra `AssetSnapshot` más antiguos que `retentionDays` (config). Opcional:
+**downsampling** — antes de borrar, agregar a resolución horaria en una tabla
+`AssetSnapshotHourly`. Para el beta, borrar basta; el downsampling es el techo.
 
 > **ponytail:** el detector de presencia es el único job imprescindible del beta. La
 > retención es imprescindible en cuanto haya tráfico real (si no, la tabla crece sin
@@ -342,6 +432,16 @@ Bloque nuevo `hygeia`, leído vía `CR` (regla del repo: nada de constantes mág
     "memPct":  { "warning": 85, "critical": 95, "sustainedHeartbeats": 3 },
     "diskPct": { "warning": 85, "critical": 95 },
     "swapPct": { "warning": 40, "critical": 70 }
+  },
+  "limits": {                      // guardas anti-abuso (§16); nada hardcodeado en código
+    "maxBodyBytes":         262144,  // 256 KB comprimido → 413 si se supera
+    "maxDecompressedBytes": 1048576, // 1 MB tras gunzip → corta el gzip-bomb
+    "maxProcesses":         20,      // tope de topCpu/topMem por snapshot
+    "maxDiskMounts":        64,
+    "maxNetInterfaces":     64,
+    "minIntervalSec":       5,       // suelo de cadencia por clave (anti-flood) → 429
+    "clockSkewSec":         300,     // ventana de cordura de collectedAt (±5 min)
+    "maxAssetsPerUser":     500      // cuota de alta por usuario
   }
 }
 ```
@@ -426,6 +526,7 @@ Cada fase es útil por sí sola (como el roadmap del motor).
 | **5** | Consulta de series (`/assets/{id}/metrics`) para el dashboard de la SPA | Visualización histórica |
 | **6** (opcional) | Baseline estadístico, resumen IA (`scribe`), downsampling, señales de seguridad | Menos falsos positivos, valor diferencial |
 | **H0-H3** (opcional, ver §14) | Inventario de software del agente como entrada del matcher CPE→CVE de Lybra | Cobertura de CVE por host, sin fingerprinting remoto ni SSH |
+| **D0** (opcional, ver §15) | Sección de descargas del agente Hygeia (binarios precompilados por SO/arquitectura) | Alta de un activo termina en "descarga el agente" sin salir de Ellysia |
 
 **Rebanada mínima para esta semana:** Fases 0+1 → un activo empujando métricas que se ven
 en la DB. A partir de ahí, Fase 2 es la que convierte "datos" en "alertas".
@@ -557,6 +658,178 @@ en cada heartbeat.
 
 ---
 
+## 15. Descarga del agente desde Ellysia (opcional, interesante)
+
+> Requisito opcional surgido de una conversación de diseño (2026-07-14). No bloquea ninguna
+> fase anterior — es una comodidad de distribución, no una pieza del contrato de ingesta.
+
+**La idea:** que dar de alta un activo (`POST /hygeia/assets`, §4) no termine en "aquí tienes
+tu clave, ve a buscar el binario a otro sitio", sino en una sección de Ellysia
+(`/hygeia/agent/download` o una página en la SPA) donde el usuario elige su SO/arquitectura y
+descarga el agente ya listo para instalar.
+
+### 15.1 Dos formas de resolverlo, y cuál conviene
+
+**A) Binarios precompilados, servidos tal cual (recomendado).** El repo del agente
+(`Ellysia - Hygeia`) ya cross-compila trivialmente con Go (`GOOS`/`GOARCH`, sin toolchains
+por plataforma — §2/§6 del plan del agente). En su CI se genera, en cada release, una matriz
+de binarios (linux/amd64, linux/arm64, windows/amd64, darwin/amd64, darwin/arm64), **firmados
+una sola vez** en ese pipeline (§5 del plan del agente, "releases firmadas"). El backend de
+Ellysia no compila nada: solo expone `GET /hygeia/agent/download?os=&arch=` que sirve (o
+redirige a) el artefacto correspondiente de la última release. Es un endpoint más, del mismo
+tipo que servir cualquier fichero estático — cero cambios de arquitectura en la API Python.
+
+**B) Compilación dinámica bajo demanda.** Técnicamente viable — se podría encolar un `go
+build` como un job más de `system/taskqueue` (categoría nueva, p. ej. `hygeia.build`) — pero
+introduce complejidad y riesgo que no compensan para lo que se gana:
+
+- Requiere el toolchain de Go desplegado junto a la API o en un worker dedicado; la API es
+  Python/Flask, así que es una dependencia de infraestructura enteramente nueva.
+- Si la razón de compilar por petición es **personalizar** el binario (embeber `serverUrl`
+  o `agentKey` en tiempo de build), entonces cada descarga necesita firmarse en caliente, lo
+  que obliga a exponer la clave de firma al servicio que atiende descargas — exactamente lo
+  que el plan del agente quiere evitar (§5: "releases firmadas", no firma-por-petición).
+- Tiempos de build (segundos a ~1 min) y limpieza de artefactos temporales por descarga,
+  para un problema que la opción A resuelve sin ninguno de estos costes.
+
+### 15.2 Recomendación
+
+Opción A. La personalización por activo (URL del servidor, `agentKey`) no necesita hornear
+secretos en el binario en cada descarga: se resuelve con el fichero de config que ya describe
+el agente (§4 de su plan) más el flujo de enrollment de la interfaz de bandeja
+(`hygeia-tray`, §11 del plan del agente) — el usuario descarga el binario genérico firmado en
+release, y pega la clave que Ellysia le mostró al dar de alta el activo (§4) en la mini UI de
+enrollment, o en el fichero de config a mano. Menos superficie de confianza, cero
+infraestructura de build nueva.
+
+### 15.3 Qué construir si se decide seguir adelante (Fase D0)
+
+- Página en la SPA (o sección de la pantalla de alta de activo) con selector de SO/arquitectura.
+- Endpoint `GET /hygeia/agent/download?os=&arch=` — sirve el binario de la última release
+  publicada (storage estático o proxy a los assets de la release en el repo del agente).
+- Idealmente, junto al botón de descarga, mostrar la clave de agente recién emitida y un
+  fragmento de config ya rellenado (`serverUrl` conocido, `agentKey` de la respuesta de
+  `POST /hygeia/assets`) para copiar-pegar — cierra el círculo alta→descarga→config sin que
+  el usuario tenga que ensamblar nada a mano.
+- No requiere cambios en el modelo de datos ni en el contrato de ingesta (§11): es una
+  superficie de distribución, no una pieza del flujo de auth/telemetría.
+
+---
+
+## 16. Guardas de seguridad y anti-abuso
+
+> Modelo de amenaza: el agente corre en hosts que Ellysia **no** controla y empuja datos sin
+> sesión interactiva. Los vectores de abuso realistas son tres — (a) una **clave de agente
+> robada** de un host comprometido, (b) un cliente que manda **payloads malformados o
+> gigantes** para tumbar la DB o el worker, y (c) un **usuario legítimo** que agota recursos
+> dando de alta activos sin fin. Todo lo de esta sección es barato y **no toca la usabilidad
+> del caso honesto** — el agente normal ni se entera. Complementa §4 (auth de agente) y §13
+> (transversales); no los repite.
+
+### 16.1 Límites de forma del payload (frontera de confianza dura)
+
+El schema Marshmallow de ingesta (§11) ya **valida y descarta lo desconocido**; encima de
+eso, límites de tamaño **antes** de tocar la DB (todos en el bloque `hygeia.limits`, §9 —
+nada hardcodeado):
+
+- **Cuerpo acotado.** Rechazar (`413`) cualquier request cuyo cuerpo supere `maxBodyBytes`.
+  Un heartbeat honesto pesa unos pocos KB.
+- **Gzip con tope de descompresión.** Como se acepta gzip (§11), descomprimir con un límite
+  duro (`maxDecompressedBytes`) y **abortar** si lo excede — nunca `gunzip` a un buffer sin
+  límite (un *gzip bomb* de pocos KB descomprime a GB).
+- **Arrays acotados.** `topCpu`/`topMem` ≤ `maxProcesses`, `disk` ≤ `maxDiskMounts`,
+  `network` ≤ `maxNetInterfaces`, `perCorePct` a un tope razonable. Un agente comprometido no
+  debe poder inflar una fila con 10⁶ procesos.
+- **Cadenas acotadas** (hostname, nombre de proceso, mount, iface) por longitud en el propio
+  schema. Cortar en la frontera, no confiar en que el agente se porte bien.
+
+> **ponytail: rechazar, no truncar.** Un payload que viola un límite es un heartbeat que se
+> descarta con un `4xx` claro, no algo que el backend intenta "arreglar" quedándose con una
+> parte — sanear datos hostiles a medias es justo cómo entran los bugs.
+
+### 16.2 Cadencia y rate-limit por clave
+
+- **Rate-limit por clave de agente** (reutiliza `limiter` de `shared`, §13): un tope de
+  requests/min por `keyId`. Una clave robada no puede martillear la ingesta.
+- **Suelo de intervalo.** El backend responde `nextIntervalSec` (§11); si una clave empuja
+  mucho más rápido que `minIntervalSec`, responder `429` en vez de persistir. Protege la DB
+  de un agente en bucle cerrado (con un bug, o comprometido).
+- **Las notificaciones ya van amortiguadas de serie.** El ciclo de vida de `Anomaly`
+  (§3.3/§8) abre **una** incidencia por condición sostenida y manda **un** correo; una métrica
+  que oscila alrededor del umbral no genera un correo por heartbeat. Es decir: una clave
+  robada tampoco sirve para *spamear* por correo al dueño. La histéresis, que estaba por
+  precisión, hace aquí de anti-abuso gratis.
+
+### 16.3 Ventana de cordura del reloj
+
+El `collectedAt` lo pone el agente (§11) y **no es de fiar**. Ya se guarda `received_at` del
+servidor aparte y el detector de presencia usa ese (§7.1/§13). Encima:
+
+- Rechazar (o marcar y **no** usar para ordenar) un `collectedAt` fuera de `±clockSkewSec`
+  respecto al reloj del servidor. Así una clave robada no puede inyectar snapshots fechados
+  en 2099 que envenenen el orden de la serie temporal o tapen un hueco de presencia.
+- El histórico y la detección se ordenan/particionan por `received_at`, nunca por el reloj
+  del agente.
+
+### 16.4 Cuota de activos por usuario
+
+`POST /hygeia/assets` está autenticado (OAuth de usuario), pero un usuario podría dar de alta
+activos sin fin y agotar filas/espacio. Un tope `maxAssetsPerUser` (config) cortado en el
+manager de alta, con un `4xx` explicativo. Número generoso (cientos): topa el abuso, no
+estorba al uso real.
+
+### 16.5 Todo lo que trae el agente es dato no confiable (UI y logs)
+
+Hostnames, nombres de proceso, mounts… los controla quien controla el agente. Al mostrarlos
+o registrarlos:
+
+- **En la SPA:** interpolación normal de Vue (que **escapa** por defecto); nunca `v-html` con
+  contenido de un snapshot. Si no, un proceso llamado `<img src=x onerror=…>` es un XSS
+  almacenado servido a quien mire el dashboard.
+- **En logs:** no volcar cadenas del agente crudas en una línea de log (evita *log injection*
+  con saltos de línea/escapes). Tratar esos campos como valores, no como formato.
+
+### 16.6 Respuesta de auth uniforme (sin oráculos de enumeración ni de *timing*)
+
+`require_agent_key` (§4) debe responder **igual** ante "`keyId` no existe" y "secreto
+incorrecto": un único `401` genérico, sin distinguir en cuerpo ni en código. Y para no filtrar
+por *timing* qué `keyId` existe, cuando el `keyId` no se encuentra hacer igualmente una
+verificación Argon2 *dummy* (contra un hash fijo) antes de responder — así el coste de un
+`keyId` inexistente y el de un secreto erróneo son indistinguibles. Barato, y cierra el
+oráculo que dejaría a un atacante enumerar `keyId` válidos.
+
+### 16.7 Endurecimiento de la descarga del agente (§15)
+
+Si se implementa la sección de descargas (`GET /hygeia/agent/download?os=&arch=`, §15):
+
+- **`os`/`arch` son un allowlist enum, nunca un trozo de ruta.** Mapear `(os, arch)` contra un
+  conjunto cerrado de artefactos conocidos; jamás interpolar el valor recibido dentro de una
+  ruta de fichero (`agents/{os}/{arch}/…`) — eso es *path traversal* (`?os=../../etc`).
+- **Sin *open redirect* ni SSRF.** Si el endpoint redirige a un storage, que sea a una URL de
+  un allowlist fijo, no a nada derivado del input del usuario.
+- **Publicar checksum + firma** junto al binario, para que el instalador verifique integridad
+  antes de ejecutar (contraparte de §5 del plan del agente, "releases firmadas").
+
+### 16.8 Lo que se deja fuera a propósito (para no estorbar la usabilidad)
+
+- **mTLS / certificados de cliente por agente:** más robusto, pero mete PKI y rotación de
+  certs en cada host — coste operativo alto para un beta. La clave bearer + TLS del proxy
+  cubre el grueso. Techo documentado en el ponytail de §4.
+- **Protección de *replay* con nonce/firma por petición:** sobre TLS, reenviar un heartbeat
+  capturado solo reinyecta una métrica vieja (impacto bajo), y la ventana de reloj (§16.3) ya
+  acota cuánto vale un payload viejo. No compensa la complejidad en beta.
+- **Firmar cada payload:** ídem — TLS ya da integridad y confidencialidad en tránsito.
+
+> **ponytail:** ninguna de estas guardas añade un paso al operador que instala un agente:
+> siguen siendo "pega la clave y arranca". La seguridad que **sí** costaría usabilidad (mTLS,
+> certs por host) es justo la que se deja como techo, no como requisito de beta.
+
+---
+
 *Documento vivo. El acoplamiento con el otro repo se limita a §11: si el contrato de
 ingesta se mantiene estable, agente y backend evolucionan por separado. El acoplamiento con
-Themis/Lybra (§14) es opcional y unidireccional: Hygeia puede vivir sin él.*
+Themis/Lybra (§14) es opcional y unidireccional: Hygeia puede vivir sin él. La sección de
+descargas (§15) es igualmente opcional: Ellysia funciona sin ella, el agente se puede
+distribuir a mano igual que hoy. Las **guardas de seguridad (§16)**, en cambio, no son
+opcionales: se tejen en las Fases 0-1 (auth, límites de payload, rate-limit), no son una fase
+aparte ni un añadido posterior.*

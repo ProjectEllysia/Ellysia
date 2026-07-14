@@ -117,6 +117,23 @@ collectors  = ["cpu","memory","disk","network","processes"]
 - **Auto-observación:** logs estructurados del propio agente (último push OK, tamaño del
   buffer, errores) para diagnosticar un agente mudo.
 - **Releases firmadas.** Auto-update es opcional y de nicho — no en beta.
+- **Integridad del binario en la instalación.** Cada release publica checksum (y firma); el
+  instalador/usuario verifica el hash del binario **descargado** (§15 del plan de backend)
+  antes de ejecutarlo. Un binario servido por la red no se ejecuta sin comprobar que es el
+  que Ellysia firmó — es la contraparte, del lado del agente, del endurecimiento de la
+  descarga.
+- **Colectores que invocan al SO, sin shell.** El colector de inventario (§10) lanza
+  `dpkg -l` / `rpm -qa` / `winget list` / `brew list` con **argumentos fijos** (`exec`/argv,
+  nunca `sh -c` con interpolación) y **parsea su salida a la defensiva**: un nombre de paquete
+  hostil (`; rm -rf`, bytes de control, líneas larguísimas) es *dato*, no puede romper el
+  parseo ni inyectar comandos. Igual para el top-N de procesos: los nombres de proceso son
+  datos no confiables, no formato.
+- **Permisos del buffer.** El ring en disco (§4) hereda los mismos permisos restringidos que
+  la config (0600 / ACL): contiene métricas del host, no debe quedar legible por otros
+  usuarios locales.
+- **Superficie saliente-solo.** El agente nunca abre un puerto de escucha para su función
+  principal (§1); la única excepción es el canal de control local del companion de bandeja,
+  endurecido aparte (§11.7).
 
 ---
 
@@ -143,9 +160,120 @@ Cross-compilación desde un solo `GOOS/GOARCH` — sin toolchains por plataforma
 | **3** | Servicio del SO (systemd/Windows/launchd) + releases firmadas. |
 | **4** (opcional) | Señales de seguridad (puertos nuevos, cryptominer, logins fallidos). |
 | **5** (opcional, ver §10) | Colector de inventario de software (paquetes instalados) + envío diferencial a `/hygeia/inventory`. |
+| **6** (opcional, ver §11) | Companion de bandeja del sistema (`hygeia-tray`): estado del agente + enrollment con UI. |
 
 **Rebanada mínima:** Fase 0 (Python) contra las Fases 0+1 del backend → ves un heartbeat
 entrando en la DB. Luego Fase 1 en Go para el artefacto real.
+
+---
+
+## 11. Companion de escritorio: icono de bandeja del sistema (opcional)
+
+> Fase 6. No es parte del agente en sí — es un **segundo binario** que vive en la sesión de
+> escritorio del usuario, separado del servicio headless (§6). Se construye después de que
+> las Fases 0-3 estén estables; no bloquea nada de lo anterior.
+
+### 11.1 Por qué es un binario aparte
+
+El servicio (`hygeia-agent`) corre como `systemd`/servicio de Windows/`launchd`, casi siempre
+sin sesión de escritorio (arranca antes del login, o bajo una cuenta de sistema sin GUI). Un
+icono en la bandeja **necesita** una sesión de usuario con escritorio activo. Mezclar ambas
+cosas en un solo binario ataría el agente (que debe poder correr en un servidor headless) a
+tener siempre un entorno gráfico disponible — rompe el caso de uso más común (servidores).
+
+Por tanto: `hygeia-tray`, un **segundo binario ligero** que se instala solo en las máquinas
+donde tiene sentido (estaciones de trabajo, laptops), arranca con la sesión del usuario
+(entrada de inicio de sesión / `Startup` en Windows, `LaunchAgent` en macOS, `.desktop` con
+`XDG_AUTOSTART` en Linux), y **no recolecta ni envía métricas** — solo consulta el estado del
+servicio y, si hace falta, le pasa la clave de agente.
+
+### 11.2 Qué muestra el icono
+
+Tres estados mínimos, cada uno con su icono:
+
+- 🟢 **Conectado** — el último heartbeat al backend de Ellysia tuvo éxito.
+- 🔴 **Error local** — el agente no puede recolectar métricas (colector caído, sin permisos)
+  o el buffer en disco (§5) está creciendo porque el backend no responde tras varios
+  reintentos.
+- ⚪ **Sin configurar** — no hay `agentKey` en la config: el agente está instalado pero no
+  dado de alta contra ningún activo todavía.
+
+El menú del icono (click) muestra un resumen breve (última recolección OK, tamaño del
+buffer, versión) y, si aplica, la opción de **introducir la clave de agente**.
+
+### 11.3 Enrollment sin clave — mini UI
+
+Si el servicio arranca y no encuentra `agentKey` en su config, sigue vivo (no crashea) pero
+se queda en estado "sin configurar" sin intentar recolectar/enviar nada. El tray lo detecta
+y, en vez de forzar al usuario a editar el TOML a mano, ofrece una ventanita mínima (un solo
+campo + botón "Guardar") para pegar la clave que el backend mostró al dar de alta el activo
+(§8, se muestra una sola vez). Tras guardarla, el servicio recarga la config (o se reinicia)
+y arranca el bucle normal.
+
+### 11.4 Cómo habla el tray con el servicio
+
+El tray **no** escribe directamente el fichero de config del servicio (permisos: en Linux el
+servicio puede correr como usuario distinto al de sesión; en Windows como
+`LocalSystem`/servicio dedicado). En su lugar, el servicio expone un **socket de control
+local, solo loopback**:
+
+- Linux/macOS: socket Unix (`/run/hygeia-agent.sock` o equivalente en el directorio de
+  estado del servicio), permisos restringidos al grupo del servicio.
+- Windows: named pipe.
+- Alternativa cross-platform más simple de implementar (menos idiomática): HTTP en
+  `127.0.0.1:<puerto>` con un token local generado al arrancar y compartido solo vía
+  fichero con permisos restringidos — nunca expuesto fuera de loopback.
+
+Superficie mínima de ese control channel (no es la API de Ellysia, es interna
+tray↔servicio):
+
+```
+GET  /status   → { "state": "connected"|"local_error"|"unconfigured", "lastPushAt": ..., "bufferSize": ... }
+POST /enroll   → { "agentKey": "..." }   # el servicio la persiste en su propia config, con sus propios permisos
+```
+
+Esto mantiene el principio del §1 (el agente es tonto) y el de mínimo privilegio (§5): el
+tray solo lee estado y empuja una clave; nunca toca métricas ni decide nada.
+
+### 11.5 Stack sugerido
+
+Igual que el agente, en Go para reusar toolchain y cross-compilación:
+[`getlantern/systray`](https://github.com/getlantern/systray) (o `fyne.io/systray`) para el
+icono nativo en las tres plataformas; una ventana nativa mínima (o un diálogo del propio
+toolkit) para el formulario de enrollment — no hace falta un framework de UI pesado para un
+campo de texto y un botón.
+
+### 11.6 Qué NO hace el tray
+
+- No recolecta métricas ni las envía — eso sigue siendo trabajo exclusivo del servicio.
+- No decide estados de salud del activo (esa autoridad, como en todo el diseño, es del
+  backend) — solo refleja si el *agente local* está pudiendo hablar con Ellysia o no.
+- No es un requisito para que el agente funcione: un servidor sin sesión de escritorio
+  corre `hygeia-agent` solo, sin `hygeia-tray`, exactamente igual que hoy.
+
+### 11.7 Endurecimiento del canal de control (tray ↔ servicio)
+
+El socket de control del §11.4 es **superficie de ataque local nueva** — cualquier proceso o
+usuario de la misma máquina podría intentar hablar con él. Reglas para que no se convierta en
+una vía de escalada:
+
+- **Autorización por permisos del transporte, no por confiar en `localhost`.** Un socket Unix
+  / named pipe con permisos restringidos (dueño = cuenta del servicio, o un grupo dedicado) es
+  preferible a HTTP en loopback **precisamente** porque `127.0.0.1` no distingue qué usuario
+  local se conecta: en una máquina multiusuario, cualquiera puede abrir un socket a
+  `127.0.0.1`. Si aun así se opta por loopback HTTP por simplicidad, exigir el token local del
+  §11.4 (fichero con permisos 0600) en cada petición — sin token, `401`.
+- **`POST /enroll` valida y no reconfigura a ciegas.** El servicio comprueba el **formato** de
+  la clave (`keyId.secreto`, longitudes esperadas — §4 del plan de backend) antes de
+  persistirla, y solo acepta el enrollment cuando está **sin configurar** (o exige el token
+  local para sobrescribir una clave existente). Así un usuario local sin privilegios no puede
+  reapuntar el agente a otro servidor ni pisar la clave de un activo ya dado de alta.
+- **El canal nunca sale de la máquina.** Ni el socket Unix, ni el named pipe, ni el loopback
+  se exponen en ninguna interfaz de red. Tray y servicio viven en el mismo host por
+  definición.
+- **Superficie mínima.** El canal de control **no** expone métricas, ni permite parar/arrancar
+  el servicio, ni nada más allá de `GET /status` + `POST /enroll` (§11.4). Cuanto menor la
+  superficie, menos que endurecer.
 
 ---
 
