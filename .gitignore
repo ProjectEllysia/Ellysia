@@ -63,7 +63,9 @@ Thumbs.db
 # ============================================
 # Certificados SSL (desarrollo / autofirmados)
 # ============================================
-web/ssl/
+web/ssl/*.key
+web/ssl/*.crt
+web/ssl/*.pem
 
 # Otros
 # ============================================
