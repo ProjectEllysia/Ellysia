@@ -335,11 +335,41 @@ Ellysia ships overlay files for GPU-accelerated local AI:
 - `docker-compose.gpu-intel.yml`
 - `docker-compose.gpu-amd.yml`
 
+### SSL certificates (development)
+
+The `container` profile serves the web app and API over HTTPS via Nginx as a
+TLS terminator. A self-signed certificate for local/dev use is generated once
+per developer machine and mounted into the web container as a read-only volume
+(`./web/ssl:/etc/nginx/ssl`).
+
+```powershell
+# Windows — requires OpenSSL (ships with Git for Windows)
+.\web\ssl\generate.ps1
+```
+
+```bash
+# Linux / WSL
+openssl req -x509 -nodes -days 365 \
+  -subj "/CN=ellysia.es" \
+  -addext "subjectAltName=DNS:ellysia.es,DNS:*.ellysia.es,DNS:api.ellysia.es" \
+  -newkey rsa:2048 \
+  -keyout web/ssl/ellysia.key \
+  -out    web/ssl/ellysia.crt
+```
+
+The `web/ssl/` directory is gitignored — each developer keeps their own
+certificates. The Nginx config references generic container paths
+(`/etc/nginx/ssl/ellysia.crt` / `ellysia.key`).
+
+For production, replace the self-signed certs with a valid certificate (Let's
+Encrypt, etc.) and update `nginx.conf` paths accordingly.
+
 ### Ports
 
 | Service | Port | Note |
 |---|---|---|
-| API | 5000 | `0.0.0.0:5000` |
+| Web (Nginx) | 80 / 443 | HTTP → HTTPS redirect, SPA + API proxy |
+| API | 5000 | `0.0.0.0:5000` (HTTP internally) |
 | PostgreSQL | 15432 | Container maps 5432 → 15432 |
 | Redis | 6379 | Required for TaskQueue |
 | OpenVAS | 9390 / 9392 | ~15 min first start (NVT feed initialization) |
