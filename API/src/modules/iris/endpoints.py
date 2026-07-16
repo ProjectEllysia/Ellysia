@@ -26,7 +26,7 @@ from src.modules.users import (
 )
 from src.modules.shared import handle_exceptions, limiter
 from src.modules.shared.schemas import ErrorSchema
-from src.modules.aegis.exceptions import DocumentError, DocumentNotFoundError, DocumentNotReadyError
+from src.modules.shared._exceptions import DocumentError, DocumentNotFoundError, DocumentNotReadyError
 
 from .managers import IrisManager, IrisReportManager
 from .exceptions import (

@@ -1,10 +1,13 @@
 from src.modules.shared._exceptions import (
-    SecOpsException,
+    EllysiaException,
     ErrorCode,
     ErrorSeverity,
     ValidationError,
     DatabaseError,
     EntityAlreadyExistsError,
+    DocumentError,
+    DocumentNotFoundError,
+    DocumentNotReadyError,
 )
 
 # Las excepciones de la capa de IA son ahora propiedad del módulo `scribe`.
@@ -45,7 +48,7 @@ class AegisInsufficientContentError(AegisValidationError):
         )
 
 
-class AegisFetchError(SecOpsException):
+class AegisFetchError(EllysiaException):
     default_code = ErrorCode.INTERNAL_SERVER_ERROR
 
     def __init__(self, source: str, message: str):
@@ -56,35 +59,9 @@ class AegisFetchError(SecOpsException):
         )
 
 
-class DocumentError(SecOpsException):
-    default_code = ErrorCode.REPORT_ERROR
-    default_status_code = 500
-    default_severity = ErrorSeverity.MEDIUM
-
-
-class DocumentNotFoundError(DocumentError):
-    default_code = ErrorCode.DOCUMENT_NOT_FOUND
-    default_status_code = 404
-    default_severity = ErrorSeverity.LOW
-
-    def __init__(self, doc_id: int):
-        super().__init__(
-            message=f"Documento {doc_id} no encontrado",
-            details={"document_id": doc_id},
-            user_message=f"Documento {doc_id} no encontrado."
-        )
-
-
-class DocumentNotReadyError(DocumentError):
-    default_code = ErrorCode.DOCUMENT_NOT_FOUND
-    default_status_code = 409
-
-    def __init__(self, doc_id: int, status: str):
-        super().__init__(
-            message=f"Documento {doc_id} no disponible (estado: {status})",
-            details={"document_id": doc_id, "status": status},
-            user_message="El documento aún no está listo."
-        )
+# DocumentError, DocumentNotFoundError y DocumentNotReadyError se movieron a
+# shared/_exceptions.py (transversales a Themis/Iris/Aegis). Se re-exportan
+# arriba para no romper los imports existentes que las traen desde aquí.
 
 
 class DocumentGenerationError(DocumentError):
@@ -123,7 +100,7 @@ class ExporterConfigurationError(ExporterError):
 # CAMPAÑAS DE CONCIENCIACIÓN
 # =============================================================================
 
-class CampaignError(SecOpsException):
+class CampaignError(EllysiaException):
     default_code = ErrorCode.INTERNAL_SERVER_ERROR
     default_status_code = 500
     default_severity = ErrorSeverity.MEDIUM
