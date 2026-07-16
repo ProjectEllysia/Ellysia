@@ -12,17 +12,17 @@ Coordinates the analysis lifecycle:
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 import logging
 from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
 import src.modules.system.config_reading as CR
-from src.modules.aegis.exceptions import DocumentNotFoundError
+from src.modules.shared._exceptions import DocumentNotFoundError
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.session import read_repo
+from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc
+from src.modules.shared._documents import run_report_generation, delete_document_with_file
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
 
 from .exceptions import (
@@ -147,7 +147,7 @@ class IrisManager(TaskTrackingMixin):
         exist, which lets callers distinguish "not found" from
         "not ready".
         """
-        return read_repo(IrisAnalysisRepository).get_by_id(analysis_id)
+        return build_repository(IrisAnalysisRepository).get_by_id(analysis_id)
 
     def get_analysis_status(self, analysis_id: int) -> Optional[str]:
         """Return the current lifecycle status string of an analysis.
@@ -192,14 +192,14 @@ class IrisManager(TaskTrackingMixin):
             IrisAnalysisNotReadyError: If the analysis is not yet
                 ``finished`` (callers should poll ``/status`` first).
         """
-        analysis = read_repo(IrisAnalysisRepository).get_by_id(analysis_id)
+        analysis = build_repository(IrisAnalysisRepository).get_by_id(analysis_id)
         if not analysis:
             raise IrisAnalysisNotFoundError(analysis_id)
 
         if analysis.status != "finished":
             raise IrisAnalysisNotReadyError(analysis_id, analysis.status)
 
-        rules = read_repo(IrisRuleResultRepository).get_by_analysis(analysis_id)
+        rules = build_repository(IrisRuleResultRepository).get_by_analysis(analysis_id)
 
         rules_data = [
             {
@@ -498,7 +498,7 @@ class IrisManager(TaskTrackingMixin):
         Returns:
             Tuple of (formatted_results: list[dict], total_count: int).
         """
-        items, total = read_repo(IrisAnalysisRepository).get_by_user_paginated(
+        items, total = build_repository(IrisAnalysisRepository).get_by_user_paginated(
             user_id, page, per_page
         )
         results = [
@@ -567,8 +567,8 @@ class IrisManager(TaskTrackingMixin):
         min_h = CR.get_iris_min_headers()
         if len(parsed) < min_h:
             raise IrisInvalidInputError(
-                "Tras parsear se obtuvieron %d cabeceras (m\u00ednimo: %d). "
-                "El contenido no contiene suficientes cabeceras de correo v\u00e1lidas." % (len(parsed), min_h)
+                f"Tras parsear se obtuvieron {len(parsed)} cabeceras (mínimo: {min_h}). "
+                "El contenido no contiene suficientes cabeceras de correo válidas."
             )
 
     @staticmethod
@@ -649,9 +649,7 @@ class IrisManager(TaskTrackingMixin):
                 named_results[rule_def["name"]] = result
 
                 progress = int(((idx + 1) / total_rules) * 100)
-                sq_task = self.find_task(analysis_id)
-                if sq_task:
-                    job.progress(progress)
+                job.progress(progress)
 
             total_score = self._aggregate_score(results)
             base_verdict = self._determine_verdict(total_score)
@@ -958,24 +956,6 @@ class IrisManager(TaskTrackingMixin):
         except Exception as e:
             logger.error(f"Failed to mark analysis {analysis_id} as failed: {e}", exc_info=True)
 
-    def _is_cancelled(self, analysis_id: int) -> bool:
-        """Check whether the analysis has been cancelled since we started.
-
-        Reads from both the TaskQueue state and the database; returns True
-        if either indicates ``cancelled``.
-        """
-        if self.task_status_of(analysis_id) == "cancelled":
-            return True
-        try:
-            with UnitOfWork() as uow:
-                repo = IrisAnalysisRepository(uow)
-                analysis = repo.get_by_id(analysis_id)
-                if analysis and analysis.status == "cancelled":
-                    return True
-        except Exception as e:
-            logger.warning(f"Error checking cancellation for analysis {analysis_id}", exc_info=True)
-        return False # type: ignore
-
 
 class IrisReportManager:
     """Manager for IrisDocument lifecycle and async PDF report generation.
@@ -1010,19 +990,19 @@ class IrisReportManager:
 
     def get_document_by_id(self, document_id: int) -> Optional[IrisDocument]:
         """Retrieve an IrisDocument by its primary key."""
-        return read_repo(IrisReportRepository).get_by_id(document_id)
+        return build_repository(IrisReportRepository).get_by_id(document_id)
 
     def get_latest_document_by_analysis_id(self, analysis_id: int) -> Optional[IrisDocument]:
         """Retrieve the most recently created document for an analysis."""
-        return read_repo(IrisReportRepository).get_latest_document(analysis_id)
+        return build_repository(IrisReportRepository).get_latest_document(analysis_id)
 
     def get_documents_for_user(self, user_id: int) -> List[IrisDocument]:
         """Retrieve all documents belonging to a user."""
-        return read_repo(IrisReportRepository).get_documents_by_user(user_id)
+        return build_repository(IrisReportRepository).get_documents_by_user(user_id)
 
     def get_documents_by_analysis_id(self, analysis_id: int) -> List[IrisDocument]:
         """Retrieve all documents generated for a specific analysis."""
-        return read_repo(IrisReportRepository).get_documents_by_analysis(analysis_id)
+        return build_repository(IrisReportRepository).get_documents_by_analysis(analysis_id)
 
     def delete_document(self, document_id: int) -> bool:
         """Delete a document and its associated file on disk.
@@ -1030,19 +1010,11 @@ class IrisReportManager:
         Raises:
             DocumentNotFoundError: If the document was not found.
         """
-        with UnitOfWork() as uow:
-            doc_repo = IrisReportRepository(uow)
-            doc = doc_repo.get_by_id(document_id)
-            if not doc:
-                raise DocumentNotFoundError(document_id)
-
-            if doc.filename and os.path.exists(doc.filename):  # type: ignore
-                try:
-                    os.remove(doc.filename)  # type: ignore
-                except (OSError, IOError) as e:
-                    logger.warning(f"No se pudo eliminar el archivo {doc.filename}: {e}", exc_info=True)
-
-            doc_repo.delete(doc)
+        delete_document_with_file(
+            document_id,
+            IrisReportRepository,
+            DocumentNotFoundError,
+        )
         return True
 
     def assert_document_ownership(self, document_id: int, user_id: int) -> IrisDocument:
@@ -1091,43 +1063,23 @@ class IrisReportManager:
             IrisReportManager()._generate_pdf_async(doc_id, analysis_id)
 
     def _generate_pdf_async(self, document_id: int, analysis_id: int) -> None:
-        """Generate the PDF in a background thread and update document status."""
-        try:
-            report = IrisManager().get_analysis_results(analysis_id)
+        """Genera el PDF del informe en el worker y sincroniza el estado del documento.
 
-            analysis = read_repo(IrisAnalysisRepository).get_by_id(analysis_id)
+        Delega en ``run_report_generation`` (helper compartido con Themis) que
+        gestiona el marcado ``done``/``error`` y el re-lanzamiento de la
+        excepción para que el job de RQ termine como FAILED si algo falla.
+        """
+        def _render() -> str:
+            report = IrisManager().get_analysis_results(analysis_id)
+            analysis = build_repository(IrisAnalysisRepository).get_by_id(analysis_id)
             path = None
             if analysis is not None:
                 context = parse_raw_message(analysis.raw_headers or "")
                 path = {"analysisId": analysis_id, **build_path(context.received_headers)}
+            return IrisPDFCreator(report=report, path=path).print_pdf()
 
-            pdf_creator = IrisPDFCreator(report=report, path=path)
-            pdf_path = pdf_creator.print_pdf()
-
-            with UnitOfWork() as uow:
-                doc = IrisReportRepository(uow).get_by_id(document_id)
-                if doc:
-                    doc.filename = pdf_path  # type: ignore
-                    doc.status = "done"  # type: ignore
-                    doc.generated_at = utcnow_naive()  # type: ignore
-
-            logger.info(f"PDF generado exitosamente para documento {document_id}")
-
-        except Exception as e:
-            logger.error(f"Error generando PDF para documento {document_id}: {e}", exc_info=True)
-            self._update_document_status(document_id, "error")
-            # Re-lanzar: sin esto el job termina "con éxito" y el callback de RQ
-            # lo registra como COMPLETED pese a que el documento quedó en error.
-            # Al propagar, RQ lo marca FAILED y estado de tarea y documento
-            # coinciden.
-            raise
-
-    def _update_document_status(self, document_id: int, status: str) -> None:
-        """Update document status in database."""
-        try:
-            with UnitOfWork() as uow:
-                doc = IrisReportRepository(uow).get_by_id(document_id)
-                if doc:
-                    doc.status = status  # type: ignore
-        except Exception:
-            logger.exception(f"Error updating document status for document {document_id}")
+        run_report_generation(
+            document_id=document_id,
+            repo_cls=IrisReportRepository,
+            render=_render,
+        )

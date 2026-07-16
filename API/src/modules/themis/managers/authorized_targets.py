@@ -11,7 +11,7 @@ import ipaddress
 import logging
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.session import read_repo
+from src.modules.infrastructure.session import build_repository
 from ..repositories import AuthorizedTargetRepository
 from ..model import AuthorizedTarget
 from ..exceptions import (
@@ -51,17 +51,23 @@ class AuthorizedTargetManager:
 
     def list(self, user_id: int) -> list[AuthorizedTarget]:
         """Lista el registro completo del usuario."""
-        return read_repo(AuthorizedTargetRepository).get_by_user(user_id)
+        return build_repository(AuthorizedTargetRepository).get_by_user(user_id)
 
-    def remove(self, target_id: int, user_id: int) -> None:
-        """Elimina una entrada del registro, verificando propiedad."""
+    def remove(self, target_id: int, user_id: int) -> str:
+        """Elimina una entrada del registro, verificando propiedad.
+
+        Returns:
+            El target (IP/CIDR) de la entrada eliminada.
+        """
         with UnitOfWork() as uow:
             repo = AuthorizedTargetRepository(uow)
             entry = repo.get_by_id_and_user(target_id, user_id)
             if entry is None:
                 raise AuthorizedTargetNotFoundError(target_id)
+            target = entry.target
             repo.delete(entry)
         logger.info(f"Objetivo autorizado {target_id} eliminado por usuario {user_id}")
+        return target
 
     @staticmethod
     def is_authorized(user_id: int, target: str) -> bool:
@@ -70,5 +76,5 @@ class AuthorizedTargetManager:
             ip = ipaddress.ip_address(target.strip())
         except ValueError:
             return False
-        entries = read_repo(AuthorizedTargetRepository).get_by_user(user_id)
+        entries = build_repository(AuthorizedTargetRepository).get_by_user(user_id)
         return any(ip in ipaddress.ip_network(entry.target, strict=False) for entry in entries)

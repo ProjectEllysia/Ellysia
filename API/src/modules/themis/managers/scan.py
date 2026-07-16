@@ -1,14 +1,14 @@
 """ScanManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
-import os
 from abc import ABC, abstractmethod
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urlparse
 import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.session import read_repo
+from src.modules.infrastructure.session import build_repository
+from src.modules.shared import assert_owned
 from ..services.csv_logger import ScanLoggerFactory
 from ..repositories import (
     ScanRepository,
@@ -86,7 +86,7 @@ class ScanManager(TaskTrackingMixin, ABC):
         Returns:
             Scan instance (typed to ``self._MODEL``), or None if not found.
         """
-        scan = read_repo(ScanRepository).get_by_id_and_type(self._MODEL, scan_id)
+        scan = build_repository(ScanRepository).get_by_id_and_type(self._MODEL, scan_id)
 
         if not scan:
             logger.warning(f"Escaneo {self.SCAN_TYPE.value if self.SCAN_TYPE else ''} {scan_id} no encontrado")
@@ -100,7 +100,7 @@ class ScanManager(TaskTrackingMixin, ABC):
         Returns:
             List of Scan instances ordered by start time descending.
         """
-        scans = read_repo(ScanRepository).get_by_type_and_user(self._MODEL, user_id)
+        scans = build_repository(ScanRepository).get_by_type_and_user(self._MODEL, user_id)
 
         logger.info(
             f"Se obtuvieron {len(scans)} escaneos {self.SCAN_TYPE.value if self.SCAN_TYPE else ''} para el usuario {user_id}"
@@ -124,11 +124,11 @@ class ScanManager(TaskTrackingMixin, ABC):
         """
         if self.SCAN_TYPE is None:
             raise NotImplementedError("SCAN_TYPE must be defined in subclass")
-        repo = read_repo(ScanRepository)
+        repo = build_repository(ScanRepository)
         items, total_count = repo.get_scans_by_type_paginated(
             user_id, self.SCAN_TYPE, page, per_page
         )
-        formatted = [self.format_scan(item.id) for item in items]
+        formatted = [self.format_scan(item.id, _scan=item) for item in items]
         return formatted, total_count
 
     def get_scan_progress(self, scan_id: int) -> Optional[int]:
@@ -199,27 +199,24 @@ class ScanManager(TaskTrackingMixin, ABC):
             True if deleted successfully, False if the scan was not found.
         """
         try:
+            from src.modules.shared._documents import delete_document_with_file
+
+            scan = build_repository(ScanRepository).get_by_id(scan_id)
+            if not scan:
+                return False
+
+            docs = build_repository(ThemisReportRepository).get_documents_by_scan(scan_id)
+            for doc in docs:
+                delete_document_with_file(
+                    doc.id, ThemisReportRepository,
+                    lambda eid: ValueError(f"Documento {eid} no existe"),
+                )
+
             with UnitOfWork() as uow:
-                scan_repo = ScanRepository(uow)
-                doc_repo = ThemisReportRepository(uow)
-
-                scan = scan_repo.get_by_id(scan_id)
-                if not scan:
-                    return False
-
-                docs = doc_repo.get_documents_by_scan(scan_id)
-
-                for doc in docs:
-                    if doc.filename and os.path.exists(doc.filename): # type: ignore
-                        try:
-                            os.remove(doc.filename) # type: ignore
-                            logger.info(f"Archivo eliminado: {doc.filename}")
-                        except (OSError, IOError) as e:
-                            logger.warning(f"No se pudo eliminar archivo {doc.filename}: {e}", exc_info=True)
-                    doc_repo.delete(doc)
-
-                scan_repo.delete(scan)
-                # UnitOfWork commits on __exit__
+                repo = ScanRepository(uow)
+                scan = repo.get_by_id(scan_id)
+                if scan:
+                    repo.delete(scan)
 
             logger.info(f"Escaneo {scan_id} eliminado")
             return True
@@ -295,22 +292,12 @@ class ScanManager(TaskTrackingMixin, ABC):
             user_id: ID del usuario que debería ser propietario.
 
         Raises:
-            ScanNotFoundError: Si el escaneo no pertenece al usuario.
+            ScanNotFoundError: Si el escaneo no existe o no pertenece al usuario.
         """
-        scan = read_repo(ScanRepository).get_by_id(scan_id)
-        if not scan:
-            raise ScanNotFoundError(scan_id)
-
-        from src.modules.users.exceptions import UserNotFoundError
-        from src.modules.users import UserManager
-        user = UserManager().get_user_by_id(user_id)
-        if not user:
-            raise UserNotFoundError(user_id)
-
-        if scan.user_id != user_id: # type: ignore
-            raise ScanNotFoundError(scan_id)
-
-        return scan
+        return assert_owned(
+            ScanRepository, scan_id, user_id,
+            lambda eid: ScanNotFoundError(eid),
+        )
 
     @classmethod
     def resolve_owned_scan(cls, scan_id: int, user_id: int) -> tuple["ScanManager", Scan]:
@@ -413,10 +400,7 @@ class ScanManager(TaskTrackingMixin, ABC):
             for scan in repo.get_active_scans():
                 external_id = f"{cls.EXTERNAL_ID_PREFIX}{scan.id}"
                 task = tq.get_task_by_external_id(external_id, cls.TASK_CATEGORY)
-                # PENDING: el job sigue encolado en Redis y un nuevo worker lo
-                # recogerá normalmente. Cualquier otro caso (None, RUNNING
-                # "started" sin worker vivo, o un estado terminal que no llegó
-                # a sincronizarse) es un huérfano del proceso anterior.
+
                 if task is not None and task.status == TaskStatus.PENDING:
                     continue
                 repo.update_status(scan, ScanStatus.FAILED)
@@ -601,6 +585,23 @@ class ScanManager(TaskTrackingMixin, ABC):
             raise ScanNotFoundError(scan_id)
         return manager_class()
 
+    @classmethod
+    def get_manager_for_type(cls, scan_type: str) -> "ScanManager":
+        """Resolver un manager por nombre de tipo (p. ej. 'nmap').
+
+        Usa el mismo ``_registry`` que ``resolve_manager``, así que añadir un
+        tipo nuevo no requiere tocar este método.
+        """
+        manager_class = cls._registry.get(ScanType(scan_type))
+        if manager_class is None:
+            raise ScanNotFoundError(scan_type)
+        return manager_class()
+
+    @classmethod
+    def all_managers(cls) -> List["ScanManager"]:
+        """Una instancia por cada tipo de escaneo registrado."""
+        return [m() for m in cls._registry.values()]
+
     # Name of the ScanRepository method that eager-loads this manager's scan
     # type for background-thread use (e.g. "get_nmap_rich"). None means the
     # plain `get_by_id` row already fetched by `get_scan_rich` is enough —
@@ -779,12 +780,15 @@ class ScanManager(TaskTrackingMixin, ABC):
         """Persist domain data into the database within the given UnitOfWork."""
 
     @abstractmethod
-    def format_scan(self, scan_id: int) -> dict:
+    def format_scan(self, scan_id: int, _scan: Optional[Scan] = None) -> dict:
         """
         Formatea un escaneo como diccionario JSON.
 
         Args:
             scan_id: ID del escaneo.
+            _scan:   Instancia ya cargada del escaneo (opcional). Si se
+                     pasa, evita el re-query por ID — útil en listados
+                     paginados donde la instancia ya está disponible.
 
         Returns:
             Diccionario con los datos del escaneo en formato JSON.

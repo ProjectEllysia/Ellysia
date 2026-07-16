@@ -1,13 +1,13 @@
 """ThemisReportManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
-import os
 from typing import List, Optional
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, job_context
-from src.modules.aegis.exceptions import DocumentError
-from src.modules.shared import Document, assert_owned, utcnow_naive
+from src.modules.shared import Document, assert_owned
+from src.modules.shared._exceptions import DocumentError
+from src.modules.shared._documents import run_report_generation, delete_document_with_file
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.session import read_repo
+from src.modules.infrastructure.session import build_repository
 from ..repositories import ThemisReportRepository
 from ..model import ThemisDocument
 from ..services import PDFCreator
@@ -54,7 +54,7 @@ class ThemisReportManager:
 
     def get_document_by_id(self, document_id: int) -> Optional[ThemisDocument]:
         """Retrieve a ThemisDocument by its primary key."""
-        doc = read_repo(ThemisReportRepository).get_by_id(document_id)
+        doc = build_repository(ThemisReportRepository).get_by_id(document_id)
 
         if not doc:
             logger.warning(f"Documento {document_id} no encontrado")
@@ -63,20 +63,20 @@ class ThemisReportManager:
 
     def get_latest_document_by_scan_id(self, scan_id: int) -> Optional[ThemisDocument]:
         """Retrieve the most recently created document for a scan."""
-        doc = read_repo(ThemisReportRepository).get_latest_document(scan_id)
+        doc = build_repository(ThemisReportRepository).get_latest_document(scan_id)
 
         return doc
 
     def get_documents_for_user(self, user_id: int) -> List[ThemisDocument]:
         """Retrieve all documents belonging to the active user."""
-        docs = read_repo(ThemisReportRepository).get_documents_by_user(user_id)  # type: ignore
+        docs = build_repository(ThemisReportRepository).get_documents_by_user(user_id)  # type: ignore
 
         logger.info(f"Se obtuvieron {len(docs)} documentos")
         return docs
 
     def get_documents_by_scan_id(self, scan_id: int) -> List[ThemisDocument]:
         """Retrieve all documents associated with a specific scan."""
-        docs = read_repo(ThemisReportRepository).get_documents_by_scan(scan_id)
+        docs = build_repository(ThemisReportRepository).get_documents_by_scan(scan_id)
 
         logger.info(f"Se obtuvieron {len(docs)} documentos para scan {scan_id}")
         return docs
@@ -91,21 +91,11 @@ class ThemisReportManager:
         Raises:
             DocumentError: If the document was not found.
         """
-        with UnitOfWork() as uow:
-            doc_repo = ThemisReportRepository(uow)
-            doc = doc_repo.get_by_id(document_id)
-
-            if not doc:
-                raise DocumentError(f"Documento {document_id} no encontrado")
-
-            if doc.filename and os.path.exists(doc.filename):  # pyright: ignore[reportArgumentType, reportGeneralTypeIssues]
-                try:
-                    os.remove(doc.filename)  # type: ignore
-                except (OSError, IOError) as e:
-                    logger.warning(f"No se pudo eliminar el archivo {doc.filename}: {e}", exc_info=True)
-
-            doc_repo.delete(doc)
-
+        delete_document_with_file(
+            document_id,
+            ThemisReportRepository,
+            lambda eid: DocumentError(f"Documento {eid} no encontrado"),
+        )
         return True
 
     def assert_document_ownership(self, document_id: int, user_id: int) -> Document:
@@ -126,14 +116,13 @@ class ThemisReportManager:
             lambda eid: DocumentError(f"Documento {eid} no encontrado"),
         )
 
-    def generate_report(self, scan_id: int, ai_report: bool = False, strategy_class=None) -> int:
+    def generate_report(self, scan_id: int, ai_report: bool = False) -> int:
         """
         Create a ThemisDocument and start async PDF generation.
 
         Args:
-            scan_id:        Primary key of the scan.
-            ai_report:      Include AI-generated analysis.
-            strategy_class: Printing strategy class for the scan type.
+            scan_id:   Primary key of the scan.
+            ai_report: Include AI-generated analysis.
 
         Returns:
             Primary key of the created ThemisDocument.
@@ -166,40 +155,15 @@ class ThemisReportManager:
         scan_id: int,
         ai_report: bool,
     ) -> None:
-        """Generate PDF in a background thread and update document status."""
+        """Genera el PDF del informe en el worker y sincroniza el estado del documento.
 
-        try:
-            pdf_creator = PDFCreator(scan_id, document_id)
-            pdf_path = pdf_creator.print_pdf(ai_report=ai_report)
-
-            with UnitOfWork() as uow:
-                doc = ThemisReportRepository(uow).get_by_id(document_id)
-                if doc:
-                    doc.filename     = pdf_path  # type: ignore
-                    doc.status       = "done"  # type: ignore
-                    doc.generated_at = utcnow_naive()  # type: ignore
-
-            logger.info(f"PDF generado exitosamente para documento {document_id}")
-
-        except Exception as e:
-            logger.error(
-                f"Error generando PDF para documento {document_id}: {e}",
-                exc_info=True
-            )
-            self._update_document_status(document_id, "error")
-            # Re-lanzar: sin esto el job termina "con éxito" y el callback de RQ
-            # lo registra como COMPLETED pese a que el documento quedó en error.
-            # Al propagar, RQ lo marca FAILED y estado de tarea y documento
-            # coinciden.
-            raise
-
-    def _update_document_status(self, document_id: int, status: str) -> None:
-        """Update document status in database."""
-        try:
-            with UnitOfWork() as uow:
-                doc = ThemisReportRepository(uow).get_by_id(document_id)
-                if doc:
-                    doc.status = status  # type: ignore
-        except (OSError, RuntimeError) as e:
-            logger.exception(f"Error updating document status for document {document_id}")
+        Delega en ``run_report_generation`` (helper compartido con Iris) que
+        gestiona el marcado ``done``/``error`` y la re-lanzamiento de la
+        excepción para que el job de RQ termine como FAILED si algo falla.
+        """
+        run_report_generation(
+            document_id=document_id,
+            repo_cls=ThemisReportRepository,
+            render=lambda: PDFCreator(scan_id, document_id).print_pdf(ai_report=ai_report),
+        )
 
