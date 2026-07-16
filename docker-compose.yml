@@ -230,6 +230,9 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      - ./web/ssl:/etc/nginx/ssl:ro
     depends_on:
       - ellysia
     networks:
