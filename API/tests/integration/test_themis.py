@@ -10,8 +10,8 @@ from datetime import datetime
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.themis.model import NmapScan, ScanStatus
-from src.modules.themis.repositories import ScanRepository
+from src.modules.themis.model import NmapScan, ScanStatus, ThemisDocument
+from src.modules.themis.repositories import ScanRepository, ThemisReportRepository
 
 pytestmark = pytest.mark.integration
 
@@ -201,3 +201,103 @@ def test_openvas_scheduled_flow_rejects_private_ip(app):
     with app.app_context():
         with pytest.raises(PrivateIPRequested):
             OpenVASScanManager().run_scan(target="10.0.0.5", user_id=1)
+
+
+# --------------------------------------------------------------- N1 IDOR docs
+# get_documents_by_scan y document-status (por scan_id) no verificaban
+# ownership: cualquier usuario con THEMIS_READ podía enumerar los documentos
+# (ids, fechas, estado, downloadUrl) de escaneos ajenos.
+
+
+def _make_scan_with_doc(app, user_id, status=ScanStatus.FINISHED):
+    with app.app_context():
+        with UnitOfWork() as uow:
+            scan = NmapScan(target="10.0.0.9", user_id=user_id, started_at=datetime.now())
+            scan.status = status.value
+            ScanRepository(uow).save(scan)
+            doc = ThemisDocument(
+                scan_id=scan.id,
+                scan_type="nmap",
+                document_type="themis",
+                filename="",
+                format="pdf",
+                status="running",
+                user_id=user_id,
+                is_ai_generated=0,
+            )
+            ThemisReportRepository(uow).save(doc)
+            return scan.id, doc.id
+
+
+def test_documents_by_scan_rejects_other_user(client, app, make_user, auth_headers):
+    owner = make_user(role="role_user", attributes=["themis_read"])
+    other = make_user(role="role_user", attributes=["themis_read"])
+    scan_id, _ = _make_scan_with_doc(app, owner.id)
+
+    resp = client.get(
+        f"/themis/scan/{scan_id}/documents", headers=auth_headers(other)
+    )
+    assert resp.status_code == 404
+
+
+def test_document_status_by_scan_id_rejects_other_user(client, app, make_user, auth_headers):
+    owner = make_user(role="role_user", attributes=["themis_read"])
+    other = make_user(role="role_user", attributes=["themis_read"])
+    scan_id, _ = _make_scan_with_doc(app, owner.id)
+
+    resp = client.get(
+        f"/themis/document-status?scan_id={scan_id}", headers=auth_headers(other)
+    )
+    assert resp.status_code == 404
+
+
+def test_document_status_by_document_id_rejects_other_user(client, app, make_user, auth_headers):
+    owner = make_user(role="role_user", attributes=["themis_read"])
+    other = make_user(role="role_user", attributes=["themis_read"])
+    _, doc_id = _make_scan_with_doc(app, owner.id)
+
+    resp = client.get(
+        f"/themis/document-status?document_id={doc_id}", headers=auth_headers(other)
+    )
+    assert resp.status_code == 404
+
+
+# --------------------------------------------------------------- N6 format_scan
+# format_scan debe aceptar una instancia ya cargada (_scan=) para evitar
+# el re-query por ID en listados paginados.
+
+
+def test_format_scan_accepts_preloaded_instance(app, regular_user):
+    from src.modules.themis.managers import NmapScanManager
+
+    scan_id = _make_scan(app, regular_user.id, ScanStatus.FINISHED)
+    with app.app_context():
+        mgr = NmapScanManager()
+        # Cargar la instancia explícitamente y pasarla a format_scan
+        scan = mgr.get_scan_by_id(scan_id)
+        assert scan is not None
+        result = mgr.format_scan(scan_id, _scan=scan)
+        assert result["id"] == scan_id
+        assert result["scanType"] == "nmap"
+        # openPorts y severityBreakdown ahora viven en format_scan (A7)
+        assert "openPorts" in result
+
+
+def test_format_scan_openvas_includes_severity_breakdown(app, regular_user):
+    # A7: severityBreakdown antes vivía en el endpoint; ahora en format_scan.
+    from src.modules.themis.managers import OpenVASScanManager
+    from src.modules.themis.model import OpenVASScan
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            scan = OpenVASScan(target="10.0.0.1", user_id=regular_user.id, started_at=datetime.now())
+            scan.status = ScanStatus.FINISHED.value
+            scan.task_id = "t1"
+            scan.report_id = "r1"
+            ScanRepository(uow).save(scan)
+            scan_id = scan.id
+
+        mgr = OpenVASScanManager()
+        result = mgr.format_scan(scan_id)
+        assert "severityBreakdown" in result
+        assert set(result["severityBreakdown"].keys()) == {"critical", "high", "medium", "low", "info"}

@@ -16,10 +16,12 @@ from src.modules.shared import (
 from src.modules.shared._exceptions import (
     ValidationError,
     IllegalStateError,
-    SecOpsException,
+    EllysiaException,
+    DocumentError,
+    DocumentNotFoundError,
+    DocumentNotReadyError,
 )
 from src.modules.shared.schemas import ErrorSchema
-from src.modules.aegis.exceptions import DocumentError, DocumentNotFoundError, DocumentNotReadyError
 
 from .managers import (
     ScanManager,
@@ -105,7 +107,31 @@ themis_blp = SmorestBlueprint(
 logger = logging.getLogger(__name__)
 
 CANCELLABLE_STATES = frozenset({"pending", "running"})
-MAX_PDF_SIZE_BYTES = 50 * 1024 * 1024
+
+
+def _download_url_for(doc) -> str | None:
+    """URL de descarga del documento, o None si no está listo."""
+    if doc.status == "done" and doc.filename: # type: ignore
+        return f"/themis/document/{doc.id}/download"
+    return None
+
+
+def _serialize_document(doc) -> dict:
+    """Serializa un ThemisDocument al formato de los endpoints de listado.
+
+    Unifica la lógica de downloadUrl y los campos comunes que antes estaban
+    duplicados en get_all_documents y get_documents_by_scan.
+    """
+    return {
+        "documentId": doc.id,
+        "scanId": doc.scan_id,
+        "scanType": doc.scan_type,
+        "status": doc.status,
+        "isAiGenerated": doc.is_ai_generated == 1 if doc.is_ai_generated is not None else False,
+        "createdAt": doc.created_at if doc.created_at else None, # type: ignore
+        "generatedAt": doc.generated_at if doc.generated_at else None, # type: ignore
+        "downloadUrl": _download_url_for(doc),
+    }
 
 
 def validate_targets(raw: str, max_hosts: int = 10) -> list[str]:
@@ -120,7 +146,7 @@ def validate_targets(raw: str, max_hosts: int = 10) -> list[str]:
     except MaxHostsExceededError as exc:
         raise ValidationError(str(exc.user_message or exc))
     except PrivateIPRequested as exc:
-        raise SecOpsException(str(exc.user_message or exc), status_code=403)
+        raise EllysiaException(str(exc.user_message or exc), status_code=403)
 
 
 def validate_nikto_target(raw: str) -> None:
@@ -137,7 +163,7 @@ def validate_nikto_target(raw: str) -> None:
     try:
         ScanManager.reject_private_ip(ip)
     except PrivateIPRequested as exc:
-        raise SecOpsException(str(exc.user_message or exc), status_code=403)
+        raise EllysiaException(str(exc.user_message or exc), status_code=403)
 
 
 @themis_blp.get("/scan-status")
@@ -442,12 +468,12 @@ def list_authorized_targets():
 def delete_authorized_target(target_id: int):
     """Eliminar una entrada del registro de objetivos autorizados."""
     user = get_current_user()
-    AuthorizedTargetManager().remove(target_id, user.id)
+    target = AuthorizedTargetManager().remove(target_id, user.id)
     logger.info(f"Objetivo autorizado {target_id} eliminado por {user.username}")
     return {
         "message": "Objetivo autorizado eliminado correctamente",
         "targetId": target_id,
-        "target": "",
+        "target": target,
         "user": user.username,
     }
 
@@ -494,15 +520,8 @@ def retrieve_all_scans(args):
     user = get_current_user()
     uid = user.id
 
-    TYPE_MGR_MAP = {
-        "nmap": NmapScanManager(),
-        "nikto": NiktoScanManager(),
-        "openvas": OpenVASScanManager(),
-        "lybra": LybraEngineManager(),
-    }
-
     if scan_type != "all":
-        mgr = TYPE_MGR_MAP[scan_type]
+        mgr = ScanManager.get_manager_for_type(scan_type)
         results, total_count = mgr.get_scans_paginated(uid, page, per_page)
         total_pages = (total_count + per_page - 1) // per_page
 
@@ -519,10 +538,10 @@ def retrieve_all_scans(args):
         }
 
     all_results = []
-    for mgr in TYPE_MGR_MAP.values():
+    for mgr in ScanManager.all_managers():
         try:
             for scan in mgr.get_scans_for_user(uid):
-                all_results.append(mgr.format_scan(scan.id))
+                all_results.append(mgr.format_scan(scan.id, _scan=scan))
         except (OSError, RuntimeError) as exc:
             logger.error(f"Error obteniendo scans: {exc}", exc_info=True)
 
@@ -606,22 +625,7 @@ def retrieve_scan_by_id(scan_id: int):
     manager, scan = ScanManager.resolve_owned_scan(scan_id, user.id) # type: ignore
 
     logger.info(f"Obteniendo detalles para escaneo {scan_id} de tipo {scan.scan_type} por usuario {user.username}")
-    result = manager.format_scan(scan_id)
-    if scan.scan_type == "nmap": # type: ignore
-        result["openPorts"] = [{
-            "port": f"{p.port_id}/{p.port.protocol}",
-            "reason": p.reason,
-            "product": p.product,
-            "version": p.version,
-        } for p in scan.open_ports_relation]
-    elif scan.scan_type == "openvas": # type: ignore
-        result["severityBreakdown"] = {
-            "critical": sum(1 for r in scan.results if r.vulnerability.severity_class == "Critical"),
-            "high": sum(1 for r in scan.results if r.vulnerability.severity_class == "High"),
-            "medium": sum(1 for r in scan.results if r.vulnerability.severity_class == "Medium"),
-            "low": sum(1 for r in scan.results if r.vulnerability.severity_class == "Low"),
-            "info": sum(1 for r in scan.results if r.vulnerability.severity_class == "Log"),
-        }
+    result = manager.format_scan(scan_id, _scan=scan)
 
     return {
         "message": "Escaneo obtenido correctamente",
@@ -792,7 +796,6 @@ def generate_pdf(args):
     doc_id = doc_mgr.generate_report(
         scan_id=scan_id,
         ai_report=ai_report,
-        strategy_class=manager._strategy_class,
     )
     logger.info(f"Generacion de PDF solicitada para escaneo {scan_id} (documento {doc_id}) por usuario {user.username} con AI Report: {ai_report}")
 
@@ -831,13 +834,10 @@ def get_document_status(args):
     if not doc:
         raise ScanNotFoundError(document_id or scan_id)
 
-    if document_id:
-        doc_mgr.assert_document_ownership(document_id, user.id)
-
-    download_url = None
-    is_done = doc.status == "done"
-    if is_done and doc.filename: # type: ignore
-        download_url = f"/themis/document/{doc.id}/download"
+    # N1: verificar ownership en ambas ramas (antes solo se comprobaba
+    # cuando se consultaba por document_id). Mismo patrón que Iris.
+    if doc.user_id != user.id: # type: ignore
+        raise ScanNotFoundError(document_id or scan_id)
 
     return {
         "documentId": doc.id,
@@ -846,7 +846,7 @@ def get_document_status(args):
         "aiReport": doc.enrichment_json is not None,
         "createdAt": doc.created_at if doc.created_at else None, # type: ignore
         "generatedAt": doc.generated_at if doc.generated_at else None, # type: ignore
-        "downloadUrl": download_url,
+        "downloadUrl": _download_url_for(doc),
     }
 
 
@@ -870,23 +870,7 @@ def get_all_documents(args):
     if scan_type_filter != "all":
         documents = [d for d in documents if d.scan_type == scan_type_filter]
 
-    docs_list = []
-    for doc in documents:
-        download_url = None
-        is_done = doc.status == "done"
-        if is_done and doc.filename: # type: ignore
-            download_url = f"/themis/document/{doc.id}/download"
-
-        docs_list.append({
-            "documentId": doc.id,
-            "scanId": doc.scan_id,
-            "scanType": doc.scan_type,
-            "status": doc.status,
-            "isAiGenerated": doc.is_ai_generated == 1 if doc.is_ai_generated is not None else False,
-            "createdAt": doc.created_at if doc.created_at else None, # type: ignore
-            "generatedAt": doc.generated_at if doc.generated_at else None, # type: ignore
-            "downloadUrl": download_url,
-        })
+    docs_list = [_serialize_document(doc) for doc in documents]
 
     return {
         "documents": docs_list,
@@ -908,32 +892,15 @@ def get_documents_by_scan(scan_id: int):
     """Obtener todos los documentos de un escaneo concreto"""
     user = get_current_user()
 
+    # N1: verificar ownership del escaneo antes de listar sus documentos.
+    # Sin esto, cualquier usuario con THEMIS_READ puede enumerar los
+    # documentos (ids, fechas, estado, downloadUrl) de escaneos ajenos.
+    ScanManager.resolve_owned_scan(scan_id, user.id) # type: ignore
+
     doc_mgr = ThemisReportManager()
-    scan_mgr = ScanManager.resolve_manager(scan_id)
-
-    scan = scan_mgr.get_scan_by_id(scan_id)
-    if not scan:
-        raise ScanNotFoundError(scan_id)
-
     documents = doc_mgr.get_documents_by_scan_id(scan_id)
 
-    docs_list = []
-    for doc in documents:
-        download_url = None
-        is_done = doc.status == "done"
-        if is_done and doc.filename: # type: ignore
-            download_url = f"/themis/document/{doc.id}/download"
-
-        docs_list.append({
-            "documentId": doc.id,
-            "scanId": doc.scan_id,
-            "scanType": doc.scan_type,
-            "status": doc.status,
-            "isAiGenerated": doc.is_ai_generated == 1 if doc.is_ai_generated is not None else False,
-            "createdAt": doc.created_at if doc.created_at else None,
-            "generatedAt": doc.generated_at if doc.generated_at else None,
-            "downloadUrl": download_url,
-        })
+    docs_list = [_serialize_document(doc) for doc in documents]
 
     return {
         "scanId": scan_id,
@@ -1276,7 +1243,7 @@ def add_scans_to_folder(data, folder_id: int):
 def remove_scan_from_folder(folder_id: int, scan_id: int):
     """Sacar un escaneo de una carpeta (lo deja sin carpeta)"""
     user = get_current_user()
-    scan = ScanFolderManager().remove_scan_from_folder(scan_id, user.id)  # type: ignore
+    ScanFolderManager().remove_scan_from_folder(scan_id, user.id)  # type: ignore
     logger.info(f"Escaneo {scan_id} sacado de carpeta {folder_id} por {user.username}")
     return {
         "message": "Escaneo eliminado de la carpeta correctamente",
