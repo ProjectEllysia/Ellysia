@@ -793,7 +793,7 @@ class LybraAIWriter:
         (see `repositories.py`), so this mirrors how the manager/report code
         already fetches them rather than adding one just for this writer.
         """
-        from src.modules.infrastructure.session import read_repo
+        from src.modules.infrastructure.session import build_repository
         from ..repositories import ScanRepository
         from ..lybra import classify_exposure
 
@@ -803,7 +803,7 @@ class LybraAIWriter:
             "exposure": classify_exposure(scan.target),
         }
 
-        rows = read_repo(ScanRepository).get_findings_by_scan(scan.id)
+        rows = build_repository(ScanRepository).get_findings_by_scan(scan.id)
         findings = [{
             "title": f.title, "category": f.category, "cve_ids": f.cve_ids,
             "cvss_score": f.cvss_score, "epss_score": f.epss_score, "in_kev": f.in_kev,

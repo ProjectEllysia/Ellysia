@@ -1976,11 +1976,11 @@ class LybraPrintingStrategy(PrintingStrategy):
         }
 
     def append_body(self, theme: "ReportTheme", elements: list, ai_report: bool = False) -> None:
-        from src.modules.infrastructure.session import read_repo
+        from src.modules.infrastructure.session import build_repository
         from ..repositories import ScanRepository
         from ..lybra import classify_exposure, score_finding
 
-        rows = read_repo(ScanRepository).get_findings_by_scan(self.scan.id)
+        rows = build_repository(ScanRepository).get_findings_by_scan(self.scan.id)
         exposure = classify_exposure(self.scan.target)
 
         findings = [{
@@ -2035,7 +2035,7 @@ class LybraPrintingStrategy(PrintingStrategy):
         set when NVD's own applicability data (the CpeMatch that matched this
         finding's product) actually states an upper bound.
         """
-        from src.modules.infrastructure.session import read_repo
+        from src.modules.infrastructure.session import build_repository
         from ..repositories import KbRepository
         from ..lybra import parse_cpe23
 
@@ -2043,7 +2043,7 @@ class LybraPrintingStrategy(PrintingStrategy):
         if not cve_ids:
             return
 
-        entries = {e.cve_id: e for e in read_repo(KbRepository).get_cves_with_matches(cve_ids)}
+        entries = {e.cve_id: e for e in build_repository(KbRepository).get_cves_with_matches(cve_ids)}
 
         for f in findings:
             ids = f.get("cve_ids") or []

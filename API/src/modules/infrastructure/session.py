@@ -8,7 +8,7 @@ the session is not closed until the response is sent.
 
 Functions:
     get_db_session:             Return (or create) the request-scoped session.
-    read_repo:                  Build a repository bound to the ambient session,
+    build_repository:                  Build a repository bound to the ambient session,
                                 for reads (the explicit counterpart to UnitOfWork
                                 on the write side — see its docstring).
     init_request_session:       Flask before_request hook that opens the session.
@@ -26,9 +26,9 @@ Usage:
 
     Reads, in repositories or managers::
 
-        from src.modules.infrastructure.session import read_repo
+        from src.modules.infrastructure.session import build_repository
 
-        scan = read_repo(ScanRepository).get_by_id(42)
+        scan = build_repository(ScanRepository).get_by_id(42)
         print(scan.host.hostname)  # lazy load works
 
     Writes go through ``UnitOfWork`` instead — see its module for the pattern.
@@ -76,14 +76,14 @@ def get_db_session():
     return get_session()
 
 
-def read_repo(repo_cls: Type[R]) -> R:
+def build_repository(repo_cls: Type[R]) -> R:
     """
     Build a repository bound to the ambient session, for the read path.
 
     This is the explicit counterpart to ``with UnitOfWork() as uow: Repo(uow)``
     on the write side. Where the implicit convention used to be "pass
     ``session=get_db_session()`` directly when you only mean to read", this
-    makes that intent visible at the call site — a reviewer sees ``read_repo``
+    makes that intent visible at the call site — a reviewer sees ``build_repository``
     and knows no transaction is being demarcated here, so writing through the
     returned repository would not be a deliberate choice.
 
@@ -103,7 +103,7 @@ def read_repo(repo_cls: Type[R]) -> R:
         An instance of ``repo_cls`` bound to the ambient session.
 
     Example:
-    >>> scan = read_repo(ScanRepository).get_by_id(42)
+    >>> scan = build_repository(ScanRepository).get_by_id(42)
     """
     return repo_cls(session=get_db_session())
 

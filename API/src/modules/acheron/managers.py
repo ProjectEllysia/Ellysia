@@ -10,7 +10,7 @@ from .model import Storable, Vault
 
 from src.modules.users import User
 from src.modules.infrastructure.unit_of_work import UnitOfWork
-from src.modules.infrastructure.session import read_repo
+from src.modules.infrastructure.session import build_repository
 from src.modules.shared import utcnow_naive
 
 from .repositories import (
@@ -63,7 +63,7 @@ class VaultManager:
             )
 
     def get_vault_by_id(self, vault_id: int) -> Optional[Vault]:
-        repo = read_repo(VaultRepository)
+        repo = build_repository(VaultRepository)
         vault = repo.get_by_id(vault_id)
         if vault is None:
             logger.warning(f"Vault {vault_id} no encontrado")
@@ -72,7 +72,7 @@ class VaultManager:
         return vault
 
     def get_vault_for_user(self, is_recovery: bool = False) -> Optional[Vault]:
-        repo = read_repo(VaultRepository)
+        repo = build_repository(VaultRepository)
         vault = repo.get_by_user(self.active_user.id)
         return vault
 
@@ -200,7 +200,7 @@ class VaultManager:
         return vault
 
     def export_vault_to_json(self, vault_id: int) -> Dict[str, Any]:
-        repo = read_repo(VaultRepository)
+        repo = build_repository(VaultRepository)
         vault = repo.get_by_id(vault_id)
         if vault is None:
             raise ValueError(f"Vault {vault_id} no encontrado")
@@ -247,7 +247,7 @@ class VaultManager:
             limit: Optional[int] = None,
             **filters: Any,
         ) -> List[Storable]:
-        repo = read_repo(StorableRepository)
+        repo = build_repository(StorableRepository)
 
         if vault_id is not None:
             vault = self.get_vault_by_id(vault_id)

@@ -8,7 +8,7 @@ respuesta (404 "no encontrado" vs 403 "no es tuyo").
 
 from typing import Callable, Type, TypeVar
 
-from src.modules.infrastructure.session import read_repo
+from src.modules.infrastructure.session import build_repository
 
 T = TypeVar("T")
 
@@ -38,7 +38,7 @@ def assert_owned(
         La excepción devuelta por ``not_found_error`` si la entidad no
         existe o pertenece a otro usuario (misma excepción en ambos casos).
     """
-    entity = read_repo(repo_cls).get_by_id(entity_id)
+    entity = build_repository(repo_cls).get_by_id(entity_id)
     if entity is None or entity.user_id != user_id:
         raise not_found_error(entity_id)
     return entity
