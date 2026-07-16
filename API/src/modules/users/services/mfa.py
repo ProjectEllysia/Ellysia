@@ -19,7 +19,6 @@ import pyotp
 
 import src.modules.system.config_reading as CR
 
-# Sin caracteres ambiguos (0/O, 1/I/l) para que sean fáciles de transcribir a mano.
 _RECOVERY_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
