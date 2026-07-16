@@ -95,17 +95,11 @@ def delete_document_with_file(
         if not doc:
             raise not_found_exc(document_id)
 
-        filename = str(doc.filename)
-        if filename:
-            if not os.path.exists(filename):
-                return True
-
+        if doc.filename and os.path.exists(doc.filename):
             try:
-                os.remove(filename)
-                return True
+                os.remove(doc.filename)
             except Exception as exc:
-                logger.warning(f"No se pudo eliminar el archivo {filename}: {exc}", exc_info=True)
-                return False
+                logger.warning(f"No se pudo eliminar el archivo {doc.filename}: {exc}", exc_info=True)
 
         doc_repo.delete(doc)
 
