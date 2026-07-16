@@ -36,7 +36,7 @@ from src.modules.infrastructure import unit_of_work
 from src.modules.shared._exceptions import (
     MissingParameterError,
     MissingJsonBodyError,
-    SecOpsException,
+    EllysiaException,
     create_error_response
 )
 from src.modules.system     import configure_logging, config_reading, system_blp
@@ -346,7 +346,7 @@ def _register_error_handlers(app: Flask) -> None:
             "error_description": "Has superado el límite de peticiones. Espera un momento e inténtalo de nuevo.",
         }), 429
 
-    @app.errorhandler(SecOpsException)
+    @app.errorhandler(EllysiaException)
     def handle_secops_exception(error):
         if error.traceback:
             _logger.error(f"[{error.code.name}] {error.message}\n{error.traceback}")

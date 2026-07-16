@@ -17,9 +17,6 @@ from ._exceptions   import handle_exceptions, ExceptionHandler
 from ._endpoints    import (
     current_actor,
     normalize_target,
-    require_json,
-    require_str,
-    require_arg,
     limiter
 )
 from ._ownership import assert_owned
@@ -33,9 +30,6 @@ __all__ = [
     "ExceptionHandler",
     "current_actor",
     "normalize_target",
-    "require_json",
-    "require_str",
-    "require_arg",
     "limiter",
     "assert_owned",
     "utcnow_naive",

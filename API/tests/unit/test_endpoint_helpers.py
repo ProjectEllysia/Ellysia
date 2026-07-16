@@ -7,9 +7,7 @@ from flask import Flask
 
 from src.modules.shared._endpoints import (
     current_actor,
-    normalize_target,
-    require_arg,
-    require_str,
+    normalize_target
 )
 from src.modules.shared._exceptions import MissingParameterError
 
@@ -45,39 +43,12 @@ def test_normalize_target_unresolvable_raises(monkeypatch):
         normalize_target("does-not-exist.invalid")
 
 
-# ------------------------------------------------------------------- require_str
-
-def test_require_str_returns_trimmed_value():
-    assert require_str({"name": "  hi  "}, "name") == "hi"
-
-
-def test_require_str_missing_raises():
-    with pytest.raises(MissingParameterError):
-        require_str({}, "name")
-
-
-def test_require_str_blank_raises():
-    with pytest.raises(MissingParameterError):
-        require_str({"name": "   "}, "name")
-
-
 # ------------------------------------------- helpers que dependen de flask.request
 
 @pytest.fixture()
 def flask_ctx():
     app = Flask(__name__)
     return app
-
-
-def test_require_arg_reads_query_string(flask_ctx):
-    with flask_ctx.test_request_context("/?id=42"):
-        assert require_arg("id") == "42"
-
-
-def test_require_arg_missing_raises(flask_ctx):
-    with flask_ctx.test_request_context("/"):
-        with pytest.raises(MissingParameterError):
-            require_arg("id")
 
 
 def test_current_actor_anonymous(flask_ctx):
