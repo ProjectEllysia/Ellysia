@@ -7,7 +7,7 @@ insertarse sin escapar/validar. Son funciones puras: no requieren BD ni red.
 
 import pytest
 
-from src.modules.aegis.services.exporters import ExportData, HTMLExporter
+from src.modules.features.aegis.services.exporters import ExportData, HTMLExporter
 
 pytestmark = pytest.mark.unit
 

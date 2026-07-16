@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 import src.modules.system.config_reading as CR
-from src.modules.herald import (
+from src.modules.tools.herald import (
     EmailConfigurationError,
     EmailConnectionError,
     EmailMessage,
@@ -14,8 +14,8 @@ from src.modules.herald import (
     SendResult,
     build_mailer,
 )
-from src.modules.herald.factory import _build_strategy
-from src.modules.herald.strategies import SmtpStrategy
+from src.modules.tools.herald.factory import _build_strategy
+from src.modules.tools.herald.strategies import SmtpStrategy
 
 pytestmark = pytest.mark.unit
 

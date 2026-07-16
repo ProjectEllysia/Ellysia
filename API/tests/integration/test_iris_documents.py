@@ -16,8 +16,8 @@ import pytest
 
 from src.modules.system.taskqueue import Task, TaskStatus
 
-import src.modules.iris.managers as managers_mod
-import src.modules.iris.services.reports as reports_mod
+import src.modules.features.iris.managers as managers_mod
+import src.modules.features.iris.services.reports as reports_mod
 
 pytestmark = pytest.mark.integration
 
@@ -66,8 +66,8 @@ def _seed_analysis(app, user_id: int, status: str = "finished",
                     verdict: str = "Phishing", total_score: float = -25.0) -> int:
     """Persist an IrisAnalysis (with one rule result) and return its id."""
     from src.modules.infrastructure import unit_of_work as uow_mod
-    from src.modules.iris.repositories import IrisAnalysisRepository, IrisRuleResultRepository
-    from src.modules.iris.model import IrisAnalysis, IrisRuleResult
+    from src.modules.features.iris.repositories import IrisAnalysisRepository, IrisRuleResultRepository
+    from src.modules.features.iris.model import IrisAnalysis, IrisRuleResult
 
     with app.app_context():
         with uow_mod.UnitOfWork() as uow:

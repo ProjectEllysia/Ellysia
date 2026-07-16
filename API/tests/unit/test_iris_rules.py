@@ -8,21 +8,21 @@ import base64
 
 import pytest
 
-from src.modules.iris.services.rules.auth_rules import (
+from src.modules.features.iris.services.rules.auth_rules import (
     check_spf, check_dkim, check_dmarc, check_domain_alignment, check_arc_chain,
 )
-from src.modules.iris.services.rules.sender_identity_rules import check_suspicious_tld
-from src.modules.iris.services.rules.body_content_rules import check_url_in_subject
-from src.modules.iris.services.rules.sender_identity_rules import check_lookalike_domain
-from src.modules.iris.services.rules.reply_path_rules import check_reply_to_free_provider
-from src.modules.iris.services.rules.reply_path_rules import check_reply_to
-from src.modules.iris.services.rules.thread_rules import check_msgid_domain
-from src.modules.iris.services.rules.content_trust_rules import check_list_unsubscribe
-from src.modules.iris.services.rules.body_content_rules import check_alarming_keywords
-from src.modules.iris.services.rules.sender_identity_rules import check_misspelled_brands
-from src.modules.iris.services.rules.content_trust_rules import check_content_type
-from src.modules.iris.services.registry import RuleResult
-from src.modules.iris.managers import IrisManager
+from src.modules.features.iris.services.rules.sender_identity_rules import check_suspicious_tld
+from src.modules.features.iris.services.rules.body_content_rules import check_url_in_subject
+from src.modules.features.iris.services.rules.sender_identity_rules import check_lookalike_domain
+from src.modules.features.iris.services.rules.reply_path_rules import check_reply_to_free_provider
+from src.modules.features.iris.services.rules.reply_path_rules import check_reply_to
+from src.modules.features.iris.services.rules.thread_rules import check_msgid_domain
+from src.modules.features.iris.services.rules.content_trust_rules import check_list_unsubscribe
+from src.modules.features.iris.services.rules.body_content_rules import check_alarming_keywords
+from src.modules.features.iris.services.rules.sender_identity_rules import check_misspelled_brands
+from src.modules.features.iris.services.rules.content_trust_rules import check_content_type
+from src.modules.features.iris.services.registry import RuleResult
+from src.modules.features.iris.managers import IrisManager
 
 pytestmark = pytest.mark.unit
 
@@ -683,7 +683,7 @@ def test_generate_ai_summary_rejects_unfinished_analysis(monkeypatch):
         IrisManager, "assert_analysis_ownership",
         classmethod(lambda cls, analysis_id, user_id: fake_analysis),
     )
-    from src.modules.iris.exceptions import IrisAnalysisNotReadyError
+    from src.modules.features.iris.exceptions import IrisAnalysisNotReadyError
     with pytest.raises(IrisAnalysisNotReadyError):
         IrisManager(task_queue=_FakeTaskQueue()).generate_ai_summary(analysis_id=9, user_id=1)
 
@@ -715,7 +715,7 @@ def test_execute_ai_summary_generation_degrades_cleanly_on_ai_failure(monkeypatc
         def generate(self, report):
             raise RuntimeError("AI backend unavailable")
 
-    monkeypatch.setattr("src.modules.iris.managers.IrisAIWriter", _BrokenWriter)
+    monkeypatch.setattr("src.modules.features.iris.managers.IrisAIWriter", _BrokenWriter)
 
     # Should not raise.
     IrisManager.execute_ai_summary_generation(analysis_id=11)

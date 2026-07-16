@@ -13,9 +13,9 @@ from __future__ import annotations
 import pytest
 
 import src.modules.system.config_reading as CR
-from src.modules.iris.services.ai_writer import IrisAIWriter
-from src.modules.scribe import AIResult
-from src.modules.scribe.exceptions import AIResponseError
+from src.modules.features.iris.services.ai_writer import IrisAIWriter
+from src.modules.tools.scribe import AIResult
+from src.modules.tools.scribe.exceptions import AIResponseError
 
 pytestmark = pytest.mark.unit
 

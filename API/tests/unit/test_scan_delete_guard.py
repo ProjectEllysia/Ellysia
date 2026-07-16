@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.modules.themis.managers.scan import ScanManager
+from src.modules.features.themis.managers.scan import ScanManager
 
 pytestmark = pytest.mark.unit
 

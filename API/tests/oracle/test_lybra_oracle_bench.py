@@ -28,9 +28,9 @@ import pytest
 
 import src.modules.system.config_reading as CR
 from src.modules.infrastructure import UnitOfWork
-from src.modules.themis.lybra import scan_ports_sync, port_concordance
-from src.modules.themis.managers import LybraEngineManager, AuthorizedTargetManager
-from src.modules.themis.repositories import ScanRepository, KbRepository
+from src.modules.features.themis.lybra import scan_ports_sync, port_concordance
+from src.modules.features.themis.managers import LybraEngineManager, AuthorizedTargetManager
+from src.modules.features.themis.repositories import ScanRepository, KbRepository
 
 from ._docker_helpers import resolve_docker, docker_run, docker_rm, wait_for_port, port_is_free
 

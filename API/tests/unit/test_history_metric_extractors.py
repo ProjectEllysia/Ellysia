@@ -10,8 +10,8 @@ from typing import Optional
 
 import pytest
 
-from src.modules.themis.model import ScanType
-from src.modules.themis.services.history import LybraMetricExtractor, MetricExtractor
+from src.modules.features.themis.model import ScanType
+from src.modules.features.themis.services.history import LybraMetricExtractor, MetricExtractor
 
 pytestmark = pytest.mark.unit
 

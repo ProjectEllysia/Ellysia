@@ -11,10 +11,10 @@ if config.config_file_name is not None:
 
 from src.modules.shared._model import Base
 import src.modules.users.model       # User, AccessToken, RefreshToken, UserAttribute
-import src.modules.themis.model      # Scan, Host, NmapScan, NiktoScan, OpenVASScan, etc.
-import src.modules.acheron.model     # Vault, Storable, Account, CreditCard, etc.
-import src.modules.aegis.model       # Topic, AegisDocument, AegisTip, AegisDocumentAlert
-import src.modules.iris.model        # IrisAnalysis, IrisRuleResult, IrisDocument
+import src.modules.features.themis.model      # Scan, Host, NmapScan, NiktoScan, OpenVASScan, etc.
+import src.modules.features.acheron.model     # Vault, Storable, Account, CreditCard, etc.
+import src.modules.features.aegis.model       # Topic, AegisDocument, AegisTip, AegisDocumentAlert
+import src.modules.features.iris.model        # IrisAnalysis, IrisRuleResult, IrisDocument
 
 target_metadata = Base.metadata
 

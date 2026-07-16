@@ -46,10 +46,10 @@ from src.modules.users      import (
     users_blp
 )
 from src.modules.users.services.secrets import hash_password as _hash_password
-from src.modules.themis   import themis_blp
-from src.modules.acheron    import acheron_blp
-from src.modules.aegis      import aegis_blp
-from src.modules.iris       import iris_blp
+from src.modules.features.themis   import themis_blp
+from src.modules.features.acheron    import acheron_blp
+from src.modules.features.aegis      import aegis_blp
+from src.modules.features.iris       import iris_blp
 
 import src.modules.system.config_reading as CR
 
@@ -129,7 +129,7 @@ def _run_shutdown_cleanup() -> None:
 
     _logger.info("[Shutdown] Deteniendo scheduler...")
     try:
-        from src.modules.themis.services.scheduling import Scheduler
+        from src.modules.features.themis.services.scheduling import Scheduler
         Scheduler.stop()
     except Exception as e:
         _logger.error(f"Error deteniendo scheduler: {e}")
@@ -189,7 +189,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     Returns:
         Flask: Aplicación completamente configurada y lista para servir.
     """
-    from src.modules.themis.services.scheduling import Scheduler
+    from src.modules.features.themis.services.scheduling import Scheduler
     from werkzeug.middleware.proxy_fix import ProxyFix
 
     configure_logging()
@@ -263,7 +263,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     if start_scheduler:
         _logger.info("Reconciliando escaneos huérfanos...")
         try:
-            from src.modules.themis.managers import ScanManager
+            from src.modules.features.themis.managers import ScanManager
             fixed = ScanManager.reconcile_orphaned_scans()
             if fixed:
                 _logger.info("Se marcaron %d escaneo(s) huérfano(s) como FAILED", fixed)
@@ -272,7 +272,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
 
         _logger.info("Reconciliando análisis Iris huérfanos...")
         try:
-            from src.modules.iris.managers import IrisManager
+            from src.modules.features.iris.managers import IrisManager
             fixed_iris = IrisManager.reconcile_orphaned_analyses()
             if fixed_iris:
                 _logger.info("Se marcaron %d análisis Iris huérfano(s) como failed", fixed_iris)

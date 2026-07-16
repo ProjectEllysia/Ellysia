@@ -58,7 +58,7 @@ Registro de colas **registrables por módulo** (adiós a constantes hardcodeadas
 ```python
 from src.modules.system.taskqueue import QueueRegistry
 
-# En src/modules/iris/__init__.py (al importar el módulo)
+# En src/modules/features/iris/__init__.py (al importar el módulo)
 QueueRegistry.register("iris.analyze")
 
 # En src/modules/sentinel/__init__.py

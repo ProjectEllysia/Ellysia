@@ -8,8 +8,8 @@ de ScanType, así que cualquier tipo futuro queda cubierto automáticamente.
 
 import pytest
 
-from src.modules.themis.model import ScanType
-from src.modules.themis.schemas import DocumentsQuerySchema
+from src.modules.features.themis.model import ScanType
+from src.modules.features.themis.schemas import DocumentsQuerySchema
 
 pytestmark = pytest.mark.unit
 

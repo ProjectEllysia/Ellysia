@@ -16,9 +16,9 @@ import pytest
 from src.modules.infrastructure import UnitOfWork
 from src.modules.system.taskqueue import Task, TaskStatus
 
-import src.modules.iris.managers as managers_mod
-from src.modules.iris.model import IrisAnalysis
-from src.modules.iris.repositories import IrisAnalysisRepository
+import src.modules.features.iris.managers as managers_mod
+from src.modules.features.iris.model import IrisAnalysis
+from src.modules.features.iris.repositories import IrisAnalysisRepository
 
 pytestmark = pytest.mark.integration
 

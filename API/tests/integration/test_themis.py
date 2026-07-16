@@ -10,8 +10,8 @@ from datetime import datetime
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.themis.model import NmapScan, ScanStatus, ThemisDocument
-from src.modules.themis.repositories import ScanRepository, ThemisReportRepository
+from src.modules.features.themis.model import NmapScan, ScanStatus, ThemisDocument
+from src.modules.features.themis.repositories import ScanRepository, ThemisReportRepository
 
 pytestmark = pytest.mark.integration
 
@@ -175,7 +175,7 @@ def test_update_status_if_noop_when_already_terminal(app, regular_user):
 
 
 def test_get_scan_status_fallback_uses_finished_vocabulary(app, regular_user, monkeypatch):
-    import src.modules.themis.managers.scan as scan_mod
+    import src.modules.features.themis.managers.scan as scan_mod
 
     class _NoTaskQueue:
         def get_task_by_external_id(self, external_id, category=None):
@@ -183,7 +183,7 @@ def test_get_scan_status_fallback_uses_finished_vocabulary(app, regular_user, mo
 
     monkeypatch.setattr(scan_mod.TaskQueue, "get_instance", lambda: _NoTaskQueue())
 
-    from src.modules.themis.managers import NmapScanManager
+    from src.modules.features.themis.managers import NmapScanManager
 
     scan_id = _make_scan(app, regular_user.id, ScanStatus.FINISHED)
     with app.app_context():
@@ -195,8 +195,8 @@ def test_openvas_scheduled_flow_rejects_private_ip(app):
     # C3: la validación de host único/IP privada vivía solo en el endpoint
     # HTTP; el flujo programado (scheduling._run_openvas_scan) llamaba a
     # OpenVASScanManager.run_scan() directo, sin pasar por validate_targets().
-    from src.modules.themis.exceptions import PrivateIPRequested
-    from src.modules.themis.managers import OpenVASScanManager
+    from src.modules.features.themis.exceptions import PrivateIPRequested
+    from src.modules.features.themis.managers import OpenVASScanManager
 
     with app.app_context():
         with pytest.raises(PrivateIPRequested):
@@ -268,7 +268,7 @@ def test_document_status_by_document_id_rejects_other_user(client, app, make_use
 
 
 def test_format_scan_accepts_preloaded_instance(app, regular_user):
-    from src.modules.themis.managers import NmapScanManager
+    from src.modules.features.themis.managers import NmapScanManager
 
     scan_id = _make_scan(app, regular_user.id, ScanStatus.FINISHED)
     with app.app_context():
@@ -285,8 +285,8 @@ def test_format_scan_accepts_preloaded_instance(app, regular_user):
 
 def test_format_scan_openvas_includes_severity_breakdown(app, regular_user):
     # A7: severityBreakdown antes vivía en el endpoint; ahora en format_scan.
-    from src.modules.themis.managers import OpenVASScanManager
-    from src.modules.themis.model import OpenVASScan
+    from src.modules.features.themis.managers import OpenVASScanManager
+    from src.modules.features.themis.model import OpenVASScan
 
     with app.app_context():
         with UnitOfWork() as uow:

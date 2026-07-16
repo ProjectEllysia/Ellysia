@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from src.modules.themis.services.scheduling import Scheduler
+from src.modules.features.themis.services.scheduling import Scheduler
 
 pytestmark = pytest.mark.unit
 

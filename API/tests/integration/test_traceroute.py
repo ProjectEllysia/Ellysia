@@ -21,7 +21,7 @@ import pytest
 
 from src.modules.system.taskqueue import Task, TaskStatus
 
-import src.modules.themis.managers as managers_mod
+import src.modules.features.themis.managers as managers_mod
 
 pytestmark = pytest.mark.integration
 
@@ -33,7 +33,7 @@ _HOPS = [
     {"ttl": 3, "ip": _TARGET, "hostname": None, "rtt_ms": 10.0},
 ]
 
-_TRACE_PATH = "src.modules.themis.services.traceroute.TracerouteService.trace"
+_TRACE_PATH = "src.modules.features.themis.services.traceroute.TracerouteService.trace"
 
 
 class _SyncTaskQueue:
@@ -81,8 +81,8 @@ def fake_queue():
 def _create_scan(app, user_id: int, target: str = _TARGET) -> int:
     """Persist a finished NmapScan owned by ``user_id`` and return its id."""
     from src.modules.infrastructure import unit_of_work as uow_mod
-    from src.modules.themis.repositories import ScanRepository
-    from src.modules.themis.model import NmapScan
+    from src.modules.features.themis.repositories import ScanRepository
+    from src.modules.features.themis.model import NmapScan
 
     with app.app_context():
         with uow_mod.UnitOfWork() as uow:
@@ -95,7 +95,7 @@ def _seed_trace(app, user_id: int, hops: list, target: str = _TARGET,
                 age: timedelta = timedelta(0)) -> None:
     """Seed a cached Traceroute row with a controllable ``created_at`` age."""
     from src.modules.infrastructure import unit_of_work as uow_mod
-    from src.modules.themis.repositories import TracerouteRepository
+    from src.modules.features.themis.repositories import TracerouteRepository
 
     with app.app_context():
         with uow_mod.UnitOfWork() as uow:
@@ -194,7 +194,7 @@ def test_empty_result_is_cached_as_failed(client, app, regular_user, auth_header
 
         # Hay fila vacía persistida.
         from src.modules.infrastructure import unit_of_work as uow_mod
-        from src.modules.themis.repositories import TracerouteRepository
+        from src.modules.features.themis.repositories import TracerouteRepository
         with app.app_context():
             with uow_mod.UnitOfWork() as uow:
                 row = TracerouteRepository(uow).get_by_user_and_target(regular_user.id, _TARGET)

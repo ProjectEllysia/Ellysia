@@ -2,7 +2,7 @@
 
 ## Contexto
 
-Acheron (`API/src/modules/acheron`) es el gestor de secretos "zero-knowledge" de SeQ: la contraseña maestra nunca sale del cliente, deriva una clave (Argon2id/PBKDF2 vía Web Crypto + `hash-wasm`) que desenvuelve una `vaultKey` AES-256-GCM, y un `checker` (SHA-256 del username, cifrado) permite validar localmente que la maestra es correcta. El servidor solo almacena blobs cifrados y parámetros de KDF.
+Acheron (`API/src/modules/features/acheron`) es el gestor de secretos "zero-knowledge" de SeQ: la contraseña maestra nunca sale del cliente, deriva una clave (Argon2id/PBKDF2 vía Web Crypto + `hash-wasm`) que desenvuelve una `vaultKey` AES-256-GCM, y un `checker` (SHA-256 del username, cifrado) permite validar localmente que la maestra es correcta. El servidor solo almacena blobs cifrados y parámetros de KDF.
 
 Primero se analizaron los **servicios** de Acheron (no la calidad del código) para detectar problemas y mejoras de seguridad, incluyendo viabilidad de Passkeys. Tras esa primera pasada, el usuario pidió reenfocar el análisis de MFA: en vez de tratarlo como una mejora aislada de Acheron, diseñarlo como **funcionalidad global de la API** — protege el login de toda la plataforma (Aegis, Sentinel, Iris, Acheron, administración), no solo el acceso al vault. Alcance acordado: backend (`API/`) + frontend web (`web/app/src`); el cliente móvil (`SeQ-AcheronMobile`) queda fuera porque el repo no está disponible en la ruta esperada.
 
@@ -14,7 +14,7 @@ Primero se analizaron los **servicios** de Acheron (no la calidad del código) p
 - **Guards existentes** (`users/services/permissions.py:186-396`): `require_oauth_token`, `require_role`, `require_attributes` — patrón de decorador reutilizable, pero el gate de MFA propuesto no necesita uno nuevo (ver diseño abajo).
 - **Frontend**: `web/app/src/stores/authStore.js:122` hace `login(username, password)` → `POST /oauth/token` directamente y guarda los tokens; es el único punto que hay que tocar para manejar un segundo paso de login.
 - **Nada de MFA/TOTP/WebAuthn/FIDO2 existe hoy en todo el repo** (`requirements.txt`, `pyproject.toml`, grep completo): terreno nuevo, pero con patrones muy claros a seguir.
-- **Acheron** (`API/src/modules/acheron`): zero-knowledge correcto a nivel arquitectónico; el `checker` nunca se valida en servidor (`schemas.py:74-82`, `managers.py`), por lo que la "fuerza bruta contra el checker" es un ataque **offline** una vez que un atacante obtiene el JSON del vault — no algo que un rate-limit del servidor pueda frenar. Esto es relevante para el diseño de MFA: el punto de control real está en el **login** (impedir que se obtenga un token válido), no en el propio endpoint de vault.
+- **Acheron** (`API/src/modules/features/acheron`): zero-knowledge correcto a nivel arquitectónico; el `checker` nunca se valida en servidor (`schemas.py:74-82`, `managers.py`), por lo que la "fuerza bruta contra el checker" es un ataque **offline** una vez que un atacante obtiene el JSON del vault — no algo que un rate-limit del servidor pueda frenar. Esto es relevante para el diseño de MFA: el punto de control real está en el **login** (impedir que se obtenga un token válido), no en el propio endpoint de vault.
 - **Infraestructura general**: `Flask-Limiter` en memoria (no sobrevive reinicios ni escala multi-worker), sin cabeceras de seguridad (CSP/HSTS), auditoría solo en logs de aplicación (sin tabla dedicada).
 
 ## Hallazgos priorizados (Acheron)
@@ -107,7 +107,7 @@ Se descarta guardar en servidor un secreto ligado a la credencial WebAuthn para 
 - `API/src/modules/users/schemas.py` — nuevos schemas para challenge/verify/enroll
 - `web/app/src/stores/authStore.js:122` — manejar `mfaRequired`
 - `API/requirements.txt` — añadir `pyotp`, `webauthn`
-- Acheron (fase 0/2): `API/src/modules/acheron/{schemas.py,model.py,managers.py,endpoints.py}`, `web/app/src/acheron/{crypto.js,vault.js}`
+- Acheron (fase 0/2): `API/src/modules/features/acheron/{schemas.py,model.py,managers.py,endpoints.py}`, `web/app/src/acheron/{crypto.js,vault.js}`
 
 ## Fuera de alcance / no-objetivos
 

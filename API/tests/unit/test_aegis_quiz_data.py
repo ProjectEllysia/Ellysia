@@ -2,8 +2,8 @@
 
 import pytest
 
-from src.modules.aegis.exceptions import AegisValidationError
-from src.modules.aegis.services.pills import AegisQuizData
+from src.modules.features.aegis.exceptions import AegisValidationError
+from src.modules.features.aegis.services.pills import AegisQuizData
 
 pytestmark = pytest.mark.unit
 

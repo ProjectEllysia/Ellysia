@@ -20,10 +20,10 @@ Orden del plan: primero mayor impacto con menor esfuerzo; dentro del mismo cuadr
 
 Dos endpoints de Themis devuelven metadatos de documentos **sin comprobar que el escaneo/documento pertenezca al usuario autenticado**:
 
-- `GET /themis/scan/<scan_id>/documents` ([endpoints.py:907-918](API/src/modules/themis/endpoints.py:907)): resuelve el scan con `resolve_manager` + `get_scan_by_id` y lista sus documentos sin ninguna aserción de propiedad. Cualquier usuario con `THEMIS_READ` puede enumerar los documentos (ids, fechas, estado, `downloadUrl`) de escaneos ajenos.
-- `GET /themis/document-status?scan_id=` ([endpoints.py:819-850](API/src/modules/themis/endpoints.py:819)): la propiedad solo se verifica en la rama `document_id` (`if document_id: assert_document_ownership(...)`); consultando por `scan_id` no hay ninguna comprobación.
+- `GET /themis/scan/<scan_id>/documents` ([endpoints.py:907-918](API/src/modules/features/themis/endpoints.py:907)): resuelve el scan con `resolve_manager` + `get_scan_by_id` y lista sus documentos sin ninguna aserción de propiedad. Cualquier usuario con `THEMIS_READ` puede enumerar los documentos (ids, fechas, estado, `downloadUrl`) de escaneos ajenos.
+- `GET /themis/document-status?scan_id=` ([endpoints.py:819-850](API/src/modules/features/themis/endpoints.py:819)): la propiedad solo se verifica en la rama `document_id` (`if document_id: assert_document_ownership(...)`); consultando por `scan_id` no hay ninguna comprobación.
 
-La descarga (`/document/<id>/download`) sí verifica propiedad, así que la fuga es de metadatos + enumeración de IDs, no del PDF — pero rompe el patrón que el resto del módulo aplica de forma consistente. **Iris hace exactamente esto bien** ([iris/endpoints.py:383](API/src/modules/iris/endpoints.py:383) comprueba `doc.user_id != user.id` en ambas ramas, y `get_documents_by_analysis` asegura `assert_analysis_ownership`), lo que confirma que en Themis es un descuido, no un diseño.
+La descarga (`/document/<id>/download`) sí verifica propiedad, así que la fuga es de metadatos + enumeración de IDs, no del PDF — pero rompe el patrón que el resto del módulo aplica de forma consistente. **Iris hace exactamente esto bien** ([iris/endpoints.py:383](API/src/modules/features/iris/endpoints.py:383) comprueba `doc.user_id != user.id` en ambas ramas, y `get_documents_by_analysis` asegura `assert_analysis_ownership`), lo que confirma que en Themis es un descuido, no un diseño.
 
 **Fix:** usar `ScanManager.assert_scan_ownership(scan_id, user.id)` (o `resolve_owned_scan`) en ambos endpoints; en `document-status` por `scan_id`, verificar `doc.user_id == user.id` como hace Iris. Añadir test de regresión (usuario B consulta documentos del scan de usuario A → 404).
 
@@ -31,8 +31,8 @@ La descarga (`/document/<id>/download`) sí verifica propiedad, así que la fuga
 
 `shared/_documents.py` contiene `run_report_generation()` y `_set_document_status_safe()` ([\_documents.py:27-79](API/src/modules/shared/_documents.py:27)), escritos explícitamente para deduplicar el patrón de generación de PDFs («Patrón común a Themis e Iris (antes duplicado en ambos managers)»)… pero **ningún módulo los llama** (verificado con grep: cero usos fuera del propio fichero). Mientras tanto:
 
-- `ThemisReportManager._generate_pdf_async` + `_update_document_status` ([reports.py:163-205](API/src/modules/themis/managers/reports.py:163))
-- `IrisReportManager._generate_pdf_async` + `_update_document_status` ([managers.py:1093-1133](API/src/modules/iris/managers.py:1093))
+- `ThemisReportManager._generate_pdf_async` + `_update_document_status` ([reports.py:163-205](API/src/modules/features/themis/managers/reports.py:163))
+- `IrisReportManager._generate_pdf_async` + `_update_document_status` ([managers.py:1093-1133](API/src/modules/features/iris/managers.py:1093))
 
 siguen duplicando el mismo bloque casi literal (mismo comentario sobre RQ incluido). Es el ítem **D1** del sondeo (marcado allí como pendiente, esfuerzo 🔧) — pero como el helper ya existe con su docstring y semántica de errores resuelta, cablearlo baja el esfuerzo a ⚡: cada `_generate_pdf_async` queda reducido a construir su `render` callable y delegar.
 
@@ -40,26 +40,26 @@ siguen duplicando el mismo bloque casi literal (mismo comentario sobre RQ inclui
 
 ### N3 — Parámetro muerto `strategy_class` + acceso a atributo privado desde el endpoint — 🟠 ⚡ · LEAN/SOLID (encapsulación)
 
-`ThemisReportManager.generate_report(scan_id, ai_report, strategy_class=None)` declara y documenta `strategy_class` pero **no lo usa en el cuerpo** ([reports.py:129-155](API/src/modules/themis/managers/reports.py:129) — la estrategia real se resuelve dentro de `PDFCreator` vía su propio registro, [services/reports.py:373](API/src/modules/themis/services/reports.py:373)). Para alimentar ese parámetro muerto, el endpoint accede a un atributo privado de otro objeto: `manager._strategy_class` ([endpoints.py:795](API/src/modules/themis/endpoints.py:795)).
+`ThemisReportManager.generate_report(scan_id, ai_report, strategy_class=None)` declara y documenta `strategy_class` pero **no lo usa en el cuerpo** ([reports.py:129-155](API/src/modules/features/themis/managers/reports.py:129) — la estrategia real se resuelve dentro de `PDFCreator` vía su propio registro, [services/reports.py:373](API/src/modules/features/themis/services/reports.py:373)). Para alimentar ese parámetro muerto, el endpoint accede a un atributo privado de otro objeto: `manager._strategy_class` ([endpoints.py:795](API/src/modules/features/themis/endpoints.py:795)).
 
 **Fix:** eliminar el parámetro del manager y el acceso `_strategy_class` del endpoint. Cero cambio de comportamiento.
 
 ### N4 — Serialización de documentos duplicada 3× dentro de `themis/endpoints.py` — 🟠 ⚡ · DRY
 
-El bloque `download_url = None; is_done = ...; docs_list.append({...})` está copiado casi idéntico en `get_document_status`, `get_all_documents` y `get_documents_by_scan` ([endpoints.py:837-850](API/src/modules/themis/endpoints.py:837), [873-889](API/src/modules/themis/endpoints.py:873), [920-936](API/src/modules/themis/endpoints.py:920)). Iris ya resolvió esto con un helper `_download_url_for(doc)` — Themis debería tener su `_serialize_document(doc)` equivalente (o mejor: un Marshmallow schema que lo haga, ya que los response schemas existen).
+El bloque `download_url = None; is_done = ...; docs_list.append({...})` está copiado casi idéntico en `get_document_status`, `get_all_documents` y `get_documents_by_scan` ([endpoints.py:837-850](API/src/modules/features/themis/endpoints.py:837), [873-889](API/src/modules/features/themis/endpoints.py:873), [920-936](API/src/modules/features/themis/endpoints.py:920)). Iris ya resolvió esto con un helper `_download_url_for(doc)` — Themis debería tener su `_serialize_document(doc)` equivalente (o mejor: un Marshmallow schema que lo haga, ya que los response schemas existen).
 
 **Fix:** extraer `_serialize_document(doc) -> dict` en `themis/endpoints.py` (o método en `ThemisReportManager`) y usarlo en los 3 sitios. De paso corrige la asimetría de que la lógica «cuándo hay downloadUrl» viva en la capa HTTP.
 
 ### N5 — Excepciones de documentos genéricas viviendo en `aegis.exceptions` — 🟠 🔧 · SOLID (acoplamiento entre módulos)
 
-`DocumentError`, `DocumentNotFoundError`, `DocumentNotReadyError` se definen en `aegis/exceptions.py` pero las importan **Themis** ([endpoints.py:22](API/src/modules/themis/endpoints.py:22), [managers/reports.py:7](API/src/modules/themis/managers/reports.py:7)) e **Iris** ([managers.py:22](API/src/modules/iris/managers.py:22)). Tres módulos feature acoplados a las excepciones de un cuarto viola la regla de capas del propio repo (lo transversal vive en `shared/`); además obliga a Themis a conocer Aegis para algo que no tiene nada que ver con campañas.
+`DocumentError`, `DocumentNotFoundError`, `DocumentNotReadyError` se definen en `aegis/exceptions.py` pero las importan **Themis** ([endpoints.py:22](API/src/modules/features/themis/endpoints.py:22), [managers/reports.py:7](API/src/modules/features/themis/managers/reports.py:7)) e **Iris** ([managers.py:22](API/src/modules/features/iris/managers.py:22)). Tres módulos feature acoplados a las excepciones de un cuarto viola la regla de capas del propio repo (lo transversal vive en `shared/`); además obliga a Themis a conocer Aegis para algo que no tiene nada que ver con campañas.
 
 **Fix:** mover las tres excepciones a `shared/_exceptions.py` y dejar re-exports en `aegis/exceptions.py` para compatibilidad (mismo patrón que ya usa `unit_of_work.py` con los helpers de `engine.py`). Actualizar imports en themis/iris cuando toque tocar esos ficheros.
 
 ### N6 — N+1 en los listados de escaneos — 🟠 🔧 · LEAN (eficiencia)
 
-- `ScanManager.get_scans_paginated` obtiene la página de scans y luego llama `self.format_scan(item.id)` **por cada ítem** ([scan.py:131](API/src/modules/themis/managers/scan.py:131)) — y `format_scan` re-consulta el scan por id, de modo que una página de 10 hace ~11+ queries.
-- `GET /themis/results?type=all` ([endpoints.py:521-527](API/src/modules/themis/endpoints.py:521)) itera los 4 managers, carga **todos** los scans del usuario sin paginación y vuelve a llamar `format_scan(scan.id)` por cada uno (re-query por fila otra vez).
+- `ScanManager.get_scans_paginated` obtiene la página de scans y luego llama `self.format_scan(item.id)` **por cada ítem** ([scan.py:131](API/src/modules/features/themis/managers/scan.py:131)) — y `format_scan` re-consulta el scan por id, de modo que una página de 10 hace ~11+ queries.
+- `GET /themis/results?type=all` ([endpoints.py:521-527](API/src/modules/features/themis/endpoints.py:521)) itera los 4 managers, carga **todos** los scans del usuario sin paginación y vuelve a llamar `format_scan(scan.id)` por cada uno (re-query por fila otra vez).
 
 **Fix:** que `format_scan` acepte la instancia ya cargada (sobrecarga `format_scan(scan)` o parámetro opcional) y que la rama `all` pagine o al menos reutilice las instancias que ya tiene. Beneficio directo en el endpoint más consultado del módulo (la SPA lo sondea cada 4 s cuando hay escaneos activos).
 
@@ -79,11 +79,11 @@ El fix de **B9** (sondeo, Fase 3) sustituyó el `setTimeout(600)` de `handlePrev
 
 Lote de limpieza sin riesgo, todo verificado con grep:
 
-- `IrisManager._is_cancelled` ([managers.py:961-977](API/src/modules/iris/managers.py:961)): sin ningún caller.
-- `MAX_PDF_SIZE_BYTES` ([themis/endpoints.py:108](API/src/modules/themis/endpoints.py:108)): declarado y nunca usado (= **Q12** del sondeo, sigue vigente).
+- `IrisManager._is_cancelled` ([managers.py:961-977](API/src/modules/features/iris/managers.py:961)): sin ningún caller.
+- `MAX_PDF_SIZE_BYTES` ([themis/endpoints.py:108](API/src/modules/features/themis/endpoints.py:108)): declarado y nunca usado (= **Q12** del sondeo, sigue vigente).
 - Docstrings «Generate PDF in a background **thread**» en ambos `_generate_pdf_async` (Themis e Iris): el modelo pasó a procesos worker de RQ hace tiempo. (Desaparece solo si se hace N2.)
-- `delete_authorized_target` devuelve `"target": ""` fijo ([endpoints.py:450](API/src/modules/themis/endpoints.py:450)) — o se devuelve el target real (se tiene antes de borrar) o se quita la clave del schema.
-- `IrisManager._validate_headers_pre` usa formato `%`-style con unicode escapado (`á`) en literales que podrían ser UTF-8 normal ([managers.py:558-561](API/src/modules/iris/managers.py:558)) — legibilidad.
+- `delete_authorized_target` devuelve `"target": ""` fijo ([endpoints.py:450](API/src/modules/features/themis/endpoints.py:450)) — o se devuelve el target real (se tiene antes de borrar) o se quita la clave del schema.
+- `IrisManager._validate_headers_pre` usa formato `%`-style con unicode escapado (`á`) en literales que podrían ser UTF-8 normal ([managers.py:558-561](API/src/modules/features/iris/managers.py:558)) — legibilidad.
 
 ### N10 — `web/app/CLAUDE.md` desactualizado (habla de "sentinel") — 🟡 ⚡ · LEAN (docs que mienten)
 
@@ -93,7 +93,7 @@ El CLAUDE.md del SPA referencia `sentinelStore`, vistas "Sentinel" y el proxy `/
 
 ### N11 — `assert_scan_ownership`: query extra de User por llamada — 🟡 ⚡ · LEAN (complementa A10)
 
-Además de no usar el helper compartido `assert_owned` (ya anotado como **A10**), `assert_scan_ownership` ([scan.py:288-313](API/src/modules/themis/managers/scan.py:288)) hace un `UserManager().get_user_by_id(user_id)` **por cada llamada** solo para lanzar `UserNotFoundError` — un caso imposible en la práctica (el `user_id` viene del JWT ya verificado) que cuesta una query en el camino caliente de casi todos los endpoints de Themis. Migrar a `assert_owned` (fix de A10) elimina la query de gratis.
+Además de no usar el helper compartido `assert_owned` (ya anotado como **A10**), `assert_scan_ownership` ([scan.py:288-313](API/src/modules/features/themis/managers/scan.py:288)) hace un `UserManager().get_user_by_id(user_id)` **por cada llamada** solo para lanzar `UserNotFoundError` — un caso imposible en la práctica (el `user_id` viene del JWT ya verificado) que cuesta una query en el camino caliente de casi todos los endpoints de Themis. Migrar a `assert_owned` (fix de A10) elimina la query de gratis.
 
 ### N12 — Pila de ~8 decoradores repetida en los ~30 endpoints de Themis — 🟡 🏗️ · DRY (opcional, discutible)
 
@@ -108,12 +108,12 @@ Estado verificado a 2026-07-14 — siguen abiertos:
 | ID sondeo | Resumen | Impacto | Esfuerzo | Nota de esta pasada |
 |---|---|---|---|---|
 | **D1** | Duplicación `_generate_pdf_async`/`_update_document_status` Themis↔Iris | 🟠→🔴 | 🔧→⚡ | Reclasificado: ver **N2** — el helper ya existe, solo falta usarlo |
-| **D2** | `delete_document` (get→exists→remove→delete) reimplementado 3× | 🟠 | ⚡ | Sigue igual ([reports.py:84](API/src/modules/themis/managers/reports.py:84), [iris/managers.py:1027](API/src/modules/iris/managers.py:1027)); encaja natural tras N2/N5 |
+| **D2** | `delete_document` (get→exists→remove→delete) reimplementado 3× | 🟠 | ⚡ | Sigue igual ([reports.py:84](API/src/modules/features/themis/managers/reports.py:84), [iris/managers.py:1027](API/src/modules/features/iris/managers.py:1027)); encaja natural tras N2/N5 |
 | **A10** | `assert_scan_ownership` no usa `assert_owned` | 🟠 | ⚡ | Ampliado por **N11** (query extra) |
-| **A7** | Lógica de negocio en endpoints Themis (`severityBreakdown`, `openPorts`, `TYPE_MGR_MAP`) | 🟠 | 🔧 | Sigue igual ([endpoints.py:497-502](API/src/modules/themis/endpoints.py:497), [610-624](API/src/modules/themis/endpoints.py:610)) |
+| **A7** | Lógica de negocio en endpoints Themis (`severityBreakdown`, `openPorts`, `TYPE_MGR_MAP`) | 🟠 | 🔧 | Sigue igual ([endpoints.py:497-502](API/src/modules/features/themis/endpoints.py:497), [610-624](API/src/modules/features/themis/endpoints.py:610)) |
 | **Q4** | `TaskStatus` duplicado (themis/services/tasks.py vs taskqueue) | 🟠 | 🔧 | Sigue igual; documentado como trampa en CLAUDE.md |
 | **Q1** | Sin estado de error en la UI (fallo → empty-state feliz) | 🟠 | 🔧 | Sigue igual (`catch { /* noop */ }` en stores) |
-| **Q11** | `find_task` (round-trip Redis) por cada regla de Iris | 🟡 | ⚡ | Sigue igual ([iris/managers.py:652-654](API/src/modules/iris/managers.py:652)) |
+| **Q11** | `find_task` (round-trip Redis) por cada regla de Iris | 🟡 | ⚡ | Sigue igual ([iris/managers.py:652-654](API/src/modules/features/iris/managers.py:652)) |
 | **S7/S9/S11** | Decisiones de producto de seguridad | 🟠 | 🔧 | Requieren luz verde explícita — fuera del alcance «no romper funcionamiento» de este plan |
 | **A1/A2/A3** | God-class `ScanManager` / god-store `themisStore` (970 líneas) / `IrisReportViewer` (1200 líneas) | 🔴 | 🏗️ | Siguen igual; hacer **después** de los quick wins y con la suite verde |
 | **D4** | Pipeline `create→commit_for_handoff→submit→execute` sin base común | 🟠 | 🏗️ | Sigue igual; N2+D2 lo dejan más cerca |

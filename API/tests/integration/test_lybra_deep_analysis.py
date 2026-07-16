@@ -19,14 +19,14 @@ from datetime import datetime
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.themis.model import NmapScan, NiktoScan, OpenVASScan, ScanStatus
-from src.modules.themis.repositories import ScanRepository, KbRepository
-from src.modules.themis.managers import (
+from src.modules.features.themis.model import NmapScan, NiktoScan, OpenVASScan, ScanStatus
+from src.modules.features.themis.repositories import ScanRepository, KbRepository
+from src.modules.features.themis.managers import (
     LybraEngineManager, ScanManager,
     NmapScanManager, NiktoScanManager, OpenVASScanManager,
 )
-from src.modules.themis.lybra import DEFAULT_PORTS
-from src.modules.themis.services.parsing import validate_port
+from src.modules.features.themis.lybra import DEFAULT_PORTS
+from src.modules.features.themis.services.parsing import validate_port
 
 pytestmark = pytest.mark.integration
 

@@ -12,9 +12,9 @@ from datetime import datetime
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.themis.model import NmapScan, NiktoScan, ScanStatus
-from src.modules.themis.repositories import ScanRepository, KbRepository
-from src.modules.themis.managers import LybraEngineManager, ScanManager, AuthorizedTargetManager
+from src.modules.features.themis.model import NmapScan, NiktoScan, ScanStatus
+from src.modules.features.themis.repositories import ScanRepository, KbRepository
+from src.modules.features.themis.managers import LybraEngineManager, ScanManager, AuthorizedTargetManager
 
 pytestmark = pytest.mark.integration
 
@@ -96,8 +96,8 @@ def test_lybra_self_discovery_requires_authorized_target(client, admin_user, aut
 
 def test_lybra_run_scan_self_discovery_succeeds_once_authorized(app, admin_user):
     from unittest import mock
-    from src.modules.themis.managers import AuthorizedTargetManager
-    from src.modules.themis.exceptions import TargetNotAuthorizedError
+    from src.modules.features.themis.managers import AuthorizedTargetManager
+    from src.modules.features.themis.exceptions import TargetNotAuthorizedError
 
     with app.app_context():
         with pytest.raises(TargetNotAuthorizedError):
@@ -359,8 +359,8 @@ def test_lybra_version_match_produces_cve_finding(app, admin_user):
 def test_lybra_active_check_persists_confirmed_finding(app, admin_user, monkeypatch):
     # Enable active checks and stub the HTTP probe so no real network is hit.
     import src.modules.system.config_reading as CR
-    from src.modules.themis.lybra import checks as checks_mod
-    from src.modules.themis.lybra.checks import Response
+    from src.modules.features.themis.lybra import checks as checks_mod
+    from src.modules.features.themis.lybra.checks import Response
 
     monkeypatch.setattr(CR, "is_lybra_active_checks_enabled", lambda: True)
 
@@ -452,7 +452,7 @@ def test_accept_nonexistent_finding_is_404(client, admin_user, auth_headers):
 def test_lybra_fingerprinting_records_agreement_with_nmap(app, admin_user, monkeypatch):
     # Enable fingerprinting and stub the HTTP probe (no real network).
     import src.modules.system.config_reading as CR
-    from src.modules.themis.lybra.checks import HttpProbe, Response
+    from src.modules.features.themis.lybra.checks import HttpProbe, Response
 
     monkeypatch.setattr(CR, "is_lybra_fingerprinting_enabled", lambda: True)
 
@@ -521,7 +521,7 @@ def test_lybra_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, mon
     look up and a self-discovery-only scan finds zero CVEs, ever.
     """
     import src.modules.system.config_reading as CR
-    from src.modules.themis.lybra.checks import HttpProbe, Response
+    from src.modules.features.themis.lybra.checks import HttpProbe, Response
 
     _seed_kb_apache_cve(app)
     monkeypatch.setattr(CR, "is_lybra_fingerprinting_enabled", lambda: True)

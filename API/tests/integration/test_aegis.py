@@ -44,8 +44,8 @@ def make_aegis_doc(app):
 
     def _make(user_id, status="done"):
         from src.modules.infrastructure.unit_of_work import UnitOfWork
-        from src.modules.aegis.model import AegisDocument, AegisTip, Topic
-        from src.modules.aegis.repositories import AegisDocumentRepository
+        from src.modules.features.aegis.model import AegisDocument, AegisTip, Topic
+        from src.modules.features.aegis.repositories import AegisDocumentRepository
 
         with app.app_context():
             with UnitOfWork() as uow:

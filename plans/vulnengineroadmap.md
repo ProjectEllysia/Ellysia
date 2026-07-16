@@ -231,7 +231,7 @@ dos pistas entrelazadas.
 
 El plan se organiza ahora en dos etapas. La **Etapa 1** agrupa las fases que construyen el motor
 nativo de un único host —descubrir, fingerprintear, detectar y correlacionar— y que ya están
-escritas en su mayor parte en `API/src/modules/themis/lybra/` (`engine.py`, `checks.py`, `kb.py`,
+escritas en su mayor parte en `API/src/modules/features/themis/lybra/` (`engine.py`, `checks.py`, `kb.py`,
 `correlation.py`, `fingerprint.py`, `transport.py`, `adapters.py`) y en sus managers
 (`managers/lybra_engine.py`, `managers/kb.py`). La **Etapa 2**, al final de este apartado, recoge
 las capacidades nuevas que llevan a Lybra más allá del host único y más allá del escaneo activo:

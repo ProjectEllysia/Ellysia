@@ -30,7 +30,7 @@ from typing import Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.modules.themis.lybra import (  # noqa: E402
+from src.modules.features.themis.lybra import (  # noqa: E402
     scan_ports_sync, port_concordance, DEFAULT_PORTS,
     HttpProbe, SshProbe, is_http_service, Service,
     fingerprint_http, fingerprint_ssh, agrees_with_nmap, concordance_rate,

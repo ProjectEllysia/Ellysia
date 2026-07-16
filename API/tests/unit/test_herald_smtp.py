@@ -17,9 +17,9 @@ import pytest
 aiosmtpd_controller = pytest.importorskip("aiosmtpd.controller")
 Controller = aiosmtpd_controller.Controller
 
-from src.modules.herald.exceptions import EmailConnectionError, EmailSendError
-from src.modules.herald.inputs import EmailMessage
-from src.modules.herald.strategies import SmtpStrategy
+from src.modules.tools.herald.exceptions import EmailConnectionError, EmailSendError
+from src.modules.tools.herald.inputs import EmailMessage
+from src.modules.tools.herald.strategies import SmtpStrategy
 
 pytestmark = pytest.mark.unit
 

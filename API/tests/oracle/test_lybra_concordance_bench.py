@@ -32,7 +32,7 @@ from pathlib import Path
 
 import pytest
 
-from src.modules.themis.lybra import scan_ports_sync, port_concordance, concordance_rate
+from src.modules.features.themis.lybra import scan_ports_sync, port_concordance, concordance_rate
 
 from ._docker_helpers import resolve_docker, docker_run, docker_rm, wait_for_port, port_is_free
 

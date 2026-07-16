@@ -17,8 +17,8 @@ import io
 import pytest
 import qrcode
 
-from src.modules.iris.services.parsers import Attachment, MessageContext
-from src.modules.iris.services.rules.body_links_rules import check_qr_code_links
+from src.modules.features.iris.services.parsers import Attachment, MessageContext
+from src.modules.features.iris.services.rules.body_links_rules import check_qr_code_links
 
 pytestmark = pytest.mark.unit
 

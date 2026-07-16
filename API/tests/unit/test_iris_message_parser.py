@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import pytest
 
-from src.modules.iris.services.parsers import parse_raw_message, MessageContext, Attachment
-from src.modules.iris.services.rules.received_timing_rules import check_received_chain
-from src.modules.iris.services.rules.body_links_rules import check_body_links
-from src.modules.iris.services.rules.body_content_rules import check_body_content
-from src.modules.iris.services.rules.attachment_media_rules import check_suspicious_attachments
+from src.modules.features.iris.services.parsers import parse_raw_message, MessageContext, Attachment
+from src.modules.features.iris.services.rules.received_timing_rules import check_received_chain
+from src.modules.features.iris.services.rules.body_links_rules import check_body_links
+from src.modules.features.iris.services.rules.body_content_rules import check_body_content
+from src.modules.features.iris.services.rules.attachment_media_rules import check_suspicious_attachments
 
 pytestmark = pytest.mark.unit
 

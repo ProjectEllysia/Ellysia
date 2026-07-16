@@ -6,12 +6,12 @@ Funciones puras sobre strings: no requieren BD ni app Flask.
 import pytest
 
 import src.modules.system.config_reading as CR
-from src.modules.themis.exceptions import (
+from src.modules.features.themis.exceptions import (
     IPValidationError,
     PortValidationError,
     PrivateIPRequested,
 )
-from src.modules.themis.services.parsing import (
+from src.modules.features.themis.services.parsing import (
     validate_ip,
     validate_port,
     reject_private_ip,

@@ -9,7 +9,7 @@ import struct
 
 import pytest
 
-from src.modules.themis.lybra import (
+from src.modules.features.themis.lybra import (
     fingerprint_http,
     fingerprint_ssh,
     parse_ssh_banner,
@@ -19,10 +19,10 @@ from src.modules.themis.lybra import (
     agrees_with_nmap,
     concordance_rate,
 )
-from src.modules.themis.lybra.checks import Response
-from src.modules.themis.lybra.fingerprint import SSH_MSG_KEXINIT
-from src.modules.themis.lybra.engine import Service
-from src.modules.themis.managers import LybraEngineManager
+from src.modules.features.themis.lybra.checks import Response
+from src.modules.features.themis.lybra.fingerprint import SSH_MSG_KEXINIT
+from src.modules.features.themis.lybra.engine import Service
+from src.modules.features.themis.managers import LybraEngineManager
 
 pytestmark = pytest.mark.unit
 
@@ -91,7 +91,7 @@ def test_fingerprint_http_vendor_signature_from_body():
 
 
 def test_load_tech_signatures_covers_known_vendors():
-    from src.modules.themis.lybra import load_tech_signatures
+    from src.modules.features.themis.lybra import load_tech_signatures
     names = {s.name for s in load_tech_signatures()}
     assert {"WordPress", "SonicWall", "pfSense", "Fortinet FortiGate", "Cisco IOS/ASA"} <= names
 

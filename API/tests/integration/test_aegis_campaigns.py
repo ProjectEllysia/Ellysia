@@ -23,7 +23,7 @@ import pytest
 aiosmtpd_controller = pytest.importorskip("aiosmtpd.controller")
 Controller = aiosmtpd_controller.Controller
 
-from src.modules.aegis.managers import CampaignManager
+from src.modules.features.aegis.managers import CampaignManager
 from src.modules.system.taskqueue import TaskQueue
 
 pytestmark = pytest.mark.integration
@@ -125,8 +125,8 @@ def make_aegis_doc_with_quiz(app):
 
     def _make(user_id):
         from src.modules.infrastructure.unit_of_work import UnitOfWork
-        from src.modules.aegis.model import AegisDocument, AegisQuizQuestion, Topic
-        from src.modules.aegis.repositories import AegisDocumentRepository
+        from src.modules.features.aegis.model import AegisDocument, AegisQuizQuestion, Topic
+        from src.modules.features.aegis.repositories import AegisDocumentRepository
 
         with app.app_context():
             with UnitOfWork() as uow:
@@ -169,7 +169,7 @@ def make_aegis_doc_with_quiz(app):
 
 
 def _fetch_token_for_email(app, campaign_id: int, email: str) -> str:
-    from src.modules.aegis.repositories import CampaignRepository
+    from src.modules.features.aegis.repositories import CampaignRepository
     from src.modules.infrastructure.session import get_db_session
 
     with app.app_context():
