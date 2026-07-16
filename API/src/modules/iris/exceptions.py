@@ -2,7 +2,7 @@
 Custom exceptions for the Iris email header analysis module.
 
 Hierarchy:
-    IrisError (SecOpsException)
+    IrisError (EllysiaException)
     ├── IrisAnalysisNotFoundError   (404)
     ├── IrisAnalysisNotReadyError   (409)
     ├── IrisExecutionError          (500)
@@ -11,10 +11,10 @@ Hierarchy:
 
 from __future__ import annotations
 
-from src.modules.shared._exceptions import SecOpsException, ErrorCode
+from src.modules.shared._exceptions import EllysiaException, ErrorCode
 
 
-class IrisError(SecOpsException):
+class IrisError(EllysiaException):
     """Base exception for all Iris module errors."""
     default_code = ErrorCode.UNKNOWN_ERROR
     default_status_code = 500

@@ -9,14 +9,14 @@ Grupos: Escaneo, Reportes, Escaneo Programado, Validación, Carpetas.
 """
 
 from src.modules.shared._exceptions import (
-    SecOpsException,
+    EllysiaException,
     ErrorCode,
     ErrorSeverity,
     ValidationError,
 )
 
 
-class ScanError(SecOpsException):
+class ScanError(EllysiaException):
     """Excepción base para errores de escaneo."""
 
     default_code = ErrorCode.SCAN_ERROR
@@ -181,7 +181,7 @@ class DuplicateAuthorizedTargetError(ScanError):
         )
 
 
-class ReportError(SecOpsException):
+class ReportError(EllysiaException):
     """Excepción base para errores de reportes y documentos."""
 
     default_code = ErrorCode.REPORT_ERROR

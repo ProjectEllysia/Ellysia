@@ -22,7 +22,7 @@ from .exceptions import (
     DistributionListNotFoundError,
     QuizAlreadyCompletedError,
     QuizTokenInvalidError,
-    SecOpsException,
+    EllysiaException,
 )
 from .services import (
     ExportData,
@@ -204,7 +204,7 @@ def aegis_update_document(args, data):
 @limiter.limit("120 per hour; 500 per day")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.AEGIS_READ])
-@handle_exceptions(default_exception=SecOpsException, logger=logger)
+@handle_exceptions(default_exception=EllysiaException, logger=logger)
 def aegis_get_org_profile():
     """Obtener el perfil de organización del usuario actual (o defaults)"""
     user = get_current_user()
@@ -221,7 +221,7 @@ def aegis_get_org_profile():
 @limiter.limit("30 per hour; 100 per day")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.AEGIS_UPDATE])
-@handle_exceptions(default_exception=SecOpsException, logger=logger)
+@handle_exceptions(default_exception=EllysiaException, logger=logger)
 def aegis_save_org_profile(data):
     """Crear o actualizar (upsert) el perfil de organización del usuario actual"""
     user = get_current_user()

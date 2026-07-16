@@ -11,10 +11,10 @@ Históricamente vivían en ``aegis.exceptions``; ahora son propiedad de ``scribe
 y aquél las reexporta por retrocompatibilidad.
 """
 
-from src.modules.shared._exceptions import SecOpsException, ErrorCode, ErrorSeverity
+from src.modules.shared._exceptions import EllysiaException, ErrorCode, ErrorSeverity
 
 
-class AIConnectionError(SecOpsException):
+class AIConnectionError(EllysiaException):
     """No se pudo establecer comunicación con el backend del modelo."""
 
     default_code = ErrorCode.INTERNAL_SERVER_ERROR
@@ -30,7 +30,7 @@ class AIConnectionError(SecOpsException):
         )
 
 
-class AIResponseError(SecOpsException):
+class AIResponseError(EllysiaException):
     """El modelo devolvió una respuesta vacía o no parseable."""
 
     default_code = ErrorCode.INTERNAL_SERVER_ERROR
@@ -45,7 +45,7 @@ class AIResponseError(SecOpsException):
         )
 
 
-class AIFallbackExhaustedError(SecOpsException):
+class AIFallbackExhaustedError(EllysiaException):
     """Se agotaron todos los reintentos sin obtener una respuesta válida."""
 
     default_code = ErrorCode.INTERNAL_SERVER_ERROR
@@ -60,7 +60,7 @@ class AIFallbackExhaustedError(SecOpsException):
         )
 
 
-class CircuitBreakerOpenError(SecOpsException):
+class CircuitBreakerOpenError(EllysiaException):
     """El circuit breaker del backend está abierto tras fallos repetidos."""
 
     default_code = ErrorCode.INTERNAL_SERVER_ERROR
@@ -75,7 +75,7 @@ class CircuitBreakerOpenError(SecOpsException):
         )
 
 
-class AIStrategyConfigurationError(SecOpsException):
+class AIStrategyConfigurationError(EllysiaException):
     """La estrategia solicitada no existe o le faltan credenciales."""
 
     default_code = ErrorCode.CONFIGURATION_ERROR

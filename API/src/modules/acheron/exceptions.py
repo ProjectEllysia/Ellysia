@@ -16,7 +16,7 @@ Ejemplo de uso:
 """
 
 from src.modules.shared._exceptions import (
-    SecOpsException,
+    EllysiaException,
     ErrorCode,
     ErrorSeverity,
     DatabaseError,

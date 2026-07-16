@@ -8,10 +8,10 @@ el proveedor SMTP) y de envío (mensaje rechazado). Son independientes del
 dominio que consume el mailer (Aegis, …). Espejo de ``scribe.exceptions``.
 """
 
-from src.modules.shared._exceptions import SecOpsException, ErrorCode, ErrorSeverity
+from src.modules.shared._exceptions import EllysiaException, ErrorCode, ErrorSeverity
 
 
-class EmailConnectionError(SecOpsException):
+class EmailConnectionError(EllysiaException):
     """No se pudo establecer comunicación con el servidor de correo."""
 
     default_code = ErrorCode.INTERNAL_SERVER_ERROR
@@ -27,7 +27,7 @@ class EmailConnectionError(SecOpsException):
         )
 
 
-class EmailSendError(SecOpsException):
+class EmailSendError(EllysiaException):
     """El proveedor rechazó el mensaje (destinatario o contenido inválido)."""
 
     default_code = ErrorCode.INTERNAL_SERVER_ERROR
@@ -43,7 +43,7 @@ class EmailSendError(SecOpsException):
         )
 
 
-class EmailConfigurationError(SecOpsException):
+class EmailConfigurationError(EllysiaException):
     """La estrategia de correo solicitada no existe o le faltan credenciales."""
 
     default_code = ErrorCode.CONFIGURATION_ERROR

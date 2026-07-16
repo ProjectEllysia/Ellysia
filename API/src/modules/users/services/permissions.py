@@ -5,7 +5,7 @@ from typing import List, Optional, Set
 
 from flask import request, jsonify
 
-from src.modules.shared._exceptions import MissingParameterError, MissingJsonBodyError, SecOpsException, ErrorCode
+from src.modules.shared._exceptions import MissingParameterError, MissingJsonBodyError, EllysiaException, ErrorCode
 
 from ..managers import OAuthTokenManager
 from ..repositories import AttributeRepository
@@ -236,7 +236,7 @@ def require_oauth_token(f):
 
             return f(*args, **kwargs)
 
-        except (SecOpsException, MissingParameterError, MissingJsonBodyError):
+        except (EllysiaException, MissingParameterError, MissingJsonBodyError):
             raise
         except Exception as exc:
             logger.exception("Error durante la autenticación")
@@ -383,7 +383,7 @@ def require_attributes(
                 )
                 return f(*args, **kwargs)
 
-            except (SecOpsException, MissingParameterError, MissingJsonBodyError):
+            except (EllysiaException, MissingParameterError, MissingJsonBodyError):
                 raise
             except Exception as exc:
                 logger.error(f"Error en require_permissions: {exc}", exc_info=True)

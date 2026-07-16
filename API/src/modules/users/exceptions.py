@@ -1,12 +1,12 @@
 from src.modules.shared._exceptions import (
-    SecOpsException,
+    EllysiaException,
     ErrorCode,
     ErrorSeverity,
     DatabaseError,
 )
 
 
-class AuthenticationError(SecOpsException):
+class AuthenticationError(EllysiaException):
     default_code = ErrorCode.AUTHENTICATION_ERROR
     default_status_code = 401
     default_severity = ErrorSeverity.MEDIUM
@@ -17,7 +17,7 @@ class AuthenticationError(SecOpsException):
         super().__init__(message=message, **kwargs)
 
 
-class AuthorizationError(SecOpsException):
+class AuthorizationError(EllysiaException):
     default_code = ErrorCode.AUTHORIZATION_ERROR
     default_status_code = 403
     default_severity = ErrorSeverity.MEDIUM
