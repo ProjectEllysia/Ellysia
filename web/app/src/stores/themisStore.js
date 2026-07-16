@@ -30,27 +30,28 @@ export const useThemisStore = defineStore('themis', () => {
   /* ════════════════════════════════ STATS ══════════════════════════════ */
   const stats = reactive({ total: 0, nmap: 0, nikto: 0, openvas: 0, lybra: 0 })
   const loadingStats = ref(false)
+  const statsError = ref(null)
 
   /* ════════════════════════════════ SCANS POR TIPO ═════════════════════ */
   const scans = reactive({
-    nmap:    { results: [], loading: false, page: 1, totalCount: 0, perPage: 10 },
-    nikto:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10 },
-    openvas: { results: [], loading: false, page: 1, totalCount: 0, perPage: 10 },
-    lybra:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10 },
+    nmap:    { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
+    nikto:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
+    openvas: { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
+    lybra:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
   })
 
   // Escaneos Nmap terminados, para el modo "analizar un Nmap existente" de Lybra.
-  const sourceNmapScans = reactive({ items: [], loading: false })
+  const sourceNmapScans = reactive({ items: [], loading: false, error: null })
 
   // Registro de objetivos autorizados (roadmap §6): gate legal por-usuario que
   // desbloquea el autodescubrimiento, el fingerprinting propio y las
   // comprobaciones activas de Lybra sobre un objetivo concreto.
-  const authorizedTargets = reactive({ items: [], loading: false })
+  const authorizedTargets = reactive({ items: [], loading: false, error: null })
 
   const launching = ref(false)
 
   /* ════════════════════════════════ PROGRAMADOS ════════════════════════ */
-  const scheduled = reactive({ scans: [], loading: false })
+  const scheduled = reactive({ scans: [], loading: false, error: null })
   const scheduling = reactive({ showForm: false, submitting: false })
 
   /* ════════════════════════════════ MODALES ════════════════════════════ */
@@ -59,7 +60,7 @@ export const useThemisStore = defineStore('themis', () => {
 
   /* ════════════════════════════════ VISTA DE CARPETAS ══════════════════ */
   const viewMode = ref('full') // 'full' | 'folders'
-  const folders = reactive({ items: [], loading: false })
+  const folders = reactive({ items: [], loading: false, error: null })
   const folderForms = reactive({
     create: { show: false, submitting: false },
     rename: { show: false, folderId: null, name: '', submitting: false },
@@ -68,9 +69,9 @@ export const useThemisStore = defineStore('themis', () => {
 
   /* ════════════════════════════════ ESTADÍSTICAS HISTÓRICAS ════════════ */
   const history = reactive({
-    hosts: [], loading: false,
+    hosts: [], loading: false, error: null,
     selected: null,          // { target, scanType }
-    chart: null, chartLoading: false,
+    chart: null, chartLoading: false, chartError: null,
     cache: {},                // `${type}|${target}` -> payload, evita refetch al re-seleccionar
   })
 
@@ -108,14 +109,15 @@ export const useThemisStore = defineStore('themis', () => {
     loadingStats.value = true
     try {
       const res = await apiFetch('/themis/stats')
-      if (!res?.ok) return
+      if (!res?.ok) { statsError.value = 'No se pudieron cargar las estadísticas.'; return }
       const data = await res.json()
       stats.nmap    = data.nmap    ?? 0
       stats.nikto   = data.nikto   ?? 0
       stats.openvas = data.openvas ?? 0
       stats.lybra   = data.lybra   ?? 0
       stats.total   = data.total   ?? 0
-    } catch { /* noop */ }
+      statsError.value = null
+    } catch { statsError.value = 'Error de conexión al cargar las estadísticas.' }
     finally { loadingStats.value = false }
   }
 
@@ -154,10 +156,18 @@ export const useThemisStore = defineStore('themis', () => {
     try {
       const params = new URLSearchParams({ type, page: d.page, per_page: d.perPage })
       const res = await apiFetch(`/themis/results?${params}`)
-      if (!res?.ok) { d.results = []; return }
+      if (!res?.ok) {
+        d.results = []
+        d.error = await apiError(res, 'No se pudieron cargar los escaneos.')
+        return
+      }
       const data = await res.json()
       d.results = data.results ?? []
       d.totalCount = data.totalCount ?? 0
+      d.error = null
+    } catch (e) {
+      d.results = []
+      d.error = 'Error de conexión al cargar los escaneos.'
     } finally {
       d.loading = false
       _scheduleScanPoll(type)
@@ -240,10 +250,11 @@ export const useThemisStore = defineStore('themis', () => {
     try {
       const params = new URLSearchParams({ type: 'nmap', page: 1, per_page: 100 })
       const res = await apiFetch(`/themis/results?${params}`)
-      if (!res?.ok) { sourceNmapScans.items = []; return }
+      if (!res?.ok) { sourceNmapScans.items = []; sourceNmapScans.error = 'No se pudieron cargar los escaneos Nmap.'; return }
       const data = await res.json()
       sourceNmapScans.items = (data.results ?? []).filter(s => s.status === 'finished')
-    } catch { sourceNmapScans.items = [] }
+      sourceNmapScans.error = null
+    } catch { sourceNmapScans.items = []; sourceNmapScans.error = 'Error de conexión.' }
     finally { sourceNmapScans.loading = false }
   }
 
@@ -252,10 +263,11 @@ export const useThemisStore = defineStore('themis', () => {
     authorizedTargets.loading = true
     try {
       const res = await apiFetch('/themis/authorized-targets')
-      if (!res?.ok) { authorizedTargets.items = []; return }
+      if (!res?.ok) { authorizedTargets.items = []; authorizedTargets.error = 'No se pudieron cargar los objetivos.'; return }
       const data = await res.json()
       authorizedTargets.items = data.targets ?? []
-    } catch { authorizedTargets.items = [] }
+      authorizedTargets.error = null
+    } catch { authorizedTargets.items = []; authorizedTargets.error = 'Error de conexión.' }
     finally { authorizedTargets.loading = false }
   }
 
@@ -624,10 +636,12 @@ export const useThemisStore = defineStore('themis', () => {
     scheduled.loading = true
     try {
       const res = await apiFetch('/themis/scheduled-scans')
-      if (!res?.ok) { scheduled.scans = []; return }
+      if (!res?.ok) { scheduled.scans = []; scheduled.error = 'No se pudieron cargar los escaneos programados.'; return }
       const data = await res.json()
       scheduled.scans = data.scheduledScans ?? []
-    } finally { scheduled.loading = false }
+      scheduled.error = null
+    } catch { scheduled.scans = []; scheduled.error = 'Error de conexión.' }
+    finally { scheduled.loading = false }
   }
 
   /** Crea un nuevo escaneo programado. */
@@ -678,12 +692,13 @@ export const useThemisStore = defineStore('themis', () => {
     folders.loading = true
     try {
       const res = await apiFetch('/themis/folders')
-      if (!res?.ok) { folders.items = []; return }
+      if (!res?.ok) { folders.items = []; folders.error = 'No se pudieron cargar las carpetas.'; return }
       const data = await res.json()
       folders.items = data.folders ?? []
       // Append the virtual unfoldered group as a folder-like entry
       if (data.unfoldered) folders.items.push(data.unfoldered)
-    } catch { folders.items = [] }
+      folders.error = null
+    } catch { folders.items = []; folders.error = 'Error de conexión.' }
     finally { folders.loading = false }
   }
 
@@ -704,11 +719,12 @@ export const useThemisStore = defineStore('themis', () => {
     history.loading = true
     try {
       const res = await apiFetch('/themis/history/hosts')
-      if (!res?.ok) { history.hosts = []; return }
+      if (!res?.ok) { history.hosts = []; history.error = 'No se pudieron cargar los hosts.'; return }
       const data = await res.json()
       history.hosts = data.hosts ?? []
       if (force) history.cache = {}
-    } catch { history.hosts = [] }
+      history.error = null
+    } catch { history.hosts = []; history.error = 'Error de conexión.' }
     finally { history.loading = false }
   }
 
@@ -728,14 +744,15 @@ export const useThemisStore = defineStore('themis', () => {
       const params = new URLSearchParams({ target, type })
       const res = await apiFetch(`/themis/history/stats?${params}`)
       if (!res?.ok) {
-        toast.show(await apiError(res, 'No se pudieron obtener las estadísticas.'), 'error')
+        history.chartError = await apiError(res, 'No se pudieron obtener las estadísticas.')
         return
       }
       const data = await res.json()
       history.chart = data
       history.cache[key] = data
+      history.chartError = null
     } catch {
-      toast.show('No se pudo conectar con la API.', 'error')
+      history.chartError = 'No se pudo conectar con la API.'
     } finally { history.chartLoading = false }
   }
 
@@ -920,7 +937,7 @@ export const useThemisStore = defineStore('themis', () => {
   async function generateLybraPdf(scanId, useAi = false) {
     const ok = await generatePdf(scanId, useAi)
     if (ok) {
-      await new Promise(r => setTimeout(r, 600))
+      await waitForDocument(scanId)
       await loadLybraDocs(scanId)
     }
     return ok
@@ -947,7 +964,7 @@ export const useThemisStore = defineStore('themis', () => {
   return {
     world, setWorld, sourceNmapScans,
     authorizedTargets, loadAuthorizedTargets, addAuthorizedTarget, removeAuthorizedTarget,
-    activeTab, stats, loadingStats, scans, launching,
+    activeTab, stats, loadingStats, statsError, scans, launching,
     scheduled, scheduling,
     preview, details,
     viewMode, folders, folderForms, moveScan,

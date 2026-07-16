@@ -29,6 +29,7 @@ export const useQueueStore = defineStore('queue', () => {
 
   /** Carga en curso */
   const loading = ref(false)
+  const listError = ref(null)
 
   /** Paginacion */
   const currentPage = ref(1)
@@ -68,14 +69,17 @@ export const useQueueStore = defineStore('queue', () => {
       })
       const res = await apiFetch(`/system/tasks?${params}`)
       if (!res?.ok) {
-        toast.show('Error al cargar las tareas.', 'error')
+        tasks.value = []
+        listError.value = 'Error al cargar las tareas.'
         return
       }
       const data = await res.json()
       tasks.value = data.tasks ?? []
       totalCount.value = data.totalCount ?? 0
+      listError.value = null
     } catch {
-      toast.show('Error al conectar con la cola.', 'error')
+      tasks.value = []
+      listError.value = 'Error de conexión con la cola.'
     } finally {
       loading.value = false
     }
@@ -146,6 +150,7 @@ export const useQueueStore = defineStore('queue', () => {
     status,
     tasks,
     loading,
+    listError,
     activeTab,
     currentPage,
     totalCount,

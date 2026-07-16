@@ -9,6 +9,7 @@ export const useIrisStore = defineStore('iris', () => {
 
   const analyses = ref([])
   const loading = ref(false)
+  const listError = ref(null)
   const submitting = ref(false)
   const totalCount = ref(0)
   const page = ref(1)
@@ -65,11 +66,15 @@ export const useIrisStore = defineStore('iris', () => {
     try {
       const params = new URLSearchParams({ page: pg, per_page: pp })
       const res = await apiFetch(`/iris/results?${params}`)
-      if (!res?.ok) { analyses.value = []; return }
+      if (!res?.ok) { analyses.value = []; listError.value = 'No se pudieron cargar los análisis.'; return }
       const data = await res.json()
       analyses.value = data.analyses ?? []
       totalCount.value = data.total ?? 0
       page.value = pg
+      listError.value = null
+    } catch {
+      analyses.value = []
+      listError.value = 'Error de conexión al cargar los análisis.'
     } finally {
       loading.value = false
     }
@@ -430,7 +435,7 @@ export const useIrisStore = defineStore('iris', () => {
   }
 
   return {
-    analyses, loading, submitting, totalCount, page, perPage, loadingMore, hasMore,
+    analyses, loading, listError, submitting, totalCount, page, perPage, loadingMore, hasMore,
     currentId, currentReport, currentStatus, currentPath, pathCache,
     currentIocs, iocsCache, aiSummaryLoading,
     documents, documentsLoading,

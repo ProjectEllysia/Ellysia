@@ -26,6 +26,7 @@ export const useAegisStore = defineStore('aegis', () => {
   const brands = ref([])
   /** Documentos del historial del usuario */
   const documents = ref([])
+  const listError = ref(null)
   /** Tema seleccionado para generación */
   const selectedTopicId = ref(null)
   /** Documento actualmente en el visor */
@@ -177,9 +178,13 @@ export const useAegisStore = defineStore('aegis', () => {
     loading.value = true
     try {
       const res = await apiFetch('/aegis/documents')
-      if (!res?.ok) { documents.value = []; return }
+      if (!res?.ok) { documents.value = []; listError.value = 'No se pudieron cargar los documentos.'; return }
       const data = await res.json()
       documents.value = [...(data.documents ?? [])]
+      listError.value = null
+    } catch {
+      documents.value = []
+      listError.value = 'Error de conexión.'
     } finally { loading.value = false }
   }
 
@@ -466,7 +471,7 @@ export const useAegisStore = defineStore('aegis', () => {
   }
 
   return {
-    topics, brands, documents, selectedTopicId, currentDocId, sortMode, selectedBrands,
+    topics, brands, documents, listError, selectedTopicId, currentDocId, sortMode, selectedBrands,
     generating, loading, editing, saving, tweaks, viewerDoc,
     loadingOrgProfile, savingOrgProfile, orgProfileConfigured,
     loadTopics, loadBrands, loadOrgProfile, saveOrgProfile, loadHistory, sortedDocuments, generate,
