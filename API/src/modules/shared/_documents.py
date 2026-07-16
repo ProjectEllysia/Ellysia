@@ -109,19 +109,4 @@ def delete_document_with_file(
 
         doc_repo.delete(doc)
 
-
-def _safe_delete_file(filename: str) -> bool:
-    """
-    Elimina un archivo del sistema de archivos de forma segura.
-
-    Args:
-        filename: Ruta al archivo a eliminar.
-
-    Returns:
-        True si el archivo fue eliminado o no existía, False si hubo error.
-    """
-    
-    if not filename:
-        return False
-
     
