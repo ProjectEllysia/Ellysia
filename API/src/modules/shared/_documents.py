@@ -6,6 +6,7 @@ updates, listing, deletion). The AI generation itself lives in the ``scribe``
 module; this file no longer holds any LLM client logic.
 """
 
+import os
 import logging
 
 from typing import Callable, Type
@@ -87,15 +88,24 @@ def delete_document_with_file(
     Raises:
         La excepción devuelta por ``not_found_exc`` si el documento no existe.
     """
+    
     with UnitOfWork() as uow:
         doc_repo = repo_cls(uow)
         doc = doc_repo.get_by_id(document_id)
         if not doc:
             raise not_found_exc(document_id)
 
-        filename = doc.filename  # type: ignore
+        filename = str(doc.filename)
         if filename:
-            _safe_delete_file(str(filename))
+            if not os.path.exists(filename):
+                return True
+
+            try:
+                os.remove(filename)
+                return True
+            except Exception as exc:
+                logger.warning(f"No se pudo eliminar el archivo {filename}: {exc}", exc_info=True)
+                return False
 
         doc_repo.delete(doc)
 
@@ -110,17 +120,8 @@ def _safe_delete_file(filename: str) -> bool:
     Returns:
         True si el archivo fue eliminado o no existía, False si hubo error.
     """
-    import os
-
+    
     if not filename:
         return False
 
-    if not os.path.exists(filename):
-        return True
-
-    try:
-        os.remove(filename)
-        return True
-    except Exception as exc:
-        logger.warning(f"No se pudo eliminar el archivo {filename}: {exc}", exc_info=True)
-        return False
+    
