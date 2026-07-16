@@ -9,13 +9,14 @@ from src.modules.shared._exceptions import (
     handle_exceptions,
     DatabaseError,
     IllegalStateError,
-    SecOpsException,
+    EllysiaException,
 )
 from src.modules.shared.schemas import ErrorSchema
 from src.modules.shared import utcnow_naive
 
 from .services import Role, require_oauth_token, require_role
-from .managers import ACCESS_TOKEN_EXPIRE_MINUTES, UserManager, OAuthTokenManager, MFAManager
+from .managers import UserManager, OAuthTokenManager, MFAManager
+import src.modules.system.config_reading as CR
 from .exceptions import (
     InvalidCredentialsError,
     PasswordChangedError,
@@ -140,7 +141,7 @@ def oauth_token(data: dict[str, Any]):
         return {
             "access_token": access_token,
             "token_type": "Bearer",
-            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "expires_in": CR.get_oauth_config()[0] * 60,
             "refresh_token": refresh_token,
             "role": user.role if user else "role_user",
             "attributes": user_attrs,
@@ -170,7 +171,7 @@ def oauth_token(data: dict[str, Any]):
         return {
             "access_token": access_token,
             "token_type": "Bearer",
-            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "expires_in": CR.get_oauth_config()[0] * 60,
             "role": user.role,
             "attributes": user_attrs,
         }
@@ -241,7 +242,7 @@ def oauth_mfa_verify(data: dict[str, Any]):
     return {
         "access_token": access_token,
         "token_type": "Bearer",
-        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "expires_in": CR.get_oauth_config()[0] * 60,
         "refresh_token": refresh_token,
         "role": user.role,
         "attributes": user_attrs,
@@ -395,7 +396,7 @@ def list_user_attributes(target_user_id: int):
 
     if not USER_MANAGER.can_manage_user(uid, target_user_id):
         logger.warning(f"Usuario {uid} intento ver atributos de {target_user_id} sin permiso")
-        raise SecOpsException(
+        raise EllysiaException(
             "No tienes permiso para ver atributos de este usuario",
             status_code=403,
         )
@@ -423,7 +424,7 @@ def add_user_attribute(data: dict[str, Any], target_user_id: int):
 
     if not USER_MANAGER.can_manage_user(current_user_id, target_user_id):
         logger.warning(f"Usuario {current_user_id} intento anadir atributos a {target_user_id} sin permiso")
-        raise SecOpsException(
+        raise EllysiaException(
             "No tienes permiso para gestionar atributos de este usuario",
             status_code=403,
         )
@@ -454,7 +455,7 @@ def remove_user_attribute(data: dict[str, Any], target_user_id: int):
         logger.warning(
             f"Usuario {current_user_id} intento eliminar atributos de {target_user_id} sin permiso"
         )
-        raise SecOpsException(
+        raise EllysiaException(
             "No tienes permiso para gestionar atributos de este usuario",
             status_code=403,
         )

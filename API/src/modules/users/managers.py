@@ -39,7 +39,7 @@ from src.modules.users.exceptions import (
 )
 from src.modules.infrastructure import UnitOfWork
 from src.modules.shared import utcnow_naive
-from src.modules.infrastructure.session import read_repo
+from src.modules.infrastructure.session import build_repository
 
 from .model import (
     AccessToken,
@@ -65,13 +65,6 @@ from .services import (
 )
 
 logger = logging.getLogger(__name__)
-
-(
-    ACCESS_TOKEN_EXPIRE_MINUTES,
-    REFRESH_TOKEN_EXPIRE_DAYS,
-    JWT_SECRET_KEY,
-    JWT_ALGORITHM,
-) = CR.get_oauth_config()
 
 
 def _to_utc_epoch(dt: Optional[datetime]) -> Optional[int]:
@@ -123,7 +116,7 @@ class UserManager:
             Exception: On unexpected database errors.
         """
         try:
-            user = read_repo(UserRepository).get_by_username(username)
+            user = build_repository(UserRepository).get_by_username(username)
 
             if user is None:
                 # Dummy comparison to prevent username enumeration via timing differences.
@@ -266,7 +259,7 @@ Raises:
             User instance (without credential fields accessible to caller),
             or None if not found.
         """
-        return read_repo(UserRepository).get_by_id(user_id)
+        return build_repository(UserRepository).get_by_id(user_id)
 
     def get_all_users(self) -> List[User]:
         """
@@ -275,7 +268,7 @@ Raises:
         Returns:
             List of user dictionaries (public info only).
         """
-        return read_repo(UserRepository).get_all()
+        return build_repository(UserRepository).get_all()
 
     def get_user_by_username(self, username: str) -> Optional[User]:
         """
@@ -287,7 +280,7 @@ Raises:
         Returns:
             User instance, or None if not found.
         """
-        return read_repo(UserRepository).get_by_username(username)
+        return build_repository(UserRepository).get_by_username(username)
 
 
     # =========================================================================
@@ -454,7 +447,7 @@ Raises:
         Returns:
             List of attribute name strings.
         """
-        attrs = read_repo(AttributeRepository).get_by_user(user_id)
+        attrs = build_repository(AttributeRepository).get_by_user(user_id)
         return [a.attribute_name for a in attrs]
 
     def add_user_attributes(
@@ -570,7 +563,11 @@ class OAuthTokenManager:
         Returns:
             Signed JWT string.
         """
-        expires_at = utcnow_naive() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        # N7: leer config OAuth en el punto de uso, no en import-time.
+        # CR.get_oauth_config() cachea con @_lazy_load → barato y permite
+        # que PUT /system recargue tuning JWT sin reiniciar la app.
+        expire_min, _, jwt_secret, jwt_algo = CR.get_oauth_config()
+        expires_at = utcnow_naive() + timedelta(minutes=expire_min)
 
         payload = {
             "sub":      str(user_id),
@@ -583,7 +580,7 @@ class OAuthTokenManager:
             "pwd_at":   _to_utc_epoch(password_changed_at),
             "mfa_at":   _to_utc_epoch(mfa_at),
         }
-        token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+        token = jwt.encode(payload, jwt_secret, algorithm=jwt_algo)
 
         with UnitOfWork() as uow:
             TokenRepository(uow).save_access_token(
@@ -606,7 +603,8 @@ class OAuthTokenManager:
             Raw refresh token string (URL-safe base64, 64 bytes).
         """
         token      = secrets.token_urlsafe(64)
-        expires_at = utcnow_naive() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        _, refresh_days, _, _ = CR.get_oauth_config()
+        expires_at = utcnow_naive() + timedelta(days=refresh_days)
 
         with UnitOfWork() as uow:
             TokenRepository(uow).save_refresh_token(
@@ -634,13 +632,14 @@ class OAuthTokenManager:
         """
         try:
             # Step 1: validate JWT signature and expiry (no DB hit yet).
-            payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            _, _, jwt_secret, jwt_algo = CR.get_oauth_config()
+            payload = jwt.decode(token, jwt_secret, algorithms=[jwt_algo])
 
             if payload.get("type") != "access":
                 return None
 
             # Step 2: check database record for revocation.
-            record = read_repo(TokenRepository).get_access_token(token)
+            record = build_repository(TokenRepository).get_access_token(token)
             is_valid = record is not None and record.is_valid()
 
             return payload if is_valid else None
@@ -664,7 +663,7 @@ class OAuthTokenManager:
             User primary key if the token is valid, None otherwise.
         """
         try:
-            record = read_repo(TokenRepository).get_refresh_token(token)
+            record = build_repository(TokenRepository).get_refresh_token(token)
             if record is None or not record.is_valid():
                 return None
             return record.user_id
@@ -687,8 +686,9 @@ class OAuthTokenManager:
         que se llama únicamente en el camino de error.
         """
         try:
+            _, _, jwt_secret, jwt_algo = CR.get_oauth_config()
             payload = jwt.decode(
-                token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM],
+                token, jwt_secret, algorithms=[jwt_algo],
                 options={"verify_exp": False},
             )
         except jwt.InvalidTokenError:
@@ -700,7 +700,7 @@ class OAuthTokenManager:
             return False
 
         try:
-            user = read_repo(UserRepository).get_by_id(int(sub))
+            user = build_repository(UserRepository).get_by_id(int(sub))
         except Exception:
             return False
 
@@ -718,10 +718,10 @@ class OAuthTokenManager:
         ``password_changed`` en el grant ``refresh_token``.
         """
         try:
-            record = read_repo(TokenRepository).get_refresh_token(token)
+            record = build_repository(TokenRepository).get_refresh_token(token)
             if record is None:
                 return False
-            user = read_repo(UserRepository).get_by_id(record.user_id)
+            user = build_repository(UserRepository).get_by_id(record.user_id)
         except Exception:
             return False
 
@@ -820,7 +820,7 @@ class OAuthTokenManager:
             User primary key if valid, None otherwise.
         """
         cfg = CR.get_mfa_config()
-        challenge = read_repo(MFARepository).get_challenge(token)
+        challenge = build_repository(MFARepository).get_challenge(token)
         if challenge is None or not challenge.is_valid(cfg["max_challenge_attempts"]):
             return None
         return challenge.user_id
@@ -882,12 +882,12 @@ class MFAManager:
 
     def is_enabled(self, user_id: int) -> bool:
         """True if the user has a confirmed TOTP credential."""
-        cred = read_repo(MFARepository).get_totp_credential(user_id)
+        cred = build_repository(MFARepository).get_totp_credential(user_id)
         return cred is not None and cred.confirmed_at is not None
 
     def get_status(self, user_id: int) -> dict:
         """Return {'enabled': bool, 'confirmedAt': datetime|None} for a user."""
-        cred = read_repo(MFARepository).get_totp_credential(user_id)
+        cred = build_repository(MFARepository).get_totp_credential(user_id)
         return {
             "enabled": cred is not None and cred.confirmed_at is not None,
             "confirmedAt": cred.confirmed_at if cred else None,
@@ -1022,7 +1022,7 @@ class MFAManager:
         Returns:
             True if either factor verified successfully.
         """
-        repo = read_repo(MFARepository)
+        repo = build_repository(MFARepository)
 
         if code:
             cred = repo.get_totp_credential(user_id)
