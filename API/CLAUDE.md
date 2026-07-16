@@ -23,7 +23,7 @@ alembic upgrade head                             # apply (also auto-runs on run.
 ## Module convention (`src/modules/<feature>/`)
 `endpoints.py` (Blueprint: auth + schema only) → `managers.py` (business logic; DB access **only** via `UnitOfWork` + repository) → `repositories.py` → `model.py` / `schemas.py` (JSON keys **camelCase**). Module-internal helpers live under `services/`.
 
-Cross-cutting: `infrastructure/` (UnitOfWork, base repo, sessions), `shared/` (base model/exceptions/limiter), `scribe/` (AI-gen strategy layer), `herald/` (email strategy layer), `system/taskqueue/` (RQ + Redis). Blueprints are registered in `run.py`.
+Cross-cutting: `infrastructure/` (UnitOfWork, base repo, sessions), `shared/` (base model/exceptions/limiter), `tools/scribe/` (AI-gen strategy layer), `tools/herald/` (email strategy layer), `system/taskqueue/` (RQ + Redis). Blueprints are registered in `run.py`.
 
 ## Watch out
 - `CREATE_DATABASE=True` triggers a **destructive** `_init_db()` — first deploy only, then set to `False`.

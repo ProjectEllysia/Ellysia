@@ -767,7 +767,7 @@ def get_iris_data(key: str):
 
     Los datasets (marcas, dominios, keywords, extensiones…) viven en el bloque
     ``iris.data`` de SecOpsConfig.json; los defaults de respaldo están en
-    ``src/modules/iris/services/shared.py``, que es el único consumidor previsto.
+    ``src/modules/features/iris/services/shared.py``, que es el único consumidor previsto.
     """
     return _cfg(f"iris.data.{key}")
 

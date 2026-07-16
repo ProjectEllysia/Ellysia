@@ -77,8 +77,8 @@ Blueprints are registered in `run.py` (`/system`, `/oauth`, `/users`, `/themis`,
 **Cross-cutting modules:**
 - `infrastructure/` — `UnitOfWork` (transaction boundary), `base_repository`, engine/session singletons. UnitOfWork does **not** own sessions: lifecycle lives at the two edges — `teardown_request` for HTTP, `job_context`/`Scheduler.execute` for background work. In a request `__exit__` is a no-op (teardown commits, one atomic transaction); in a background context it commits on clean exit / rolls back on error. Never manage sessions directly outside repositories.
 - `shared/` — base model, exceptions, `handle_exceptions`, rate limiter, `Document` base.
-- `scribe/` — pluggable **AI generation** strategy layer (Ollama / OpenAI). Consumers hand it inputs; it knows nothing about them. Strategy chosen per-module in `SecOpsConfig.json` → `ai.modules`.
-- `herald/` — pluggable **email sending** strategy layer (SMTP relay), same philosophy as `scribe`. Chosen per-module in `SecOpsConfig.json` → `email.modules`. Used by Aegis campaigns.
+- `tools/scribe/` — pluggable **AI generation** strategy layer (Ollama / OpenAI). Consumers hand it inputs; it knows nothing about them. Strategy chosen per-module in `SecOpsConfig.json` → `ai.modules`.
+- `tools/herald/` — pluggable **email sending** strategy layer (SMTP relay), same philosophy as `scribe`. Chosen per-module in `SecOpsConfig.json` → `email.modules`. Used by Aegis campaigns.
 
 ### TaskQueue (RQ + Redis) — `system/taskqueue/`
 Replaces the legacy in-process queue. Jobs persist in Redis (survive API restarts) and run in **isolated OS worker processes**, not threads.

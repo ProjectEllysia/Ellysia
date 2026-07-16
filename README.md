@@ -67,12 +67,14 @@ Ellysia/
 │   ├── src/modules/
 │   │   ├── system/              # Config, logging, task queue admin
 │   │   ├── users/               # OAuth 2.0 + JWT, user CRUD, ABAC
-│   │   ├── themis/            # Scan orchestration (Nmap/Nikto/OpenVAS)
-│   │   ├── iris/                # Email header analysis (37 rules)
-│   │   ├── aegis/               # Awareness pills + CVE alerts
-│   │   ├── acheron/             # Encrypted credential vault
-│   │   ├── scribe/              # AI generation abstraction layer
-│   │   ├── herald/              # Email sending abstraction layer
+│   │   ├── features/            # Feature modules (themis, iris, aegis, acheron)
+│   │   │   ├── themis/          # Scan orchestration (Nmap/Nikto/OpenVAS)
+│   │   │   ├── iris/            # Email header analysis (37 rules)
+│   │   │   ├── aegis/           # Awareness pills + CVE alerts
+│   │   │   └── acheron/         # Encrypted credential vault
+│   │   ├── tools/               # Cross-cutting strategy layers
+│   │   │   ├── scribe/          # AI generation abstraction layer
+│   │   │   └── herald/          # Email sending abstraction layer
 │   │   ├── infrastructure/      # ORM plumbing (UnitOfWork, repos)
 │   │   ├── shared/              # Base models, exceptions, schemas
 │   │   └── pages/               # Legacy static pages
