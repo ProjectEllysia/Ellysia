@@ -32,7 +32,7 @@ import logging
 import random
 import secrets
 import threading
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -55,13 +55,7 @@ from src.modules.herald import EmailMessage, build_mailer
 from src.modules.users import User
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, job_context
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.session import get_db_session, read_repo
-from src.modules.shared._documents import (
-    get_document_by_id,
-    delete_document_file,
-    update_document_status,
-    serialize_document_list,
-)
+from src.modules.infrastructure.session import get_db_session, build_repository
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc
 
 from .model import AegisDocument, AegisOrgProfile, Campaign, CampaignRecipient, DistributionList, Topic
@@ -117,7 +111,7 @@ class AegisManager:
         return document_id
 
     def get_document(self, doc_id: int) -> dict:
-        repo = read_repo(AegisDocumentRepository)
+        repo = build_repository(AegisDocumentRepository)
         doc = repo.get_by_id(doc_id)
         if not doc:
             raise DocumentNotFoundError(doc_id)
@@ -276,9 +270,7 @@ class AegisManager:
 
     def get_document_path(self, document_id: int) -> Path:
         """Devuelve la ruta al archivo generado, validando propiedad y existencia."""
-        self.assert_document_ownership(document_id)
-
-        doc = get_document_by_id(document_id)
+        doc = self.assert_document_ownership(document_id)
         if not doc:
             raise ValueError(f"Documento {document_id} no existe")
 
@@ -297,7 +289,22 @@ class AegisManager:
 
         cfg = self._read_cfg()
         try:
-            delete_document_file(document_id, cfg["output_dir"])
+            with UnitOfWork() as uow:
+                repo = AegisDocumentRepository(uow)
+                doc = repo.get_by_id(document_id)
+                if not doc:
+                    raise ValueError(f"Documento {document_id} no existe")
+
+                if doc.filename:
+                    file_path = cfg["output_dir"] / doc.filename
+                    if file_path.exists():
+                        import os
+                        try:
+                            os.remove(str(file_path))
+                        except OSError:
+                            logger.warning("No se pudo eliminar el archivo %s", file_path, exc_info=True)
+
+                repo.delete(doc)
         except Exception as exc:
             raise RuntimeError(f"Error eliminando documento: {exc}")
 
@@ -325,11 +332,23 @@ class AegisManager:
             "generated_at": "generatedAt",
             "topic_id":    "topicId",
         }
-        return serialize_document_list(docs, fields_map)
+        result = []
+        for doc in docs:
+            item = {}
+            for model_field, output_name in fields_map.items():
+                value = getattr(doc, model_field, None)
+                if value is None:
+                    item[output_name] = None
+                elif isinstance(value, datetime):
+                    item[output_name] = isoformat_utc(value)
+                else:
+                    item[output_name] = value
+            result.append(item)
+        return result
 
     def get_topics(self) -> list[dict]:
         """Devuelve todos los temas disponibles ordenados por título."""
-        repo = read_repo(AegisDocumentRepository)
+        repo = build_repository(AegisDocumentRepository)
 
         topics = repo.get_topics()
         return [{"id": t.id, "title": t.title} for t in topics]
@@ -611,13 +630,9 @@ class AegisManager:
         error: str | None = None,
     ) -> None:
         """Actualiza el estado del documento usando el repositorio."""
-        doc = get_document_by_id(document_id)
-        if not doc:
-            logger.error(f"Documento {document_id} no encontrado para actualizar estado")
-            return
-
-        set_generated_at = status == "done"
-        update_document_status(doc, status, title, filename, error, set_generated_at)
+        with UnitOfWork() as uow:
+            repo = AegisDocumentRepository(uow)
+            repo.update_status(document_id, status, title, filename, error)
 
 
 # Defaults del perfil de organización cuando el usuario aún no ha guardado
@@ -650,7 +665,7 @@ class AegisOrgProfileManager:
 
     def get_or_default(self) -> dict:
         """Devuelve el perfil guardado, o los defaults si aún no existe."""
-        repo = read_repo(AegisOrgProfileRepository)
+        repo = build_repository(AegisOrgProfileRepository)
         profile = repo.get_by_user_id(self.user.id)
         if profile is None:
             return dict(_ORG_PROFILE_DEFAULTS)
@@ -684,7 +699,7 @@ class CampaignManager:
     Gestiona listas de distribución y campañas de concienciación.
 
     Sigue la convención del proyecto para el acceso a datos: las **lecturas**
-    usan ``read_repo(RepoCls)`` (sesión ambiental de la request, sin demarcar
+    usan ``build_repository(RepoCls)`` (sesión ambiental de la request, sin demarcar
     transacción) y las **escrituras** van dentro de un ``UnitOfWork``. El
     manager nunca crea ni cierra sesiones — de eso se encargan los bordes
     (``teardown_request`` en HTTP, ``job_context`` en el worker).
@@ -705,7 +720,7 @@ class CampaignManager:
             return dist_list.to_dict()
 
     def list_lists(self) -> list[dict]:
-        repo = read_repo(DistributionListRepository)
+        repo = build_repository(DistributionListRepository)
         return [d.to_dict() for d in repo.get_lists_by_user(self.user.id)]
 
     def get_list(self, list_id: int) -> dict:
@@ -729,7 +744,7 @@ class CampaignManager:
 
     def get_recipients(self, list_id: int) -> list[dict]:
         self._assert_list_ownership(list_id)
-        repo = read_repo(DistributionListRepository)
+        repo = build_repository(DistributionListRepository)
         return [r.to_dict() for r in repo.get_recipients(list_id)]
 
     def remove_recipient(self, list_id: int, recipient_id: int) -> None:
@@ -746,7 +761,7 @@ class CampaignManager:
     # =========================================================================
 
     def create_campaign(self, document_id: int, list_id: int, name: str) -> dict:
-        doc_repo = read_repo(AegisDocumentRepository)
+        doc_repo = build_repository(AegisDocumentRepository)
         doc = doc_repo.get_by_id(document_id)
         if doc is None or doc.user_id != self.user.id:
             raise DocumentNotFoundError(document_id)
@@ -761,12 +776,12 @@ class CampaignManager:
             return campaign.to_dict()
 
     def list_campaigns(self) -> list[dict]:
-        repo = read_repo(CampaignRepository)
+        repo = build_repository(CampaignRepository)
         return [c.to_dict() for c in repo.get_campaigns_by_user(self.user.id)]
 
     def get_campaign(self, campaign_id: int) -> dict:
         campaign = self._assert_campaign_ownership(campaign_id)
-        repo = read_repo(CampaignRepository)
+        repo = build_repository(CampaignRepository)
         recipients = repo.get_recipients(campaign_id)
         result = campaign.to_dict()
         result["recipients"] = [r.to_dict() for r in recipients]
@@ -782,13 +797,13 @@ class CampaignManager:
         if campaign.status != "draft":
             raise CampaignAlreadyLaunchedError(campaign_id, campaign.status)
 
-        doc_repo = read_repo(AegisDocumentRepository)
+        doc_repo = build_repository(AegisDocumentRepository)
         doc = doc_repo.get_by_id(campaign.document_id)
         questions_snapshot = [q.to_dict() for q in doc.questions] if doc else []
         if not questions_snapshot:
             raise CampaignNoQuestionsError(campaign.document_id)
 
-        list_repo = read_repo(DistributionListRepository)
+        list_repo = build_repository(DistributionListRepository)
         recipients = list_repo.get_recipients(campaign.list_id)
         if not recipients:
             raise CampaignEmptyListError(campaign.list_id)
@@ -841,7 +856,7 @@ class CampaignManager:
     def _run_campaign_send(self, campaign_id: int) -> None:
         """Envía el email de la campaña a cada destinatario pendiente."""
         with job_context() as job:
-            camp_repo = read_repo(CampaignRepository)
+            camp_repo = build_repository(CampaignRepository)
             campaign = camp_repo.get_by_id(campaign_id)
             if campaign is None:
                 logger.error(f"Campaña {campaign_id} no encontrada para envío")
@@ -913,7 +928,7 @@ class CampaignManager:
         única identidad. Si el test ya fue completado, devuelve el estado
         final (score) en vez de volver a servir las preguntas.
         """
-        repo = read_repo(CampaignRepository)
+        repo = build_repository(CampaignRepository)
         recipient = repo.get_recipient_by_token(token)
         if recipient is None:
             raise QuizTokenInvalidError()
@@ -955,7 +970,7 @@ class CampaignManager:
         mismo token (el segundo falla al hacer flush y se traduce al mismo
         409) — el token nunca puede completar el test dos veces.
         """
-        repo = read_repo(CampaignRepository)
+        repo = build_repository(CampaignRepository)
         recipient = repo.get_recipient_by_token(token)
         if recipient is None:
             raise QuizTokenInvalidError()
