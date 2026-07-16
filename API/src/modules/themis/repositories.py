@@ -81,6 +81,22 @@ class ScanRepository(BaseRepository[Scan]):
     ...     scan = NmapScan(target="192.168.1.1", user_id=1)
     ...     repo.save(scan)
     """
+    
+    _HISTORY_OPTIONS = {
+        ScanType.NMAP: (
+            NmapScan,
+            lambda: [joinedload(NmapScan.open_ports_relation).joinedload(OpenPort.port)],
+        ),
+        ScanType.NIKTO: (
+            NiktoScan,
+            lambda: [joinedload(NiktoScan.incidents)],
+        ),
+        ScanType.OPENVAS: (
+            OpenVASScan,
+            lambda: [joinedload(OpenVASScan.results).joinedload(OpenVASScanResult.vulnerability)],
+        ),
+    }
+
 
     def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
         super().__init__(Scan, uow=uow, session=session)
@@ -156,14 +172,6 @@ class ScanRepository(BaseRepository[Scan]):
         return (
             self._session.query(Scan)
             .filter(Scan.user_id == user_id)
-            .order_by(Scan.started_at.desc())
-            .all()
-        )
-
-    def get_by_user_and_type(self, user_id: int, scan_type: ScanType) -> List[Scan]:
-        return (
-            self._session.query(Scan)
-            .filter(Scan.user_id == user_id, Scan.scan_type == scan_type)
             .order_by(Scan.started_at.desc())
             .all()
         )
@@ -287,24 +295,6 @@ class ScanRepository(BaseRepository[Scan]):
             for target, scan_type, count, last_scanned in rows
         ]
 
-    # Eager-loading options per subtype so the returned scans remain usable
-    # after the per-job session is reset at the job boundary (report
-    # generation runs in a background worker).
-    _HISTORY_OPTIONS = {
-        ScanType.NMAP: (
-            NmapScan,
-            lambda: [joinedload(NmapScan.open_ports_relation).joinedload(OpenPort.port)],
-        ),
-        ScanType.NIKTO: (
-            NiktoScan,
-            lambda: [joinedload(NiktoScan.incidents)],
-        ),
-        ScanType.OPENVAS: (
-            OpenVASScan,
-            lambda: [joinedload(OpenVASScan.results).joinedload(OpenVASScanResult.vulnerability)],
-        ),
-    }
-
     def get_recent_finished(
         self,
         user_id: int,
@@ -317,6 +307,7 @@ class ScanRepository(BaseRepository[Scan]):
         Findings relationships are eagerly loaded. Ordered newest-first; the
         service reverses the list to ascending order for charting.
         """
+
         scan_type = ScanType(scan_type)
         model, options_factory = self._HISTORY_OPTIONS[scan_type]
         return (
