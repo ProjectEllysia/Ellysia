@@ -131,8 +131,8 @@ class NiktoScanManager(ScanManager):
             findings.append(finding)
         scan_repo.persist_findings(scan, findings)
 
-    def format_scan(self, scan_id: int) -> dict:
-        scan = self.get_scan_by_id(scan_id)
+    def format_scan(self, scan_id: int, _scan=None) -> dict:
+        scan = _scan or self.get_scan_by_id(scan_id)
         if not scan:
             raise ScanNotFoundError(scan_id)
 

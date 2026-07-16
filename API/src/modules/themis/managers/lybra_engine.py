@@ -6,7 +6,7 @@ from typing import Optional
 import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import ITaskQueue, job_context
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.session import read_repo
+from src.modules.infrastructure.session import build_repository
 from src.modules.shared import utcnow_naive, isoformat_utc
 from ..repositories import (
     ScanRepository,
@@ -639,12 +639,12 @@ class LybraEngineManager(ScanManager):
         """Persist the engine's findings (``domain_data`` is a list of dicts)."""
         ScanRepository(uow).persist_findings(scan, domain_data)
 
-    def format_scan(self, scan_id: int) -> dict:
-        scan = self.get_scan_by_id(scan_id)
+    def format_scan(self, scan_id: int, _scan=None) -> dict:
+        scan = _scan or self.get_scan_by_id(scan_id)
         if not scan:
             raise ScanNotFoundError(scan_id)
 
-        repo = read_repo(ScanRepository)
+        repo = build_repository(ScanRepository)
         own_findings = [self._finding_view_dict(f) for f in repo.get_findings_by_scan(scan_id)]
 
         # Fase 6 "análisis profundo": merge in the corroborator scans' own

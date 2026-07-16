@@ -220,8 +220,8 @@ class OpenVASScanManager(ScanManager):
             findings.append(finding)
         scan_repo.persist_findings(scan, findings)
 
-    def format_scan(self, scan_id: int) -> dict:
-        scan = self.get_scan_by_id(scan_id)
+    def format_scan(self, scan_id: int, _scan=None) -> dict:
+        scan = _scan or self.get_scan_by_id(scan_id)
         if not scan:
             raise ScanNotFoundError(scan_id)
 
@@ -255,6 +255,13 @@ class OpenVASScanManager(ScanManager):
             "totalVulnerabilities": len(scan.results),
             "criticalCount": sum(1 for r in scan.results if r.vulnerability.severity_class == "Critical"),
             "highCount": sum(1 for r in scan.results if r.vulnerability.severity_class == "High"),
+            "severityBreakdown": {
+                "critical": sum(1 for r in scan.results if r.vulnerability.severity_class == "Critical"),
+                "high": sum(1 for r in scan.results if r.vulnerability.severity_class == "High"),
+                "medium": sum(1 for r in scan.results if r.vulnerability.severity_class == "Medium"),
+                "low": sum(1 for r in scan.results if r.vulnerability.severity_class == "Low"),
+                "info": sum(1 for r in scan.results if r.vulnerability.severity_class == "Log"),
+            },
         }
         self._append_document_info(scan, result)
         return result

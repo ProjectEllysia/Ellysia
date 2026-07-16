@@ -123,8 +123,8 @@ class NmapScanManager(ScanManager):
         )
         scan_repo.persist_nmap_results(scan, host, ports_data)
 
-    def format_scan(self, scan_id: int) -> dict:
-        scan = self.get_scan_by_id(scan_id)
+    def format_scan(self, scan_id: int, _scan=None) -> dict:
+        scan = _scan or self.get_scan_by_id(scan_id)
         if not scan:
             raise ScanNotFoundError(scan_id)
 
@@ -136,7 +136,12 @@ class NmapScanManager(ScanManager):
             "startedAt": isoformat_utc(scan.started_at),
             "finishedAt": isoformat_utc(scan.finished_at), # type: ignore
             "openPorts": [
-                {"port": f"{p.port_id}/{p.port.protocol}", "reason": p.reason}
+                {
+                    "port": f"{p.port_id}/{p.port.protocol}",
+                    "reason": p.reason,
+                    "product": p.product,
+                    "version": p.version,
+                }
                 for p in scan.open_ports_relation
             ],
             "totalOpenPorts": len(scan.open_ports_relation),
