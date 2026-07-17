@@ -145,7 +145,7 @@ Ellysia uses OAuth 2.0 with `grant_type: password` and refresh tokens (JWT signe
 POST /oauth/token
 Content-Type: application/json
 
-{ "grantType": "password", "username": "root", "password": "admin" }
+{ "grantType": "password", "username": "root", "password": "root" }
 ```
 
 **Response:**

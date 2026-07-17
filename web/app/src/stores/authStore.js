@@ -23,7 +23,7 @@ const REASON_KEY = 'seq_session_end_reason'
  * @example
  * import { useAuthStore } from '@/stores/authStore'
  * const auth = useAuthStore()
- * auth.login('root', 'admin')  // POST /oauth/token, guarda en sessionStorage
+ * auth.login('root', 'root')  // POST /oauth/token, guarda en sessionStorage
  * auth.isAdmin                 // true si el rol es admin o root
  * auth.username()              // extraído del payload JWT
  */
@@ -122,7 +122,7 @@ export const useAuthStore = defineStore('auth', () => {
    *          mfaRequired=true si falta el segundo factor.
    * @throws {Error} Si las credenciales son inválidas, hay rate-limit, o el servidor devuelve error
    * @example
-   * const step = await auth.login('root', 'admin')
+   * const step = await auth.login('root', 'root')
    * if (step.mfaRequired) { await auth.verifyMfa(step.challengeToken, code) }
    */
   async function login(username, password) {

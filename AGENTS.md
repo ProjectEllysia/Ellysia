@@ -78,7 +78,7 @@ All config keys lazily loaded via `@_lazy_load` decorator.
 OAuth 2.0 + JWT. **JSON keys use camelCase** (`grantType`, `refresh_token`).
 
 ```
-POST /oauth/token  {"grantType": "password", "username": "root", "password": "admin"}
+POST /oauth/token  {"grantType": "password", "username": "root", "password": "root"}
 ```
 
 Protected endpoints require `Authorization: Bearer <access_token>`. Roles checked via `require_role()`.
