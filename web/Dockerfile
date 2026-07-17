@@ -1,15 +1,15 @@
 # Stage 1: Build the Vue SPA
-FROM node:20-alpine AS builder
+FROM node:22-slim AS builder
 WORKDIR /app
-COPY app/package.json ./
-RUN corepack enable && pnpm install
+COPY app/package.json app/pnpm-lock.yaml ./
+RUN npm install -g pnpm@11.10.0 && pnpm install --frozen-lockfile
 COPY app/ .
 RUN pnpm build
 
 # Stage 2: Serve with Nginx
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY resources/ /usr/share/nginx/html/resources/
+COPY ssl/ /etc/nginx/ssl/
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
+EXPOSE 80 443
 CMD ["nginx", "-g", "daemon off;"]
