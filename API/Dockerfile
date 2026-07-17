@@ -26,6 +26,7 @@ COPY run.py .
 COPY SecOpsConfig.json .
 COPY alembic.ini .
 COPY alembic/ ./alembic/
+COPY resources/ ./resources/
 
 RUN mkdir -p /app/data/sentinel/output /app/data/aegis/output /app/data/aegis/stack /app/temp /app/logs
 
