@@ -17,7 +17,11 @@ import { useAuthStore } from '@/stores/authStore'
 export async function apiError(res, fallback) {
   if (!res) return fallback
   const data = await res.json().catch(() => ({}))
-  return data.error_description || data.message || data.error || fallback
+  const serverMsg = data.error_description || data.message || data.error
+  if (res.status === 403 && (data.error === 'forbidden' || data.error_description === 'Insufficient permissions')) {
+    return 'No tienes permisos suficientes para realizar esta acción.'
+  }
+  return serverMsg || fallback
 }
 
 /**
