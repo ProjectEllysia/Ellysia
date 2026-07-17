@@ -31,7 +31,7 @@ Write-Host "Generating self-signed certificate for $Domain (includes *.${Domain}
 
 & $openssl req -x509 -nodes -days 365 `
     -subj "/CN=$Domain" `
-    -addext "subjectAltName=DNS:${Domain},DNS:*.${Domain},DNS:api.${Domain}" `
+    -addext "subjectAltName=DNS:${Domain},DNS:*.${Domain},DNS:api.${Domain},DNS:localhost,IP:127.0.0.1" `
     -newkey rsa:2048 `
     -keyout $keyFile `
     -out $certFile
