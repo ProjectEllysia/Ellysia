@@ -140,14 +140,14 @@
   },
   "ai": {
     "defaultStrategy": "openai",
-    "strategies": {
-      "google": {
-        "model": null
-      }
-    },
     "modules": {
       "aegis": "openai",
       "themis": "openai"
+    },
+    "strategies": {
+      "google": {
+        "model": ""
+      }
     }
   },
   "appVersion": "4.2",
@@ -156,6 +156,9 @@
   },
   "email": {
     "defaultStrategy": "smtp",
+    "modules": {
+      "aegis": "smtp"
+    },
     "strategies": {
       "smtp": {
         "fromAddress": "noreply@tudominio.com",
@@ -164,9 +167,6 @@
         "port": 587,
         "useTls": true
       }
-    },
-    "modules": {
-      "aegis": "smtp"
     }
   },
   "general": {
@@ -765,6 +765,12 @@
         "link.mi-al.it",
         "open.mi-al.it"
       ],
+      "exotic_charsets": [
+        "utf-7",
+        "unicode-1-1-utf-7",
+        "csunicode11utf7",
+        "x-unicode-2-0-utf-7"
+      ],
       "free_provider_domains": [
         "gmail.com",
         "googlemail.com",
@@ -870,7 +876,6 @@
         "has ganado"
       ],
       "homoglyph_map": {
-        "$": "s",
         "0": "o",
         "1": "l",
         "2": "z",
@@ -880,6 +885,7 @@
         "7": "t",
         "8": "b",
         "9": "g",
+        "$": "s",
         "@": "a",
         "€": "e"
       },
@@ -1110,12 +1116,6 @@
         "invoice",
         "wallet",
         "suspended"
-      ],
-      "exotic_charsets": [
-        "utf-7",
-        "unicode-1-1-utf-7",
-        "csunicode11utf7",
-        "x-unicode-2-0-utf-7"
       ]
     },
     "directories": {
@@ -1123,13 +1123,13 @@
     },
     "legitimate_threshold": 80,
     "min_headers": 2,
-    "suspicious_threshold": 55,
     "prompts": {
       "summary": {
         "system": "Eres un analista anti-phishing especializado en interpretar los resultados de un motor de reglas heurísticas (Iris) que analiza cabeceras y contenido de correo electrónico.\nTu tarea es producir una narrativa CALIBRADA: ni alarmista ni complaciente. Respondes EXCLUSIVAMENTE en el formato JSON indicado. No añades texto fuera del JSON.\n\n════════════════════════════════════════\nPRINCIPIO FUNDAMENTAL: EXPLICA LO QUE YA SE DETECTÓ, NO INVENTES NADA NUEVO\n════════════════════════════════════════\nRecibes el veredicto, el score y la lista de reglas que fallaron (con su categoría, penalización y recomendación técnica) que el motor de Iris ya calculó de forma determinista.\nTu trabajo NO es re-evaluar el riesgo ni inventar hallazgos que no aparezcan en los datos — es traducir esas señales técnicas en una narrativa legible para un analista o un usuario no técnico, e inferir la intención más probable del atacante a partir de la COMBINACIÓN de señales presentes.\nNUNCA inventes dominios, URLs, remitentes o técnicas que no figuren en los datos proporcionados. Si el veredicto es Legitimate, dilo con la misma calibración: no busques problemas donde el motor no encontró ninguno.\n\n════════════════════════════════════════\nCÓMO INFERIR attacker_intent\n════════════════════════════════════════\nBasándote en las categorías de reglas falladas, identifica el patrón de ataque más probable:\n- Fallos de autenticación (SPF/DKIM/DMARC/Domain Alignment) + suplantación de marca → robo de credenciales suplantando una marca conocida.\n- BEC Wire Transfer Pattern / dominio corporativo + lenguaje financiero → fraude del CEO / desvío de pago.\n- Enlaces/QR sospechosos + urgencia → phishing de credenciales con cebo de clic.\n- Adjuntos peligrosos/macros → distribución de malware.\n- Solo señales débiles o dispersas sin patrón claro → indica explícitamente que no hay un patrón de ataque dominante, no fuerces una narrativa.\n\n════════════════════════════════════════\nNIVELES DE CONFIDENCE VÁLIDOS\n════════════════════════════════════════\nALTA | MEDIA | BAJA\n- ALTA: gates de alta confianza disparados (gate_reasons no vacío) o múltiples señales fuertes coincidentes.\n- MEDIA: veredicto Suspicious con señales moderadas, sin gate de alta confianza.\n- BAJA: score cercano al umbral, señales débiles o contradictorias entre sí.\n\nFORMATO DE RESPUESTA (JSON estricto, sin texto antes ni después):\n{\n    \"executive_summary\": \"3-4 frases en español dirigidas a quien recibió el correo: qué se detectó, por qué es (o no es) sospechoso, sin jerga innecesaria.\",\n    \"attacker_intent\": \"1-2 frases describiendo el objetivo más probable del atacante según las señales presentes, o indicando explícitamente que no hay patrón claro si el veredicto es Legitimate o las señales son dispersas.\",\n    \"recommendations\": [\"acción concreta 1\", \"acción concreta 2\"],\n    \"confidence\": \"ALTA|MEDIA|BAJA\"\n}",
         "userTemplate": "Analiza el siguiente resultado de un análisis Iris de correo electrónico.\n\nVEREDICTO: {{verdict}}\nSCORE: {{score}} / 100\n\nRAZONES DE GATES DE ALTA CONFIANZA (si vacío, ningún gate se disparó):\n{{gate_reasons_json}}\n\nREGLAS QUE FALLARON (nombre, categoría, penalización, recomendación técnica):\n{{failed_rules_json}}\n\nFORMATO DE RESPUESTA (JSON estricto, sin ningún texto antes ni después del JSON):\n{\n    \"executive_summary\": \"...\",\n    \"attacker_intent\": \"...\",\n    \"recommendations\": [\"...\"],\n    \"confidence\": \"ALTA|MEDIA|BAJA\"\n}"
       }
-    }
+    },
+    "suspicious_threshold": 55
   },
   "redis": {
     "db": 0,
@@ -1144,19 +1144,19 @@
       "time_cost": 3
     },
     "jwt": {
-      "algorithm": "HS256",
       "access_token_expiry_minutes": 30,
+      "algorithm": "HS256",
       "refresh_token_expiry_days": 7
     },
     "mfa": {
-      "issuer": "Ellysia",
       "challenge_expiry_minutes": 5,
+      "issuer": "Ellysia",
       "max_challenge_attempts": 5,
       "recovery_codes_count": 10
     }
   },
   "themis": {
-    "areLocalIpsAllowed": false,
+    "areLocalIpsAllowed": true,
     "directories": {
       "csv": "data/themis/csv",
       "output": "data/themis/output",
@@ -1176,25 +1176,25 @@
     },
     "kb": {
       "enabled": true,
-      "syncCron": "0 3 * * *",
       "nvdWindowDays": 8,
       "sources": {
-        "nvd": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        "epss": "https://epss.cyentia.com/epss_scores-current.csv.gz",
         "kev": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
-        "epss": "https://epss.cyentia.com/epss_scores-current.csv.gz"
-      }
+        "nvd": "https://services.nvd.nist.gov/rest/json/cves/2.0"
+      },
+      "syncCron": "0 3 * * *"
     },
     "lybra": {
       "activeChecks": true,
-      "fingerprintingEnabled": true,
       "colorPalette": {
         "black": "#1a2410",
         "dark": "#4a6132",
+        "light": "#d4e8c4",
         "main": "#7ca163",
         "secondary": "#a8c98f",
-        "light": "#d4e8c4",
         "white": "#f3f8ee"
       },
+      "fingerprintingEnabled": true,
       "prompts": {
         "system": "Eres un analista senior de seguridad ofensiva redactando la sección ejecutiva de un informe de pentest. Analizas la salida ya estructurada del motor de detección Lybra: cada hallazgo trae su CVE, CVSS, EPSS (probabilidad de explotación en 30 días), si está en la lista CISA KEV (explotación activa confirmada), y si fue 'confirmado' activamente o es una 'hipótesis' por versión de banner.\n\nREGLAS ABSOLUTAS:\n1. Generas EXCLUSIVAMENTE JSON válido, sin markdown, sin texto antes ni después.\n2. NUNCA inventas un CVE, CVSS o EPSS que no esté en los datos proporcionados. Si un hallazgo no trae CVSS, no le asignes uno.\n3. Un hallazgo 'confirmado=true' es un hecho verificado; uno 'confirmado=false' es una hipótesis por versión que puede ser un falso positivo (backport). Nunca los trates con el mismo nivel de certeza en el texto.\n4. 'en_kev=true' es la señal más fuerte de urgencia (se explota activamente en el mundo real) y debe mencionarse explícitamente si aparece en algún hallazgo.\n5. El 'risk_level' es un techo, no un promedio: si existe al menos un hallazgo confirmado o en KEV con CVSS alto, el nivel debe reflejarlo aunque el resto de hallazgos sean informativos.\n6. Las 'recommendations' deben ser accionables y concretas (qué actualizar, qué cerrar, qué comprobar), nunca genéricas tipo 'mejorar la seguridad'.\n7. Si prácticamente todos los hallazgos son de categoría 'open_port' sin CVEs, dilo explícitamente: es un mapa de superficie, no una lista de vulnerabilidades.\n\nFORMATO DE RESPUESTA (JSON estricto):\n{\n  \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n  \"executive_summary\": \"3-5 frases en español, para un lector no técnico: qué se encontró y por qué importa.\",\n  \"technical_analysis\": \"Análisis técnico más detallado, citando los CVEs/CVSS/EPSS concretos de los datos.\",\n  \"recommendations\": [\n    {\"title\": \"...\", \"description\": \"...\", \"priority\": \"ALTA|MEDIA|BAJA\", \"remediation\": \"acción concreta\", \"cve_refs\": [\"CVE-YYYY-NNNNN\"]}\n  ],\n  \"conclusions\": \"1-2 frases de cierre.\"\n}",
         "userTemplate": "Escaneo Lybra sobre {{target}} (exposición: {{exposure}}), iniciado el {{started}}.\n\nTotal de hallazgos: {{total_findings}} | Confirmados activamente: {{confirmed_count}} | En CISA KEV: {{kev_count}}\n\nHallazgos (los confirmados y los de KEV van siempre incluidos; el resto es una muestra representativa):\n{{findings_json}}\n\nGenera el análisis en el formato JSON indicado en las instrucciones del sistema."
