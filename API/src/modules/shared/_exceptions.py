@@ -217,10 +217,13 @@ class ValidationError(EllysiaException):
             details.update(kwargs.pop("details"))
 
         if "user_message" not in kwargs:
+            _msg = str(message).strip()
+            if len(_msg) > 100:
+                _msg = _msg[:97] + "…"
             if field:
-                kwargs["user_message"] = f"El campo '{field}' no es válido: {message}"
+                kwargs["user_message"] = f"'{field}' no es válido: {_msg}"
             else:
-                kwargs["user_message"] = f"Validación fallida: {message}"
+                kwargs["user_message"] = _msg or "Validación fallida."
 
         super().__init__(
             message=f"Validación fallida: {message}",
