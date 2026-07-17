@@ -97,39 +97,39 @@ async function handleAddAttributes() { if (selectedAttrs.value.length === 0) ret
 .modal-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 1.5rem; backdrop-filter: blur(4px); }
 .modal-box { background: var(--surface); border: 1px solid var(--border-solid); border-radius: 12px; width: 100%; max-width: 540px; max-height: 90vh; overflow-y: auto; padding: 1.5rem; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.1rem; }
-.modal-header h3 { font-size: 1.84rem; font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); }
-.modal-close { background: none; border: none; font-size: 1.4rem; color: var(--text-muted); cursor: pointer; padding: 0 0.2rem; line-height: 1; }
+.modal-header h3 { font-size: var(--fs-xl); font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); }
+.modal-close { background: none; border: none; font-size: var(--fs-lg); color: var(--text-muted); cursor: pointer; padding: 0 0.2rem; line-height: 1; }
 .modal-close:hover { color: var(--text); }
-.modal-loading { text-align: center; padding: 2.5rem 0; color: var(--text-muted); font-size: 1.49rem; }
+.modal-loading { text-align: center; padding: 2.5rem 0; color: var(--text-muted); font-size: var(--fs-lg); }
 .detail-header { display: flex; align-items: center; gap: 0.85rem; margin-bottom: 1.1rem; }
-.detail-avatar { width: 48px; height: 48px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 1.93rem; font-weight: 700; background: var(--accent-dim); color: var(--accent-bright); font-family: var(--font-mono); }
+.detail-avatar { width: 48px; height: 48px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: var(--fs-2xl); font-weight: 700; background: var(--accent-dim); color: var(--accent-bright); font-family: var(--font-mono); }
 .role-avatar--root  { background: rgba(217,108,108,0.15); color: var(--danger); }
 .role-avatar--admin { background: rgba(212,160,74,0.15); color: var(--warn); }
 .role-avatar--user  { background: rgba(96,128,224,0.15); color: var(--info); }
 .detail-names { flex: 1; min-width: 0; }
-.detail-names h4 { font-size: 1.84rem; font-weight: 700; color: var(--text); margin: 0 0 0.1rem; }
-.detail-names p { font-size: 1.37rem; color: var(--text-dim); margin: 0; }
-.detail-role-badge { font-size: 1.09rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; padding: 0.1rem 0.45rem; border-radius: 4px; }
+.detail-names h4 { font-size: var(--fs-xl); font-weight: 700; color: var(--text); margin: 0 0 0.1rem; }
+.detail-names p { font-size: var(--fs-lg); color: var(--text-dim); margin: 0; }
+.detail-role-badge { font-size: var(--fs-body); font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; padding: 0.1rem 0.45rem; border-radius: 4px; }
 .role-badge--root  { background: rgba(217,108,108,0.15);  color: var(--danger); }
 .role-badge--admin { background: rgba(212,160,74,0.15); color: var(--warn); }
 .role-badge--user  { background: rgba(96,128,224,0.12); color: var(--info); }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; margin-bottom: 1.25rem; padding: 0.85rem; background: var(--bg); border-radius: 8px; }
 .detail-item { display: flex; flex-direction: column; gap: 0.1rem; }
-.detail-label { font-size: 1.19rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
-.detail-value { font-size: 1.44rem; color: var(--text); word-break: break-word; }
+.detail-label { font-size: var(--fs-md); font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.detail-value { font-size: var(--fs-lg); color: var(--text); word-break: break-word; }
 .detail-section { margin-top: 1.25rem; }
-.detail-section h4 { font-size: 1.54rem; font-weight: 600; color: var(--text); margin: 0 0 0.65rem; }
+.detail-section h4 { font-size: var(--fs-lg); font-weight: 600; color: var(--text); margin: 0 0 0.65rem; }
 .attr-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.65rem; }
-.attr-tag { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.45rem; font-size: 1.26rem; font-weight: 500; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-family: var(--font-mono); }
-.attr-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.9rem; line-height: 1; padding: 0; display: flex; }
+.attr-tag { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.45rem; font-size: var(--fs-md); font-weight: 500; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-family: var(--font-mono); }
+.attr-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: var(--fs-sm); line-height: 1; padding: 0; display: flex; }
 .attr-remove:hover { color: var(--danger); }
-.attr-empty { font-size: 1.37rem; color: var(--text-muted); }
+.attr-empty { font-size: var(--fs-lg); color: var(--text-muted); }
 .attr-manage { margin-top: 0.65rem; }
 .attr-form { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 8px; padding: 0.85rem; margin-top: 0.4rem; }
 .attr-module { margin-bottom: 0.65rem; }
-.attr-module h5 { font-size: 1.31rem; font-weight: 700; color: var(--accent); margin: 0 0 0.3rem; }
+.attr-module h5 { font-size: var(--fs-md); font-weight: 700; color: var(--accent); margin: 0 0 0.3rem; }
 .attr-checks { display: flex; flex-wrap: wrap; gap: 0.35rem; }
-.attr-check { display: flex; align-items: center; gap: 0.25rem; font-size: 1.31rem; color: var(--text); cursor: pointer; }
+.attr-check { display: flex; align-items: center; gap: 0.25rem; font-size: var(--fs-md); color: var(--text); cursor: pointer; }
 .attr-check input { accent-color: var(--accent); cursor: pointer; }
 .attr-form-actions { display: flex; gap: 0.4rem; justify-content: flex-end; margin-top: 0.65rem; }
 </style>

@@ -199,33 +199,33 @@ function downloadRecoveryCodes() {
 .profile-page { min-height: 100vh; background: var(--bg); padding-top: var(--topbar-h); position: relative; }
 .main { max-width: 1020px; margin: 0 auto; padding: 1.75rem 1.1rem; position: relative; z-index: 1; }
 .profile-header { text-align: center; margin-bottom: 2rem; }
-.profile-avatar { width: 72px; height: 72px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 2.8rem; font-weight: 700; font-family: var(--font-display); display: flex; align-items: center; justify-content: center; margin: 0 auto 0.75rem; }
-.profile-display-name { font-size: 2.19rem; font-weight: 700; color: var(--text); margin: 0 0 0.2rem; font-family: var(--font-display); }
-.profile-username { font-size: 1.44rem; color: var(--text-muted); margin: 0; }
+.profile-avatar { width: 72px; height: 72px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: var(--fs-3xl); font-weight: 700; font-family: var(--font-display); display: flex; align-items: center; justify-content: center; margin: 0 auto 0.75rem; }
+.profile-display-name { font-size: var(--fs-2xl); font-weight: 700; color: var(--text); margin: 0 0 0.2rem; font-family: var(--font-display); }
+.profile-username { font-size: var(--fs-lg); color: var(--text-muted); margin: 0; }
 .profile-section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.1rem; }
-.profile-section h2 { font-size: 1.66rem; font-weight: 600; margin: 0 0 0.85rem; color: var(--text); font-family: var(--font-display); }
+.profile-section h2 { font-size: var(--fs-xl); font-weight: 600; margin: 0 0 0.85rem; color: var(--text); font-family: var(--font-display); }
 .profile-form { display: flex; flex-direction: column; gap: 0.85rem; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; }
 .form-row--single { grid-template-columns: 1fr; }
 .form-group { display: flex; flex-direction: column; gap: 0.3rem; }
-.form-group label { font-size: 1.31rem; font-weight: 600; color: var(--text-dim); }
-.inp { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 6px; padding: 0.5rem 0.65rem; color: var(--text); font-size: 1.49rem; outline: none; transition: border-color 0.2s; }
+.form-group label { font-size: var(--fs-md); font-weight: 600; color: var(--text-dim); }
+.inp { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 6px; padding: 0.5rem 0.65rem; color: var(--text); font-size: var(--fs-input); outline: none; transition: border-color 0.2s; }
 .inp:focus { border-color: var(--accent); }
 .inp--disabled { opacity: 0.55; cursor: not-allowed; }
-.form-error { color: var(--danger); font-size: 1.37rem; margin: 0; }
+.form-error { color: var(--danger); font-size: var(--fs-lg); margin: 0; }
 .form-actions { display: flex; gap: 0.6rem; justify-content: flex-end; padding-top: 0.35rem; }
-.mfa-status-text { font-size: 1.49rem; color: var(--text-dim); margin: 0 0 0.85rem; }
+.mfa-status-text { font-size: var(--fs-lg); color: var(--text-dim); margin: 0 0 0.85rem; }
 .mfa-status-text--on { color: var(--success, #2e9c5b); }
 .mfa-fade-enter-active, .mfa-fade-leave-active { transition: opacity 0.18s ease, transform 0.18s ease; }
 .mfa-fade-enter-from { opacity: 0; transform: translateY(4px); }
 .mfa-fade-leave-to { opacity: 0; transform: translateY(-4px); }
-.mfa-recovery-warning { font-size: 1.4rem; color: var(--text-dim); margin: 0 0 0.75rem; }
+.mfa-recovery-warning { font-size: var(--fs-lg); color: var(--text-dim); margin: 0 0 0.75rem; }
 .mfa-recovery-list {
   display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem 1rem;
   list-style: none; margin: 0 0 1rem; padding: 0.75rem; background: var(--bg);
   border: 1px solid var(--border-solid); border-radius: 6px;
 }
-.mfa-recovery-list code { font-family: monospace; font-size: 1.49rem; color: var(--text); }
+.mfa-recovery-list code { font-family: monospace; font-size: var(--fs-lg); color: var(--text); }
 .loading-block { padding: 3.5rem 0; display: flex; justify-content: center; }
 .skeleton { background: var(--surface); border-radius: 8px; animation: pulse 1.4s ease-in-out infinite; }
 .skeleton--lg { width: 100%; height: 240px; }

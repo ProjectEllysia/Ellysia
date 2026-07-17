@@ -73,7 +73,7 @@ const initial = computed(() => (auth.username()?.[0] || 'U').toUpperCase())
 }
 .brand-text {
   font-family: var(--font-epic);
-  font-size: 1.65rem; font-weight: 600;
+  font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.32em; text-transform: uppercase;
   color: var(--text);
 }
@@ -82,7 +82,7 @@ const initial = computed(() => (auth.username()?.[0] || 'U').toUpperCase())
 .site-nav { display: flex; gap: 1.5rem; margin-left: auto; }
 .nav-link {
   font-family: var(--font-epic);
-  font-size: 1.22rem; font-weight: 500;
+  font-size: var(--fs-md); font-weight: 500;
   letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--text-dim);
   padding: 0.3rem 0;
@@ -105,7 +105,7 @@ const initial = computed(() => (auth.username()?.[0] || 'U').toUpperCase())
 .icon-btn svg { width: 18px; height: 18px; }
 .enter-btn {
   font-family: var(--font-epic);
-  font-size: 1.26rem; font-weight: 600;
+  font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--accent-bright);
   padding: 0.5rem 1.3rem;
@@ -121,7 +121,7 @@ const initial = computed(() => (auth.username()?.[0] || 'U').toUpperCase())
   background: var(--accent-dim);
   border: 1.5px solid var(--border-med);
   color: var(--accent-bright);
-  font-size: 1.26rem; font-weight: 700;
+  font-size: var(--fs-md); font-weight: 700;
   transition: all var(--transition);
 }
 .avatar-btn:hover { border-color: var(--accent); box-shadow: 0 0 12px var(--accent-dim); }

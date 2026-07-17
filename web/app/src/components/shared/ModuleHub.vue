@@ -267,7 +267,7 @@ onUnmounted(() => observer?.disconnect())
 .hero-kicker {
   display: block;
   font-family: var(--font-epic);
-  font-size: 1.55rem; font-weight: 600;
+  font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.34em; text-transform: uppercase;
   color: var(--accent);
 }
@@ -299,7 +299,7 @@ onUnmounted(() => observer?.disconnect())
 }
 .cta {
   font-family: var(--font-epic);
-  font-size: 1.47rem; font-weight: 600;
+  font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.18em; text-transform: uppercase;
   padding: 0.9rem 2.1rem;
   border-radius: 3px;
@@ -339,14 +339,14 @@ onUnmounted(() => observer?.disconnect())
 .hero-plaque :slotted(.metric-label),
 .hero-plaque .metric-label {
   font-family: var(--font-mono);
-  font-size: 1.2rem;
+  font-size: var(--fs-md);
   letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--text-muted);
 }
 .hero-plaque :slotted(.metric-value),
 .hero-plaque .metric-value {
   font-family: var(--font-display);
-  font-size: 2.6rem; font-weight: 600;
+  font-size: var(--fs-3xl); font-weight: 600;
   color: var(--accent-bright);
   line-height: 1.2;
   padding-bottom: 0.5rem;
@@ -354,14 +354,14 @@ onUnmounted(() => observer?.disconnect())
 .hero-plaque :slotted(.metric-sub),
 .hero-plaque .metric-sub {
   font-family: var(--font-mono);
-  font-size: 1.25rem;
+  font-size: var(--fs-md);
   color: var(--text-dim);
 }
 .hero-plaque :slotted(.metric-loading),
 .hero-plaque :slotted(.metric-empty),
 .hero-plaque .metric-empty {
   font-family: var(--font-mono);
-  font-size: 1.35rem;
+  font-size: var(--fs-md);
   color: var(--text-muted);
 }
 
@@ -372,7 +372,7 @@ onUnmounted(() => observer?.disconnect())
 }
 .shortcut {
   font-family: var(--font-mono);
-  font-size: 1.37rem;
+  font-size: var(--fs-lg);
   color: var(--text-dim);
   padding-bottom: 0.15rem;
   border-bottom: 1px solid transparent;
@@ -425,7 +425,7 @@ onUnmounted(() => observer?.disconnect())
 .rites-bajada {
   font-family: var(--font-display);
   font-style: italic;
-  font-size: 1.65rem;
+  font-size: var(--fs-xl);
   color: var(--text-muted);
   margin-top: 0.6rem;
   text-wrap: balance;
@@ -445,19 +445,19 @@ onUnmounted(() => observer?.disconnect())
 .rite.revealed { opacity: 1; transform: translateY(0); }
 .rite-kicker {
   font-family: var(--font-epic);
-  font-size: 1.26rem; font-weight: 600;
+  font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.28em; text-transform: uppercase;
   color: var(--accent);
 }
 .rite-title {
   font-family: var(--font-display);
-  font-size: 2rem; font-weight: 600;
+  font-size: var(--fs-2xl); font-weight: 600;
   line-height: 1.25;
   color: var(--text);
   margin-top: 0.5rem;
 }
 .rite-desc {
-  font-size: 1.4rem;
+  font-size: var(--fs-lg);
   color: var(--text-dim);
   margin-top: 0.55rem;
   line-height: 1.65;
@@ -473,7 +473,7 @@ onUnmounted(() => observer?.disconnect())
 }
 .scrolls-title {
   font-family: var(--font-epic);
-  font-size: 1.45rem; font-weight: 600;
+  font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--accent);
   margin-bottom: 1.2rem;
@@ -485,7 +485,7 @@ onUnmounted(() => observer?.disconnect())
 }
 .scroll-link {
   display: inline-block;
-  font-size: 1.54rem;
+  font-size: var(--fs-lg);
   color: var(--text-dim);
   padding: 0.5rem 1.1rem;
   border: 1px solid var(--border-med);
@@ -503,7 +503,7 @@ onUnmounted(() => observer?.disconnect())
 }
 .pantheon-title {
   font-family: var(--font-epic);
-  font-size: 1.45rem; font-weight: 600;
+  font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--accent);
   text-align: center;
@@ -531,13 +531,13 @@ onUnmounted(() => observer?.disconnect())
 .pantheon-card img { width: 40px; height: 40px; object-fit: contain; }
 .pantheon-name {
   font-family: var(--font-epic);
-  font-size: 1.4rem; font-weight: 600;
+  font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--accent);
   margin-top: 0.3rem;
 }
 .pantheon-desc {
-  font-size: 1.54rem;
+  font-size: var(--fs-lg);
   color: var(--text-dim);
   line-height: 1.55;
 }
@@ -551,7 +551,7 @@ onUnmounted(() => observer?.disconnect())
 }
 .call-epigraph {
   font-family: var(--font-epic);
-  font-size: 1.4rem; font-weight: 600;
+  font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.4em; text-transform: uppercase;
   color: var(--on-accent);
   opacity: 0.65;
@@ -568,7 +568,7 @@ onUnmounted(() => observer?.disconnect())
   display: inline-block;
   margin-top: 1.8rem;
   font-family: var(--font-epic);
-  font-size: 1.5rem; font-weight: 600;
+  font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--text);
   background: var(--bg);

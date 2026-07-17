@@ -56,7 +56,7 @@ const filteredTopics = computed(() => {
 
 <style scoped>
 .topic-grid { display: flex; flex-direction: column; max-height: 340px; }
-.topic-grid h4 { font-size: 1.37rem; font-weight: 600; color: var(--text-dim); margin: 0 0 0.4rem; flex-shrink: 0; }
+.topic-grid h4 { font-size: var(--fs-lg); font-weight: 600; color: var(--text-dim); margin: 0 0 0.4rem; flex-shrink: 0; }
 
 /* ── Buscador ── */
 .topic-search { position: relative; display: flex; align-items: center; margin-bottom: 0.45rem; flex-shrink: 0; }
@@ -65,7 +65,7 @@ const filteredTopics = computed(() => {
   width: 100%; box-sizing: border-box;
   padding: 0.4rem 1.9rem 0.4rem 2rem;
   background: var(--bg); border: 1px solid var(--border-solid); border-radius: 7px;
-  color: var(--text); font-size: 1.3rem; font-family: inherit; outline: none;
+  color: var(--text); font-size: var(--fs-md); font-family: inherit; outline: none;
   transition: border-color 0.2s;
 }
 .search-input:focus { border-color: var(--accent); }
@@ -74,7 +74,7 @@ const filteredTopics = computed(() => {
   position: absolute; right: 0.4rem;
   width: 20px; height: 20px; border: none; border-radius: 50%;
   background: none; color: var(--text-muted); cursor: pointer;
-  font-size: 1.5rem; line-height: 1; display: grid; place-items: center;
+  font-size: var(--fs-lg); line-height: 1; display: grid; place-items: center;
   transition: color 0.2s;
 }
 .search-clear:hover { color: var(--text); }
@@ -82,10 +82,10 @@ const filteredTopics = computed(() => {
 .grid-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.35rem; padding-right: 0.25rem; }
 .grid-scroll::-webkit-scrollbar { width: 4px; }
 .grid-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-.topic-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem; padding: 0.5rem 0.65rem; font-size: 1.4rem; font-weight: 600; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer; transition: all 0.2s; text-align: left; flex-shrink: 0; }
+.topic-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem; padding: 0.5rem 0.65rem; font-size: var(--fs-lg); font-weight: 600; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer; transition: all 0.2s; text-align: left; flex-shrink: 0; }
 .topic-btn:hover { border-color: var(--accent); color: var(--text); background: var(--surface); }
 .topic-btn.selected { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .topic-name { line-height: 1.3; }
-.topic-desc { font-size: 1.14rem; font-weight: 400; opacity: 0.7; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.empty-hint { font-size: 1.31rem; color: var(--text-muted); margin: 0.2rem 0; }
+.topic-desc { font-size: var(--fs-body); font-weight: 400; opacity: 0.7; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.empty-hint { font-size: var(--fs-md); color: var(--text-muted); margin: 0.2rem 0; }
 </style>

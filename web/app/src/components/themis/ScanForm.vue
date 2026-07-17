@@ -101,8 +101,8 @@ function handleLaunch() {
 <style scoped>
 .launch-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.1rem 1.25rem; margin-bottom: 1.1rem; }
 .launch-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.85rem; }
-.launch-title { font-weight: 600; color: var(--text); font-size: 1.58rem; font-family: var(--font-display); }
-.launch-success { font-size: 1.26rem; color: var(--success); background: var(--success-dim); padding: 0.15rem 0.5rem; border-radius: 6px; }
+.launch-title { font-weight: 600; color: var(--text); font-size: var(--fs-xl); font-family: var(--font-display); }
+.launch-success { font-size: var(--fs-md); color: var(--success); background: var(--success-dim); padding: 0.15rem 0.5rem; border-radius: 6px; }
 .pop-enter-active { transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .pop-enter-from { opacity: 0; transform: scale(0.8); }
 .pop-leave-active { transition: opacity 0.15s ease; }
@@ -116,22 +116,22 @@ function handleLaunch() {
 .field { display: flex; flex-direction: column; gap: 0.25rem; flex: 1; min-width: 130px; }
 .ports-row .field:nth-child(2) { max-height: 70px; overflow: hidden; transition: max-height 0.2s ease, opacity 0.2s ease; opacity: 1; }
 .ports-row .field.hidden { max-height: 0; opacity: 0; pointer-events: none; }
-.field label { font-size: 1.26rem; color: var(--text-muted); font-weight: 500; }
-.field input, .field select { padding: 0.5rem 0.65rem; background: var(--surface-2); border: 1px solid var(--border-solid); border-radius: 6px; color: var(--text); font-size: 1.43rem; outline: none; transition: border-color 0.2s; }
+.field label { font-size: var(--fs-md); color: var(--text-muted); font-weight: 500; }
+.field input, .field select { padding: 0.5rem 0.65rem; background: var(--surface-2); border: 1px solid var(--border-solid); border-radius: 6px; color: var(--text); font-size: var(--fs-input); outline: none; transition: border-color 0.2s; }
 .field input:focus, .field select:focus { border-color: var(--accent); }
 .field-sm { flex: 0 0 100px; min-width: 90px; }
 .field-md { flex: 0 0 160px; }
 .field-lg { flex: 2; min-width: 190px; }
 
 .strategy-picker { display: flex; gap: 0.3rem; flex-wrap: wrap; }
-.strategy-chip { display: flex; align-items: center; gap: 0.32rem; padding: 0.5rem 0.6rem; background: var(--surface-2); border: 1px solid var(--border-solid); border-radius: 6px; color: var(--text-muted); font-size: 1.3rem; font-weight: 500; cursor: pointer; transition: all 0.2s ease; white-space: nowrap; }
+.strategy-chip { display: flex; align-items: center; gap: 0.32rem; padding: 0.5rem 0.6rem; background: var(--surface-2); border: 1px solid var(--border-solid); border-radius: 6px; color: var(--text-muted); font-size: var(--fs-md); font-weight: 500; cursor: pointer; transition: all 0.2s ease; white-space: nowrap; }
 .strategy-chip:hover { color: var(--text-dim); border-color: var(--accent); }
 .strategy-chip svg { width: 13px; height: 13px; flex-shrink: 0; }
 .strategy-chip.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-bright); font-weight: 600; }
 @media (max-width: 640px) { .strategy-label { display: none; } .strategy-chip { padding: 0.5rem; } }
 .no-spin::-webkit-outer-spin-button, .no-spin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .no-spin { -moz-appearance: textfield; }
-.btn-launch { height: 34px; padding: 0 1.15rem; margin-bottom: 0; background: var(--accent-dim); border: 1px solid var(--accent); color: var(--accent-bright); font-weight: 600; font-size: 1.4rem; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 0.35rem; transition: all 0.2s; white-space: nowrap; position: relative; }
+.btn-launch { height: 34px; padding: 0 1.15rem; margin-bottom: 0; background: var(--accent-dim); border: 1px solid var(--accent); color: var(--accent-bright); font-weight: 600; font-size: var(--fs-lg); border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 0.35rem; transition: all 0.2s; white-space: nowrap; position: relative; }
 .btn-launch:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
 .btn-launch:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-launch.loading .btn-label { opacity: 0; }

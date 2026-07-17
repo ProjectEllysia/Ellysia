@@ -40,14 +40,14 @@ const iconSvg = computed(() => icons[props.icon] || icons.scan)
 .scanner-card { background: var(--surface); border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
 .scanner-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 0.85rem; border-bottom: 1px solid var(--border); background: var(--bg); }
 .scanner-icon { width: 20px; height: 20px; color: var(--accent); flex-shrink: 0; display: flex; }
-.scanner-header h3 { font-size: 1.61rem; font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); }
+.scanner-header h3 { font-size: var(--fs-xl); font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); }
 .scanner-body { padding: 0.85rem; display: flex; flex-direction: column; gap: 0.65rem; }
-.scanner-body h4 { font-size: 1.19rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0; }
+.scanner-body h4 { font-size: var(--fs-md); font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0; }
 .color-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.35rem; }
 .color-pick { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; padding: 0.4rem 0.2rem; background: var(--bg); border-radius: 5px; border: 1px solid var(--border); }
 .color-input { width: 30px; height: 22px; border: none; border-radius: 3px; cursor: pointer; background: transparent; padding: 0; }
-.color-label { font-size: 1.09rem; font-weight: 600; color: var(--text-dim); }
-.color-hex { font-size: 1.02rem; color: var(--text-muted); font-family: var(--font-mono); }
-.textarea { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 5px; padding: 0.45rem 0.55rem; color: var(--text); font-size: 1.31rem; font-family: var(--font-mono); outline: none; resize: vertical; width: 100%; box-sizing: border-box; transition: border-color 0.2s; }
+.color-label { font-size: var(--fs-body); font-weight: 600; color: var(--text-dim); }
+.color-hex { font-size: var(--fs-body); color: var(--text-muted); font-family: var(--font-mono); }
+.textarea { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 5px; padding: 0.45rem 0.55rem; color: var(--text); font-size: var(--fs-input); font-family: var(--font-mono); outline: none; resize: vertical; width: 100%; box-sizing: border-box; transition: border-color 0.2s; }
 .textarea:focus { border-color: var(--accent); }
 </style>

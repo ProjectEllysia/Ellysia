@@ -135,52 +135,52 @@ function fmtDate(iso) { if (!iso) return ''; return new Date(iso).toLocaleDateSt
 .pv-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem; margin-bottom: 0.65rem; }
 .pv-info-card { border-left: 3px solid var(--accent); }
 .pv-card-top { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.5rem; }
-.pv-badge { font-family: var(--font-mono); font-size: 1.4rem; font-weight: 800; color: var(--accent); background: var(--accent-dim); padding: 2px 9px; border-radius: 5px; }
-.pv-type-tag { font-size: 1.05rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); background: var(--surface-3); padding: 2px 7px; border-radius: 4px; }
+.pv-badge { font-family: var(--font-mono); font-size: var(--fs-lg); font-weight: 800; color: var(--accent); background: var(--accent-dim); padding: 2px 9px; border-radius: 5px; }
+.pv-type-tag { font-size: var(--fs-body); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); background: var(--surface-3); padding: 2px 7px; border-radius: 4px; }
 .pv-target-row { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.45rem; }
 .pv-icon { width: 14px; height: 14px; color: var(--accent); flex-shrink: 0; }
-.pv-target { font-size: 1.49rem; color: var(--text); font-family: var(--font-mono); word-break: break-all; }
-.pv-meta { display: flex; align-items: center; gap: 0.3rem; font-size: 1.22rem; color: var(--text-muted); flex-wrap: wrap; }
+.pv-target { font-size: var(--fs-lg); color: var(--text); font-family: var(--font-mono); word-break: break-all; }
+.pv-meta { display: flex; align-items: center; gap: 0.3rem; font-size: var(--fs-md); color: var(--text-muted); flex-wrap: wrap; }
 .pv-sep { color: var(--border-med); }
 .pv-stats-row { display: flex; gap: 0.4rem; }
 .pv-stat { flex: 1; text-align: center; padding: 0.55rem 0.3rem; background: var(--surface); border-radius: 6px; }
 .pv-stat.crit { background: rgba(217,108,108,0.08); border: 1px solid rgba(217,108,108,0.15); }
 .pv-stat.high { background: rgba(212,160,74,0.08); border: 1px solid rgba(212,160,74,0.15); }
-.pv-stat-val { display: block; font-family: var(--font-mono); font-size: 1.82rem; font-weight: 800; color: var(--text); line-height: 1.2; }
+.pv-stat-val { display: block; font-family: var(--font-mono); font-size: var(--fs-xl); font-weight: 800; color: var(--text); line-height: 1.2; }
 .pv-stat.crit .pv-stat-val { color: var(--danger); }
 .pv-stat.high .pv-stat-val { color: var(--warn); }
-.pv-stat-lbl { font-size: 1.05rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; display: block; }
+.pv-stat-lbl { font-size: var(--fs-body); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; display: block; }
 .pv-docs-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.65rem; }
-.pv-docs-head h4 { font-size: 1.43rem; color: var(--text); font-weight: 600; display: flex; align-items: center; gap: 0.35rem; }
-.pv-count { font-size: 1.14rem; font-weight: 500; color: var(--text-muted); background: var(--surface-3); padding: 1px 6px; border-radius: 8px; }
+.pv-docs-head h4 { font-size: var(--fs-lg); color: var(--text); font-weight: 600; display: flex; align-items: center; gap: 0.35rem; }
+.pv-count { font-size: var(--fs-body); font-weight: 500; color: var(--text-muted); background: var(--surface-3); padding: 1px 6px; border-radius: 8px; }
 .pv-refresh-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 3px; border-radius: 5px; display: flex; }
 .pv-refresh-btn:hover:not(:disabled) { color: var(--accent); }
 .pv-refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .pv-refresh-btn svg { width: 13px; height: 13px; }
-.pv-empty { font-size: 1.4rem; color: var(--text-muted); padding: 0.85rem 0; text-align: center; }
+.pv-empty { font-size: var(--fs-lg); color: var(--text-muted); padding: 0.85rem 0; text-align: center; }
 .pv-docs-list { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.65rem; max-height: 200px; overflow-y: auto; }
 .pv-doc-item { display: flex; align-items: center; justify-content: space-between; padding: 0.45rem 0.6rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; transition: border-color var(--transition); }
 .pv-doc-item:hover { border-color: var(--accent); }
 .pv-doc-left { display: flex; align-items: center; gap: 0.45rem; min-width: 0; flex: 1; }
 .pv-doc-icon { width: 14px; height: 14px; color: var(--text-muted); flex-shrink: 0; }
-.pv-doc-name { font-size: 1.37rem; color: var(--text); font-weight: 500; white-space: nowrap; }
-.pv-ai-pill { font-size: 1.01rem; color: var(--accent); background: var(--accent-dim); padding: 1px 4px; border-radius: 3px; margin-left: 3px; font-weight: 700; }
-.pv-doc-date { font-size: 1.19rem; color: var(--text-muted); white-space: nowrap; }
+.pv-doc-name { font-size: var(--fs-lg); color: var(--text); font-weight: 500; white-space: nowrap; }
+.pv-ai-pill { font-size: var(--fs-body); color: var(--accent); background: var(--accent-dim); padding: 1px 4px; border-radius: 3px; margin-left: 3px; font-weight: 700; }
+.pv-doc-date { font-size: var(--fs-md); color: var(--text-muted); white-space: nowrap; }
 .pv-doc-right { display: flex; gap: 0.2rem; align-items: center; flex-shrink: 0; }
 .pv-icon-btn { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); cursor: pointer; transition: all var(--transition); }
 .pv-icon-btn:hover { border-color: var(--accent); color: var(--accent); }
 .pv-icon-btn.danger:hover { border-color: var(--danger); color: var(--danger); background: var(--danger-dim); }
 .pv-icon-btn svg { width: 12px; height: 12px; }
-.pv-doc-status { font-size: 1.12rem; padding: 2px 8px; border-radius: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
+.pv-doc-status { font-size: var(--fs-body); padding: 2px 8px; border-radius: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
 .pv-doc-status.running { background: var(--info-dim); color: var(--info); }
 .pv-doc-status.pending { background: var(--warn-dim); color: var(--warn); }
 .pv-doc-status.error   { background: var(--danger-dim); color: var(--danger); }
 .pv-gen-bar { display: flex; align-items: center; justify-content: space-between; padding-top: 0.65rem; border-top: 1px solid var(--border); }
-.pv-checkbox { display: flex; align-items: center; gap: 0.35rem; font-size: 1.31rem; color: var(--text-dim); cursor: pointer; user-select: none; }
+.pv-checkbox { display: flex; align-items: center; gap: 0.35rem; font-size: var(--fs-md); color: var(--text-dim); cursor: pointer; user-select: none; }
 .pv-checkbox input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; padding: 0; border: 1.5px solid var(--text-muted); border-radius: 3px; background: transparent; cursor: pointer; margin: 0; flex-shrink: 0; position: relative; }
 .pv-checkbox input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
 .pv-checkbox input[type="checkbox"]:checked::after { content: ''; position: absolute; top: 1px; left: 2px; width: 3px; height: 6px; border: solid var(--surface-1); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
-.pv-gen-btn { display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; font-size: 1.31rem; font-weight: 600; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 6px; color: var(--accent-bright); cursor: pointer; transition: all var(--transition); }
+.pv-gen-btn { display: flex; align-items: center; gap: 0.35rem; padding: 0.4rem 0.75rem; font-size: var(--fs-md); font-weight: 600; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 6px; color: var(--accent-bright); cursor: pointer; transition: all var(--transition); }
 .pv-gen-btn:hover { background: var(--accent); color: var(--on-accent); }
 .pv-gen-icon { width: 12px; height: 12px; }
 .spin { animation: seq-spin 0.8s linear infinite; }

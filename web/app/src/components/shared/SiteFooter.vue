@@ -91,7 +91,7 @@ onMounted(() => {
 }
 .footer-wordmark {
   font-family: var(--font-epic);
-  font-size: 1.75rem; font-weight: 600;
+  font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.3em; text-transform: uppercase;
   color: var(--text);
 }
@@ -102,14 +102,14 @@ onMounted(() => {
 .footer-cols { flex: 1; display: flex; justify-content: space-between; gap: 2.5rem; flex-wrap: wrap; }
 .footer-heading {
   font-family: var(--font-epic);
-  font-size: 1.22rem; font-weight: 600;
+  font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--accent);
   margin-bottom: 0.9rem;
 }
 .footer-col ul { list-style: none; display: flex; flex-direction: column; gap: 0.55rem; }
 .footer-col a {
-  font-size: 1.57rem;
+  font-size: var(--fs-xl);
   color: var(--text-dim);
   transition: color var(--transition);
 }
@@ -128,7 +128,7 @@ onMounted(() => {
   display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 0.5rem;
   font-family: var(--font-mono);
-  font-size: 1.26rem;
+  font-size: var(--fs-md);
   color: var(--text-muted);
   letter-spacing: 0.04em;
 }

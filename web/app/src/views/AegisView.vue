@@ -133,7 +133,7 @@ onMounted(async () => { await Promise.all([store.loadTopics(), store.loadBrands(
   width: 26px; height: 72px;
   display: grid; place-items: center;
   background: var(--surface-2); border: 1px solid var(--border-med);
-  color: var(--text-dim); cursor: pointer; font-size: 1.6rem; line-height: 1;
+  color: var(--text-dim); cursor: pointer; font-size: var(--fs-xl); line-height: 1;
   box-shadow: 0 2px 10px rgba(0,0,0,0.28);
   transition: background var(--transition), color var(--transition), border-color var(--transition);
 }

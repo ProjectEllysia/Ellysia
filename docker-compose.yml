@@ -52,11 +52,11 @@ services:
       OLLAMA_HOST: 0.0.0.0:11434
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 60s
+      start_period: 10s
     deploy:
       resources:
         limits:
@@ -140,6 +140,8 @@ services:
       dockerfile: Dockerfile
     container_name: Ellysia-API
     restart: unless-stopped
+    env_file:
+      - .env
     # traceroute (y el chequeo ICMP de alcanzabilidad) necesitan raw sockets
     # para leer las respuestas ICMP TTL-exceeded.
     cap_add:
@@ -154,7 +156,7 @@ services:
       openvas:
         condition: service_started
     ports:
-      - "127.0.0.1:5000:5000"
+      - "127.0.0.1:15000:5000"
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -186,6 +188,8 @@ services:
       dockerfile: Dockerfile
     container_name: Ellysia-Worker
     restart: unless-stopped
+    env_file:
+      - .env
     # traceroute necesita raw sockets para leer las respuestas ICMP TTL-exceeded.
     cap_add:
       - NET_RAW
@@ -234,7 +238,8 @@ services:
     volumes:
       - ./web/ssl:/etc/nginx/ssl:ro
     depends_on:
-      - ellysia
+      ellysia:
+        condition: service_started
     networks:
       - secops-net
     profiles:

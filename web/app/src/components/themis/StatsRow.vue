@@ -36,10 +36,10 @@ defineProps({
 .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.85rem; margin-bottom: 1.25rem; }
 .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.1rem 1.25rem; transition: border-color 0.2s, transform 0.2s; }
 .stat-card:hover { border-color: var(--border-med); }
-.stat-value { display: block; overflow: hidden; font-size: 2.16rem; font-weight: 800; font-family: var(--font-mono); line-height: 1.2; }
+.stat-value { display: block; overflow: hidden; font-size: var(--fs-2xl); font-weight: 800; font-family: var(--font-mono); line-height: 1.2; }
 .stat-value span { display: inline-block; }
-.stat-label { font-size: 1.43rem; font-weight: 600; color: var(--text-dim); margin-top: 0.2rem; }
-.stat-sub { font-size: 1.19rem; color: var(--text-muted); margin-top: 0.1rem; }
+.stat-label { font-size: var(--fs-lg); font-weight: 600; color: var(--text-dim); margin-top: 0.2rem; }
+.stat-sub { font-size: var(--fs-md); color: var(--text-muted); margin-top: 0.1rem; }
 .green .stat-value { color: var(--success); }
 .blue .stat-value { color: var(--info); }
 .amber .stat-value { color: var(--warn); }

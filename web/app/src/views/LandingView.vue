@@ -412,14 +412,14 @@ onUnmounted(() => {
 .wordmark:hover .wordmark-mark { filter: drop-shadow(0 0 14px var(--sun-glow)); transform: translateY(-3px); }
 .wordmark-text {
   font-family: var(--font-epic);
-  font-size: 1.85rem; font-weight: 600;
+  font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.38em; text-transform: uppercase;
   color: var(--text);
 }
 .ely-nav { display: flex; gap: 2.2rem; justify-self: center; }
 .nav-link {
   font-family: var(--font-epic);
-  font-size: 1.25rem; font-weight: 500;
+  font-size: var(--fs-md); font-weight: 500;
   letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--text-dim);
   padding: 0.3rem 0.1rem;
@@ -452,7 +452,7 @@ onUnmounted(() => {
 .nav-panel-item {
   display: flex; align-items: center; gap: 0.6rem;
   padding: 0.5rem 0.6rem; border-radius: 7px;
-  font-size: 1.32rem; font-weight: 500;
+  font-size: var(--fs-md); font-weight: 500;
   color: var(--text-dim);
   transition: all 0.15s ease;
 }
@@ -464,8 +464,8 @@ onUnmounted(() => {
 .nav-panel-item--tool { gap: 0.85rem; padding: 0.6rem; }
 .nav-panel-item--tool .nav-panel-icon { width: 28px; height: 28px; }
 .nav-panel-text { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
-.nav-panel-name { font-size: 1.36rem; font-weight: 600; color: var(--text); letter-spacing: 0.02em; }
-.nav-panel-blurb { font-size: 1.1rem; color: var(--text-muted); font-weight: 400; }
+.nav-panel-name { font-size: var(--fs-lg); font-weight: 600; color: var(--text); letter-spacing: 0.02em; }
+.nav-panel-blurb { font-size: var(--fs-body); color: var(--text-muted); font-weight: 400; }
 .nav-panel-item--tool:hover .nav-panel-blurb { color: var(--text-dim); }
 
 .header-actions { display: flex; align-items: center; gap: 0.9rem; justify-self: end; }
@@ -480,7 +480,7 @@ onUnmounted(() => {
 .theme-toggle svg { width: 17px; height: 17px; }
 .enter-btn {
   font-family: var(--font-epic);
-  font-size: 1.3rem; font-weight: 600;
+  font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--accent-bright);
   padding: 0.55rem 1.4rem;
@@ -496,7 +496,7 @@ onUnmounted(() => {
   background: var(--accent-dim);
   border: 1.5px solid var(--border-med);
   color: var(--accent-bright);
-  font-size: 1.25rem; font-weight: 700;
+  font-size: var(--fs-md); font-weight: 700;
   font-family: var(--font-body);
   transition: all var(--transition);
 }
@@ -521,20 +521,20 @@ onUnmounted(() => {
 .drop-avatar {
   width: 38px; height: 38px; border-radius: 50%;
   background: var(--accent-dim); color: var(--accent-bright);
-  font-size: 0.75rem; font-weight: 700; flex-shrink: 0;
+  font-size: var(--fs-sm); font-weight: 700; flex-shrink: 0;
   display: grid; place-items: center;
   border: 1px solid var(--border-med);
 }
-.drop-name { font-size: 1.6rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.drop-name { font-size: var(--fs-xl); font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .drop-role {
-  font-family: var(--font-mono); font-size: 1.1rem; color: var(--accent);
+  font-family: var(--font-mono); font-size: var(--fs-body); color: var(--accent);
   letter-spacing: 0.06em; text-transform: uppercase;
 }
 .drop-menu { display: flex; flex-direction: column; gap: 0.15rem; }
 .drop-item {
   display: block;
   padding: 0.5rem 0.6rem; border-radius: 7px;
-  color: var(--text-dim); font-size: 1.45rem; font-weight: 500;
+  color: var(--text-dim); font-size: var(--fs-lg); font-weight: 500;
   transition: all 0.15s ease; text-align: left; width: 100%;
 }
 .drop-item:hover { background: var(--accent-dim); color: var(--text); }
@@ -557,7 +557,7 @@ onUnmounted(() => {
 .eyebrow {
   display: inline-block;
   font-family: var(--font-epic);
-  font-size: 1.5rem; font-weight: 500;
+  font-size: var(--fs-lg); font-weight: 500;
   letter-spacing: 0.42em; text-transform: uppercase;
   color: var(--accent);
   margin-top: 2.5rem;
@@ -579,7 +579,7 @@ onUnmounted(() => {
   letter-spacing: 0.04em;
 }
 .lede {
-  font-size: 1.7rem;
+  font-size: var(--fs-xl);
   color: var(--text-muted);
   margin-top: 0.6rem;
 }
@@ -589,7 +589,7 @@ onUnmounted(() => {
 }
 .cta {
   font-family: var(--font-epic);
-  font-size: 1rem; font-weight: 600;
+  font-size: var(--fs-body); font-weight: 600;
   letter-spacing: 0.2em; text-transform: uppercase;
   padding: 0.95rem 2.3rem;
   border-radius: 3px;
@@ -686,7 +686,7 @@ onUnmounted(() => {
 .stelae-bajada {
   font-family: var(--font-display);
   font-style: italic;
-  font-size: 1.9rem;
+  font-size: var(--fs-xl);
   color: var(--text-muted);
   margin-top: 0.8rem;
   padding-bottom: 2.5rem;
@@ -766,14 +766,14 @@ onUnmounted(() => {
 .stele-body { position: relative; z-index: 1; }
 .stele-kicker {
   font-family: var(--font-epic);
-  font-size: 1.65rem; font-weight: 600;
+  font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.34em; text-transform: uppercase;
   color: var(--accent);
 }
 .stele-myth {
   font-family: var(--font-display);
   font-style: italic;
-  font-size: 1.9rem;
+  font-size: var(--fs-xl);
   color: var(--text-muted);
   margin-top: 0.5rem;
   text-shadow: 0 1px 0 var(--bg);
@@ -783,7 +783,7 @@ onUnmounted(() => {
 .stele-epigraph {
   display: block;
   font-family: var(--font-epic);
-  font-size: 1.6rem; font-weight: 600;
+  font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.4em; text-transform: uppercase;
   color: var(--accent);
   opacity: 0.6;
@@ -799,7 +799,7 @@ onUnmounted(() => {
   margin-top: 0.7rem;
 }
 .stele-desc {
-  font-size: 1.65rem;
+  font-size: var(--fs-xl);
   color: var(--text-dim);
   margin-top: 0.8rem;
   max-width: 72ch;
@@ -812,7 +812,7 @@ onUnmounted(() => {
 }
 .stele-chips li {
   font-family: var(--font-mono);
-  font-size: 1.1rem;
+  font-size: var(--fs-body);
   color: var(--accent);
   padding: 0.32rem 0.85rem;
   border: 1px solid var(--border-med);
@@ -824,7 +824,7 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; gap: 0.5rem;
   margin-top: 1.5rem;
   font-family: var(--font-epic);
-  font-size: 1.6rem; font-weight: 600;
+  font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--accent);
   padding-bottom: 0.3rem;
@@ -869,7 +869,7 @@ onUnmounted(() => {
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   font-family: var(--font-mono);
-  font-size: 1.25rem;
+  font-size: var(--fs-md);
   color: var(--text-dim);
   letter-spacing: 0.05em;
 }
@@ -903,12 +903,12 @@ onUnmounted(() => {
   .stele-epigraph { letter-spacing: 0.28em; }
 }
 @media (max-width: 640px) {
-  .wordmark-text { letter-spacing: 0.24em; font-size: 1.6rem; }
+  .wordmark-text { letter-spacing: 0.24em; font-size: var(--fs-xl); }
   .columns { width: 34vw; }
   .hero-actions .cta { padding: 0.8rem 1.5rem; }
   .stelae-title { letter-spacing: 0.1em; }
-  .stelae-bajada { font-size: 1.6rem; padding-bottom: 1.8rem; }
-  .stele-epigraph { letter-spacing: 0.2em; font-size: 1.35rem; }
+  .stelae-bajada { font-size: var(--fs-xl); padding-bottom: 1.8rem; }
+  .stele-epigraph { letter-spacing: 0.2em; font-size: var(--fs-md); }
   .stele-divider { max-width: 320px; }
   .stelae { padding: 3rem 1.2rem 2.5rem; }
   .greek-banner { height: 28px; }

@@ -26,7 +26,7 @@ const views = [
 
 <style scoped>
 .view-toggle { display: flex; gap: 0.5rem; margin-bottom: 1.1rem; }
-.view-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 0.4rem; padding: 0.55rem 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); font-size: 1.43rem; font-weight: 500; cursor: pointer; transition: all 0.2s ease; }
+.view-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 0.4rem; padding: 0.55rem 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); font-size: var(--fs-lg); font-weight: 500; cursor: pointer; transition: all 0.2s ease; }
 .view-btn:hover { border-color: var(--accent); color: var(--text-dim); }
 .view-btn.active { background: var(--surface-2); border-color: var(--accent); color: var(--text); font-weight: 600; }
 .view-btn svg { width: 14px; height: 14px; }

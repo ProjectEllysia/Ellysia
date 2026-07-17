@@ -73,20 +73,20 @@ function onSelect(event) {
 <style scoped>
 .history-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; }
 .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.1rem; }
-.panel-title { font-size: 1.42rem; font-weight: 700; color: var(--text); margin: 0; }
-.panel-sub { font-size: 1.4rem; color: var(--text-muted); margin: 0.2rem 0 0; }
+.panel-title { font-size: var(--fs-lg); font-weight: 700; color: var(--text); margin: 0; }
+.panel-sub { font-size: var(--fs-lg); color: var(--text-muted); margin: 0.2rem 0 0; }
 
-.refresh-btn { display: flex; align-items: center; gap: 0.35rem; padding: 0.45rem 0.8rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim); font-size: 1.37rem; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+.refresh-btn { display: flex; align-items: center; gap: 0.35rem; padding: 0.45rem 0.8rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim); font-size: var(--fs-lg); cursor: pointer; transition: all 0.2s; white-space: nowrap; }
 .refresh-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
 .refresh-btn:disabled { opacity: 0.5; cursor: default; }
 .refresh-btn svg { width: 13px; height: 13px; }
 
 .selector { margin-bottom: 1.25rem; }
-.selector label { display: block; margin-bottom: 0.4rem; font-size: 1.37rem; color: var(--text-dim); }
-.selector select { width: 100%; padding: 0.55rem 0.75rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 1.49rem; }
+.selector label { display: block; margin-bottom: 0.4rem; font-size: var(--fs-lg); color: var(--text-dim); }
+.selector select { width: 100%; padding: 0.55rem 0.75rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: var(--fs-input); }
 .selector select:focus { outline: none; border-color: var(--accent); }
 
 .chart-area { min-height: 120px; }
-.state { padding: 2rem 1rem; text-align: center; color: var(--text-muted); font-size: 1.54rem; }
+.state { padding: 2rem 1rem; text-align: center; color: var(--text-muted); font-size: var(--fs-lg); }
 .state.hint { color: var(--text-dim); }
 </style>

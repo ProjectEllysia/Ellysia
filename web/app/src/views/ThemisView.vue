@@ -294,7 +294,7 @@ async function handleDeleteScheduled(id) { await store.deleteScheduledScan(id) }
 .world-opt {
   flex: 1; display: flex; align-items: center; justify-content: center; gap: 0.45rem;
   padding: 0.6rem 0.9rem; background: none; border: none; border-radius: 7px;
-  color: var(--text-muted); font-size: 1.49rem; font-weight: 500; cursor: pointer;
+  color: var(--text-muted); font-size: var(--fs-lg); font-weight: 500; cursor: pointer;
   transition: all 0.2s ease;
 }
 .world-opt svg { width: 16px; height: 16px; }
@@ -305,7 +305,7 @@ async function handleDeleteScheduled(id) { await store.deleteScheduledScan(id) }
 .lybra-history-toggle {
   display: block; margin: 0 0 0.85rem auto; padding: 0.45rem 0.8rem;
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
-  color: var(--text-dim); font-size: 1.37rem; cursor: pointer; transition: all 0.2s;
+  color: var(--text-dim); font-size: var(--fs-lg); cursor: pointer; transition: all 0.2s;
 }
 .lybra-history-toggle:hover { border-color: var(--accent); color: var(--text); }
 
@@ -332,16 +332,16 @@ async function handleDeleteScheduled(id) { await store.deleteScheduledScan(id) }
   .fade-swap-enter-active, .fade-swap-leave-active { transition: opacity 0.01s linear !important; }
 }
 
-.batch-btn { display: flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.6rem; background: var(--accent); border: 1px solid var(--accent); border-radius: 6px; color: var(--on-accent); font-size: 1.31rem; cursor: pointer; transition: all 0.2s; }
+.batch-btn { display: flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.6rem; background: var(--accent); border: 1px solid var(--accent); border-radius: 6px; color: var(--on-accent); font-size: var(--fs-md); cursor: pointer; transition: all 0.2s; }
 .batch-btn:hover { opacity: 0.9; }
 .batch-btn svg { width: 11px; height: 11px; }
 .batch-btn.danger { background: var(--danger); border-color: var(--danger); }
 .batch-btn.danger:hover { opacity: 0.85; }
 
-.batch-warning { font-size: 1.43rem; color: var(--text); margin: 0 0 0.5rem; }
-.batch-warning-sub { font-size: 1.31rem; color: var(--text-dim); margin: 0; }
+.batch-warning { font-size: var(--fs-lg); color: var(--text); margin: 0 0 0.5rem; }
+.batch-warning-sub { font-size: var(--fs-md); color: var(--text-dim); margin: 0; }
 
-label { display: block; margin-bottom: 0.4rem; font-size: 1.37rem; color: var(--text-dim); }
-select { width: 100%; padding: 0.55rem 0.75rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 1.49rem; }
+label { display: block; margin-bottom: 0.4rem; font-size: var(--fs-lg); color: var(--text-dim); }
+select { width: 100%; padding: 0.55rem 0.75rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: var(--fs-input); }
 select:focus { outline: none; border-color: var(--accent); }
 </style>

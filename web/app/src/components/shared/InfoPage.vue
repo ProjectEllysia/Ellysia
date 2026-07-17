@@ -33,7 +33,7 @@ defineProps({
 }
 .info-eyebrow {
   font-family: var(--font-epic);
-  font-size: 1.3rem; font-weight: 600;
+  font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.32em; text-transform: uppercase;
   color: var(--accent);
 }
@@ -48,13 +48,13 @@ defineProps({
 .info-body {
   margin-top: 2rem;
   color: var(--text-dim);
-  font-size: 1.4rem;
+  font-size: var(--fs-lg);
   line-height: 1.75;
 }
 /* El contenido llega vía slot; estos estilos globales lo maquetan. */
 .info-body :deep(h2) {
   font-family: var(--font-epic);
-  font-size: 1.57rem; font-weight: 600;
+  font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.16em; text-transform: uppercase;
   color: var(--accent);
   margin: 2.4rem 0 0.8rem;
@@ -68,7 +68,7 @@ defineProps({
   border-left: 2px solid var(--accent);
   background: var(--accent-dim);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  font-size: 1.25rem;
+  font-size: var(--fs-md);
   color: var(--text-dim);
 }
 </style>
