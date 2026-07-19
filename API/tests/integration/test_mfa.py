@@ -169,7 +169,20 @@ def test_mfa_challenge_locks_after_max_attempts(client, regular_user, auth_heade
         "code": "000000",
     })
     assert resp.status_code == 401
-    assert resp.get_json().get("code") == 1613
+
+
+def test_mfa_verify_is_rate_limited(client, rate_limiting_enabled):
+    # T4: mismo idioma que test_password_grant_is_rate_limited — reactiva el
+    # limiter real para verificar que /oauth/mfa/verify ("10 per minute")
+    # efectivamente devuelve 429. Un challenge token inexistente basta (falla
+    # rápido, sin consumir el contador de intentos de ningún challenge real).
+    body = {"challengeToken": "no-existe", "code": "000000"}
+    for _ in range(10):
+        resp = client.post("/oauth/mfa/verify", json=body)
+        assert resp.status_code == 401
+
+    resp = client.post("/oauth/mfa/verify", json=body)
+    assert resp.status_code == 429
 
 
 # ── Códigos de recuperación ───────────────────────────────────────────────

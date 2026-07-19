@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
+import pytest
+
 from src.modules.system.taskqueue import (
     DEFAULT_QUEUE,
     ITaskQueue,
@@ -166,3 +168,23 @@ def test_manager_uses_injected_queue_on_submit():
     assert len(fake.submitted) == 1
     assert fake.submitted[0]["external_id"] == "demo:1"
     assert fake.submitted[0]["category"] == "demo.category"
+
+
+# ---------------------------------------------------------------------------
+# C4: rechazo del reencolado cuando el job existente sigue "started"
+# ---------------------------------------------------------------------------
+
+def test_reject_if_still_running_raises_for_started_job():
+    from src.modules.shared._exceptions import IllegalStateError
+    from src.modules.system.taskqueue.queue import _reject_if_still_running
+
+    with pytest.raises(IllegalStateError) as exc_info:
+        _reject_if_still_running("NmapScan-1", "started")
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.parametrize("status", ["queued", "scheduled", "finished", "failed"])
+def test_reject_if_still_running_allows_other_statuses(status):
+    from src.modules.system.taskqueue.queue import _reject_if_still_running
+
+    _reject_if_still_running("NmapScan-1", status)  # no debe lanzar

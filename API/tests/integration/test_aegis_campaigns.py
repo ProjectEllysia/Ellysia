@@ -350,3 +350,16 @@ def test_full_campaign_flow_send_and_quiz_no_repeat(
 def test_public_quiz_unknown_token_returns_404(client):
     resp = client.get("/aegis/quiz?t=this-token-does-not-exist")
     assert resp.status_code == 404
+
+
+def test_public_quiz_is_rate_limited(client, rate_limiting_enabled):
+    # T4: mismo idioma que los tests de rate limit de oauth/mfa. /aegis/quiz
+    # es el único endpoint sin autenticación de toda la API (el token opaco
+    # es la única identidad) — sin límite real, sería enumerable a fuerza
+    # bruta. "30 per hour".
+    for _ in range(30):
+        resp = client.get("/aegis/quiz?t=this-token-does-not-exist")
+        assert resp.status_code == 404
+
+    resp = client.get("/aegis/quiz?t=this-token-does-not-exist")
+    assert resp.status_code == 429
