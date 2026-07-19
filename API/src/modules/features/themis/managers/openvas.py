@@ -47,8 +47,17 @@ class OpenVASScanManager(ScanManager):
     ... scan_id = manager.run_scan(target="192.168.1.1")
     """
 
-    SCAN_CONFIGS = CR.get_openvas_scan_configs()
-    PORT_LISTS = CR.get_openvas_port_list()
+    # A8: propiedades en vez de atributos de clase — CR.get_openvas_*() ya
+    # cachea con @_lazy_load, así que leerlas en el punto de uso es igual de
+    # barato pero recoge cambios de config aplicados vía PUT /system sin
+    # reiniciar el proceso (antes solo se leían una vez, al importar la clase).
+    @property
+    def SCAN_CONFIGS(self) -> dict:
+        return CR.get_openvas_scan_configs()
+
+    @property
+    def PORT_LISTS(self) -> dict:
+        return CR.get_openvas_port_list()
 
     SCAN_TYPE = ScanType.OPENVAS
     _MODEL = OpenVASScan
@@ -110,7 +119,7 @@ class OpenVASScanManager(ScanManager):
                 name=f"OpenVASScan-{scan_id}",
                 category=self.TASK_CATEGORY,
                 external_id=self.external_id_for(scan_id),
-                timeout=14400,
+                timeout=CR.get_openvas_task_timeout(),
             )
 
             logger.info(f"Escaneo OpenVAS {scan_id} iniciado")

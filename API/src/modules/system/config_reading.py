@@ -4,6 +4,7 @@ Módulo de lectura de configuración SecOps.
 Carga lazy (solo al primer acceso) desde SecOpsConfig.json o variables de entorno.
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -579,6 +580,26 @@ def get_themis_csv_dir() -> str:
     return get_directory_of(DirectoryType.CSV_THEMIS)
 
 
+# --- Task timeouts (Q2: números mágicos movidos desde themis/services/tasks.py) ---
+
+@_lazy_load
+def get_themis_task_default_timeout() -> float:
+    """Timeout (s) de ``_Task`` cuando el caller no especifica uno explícito."""
+    return _cfg("themis.taskDefaults.timeout", 200000, float)
+
+@_lazy_load
+def get_openvas_task_timeout() -> float:
+    """Timeout (s) por defecto de ``OpenVASTask`` — también usado como timeout
+    del job en ``OpenVASScanManager.run_scan`` (deben coincidir: si el job de
+    RQ expira antes que el escaneo interno, se mata a mitad de sondeo)."""
+    return _cfg("themis.openvas.timeout", 14400, float)
+
+@_lazy_load
+def get_openvas_max_wait_timeout() -> float:
+    """Techo aplicado en ``OpenVASTask.wait()`` al timeout recibido."""
+    return _cfg("themis.openvas.maxWaitTimeout", 28800, float)
+
+
 # --- Lybra knowledge base (local NVD/KEV/EPSS mirror) ---
 
 @_lazy_load
@@ -675,11 +696,48 @@ def get_full_config() -> dict:
     """Devuelve toda la configuración."""
     return _require_configs().copy()
 
-def save_full_config(new_config: dict) -> dict:
-    """Guarda la configuración completa."""
+
+def _compute_config_version(configs: dict) -> str:
+    """Hash de contenido de una config — usado como ETag (C9)."""
+    canonical = json.dumps(configs, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()[:16]
+
+
+@_lazy_load
+def get_config_version() -> str:
+    """ETag de la config actual: detecta escrituras concurrentes en PUT
+    /system (C9) — dos admin/pestañas guardando a la vez pisaban el config
+    del otro sin avisar. El cliente debe reenviar este valor vía cabecera
+    ``If-Match`` en el PUT; si no coincide con la versión actual, se rechaza."""
+    return _compute_config_version(_require_configs())
+
+
+def save_full_config(new_config: dict, expected_version: Optional[str] = None) -> dict:
+    """Guarda la configuración completa.
+
+    Si ``expected_version`` se indica y no coincide con la versión actual
+    (ETag de ``get_config_version()``), lanza ``IllegalStateError`` (409) en
+    vez de sobrescribir — evita el last-write-wins silencioso de C9.
+    """
     global _configs
     if _configs_path is None:
         raise FileNotFoundError("No se encontró ningún archivo de configuración.")
+    if expected_version is not None:
+        current_version = get_config_version()
+        if expected_version != current_version:
+            friendly = (
+                "La configuración cambió desde que la cargaste. Recárgala "
+                "antes de guardar para no sobrescribir cambios ajenos."
+            )
+            # user_message explícito: IllegalStateError autogenera uno
+            # genérico a partir de expected_state/current_state si no se
+            # pasa, y el texto de arriba nunca llegaría al cliente.
+            raise IllegalStateError(
+                friendly,
+                expected_state=expected_version,
+                current_state=current_version,
+                user_message=friendly,
+            )
     with open(_configs_path, "w", encoding="utf-8") as f:
         json.dump(new_config, f, indent=2, ensure_ascii=False)
     _configs = new_config

@@ -63,10 +63,13 @@ class _Task(ABC):
     def __init__(
         self,
         target: str,
-        timeout: int = 200000,
+        timeout: Optional[int] = None,
         progress_callback: Optional[Callable[[int], None]] = None,
     ):
-        self.timeout = timeout
+        # Q2: el default vive en SecOpsConfig.json, no como literal aquí —
+        # None solo cuando el caller no pasa timeout explícito (todas las
+        # subclases sí lo hacen hoy, pero se mantiene el fallback).
+        self.timeout = timeout if timeout is not None else CR.get_themis_task_default_timeout()
         self.status: TaskStatus = TaskStatus.PENDING
         self.progress: int = 0
         self.results: Optional[Any] = None
@@ -96,6 +99,13 @@ class _Task(ABC):
     def _process_results(self) -> None:
         """Procesa los resultados del escaneo. Override en subclases si es necesario."""
 
+    def _check_output_line(self, line: str) -> None:
+        """Hook para detectar en una línea de salida un fallo que el proceso
+        no ha reportado aún vía código de salida. No-op por defecto — override
+        en la subclase que lo necesite (A11: antes este check estaba
+        hardcodeado aquí con strings de Nikto, acoplando la clase base a un
+        único scanner concreto)."""
+
     def _parse_progress(self, line: str) -> int:
         """Extrae el porcentaje de progreso de una línea de salida."""
         match = re.search(r'(\d+(?:\.\d+)?)%', line)
@@ -117,9 +127,7 @@ class _Task(ABC):
                     break
                 logger.debug(f"Output: {line.strip()}")
 
-                if "Unknown option:" in line or "requires a value" in line:
-                    logger.error(f"Nikto rechazó el comando (opción inválida): {line.strip()}")
-                    self.status = TaskStatus.FAILED
+                self._check_output_line(line)
 
                 prog = self._parse_progress(line)
                 if prog != -1:
@@ -359,6 +367,11 @@ class NiktoScanTask(_Task):
 
         return nikto_cmd
 
+    def _check_output_line(self, line: str) -> None:
+        if "Unknown option:" in line or "requires a value" in line:
+            logger.error(f"Nikto rechazó el comando (opción inválida): {line.strip()}")
+            self.status = TaskStatus.FAILED
+
     def _process_results(self) -> None:
         try:
             if not self.temp_path.exists():
@@ -401,10 +414,13 @@ class OpenVASTask(_Task):
         password: str,
         scan_config: Optional[str] = None,
         port_list_id: Optional[str] = None,
-        timeout: int = 14400,
+        timeout: Optional[int] = None,
         progress_callback: Optional[Callable[[int], None]] = None,
     ):
-        super().__init__(target, timeout, progress_callback=progress_callback)
+        # Q2: default propio (no el genérico de _Task) — resuelto aquí y no
+        # como default de parámetro para no evaluar CR en tiempo de import.
+        resolved_timeout = timeout if timeout is not None else CR.get_openvas_task_timeout()
+        super().__init__(target, resolved_timeout, progress_callback=progress_callback)
         self.hostname = hostname
         self.port = port
         self.username = username
@@ -435,7 +451,7 @@ class OpenVASTask(_Task):
     def wait(self, timeout: Optional[float] = None, cancel_check: Optional[Callable[[], bool]] = None) -> bool:
         """Override: OpenVAS gestiona su propio ciclo interno."""
         try:
-            safe_timeout = min(timeout, 28800) if timeout is not None else None
+            safe_timeout = min(timeout, CR.get_openvas_max_wait_timeout()) if timeout is not None else None
             granularity = 1.0
             deadline = time.monotonic() + safe_timeout if safe_timeout else None
 
@@ -709,7 +725,10 @@ class OpenVASTask(_Task):
                     f"Error consultando tarea, reintentando en {check_interval}s: {e}",
                     exc_info=True
                 )
-                time.sleep(check_interval)
+                # C5: Event.wait() en vez de sleep — retorna en cuanto se
+                # señaliza la cancelación, en vez de esperar el intervalo
+                # completo (hasta 60s) para volver a mirar _cancel_event.
+                self._cancel_event.wait(check_interval)
                 continue
 
             status_els = task.xpath('task/status')
@@ -717,7 +736,7 @@ class OpenVASTask(_Task):
 
             if not status_els:
                 logger.warning("Respuesta de tarea sin campo 'status', reintentando...")
-                time.sleep(check_interval)
+                self._cancel_event.wait(check_interval)
                 continue
 
             status = status_els[0].text
@@ -740,7 +759,7 @@ class OpenVASTask(_Task):
                 self.status = TaskStatus.CANCELLED
                 break
 
-            time.sleep(check_interval)
+            self._cancel_event.wait(check_interval)
 
     # ── Reporte y parseo ──────────────────────────────────────────────────────
 

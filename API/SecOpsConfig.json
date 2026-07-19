@@ -1169,6 +1169,9 @@
     "history": {
       "maxScans": 5
     },
+    "taskDefaults": {
+      "timeout": 200000
+    },
     "hostReachabilityCheck": {
       "enabled": true,
       "port": 80,
@@ -1229,6 +1232,8 @@
       }
     },
     "openvas": {
+      "timeout": 14400,
+      "maxWaitTimeout": 28800,
       "colorPalette": {
         "black": "#0d2818",
         "dark": "#1b5e20",
