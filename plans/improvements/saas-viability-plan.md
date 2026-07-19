@@ -1,6 +1,8 @@
 # Ellysia — Plan de viabilidad SaaS (multiusuario, sin multitenancy empresarial)
 
-_Consolidado el 2026-07-11 a partir de dos análisis previos + verificación directa contra el código actual._
+> ⏸ **EN PAUSA — no es trabajo activo.** Este documento es el plan de negocio/roadmap para convertir Ellysia en un SaaS de pago; no se está ejecutando ahora mismo. Se deja aquí completo, con el §0 y el checklist del §8 refrescados contra el estado del código a 2026-07-19, para poder retomarlo sin tener que reconstruir el contexto desde cero. El propio documento ya trae su propio punto de decisión (§8, checklist de días 60–90) para cuando se decida continuar.
+
+_Consolidado el 2026-07-11 a partir de dos análisis previos + verificación directa contra el código actual. Última verificación de estado: 2026-07-19 (ver notas "✅ actualizado 2026-07-19" en las tablas)._
 
 ## 0. Premisa confirmada
 
@@ -10,7 +12,7 @@ Modelo: **una sola instancia, una sola base de datos, aislamiento por `user_id`*
 |---|---|---|
 | Iris filtra por `user_id` | ✅ confirmado | `iris/repositories.py:27,36,98` |
 | Themis/Aegis/Acheron/Users filtran por `user_id` | ✅ ya sabido | repos con `filters={"user_id": ...}` |
-| Rate limiter sobrevive multi-worker/reinicio | ❌ **no** — `storage_uri="memory://"` | `shared/_endpoints.py:123` |
+| Rate limiter sobrevive multi-worker/reinicio | ✅ **actualizado 2026-07-19** — Redis por defecto, con fallback documentado | `run.py` fija `RATELIMIT_STORAGE_URI` a Redis antes de `limiter.init_app(app)` |
 | Token de quiz de Aegis no filtra otros recipients | ✅ seguro — 1 token → 1 recipient, sin listado | `aegis/managers.py:840-875`, rate-limit 10/h en `endpoints.py:736` |
 | Flujo "olvidé mi contraseña" | ❌ no existe | sin resultados en `users/` |
 | Integración de pagos (Stripe/Paddle/LemonSqueezy) | ❌ no existe | sin resultados en `API/` |
@@ -21,7 +23,7 @@ Modelo: **una sola instancia, una sola base de datos, aislamiento por `user_id`*
 | MFA (TOTP + recovery codes) | ✅ **implementado** end-to-end, no solo diseñado | modelos `MFATotpCredential`/`MFARecoveryCode`/`MFAChallenge`, login con paso de 2º factor en `LoginView.vue`, `MfaSetupModal.vue` |
 | Aviso al usuario si no tiene MFA activado (login o email) | ❌ no existe | sin resultados de nudge/recordatorio |
 | Scheduler periódico reutilizable (cron/interval) | ✅ ya existe y en uso | `APScheduler` (dependencia declarada), `themis/services/scheduling.py:Scheduler` lo usa para escaneos recurrentes |
-| Landing/hub intermedio por módulo (antes de entrar a la herramienta) | ❌ no existe | el nav lleva directo a la vista de trabajo de cada módulo |
+| Landing/hub intermedio por módulo (antes de entrar a la herramienta) | ✅ hecho 2026-07-11 (ver §2 Fase 1, punto 2) | `ModuleHub.vue` + 4 hubs públicos, `LandingView` como meta-hub |
 
 Esta tabla es la fuente de verdad para las fases siguientes — no reabrir preguntas ya verificadas (p. ej. no volver a auditar el leak de tokens de quiz salvo que cambie el código).
 
@@ -152,7 +154,7 @@ No es una nueva clase "extensión del mailer" — la pieza que faltaba nunca fue
 ## 8. Checklist accionable — próximos 30/60/90 días
 
 **Días 0–30 (Fase 0 + arranque Fase 1):**
-- [ ] Rate limiter a Redis
+- [x] Rate limiter a Redis — hecho 2026-07-19 (ver §0)
 - [ ] Cuotas básicas por usuario (al menos: scans concurrentes, píldoras/día)
 - [ ] Flujo de reset de contraseña
 - [ ] Elegir proveedor de pago (Stripe vs Lemon Squeezy/Paddle) e integrar Checkout + webhook
@@ -161,7 +163,7 @@ No es una nueva clase "extensión del mailer" — la pieza que faltaba nunca fue
 - [ ] SPF/DKIM/DMARC en dominio de envío Brevo
 
 **Días 30–60 (lanzamiento Aegis):**
-- [ ] UX de campaña completa en frontend
+- [x] UX de campaña completa en frontend — confirmado 2026-07-19: `CampaignModal.vue`, `aegisStore.js` (listas de distribución, lanzamiento, resultados por documento) ya implementados y en uso desde `AegisView.vue`
 - [x] Hubs de los 4 módulos (plantilla reusable) — hecho 2026-07-11; falta landing/pricing enfocados en Aegis
 - [ ] Nudge de MFA en login + job de recordatorio programado (reusando `APScheduler`)
 - [ ] 5–8 conversaciones selectivas con consultoras IT (no cold — LinkedIn, recomendación, INCIBE)
@@ -185,3 +187,44 @@ Checklist:
 | **Ningún interés real** | Acepta feedback negativo. Side-project a 5–10h/semana. Diagnostica en enero: ¿pivotear o cerrar? |
 
 **Nota importante:** no es "fallo" terminar en octubre con Ellysia en side-project. Es reconocer que el runway de septiembre fue para *validar*, no para *convertir*. Si validaste que el mercado existe, has ganado.
+
+## 9. Apéndice — Requisitos funcionales y no funcionales observados en código (2026-07-19)
+
+Migrado desde la auditoría de código (cerrada) al retomar este plan — snapshot del código en esa fecha, no se actualiza automáticamente con cambios posteriores.
+
+### Requisitos funcionales
+
+**Implementados (verificados en código/tests):**
+
+- **RF1 — Autenticación:** OAuth2 password grant + JWT (access 30 min / refresh 7 d), Argon2id, MFA TOTP con códigos de recuperación, revocación por `jti`.
+- **RF2 — Autorización:** roles jerárquicos (user/admin/root) + atributos ABAC por módulo (`THEMIS_READ`, etc.); ownership por `user_id` en todos los recursos.
+- **RF3 — Themis:** escaneos Nmap/Nikto/OpenVAS/Lybra con validación anti-SSRF, un host por escaneo OpenVAS, carpetas, escaneos programados (APScheduler), traceroute, informes PDF (con IA opcional), targets autorizados.
+- **RF4 — Iris:** análisis de cabeceras (37 reglas, scoring sustractivo 0–100), quishing (QR), documentos PDF, reconciliación de análisis huérfanos.
+- **RF5 — Aegis:** píldoras de concienciación generadas por IA (scribe: OpenAI/Ollama/Gemini), campañas con listas de distribución, envío por `herald` (SMTP), quiz público por token opaco (único endpoint sin auth), perfil de organización.
+- **RF6 — Acheron:** vault zero-knowledge (cripto en cliente, interop web/móvil verificada por vectores compartidos), 7 tipos de storable, generador de contraseñas (autenticado).
+- **RF7 — Sistema:** cola de tareas persistente (RQ+Redis) con categorías, cancelación cooperativa, progreso, reconciliación al arranque; administración de tareas y config en runtime (`/system/tasks/*`, `PUT /system` con control de concurrencia por ETag).
+
+**Faltantes confirmados (grep negativo — todos los que motivan este plan):**
+
+- **RF8 — Registro público de usuarios** (no existe ruta ni vista).
+- **RF9 — Recuperación de contraseña** (ni endpoint ni email transaccional).
+- **RF10 — Cuotas por usuario** (scans/día, píldoras/día, tamaño vault, recipients).
+- **RF11 — Pagos/suscripción** (Stripe/Paddle/Lemon: cero referencias) + página de pricing.
+- **RF12 — Nudge/recordatorio de MFA** (toast post-login + job periódico).
+- **RF13 — Ingesta IMAP en Iris** (convertir demo en hábito diario — Fase 2).
+- **RF14 — Export GDPR y baja autoservicio** (Fase 3).
+
+### Requisitos no funcionales
+
+| # | Requisito | Estado observado |
+|---|---|---|
+| **RNF1** | **Seguridad:** hashing Argon2id, Fernet para TOTP, anti-SSRF en todos los scanners, rate limiting distribuido, mínimo endpoint público, config global solo-root con control de concurrencia | ✅ sólido en código y despliegue |
+| **RNF2** | **Rendimiento:** servidor WSGI de producción, gzip + cache de assets | ✅ resuelto |
+| **RNF3** | **Disponibilidad/resiliencia:** tareas sobreviven reinicios (RQ persistente), reconciliación de huérfanos, `restart: unless-stopped`, healthcheck de API; sin monitoring ni backups | parcial — falta plan de Fase 0 (backups, UptimeKuma) |
+| **RNF4** | **Escalabilidad:** single VPS, single DB, aislamiento por `user_id`; colas por categoría; RLS y prioridades diferidas a Fase 3 | acorde al plan |
+| **RNF5** | **Mantenibilidad:** capas endpoint→manager→repo respetadas, suite de integración amplia, pylint limpio, migraciones lineales | ✅ sólido |
+| **RNF6** | **Reproducibilidad de build:** mismas fuentes → misma imagen | ❌ `requirements.txt` sin lockfile |
+| **RNF7** | **Cumplimiento (UE):** páginas legales preliminares ✅; fuentes autoalojadas (sin CDN de Google) ✅; sin export GDPR (RF14) | pendiente antes de cobrar (RF14) |
+| **RNF8** | **Portabilidad:** API Linux-only (nmap/nikto/openvas) — asumido y documentado; web/tests corren en Windows | ✅ asumido |
+| **RNF9** | **Observabilidad:** logs JSON rotados en compose, `log_min_duration_statement=200`; sin métricas ni uptime monitoring | parcial (plan: UptimeKuma) |
+| **RNF10** | **i18n:** texto embebido en español | asumido mientras el mercado sea ES/LatAm |
