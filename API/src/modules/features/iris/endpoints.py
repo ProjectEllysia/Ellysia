@@ -65,8 +65,6 @@ iris_blp = SmorestBlueprint(
 
 logger = logging.getLogger(__name__)
 
-CANCELLABLE_STATES = frozenset({"pending", "running"})
-
 
 @iris_blp.post("/analyze")
 @iris_blp.arguments(AnalyzeRequestSchema)

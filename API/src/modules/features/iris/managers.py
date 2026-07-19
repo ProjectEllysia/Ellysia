@@ -21,7 +21,7 @@ import src.modules.system.config_reading as CR
 from src.modules.shared._exceptions import DocumentNotFoundError
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
-from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc
+from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc, CANCELLABLE_STATES as _CANCELLABLE_STATES
 from src.modules.shared._documents import run_report_generation, delete_document_with_file
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
 
@@ -43,8 +43,6 @@ from .services.ai_writer import IrisAIWriter
 
 
 logger = logging.getLogger(__name__)
-
-_CANCELLABLE_STATES = frozenset({"pending", "running"})
 
 # Verdict severity ordering, worst last. Gating can only push a verdict
 # toward a *worse* category, never improve it.
@@ -957,7 +955,7 @@ class IrisManager(TaskTrackingMixin):
             logger.error(f"Failed to mark analysis {analysis_id} as failed: {e}", exc_info=True)
 
 
-class IrisReportManager:
+class IrisReportManager(TaskTrackingMixin):
     """Manager for IrisDocument lifecycle and async PDF report generation.
 
     Mirrors ``ThemisReportManager``: creates an ``IrisDocument`` row in
@@ -965,6 +963,9 @@ class IrisReportManager:
     that renders the PDF via :class:`IrisPDFCreator`, and exposes the
     CRUD/ownership operations the endpoints need.
     """
+
+    EXTERNAL_ID_PREFIX = "iris-doc:"
+    TASK_CATEGORY = "iris.report"
 
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
@@ -1051,8 +1052,8 @@ class IrisReportManager:
             func=IrisReportManager.execute_report_generation,
             args=(doc_id, analysis_id),
             name=f"PDFGeneration-Analysis-{analysis_id}",
-            category="iris.report",
-            external_id=f"iris-doc:{doc_id}",
+            category=self.TASK_CATEGORY,
+            external_id=self.external_id_for(doc_id),
         )
         return doc_id  # type: ignore
 

@@ -51,11 +51,11 @@ from src.modules.features.aegis.exceptions import (
     QuizTokenInvalidError,
 )
 import src.modules.system.config_reading as CR
-from src.modules.tools.herald import EmailMessage, build_mailer
+from src.modules.tools.herald import EmailMessage, Mailer, build_mailer
 from src.modules.users import User
-from src.modules.system.taskqueue import ITaskQueue, TaskQueue, job_context
+from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.session import get_db_session, build_repository
+from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc
 
 from .model import AegisDocument, AegisOrgProfile, Campaign, CampaignRecipient, DistributionList, Topic
@@ -71,7 +71,7 @@ from .repositories import (
 logger = logging.getLogger(__name__)
 
 
-class AegisManager:
+class AegisManager(TaskTrackingMixin):
     """
     Gestiona el ciclo de vida completo de los documentos Aegis:
     creación, generación asíncrona, consulta, exportación y eliminación.
@@ -80,11 +80,27 @@ class AegisManager:
     usando UnitOfWork. El manager no gestiona sesiones directamente.
     """
 
+    EXTERNAL_ID_PREFIX = "aegis-doc:"
+    TASK_CATEGORY = "aegis.generate"
+
     _lock = threading.Lock()
 
-    def __init__(self, user: User, task_queue: ITaskQueue | None = None) -> None:
+    def __init__(
+        self,
+        user: User,
+        task_queue: ITaskQueue | None = None,
+        alert_fetcher: AegisAlertFetcher | None = None,
+        ai_writer: AegisAIWriter | None = None,
+    ) -> None:
+        # A9: alert_fetcher/ai_writer inyectables (mismo patrón que task_queue)
+        # — los tests pueden sustituirlos por dobles sin monkeypatchear la clase.
+        # ai_writer se guarda tal cual (puede ser None) y solo se construye el
+        # default de forma perezosa en generate(): instanciarlo aquí resolvería
+        # la estrategia de IA (y loguearía) en cada AegisManager(), incluida
+        # la mayoría de llamadas (list/delete/get_topics) que nunca generan.
         self.user = user
-        self.alert_fetcher = AegisAlertFetcher()
+        self.alert_fetcher = alert_fetcher or AegisAlertFetcher()
+        self.ai_writer = ai_writer
         self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
 
     # =========================================================================
@@ -104,8 +120,8 @@ class AegisManager:
                 func=AegisManager.execute_aegis_generation,
                 args=(document_id, topic_id, tweaks, self.user.id),
                 name=f"AegisGen-{document_id}",
-                category="aegis.generate",
-                external_id=f"aegis-doc:{document_id}",
+                category=self.TASK_CATEGORY,
+                external_id=self.external_id_for(document_id),
             )
 
         return document_id
@@ -310,18 +326,12 @@ class AegisManager:
 
     def list_user_documents(self) -> list[dict]:
         """Lista todos los documentos del usuario, ordenados por fecha descendente."""
-        from sqlalchemy import desc
-        from src.modules.shared import Document
-
-        session = get_db_session()
-        docs = (
-            session.query(Document)
-            .filter(Document.user_id == self.user.id)
-            .filter(Document.document_type == "aegis")
-            .order_by(desc(Document.generated_at))
-            .limit(100)
-            .all()
-        )
+        # A4: antes hacía session.query(Document) directo aquí, duplicando lo
+        # que ya resuelve el repositorio (mismo filtro/orden/límite, y evita
+        # el lazy-load extra de las columnas de AegisDocument al consultar
+        # solo la tabla base Document).
+        repo = build_repository(AegisDocumentRepository)
+        docs = repo.get_documents_by_user(self.user.id)
         fields_map = {
             "id":          "id",
             "title":       "title",
@@ -426,7 +436,7 @@ class AegisManager:
                 reference = self._load_reference_stack(cfg["stack_dir"])
 
                 # 3. Generación de contenido con el modelo
-                writer = AegisAIWriter()
+                writer = self.ai_writer or AegisAIWriter()
                 content: AegisContent = writer.generate(
                     topic             = topic,
                     resolved_topic_id = resolved_id,
@@ -694,7 +704,7 @@ class AegisOrgProfileManager:
             return saved.to_dict()
 
 
-class CampaignManager:
+class CampaignManager(TaskTrackingMixin):
     """
     Gestiona listas de distribución y campañas de concienciación.
 
@@ -705,9 +715,21 @@ class CampaignManager:
     (``teardown_request`` en HTTP, ``job_context`` en el worker).
     """
 
-    def __init__(self, user: User, task_queue: ITaskQueue | None = None) -> None:
+    EXTERNAL_ID_PREFIX = "aegis-campaign:"
+    TASK_CATEGORY = "aegis.campaign"
+
+    def __init__(
+        self,
+        user: User,
+        task_queue: ITaskQueue | None = None,
+        mailer: Mailer | None = None,
+    ) -> None:
+        # A9: mailer inyectable — igual que ai_writer en AegisManager, se
+        # guarda tal cual (puede ser None) y el default se construye de
+        # forma perezosa en _run_campaign_send, no aquí.
         self.user = user
         self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
+        self.mailer = mailer
 
     # =========================================================================
     # DISTRIBUTION LISTS
@@ -828,8 +850,8 @@ class CampaignManager:
             func=CampaignManager.execute_campaign_send,
             args=(campaign_id, self.user.id),
             name=f"CampaignSend-{campaign_id}",
-            category="aegis.campaign",
-            external_id=f"aegis-campaign:{campaign_id}",
+            category=self.TASK_CATEGORY,
+            external_id=self.external_id_for(campaign_id),
         )
         logger.info(f"Campaña {campaign_id} lanzada: {len(campaign_recipients)} destinatarios")
 
@@ -870,7 +892,7 @@ class CampaignManager:
                 return
 
             base_url = CR.get_public_web_url()
-            mailer = build_mailer("aegis")
+            mailer = self.mailer or build_mailer("aegis")
             pill_title = doc.subtitle or doc.title if doc else "Formación de concienciación"
 
             sent_count = 0
