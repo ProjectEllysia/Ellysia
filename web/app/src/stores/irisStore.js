@@ -1,10 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, reactive, computed } from 'vue'
 import { useApi } from '@/composables/useApi'
+import { useUtils } from '@/composables/useUtils'
 import { useToastStore } from '@/stores/toastStore'
 
 export const useIrisStore = defineStore('iris', () => {
   const { apiFetch, apiError } = useApi()
+  const { triggerDownload, filenameFromResponse } = useUtils()
   const toast = useToastStore()
 
   const analyses = ref([])
@@ -181,6 +183,31 @@ export const useIrisStore = defineStore('iris', () => {
     } finally {
       currentIocs.loading = false
     }
+  }
+
+  // A3: getters de valor ya resuelto — antes IrisReportViewer.vue leía
+  // pathCache/currentPath/iocsCache/currentIocs directamente (cachés
+  // internos de la estrategia de carga bajo demanda, no la API pública del
+  // store). El componente ahora solo conoce estos cuatro getters.
+  function resolvedPathFor(id) {
+    if (!id) return null
+    const cached = pathCache.get(id)
+    if (cached) return cached
+    return currentPath.data?.analysisId === id ? currentPath.data : null
+  }
+  function isPathLoadingFor(id) {
+    if (!id) return false
+    return currentPath.loading && currentPath.data?.analysisId !== id
+  }
+  function resolvedIocsFor(id) {
+    if (!id) return null
+    const cached = iocsCache.get(id)
+    if (cached) return cached
+    return currentIocs.data?.analysisId === id ? currentIocs.data : null
+  }
+  function isIocsLoadingFor(id) {
+    if (!id) return false
+    return currentIocs.loading && currentIocs.data?.analysisId !== id
   }
 
   function startPolling(id) {
@@ -405,15 +432,8 @@ export const useIrisStore = defineStore('iris', () => {
       const res = await apiFetch(`/iris/document/${documentId}/download`)
       if (!res?.ok) { toast.show('No se pudo descargar el informe.', 'error'); return false }
       const blob = await res.blob()
-      const cd = res.headers.get('Content-Disposition') ?? ''
-      const name = cd.match(/filename="?([^";\n]+)"?/i)?.[1] ?? `iris_analysis_${documentId}.pdf`
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = name
-      document.body.appendChild(a)
-      a.click()
-      setTimeout(() => { URL.revokeObjectURL(url); a.remove() }, 1000)
+      const name = filenameFromResponse(res, `iris_analysis_${documentId}.pdf`)
+      triggerDownload(blob, name)
       toast.show('Informe descargado.', 'success')
       return true
     } catch (e) {
@@ -434,16 +454,44 @@ export const useIrisStore = defineStore('iris', () => {
     return true
   }
 
+  /** Limpia el estado (Q6: logout SPA sin recarga dura) — detiene también el
+   * polling de estado y de documentos en curso. */
+  function $reset() {
+    stopPolling()
+    stopDocumentPolling()
+
+    analyses.value = []
+    loading.value = false
+    listError.value = null
+    submitting.value = false
+    totalCount.value = 0
+    page.value = 1
+    loadingMore.value = false
+
+    currentId.value = null
+    Object.assign(currentReport, { loading: false, data: null })
+    Object.assign(currentStatus, { polling: false, status: null, progress: null })
+    pathCache.clear()
+    Object.assign(currentPath, { loading: false, data: null })
+    iocsCache.clear()
+    Object.assign(currentIocs, { loading: false, data: null })
+    aiSummaryLoading.value = false
+
+    documents.value = []
+    documentsLoading.value = false
+  }
+
   return {
     analyses, loading, listError, submitting, totalCount, page, perPage, loadingMore, hasMore,
-    currentId, currentReport, currentStatus, currentPath, pathCache,
-    currentIocs, iocsCache, aiSummaryLoading,
+    currentId, currentReport, currentStatus, aiSummaryLoading,
     documents, documentsLoading,
     submitAnalysis, fetchResults, fetchMoreResults, getReport, getStatus, pathFor, iocsFor,
+    resolvedPathFor, isPathLoadingFor, resolvedIocsFor, isIocsLoadingFor,
     generateAiSummary, checkAiSummary,
     cancelAnalysis, deleteAnalysis, reanalyzeAnalysis, selectAnalysis, goToPage,
     startPolling, stopPolling,
     generateDocument, fetchDocuments, getDocumentStatus, downloadDocument, deleteDocument,
     stopDocumentPolling,
+    $reset,
   }
 })

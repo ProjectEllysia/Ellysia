@@ -85,16 +85,7 @@
       </div>
 
       <!-- Score + Verdict hero -->
-      <div class="rv-hero" :class="`rv-hero--${verdictClass}`">
-        <div class="rv-hero-score">
-          <span class="score-num">{{ reportData.totalScore }}</span>
-          <span class="score-unit">/ máx</span>
-        </div>
-        <div class="rv-hero-verdict">
-          <span class="verdict-badge" :class="`verdict--${verdictClass}`">{{ reportData.verdict }}</span>
-          <span class="verdict-status">{{ statusLabel }}</span>
-        </div>
-      </div>
+      <IrisVerdictHero :score="reportData.totalScore" :verdict="reportData.verdict" />
 
       <!-- Gate reasons: señales de alta confianza que fijaron el veredicto -->
       <div v-if="reportData.gateReasons && reportData.gateReasons.length" class="rv-gates">
@@ -235,24 +226,7 @@
               <div class="spinner spinner--sm"></div>
               <span>Extrayendo IOCs…</span>
             </div>
-            <template v-else-if="iocsData">
-              <p class="ioc-hint">
-                Valores <em>defanged</em> para pegar de forma segura sin activar enlaces.
-              </p>
-              <div v-for="cat in iocCategories" :key="cat.key" class="ioc-category">
-                <div class="ioc-category-header">
-                  <span class="ioc-category-title">{{ cat.label }} ({{ iocsData[cat.key].length }})</span>
-                </div>
-                <ul v-if="iocsData[cat.key].length" class="ioc-list">
-                  <li v-for="(val, i) in iocsData[cat.key]" :key="i" class="ioc-item">{{ defang(val) }}</li>
-                </ul>
-                <p v-else class="ioc-empty">Ninguno detectado.</p>
-              </div>
-              <button type="button" class="btn-export-csv" @click="exportIocsCsv">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Exportar CSV
-              </button>
-            </template>
+            <IrisIocsPanel v-else-if="iocsData" :data="iocsData" :report-id="reportId" />
             <p v-else class="rv-path-empty">No se pudieron cargar los IOCs.</p>
           </div>
         </Transition>
@@ -294,6 +268,8 @@ import { useIrisStore } from '@/stores/irisStore'
 import IrisEmailPath from '@/components/iris/IrisEmailPath.vue'
 import IrisDocumentsModal from '@/components/iris/IrisDocumentsModal.vue'
 import IrisRuleCard from '@/components/iris/IrisRuleCard.vue'
+import IrisIocsPanel from '@/components/iris/IrisIocsPanel.vue'
+import IrisVerdictHero from '@/components/iris/IrisVerdictHero.vue'
 
 const { formatDate } = useUtils()
 const irisStore = useIrisStore()
@@ -344,94 +320,25 @@ async function jumpToRule(i) {
   ruleCardEls[i]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
-const verdictClass = computed(() => {
-  const v = props.reportData?.verdict?.toLowerCase() ?? ''
-  if (v === 'legitimate') return 'legit'
-  if (v === 'suspicious') return 'susp'
-  if (v === 'phishing') return 'phish'
-  return 'unknown'
-})
-
-const statusLabel = computed(() => {
-  const v = props.reportData?.verdict?.toLowerCase() ?? ''
-  if (v === 'legitimate') return 'Correo verificado'
-  if (v === 'suspicious') return 'Posible amenaza'
-  if (v === 'phishing') return 'Phishing detectado'
-  return ''
-})
-
-const pathData = computed(() => {
-  if (!props.reportId) return null
-  const cached = irisStore.pathCache.get(props.reportId)
-  if (cached) return cached
-  return irisStore.currentPath?.data?.analysisId === props.reportId
-    ? irisStore.currentPath.data
-    : null
-})
-const pathLoading = computed(() => {
-  if (!props.reportId) return false
-  return irisStore.currentPath?.loading && irisStore.currentPath?.data?.analysisId !== props.reportId
-})
+// A3: valor ya resuelto desde la API pública del store — antes se leían
+// pathCache/currentPath (cachés internos de la estrategia de carga bajo
+// demanda) directamente desde el componente.
+const pathData = computed(() => irisStore.resolvedPathFor(props.reportId))
+const pathLoading = computed(() => irisStore.isPathLoadingFor(props.reportId))
 const pathVisible = computed(() => {
   return props.reportData?.status === 'finished' && !!props.reportId && (
     pathData.value || pathLoading.value
   )
 })
 
-/* ── IOCs (O1: export, O2: defanged rendering) ── */
+/* ── IOCs (A3: contenido con datos vive en IrisIocsPanel.vue) ── */
 const iocsOpen = ref(false)
-const iocCategories = [
-  { key: 'domains', label: 'Dominios' },
-  { key: 'urls', label: 'URLs' },
-  { key: 'ips', label: 'IPs' },
-  { key: 'emails', label: 'Emails' },
-  { key: 'hashes', label: 'Hashes (SHA256)' },
-]
-
-const iocsData = computed(() => {
-  if (!props.reportId) return null
-  const cached = irisStore.iocsCache.get(props.reportId)
-  if (cached) return cached
-  return irisStore.currentIocs?.data?.analysisId === props.reportId
-    ? irisStore.currentIocs.data
-    : null
-})
-const iocsLoading = computed(() => {
-  if (!props.reportId) return false
-  return irisStore.currentIocs?.loading && irisStore.currentIocs?.data?.analysisId !== props.reportId
-})
+const iocsData = computed(() => irisStore.resolvedIocsFor(props.reportId))
+const iocsLoading = computed(() => irisStore.isIocsLoadingFor(props.reportId))
 
 function toggleIocs() {
   iocsOpen.value = !iocsOpen.value
   if (iocsOpen.value && !iocsData.value) irisStore.iocsFor(props.reportId)
-}
-
-// Neutraliza dominios/URLs/IPs/emails para que no se conviertan en enlaces
-// clicables ni resuelvan accidentalmente al pegarlos en otra herramienta.
-function defang(value) {
-  return String(value)
-    .replace(/https?/gi, (m) => m.replace(/^http/i, 'hxxp'))
-    .replace(/\./g, '[.]')
-    .replace(/@/g, '[at]')
-}
-
-function exportIocsCsv() {
-  if (!iocsData.value) return
-  const rows = [['type', 'value']]
-  for (const cat of iocCategories) {
-    for (const val of iocsData.value[cat.key]) {
-      rows.push([cat.key, val])
-    }
-  }
-  const csv = rows.map(r => r.map(f => `"${String(f).replace(/"/g, '""')}"`).join(',')).join('\n')
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `iris_iocs_${props.reportId}.csv`
-  document.body.appendChild(a)
-  a.click()
-  setTimeout(() => { URL.revokeObjectURL(url); a.remove() }, 1000)
 }
 
 /* ── Recomendaciones (recorte con "mostrar más") ── */
@@ -712,76 +619,6 @@ watch(
   font-weight: 700;
   font-family: var(--font-mono);
   line-height: 1;
-}
-
-/* Hero */
-.rv-hero {
-  display: flex;
-  align-items: center;
-  gap: 2rem;
-  padding: 1.5rem 2rem;
-  border-radius: 12px;
-  border: 1px solid var(--border-med);
-  background: var(--surface);
-}
-
-.rv-hero--legit {
-  border-color: rgba(76, 183, 130, 0.2);
-  background: linear-gradient(135deg, var(--surface) 0%, rgba(76, 183, 130, 0.04) 100%);
-}
-
-.rv-hero--susp {
-  border-color: rgba(212, 160, 74, 0.2);
-  background: linear-gradient(135deg, var(--surface) 0%, rgba(212, 160, 74, 0.04) 100%);
-}
-
-.rv-hero--phish {
-  border-color: rgba(217, 108, 108, 0.2);
-  background: linear-gradient(135deg, var(--surface) 0%, rgba(217, 108, 108, 0.04) 100%);
-}
-
-.rv-hero-score {
-  display: flex;
-  align-items: baseline;
-  gap: 0.25rem;
-}
-
-.score-num {
-  font-size: var(--fs-stat-hero);
-  font-weight: 800;
-  font-family: var(--font-display);
-  letter-spacing: -0.02em;
-}
-
-.rv-hero--legit .score-num { color: var(--success); }
-.rv-hero--susp .score-num { color: var(--warn); }
-.rv-hero--phish .score-num { color: var(--danger); }
-
-.score-unit {
-  font-size: var(--fs-lg);
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
-
-.rv-hero-verdict {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.verdict-badge {
-  font-size: var(--fs-xl);
-  font-weight: 700;
-  font-family: var(--font-display);
-}
-
-.verdict--legit { color: var(--success); }
-.verdict--susp { color: var(--warn); }
-.verdict--phish { color: var(--danger); }
-
-.verdict-status {
-  font-size: var(--fs-lg);
-  color: var(--text-dim);
 }
 
 /* Section title */
@@ -1120,57 +957,14 @@ watch(
   text-align: center;
 }
 
-/* IOCs */
+/* IOCs — el contenido "con datos" (hint, categorías, lista, vacío) vive
+   en IrisIocsPanel.vue; .ioc-panel es el contenedor del chrome colapsable,
+   que se queda aquí (ver A3). */
 .ioc-panel {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
   padding: 0.2rem 0 0.6rem;
-}
-
-.ioc-hint {
-  margin: 0;
-  font-size: var(--fs-lg);
-  color: var(--text-muted);
-}
-
-.ioc-category-header {
-  margin-bottom: 0.4rem;
-}
-
-.ioc-category-title {
-  font-size: var(--fs-lg);
-  font-weight: 700;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.ioc-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.ioc-item {
-  padding: 0.5rem 0.75rem;
-  background: var(--surface);
-  border: 1px solid var(--border-solid);
-  border-radius: 6px;
-  font-family: var(--font-mono);
-  font-size: var(--fs-lg);
-  color: var(--text-dim);
-  word-break: break-all;
-}
-
-.ioc-empty {
-  margin: 0;
-  font-size: var(--fs-lg);
-  color: var(--text-muted);
-  font-style: italic;
 }
 
 .btn-export-csv {
