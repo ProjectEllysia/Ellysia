@@ -111,3 +111,4 @@ Changes to `SecOpsConfig.json` require an app restart (values are cached) unless
 - `themis/services/tasks.py` defines its **own** `TaskStatus` enum — distinct from `taskqueue.TaskStatus`. Don't conflate them.
 - OpenVAS accepts **one host per scan** (no CIDR ranges) and takes ~15 min on first start (NVT feed).
 - API version is config-driven: `create_app()` reads it via `CR.get_app_version()` from `appVersion` in `SecOpsConfig.json` (currently `4.2`) — it is not hardcoded.
+- `themis.areLocalIpsAllowed` is set to `true` in `SecOpsConfig.json` (intentional, for local dev against private IPs) — with it `true`, 4 SSRF tests don't trigger (`test_nikto_rejects_loopback_target`, `test_nikto_rejects_cloud_metadata_target`, `test_nmap_rejects_private_ip_target`, `test_openvas_scheduled_flow_rejects_private_ip`; not a regression). **Must be reverted to `false` before any real deployment**, or the anti-SSRF defense stays disabled in production.
