@@ -12,6 +12,7 @@ from src.modules.shared import (
     handle_exceptions,
     limiter,
     normalize_target,
+    CANCELLABLE_STATES,
 )
 from src.modules.shared._exceptions import (
     ValidationError,
@@ -105,8 +106,6 @@ themis_blp = SmorestBlueprint(
     description="Escaneos de seguridad (Nmap, Nikto, OpenVAS) y PDFs"
 )
 logger = logging.getLogger(__name__)
-
-CANCELLABLE_STATES = frozenset({"pending", "running"})
 
 
 def _download_url_for(doc) -> str | None:

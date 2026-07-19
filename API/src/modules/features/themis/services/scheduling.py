@@ -8,7 +8,6 @@ from apscheduler.schedulers.background import BackgroundScheduler as _BgSchedule
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from croniter import croniter
-from sqlalchemy.orm import Session
 
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.unit_of_work import close_all
@@ -16,8 +15,8 @@ from src.modules.infrastructure.retry import retry_on_transient
 from src.modules.shared import utcnow_naive
 
 from ..exceptions import InvalidProgramedTaskArgumentError
-from ..repositories import ProgramedScanRepository
-from ..model import Scan, ScanStatus, ScanType
+from ..repositories import ProgramedScanRepository, ScanRepository
+from ..model import ScanType
 
 logger = logging.getLogger(__name__)
 
@@ -279,19 +278,6 @@ class Scheduler:
                     ps.next_run_at = next_run
             logger.info("Synced %d active scans from database", len(active))
 
-    @staticmethod
-    def _has_active_run(session: Session, ps_id: int) -> bool:
-        """True if the programed scan already has a pending/running scan."""
-        return (
-            session.query(Scan)
-            .filter(
-                Scan.programed_scan_id == ps_id,
-                Scan.status.in_([ScanStatus.PENDING.value, ScanStatus.RUNNING.value]),
-            )
-            .first()
-            is not None
-        )
-
     # =========================================================================
     # EXECUTION
     # =========================================================================
@@ -317,7 +303,7 @@ class Scheduler:
             if ScanType(ps.scan_type) not in cls._TASK_MAPPING:
                 raise ValueError(f"Unknown scan type: {ps.scan_type}")
 
-            if cls._has_active_run(uow.session, ps.id):
+            if ScanRepository(uow).has_active_run_for_programed(ps.id):
                 logger.info(
                     "Programed scan %d already has a pending/running scan, skipping",
                     ps.id,

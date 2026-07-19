@@ -293,7 +293,7 @@ class Scan(Base):
         status: Current scan status (pending/running/finished/failed/cancelled).
         user_id: Foreign key to User.id (scan owner).
         scan_type: Polymorphic discriminator (nmap/nikto/openvas).
-        frecuent: Whether this is a scheduled/repeated scan.
+        frequent: Whether this is a scheduled/repeated scan.
         host_id: Optional foreign key to Host.
         finished_at: Scan completion timestamp (nullable).
 
@@ -318,7 +318,11 @@ class Scan(Base):
     status      = Column(String(20), nullable=False, default=ScanStatus.PENDING.value)
     user_id     = Column(Integer,    ForeignKey("User.id"), nullable=False)
     scan_type   = Column(String(50))
-    frecuent    = Column(Boolean,    nullable=False, default=True)
+    # Q13: "frecuent" era un typo de "frequent" — el atributo Python se
+    # renombra sin migración (la columna real en BD sigue llamándose
+    # "frecuent"; renombrar la columna es un cambio de esquema que no
+    # compensa para un campo interno sin consumidores activos).
+    frequent    = Column("frecuent", Boolean, nullable=False, default=True)
     host_id     = Column(Integer,    ForeignKey("Host.id"))
     finished_at = Column(DateTime,   nullable=True)
 

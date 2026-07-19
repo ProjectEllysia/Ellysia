@@ -248,8 +248,20 @@ class ScanRepository(BaseRepository[Scan]):
     def get_frequent_scans(self, user_id: int) -> List[Scan]:
         return (
             self._session.query(Scan)
-            .filter(Scan.user_id == user_id, Scan.frecuent.is_(True))
+            .filter(Scan.user_id == user_id, Scan.frequent.is_(True))
             .all()
+        )
+
+    def has_active_run_for_programed(self, programed_scan_id: int) -> bool:
+        """True si el escaneo programado ya tiene una ejecución pending/running."""
+        return (
+            self._session.query(Scan)
+            .filter(
+                Scan.programed_scan_id == programed_scan_id,
+                Scan.status.in_([ScanStatus.PENDING.value, ScanStatus.RUNNING.value]),
+            )
+            .first()
+            is not None
         )
 
     def get_by_host(self, host_id: int) -> List[Scan]:

@@ -43,6 +43,7 @@ from .openvas import OpenVASScanManager
 from .authorized_targets import AuthorizedTargetManager
 
 
+
 logger = logging.getLogger(__name__)
 
 
