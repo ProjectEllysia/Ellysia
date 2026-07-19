@@ -24,7 +24,7 @@ from ..services import (
     _Task,
 )
 from ..services import parsing, reachability
-from ..exceptions import ScanNotFoundError
+from ..exceptions import ScanError, ScanNotFoundError
 
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,18 @@ class ScanManager(TaskTrackingMixin, ABC):
     Attributes:
         user: User executing the scan operations.
         logger:      Logger instance for this manager.
+
+    Nota sobre los ``# type: ignore`` restantes en este fichero (Q3): los
+    modelos del proyecto usan `Column(...)` clásico de SQLAlchemy en vez de
+    `Mapped[...]` (no hay plugin de mypy para SQLAlchemy configurado), así
+    que el checker a veces infiere el tipo de un atributo de instancia como
+    `Column[T]` en vez de `T` — sobre todo cuando el valor pasa por una
+    variable intermedia o una reasignación cercana. Es ruido de tipado
+    estático, no una inseguridad real de `None`: en tiempo de ejecución el
+    ORM ya hidrató el valor real. Cada uno de los que quedan se auditó al
+    hacer Q3; los que sí escondían un bug real (reasignación de variable
+    que perdía el narrowing, un `_MODEL` sin comprobar, un argumento con el
+    tipo equivocado) se corrigieron en la fuente, no con un ignore.
     """
 
     _scan_timeout_margin: int = 30
@@ -86,6 +98,11 @@ class ScanManager(TaskTrackingMixin, ABC):
         Returns:
             Scan instance (typed to ``self._MODEL``), or None if not found.
         """
+        # Q3: _MODEL es Optional a nivel de la clase base porque solo las
+        # subclases concretas lo fijan (Nmap/Nikto/OpenVAS/Lybra) — nunca es
+        # None en una instancia real. El assert lo deja explícito para el
+        # checker de tipos y sirve de red si alguna subclase nueva lo olvidara.
+        assert self._MODEL is not None, f"{type(self).__name__} no define _MODEL"
         scan = build_repository(ScanRepository).get_by_id_and_type(self._MODEL, scan_id)
 
         if not scan:
@@ -100,6 +117,7 @@ class ScanManager(TaskTrackingMixin, ABC):
         Returns:
             List of Scan instances ordered by start time descending.
         """
+        assert self._MODEL is not None, f"{type(self).__name__} no define _MODEL"
         scans = build_repository(ScanRepository).get_by_type_and_user(self._MODEL, user_id)
 
         logger.info(
@@ -479,7 +497,7 @@ class ScanManager(TaskTrackingMixin, ABC):
             logger.info(f"Procesando resultados de escaneo {scan_id}")
 
             processor  = thread_manager.result_processor # type: ignore
-            domain_data = processor.process(task.results, target) if scan_type == "nmap" else processor.process(task.results) # type: ignore
+            domain_data = processor.process(task.results, target) if scan_type == "nmap" else processor.process(task.results)
 
             with UnitOfWork() as uow:
                 scan_repo  = ScanRepository(uow)
@@ -528,14 +546,20 @@ class ScanManager(TaskTrackingMixin, ABC):
         except (OSError, RuntimeError) as update_err:
             logger.error(f"Error actualizando estado de escaneo {scan_id}: {update_err}", exc_info=True)
 
-    def _log_to_csv(self, scan_id: int, scan: Scan, task: "_Task") -> None:
+    def _log_to_csv(self, scan_id: int, scan: Optional[Scan], task: "_Task") -> None:
         """
         Registra el escaneo en el CSV correspondiente.
         Fallos en logging no interrumpen el flujo del scan.
 
         Args:
             scan_id: Primary key del escaneo.
-            scan: Instancia del scan (puede estar detached de la sesión).
+            scan: Instancia del scan pasada por el caller — no se usa aquí
+                (el método relee su propio `fresh_scan` por `scan_id`); el
+                parámetro es Optional porque el caller (`_execute_scan`)
+                puede tener `None` si el escaneo se borró a mitad de
+                ejecución (Q3). Cualquier fallo al releer/loguear queda
+                absorbido por el try/except de abajo — es logging
+                best-effort, nunca interrumpe el escaneo.
             task: Task que ejecutó el scan.
         """
         try:
@@ -545,12 +569,16 @@ class ScanManager(TaskTrackingMixin, ABC):
                 start = fresh_scan.started_at # type: ignore
                 end = fresh_scan.finished_at # type: ignore
                 status = fresh_scan.status # type: ignore
-                duration = (end - start).total_seconds() if end and start else 0 # type: ignore
+                duration = (end - start).total_seconds() if end and start else 0
 
                 data = {
                     "duration_sec": round(duration, 2),
                     "status": status,
-                    "concurrent_tasks": self._tq.get_status()["runningCount"],
+                    # Q3: get_status() es admin/monitoring, fuera a propósito
+                    # del contrato ITaskQueue (per-tarea) — self._tq aquí es
+                    # siempre el TaskQueue real (nunca un doble de test, que
+                    # no llega a este código de logging en segundo plano).
+                    "concurrent_tasks": self._tq.get_status()["runningCount"],  # type: ignore[attr-defined]
                 }
 
                 self.append_csv_data(data, fresh_scan, task)
@@ -594,7 +622,16 @@ class ScanManager(TaskTrackingMixin, ABC):
         """
         manager_class = cls._registry.get(ScanType(scan_type))
         if manager_class is None:
-            raise ScanNotFoundError(scan_type)
+            # Q3: ScanNotFoundError espera un scan_id (int) — scan_type es un
+            # str, así que reutilizarla aquí producía un mensaje incorrecto
+            # ("Escaneo con ID nmap2 no encontrado"). En la práctica el
+            # esquema del endpoint ya restringe scan_type a valores válidos
+            # (validate.OneOf), así que esta rama es defensiva.
+            raise ScanError(
+                f"Tipo de escaneo desconocido: '{scan_type}'",
+                status_code=404,
+                user_message=f"Tipo de escaneo desconocido: '{scan_type}'.",
+            )
         return manager_class()
 
     @classmethod
@@ -642,8 +679,18 @@ class ScanManager(TaskTrackingMixin, ABC):
             manager_class = cls._registry.get(scan_type)
             loader_name = getattr(manager_class, "_RICH_LOADER", None)
             if loader_name:
-                scan = getattr(repo, loader_name)(scan_id)
+                # Q3: el loader puede devolver None si el escaneo se borró
+                # entre el get_by_id de arriba y esta segunda consulta (race
+                # real, no solo teórica) — si eso pasa, nos quedamos con el
+                # `scan` ya cargado en vez de perderlo, en vez de devolver
+                # None desde un método tipado a `Scan` no-opcional.
+                rich_scan = getattr(repo, loader_name)(scan_id)
+                if rich_scan is not None:
+                    scan = rich_scan
 
+        # mypy no conserva el narrowing de `scan is not None` (línea 671) a
+        # través del bloque `with` + la reasignación condicional de arriba.
+        assert scan is not None
         return scan
 
     @classmethod

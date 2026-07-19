@@ -73,7 +73,7 @@ def current_actor() -> str:
 def normalize_target(
     user_input: str,
     resolve_hostname: bool = False
-) -> Tuple[Optional[str], Optional[str]]:
+) -> Tuple[str, str]:
     """
     Normaliza el target del usuario a IP + hostname.
     Acepta IPs, dominios o URLs completas (http://, https://).
@@ -88,6 +88,13 @@ def normalize_target(
 
     Returns:
         (ip, hostname): hostname == ip cuando no se resuelve o resolve_hostname=False.
+        Nunca None en un retorno normal — toda rama que no logra resolver ``ip``
+        lanza ``ValueError`` antes de llegar al return (Q3: el tipo antes decía
+        Optional[str] para ambos, forzando un `# type: ignore` en cada caller que
+        desempaqueta el resultado y lo usa como str sin comprobar None).
+
+    Raises:
+        ValueError: Si ``user_input`` no es una IP válida ni un hostname resoluble.
     """
 
     def _gethostbyaddr_with_timeout(ip: str) -> Optional[str]:
@@ -110,8 +117,8 @@ def normalize_target(
     else:
         cleaned_input = cleaned_input.split(':')[0].split('/')[0]
 
-    ip: Optional[str] = None
-    hostname: Optional[str] = None
+    ip: str
+    hostname: str
 
     try:
         ip_obj = ipaddress.ip_address(cleaned_input)

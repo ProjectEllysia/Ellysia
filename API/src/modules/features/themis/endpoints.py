@@ -107,10 +107,19 @@ themis_blp = SmorestBlueprint(
 )
 logger = logging.getLogger(__name__)
 
+# Nota sobre los `# type: ignore` de este fichero (Q3): los modelos usan
+# `Column(...)` clásico de SQLAlchemy en vez de `Mapped[...]`, así que mypy a
+# veces infiere `user.id`/`scan.campo` como `Column[T]` en vez de `T` — ruido
+# de tipado estático, no una inseguridad real de `None` (el ORM ya hidrató el
+# valor real en tiempo de ejecución). Se auditaron todos al hacer Q3; los que
+# escondían un bug real (una variable reasignada que perdía el narrowing de
+# tipo, un argumento con el tipo equivocado) se corrigieron en la fuente, no
+# con un ignore — ver `cancel_scan` y `ScanManager.get_manager_for_type`.
+
 
 def _download_url_for(doc) -> str | None:
     """URL de descarga del documento, o None si no está listo."""
-    if doc.status == "done" and doc.filename: # type: ignore
+    if doc.status == "done" and doc.filename:
         return f"/themis/document/{doc.id}/download"
     return None
 
@@ -127,8 +136,8 @@ def _serialize_document(doc) -> dict:
         "scanType": doc.scan_type,
         "status": doc.status,
         "isAiGenerated": doc.is_ai_generated == 1 if doc.is_ai_generated is not None else False,
-        "createdAt": doc.created_at if doc.created_at else None, # type: ignore
-        "generatedAt": doc.generated_at if doc.generated_at else None, # type: ignore
+        "createdAt": doc.created_at if doc.created_at else None,
+        "generatedAt": doc.generated_at if doc.generated_at else None,
         "downloadUrl": _download_url_for(doc),
     }
 
@@ -179,7 +188,7 @@ def get_scan_status(args):
     """Estado y progreso de un escaneo"""
     scan_id = args["id"]
     user = get_current_user()
-    manager, scan = ScanManager.resolve_owned_scan(scan_id, user.id) # type: ignore
+    manager, scan = ScanManager.resolve_owned_scan(scan_id, user.id)
 
     status = manager.get_scan_status(scan_id)
     progress = manager.get_scan_progress(scan_id)
@@ -226,11 +235,14 @@ def cancel_scan(scan_id: int):
             reason="No se pudo cancelar",
         )
 
-    scan = manager.get_scan_by_id(scan_id)
-    if not scan:
+    # Q3: variable nueva en vez de reasignar `scan` — reusar el mismo nombre
+    # con un tipo distinto (Scan | None aquí, Scan más arriba) es lo que
+    # forzaba el type: ignore en esta función completa.
+    refreshed_scan = manager.get_scan_by_id(scan_id)
+    if not refreshed_scan:
         raise ScanNotFoundError(scan_id)
 
-    logger.info(f"Escaneo {scan.scan_type} {scan_id} cancelado por {user.username}")
+    logger.info(f"Escaneo {refreshed_scan.scan_type} {scan_id} cancelado por {user.username}")
     return {
         "message": "Escaneo cancelado exitosamente",
         "scanId": scan_id,
@@ -304,7 +316,7 @@ def start_nikto_scan(data):
     validate_nikto_target(target)
 
     nikto_manager = NiktoScanManager()
-    scan_id = nikto_manager.run_scan(target, user_id=user.id, timeout=timeout) # type: ignore
+    scan_id = nikto_manager.run_scan(target, user_id=user.id, timeout=timeout)
     logger.info(f"Nikto lanzado: ID={scan_id} target={target} timeout={timeout} user={user.username}")
     return {
         "message": "Escaneo Nikto iniciado correctamente",
@@ -564,7 +576,7 @@ def retrieve_all_scans(args):
 def get_scan_stats():
     """Contadores de escaneos por tipo"""
     user = get_current_user()
-    return ScanHistoryManager().get_stats(user.id)  # type: ignore
+    return ScanHistoryManager().get_stats(user.id)
 
 
 @themis_blp.get("/history/hosts")
@@ -578,7 +590,7 @@ def get_scan_stats():
 def list_history_hosts():
     """Listar los hosts escaneados por el usuario (para el selector de estadísticas)"""
     user = get_current_user()
-    hosts = ScanHistoryManager().list_scanned_hosts(user.id)  # type: ignore
+    hosts = ScanHistoryManager().list_scanned_hosts(user.id)
     return {
         "message": "Hosts obtenidos correctamente",
         "hosts": hosts,
@@ -602,7 +614,7 @@ def get_history_stats(args):
     scan_type = ScanType(args["type"])
 
     user = get_current_user()
-    payload = ScanHistoryManager().get_host_history(user.id, target, scan_type)  # type: ignore
+    payload = ScanHistoryManager().get_host_history(user.id, target, scan_type)
     payload["message"] = "Estadísticas obtenidas correctamente"
     payload["user"] = user.username
     return payload
@@ -683,9 +695,9 @@ def is_scan_finished(args):
     """Indicar si un escaneo ha finalizado"""
     user = get_current_user()
     scan_id = args["id"]
-    manager, scan = ScanManager.resolve_owned_scan(scan_id, user.id) # type: ignore
+    manager, scan = ScanManager.resolve_owned_scan(scan_id, user.id)
 
-    finished = manager.is_scan_finished(scan.id) # type: ignore
+    finished = manager.is_scan_finished(scan.id)
 
     return {
         "message": f"El escaneo {scan_id} {'esta' if finished else 'no esta'} terminado",
@@ -782,7 +794,7 @@ def generate_pdf(args):
     user = get_current_user()
     uid = user.id
 
-    manager, _scan = ScanManager.resolve_owned_scan(scan_id, uid) # type: ignore
+    manager, _scan = ScanManager.resolve_owned_scan(scan_id, uid)
 
     if not manager.is_scan_finished(scan_id):
         raise ValidationError(
@@ -835,7 +847,7 @@ def get_document_status(args):
 
     # N1: verificar ownership en ambas ramas (antes solo se comprobaba
     # cuando se consultaba por document_id). Mismo patrón que Iris.
-    if doc.user_id != user.id: # type: ignore
+    if doc.user_id != user.id:
         raise ScanNotFoundError(document_id or scan_id)
 
     return {
@@ -843,8 +855,8 @@ def get_document_status(args):
         "scanId": doc.scan_id,
         "status": doc.status,
         "aiReport": doc.enrichment_json is not None,
-        "createdAt": doc.created_at if doc.created_at else None, # type: ignore
-        "generatedAt": doc.generated_at if doc.generated_at else None, # type: ignore
+        "createdAt": doc.created_at if doc.created_at else None,
+        "generatedAt": doc.generated_at if doc.generated_at else None,
         "downloadUrl": _download_url_for(doc),
     }
 
@@ -864,7 +876,7 @@ def get_all_documents(args):
     scan_type_filter = args["scan_type"]
 
     doc_mgr = ThemisReportManager()
-    documents = doc_mgr.get_documents_for_user(user.id) # type: ignore
+    documents = doc_mgr.get_documents_for_user(user.id)
 
     if scan_type_filter != "all":
         documents = [d for d in documents if d.scan_type == scan_type_filter]
@@ -931,13 +943,13 @@ def download_document(document_id: int):
         logger.warning(f"Document {document_id} not found or access denied for user {uid}")
         raise DocumentNotFoundError(document_id)
 
-    if doc.status != "done" or not doc.filename or not os.path.exists(doc.filename): # type: ignore
+    if doc.status != "done" or not doc.filename or not os.path.exists(doc.filename):
         logger.warning(f"Document {document_id} not ready: status={doc.status}, filename={doc.filename}")
         raise DocumentNotReadyError(document_id, doc.status)
 
     logger.info(f"Serving document {document_id}: {doc.filename}")
     return send_file(
-        doc.filename, # type: ignore
+        doc.filename,
         mimetype="application/pdf",
         as_attachment=True,
         download_name=f"{doc.scan_type}_scan_{doc.scan_id}.pdf",
@@ -988,7 +1000,7 @@ def schedule_scan(data):
         )
     user = get_current_user()
     ps = ProgramedScanManager.register(
-        user_id=user.id, # type: ignore
+        user_id=user.id,
         scan_type=ScanType(scan_type_str),
         arguments=data["arguments"],
         schedule_type=data["schedule_type"],
@@ -1004,7 +1016,7 @@ def schedule_scan(data):
         "scanType": scan_type_str,
         "scheduleType": data["schedule_type"],
         "scheduleConfig": data["schedule_config"],
-        "nextRunAt": ps.next_run_at if ps.next_run_at else None, # type: ignore
+        "nextRunAt": ps.next_run_at if ps.next_run_at else None,
         "user": user.username,
     }
 
@@ -1066,7 +1078,7 @@ def delete_scheduled_scan(ps_id: int):
 def list_scheduled_scans():
     """Listar todos los escaneos programados del usuario"""
     user = get_current_user()
-    scans = ProgramedScanManager.get_scans_for_user(user.id) # type: ignore
+    scans = ProgramedScanManager.get_scans_for_user(user.id)
     results = [
         {
             "id": ps.id,
@@ -1075,9 +1087,9 @@ def list_scheduled_scans():
             "scheduleType": ps.schedule_type,
             "scheduleConfig": ps.schedule_config,
             "isActive": ps.is_active,
-            "lastRunAt": ps.last_run_at if ps.last_run_at else None, # type: ignore
-            "nextRunAt": ps.next_run_at if ps.next_run_at else None, # type: ignore
-            "createdAt": ps.created_at if ps.created_at else None, # type: ignore
+            "lastRunAt": ps.last_run_at if ps.last_run_at else None,
+            "nextRunAt": ps.next_run_at if ps.next_run_at else None,
+            "createdAt": ps.created_at if ps.created_at else None,
         }
         for ps in scans
     ]
@@ -1106,7 +1118,7 @@ def list_scheduled_scans():
 def create_folder(data):
     """Crear una nueva carpeta de escaneos"""
     user = get_current_user()
-    folder = ScanFolderManager().create_folder(user.id, data["name"])  # type: ignore
+    folder = ScanFolderManager().create_folder(user.id, data["name"])
     logger.info(f"Carpeta {folder.id} creada por {user.username}")
     return {
         "message": "Carpeta creada correctamente",
@@ -1127,7 +1139,7 @@ def create_folder(data):
 def list_folders():
     """Listar todas las carpetas del usuario con sus escaneos completos"""
     user = get_current_user()
-    result = ScanFolderManager().get_folders_with_scans(user.id)  # type: ignore
+    result = ScanFolderManager().get_folders_with_scans(user.id)
     logger.info(f"Carpetas obtenidas para usuario {user.username}")
     return {
         "message": "Carpetas obtenidas correctamente",
