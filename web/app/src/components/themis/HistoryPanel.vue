@@ -41,11 +41,11 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useThemisStore } from '@/stores/themisStore'
+import { useThemisHistoryStore } from '@/stores/themisHistoryStore'
 import HistoryChart from '@/components/themis/HistoryChart.vue'
 import { SCAN_TYPES, SCAN_TYPE_ORDER } from '@/constants/scanTypes'
 
-const store = useThemisStore()
+const store = useThemisHistoryStore()
 
 const selectedKey = computed(() => {
   const s = store.history.selected

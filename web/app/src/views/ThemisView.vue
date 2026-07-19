@@ -34,6 +34,7 @@
         <template v-else>
           <LybraLaunchPanel
             :launching="store.launching"
+            :launched="hasActiveLybraScan"
             :source-scans="store.sourceNmapScans.items"
             :source-loading="store.sourceNmapScans.loading"
             :authorized-targets="store.authorizedTargets.items"
@@ -54,8 +55,8 @@
             @generate-pdf="handleLybraGeneratePdf"
             @download-doc="store.downloadDocument"
             @delete-doc="handleLybraDeleteDoc" />
-          <ScheduledScansPanel :scheduled="store.scheduled" :scheduling="store.scheduling" active-tab="lybra"
-            @create="handleCreateScheduled" @deactivate="handleDeactivateScheduled" @delete="handleDeleteScheduled" @toggle-form="store.toggleScheduledForm()" />
+          <ScheduledScansPanel :scheduled="scheduledStore.scheduled" :scheduling="scheduledStore.scheduling" active-tab="lybra"
+            @create="handleCreateScheduled" @deactivate="handleDeactivateScheduled" @delete="handleDeleteScheduled" @toggle-form="scheduledStore.toggleScheduledForm()" />
         </template>
       </div>
 
@@ -66,8 +67,8 @@
       <Transition name="fade-swap" mode="out-in" appear>
         <div v-if="store.viewMode === 'full'" key="full" class="view-block">
           <ScanTabs :active="store.activeTab" @switch="handleTabSwitch" />
-          <ScanForm :type="store.activeTab" :launching="store.launching" @launch="handleLaunch" />
-          <ScanTable :type="store.activeTab" :rows="currentData.results" :loading="currentData.loading" :current-page="currentData.page" :total-count="currentData.totalCount" :per-page="currentData.perPage" :selected-ids="batchSelectedArray"
+          <ScanForm :type="store.activeTab" :launching="store.launching" :launched="hasActiveScan" @launch="handleLaunch" />
+          <ScanTable :type="store.activeTab" :rows="currentData.results" :loading="currentData.loading" :error="currentData.error" :current-page="currentData.page" :total-count="currentData.totalCount" :per-page="currentData.perPage" :selected-ids="batchSelectedArray"
             @preview="(id, type) => store.openPreview(id, type)" @cancel="handleCancel" @delete="handleDelete" @refresh="store.refreshCurrent()" @page-change="page => store.goToPage(store.activeTab, page)"
             @toggle-select="batchToggle" @select-all="batchSelectAll">
             <template #batch-actions="{ selectedCount }">
@@ -81,15 +82,15 @@
               </button>
             </template>
           </ScanTable>
-          <ScheduledScansPanel :scheduled="store.scheduled" :scheduling="store.scheduling" :active-tab="store.activeTab" @create="handleCreateScheduled" @deactivate="handleDeactivateScheduled" @delete="handleDeleteScheduled" @toggle-form="store.toggleScheduledForm()" />
+          <ScheduledScansPanel :scheduled="scheduledStore.scheduled" :scheduling="scheduledStore.scheduling" :active-tab="store.activeTab" @create="handleCreateScheduled" @deactivate="handleDeactivateScheduled" @delete="handleDeleteScheduled" @toggle-form="scheduledStore.toggleScheduledForm()" />
         </div>
         <ScanFolderView v-else-if="store.viewMode === 'folders'" key="folders"
-          :folders="store.folders.items" :loading="store.folders.loading"
-          @refresh="store.loadFolders()"
+          :folders="foldersStore.folders.items" :loading="foldersStore.folders.loading"
+          @refresh="foldersStore.loadFolders()"
           @preview="(id, type) => store.openPreview(id, type)"
           @cancel="handleCancel"
           @delete="handleDelete"
-          @create-folder="store.folderForms.create.show = true"
+          @create-folder="foldersStore.folderForms.create.show = true"
           @rename-folder="handleRenameFolder"
           @delete-folder="handleDeleteFolder"
           @move-scan="handleOpenMoveScan"
@@ -105,28 +106,28 @@
 
     <FolderFormModal
       :key="'create-folder'"
-      :show="store.folderForms.create.show"
+      :show="foldersStore.folderForms.create.show"
       title="Nueva carpeta"
-      :submitting="store.folderForms.create.submitting"
-      @close="store.folderForms.create.show = false"
-      @submit="async name => { if (await store.createFolder(name)) store.folderForms.create.show = false }" />
+      :submitting="foldersStore.folderForms.create.submitting"
+      @close="foldersStore.folderForms.create.show = false"
+      @submit="async name => { if (await foldersStore.createFolder(name)) foldersStore.folderForms.create.show = false }" />
     <FolderFormModal
       :key="'rename-folder'"
-      :show="store.folderForms.rename.show"
+      :show="foldersStore.folderForms.rename.show"
       title="Renombrar carpeta"
-      :initial-name="store.folderForms.rename.name"
-      :submitting="store.folderForms.rename.submitting"
-      @close="store.folderForms.rename.show = false"
-      @submit="async name => { if (await store.renameFolder(store.folderForms.rename.folderId, name)) store.folderForms.rename.show = false }" />
+      :initial-name="foldersStore.folderForms.rename.name"
+      :submitting="foldersStore.folderForms.rename.submitting"
+      @close="foldersStore.folderForms.rename.show = false"
+      @submit="async name => { if (await foldersStore.renameFolder(foldersStore.folderForms.rename.folderId, name)) foldersStore.folderForms.rename.show = false }" />
     <MoveScanModal
       :key="'move-scan'"
-      :show="store.moveScan.show"
-      :scan-id="store.moveScan.scanId"
-      :current-folder-id="store.moveScan.folderId"
-      :folders="store.folders.items"
-      :submitting="store.moveScan.submitting"
-      @close="store.closeMoveScan()"
-      @move="async folderId => { if (await store.moveScanToFolder(store.moveScan.scanId, folderId)) store.closeMoveScan() }" />
+      :show="foldersStore.moveScan.show"
+      :scan-id="foldersStore.moveScan.scanId"
+      :current-folder-id="foldersStore.moveScan.folderId"
+      :folders="foldersStore.folders.items"
+      :submitting="foldersStore.moveScan.submitting"
+      @close="foldersStore.closeMoveScan()"
+      @move="async folderId => { if (await foldersStore.moveScanToFolder(foldersStore.moveScan.scanId, folderId)) foldersStore.closeMoveScan() }" />
 
     <BatchActionModal
       :show="activeBatchAction === 'add-to-folder'"
@@ -160,6 +161,16 @@
         <p class="batch-warning-sub">Los escaneos en ejecucion se cancelaran antes de ser eliminados.</p>
       </template>
     </BatchActionModal>
+    <ConfirmModal
+      :show="!!pendingConfirm"
+      title="Eliminar"
+      :message="pendingConfirm?.type === 'delete-lybra'
+        ? '¿Eliminar este escaneo Lybra y sus hallazgos?'
+        : '¿Eliminar esta carpeta? Los escaneos no se borrarán, solo quedarán sin carpeta.'"
+      confirm-label="Eliminar"
+      danger
+      @confirm="runPendingConfirm"
+      @cancel="pendingConfirm = null" />
   </div>
 </template>
 
@@ -178,24 +189,41 @@ import ScanPreviewModal from '@/components/themis/ScanPreviewModal.vue'
 import FolderFormModal from '@/components/themis/FolderFormModal.vue'
 import MoveScanModal from '@/components/themis/MoveScanModal.vue'
 import BatchActionModal from '@/components/themis/BatchActionModal.vue'
+import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 import ScheduledScansPanel from '@/components/themis/ScheduledScansPanel.vue'
 import LybraLaunchPanel from '@/components/themis/lybra/LybraLaunchPanel.vue'
 import LybraResults from '@/components/themis/lybra/LybraResults.vue'
 import { useRoute } from 'vue-router'
 import { useThemisStore } from '@/stores/themisStore'
+import { useThemisScheduledStore } from '@/stores/themisScheduledStore'
+import { useThemisFoldersStore } from '@/stores/themisFoldersStore'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 
 const route = useRoute()
 const store = useThemisStore()
+const scheduledStore = useThemisScheduledStore()
+const foldersStore = useThemisFoldersStore()
 const { selectedIds: batchSelectedIds, selectedCount: batchSelectedCount, selectedArray: batchSelectedArray, toggle: batchToggle, selectAll: batchSelectAll, clear: batchClear } = useBatchSelection()
 const currentData = computed(() => store.scans[store.activeTab])
+
+// Q8: antes ScanForm/LybraLaunchPanel llevaban su propio `launched` local
+// que se ponía a true al lanzar y nunca volvía a false (o solo al cambiar
+// de pestaña) — el badge "Escaneo iniciado"/"Motor en marcha" quedaba fijo.
+// Se deriva del estado real (¿hay algún escaneo pending/running?), que el
+// polling de C2 ya mantiene fresco.
+const hasActiveScan = computed(() =>
+  currentData.value.results.some(s => s.status === 'pending' || s.status === 'running')
+)
+const hasActiveLybraScan = computed(() =>
+  store.scans.lybra.results.some(s => s.status === 'pending' || s.status === 'running')
+)
 
 const activeBatchAction = ref(null)
 const batchSubmitting = ref(false)
 const selectedFolderId = ref('')
 
 const selectableFolders = computed(() =>
-  store.folders.items.filter(f => f.id !== null)
+  foldersStore.folders.items.filter(f => f.id !== null)
 )
 
 // El store es un singleton de Pinia que sobrevive a la navegación dentro de
@@ -207,7 +235,7 @@ const selectableFolders = computed(() =>
 onMounted(() => {
   store.setWorld(route.query.world === 'external' ? 'external' : 'lybra')
   if (route.query.view === 'history' || route.query.view === 'folders') store.setViewMode(route.query.view)
-  store.loadStats(); store.loadScans(store.activeTab); store.loadScheduledScans(); store.loadFolders()
+  store.loadStats(); store.loadScans(store.activeTab); scheduledStore.loadScheduledScans(); foldersStore.loadFolders()
 })
 onBeforeUnmount(() => store.stopScanPolling())
 
@@ -223,7 +251,7 @@ watch(() => store.world, (w) => {
 }, { immediate: true })
 
 async function handleLaunchLybra(payload) { await store.launchLybra(payload) }
-async function handleDeleteLybra(id) { if (confirm('¿Eliminar este escaneo Lybra y sus hallazgos?')) await store.deleteLybraScan(id) }
+function handleDeleteLybra(id) { pendingConfirm.value = { type: 'delete-lybra', id } }
 async function handleLybraGeneratePdf(scanId, useAi) { await store.generateLybraPdf(scanId, useAi) }
 async function handleLybraDeleteDoc(scanId, docId) { await store.deleteLybraDoc(scanId, docId) }
 async function handleAddAuthorizedTarget({ target, label }) { await store.addAuthorizedTarget(target, label) }
@@ -233,7 +261,7 @@ watch(activeBatchAction, (val) => {
 })
 
 function openBatchAction(action) {
-  if (action === 'add-to-folder') store.loadFolders()
+  if (action === 'add-to-folder') foldersStore.loadFolders()
   activeBatchAction.value = action
 }
 
@@ -245,7 +273,7 @@ function closeBatchAction() {
 async function handleBatchAddToFolder() {
   if (!selectedFolderId.value || batchSubmitting.value) return
   batchSubmitting.value = true
-  const ok = await store.addScansToFolder(batchSelectedArray.value, Number(selectedFolderId.value))
+  const ok = await foldersStore.addScansToFolder(batchSelectedArray.value, Number(selectedFolderId.value))
   batchSubmitting.value = false
   if (ok) { batchClear(); closeBatchAction() }
 }
@@ -266,10 +294,20 @@ function handleTabSwitch(type) {
 async function handleCancel(id) { await store.cancelScan(id) }
 async function handleDelete(id) { await store.deleteScan(id) }
 function handleLaunch(payload) { const fns = { nmap: store.launchNmap, nikto: store.launchNikto, openvas: store.launchOpenvas }; const fn = fns[store.activeTab]; if (fn) fn(payload) }
-function handleRenameFolder(folder) { store.folderForms.rename = { show: true, folderId: folder.id, name: folder.name, submitting: false } }
-async function handleDeleteFolder(folderId) { if (confirm('¿Eliminar esta carpeta? Los escaneos no se borraran, solo quedaran sin carpeta.')) await store.deleteFolder(folderId) }
-function handleOpenMoveScan(scanId, folderId) { store.openMoveScan(scanId, folderId) }
-async function handleRemoveScan(scanId, folderId) { await store.removeScanFromFolder(scanId, folderId) }
+function handleRenameFolder(folder) { foldersStore.folderForms.rename = { show: true, folderId: folder.id, name: folder.name, submitting: false } }
+function handleDeleteFolder(folderId) { pendingConfirm.value = { type: 'delete-folder', id: folderId } }
+
+// Q7: modal propio en vez de confirm() nativo del navegador.
+const pendingConfirm = ref(null) // { type: 'delete-lybra'|'delete-folder', id }
+async function runPendingConfirm() {
+  const action = pendingConfirm.value
+  pendingConfirm.value = null
+  if (!action) return
+  if (action.type === 'delete-lybra') await store.deleteLybraScan(action.id)
+  else if (action.type === 'delete-folder') await foldersStore.deleteFolder(action.id)
+}
+function handleOpenMoveScan(scanId, folderId) { foldersStore.openMoveScan(scanId, folderId) }
+async function handleRemoveScan(scanId, folderId) { await foldersStore.removeScanFromFolder(scanId, folderId) }
 async function handlePreviewPdf(id, type, useAi) {
   const started = await store.generatePdf(id, useAi)
   if (started) await store.waitForDocument(id)
@@ -279,9 +317,9 @@ async function handlePreviewPdf(id, type, useAi) {
 
 async function handleDeletePreviewDoc(docId) { await store.deleteDocument(docId); await store.refreshPreviewDocs() }
 
-async function handleCreateScheduled(payload) { await store.createScheduledScan(payload) }
-async function handleDeactivateScheduled(id) { await store.deactivateScheduledScan(id) }
-async function handleDeleteScheduled(id) { await store.deleteScheduledScan(id) }
+async function handleCreateScheduled(payload) { await scheduledStore.createScheduledScan(payload) }
+async function handleDeactivateScheduled(id) { await scheduledStore.deactivateScheduledScan(id) }
+async function handleDeleteScheduled(id) { await scheduledStore.deleteScheduledScan(id) }
 </script>
 
 <style scoped>
