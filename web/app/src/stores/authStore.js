@@ -1,5 +1,6 @@
-import { defineStore } from 'pinia'
+import { defineStore, getActivePinia } from 'pinia'
 import { ref, computed } from 'vue'
+import router from '@/router'
 
 /**
  * Clave usada en sessionStorage para persistir los datos de sesión.
@@ -218,8 +219,40 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
+   * Limpia el estado del resto de stores tras cerrar sesión (Q6).
+   *
+   * `pinia.state.value = {}` no basta para los "setup stores" de este
+   * proyecto: no limpia los `ref()`/`reactive()` ya vinculados a las
+   * plantillas, así que dejaba datos de la sesión anterior visibles hasta
+   * el siguiente fetch. Cada store expone su propio `$reset()` (Pinia no lo
+   * genera automáticamente para setup stores); aquí solo se orquesta la
+   * llamada, sin acoplar authStore a qué stores existen — se itera la
+   * instancia activa de Pinia y se resetea cualquiera que lo implemente.
+   * `auth`/`toast`/`theme` quedan fuera a propósito: `auth` ya se limpia en
+   * las líneas de arriba, y toast/theme son preferencias de dispositivo/UI,
+   * no datos de sesión — resetearlas en cada logout sería una regresión de UX.
+   */
+  function _resetOtherStores() {
+    const pinia = getActivePinia()
+    pinia?._s.forEach((store, id) => {
+      if (id === 'auth') return
+      try {
+        store.$reset()
+      } catch (e) {
+        // Pinia expone $reset en todo store, pero para "setup stores" sin
+        // implementación propia (toast, theme) el stub por defecto LANZA en
+        // vez de ser un no-op — es el caso esperado para esos dos, no un error.
+        if (!String(e?.message).includes('does not implement')) {
+          console.error(`[Ellysia] $reset() falló en store "${id}":`, e)
+        }
+      }
+    })
+  }
+
+  /**
    * Cierra la sesión: revoca el token en el servidor (fire-and-forget),
-   * limpia el estado y el sessionStorage, y redirige al login.
+   * limpia el estado de todos los stores y navega al login por el router
+   * (sin recarga dura de página).
    */
   function logout() {
     const token = accessToken.value
@@ -238,7 +271,8 @@ export const useAuthStore = defineStore('auth', () => {
         },
       }).catch(() => {})
     }
-    window.location.href = '/login'
+    _resetOtherStores()
+    router.push('/login')
   }
 
   /**
@@ -255,10 +289,9 @@ export const useAuthStore = defineStore('auth', () => {
     role.value = 'role_user'
     sessionEndReason.value = reason || null
     sessionStorage.removeItem(STORAGE_KEY)
-    // Persistir el motivo: window.location.href recarga la página y reinicia el
-    // store, así que el ref en memoria se perdería.
     if (reason) sessionStorage.setItem(REASON_KEY, reason)
-    window.location.href = '/login'
+    _resetOtherStores()
+    router.push('/login')
   }
 
   /** Consume (lee y limpia) el motivo de fin de sesión persistido. */

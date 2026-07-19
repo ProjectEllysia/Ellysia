@@ -9,7 +9,7 @@
       </div>
 
       <div class="status-bar">
-        <div class="stat-item">
+        <div class="stat-item" title="maxWorkers es la config objetivo; solo se aplica al reiniciar el proceso worker, no en caliente">
           <span class="stat-label">Workers</span>
           <span class="stat-value">{{ store.status.aliveWorkers }} / {{ store.status.maxWorkers }}</span>
         </div>
@@ -71,6 +71,10 @@
         </div>
       </div>
 
+      <div v-else-if="store.listError" class="empty-state error-state">
+        {{ store.listError }}
+        <button class="btn-refresh" @click="store.loadTasks()">Reintentar</button>
+      </div>
       <div v-else class="empty-state">No hay tareas en esta categoría.</div>
 
       <AppPagination :current="store.currentPage" :total="store.totalCount" :per-page="store.perPage" @go="store.goToPage" />
@@ -155,5 +159,8 @@ async function handleCancel(id) { await store.cancelTask(id) }
 .skeleton--row { width: 100%; height: 56px; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 .empty-state { text-align: center; padding: 3.5rem 0; color: var(--text-muted); font-size: var(--fs-xl); }
+.error-state { color: var(--danger); display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
+.error-state .btn-refresh { padding: 0.35rem 0.8rem; border-radius: 6px; border: 1px solid var(--danger); background: var(--danger-dim); color: var(--danger); font-size: var(--fs-md); font-weight: 600; cursor: pointer; }
+.error-state .btn-refresh:hover { background: var(--danger); color: #fff; }
 @media (max-width: 768px) { .status-bar { gap: 0.4rem; } .stat-item { min-width: 60px; } .task-row { flex-direction: column; align-items: flex-start; gap: 0.4rem; } .task-progress { width: 100%; } .btn-cancel { align-self: flex-end; } }
 </style>

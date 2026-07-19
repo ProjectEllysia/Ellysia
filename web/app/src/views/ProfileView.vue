@@ -121,7 +121,11 @@ const store = useProfileStore()
 const auth = useAuthStore()
 const mfa = useMfaStore()
 const router = useRouter()
-const { getInitials } = useUtils()
+
+// Q15: tiempo para que el usuario alcance a leer el toast de éxito antes
+// de que el cambio de contraseña fuerce el logout (revoca todos los tokens).
+const POST_PASSWORD_CHANGE_LOGOUT_DELAY_MS = 2000
+const { getInitials, triggerDownload } = useUtils()
 const firstName = ref('')
 const lastName = ref('')
 const savingProfile = ref(false)
@@ -153,9 +157,9 @@ async function handlePasswordSubmit() {
   if (newPassword.value !== confirmPassword.value) { passwordError.value = 'Las contraseñas no coinciden.'; return }
   if (newPassword.value === currentPassword.value) { passwordError.value = 'La nueva contraseña debe ser diferente de la actual.'; return }
   savingPassword.value = true
-  const ok = await store.changePassword(newPassword.value)
+  const ok = await store.changePassword(currentPassword.value, newPassword.value)
   savingPassword.value = false
-  if (ok) { currentPassword.value = ''; newPassword.value = ''; confirmPassword.value = ''; setTimeout(() => auth.logout(), 2000) }
+  if (ok) { currentPassword.value = ''; newPassword.value = ''; confirmPassword.value = ''; setTimeout(() => auth.logout(), POST_PASSWORD_CHANGE_LOGOUT_DELAY_MS) }
 }
 
 async function handleStartSetup() {
@@ -184,14 +188,7 @@ async function handleDisableMfa() {
 function downloadRecoveryCodes() {
   const content = `CÓDIGOS DE RECUPERACIÓN MFA - ELLYSIA\n\nGuarda estos códigos en un lugar seguro. Cada uno sirve para un solo inicio de sesión de emergencia si pierdes tu app autenticadora.\n\n${recoveryCodes.value.join('\n')}\n\nNota: Estos códigos no se volverán a mostrar. Si los pierdes, deberás desactivar y reconfigurar MFA.`
   const blob = new Blob([content], { type: 'text/plain' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `ellysia-recovery-codes-${new Date().toISOString().split('T')[0]}.txt`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  triggerDownload(blob, `ellysia-recovery-codes-${new Date().toISOString().split('T')[0]}.txt`)
 }
 </script>
 

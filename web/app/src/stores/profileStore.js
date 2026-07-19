@@ -54,11 +54,9 @@ export const useProfileStore = defineStore('profile', () => {
     const cached = profileCache.get(CACHE_KEY)
     if (cached) {
       _hydrate(cached)
-      console.log('[profileStore] cache HIT — usando datos cacheados')
       return
     }
 
-    console.log('[profileStore] cache MISS — fetching from API')
     loading.value = true
     try {
       const res = await apiFetch('/users/me')
@@ -66,7 +64,6 @@ export const useProfileStore = defineStore('profile', () => {
       const data = await res.json()
       _hydrate(data)
       profileCache.set(CACHE_KEY, _snapshot())
-      console.log('[profileStore] datos cacheados en sessionStorage:', !!sessionStorage.getItem('profile:me'))
     } finally { loading.value = false }
   }
 
@@ -95,13 +92,14 @@ export const useProfileStore = defineStore('profile', () => {
 
   /**
    * Cambia la contraseña del usuario vía PUT /users/change-password.
+   * @param {string} currentPassword - Contraseña actual (el servidor la reverifica)
    * @param {string} newPassword - Nueva contraseña (mín. 8 caracteres)
    * @returns {Promise<boolean>} True si se cambió correctamente
    */
-  async function changePassword(newPassword) {
+  async function changePassword(currentPassword, newPassword) {
     const res = await apiFetch('/users/change-password', {
       method: 'PUT',
-      body: JSON.stringify({ newPassword }),
+      body: JSON.stringify({ currentPassword, newPassword }),
     })
     if (!res?.ok) {
       toast.show(await apiError(res, 'Error al cambiar la contraseña.'), 'error')
@@ -111,5 +109,15 @@ export const useProfileStore = defineStore('profile', () => {
     return true
   }
 
-  return { profile, loading, loadProfile, updateProfile, changePassword }
+  /** Limpia el estado (Q6: logout SPA sin recarga dura). También vacía la
+   * caché de sessionStorage (`profile:me`, TTL 5min) — sin esto, un usuario
+   * nuevo en la misma pestaña vería el nombre/email del anterior hasta que
+   * expirase por su cuenta. */
+  function $reset() {
+    Object.assign(profile, { first_name: '', last_name: '', email: '', username: '', role: '', created_at: '' })
+    loading.value = false
+    profileCache.clear()
+  }
+
+  return { profile, loading, loadProfile, updateProfile, changePassword, $reset }
 })

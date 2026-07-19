@@ -11,6 +11,10 @@ import { useUtils } from '@/composables/useUtils'
  * se aplana a claves con notación de punto para poder usar v-model directamente
  * en los inputs del formulario. Al guardar se reconstruye el objeto anidado y
  * se envía completo a PUT /system.
+ *
+ * C9: GET /system devuelve un ETag de contenido; PUT /system exige que se
+ * reenvíe vía cabecera If-Match, y responde 409 si no coincide (otra sesión
+ * guardó primero) — evita el last-write-wins silencioso entre dos root/pestañas.
  */
 export const useConfigStore = defineStore('config', () => {
   const { apiFetch, apiError } = useApi()
@@ -21,6 +25,8 @@ export const useConfigStore = defineStore('config', () => {
   const configFlat = reactive({})
   /** Copia de la configuración original para el botón de reset */
   let originalFlat = {}
+  /** ETag de la última carga/guardado, reenviado como If-Match en el PUT */
+  let etag = null
   /** Carga inicial en curso */
   const loading = ref(false)
   /** Guardado en curso */
@@ -35,6 +41,7 @@ export const useConfigStore = defineStore('config', () => {
       const res = await apiFetch('/system')
       if (!res?.ok) { toast.show('Error al cargar la configuración.', 'error'); return }
       const data = await res.json()
+      etag = res.headers.get('ETag')
       const flat = flatten(data)
       Object.assign(configFlat, flat)
       originalFlat = { ...flat }
@@ -56,17 +63,36 @@ export const useConfigStore = defineStore('config', () => {
       const merged = deepMerge(unflatten(originalFlat), unflatten({ ...configFlat }))
       const res = await apiFetch('/system', {
         method: 'PUT',
+        headers: etag ? { 'If-Match': etag } : {},
         body: JSON.stringify(merged),
       })
       if (!res?.ok) {
-        toast.show(await apiError(res, 'Error al guardar la configuración.'), 'error')
+        if (res?.status === 409) {
+          toast.show(
+            await apiError(res, 'La configuración cambió desde que la cargaste. Recárgala antes de guardar.'),
+            'error',
+          )
+        } else {
+          toast.show(await apiError(res, 'Error al guardar la configuración.'), 'error')
+        }
         return false
       }
+      etag = res.headers.get('ETag')
       originalFlat = { ...configFlat }
       toast.show('Configuración guardada.', 'success')
       return true
     } finally { saving.value = false }
   }
 
-  return { configFlat, loading, saving, loadConfig, resetForm, saveConfig }
+  /** Limpia el estado (Q6: logout SPA sin recarga dura) — configFlat trae
+   * toda la config global (root-only), no debe sobrevivir a la sesión. */
+  function $reset() {
+    for (const key of Object.keys(configFlat)) delete configFlat[key]
+    originalFlat = {}
+    etag = null
+    loading.value = false
+    saving.value = false
+  }
+
+  return { configFlat, loading, saving, loadConfig, resetForm, saveConfig, $reset }
 })

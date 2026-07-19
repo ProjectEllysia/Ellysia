@@ -109,5 +109,17 @@ export function useUtils() {
     setTimeout(() => { URL.revokeObjectURL(url); a.remove() }, 1000)
   }
 
-  return { formatDate, getInitials, flatten, unflatten, deepMerge, triggerDownload }
+  /**
+   * Extrae el filename de una cabecera Content-Disposition (D7: el mismo
+   * regex estaba copiado en themisStore/aegisStore/irisStore).
+   * @param {Response} res - Respuesta de fetch con la cabecera
+   * @param {string} fallback - Nombre a usar si la cabecera no trae uno
+   * @returns {string}
+   */
+  function filenameFromResponse(res, fallback) {
+    const cd = res.headers.get('Content-Disposition') ?? ''
+    return cd.match(/filename="?([^";\n]+)"?/i)?.[1] ?? fallback
+  }
+
+  return { formatDate, getInitials, flatten, unflatten, deepMerge, triggerDownload, filenameFromResponse }
 }

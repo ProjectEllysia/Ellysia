@@ -15,6 +15,11 @@
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="spin"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
         <span>Cargando…</span>
       </div>
+      <div v-else-if="error" key="error" class="empty-state error-state">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>{{ error }}</span>
+        <button class="btn-refresh" @click="$emit('refresh')">Reintentar</button>
+      </div>
       <div v-else-if="!rows.length" key="empty" class="empty-state">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         <span>No hay escaneos todavía. ¡Lanza el primero!</span>
@@ -60,6 +65,14 @@
     <div class="table-footer">
       <AppPagination v-if="totalCount > perPage" :current="currentPage" :total="totalCount" :per-page="perPage" @go="page => $emit('page-change', page)" />
     </div>
+    <ConfirmModal
+      :show="!!pendingAction"
+      :title="pendingAction?.type === 'delete' ? 'Eliminar escaneo' : 'Cancelar escaneo'"
+      :message="pendingAction?.type === 'delete' ? `¿Eliminar el escaneo #${pendingAction.id}?` : `¿Cancelar el escaneo #${pendingAction?.id}?`"
+      :confirm-label="pendingAction?.type === 'delete' ? 'Eliminar' : 'Cancelar escaneo'"
+      :danger="pendingAction?.type === 'delete'"
+      @confirm="runPendingAction"
+      @cancel="pendingAction = null" />
   </div>
 </template>
 
@@ -67,8 +80,9 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
 import StatusBadge from './StatusBadge.vue'
 import AppPagination from '@/components/shared/AppPagination.vue'
+import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 
-const props = defineProps({ type: { type: String, required: true }, rows: { type: Array, default: () => [] }, loading: { type: Boolean, default: false }, currentPage: { type: Number, default: 1 }, totalCount: { type: Number, default: 0 }, perPage: { type: Number, default: 10 }, selectedIds: { type: Array, default: () => [] } })
+const props = defineProps({ type: { type: String, required: true }, rows: { type: Array, default: () => [] }, loading: { type: Boolean, default: false }, error: { type: String, default: null }, currentPage: { type: Number, default: 1 }, totalCount: { type: Number, default: 0 }, perPage: { type: Number, default: 10 }, selectedIds: { type: Array, default: () => [] } })
 const emit = defineEmits(['preview', 'cancel', 'delete', 'refresh', 'page-change', 'toggle-select', 'select-all'])
 
 const _selectedSet = computed(() => new Set(props.selectedIds))
@@ -82,8 +96,15 @@ const allSelected = computed(() => props.rows.length > 0 && props.rows.every(r =
 const someSelected = computed(() => props.rows.some(r => _selectedSet.value.has(r.id)) && !allSelected.value)
 
 function isActive(s) { const st = (s ?? '').toLowerCase(); return st === 'running' || st === 'pending' }
-function confirmCancel(id) { if (confirm(`¿Cancelar el escaneo #${id}?`)) emit('cancel', id) }
-function confirmDelete(id) { if (confirm(`¿Eliminar el escaneo #${id}?`)) emit('delete', id) }
+
+// Q7: modal propio en vez de confirm() nativo del navegador.
+const pendingAction = ref(null) // { type: 'cancel'|'delete', id }
+function confirmCancel(id) { pendingAction.value = { type: 'cancel', id } }
+function confirmDelete(id) { pendingAction.value = { type: 'delete', id } }
+function runPendingAction() {
+  if (pendingAction.value) emit(pendingAction.value.type, pendingAction.value.id)
+  pendingAction.value = null
+}
 function formatDate(iso) { if (!iso) return '—'; return new Date(iso).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }
 </script>
 
@@ -135,6 +156,9 @@ tr.selected td { background: rgba(99,102,241,0.06); }
 .act-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; padding: 2.5rem 1rem; color: var(--text-muted); font-size: var(--fs-lg); text-align: center; }
 .empty-state svg { opacity: 0.2; }
+.error-state { color: var(--danger); }
+.error-state svg { opacity: 0.6; }
+.error-state .btn-refresh { margin-top: 0.4rem; }
 .spin { animation: seq-spin 0.8s linear infinite; }
 .table-footer { border-top: 1px solid var(--border); padding: 0.5rem; }
 @media (max-width: 768px) { .target { max-width: 100px; } }

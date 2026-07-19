@@ -100,5 +100,15 @@ export const useMfaStore = defineStore('mfa', () => {
     pendingSetup.provisioningUri = ''
   }
 
-  return { status, pendingSetup, loading, loadStatus, setupTotp, confirmTotp, disableTotp, cancelSetup }
+  /** Limpia el estado (Q6: logout SPA sin recarga dura) — pendingSetup lleva
+   * el secreto TOTP de una inscripción sin confirmar, no debe sobrevivir. */
+  function $reset() {
+    status.enabled = false
+    status.confirmedAt = null
+    pendingSetup.secret = ''
+    pendingSetup.provisioningUri = ''
+    loading.value = false
+  }
+
+  return { status, pendingSetup, loading, loadStatus, setupTotp, confirmTotp, disableTotp, cancelSetup, $reset }
 })

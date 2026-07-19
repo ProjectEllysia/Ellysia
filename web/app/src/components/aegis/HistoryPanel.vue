@@ -18,7 +18,8 @@
     </div>
 
     <div class="history-list">
-      <div v-if="documents.length === 0" class="history-empty">Sin documentos aún</div>
+      <div v-if="error" class="history-empty history-error">{{ error }}</div>
+      <div v-else-if="documents.length === 0" class="history-empty">Sin documentos aún</div>
 
       <div v-for="doc in documents" :key="doc.id"
         class="history-item" :class="{ active: doc.id === currentDocId }">
@@ -65,7 +66,7 @@ import { ref } from 'vue'
 import { useUtils } from '@/composables/useUtils'
 
 const { formatDate } = useUtils()
-const props = defineProps({ documents: { type: Array, default: () => [] }, currentDocId: { type: [Number, null], default: null }, sortMode: { type: String, default: 'date-desc' } })
+const props = defineProps({ documents: { type: Array, default: () => [] }, error: { type: String, default: null }, currentDocId: { type: [Number, null], default: null }, sortMode: { type: String, default: 'date-desc' } })
 const emit = defineEmits(['view', 'delete', 'export', 'preview', 'sort', 'refresh'])
 
 const sortModeLocal = ref(props.sortMode)
@@ -95,6 +96,7 @@ function doDelete() { emit('delete', deleteTarget.value); deleteTarget.value = n
 .btn-icon.spinning svg { animation: seq-spin 0.7s linear infinite; }
 .history-list { flex: 1; overflow-y: auto; padding: 0.4rem; }
 .history-empty { text-align: center; padding: 2rem 1rem; color: var(--text-muted); font-size: var(--fs-lg); }
+.history-error { color: var(--danger); }
 .history-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.55rem 0.65rem; border-radius: 7px; cursor: default; transition: background 0.15s; margin-bottom: 2px; position: relative; }
 .history-item:hover { background: var(--bg); }
 .history-item.active { background: var(--bg); border: 1px solid var(--accent); padding: calc(0.55rem - 1px) calc(0.65rem - 1px); }

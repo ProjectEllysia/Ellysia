@@ -15,7 +15,7 @@ import { useToastStore } from '@/stores/toastStore'
 export const useAegisStore = defineStore('aegis', () => {
   const { apiFetch, apiError } = useApi()
   const toast = useToastStore()
-  const { triggerDownload } = useUtils()
+  const { triggerDownload, filenameFromResponse } = useUtils()
 
   /** Caché de documentos del visor (evita re-fetch al navegar entre documentos ya vistos) */
   const docCache = useCache({ keyPrefix: 'aegis:doc:', maxSize: 50 })
@@ -340,8 +340,7 @@ export const useAegisStore = defineStore('aegis', () => {
       const res = await apiFetch(`/aegis/export/${docId}/download?format=${format}&inline=false`)
       if (!res?.ok) { toast.show('No se pudo exportar.', 'error'); return false }
       const blob = await res.blob()
-      const cd = res.headers.get('Content-Disposition') ?? ''
-      const name = cd.match(/filename="?([^";\n]+)"?/i)?.[1] ?? `documento_${docId}.${format}`
+      const name = filenameFromResponse(res, `documento_${docId}.${format}`)
       triggerDownload(blob, name)
       toast.show('Documento descargado.', 'success')
       return true
@@ -470,6 +469,42 @@ export const useAegisStore = defineStore('aegis', () => {
     } finally { launchingCampaign.value = false }
   }
 
+  /** Limpia el estado (Q6: logout SPA sin recarga dura) — incluye la caché
+   * de documentos del visor (memoria) y los tweaks precargados con el
+   * perfil de organización del usuario saliente. */
+  function $reset() {
+    docCache.clear()
+
+    topics.value = []
+    brands.value = []
+    documents.value = []
+    listError.value = null
+    selectedTopicId.value = null
+    currentDocId.value = null
+    sortMode.value = 'date-desc'
+    selectedBrands.value = []
+    generating.value = false
+    loading.value = false
+    editing.value = false
+    saving.value = false
+    loadingOrgProfile.value = false
+    savingOrgProfile.value = false
+
+    Object.assign(tweaks, {
+      company: '', language: 'es', tone: 'profesional', audienceLevel: 'mixed',
+      mentionContact: '', sector: '', topicFocus: '', companySize: '',
+      employeeCount: null, jurisdiction: '', workModel: '', recentIncident: '',
+    })
+    Object.assign(viewerDoc, { loading: false, data: null })
+
+    campaignModalOpen.value = false
+    distributionLists.value = []
+    loadingLists.value = false
+    campaignsForDoc.value = []
+    creatingList.value = false
+    launchingCampaign.value = false
+  }
+
   return {
     topics, brands, documents, listError, selectedTopicId, currentDocId, sortMode, selectedBrands,
     generating, loading, editing, saving, tweaks, viewerDoc,
@@ -481,5 +516,6 @@ export const useAegisStore = defineStore('aegis', () => {
     creatingList, launchingCampaign,
     openCampaignModal, closeCampaignModal, loadDistributionLists,
     createDistributionListWithRecipients, launchNewCampaign,
+    $reset,
   }
 })

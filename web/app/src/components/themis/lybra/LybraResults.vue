@@ -74,9 +74,11 @@
                   <span class="findings-count">{{ sortedFindings(scan).length }}</span>
                 </button>
 
-                <div v-if="findingsOpen.has(scan.id)">
-                  <ul class="findings">
-                    <li v-for="f in visibleFindings(scan)" :key="f.id" class="finding" :class="{ potential: !f.confirmed }">
+                <Transition name="findings-panel">
+                <div v-if="findingsOpen.has(scan.id)" class="findings-panel">
+                  <TransitionGroup tag="ul" name="finding-item" class="findings">
+                    <li v-for="(f, idx) in visibleFindings(scan)" :key="f.id" class="finding" :class="{ potential: !f.confirmed }"
+                      :style="{ '--enter-delay': (idx % FINDINGS_PAGE) * 22 + 'ms' }">
                       <span class="f-prio" :class="(f.priority || 'INFO').toLowerCase()">{{ PRIO_LABEL[f.priority] || f.priority }}</span>
                       <div class="f-main">
                         <div class="f-title-row">
@@ -97,12 +99,13 @@
                         </div>
                       </div>
                     </li>
-                  </ul>
+                  </TransitionGroup>
 
                   <button v-if="visibleFindings(scan).length < sortedFindings(scan).length" type="button" class="load-more-findings" @click="showMoreFindings(scan.id)">
                     Ver más ({{ visibleFindings(scan).length }} de {{ sortedFindings(scan).length }})
                   </button>
                 </div>
+                </Transition>
               </template>
 
               <div v-if="scan.status === 'finished' && scan.targetAuthorized === false" class="body-unauth-hint">
@@ -211,6 +214,9 @@ function toggleFindings(id) {
   const s = new Set(findingsOpen.value)
   if (s.has(id)) {
     s.delete(id)
+    // Al comprimir, olvida cuánto se había revelado con "ver más": la
+    // próxima vez que se abra empieza otra vez por la primera página.
+    findingsLimit[id] = FINDINGS_PAGE
   } else {
     s.add(id)
     if (!findingsLimit[id]) findingsLimit[id] = FINDINGS_PAGE
@@ -306,6 +312,21 @@ function fmtDate(iso) {
 .body-pending { color: var(--text-dim); }
 .body-failed { color: var(--danger); }
 .body-clean { color: var(--success); }
+
+/* Acordeón anidado de hallazgos: la sección entera se desliza al abrir/
+   cerrar, y cada fila entra con un ligero cascadeo (retardo creciente por
+   índice, --enter-delay) en vez de aparecer toda de golpe. */
+.findings-panel-enter-active, .findings-panel-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; overflow: hidden; }
+.findings-panel-enter-from, .findings-panel-leave-to { opacity: 0; transform: translateY(-6px); }
+
+.findings { position: relative; }
+.finding-item-enter-active {
+  transition: opacity 0.32s ease var(--enter-delay, 0ms), transform 0.32s ease var(--enter-delay, 0ms);
+}
+.finding-item-enter-from { opacity: 0; transform: translateY(-8px); }
+.finding-item-leave-active { transition: opacity 0.15s ease; position: absolute; width: 100%; }
+.finding-item-leave-to { opacity: 0; }
+.finding-item-move { transition: transform 0.25s ease; }
 
 .findings-toggle {
   display: inline-flex; align-items: center; gap: 0.4rem;
@@ -408,6 +429,8 @@ function fmtDate(iso) {
 }
 @media (prefers-reduced-motion: reduce) {
   .spin { animation: none !important; }
-  .chevron, .expand-enter-active, .expand-leave-active, .fade-swap-enter-active, .fade-swap-leave-active { transition: none !important; }
+  .chevron, .expand-enter-active, .expand-leave-active, .fade-swap-enter-active, .fade-swap-leave-active,
+  .findings-panel-enter-active, .findings-panel-leave-active,
+  .finding-item-enter-active, .finding-item-leave-active, .finding-item-move { transition: none !important; }
 }
 </style>

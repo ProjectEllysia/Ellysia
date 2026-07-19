@@ -124,5 +124,11 @@ export const useUsersStore = defineStore('users', () => {
     })
   }
 
-  return { users, loading, grouped, loadUsers, createUser, loadUserAttributes, addAttributes, removeAttributes }
+  /** Limpia el estado (Q6: logout SPA sin recarga dura). */
+  function $reset() {
+    users.value = []
+    loading.value = false
+  }
+
+  return { users, loading, grouped, loadUsers, createUser, loadUserAttributes, addAttributes, removeAttributes, $reset }
 })

@@ -58,9 +58,14 @@
 <script setup>
 import { ref, watch } from 'vue'
 
-const props = defineProps({ type: { type: String, required: true }, launching: { type: Boolean, default: false } })
+const props = defineProps({
+  type: { type: String, required: true },
+  launching: { type: Boolean, default: false },
+  // Q8: viene del padre (deriva del estado real de los escaneos), no de un
+  // flag local que solo se limpiaba al cambiar de pestaña.
+  launched: { type: Boolean, default: false },
+})
 const emit = defineEmits(['launch'])
-const launched = ref(false)
 
 const DEFAULTS = {
   nmap:    { target: '', ports: '1-1000', timeout: 900,  config: 'full_fast' },
@@ -84,7 +89,7 @@ function selectPortMode(id) {
   if (id !== 'custom') form.value.ports = PORT_PRESETS[id]
 }
 
-function resetForm(type) { launched.value = false; form.value = { ...DEFAULTS[type] }; portMode.value = 'custom' }
+function resetForm(type) { form.value = { ...DEFAULTS[type] }; portMode.value = 'custom' }
 watch(() => props.type, resetForm, { immediate: true })
 
 function handleLaunch() {
@@ -93,7 +98,6 @@ function handleLaunch() {
   if (props.type === 'nmap') { payload.ports = form.value.ports; payload.timeout = form.value.timeout }
   if (props.type === 'nikto') { payload.timeout = form.value.timeout }
   if (props.type === 'openvas') { payload.scanConfig = form.value.config }
-  launched.value = true
   emit('launch', payload)
 }
 </script>

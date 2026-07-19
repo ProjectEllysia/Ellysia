@@ -120,7 +120,9 @@ export const useQueueStore = defineStore('queue', () => {
         toast.show(await apiError(res, 'Error al actualizar configuracion.'), 'error')
         return false
       }
-      toast.show(`Workers ajustados a ${maxWorkers}.`, 'success')
+      // C6: el backend solo persiste la config — no reinicia el proceso
+      // worker, así que aliveWorkers no cambia hasta el próximo reinicio.
+      toast.show(`Config actualizada a ${maxWorkers}. Se aplicará al reiniciar el worker.`, 'success')
       await loadStatus()
       return true
     } catch {
@@ -146,6 +148,17 @@ export const useQueueStore = defineStore('queue', () => {
     loadTasks()
   }
 
+  /** Limpia el estado (Q6: logout SPA sin recarga dura). */
+  function $reset() {
+    status.value = { maxWorkers: 0, aliveWorkers: 0, runningCount: 0, pendingCount: 0, historyCount: 0 }
+    tasks.value = []
+    loading.value = false
+    listError.value = null
+    currentPage.value = 1
+    totalCount.value = 0
+    activeTab.value = 'running'
+  }
+
   return {
     status,
     tasks,
@@ -161,5 +174,6 @@ export const useQueueStore = defineStore('queue', () => {
     updateMaxWorkers,
     switchTab,
     goToPage,
+    $reset,
   }
 })

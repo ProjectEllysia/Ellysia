@@ -37,6 +37,10 @@
     </Transition>
 
     <div class="iris-layout">
+      <div v-if="store.listError" class="history-error-banner">
+        {{ store.listError }}
+        <button type="button" @click="store.fetchResults()">Reintentar</button>
+      </div>
       <IrisHistoryStrip
         :items="sortedAnalyses"
         :active-id="store.currentId"
@@ -256,6 +260,28 @@ function handleSort(mode) {
   position: relative;
   z-index: 1;
 }
+
+.history-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 1rem;
+  color: var(--danger);
+  background: var(--danger-dim);
+  font-size: var(--fs-md);
+  flex-shrink: 0;
+}
+.history-error-banner button {
+  border: 1px solid var(--danger);
+  background: transparent;
+  color: var(--danger);
+  border-radius: 6px;
+  padding: 0.2rem 0.6rem;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.history-error-banner button:hover { background: var(--danger); color: #fff; }
 
 .iris-main {
   flex: 1;

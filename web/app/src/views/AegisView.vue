@@ -54,6 +54,7 @@
         <div class="panel-content" v-show="!rightCollapsed">
           <HistoryPanel
             :documents="store.sortedDocuments()"
+            :error="store.listError"
             :current-doc-id="store.currentDocId"
             :sort-mode="store.sortMode"
             @view="store.loadDocument($event)"

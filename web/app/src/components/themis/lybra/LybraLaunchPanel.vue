@@ -11,7 +11,7 @@
         <span class="engine-title">Motor Lybra</span>
         <span class="engine-sub">Pesa cada amenaza antes de que golpee</span>
       </div>
-      <Transition name="pop"><span v-if="launched" class="engine-launched">Motor en marcha</span></Transition>
+      <Transition name="pop"><span v-if="props.launched" class="engine-launched">Motor en marcha</span></Transition>
     </div>
 
     <!-- Selector de modo -->
@@ -132,6 +132,9 @@ import { ref, computed } from 'vue'
 
 const props = defineProps({
   launching: { type: Boolean, default: false },
+  // Q8: viene del padre (deriva del estado real de los escaneos), no de un
+  // flag local que quedaba en true para siempre tras el primer lanzamiento.
+  launched: { type: Boolean, default: false },
   sourceScans: { type: Array, default: () => [] },
   sourceLoading: { type: Boolean, default: false },
   authorizedTargets: { type: Array, default: () => [] },
@@ -145,7 +148,6 @@ const ports = ref('')
 const sourceScanId = ref('')
 const deep = ref(false)
 const timeout = ref(120)
-const launched = ref(false)
 
 const canLaunch = computed(() =>
   mode.value === 'discover' ? !!target.value.trim() : !!sourceScanId.value
@@ -190,7 +192,6 @@ function handleLaunch() {
   } else {
     payload.sourceScanId = Number(sourceScanId.value)
   }
-  launched.value = true
   emit('launch', payload)
 }
 </script>
