@@ -282,11 +282,18 @@ def check_credentials(data: dict[str, Any]):
 @handle_exceptions(default_exception=DatabaseError, logger=logger)
 def change_password(data: dict[str, Any]):
     """Cambiar la contrasena del usuario autenticado. Invalida todos sus tokens."""
+    current_password = data["currentPassword"]
     new_password = data["newPassword"]
 
     user = get_current_user()
     user_id = user.id
     username = user.username
+
+    # S11: antes solo se comparaba en cliente (ProfileView.vue); una operación
+    # sensible autorizada solo por JWT es insuficiente — se re-verifica aquí.
+    is_valid, _ = USER_MANAGER.verify_credentials(username, current_password)
+    if not is_valid:
+        raise InvalidCredentialsError()
 
     USER_MANAGER.update_user_password(user_id, new_password)
     OAUTH_MANAGER.revoke_all_user_tokens(user_id)

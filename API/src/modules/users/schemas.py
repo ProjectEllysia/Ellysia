@@ -65,6 +65,7 @@ class CheckCredentialsResponseSchema(Schema):
 
 
 class ChangePasswordRequestSchema(Schema):
+    currentPassword = fields.String(required=True)
     newPassword = fields.String(required=True)
 
 

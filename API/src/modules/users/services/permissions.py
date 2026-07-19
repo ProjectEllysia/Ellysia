@@ -8,7 +8,7 @@ from flask import request, jsonify
 from src.modules.shared._exceptions import MissingParameterError, MissingJsonBodyError, EllysiaException, ErrorCode
 
 from ..managers import OAuthTokenManager
-from ..repositories import AttributeRepository
+from ..repositories import AttributeRepository, UserRepository
 from src.modules.infrastructure import UnitOfWork
 
 
@@ -255,6 +255,15 @@ def require_role(minimum_role: Role):
     Jerarquía (de menor a mayor): USER < ADMIN < ROOT.
     Debe usarse DESPUÉS de @require_oauth_token.
 
+    S9: el rol se revalida contra BD en cada llamada en vez de confiar solo
+    en el claim del JWT — un cambio de rol (p. ej. degradar a un admin)
+    surte efecto en la siguiente petición, no solo cuando el access token
+    expire (ventana de hasta ``access_token_expiry_minutes``). Se acepta el
+    coste de una query extra por petición porque este decorador solo protege
+    endpoints de baja frecuencia (``/system``, `/users``); los endpoints de
+    alto tráfico (Themis/Iris/Aegis/Acheron) usan ``require_attributes``, que
+    no se toca aquí para no duplicar su query ya existente en el hot path.
+
     Args:
         minimum_role: Rol mínimo requerido.
 
@@ -269,8 +278,14 @@ def require_role(minimum_role: Role):
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
-            user_role_str = getattr(request, "current_user_role", Role.USER.value)
-            user_id       = getattr(request, "current_user_id", None)
+            user_id = getattr(request, "current_user_id", None)
+
+            user_role_str = Role.USER.value
+            if user_id is not None:
+                with UnitOfWork() as uow:
+                    db_user = UserRepository(uow).get_by_id(user_id)
+                if db_user is not None:
+                    user_role_str = db_user.role
 
             try:
                 user_role = Role(user_role_str)
