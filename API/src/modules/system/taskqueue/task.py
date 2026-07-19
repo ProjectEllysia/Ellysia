@@ -50,6 +50,13 @@ class Task:
         category: str = "",
         external_id: Optional[str] = None,
     ) -> Task:
+        # C8: refresh=False es correcto aquí — todos los callers pasan un
+        # `job` recién obtenido de `Job.fetch()` (HGETALL completo, status
+        # incluido), así que un refresh aquí sería un round-trip a Redis
+        # redundante en el path de sondeo más frecuente de la app
+        # (GET /themis/results cada 4s). Si algún caller nuevo empezara a
+        # reutilizar una instancia de `Job` entre llamadas, este supuesto
+        # dejaría de cumplirse y sí haría falta refrescar.
         meta = job.meta or {}
         return cls(
             id=job.id,

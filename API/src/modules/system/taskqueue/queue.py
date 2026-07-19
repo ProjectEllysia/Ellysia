@@ -56,6 +56,7 @@ from rq.worker_registration import clean_worker_registry
 logger = logging.getLogger(__name__)
 
 import src.modules.system.config_reading as CR
+from src.modules.shared._exceptions import IllegalStateError
 
 from .connection import RedisConnectionFactory
 from .stores import (
@@ -294,6 +295,33 @@ class ITaskQueue(Protocol):
         ...
 
 
+def _reject_if_still_running(job_id: str, status: str) -> None:
+    """Rechaza el reencolado si ya hay un job "started" con el mismo job_id (C4).
+
+    La cancelación de un job "started" es cooperativa: ``TaskQueue.cancel()``
+    solo señaliza y retorna de inmediato, sin esperar a que el worker note la
+    bandera y termine. Si ``submit()`` igual reencolara con el mismo job_id,
+    durante la ventana en que el job viejo sigue vivo dos ejecuciones lógicas
+    compartirían un mismo job_id de RQ (metadata/callbacks/historial
+    mezclados). Se rechaza explícitamente en vez de arriesgar esa corrupción
+    silenciosa; el caller puede reintentar cuando el job viejo termine.
+    """
+    if status == "started":
+        friendly = (
+            f"Ya hay una tarea '{job_id}' en ejecución; espera a que "
+            "termine o cancélala antes de reintentar."
+        )
+        # IllegalStateError autogenera un user_message genérico a partir de
+        # expected_state/current_state si no se pasa explícito — sin esto el
+        # mensaje legible de arriba nunca llegaría al cliente.
+        raise IllegalStateError(
+            friendly,
+            expected_state="not_started",
+            current_state=status,
+            user_message=friendly,
+        )
+
+
 class TaskQueue:
     """Singleton fachada de la cola de tareas (RQ + Redis)."""
 
@@ -379,7 +407,8 @@ class TaskQueue:
             existing = self._try_fetch_job(job_id)
             if existing is not None:
                 status = existing.get_status(refresh=True)
-                if status in ("queued", "scheduled", "started"):
+                _reject_if_still_running(job_id, status)
+                if status == "queued" or status == "scheduled":
                     logger.warning(
                         "Task %s already exists with status %s, cancelling old job",
                         job_id, status,
