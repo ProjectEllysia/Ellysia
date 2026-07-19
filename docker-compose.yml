@@ -4,8 +4,10 @@ services:
     image: postgres:16-alpine
     container_name: PostgresEllysia
     restart: unless-stopped
-    env_file:
-      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "127.0.0.1:15432:5432"
     volumes:
@@ -42,8 +44,6 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: OllamaEllysia
-    env_file:
-      - .env
     ports:
       - "127.0.0.1:11434:11434"
     volumes:
@@ -66,8 +66,13 @@ services:
     networks:
       - secops-net
     profiles:
+      # E2: fuera del perfil "container" por defecto — scribe (generación IA)
+      # usa OpenAI por defecto (ver SecOpsConfig.json), Ollama es opcional y
+      # reserva 4-8GB de RAM que no caben en el presupuesto del VPS objetivo
+      # (plans/improvements/saas-viability-plan.md §5). Levantarlo con
+      # `docker compose --profile container --profile local-ai up -d`.
       - dev
-      - container
+      - local-ai
     logging:
       driver: "json-file"
       options:
@@ -78,15 +83,17 @@ services:
     image: redis:7-alpine
     container_name: RedisEllysia
     restart: unless-stopped
-    env_file:
-      - .env
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping || redis-cli ping"]
+      # E4: redis-cli sale con exit 0 incluso ante NOAUTH/WRONGPASS (no
+      # propaga el error de protocolo al exit code) — el "|| redis-cli ping"
+      # nunca hacía falta y el chequeo nunca podía fallar por contraseña mal
+      # configurada. Se valida el contenido real de la respuesta.
+      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping 2>/dev/null | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -106,8 +113,6 @@ services:
     image: immauss/openvas:latest
     container_name: openvas
     restart: unless-stopped
-    env_file:
-      - .env
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -150,8 +155,6 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      ollama:
         condition: service_healthy
       openvas:
         condition: service_started
@@ -201,6 +204,10 @@ services:
       openvas:
         condition: service_started
     command: python -m src.modules.system.taskqueue.worker
+    # E5: el HEALTHCHECK del Dockerfile pega a /system/say-hello — el worker
+    # no sirve HTTP, así que se anula (mismo patrón que openvas más arriba).
+    healthcheck:
+      disable: true
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432

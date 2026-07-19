@@ -203,17 +203,26 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
 
     _logger.info("Inicializando la aplicación Ellysia...")
     _logger.info("Inicializando CORS...")
-    raw     = os.environ.get("ALLOWED_ORIGINS", "http://localhost:8080")
+    # E10: el default apuntaba a :8080 (nadie sirve ahí) y el origen de dev
+    # viajaba siempre, incluso en producción. El dev server real de Vite es
+    # :5173 (ver web/app/CLAUDE.md); el origen extra solo se añade en dev.
+    raw     = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173")
     origins = [o.strip() for o in raw.split(",") if o.strip()]
-    origins.append("http://127.0.0.1:3000")
+    if config_reading.is_development():
+        origins.append("http://127.0.0.1:5173")
     CORS(app, origins=origins, supports_credentials=True)
 
     _logger.info("Inicializando rate limiting...")
-    redis_cfg = CR.get_redis_config()
-    redis_auth = f":{quote_plus(redis_cfg['password'])}@" if redis_cfg.get("password") else ""
-    app.config["RATELIMIT_STORAGE_URI"] = (
-        f"redis://{redis_auth}{redis_cfg['host']}:{redis_cfg['port']}/{redis_cfg['db']}"
-    )
+    # T4: RATELIMIT_STORAGE_URI explícita (mismo patrón que ALLOWED_ORIGINS)
+    # tiene prioridad sobre el Redis derivado de la config — permite apuntar
+    # el backend del limiter a otro storage (p. ej. "memory://" en tests)
+    # sin depender de un Redis real.
+    storage_uri = os.environ.get("RATELIMIT_STORAGE_URI")
+    if not storage_uri:
+        redis_cfg = CR.get_redis_config()
+        redis_auth = f":{quote_plus(redis_cfg['password'])}@" if redis_cfg.get("password") else ""
+        storage_uri = f"redis://{redis_auth}{redis_cfg['host']}:{redis_cfg['port']}/{redis_cfg['db']}"
+    app.config["RATELIMIT_STORAGE_URI"] = storage_uri
     limiter.init_app(app)
 
     _logger.info("Inicializando documentación OpenAPI...")
@@ -338,8 +347,13 @@ def _register_error_handlers(app: Flask) -> None:
             "allowedMethods": list(error.valid_methods) if hasattr(error, "valid_methods") else [],
         }), 405
 
-    @app.errorhandler(429) # type: ignore
-    def too_many_requests():
+    @app.errorhandler(429)
+    def too_many_requests(error):
+        # T4: Flask siempre llama al handler con la excepción como argumento
+        # posicional — esta firma sin parámetros nunca se había ejercitado
+        # porque el rate limiter estaba desactivado en toda la suite; un 429
+        # real en producción habría lanzado TypeError en vez de la respuesta
+        # JSON esperada.
         _logger.warning("Rate limit superado: %s", request.remote_addr)
         return jsonify({
             "error": "too_many_requests",
@@ -546,6 +560,17 @@ def _init_db() -> None:
         f"  contraseña: {root_password}\n"
         + "=" * 70
     )
+
+
+def app_factory() -> Flask:
+    """Factory para gunicorn (``gunicorn --factory run:app_factory``).
+
+    En Docker el worker RQ corre en su propio contenedor (``ellysia-worker``,
+    ver docker-compose.yml), así que aquí no hace falta la lógica de
+    subprocess del bloque ``__main__`` — solo replicar la llamada a
+    ``create_app`` que hace ``python run.py`` sin ``--with-worker``.
+    """
+    return create_app(APP_CONTEXT.create_database)
 
 
 if __name__ == "__main__":
