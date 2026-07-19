@@ -113,7 +113,10 @@ const routes = [
     path: '/config',
     name: 'Config',
     component: () => import('@/views/ConfigView.vue'),
-    meta: { requiresAuth: true },
+    // S12: ConfigView llama a GET/PUT /system, root-only desde S7 — el guard
+    // del cliente es defensa en profundidad (la API ya rechaza con 403;
+    // esto evita cargar la vista para un admin que de todos modos rebotará).
+    meta: { requiresAuth: true, requiresRoot: true },
   },
   {
     path: '/profile',
@@ -125,7 +128,7 @@ const routes = [
     path: '/users',
     name: 'Users',
     component: () => import('@/views/UsersView.vue'),
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, requiresAdmin: true },
   },
   {
     path: '/queue',
@@ -165,6 +168,10 @@ router.beforeEach((to) => {
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return { path: '/login', query: { redirect: to.fullPath } }
   } else if (to.meta.guest && auth.isAuthenticated) {
+    return '/'
+  } else if (to.meta.requiresRoot && !auth.isRoot) {
+    return '/'
+  } else if (to.meta.requiresAdmin && !auth.isAdmin) {
     return '/'
   }
 })
