@@ -798,6 +798,80 @@ def get_public_web_url() -> str:
     return _cfg("general.publicUrl", "http://localhost:5173", str).rstrip("/")
 
 # =============================================================================
+# CONFIGURACIÓN DE HYGEIA
+# =============================================================================
+
+@_lazy_load
+def get_hygeia_config() -> dict:
+    return _cfg("hygeia", {})
+
+@_lazy_load
+def get_hygeia_heartbeat_interval_sec() -> int:
+    """Intervalo de heartbeat esperado del agente, en segundos (por defecto, 15)."""
+    return _cfg("hygeia.heartbeatIntervalSec", 15, int)
+
+@_lazy_load
+def get_hygeia_max_assets_per_user() -> int:
+    """Cuota de activos monitorizados que puede dar de alta un mismo usuario (§16.4)."""
+    return _cfg("hygeia.limits.maxAssetsPerUser", 500, int)
+
+@_lazy_load
+def get_hygeia_max_body_bytes() -> int:
+    """Tamaño máximo (comprimido) del cuerpo de un heartbeat, en bytes (§16.1)."""
+    return _cfg("hygeia.limits.maxBodyBytes", 262144, int)
+
+@_lazy_load
+def get_hygeia_max_decompressed_bytes() -> int:
+    """Tope de descompresión de un heartbeat gzip, en bytes (defensa anti gzip-bomb, §16.1)."""
+    return _cfg("hygeia.limits.maxDecompressedBytes", 1048576, int)
+
+@_lazy_load
+def get_hygeia_max_processes() -> int:
+    """Máximo de procesos en topCpu/topMem por heartbeat (§16.1)."""
+    return _cfg("hygeia.limits.maxProcesses", 20, int)
+
+@_lazy_load
+def get_hygeia_max_disk_mounts() -> int:
+    """Máximo de puntos de montaje reportados por heartbeat (§16.1)."""
+    return _cfg("hygeia.limits.maxDiskMounts", 64, int)
+
+@_lazy_load
+def get_hygeia_max_net_interfaces() -> int:
+    """Máximo de interfaces de red reportadas por heartbeat (§16.1)."""
+    return _cfg("hygeia.limits.maxNetInterfaces", 64, int)
+
+@_lazy_load
+def get_hygeia_min_interval_sec() -> int:
+    """Suelo de cadencia entre heartbeats de una misma clave, en segundos (§16.2)."""
+    return _cfg("hygeia.limits.minIntervalSec", 5, int)
+
+@_lazy_load
+def get_hygeia_clock_skew_sec() -> int:
+    """Ventana de cordura (± segundos) para el ``collectedAt`` del agente (§16.3)."""
+    return _cfg("hygeia.limits.clockSkewSec", 300, int)
+
+@_lazy_load
+def get_hygeia_thresholds() -> dict[str, dict[str, int]]:
+    """Umbrales globales por defecto de Hygeia (``hygeia.thresholds``); override por activo en DB."""
+    return _cfg("hygeia.thresholds", {})
+
+@_lazy_load
+def get_hygeia_offline_after_missed() -> int:
+    """Heartbeats perdidos (sobre el intervalo efectivo) para pasar de stale a offline."""
+    return _cfg("hygeia.offlineAfterMissed", 4, int)
+
+@_lazy_load
+def get_hygeia_retention_days() -> int:
+    """Antigüedad máxima de un AssetSnapshot antes de podarlo (§7.3)."""
+    return _cfg("hygeia.retentionDays", 30, int)
+
+@_lazy_load
+def get_hygeia_retention_cron() -> str:
+    """Expresión cron del job diario de poda de snapshots."""
+    return _cfg("hygeia.retentionCron", "0 4 * * *", str)
+
+
+# =============================================================================
 # CONFIGURACIÓN DE IRIS
 # =============================================================================
 
