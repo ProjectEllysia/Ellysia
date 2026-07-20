@@ -36,6 +36,7 @@ export default defineConfig({
       '/system':    { target: 'http://localhost:5000', changeOrigin: true },
       '/acheron':   { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
       '/iris':      { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
+      '/hygeia':    { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
     }
   }
 })
@@ -48,6 +49,7 @@ const FRONTEND_SUBROUTES = new Set([
   '/aegis/generador',
   '/iris/analisis',
   '/acheron/boveda',
+  '/hygeia/activos',
 ])
 
 function proxyBypass(req) {

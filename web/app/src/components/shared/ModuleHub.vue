@@ -122,9 +122,10 @@ import themisIcon from '@/assets/images/themis/Themis-Turqoise-BgN.png'
 import aegisIcon from '@/assets/images/aegis/Ellysia-Aegis-Blue-BgN.png'
 import irisIcon from '@/assets/images/iris/Iris-Red-BgN.png'
 import acheronIcon from '@/assets/images/acheron/Acheron-Purple-BgN.png'
+import hygeiaIcon from '@/assets/images/hygeia/Hygeia-DarkGreen-BgN.png'
 
 const props = defineProps({
-  moduleId: { type: String, required: true }, // 'themis' | 'aegis' | 'iris' | 'acheron'
+  moduleId: { type: String, required: true }, // 'themis' | 'aegis' | 'iris' | 'acheron' | 'hygeia'
   icon: { type: String, required: true },
   name: { type: String, required: true },
   numeral: { type: String, required: true },
@@ -150,6 +151,7 @@ const ALL_MODULES = [
   { id: 'aegis', numeral: 'II', name: 'Aegis', icon: aegisIcon, route: '/aegis', desc: 'Concienciación que llega antes que el ataque: píldoras IA y campañas con seguimiento.' },
   { id: 'iris', numeral: 'III', name: 'Iris', icon: irisIcon, route: '/iris', desc: 'Verifica quién firma cada correo: 37 reglas contra el phishing.' },
   { id: 'acheron', numeral: 'IV', name: 'Acheron', icon: acheronIcon, route: '/acheron', desc: 'Guarda lo que no debe perderse: bóveda cifrada en tu navegador.' },
+  { id: 'hygeia', numeral: 'V', name: 'Hygeia', icon: hygeiaIcon, route: '/hygeia', desc: 'Vigila el pulso de cada activo: telemetría en vivo y alertas antes del fallo.' },
 ]
 
 const otherModules = computed(() => ALL_MODULES.filter((m) => m.id !== props.moduleId))
@@ -243,7 +245,7 @@ onUnmounted(() => observer?.disconnect())
 /* ── Emblema ── */
 .hero-emblem {
   position: relative;
-  width: 96px; height: 96px;
+  width: 180px; height: 180px;
   margin: 0 auto 1.6rem;
   border-radius: 50%;
   display: grid; place-items: center;

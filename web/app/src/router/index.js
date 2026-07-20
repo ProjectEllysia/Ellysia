@@ -72,6 +72,17 @@ const routes = [
     component: () => import('@/views/AcheronView.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    path: '/hygeia',
+    name: 'HygeiaHub',
+    component: () => import('@/views/HygeiaHubView.vue'),
+  },
+  {
+    path: '/hygeia/activos',
+    name: 'Hygeia',
+    component: () => import('@/views/HygeiaView.vue'),
+    meta: { requiresAuth: true },
+  },
   // Páginas informativas públicas (enlazadas desde el pie).
   {
     path: '/sobre',
