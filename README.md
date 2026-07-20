@@ -10,7 +10,6 @@
 [![Vue 3](https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org)
 [![Ollama](https://img.shields.io/badge/Ollama-llama3.2-ff7000?style=flat-square&logo=ollama)](https://ollama.com)
-[![Android](https://img.shields.io/badge/Android-Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com)
 
 [Overview](#overview) · [Features](#features) · [Architecture](#architecture) · [Modules](#modules) · [Quick start](#quick-start) · [API reference](#api-reference) · [TaskQueue](#taskqueue-rq--redis) · [Docker](#docker) · [Stack](#technology-stack) · [Configuration](#configuration)
@@ -25,6 +24,9 @@
 
 The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Redis** queues, while local AI (Ollama) generates reports, awareness pills, and contextual verdicts. All modules share an OAuth 2.0 authentication layer with fine-grained attribute-based access control.
 
+> [!NOTE]
+> The Android companion app lives in a separate repository: [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) (Kotlin/Jetpack Compose, with the AcheronCore Java crypto engine). It consumes the `/acheron` endpoints documented below.
+
 > [!IMPORTANT]
 > The API assumes a **Linux** environment. Scan tools (Nmap, Nikto, OpenVAS/Greenbone) are Linux-native. On Windows, use WSL (`wsl` → `cd API && python run.py`) or `docker compose`.
 
@@ -33,7 +35,7 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
 - **Vulnerability scanning** — Nmap (port/OS detection), Nikto (web vulns), and OpenVAS/GVM (full NVT scans), with scheduled execution via APScheduler.
 - **AI-powered PDF reports** — Scan results enriched by local LLM (Ollama) with "Controls, Not Counts" risk assessment.
 - **Anti-phishing analysis** — 37 atomic rules evaluate email headers (SPF, DKIM, DMARC, content heuristics, domain impersonation) and produce a calibrated verdict.
-- **Encrypted credential vault** — AES-256-GCM client-side encryption via AcheronCore (Java), with sync API and Android companion app.
+- **Encrypted credential vault** — AES-256-GCM client-side encryption (AcheronCore), with a sync API consumed by the web client and the [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) Android app.
 - **Security awareness training** — AI generates 73-topic awareness pills with current CVE alerts from INCIBE-CERT / CIRCL / NVD.
 - **Persistent task queue** — Background jobs survive API restarts (Redis-backed RQ), run in isolated OS processes, and support cooperative cancellation.
 - **OAuth 2.0 + JWT** — Refresh tokens, global revocation, Argon2id password hashing, role-based access with ABAC attributes.
@@ -82,11 +84,11 @@ Ellysia/
 ├── web/
 │   ├── app/    # Vue 3 SPA (Vite + Pinia + Vue Router)
 │   └── legacy/ # Legacy static HTML
-├── mobile/
-│   └── AcheronMobile/  # Android (Kotlin + Jetpack Compose)
-│       └── AcheronCore/        # Java crypto engine
 └── docker-compose.yml
 ```
+
+> [!NOTE]
+> The Android client (`AcheronMobile`, Kotlin/Jetpack Compose) and its `AcheronCore` Java crypto engine were split out into [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile).
 
 ## Modules
 
@@ -94,7 +96,7 @@ Ellysia/
 |---|---|---|
 | **Themis** | Nmap, Nikto, and OpenVAS scans with PDF reports, scheduled execution, AI enrichment, and traceroute tracing. | Operational |
 | **Iris** | Phishing detection via 37 atomic email header analysis rules with subtractive risk scoring. | Operational |
-| **Acheron** | Client-encrypted credential vault with granular sync, export/import, and Android app. | Operational |
+| **Acheron** | Client-encrypted credential vault with granular sync and export/import, consumed by the web client and [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile). | Operational |
 | **Aegis** | AI-generated security awareness pills across 73 topics with real-time CVE alerts from 19 tracked brands. | Operational |
 | **Scribe** | Abstraction layer for AI generation — pluggable strategies (Ollama, OpenAI) per module. | Operational |
 | **Herald** | Abstraction layer for email sending — pluggable strategies (SMTP relay) per module, transversal like Scribe. | Operational |
@@ -237,7 +239,7 @@ Aegis combines AI-generated awareness content with current CVE alerts from INCIB
 | `DELETE` | `/acheron/storables` | Delete a Storable by `internalId` |
 
 > [!NOTE]
-> Encryption happens **client-side** (AcheronCore, Java). The server stores only ciphertext. Internal IDs are deterministic SHA-256 hex hashes of encrypted content — collision-free across offline devices.
+> Encryption happens **client-side** (AcheronCore — see [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) for the Android implementation). The server stores only ciphertext. Internal IDs are deterministic SHA-256 hex hashes of encrypted content — collision-free across offline devices.
 
 ### Users and system
 
@@ -456,11 +458,12 @@ SMTP_PASSWORD=your-smtp-key
 | AI / LLM | Ollama (local) / OpenAI (swappable via `scribe`) |
 | Vulnerability feeds | INCIBE-CERT, CIRCL / NVD |
 | Frontend web | Vue 3 (Vite + Pinia + Vue Router) |
-| Mobile | Android / Kotlin + Jetpack Compose, Retrofit + OkHttp |
-| Vault crypto | AcheronCore (Java): AES-256-GCM + Argon2id (fallback PBKDF2) |
-| Mobile session | EncryptedSharedPreferences (Android Keystore, AES-256-GCM/SIV) |
+| Vault crypto | AcheronCore: AES-256-GCM + Argon2id (fallback PBKDF2) |
 | Scheduling | APScheduler (cron / interval triggers) |
 | Containerization | Docker + Docker Compose |
+
+> [!NOTE]
+> The Android client (Kotlin + Jetpack Compose, Retrofit + OkHttp) and the AcheronCore engine it embeds now live in [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile).
 
 ## Configuration
 
