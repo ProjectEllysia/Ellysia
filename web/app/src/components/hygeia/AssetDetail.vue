@@ -125,24 +125,24 @@
         <div class="proc-cols">
           <div v-if="topCpu.length" class="proc-col">
             <h5 class="proc-head">Por CPU</h5>
-            <ul class="rows">
+            <TransitionGroup tag="ul" name="proc-row" class="rows">
               <li v-for="p in topCpu" :key="`c${p.pid}`" class="row row--proc">
                 <span class="row-name" :title="p.name">{{ p.name }}</span>
                 <span class="row-pid">{{ p.pid }}</span>
                 <span class="row-value">{{ fmtPct(p.cpuPct) }}%</span>
               </li>
-            </ul>
+            </TransitionGroup>
           </div>
 
           <div v-if="topMem.length" class="proc-col">
             <h5 class="proc-head">Por memoria</h5>
-            <ul class="rows">
+            <TransitionGroup tag="ul" name="proc-row" class="rows">
               <li v-for="p in topMem" :key="`m${p.pid}`" class="row row--proc">
                 <span class="row-name" :title="p.name">{{ p.name }}</span>
                 <span class="row-pid">{{ p.pid }}</span>
                 <span class="row-value">{{ fmtPct(p.memPct) }}%</span>
               </li>
-            </ul>
+            </TransitionGroup>
           </div>
         </div>
 
@@ -379,17 +379,26 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
   flex: 1 1 0; min-width: 3rem; height: 6px;
   border-radius: 999px; background: var(--surface-3); overflow: hidden;
 }
-.bar-fill { display: block; height: 100%; background: var(--accent); border-radius: inherit; }
+.bar-fill {
+  display: block; height: 100%; background: var(--accent); border-radius: inherit;
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.3s ease;
+}
 .bar--hot .bar-fill { background: var(--danger); }
 
-/* ── Núcleos ── */
-.cores { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 2px; }
+/* ── Núcleos ──
+   Antes tan pequeños (8×26px) que la sección quedaba enana junto al resto de
+   monitores; se agrandan a un tamaño comparable a las barras de disco. El
+   relleno transiciona en vez de saltar entre heartbeats. */
+.cores { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 4px; }
 .core {
   display: flex; align-items: flex-end;
-  width: 8px; height: 26px;
-  border-radius: 2px; background: var(--surface-3);
+  width: 14px; height: 52px;
+  border-radius: 3px; background: var(--surface-3); overflow: hidden;
 }
-.core-fill { width: 100%; background: var(--accent-bright); border-radius: inherit; }
+.core-fill {
+  width: 100%; background: var(--accent-bright); border-radius: inherit;
+  transition: height 0.5s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.3s ease;
+}
 .core--hot .core-fill { background: var(--danger); }
 
 /* ── Procesos ── */
@@ -399,6 +408,33 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
   margin: 0 0 0.35rem;
   font-size: var(--fs-xs); font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted);
+}
+
+/* Las cards de proceso cambian de orden en cada heartbeat según quién
+   consuma más CPU/memoria; TransitionGroup anima ese reordenamiento (FLIP)
+   en vez de que las filas salten de sitio de golpe.
+   A propósito NO se usa `position: absolute` en `-leave-active` (el truco
+   habitual para que una fila saliente no desplace al resto durante su
+   fundido): con esa variante, al forzar reordenamientos rápidos con un
+   mismo pid saliendo y volviendo a entrar al top-N, aparecían filas
+   atascadas con opacidad 0 que nunca se retiraban del DOM. No se pudo
+   aislar con certeza si la causa era la combinación de `transform`
+   compartido entre `-move` y `-leave-active`, o una limitación del propio
+   entorno de verificación (el pintado no llegó a confirmarse ahí). Se
+   mantiene esta versión, más simple y sin ese riesgo, por precaución: es
+   además la receta estándar de Vue para listas. El coste es un salto de
+   layout mínimo mientras una fila se desvanece, imperceptible con filas de
+   una sola línea. */
+.proc-row-move {
+  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.proc-row-enter-active,
+.proc-row-leave-active {
+  transition: opacity 0.3s ease;
+}
+.proc-row-enter-from,
+.proc-row-leave-to {
+  opacity: 0;
 }
 
 /* ── Anomalías ── */
