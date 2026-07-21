@@ -157,7 +157,8 @@
   "email": {
     "defaultStrategy": "smtp",
     "modules": {
-      "aegis": "smtp"
+      "aegis": "smtp",
+      "hygeia": "smtp"
     },
     "strategies": {
       "smtp": {
@@ -179,6 +180,28 @@
       "history_max_items": 200,
       "history_ttl_seconds": 3600,
       "max_workers": 4
+    }
+  },
+  "hygeia": {
+    "heartbeatIntervalSec": 15,
+    "offlineAfterMissed": 4,
+    "retentionDays": 30,
+    "retentionCron": "0 4 * * *",
+    "thresholds": {
+      "cpuPct":  { "warning": 85, "critical": 95, "sustainedHeartbeats": 3 },
+      "memPct":  { "warning": 85, "critical": 95, "sustainedHeartbeats": 3 },
+      "diskPct": { "warning": 85, "critical": 95 },
+      "swapPct": { "warning": 40, "critical": 70 }
+    },
+    "limits": {
+      "maxBodyBytes": 262144,
+      "maxDecompressedBytes": 1048576,
+      "maxProcesses": 20,
+      "maxDiskMounts": 64,
+      "maxNetInterfaces": 64,
+      "minIntervalSec": 5,
+      "clockSkewSec": 300,
+      "maxAssetsPerUser": 500
     }
   },
   "iris": {

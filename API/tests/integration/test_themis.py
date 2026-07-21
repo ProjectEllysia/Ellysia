@@ -9,6 +9,7 @@ from datetime import datetime
 
 import pytest
 
+import src.modules.system.config_reading as CR
 from src.modules.infrastructure import UnitOfWork
 from src.modules.features.themis.model import NmapScan, ScanStatus, ThemisDocument
 from src.modules.features.themis.repositories import ScanRepository, ThemisReportRepository
@@ -92,11 +93,22 @@ def test_folder_isolation_between_users(client, make_user, auth_headers):
 # SecOpsConfig.json versionado. Ambos cierran el mismo hueco: sin autorización
 # explícita, ningún scanner debe poder alcanzar una IP privada/loopback ni la
 # IP de metadata de nube.
+#
+# 'themis.areLocalIpsAllowed' se deja en true en el SecOpsConfig.json
+# versionado a propósito, para desarrollo local (ver CLAUDE.md). Estos tests
+# verifican la protección anti-SSRF en sí, así que fuerzan el valor a false
+# independientemente de esa config ambiente, igual que TestPrivateIpPolicy en
+# tests/unit/test_themis_parsing.py.
 
 
 @pytest.fixture()
 def themis_creator(make_user):
     return make_user(role="role_user", attributes=["themis_create"])
+
+
+@pytest.fixture(autouse=True)
+def _reject_local_ips(monkeypatch):
+    monkeypatch.setattr(CR, "are_local_ips_allowed", lambda: False)
 
 
 def test_nikto_rejects_loopback_target(client, themis_creator, auth_headers):

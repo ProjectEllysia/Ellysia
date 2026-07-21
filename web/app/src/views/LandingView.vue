@@ -120,7 +120,7 @@
     <section id="tools" class="stelae">
       <!-- Cabecera de sección -->
       <div class="stelae-intro">
-        <h2 class="stelae-title">Las cuatro herramientas</h2>
+        <h2 class="stelae-title">Las cinco herramientas</h2>
         <p class="stelae-bajada">Cada una guarda un aspecto de tu seguridad.</p>
         <div class="horizon-divider"></div>
       </div>
@@ -164,7 +164,7 @@
 
     <!-- ═══════════ PLACA ═══════════ -->
     <section class="plaque">
-      <span class="plaque-item"><i class="plaque-dot"></i>Operativo — 4/4 herramientas</span>
+      <span class="plaque-item"><i class="plaque-dot"></i>Operativo — 5/5 herramientas</span>
       <span class="plaque-sep" aria-hidden="true">·</span>
       <span class="plaque-item">v{{ appVersion }}</span>
       <span class="plaque-sep" aria-hidden="true">·</span>
@@ -191,6 +191,7 @@ import themisIcon from '@/assets/images/themis/Themis-Turqoise-BgN.png'
 import aegisIcon from '@/assets/images/aegis/Ellysia-Aegis-Blue-BgN.png'
 import irisIcon from '@/assets/images/iris/Iris-Red-BgN.png'
 import acheronIcon from '@/assets/images/acheron/Acheron-Purple-BgN.png'
+import hygeiaIcon from '@/assets/images/hygeia/Hygeia-DarkGreen-BgN.png'
 
 const auth = useAuthStore()
 const profileStore = useProfileStore()
@@ -224,7 +225,7 @@ const reduceMotion =
   typeof window !== 'undefined' &&
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
-/** Las cuatro herramientas, con su epígrafe mitológico y su función real. */
+/** Las cinco herramientas, con su epígrafe mitológico y su función real. */
 const tools = [
   {
     id: 'themis',
@@ -277,6 +278,19 @@ const tools = [
     title: 'Guarda lo que no debe perderse',
     desc: 'Bóveda cifrada de credenciales y tarjetas para tu organización. El cifrado ocurre en tu navegador: la llave nunca viaja.',
     chips: ['Cifrado en navegador', 'Credenciales', 'Tarjetas'],
+  },
+  {
+    id: 'hygeia',
+    numeral: 'V',
+    epigraph: 'SALUS',
+    name: 'Hygeia',
+    icon: hygeiaIcon,
+    route: '/hygeia',
+    blurb: 'Monitorización de activos',
+    myth: 'La diosa de la salud; vigila los signos vitales de cada activo.',
+    title: 'Vigila el pulso de cada activo',
+    desc: 'Agentes ligeros empujan telemetría de hardware; los umbrales con histéresis abren y resuelven anomalías solos, con aviso por correo en lo crítico.',
+    chips: ['Push', 'Umbrales', 'Host caído', 'Alertas'],
   },
 ]
 

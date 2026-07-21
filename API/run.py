@@ -50,6 +50,7 @@ from src.modules.features.themis   import themis_blp
 from src.modules.features.acheron    import acheron_blp
 from src.modules.features.aegis      import aegis_blp
 from src.modules.features.iris       import iris_blp
+from src.modules.features.hygeia     import hygeia_blp
 
 import src.modules.system.config_reading as CR
 
@@ -134,6 +135,13 @@ def _run_shutdown_cleanup() -> None:
     except Exception as e:
         _logger.error(f"Error deteniendo scheduler: {e}")
 
+    _logger.info("[Shutdown] Deteniendo scheduler de Hygeia...")
+    try:
+        from src.modules.features.hygeia.services.scheduling import HygeiaScheduler
+        HygeiaScheduler.stop()
+    except Exception as e:
+        _logger.error(f"Error deteniendo scheduler de Hygeia: {e}")
+
     _logger.info("[Shutdown] Cerrando sesiones de base de datos...")
     try:
         unit_of_work.close_all()
@@ -190,6 +198,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
         Flask: Aplicación completamente configurada y lista para servir.
     """
     from src.modules.features.themis.services.scheduling import Scheduler
+    from src.modules.features.hygeia.services.scheduling import HygeiaScheduler
     from werkzeug.middleware.proxy_fix import ProxyFix
 
     configure_logging()
@@ -242,6 +251,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     flask_smorest_api.register_blueprint(acheron_blp,  url_prefix="/acheron")
     flask_smorest_api.register_blueprint(aegis_blp,    url_prefix="/aegis")
     flask_smorest_api.register_blueprint(iris_blp,     url_prefix="/iris")
+    flask_smorest_api.register_blueprint(hygeia_blp,   url_prefix="/hygeia")
 
     _logger.info("Registrando manejadores de error globales...")
     _register_error_handlers(app)
@@ -290,6 +300,9 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
 
         _logger.info("Arrancando scheduler de tareas programadas...")
         Scheduler.start()
+
+        _logger.info("Arrancando scheduler de Hygeia...")
+        HygeiaScheduler.start()
 
     _logger.info("Verificando conexion a Redis...")
     import redis as redis_lib

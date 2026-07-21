@@ -76,6 +76,10 @@ _ATTRIBUTE_DESCRIPTIONS: dict[str, str] = {
     "themis_schedule_create": "Create access for scheduled scans",
     "themis_schedule_read":   "Read access for scheduled scans",
     "themis_schedule_delete": "Delete access for scheduled scans",
+    "hygeia_create":   "Create access for Hygeia monitored assets",
+    "hygeia_read":     "Read access for Hygeia monitored assets",
+    "hygeia_update":   "Update access for Hygeia monitored assets",
+    "hygeia_delete":   "Delete access for Hygeia monitored assets",
 }
 
 
@@ -123,6 +127,11 @@ class AttributeType(Enum):
     THEMIS_SCHEDULE_READ   = "themis_schedule_read"
     THEMIS_SCHEDULE_DELETE = "themis_schedule_delete"
 
+    HYGEIA_CREATE = "hygeia_create"
+    HYGEIA_READ   = "hygeia_read"
+    HYGEIA_UPDATE = "hygeia_update"
+    HYGEIA_DELETE = "hygeia_delete"
+
     @property
     def db_name(self) -> str:
         return self.value  # type: ignore
@@ -153,6 +162,10 @@ ROLE_PERMISSIONS: dict[Role, Set[AttributeType]] = {
         AttributeType.THEMIS_FOLDER_READ,
         AttributeType.THEMIS_FOLDER_UPDATE,
         AttributeType.THEMIS_FOLDER_DELETE,
+        AttributeType.HYGEIA_CREATE,
+        AttributeType.HYGEIA_READ,
+        AttributeType.HYGEIA_UPDATE,
+        AttributeType.HYGEIA_DELETE,
     },
     Role.ADMIN: {
         AttributeType.AEGIS_CREATE,
@@ -175,6 +188,10 @@ ROLE_PERMISSIONS: dict[Role, Set[AttributeType]] = {
         AttributeType.THEMIS_SCHEDULE_CREATE,
         AttributeType.THEMIS_SCHEDULE_READ,
         AttributeType.THEMIS_SCHEDULE_DELETE,
+        AttributeType.HYGEIA_CREATE,
+        AttributeType.HYGEIA_READ,
+        AttributeType.HYGEIA_UPDATE,
+        AttributeType.HYGEIA_DELETE,
     },
 }
 

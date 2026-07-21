@@ -45,6 +45,7 @@ const modules = [
   { id: 'aegis', name: 'Aegis', route: '/aegis' },
   { id: 'iris', name: 'Iris', route: '/iris' },
   { id: 'acheron', name: 'Acheron', route: '/acheron' },
+  { id: 'hygeia', name: 'Hygeia', route: '/hygeia' },
 ]
 
 const initial = computed(() => (auth.username()?.[0] || 'U').toUpperCase())

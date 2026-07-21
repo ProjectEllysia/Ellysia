@@ -36,12 +36,9 @@ from .programed import ProgramedScanManager
 from .scan_folder import ScanFolderManager
 from .scan_history import ScanHistoryManager
 from .traceroute import TracerouteManager
-from .nmap import NmapScanManager
-from .nikto import NiktoScanManager
-from .openvas import OpenVASScanManager
-from .lybra_engine import LybraEngineManager
+from .thirdparty_scans_managers import NmapScanManager, NiktoScanManager, OpenVASScanManager
+from .lybra_engine import LybraEngineManager, AuthorizedTargetManager
 from .kb import KbSyncManager
-from .authorized_targets import AuthorizedTargetManager
 from .reports import ThemisReportManager
 
 __all__ = [

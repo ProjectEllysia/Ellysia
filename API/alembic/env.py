@@ -15,6 +15,7 @@ import src.modules.features.themis.model      # Scan, Host, NmapScan, NiktoScan,
 import src.modules.features.acheron.model     # Vault, Storable, Account, CreditCard, etc.
 import src.modules.features.aegis.model       # Topic, AegisDocument, AegisTip, AegisDocumentAlert
 import src.modules.features.iris.model        # IrisAnalysis, IrisRuleResult, IrisDocument
+import src.modules.features.hygeia.model      # MonitoredAsset, AssetSnapshot, Anomaly
 
 target_metadata = Base.metadata
 
