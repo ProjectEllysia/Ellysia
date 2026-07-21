@@ -37,6 +37,7 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
 - **Anti-phishing analysis** — 37 atomic rules evaluate email headers (SPF, DKIM, DMARC, content heuristics, domain impersonation) and produce a calibrated verdict.
 - **Encrypted credential vault** — AES-256-GCM client-side encryption (AcheronCore), with a sync API consumed by the web client and the [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) Android app.
 - **Security awareness training** — AI generates 73-topic awareness pills with current CVE alerts from INCIBE-CERT / CIRCL / NVD.
+- **Infrastructure monitoring** — Lightweight agent heartbeats (CPU/memory/disk/network/processes) feed presence detection and threshold-based anomaly alerting, with email notification on critical events.
 - **Persistent task queue** — Background jobs survive API restarts (Redis-backed RQ), run in isolated OS processes, and support cooperative cancellation.
 - **OAuth 2.0 + JWT** — Refresh tokens, global revocation, Argon2id password hashing, role-based access with ABAC attributes.
 - **Database migrations** — Schema changes are versioned, reversible, and applied automatically on startup via Alembic.
@@ -47,15 +48,15 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
                 ┌─────────────────────────────────────────────────────────┐
                 │                    Ellysia API (Flask)                  │
                 │  system · oauth · users · themis · acheron · iris ·   │
-                │              aegis · scribe · herald · pages            │
+                │       aegis · hygeia · scribe · herald · pages          │
                 │  ┌──────────────────────────────────────────────────┐   │
                 │  │  APScheduler ──► TaskQueue (RQ + Redis)          │   │
    Web SPA ────►│  │               ┌────────────────────────────┤     │   │
   (Vue 3)       │  │               │ RQ Workers (isolated procs)│     │──►  Nmap / Nikto / OpenVAS
-                │  │               │   themis.scan            │     │──►  Ollama / OpenAI
-  Android  ────►│  │               │   themis.report          │     │──►  INCIBE-CERT · CIRCL · NVD
-  (Kotlin)      │  │               │   aegis.generate           │     │
-                │  │               │   iris.analyze             │     │
+                │  │               │   themis.scan/report/...  │     │──►  Ollama / OpenAI
+  Android  ────►│  │               │   aegis.generate/campaign │     │──►  INCIBE-CERT · CIRCL · NVD
+  (Kotlin)      │  │               │   iris.analyze/report      │     │──►  SMTP relay (herald)
+  Hygeia agent─►│  │               │   hygeia.notify             │     │
                 │  │               └────────────────────────────┘     │   │
                 │  └──────────────────────────────────────────────────┘   │
                 │  PostgreSQL (15432)  ·  Alembic migrations              │
@@ -69,11 +70,12 @@ Ellysia/
 │   ├── src/modules/
 │   │   ├── system/              # Config, logging, task queue admin
 │   │   ├── users/               # OAuth 2.0 + JWT, user CRUD, ABAC
-│   │   ├── features/            # Feature modules (themis, iris, aegis, acheron)
+│   │   ├── features/            # Feature modules (themis, iris, aegis, acheron, hygeia)
 │   │   │   ├── themis/          # Scan orchestration (Nmap/Nikto/OpenVAS)
 │   │   │   ├── iris/            # Email header analysis (37 rules)
 │   │   │   ├── aegis/           # Awareness pills + CVE alerts
-│   │   │   └── acheron/         # Encrypted credential vault
+│   │   │   ├── acheron/         # Encrypted credential vault
+│   │   │   └── hygeia/          # Asset monitoring (agent heartbeats, anomalies)
 │   │   ├── tools/               # Cross-cutting strategy layers
 │   │   │   ├── scribe/          # AI generation abstraction layer
 │   │   │   └── herald/          # Email sending abstraction layer
@@ -98,9 +100,10 @@ Ellysia/
 | **Iris** | Phishing detection via 37 atomic email header analysis rules with subtractive risk scoring. | Operational |
 | **Acheron** | Client-encrypted credential vault with granular sync and export/import, consumed by the web client and [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile). | Operational |
 | **Aegis** | AI-generated security awareness pills across 73 topics with real-time CVE alerts from 19 tracked brands. | Operational |
+| **Hygeia** | Lightweight agent-based monitoring: heartbeat ingestion, presence detection, threshold anomaly alerting, and email notification on critical events. | Operational |
 | **Scribe** | Abstraction layer for AI generation — pluggable strategies (Ollama, OpenAI) per module. | Operational |
 | **Herald** | Abstraction layer for email sending — pluggable strategies (SMTP relay) per module, transversal like Scribe. | Operational |
-| **Ellysia Web** | Vue 3 SPA with hub dashboard, scan management, analysis viewer, vault client, and admin panel. | Operational |
+| **Ellysia Web** | Vue 3 SPA with hub dashboard, scan management, analysis viewer, vault client, asset monitoring dashboard, and admin panel. | Operational |
 | **AcheronMobile** | Android app with Jetpack Compose UI, Material 3 design, and Java crypto core for offline vault operations. | Operational |
 
 ## Quick start
@@ -241,6 +244,23 @@ Aegis combines AI-generated awareness content with current CVE alerts from INCIB
 > [!NOTE]
 > Encryption happens **client-side** (AcheronCore — see [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) for the Android implementation). The server stores only ciphertext. Internal IDs are deterministic SHA-256 hex hashes of encrypted content — collision-free across offline devices.
 
+### Hygeia — infrastructure monitoring
+
+| Method | Endpoint | Permission | Description |
+|---|---|---|---|
+| `POST` | `/hygeia/assets` | `HYGEIA_CREATE` | Register a monitored asset; returns the agent key **once** |
+| `GET` | `/hygeia/assets` | `HYGEIA_READ` | List the user's assets with presence status |
+| `GET` | `/hygeia/assets/<id>` | `HYGEIA_READ` | Asset detail |
+| `GET` | `/hygeia/assets/<id>/metrics?from=&to=` | `HYGEIA_READ` | CPU/memory time series for the asset's chart |
+| `DELETE` | `/hygeia/assets/<id>` | `HYGEIA_DELETE` | Deregister an asset, revoking its agent key |
+| `POST` | `/hygeia/assets/<id>/rotate-key` | `HYGEIA_UPDATE` | Rotate the agent key, invalidating the previous one |
+| `GET` | `/hygeia/alerts?state=&severity=&assetId=` | `HYGEIA_READ` | List anomalies for the user's assets |
+| `POST` | `/hygeia/alerts/<id>/ack` | `HYGEIA_UPDATE` | Acknowledge an anomaly |
+| `POST` | `/hygeia/alerts/<id>/resolve` | `HYGEIA_UPDATE` | Resolve an anomaly manually |
+| `POST` | `/hygeia/ingest` | agent key | Agent heartbeat (host info, CPU/memory/disk/network/processes) |
+
+Hygeia has two separate auth surfaces: standard OAuth for the user-facing endpoints above, and a per-asset **agent key** (`@require_agent_key`, not OAuth) for `POST /hygeia/ingest` — the only endpoint an agent calls. A presence-check job marks assets `stale`/`offline` and opens a `host_down` anomaly when heartbeats stop; critical anomalies trigger an async email notification (`hygeia.notify`, via `herald`).
+
 ### Users and system
 
 | Method | Endpoint | Description |
@@ -262,17 +282,22 @@ queue.submit(func, name="Scan 192.168.1.1", category="themis.scan", external_id=
 
 **Categories and entry points:**
 
+Each entry point is a `@staticmethod` on the owning module's manager class — picklable by reference, no bound state; it instantiates a fresh manager inside the worker process.
+
 | Category | Module | Entry function |
 |---|---|---|
-| `themis.scan` | Themis | `services/rq_tasks.execute_nmap_scan` |
-| `themis.report` | Themis | `services/rq_tasks.execute_report_generation` |
-| `aegis.generate` | Aegis | `services/rq_tasks.execute_aegis_generation` |
-| `aegis.campaign` | Aegis | `campaign_managers.CampaignManager.execute_campaign_send` |
-| `iris.analyze` | Iris | `services/rq_tasks.execute_iris_analysis` |
+| `themis.scan` | Themis | `managers.NmapScanManager.execute_nmap_scan` (also `NiktoScanManager`, `OpenVASScanManager`) |
+| `themis.report` | Themis | `managers.ThemisReportManager.execute_report_generation` |
+| `themis.traceroute` | Themis | `managers.TracerouteManager.execute_traceroute` |
+| `aegis.generate` | Aegis | `managers.AegisManager.execute_aegis_generation` |
+| `aegis.campaign` | Aegis | `managers.CampaignManager.execute_campaign_send` |
+| `iris.analyze` | Iris | `managers.IrisManager.execute_iris_analysis` |
+| `iris.report` | Iris | `managers.IrisReportManager.execute_report_generation` |
+| `hygeia.notify` | Hygeia | `managers.HygeiaNotifyManager.execute_notify_critical_anomaly` |
 
 - **Progress reporting**: workers update `job.meta["progress"]` via `_Task(progress_callback=...)`.
 - **Cooperative cancellation**: set Redis key `taskqueue:cancel:{job_id}`; workers check via `_Task.wait(cancel_check=...)`.
-- **External IDs** follow the pattern `scan:<id>`, `themis-doc:<id>`, `aegis-doc:<id>`, `aegis-campaign:<id>`, `iris-analysis:<id>`.
+- **External IDs** follow the pattern `scan:<id>`, `themis-doc:<id>`, `aegis-doc:<id>`, `aegis-campaign:<id>`, `iris-analysis:<id>`, `hygeia-notify:<id>`.
 
 > [!WARNING]
 > Workers must be running for async tasks: `python -m src.modules.system.taskqueue.worker`. They listen on category-specific queues + `default`.

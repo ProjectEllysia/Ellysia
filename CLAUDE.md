@@ -62,7 +62,7 @@ Monorepo with three deliverables:
 - **`mobile/AcheronMobile/`** — Android/Kotlin + `AcheronCore` (Java crypto engine).
 
 ### Backend module layout (`API/src/modules/`)
-Each feature module (`themis`, `iris`, `aegis`, `acheron`, `users`, `system`) follows the same layering — respect it when adding code:
+Each feature module (`themis`, `iris`, `aegis`, `acheron`, `hygeia`, `users`, `system`) follows the same layering — respect it when adding code:
 
 ```
 endpoints.py      # Flask-Smorest Blueprint; auth + schema validation only, no business logic
@@ -72,7 +72,7 @@ model.py          # SQLAlchemy models (base from shared/_model.py)
 schemas.py        # Marshmallow request/response schemas — JSON keys are camelCase
 services/         # module-internal helpers (scanners, parsers, scheduling, reports)
 ```
-Blueprints are registered in `run.py` (`/system`, `/oauth`, `/users`, `/themis`, `/acheron`, `/aegis`, `/iris`).
+Blueprints are registered in `run.py` (`/system`, `/oauth`, `/users`, `/themis`, `/acheron`, `/aegis`, `/iris`, `/hygeia`).
 
 **Cross-cutting modules:**
 - `infrastructure/` — `UnitOfWork` (transaction boundary), `base_repository`, engine/session singletons. UnitOfWork does **not** own sessions: lifecycle lives at the two edges — `teardown_request` for HTTP, `job_context`/`Scheduler.execute` for background work. In a request `__exit__` is a no-op (teardown commits, one atomic transaction); in a background context it commits on clean exit / rolls back on error. Never manage sessions directly outside repositories.
@@ -84,7 +84,7 @@ Blueprints are registered in `run.py` (`/system`, `/oauth`, `/users`, `/themis`,
 Replaces the legacy in-process queue. Jobs persist in Redis (survive API restarts) and run in **isolated OS worker processes**, not threads.
 - Submit: `TaskQueue.get_instance().submit(func, name=, category=, external_id=, args=, timeout=)`.
 - Entry points are `@staticmethod` on each module's manager class (e.g. `NmapScanManager.execute_nmap_scan`) — picklable by reference with no bound state; they instantiate a fresh manager inside the worker (`execute_*` seam → `_run_*` body).
-- Categories: `themis.scan`, `themis.report`, `themis.traceroute`, `aegis.generate`, `aegis.campaign`, `iris.analyze`, `iris.report` (+ `default`). Workers listen on category-specific queues.
+- Categories: `themis.scan`, `themis.report`, `themis.traceroute`, `aegis.generate`, `aegis.campaign`, `iris.analyze`, `iris.report`, `hygeia.notify` (+ `default`). Workers listen on category-specific queues.
 - **Cancellation** is cooperative: sets Redis key `taskqueue:cancel:{job_id}`; workers poll it. **Progress** via `job.meta["progress"]`. No `on_cancel`/`on_complete`/`on_error` callbacks (removed).
 - Admin REST surface at `/system/tasks/*`.
 
