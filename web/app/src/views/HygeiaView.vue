@@ -57,6 +57,18 @@
       @cancel="pendingDeleteId = null"
     />
 
+    <ConfirmModal
+      :show="!!pendingRotateId"
+      title="Rotar clave de agente"
+      emphasis="¡Cuidado!"
+      message="Esta acción revocará la clave de agente actual y deberá sustituirla manualmente (no se preocupe, le entregaremos una clave nueva si acepta). ¿Está seguro de que quiere continuar?"
+      confirm-label="Continuar"
+      danger
+      swap-emphasis
+      @confirm="handleRotateConfirm"
+      @cancel="pendingRotateId = null"
+    />
+
     <AppToast />
   </div>
 </template>
@@ -82,6 +94,7 @@ const toast = useToastStore()
 const showCreateModal = ref(false)
 const creating = ref(false)
 const pendingDeleteId = ref(null)
+const pendingRotateId = ref(null)
 
 const selectedAsset = computed(() =>
   store.state.assets.find((a) => a.id === store.state.selectedId) || null
@@ -123,7 +136,14 @@ async function handleDeleteConfirm() {
   toast.show(ok ? 'Activo eliminado.' : (store.state.error || 'No se pudo eliminar.'), ok ? 'success' : 'error')
 }
 
-async function handleRotate(id) {
+function handleRotate(id) {
+  pendingRotateId.value = id
+}
+
+async function handleRotateConfirm() {
+  const id = pendingRotateId.value
+  pendingRotateId.value = null
+  if (!id) return
   const key = await store.rotateKey(id)
   if (!key) toast.show(store.state.error || 'No se pudo rotar la clave.', 'error')
 }
