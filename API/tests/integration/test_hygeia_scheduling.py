@@ -9,11 +9,13 @@ presencia, no el temporizador real.
 
 import secrets
 from datetime import timedelta
+from unittest import mock
 
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
 from src.modules.shared import utcnow_naive
+from src.modules.features.hygeia import managers as hygeia_managers
 from src.modules.features.hygeia.managers import HygeiaMaintenanceManager
 from src.modules.features.hygeia.model import Anomaly, AssetSnapshot, MonitoredAsset
 from src.modules.features.hygeia.repositories import (
@@ -26,6 +28,26 @@ pytestmark = pytest.mark.integration
 
 _INTERVAL = 15
 _OFFLINE_AFTER_MISSED = 4
+
+
+class _FakeTaskQueue:
+    """Doble sin Redis para el submit() de HygeiaNotifyManager.enqueue_for.
+
+    execute_presence_check() encola una notificación real cuando un activo
+    transiciona a offline; este banco solo verifica la transición y la
+    apertura de la anomalía, no el envío async, así que el submit se
+    descarta sin tocar TaskQueue/Redis (mismo patrón que test_traceroute.py
+    y test_iris_documents.py).
+    """
+
+    def submit(self, **kwargs):
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _fake_task_queue():
+    with mock.patch.object(hygeia_managers.TaskQueue, "get_instance", return_value=_FakeTaskQueue()):
+        yield
 
 
 def _create_asset(app, user_id: int, status: str, last_seen_at, interval: int = _INTERVAL) -> int:
