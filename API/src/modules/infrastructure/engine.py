@@ -38,6 +38,7 @@ from typing import Optional
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, scoped_session, sessionmaker
+from src.modules.system import config_reading as CR
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,6 @@ def initialize(database_url: Optional[str] = None) -> Engine:
         return ENGINE
 
     if database_url is None:
-        from src.modules.system import config_reading as CR
         db_creds = CR.get_db_credentials()
         database_url = (
             f"{db_creds['dialect']}://"
@@ -75,7 +75,6 @@ def initialize(database_url: Optional[str] = None) -> Engine:
             f"@{db_creds['host']}:{db_creds['port']}/{db_creds['dbname']}"
         )
 
-    from src.modules.system import config_reading as CR
     isolation_level = CR.get_db_isolation_level()
 
     engine_kwargs = dict(
