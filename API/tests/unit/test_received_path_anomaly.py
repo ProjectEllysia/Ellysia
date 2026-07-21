@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.modules.iris.services.message_parser import MessageContext
-from src.modules.iris.rules.received_path_anomaly import (
+from src.modules.features.iris.services.parsers import MessageContext
+from src.modules.features.iris.services.rules.received_timing_rules import (
     check_received_path_anomaly,
 )
 

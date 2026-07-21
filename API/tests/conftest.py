@@ -1,7 +1,7 @@
 """
 tests/conftest.py
 ═════════════════
-Infraestructura compartida para toda la suite de tests de la API SeQ.
+Infraestructura compartida para toda la suite de tests de la API Ellysia.
 
 Decisiones de diseño (ver el plan de tests):
 
@@ -41,18 +41,27 @@ if str(_API_DIR) not in sys.path:
 
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-not-for-production"
 os.environ.setdefault("JWT_ALGORITHM", "HS256")
+# Clave Fernet válida (32 bytes urlsafe-base64) solo para tests — ver
+# users.services.secrets.encrypt_totp_secret / config_reading.get_mfa_config().
+os.environ.setdefault("MFA_ENCRYPTION_KEY", "oZrC9aq99vdSaSW5nk55KNJFr9flChUBjs16fNhpfuU=")
 os.environ.setdefault("ACCESS_TOKEN_EXPIRY_MINUTES", "30")
 os.environ.setdefault("REFRESH_TOKEN_EXPIRY_DAYS", "7")
 os.environ.setdefault("FLASK_ENV", "development")
 
 # get_app_context() exige estas variables (su comprobación con all() trata el
-# bool False por defecto como ausente — ver IMPROVEMENTS.md). Las fijamos como
-# strings para poder importar run.py sin que lance ValueError.
+# bool False por defecto como ausente). Las fijamos como strings para poder
+# importar run.py sin que lance ValueError.
 os.environ.setdefault("CREATE_DATABASE", "false")
 os.environ.setdefault("DEBUG", "false")
 os.environ.setdefault("HOST", "127.0.0.1")
 os.environ.setdefault("PORT", "5000")
 os.environ.setdefault("SHUTDOWN_TIMEOUT", "30")
+
+# T4: storage en memoria para el rate limiter — permite reactivarlo en tests
+# puntuales (ver fixture `rate_limiting_enabled`) sin depender de un Redis
+# real. Solo afecta al backend de almacenamiento del limiter, no al resto de
+# la app (que sigue mockeando Redis para create_app()).
+os.environ.setdefault("RATELIMIT_STORAGE_URI", "memory://")
 
 # Redis/Ollama/OpenVAS: valores inertes; los servicios se mockean.
 os.environ.setdefault("REDIS_HOST", "localhost")
@@ -71,40 +80,15 @@ from sqlalchemy.dialects.postgresql import JSONB  # noqa: E402
 from sqlalchemy.orm import scoped_session, sessionmaker  # noqa: E402
 
 from src.modules.shared import Base  # noqa: E402
+from src.modules.infrastructure import engine as engine_module  # noqa: E402
 from src.modules.infrastructure import unit_of_work  # noqa: E402
-from src.modules.users.model import User, UserAttribute  # noqa: E402
+from src.modules.users.model import User  # noqa: E402
 from src.modules.users.repositories import (  # noqa: E402
     AttributeRepository,
     UserRepository,
 )
 from src.modules.users.managers import OAuthTokenManager  # noqa: E402
-from src.modules.users.services import generate_salt, hash_password_with_salt  # noqa: E402
-
-
-# ---------------------------------------------------------------------------
-# Shim: unicidad de access tokens
-# ---------------------------------------------------------------------------
-# Los JWT se firman con ``iat``/``exp`` a resolución de SEGUNDO, de modo que dos
-# tokens del mismo usuario emitidos dentro del mismo segundo son idénticos y
-# colisionan con la constraint UNIQUE de ``AccessToken.token`` (ver
-# IMPROVEMENTS.md). En tests legítimos esto ocurre a menudo (login + refresh,
-# fixture + login). Añadimos un ``jti`` aleatorio al payload antes de firmar;
-# ``verify_access_token`` ignora ese claim, así que el comportamiento observable
-# no cambia. Es un parche SOLO de test, no toca ``src/``.
-import uuid  # noqa: E402
-
-import src.modules.users.managers as _um  # noqa: E402
-
-_real_jwt_encode = _um.jwt.encode
-
-
-def _unique_jwt_encode(payload, key, algorithm=None, **kwargs):
-    if isinstance(payload, dict) and payload.get("type") == "access":
-        payload = {**payload, "jti": uuid.uuid4().hex}
-    return _real_jwt_encode(payload, key, algorithm=algorithm, **kwargs)
-
-
-_um.jwt.encode = _unique_jwt_encode
+from src.modules.users.services import generate_salt, hash_password, hash_password_with_salt  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -138,18 +122,18 @@ def _sqlite_url(tmp_path_factory) -> str:
 
 @pytest.fixture(scope="session")
 def _initialized_db(_sqlite_url):
-    """Crea un engine SQLite e inyecta el singleton de ``unit_of_work``.
+    """Crea un engine SQLite e inyecta el singleton de ``infrastructure.engine``.
 
-    No se puede usar ``unit_of_work.initialize`` directamente porque fija
+    No se puede usar ``engine.initialize`` directamente porque fija
     ``isolation_level="READ COMMITTED"`` (válido en PostgreSQL, rechazado por
-    SQLite — ver IMPROVEMENTS.md). En su lugar construimos aquí un engine
+    SQLite). En su lugar construimos aquí un engine
     compatible con SQLite y lo asignamos a los globales de
-    ``infrastructure.unit_of_work``; como su función de init es idempotente
+    ``infrastructure.engine``; como su función de init es idempotente
     (``if ENGINE is None``), después reutilizará este engine.
     """
     # Importar run arrastra todos los blueprints y, con ellos, TODOS los modelos
     # de cada módulo a Base.metadata. Debe ocurrir antes del shim para que se
-    # parcheen también las tablas de iris/sentinel/aegis.
+    # parcheen también las tablas de iris/themis/aegis.
     import run  # noqa: F401
 
     _patch_postgres_types()
@@ -169,8 +153,12 @@ def _initialized_db(_sqlite_url):
         )
     )
 
-    unit_of_work.ENGINE = engine
-    unit_of_work.SESSION_FACTORY = session_factory
+    # The engine/session-factory singletons live in infrastructure.engine now,
+    # and get_session()/close_all() read them from *that* module's namespace, so
+    # the injection must target engine_module — reassigning unit_of_work.* (a
+    # re-exported copy) would have no effect on what those functions see.
+    engine_module.ENGINE = engine
+    engine_module.SESSION_FACTORY = session_factory
 
     Base.metadata.create_all(engine)
     yield engine
@@ -184,7 +172,7 @@ def _initialized_db(_sqlite_url):
 
 @pytest.fixture(scope="session")
 def app(_initialized_db):
-    """Crea la app SeQ apuntando a SQLite, sin scheduler ni Redis real."""
+    """Crea la app Ellysia apuntando a SQLite, sin scheduler ni Redis real."""
     import run  # import diferido: ya hay entorno y engines listos
 
     # ``redis.Redis(...).ping()`` se ejecuta dentro de create_app; lo
@@ -206,6 +194,28 @@ def app(_initialized_db):
 def client(app):
     """Cliente HTTP de pruebas de Flask."""
     return app.test_client()
+
+
+@pytest.fixture()
+def rate_limiting_enabled(app):
+    """T4: reactiva el rate limiting real (storage en memoria, ver env
+    RATELIMIT_STORAGE_URI) solo para el test que pida este fixture.
+
+    El resto de la suite sigue con el limiter desactivado (ver fixture
+    `app`) para que los límites no contaminen tests no relacionados — `app`
+    es session-scoped, así que un límite global dejaría "quemadas" las
+    peticiones de tests posteriores que compartan endpoint. Este fixture
+    resetea el storage antes y después para no dejar rastro.
+    """
+    from src.modules.shared import limiter
+
+    limiter.storage.reset()
+    limiter.enabled = True
+    try:
+        yield
+    finally:
+        limiter.enabled = False
+        limiter.storage.reset()
 
 
 # ---------------------------------------------------------------------------
@@ -244,23 +254,37 @@ def make_user(app):
     Devuelve un ``UserHandle`` con id/username/password/role. El usuario se
     persiste con una contraseña hasheada real, de modo que sirve tanto para
     flujos de login como para minar tokens.
+
+    T5: por defecto hashea con Argon2 (``hash_password``), igual que
+    ``sign_in_user`` hashea a cualquier usuario real desde el alta — antes
+    todo usuario de test se creaba por la ruta legacy SHA-256
+    (``hash_password_with_salt``), así que ningún test de login por HTTP
+    ejercitaba de verdad la rama Argon2 de ``verify_password`` (la que usa el
+    100% de los usuarios reales). ``legacy_hash=True`` sigue disponible para
+    los tests que verifican explícitamente la migración SHA-256→Argon2.
     """
     counter = {"n": 0}
 
-    def _make(role: str = "role_user", attributes=None, password: str = "Secret123!"):
+    def _make(role: str = "role_user", attributes=None, password: str = "Secret123!", legacy_hash: bool = False):
         counter["n"] += 1
         suffix = counter["n"]
         username = f"user{suffix}"
-        email = f"user{suffix}@seq.test"
+        email = f"user{suffix}@ellysia.test"
 
         with app.app_context():
-            salt = generate_salt()
+            if legacy_hash:
+                salt = generate_salt()
+                password_hash = hash_password_with_salt(password, salt)
+            else:
+                salt = ""
+                password_hash = hash_password(password)
+
             user = User(
                 username=username,
                 email=email,
                 first_name="Test",
                 last_name=f"User{suffix}",
-                password_hash=hash_password_with_salt(password, salt),
+                password_hash=password_hash,
                 password_salt=salt,
                 role=role,
             )

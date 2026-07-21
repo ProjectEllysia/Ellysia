@@ -1,0 +1,91 @@
+"""Unit tests for Lybra's own port discovery (Fase T).
+
+The connect scanner runs on a real (test-thread) event loop but against an
+injected ``opener``, so no real sockets or privileges are involved.
+"""
+
+import pytest
+
+from src.modules.features.themis.lybra import (
+    scan_ports_sync,
+    services_from_discovered_ports,
+    port_concordance,
+    DEFAULT_PORTS,
+)
+
+pytestmark = pytest.mark.unit
+
+
+class _FakeWriter:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+    async def wait_closed(self):
+        pass
+
+
+def _opener_for(open_ports):
+    """Async opener that 'connects' only to the given ports."""
+    async def opener(host, port):
+        if port in open_ports:
+            return None, _FakeWriter()
+        raise ConnectionRefusedError(f"port {port} closed")
+    return opener
+
+
+# ------------------------------------------------------------- connect scan
+
+def test_scan_returns_only_open_ports_sorted():
+    opener = _opener_for({22, 80, 443})
+    result = scan_ports_sync("10.0.0.5", [443, 22, 81, 80, 8080], opener=opener)
+    assert result == [22, 80, 443]
+
+
+def test_scan_all_closed_returns_empty():
+    result = scan_ports_sync("10.0.0.5", [1, 2, 3], opener=_opener_for(set()))
+    assert result == []
+
+
+def test_scan_opener_oserror_is_treated_as_closed():
+    async def failing(host, port):
+        raise OSError("network unreachable")
+    assert scan_ports_sync("10.0.0.5", [80, 443], opener=failing) == []
+
+
+def test_scan_respects_cancel_check():
+    opener = _opener_for({22, 80, 443})
+    result = scan_ports_sync("10.0.0.5", [22, 80, 443], opener=opener,
+                             cancel_check=lambda: True)
+    assert result == []          # cancelled before any probe registered a port
+
+
+def test_scan_defaults_to_curated_port_set():
+    # No explicit port list -> DEFAULT_PORTS is swept.
+    opener = _opener_for({80})
+    assert scan_ports_sync("10.0.0.5", opener=opener) == [80]
+    assert {22, 80, 443} <= set(DEFAULT_PORTS)
+
+
+# ------------------------------------------------------- services + oracle
+
+def test_services_from_discovered_ports_names_well_known():
+    services = services_from_discovered_ports([80, 22, 12345])
+    by_port = {s.port: s for s in services}
+    assert by_port[80].name == "http"
+    assert by_port[22].name == "ssh"
+    assert by_port[12345].name == ""          # unknown port -> no guessed name
+    # No product/version yet — fingerprinting (Fase F) fills those when enabled.
+    assert by_port[80].product == "" and by_port[80].version == ""
+
+
+@pytest.mark.parametrize("own,nmap,expected", [
+    ({80, 443}, {80, 443}, 1.0),
+    ({80, 443}, {80, 443, 22}, 2 / 3),
+    (set(), set(), 1.0),                        # nothing to disagree on
+    ({80}, set(), 0.0),
+])
+def test_port_concordance(own, nmap, expected):
+    assert port_concordance(own, nmap) == pytest.approx(expected)

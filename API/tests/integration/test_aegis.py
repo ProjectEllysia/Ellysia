@@ -22,11 +22,6 @@ def test_list_documents_empty(client, regular_user, auth_headers):
     assert resp.get_json()["count"] == 0
 
 
-@pytest.mark.xfail(
-    reason="require_attributes captura la excepción de dominio y devuelve 500 "
-           "en lugar de 404. Ver IMPROVEMENTS.md.",
-    strict=True,
-)
 def test_status_unknown_document_returns_404(client, regular_user, auth_headers):
     resp = client.get("/aegis/status?id=999999", headers=auth_headers(regular_user))
     assert resp.status_code == 404
@@ -49,8 +44,8 @@ def make_aegis_doc(app):
 
     def _make(user_id, status="done"):
         from src.modules.infrastructure.unit_of_work import UnitOfWork
-        from src.modules.aegis.model import AegisDocument, AegisTip, Topic
-        from src.modules.aegis.repositories import AegisDocumentRepository
+        from src.modules.features.aegis.model import AegisDocument, AegisTip, Topic
+        from src.modules.features.aegis.repositories import AegisDocumentRepository
 
         with app.app_context():
             with UnitOfWork() as uow:

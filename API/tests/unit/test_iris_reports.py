@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from src.modules.iris.services.reports import IrisPDFCreator
+from src.modules.features.iris.services.reports import IrisPDFCreator
 
 pytestmark = pytest.mark.unit
 
@@ -14,7 +14,7 @@ pytestmark = pytest.mark.unit
 @pytest.fixture(autouse=True)
 def _redirect_output_dir(tmp_path, monkeypatch):
     """Evita escribir PDFs de prueba en el directorio real de salida."""
-    import src.modules.iris.services.reports as reports_mod
+    import src.modules.features.iris.services.reports as reports_mod
     monkeypatch.setattr(
         reports_mod.CR, "get_directory_of", lambda *_args, **_kwargs: str(tmp_path)
     )

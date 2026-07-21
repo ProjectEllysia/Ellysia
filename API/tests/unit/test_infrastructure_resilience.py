@@ -150,7 +150,7 @@ def test_worker_perform_job_removes_session_on_error(monkeypatch):
 
 
 def test_scheduler_execute_removes_session(monkeypatch):
-    from src.modules.sentinel.services import scheduling
+    from src.modules.features.themis.services import scheduling
 
     calls = {"n": 0}
     monkeypatch.setattr(scheduling, "close_all", lambda: calls.__setitem__("n", calls["n"] + 1))

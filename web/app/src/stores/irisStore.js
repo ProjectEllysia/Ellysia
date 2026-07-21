@@ -1,14 +1,17 @@
 import { defineStore } from 'pinia'
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { useApi } from '@/composables/useApi'
+import { useUtils } from '@/composables/useUtils'
 import { useToastStore } from '@/stores/toastStore'
 
 export const useIrisStore = defineStore('iris', () => {
-  const { apiFetch } = useApi()
+  const { apiFetch, apiError } = useApi()
+  const { triggerDownload, filenameFromResponse } = useUtils()
   const toast = useToastStore()
 
   const analyses = ref([])
   const loading = ref(false)
+  const listError = ref(null)
   const submitting = ref(false)
   const totalCount = ref(0)
   const page = ref(1)
@@ -19,6 +22,9 @@ export const useIrisStore = defineStore('iris', () => {
   const currentStatus = reactive({ polling: false, status: null, progress: null })
   const pathCache = reactive(new Map())
   const currentPath = reactive({ loading: false, data: null })
+  const iocsCache = reactive(new Map())
+  const currentIocs = reactive({ loading: false, data: null })
+  const aiSummaryLoading = ref(false)
 
   const documents = ref([])
   const documentsLoading = ref(false)
@@ -62,11 +68,15 @@ export const useIrisStore = defineStore('iris', () => {
     try {
       const params = new URLSearchParams({ page: pg, per_page: pp })
       const res = await apiFetch(`/iris/results?${params}`)
-      if (!res?.ok) { analyses.value = []; return }
+      if (!res?.ok) { analyses.value = []; listError.value = 'No se pudieron cargar los análisis.'; return }
       const data = await res.json()
       analyses.value = data.analyses ?? []
       totalCount.value = data.total ?? 0
       page.value = pg
+      listError.value = null
+    } catch {
+      analyses.value = []
+      listError.value = 'Error de conexión al cargar los análisis.'
     } finally {
       loading.value = false
     }
@@ -150,38 +160,148 @@ export const useIrisStore = defineStore('iris', () => {
     }
   }
 
+  /** Indicadores de compromiso (O1): dominios/URLs/IPs/emails extraídos bajo demanda. */
+  async function iocsFor(id) {
+    if (!id) return null
+    if (iocsCache.has(id)) {
+      currentIocs.loading = false
+      currentIocs.data = iocsCache.get(id)
+      return currentIocs.data
+    }
+    currentIocs.loading = true
+    currentIocs.data = null
+    try {
+      const res = await apiFetch(`/iris/results/${id}/iocs`)
+      if (!res?.ok) {
+        currentIocs.loading = false
+        return null
+      }
+      const data = await res.json()
+      iocsCache.set(id, data)
+      currentIocs.data = data
+      return data
+    } finally {
+      currentIocs.loading = false
+    }
+  }
+
+  // A3: getters de valor ya resuelto — antes IrisReportViewer.vue leía
+  // pathCache/currentPath/iocsCache/currentIocs directamente (cachés
+  // internos de la estrategia de carga bajo demanda, no la API pública del
+  // store). El componente ahora solo conoce estos cuatro getters.
+  function resolvedPathFor(id) {
+    if (!id) return null
+    const cached = pathCache.get(id)
+    if (cached) return cached
+    return currentPath.data?.analysisId === id ? currentPath.data : null
+  }
+  function isPathLoadingFor(id) {
+    if (!id) return false
+    return currentPath.loading && currentPath.data?.analysisId !== id
+  }
+  function resolvedIocsFor(id) {
+    if (!id) return null
+    const cached = iocsCache.get(id)
+    if (cached) return cached
+    return currentIocs.data?.analysisId === id ? currentIocs.data : null
+  }
+  function isIocsLoadingFor(id) {
+    if (!id) return false
+    return currentIocs.loading && currentIocs.data?.analysisId !== id
+  }
+
   function startPolling(id) {
     stopPolling()
     currentStatus.polling = true
     currentStatus.status = 'pending'
     currentStatus.progress = 0
+    _pollStatus(id)
+  }
 
-    pollTimer = setInterval(async () => {
-      const st = await getStatus(id)
-      if (!st) return
+  // B10: setInterval con callback async no esperaba a que la petición anterior
+  // terminara — si getStatus/getReport tardaban más de 2s, podían dispararse
+  // varias peticiones solapadas. setTimeout re-encadenado (mismo idioma que
+  // traceroute/Themis) garantiza que el siguiente sondeo no arranca hasta que
+  // el actual termina. El chequeo de `currentStatus.polling` evita que un
+  // ciclo en vuelo se reprograme después de que stopPolling() ya corrió.
+  async function _pollStatus(id) {
+    const st = await getStatus(id)
+    if (!currentStatus.polling) return
 
-      currentStatus.status = st.status
-      currentStatus.progress = st.progress ?? null
+    if (!st) {
+      pollTimer = setTimeout(() => _pollStatus(id), 2000)
+      return
+    }
 
-      if (st.status === 'finished') {
-        await getReport(id)
-        await fetchResults()
-        stopPolling()
-      } else if (st.status === 'failed' || st.status === 'cancelled') {
-        currentReport.data = { status: st.status }
-        currentReport.loading = false
-        await fetchResults()
-        stopPolling()
-      }
-    }, 2000)
+    currentStatus.status = st.status
+    currentStatus.progress = st.progress ?? null
+
+    if (st.status === 'finished') {
+      await getReport(id)
+      await fetchResults()
+      stopPolling()
+    } else if (st.status === 'failed' || st.status === 'cancelled') {
+      currentReport.data = { status: st.status }
+      currentReport.loading = false
+      await fetchResults()
+      stopPolling()
+    } else {
+      pollTimer = setTimeout(() => _pollStatus(id), 2000)
+    }
   }
 
   function stopPolling() {
     if (pollTimer) {
-      clearInterval(pollTimer)
+      clearTimeout(pollTimer)
       pollTimer = null
     }
     currentStatus.polling = false
+  }
+
+  /** Re-lanza el análisis con el ruleset actual sobre el mismo correo original. */
+  async function reanalyzeAnalysis(id) {
+    const res = await apiFetch(`/iris/results/${id}/reanalyze`, { method: 'POST' })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo relanzar el análisis.'), 'error')
+      return null
+    }
+    const data = await res.json()
+    toast.show(`Reanálisis iniciado (ID: ${data.analysisId})`, 'success')
+    await fetchResults()
+    selectAnalysis(data.analysisId)
+    return data.analysisId
+  }
+
+  /**
+   * Solicita la narrativa ejecutiva IA (IA1) y sondea el informe hasta que
+   * aparece `aiSummary` — no hay endpoint de estado propio, la narrativa es
+   * simplemente un campo más del informe principal una vez generada.
+   */
+  async function generateAiSummary(id) {
+    const res = await apiFetch(`/iris/results/${id}/ai-summary`, { method: 'POST' })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo generar el resumen IA.'), 'error')
+      return false
+    }
+    toast.show('Generando resumen ejecutivo con IA…', 'success')
+    aiSummaryLoading.value = true
+    return true
+  }
+
+  /**
+   * Comprueba una vez si el resumen IA ya está listo. Sin polling automático
+   * a propósito: el usuario decide cuándo volver a preguntar, en vez de un
+   * setTimeout re-encadenado — deja el terreno listo para sustituir esto por
+   * un webhook/push más adelante sin tener que desmontar un poller primero.
+   */
+  async function checkAiSummary(id) {
+    const data = await getReport(id)
+    if (data?.aiSummary) {
+      aiSummaryLoading.value = false
+    } else {
+      toast.show('El resumen IA todavía se está generando. Vuelve a comprobar en unos segundos.', 'info')
+    }
+    return data
   }
 
   async function cancelAnalysis(id) {
@@ -205,10 +325,12 @@ export const useIrisStore = defineStore('iris', () => {
     }
     toast.show('An\u00e1lisis eliminado.', 'success')
     pathCache.delete(id)
+    iocsCache.delete(id)
     if (currentId.value === id) {
       currentId.value = null
       currentReport.data = null
       currentPath.data = null
+      currentIocs.data = null
     }
     await fetchResults()
     return true
@@ -217,8 +339,10 @@ export const useIrisStore = defineStore('iris', () => {
   function selectAnalysis(id) {
     if (currentId.value === id) return
     stopPolling()
+    stopDocumentPolling()
     currentReport.data = null
     currentPath.data = null
+    currentIocs.data = null
     if (id === null) {
       currentId.value = null
       currentStatus.status = null
@@ -250,8 +374,7 @@ export const useIrisStore = defineStore('iris', () => {
   async function generateDocument(analysisId) {
     const res = await apiFetch(`/iris/results/${analysisId}/document`, { method: 'POST' })
     if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.error_description || data.message || 'No se pudo generar el informe.', 'error')
+      toast.show(await apiError(res, 'No se pudo generar el informe.'), 'error')
       return null
     }
     const data = await res.json()
@@ -296,21 +419,21 @@ export const useIrisStore = defineStore('iris', () => {
     documentPollTimers.set(documentId, timer)
   }
 
+  /** Detiene todos los pollings de documentos activos (documento colgado,
+   * análisis borrado, o navegación fuera de la vista). */
+  function stopDocumentPolling() {
+    for (const timer of documentPollTimers.values()) clearInterval(timer)
+    documentPollTimers.clear()
+  }
+
   /** Descarga un documento PDF por ID. */
   async function downloadDocument(documentId) {
     try {
       const res = await apiFetch(`/iris/document/${documentId}/download`)
       if (!res?.ok) { toast.show('No se pudo descargar el informe.', 'error'); return false }
       const blob = await res.blob()
-      const cd = res.headers.get('Content-Disposition') ?? ''
-      const name = cd.match(/filename="?([^";\n]+)"?/i)?.[1] ?? `iris_analysis_${documentId}.pdf`
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = name
-      document.body.appendChild(a)
-      a.click()
-      setTimeout(() => { URL.revokeObjectURL(url); a.remove() }, 1000)
+      const name = filenameFromResponse(res, `iris_analysis_${documentId}.pdf`)
+      triggerDownload(blob, name)
       toast.show('Informe descargado.', 'success')
       return true
     } catch (e) {
@@ -331,13 +454,44 @@ export const useIrisStore = defineStore('iris', () => {
     return true
   }
 
+  /** Limpia el estado (Q6: logout SPA sin recarga dura) — detiene también el
+   * polling de estado y de documentos en curso. */
+  function $reset() {
+    stopPolling()
+    stopDocumentPolling()
+
+    analyses.value = []
+    loading.value = false
+    listError.value = null
+    submitting.value = false
+    totalCount.value = 0
+    page.value = 1
+    loadingMore.value = false
+
+    currentId.value = null
+    Object.assign(currentReport, { loading: false, data: null })
+    Object.assign(currentStatus, { polling: false, status: null, progress: null })
+    pathCache.clear()
+    Object.assign(currentPath, { loading: false, data: null })
+    iocsCache.clear()
+    Object.assign(currentIocs, { loading: false, data: null })
+    aiSummaryLoading.value = false
+
+    documents.value = []
+    documentsLoading.value = false
+  }
+
   return {
-    analyses, loading, submitting, totalCount, page, perPage, loadingMore, hasMore,
-    currentId, currentReport, currentStatus, currentPath, pathCache,
+    analyses, loading, listError, submitting, totalCount, page, perPage, loadingMore, hasMore,
+    currentId, currentReport, currentStatus, aiSummaryLoading,
     documents, documentsLoading,
-    submitAnalysis, fetchResults, fetchMoreResults, getReport, getStatus, pathFor,
-    cancelAnalysis, deleteAnalysis, selectAnalysis, goToPage,
+    submitAnalysis, fetchResults, fetchMoreResults, getReport, getStatus, pathFor, iocsFor,
+    resolvedPathFor, isPathLoadingFor, resolvedIocsFor, isIocsLoadingFor,
+    generateAiSummary, checkAiSummary,
+    cancelAnalysis, deleteAnalysis, reanalyzeAnalysis, selectAnalysis, goToPage,
     startPolling, stopPolling,
     generateDocument, fetchDocuments, getDocumentStatus, downloadDocument, deleteDocument,
+    stopDocumentPolling,
+    $reset,
   }
 })

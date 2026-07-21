@@ -36,7 +36,10 @@ import uuid
 import psutil
 
 from rq import Queue, SimpleWorker
+from rq.registry import BaseRegistry
 from rq.timeouts import TimerDeathPenalty
+
+BaseRegistry.death_penalty_class = TimerDeathPenalty
 
 import src.modules.system.config_reading as CR
 from src.modules.system.logging import configure_logging
@@ -101,7 +104,7 @@ def _worker_thread(worker_num: int):
            - Cada módulo hace QueueRegistry.register("categoría")
         2. app.app_context() → empuja contexto Flask para que DB sessions funcionen
         3. QueueRegistry.names() → obtiene todas las colas registradas
-           Ej: ["default", "sentinel.scan", "sentinel.report", "aegis.generate", "iris.analyze"]
+           Ej: ["default", "themis.scan", "themis.report", "aegis.generate", "iris.analyze"]
         4. Crea RQ Queue para cada nombre (conexión a Redis)
         5. Crea RQ Worker y lo registra en _workers (para poder pararlo después)
         6. worker.work() → loop infinito que:

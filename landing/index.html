@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/x-icon" href="./resources/images/favicon.ico" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Ellysia — Modular security operations platform: vulnerability scanning, anti-phishing analysis, encrypted credential vault, AI-powered awareness training." />
+  <meta property="og:title" content="Ellysia — Security Operations Platform" />
+  <meta property="og:description" content="Vulnerability scanning, anti-phishing analysis, encrypted credential vault, and AI-powered security awareness — in a single server." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="./resources/images/Ellysia-BgN.png" />
+  <meta name="theme-color" content="#0b0c10" />
+  <link rel="stylesheet" href="./css/fonts.css" />
+  <title>Ellysia — Security Operations Platform</title>
+</head>
+<body>
+
+  <div class="bg-orbs" aria-hidden="true">
+    <span class="orb orb--gold"></span>
+    <span class="orb orb--green"></span>
+    <span class="orb orb--blue"></span>
+  </div>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-radar" aria-hidden="true"><span class="radar-sweep"></span></div>
+  <div class="bg-scanlines" aria-hidden="true"></div>
+  <svg class="bg-constellation" aria-hidden="true" preserveAspectRatio="none"></svg>
+  <div class="watermark" aria-hidden="true"><span>Ellysia</span></div>
+
+  <header class="topbar" role="banner">
+    <a class="topbar-logo" href="#top" aria-label="Ellysia">
+      <span class="logo-bracket">[</span><span class="logo-text">Ellysia</span><span class="logo-bracket">]</span>
+    </a>
+    <nav class="topbar-nav" aria-label="Primary">
+      <a href="https://github.com/ProjectEllysia/Ellysia" target="_blank" rel="noopener noreferrer">github</a>
+      <span class="topbar-sep">·</span>
+      <a href="https://github.com/ProjectEllysia/Ellysia#readme" target="_blank" rel="noopener noreferrer">docs</a>
+      <span class="topbar-sep">·</span>
+      <span class="topbar-ver">v4.2</span>
+    </nav>
+    <span class="topbar-clock" id="clock">--:--:--</span>
+  </header>
+
+  <main id="top">
+
+    <section class="hero" aria-labelledby="hero-title">
+
+      <div class="hero-boot" role="log" aria-live="off" aria-label="Sequence initialization log">
+        <pre class="boot-log" id="bootLog"></pre>
+      </div>
+
+      <div class="hero-body">
+        <h1 class="hero-title" id="hero-title">
+          <span class="title-bracket">[</span>
+          <span class="title-text" id="heroText" data-text="Ellysia">Ellysia</span>
+          <span class="title-bracket">]</span>
+        </h1>
+        <p class="hero-sublabel">Security Operations Platform</p>
+        <p class="hero-lead">
+          Plataforma modular de operaciones de seguridad: escaneo de vulnerabilidades,
+          análisis anti-phishing, bóveda cifrada de credenciales y formación de
+          concienciación con IA — en un solo servidor.
+        </p>
+
+        <div class="hero-cta">
+          <a class="cta" href="https://github.com/ProjectEllysia/Ellysia" target="_blank" rel="noopener noreferrer">
+            <span class="cta-dash">——</span>
+            <span class="cta-label">OPEN CONSOLE</span>
+            <span class="cta-arrow" aria-hidden="true">→</span>
+          </a>
+          <span class="cta-meta">github.com/ProjectEllysia/Ellysia</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="modules" aria-labelledby="modules-eyebrow">
+      <p class="eyebrow" id="modules-eyebrow"><span class="comment">//</span> 02 — MODULE INVENTORY</p>
+      <ul class="modules" role="list">
+
+        <li class="module" style="--m: #4cb782">
+          <a href="https://github.com/ProjectEllysia/Ellysia/tree/main/API/src/modules/sentinel" target="_blank" rel="noopener noreferrer">
+            <div class="module-row">
+              <span class="module-id">01</span>
+              <span class="module-name">sentinel</span>
+              <span class="module-line" aria-hidden="true"></span>
+              <span class="module-go" aria-hidden="true">→</span>
+            </div>
+            <p class="module-desc">Escaneo de red, análisis de vulnerabilidades e informes PDF generados con IA.</p>
+            <div class="module-meta">
+              <span class="meta-stack">nmap · nikto · openvas</span>
+              <span class="meta-status"><span class="status-dot"></span>operational</span>
+            </div>
+          </a>
+        </li>
+
+        <li class="module" style="--m: #6080e0">
+          <a href="https://github.com/ProjectEllysia/Ellysia/tree/main/API/src/modules/features/aegis" target="_blank" rel="noopener noreferrer">
+            <div class="module-row">
+              <span class="module-id">02</span>
+              <span class="module-name">aegis</span>
+              <span class="module-line" aria-hidden="true"></span>
+              <span class="module-go" aria-hidden="true">→</span>
+            </div>
+            <p class="module-desc">IA genera 73 temas de concienciación + alertas CVE live de 19 marcas.</p>
+            <div class="module-meta">
+              <span class="meta-stack">ollama · openai · incibe-cert</span>
+              <span class="meta-status"><span class="status-dot"></span>operational</span>
+            </div>
+          </a>
+        </li>
+
+        <li class="module" style="--m: #e07a5f">
+          <a href="https://github.com/ProjectEllysia/Ellysia/tree/main/API/src/modules/features/iris" target="_blank" rel="noopener noreferrer">
+            <div class="module-row">
+              <span class="module-id">03</span>
+              <span class="module-name">iris</span>
+              <span class="module-line" aria-hidden="true"></span>
+              <span class="module-go" aria-hidden="true">→</span>
+            </div>
+            <p class="module-desc">37 reglas atómicas sobre SPF, DKIM, DMARC, heurísticas de contenido y spoofing de dominio.</p>
+            <div class="module-meta">
+              <span class="meta-stack">header analysis · subtractive scoring</span>
+              <span class="meta-status"><span class="status-dot"></span>operational</span>
+            </div>
+          </a>
+        </li>
+
+        <li class="module" style="--m: #a07ac0">
+          <a href="https://github.com/ProjectEllysia/Ellysia/tree/main/API/src/modules/features/acheron" target="_blank" rel="noopener noreferrer">
+            <div class="module-row">
+              <span class="module-id">04</span>
+              <span class="module-name">acheron</span>
+              <span class="module-line" aria-hidden="true"></span>
+              <span class="module-go" aria-hidden="true">→</span>
+            </div>
+            <p class="module-desc">Bóveda de credenciales AES-256-GCM cifrada en cliente + sync Android.</p>
+            <div class="module-meta">
+              <span class="meta-stack">acheroncore (java) · android kotlin</span>
+              <span class="meta-status"><span class="status-dot"></span>operational</span>
+            </div>
+          </a>
+        </li>
+
+      </ul>
+    </section>
+
+    <section class="section" id="spec" aria-labelledby="spec-eyebrow">
+      <p class="eyebrow" id="spec-eyebrow"><span class="comment">//</span> 03 — SPECIFICATION</p>
+
+      <table class="spec">
+        <thead>
+          <tr><th class="col-layer">LAYER</th><th class="col-comp">COMPONENT</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="layer">backend</td>     <td class="comp">flask 3.0 · sqlalchemy 2.0 · flask-smorest</td></tr>
+          <tr><td class="layer">database</td>    <td class="comp">postgresql 16 · alembic migrations</td></tr>
+          <tr><td class="layer">task queue</td>  <td class="comp">rq + redis 7 · isolated workers</td></tr>
+          <tr><td class="layer">auth</td>        <td class="comp">oauth 2.0 · jwt · argon2id</td></tr>
+          <tr><td class="layer">scanning</td>    <td class="comp">nmap · nikto · openvas / gvm</td></tr>
+          <tr><td class="layer">ai / llm</td>    <td class="comp">ollama (local) · openai (swappable)</td></tr>
+          <tr><td class="layer">frontend</td>    <td class="comp">vue 3 · vite · pinia · vue router</td></tr>
+          <tr><td class="layer">mobile</td>      <td class="comp">kotlin · jetpack compose · retrofit</td></tr>
+          <tr><td class="layer">crypto</td>      <td class="comp">aes-256-gcm (acheroncore) · android keystore</td></tr>
+          <tr><td class="layer">ops</td>         <td class="comp">docker compose · apscheduler</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+  </main>
+
+  <footer class="footer" role="contentinfo">
+    <span class="foot-pulse"><i></i>enlace cifrado activo</span>
+    <span class="foot-meta">
+      <a href="https://github.com/ProjectEllysia/Ellysia" target="_blank" rel="noopener noreferrer">Ellysia v4.2</a>
+      &nbsp;·&nbsp; MIT
+      &nbsp;·&nbsp; <span class="foot-clock" id="footClock">--:--:--</span>
+    </span>
+  </footer>
+
+  <link rel="stylesheet" href="./css/style.css" />
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>

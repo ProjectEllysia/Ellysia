@@ -1,11 +1,19 @@
-import { defineStore } from 'pinia'
+import { defineStore, getActivePinia } from 'pinia'
 import { ref, computed } from 'vue'
+import router from '@/router'
 
 /**
  * Clave usada en sessionStorage para persistir los datos de sesión.
  * @type {string}
  */
 const STORAGE_KEY = 'seq_session'
+
+/**
+ * Clave en sessionStorage para el motivo de fin de sesión, de forma que
+ * sobreviva a la recarga de página que provoca endSession().
+ * @type {string}
+ */
+const REASON_KEY = 'seq_session_end_reason'
 
 /**
  * Store de autenticación — gestiona JWT, login, logout y refresh automático.
@@ -16,7 +24,7 @@ const STORAGE_KEY = 'seq_session'
  * @example
  * import { useAuthStore } from '@/stores/authStore'
  * const auth = useAuthStore()
- * auth.login('root', 'admin')  // POST /oauth/token, guarda en sessionStorage
+ * auth.login('root', 'root')  // POST /oauth/token, guarda en sessionStorage
  * auth.isAdmin                 // true si el rol es admin o root
  * auth.username()              // extraído del payload JWT
  */
@@ -29,6 +37,12 @@ export const useAuthStore = defineStore('auth', () => {
   const expiresAt = ref(0)
   /** @type {import('vue').Ref<string>} Rol del usuario (role_user, role_admin, role_root) */
   const role = ref('role_user')
+  /**
+   * Motivo por el que terminó la última sesión, para que LoginView muestre un
+   * mensaje dedicado. 'password_changed' = la contraseña de acceso cambió.
+   * @type {import('vue').Ref<string|null>}
+   */
+  const sessionEndReason = ref(null)
 
   /** @type {import('vue').ComputedRef<boolean>} True si hay un access token vigente */
   const isAuthenticated = computed(() => !!accessToken.value)
@@ -99,12 +113,18 @@ export const useAuthStore = defineStore('auth', () => {
   /**
    * Autentica al usuario contra /oauth/token con grant_type password.
    * En caso de éxito, persiste los tokens en sessionStorage y actualiza
-   * el estado reactivo del store.
+   * el estado reactivo del store. Si la cuenta tiene MFA activado, el
+   * servidor no devuelve tokens todavía: devuelve un `challengeToken` que
+   * hay que canjear con verifyMfa() tras introducir el código TOTP.
    * @param {string} username - Nombre de usuario
    * @param {string} password - Contraseña
+   * @returns {Promise<{mfaRequired: boolean, challengeToken?: string, methods?: string[]}>}
+   *          mfaRequired=false si el login se completó (tokens ya guardados);
+   *          mfaRequired=true si falta el segundo factor.
    * @throws {Error} Si las credenciales son inválidas, hay rate-limit, o el servidor devuelve error
    * @example
-   * try { await auth.login('root', 'admin') } catch (e) { console.error(e.message) }
+   * const step = await auth.login('root', 'root')
+   * if (step.mfaRequired) { await auth.verifyMfa(step.challengeToken, code) }
    */
   async function login(username, password) {
     const res = await fetch('/oauth/token', {
@@ -118,6 +138,40 @@ export const useAuthStore = defineStore('auth', () => {
       if (res.status === 429) throw new Error('Demasiados intentos. Espera unos minutos.')
       throw new Error(data.error_description || `Error del servidor (${res.status})`)
     }
+
+    if (data.mfaRequired) {
+      return { mfaRequired: true, challengeToken: data.challengeToken, methods: data.methods || [] }
+    }
+
+    _applyTokens(data)
+    return { mfaRequired: false }
+  }
+
+  /**
+   * Canjea un challenge de MFA (emitido por login() cuando mfaRequired=true)
+   * por los tokens reales, aportando un código TOTP o un código de recuperación.
+   * @param {string} challengeToken - Token devuelto por login()
+   * @param {{code?: string, recoveryCode?: string}} secondFactor - Uno de los dos
+   * @throws {Error} Si el código es inválido, el challenge expiró, o hay rate-limit
+   * @example await auth.verifyMfa(step.challengeToken, { code: '123456' })
+   */
+  async function verifyMfa(challengeToken, { code, recoveryCode } = {}) {
+    const res = await fetch('/oauth/mfa/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challengeToken, code, recoveryCode }),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      if (res.status === 401) throw new Error(data.error_description || 'Código inválido o verificación expirada.')
+      if (res.status === 429) throw new Error('Demasiados intentos. Espera unos minutos.')
+      throw new Error(data.error_description || `Error del servidor (${res.status})`)
+    }
+    _applyTokens(data)
+  }
+
+  /** Vuelca la respuesta de tokens (login directo o tras verifyMfa) al estado reactivo. */
+  function _applyTokens(data) {
     accessToken.value = data.access_token
     refreshToken.value = data.refresh_token
     expiresAt.value = Date.now() + data.expires_in * 1000
@@ -165,8 +219,40 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
+   * Limpia el estado del resto de stores tras cerrar sesión (Q6).
+   *
+   * `pinia.state.value = {}` no basta para los "setup stores" de este
+   * proyecto: no limpia los `ref()`/`reactive()` ya vinculados a las
+   * plantillas, así que dejaba datos de la sesión anterior visibles hasta
+   * el siguiente fetch. Cada store expone su propio `$reset()` (Pinia no lo
+   * genera automáticamente para setup stores); aquí solo se orquesta la
+   * llamada, sin acoplar authStore a qué stores existen — se itera la
+   * instancia activa de Pinia y se resetea cualquiera que lo implemente.
+   * `auth`/`toast`/`theme` quedan fuera a propósito: `auth` ya se limpia en
+   * las líneas de arriba, y toast/theme son preferencias de dispositivo/UI,
+   * no datos de sesión — resetearlas en cada logout sería una regresión de UX.
+   */
+  function _resetOtherStores() {
+    const pinia = getActivePinia()
+    pinia?._s.forEach((store, id) => {
+      if (id === 'auth') return
+      try {
+        store.$reset()
+      } catch (e) {
+        // Pinia expone $reset en todo store, pero para "setup stores" sin
+        // implementación propia (toast, theme) el stub por defecto LANZA en
+        // vez de ser un no-op — es el caso esperado para esos dos, no un error.
+        if (!String(e?.message).includes('does not implement')) {
+          console.error(`[Ellysia] $reset() falló en store "${id}":`, e)
+        }
+      }
+    })
+  }
+
+  /**
    * Cierra la sesión: revoca el token en el servidor (fire-and-forget),
-   * limpia el estado y el sessionStorage, y redirige al login.
+   * limpia el estado de todos los stores y navega al login por el router
+   * (sin recarga dura de página).
    */
   function logout() {
     const token = accessToken.value
@@ -174,6 +260,7 @@ export const useAuthStore = defineStore('auth', () => {
     refreshToken.value = null
     expiresAt.value = 0
     role.value = 'role_user'
+    sessionEndReason.value = null
     sessionStorage.removeItem(STORAGE_KEY)
     if (token) {
       fetch('/oauth/revoke', {
@@ -184,13 +271,41 @@ export const useAuthStore = defineStore('auth', () => {
         },
       }).catch(() => {})
     }
-    window.location.href = '/login'
+    _resetOtherStores()
+    router.push('/login')
+  }
+
+  /**
+   * Termina la sesión por un motivo concreto (p.ej. la contraseña de acceso
+   * cambió en otro dispositivo). A diferencia de logout(), NO intenta revocar
+   * en el servidor (los tokens ya son inválidos) y registra el motivo para que
+   * LoginView muestre el mensaje adecuado.
+   * @param {string} reason - p.ej. 'password_changed'
+   */
+  function endSession(reason) {
+    accessToken.value = null
+    refreshToken.value = null
+    expiresAt.value = 0
+    role.value = 'role_user'
+    sessionEndReason.value = reason || null
+    sessionStorage.removeItem(STORAGE_KEY)
+    if (reason) sessionStorage.setItem(REASON_KEY, reason)
+    _resetOtherStores()
+    router.push('/login')
+  }
+
+  /** Consume (lee y limpia) el motivo de fin de sesión persistido. */
+  function takeSessionEndReason() {
+    const r = sessionStorage.getItem(REASON_KEY) || sessionEndReason.value
+    sessionStorage.removeItem(REASON_KEY)
+    sessionEndReason.value = null
+    return r
   }
 
   return {
-    accessToken, refreshToken, expiresAt, role,
+    accessToken, refreshToken, expiresAt, role, sessionEndReason,
     isAuthenticated, isAdmin, isRoot,
     username, loadFromStorage, saveToStorage,
-    login, getToken, logout,
+    login, verifyMfa, getToken, logout, refreshAccessToken, endSession, takeSessionEndReason,
   }
 })

@@ -1,4 +1,4 @@
-# Alembic — Migraciones de Base de Datos para SeQ
+# Alembic — Migraciones de Base de Datos para Ellysia
 
 ## ¿Qué es Alembic?
 
@@ -60,7 +60,7 @@ lo necesario.
 alembic upgrade head
 ```
 
-SeQ ejecuta esto automáticamente al arrancar (`run.py → _run_migrations()`), así que en
+Ellysia ejecuta esto automáticamente al arrancar (`run.py → _run_migrations()`), así que en
 producción/Docker no hace falta correrlo manualmente. En desarrollo, tras generar una
 nueva migración, aplicarla antes de arrancar la app.
 
@@ -92,8 +92,8 @@ El Dockerfile ya copia `alembic.ini` y `alembic/` al contenedor. Al arrancar:
 
 | Perfil | Contenedor | ¿Ejecuta migraciones? |
 |---|---|---|
-| `container` | `SeQ-API` | Sí — `run.py` llama a `_run_migrations()` antes de arrancar el servidor. |
-| `container` | `SeQ-Worker` | No — el worker no toca el esquema; la API ya lo ha aplicado. |
+| `container` | `Ellysia-API` | Sí — `run.py` llama a `_run_migrations()` antes de arrancar el servidor. |
+| `container` | `Ellysia-Worker` | No — el worker no toca el esquema; la API ya lo ha aplicado. |
 | `dev` | `python run.py` local | Sí — `run.py` llama a `_run_migrations()` en cada arranque (salvo `fresh_db_init=True`). |
 
 ## Fresh DB Init (`CREATE_DATABASE=true`)
@@ -107,14 +107,14 @@ Cuando se configura `CREATE_DATABASE=true` en `API/.env`, la app ejecuta `_init_
 Esta ruta **no debería usarse en producción** — es destructiva. Para entornos reales,
 las migraciones de Alembic gestionan la evolución del esquema sin pérdida de datos.
 
-## Notas específicas de SeQ
+## Notas específicas de Ellysia
 
 ### Modelos con herencia joined-table
 
 Las siguientes jerarquías usan herencia de tabla unida (polymorphic), que puede
 confundir al autogenerate:
 
-- `Document` → `AegisDocument`, `SentinelDocument`, `IrisDocument`
+- `Document` → `AegisDocument`, `ThemisDocument`, `IrisDocument`
 - `Scan` → `NmapScan`, `NiktoScan`, `OpenVASScan`
 - `Storable` → `Account`, `CreditCard`, `SecureNote`, `Identity`, `BankAccount`, `WifiNetwork`, `SoftwareLicense`
 

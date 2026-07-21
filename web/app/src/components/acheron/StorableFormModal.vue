@@ -210,7 +210,7 @@ function submit() {
   display: flex; align-items: center; justify-content: space-between;
   padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border);
 }
-.modal-title { font-family: var(--font-display); font-size: 1.2rem; color: var(--text); }
+.modal-title { font-family: var(--font-display); font-size: var(--fs-xl); color: var(--text); }
 .modal-close {
   background: none; border: none; color: var(--text-muted); cursor: pointer;
   padding: 0.25rem; display: grid; place-items: center;
@@ -229,14 +229,14 @@ function submit() {
   border-radius: 10px; transition: all 0.18s ease;
 }
 .type-btn:hover { background: rgba(160, 122, 192, 0.14); border-color: rgba(160, 122, 192, 0.45); }
-.type-btn-label { color: var(--text); font-weight: 600; font-size: 0.95rem; }
-.type-btn-sub { color: var(--text-muted); font-size: 0.72rem; }
+.type-btn-label { color: var(--text); font-weight: 600; font-size: var(--fs-xl); }
+.type-btn-sub { color: var(--text-muted); font-size: var(--fs-md); }
 
 /* Formulario */
 .modal-form { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
 .form-field { display: flex; flex-direction: column; gap: 0.35rem; }
 .form-label {
-  font-family: var(--font-mono); font-size: 0.66rem; text-transform: uppercase;
+  font-family: var(--font-mono); font-size: var(--fs-md); text-transform: uppercase;
   letter-spacing: 0.06em; color: var(--text-muted);
 }
 .form-hint { text-transform: none; letter-spacing: 0; color: var(--text-muted); opacity: 0.8; }
@@ -245,7 +245,7 @@ function submit() {
 .modal-form textarea {
   width: 100%; padding: 0.65rem 0.8rem; background: rgba(0, 0, 0, 0.25);
   border: 1px solid var(--border-med); border-radius: 9px; color: var(--text);
-  font-size: 0.9rem; font-family: var(--font-mono); transition: border-color 0.2s ease;
+  font-size: var(--fs-input); font-family: var(--font-mono); transition: border-color 0.2s ease;
 }
 .modal-form input { padding-right: 2.4rem; }
 .modal-form textarea { resize: vertical; line-height: 1.5; }
@@ -259,7 +259,7 @@ function submit() {
 .reveal-btn svg { width: 17px; height: 17px; }
 
 .form-error {
-  color: var(--danger); font-size: 0.8rem;
+  color: var(--danger); font-size: var(--fs-lg);
   background: var(--danger-dim); border: 1px solid rgba(217, 108, 108, 0.25);
   border-radius: 8px; padding: 0.5rem 0.7rem;
 }
@@ -269,13 +269,13 @@ function submit() {
 .btn-ghost {
   padding: 0.6rem 0.9rem; border-radius: 9px; cursor: pointer;
   background: none; border: 1px solid var(--border-med); color: var(--text-dim);
-  font-size: 0.85rem; transition: all 0.18s ease;
+  font-size: var(--fs-lg); transition: all 0.18s ease;
 }
 .btn-ghost:hover:not(:disabled) { color: var(--text); border-color: var(--border-solid); }
 .btn-primary {
   padding: 0.6rem 1.2rem; border: none; border-radius: 9px; cursor: pointer;
   background: linear-gradient(135deg, #a07ac0, #7d5aa0); color: #fff;
-  font-size: 0.85rem; font-weight: 600;
+  font-size: var(--fs-lg); font-weight: 600;
   display: inline-flex; align-items: center; gap: 0.5rem;
   transition: filter 0.18s ease;
 }

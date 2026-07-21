@@ -7,7 +7,7 @@ connection, a deadlock, or a serialization failure — rather than a genuine
 logic or integrity error.
 
 Only idempotent operations should be retried: re-running the callable must be
-safe. In SeQ this is applied to the background DB phases of the scheduler
+safe. In Ellysia this is applied to the background DB phases of the scheduler
 (load + record run timestamps), never to the request path where a handler may
 have non-idempotent side effects.
 

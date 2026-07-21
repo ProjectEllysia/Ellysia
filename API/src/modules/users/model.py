@@ -16,12 +16,10 @@ Example:
 'User(id=None, username='admin', role='role_user')'
 """
 
-from datetime import datetime
-
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
-from src.modules.shared import Base
+from src.modules.shared import Base, utcnow_naive
 
 
 # =========================================================================
@@ -57,7 +55,7 @@ class AccessToken(Base):
     token      = Column(String(512), unique=True, nullable=False, index=True)
     user_id    = Column(Integer,     ForeignKey("User.id"), nullable=False)
     expires_at = Column(DateTime,    nullable=False)
-    created_at = Column(DateTime,    nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime,    nullable=False, default=utcnow_naive)
     revoked    = Column(Integer,     default=0)  # 0=activo, 1=revocado
 
     user = relationship("User", back_populates="tokens")
@@ -69,7 +67,7 @@ class AccessToken(Base):
         Returns:
             True if token is not revoked and has not expired.
         """
-        return not self.revoked and datetime.utcnow() < self.expires_at
+        return not self.revoked and utcnow_naive() < self.expires_at
 
     def __str__(self):
         return f"AccessToken(id={self.id}, user_id={self.user_id}, expires_at={self.expires_at})"
@@ -104,7 +102,7 @@ class RefreshToken(Base):
     token      = Column(String(512), unique=True, nullable=False, index=True)
     user_id    = Column(Integer,     ForeignKey("User.id"), nullable=False)
     expires_at = Column(DateTime,    nullable=False)
-    created_at = Column(DateTime,    nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime,    nullable=False, default=utcnow_naive)
     revoked    = Column(Integer,     default=0)
 
     user = relationship("User", back_populates="refresh_tokens")
@@ -116,7 +114,7 @@ class RefreshToken(Base):
         Returns:
             True if token is not revoked and has not expired.
         """
-        return not self.revoked and datetime.utcnow() < self.expires_at  # type: ignore
+        return not self.revoked and utcnow_naive() < self.expires_at  # type: ignore
 
     def __str__(self):
         return f"RefreshToken(id={self.id}, user_id={self.user_id})"
@@ -145,6 +143,8 @@ class User(Base):
         created_at: Account creation timestamp (automatic).
         password_hash: Hashed password (max 128 characters).
         password_salt: Salt used for password hashing (max 128 characters).
+        password_changed_at: Timestamp of the last access-password change
+            (nullable; None means never changed since this column was added).
 
     Relationships:
         scans: List of Scan objects (security scans performed).
@@ -164,14 +164,26 @@ class User(Base):
     first_name      = Column(String(64),    nullable=False)
     last_name       = Column(String(64),    nullable=False)
     role            = Column(String(32),    nullable=False, default="role_user")
-    created_at      = Column(DateTime,      nullable=False, default=datetime.utcnow)
+    created_at      = Column(DateTime,      nullable=False, default=utcnow_naive)
     password_hash   = Column(String(128),   nullable=False)
     password_salt   = Column(String(128),   nullable=False)
+    # Marca de la última vez que se cambió la contraseña de acceso. Permite a los
+    # clientes (web/móvil) detectar que un token/sesión quedó obsoleto por un
+    # cambio de contraseña (ver require_oauth_token y el grant refresh_token).
+    password_changed_at = Column(DateTime,  nullable=True)
 
     scans          = relationship("Scan",         back_populates="user", cascade="all, delete-orphan")
     tokens         = relationship("AccessToken",  back_populates="user", cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
-    vaults         = relationship("Vault",        back_populates="user")
+    vaults         = relationship("Vault",        back_populates="user", cascade="all, delete-orphan")
+
+    mfa_totp_credential = relationship(
+        "MFATotpCredential", back_populates="user",
+        uselist=False, cascade="all, delete-orphan",
+    )
+    mfa_recovery_codes = relationship(
+        "MFARecoveryCode", back_populates="user", cascade="all, delete-orphan",
+    )
 
     analyses = relationship(
         "IrisAnalysis",
@@ -208,22 +220,22 @@ class UserAttribute(Base):
     ABAC capability attributes assigned to a user.
 
     Each row represents a single fine-grained permission (e.g.
-    "sentinel_read", "aegis_create"). Role-level identity
+    "themis_read", "aegis_create"). Role-level identity
     (root / admin / user) is stored exclusively in User.role and
     must NEVER appear here.
 
     Attributes:
         user_id: Foreign key to User.id (part of composite PK).
         attribute_name: Attribute identifier matching a Permission enum value
-                        (e.g. "sentinel_read", "acheron_delete").
+                        (e.g. "themis_read", "acheron_delete").
 
     Relationships:
         user: User that owns this attribute assignment.
 
     Example:
-    >>> ua = UserAttribute(user_id=1, attribute_name="sentinel_read")
+    >>> ua = UserAttribute(user_id=1, attribute_name="themis_read")
     >>> print(ua)
-    'UserAttribute(user_id=1, attribute_name='sentinel_read')'
+    'UserAttribute(user_id=1, attribute_name='themis_read')'
     """
     __tablename__ = "UserAttribute"
 
@@ -237,3 +249,100 @@ class UserAttribute(Base):
 
     def __repr__(self):
         return f"<UserAttribute(user_id={self.user_id}, attribute_name='{self.attribute_name}')>"
+
+
+# =========================================================================
+# MFA (TOTP) MODELS
+# =========================================================================
+
+
+class MFATotpCredential(Base):
+    """
+    TOTP (Time-based One-Time Password) credential for a user.
+
+    One row per user (unique ``user_id``). ``secret_encrypted`` holds the
+    shared TOTP secret, encrypted at rest with a server-side key — unlike
+    Acheron this is NOT zero-knowledge, since the server must be able to
+    compute the current code to verify a login attempt.
+
+    ``confirmed_at`` is NULL until the user proves control of the secret by
+    submitting a valid code during setup; MFA only counts as "enabled" once
+    confirmed (see MFAManager.is_enabled).
+
+    Attributes:
+        user_id: Foreign key to User.id (unique — one credential per user).
+        secret_encrypted: Fernet-encrypted Base32 TOTP secret.
+        confirmed_at: When the user confirmed enrollment (None = pending).
+        created_at: When the credential was created (setup started).
+    """
+    __tablename__ = "MFATotpCredential"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id"), nullable=False, unique=True)
+    secret_encrypted = Column(String(512), nullable=False)
+    confirmed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    user = relationship("User", back_populates="mfa_totp_credential")
+
+    def __repr__(self) -> str:
+        return f"<MFATotpCredential user_id={self.user_id} confirmed={self.confirmed_at is not None}>"
+
+
+class MFARecoveryCode(Base):
+    """
+    One-time recovery code for MFA, used when the user loses their TOTP device.
+
+    Attributes:
+        user_id: Foreign key to User.id.
+        code_hash: Argon2id hash of the recovery code (same hasher as passwords).
+        used_at: When the code was consumed (None = still usable).
+        created_at: Batch creation timestamp.
+    """
+    __tablename__ = "MFARecoveryCode"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
+    code_hash = Column(String(512), nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    user = relationship("User", back_populates="mfa_recovery_codes")
+
+    def __repr__(self) -> str:
+        return f"<MFARecoveryCode id={self.id} user_id={self.user_id} used={self.used_at is not None}>"
+
+
+class MFAChallenge(Base):
+    """
+    Short-lived challenge issued after a successful password grant when the
+    user has MFA enabled; exchanged for real tokens at POST /oauth/mfa/verify.
+
+    Unlike AccessToken/RefreshToken, tracks ``attempts`` so failed TOTP/recovery
+    guesses can be capped server-side — a 6-digit TOTP code is brute-forceable
+    online, unlike Acheron's client-side-only vault checker.
+
+    Attributes:
+        token: Opaque random string handed to the client (not a JWT).
+        user_id: Foreign key to User.id.
+        expires_at: Short expiry (minutes, see config_reading.get_mfa_config).
+        attempts: Number of failed verification attempts so far.
+        created_at: Issuance timestamp.
+    """
+    __tablename__ = "MFAChallenge"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    token = Column(String(512), unique=True, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    user = relationship("User")
+
+    def is_valid(self, max_attempts: int) -> bool:
+        """True if the challenge is under the allowed attempt count and not expired."""
+        return self.attempts < max_attempts and utcnow_naive() < self.expires_at
+
+    def __repr__(self) -> str:
+        return f"<MFAChallenge id={self.id} user_id={self.user_id} attempts={self.attempts}>"

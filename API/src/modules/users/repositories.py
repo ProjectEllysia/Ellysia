@@ -29,9 +29,18 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from .model import AccessToken, RefreshToken, User, UserAttribute
+from .model import (
+    AccessToken,
+    RefreshToken,
+    User,
+    UserAttribute,
+    MFATotpCredential,
+    MFARecoveryCode,
+    MFAChallenge,
+)
 
 from src.modules.infrastructure.base_repository import BaseRepository, UnitOfWork
+from src.modules.shared import utcnow_naive
 
 
 class UserRepository(BaseRepository[User]):
@@ -334,7 +343,7 @@ class TokenRepository(BaseRepository[AccessToken]):
         Returns:
             Tuple of (access_tokens_deleted, refresh_tokens_deleted).
         """
-        now = datetime.utcnow()
+        now = utcnow_naive()
         access_deleted  = self.delete_expired_access_tokens(now)
         refresh_deleted = self.delete_expired_refresh_tokens(now)
         return access_deleted, refresh_deleted
@@ -488,6 +497,117 @@ class AttributeRepository(BaseRepository[UserAttribute]):
                 UserAttribute.user_id == user_id,
                 UserAttribute.attribute_name.in_(attribute_names),
             )
+            .delete(synchronize_session=False)
+        )
+        self._session.flush()
+        return deleted
+
+
+class MFARepository(BaseRepository[MFATotpCredential]):
+    """
+    Repository for MFA persistence: TOTP credentials, recovery codes, and
+    login challenges. Grouped together since their lifecycle is coordinated
+    (enabling/disabling TOTP always touches credential + recovery codes).
+
+    Example:
+        >>> with UnitOfWork() as uow:
+        ...     repo = MFARepository(uow)
+        ...     cred = repo.get_totp_credential(user_id=1)
+    """
+
+    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
+        super().__init__(MFATotpCredential, uow=uow, session=session)
+
+    # =========================================================================
+    # TOTP CREDENTIAL
+    # =========================================================================
+
+    def get_totp_credential(self, user_id: int) -> Optional[MFATotpCredential]:
+        """Retrieve the (at most one) TOTP credential for a user, confirmed or not."""
+        return (
+            self._session.query(MFATotpCredential)
+            .filter(MFATotpCredential.user_id == user_id)
+            .one_or_none()
+        )
+
+    def save_totp_credential(self, credential: MFATotpCredential) -> MFATotpCredential:
+        """Persist a new TOTP credential."""
+        return self.save(credential)
+
+    def delete_totp_credential(self, user_id: int) -> None:
+        """Delete the TOTP credential for a user, if any."""
+        self._session.query(MFATotpCredential).filter(
+            MFATotpCredential.user_id == user_id
+        ).delete(synchronize_session=False)
+        self._session.flush()
+
+    # =========================================================================
+    # RECOVERY CODES
+    # =========================================================================
+
+    def get_recovery_codes(self, user_id: int, only_unused: bool = False) -> List[MFARecoveryCode]:
+        """Retrieve recovery codes for a user, optionally filtering to unused ones."""
+        query = self._session.query(MFARecoveryCode).filter(MFARecoveryCode.user_id == user_id)
+        if only_unused:
+            query = query.filter(MFARecoveryCode.used_at.is_(None))
+        return query.all()
+
+    def save_recovery_codes(self, codes: List[MFARecoveryCode]) -> None:
+        """Persist a freshly generated batch of recovery codes."""
+        self._session.add_all(codes)
+        self._session.flush()
+
+    def delete_recovery_codes(self, user_id: int) -> None:
+        """Delete all recovery codes for a user (used before regenerating a batch)."""
+        self._session.query(MFARecoveryCode).filter(
+            MFARecoveryCode.user_id == user_id
+        ).delete(synchronize_session=False)
+        self._session.flush()
+
+    def mark_recovery_code_used(self, code_id: int) -> None:
+        """Mark a recovery code as consumed so it can't be reused."""
+        code = self._session.query(MFARecoveryCode).filter(MFARecoveryCode.id == code_id).one_or_none()
+        if code is not None:
+            code.used_at = utcnow_naive()
+            self._session.flush()
+
+    # =========================================================================
+    # LOGIN CHALLENGES
+    # =========================================================================
+
+    def get_challenge(self, token: str) -> Optional[MFAChallenge]:
+        """Retrieve an MFAChallenge record by its opaque token string."""
+        return (
+            self._session.query(MFAChallenge)
+            .filter(MFAChallenge.token == token)
+            .one_or_none()
+        )
+
+    def save_challenge(self, challenge: MFAChallenge) -> MFAChallenge:
+        """Persist a newly issued MFA challenge."""
+        self._session.add(challenge)
+        self._session.flush()
+        return challenge
+
+    def increment_challenge_attempts(self, token: str) -> None:
+        """Increment the failed-attempt counter for a challenge."""
+        self._session.query(MFAChallenge).filter(MFAChallenge.token == token).update(
+            {"attempts": MFAChallenge.attempts + 1}, synchronize_session=False
+        )
+        self._session.flush()
+
+    def delete_challenge(self, token: str) -> None:
+        """Delete a challenge (after successful verification, so it can't be reused)."""
+        self._session.query(MFAChallenge).filter(
+            MFAChallenge.token == token
+        ).delete(synchronize_session=False)
+        self._session.flush()
+
+    def delete_expired_challenges(self, before: datetime) -> int:
+        """Delete challenges whose expires_at is before the given timestamp."""
+        deleted = (
+            self._session.query(MFAChallenge)
+            .filter(MFAChallenge.expires_at < before)
             .delete(synchronize_session=False)
         )
         self._session.flush()

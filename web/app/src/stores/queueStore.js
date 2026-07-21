@@ -12,7 +12,7 @@ import { useToastStore } from '@/stores/toastStore'
  * @module queueStore
  */
 export const useQueueStore = defineStore('queue', () => {
-  const { apiFetch } = useApi()
+  const { apiFetch, apiError } = useApi()
   const toast = useToastStore()
 
   /** Estado global de la cola (maxWorkers, aliveWorkers, counts) */
@@ -29,6 +29,7 @@ export const useQueueStore = defineStore('queue', () => {
 
   /** Carga en curso */
   const loading = ref(false)
+  const listError = ref(null)
 
   /** Paginacion */
   const currentPage = ref(1)
@@ -68,14 +69,17 @@ export const useQueueStore = defineStore('queue', () => {
       })
       const res = await apiFetch(`/system/tasks?${params}`)
       if (!res?.ok) {
-        toast.show('Error al cargar las tareas.', 'error')
+        tasks.value = []
+        listError.value = 'Error al cargar las tareas.'
         return
       }
       const data = await res.json()
       tasks.value = data.tasks ?? []
       totalCount.value = data.totalCount ?? 0
+      listError.value = null
     } catch {
-      toast.show('Error al conectar con la cola.', 'error')
+      tasks.value = []
+      listError.value = 'Error de conexión con la cola.'
     } finally {
       loading.value = false
     }
@@ -90,8 +94,7 @@ export const useQueueStore = defineStore('queue', () => {
         method: 'POST',
       })
       if (!res?.ok) {
-        const data = await res?.json().catch(() => ({}))
-        toast.show(data.error_description || 'Error al cancelar la tarea.', 'error')
+        toast.show(await apiError(res, 'Error al cancelar la tarea.'), 'error')
         return false
       }
       toast.show('Tarea cancelada.', 'success')
@@ -114,11 +117,12 @@ export const useQueueStore = defineStore('queue', () => {
         body: JSON.stringify({ max_workers: maxWorkers }),
       })
       if (!res?.ok) {
-        const data = await res?.json().catch(() => ({}))
-        toast.show(data.error_description || 'Error al actualizar configuracion.', 'error')
+        toast.show(await apiError(res, 'Error al actualizar configuracion.'), 'error')
         return false
       }
-      toast.show(`Workers ajustados a ${maxWorkers}.`, 'success')
+      // C6: el backend solo persiste la config — no reinicia el proceso
+      // worker, así que aliveWorkers no cambia hasta el próximo reinicio.
+      toast.show(`Config actualizada a ${maxWorkers}. Se aplicará al reiniciar el worker.`, 'success')
       await loadStatus()
       return true
     } catch {
@@ -144,10 +148,22 @@ export const useQueueStore = defineStore('queue', () => {
     loadTasks()
   }
 
+  /** Limpia el estado (Q6: logout SPA sin recarga dura). */
+  function $reset() {
+    status.value = { maxWorkers: 0, aliveWorkers: 0, runningCount: 0, pendingCount: 0, historyCount: 0 }
+    tasks.value = []
+    loading.value = false
+    listError.value = null
+    currentPage.value = 1
+    totalCount.value = 0
+    activeTab.value = 'running'
+  }
+
   return {
     status,
     tasks,
     loading,
+    listError,
     activeTab,
     currentPage,
     totalCount,
@@ -158,5 +174,6 @@ export const useQueueStore = defineStore('queue', () => {
     updateMaxWorkers,
     switchTab,
     goToPage,
+    $reset,
   }
 })

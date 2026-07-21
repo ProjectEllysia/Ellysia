@@ -35,13 +35,15 @@ class ExternalIdStore:
         return self._redis.hget(self.KEY, external_id)
 
     def remove_by_job_id(self, job_id: str) -> None:
+        # C7: recorre el hash completo en vez de salir en la primera
+        # coincidencia — si 2 external_ids apuntaran al mismo job_id (p. ej.
+        # tras un reencolado), el segundo mapping quedaba huérfano.
         cursor = 0
         while True:
             cursor, items = self._redis.hscan(self.KEY, cursor=cursor)
             for key, val in items.items():
                 if val == job_id:
                     self._redis.hdel(self.KEY, key)
-                    return
             if cursor == 0:
                 break
 

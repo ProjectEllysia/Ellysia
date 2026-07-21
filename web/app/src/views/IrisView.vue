@@ -8,7 +8,7 @@
     @drop="onDrop"
   >
     <StarBackground />
-    <Topbar title="Iris" badge="Análisis de Cabeceras" />
+    <Topbar title="Iris" badge="Análisis de Cabeceras" back-to="/iris" back-label="Volver" />
 
     <!-- Intake de evidencia: visor que aparece al arrastrar un .eml -->
     <Transition name="intake-fade">
@@ -37,6 +37,10 @@
     </Transition>
 
     <div class="iris-layout">
+      <div v-if="store.listError" class="history-error-banner">
+        {{ store.listError }}
+        <button type="button" @click="store.fetchResults()">Reintentar</button>
+      </div>
       <IrisHistoryStrip
         :items="sortedAnalyses"
         :active-id="store.currentId"
@@ -181,7 +185,11 @@ async function onDrop(e) {
   }
 }
 
-onBeforeUnmount(() => clearTimeout(rejectTimer))
+onBeforeUnmount(() => {
+  clearTimeout(rejectTimer)
+  store.stopPolling()
+  store.stopDocumentPolling()
+})
 
 const sortMode = computed({
   get: () => store.sortMode || 'date-desc',
@@ -252,6 +260,28 @@ function handleSort(mode) {
   position: relative;
   z-index: 1;
 }
+
+.history-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 1rem;
+  color: var(--danger);
+  background: var(--danger-dim);
+  font-size: var(--fs-md);
+  flex-shrink: 0;
+}
+.history-error-banner button {
+  border: 1px solid var(--danger);
+  background: transparent;
+  color: var(--danger);
+  border-radius: 6px;
+  padding: 0.2rem 0.6rem;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.history-error-banner button:hover { background: var(--danger); color: #fff; }
 
 .iris-main {
   flex: 1;
@@ -351,7 +381,7 @@ function handleSort(mode) {
 .intake-eyebrow {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: var(--fs-md);
   letter-spacing: 0.28em;
   text-transform: uppercase;
   color: var(--intake-color);
@@ -361,7 +391,7 @@ function handleSort(mode) {
 .intake-title {
   margin: 0.1rem 0 0.6rem;
   font-family: var(--font-display);
-  font-size: 1.3rem;
+  font-size: var(--fs-xl);
   font-weight: 700;
   line-height: 1.25;
   text-align: center;
@@ -371,7 +401,7 @@ function handleSort(mode) {
 
 .intake-chip {
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: var(--fs-lg);
   font-weight: 600;
   letter-spacing: 0.06em;
   padding: 0.25rem 0.7rem;
@@ -432,6 +462,6 @@ function handleSort(mode) {
 
 @media (max-width: 540px) {
   .intake-frame { padding: 2.5rem 1.5rem 2.25rem; }
-  .intake-title { font-size: 1.1rem; }
+  .intake-title { font-size: var(--fs-lg); }
 }
 </style>

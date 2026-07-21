@@ -13,7 +13,7 @@ import { useToastStore } from '@/stores/toastStore'
  * @module usersStore
  */
 export const useUsersStore = defineStore('users', () => {
-  const { apiFetch } = useApi()
+  const { apiFetch, apiError } = useApi()
   const toast = useToastStore()
 
   /** Lista plana de todos los usuarios */
@@ -60,10 +60,9 @@ export const useUsersStore = defineStore('users', () => {
       body: JSON.stringify(userData),
     })
     if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      if (res.status === 409) toast.show(data.message || 'Usuario o email ya existe.', 'error')
-      else if (res.status === 403) toast.show('Permisos insuficientes para crear usuarios.', 'error')
-      else toast.show(data.message || 'Error al crear usuario.', 'error')
+      if (res?.status === 409) toast.show(await apiError(res, 'Usuario o email ya existe.'), 'error')
+      else if (res?.status === 403) toast.show('Permisos insuficientes para crear usuarios.', 'error')
+      else toast.show(await apiError(res, 'Error al crear usuario.'), 'error')
       return false
     }
     toast.show('Usuario creado exitosamente.', 'success')
@@ -85,24 +84,31 @@ export const useUsersStore = defineStore('users', () => {
     } catch { return [] }
   }
 
+  /** PUT/DELETE /users/{id}/attributes — comparten cuerpo salvo método y mensajes */
+  async function _updateAttributes(userId, attrs, method, { errorMsg, successMsg }) {
+    const res = await apiFetch(`/users/${userId}/attributes`, {
+      method,
+      body: JSON.stringify({ attributes: attrs }),
+    })
+    if (!res?.ok) {
+      toast.show(await apiError(res, errorMsg), 'error')
+      return false
+    }
+    toast.show(successMsg, 'success')
+    return true
+  }
+
   /**
    * Añade atributos a un usuario vía PUT /users/{id}/attributes.
    * @param {number|string} userId - ID del usuario
    * @param {string[]} attrs - Lista de nombres de atributos a añadir
    * @returns {Promise<boolean>}
    */
-  async function addAttributes(userId, attrs) {
-    const res = await apiFetch(`/users/${userId}/attributes`, {
-      method: 'PUT',
-      body: JSON.stringify({ attributes: attrs }),
+  function addAttributes(userId, attrs) {
+    return _updateAttributes(userId, attrs, 'PUT', {
+      errorMsg: 'Error al añadir atributos.',
+      successMsg: 'Atributos actualizados.',
     })
-    if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.message || 'Error al añadir atributos.', 'error')
-      return false
-    }
-    toast.show('Atributos actualizados.', 'success')
-    return true
   }
 
   /**
@@ -111,19 +117,18 @@ export const useUsersStore = defineStore('users', () => {
    * @param {string[]} attrs - Lista de nombres de atributos a eliminar
    * @returns {Promise<boolean>}
    */
-  async function removeAttributes(userId, attrs) {
-    const res = await apiFetch(`/users/${userId}/attributes`, {
-      method: 'DELETE',
-      body: JSON.stringify({ attributes: attrs }),
+  function removeAttributes(userId, attrs) {
+    return _updateAttributes(userId, attrs, 'DELETE', {
+      errorMsg: 'Error al eliminar atributos.',
+      successMsg: 'Atributo eliminado.',
     })
-    if (!res?.ok) {
-      const data = await res?.json().catch(() => ({}))
-      toast.show(data.message || 'Error al eliminar atributos.', 'error')
-      return false
-    }
-    toast.show('Atributo eliminado.', 'success')
-    return true
   }
 
-  return { users, loading, grouped, loadUsers, createUser, loadUserAttributes, addAttributes, removeAttributes }
+  /** Limpia el estado (Q6: logout SPA sin recarga dura). */
+  function $reset() {
+    users.value = []
+    loading.value = false
+  }
+
+  return { users, loading, grouped, loadUsers, createUser, loadUserAttributes, addAttributes, removeAttributes, $reset }
 })

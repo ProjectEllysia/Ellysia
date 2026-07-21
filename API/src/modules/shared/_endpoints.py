@@ -29,6 +29,26 @@ from ._exceptions import MissingParameterError, MissingJsonBodyError
 
 
 # =========================================================================
+# RATE LIMITING
+# =========================================================================
+# S4: el storage_uri por defecto es 'memory://' (por-proceso) — con varios
+# workers/gunicorn cada uno lleva su propio contador, multiplicando el
+# límite real (p. ej. fuerza bruta en /oauth/token) y reseteándolo en cada
+# reinicio. create_app() (run.py) sobreescribe esto a Redis-backed vía
+# app.config["RATELIMIT_STORAGE_URI"] antes de limiter.init_app(app) —
+# no se resuelve aquí porque importar config_reading en tiempo de carga de
+# este módulo crea un import circular (shared -> system -> users -> shared).
+# in_memory_fallback_enabled evita que un Redis caído tumbe el rate limiting.
+
+limiter = Limiter(
+    get_remote_address,
+    default_limits=[],
+    storage_uri="memory://",
+    in_memory_fallback_enabled=True,
+)
+
+
+# =========================================================================
 # HELPERS
 # =========================================================================
 
@@ -53,7 +73,7 @@ def current_actor() -> str:
 def normalize_target(
     user_input: str,
     resolve_hostname: bool = False
-) -> Tuple[Optional[str], Optional[str]]:
+) -> Tuple[str, str]:
     """
     Normaliza el target del usuario a IP + hostname.
     Acepta IPs, dominios o URLs completas (http://, https://).
@@ -68,6 +88,13 @@ def normalize_target(
 
     Returns:
         (ip, hostname): hostname == ip cuando no se resuelve o resolve_hostname=False.
+        Nunca None en un retorno normal — toda rama que no logra resolver ``ip``
+        lanza ``ValueError`` antes de llegar al return (Q3: el tipo antes decía
+        Optional[str] para ambos, forzando un `# type: ignore` en cada caller que
+        desempaqueta el resultado y lo usa como str sin comprobar None).
+
+    Raises:
+        ValueError: Si ``user_input`` no es una IP válida ni un hostname resoluble.
     """
 
     def _gethostbyaddr_with_timeout(ip: str) -> Optional[str]:
@@ -90,8 +117,8 @@ def normalize_target(
     else:
         cleaned_input = cleaned_input.split(':')[0].split('/')[0]
 
-    ip: Optional[str] = None
-    hostname: Optional[str] = None
+    ip: str
+    hostname: str
 
     try:
         ip_obj = ipaddress.ip_address(cleaned_input)
@@ -113,97 +140,5 @@ def normalize_target(
 
 
 
-# =========================================================================
-# RATE LIMITING
-# =========================================================================
-
-limiter = Limiter(
-    get_remote_address,
-    default_limits=[],
-    storage_uri="memory://",
-)
-
-
-# =========================================================================
-# DATA PARSING
-# =========================================================================
-
-def require_json(required_fields: list):
-    """Decorador que valida y extrae el cuerpo JSON del request.
-
-    Pasa los datos validados como argumento 'data' a la función decorada.
-    Lanza MissingJsonBodyError si el Content-Type no es application/json
-    o el JSON es inválido.
-
-    Args:
-        required_fields: Lista opcional de campos requeridos. Si se especifica,
-                        valida que todos existan y no estén vacíos antes de llamar
-                        al endpoint. Lanza MissingParameterError si falta alguno.
-
-    Usage:
-    >>> @require_json
-    >>> def create_user(data):
-    ...    username = require_str(data, "username")
-
-    >>> @require_json(["target", "ports"])
-    >>> def start_scan(data):
-    ...    # data ya tiene "target" y "ports" validados
-    """
-    def decorator(f):
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            if not request.is_json:
-                raise MissingJsonBodyError("Content-Type must be application/json")
-            data = request.get_json(silent=True)
-            if not data or not isinstance(data, dict):
-                raise MissingJsonBodyError("Request body must be a JSON object")
-
-            if required_fields:
-                for field in required_fields:
-                    value = data.get(field)
-                    if value is None or (isinstance(value, str) and not value.strip()):
-                        raise MissingParameterError(field)
-
-            return f(data, *args, **kwargs)
-        return wrapper
-
-    if callable(required_fields):
-        return decorator(required_fields)
-
-    return decorator
-
-def require_str(data: dict, field: str) -> str:
-    """Extrae un campo obligatorio del JSON y lo valida como string no vacío.
-
-    Args:
-        data: Diccionario con los datos del request.
-        field: Nombre del campo a extraer.
-
-    Returns:
-        str: El valor del campo, triminado de espacios.
-
-    Raises:
-        MissingParameterError: Si el campo falta o está vacío.
-    """
-    value = data.get(field)
-    if not value or not str(value).strip():
-        raise MissingParameterError(field)
-    return str(value).strip()
-
-def require_arg(arg: str) -> str:
-    """Extrae el parámetro 'arg' de la query string como entero.
-
-    Returns:
-        str: Valor del argumento pedido
-
-    Raises:
-        MissingParameterError: Si el parámetro no existe.
-
-    """
-    value = request.args.get(arg)
-    if not value:
-        raise MissingParameterError(arg)
-
-    return value
 
 

@@ -18,6 +18,8 @@ import {
   aesGcmDecrypt,
   sha256Hex,
   generateSaltB64,
+  randomBytes,
+  b64encode,
 } from './crypto.js'
 import { STORABLE_FIELDS, STORABLE_CATEGORIES, KIND_BY_CATEGORY } from './storableFields.js'
 
@@ -47,6 +49,31 @@ export async function openVault(vaultJson, masterPassword, username) {
 
   const vaultKey = await importVaultKey(derivedKey, vaultJson.vaultKey)
   return new OpenVault(vaultJson, vaultKey)
+}
+
+/**
+ * Genera los metadatos criptográficos iniciales de una bóveda nueva: una
+ * vaultKey aleatoria envuelta con la contraseña maestra elegida. Espejo del
+ * primer arranque de `VaultFactory` en AcheronCore, para `POST /vault`.
+ *
+ * @param {string} masterPassword
+ * @param {string} username  validator del checker (username del usuario)
+ * @returns {Promise<{ checker: string, vaultKey: string, algorithm: object }>}
+ */
+export async function createVault(masterPassword, username) {
+  const rawVaultKey = randomBytes(32)
+  const algorithm = {
+    transformation: 'AES/GCM/NoPadding',
+    kdf: 'Argon2',
+    kdfIterations: '3',
+    kdfMemoryKiB: '65536',
+    kdfParallelism: '1',
+    salt: generateSaltB64(),
+  }
+  const derivedKey = await deriveKey(masterPassword, algorithm)
+  const checker = await aesGcmEncrypt(derivedKey, await sha256Hex(username))
+  const vaultKey = await aesGcmEncrypt(derivedKey, b64encode(rawVaultKey))
+  return { checker, vaultKey, algorithm }
 }
 
 /**

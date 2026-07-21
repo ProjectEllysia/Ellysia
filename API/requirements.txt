@@ -1,6 +1,7 @@
 # Web Framework
 Flask>=3.0.0
 flask-cors>=4.0.0
+gunicorn>=21.2.0
 
 # Database & ORM
 SQLAlchemy>=2.0.23
@@ -11,11 +12,11 @@ alembic>=1.13
 reportlab>=4.0.7
 Pillow>=11.0.0
 
+# QR code decoding (Iris quishing detection, D1)
+opencv-python-headless>=4.10.0
+
 # Python-Nmap: Interfaz Python para Nmap
 python-nmap==0.7.1
-
-# Networking & IP Handling
-ipaddress==1.0.23
 
 # XML Processing (for Nmap and Nikto output parsing)
 lxml>=4.9.3
@@ -43,15 +44,15 @@ argon2-cffi>=23.1.0
 cryptography>=41.0.4
 flask_limiter
 PyJWT
+pyotp>=2.9.0
 dnspython
 python-gvm
 ollama
 openai>=1.0
+google-generativeai>=0.8.0
 requests
 ddgs
 psutil
-duckduckgo-search>=6.0
-flask-jwt-extended>=4.6.0
 python-dotenv>=1.2.2
 APScheduler>=3.10
 croniter>=2.0

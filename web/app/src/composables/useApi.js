@@ -1,6 +1,30 @@
 import { useAuthStore } from '@/stores/authStore'
 
 /**
+ * Extrae un mensaje de error legible de una respuesta fallida (D3/B11).
+ *
+ * Antes cada store repetía `const data = await res?.json().catch(() => ({}))`
+ * seguido de `data.error_description || data.message`: si `res` era `null`
+ * (apiFetch devuelve null en error de red o sesión caída), `res?.json()`
+ * cortocircuitaba TODA la cadena a `undefined` — `data` quedaba `undefined`
+ * y `data.message` lanzaba un `TypeError` silencioso (atrapado por el
+ * try/catch exterior, pero ocultando el mensaje real).
+ *
+ * @param {Response|null} res - Lo que devolvió `apiFetch` (puede ser null)
+ * @param {string} fallback - Mensaje a usar si no hay `res` o su cuerpo no trae uno
+ * @returns {Promise<string>}
+ */
+export async function apiError(res, fallback) {
+  if (!res) return fallback
+  const data = await res.json().catch(() => ({}))
+  const serverMsg = data.error_description || data.message || data.error
+  if (res.status === 403 && (data.error === 'forbidden' || data.error_description === 'Insufficient permissions')) {
+    return 'No tienes permisos suficientes para realizar esta acción.'
+  }
+  return serverMsg || fallback
+}
+
+/**
  * Composable para llamadas autenticadas a la API REST.
  *
  * Inyecta automáticamente el header Authorization con el JWT vigente
@@ -48,22 +72,40 @@ export function useApi() {
     try {
       res = await fetch(path, { ...options, headers })
     } catch (e) {
-      console.error('[SeQ] apiFetch error:', e)
+      console.error('[Ellysia] apiFetch error:', e)
       return null
     }
 
-    // ── 401 handling: refresh token once and retry ────────────────────
-    if (res.status === 401 && !_isRetry) {
-      const refreshed = await auth.refresh()
-      if (!refreshed) {
-        auth.logout()
+    // ── 401 handling ──────────────────────────────────────────────────
+    if (res.status === 401) {
+      // ¿La sesión cayó porque la contraseña de acceso cambió? → pantalla dedicada
+      let body = null
+      try {
+        body = await res.clone().json()
+      } catch {
+        /* cuerpo no-JSON: ignorar */
+      }
+      if (body && (body.code === 1609 || body.error === 'password_changed')) {
+        auth.endSession('password_changed')
         return null
       }
-      return apiFetch(path, options, true)
+
+      // 401 genérico: refrescar el token una vez y reintentar.
+      if (!_isRetry) {
+        const refreshed = await auth.refreshAccessToken()
+        if (!refreshed) {
+          auth.logout()
+          return null
+        }
+        return apiFetch(path, options, true)
+      }
+
+      auth.logout()
+      return null
     }
 
     return res
   }
 
-  return { apiFetch }
+  return { apiFetch, apiError }
 }

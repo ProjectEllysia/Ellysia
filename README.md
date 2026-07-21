@@ -1,9 +1,9 @@
 <!-- prettier-ignore -->
 <div align="center">
 
-<img src="./API/resources/images/seq/SeQ-BgN.png" alt="SeQ" height="110" />
+<img src="./API/resources/images/ellysia/Ellysia-BgN.png" alt="Ellysia" height="110" />
 
-# SeQ — Web — Security Operations Platform
+# Ellysia — Security Operations Platform
 
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org)
 [![Flask 3.0](https://img.shields.io/badge/Flask-3.0-000?style=flat-square&logo=flask)](https://flask.palletsprojects.com)
@@ -20,7 +20,7 @@
 
 ## Overview
 
-**SeQ** is a modular security operations platform that combines vulnerability scanning, anti-phishing email analysis, encrypted credential management, and AI-powered security awareness training into a single server, exposed through this REST API and the Vue 3 web client.
+**Ellysia** is a modular security operations platform that combines vulnerability scanning, anti-phishing email analysis, encrypted credential management, and AI-powered security awareness training into a single server — with web and mobile interfaces.
 
 The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Redis** queues, while local AI (Ollama) generates reports, awareness pills, and contextual verdicts. All modules share an OAuth 2.0 authentication layer with fine-grained attribute-based access control.
 
@@ -37,6 +37,7 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
 - **Anti-phishing analysis** — 37 atomic rules evaluate email headers (SPF, DKIM, DMARC, content heuristics, domain impersonation) and produce a calibrated verdict.
 - **Encrypted credential vault** — AES-256-GCM client-side encryption (AcheronCore), with a sync API consumed by the web client and the [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) Android app.
 - **Security awareness training** — AI generates 73-topic awareness pills with current CVE alerts from INCIBE-CERT / CIRCL / NVD.
+- **Infrastructure monitoring** — Lightweight agent heartbeats (CPU/memory/disk/network/processes) feed presence detection and threshold-based anomaly alerting, with email notification on critical events.
 - **Persistent task queue** — Background jobs survive API restarts (Redis-backed RQ), run in isolated OS processes, and support cooperative cancellation.
 - **OAuth 2.0 + JWT** — Refresh tokens, global revocation, Argon2id password hashing, role-based access with ABAC attributes.
 - **Database migrations** — Schema changes are versioned, reversible, and applied automatically on startup via Alembic.
@@ -45,17 +46,17 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
 
 ```
                 ┌─────────────────────────────────────────────────────────┐
-                │                    SeQ API (Flask)                      │
-                │  system · oauth · users · sentinel · acheron · iris ·   │
-                │                     aegis · scribe · pages              │
+                │                    Ellysia API (Flask)                  │
+                │  system · oauth · users · themis · acheron · iris ·   │
+                │       aegis · hygeia · scribe · herald · pages          │
                 │  ┌──────────────────────────────────────────────────┐   │
                 │  │  APScheduler ──► TaskQueue (RQ + Redis)          │   │
    Web SPA ────►│  │               ┌────────────────────────────┤     │   │
   (Vue 3)       │  │               │ RQ Workers (isolated procs)│     │──►  Nmap / Nikto / OpenVAS
-                │  │               │   sentinel.scan            │     │──►  Ollama / OpenAI
-AcheronMobile────►│  │               │   sentinel.report          │     │──►  INCIBE-CERT · CIRCL · NVD
-(separate repo)   │  │               │   aegis.generate           │     │
-                │  │               │   iris.analyze             │     │
+                │  │               │   themis.scan/report/...  │     │──►  Ollama / OpenAI
+  Android  ────►│  │               │   aegis.generate/campaign │     │──►  INCIBE-CERT · CIRCL · NVD
+  (Kotlin)      │  │               │   iris.analyze/report      │     │──►  SMTP relay (herald)
+  Hygeia agent─►│  │               │   hygeia.notify             │     │
                 │  │               └────────────────────────────┘     │   │
                 │  └──────────────────────────────────────────────────┘   │
                 │  PostgreSQL (15432)  ·  Alembic migrations              │
@@ -63,17 +64,21 @@ AcheronMobile────►│  │               │   sentinel.report        
 ```
 
 ```
-SeQ-Web/
+Ellysia/
 ├── API/        # Flask backend (run.py → create_app())
 │   ├── alembic/                 # Schema migrations (versioned)
 │   ├── src/modules/
 │   │   ├── system/              # Config, logging, task queue admin
 │   │   ├── users/               # OAuth 2.0 + JWT, user CRUD, ABAC
-│   │   ├── sentinel/            # Scan orchestration (Nmap/Nikto/OpenVAS)
-│   │   ├── iris/                # Email header analysis (37 rules)
-│   │   ├── aegis/               # Awareness pills + CVE alerts
-│   │   ├── acheron/             # Encrypted credential vault
-│   │   ├── scribe/              # AI generation abstraction layer
+│   │   ├── features/            # Feature modules (themis, iris, aegis, acheron, hygeia)
+│   │   │   ├── themis/          # Scan orchestration (Nmap/Nikto/OpenVAS)
+│   │   │   ├── iris/            # Email header analysis (37 rules)
+│   │   │   ├── aegis/           # Awareness pills + CVE alerts
+│   │   │   ├── acheron/         # Encrypted credential vault
+│   │   │   └── hygeia/          # Asset monitoring (agent heartbeats, anomalies)
+│   │   ├── tools/               # Cross-cutting strategy layers
+│   │   │   ├── scribe/          # AI generation abstraction layer
+│   │   │   └── herald/          # Email sending abstraction layer
 │   │   ├── infrastructure/      # ORM plumbing (UnitOfWork, repos)
 │   │   ├── shared/              # Base models, exceptions, schemas
 │   │   └── pages/               # Legacy static pages
@@ -91,12 +96,15 @@ SeQ-Web/
 
 | Module | Description | Status |
 |---|---|---|
-| **Sentinel** | Nmap, Nikto, and OpenVAS scans with PDF reports, scheduled execution, AI enrichment, and traceroute tracing. | Operational |
+| **Themis** | Nmap, Nikto, and OpenVAS scans with PDF reports, scheduled execution, AI enrichment, and traceroute tracing. | Operational |
 | **Iris** | Phishing detection via 37 atomic email header analysis rules with subtractive risk scoring. | Operational |
 | **Acheron** | Client-encrypted credential vault with granular sync and export/import, consumed by the web client and [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile). | Operational |
 | **Aegis** | AI-generated security awareness pills across 73 topics with real-time CVE alerts from 19 tracked brands. | Operational |
+| **Hygeia** | Lightweight agent-based monitoring: heartbeat ingestion, presence detection, threshold anomaly alerting, and email notification on critical events. | Operational |
 | **Scribe** | Abstraction layer for AI generation — pluggable strategies (Ollama, OpenAI) per module. | Operational |
-| **SeQ Web** | Vue 3 SPA with hub dashboard, scan management, analysis viewer, vault client, and admin panel. | Operational |
+| **Herald** | Abstraction layer for email sending — pluggable strategies (SMTP relay) per module, transversal like Scribe. | Operational |
+| **Ellysia Web** | Vue 3 SPA with hub dashboard, scan management, analysis viewer, vault client, asset monitoring dashboard, and admin panel. | Operational |
+| **AcheronMobile** | Android app with Jetpack Compose UI, Material 3 design, and Java crypto core for offline vault operations. | Operational |
 
 ## Quick start
 
@@ -105,8 +113,8 @@ SeQ-Web/
 
 ```bash
 # 1. Clone
-git clone https://github.com/gamustea/SeQ-Web.git
-cd SeQ-Web
+git clone https://github.com/ProjectEllysia/Ellysia.git
+cd Ellysia
 
 # 2. Start infrastructure (PostgreSQL 15432, Redis, Ollama, OpenVAS)
 docker compose --profile dev up -d
@@ -120,7 +128,7 @@ POSTGRES_USER=SecOps
 POSTGRES_PASSWORD=<from .env root>
 POSTGRES_HOST=localhost
 POSTGRES_PORT=15432
-POSTGRES_DB=SeQ
+POSTGRES_DB=Ellysia
 CREATE_DATABASE=True
 EOF
 
@@ -136,13 +144,13 @@ python -m src.modules.system.taskqueue.worker
 
 ### Authentication
 
-SeQ uses OAuth 2.0 with `grant_type: password` and refresh tokens (JWT signed with PyJWT). JSON keys use **camelCase**.
+Ellysia uses OAuth 2.0 with `grant_type: password` and refresh tokens (JWT signed with PyJWT). JSON keys use **camelCase**.
 
 ```http
 POST /oauth/token
 Content-Type: application/json
 
-{ "grantType": "password", "username": "root", "password": "admin" }
+{ "grantType": "password", "username": "root", "password": "root" }
 ```
 
 **Response:**
@@ -155,27 +163,27 @@ Content-Type: application/json
 
 ## API Reference
 
-### Sentinel — vulnerability scanning
+### Themis — vulnerability scanning
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/sentinel/nmap` | Port scan (supports CIDR ranges) |
-| `POST` | `/sentinel/nikto` | Web configuration / vulnerability scan |
-| `POST` | `/sentinel/openvas` | Full NVT scan (single host per scan) |
-| `GET` | `/sentinel/results` | List scans (filterable, paginated) |
-| `GET` | `/sentinel/results/<id>` | Scan detail |
-| `GET` | `/sentinel/scan-status?id=` | Status: pending / running / done / cancelled |
-| `POST` | `/sentinel/scans/<id>/cancel` | Cancel a running scan |
-| `DELETE` | `/sentinel/<id>` | Delete a scan |
-| `POST` | `/sentinel/generate-pdf` | Generate PDF report (`{ "id": <scanId>, "aiReport": true }`) |
-| `GET` | `/sentinel/document/<id>/download` | Download PDF |
-| `POST` | `/sentinel/scheduled-scans` | Create scheduled scan (cron/interval) |
-| `GET/DELETE` | `/sentinel/folders[/<id>]` | Organize scans in folders |
+| `POST` | `/themis/nmap` | Port scan (supports CIDR ranges) |
+| `POST` | `/themis/nikto` | Web configuration / vulnerability scan |
+| `POST` | `/themis/openvas` | Full NVT scan (single host per scan) |
+| `GET` | `/themis/results` | List scans (filterable, paginated) |
+| `GET` | `/themis/results/<id>` | Scan detail |
+| `GET` | `/themis/scan-status?id=` | Status: pending / running / done / cancelled |
+| `POST` | `/themis/scans/<id>/cancel` | Cancel a running scan |
+| `DELETE` | `/themis/<id>` | Delete a scan |
+| `POST` | `/themis/generate-pdf` | Generate PDF report (`{ "id": <scanId>, "aiReport": true }`) |
+| `GET` | `/themis/document/<id>/download` | Download PDF |
+| `POST` | `/themis/scheduled-scans` | Create scheduled scan (cron/interval) |
+| `GET/DELETE` | `/themis/folders[/<id>]` | Organize scans in folders |
 
 **Nmap scan example:**
 
 ```http
-POST /sentinel/nmap
+POST /themis/nmap
 Authorization: Bearer <token>
 Content-Type: application/json
 
@@ -215,8 +223,13 @@ Iris applies 37 rules across authentication (SPF, DKIM, DMARC), header anomalies
 | `GET` | `/aegis/download_as_pdf?id=` | Export as PDF |
 | `GET` | `/aegis/topics` | List available topics |
 | `GET/DELETE` | `/aegis/documents[/<id>]` | List / detail / delete |
+| `POST/GET/DELETE` | `/aegis/lists[/<id>]` | Distribution lists (owner) |
+| `POST/GET/DELETE` | `/aegis/lists/<id>/recipients[/<id>]` | Recipients within a list (owner) |
+| `POST/GET` | `/aegis/campaigns[/<id>]` | Create/list/detail a campaign (owner) |
+| `POST` | `/aegis/campaigns/<id>/launch` | Launch: snapshots the quiz, mints one opaque token per recipient, queues sending |
+| `GET/POST` | `/aegis/quiz?t=<token>` | **Public, no auth** — serve/grade the quiz for one recipient. One-shot: a completed token always 409s on resubmission |
 
-Aegis combines AI-generated awareness content with current CVE alerts from INCIBE-CERT and CIRCL/NVD, tracking 19 major technology brands.
+Aegis combines AI-generated awareness content with current CVE alerts from INCIBE-CERT and CIRCL/NVD, tracking 19 major technology brands. Each generated pill also gets a 2-3 question multiple-choice quiz; a **campaign** sends the pill + quiz to a distribution list, tracking `sent → opened → completed` per recipient via `herald`.
 
 ### Acheron — credential vault
 
@@ -230,6 +243,23 @@ Aegis combines AI-generated awareness content with current CVE alerts from INCIB
 
 > [!NOTE]
 > Encryption happens **client-side** (AcheronCore — see [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) for the Android implementation). The server stores only ciphertext. Internal IDs are deterministic SHA-256 hex hashes of encrypted content — collision-free across offline devices.
+
+### Hygeia — infrastructure monitoring
+
+| Method | Endpoint | Permission | Description |
+|---|---|---|---|
+| `POST` | `/hygeia/assets` | `HYGEIA_CREATE` | Register a monitored asset; returns the agent key **once** |
+| `GET` | `/hygeia/assets` | `HYGEIA_READ` | List the user's assets with presence status |
+| `GET` | `/hygeia/assets/<id>` | `HYGEIA_READ` | Asset detail |
+| `GET` | `/hygeia/assets/<id>/metrics?from=&to=` | `HYGEIA_READ` | CPU/memory time series for the asset's chart |
+| `DELETE` | `/hygeia/assets/<id>` | `HYGEIA_DELETE` | Deregister an asset, revoking its agent key |
+| `POST` | `/hygeia/assets/<id>/rotate-key` | `HYGEIA_UPDATE` | Rotate the agent key, invalidating the previous one |
+| `GET` | `/hygeia/alerts?state=&severity=&assetId=` | `HYGEIA_READ` | List anomalies for the user's assets |
+| `POST` | `/hygeia/alerts/<id>/ack` | `HYGEIA_UPDATE` | Acknowledge an anomaly |
+| `POST` | `/hygeia/alerts/<id>/resolve` | `HYGEIA_UPDATE` | Resolve an anomaly manually |
+| `POST` | `/hygeia/ingest` | agent key | Agent heartbeat (host info, CPU/memory/disk/network/processes) |
+
+Hygeia has two separate auth surfaces: standard OAuth for the user-facing endpoints above, and a per-asset **agent key** (`@require_agent_key`, not OAuth) for `POST /hygeia/ingest` — the only endpoint an agent calls. A presence-check job marks assets `stale`/`offline` and opens a `host_down` anomaly when heartbeats stop; critical anomalies trigger an async email notification (`hygeia.notify`, via `herald`).
 
 ### Users and system
 
@@ -247,28 +277,34 @@ Background jobs persist in Redis and survive API restarts. Workers are **isolate
 ```python
 from src.modules.system.taskqueue import TaskQueue
 queue = TaskQueue.get_instance()
-queue.submit(func, name="Scan 192.168.1.1", category="sentinel.scan", external_id="scan:42", args=[...])
+queue.submit(func, name="Scan 192.168.1.1", category="themis.scan", external_id="scan:42", args=[...])
 ```
 
 **Categories and entry points:**
 
+Each entry point is a `@staticmethod` on the owning module's manager class — picklable by reference, no bound state; it instantiates a fresh manager inside the worker process.
+
 | Category | Module | Entry function |
 |---|---|---|
-| `sentinel.scan` | Sentinel | `services/rq_tasks.execute_nmap_scan` |
-| `sentinel.report` | Sentinel | `services/rq_tasks.execute_report_generation` |
-| `aegis.generate` | Aegis | `services/rq_tasks.execute_aegis_generation` |
-| `iris.analyze` | Iris | `services/rq_tasks.execute_iris_analysis` |
+| `themis.scan` | Themis | `managers.NmapScanManager.execute_nmap_scan` (also `NiktoScanManager`, `OpenVASScanManager`) |
+| `themis.report` | Themis | `managers.ThemisReportManager.execute_report_generation` |
+| `themis.traceroute` | Themis | `managers.TracerouteManager.execute_traceroute` |
+| `aegis.generate` | Aegis | `managers.AegisManager.execute_aegis_generation` |
+| `aegis.campaign` | Aegis | `managers.CampaignManager.execute_campaign_send` |
+| `iris.analyze` | Iris | `managers.IrisManager.execute_iris_analysis` |
+| `iris.report` | Iris | `managers.IrisReportManager.execute_report_generation` |
+| `hygeia.notify` | Hygeia | `managers.HygeiaNotifyManager.execute_notify_critical_anomaly` |
 
 - **Progress reporting**: workers update `job.meta["progress"]` via `_Task(progress_callback=...)`.
 - **Cooperative cancellation**: set Redis key `taskqueue:cancel:{job_id}`; workers check via `_Task.wait(cancel_check=...)`.
-- **External IDs** follow the pattern `scan:<id>`, `sentinel-doc:<id>`, `aegis-doc:<id>`, `iris-analysis:<id>`.
+- **External IDs** follow the pattern `scan:<id>`, `themis-doc:<id>`, `aegis-doc:<id>`, `aegis-campaign:<id>`, `iris-analysis:<id>`, `hygeia-notify:<id>`.
 
 > [!WARNING]
 > Workers must be running for async tasks: `python -m src.modules.system.taskqueue.worker`. They listen on category-specific queues + `default`.
 
 ## Database Migrations
 
-SeQ uses **Alembic** for schema versioning — replacing the previous `Base.metadata.create_all()` approach that could only create new tables.
+Ellysia uses **Alembic** for schema versioning — replacing the previous `Base.metadata.create_all()` approach that could only create new tables.
 
 ### How it works
 
@@ -322,17 +358,47 @@ docker compose -f docker-compose.yml -f docker-compose.gpu-nvidia.yml --profile 
 
 ### GPU support
 
-SeQ ships overlay files for GPU-accelerated local AI:
+Ellysia ships overlay files for GPU-accelerated local AI:
 
 - `docker-compose.gpu-nvidia.yml`
 - `docker-compose.gpu-intel.yml`
 - `docker-compose.gpu-amd.yml`
 
+### SSL certificates (development)
+
+The `container` profile serves the web app and API over HTTPS via Nginx as a
+TLS terminator. A self-signed certificate for local/dev use is generated once
+per developer machine and mounted into the web container as a read-only volume
+(`./web/ssl:/etc/nginx/ssl`).
+
+```powershell
+# Windows — requires OpenSSL (ships with Git for Windows)
+.\web\ssl\generate.ps1
+```
+
+```bash
+# Linux / WSL
+openssl req -x509 -nodes -days 365 \
+  -subj "/CN=ellysia.es" \
+  -addext "subjectAltName=DNS:ellysia.es,DNS:*.ellysia.es,DNS:api.ellysia.es" \
+  -newkey rsa:2048 \
+  -keyout web/ssl/ellysia.key \
+  -out    web/ssl/ellysia.crt
+```
+
+The `web/ssl/` directory is gitignored — each developer keeps their own
+certificates. The Nginx config references generic container paths
+(`/etc/nginx/ssl/ellysia.crt` / `ellysia.key`).
+
+For production, replace the self-signed certs with a valid certificate (Let's
+Encrypt, etc.) and update `nginx.conf` paths accordingly.
+
 ### Ports
 
 | Service | Port | Note |
 |---|---|---|
-| API | 5000 | `0.0.0.0:5000` |
+| Web (Nginx) | 80 / 443 | HTTP → HTTPS redirect, SPA + API proxy |
+| API | 5000 | `0.0.0.0:5000` (HTTP internally) |
 | PostgreSQL | 15432 | Container maps 5432 → 15432 |
 | Redis | 6379 | Required for TaskQueue |
 | OpenVAS | 9390 / 9392 | ~15 min first start (NVT feed initialization) |
@@ -346,7 +412,7 @@ AI generation uses an injectable strategy chosen in `API/SecOpsConfig.json`:
 "ai": {
   "defaultStrategy": "ollama",
   "strategies": { "ollama": {}, "openai": {} },
-  "modules": { "sentinel": "ollama", "aegis": "openai" }
+  "modules": { "themis": "ollama", "aegis": "openai" }
 }
 ```
 
@@ -362,6 +428,44 @@ OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=llama3.2
 OPENAI_API_KEY=sk-...        # only needed if a module uses "openai"
 OPENAI_MODEL=gpt-4o-mini
+```
+
+### Email configuration (herald module)
+
+Transversal module for sending email — same philosophy as `scribe`: any module builds a message
+and hands it to `herald`, which delegates to an injectable strategy chosen per module in
+`API/SecOpsConfig.json`. `herald` has no knowledge of its consumers (Aegis, …).
+
+```json
+"email": {
+  "defaultStrategy": "smtp",
+  "strategies": {
+    "smtp": {
+      "host": "smtp-relay.brevo.com",
+      "port": 587,
+      "useTls": true,
+      "fromAddress": "noreply@tudominio.com",
+      "fromName": "Ellysia Awareness"
+    }
+  },
+  "modules": { "aegis": "smtp" }
+}
+```
+
+| Strategy | Transport | Use case |
+|---|---|---|
+| `smtp` | SMTP relay (TLS) | Works with any provider that exposes an SMTP endpoint — Brevo, SES, Postmark, or a self-hosted relay. |
+
+Recommended provider for teams without existing infrastructure: **Brevo** (EU-based, RGPD-friendly,
+free tier around 300 emails/day, allows list/broadcast sending) via its SMTP relay
+(`smtp-relay.brevo.com:587`). Amazon SES is the cheaper option once volume grows, at the cost of
+AWS account setup and domain verification.
+
+Environment variables (in `API/.env`, credentials only — never in `SecOpsConfig.json`):
+
+```
+SMTP_USERNAME=your-smtp-login
+SMTP_PASSWORD=your-smtp-key
 ```
 
 ## Technology stack
@@ -388,7 +492,7 @@ OPENAI_MODEL=gpt-4o-mini
 
 ## Configuration
 
-SeQ uses a layered configuration system (`API/src/modules/system/config_reading.py`):
+Ellysia uses a layered configuration system (`API/src/modules/system/config_reading.py`):
 
 1. **`API/SecOpsConfig.json`** — base configuration (prompts, directories, task queue defaults)
 2. **`API/.env`** — environment variables that **override** JSON values (required for JWT secret, DB credentials, API keys)
@@ -405,5 +509,5 @@ All values are lazily loaded via `@_lazy_load`. Changes to `SecOpsConfig.json` r
 - `API/src/data/` and `docs/` are gitignored (scan outputs, generated PDFs).
 - OpenVAS accepts **one host per scan** (no CIDR ranges) and takes ~15 min for initial NVT feed setup.
 - PostgreSQL uses port **15432** locally (not standard 5432).
-- `sentinel/services/tasks.py` defines its own `TaskStatus` enum — distinct from `taskqueue.TaskStatus`.
+- `themis/services/tasks.py` defines its own `TaskStatus` enum — distinct from `taskqueue.TaskStatus`.
 - API version is declared as `appVersion` in `SecOpsConfig.json` (read by `CR.get_app_version()`).

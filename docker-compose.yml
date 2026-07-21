@@ -2,10 +2,12 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: PostgresSeQ
+    container_name: PostgresEllysia
     restart: unless-stopped
-    env_file:
-      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "127.0.0.1:15432:5432"
     volumes:
@@ -23,7 +25,7 @@ services:
       -c effective_cache_size=256MB
       -c log_min_duration_statement=200
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-SecOps} -d $${POSTGRES_DB:-SeQ}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-SecOps} -d $${POSTGRES_DB:-Ellysia}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -41,9 +43,7 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    container_name: OllamaSeQ
-    env_file:
-      - .env
+    container_name: OllamaEllysia
     ports:
       - "127.0.0.1:11434:11434"
     volumes:
@@ -52,11 +52,11 @@ services:
       OLLAMA_HOST: 0.0.0.0:11434
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 60s
+      start_period: 10s
     deploy:
       resources:
         limits:
@@ -66,8 +66,13 @@ services:
     networks:
       - secops-net
     profiles:
+      # E2: fuera del perfil "container" por defecto — scribe (generación IA)
+      # usa OpenAI por defecto (ver SecOpsConfig.json), Ollama es opcional y
+      # reserva 4-8GB de RAM que no caben en el presupuesto del VPS objetivo
+      # (plans/improvements/saas-viability-plan.md §5). Levantarlo con
+      # `docker compose --profile container --profile local-ai up -d`.
       - dev
-      - container
+      - local-ai
     logging:
       driver: "json-file"
       options:
@@ -76,17 +81,19 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: RedisSeQ
+    container_name: RedisEllysia
     restart: unless-stopped
-    env_file:
-      - .env
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping || redis-cli ping"]
+      # E4: redis-cli sale con exit 0 incluso ante NOAUTH/WRONGPASS (no
+      # propaga el error de protocolo al exit code) — el "|| redis-cli ping"
+      # nunca hacía falta y el chequeo nunca podía fallar por contraseña mal
+      # configurada. Se valida el contenido real de la respuesta.
+      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping 2>/dev/null | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -106,8 +113,6 @@ services:
     image: immauss/openvas:latest
     container_name: openvas
     restart: unless-stopped
-    env_file:
-      - .env
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -134,12 +139,14 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  seq:
+  ellysia:
     build:
       context: ./API
       dockerfile: Dockerfile
-    container_name: SeQ-API
+    container_name: Ellysia-API
     restart: unless-stopped
+    env_file:
+      - .env
     # traceroute (y el chequeo ICMP de alcanzabilidad) necesitan raw sockets
     # para leer las respuestas ICMP TTL-exceeded.
     cap_add:
@@ -149,12 +156,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      ollama:
-        condition: service_healthy
       openvas:
         condition: service_started
     ports:
-      - "127.0.0.1:5000:5000"
+      - "127.0.0.1:15000:5000"
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -167,7 +172,7 @@ services:
       LOG_DIR: /app/logs
       OUTPUT_DIR: /app/data
     volumes:
-      - seq_data:/app/data
+      - ellysia_data:/app/data
       - scan_temp:/app/temp
       - scan_logs:/app/logs
     networks:
@@ -180,12 +185,14 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  seq-worker:
+  ellysia-worker:
     build:
       context: ./API
       dockerfile: Dockerfile
-    container_name: SeQ-Worker
+    container_name: Ellysia-Worker
     restart: unless-stopped
+    env_file:
+      - .env
     # traceroute necesita raw sockets para leer las respuestas ICMP TTL-exceeded.
     cap_add:
       - NET_RAW
@@ -197,6 +204,10 @@ services:
       openvas:
         condition: service_started
     command: python -m src.modules.system.taskqueue.worker
+    # E5: el HEALTHCHECK del Dockerfile pega a /system/say-hello — el worker
+    # no sirve HTTP, así que se anula (mismo patrón que openvas más arriba).
+    healthcheck:
+      disable: true
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -209,7 +220,7 @@ services:
       LOG_DIR: /app/logs
       OUTPUT_DIR: /app/data
     volumes:
-      - seq_data:/app/data
+      - ellysia_data:/app/data
       - scan_temp:/app/temp
       - scan_logs:/app/logs
     networks:
@@ -226,12 +237,16 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
-    container_name: SeQ-Web
+    container_name: Ellysia-Web
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      - ./web/ssl:/etc/nginx/ssl:ro
     depends_on:
-      - seq
+      ellysia:
+        condition: service_started
     networks:
       - secops-net
     profiles:
@@ -248,7 +263,7 @@ volumes:
   redis_data:
   ollama_models:
   openvas_data:
-  seq_data:
+  ellysia_data:
   scan_temp:
   scan_logs:
 

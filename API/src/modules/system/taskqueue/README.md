@@ -2,7 +2,7 @@
 
 ## Visión General
 
-`TaskQueue` es el subsistema de colas de tareas de SeQ. Coordina la **ejecución asincrónica** de operaciones costosas (análisis, escaneos, generación de documentos) usando **Redis** como backend persistente y **RQ** (Redis Queue) para orquestación. Las tareas sobreviven a reinicios de la API, se monitorean en tiempo real y soportan cancelación cooperativa.
+`TaskQueue` es el subsistema de colas de tareas de Ellysia. Coordina la **ejecución asincrónica** de operaciones costosas (análisis, escaneos, generación de documentos) usando **Redis** como backend persistente y **RQ** (Redis Queue) para orquestación. Las tareas sobreviven a reinicios de la API, se monitorean en tiempo real y soportan cancelación cooperativa.
 
 ### Características clave
 - **Persistencia**: tareas almacenadas en Redis (no se pierden al reiniciar).
@@ -58,7 +58,7 @@ Registro de colas **registrables por módulo** (adiós a constantes hardcodeadas
 ```python
 from src.modules.system.taskqueue import QueueRegistry
 
-# En src/modules/iris/__init__.py (al importar el módulo)
+# En src/modules/features/iris/__init__.py (al importar el módulo)
 QueueRegistry.register("iris.analyze")
 
 # En src/modules/sentinel/__init__.py

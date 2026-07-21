@@ -60,7 +60,7 @@ def hello():
 def system_info():
     """Metainformacion de la aplicacion: version, entorno, etc."""
     return {
-        "name": "SeQ",
+        "name": "Ellysia",
         "version": CR.get_app_version(),
         "environment": "development" if CR.is_development() else "production",
         "pythonVersion": sys.version,
@@ -107,12 +107,16 @@ def status():
 @system_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
 @limiter.limit("30 per hour; 100 per day")
 @require_oauth_token
-@require_role(minimum_role=Role.ADMIN)
+# S7: root, no admin — expone toda la config, incluida la política anti-SSRF
+# (areLocalIpsAllowed) y los parámetros de Argon2.
+@require_role(minimum_role=Role.ROOT)
 @handle_exceptions(default_exception=IllegalStateError, logger=logger)
 def get_config():
     """Obtiene toda la configuración de SecOpsConfig.json"""
     config = CR.get_full_config()
-    return config
+    # C9: ETag de contenido — el cliente debe reenviarlo vía If-Match en el
+    # PUT para que el servidor detecte si otra sesión guardó primero.
+    return config, 200, {"ETag": CR.get_config_version()}
 
 
 @system_blp.put("")
@@ -120,9 +124,12 @@ def get_config():
 @system_blp.alt_response(400, schema=ErrorSchema, description="Invalid body")
 @system_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @system_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@system_blp.alt_response(409, schema=ErrorSchema, description="Config changed since last read")
 @limiter.limit("10 per hour; 20 per day")
 @require_oauth_token
-@require_role(minimum_role=Role.ADMIN)
+# S7: root, no admin — un admin no debería poder bajar security.argon2 o
+# reactivar areLocalIpsAllowed (reabriría el SSRF cerrado en S1/S2).
+@require_role(minimum_role=Role.ROOT)
 @handle_exceptions(default_exception=IllegalStateError, logger=logger)
 def update_config():
     """Actualiza la configuración de SecOpsConfig.json"""
@@ -133,9 +140,17 @@ def update_config():
     if not new_config:
         raise ValidationError("Request body must be JSON")
 
-    config = CR.save_full_config(new_config)
+    # C9: If-Match obligatorio — sin él, dos sesiones root guardando a la
+    # vez se pisan sin avisar (last-write-wins silencioso).
+    if_match = request.headers.get("If-Match")
+    if not if_match:
+        raise ValidationError(
+            "Falta la cabecera If-Match: recarga la configuración antes de guardar."
+        )
+
+    config = CR.save_full_config(new_config, expected_version=if_match)
     logger.info("Configuracion actualizada correctamente | user=%s", current_actor())
-    return config
+    return config, 200, {"ETag": CR.get_config_version()}
 
 
 # =============================================================================

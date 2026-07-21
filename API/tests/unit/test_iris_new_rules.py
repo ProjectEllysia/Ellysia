@@ -17,29 +17,29 @@ from __future__ import annotations
 
 import pytest
 
-from src.modules.iris.services.message_parser import MessageContext
-from src.modules.iris.rules.display_name_email_mismatch import (
+from src.modules.features.iris.services.parsers import MessageContext
+from src.modules.features.iris.services.rules.sender_identity_rules import (
     check_display_name_email_mismatch,
 )
-from src.modules.iris.rules.subdomain_impersonation import (
+from src.modules.features.iris.services.rules.sender_identity_rules import (
     check_subdomain_impersonation,
 )
-from src.modules.iris.rules.compromised_legitimate_domain import (
+from src.modules.features.iris.services.rules.body_links_rules import (
     check_compromised_legitimate_domain,
 )
-from src.modules.iris.rules.bare_url_bec_pattern import (
+from src.modules.features.iris.services.rules.body_content_rules import (
     check_bec_wire_pattern,
 )
-from src.modules.iris.rules.generic_greeting import check_generic_greeting
-from src.modules.iris.rules.reply_to_path_mismatch import check_triangulation
-from src.modules.iris.rules.image_only_email import check_image_only_email
-from src.modules.iris.rules.received_chain_temporal_inconsistency import (
+from src.modules.features.iris.services.rules.body_content_rules import check_generic_greeting
+from src.modules.features.iris.services.rules.reply_path_rules import check_triangulation
+from src.modules.features.iris.services.rules.attachment_media_rules import check_image_only_email
+from src.modules.features.iris.services.rules.received_timing_rules import (
     check_received_chain_temporal_inconsistency,
 )
-from src.modules.iris.rules.in_reply_to_self_reference import (
+from src.modules.features.iris.services.rules.thread_rules import (
     check_self_referencing_in_reply_to,
 )
-from src.modules.iris.rules.body_external_image_tracking import (
+from src.modules.features.iris.services.rules.attachment_media_rules import (
     check_external_image_tracking,
 )
 
@@ -130,7 +130,7 @@ def _ctx_with_links(links):
 
 
 def test_compromised_domain_flags_open_redirect():
-    from src.modules.iris.services.message_parser import Link
+    from src.modules.features.iris.services.parsers import Link
     ctx = _ctx_with_links([
         Link(href="https://legit-site.com/redirect?url=https://evil.tk/login",
              text="click"),
@@ -141,7 +141,7 @@ def test_compromised_domain_flags_open_redirect():
 
 
 def test_compromised_domain_flags_opaque_path():
-    from src.modules.iris.services.message_parser import Link
+    from src.modules.features.iris.services.parsers import Link
     ctx = _ctx_with_links([
         Link(href="https://legit-site.com/aB3dEf12XyZ9Pq", text="open"),
     ])
@@ -150,7 +150,7 @@ def test_compromised_domain_flags_opaque_path():
 
 
 def test_compromised_domain_passes_clean_legit_link():
-    from src.modules.iris.services.message_parser import Link
+    from src.modules.features.iris.services.parsers import Link
     ctx = _ctx_with_links([
         Link(href="https://legit-site.com/account/settings", text="settings"),
     ])

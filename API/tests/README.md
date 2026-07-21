@@ -1,4 +1,4 @@
-# Tests de la API SeQ
+# Tests de la API Ellysia
 
 Suite de tests con `pytest`. No requiere PostgreSQL, Redis ni herramientas de
 escaneo: la base de datos se levanta en **SQLite** en un fichero temporal y los
@@ -32,9 +32,9 @@ tests/
 
 ## Notas
 
-- Varios tests usan `xfail(strict=True)`: documentan bugs reales del código
-  (p. ej. respuestas 500 donde deberían ser 404). Cuando el bug se corrija, el
-  test pasará a XPASS y el marcador deberá retirarse. Ver
-  [`IMPROVEMENTS.md`](IMPROVEMENTS.md).
+- `xfail(strict=True)` documenta bugs reales del código (p. ej. una respuesta
+  500 donde debería ser 404). Cuando el bug se corrija, el test pasará a
+  XPASS y el marcador deberá retirarse. A día de hoy no queda ninguno abierto
+  en la suite.
 - La adaptación a SQLite y los mocks viven exclusivamente en `tests/`; no se
   modifica `src/`.

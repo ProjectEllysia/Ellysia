@@ -1,12 +1,12 @@
 from src.modules.shared._exceptions import (
-    SecOpsException,
+    EllysiaException,
     ErrorCode,
     ErrorSeverity,
     DatabaseError,
 )
 
 
-class AuthenticationError(SecOpsException):
+class AuthenticationError(EllysiaException):
     default_code = ErrorCode.AUTHENTICATION_ERROR
     default_status_code = 401
     default_severity = ErrorSeverity.MEDIUM
@@ -17,7 +17,7 @@ class AuthenticationError(SecOpsException):
         super().__init__(message=message, **kwargs)
 
 
-class AuthorizationError(SecOpsException):
+class AuthorizationError(EllysiaException):
     default_code = ErrorCode.AUTHORIZATION_ERROR
     default_status_code = 403
     default_severity = ErrorSeverity.MEDIUM
@@ -44,6 +44,22 @@ class InvalidCredentialsError(AuthenticationError):
         super().__init__(
             message="Credenciales inválidas",
             user_message="Usuario o contraseña incorrectos."
+        )
+
+
+class PasswordChangedError(AuthenticationError):
+    """La sesión/token quedó obsoleto porque la contraseña de acceso cambió.
+
+    Se distingue de ``InvalidCredentialsError`` para que el cliente pueda mostrar
+    una pantalla dedicada ("tu contraseña ha cambiado; inicia sesión de nuevo")
+    en lugar de un error genérico. Se identifica por ``code == 1609``.
+    """
+    default_code = ErrorCode.PASSWORD_CHANGED
+
+    def __init__(self):
+        super().__init__(
+            message="La contraseña fue cambiada; el token/sesión ya no es válido",
+            user_message="Tu contraseña ha cambiado. Inicia sesión de nuevo.",
         )
 
 
@@ -97,4 +113,52 @@ class ProfileUpdateError(AuthenticationError):
         super().__init__(
             message=message,
             user_message="No se pudo actualizar el perfil. Intente de nuevo."
+        )
+
+
+class MfaAlreadyEnabledError(AuthenticationError):
+    """El usuario ya tiene un método TOTP confirmado; no se puede re-inscribir
+    sin desactivarlo antes."""
+    default_code = ErrorCode.MFA_ALREADY_ENABLED
+    default_status_code = 409
+
+    def __init__(self):
+        super().__init__(
+            message="El usuario ya tiene MFA (TOTP) activado y confirmado",
+            user_message="Ya tienes la verificación en dos pasos activada.",
+        )
+
+
+class MfaNotEnabledError(AuthenticationError):
+    """No existe una inscripción TOTP (confirmada o pendiente) para el usuario."""
+    default_code = ErrorCode.MFA_NOT_ENABLED
+    default_status_code = 400
+
+    def __init__(self):
+        super().__init__(
+            message="El usuario no tiene MFA (TOTP) activado",
+            user_message="No tienes la verificación en dos pasos activada.",
+        )
+
+
+class InvalidMfaCodeError(AuthenticationError):
+    """El código TOTP o de recuperación no coincide."""
+    default_code = ErrorCode.INVALID_MFA_CODE
+
+    def __init__(self):
+        super().__init__(
+            message="Código MFA o de recuperación inválido",
+            user_message="El código introducido no es válido.",
+        )
+
+
+class MfaChallengeInvalidError(AuthenticationError):
+    """El challenge de ``POST /oauth/mfa/verify`` no existe, expiró o agotó sus
+    intentos — el cliente debe reiniciar el login desde cero."""
+    default_code = ErrorCode.MFA_CHALLENGE_INVALID
+
+    def __init__(self):
+        super().__init__(
+            message="El challenge de MFA es inválido, expiró o agotó sus intentos",
+            user_message="La verificación ha expirado. Inicia sesión de nuevo.",
         )

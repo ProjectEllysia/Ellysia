@@ -20,7 +20,7 @@ Classes:
 
 import logging
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 from typing import List, Optional, Tuple
 
@@ -33,27 +33,50 @@ from src.modules.users.exceptions import (
     PermissionsError,
     ProfileUpdateError,
     UserBindingError,
+    MfaAlreadyEnabledError,
+    MfaNotEnabledError,
+    InvalidMfaCodeError,
 )
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.session import get_db_session
+from src.modules.shared import utcnow_naive
+from src.modules.infrastructure.session import build_repository
 
-from .model import AccessToken, RefreshToken, User, UserAttribute
-from .repositories import TokenRepository, UserRepository, AttributeRepository
+from .model import (
+    AccessToken,
+    RefreshToken,
+    User,
+    UserAttribute,
+    MFATotpCredential,
+    MFARecoveryCode,
+    MFAChallenge,
+)
+from .repositories import TokenRepository, UserRepository, AttributeRepository, MFARepository
 from .services import (
     generate_salt,
     hash_password,
     hash_password_with_salt,
-    verify_password
+    verify_password,
+    encrypt_totp_secret,
+    decrypt_totp_secret,
+    generate_totp_secret,
+    totp_provisioning_uri,
+    verify_totp_code,
+    generate_recovery_codes,
 )
 
 logger = logging.getLogger(__name__)
 
-(
-    ACCESS_TOKEN_EXPIRE_MINUTES,
-    REFRESH_TOKEN_EXPIRE_DAYS,
-    JWT_SECRET_KEY,
-    JWT_ALGORITHM,
-) = CR.get_oauth_config()
+
+def _to_utc_epoch(dt: Optional[datetime]) -> Optional[int]:
+    """Convierte un datetime *naive en UTC* (como ``utcnow_naive()``) a epoch
+    en segundos, de forma consistente con cómo PyJWT codifica ``iat``/``exp``
+    (siempre tratando el valor como UTC). Devuelve ``None`` si ``dt`` es ``None``.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())
 
 class UserManager:
     """
@@ -93,8 +116,7 @@ class UserManager:
             Exception: On unexpected database errors.
         """
         try:
-            session = get_db_session()
-            user = UserRepository(session=session).get_by_username(username)
+            user = build_repository(UserRepository).get_by_username(username)
 
             if user is None:
                 # Dummy comparison to prevent username enumeration via timing differences.
@@ -237,8 +259,7 @@ Raises:
             User instance (without credential fields accessible to caller),
             or None if not found.
         """
-        session = get_db_session()
-        return UserRepository(session=session).get_by_id(user_id)
+        return build_repository(UserRepository).get_by_id(user_id)
 
     def get_all_users(self) -> List[User]:
         """
@@ -247,8 +268,7 @@ Raises:
         Returns:
             List of user dictionaries (public info only).
         """
-        session = get_db_session()
-        return UserRepository(session=session).get_all()
+        return build_repository(UserRepository).get_all()
 
     def get_user_by_username(self, username: str) -> Optional[User]:
         """
@@ -260,8 +280,7 @@ Raises:
         Returns:
             User instance, or None if not found.
         """
-        session = get_db_session()
-        return UserRepository(session=session).get_by_username(username)
+        return build_repository(UserRepository).get_by_username(username)
 
 
     # =========================================================================
@@ -291,6 +310,7 @@ Raises:
 
             user.password_hash = hash_password(new_password)
             user.password_salt = ""
+            user.password_changed_at = utcnow_naive()
 
         logger.info(f"Contraseña actualizada para usuario {user_id}")
 
@@ -427,8 +447,7 @@ Raises:
         Returns:
             List of attribute name strings.
         """
-        session = get_db_session()
-        attrs = AttributeRepository(session=session).get_by_user(user_id)
+        attrs = build_repository(AttributeRepository).get_by_user(user_id)
         return [a.attribute_name for a in attrs]
 
     def add_user_attributes(
@@ -479,10 +498,10 @@ Raises:
         Return a list of all available attributes that can be assigned to users.
 
         These attributes correspond to the AttributeType enum values and represent
-        fine-grained ABAC capabilities across modules (Aegis, Sentinel, Acheron).
+        fine-grained ABAC capabilities across modules (Aegis, Themis, Acheron).
 
         Returns:
-            List of attribute name strings (e.g. ["aegis_create", "sentinel_read", ...]).
+            List of attribute name strings (e.g. ["aegis_create", "themis_read", ...]).
         """
         from .services.permissions import AttributeType
         return [attr.value for attr in AttributeType.__members__.values() if isinstance(attr.value, str)]
@@ -516,7 +535,14 @@ class OAuthTokenManager:
     # TOKEN CREATION
     # =========================================================================
 
-    def create_access_token(self, user_id: int, username: str, role: str = "role_user") -> str:
+    def create_access_token(
+        self,
+        user_id: int,
+        username: str,
+        role: str = "role_user",
+        password_changed_at: Optional[datetime] = None,
+        mfa_at: Optional[datetime] = None,
+    ) -> str:
         """
         Create and persist a signed JWT access token.
 
@@ -524,22 +550,37 @@ class OAuthTokenManager:
             user_id:  User primary key to embed in the token payload.
             username: Username to embed in the token payload.
             role:     Role to embed in the token payload.
+            password_changed_at: Timestamp of the user's last access-password
+                change, embedded as the ``pwd_at`` claim (UTC epoch seconds).
+                Lets clients reason about password-change state. ``None`` when
+                the password has never been changed.
+            mfa_at: Timestamp at which the second factor was verified for this
+                session, embedded as the ``mfa_at`` claim (UTC epoch seconds).
+                ``None`` when the user doesn't have MFA enabled — possession of
+                an access token with ``mfa_at`` set implies MFA was satisfied,
+                so no per-endpoint guard is needed.
 
         Returns:
             Signed JWT string.
         """
-        expires_at = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        # N7: leer config OAuth en el punto de uso, no en import-time.
+        # CR.get_oauth_config() cachea con @_lazy_load → barato y permite
+        # que PUT /system recargue tuning JWT sin reiniciar la app.
+        expire_min, _, jwt_secret, jwt_algo = CR.get_oauth_config()
+        expires_at = utcnow_naive() + timedelta(minutes=expire_min)
 
         payload = {
             "sub":      str(user_id),
             "username": username,
             "exp":      expires_at,
-            "iat":      datetime.utcnow(),
+            "iat":      utcnow_naive(),
             "jti":      uuid4().hex,
             "type":     "access",
             "role":     role,
+            "pwd_at":   _to_utc_epoch(password_changed_at),
+            "mfa_at":   _to_utc_epoch(mfa_at),
         }
-        token = jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+        token = jwt.encode(payload, jwt_secret, algorithm=jwt_algo)
 
         with UnitOfWork() as uow:
             TokenRepository(uow).save_access_token(
@@ -562,7 +603,8 @@ class OAuthTokenManager:
             Raw refresh token string (URL-safe base64, 64 bytes).
         """
         token      = secrets.token_urlsafe(64)
-        expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        _, refresh_days, _, _ = CR.get_oauth_config()
+        expires_at = utcnow_naive() + timedelta(days=refresh_days)
 
         with UnitOfWork() as uow:
             TokenRepository(uow).save_refresh_token(
@@ -590,14 +632,14 @@ class OAuthTokenManager:
         """
         try:
             # Step 1: validate JWT signature and expiry (no DB hit yet).
-            payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            _, _, jwt_secret, jwt_algo = CR.get_oauth_config()
+            payload = jwt.decode(token, jwt_secret, algorithms=[jwt_algo])
 
             if payload.get("type") != "access":
                 return None
 
             # Step 2: check database record for revocation.
-            session = get_db_session()
-            record = TokenRepository(session=session).get_access_token(token)
+            record = build_repository(TokenRepository).get_access_token(token)
             is_valid = record is not None and record.is_valid()
 
             return payload if is_valid else None
@@ -621,8 +663,7 @@ class OAuthTokenManager:
             User primary key if the token is valid, None otherwise.
         """
         try:
-            session = get_db_session()
-            record = TokenRepository(session=session).get_refresh_token(token)
+            record = build_repository(TokenRepository).get_refresh_token(token)
             if record is None or not record.is_valid():
                 return None
             return record.user_id
@@ -630,6 +671,70 @@ class OAuthTokenManager:
         except Exception as e:
             logger.error(f"Error verificando refresh token: {e}")
             return None
+
+    # =========================================================================
+    # PASSWORD-CHANGE STALENESS
+    # =========================================================================
+
+    def is_token_stale_by_password(self, token: str) -> bool:
+        """True si el access token (firma válida) se emitió ANTES del último
+        cambio de contraseña del usuario.
+
+        Solo debe consultarse cuando ``verify_access_token`` ya devolvió ``None``
+        (token revocado/expirado/ inválido), para distinguir un rechazo causado por
+        un cambio de contraseña de un rechazo genérico. Hace un acceso a BD, así
+        que se llama únicamente en el camino de error.
+        """
+        try:
+            _, _, jwt_secret, jwt_algo = CR.get_oauth_config()
+            payload = jwt.decode(
+                token, jwt_secret, algorithms=[jwt_algo],
+                options={"verify_exp": False},
+            )
+        except jwt.InvalidTokenError:
+            return False
+
+        iat = payload.get("iat")
+        sub = payload.get("sub")
+        if iat is None or sub is None:
+            return False
+
+        try:
+            user = build_repository(UserRepository).get_by_id(int(sub))
+        except Exception:
+            return False
+
+        if user is None or user.password_changed_at is None:
+            return False
+
+        changed_epoch = _to_utc_epoch(user.password_changed_at)
+        return changed_epoch is not None and changed_epoch > int(iat)
+
+    def is_refresh_stale_by_password(self, token: str) -> bool:
+        """True si el refresh token existe pero se creó ANTES del último cambio de
+        contraseña del usuario (es decir, quedó obsoleto por dicho cambio).
+
+        Consulta la BD aunque el token esté revocado, para poder dar el motivo
+        ``password_changed`` en el grant ``refresh_token``.
+        """
+        try:
+            record = build_repository(TokenRepository).get_refresh_token(token)
+            if record is None:
+                return False
+            user = build_repository(UserRepository).get_by_id(record.user_id)
+        except Exception:
+            return False
+
+        if user is None or user.password_changed_at is None:
+            return False
+
+        changed_epoch = _to_utc_epoch(user.password_changed_at)
+        created_epoch = _to_utc_epoch(record.created_at)
+        return (
+            changed_epoch is not None
+            and created_epoch is not None
+            and changed_epoch > created_epoch
+        )
 
     # =========================================================================
     # REVOCATION
@@ -673,19 +778,266 @@ class OAuthTokenManager:
         logger.info(f"Todos los tokens revocados para usuario {user_id}")
 
     # =========================================================================
+    # MFA CHALLENGE
+    # =========================================================================
+
+    def create_mfa_challenge(self, user_id: int) -> str:
+        """
+        Issue a short-lived opaque challenge after a password grant succeeds
+        for a user with MFA enabled. Exchanged for real tokens at
+        POST /oauth/mfa/verify once the user proves the second factor.
+
+        Args:
+            user_id: User primary key.
+
+        Returns:
+            Opaque challenge token string (not a JWT).
+        """
+        cfg = CR.get_mfa_config()
+        token = secrets.token_urlsafe(48)
+        expires_at = utcnow_naive() + timedelta(minutes=cfg["challenge_expiry_minutes"])
+
+        with UnitOfWork() as uow:
+            MFARepository(uow).save_challenge(
+                MFAChallenge(token=token, user_id=user_id, expires_at=expires_at)
+            )
+
+        return token
+
+    def verify_mfa_challenge(self, token: str) -> Optional[int]:
+        """
+        Return the user_id for a still-valid MFA challenge (not expired, under
+        the max attempt count), or None otherwise.
+
+        Does NOT consume the challenge — callers must call
+        consume_mfa_challenge() on success or register_mfa_challenge_failure()
+        on a failed code attempt.
+
+        Args:
+            token: Opaque challenge token string.
+
+        Returns:
+            User primary key if valid, None otherwise.
+        """
+        cfg = CR.get_mfa_config()
+        challenge = build_repository(MFARepository).get_challenge(token)
+        if challenge is None or not challenge.is_valid(cfg["max_challenge_attempts"]):
+            return None
+        return challenge.user_id
+
+    def register_mfa_challenge_failure(self, token: str) -> None:
+        """Increment the failed-attempt counter for an MFA challenge."""
+        with UnitOfWork() as uow:
+            MFARepository(uow).increment_challenge_attempts(token)
+
+    def consume_mfa_challenge(self, token: str) -> None:
+        """Delete an MFA challenge after it has been successfully verified."""
+        with UnitOfWork() as uow:
+            MFARepository(uow).delete_challenge(token)
+
+    # =========================================================================
     # MAINTENANCE
     # =========================================================================
 
     def cleanup_expired_tokens(self) -> None:
         """
-        Delete all expired access and refresh tokens from the database.
+        Delete all expired access/refresh tokens and MFA challenges from the
+        database.
 
         Intended to be called from a periodic maintenance task.
         """
         with UnitOfWork() as uow:
             access_deleted, refresh_deleted = TokenRepository(uow).cleanup_expired_tokens()
+            challenges_deleted = MFARepository(uow).delete_expired_challenges(utcnow_naive())
 
         logger.info(
             f"Tokens expirados eliminados: "
-            f"{access_deleted} access, {refresh_deleted} refresh"
+            f"{access_deleted} access, {refresh_deleted} refresh, "
+            f"{challenges_deleted} mfa challenges"
         )
+
+
+class MFAManager:
+    """
+    Manages TOTP enrollment/confirmation, disabling, and verification, plus
+    the recovery-code fallback.
+
+    All database access goes through UnitOfWork + MFARepository. The TOTP
+    secret is encrypted at rest (services.encrypt_totp_secret) since, unlike
+    Acheron, the server must be able to compute the current code to verify
+    it — this is NOT zero-knowledge.
+
+    Example:
+    >>> manager = MFAManager()
+    >>> setup = manager.setup_totp(user_id=1, username="johnd")
+    >>> codes = manager.confirm_totp(user_id=1, code="123456")
+    """
+
+    def __init__(self) -> None:
+        pass
+
+    # =========================================================================
+    # STATUS
+    # =========================================================================
+
+    def is_enabled(self, user_id: int) -> bool:
+        """True if the user has a confirmed TOTP credential."""
+        cred = build_repository(MFARepository).get_totp_credential(user_id)
+        return cred is not None and cred.confirmed_at is not None
+
+    def get_status(self, user_id: int) -> dict:
+        """Return {'enabled': bool, 'confirmedAt': datetime|None} for a user."""
+        cred = build_repository(MFARepository).get_totp_credential(user_id)
+        return {
+            "enabled": cred is not None and cred.confirmed_at is not None,
+            "confirmedAt": cred.confirmed_at if cred else None,
+        }
+
+    # =========================================================================
+    # ENROLLMENT
+    # =========================================================================
+
+    def setup_totp(self, user_id: int, username: str) -> dict:
+        """
+        Start TOTP enrollment: generate a secret and its provisioning URI.
+
+        Overwrites any previous *unconfirmed* attempt (the user can re-scan a
+        fresh QR if they abandoned setup). Raises if TOTP is already confirmed.
+
+        Args:
+            user_id:  User primary key.
+            username: Username, embedded in the provisioning URI label.
+
+        Returns:
+            dict with 'secret' (manual entry) and 'provisioningUri' (QR).
+
+        Raises:
+            MfaAlreadyEnabledError: if TOTP is already confirmed for this user.
+        """
+        secret = generate_totp_secret()
+
+        with UnitOfWork() as uow:
+            repo = MFARepository(uow)
+            existing = repo.get_totp_credential(user_id)
+            if existing is not None and existing.confirmed_at is not None:
+                raise MfaAlreadyEnabledError()
+
+            if existing is not None:
+                existing.secret_encrypted = encrypt_totp_secret(secret)
+            else:
+                repo.save_totp_credential(
+                    MFATotpCredential(user_id=user_id, secret_encrypted=encrypt_totp_secret(secret))
+                )
+
+        return {
+            "secret": secret,
+            "provisioningUri": totp_provisioning_uri(secret, username),
+        }
+
+    def confirm_totp(self, user_id: int, code: str) -> List[str]:
+        """
+        Confirm TOTP enrollment by verifying the first code, then generate and
+        persist a fresh batch of recovery codes.
+
+        Args:
+            user_id: User primary key.
+            code:    6-digit TOTP code from the authenticator app.
+
+        Returns:
+            The plaintext recovery codes (shown to the user exactly once).
+
+        Raises:
+            MfaNotEnabledError: if setup_totp() was never called.
+            InvalidMfaCodeError: if the code doesn't match.
+        """
+        with UnitOfWork() as uow:
+            repo = MFARepository(uow)
+            cred = repo.get_totp_credential(user_id)
+            if cred is None:
+                raise MfaNotEnabledError()
+
+            secret = decrypt_totp_secret(cred.secret_encrypted)
+            if not verify_totp_code(secret, code):
+                raise InvalidMfaCodeError()
+
+            cred.confirmed_at = utcnow_naive()
+
+            repo.delete_recovery_codes(user_id)
+            cfg = CR.get_mfa_config()
+            plaintext_codes = generate_recovery_codes(cfg["recovery_codes_count"])
+            repo.save_recovery_codes([
+                MFARecoveryCode(user_id=user_id, code_hash=hash_password(plain))
+                for plain in plaintext_codes
+            ])
+
+        logger.info(f"MFA (TOTP) confirmado para usuario {user_id}")
+        return plaintext_codes
+
+    def disable_totp(
+        self, user_id: int, code: Optional[str] = None, recovery_code: Optional[str] = None,
+    ) -> None:
+        """
+        Disable TOTP MFA for a user.
+
+        Requires proving current possession of the second factor (a valid TOTP
+        code or an unused recovery code) so that a stolen session token alone
+        can't silently turn off 2FA.
+
+        Args:
+            user_id: User primary key.
+            code: Current TOTP code, if using that method to confirm.
+            recovery_code: An unused recovery code, if using that method instead.
+
+        Raises:
+            InvalidMfaCodeError: if neither the code nor the recovery code verify.
+        """
+        if not self.verify_totp_or_recovery(user_id, code=code, recovery_code=recovery_code):
+            raise InvalidMfaCodeError()
+
+        with UnitOfWork() as uow:
+            repo = MFARepository(uow)
+            repo.delete_recovery_codes(user_id)
+            repo.delete_totp_credential(user_id)
+
+        logger.info(f"MFA (TOTP) desactivado para usuario {user_id}")
+
+    # =========================================================================
+    # VERIFICATION
+    # =========================================================================
+
+    def verify_totp_or_recovery(
+        self, user_id: int, code: Optional[str] = None, recovery_code: Optional[str] = None,
+    ) -> bool:
+        """
+        Verify a TOTP code or, failing that, an unused recovery code.
+
+        A matching recovery code is marked as used (one-time only) as a side
+        effect of a successful verification.
+
+        Args:
+            user_id: User primary key.
+            code: 6-digit TOTP code to try, if provided.
+            recovery_code: Recovery code to try, if provided (and code fails/absent).
+
+        Returns:
+            True if either factor verified successfully.
+        """
+        repo = build_repository(MFARepository)
+
+        if code:
+            cred = repo.get_totp_credential(user_id)
+            if cred is not None and cred.confirmed_at is not None:
+                secret = decrypt_totp_secret(cred.secret_encrypted)
+                if verify_totp_code(secret, code):
+                    return True
+
+        if recovery_code:
+            for stored in repo.get_recovery_codes(user_id, only_unused=True):
+                is_valid, _ = verify_password(stored.code_hash, recovery_code)
+                if is_valid:
+                    with UnitOfWork() as uow:
+                        MFARepository(uow).mark_recovery_code_used(stored.id)
+                    logger.warning(f"Código de recuperación MFA usado por usuario {user_id}")
+                    return True
+
+        return False

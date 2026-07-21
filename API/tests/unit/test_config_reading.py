@@ -34,6 +34,20 @@ def test_get_oauth_config_missing_var_raises(monkeypatch):
         CR.get_oauth_config()
 
 
+def test_get_oauth_config_rejects_disallowed_algorithm(monkeypatch):
+    # S8: sin allowlist, un JWT_ALGORITHM mal puesto (typo, "none", un
+    # algoritmo asimétrico que necesita un par de claves) pasaba silencioso.
+    monkeypatch.setenv("JWT_ALGORITHM", "none")
+    with pytest.raises(ValueError):
+        CR.get_oauth_config()
+
+
+def test_get_oauth_config_accepts_allowed_hs_algorithm(monkeypatch):
+    monkeypatch.setenv("JWT_ALGORITHM", "HS512")
+    _, _, _, algorithm = CR.get_oauth_config()
+    assert algorithm == "HS512"
+
+
 def test_is_development_reflects_flask_env(monkeypatch):
     monkeypatch.setenv("FLASK_ENV", "development")
     assert CR.is_development() is True

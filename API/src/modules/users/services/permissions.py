@@ -5,10 +5,10 @@ from typing import List, Optional, Set
 
 from flask import request, jsonify
 
-from src.modules.shared._exceptions import MissingParameterError, MissingJsonBodyError, SecOpsException
+from src.modules.shared._exceptions import MissingParameterError, MissingJsonBodyError, EllysiaException, ErrorCode
 
 from ..managers import OAuthTokenManager
-from ..repositories import AttributeRepository
+from ..repositories import AttributeRepository, UserRepository
 from src.modules.infrastructure import UnitOfWork
 
 
@@ -28,15 +28,11 @@ class Role(Enum):
 
     Use Role to gate access based on identity level (e.g. only admins
     can create users). Use AttributeType for fine-grained capability checks
-    (e.g. only users with sentinel_read can list scans).
+    (e.g. only users with themis_read can list scans).
     """
     ROOT  = "role_root"
     ADMIN = "role_admin"
     USER  = "role_user"
-
-    # Ordered from lowest to highest privilege.
-    # Used by require_role() for hierarchy comparisons.
-    _HIERARCHY = ["role_user", "role_admin", "role_root"]
 
     @property
     def db_name(self) -> str:
@@ -61,14 +57,14 @@ _ATTRIBUTE_DESCRIPTIONS: dict[str, str] = {
     "aegis_read":      "Read access for Aegis awareness pills",
     "aegis_update":    "Update access for Aegis awareness pills",
     "aegis_delete":    "Delete access for Aegis awareness pills",
-    "sentinel_create": "Create access for Sentinel security scans",
-    "sentinel_read":   "Read access for Sentinel security scans",
-    "sentinel_update": "Update access for Sentinel security scans",
-    "sentinel_delete": "Delete access for Sentinel security scans",
-    "sentinel_folder_create": "Create access for Sentinel scan folders",
-    "sentinel_folder_read":   "Read access for Sentinel scan folders",
-    "sentinel_folder_update": "Update access for Sentinel scan folders",
-    "sentinel_folder_delete": "Delete access for Sentinel scan folders",
+    "themis_create": "Create access for Themis security scans",
+    "themis_read":   "Read access for Themis security scans",
+    "themis_update": "Update access for Themis security scans",
+    "themis_delete": "Delete access for Themis security scans",
+    "themis_folder_create": "Create access for Themis scan folders",
+    "themis_folder_read":   "Read access for Themis scan folders",
+    "themis_folder_update": "Update access for Themis scan folders",
+    "themis_folder_delete": "Delete access for Themis scan folders",
     "acheron_create":  "Create access for Acheron vault secrets",
     "acheron_read":    "Read access for Acheron vault secrets",
     "acheron_update":  "Update access for Acheron vault secrets",
@@ -77,9 +73,13 @@ _ATTRIBUTE_DESCRIPTIONS: dict[str, str] = {
     "iris_read":       "Read access for Iris email header analysis",
     "iris_update":     "Update access for Iris email header analysis",
     "iris_delete":     "Delete access for Iris email header analysis",
-    "sentinel_schedule_create": "Create access for scheduled scans",
-    "sentinel_schedule_read":   "Read access for scheduled scans",
-    "sentinel_schedule_delete": "Delete access for scheduled scans",
+    "themis_schedule_create": "Create access for scheduled scans",
+    "themis_schedule_read":   "Read access for scheduled scans",
+    "themis_schedule_delete": "Delete access for scheduled scans",
+    "hygeia_create":   "Create access for Hygeia monitored assets",
+    "hygeia_read":     "Read access for Hygeia monitored assets",
+    "hygeia_update":   "Update access for Hygeia monitored assets",
+    "hygeia_delete":   "Delete access for Hygeia monitored assets",
 }
 
 
@@ -103,15 +103,15 @@ class AttributeType(Enum):
     AEGIS_UPDATE    = "aegis_update"
     AEGIS_DELETE    = "aegis_delete"
 
-    SENTINEL_CREATE = "sentinel_create"
-    SENTINEL_READ   = "sentinel_read"
-    SENTINEL_UPDATE = "sentinel_update"
-    SENTINEL_DELETE = "sentinel_delete"
+    THEMIS_CREATE = "themis_create"
+    THEMIS_READ   = "themis_read"
+    THEMIS_UPDATE = "themis_update"
+    THEMIS_DELETE = "themis_delete"
 
-    SENTINEL_FOLDER_CREATE = "sentinel_folder_create"
-    SENTINEL_FOLDER_READ   = "sentinel_folder_read"
-    SENTINEL_FOLDER_UPDATE = "sentinel_folder_update"
-    SENTINEL_FOLDER_DELETE = "sentinel_folder_delete"
+    THEMIS_FOLDER_CREATE = "themis_folder_create"
+    THEMIS_FOLDER_READ   = "themis_folder_read"
+    THEMIS_FOLDER_UPDATE = "themis_folder_update"
+    THEMIS_FOLDER_DELETE = "themis_folder_delete"
 
     ACHERON_CREATE  = "acheron_create"
     ACHERON_READ    = "acheron_read"
@@ -123,9 +123,14 @@ class AttributeType(Enum):
     IRIS_UPDATE     = "iris_update"
     IRIS_DELETE     = "iris_delete"
 
-    SENTINEL_SCHEDULE_CREATE = "sentinel_schedule_create"
-    SENTINEL_SCHEDULE_READ   = "sentinel_schedule_read"
-    SENTINEL_SCHEDULE_DELETE = "sentinel_schedule_delete"
+    THEMIS_SCHEDULE_CREATE = "themis_schedule_create"
+    THEMIS_SCHEDULE_READ   = "themis_schedule_read"
+    THEMIS_SCHEDULE_DELETE = "themis_schedule_delete"
+
+    HYGEIA_CREATE = "hygeia_create"
+    HYGEIA_READ   = "hygeia_read"
+    HYGEIA_UPDATE = "hygeia_update"
+    HYGEIA_DELETE = "hygeia_delete"
 
     @property
     def db_name(self) -> str:
@@ -149,36 +154,44 @@ class AttributeType(Enum):
 ROLE_PERMISSIONS: dict[Role, Set[AttributeType]] = {
     Role.USER: {
         AttributeType.AEGIS_READ,
-        AttributeType.SENTINEL_READ,
+        AttributeType.THEMIS_READ,
         AttributeType.ACHERON_READ,
         AttributeType.IRIS_READ,
-        AttributeType.SENTINEL_SCHEDULE_READ,
-        AttributeType.SENTINEL_FOLDER_CREATE,
-        AttributeType.SENTINEL_FOLDER_READ,
-        AttributeType.SENTINEL_FOLDER_UPDATE,
-        AttributeType.SENTINEL_FOLDER_DELETE,
+        AttributeType.THEMIS_SCHEDULE_READ,
+        AttributeType.THEMIS_FOLDER_CREATE,
+        AttributeType.THEMIS_FOLDER_READ,
+        AttributeType.THEMIS_FOLDER_UPDATE,
+        AttributeType.THEMIS_FOLDER_DELETE,
+        AttributeType.HYGEIA_CREATE,
+        AttributeType.HYGEIA_READ,
+        AttributeType.HYGEIA_UPDATE,
+        AttributeType.HYGEIA_DELETE,
     },
     Role.ADMIN: {
         AttributeType.AEGIS_CREATE,
         AttributeType.AEGIS_READ,
         AttributeType.AEGIS_UPDATE,
         AttributeType.AEGIS_DELETE,
-        AttributeType.SENTINEL_CREATE,
-        AttributeType.SENTINEL_READ,
-        AttributeType.SENTINEL_UPDATE,
-        AttributeType.SENTINEL_DELETE,
-        AttributeType.SENTINEL_FOLDER_CREATE,
-        AttributeType.SENTINEL_FOLDER_READ,
-        AttributeType.SENTINEL_FOLDER_UPDATE,
-        AttributeType.SENTINEL_FOLDER_DELETE,
+        AttributeType.THEMIS_CREATE,
+        AttributeType.THEMIS_READ,
+        AttributeType.THEMIS_UPDATE,
+        AttributeType.THEMIS_DELETE,
+        AttributeType.THEMIS_FOLDER_CREATE,
+        AttributeType.THEMIS_FOLDER_READ,
+        AttributeType.THEMIS_FOLDER_UPDATE,
+        AttributeType.THEMIS_FOLDER_DELETE,
         AttributeType.ACHERON_READ,
         AttributeType.IRIS_CREATE,
         AttributeType.IRIS_READ,
         AttributeType.IRIS_UPDATE,
         AttributeType.IRIS_DELETE,
-        AttributeType.SENTINEL_SCHEDULE_CREATE,
-        AttributeType.SENTINEL_SCHEDULE_READ,
-        AttributeType.SENTINEL_SCHEDULE_DELETE,
+        AttributeType.THEMIS_SCHEDULE_CREATE,
+        AttributeType.THEMIS_SCHEDULE_READ,
+        AttributeType.THEMIS_SCHEDULE_DELETE,
+        AttributeType.HYGEIA_CREATE,
+        AttributeType.HYGEIA_READ,
+        AttributeType.HYGEIA_UPDATE,
+        AttributeType.HYGEIA_DELETE,
     },
 }
 
@@ -217,9 +230,18 @@ def require_oauth_token(f):
                 }), 401
 
             token = parts[1]
-            payload = OAuthTokenManager().verify_access_token(token)
+            manager = OAuthTokenManager()
+            payload = manager.verify_access_token(token)
 
             if not payload:
+                # Distinguir un token obsoleto por cambio de contraseña de un fallo
+                # genérico, para que el cliente muestre la pantalla dedicada.
+                if manager.is_token_stale_by_password(token):
+                    return jsonify({
+                        "error": "password_changed",
+                        "error_description": "Tu contraseña ha cambiado. Inicia sesión de nuevo.",
+                        "code": ErrorCode.PASSWORD_CHANGED.value,
+                    }), 401
                 return jsonify({
                     "error": "invalid_token",
                     "error_description": "The access token is invalid or expired",
@@ -231,7 +253,7 @@ def require_oauth_token(f):
 
             return f(*args, **kwargs)
 
-        except (SecOpsException, MissingParameterError, MissingJsonBodyError):
+        except (EllysiaException, MissingParameterError, MissingJsonBodyError):
             raise
         except Exception as exc:
             logger.exception("Error durante la autenticación")
@@ -250,6 +272,15 @@ def require_role(minimum_role: Role):
     Jerarquía (de menor a mayor): USER < ADMIN < ROOT.
     Debe usarse DESPUÉS de @require_oauth_token.
 
+    S9: el rol se revalida contra BD en cada llamada en vez de confiar solo
+    en el claim del JWT — un cambio de rol (p. ej. degradar a un admin)
+    surte efecto en la siguiente petición, no solo cuando el access token
+    expire (ventana de hasta ``access_token_expiry_minutes``). Se acepta el
+    coste de una query extra por petición porque este decorador solo protege
+    endpoints de baja frecuencia (``/system``, `/users``); los endpoints de
+    alto tráfico (Themis/Iris/Aegis/Acheron) usan ``require_attributes``, que
+    no se toca aquí para no duplicar su query ya existente en el hot path.
+
     Args:
         minimum_role: Rol mínimo requerido.
 
@@ -264,8 +295,14 @@ def require_role(minimum_role: Role):
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
-            user_role_str = getattr(request, "current_user_role", Role.USER.value)
-            user_id       = getattr(request, "current_user_id", None)
+            user_id = getattr(request, "current_user_id", None)
+
+            user_role_str = Role.USER.value
+            if user_id is not None:
+                with UnitOfWork() as uow:
+                    db_user = UserRepository(uow).get_by_id(user_id)
+                if db_user is not None:
+                    user_role_str = db_user.role
 
             try:
                 user_role = Role(user_role_str)
@@ -310,7 +347,7 @@ def require_attributes(
 
     Ejemplo:
         @require_oauth_token
-        @require_permissions(at_least_one=[AttributeType.SENTINEL_READ])
+        @require_permissions(at_least_one=[AttributeType.THEMIS_READ])
         def listar_scans(): ...
 
         @require_oauth_token
@@ -378,7 +415,7 @@ def require_attributes(
                 )
                 return f(*args, **kwargs)
 
-            except (SecOpsException, MissingParameterError, MissingJsonBodyError):
+            except (EllysiaException, MissingParameterError, MissingJsonBodyError):
                 raise
             except Exception as exc:
                 logger.error(f"Error en require_permissions: {exc}", exc_info=True)

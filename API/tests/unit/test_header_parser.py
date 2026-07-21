@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.modules.iris.services.header_parser import parse_raw_headers
+from src.modules.features.iris.services.parsers import parse_raw_headers
 
 pytestmark = pytest.mark.unit
 

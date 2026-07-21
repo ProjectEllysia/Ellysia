@@ -20,7 +20,7 @@
             class="form-field"
           >
             <span class="form-label">{{ f.label }}</span>
-            <div class="form-input">
+            <div class="form-input" :class="{ 'form-input--with-generate': f.key === 'next' }">
               <input
                 :ref="(el) => { if (f.key === 'current') firstInput = el }"
                 v-model="form[f.key]"
@@ -30,6 +30,15 @@
                 :placeholder="f.label"
               />
               <button
+                v-if="f.key === 'next'"
+                type="button" class="gen-btn" tabindex="-1"
+                aria-label="Generar contraseña"
+                :disabled="saving"
+                @click="generateNext"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              </button>
+              <button
                 type="button" class="reveal-btn" tabindex="-1"
                 :aria-label="revealed.has(f.key) ? 'Ocultar' : 'Mostrar'"
                 @click="toggleReveal(f.key)"
@@ -38,6 +47,7 @@
                 <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
               </button>
             </div>
+            <PasswordStrengthMeter v-if="f.key === 'next'" :password="form.next" />
           </label>
 
           <p v-if="displayError" class="form-error">{{ displayError }}</p>
@@ -60,6 +70,8 @@
 
 <script setup>
 import { reactive, ref, computed, watch, nextTick } from 'vue'
+import PasswordStrengthMeter from './PasswordStrengthMeter.vue'
+import { generatePassword } from '@/acheron/passwordGenerator.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -102,6 +114,14 @@ function toggleReveal(key) {
   else revealed.add(key)
 }
 
+function generateNext() {
+  const generated = generatePassword()
+  form.next = generated
+  form.confirm = generated
+  revealed.add('next')
+  revealed.add('confirm')
+}
+
 function validate() {
   if (!form.current) return 'Introduce tu contraseña actual.'
   if (!form.next) return 'Introduce la nueva contraseña.'
@@ -139,7 +159,7 @@ function submit() {
   display: flex; align-items: center; justify-content: space-between;
   padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border);
 }
-.modal-title { font-family: var(--font-display); font-size: 1.2rem; color: var(--text); }
+.modal-title { font-family: var(--font-display); font-size: var(--fs-xl); color: var(--text); }
 .modal-close {
   background: none; border: none; color: var(--text-muted); cursor: pointer;
   padding: 0.25rem; display: grid; place-items: center;
@@ -148,30 +168,39 @@ function submit() {
 .modal-close svg { width: 20px; height: 20px; }
 
 .modal-form { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
-.modal-intro { font-size: 0.82rem; color: var(--text-dim); line-height: 1.5; margin: 0; }
+.modal-intro { font-size: var(--fs-lg); color: var(--text-dim); line-height: 1.5; margin: 0; }
 .modal-intro strong { color: #c4a0e0; font-weight: 600; }
 
 .form-field { display: flex; flex-direction: column; gap: 0.35rem; }
 .form-label {
-  font-family: var(--font-mono); font-size: 0.66rem; text-transform: uppercase;
+  font-family: var(--font-mono); font-size: var(--fs-md); text-transform: uppercase;
   letter-spacing: 0.06em; color: var(--text-muted);
 }
 .form-input { position: relative; display: flex; align-items: center; }
 .modal-form input {
   width: 100%; padding: 0.65rem 2.4rem 0.65rem 0.8rem; background: rgba(0, 0, 0, 0.25);
   border: 1px solid var(--border-med); border-radius: 9px; color: var(--text);
-  font-size: 0.9rem; font-family: var(--font-mono); transition: border-color 0.2s ease;
+  font-size: var(--fs-input); font-family: var(--font-mono); transition: border-color 0.2s ease;
 }
 .modal-form input:focus { outline: none; border-color: rgba(160, 122, 192, 0.55); }
+.form-input--with-generate input { padding-right: 4.4rem; }
 .reveal-btn {
   position: absolute; right: 0.5rem; background: none; border: none;
   color: var(--text-muted); cursor: pointer; padding: 0.3rem; display: grid; place-items: center;
 }
 .reveal-btn:hover { color: #c4a0e0; }
 .reveal-btn svg { width: 17px; height: 17px; }
+.gen-btn {
+  position: absolute; right: 2.4rem; background: none; border: none;
+  color: var(--text-muted); cursor: pointer; padding: 0.3rem; display: grid; place-items: center;
+  transition: color 0.15s ease;
+}
+.gen-btn:hover:not(:disabled) { color: #c4a0e0; }
+.gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.gen-btn svg { width: 16px; height: 16px; }
 
 .form-error {
-  color: var(--danger); font-size: 0.8rem;
+  color: var(--danger); font-size: var(--fs-lg);
   background: var(--danger-dim); border: 1px solid rgba(217, 108, 108, 0.25);
   border-radius: 8px; padding: 0.5rem 0.7rem;
 }
@@ -181,13 +210,13 @@ function submit() {
 .btn-ghost {
   padding: 0.6rem 0.9rem; border-radius: 9px; cursor: pointer;
   background: none; border: 1px solid var(--border-med); color: var(--text-dim);
-  font-size: 0.85rem; transition: all 0.18s ease;
+  font-size: var(--fs-lg); transition: all 0.18s ease;
 }
 .btn-ghost:hover:not(:disabled) { color: var(--text); border-color: var(--border-solid); }
 .btn-primary {
   padding: 0.6rem 1.2rem; border: none; border-radius: 9px; cursor: pointer;
   background: linear-gradient(135deg, #a07ac0, #7d5aa0); color: #fff;
-  font-size: 0.85rem; font-weight: 600;
+  font-size: var(--fs-lg); font-weight: 600;
   display: inline-flex; align-items: center; gap: 0.5rem;
   transition: filter 0.18s ease;
 }

@@ -1,13 +1,13 @@
 """Tests unitarios del parser de TracerouteService (sin red ni BD).
 
 Se ejercita ``_parse`` con salida real de ``traceroute`` (Linux, el servidor
-SeQ) y ``tracert`` (Windows, máquinas de desarrollo), incluyendo saltos sin
+Ellysia) y ``tracert`` (Windows, máquinas de desarrollo), incluyendo saltos sin
 respuesta, resolución de nombres e IPv6.
 """
 
 import pytest
 
-from src.modules.sentinel.services.traceroute import TracerouteService
+from src.modules.features.themis.services.traceroute import TracerouteService
 
 pytestmark = pytest.mark.unit
 

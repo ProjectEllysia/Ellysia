@@ -1,9 +1,10 @@
 from typing import Any, Dict, Optional, Type
-from datetime import datetime
 from enum import Enum
 from functools import wraps
 import traceback
 import sys
+
+from ._time import utcnow_naive, isoformat_utc
 
 
 class ErrorCode(Enum):
@@ -38,6 +39,9 @@ class ErrorCode(Enum):
     PROGRAMED_SCAN_NOT_FOUND = 1309
     PROGRAMED_SCAN_ALREADY_ACTIVE = 1310
     PROGRAMED_SCAN_INVALID_ARGUMENT = 1311
+    TARGET_NOT_AUTHORIZED = 1312
+    AUTHORIZED_TARGET_NOT_FOUND = 1313
+    AUTHORIZED_TARGET_ALREADY_EXISTS = 1314
 
     REPORT_ERROR = 1400
     REPORT_GENERATION_ERROR = 1401
@@ -56,6 +60,11 @@ class ErrorCode(Enum):
     UNBINDABLE_USER = 1606
     DUPLICATED_CREDENTIALS = 1607
     PROFILE_UPDATE_ERROR = 1608
+    PASSWORD_CHANGED = 1609
+    MFA_ALREADY_ENABLED = 1610
+    MFA_NOT_ENABLED = 1611
+    INVALID_MFA_CODE = 1612
+    MFA_CHALLENGE_INVALID = 1613
     PARSING_ERROR = 1700
     XML_PARSING_ERROR = 1701
     JSON_PARSING_ERROR = 1702
@@ -71,7 +80,7 @@ class ErrorSeverity(Enum):
     CRITICAL = "critical"
 
 
-class SecOpsException(Exception):
+class EllysiaException(Exception):
     default_code = ErrorCode.UNKNOWN_ERROR
     default_status_code = 500
     default_severity = ErrorSeverity.MEDIUM
@@ -95,7 +104,7 @@ class SecOpsException(Exception):
         self.status_code = status_code or self.default_status_code
         self.user_message = user_message or self._generate_user_message()
 
-        self.timestamp = datetime.utcnow()
+        self.timestamp = utcnow_naive()
         self.traceback = self._capture_traceback()
 
     def _generate_user_message(self) -> str:
@@ -120,7 +129,7 @@ class SecOpsException(Exception):
             "error": self.__class__.__name__,
             "code": self.code.value,
             "message": self.user_message,
-            "timestamp": self.timestamp.isoformat(),
+            "timestamp": isoformat_utc(self.timestamp),
         }
 
         if self.details:
@@ -146,7 +155,7 @@ class SecOpsException(Exception):
         )
 
 
-class IllegalStateError(SecOpsException):
+class IllegalStateError(EllysiaException):
     default_code = ErrorCode.ILLEGAL_STATE_ERROR
     default_status_code = 409
     default_severity = ErrorSeverity.MEDIUM
@@ -183,7 +192,7 @@ class IllegalStateError(SecOpsException):
         )
 
 
-class ValidationError(SecOpsException):
+class ValidationError(EllysiaException):
     default_code = ErrorCode.VALIDATION_ERROR
     default_status_code = 400
     default_severity = ErrorSeverity.LOW
@@ -208,10 +217,13 @@ class ValidationError(SecOpsException):
             details.update(kwargs.pop("details"))
 
         if "user_message" not in kwargs:
+            _msg = str(message).strip()
+            if len(_msg) > 100:
+                _msg = _msg[:97] + "…"
             if field:
-                kwargs["user_message"] = f"El campo '{field}' no es válido: {message}"
+                kwargs["user_message"] = f"'{field}' no es válido: {_msg}"
             else:
-                kwargs["user_message"] = f"Validación fallida: {message}"
+                kwargs["user_message"] = _msg or "Validación fallida."
 
         super().__init__(
             message=f"Validación fallida: {message}",
@@ -231,7 +243,7 @@ class MissingParameterError(ValidationError):
         )
 
 
-class MissingJsonBodyError(SecOpsException):
+class MissingJsonBodyError(EllysiaException):
     default_code = ErrorCode.JSON_PARSING_ERROR
     default_status_code = 400
     default_severity = ErrorSeverity.LOW
@@ -243,7 +255,7 @@ class MissingJsonBodyError(SecOpsException):
         )
 
 
-class DatabaseError(SecOpsException):
+class DatabaseError(EllysiaException):
     default_code = ErrorCode.DATABASE_ERROR
     default_status_code = 500
     default_severity = ErrorSeverity.HIGH
@@ -293,7 +305,46 @@ class TransactionError(DatabaseError):
     default_severity = ErrorSeverity.HIGH
 
 
-class ParsingError(SecOpsException):
+# =========================================================================
+# Excepciones de documentos (transversales: Themis, Iris, Aegis)
+# Antes vivían en aegis/exceptions.py, lo que acoplaba tres módulos feature
+# a las excepciones de un cuarto. Se re-exportan desde aegis/exceptions.py
+# para compatibilidad.
+# =========================================================================
+
+
+class DocumentError(EllysiaException):
+    default_code = ErrorCode.REPORT_ERROR
+    default_status_code = 500
+    default_severity = ErrorSeverity.MEDIUM
+
+
+class DocumentNotFoundError(DocumentError):
+    default_code = ErrorCode.DOCUMENT_NOT_FOUND
+    default_status_code = 404
+    default_severity = ErrorSeverity.LOW
+
+    def __init__(self, doc_id: int):
+        super().__init__(
+            message=f"Documento {doc_id} no encontrado",
+            details={"document_id": doc_id},
+            user_message=f"Documento {doc_id} no encontrado."
+        )
+
+
+class DocumentNotReadyError(DocumentError):
+    default_code = ErrorCode.DOCUMENT_NOT_FOUND
+    default_status_code = 409
+
+    def __init__(self, doc_id: int, status: str):
+        super().__init__(
+            message=f"Documento {doc_id} no disponible (estado: {status})",
+            details={"document_id": doc_id, "status": status},
+            user_message="El documento aún no está listo."
+        )
+
+
+class ParsingError(EllysiaException):
     default_code = ErrorCode.PARSING_ERROR
     default_status_code = 500
     default_severity = ErrorSeverity.MEDIUM
@@ -325,10 +376,10 @@ class ExceptionHandler:
     @staticmethod
     def wrap_exception(
         exc: Exception,
-        default_exception_class: Type[SecOpsException] = SecOpsException,
+        default_exception_class: Type[EllysiaException] = EllysiaException,
         logger=None
-    ) -> SecOpsException:
-        if isinstance(exc, SecOpsException):
+    ) -> EllysiaException:
+        if isinstance(exc, EllysiaException):
             return exc
 
         if logger:
@@ -344,7 +395,7 @@ class ExceptionHandler:
             )
 
         if "Timeout" in exc_type or "timeout" in exc_message.lower():
-            return TimeoutError(
+            return OperationTimeoutError(
                 message=f"Timeout: {exc_message}",
                 original_exception=exc
             )
@@ -367,7 +418,7 @@ class ExceptionHandler:
         )
 
     @staticmethod
-    def handle_and_log(exc: Exception, logger) -> SecOpsException:
+    def handle_and_log(exc: Exception, logger) -> EllysiaException:
         secops_exc = ExceptionHandler.wrap_exception(exc, logger=logger)
 
         if secops_exc.severity == ErrorSeverity.CRITICAL:
@@ -382,27 +433,27 @@ class ExceptionHandler:
         return secops_exc
 
 
-class TimeoutError(SecOpsException):
+class OperationTimeoutError(EllysiaException):
     default_code = ErrorCode.SCAN_TIMEOUT
     default_status_code = 408
     default_severity = ErrorSeverity.MEDIUM
 
 
 def handle_exceptions(
-    default_exception: Type[SecOpsException] = SecOpsException,
+    default_exception: Type[EllysiaException] = EllysiaException,
     logger=None,
     re_raise: bool = True
 ):
     """
     Decorador para manejo automático de excepciones en funciones/métodos.
 
-    Envuelve una función para capturar excepciones que no sean SecOpsException
+    Envuelve una función para capturar excepciones que no sean EllysiaException
     y convertirlas automáticamente al formato de la aplicación.
 
     Args:
-        default_exception: Clase de excepción SecOpsException a usar como base
+        default_exception: Clase de excepción EllysiaException a usar como base
                           cuando se envuelve una excepción unknown. Por defecto
-                          SecOpsException.
+                          EllysiaException.
         logger: Logger opcional para registrar las excepciones envueltas.
         re_raise: Si True, relanza la excepción envuelta. Si False, la retorna
                   sin relanzar. Por defecto True.
@@ -412,7 +463,7 @@ def handle_exceptions(
 
     Example:
     >>> from src.modules.shared import handle_exceptions
-    >>> from src.modules.sentinel.exceptions import ScanError
+    >>> from src.modules.features.themis.exceptions import ScanError
     >>> import logging
     >>> _logger = logging.getLogger(__name__)
     >>>
@@ -422,7 +473,7 @@ def handle_exceptions(
     ...     pass
 
     Note:
-        Las excepciones que ya heredan de SecOpsException se propagan directamente
+        Las excepciones que ya heredan de EllysiaException se propagan directamente
         sin conversión.
     """
     def decorator(func):
@@ -430,7 +481,7 @@ def handle_exceptions(
         def wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
-            except SecOpsException:
+            except EllysiaException:
                 raise
             except Exception as e:
                 secops_exc = ExceptionHandler.wrap_exception(
@@ -446,7 +497,7 @@ def handle_exceptions(
 
 
 def create_error_response(
-    exception: SecOpsException,
+    exception: EllysiaException,
     include_debug_info: bool = False
 ) -> tuple[Dict[str, Any], int]:
     response = {

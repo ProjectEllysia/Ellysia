@@ -15,7 +15,6 @@ __pycache__/
 # Entornos y credenciales
 # ============================================
 .env
-.env.*
 .agents
 skills-lock.json
 
@@ -62,6 +61,12 @@ build/
 Thumbs.db
 
 # ============================================
+# Certificados SSL (desarrollo / autofirmados)
+# ============================================
+web/ssl/*.key
+web/ssl/*.crt
+web/ssl/*.pem
+
 # Otros
 # ============================================
 *.pdf
@@ -73,6 +78,8 @@ API/.coverage
 API/htmlcov/
 API/src/tmp
 .claude
+.codebase-memory
+.codegraph/
 
 # ============================================
 # Análisis interno

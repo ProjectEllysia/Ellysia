@@ -30,6 +30,7 @@ def test_update_own_profile(client, regular_user, auth_headers):
 
 def test_change_password(client, regular_user, auth_headers):
     resp = client.put("/users/change-password", headers=auth_headers(regular_user), json={
+        "currentPassword": regular_user.password,
         "newPassword": "NuevaP@ss1",
     })
     assert resp.status_code == 200
@@ -39,6 +40,23 @@ def test_change_password(client, regular_user, auth_headers):
         "grantType": "password",
         "username": regular_user.username,
         "password": "NuevaP@ss1",
+    })
+    assert login.status_code == 200
+
+
+def test_change_password_rejects_wrong_current_password(client, regular_user, auth_headers):
+    # S11: el servidor reverifica currentPassword, no solo el cliente.
+    resp = client.put("/users/change-password", headers=auth_headers(regular_user), json={
+        "currentPassword": "esto-no-es-la-contrasena-actual",
+        "newPassword": "NuevaP@ss1",
+    })
+    assert resp.status_code == 401
+
+    # La contraseña original sigue funcionando: el cambio no se aplicó.
+    login = client.post("/oauth/token", json={
+        "grantType": "password",
+        "username": regular_user.username,
+        "password": regular_user.password,
     })
     assert login.status_code == 200
 
@@ -83,15 +101,15 @@ def test_admin_manages_user_attributes(client, admin_user, make_user, auth_heade
     headers = auth_headers(admin_user)
 
     add = client.put(f"/users/{target.id}/attributes", headers=headers, json={
-        "attributes": ["sentinel_create"],
+        "attributes": ["themis_create"],
     })
     assert add.status_code == 200
 
     listed = client.get(f"/users/{target.id}/attributes", headers=headers)
     assert listed.status_code == 200
-    assert "sentinel_create" in listed.get_json()["attributes"]
+    assert "themis_create" in listed.get_json()["attributes"]
 
     removed = client.delete(f"/users/{target.id}/attributes", headers=headers, json={
-        "attributes": ["sentinel_create"],
+        "attributes": ["themis_create"],
     })
     assert removed.status_code == 200

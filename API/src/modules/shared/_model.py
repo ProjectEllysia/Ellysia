@@ -15,10 +15,10 @@ Example:
 >>> Base.metadata.create_all(engine)
 """
 
-from datetime import datetime
-
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship, declarative_base
+
+from ._time import utcnow_naive
 
 
 Base = declarative_base()
@@ -32,12 +32,12 @@ class Document(Base):
     its own table with specific fields and inherits these via FK.
 
     This model stores metadata common to all document types, while
-    subclasses like AegisDocument and SentinelDocument define their
+    subclasses like AegisDocument and ThemisDocument define their
     specific attributes.
 
     Attributes:
         id: Primary key, auto-incrementing integer.
-        document_type: Polymorphic discriminator ('aegis' | 'sentinel').
+        document_type: Polymorphic discriminator ('aegis' | 'themis').
         filename: Relative path to the file on disk.
         format: Document format ('pdf' | 'json' | 'md').
         status: Generation status ('pending' | 'running' | 'done' | 'error').
@@ -49,21 +49,21 @@ class Document(Base):
 
     Subclasses:
         AegisDocument: Security awareness pills.
-        SentinelDocument: Scan reports.
+        ThemisDocument: Scan reports.
 
     Auto-generated fields (DO NOT assign manually):
         id, document_type, created_at
 
     Example:
     >>> doc = Document(
-    ...     document_type='sentinel',
+    ...     document_type='themis',
     ...     filename='reports/scan_123.pdf',
     ...     format='pdf',
     ...     status='done',
     ...     user_id=1
     ... )
     >>> print(doc)
-    '<Document(id=None, type='sentinel', status='done', user_id=1)>'
+    '<Document(id=None, type='themis', status='done', user_id=1)>'
     """
 
     __tablename__ = "Document"
@@ -75,7 +75,7 @@ class Document(Base):
     format        = Column(String(10),  nullable=False)
 
     status          = Column(String(20),  nullable=False, default="pending")
-    created_at      = Column(DateTime,    nullable=False, default=datetime.utcnow)
+    created_at      = Column(DateTime,    nullable=False, default=utcnow_naive)
     generated_at    = Column(DateTime,    nullable=True)
     is_ai_generated = Column(Integer,     nullable=False, default=1)
 

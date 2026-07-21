@@ -1,12 +1,94 @@
 <template>
   <div class="acheron-page" data-module="acheron">
     <StarBackground />
-    <Topbar title="Acheron" badge="Bóveda cifrada" />
+    <Topbar title="Acheron" badge="Bóveda cifrada" back-to="/acheron" back-label="Volver" />
 
     <main class="acheron-main">
+      <Transition name="view-fade" mode="out-in">
       <!-- ─────────────── Pantalla de desbloqueo ─────────────── -->
-      <section v-if="!unlocked" class="unlock-wrap">
-        <form class="unlock-card" @submit.prevent="unlock">
+      <section v-if="!unlocked && !showVaultSkeleton" key="unlock" class="unlock-wrap">
+        <!-- Comprobando si el usuario ya tiene bóveda -->
+        <div v-if="vaultState === 'loading'" class="unlock-card">
+          <div class="unlock-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="11" width="18" height="11" rx="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+          </div>
+          <h1 class="unlock-title">Comprobando tu bóveda…</h1>
+          <p class="unlock-sub">Un momento, por favor.</p>
+        </div>
+
+        <!-- Sin bóveda todavía: crear contraseña maestra -->
+        <form v-else-if="vaultState === 'missing'" class="unlock-card" @submit.prevent="createVaultHandler">
+          <div class="unlock-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="11" width="18" height="11" rx="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+          </div>
+          <h1 class="unlock-title">Crea tu contraseña maestra</h1>
+          <p class="unlock-sub">
+            Todavía no tienes ninguna bóveda. Elige una contraseña maestra para crearla:
+            el cifrado ocurre <strong>en tu navegador</strong> y nunca se envía al servidor.
+          </p>
+
+          <label class="field">
+            <span class="field-label">Nueva contraseña maestra</span>
+            <div class="field-input field-input--with-generate">
+              <input
+                ref="createPasswordInput"
+                v-model="newPassword"
+                :type="showCreatePassword ? 'text' : 'password'"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="••••••••••••"
+                :disabled="createBusy"
+              />
+              <button
+                type="button" class="gen-btn" tabindex="-1"
+                aria-label="Generar contraseña"
+                :disabled="createBusy"
+                @click="generateNewPassword"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              </button>
+              <button
+                type="button" class="reveal-btn" tabindex="-1"
+                :aria-label="showCreatePassword ? 'Ocultar' : 'Mostrar'"
+                @click="showCreatePassword = !showCreatePassword"
+              >
+                <svg v-if="showCreatePassword" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              </button>
+            </div>
+            <PasswordStrengthMeter :password="newPassword" />
+          </label>
+
+          <label class="field">
+            <span class="field-label">Repite la contraseña</span>
+            <div class="field-input">
+              <input
+                v-model="confirmPassword"
+                :type="showCreatePassword ? 'text' : 'password'"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="••••••••••••"
+                :disabled="createBusy"
+              />
+            </div>
+          </label>
+
+          <p v-if="createError" class="unlock-error">{{ createError }}</p>
+
+          <button type="submit" class="unlock-btn" :disabled="createBusy || !newPassword || !confirmPassword">
+            <span v-if="createBusy" class="spinner" aria-hidden="true"></span>
+            {{ createBusy ? 'Creando…' : 'Crear bóveda' }}
+          </button>
+        </form>
+
+        <!-- Bóveda existente: desbloquear -->
+        <form v-else class="unlock-card" @submit.prevent="unlock">
           <div class="unlock-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <rect x="3" y="11" width="18" height="11" rx="2" />
@@ -51,8 +133,35 @@
         </form>
       </section>
 
+      <!-- ─────────────── Cargando bóveda (skeleton) ─────────────── -->
+      <section v-else-if="showVaultSkeleton" key="skeleton" class="vault-wrap" aria-hidden="true">
+        <header class="vault-head">
+          <div class="vault-head-info">
+            <div class="skeleton-bar skeleton-bar--title"></div>
+            <div class="skeleton-bar skeleton-bar--count"></div>
+          </div>
+          <div class="vault-head-actions">
+            <div class="skeleton-bar skeleton-bar--btn"></div>
+            <div class="skeleton-bar skeleton-bar--btn"></div>
+            <div class="skeleton-bar skeleton-bar--btn"></div>
+          </div>
+        </header>
+
+        <div v-for="n in 2" :key="n" class="vault-section">
+          <div class="skeleton-bar skeleton-bar--section-title"></div>
+          <div class="cards-grid">
+            <div v-for="m in 3" :key="m" class="entry-card skeleton-card">
+              <div class="skeleton-bar skeleton-bar--card-title"></div>
+              <div class="skeleton-bar skeleton-bar--line"></div>
+              <div class="skeleton-bar skeleton-bar--line"></div>
+              <div class="skeleton-bar skeleton-bar--line short"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ─────────────── Bóveda descifrada ─────────────── -->
-      <section v-else class="vault-wrap">
+      <section v-else key="vault" class="vault-wrap vault-appear">
         <header class="vault-head">
           <div class="vault-head-info">
             <h1 class="vault-title">Tu bóveda</h1>
@@ -126,6 +235,7 @@
           </div>
         </div>
       </section>
+      </Transition>
     </main>
 
     <!-- Notificación transitoria (alta/edición/borrado) -->
@@ -162,9 +272,11 @@ import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
 import StorableFormModal from '@/components/acheron/StorableFormModal.vue'
 import ChangePasswordModal from '@/components/acheron/ChangePasswordModal.vue'
+import PasswordStrengthMeter from '@/components/acheron/PasswordStrengthMeter.vue'
 import { useApi } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/authStore'
-import { openVault, WrongPasswordError } from '@/acheron/vault.js'
+import { openVault, createVault, WrongPasswordError } from '@/acheron/vault.js'
+import { generatePassword } from '@/acheron/passwordGenerator.js'
 import { STORABLE_CATEGORIES } from '@/acheron/storableFields.js'
 import { TYPE_BY_CATEGORY } from '@/acheron/storableTypes.js'
 
@@ -177,11 +289,27 @@ const busy = ref(false)
 const error = ref('')
 const unlocked = ref(false)
 const passwordInput = ref(null)
+// Cubre el hueco entre enviar la contraseña y tener la bóveda descifrada
+// (petición de red + KDF + descifrado), especialmente notable si el servidor
+// no está en la misma máquina que el navegador.
+const showVaultSkeleton = ref(false)
+
+// Estado de la comprobación de existencia de bóveda al montar el componente.
+const vaultState = ref('loading') // 'loading' | 'missing' | 'exists'
+const newPassword = ref('')
+const confirmPassword = ref('')
+const showCreatePassword = ref(false)
+const createBusy = ref(false)
+const createError = ref('')
+const createPasswordInput = ref(null)
 
 const entries = reactive({})
 const revealed = reactive(new Set())
 let vault = null // instancia OpenVault con la vaultKey en memoria
 let algorithm = null
+// Versión de metadatos con la que se abrió el vault. Si el servidor reporta una
+// mayor, la contraseña maestra cambió en otro dispositivo durante esta sesión.
+let currentMetadataVersion = null
 
 const modal = reactive({ open: false, mode: 'add', category: null, item: null })
 const saving = ref(false)
@@ -221,11 +349,78 @@ function flash(text, isError = false) {
   noticeTimer = setTimeout(() => (notice.text = ''), 2600)
 }
 
+/* ── comprobación inicial de existencia de bóveda ── */
+async function checkVaultExists() {
+  let res
+  try {
+    res = await apiFetch('/acheron/vault')
+  } catch {
+    vaultState.value = 'exists' // deja que unlock() muestre el error real
+    return
+  }
+  if (!res) return // sesión expirada: useApi ya redirige
+  if (res.status === 404) {
+    vaultState.value = 'missing'
+    nextTick(() => createPasswordInput.value?.focus())
+    return
+  }
+  vaultState.value = 'exists'
+  nextTick(() => passwordInput.value?.focus())
+}
+
+/* ── generación de contraseña maestra ── */
+function generateNewPassword() {
+  const generated = generatePassword()
+  newPassword.value = generated
+  confirmPassword.value = generated
+  showCreatePassword.value = true
+}
+
+/* ── creación de bóveda (usuario sin contraseña maestra todavía) ── */
+async function createVaultHandler() {
+  if (createBusy.value) return
+  createError.value = ''
+  if (!newPassword.value || newPassword.value.length < 8) {
+    createError.value = 'La contraseña debe tener al menos 8 caracteres.'
+    return
+  }
+  if (newPassword.value !== confirmPassword.value) {
+    createError.value = 'Las contraseñas no coinciden.'
+    return
+  }
+  createBusy.value = true
+  try {
+    const payload = await createVault(newPassword.value, auth.username())
+    const res = await apiFetch('/acheron/vault', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+    if (!res) return // sesión expirada: useApi ya redirige
+    if (res.status === 201 || res.ok) {
+      newPassword.value = ''
+      confirmPassword.value = ''
+      vaultState.value = 'exists'
+      flash('Bóveda creada. Desbloquéala con tu contraseña maestra.')
+      nextTick(() => passwordInput.value?.focus())
+    } else if (res.status === 403) {
+      createError.value = 'Tu cuenta todavía no tiene acceso a Acheron. Contacta con un administrador.'
+    } else {
+      createError.value = await errMessage(res, 'No se pudo crear la bóveda.')
+    }
+  } catch (e) {
+    console.error('[Acheron] error al crear la bóveda:', e)
+    createError.value = 'Error al generar las claves de cifrado.'
+  } finally {
+    createBusy.value = false
+  }
+}
+
 /* ── desbloqueo ── */
 async function unlock() {
   if (!masterPassword.value || busy.value) return
   busy.value = true
   error.value = ''
+  showVaultSkeleton.value = true
   try {
     const res = await apiFetch('/acheron/vault')
     if (!res) return // sesión expirada: useApi ya redirige
@@ -245,6 +440,7 @@ async function unlock() {
     for (const cat of STORABLE_CATEGORIES) entries[cat] = decrypted[cat] || []
     vault = opened
     algorithm = vaultJson.algorithm
+    currentMetadataVersion = vaultJson.metadataVersion ?? null
     unlocked.value = true
   } catch (e) {
     if (e instanceof WrongPasswordError) {
@@ -255,6 +451,7 @@ async function unlock() {
     }
   } finally {
     busy.value = false
+    showVaultSkeleton.value = false
   }
 }
 
@@ -265,9 +462,41 @@ function lock() {
   for (const cat of STORABLE_CATEGORIES) entries[cat] = []
   vault = null
   algorithm = null
+  currentMetadataVersion = null
   unlocked.value = false
   modal.open = false
   nextTick(() => passwordInput.value?.focus())
+}
+
+/* ── detección de cambio de la maestra en otro dispositivo ──
+   El cambio de contraseña maestra incrementa metadataVersion en el servidor
+   (la vaultKey no cambia, así que la sesión abierta sigue operando sin error).
+   Al volver a la pestaña, re-comprobamos: si la versión del servidor es mayor,
+   bloqueamos y pedimos re-desbloquear con la nueva contraseña. */
+async function checkVaultFreshness() {
+  if (!unlocked.value || currentMetadataVersion == null) return
+  let res
+  try {
+    res = await apiFetch('/acheron/vault')
+  } catch {
+    return // problema de red: no molestar
+  }
+  if (!res || !res.ok) return
+  let vaultJson
+  try {
+    vaultJson = await res.json()
+  } catch {
+    return
+  }
+  const serverVersion = vaultJson.metadataVersion ?? null
+  if (serverVersion != null && serverVersion > currentMetadataVersion) {
+    lock()
+    error.value = 'Tu contraseña maestra cambió en otro dispositivo. Vuelve a introducirla.'
+  }
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') checkVaultFreshness()
 }
 
 /* ── cambio de contraseña maestra ── */
@@ -402,9 +631,13 @@ async function errMessage(res, fallback) {
   }
 }
 
-onMounted(() => passwordInput.value?.focus())
+onMounted(() => {
+  checkVaultExists()
+  document.addEventListener('visibilitychange', onVisibilityChange)
+})
 onBeforeUnmount(() => {
   clearTimeout(noticeTimer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   lock()
 })
 </script>
@@ -435,7 +668,7 @@ onBeforeUnmount(() => {
 .unlock-card {
   width: 100%;
   max-width: 420px;
-  background: rgba(17, 18, 24, 0.7);
+  background: var(--surface);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   border: 1px solid rgba(160, 122, 192, 0.22);
@@ -452,13 +685,13 @@ onBeforeUnmount(() => {
   color: #c4a0e0;
 }
 .unlock-icon svg { width: 26px; height: 26px; }
-.unlock-title { font-family: var(--font-display); font-size: 1.5rem; color: var(--text); margin-bottom: 0.5rem; }
-.unlock-sub { font-size: 0.85rem; color: var(--text-dim); line-height: 1.5; margin-bottom: 1.5rem; }
+.unlock-title { font-family: var(--font-display); font-size: var(--fs-2xl); color: var(--text); margin-bottom: 0.5rem; }
+.unlock-sub { font-size: var(--fs-lg); color: var(--text-dim); line-height: 1.5; margin-bottom: 1.5rem; }
 .unlock-sub strong { color: #c4a0e0; font-weight: 600; }
 
 .field { display: block; text-align: left; margin-bottom: 1rem; }
 .field-label {
-  display: block; font-family: var(--font-mono); font-size: 0.66rem;
+  display: block; font-family: var(--font-mono); font-size: var(--fs-md);
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted);
   margin-bottom: 0.4rem;
 }
@@ -466,10 +699,11 @@ onBeforeUnmount(() => {
 .field-input input {
   width: 100%; padding: 0.7rem 2.6rem 0.7rem 0.85rem;
   background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-med);
-  border-radius: 9px; color: var(--text); font-size: 0.95rem;
+  border-radius: 9px; color: var(--text); font-size: var(--fs-xl);
   font-family: var(--font-mono); transition: border-color 0.2s ease;
 }
 .field-input input:focus { outline: none; border-color: rgba(160, 122, 192, 0.55); }
+.field-input--with-generate input { padding-right: 4.6rem; }
 .reveal-btn {
   position: absolute; right: 0.5rem; background: none; border: none;
   color: var(--text-muted); cursor: pointer; padding: 0.3rem;
@@ -477,16 +711,24 @@ onBeforeUnmount(() => {
 }
 .reveal-btn:hover { color: #c4a0e0; }
 .reveal-btn svg { width: 18px; height: 18px; }
+.gen-btn {
+  position: absolute; right: 2.5rem; background: none; border: none;
+  color: var(--text-muted); cursor: pointer; padding: 0.3rem;
+  display: grid; place-items: center; transition: color 0.15s ease;
+}
+.gen-btn:hover:not(:disabled) { color: #c4a0e0; }
+.gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.gen-btn svg { width: 17px; height: 17px; }
 
 .unlock-error {
-  color: var(--danger); font-size: 0.82rem; margin-bottom: 0.9rem;
+  color: var(--danger); font-size: var(--fs-lg); margin-bottom: 0.9rem;
   background: var(--danger-dim); border: 1px solid rgba(217, 108, 108, 0.25);
   border-radius: 8px; padding: 0.55rem 0.7rem;
 }
 .unlock-btn {
   width: 100%; padding: 0.8rem; border: none; border-radius: 9px;
   background: linear-gradient(135deg, #a07ac0, #7d5aa0); color: #fff;
-  font-size: 0.95rem; font-weight: 600; cursor: pointer;
+  font-size: var(--fs-xl); font-weight: 600; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
   transition: filter 0.2s ease, opacity 0.2s ease;
 }
@@ -499,21 +741,77 @@ onBeforeUnmount(() => {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ════════ Transición entre vistas (desbloqueo ↔ skeleton ↔ bóveda) ════════ */
+.view-fade-enter-active, .view-fade-leave-active { transition: opacity 0.22s ease; }
+.view-fade-enter-from, .view-fade-leave-to { opacity: 0; }
+
+/* ════════ Skeleton de carga (fetch + descifrado) ════════ */
+.skeleton-bar {
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    rgba(160, 122, 192, 0.08) 25%,
+    rgba(160, 122, 192, 0.2) 37%,
+    rgba(160, 122, 192, 0.08) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+.skeleton-bar--title { width: 140px; height: 1.6rem; margin-bottom: 0.55rem; }
+.skeleton-bar--count { width: 190px; height: 0.85rem; }
+.skeleton-bar--btn { width: 92px; height: 2.2rem; border-radius: 9px; }
+.skeleton-bar--section-title { width: 160px; height: 0.95rem; margin-bottom: 0.9rem; }
+.skeleton-bar--card-title { width: 60%; height: 1.05rem; margin-bottom: 0.85rem; }
+.skeleton-bar--line { width: 100%; height: 0.65rem; margin-bottom: 0.55rem; }
+.skeleton-bar--line.short { width: 45%; margin-bottom: 0; }
+.skeleton-card { display: flex; flex-direction: column; }
+
+/* ════════ Animación de entrada de la bóveda descifrada ════════ */
+@keyframes vault-item-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.vault-appear .vault-head,
+.vault-appear .vault-empty,
+.vault-appear .vault-section {
+  animation: vault-item-in 0.45s ease both;
+}
+.vault-appear .vault-empty { animation-delay: 0.06s; }
+.vault-appear .vault-section:nth-of-type(1) { animation-delay: 0.06s; }
+.vault-appear .vault-section:nth-of-type(2) { animation-delay: 0.12s; }
+.vault-appear .vault-section:nth-of-type(3) { animation-delay: 0.18s; }
+.vault-appear .vault-section:nth-of-type(4) { animation-delay: 0.24s; }
+.vault-appear .vault-section:nth-of-type(5) { animation-delay: 0.3s; }
+.vault-appear .vault-section:nth-of-type(n+6) { animation-delay: 0.36s; }
+.vault-appear .entry-card {
+  animation: vault-item-in 0.4s ease both;
+}
+.vault-appear .entry-card:nth-child(1) { animation-delay: 0.04s; }
+.vault-appear .entry-card:nth-child(2) { animation-delay: 0.08s; }
+.vault-appear .entry-card:nth-child(3) { animation-delay: 0.12s; }
+.vault-appear .entry-card:nth-child(4) { animation-delay: 0.16s; }
+.vault-appear .entry-card:nth-child(5) { animation-delay: 0.2s; }
+.vault-appear .entry-card:nth-child(n+6) { animation-delay: 0.24s; }
+
 /* ════════ Bóveda descifrada ════════ */
 .vault-head {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 1.75rem; gap: 1rem; flex-wrap: wrap;
 }
-.vault-title { font-family: var(--font-display); font-size: 1.7rem; color: var(--text); }
+.vault-title { font-family: var(--font-display); font-size: var(--fs-2xl); color: var(--text); }
 .vault-count {
-  font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted);
+  font-family: var(--font-mono); font-size: var(--fs-md); color: var(--text-muted);
   letter-spacing: 0.04em;
 }
 .vault-head-actions { display: flex; gap: 0.6rem; }
 .add-btn, .lock-btn {
   display: inline-flex; align-items: center; gap: 0.45rem;
   padding: 0.55rem 1rem; border-radius: 9px; cursor: pointer;
-  font-size: 0.82rem; font-weight: 600; transition: filter 0.2s ease, background 0.2s ease;
+  font-size: var(--fs-lg); font-weight: 600; transition: filter 0.2s ease, background 0.2s ease;
 }
 .add-btn {
   background: linear-gradient(135deg, #a07ac0, #7d5aa0); border: none; color: #fff;
@@ -525,19 +823,19 @@ onBeforeUnmount(() => {
 .lock-btn:hover { background: rgba(160, 122, 192, 0.18); }
 .add-btn svg, .lock-btn svg { width: 15px; height: 15px; }
 
-.vault-empty { color: var(--text-dim); font-size: 0.95rem; text-align: center; padding: 3rem 0; }
+.vault-empty { color: var(--text-dim); font-size: var(--fs-xl); text-align: center; padding: 3rem 0; }
 .vault-empty strong { color: #c4a0e0; }
 
 .vault-section { margin-bottom: 2rem; }
 .section-title {
   display: flex; align-items: center; gap: 0.55rem;
-  font-family: var(--font-mono); font-size: 0.78rem; text-transform: uppercase;
+  font-family: var(--font-mono); font-size: var(--fs-lg); text-transform: uppercase;
   letter-spacing: 0.1em; color: #c4a0e0; margin-bottom: 0.9rem;
   padding-bottom: 0.5rem; border-bottom: 1px solid rgba(160, 122, 192, 0.15);
 }
 .section-count {
   background: rgba(160, 122, 192, 0.15); color: #c4a0e0;
-  border-radius: 20px; padding: 0.05rem 0.5rem; font-size: 0.68rem;
+  border-radius: 20px; padding: 0.05rem 0.5rem; font-size: var(--fs-md);
 }
 
 .cards-grid {
@@ -545,7 +843,7 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
 }
 .entry-card {
-  background: rgba(17, 18, 24, 0.6);
+  background: var(--surface);
   border: 1px solid var(--border); border-radius: 12px;
   padding: 1.1rem 1.2rem; transition: border-color 0.2s ease;
 }
@@ -554,18 +852,18 @@ onBeforeUnmount(() => {
   display: flex; align-items: baseline; justify-content: space-between;
   gap: 0.5rem; margin-bottom: 0.8rem;
 }
-.entry-title { font-size: 1.05rem; font-weight: 600; color: var(--text); }
+.entry-title { font-size: var(--fs-lg); font-weight: 600; color: var(--text); }
 .entry-actions { display: flex; gap: 0.15rem; flex-shrink: 0; }
 
 .entry-fields { display: flex; flex-direction: column; gap: 0.55rem; }
 .entry-field { display: flex; flex-direction: column; gap: 0.15rem; }
 .entry-field dt {
-  font-family: var(--font-mono); font-size: 0.6rem; text-transform: uppercase;
+  font-family: var(--font-mono); font-size: var(--fs-body); text-transform: uppercase;
   letter-spacing: 0.06em; color: var(--text-muted);
 }
 .entry-field dd { display: flex; align-items: center; gap: 0.4rem; }
 .field-value {
-  font-size: 0.88rem; color: var(--text); word-break: break-all;
+  font-size: var(--fs-lg); color: var(--text); word-break: break-all;
   font-family: var(--font-mono); flex: 1;
 }
 .icon-btn {
@@ -581,7 +879,7 @@ onBeforeUnmount(() => {
 .notice {
   position: fixed; left: 50%; bottom: 1.5rem; transform: translateX(-50%);
   z-index: 120; padding: 0.65rem 1.1rem; border-radius: 10px;
-  background: rgba(160, 122, 192, 0.95); color: #fff; font-size: 0.85rem; font-weight: 500;
+  background: rgba(160, 122, 192, 0.95); color: #fff; font-size: var(--fs-lg); font-weight: 500;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
 }
 .notice--error { background: rgba(200, 70, 70, 0.95); }

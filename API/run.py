@@ -1,5 +1,5 @@
 """
-run.py — Punto de entrada de la API SeQ
+run.py — Punto de entrada de la API Ellysia
 ═══════════════════════════════════════
 Responsabilidades de este fiche:
     1. Crear la aplicación Flask.
@@ -14,6 +14,7 @@ el frontend con proxy inverso al backend. La API no sirve contenido
 estático.
 """
 
+import json
 import os
 import re
 import signal
@@ -35,7 +36,7 @@ from src.modules.infrastructure import unit_of_work
 from src.modules.shared._exceptions import (
     MissingParameterError,
     MissingJsonBodyError,
-    SecOpsException,
+    EllysiaException,
     create_error_response
 )
 from src.modules.system     import configure_logging, config_reading, system_blp
@@ -45,11 +46,11 @@ from src.modules.users      import (
     users_blp
 )
 from src.modules.users.services.secrets import hash_password as _hash_password
-from src.modules.sentinel   import sentinel_blp
-from src.modules.acheron    import acheron_blp
-from src.modules.aegis      import aegis_blp
-from src.modules.iris       import iris_blp
-from src.modules.pages      import pages_bp
+from src.modules.features.themis   import themis_blp
+from src.modules.features.acheron    import acheron_blp
+from src.modules.features.aegis      import aegis_blp
+from src.modules.features.iris       import iris_blp
+from src.modules.features.hygeia     import hygeia_blp
 
 import src.modules.system.config_reading as CR
 
@@ -129,10 +130,17 @@ def _run_shutdown_cleanup() -> None:
 
     _logger.info("[Shutdown] Deteniendo scheduler...")
     try:
-        from src.modules.sentinel.services.scheduling import Scheduler
+        from src.modules.features.themis.services.scheduling import Scheduler
         Scheduler.stop()
     except Exception as e:
         _logger.error(f"Error deteniendo scheduler: {e}")
+
+    _logger.info("[Shutdown] Deteniendo scheduler de Hygeia...")
+    try:
+        from src.modules.features.hygeia.services.scheduling import HygeiaScheduler
+        HygeiaScheduler.stop()
+    except Exception as e:
+        _logger.error(f"Error deteniendo scheduler de Hygeia: {e}")
 
     _logger.info("[Shutdown] Cerrando sesiones de base de datos...")
     try:
@@ -178,7 +186,7 @@ def _graceful_shutdown(signum, *args) -> None:
 
 def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_migrations: bool = True) -> Flask:
     """
-    Factory de la aplicación Flask SeQ.
+    Factory de la aplicación Flask Ellysia.
 
     Configura todos los componentes necesarios para servir la API REST.
 
@@ -189,24 +197,45 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     Returns:
         Flask: Aplicación completamente configurada y lista para servir.
     """
-    from src.modules.sentinel.services.scheduling import Scheduler
+    from src.modules.features.themis.services.scheduling import Scheduler
+    from src.modules.features.hygeia.services.scheduling import HygeiaScheduler
+    from werkzeug.middleware.proxy_fix import ProxyFix
 
     configure_logging()
 
     app = Flask(__name__)
+    # S5: la app corre detrás de nginx (ver web/nginx.conf) — sin esto,
+    # request.remote_addr (y por tanto el rate limiter y los logs de
+    # auditoría) ven la IP del contenedor de nginx, no la del cliente real.
+    # x_for=1 confía en un único salto de X-Forwarded-For (el proxy inmediato).
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1) # type: ignore
 
-    _logger.info("Inicializando la aplicación SeQ...")
+    _logger.info("Inicializando la aplicación Ellysia...")
     _logger.info("Inicializando CORS...")
-    raw     = os.environ.get("ALLOWED_ORIGINS", "http://localhost:8080")
+    # E10: el default apuntaba a :8080 (nadie sirve ahí) y el origen de dev
+    # viajaba siempre, incluso en producción. El dev server real de Vite es
+    # :5173 (ver web/app/CLAUDE.md); el origen extra solo se añade en dev.
+    raw     = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173")
     origins = [o.strip() for o in raw.split(",") if o.strip()]
-    origins.append("http://127.0.0.1:3000")
+    if config_reading.is_development():
+        origins.append("http://127.0.0.1:5173")
     CORS(app, origins=origins, supports_credentials=True)
 
     _logger.info("Inicializando rate limiting...")
+    # T4: RATELIMIT_STORAGE_URI explícita (mismo patrón que ALLOWED_ORIGINS)
+    # tiene prioridad sobre el Redis derivado de la config — permite apuntar
+    # el backend del limiter a otro storage (p. ej. "memory://" en tests)
+    # sin depender de un Redis real.
+    storage_uri = os.environ.get("RATELIMIT_STORAGE_URI")
+    if not storage_uri:
+        redis_cfg = CR.get_redis_config()
+        redis_auth = f":{quote_plus(redis_cfg['password'])}@" if redis_cfg.get("password") else ""
+        storage_uri = f"redis://{redis_auth}{redis_cfg['host']}:{redis_cfg['port']}/{redis_cfg['db']}"
+    app.config["RATELIMIT_STORAGE_URI"] = storage_uri
     limiter.init_app(app)
 
     _logger.info("Inicializando documentación OpenAPI...")
-    app.config["API_TITLE"]             = "SeQ API"
+    app.config["API_TITLE"]             = "Ellysia API"
     app.config["API_VERSION"]           = CR.get_app_version()
     app.config["OPENAPI_VERSION"]       = "3.0.3"
     app.config["OPENAPI_URL_PREFIX"]    = "/api-docs"
@@ -218,11 +247,11 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     flask_smorest_api.register_blueprint(system_blp,  url_prefix="/system")
     flask_smorest_api.register_blueprint(oauth_blp,   url_prefix="/oauth")
     flask_smorest_api.register_blueprint(users_blp,   url_prefix="/users")
-    flask_smorest_api.register_blueprint(sentinel_blp, url_prefix="/sentinel")
+    flask_smorest_api.register_blueprint(themis_blp, url_prefix="/themis")
     flask_smorest_api.register_blueprint(acheron_blp,  url_prefix="/acheron")
     flask_smorest_api.register_blueprint(aegis_blp,    url_prefix="/aegis")
     flask_smorest_api.register_blueprint(iris_blp,     url_prefix="/iris")
-    app.register_blueprint(pages_bp,    url_prefix="/pages")
+    flask_smorest_api.register_blueprint(hygeia_blp,   url_prefix="/hygeia")
 
     _logger.info("Registrando manejadores de error globales...")
     _register_error_handlers(app)
@@ -253,15 +282,27 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     if start_scheduler:
         _logger.info("Reconciliando escaneos huérfanos...")
         try:
-            from src.modules.sentinel.managers import ScanManager
+            from src.modules.features.themis.managers import ScanManager
             fixed = ScanManager.reconcile_orphaned_scans()
             if fixed:
                 _logger.info("Se marcaron %d escaneo(s) huérfano(s) como FAILED", fixed)
         except Exception as e:
             _logger.warning("No se pudo reconciliar escaneos huérfanos: %s", e)
 
+        _logger.info("Reconciliando análisis Iris huérfanos...")
+        try:
+            from src.modules.features.iris.managers import IrisManager
+            fixed_iris = IrisManager.reconcile_orphaned_analyses()
+            if fixed_iris:
+                _logger.info("Se marcaron %d análisis Iris huérfano(s) como failed", fixed_iris)
+        except Exception as e:
+            _logger.warning("No se pudo reconciliar análisis Iris huérfanos: %s", e)
+
         _logger.info("Arrancando scheduler de tareas programadas...")
         Scheduler.start()
+
+        _logger.info("Arrancando scheduler de Hygeia...")
+        HygeiaScheduler.start()
 
     _logger.info("Verificando conexion a Redis...")
     import redis as redis_lib
@@ -280,7 +321,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     except Exception as e:
         _logger.warning("Redis no disponible — la cola de tareas no funcionara: %s", e)
 
-    _logger.info("Aplicación SeQ iniciada correctamente")
+    _logger.info("Aplicación Ellysia iniciada correctamente")
     return app
 
 def _register_error_handlers(app: Flask) -> None:
@@ -319,15 +360,20 @@ def _register_error_handlers(app: Flask) -> None:
             "allowedMethods": list(error.valid_methods) if hasattr(error, "valid_methods") else [],
         }), 405
 
-    @app.errorhandler(429) # type: ignore
-    def too_many_requests():
+    @app.errorhandler(429)
+    def too_many_requests(error):
+        # T4: Flask siempre llama al handler con la excepción como argumento
+        # posicional — esta firma sin parámetros nunca se había ejercitado
+        # porque el rate limiter estaba desactivado en toda la suite; un 429
+        # real en producción habría lanzado TypeError en vez de la respuesta
+        # JSON esperada.
         _logger.warning("Rate limit superado: %s", request.remote_addr)
         return jsonify({
             "error": "too_many_requests",
             "error_description": "Has superado el límite de peticiones. Espera un momento e inténtalo de nuevo.",
         }), 429
 
-    @app.errorhandler(SecOpsException)
+    @app.errorhandler(EllysiaException)
     def handle_secops_exception(error):
         if error.traceback:
             _logger.error(f"[{error.code.name}] {error.message}\n{error.traceback}")
@@ -380,7 +426,7 @@ def _register_request_audit(app: Flask) -> None:
     Args:
         app: Instancia de la aplicación Flask.
     """
-    audit_logger = logging.getLogger("seq.audit")
+    audit_logger = logging.getLogger("ellysia.audit")
 
     @app.before_request
     def _audit_start():
@@ -430,7 +476,7 @@ def _run_migrations() -> None:
 
 def _init_db() -> None:
     """
-    Inicializa la base de datos completa de SeQ desde cero.
+    Inicializa la base de datos completa de Ellysia desde cero.
 
     Este proceso destructivo elimina cualquier base de datos existente
     y la recrea con la estructura y datos iniciales:
@@ -491,13 +537,14 @@ def _init_db() -> None:
     database_url = f"{dialect}://{username}:{quote_plus(password)}@{host}:{port}/{dbname}"
     engine = create_engine(database_url)
 
-    root_password_hash = _hash_password("root")
+    root_password = "root"
+    root_password_hash = _hash_password(root_password)
     with engine.connect() as conn:
         conn.execute(
             text(
                 'INSERT INTO "User" '
                 "(username, first_name, last_name, password_hash, password_salt, email, created_at, role) "
-                "VALUES ('root', 'Gabe', 'Joe', :pwdhash, '', 'gjoe@seq.com', CURRENT_DATE, 'role_root');"
+                "VALUES ('root', 'Gabe', 'Joe', :pwdhash, '', 'gjoe@ellysia.com', CURRENT_DATE, 'role_root');"
             ),
             {"pwdhash": root_password_hash},
         )
@@ -509,104 +556,39 @@ def _init_db() -> None:
                 {"attr": attr},
             )
 
-        conn.execute(text(("""
-        INSERT INTO "Topic" (title) VALUES
-            -- Ingeniería Social
-            ('Phishing y suplantación de identidad'),
-            ('Spear phishing: ataques dirigidos'),
-            ('Smishing: fraude por SMS'),
-            ('Vishing: fraude por llamada telefónica'),
-            ('Pretexting: manipulación por contexto falso'),
-            ('Baiting: señuelos físicos y digitales'),
-            ('Quid pro quo: intercambio fraudulento'),
-            -- Contraseñas y Autenticación
-            ('Contraseñas robustas: cómo crearlas'),
-            ('Gestores de contraseñas corporativos'),
-            ('Autenticación de doble factor (2FA)'),
-            ('Riesgos de reutilizar contraseñas'),
-            ('Ataques de fuerza bruta y diccionario'),
-            ('Passkeys: el futuro sin contraseñas'),
-            -- Correo Electrónico
-            ('Uso seguro del correo corporativo'),
-            ('Cómo identificar un correo fraudulento'),
-            ('Riesgos de archivos adjuntos maliciosos'),
-            ('Email spoofing: correos falsificados'),
-            ('BEC: fraude al CEO por correo'),
-            -- Malware
-            ('Ransomware: secuestro de datos'),
-            ('Troyanos: software disfrazado'),
-            ('Spyware: espionaje silencioso'),
-            ('Adware y PUPs: software no deseado'),
-            ('Keyloggers: robo de pulsaciones'),
-            ('Rootkits: control oculto del sistema'),
-            ('Fileless malware: ataques sin fichero'),
-            -- Navegación y Web
-            ('Navegación segura por Internet'),
-            ('Riesgos de las extensiones de navegador'),
-            ('Verificación de URLs y certificados HTTPS'),
-            ('Descargas desde fuentes no confiables'),
-            ('Drive-by download: infección al navegar'),
-            ('Inyección SQL: riesgo en formularios web'),
-            ('Cross-Site Scripting (XSS)'),
-            -- Redes y Conectividad
-            ('Riesgos de redes Wi-Fi públicas'),
-            ('VPN: qué es y cuándo usarla'),
-            ('Ataques Man-in-the-Middle (MitM)'),
-            ('Seguridad en redes domésticas'),
-            ('Riesgos del Bluetooth activo'),
-            ('DNS spoofing: redirección maliciosa'),
-            -- Dispositivos y Endpoints
-            ('Actualización de software y parches'),
-            ('Seguridad en dispositivos móviles'),
-            ('Riesgos del BYOD en la empresa'),
-            ('Bloqueo de pantalla y sesiones'),
-            ('Cifrado de disco en portátiles'),
-            ('Seguridad en impresoras y periféricos'),
-            ('Riesgos de los dispositivos USB'),
-            -- Datos e Información
-            ('Borrado seguro de información'),
-            ('Metadatos ocultos en documentos'),
-            ('Clasificación de la información'),
-            ('Política de escritorio limpio'),
-            ('Fugas de información no intencionadas'),
-            ('Protección de datos personales (RGPD)'),
-            -- Copias de Seguridad
-            ('Copias de seguridad: por qué y cómo'),
-            ('Estrategia 3-2-1 de backups'),
-            ('Recuperación ante desastres'),
-            ('Verificación de restauraciones'),
-            -- Cloud y Servicios Online
-            ('Seguridad en servicios en la nube'),
-            ('Riesgos de compartir documentos en cloud'),
-            ('Shadow IT: apps no autorizadas'),
-            ('Configuraciones inseguras en cloud'),
-            ('OAuth y permisos de aplicaciones terceras'),
-            -- Trabajo Remoto
-            ('Teletrabajo seguro'),
-            ('Riesgos del acceso remoto (RDP)'),
-            ('Seguridad en videoconferencias'),
-            ('Entornos de trabajo híbrido'),
-            -- Amenazas Avanzadas
-            ('APT: amenazas persistentes avanzadas'),
-            ('Ataques a la cadena de suministro'),
-            ('Zero-day: vulnerabilidades sin parche'),
-            ('Lateral movement: movimiento en red interna'),
-            ('Exfiltración de datos corporativos'),
-            -- Concienciación General
-            ('Ingeniería social en redes sociales'),
-            ('Sobrexposición en redes sociales'),
-            ('Fraude en compras online'),
-            ('Ciberseguridad en vacaciones'),
-            ('Reporte de incidentes de seguridad'),
-            ('El factor humano en ciberseguridad'),
-            ('Cultura de seguridad en la empresa');"""
-        )))
+        topics_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "topics_seed.json")
+        with open(topics_path, encoding="utf-8") as f:
+            topics_by_category = json.load(f)
+        topic_titles = [title for titles in topics_by_category.values() for title in titles]
+        conn.execute(
+            text('INSERT INTO "Topic" (title) VALUES (:title);'),
+            [{"title": title} for title in topic_titles],
+        )
         conn.commit()
+
+    _logger.warning(
+        "=" * 70 + "\n"
+        "Usuario root creado:\n"
+        "  usuario:    root\n"
+        f"  contraseña: {root_password}\n"
+        + "=" * 70
+    )
+
+
+def app_factory() -> Flask:
+    """Factory para gunicorn (``gunicorn --factory run:app_factory``).
+
+    En Docker el worker RQ corre en su propio contenedor (``ellysia-worker``,
+    ver docker-compose.yml), así que aquí no hace falta la lógica de
+    subprocess del bloque ``__main__`` — solo replicar la llamada a
+    ``create_app`` que hace ``python run.py`` sin ``--with-worker``.
+    """
+    return create_app(APP_CONTEXT.create_database)
 
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="SeQ API server")
+    parser = argparse.ArgumentParser(description="Ellysia API server")
     parser.add_argument("--with-worker", action="store_true", help="Start RQ worker as subprocess")
     _args, _ = parser.parse_known_args()
 
