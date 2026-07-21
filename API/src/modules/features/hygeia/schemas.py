@@ -232,7 +232,13 @@ class AnomalyListResponseSchema(Schema):
 # =============================================================================
 
 class AssetMetricsQuerySchema(Schema):
-    """Filtros opcionales de rango temporal (``?from=&to=``, §5)."""
+    """Filtros opcionales de rango temporal (``?from=&to=``, §5).
+
+    El rango se aplica sobre ``receivedAt`` (reloj del servidor), no sobre
+    ``collectedAt`` (reloj del agente): es el mismo eje por el que se ordena
+    y se poda la serie, así que ventana y orden no pueden discrepar por una
+    deriva de reloj del agente.
+    """
     since = fields.DateTime(data_key="from", load_default=None, format="iso")
     until = fields.DateTime(data_key="to", load_default=None, format="iso")
 

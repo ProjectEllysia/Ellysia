@@ -851,6 +851,11 @@ def get_hygeia_clock_skew_sec() -> int:
     return _cfg("hygeia.limits.clockSkewSec", 300, int)
 
 @_lazy_load
+def get_hygeia_max_series_points() -> int:
+    """Máximo de puntos devueltos por la serie temporal de un activo (§5)."""
+    return _cfg("hygeia.limits.maxSeriesPoints", 1000, int)
+
+@_lazy_load
 def get_hygeia_thresholds() -> dict[str, dict[str, int]]:
     """Umbrales globales por defecto de Hygeia (``hygeia.thresholds``); override por activo en DB."""
     return _cfg("hygeia.thresholds", {})

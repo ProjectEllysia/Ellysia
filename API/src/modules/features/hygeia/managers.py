@@ -105,8 +105,8 @@ class HygeiaAssetManager:
 
         Args:
             asset_id: Activo cuya serie se consulta.
-            since: Límite inferior opcional de ``collectedAt``.
-            until: Límite superior opcional de ``collectedAt``.
+            since: Límite inferior opcional de ``receivedAt``.
+            until: Límite superior opcional de ``receivedAt``.
 
         Raises:
             AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
@@ -115,7 +115,10 @@ class HygeiaAssetManager:
         self._get_owned_asset(asset_repo, asset_id, self.user.id)
 
         snapshot_repo = build_repository(AssetSnapshotRepository)
-        snapshots = snapshot_repo.get_series(asset_id, since=since, until=until)
+        snapshots = snapshot_repo.get_series(
+            asset_id, since=since, until=until,
+            limit=CR.get_hygeia_max_series_points(),
+        )
         return [
             {
                 "collectedAt": snapshot.collected_at,

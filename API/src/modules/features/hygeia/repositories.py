@@ -113,12 +113,24 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
         self, asset_id: int, since: Optional[datetime] = None,
         until: Optional[datetime] = None, limit: int = 1000,
     ) -> List[AssetSnapshot]:
-        """Devuelve la serie temporal de snapshots de un activo, ordenada cronológicamente.
+        """Devuelve los ``limit`` snapshots **más recientes** de un activo, en orden cronológico.
+
+        El recorte se aplica por la cola, no por la cabeza: se ordena de más
+        nuevo a más viejo, se corta a ``limit`` y se reinvierte en memoria. Un
+        ``ORDER BY ... ASC`` con ``LIMIT`` devolvería los puntos más antiguos,
+        que para una gráfica de pulso es justo lo contrario de lo que se pide.
+
+        El eje es ``received_at`` (reloj del servidor), nunca ``collected_at``
+        (reloj del agente): ``check_clock_skew`` solo acota la deriva del
+        agente a una banda de ± unos minutos, y dentro de esa banda un reloj
+        desviado bastaría para desordenar la serie o para anclar la ventana
+        en filas viejas. Los filtros ``since``/``until`` se aplican sobre el
+        mismo campo, para que ventana y orden hablen del mismo reloj.
 
         Args:
             asset_id: Activo cuya serie se consulta.
-            since: Límite inferior opcional de ``collected_at``.
-            until: Límite superior opcional de ``collected_at``.
+            since: Límite inferior opcional de ``received_at``.
+            until: Límite superior opcional de ``received_at``.
             limit: Máximo de puntos a devolver, para no cargar un histórico sin fin.
 
         Returns:
@@ -126,19 +138,26 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
         """
         query = self._session.query(AssetSnapshot).filter(AssetSnapshot.asset_id == asset_id)
         if since is not None:
-            query = query.filter(AssetSnapshot.collected_at >= since)
+            query = query.filter(AssetSnapshot.received_at >= since)
         if until is not None:
-            query = query.filter(AssetSnapshot.collected_at <= until)
-        return query.order_by(AssetSnapshot.collected_at.asc()).limit(limit).all()
+            query = query.filter(AssetSnapshot.received_at <= until)
+
+        rows = query.order_by(AssetSnapshot.received_at.desc()).limit(limit).all()
+        rows.reverse()
+        return rows
 
     def delete_older_than(self, cutoff: datetime) -> int:
         """Elimina snapshots anteriores a ``cutoff`` (job de retención, §7.3).
+
+        Poda por ``received_at``, el mismo eje que ordena la serie: con
+        ``collected_at`` las filas de un agente con el reloj adelantado
+        sobrevivirían a su ventana de retención.
 
         Returns:
             Número de filas eliminadas.
         """
         result = self._session.query(AssetSnapshot).filter(
-            AssetSnapshot.collected_at < cutoff
+            AssetSnapshot.received_at < cutoff
         ).delete(synchronize_session=False)
         return result
 

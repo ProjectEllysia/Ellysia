@@ -178,6 +178,10 @@ class AssetSnapshot(Base):
 
     __table_args__ = (
         Index("ix_snapshot_asset_time", "asset_id", "collected_at"),
+        # La serie temporal se ordena y se poda por ``received_at``; sin este
+        # índice, el ORDER BY ... DESC LIMIT de get_series tendría que ordenar
+        # la partición entera del activo (30 días de heartbeats) en cada carga.
+        Index("ix_snapshot_asset_received", "asset_id", "received_at"),
     )
 
     def to_dict(self) -> dict:

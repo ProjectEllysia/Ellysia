@@ -199,6 +199,7 @@
       "maxProcesses": 20,
       "maxDiskMounts": 64,
       "maxNetInterfaces": 64,
+      "maxSeriesPoints": 1000,
       "minIntervalSec": 5,
       "clockSkewSec": 300,
       "maxAssetsPerUser": 500
