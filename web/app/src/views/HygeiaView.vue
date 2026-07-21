@@ -22,8 +22,11 @@
         <AssetDetail
           :asset="selectedAsset"
           :metrics="store.state.metrics"
+          :metrics-truncated="store.state.metricsTruncated"
           :metrics-loading="store.state.metricsLoading"
           :metrics-error="store.state.metricsError"
+          :latest="store.state.latest"
+          :latest-error="store.state.latestError"
           :anomalies="assetAnomalies"
           @ack="handleAck"
           @resolve="handleResolve"
@@ -147,7 +150,12 @@ let pollId = null
 /** Refresco manual (botón de recargar): sí muestra el estado de carga. */
 async function refreshNow() {
   await store.fetchAssets()
-  if (store.state.selectedId) await store.fetchMetrics(store.state.selectedId)
+  const id = store.state.selectedId
+  if (!id) return
+  await Promise.all([
+    store.fetchMetrics(id),
+    store.fetchLatest(id),
+  ])
 }
 
 /** Refresco periódico: silencioso, para no parpadear cada 15 s. */
@@ -158,6 +166,7 @@ async function poll() {
   if (!id) return
   await Promise.all([
     store.fetchMetrics(id, { silent: true }),
+    store.fetchLatest(id),
     alerts.fetchAlerts({ assetId: id }),
   ])
 }
