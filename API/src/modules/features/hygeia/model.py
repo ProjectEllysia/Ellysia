@@ -20,6 +20,7 @@ Example:
 """
 
 from sqlalchemy import (
+    BigInteger,
     Column,
     DateTime,
     Float,
@@ -48,12 +49,20 @@ class MonitoredAsset(Base):
         id: Clave primaria, autoincremental.
         hostname: Nombre del host tal como lo reporta el agente.
         os: Sistema operativo ("linux" | "windows" | "darwin"), opcional.
+        kernel: Versión de kernel reportada por el agente, opcional. Es
+            identidad del host, no una métrica: se conserva el último valor
+            conocido si un heartbeat concreto no lo trae.
         labels: Etiquetas libres del activo (entorno, rol, ubicación...).
         agent_key_id: Prefijo público de la clave de agente, único e indexado.
         agent_key_hash: Hash Argon2id del secreto de la clave de agente.
         agent_version: Versión del agente instalado, opcional.
         status: Estado de presencia ("pending" | "online" | "stale" | "offline").
         last_seen_at: Instante del último heartbeat recibido.
+        uptime_sec: Segundos que el host llevaba encendido en el último
+            heartbeat. Es estado instantáneo, no identidad: se sobreescribe
+            en cada heartbeat, ``None`` incluido. Para presentarlo conviene
+            derivar el instante de arranque (``last_seen_at - uptime_sec``),
+            que no envejece entre lecturas.
         heartbeat_interval_sec: Intervalo de heartbeat que el agente tiene
             configurado actualmente para este activo. Nace con el valor
             global de config y se actualiza si el agente se auto-ajusta
@@ -80,6 +89,7 @@ class MonitoredAsset(Base):
     id       = Column(Integer, primary_key=True, autoincrement=True)
     hostname = Column(String(255), nullable=False)
     os       = Column(String(64), nullable=True)
+    kernel   = Column(String(128), nullable=True)
     labels   = Column(JSONB, nullable=True)
 
     agent_key_id   = Column(String(32), unique=True, index=True, nullable=False)
@@ -88,6 +98,7 @@ class MonitoredAsset(Base):
 
     status                 = Column(String(16), nullable=False, default="pending")
     last_seen_at           = Column(DateTime, nullable=True)
+    uptime_sec             = Column(Integer, nullable=True)
     heartbeat_interval_sec = Column(Integer, nullable=True)
     breach_counters        = Column(JSONB, nullable=True)
     thresholds             = Column(JSONB, nullable=True)
@@ -115,16 +126,18 @@ class MonitoredAsset(Base):
         con sufijo de zona horaria, igual que en el resto de módulos.
 
         Returns:
-            Diccionario con id, hostname, os, labels, status, lastSeenAt,
-            agentVersion y createdAt.
+            Diccionario con id, hostname, os, kernel, labels, status,
+            lastSeenAt, uptimeSec, agentVersion y createdAt.
         """
         return {
             "id":           self.id,
             "hostname":     self.hostname,
             "os":           self.os,
+            "kernel":       self.kernel,
             "labels":       self.labels or {},
             "status":       self.status,
             "lastSeenAt":   self.last_seen_at,
+            "uptimeSec":    self.uptime_sec,
             "agentVersion": self.agent_version,
             "createdAt":    self.created_at,
         }
@@ -142,8 +155,23 @@ class AssetSnapshot(Base):
     ``metrics`` (JSONB), en lugar de una fila por (métrica, timestamp). El
     agente empuja un payload completo por intervalo, así que una fila por
     payload es el mapeo natural y minimiza volumen de filas y complejidad
-    de escritura. Solo las dos métricas más consultadas se desnormalizan a
-    columnas propias para poder filtrar/ordenar sin abrir el JSONB.
+    de escritura.
+
+    Sobre esa base se desnormalizan a columnas propias las métricas
+    **escalares por snapshot** — un número por heartbeat, que es lo que
+    tiene sentido graficar en el tiempo — para poder servir la serie
+    temporal sin abrir el JSONB ni una sola vez. Las calcula
+    ``services/aggregation.denormalize`` en el momento de la ingesta, de
+    modo que el camino de lectura no necesita conocer la forma del payload
+    del agente. Lo que tiene cardinalidad por entidad (uso por punto de
+    montaje, tráfico por interfaz) o solo tiene sentido "ahora" (uso por
+    núcleo, procesos top) se queda únicamente en ``metrics``.
+
+    Todas las columnas desnormalizadas son nullable y ``NULL`` significa
+    "no reportado", que es distinto de ``0``: un agente de Windows no manda
+    ``loadAvg``, y uno sin interfaces visibles no manda red. Las filas
+    anteriores a la instrumentación de cada columna se quedan a ``NULL`` y
+    el gráfico simplemente empieza la traza donde hay datos.
 
     Attributes:
         id: Clave primaria, autoincremental.
@@ -157,6 +185,12 @@ class AssetSnapshot(Base):
             (ya validado por el schema de ingesta).
         cpu_pct: Porcentaje de uso de CPU, desnormalizado desde ``metrics``.
         mem_pct: Porcentaje de uso de memoria, desnormalizado desde ``metrics``.
+        swap_pct: Porcentaje de swap en uso.
+        load1: Carga media a 1 minuto (``loadAvg[0]``); nulo en Windows.
+        disk_max_pct: Uso del punto de montaje más lleno del host.
+        disk_max_mount: Punto de montaje al que corresponde ``disk_max_pct``.
+        net_rx_bps: Bytes/s recibidos, sumados sobre las interfaces no-loopback.
+        net_tx_bps: Bytes/s enviados, sumados sobre las interfaces no-loopback.
         asset: Activo al que pertenece este snapshot.
     """
 
@@ -171,8 +205,15 @@ class AssetSnapshot(Base):
     received_at  = Column(DateTime, nullable=False, default=utcnow_naive)
 
     metrics = Column(JSONB, nullable=False)
-    cpu_pct = Column(Float, nullable=True)
-    mem_pct = Column(Float, nullable=True)
+
+    cpu_pct        = Column(Float, nullable=True)
+    mem_pct        = Column(Float, nullable=True)
+    swap_pct       = Column(Float, nullable=True)
+    load1          = Column(Float, nullable=True)
+    disk_max_pct   = Column(Float, nullable=True)
+    disk_max_mount = Column(String(256), nullable=True)
+    net_rx_bps     = Column(BigInteger, nullable=True)
+    net_tx_bps     = Column(BigInteger, nullable=True)
 
     asset = relationship("MonitoredAsset", back_populates="snapshots")
 
@@ -186,17 +227,30 @@ class AssetSnapshot(Base):
 
     def to_dict(self) -> dict:
         """
-        Serializa el snapshot para respuestas de API (serie temporal).
+        Serializa el snapshot como punto de la serie temporal.
+
+        Devuelve **solo los escalares desnormalizados**, nunca el JSONB
+        ``metrics``: multiplicado por los cientos de puntos de una serie, el
+        payload completo pesaría órdenes de magnitud más sin aportar nada a
+        un gráfico. Quien necesite el desglose por montaje, interfaz, núcleo
+        o proceso lo pide para un único instante, por el endpoint de últimas
+        métricas.
 
         Returns:
-            Diccionario con collectedAt, receivedAt, cpuPct, memPct y metrics.
+            Diccionario con collectedAt, receivedAt y los escalares del
+            heartbeat, con las claves en camelCase.
         """
         return {
-            "collectedAt": self.collected_at,
-            "receivedAt":  self.received_at,
-            "cpuPct":      self.cpu_pct,
-            "memPct":      self.mem_pct,
-            "metrics":     self.metrics,
+            "collectedAt":  self.collected_at,
+            "receivedAt":   self.received_at,
+            "cpuPct":       self.cpu_pct,
+            "memPct":       self.mem_pct,
+            "swapPct":      self.swap_pct,
+            "load1":        self.load1,
+            "diskMaxPct":   self.disk_max_pct,
+            "diskMaxMount": self.disk_max_mount,
+            "netRxBps":     self.net_rx_bps,
+            "netTxBps":     self.net_tx_bps,
         }
 
     def __repr__(self) -> str:

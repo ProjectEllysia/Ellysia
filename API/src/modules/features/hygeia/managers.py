@@ -31,7 +31,7 @@ from .exceptions import (
 )
 from .model import Anomaly, MonitoredAsset, AssetSnapshot
 from .repositories import AnomalyRepository, AssetSnapshotRepository, MonitoredAssetRepository
-from .services import check_clock_skew, evaluate, generate_agent_key
+from .services import check_clock_skew, denormalize, evaluate, generate_agent_key
 
 logger = logging.getLogger(__name__)
 
@@ -94,19 +94,62 @@ class HygeiaAssetManager:
 
     def get_metrics(
         self, asset_id: int, since: Optional[object] = None, until: Optional[object] = None,
-    ) -> list[dict]:
+    ) -> dict:
         """
-        Devuelve la serie temporal de métricas (CPU/memoria) de un activo del
-        usuario, para el gráfico de la SPA (§5, Fase 5).
+        Devuelve la serie temporal de métricas de un activo del usuario, para
+        el gráfico de la SPA (§5, Fase 5).
 
-        Solo se devuelven los campos ya desnormalizados (``cpuPct``/``memPct``)
-        por punto — nunca el JSONB completo de cada snapshot, que no aporta
-        nada a un gráfico y multiplicaría el peso de la respuesta sin motivo.
+        Solo se devuelven los escalares ya desnormalizados por punto — nunca
+        el JSONB completo de cada snapshot, que multiplicaría el peso de la
+        respuesta por cada punto de la serie sin aportar nada a un gráfico.
+        Lo que tiene cardinalidad por entidad (disco por montaje, red por
+        interfaz) o solo tiene sentido "ahora" (procesos, núcleos) se sirve
+        por ``get_latest_metrics``.
 
         Args:
             asset_id: Activo cuya serie se consulta.
             since: Límite inferior opcional de ``receivedAt``.
             until: Límite superior opcional de ``receivedAt``.
+
+        Returns:
+            Diccionario con ``snapshots`` y ``truncated``. Este último avisa
+            de que el histórico da para más puntos de los devueltos, para que
+            la SPA pueda rotular la ventana con honestidad en vez de
+            presentar un recorte silencioso como si fuera la serie entera.
+
+        Raises:
+            AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
+        """
+        asset_repo = build_repository(MonitoredAssetRepository)
+        self._get_owned_asset(asset_repo, asset_id, self.user.id)
+
+        limit = CR.get_hygeia_max_series_points()
+        snapshot_repo = build_repository(AssetSnapshotRepository)
+        snapshots = snapshot_repo.get_series(
+            asset_id, since=since, until=until, limit=limit,
+        )
+        return {
+            "snapshots": [snapshot.to_dict() for snapshot in snapshots],
+            "truncated": len(snapshots) == limit,
+        }
+
+    def get_latest_metrics(self, asset_id: int) -> dict:
+        """
+        Devuelve el último heartbeat completo de un activo del usuario.
+
+        A diferencia de la serie temporal, aquí sí viaja el JSONB íntegro:
+        es un único punto, así que el desglose por punto de montaje, por
+        interfaz de red, por núcleo y la lista de procesos caben sin
+        penalizar la respuesta.
+
+        Un activo dado de alta que aún no ha reportado devuelve los tres
+        campos a ``None``. No es un 404: el activo existe y "todavía no ha
+        latido" es un estado suyo legítimo (``status == "pending"``); un 404
+        sería indistinguible del de un activo ajeno y haría que el sondeo de
+        la SPA pintase un error cada pocos segundos sobre algo normal.
+
+        Args:
+            asset_id: Activo cuyas últimas métricas se consultan.
 
         Raises:
             AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
@@ -115,18 +158,15 @@ class HygeiaAssetManager:
         self._get_owned_asset(asset_repo, asset_id, self.user.id)
 
         snapshot_repo = build_repository(AssetSnapshotRepository)
-        snapshots = snapshot_repo.get_series(
-            asset_id, since=since, until=until,
-            limit=CR.get_hygeia_max_series_points(),
-        )
-        return [
-            {
-                "collectedAt": snapshot.collected_at,
-                "cpuPct": snapshot.cpu_pct,
-                "memPct": snapshot.mem_pct,
-            }
-            for snapshot in snapshots
-        ]
+        snapshot = snapshot_repo.get_latest(asset_id)
+        if snapshot is None:
+            return {"collectedAt": None, "receivedAt": None, "metrics": None}
+
+        return {
+            "collectedAt": snapshot.collected_at,
+            "receivedAt":  snapshot.received_at,
+            "metrics":     snapshot.metrics,
+        }
 
     def get_asset(self, asset_id: int) -> dict:
         """
@@ -265,18 +305,25 @@ class HygeiaIngestManager:
             asset.status = "online"
             asset.agent_version = payload["agentVersion"]
             asset.os = payload["host"]["os"] or asset.os
+            # El kernel es identidad del host: si un heartbeat no lo trae, se
+            # conserva el último conocido. El uptime es estado instantáneo, así
+            # que se sobreescribe siempre — un None ahí también es información.
+            asset.kernel = payload["host"]["kernel"] or asset.kernel
+            asset.uptime_sec = payload["host"]["uptimeSec"]
             asset_repo.update(asset)
 
             self._resolve_host_down_if_open(uow, asset.id)
 
             metrics = payload["metrics"]
+            # La forma del payload la conocen el schema de ingesta y
+            # ``denormalize``, y nadie más: el camino de lectura sirve la serie
+            # temporal desde columnas y no abre el JSONB jamás.
             snapshot = AssetSnapshot(
                 asset_id=asset.id,
                 collected_at=payload["collectedAt"],
                 received_at=now,
                 metrics=metrics,
-                cpu_pct=metrics.get("cpu", {}).get("usagePct"),
-                mem_pct=metrics.get("memory", {}).get("usagePct"),
+                **denormalize(metrics),
             )
             AssetSnapshotRepository(uow).save(snapshot)
 

@@ -23,9 +23,11 @@ class AssetSchema(Schema):
     id = fields.Integer()
     hostname = fields.String()
     os = fields.String(allow_none=True)
+    kernel = fields.String(allow_none=True)
     labels = fields.Dict()
     status = fields.String()
     lastSeenAt = UTCDateTime(allow_none=True)
+    uptimeSec = fields.Integer(allow_none=True)
     agentVersion = fields.String(allow_none=True)
     createdAt = UTCDateTime()
 
@@ -253,12 +255,48 @@ class AssetMetricsQuerySchema(Schema):
 
 
 class AssetSnapshotPointSchema(Schema):
-    """Un punto de la serie temporal: solo lo desnormalizado, sin el JSONB completo."""
+    """
+    Un punto de la serie temporal: solo lo desnormalizado, sin el JSONB completo.
+
+    Todo lo que no sea el instante es nullable: ``NULL`` significa "el agente
+    no reportó esto" (Windows no manda ``load1``, un host sin interfaces
+    visibles no manda red), y las filas anteriores a la instrumentación de
+    cada columna también llegan vacías. El consumidor debe tratar cada campo
+    como opcional y omitir la traza en lugar de dibujar un cero.
+    """
     collectedAt = UTCDateTime()
+    receivedAt = UTCDateTime()
     cpuPct = fields.Float(allow_none=True)
     memPct = fields.Float(allow_none=True)
+    swapPct = fields.Float(allow_none=True)
+    load1 = fields.Float(allow_none=True)
+    diskMaxPct = fields.Float(allow_none=True)
+    diskMaxMount = fields.String(allow_none=True)
+    netRxBps = fields.Integer(allow_none=True)
+    netTxBps = fields.Integer(allow_none=True)
 
 
 class AssetMetricsResponseSchema(Schema):
     """Serie temporal de métricas de un activo, para el gráfico de la SPA."""
     snapshots = fields.List(fields.Nested(AssetSnapshotPointSchema))
+    truncated = fields.Boolean(
+        metadata={"description": "La serie se recortó al máximo de puntos: "
+                                 "hay más histórico del que se devuelve."},
+    )
+
+
+class AssetLatestResponseSchema(Schema):
+    """
+    Últimas métricas completas de un activo — lo que la serie temporal no cabe.
+
+    Aquí viaja el payload íntegro del último heartbeat: uso por punto de
+    montaje, tráfico por interfaz, procesos top y uso por núcleo. Reutiliza
+    ``MetricsSchema``, el mismo schema con el que se validó al entrar, en
+    dirección de volcado: un solo contrato, documentado una vez.
+
+    Los tres campos son nullable porque un activo recién dado de alta existe
+    pero aún no ha reportado — un estado legítimo, no un error.
+    """
+    collectedAt = UTCDateTime(allow_none=True)
+    receivedAt = UTCDateTime(allow_none=True)
+    metrics = fields.Nested(MetricsSchema, allow_none=True)

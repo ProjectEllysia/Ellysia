@@ -146,6 +146,20 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
         rows.reverse()
         return rows
 
+    def get_latest(self, asset_id: int) -> Optional[AssetSnapshot]:
+        """Devuelve el último snapshot recibido de un activo, o ``None`` si nunca reportó.
+
+        Ordena por ``received_at`` como ``get_series``, y por el mismo motivo:
+        con ``collected_at``, un agente con el reloj adelantado se declararía
+        "el más reciente" indefinidamente.
+        """
+        return (
+            self._session.query(AssetSnapshot)
+            .filter(AssetSnapshot.asset_id == asset_id)
+            .order_by(AssetSnapshot.received_at.desc())
+            .first()
+        )
+
     def delete_older_than(self, cutoff: datetime) -> int:
         """Elimina snapshots anteriores a ``cutoff`` (job de retención, §7.3).
 
