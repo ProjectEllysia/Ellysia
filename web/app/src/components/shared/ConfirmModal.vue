@@ -8,10 +8,11 @@
             <button class="close-btn" @click="$emit('cancel')">&times;</button>
           </div>
           <div class="modal-body">
+            <p v-if="emphasis" class="emphasis">{{ emphasis }}</p>
             <p class="message">{{ message }}</p>
             <div class="modal-footer">
-              <button type="button" class="btn-secondary" @click="$emit('cancel')">Cancelar</button>
-              <button type="button" :class="danger ? 'btn-danger' : 'btn-primary'" @click="$emit('confirm')">
+              <button type="button" :class="swapEmphasis ? (danger ? 'btn-danger' : 'btn-primary') : 'btn-secondary'" @click="$emit('cancel')">Cancelar</button>
+              <button type="button" :class="swapEmphasis ? 'btn-secondary' : (danger ? 'btn-danger' : 'btn-primary')" @click="$emit('confirm')">
                 {{ confirmLabel }}
               </button>
             </div>
@@ -34,6 +35,8 @@ defineProps({
   message: { type: String, required: true },
   confirmLabel: { type: String, default: 'Confirmar' },
   danger: { type: Boolean, default: false },
+  swapEmphasis: { type: Boolean, default: false },
+  emphasis: { type: String, default: '' },
 })
 defineEmits(['confirm', 'cancel'])
 </script>
@@ -45,7 +48,8 @@ defineEmits(['confirm', 'cancel'])
 .modal-header h3 { margin: 0; font-size: var(--fs-xl); color: var(--text); }
 .close-btn { background: none; border: none; color: var(--text-muted); font-size: var(--fs-xl); cursor: pointer; }
 .modal-body { padding: 1rem 1.1rem; }
-.message { font-size: var(--fs-lg); color: var(--text-dim); margin: 0 0 0.8rem; }
+.emphasis { font-size: var(--fs-xl); font-weight: 700; color: var(--danger); margin: 0 0 0.4rem; }
+.message { font-size: var(--fs-lg); color: var(--text-dim); margin: 0 0 0.8rem; text-align: justify; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 0.75rem 0 0; }
 .btn-secondary, .btn-primary, .btn-danger { padding: 0.45rem 0.9rem; border-radius: 6px; font-size: var(--fs-lg); font-weight: 500; cursor: pointer; transition: all 0.2s; }
 .btn-secondary { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim); }

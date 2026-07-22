@@ -31,6 +31,7 @@ from .schemas import (
     AnomalySchema,
     AssetCreateRequestSchema,
     AssetCreatedResponseSchema,
+    AssetLatestResponseSchema,
     AssetListResponseSchema,
     AssetMetricsQuerySchema,
     AssetMetricsResponseSchema,
@@ -78,7 +79,7 @@ def create_asset(data):
 @hygeia_blp.response(200, AssetListResponseSchema, description="Assets del usuario")
 @hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@limiter.limit("300 per hour")
+@limiter.limit("600 per hour")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.HYGEIA_READ])
 @handle_exceptions(default_exception=HygeiaError, logger=logger)
@@ -94,7 +95,7 @@ def list_assets():
 @hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @hygeia_blp.alt_response(404, schema=ErrorSchema, description="Asset not found")
-@limiter.limit("300 per hour")
+@limiter.limit("600 per hour")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.HYGEIA_READ])
 @handle_exceptions(default_exception=AssetNotFoundError, logger=logger)
@@ -111,15 +112,31 @@ def get_asset(asset_id):
 @hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @hygeia_blp.alt_response(404, schema=ErrorSchema, description="Asset not found")
-@limiter.limit("300 per hour")
+@limiter.limit("600 per hour")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.HYGEIA_READ])
 @handle_exceptions(default_exception=AssetNotFoundError, logger=logger)
 def get_asset_metrics(args, asset_id):
-    """Obtener la serie temporal de métricas (CPU/memoria) de un activo, para el gráfico de la SPA"""
+    """Obtener la serie temporal de métricas escalares de un activo, para el gráfico de la SPA"""
     user = get_current_user()
     mgr = HygeiaAssetManager(user)
-    return {"snapshots": mgr.get_metrics(asset_id, since=args["since"], until=args["until"])}
+    return mgr.get_metrics(asset_id, since=args["since"], until=args["until"])
+
+
+@hygeia_blp.get("/assets/<int:asset_id>/metrics/latest")
+@hygeia_blp.response(200, AssetLatestResponseSchema, description="Últimas métricas completas del activo")
+@hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@hygeia_blp.alt_response(404, schema=ErrorSchema, description="Asset not found")
+@limiter.limit("600 per hour")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.HYGEIA_READ])
+@handle_exceptions(default_exception=AssetNotFoundError, logger=logger)
+def get_asset_latest_metrics(asset_id):
+    """Obtener el último heartbeat completo de un activo (disco, red, procesos y núcleos)"""
+    user = get_current_user()
+    mgr = HygeiaAssetManager(user)
+    return mgr.get_latest_metrics(asset_id)
 
 
 @hygeia_blp.delete("/assets/<int:asset_id>")
@@ -163,7 +180,7 @@ def rotate_key(asset_id):
 @hygeia_blp.response(200, AnomalyListResponseSchema, description="Anomalías de los activos del usuario")
 @hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@limiter.limit("300 per hour")
+@limiter.limit("600 per hour")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.HYGEIA_READ])
 @handle_exceptions(default_exception=HygeiaError, logger=logger)

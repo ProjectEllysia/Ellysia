@@ -396,7 +396,11 @@ evita egress; ASN/reputación requiere feed externo.
 
 ### `[ ]` I4 · Integración de buzón (IMAP/Graph/Gmail) — **C/L**
 Módulo de ingesta que monitoriza una carpeta "sospechosos" y crea análisis
-automáticamente. Credenciales OAuth por tenant. Diseño aparte.
+automáticamente. Credenciales OAuth por tenant. **Diseño aparte:**
+`plans/feature/iris/iris-mailbox-connector.md`, que además incluye como fase
+previa y bloqueante una auditoría completa del motor (destaca un bypass
+verificado de las 5 reglas de autenticación por `Authentication-Results`
+duplicada, y desbloquea D6 de paso).
 
 ### `[ ]` I5 · Extensión de navegador / plugin — **C/L**
 Proyecto cliente separado que reenvía a la API. Fuera del repo actual.

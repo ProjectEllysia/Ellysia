@@ -16,7 +16,8 @@ export const useHygeiaStore = defineStore('hygeia', () => {
   const state = reactive({
     assets: [], loading: false, error: null,
     selectedId: null,
-    metrics: [], metricsLoading: false, metricsError: null,
+    metrics: [], metricsTruncated: false, metricsLoading: false, metricsError: null,
+    latest: null, latestError: null,
     lastAgentKey: null,
   })
 
@@ -77,16 +78,19 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     } catch { state.error = 'No se pudo conectar con la API.'; return null }
   }
 
-  /** Selecciona un activo para ver su detalle y carga su serie de métricas. */
+  /** Selecciona un activo para ver su detalle y carga sus métricas. */
   function selectAsset(id) {
     state.selectedId = id
     state.metrics = []
+    state.metricsTruncated = false
     state.metricsError = null
-    if (id) fetchMetrics(id)
+    state.latest = null
+    state.latestError = null
+    if (id) { fetchMetrics(id); fetchLatest(id) }
   }
 
   /**
-   * Carga la serie temporal de CPU/memoria del activo dado.
+   * Carga la serie temporal de métricas escalares del activo dado.
    *
    * @param {number} id - Id del activo.
    * @param {object} [opts]
@@ -96,12 +100,39 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     if (!silent) state.metricsLoading = true
     try {
       const res = await apiFetch(`/hygeia/assets/${id}/metrics`)
+      // La selección puede haber cambiado mientras la petición volaba: sin
+      // esta guarda, la respuesta del activo anterior pisaría la del actual.
+      if (state.selectedId !== id) return
       if (!res?.ok) { state.metricsError = await apiError(res, 'No se pudieron cargar las métricas.'); return }
       const data = await res.json()
       state.metrics = data.snapshots ?? []
+      state.metricsTruncated = data.truncated ?? false
       state.metricsError = null
-    } catch { state.metricsError = 'No se pudo conectar con la API.' }
+    } catch { if (state.selectedId === id) state.metricsError = 'No se pudo conectar con la API.' }
     finally { if (!silent) state.metricsLoading = false }
+  }
+
+  /**
+   * Carga el último heartbeat completo del activo: disco por montaje, red por
+   * interfaz, procesos y uso por núcleo — lo que no cabe en la serie temporal.
+   *
+   * Un activo que aún no ha reportado responde 200 con `metrics: null`, que no
+   * es un error: se refleja como ausencia de datos, no como fallo.
+   *
+   * No tiene variante `silent` como `fetchMetrics`: es un único punto, se
+   * pinta en secciones que ya existen y su llegada no hace parpadear nada, así
+   * que nunca ha necesitado levantar un flag de carga propio.
+   *
+   * @param {number} id - Id del activo.
+   */
+  async function fetchLatest(id) {
+    try {
+      const res = await apiFetch(`/hygeia/assets/${id}/metrics/latest`)
+      if (state.selectedId !== id) return
+      if (!res?.ok) { state.latestError = await apiError(res, 'No se pudo cargar el último heartbeat.'); return }
+      state.latest = await res.json()
+      state.latestError = null
+    } catch { if (state.selectedId === id) state.latestError = 'No se pudo conectar con la API.' }
   }
 
   /** Descarta la clave de agente mostrada — llamar al cerrar el modal de una sola vez. */
@@ -112,7 +143,8 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     Object.assign(state, {
       assets: [], loading: false, error: null,
       selectedId: null,
-      metrics: [], metricsLoading: false, metricsError: null,
+      metrics: [], metricsTruncated: false, metricsLoading: false, metricsError: null,
+      latest: null, latestError: null,
       lastAgentKey: null,
     })
   }
@@ -120,7 +152,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
   return {
     state,
     fetchAssets, createAsset, deleteAsset, rotateKey,
-    selectAsset, fetchMetrics, clearAgentKey,
+    selectAsset, fetchMetrics, fetchLatest, clearAgentKey,
     $reset,
   }
 })

@@ -19,6 +19,14 @@
         <dt>Sistema</dt>
         <dd>{{ asset.os || 'Desconocido' }}</dd>
       </div>
+      <div v-if="asset.kernel" class="meta-item">
+        <dt>Kernel</dt>
+        <dd>{{ asset.kernel }}</dd>
+      </div>
+      <div v-if="bootedAgo" class="meta-item">
+        <dt>Arrancado</dt>
+        <dd>{{ bootedAgo }}</dd>
+      </div>
       <div class="meta-item">
         <dt>Agente</dt>
         <dd>{{ asset.agentVersion || 'Sin reportar' }}</dd>
@@ -33,8 +41,114 @@
       <h4 class="section-title">Constantes</h4>
       <p v-if="metricsLoading" class="state-msg">Cargando métricas…</p>
       <p v-else-if="metricsError" class="state-msg state-msg--error">{{ metricsError }}</p>
-      <MetricsChart v-else :snapshots="metrics" />
+      <MetricsChart v-else :snapshots="metrics" :truncated="metricsTruncated" />
     </section>
+
+    <p v-if="latestError" class="state-msg state-msg--error">{{ latestError }}</p>
+
+    <!-- Todo lo que sigue es el último heartbeat: tiene cardinalidad por
+         entidad (montaje, interfaz, proceso, núcleo) y solo tiene sentido
+         "ahora", así que no viaja en la serie temporal. -->
+    <template v-if="m">
+      <section v-if="memory" class="section">
+        <h4 class="section-title">Memoria</h4>
+        <dl class="readout">
+          <div class="readout-item">
+            <dt>En uso</dt>
+            <dd>{{ used.text }}<small class="unit--wide">{{ used.unit }}</small></dd>
+          </div>
+          <div class="readout-item">
+            <dt>Total</dt>
+            <dd>{{ totalMem.text }}<small class="unit--wide">{{ totalMem.unit }}</small></dd>
+          </div>
+          <div v-if="memory.swapUsedPct !== null && memory.swapUsedPct !== undefined" class="readout-item">
+            <dt>Swap</dt>
+            <dd>{{ fmtPct(memory.swapUsedPct) }}<small>%</small></dd>
+          </div>
+        </dl>
+      </section>
+
+      <section v-if="disks.length" class="section">
+        <h4 class="section-title">Almacenamiento</h4>
+        <ul class="rows">
+          <li v-for="d in disks" :key="d.mount" class="row row--disk">
+            <span class="row-name" :title="d.mount">{{ d.mount }}</span>
+            <span class="bar" :class="{ 'bar--hot': d.usagePct >= 85 }">
+              <span class="bar-fill" :style="{ width: `${Math.min(100, d.usagePct)}%` }"></span>
+            </span>
+            <span class="row-value">{{ fmtPct(d.usagePct) }}%</span>
+            <span class="row-note">{{ free(d).text }} {{ free(d).unit }} libres</span>
+          </li>
+        </ul>
+      </section>
+
+      <section v-if="nets.length" class="section">
+        <h4 class="section-title">
+          Red
+          <span class="hint">el gráfico suma solo las no-loopback</span>
+        </h4>
+        <ul class="rows">
+          <li v-for="n in nets" :key="n.iface" class="row row--net">
+            <span class="row-name" :title="n.iface">{{ n.iface }}</span>
+            <span class="row-value">↓ {{ rate(n.rxBytesPerSec).text }} <small>{{ rate(n.rxBytesPerSec).unit }}</small></span>
+            <span class="row-value">↑ {{ rate(n.txBytesPerSec).text }} <small>{{ rate(n.txBytesPerSec).unit }}</small></span>
+            <span v-if="errorsOf(n)" class="row-note row-note--bad">{{ errorsOf(n) }} err</span>
+          </li>
+        </ul>
+      </section>
+
+      <section v-if="cores.length" class="section">
+        <h4 class="section-title">
+          Núcleos
+          <span class="count">{{ coreCount }}</span>
+        </h4>
+        <div class="cores">
+          <span
+            v-for="(pct, i) in cores"
+            :key="i"
+            class="core"
+            :class="{ 'core--hot': pct >= 85 }"
+            :title="`Núcleo ${i}: ${fmtPct(pct)} %`"
+          >
+            <span class="core-fill" :style="{ height: `${Math.min(100, pct)}%` }"></span>
+          </span>
+        </div>
+        <p v-if="hiddenCores" class="hint hint--block">+{{ hiddenCores }} núcleos más sin representar</p>
+      </section>
+
+      <section v-if="topCpu.length || topMem.length" class="section">
+        <h4 class="section-title">
+          Procesos
+          <span v-if="procTotal !== null" class="count">{{ procTotal }}</span>
+        </h4>
+
+        <div class="proc-cols">
+          <div v-if="topCpu.length" class="proc-col">
+            <h5 class="proc-head">Por CPU</h5>
+            <TransitionGroup tag="ul" name="proc-row" class="rows">
+              <li v-for="p in topCpu" :key="`c${p.pid}`" class="row row--proc">
+                <span class="row-name" :title="p.name">{{ p.name }}</span>
+                <span class="row-pid">{{ p.pid }}</span>
+                <span class="row-value">{{ fmtPct(p.cpuPct) }}%</span>
+              </li>
+            </TransitionGroup>
+          </div>
+
+          <div v-if="topMem.length" class="proc-col">
+            <h5 class="proc-head">Por memoria</h5>
+            <TransitionGroup tag="ul" name="proc-row" class="rows">
+              <li v-for="p in topMem" :key="`m${p.pid}`" class="row row--proc">
+                <span class="row-name" :title="p.name">{{ p.name }}</span>
+                <span class="row-pid">{{ p.pid }}</span>
+                <span class="row-value">{{ fmtPct(p.memPct) }}%</span>
+              </li>
+            </TransitionGroup>
+          </div>
+        </div>
+
+        <p v-if="zombies" class="hint hint--block">{{ zombies }} en estado zombi</p>
+      </section>
+    </template>
 
     <section class="section">
       <h4 class="section-title">
@@ -69,20 +183,84 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import MetricsChart from '@/components/hygeia/MetricsChart.vue'
 import { useUtils } from '@/composables/useUtils'
-import { timeAgo } from './format'
+import { fmtBytes, fmtPct, fmtRate, timeAgo } from './format'
 
-defineProps({
+const props = defineProps({
   asset: { type: Object, default: null },
   metrics: { type: Array, default: () => [] },
+  metricsTruncated: { type: Boolean, default: false },
   metricsLoading: { type: Boolean, default: false },
   metricsError: { type: String, default: null },
+  // Último heartbeat completo: { collectedAt, receivedAt, metrics }. `metrics`
+  // llega a null mientras el activo no haya reportado nunca.
+  latest: { type: Object, default: null },
+  latestError: { type: String, default: null },
   anomalies: { type: Array, default: () => [] },
 })
 defineEmits(['ack', 'resolve'])
 
 const { formatDate } = useUtils()
+
+/**
+ * Un host con muchos núcleos re-renderizaría cientos de barras cada 15 s. El
+ * contrato de ingesta admite hasta 1024, así que se corta y se dice cuántos
+ * quedan fuera en vez de pintarlos todos.
+ */
+const MAX_CORES = 128
+
+/** Bloque `metrics` del último heartbeat, o null si el activo no ha reportado. */
+const m = computed(() => props.latest?.metrics ?? null)
+
+const memory = computed(() => m.value?.memory ?? null)
+const used = computed(() => fmtBytes(memory.value?.usedBytes))
+const totalMem = computed(() => fmtBytes(memory.value?.totalBytes))
+
+/** Montajes de más lleno a más vacío: lo que está a punto de reventar, arriba. */
+const disks = computed(() =>
+  [...(m.value?.disk ?? [])].sort((a, b) => (b.usagePct ?? 0) - (a.usagePct ?? 0)),
+)
+
+/**
+ * Interfaces tal como las reporta el agente, loopback incluida.
+ *
+ * El gráfico suma solo las no-loopback, así que aquí aparece una fila que no
+ * cuenta para esa traza — de ahí la nota junto al título. Es intencionado:
+ * ver el desglose completo es justamente para lo que sirve esta tabla.
+ */
+const nets = computed(() => m.value?.network ?? [])
+
+const cores = computed(() => (m.value?.cpu?.perCorePct ?? []).slice(0, MAX_CORES))
+const coreCount = computed(() => (m.value?.cpu?.perCorePct ?? []).length)
+const hiddenCores = computed(() => Math.max(0, coreCount.value - MAX_CORES))
+
+const topCpu = computed(() => m.value?.processes?.topCpu ?? [])
+const topMem = computed(() => m.value?.processes?.topMem ?? [])
+const procTotal = computed(() => m.value?.processes?.total ?? null)
+const zombies = computed(() => m.value?.processes?.zombie ?? 0)
+
+/**
+ * Antigüedad del arranque del host.
+ *
+ * Se deriva de `lastSeenAt - uptimeSec` en lugar de mostrar el uptime crudo:
+ * el uptime es un valor instantáneo que envejece entre sondeos, mientras que
+ * el instante de arranque es fijo y `timeAgo` lo mantiene correcto solo.
+ */
+const bootedAgo = computed(() => {
+  const uptime = props.asset?.uptimeSec
+  const seen = props.asset?.lastSeenAt
+  if (uptime === null || uptime === undefined || !seen) return null
+
+  const bootedAt = new Date(seen).getTime() - uptime * 1000
+  if (Number.isNaN(bootedAt)) return null
+  return timeAgo(new Date(bootedAt).toISOString())
+})
+
+function free(disk) { return fmtBytes(disk.freeBytes) }
+function rate(value) { return fmtRate(value) }
+function errorsOf(iface) { return (iface.errIn ?? 0) + (iface.errOut ?? 0) }
 
 const STATUS_LABELS = { pending: 'Pendiente', online: 'En línea', stale: 'Inestable', offline: 'Caído' }
 function statusLabel(status) { return STATUS_LABELS[status] || status }
@@ -152,6 +330,112 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 
 .state-msg { margin: 0; padding: 1.4rem 1rem; text-align: center; color: var(--text-muted); font-size: var(--fs-body); }
 .state-msg--error { color: var(--danger); }
+
+.hint { font-size: var(--fs-xs); font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+.hint--block { margin: 0.5rem 0 0; }
+
+/* ── Lecturas puntuales (memoria) ── */
+.readout { display: flex; flex-wrap: wrap; gap: 0 1.8rem; margin: 0; }
+.readout-item { display: flex; flex-direction: column; gap: 0.15rem; }
+.readout dt {
+  font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--text-muted);
+}
+.readout dd {
+  margin: 0;
+  font-family: var(--font-mono); font-size: var(--fs-lg); font-weight: 500;
+  color: var(--text); font-variant-numeric: tabular-nums;
+}
+.readout dd small { margin-left: 0.15em; font-size: 0.7em; color: var(--text-muted); }
+/* Las unidades de varias letras necesitan más aire que un "%". */
+.readout dd small.unit--wide { margin-left: 0.35em; }
+
+/* ── Filas por entidad (montajes, interfaces, procesos) ── */
+.rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.row {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.3rem 0.5rem; border-radius: 6px;
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+}
+.row-name {
+  flex: 1 1 0; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); color: var(--text-dim);
+}
+.row-value {
+  flex-shrink: 0;
+  font-family: var(--font-mono); color: var(--text); font-variant-numeric: tabular-nums;
+}
+.row-value small { color: var(--text-muted); }
+.row-pid { flex-shrink: 0; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); }
+.row-note { flex-shrink: 0; font-size: var(--fs-xs); color: var(--text-muted); }
+.row-note--bad { color: var(--danger); }
+
+.row--disk .row-name { flex: 0 1 8rem; }
+.row--net .row-value { min-width: 5.5rem; text-align: right; }
+
+.bar {
+  flex: 1 1 0; min-width: 3rem; height: 6px;
+  border-radius: 999px; background: var(--surface-3); overflow: hidden;
+}
+.bar-fill {
+  display: block; height: 100%; background: var(--accent); border-radius: inherit;
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.3s ease;
+}
+.bar--hot .bar-fill { background: var(--danger); }
+
+/* ── Núcleos ──
+   Antes tan pequeños (8×26px) que la sección quedaba enana junto al resto de
+   monitores; se agrandan a un tamaño comparable a las barras de disco. El
+   relleno transiciona en vez de saltar entre heartbeats. */
+.cores { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 4px; }
+.core {
+  display: flex; align-items: flex-end;
+  width: 14px; height: 52px;
+  border-radius: 3px; background: var(--surface-3); overflow: hidden;
+}
+.core-fill {
+  width: 100%; background: var(--accent-bright); border-radius: inherit;
+  transition: height 0.5s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.3s ease;
+}
+.core--hot .core-fill { background: var(--danger); }
+
+/* ── Procesos ── */
+.proc-cols { display: flex; flex-wrap: wrap; gap: 0.9rem; }
+.proc-col { flex: 1 1 14rem; min-width: 0; }
+.proc-head {
+  margin: 0 0 0.35rem;
+  font-size: var(--fs-xs); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted);
+}
+
+/* Las cards de proceso cambian de orden en cada heartbeat según quién
+   consuma más CPU/memoria; TransitionGroup anima ese reordenamiento (FLIP)
+   en vez de que las filas salten de sitio de golpe.
+   A propósito NO se usa `position: absolute` en `-leave-active` (el truco
+   habitual para que una fila saliente no desplace al resto durante su
+   fundido): con esa variante, al forzar reordenamientos rápidos con un
+   mismo pid saliendo y volviendo a entrar al top-N, aparecían filas
+   atascadas con opacidad 0 que nunca se retiraban del DOM. No se pudo
+   aislar con certeza si la causa era la combinación de `transform`
+   compartido entre `-move` y `-leave-active`, o una limitación del propio
+   entorno de verificación (el pintado no llegó a confirmarse ahí). Se
+   mantiene esta versión, más simple y sin ese riesgo, por precaución: es
+   además la receta estándar de Vue para listas. El coste es un salto de
+   layout mínimo mientras una fila se desvanece, imperceptible con filas de
+   una sola línea. */
+.proc-row-move {
+  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.proc-row-enter-active,
+.proc-row-leave-active {
+  transition: opacity 0.3s ease;
+}
+.proc-row-enter-from,
+.proc-row-leave-to {
+  opacity: 0;
+}
 
 /* ── Anomalías ── */
 .anomalies { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
