@@ -590,7 +590,11 @@ def extract_display_name(from_header: str) -> str:
 
 
 def url_host(url: str) -> Optional[str]:
-    """Hostname (lowercase, sin credenciales ni puerto) de una URL, o None."""
+    """Hostname (lowercase, sin credenciales ni puerto) de una URL, o None.
+
+    Soporta netloc IPv6 entre corchetes (``[::1]:8080``) — un ``.split(":")``
+    ingenuo lo destroza y deja solo ``"["`` (N4).
+    """
     try:
         parsed = urlparse(url)
     except ValueError:
@@ -598,7 +602,30 @@ def url_host(url: str) -> Optional[str]:
     netloc = parsed.netloc
     if not netloc:
         return None
-    return netloc.split("@")[-1].split(":")[0].lower() or None
+    netloc = netloc.split("@")[-1]
+    if netloc.startswith("["):
+        return netloc.split("]")[0].lstrip("[").lower() or None
+    return netloc.split(":")[0].lower() or None
+
+
+# Host numérico decimal (``http://2130706433/``) — rango completo de un IPv4.
+_DECIMAL_IP_HOST_RE = re.compile(r"^\d{7,10}$")
+# Host numérico hex (``http://0x7f000001/``).
+_HEX_IP_HOST_RE = re.compile(r"^0x[0-9a-f]{1,8}$", re.IGNORECASE)
+
+
+def is_obfuscated_ip_host(host: str) -> bool:
+    """True cuando *host* es un literal IPv4 disfrazado de decimal u hex (N4).
+
+    ``_URL_IP_HOST_RE`` (dotted-quad) no detecta estas formas — un enlace de
+    phishing puede usarlas para evadir el chequeo de "IP literal" a simple vista.
+    """
+    if _DECIMAL_IP_HOST_RE.match(host):
+        try:
+            return 0 <= int(host) <= 0xFFFFFFFF
+        except ValueError:
+            return False
+    return bool(_HEX_IP_HOST_RE.match(host))
 
 
 def strip_html(html: str) -> str:
@@ -768,7 +795,7 @@ def analyze_url(href: str, sender_domain: Optional[str] = None,
         findings.append({"type": "punycode", "href": href})
         score -= 8
 
-    if _URL_IP_HOST_RE.match(host):
+    if _URL_IP_HOST_RE.match(host) or is_obfuscated_ip_host(host):
         findings.append({"type": "ip_literal", "href": href})
         score -= 6
 
