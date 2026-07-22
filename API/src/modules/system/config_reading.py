@@ -899,6 +899,15 @@ def get_iris_min_headers() -> int:
     return _cfg("iris.min_headers", 2, int)
 
 @_lazy_load
+def get_iris_max_message_bytes() -> int:
+    # C4: AnalyzeRequestSchema had no upper bound at all — a multi-MB .eml
+    # (attachments included) was accepted whole into a Text column and
+    # re-parsed, base64 decoding included, on every subsequent read
+    # (get_analysis_results/path/iocs). 10 MB comfortably covers a real
+    # email with attachments while capping the re-parse cost.
+    return _cfg("iris.maxMessageBytes", 10 * 1024 * 1024, int)
+
+@_lazy_load
 def get_iris_data(key: str):
     """Dataset de detección de Iris desde ``iris.data.<key>`` (o None si falta).
 
