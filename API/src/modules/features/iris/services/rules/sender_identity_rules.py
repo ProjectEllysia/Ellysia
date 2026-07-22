@@ -545,6 +545,12 @@ def check_suspicious_tld(headers: dict) -> RuleResult:
             recommendation=None,
         )
 
+    # Dedupe by domain before scoring (B4): the same domain in From,
+    # Reply-To *and* Return-Path is one suspicious fact, not three — the
+    # loop above appends one entry per header it appears in, so a single
+    # domain could otherwise cost -15 instead of -5.
+    unique_domains = {d["domain"]: d for d in found_tlds}
+    found_tlds = list(unique_domains.values())
     count = len(found_tlds)
     domains_str = ", ".join(d["domain"] for d in found_tlds)
     tlds_str = ", ".join(d["tld"] for d in found_tlds)
