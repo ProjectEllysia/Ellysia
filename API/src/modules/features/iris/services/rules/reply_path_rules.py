@@ -25,7 +25,25 @@ from __future__ import annotations
 import re
 
 from ..registry import iris_rules, RuleResult
-from ..shared import extract_domain, is_free_provider, registrable_domain
+from ..shared import (
+    esp_msgid_domains, esp_tracker_domains, extract_domain,
+    is_free_provider, registrable_domain,
+)
+
+
+def _is_esp_domain(domain: str | None) -> bool:
+    """True when *domain* is a known ESP infrastructure domain (B3).
+
+    A newsletter sent via Mailchimp/SendGrid legitimately has three
+    distinct registrable domains across From/Reply-To/Return-Path — that
+    is the ESP's normal architecture, not evidence of anything. Reuses
+    the allowlists already trusted for Message-ID and image-tracking
+    checks so this doesn't drift into a fourth copy of "is this a known
+    ESP domain".
+    """
+    if not domain:
+        return False
+    return domain in esp_msgid_domains() or domain in esp_tracker_domains()
 
 
 @iris_rules.register(
@@ -67,6 +85,13 @@ def check_reply_to(headers: dict) -> RuleResult:
 
     from_domain = from_addr.split("@")[-1].rstrip(">").strip() if "@" in from_addr else from_addr
     reply_domain = reply_to.split("@")[-1].rstrip(">").strip() if "@" in reply_to else reply_to
+
+    if _is_esp_domain(registrable_domain(reply_domain)):
+        return RuleResult(
+            score=1, verdict="pass",
+            details={"from": from_addr, "reply_to": reply_to, "esp": True},
+            recommendation=None,
+        )
 
     if registrable_domain(from_domain) != registrable_domain(reply_domain):
         return RuleResult(
@@ -152,10 +177,14 @@ def check_return_path(headers: dict) -> RuleResult:
             recommendation=None,
         )
 
-    rp_domain = extract_domain(return_path)
-    from_domain = extract_domain(from_addr)
+    # F4: compared at the registrable-domain level, matching check_reply_to's
+    # sibling logic — a full-hostname compare flags every ESP/bounce
+    # subdomain (``bounce.mail.paypal.com`` vs ``paypal.com``) as a mismatch,
+    # which is the normal shape of transactional/bulk mail, not spoofing.
+    rp_domain = registrable_domain(extract_domain(return_path))
+    from_domain = registrable_domain(extract_domain(from_addr))
 
-    if rp_domain and from_domain and rp_domain != from_domain:
+    if rp_domain and from_domain and rp_domain != from_domain and not _is_esp_domain(rp_domain):
         return RuleResult(
             score=-8, verdict="fail",
             details={
@@ -170,7 +199,10 @@ def check_return_path(headers: dict) -> RuleResult:
 
     return RuleResult(
         score=2, verdict="pass",
-        details={"return_path_domain": rp_domain, "from_domain": from_domain, "match": True},
+        details={
+            "return_path_domain": rp_domain, "from_domain": from_domain,
+            "match": rp_domain == from_domain,
+        },
         recommendation=None,
     )
 
@@ -208,7 +240,13 @@ def check_triangulation(headers: dict) -> RuleResult:
     present = [d for d in (from_dom, reply_dom, return_dom) if d]
     distinct = set(present)
 
-    if len(distinct) < 3:
+    # B3: a Reply-To/Return-Path on a known ESP domain is exactly what
+    # legitimate bulk mail looks like (From=company.com, Reply-To on the
+    # ESP's reply infra, Return-Path on the ESP's bounce infra) — three
+    # distinct domains by design, not a triangulation attack.
+    esp_involved = _is_esp_domain(reply_dom) or _is_esp_domain(return_dom)
+
+    if len(distinct) < 3 or esp_involved:
         return RuleResult(
             score=0, verdict="neutral",
             details={
@@ -216,6 +254,7 @@ def check_triangulation(headers: dict) -> RuleResult:
                 "reply_to_domain": reply_dom,
                 "return_path_domain": return_dom,
                 "distinct_count": len(distinct),
+                "esp": esp_involved,
             },
             recommendation=None,
         )
