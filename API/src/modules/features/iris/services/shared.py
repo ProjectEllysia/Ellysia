@@ -373,6 +373,19 @@ _DEFAULTS: dict[str, Any] = {
         "utf-7", "unicode-1-1-utf-7", "csunicode11utf7", "x-unicode-2-0-utf-7",
     ],
 
+    # Servicios de hosting multi-tenant abusables: el registrable_label es
+    # de la marca (google.com, sharepoint.com...) pero el path/subdominio
+    # es de un usuario cualquiera, así que una página de cosecha de
+    # credenciales alojada ahí hoy se salta el chequeo pensado solo para
+    # "es la propia web de la marca" (N3).
+    "multitenant_hosting_domains": [
+        "docs.google.com", "forms.gle", "forms.office.com", "drive.google.com",
+        "sites.google.com", "sharepoint.com", "onedrive.live.com",
+        "notion.site", "web.app", "pages.dev", "vercel.app", "netlify.app",
+        "t.me", "cdn.discordapp.com", "firebasestorage.googleapis.com",
+        "typeform.com", "airtable.com",
+    ],
+
     # Patrones de destinatarios ocultos en el To.
     "undisclosed_patterns": [
         "undisclosed", "undisclosed-recipients", "undisclosed recipients",
@@ -463,6 +476,9 @@ def undisclosed_patterns() -> tuple[str, ...]:
 
 def url_phishing_keywords() -> tuple[str, ...]:
     return _cached_tuple("url_phishing_keywords")
+
+def multitenant_hosting_domains() -> frozenset[str]:
+    return _cached_set("multitenant_hosting_domains")
 
 def exotic_charsets() -> tuple[str, ...]:
     return _cached_tuple("exotic_charsets")
@@ -787,13 +803,31 @@ def analyze_url(href: str, sender_domain: Optional[str] = None,
     # brand's domain, since "login"/"verify"/"account" are completely
     # normal on a company's own site. An insecure (http) page asking for
     # credentials on top of that is the textbook harvesting-page pattern.
-    if host_reg != sender_domain and registrable_label(host) not in brands:
+    #
+    # N3: that "known brand's domain" carve-out is also what let a
+    # credential-harvest form hosted on ``docs.google.com`` or
+    # ``sharepoint.com`` through with zero findings — those are
+    # multi-tenant hosting services where the path/subdomain is
+    # attacker-controlled even though the registrable domain genuinely
+    # belongs to the brand. Multi-tenant hosts are checked regardless of
+    # the brand carve-out, at a lower weight (it can still be a
+    # legitimate form) and tagged distinctly so the report doesn't read
+    # as "the sender's own site is malicious".
+    is_multitenant_host = any(
+        host == d or host.endswith("." + d) for d in multitenant_hosting_domains()
+    )
+    if is_multitenant_host or (host_reg != sender_domain and registrable_label(host) not in brands):
         path_and_query = f"{parsed.path} {parsed.query}".lower()
         kw_hits = [kw for kw in phishing_keywords if kw in path_and_query]
         if kw_hits:
-            is_insecure = parsed.scheme == "http"
-            finding_type = "insecure_credential_page" if is_insecure else "credential_harvest_path"
+            if is_multitenant_host:
+                finding_type = "multitenant_credential_page"
+                penalty = 8
+            else:
+                is_insecure = parsed.scheme == "http"
+                finding_type = "insecure_credential_page" if is_insecure else "credential_harvest_path"
+                penalty = 10 if is_insecure else 6
             findings.append({"type": finding_type, "href": href, "keywords": kw_hits})
-            score -= 10 if is_insecure else 6
+            score -= penalty
 
     return findings, score
