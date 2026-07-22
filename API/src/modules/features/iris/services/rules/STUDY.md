@@ -1,8 +1,26 @@
 # IRIS Phishing Detection Rules — Study Guide
 
-Cuaderno de estudio sobre las 35 reglas de detección de phishing del motor IRIS.
+Cuaderno de estudio sobre las reglas de detección de phishing del motor IRIS.
 Cada regla explica: qué analiza, qué concepto de ciberseguridad hay detrás,
 cuándo es indicio de phishing y cuándo es un falso positivo (legítimo).
+
+> **Desincronizado (D1-D3, ver `plans/feature/iris/iris-mailbox-connector.md`
+> §1.5).** Este documento dice "35 reglas"; el registro real tiene **40**
+> (verificado con `iris_rules.get_rules()`). Las líneas **"Archivo:"** de
+> cada sección referencian los ~38 ficheros de una regla que existían antes
+> de la Fase 0c del `ROADMAP.md` (p.ej. `spf.py`, `display_name_spoof.py`) —
+> hoy están consolidados en los 10 ficheros temáticos de este directorio
+> (`auth_rules.py`, `sender_identity_rules.py`, `reply_path_rules.py`,
+> `thread_rules.py`, `recipient_rules.py`, `received_timing_rules.py`,
+> `content_trust_rules.py`, `body_content_rules.py`, `body_links_rules.py`,
+> `attachment_media_rules.py`); ninguna ruta se actualizó. Las tablas de
+> score que documentan bonificaciones positivas (`+5`, `+3`...) siguen
+> siendo la vigencia real del código *en cada regla considerada aislada*
+> (útil al testear una regla sola), pero nunca llegan a sumar al total: el
+> modelo agregado es puramente sustractivo y las clampa a 0 (ver
+> `IrisManager._aggregate_score`). Reescribir este documento entero está
+> fuera del alcance de la Fase 1 (bajo impacto en tiempo de ejecución); esta
+> nota es la corrección mínima para que no siga afirmando algo falso.
 
 ---
 

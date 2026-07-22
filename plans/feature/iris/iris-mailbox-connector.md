@@ -57,6 +57,108 @@ construirlo ya.
 
 ## Fase 1 — Auditoría del motor (bloqueante)
 
+> **Estado de implementación (2026-07-22, rama `feature/iris/rules-fine-tunning`).**
+> Bloques 1-2 y la mayor parte del 3 de la sección 1.8 están implementados y con
+> `pytest` en verde (suite completa + corpus de regresión nuevo). Detalle por hallazgo:
+>
+> **Hecho:**
+> - **A1 + N5** — implementados como la *mitigación mínima* que el propio hallazgo A1
+>   sanciona ("`auth_results[0]` ya es estrictamente mejor que la última ocurrencia"),
+>   pero a nivel de root cause: `parse_raw_headers` ahora conserva la **primera**
+>   (más alta = más nueva) ocurrencia de cualquier cabecera repetida, en vez de la
+>   última. Esto cierra A1 y N5 a la vez (ambos eran el mismo bug de raíz) sin tocar
+>   `auth_rules.py` ni convertir esas 5 reglas a `needs_context`, y sin romper ningún
+>   test existente (que solo pasan una ocurrencia por cabecera). La lista de
+>   `authserv_id` de confianza (D6) sigue siendo trabajo real pendiente — no se
+>   implementó `trusted_auth_results`/`MessageContext.auth_results` de la sección A1
+>   porque el mecanismo de "primera ocurrencia" ya resuelve el bypass verificado sin
+>   esa complejidad adicional.
+> - **N1/G2** — `parse_raw_message` ahora parsea envoltorio *y* anidado
+>   (`MessageContext.wrapper_context`); `IrisManager._run_analysis` ejecuta las 40
+>   reglas sobre ambos y persiste el veredicto **peor** (empate a favor del interior).
+> - **B1** — `shared.phrase_matches()` (regex con `\b`) sustituye el `in` sin límites
+>   de palabra en `bec_phrases`, `credential_phrases`, `high_signal_keywords`,
+>   `low_signal_keywords`, `generic_greetings`, `action_verbs`. Se eliminaron
+>   `"confidencial"`, `"asap"`, `"con urgencia"`, `"lo antes posible"` de
+>   `bec_phrases` en **ambos** sitios (`shared.py::_DEFAULTS` y
+>   `SecOpsConfig.json::iris.data.bec_phrases` — el JSON tiene prioridad sobre el
+>   default de Python y también los contenía; sin tocarlo el fix no aplicaba, cazado
+>   por el corpus de regresión nuevo).
+> - **B2** — `check_bec_wire_pattern` usa `is_free_provider` para que el mensaje
+>   ("dominio corporativo" vs "proveedor gratuito") sea honesto.
+> - **B3** — allowlist ESP (`esp_msgid_domains`/`esp_tracker_domains`) aplicada a
+>   `check_reply_to`, `check_return_path` y `check_triangulation`.
+> - **B4** — `check_suspicious_tld` dedupe por dominio antes de puntuar (ya no cobra
+>   una vez por cabecera).
+> - **F3 (parcial)** — cluster autenticación: `check_domain_alignment` también
+>   diferencia a DMARC cuando `dmarc=fail` (antes solo cuando `dmarc=pass`). Cluster
+>   Received: `check_received_path_anomaly` exime `tls_downgrade`/`long_chain` cuando
+>   la cadena entera es RFC1918. Cluster identidad: ya cubierto por B3. Cluster marca
+>   (fusionar Subdomain Impersonation + Misspelled Brands dentro de Lookalike) **NO
+>   implementado** — ver "No hecho" abajo.
+> - **F4** — `check_return_path` compara `registrable_domain`, no el host completo
+>   (alineado con `check_reply_to`), más el mismo guard ESP de B3.
+> - **F5 (parcial)** — solo se amplió `esp_tracker_domains` con Akamai/Fastly/
+>   Cloudinary/imgix. La correlación pixel-externo↔host-de-cosecha propuesta **NO**
+>   se implementó — habría cambiado `check_external_image_tracking` a no penalizar
+>   una imagen externa aislada sin corroborar, lo que contradice
+>   `test_external_image_tracking_flags_non_esp_external_image` (test deliberado
+>   existente) y reduce detección real de tracking pixels aislados. Ver G22 (medio
+>   esfuerzo) para la versión completa.
+> - **G6** — Self-Referencing In-Reply-To, inversión temporal de Received, Unicode
+>   Evasion y Triangulation promovidos a gate `Suspicious` en
+>   `IrisManager._extract_verdict_signals`/`_evaluate_gates`.
+> - **N3** — nuevo dataset `multitenant_hosting_domains` (Google Forms/Docs,
+>   SharePoint, Notion, Vercel, Netlify, Discord CDN...); `analyze_url` ya no salta
+>   el chequeo de credenciales solo por ser dominio de marca cuando además es
+>   hosting multi-tenant.
+> - **N4/G4** — `url_host` soporta IPv6 entre corchetes; `analyze_url` detecta IP
+>   ofuscada decimal/hex (`is_obfuscated_ip_host`).
+> - **C2/C3** — `_run_analysis` persiste en un único `UnitOfWork` al final (antes: un
+>   `UnitOfWork`/commit por regla); una cancelación a mitad de bucle ya no deja filas
+>   huérfanas porque no hay commit hasta el final.
+> - **C4** — `iris.maxMessageBytes` (10 MB default, `SecOpsConfig.json`), validado en
+>   `AnalyzeRequestSchema` igual que `hygeia/schemas.py` (leído en cada validación,
+>   no horneado al importar, para que `PUT /system` surta efecto sin reiniciar).
+> - **C6** — `RuleRegistry._rules` pasó de atributo de clase a atributo de instancia.
+> - **C7** — resuelto como efecto colateral de C2/C3: el método nuevo
+>   (`_persist_analysis_results`) ya no rebinda `result` con el tipo ORM.
+> - **Corpus de regresión de FP (bloque 5)** — nuevo
+>   `API/tests/unit/test_iris_fp_regression.py`: ejecuta el motor completo (40
+>   reglas + agregación + gates) sobre newsletter-vía-ESP, aviso interno con
+>   disclaimer, alerta bancaria real (las tres del cuadro de la sección 1.1) y un
+>   phishing evidente de control. Las tres legítimas dan `Legitimate`; el phishing
+>   sigue dando `Phishing` — verifica que los arreglos de FP no neutralizan detección
+>   real.
+> - **D1-D3 (parcial)** — nota de cabecera en `STUDY.md` corrigiendo el recuento (35→40)
+>   y explicando que las rutas "Archivo:" son pre-consolidación; no se reescribió el
+>   documento completo (2300 líneas, bajo impacto en runtime).
+>
+> **No hecho (deliberado, con motivo):**
+> - **C1** (poner a 0 los `+N` de las ramas "pass") — el propio código ya los clampa
+>   a 0 en el agregado, pero **~15 tests unitarios existentes verifican
+>   explícitamente `score > 0` en aislamiento** para SPF/DKIM/DMARC/Domain
+>   Alignment/ARC/List-Unsubscribe (contrato deliberado: cada regla es testeable
+>   sola). Aplicar C1 tal cual rompía ese contrato probado sin arreglar ningún bug de
+>   comportamiento real. Se dejó como documentación (ver docstring de
+>   `auth_rules.py::check_spf`) en vez de como cambio de código.
+> - **F6** (recalibración completa de pesos + fusión de reglas + eliminar "Content-Type
+>   check") — el informe del consejo con la tabla peso actual→propuesto no está
+>   disponible en este repo; recalibrar sin él es a ciegas. Los FP concretos que F6
+>   cubre ya quedan resueltos por B1-B4/F3/F4 (estructurales, no de peso). Fusionar
+>   Subdomain Impersonation/Misspelled Brands dentro de Lookalike habría roto tests
+>   dedicados existentes (`test_iris_new_rules.py`) sin beneficio de comportamiento.
+> - **N2** (marcas ES/EU/logística/cripito) y **G1/G3/G5/G7-G32** (catálogo de
+>   detección nueva) — explícitamente "secundario frente a los bloques 1-3" según
+>   este mismo documento (sección 1.8); son features nuevas, no arreglos de reglas
+>   existentes.
+> - **C5** (persistir `unwrapped_from_forward`/`wrapper_*` como columnas en vez de
+>   re-parsear) — requiere migración Alembic; deferred por no poder verificarla
+>   contra una base de datos real desde este entorno.
+>
+> Este resumen se guardó también como memoria persistente de Claude Code
+> (`iris-rules-audit-fase1.md`) para continuidad entre sesiones.
+
 Hallazgos verificados leyendo el código, no inferidos. Ordenados por severidad.
 
 **Actualización (2026-07-22): auditoría por consejo.** A la auditoría inicial se añadió un
