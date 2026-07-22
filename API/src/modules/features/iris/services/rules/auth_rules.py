@@ -46,9 +46,15 @@ def check_spf(headers: dict) -> RuleResult:
     """Evaluate the SPF result from ``Authentication-Results`` or ``Received-SPF`` headers.
 
     Returns:
-        - ``pass`` (score +5) when SPF passes.  A passing result only proves
+        - ``pass`` (score +5) when SPF passes. A passing result only proves
           the sending server is authorised — it is weak positive evidence,
-          not proof of legitimacy, so the bonus is intentionally small.
+          not proof of legitimacy, so the credit is intentionally small.
+          NOTE (C1): under the subtractive model every rule's score is
+          clamped to <= 0 when the analysis aggregates its total (see
+          ``IrisManager._run_analysis``), so this +5 never actually raises
+          the total — it exists only so a caller/test inspecting this
+          rule's result *in isolation* can tell "passed cleanly" apart
+          from "neutral, nothing to evaluate" (score 0 below).
         - ``fail``/``hardfail`` (score -20) when SPF clearly fails.
         - ``softfail``/``neutral`` (score -5) for non-strict results.
         - ``error`` (score -3) for DNS lookup errors.
@@ -276,6 +282,22 @@ def check_domain_alignment(headers: dict) -> RuleResult:
         return RuleResult(
             score=3, verdict="pass",
             details={"from_domain": from_domain, "reason": "dmarc=pass"},
+            recommendation=None,
+        )
+
+    # DMARC fail already means "SPF/DKIM don't align with From" — that's
+    # the exact fact this rule exists to reconstruct when DMARC is absent
+    # (see module docstring). Evaluating alignment again here on top of a
+    # dmarc=fail double-counts the same non-alignment as a second, separate
+    # -15 penalty (F3): the realistic case is DKIM passing on the signing
+    # infrastructure's own domain while DMARC fails precisely because that
+    # domain isn't aligned with From, so this rule's own logic below would
+    # otherwise flag it too. DMARC's own check_dmarc rule already scores
+    # dmarc=fail; defer to it entirely.
+    if "dmarc=fail" in auth:
+        return RuleResult(
+            score=0, verdict="neutral",
+            details={"from_domain": from_domain, "reason": "dmarc=fail ya determinó la desalineación"},
             recommendation=None,
         )
 

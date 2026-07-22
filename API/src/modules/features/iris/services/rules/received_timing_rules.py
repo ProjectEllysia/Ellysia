@@ -263,18 +263,29 @@ def check_received_path_anomaly(context) -> RuleResult:
     transitions: List[dict] = path["transitions"]
     unique_signals: List[str] = []
 
+    # F3 (Received cluster): a chain that never left RFC1918 space is an
+    # internal corporate relay path — 5+ hops through internal load
+    # balancers/gateways is completely normal there, and TLS between two
+    # hosts on the same private network is not the "downgrade" this rule
+    # means to catch. Only exempt tls_downgrade/long_chain (not the
+    # missing_timestamps signal below, which is unrelated) when every hop
+    # that *does* expose an IP is private; an unparseable/absent IP on
+    # some hops shouldn't itself defeat the exemption.
+    hop_ips = [h.get("fromIp") for h in hops if h.get("fromIp")]
+    all_internal = bool(hop_ips) and all(_is_private_ip(ip) for ip in hop_ips)
+
     # --- TLS downgrade between consecutive hops ---
     tls_downgrade_pairs: List[dict] = [
         {"from": t["from"], "to": t["to"]}
         for t in transitions
         if "tls_downgrade" in t.get("reasons", [])
-    ]
+    ] if not all_internal else []
     if tls_downgrade_pairs:
         unique_signals.append("tls_downgrade")
 
     # --- Long chain (>= 5 hops with mostly unique IPs) ---
     long_chain = False
-    if len(hops) >= LONG_CHAIN_THRESHOLD:
+    if not all_internal and len(hops) >= LONG_CHAIN_THRESHOLD:
         ips = [h.get("fromIp") for h in hops if h.get("fromIp")]
         if len(set(ips)) >= max(3, int(0.6 * len(hops))):
             long_chain = True
