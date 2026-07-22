@@ -43,7 +43,13 @@ class RuleRegistry:
     rule modules are imported — just add a new ``.py`` file under
     ``services/rules/`` and import it in ``services/rules/__init__.py``.
     """
-    _rules: List[Dict] = []
+
+    def __init__(self) -> None:
+        # Instance attribute, not class attribute: the latter is shared
+        # across every RuleRegistry (in practice just the ``iris_rules``
+        # singleton, but ``clear()`` — used in tests — mutated it as
+        # global state regardless, making test order matter (C6).
+        self._rules: List[Dict] = []
 
     def register(self, name: str, category: str = "general",
                  description: str = "", needs_context: bool = False):

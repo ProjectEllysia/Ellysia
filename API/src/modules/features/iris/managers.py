@@ -584,15 +584,14 @@ class IrisManager(TaskTrackingMixin):
            — Fase 2 rules). ``raw_input`` may be a headers-only block or
            a full ``.eml`` message; the context degrades gracefully to
            empty body/links/attachments in the former case.
-        3. Iterates over every registered rule, dispatching ``headers``
-           or ``context`` depending on each rule's ``needs_context`` flag,
-           and collects RuleResults.
-        4. Updates the TaskQueue task progress after each rule.
-        5. Computes the total score and verdict.
-        6. Persists the final state (``finished`` + score + verdict).
-
-        If cancellation is detected between rule executions, the task
-        exits early without saving results.
+        3. Runs every registered rule against the message (N1: against
+           *both* the message and its ``message/rfc822`` wrapper when one
+           is present, keeping the worse verdict — see
+           ``_evaluate_context``).
+        4. Persists the winning context's rule results and the final
+           score/verdict in a single transaction (C2/C3: no partial rows
+           survive a mid-run cancellation, and there's one commit per
+           analysis instead of one per rule).
         """
         with job_context() as job:
             logger.info(f"Starting analysis {analysis_id}")
@@ -611,57 +610,76 @@ class IrisManager(TaskTrackingMixin):
             # parse_raw_headers(raw_input) here would silently re-introduce
             # the envelope's headers and analyze the wrong message.
             context = parse_raw_message(raw_input)
-            headers = context.headers
-            self._validate_headers_parsed(headers)
+            self._validate_headers_parsed(context.headers)
+
+            # N1: a "report phishing" forward is safe to unwrap unconditionally
+            # for a human-submitted analysis, but the same message/rfc822
+            # mechanism lets an attacker send their own phishing as the outer
+            # message and staple a benign .eml on as an attachment — analyzing
+            # only the unwrapped inner message would then score the wrong
+            # mail entirely. Evaluate both when a wrapper exists and keep the
+            # worse verdict; this matters most for unattended ingestion
+            # (Fase 3+), where there is no human eyeballing the wrapper first.
+            contexts_to_evaluate = [context]
+            if context.wrapper_context is not None:
+                contexts_to_evaluate.append(context.wrapper_context)
 
             rules_defs = iris_rules.get_rules()
-            total_rules = len(rules_defs)
-            results: List[RuleResult] = []
-            named_results: Dict[str, RuleResult] = {}
+            total_steps = len(rules_defs) * len(contexts_to_evaluate)
+            completed_steps = 0
 
-            for idx, rule_def in enumerate(rules_defs):
-                if job.cancelled():
-                    logger.info(f"Analysis {analysis_id} was cancelled")
-                    return
+            evaluations: List[tuple[str, float, list[str], List[RuleResult]]] = []
+            for ctx in contexts_to_evaluate:
+                results: List[RuleResult] = []
+                named_results: Dict[str, RuleResult] = {}
 
-                try:
-                    rule_input = context if rule_def.get("needs_context") else headers
-                    result = rule_def["func"](rule_input)
-                except Exception as e:
-                    logger.error(f"Rule '{rule_def['name']}' failed for analysis {analysis_id}: {e}", exc_info=True)
-                    result = RuleResult(
-                        score=0, verdict="error",
-                        details={"error": str(e)},
-                        recommendation=f"La regla '{rule_def['name']}' falló durante la ejecución.",
-                    )
+                for rule_def in rules_defs:
+                    if job.cancelled():
+                        logger.info(f"Analysis {analysis_id} was cancelled")
+                        return
 
-                # Subtractive contract: a rule can only *subtract*. Whatever a
-                # rule returns on a pass (historically +5/+3/+1 "credibility"
-                # bonuses), the score it contributes — and the score shown in
-                # the UI — is clamped to <= 0. Passing a rule means "no
-                # deduction", never a bonus. The verdict/details are untouched.
-                result = replace(result, score=min(0.0, float(result.score)))
+                    try:
+                        rule_input = ctx if rule_def.get("needs_context") else ctx.headers
+                        result = rule_def["func"](rule_input)
+                    except Exception as e:
+                        logger.error(f"Rule '{rule_def['name']}' failed for analysis {analysis_id}: {e}", exc_info=True)
+                        result = RuleResult(
+                            score=0, verdict="error",
+                            details={"error": str(e)},
+                            recommendation=f"La regla '{rule_def['name']}' falló durante la ejecución.",
+                        )
 
-                self._persist_rule_result(analysis_id, rule_def, result, idx)
-                results.append(result)
-                named_results[rule_def["name"]] = result
+                    # Subtractive contract: a rule can only *subtract*. Whatever a
+                    # rule returns on a pass (historically +5/+3/+1 "credibility"
+                    # bonuses), the score it contributes — and the score shown in
+                    # the UI — is clamped to <= 0. Passing a rule means "no
+                    # deduction", never a bonus. The verdict/details are untouched.
+                    result = replace(result, score=min(0.0, float(result.score)))
 
-                progress = int(((idx + 1) / total_rules) * 100)
-                job.progress(progress)
+                    results.append(result)
+                    named_results[rule_def["name"]] = result
 
-            total_score = self._aggregate_score(results)
-            base_verdict = self._determine_verdict(total_score)
-            verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
+                    completed_steps += 1
+                    job.progress(int((completed_steps / total_steps) * 100))
+
+                total_score = self._aggregate_score(results)
+                base_verdict = self._determine_verdict(total_score)
+                verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
+                evaluations.append((verdict, total_score, gate_reasons, results))
+
+            # Worse verdict wins across contexts; on a tie, keep the first
+            # (the unwrapped/inner message — the one ``contexts_to_evaluate``
+            # is ordered by, and the one every other persisted field
+            # describes) rather than the wrapper.
+            chosen = evaluations[0]
+            for evaluation in evaluations[1:]:
+                if _VERDICT_SEVERITY[evaluation[0]] > _VERDICT_SEVERITY[chosen[0]]:
+                    chosen = evaluation
+            verdict, total_score, gate_reasons, results = chosen
 
             try:
-                self._update_analysis(
-                    analysis_id,
-                    status="finished",
-                    total_score=total_score,
-                    verdict=verdict,
-                    gate_reasons=gate_reasons,
-                    finished_at=utcnow_naive(),
-                )
+                self._persist_analysis_results(analysis_id, rules_defs, results,
+                                                verdict, total_score, gate_reasons)
             except Exception as e:
                 logger.error(f"Failed to finalise analysis {analysis_id}: {e}", exc_info=True)
                 self._fail_analysis(analysis_id)
@@ -669,29 +687,42 @@ class IrisManager(TaskTrackingMixin):
 
             logger.info(f"Analysis {analysis_id} completed: score={total_score}, verdict={verdict}")
 
-    def _persist_rule_result(self, analysis_id: int, rule_def: dict,
-                              result: RuleResult, position: int) -> None:
-        """Save a single rule's outcome to the IrisRuleResult table.
+    @staticmethod
+    def _persist_analysis_results(analysis_id: int, rules_defs: List[dict], results: List[RuleResult],
+                                   verdict: str, total_score: float, gate_reasons: list[str]) -> None:
+        """Persist every rule row and the final analysis state in one transaction.
 
-        Failures are logged but do not interrupt the analysis — the
-        rule is treated as a neutral (zero-score) result.
+        Previously each rule opened (and committed) its own
+        ``UnitOfWork`` — ~40 commits per analysis, and a cancellation
+        mid-loop left the already-committed rows of a ``cancelled``
+        analysis dangling (C2/C3). One transaction for the whole batch
+        fixes both: it's atomic, and a ``return`` before this point
+        (cancellation) now leaves nothing committed at all.
         """
-        try:
-            with UnitOfWork() as uow:
-                repo = IrisRuleResultRepository(uow)
-                result = IrisRuleResult(
+        with UnitOfWork() as uow:
+            rule_repo = IrisRuleResultRepository(uow)
+            for position, (rule_def, rule_result) in enumerate(zip(rules_defs, results)):
+                rule_repo.save(IrisRuleResult(
                     analysis_id=analysis_id,
                     rule_name=rule_def["name"],
                     category=rule_def["category"],
-                    score=result.score,
-                    verdict=result.verdict,
-                    details=result.details,
-                    recommendation=result.recommendation,
+                    score=rule_result.score,
+                    verdict=rule_result.verdict,
+                    details=rule_result.details,
+                    recommendation=rule_result.recommendation,
                     position=position,
-                )
-                repo.save(result)
-        except Exception as e:
-            logger.error(f"Failed to persist rule result for analysis {analysis_id}: {e}", exc_info=True)
+                ))
+
+            analysis_repo = IrisAnalysisRepository(uow)
+            analysis = analysis_repo.get_by_id(analysis_id)
+            if analysis is None:
+                return
+            analysis.status = "finished"
+            analysis.total_score = total_score
+            analysis.verdict = verdict
+            analysis.gate_reasons = gate_reasons
+            analysis.finished_at = utcnow_naive()
+            analysis_repo.update(analysis)
 
     @staticmethod
     def _aggregate_score(results: List[RuleResult]) -> float:

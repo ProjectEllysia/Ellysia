@@ -84,7 +84,9 @@ def parse_raw_headers(raw: str) -> Dict[str, str]:
             key, _, val = line.partition(":")
             current_key = key.strip().lower()
             current_value = val.strip()
-            headers[current_key] = current_value
+            is_repeat_occurrence = current_key in headers
+            if not is_repeat_occurrence:
+                headers[current_key] = current_value
 
     return headers
 
@@ -176,7 +178,18 @@ class MessageContext:
     *unwrapped original* — the message that actually matters for
     analysis — not the forwarding envelope. ``unwrapped_from_forward``
     and the ``wrapper_*`` fields preserve just enough of the outer
-    message's identity for the report to say so.
+    message's identity for the report to say so, and ``wrapper_context``
+    carries the *full* parsed wrapper so the caller can run the rule
+    engine on it too (N1): a real "report phishing" forward is benign to
+    unwrap, but an attacker can just as easily send their own phishing as
+    the outer message and staple a benign ``.eml`` on as a
+    ``message/rfc822`` attachment — unwrapping unconditionally then
+    means the 40 rules never see the phishing the victim actually
+    received. Analyzing only the unwrapped inner message is what a
+    forward-unaware submission always wants; the ingestion pipeline
+    (Fase 3+) is exactly the "automatic, no human forwarding" case where
+    that assumption stops holding, so it must evaluate both and keep the
+    worse verdict.
     """
     headers: Dict[str, str]
     body_text: str = ""
@@ -187,6 +200,7 @@ class MessageContext:
     unwrapped_from_forward: bool = False
     wrapper_from: str = ""
     wrapper_subject: str = ""
+    wrapper_context: Optional["MessageContext"] = None
 
 
 def _decode_payload(part: Message) -> str:
@@ -319,10 +333,13 @@ def parse_raw_message(raw: str) -> MessageContext:
         When *raw* is a "report phishing" forward carrying the original
         email as a ``message/rfc822`` part, the returned context
         describes that *nested original* instead of the forwarding
-        envelope — analyzing the wrapper would score the wrong message
-        entirely. ``unwrapped_from_forward`` is set, and ``wrapper_from``/
+        envelope. ``unwrapped_from_forward`` is set, ``wrapper_from``/
         ``wrapper_subject`` retain the forwarding envelope's identity for
-        the report to reference.
+        the report to reference, and ``wrapper_context`` carries the full
+        parsed wrapper (N1) so the caller can run the rule engine on it
+        too and keep the worse of the two verdicts — see
+        ``MessageContext`` for why analyzing only the unwrapped inner
+        message is unsafe once submissions are no longer human-forwarded.
     """
     msg = message_from_string(raw)
 
@@ -340,6 +357,7 @@ def parse_raw_message(raw: str) -> MessageContext:
         context.unwrapped_from_forward = True
         context.wrapper_from = decode_mime_words(msg.get("from", "") or "")
         context.wrapper_subject = decode_mime_words(msg.get("subject", "") or "")
+        context.wrapper_context = _message_context_from(msg, raw)
         return context
 
     return _message_context_from(msg, raw)
