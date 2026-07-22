@@ -27,10 +27,9 @@ import re
 
 from ..registry import iris_rules, RuleResult
 from ..shared import (
-    action_verbs, alarming_emojis, bec_phrases, credential_phrases,
-    exotic_charsets, extract_display_name, extract_domain,
-    generic_greetings, high_signal_keywords, low_signal_keywords,
-    registrable_domain, strip_html, suspicious_tlds,
+    alarming_emojis, exotic_charsets, extract_display_name, extract_domain,
+    is_free_provider, phrase_matches, registrable_domain, strip_html,
+    suspicious_tlds,
 )
 from ..parsers import decode_mime_words
 
@@ -65,8 +64,8 @@ def check_alarming_keywords(headers: dict) -> RuleResult:
 
     combined = (subject + " " + display_name).lower()
 
-    high_found = [kw for kw in high_signal_keywords() if kw in combined]
-    low_found = [kw for kw in low_signal_keywords() if kw in combined]
+    high_found = phrase_matches("high_signal_keywords", combined)
+    low_found = phrase_matches("low_signal_keywords", combined)
     emoji_found = [repr(e) for e in alarming_emojis() if e in combined]
 
     weight = 2 * len(high_found) + len(low_found) + len(emoji_found)
@@ -141,7 +140,7 @@ def _has_evasive_hidden_text(body_html: str) -> bool:
         if _HIDDEN_LINK_RE.search(inner):
             return True
         inner_text = strip_html(inner).lower()
-        if any(phrase in inner_text for phrase in credential_phrases()):
+        if phrase_matches("credential_phrases", inner_text):
             return True
     return False
 
@@ -162,7 +161,7 @@ def check_body_content(context) -> RuleResult:
     if not text_lower.strip():
         return RuleResult(score=0, verdict="neutral", details={"reason": "empty body"})
 
-    found = [p for p in credential_phrases() if p in text_lower]
+    found = phrase_matches("credential_phrases", text_lower)
     hidden = _has_evasive_hidden_text(_strip_style_blocks(body_html))
 
     if not found and not hidden:
@@ -206,7 +205,7 @@ def check_bec_wire_pattern(context) -> RuleResult:
     if not from_domain:
         return RuleResult(score=0, verdict="neutral", details={}, recommendation=None)
 
-    matches = [p for p in bec_phrases() if p in text]
+    matches = phrase_matches("bec_phrases", text)
 
     if not matches:
         return RuleResult(score=0, verdict="neutral",
@@ -222,6 +221,14 @@ def check_bec_wire_pattern(context) -> RuleResult:
     if suspicious_redirect:
         base -= 4
 
+    # B2: the rule's own recommendation used to assert "sender uses a
+    # corporate domain" unconditionally — from_domain is just whatever's
+    # parseable from From, gmail.com included. is_free_provider is already
+    # what managers._extract_verdict_signals uses to derive bec_free from
+    # this same rule's details; use it here too so the message told to the
+    # analyst matches what the engine actually knows.
+    is_corporate = not is_free_provider(from_domain)
+
     return RuleResult(
         score=base, verdict="fail",
         details={
@@ -229,13 +236,20 @@ def check_bec_wire_pattern(context) -> RuleResult:
             "reply_domain": reply_domain,
             "matches": matches,
             "redirect_to_external_reply": suspicious_redirect,
+            "is_corporate_domain": is_corporate,
         },
         recommendation=(
             f"El cuerpo contiene {len(matches)} frase(s) típica(s) de fraude BEC "
-            f"({', '.join(matches[:3])}). El remitente usa un dominio "
-            f"corporativo ({from_domain}), lo que hace este patrón especialmente "
-            "peligroso: si el dominio es legítimo, la cuenta puede estar "
-            "comprometida; si es suplantado, es un ataque dirigido. Verifica "
+            f"({', '.join(matches[:3])}). El remitente "
+            + (f"usa un dominio corporativo ({from_domain}), lo que hace este "
+               "patrón especialmente peligroso: si el dominio es legítimo, la "
+               "cuenta puede estar comprometida; si es suplantado, es un "
+               "ataque dirigido. "
+               if is_corporate else
+               f"usa un proveedor de correo gratuito ({from_domain}), el patrón "
+               "clásico de fraude del CEO/BEC desde una cuenta creada para la "
+               "ocasión — no hay dominio corporativo que comprometer. ")
+            + "Verifica "
             "por un canal alternativo (teléfono, en persona) ANTES de "
             "realizar cualquier pago o cambio de datos bancarios."
         ),
@@ -261,8 +275,8 @@ def check_generic_greeting(context) -> RuleResult:
 
     first_chunk = text[:600]
 
-    greeting_hits = [g for g in generic_greetings() if g in first_chunk]
-    action_hits = [v for v in action_verbs() if v in text]
+    greeting_hits = phrase_matches("generic_greetings", first_chunk)
+    action_hits = phrase_matches("action_verbs", text)
 
     if not greeting_hits or not action_hits:
         return RuleResult(

@@ -320,12 +320,9 @@
         "nueva cuenta bancaria",
         "número de ruta",
         "datos bancarios nuevos",
-        "confidencial",
         "no notifiques",
         "no informar a",
-        "mientras estoy en reunión",
-        "con urgencia",
-        "lo antes posible"
+        "mientras estoy en reunión"
       ],
       "brand_trusted_domains": [
         {
@@ -787,7 +784,12 @@
         "t.sendgrid.net",
         "click.mi-al.it",
         "link.mi-al.it",
-        "open.mi-al.it"
+        "open.mi-al.it",
+        "akamaized.net",
+        "akamaihd.net",
+        "fastly.net",
+        "cloudinary.com",
+        "imgix.net"
       ],
       "exotic_charsets": [
         "utf-7",

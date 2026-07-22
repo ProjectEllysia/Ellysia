@@ -301,8 +301,8 @@ _DEFAULTS: dict[str, Any] = {
         "enviar bitcoin", "transferencia cripto", "criptomonedas",
         "cambiar la cuenta bancaria", "nueva cuenta bancaria",
         "número de ruta", "datos bancarios nuevos",
-        "confidencial", "no notifiques", "no informar a",
-        "mientras estoy en reunión", "con urgencia", "lo antes posible",
+        "no notifiques", "no informar a",
+        "mientras estoy en reunión",
     ],
 
     # Action-words combinables con marcas en subdominios (secure-paypal…).
@@ -477,6 +477,37 @@ def brand_trusted_domains() -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ..
         (tuple(entry["keywords"]), tuple(entry["domains"]))
         for entry in _data("brand_trusted_domains")
     )
+
+
+# =============================================================================
+# MATCHING DE FRASES CON LÍMITES DE PALABRA (B1)
+# =============================================================================
+#
+# Los datasets de frases (bec_phrases, credential_phrases, high/low_signal_
+# keywords, generic_greetings, action_verbs) se comparaban históricamente con
+# `kw in texto`, lo que hace matchear "you won" dentro de "you won't" o
+# "free" dentro de "freelance"/"free shipping". `phrase_matches` compila cada
+# dataset una vez (cacheado) como alternancia regex con límites `\b` y
+# devuelve las frases del dataset que de verdad aparecen como palabra(s)
+# completa(s), en el mismo orden que el dataset (para no cambiar el
+# comportamiento de "primeros N matches" que ya consumían las reglas).
+
+@lru_cache(maxsize=None)
+def _phrase_pattern(key: str) -> re.Pattern:
+    phrases = sorted(_data(key), key=len, reverse=True)
+    alternation = "|".join(re.escape(p) for p in phrases)
+    return re.compile(rf"\b(?:{alternation})\b", re.IGNORECASE)
+
+
+def phrase_matches(key: str, text: str) -> list[str]:
+    """Frases del dataset ``key`` presentes en *text* como palabra(s) completa(s).
+
+    *text* debe venir ya en minúsculas (mismo contrato que los datasets).
+    """
+    if not text:
+        return []
+    hits = {m.lower() for m in _phrase_pattern(key).findall(text)}
+    return [p for p in _data(key) if p.lower() in hits]
 
 
 # =============================================================================
