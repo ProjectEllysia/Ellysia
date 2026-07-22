@@ -843,6 +843,19 @@ class IrisManager(TaskTrackingMixin):
             "auth_fail": spf_fail or dmarc_fail or align_fail,
             "bec_fail": bec_fail,
             "bec_free": bec_free,
+            # G6/F2: these four are structural forgeries no legitimate mail
+            # client ever produces by accident (a self-citing In-Reply-To, a
+            # Received chain that runs backwards in time, RLO/mixed-script
+            # control characters, three mutually distinct identity domains).
+            # Previously they only subtracted score, so a message could carry
+            # one of these unambiguous tells and still net "Legitimate" once
+            # a handful of small positive-turned-zero checks passed —
+            # promoted here to a minimum-severity gate like every other
+            # high-confidence signal.
+            "self_referencing_threading": verdict_is("Self-Referencing In-Reply-To", "fail"),
+            "received_time_inversion": verdict_is("Received Chain Temporal Inconsistency", "fail"),
+            "unicode_evasion": verdict_is("Unicode Evasion", "fail"),
+            "triangulation_fail": verdict_is("From Reply-To Return-Path Triangulation", "fail"),
         }
 
     @staticmethod
@@ -884,6 +897,10 @@ class IrisManager(TaskTrackingMixin):
         gate(attach, "Suspicious", "dangerous attachment")
         gate(spf_fail or dmarc_fail, "Suspicious", "SPF/DMARC failure")
         gate(signals["replyfree"], "Suspicious", "reply target is free webmail")
+        gate(signals["self_referencing_threading"], "Suspicious", "forged threading headers (self-referencing In-Reply-To/References)")
+        gate(signals["received_time_inversion"], "Suspicious", "Received chain timestamps run backwards (fabricated hop)")
+        gate(signals["unicode_evasion"], "Suspicious", "Unicode bidi/mixed-script evasion characters")
+        gate(signals["triangulation_fail"], "Suspicious", "From/Reply-To/Return-Path point to three distinct domains")
         gate(body_links_fail, "Suspicious", "suspicious body links")
         gate(signals["body_content_fail"], "Suspicious", "phishing phrasing or hidden text in body")
         gate(signals["received_chain_fail"], "Suspicious", "Received chain anomaly")
