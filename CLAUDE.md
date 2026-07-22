@@ -102,6 +102,11 @@ Layered, read via `system/config_reading.py` (imported as `CR`, lazily cached wi
 
 Changes to `SecOpsConfig.json` require an app restart (values are cached) unless applied via `PUT /system`.
 
+## Naming conventions
+
+- **Variable names**: Always use full words; never abbreviate to single letters or cryptic short forms. `message` not `msg`, `count` not `cnt`. Exception: common diminutives are fine (`repo` for repository, `config` for configuration).
+- **Type clarity**: Variable names must clarify what data they hold. Don't use generic names that obscure the type: use `critical_threshold` not `critical`, `scan_repository` not `scan_repo` (though `repo` alone is fine). A name like `critical` reads as a boolean; `critical_threshold` correctly implies an integer threshold.
+
 ## Things that bite
 
 - `.env` files hold credentials — never commit. `API/.env`, `API/src/data/`, and `docs/` are gitignored.
