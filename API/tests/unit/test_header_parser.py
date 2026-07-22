@@ -33,10 +33,27 @@ def test_handles_crlf_line_endings():
     assert headers["subject"] == "Test"
 
 
-def test_last_occurrence_wins_for_duplicates():
+def test_first_occurrence_wins_for_duplicates():
+    # A1/N5: MTAs *prepend* trace headers (Received, Authentication-Results,
+    # ARC-Seal...), so the topmost occurrence of a repeated header is the
+    # newest one, added closest to delivery — the only one an attacker
+    # can't have forged by prepending their own copy to the message they
+    # send. "Last occurrence wins" (the previous behaviour) handed a
+    # one-line spoofing bypass to every rule reading
+    # Authentication-Results/ARC-Seal from this dict.
     raw = "X-Spam: no\nX-Spam: yes"
     headers = parse_raw_headers(raw)
-    assert headers["x-spam"] == "yes"
+    assert headers["x-spam"] == "no"
+
+
+def test_continuation_after_a_repeat_occurrence_does_not_corrupt_the_first():
+    raw = (
+        "Authentication-Results: mx.real.example; spf=fail\n"
+        "Authentication-Results: attacker-inserted; spf=pass\n"
+        "  smtp.mailfrom=a@b.com\n"
+    )
+    headers = parse_raw_headers(raw)
+    assert headers["authentication-results"] == "mx.real.example; spf=fail"
 
 
 def test_empty_input_returns_empty_dict():

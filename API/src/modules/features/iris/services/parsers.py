@@ -47,18 +47,34 @@ def parse_raw_headers(raw: str) -> Dict[str, str]:
 
     Returns:
         A dictionary mapping lowercase header names to their full values.
-        Headers that appear multiple times are represented by the last
-        occurrence (folding continuation lines into it as they arrive).
+        Headers that appear multiple times are represented by the
+        **first** (topmost) occurrence, folding its own continuation
+        lines into it as they arrive. MTAs *prepend* trace headers
+        (``Received``, ``Authentication-Results``, ``ARC-Seal``...), so
+        the topmost occurrence of a repeated header is the newest one —
+        added by the receiving MTA closest to delivery — while any
+        occurrence further down is older and, for headers an attacker
+        controls the content of before it ever reaches an MTA (e.g. by
+        forging their own ``Authentication-Results`` line in the message
+        they send), attacker-injected. Keeping "last occurrence wins"
+        here handed a one-line spoofing bypass to every rule that reads
+        ``Authentication-Results``/``ARC-Seal`` from this dict (A1, N5).
     """
     headers: Dict[str, str] = {}
     current_key: str | None = None
     current_value: str | None = None
+    # True while folding continuation lines that belong to a *repeat*
+    # occurrence of a header already captured above — those continuation
+    # lines must not be appended onto the retained first occurrence.
+    is_repeat_occurrence = False
 
     for line in raw.split("\n"):
         line = line.rstrip("\r")
 
         # continuation line (starts with space or tab)
         if line and line[0] in (" ", "\t") and current_key is not None:
+            if is_repeat_occurrence:
+                continue
             current_value = (current_value or "") + " " + line.strip()
             headers[current_key] = (current_value or "").strip()
             continue
