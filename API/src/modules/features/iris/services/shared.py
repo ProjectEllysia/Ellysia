@@ -327,6 +327,11 @@ _DEFAULTS: dict[str, Any] = {
         "s7.addthis.com", "addthis.com", "tracking.mi-al.it",
         "mta-in.com", "rs6.net", "t.sendgrid.net", "click.mi-al.it",
         "link.mi-al.it", "open.mi-al.it",
+        # CDNs mainstream usadas por correo legítimo para servir imágenes
+        # (logos, banners) — "imagen externa" no ESP-específica no es señal
+        # de phishing por sí sola (F5).
+        "akamaized.net", "akamaihd.net", "fastly.net", "cloudinary.com",
+        "imgix.net",
     ],
 
     # ESPs que estampan el Message-ID con su propio dominio (legítimo).
