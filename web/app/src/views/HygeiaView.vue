@@ -30,6 +30,7 @@
           :anomalies="assetAnomalies"
           @ack="handleAck"
           @resolve="handleResolve"
+          @delete="handleDeleteAnomalyRequest"
         />
       </section>
     </main>
@@ -68,6 +69,16 @@
       @confirm="handleRotateConfirm"
       @cancel="pendingRotateId = null"
     />
+
+    <ConfirmModal
+      :show="!!pendingDeleteAnomalyId"
+      title="Borrar anomalía"
+      message="Se eliminará el registro de esta anomalía. Esta acción no se puede deshacer."
+      confirm-label="Borrar"
+      danger
+      @confirm="handleDeleteAnomalyConfirm"
+      @cancel="pendingDeleteAnomalyId = null"
+    />
   </div>
 </template>
 
@@ -92,6 +103,7 @@ const showCreateModal = ref(false)
 const creating = ref(false)
 const pendingDeleteId = ref(null)
 const pendingRotateId = ref(null)
+const pendingDeleteAnomalyId = ref(null)
 
 const selectedAsset = computed(() =>
   store.state.assets.find((a) => a.id === store.state.selectedId) || null
@@ -153,6 +165,18 @@ async function handleAck(id) {
 async function handleResolve(id) {
   const ok = await alerts.resolveAlert(id)
   if (!ok) toast.show(alerts.state.error || 'No se pudo resolver la anomalía.', 'error')
+}
+
+function handleDeleteAnomalyRequest(id) {
+  pendingDeleteAnomalyId.value = id
+}
+
+async function handleDeleteAnomalyConfirm() {
+  const id = pendingDeleteAnomalyId.value
+  pendingDeleteAnomalyId.value = null
+  if (!id) return
+  const ok = await alerts.deleteAlert(id)
+  toast.show(ok ? 'Anomalía eliminada.' : (alerts.state.error || 'No se pudo borrar la anomalía.'), ok ? 'success' : 'error')
 }
 
 /**
