@@ -15,6 +15,7 @@ ocupa de OAuth, credenciales cifradas, y el ciclo de sondeo.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import date
 from typing import Any, Optional
@@ -27,6 +28,7 @@ from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, decrypt_at_rest, encrypt_at_rest, utcnow_naive
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, job_context
+from src.modules.system.taskqueue.connection import RedisConnectionFactory
 
 from .exceptions import (
     IrisMailboxConnectionNotFoundError,
@@ -43,6 +45,7 @@ logger = logging.getLogger(__name__)
 
 _STATE_SALT = "iris-mailbox-oauth-state"
 _STATE_MAX_AGE_SECONDS = 600  # 10 minutos — ver Decisión 5 del plan de sesión.
+_STATE_USED_KEY_PREFIX = "iris:mailbox:oauth-state-used:"
 
 _VALID_UPDATE_STATUSES = ("active", "paused")
 
@@ -124,6 +127,26 @@ class IrisMailboxManager:
                 "El enlace de conexión es inválido o ha caducado. Vuelve a iniciar el proceso."
             ) from e
 
+    @classmethod
+    def _consume_state(cls, state: str) -> None:
+        """Marca ``state`` como usado para que el callback no sea repetible.
+
+        La firma + TTL de ``_verify_state`` bastan contra falsificación, pero
+        no contra repetición: un ``state`` capturado (log, proxy, enlace
+        reenviado) seguiría siendo válido durante toda su ventana de 10
+        minutos. ``SET NX`` en Redis da un consumo atómico de un solo uso sin
+        estado nuevo en Postgres -- la clave expira sola con el mismo TTL que
+        ya limita la validez de la firma.
+        """
+        key = _STATE_USED_KEY_PREFIX + hashlib.sha256(state.encode()).hexdigest()
+        already_used = not RedisConnectionFactory.decoded().set(
+            key, "1", nx=True, ex=_STATE_MAX_AGE_SECONDS,
+        )
+        if already_used:
+            raise IrisMailboxOAuthStateError(
+                "Este enlace de conexión ya se usó. Vuelve a iniciar el proceso."
+            )
+
     def start_connect(self, user_id: int, provider: str,
                        full_message_mode: bool = False,
                        folder: Optional[str] = None) -> str:
@@ -161,6 +184,7 @@ class IrisMailboxManager:
             El id de la IrisMailboxConnection creada o actualizada.
         """
         claims = self._verify_state(state)
+        self._consume_state(state)
         user_id = claims["user_id"]
         provider = claims["provider"]
         full_message_mode = claims["full_message_mode"]

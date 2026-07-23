@@ -28,6 +28,42 @@ from src.modules.shared import decrypt_at_rest, encrypt_at_rest, utcnow_naive
 pytestmark = pytest.mark.integration
 
 
+class _FakeStateRedis:
+    """Doble en memoria de RedisConnectionFactory.decoded() -- solo el
+    subconjunto que _consume_state usa (SET NX EX)."""
+
+    def __init__(self):
+        self._keys: set[str] = set()
+
+    def set(self, key, value, nx=False, ex=None):
+        if nx and key in self._keys:
+            return None
+        self._keys.add(key)
+        return True
+
+
+class _FakeStateRedisFactory:
+    """Doble de RedisConnectionFactory expuesto solo dentro del namespace de
+    mailbox_managers -- parchear el classmethod real afectaría también a
+    TaskQueue (usa la misma clase para su HistoryStore), que estos tests no
+    dobla."""
+
+    def __init__(self):
+        self._redis = _FakeStateRedis()
+
+    def decoded(self):
+        return self._redis
+
+
+@pytest.fixture(autouse=True)
+def _fake_state_redis():
+    """El consumo de state (single-use) usa Redis; los tests no levantan uno
+    real (ver conftest.py, que solo mockea .ping()/.close() de create_app),
+    así que se dobla aquí -- misma idea que _FakeTaskQueue de abajo."""
+    with mock.patch.object(mailbox_managers_mod, "RedisConnectionFactory", _FakeStateRedisFactory()):
+        yield
+
+
 class _FakeTaskQueue:
     def __init__(self):
         self.submitted = []
@@ -199,6 +235,19 @@ def test_handle_callback_invalid_state_raises(app):
     with app.app_context():
         with pytest.raises(IrisMailboxOAuthStateError):
             IrisMailboxManager().handle_callback("not-a-real-state", "auth-code")
+
+
+def test_handle_callback_rejects_replayed_state(app, regular_user):
+    """El state es de un solo uso: una segunda llamada con el mismo state
+    (firma y TTL todavía válidos) debe rechazarse, no repetir el canje."""
+    with app.app_context():
+        state = IrisMailboxManager._sign_state(
+            user_id=regular_user.id, provider="gmail", full_message_mode=False, folder=None,
+        )
+        with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=_FakeConnector()):
+            IrisMailboxManager().handle_callback(state, "auth-code")
+            with pytest.raises(IrisMailboxOAuthStateError):
+                IrisMailboxManager().handle_callback(state, "auth-code")
 
 
 # ------------------------------------------------------------------- CRUD
