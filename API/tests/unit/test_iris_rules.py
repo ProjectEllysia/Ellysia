@@ -642,7 +642,8 @@ def test_reanalyze_submits_the_same_stored_raw_input(monkeypatch):
         IrisManager, "assert_analysis_ownership",
         classmethod(lambda cls, analysis_id, user_id: fake_analysis),
     )
-    monkeypatch.setattr(IrisManager, "_create_analysis_record", lambda self, r, uid, title=None: 99)
+    monkeypatch.setattr(IrisManager, "_create_analysis_record",
+                        lambda self, r, uid, title=None, connection_id=None, source_message_uid=None: 99)
     monkeypatch.setattr(IrisManager, "_validate_headers_pre", staticmethod(lambda r: None))
 
     fake_queue = _FakeTaskQueue()
@@ -658,7 +659,7 @@ def test_reanalyze_title_references_the_original():
     captured_titles = []
 
     class _Manager(IrisManager):
-        def _create_analysis_record(self, raw, uid, title=None):
+        def _create_analysis_record(self, raw, uid, title=None, connection_id=None, source_message_uid=None):
             captured_titles.append(title)
             return 100
 

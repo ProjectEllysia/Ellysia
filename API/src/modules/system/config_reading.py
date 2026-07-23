@@ -953,6 +953,74 @@ def get_iris_prompts() -> dict:
 
 
 # =============================================================================
+# CONECTOR DE BUZÓN DE IRIS (Fase 3-4 del plan mailbox-connector)
+# =============================================================================
+
+@_lazy_load
+def get_iris_max_connections_per_user() -> int:
+    """Máximo de cuentas de correo que un usuario puede conectar a la vez."""
+    return _cfg("iris.maxConnectionsPerUser", 5, int)
+
+
+@_lazy_load
+def get_iris_poll_interval_minutes() -> int:
+    """Intervalo (minutos) del scheduler que sondea las conexiones activas."""
+    return _cfg("iris.pollIntervalMinutes", 5, int)
+
+
+@_lazy_load
+def get_iris_max_ingested_per_day() -> int:
+    """Tope diario de análisis auto-ingeridos, por conexión (no global).
+
+    Una conexión mal configurada (carpeta ruidosa, bucle de reenvíos) no
+    debe poder generar analisis sin límite — ver roadmap-ellysia.md §8.1.
+    """
+    return _cfg("iris.maxIngestedPerDay", 200, int)
+
+
+def get_gmail_environment() -> dict[str, str]:
+    """Credenciales OAuth de la app de Gmail desde variables de entorno.
+
+    Returns:
+        dict con 'client_id' y 'client_secret'.
+
+    Raises:
+        ValueError: Si falta alguna de las dos.
+    """
+    client_id = os.getenv("GMAIL_CLIENT_ID")
+    client_secret = os.getenv("GMAIL_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise ValueError(
+            "Faltan GMAIL_CLIENT_ID/GMAIL_CLIENT_SECRET en el archivo .env. "
+            "Regístralos en Google Cloud Console (OAuth client, tipo 'Web "
+            "application') antes de conectar una cuenta Gmail."
+        )
+    return {"client_id": client_id, "client_secret": client_secret}
+
+
+def get_graph_environment() -> dict[str, str]:
+    """Credenciales OAuth de la app registrada en Microsoft Entra ID.
+
+    Returns:
+        dict con 'client_id', 'client_secret' y 'tenant' (por defecto
+        "common": cuentas personales y de cualquier organización).
+
+    Raises:
+        ValueError: Si falta client_id o client_secret.
+    """
+    client_id = os.getenv("GRAPH_CLIENT_ID")
+    client_secret = os.getenv("GRAPH_CLIENT_SECRET")
+    tenant = os.getenv("GRAPH_TENANT_ID", "common")
+    if not client_id or not client_secret:
+        raise ValueError(
+            "Faltan GRAPH_CLIENT_ID/GRAPH_CLIENT_SECRET en el archivo .env. "
+            "Regístralos como app registration en Microsoft Entra ID (Azure "
+            "AD) antes de conectar una cuenta Microsoft 365."
+        )
+    return {"client_id": client_id, "client_secret": client_secret, "tenant": tenant}
+
+
+# =============================================================================
 # VERSIÓN DE LA APLICACIÓN
 # =============================================================================
 

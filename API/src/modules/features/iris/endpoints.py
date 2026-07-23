@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 
-from flask import send_file
+from flask import redirect, send_file
 from flask_smorest import Blueprint as SmorestBlueprint
 
 from src.modules.users import (
@@ -28,13 +28,18 @@ from src.modules.shared import handle_exceptions, limiter
 from src.modules.shared.schemas import ErrorSchema
 from src.modules.shared._exceptions import DocumentError, DocumentNotFoundError, DocumentNotReadyError
 
+import src.modules.system.config_reading as CR
+
 from .managers import IrisManager, IrisReportManager
+from .mailbox_managers import IrisMailboxManager
 from .exceptions import (
     IrisAnalysisNotFoundError,
     IrisAnalysisNotReadyError,
     IrisExecutionError,
     IrisInvalidInputError,
     IrisInvalidStateError,
+    IrisMailboxConnectionNotFoundError,
+    IrisMailboxOAuthStateError,
 )
 from .schemas import (
     AnalysisIdQuerySchema,
@@ -55,6 +60,15 @@ from .schemas import (
     IrisDocumentListResponseSchema,
     AnalysisDocumentsResponseSchema,
     IrisDocumentDeleteResponseSchema,
+    IrisMailboxProvidersResponseSchema,
+    IrisMailboxConnectRequestSchema,
+    IrisMailboxConnectResponseSchema,
+    IrisMailboxConnectionItemSchema,
+    IrisMailboxConnectionListResponseSchema,
+    IrisMailboxUpdateConnectionRequestSchema,
+    IrisMailboxConnectionDeleteResponseSchema,
+    IrisMailboxSyncResponseSchema,
+    IrisMailboxCallbackQuerySchema,
 )
 
 
@@ -497,3 +511,163 @@ def delete_document(document_id: int):
 
     logger.info(f"Documento {document_id} eliminado por usuario {user.username}")
     return {"message": "Documento eliminado correctamente", "documentId": document_id}
+
+
+# =============================================================================
+# Mailbox connector (Fase 4) — Gmail / Microsoft Graph
+# =============================================================================
+
+def _serialize_connection(connection) -> dict:
+    """Never includes refresh_token_enc/access_token_enc — those must not
+    leave the server under any circumstance."""
+    return {
+        "connectionId": connection.id,
+        "provider": connection.provider,
+        "accountEmail": connection.account_email,
+        "folder": connection.folder,
+        "fullMessageMode": connection.full_message_mode,
+        "status": connection.status,
+        "lastSyncAt": connection.last_sync_at,
+        "lastError": connection.last_error,
+        "createdAt": connection.created_at,
+    }
+
+
+@iris_blp.get("/mailbox/providers")
+@iris_blp.response(200, IrisMailboxProvidersResponseSchema, description="Supported mailbox providers")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+def list_mailbox_providers():
+    """Proveedores de buzón soportados por el conector"""
+    return {"providers": IrisMailboxManager.list_providers()}
+
+
+@iris_blp.post("/mailbox/connect")
+@iris_blp.arguments(IrisMailboxConnectRequestSchema)
+@iris_blp.response(201, IrisMailboxConnectResponseSchema, description="Authorization URL")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Invalid provider or quota exceeded")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_CREATE])
+@limiter.limit("20 per hour; 100 per day")
+@handle_exceptions(default_exception=IrisExecutionError, logger=logger)
+def connect_mailbox(data):
+    """Iniciar la conexión de un buzón externo (Gmail / Microsoft 365).
+
+    Devuelve la URL de autorización del proveedor; el frontend debe abrir
+    una ventana/redirigir ahí. El proveedor redirige de vuelta a
+    ``GET /iris/mailbox/callback`` cuando el usuario consiente (o lo rechaza).
+    """
+    user = get_current_user()
+    authorize_url = IrisMailboxManager().start_connect(
+        user.id, data["provider"],
+        full_message_mode=data.get("fullMessageMode", False),
+        folder=data.get("folder"),
+    )
+    logger.info(f"Usuario {user.username} inició conexión de buzón ({data['provider']})")
+    return {"authorizeUrl": authorize_url}, 201
+
+
+@iris_blp.get("/mailbox/callback")
+@iris_blp.arguments(IrisMailboxCallbackQuerySchema, location="query")
+@iris_blp.response(302, description="Redirect to the frontend")
+def mailbox_oauth_callback(args: dict):
+    """Callback OAuth de Google/Microsoft.
+
+    Sin ``require_oauth_token``: llega como navegación directa del
+    navegador tras el redirect del proveedor, sin Authorization header
+    posible. El ``state`` firmado (ver ``IrisMailboxManager._verify_state``)
+    hace de protección CSRF y liga la petición al usuario que inició
+    ``/mailbox/connect`` — es la única identidad que este endpoint necesita.
+    """
+    connections_url = f"{CR.get_public_web_url()}/iris/conexiones"
+
+    if args.get("error"):
+        logger.info(f"Mailbox OAuth callback: consentimiento denegado ({args['error']})")
+        return redirect(f"{connections_url}?error=consent_denied")
+
+    if not args.get("code"):
+        return redirect(f"{connections_url}?error=missing_code")
+
+    try:
+        IrisMailboxManager().handle_callback(args["state"], args["code"])
+    except IrisMailboxOAuthStateError:
+        logger.warning("Mailbox OAuth callback: state inválido o caducado")
+        return redirect(f"{connections_url}?error=invalid_state")
+    except Exception as e:
+        logger.error(f"Mailbox OAuth callback falló: {e}", exc_info=True)
+        return redirect(f"{connections_url}?error=connection_failed")
+
+    return redirect(f"{connections_url}?connected=1")
+
+
+@iris_blp.get("/mailbox/connections")
+@iris_blp.response(200, IrisMailboxConnectionListResponseSchema, description="Mailbox connections")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+def list_mailbox_connections():
+    """Listar las conexiones de buzón del usuario actual (nunca expone tokens)"""
+    user = get_current_user()
+    connections = IrisMailboxManager.list_connections(user.id)
+    items = [_serialize_connection(c) for c in connections]
+    return {"connections": items, "total": len(items)}
+
+
+@iris_blp.patch("/mailbox/connections/<int:connection_id>")
+@iris_blp.arguments(IrisMailboxUpdateConnectionRequestSchema)
+@iris_blp.response(200, IrisMailboxConnectionItemSchema, description="Connection updated")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Invalid status")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Connection not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("60 per hour; 300 per day")
+@handle_exceptions(default_exception=IrisMailboxConnectionNotFoundError, logger=logger)
+def update_mailbox_connection(data, connection_id: int):
+    """Cambiar la carpeta vigilada o pausar/reactivar una conexión"""
+    user = get_current_user()
+    connection = IrisMailboxManager().update_connection(
+        connection_id, user.id, folder=data.get("folder"), status=data.get("status"),
+    )
+    logger.info(f"Conexión {connection_id} actualizada por usuario {user.username}")
+    return _serialize_connection(connection)
+
+
+@iris_blp.delete("/mailbox/connections/<int:connection_id>")
+@iris_blp.response(200, IrisMailboxConnectionDeleteResponseSchema, description="Connection deleted")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Connection not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_DELETE])
+@limiter.limit("60 per hour; 200 per day")
+@handle_exceptions(default_exception=IrisMailboxConnectionNotFoundError, logger=logger)
+def delete_mailbox_connection(connection_id: int):
+    """Desconectar un buzón: revoca el token en el proveedor (best-effort) y borra la fila"""
+    user = get_current_user()
+    IrisMailboxManager().delete_connection(connection_id, user.id)
+    logger.info(f"Conexión {connection_id} eliminada por usuario {user.username}")
+    return {"message": "Conexión eliminada correctamente", "connectionId": connection_id}
+
+
+@iris_blp.post("/mailbox/connections/<int:connection_id>/sync")
+@iris_blp.response(202, IrisMailboxSyncResponseSchema, description="Sync queued")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Connection not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("30 per hour; 100 per day")
+@handle_exceptions(default_exception=IrisMailboxConnectionNotFoundError, logger=logger)
+def sync_mailbox_connection(connection_id: int):
+    """Sondeo manual de una conexión (fuera del ciclo periódico del scheduler)"""
+    user = get_current_user()
+    IrisMailboxManager().trigger_sync(connection_id, user.id)
+    logger.info(f"Sync manual de la conexión {connection_id} encolado por usuario {user.username}")
+    return {"message": "Sincronización encolada correctamente", "connectionId": connection_id}, 202

@@ -85,7 +85,9 @@ class IrisManager(TaskTrackingMixin):
         raw_headers: str | None,
         user_id: int,
         title: str | None = None,
-        raw_message: str | None = None
+        raw_message: str | None = None,
+        connection_id: int | None = None,
+        source_message_uid: str | None = None,
     ) -> int:
         """Submit raw email headers (or a full message) for background analysis.
 
@@ -103,6 +105,14 @@ class IrisManager(TaskTrackingMixin):
                          given, since it's a superset of the header data.
                          Rules that need body/links/attachments only see
                          them when this is provided.
+            connection_id: IrisMailboxConnection this message was ingested
+                         through (Fase 3-4). None for manual submissions —
+                         the original, still-default flow.
+            source_message_uid: Provider-specific message id, set only
+                         together with connection_id. The (connection_id,
+                         source_message_uid) pair is UNIQUE at the DB level,
+                         so a mailbox sync retry that resubmits the same
+                         message raises instead of duplicating the analysis.
 
         Returns:
             The new IrisAnalysis primary key (``analysis_id``).  The
@@ -122,7 +132,10 @@ class IrisManager(TaskTrackingMixin):
             )
 
         self._validate_headers_pre(raw_input)
-        analysis_id = self._create_analysis_record(raw_input, user_id, title=title)
+        analysis_id = self._create_analysis_record(
+            raw_input, user_id, title=title,
+            connection_id=connection_id, source_message_uid=source_message_uid,
+        )
         logger.info(f"Iris analysis {analysis_id} created for user {user_id}")
 
         if self.TASK_CATEGORY is None:
@@ -527,13 +540,17 @@ class IrisManager(TaskTrackingMixin):
     # INTERNAL
     # =========================================================================
 
-    def _create_analysis_record(self, raw_headers: str, user_id: int, title: str | None = None) -> int:
+    def _create_analysis_record(self, raw_headers: str, user_id: int, title: str | None = None,
+                                 connection_id: int | None = None,
+                                 source_message_uid: str | None = None) -> int:
         """Persist a new IrisAnalysis row in ``pending`` state."""
         analysis = IrisAnalysis(
             raw_headers=raw_headers,
             user_id=user_id,
             title=title.strip()[:120] if title and title.strip() else None,
             status="pending",
+            connection_id=connection_id,
+            source_message_uid=source_message_uid,
         )
         with UnitOfWork() as uow:
             repo = IrisAnalysisRepository(uow)

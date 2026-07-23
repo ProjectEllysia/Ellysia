@@ -293,3 +293,74 @@ class IrisDocumentDeleteResponseSchema(Schema):
     """Confirmation after deleting an IrisDocument."""
     message = fields.String()
     documentId = fields.Integer()
+
+
+# =============================================================================
+# Mailbox connector (Fase 4) — Gmail / Microsoft Graph
+# =============================================================================
+
+class IrisMailboxProvidersResponseSchema(Schema):
+    """Providers configured/supported for the mailbox connector."""
+    providers = fields.List(fields.String())
+
+
+class IrisMailboxConnectRequestSchema(Schema):
+    """Request body for ``POST /iris/mailbox/connect``."""
+    provider = fields.String(required=True)
+    fullMessageMode = fields.Boolean(load_default=False)
+    folder = fields.String(load_default=None, allow_none=True)
+
+
+class IrisMailboxConnectResponseSchema(Schema):
+    """Authorization URL to redirect the user to."""
+    authorizeUrl = fields.String()
+
+
+class IrisMailboxConnectionItemSchema(Schema):
+    """A connected mailbox — never includes tokens, encrypted or otherwise."""
+    connectionId = fields.Integer()
+    provider = fields.String()
+    accountEmail = fields.String()
+    folder = fields.String(allow_none=True)
+    fullMessageMode = fields.Boolean()
+    status = fields.String()
+    lastSyncAt = UTCDateTime(allow_none=True)
+    lastError = fields.String(allow_none=True)
+    createdAt = UTCDateTime(allow_none=True)
+
+
+class IrisMailboxConnectionListResponseSchema(Schema):
+    """All mailbox connections belonging to the current user."""
+    connections = fields.List(fields.Nested(IrisMailboxConnectionItemSchema))
+    total = fields.Integer()
+
+
+class IrisMailboxUpdateConnectionRequestSchema(Schema):
+    """Request body for ``PATCH /iris/mailbox/connections/<id>``."""
+    folder = fields.String(load_default=None, allow_none=True)
+    status = fields.String(load_default=None, allow_none=True,
+                            validate=validate.OneOf(["active", "paused"]))
+
+
+class IrisMailboxConnectionDeleteResponseSchema(Schema):
+    """Confirmation after deleting a mailbox connection."""
+    message = fields.String()
+    connectionId = fields.Integer()
+
+
+class IrisMailboxSyncResponseSchema(Schema):
+    """Confirmation after queuing a manual sync."""
+    message = fields.String()
+    connectionId = fields.Integer()
+
+
+class IrisMailboxCallbackQuerySchema(Schema):
+    """Query params on the OAuth redirect back from Google/Microsoft.
+
+    ``error`` is present instead of ``code`` when the user denies consent —
+    both are optional here so the endpoint can distinguish and redirect
+    accordingly rather than failing schema validation on a normal decline.
+    """
+    state = fields.String(required=True)
+    code = fields.String(load_default=None)
+    error = fields.String(load_default=None)
