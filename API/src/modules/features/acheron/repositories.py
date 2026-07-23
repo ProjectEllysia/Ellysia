@@ -24,7 +24,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from src.modules.features.acheron.model import Account, CreditCard, Storable, Vault
+from src.modules.features.acheron.model import Storable, Vault
 from src.modules.infrastructure import BaseRepository, UnitOfWork
 
 
@@ -80,63 +80,7 @@ class VaultRepository(BaseRepository[Vault]):
             .filter(Vault.user_id == user_id)
             .all()
         )
-
-    # =========================================================================
-    # CREATE / UPDATE
-    # =========================================================================
-
-    def save_with_storables(
-        self,
-        vault: Vault,
-        accounts_data: List[dict] | None = None,
-        creditcards_data: List[dict] | None = None,
-    ) -> Vault:
-        """
-        Save a vault and optionally create storables in the same transaction.
-
-        Args:
-            vault: Vault instance to save.
-            accounts_data: Optional list of account dictionaries.
-            creditcards_data: Optional list of credit card dictionaries.
-
-        Returns:
-            Saved Vault instance.
-        """
-        self._session.add(vault)
-        self._session.flush()
-
-        if accounts_data:
-            for acc_data in accounts_data:
-                self._session.add(Account(
-                    vault=vault,
-                    internal_id=acc_data.get("id"),
-                    title=acc_data.get("title"),
-                    created_at=acc_data.get("created_at"),
-                    updated_at=acc_data.get("updated_at"),
-                    username=acc_data.get("username", ""),
-                    domain=acc_data.get("domain", ""),
-                    password=acc_data.get("password", ""),
-                ))
-
-        if creditcards_data:
-            for cc_data in creditcards_data:
-                self._session.add(CreditCard(
-                    vault=vault,
-                    internal_id=cc_data.get("id"),
-                    title=cc_data.get("title"),
-                    created_at=cc_data.get("created_at"),
-                    updated_at=cc_data.get("updated_at"),
-                    cardholder_name=cc_data.get("cardholder_name", ""),
-                    card_number=cc_data.get("card_number", ""),
-                    expiration_date=cc_data.get("expiration_date", ""),
-                    postal_code=cc_data.get("postal_code", ""),
-                    cvv=cc_data.get("cvv", ""),
-                ))
-
-        self._session.flush()
-        self._session.refresh(vault)
-        return vault
-
+    
     def delete_with_storables(self, vault: Vault) -> None:
         """
         Delete a vault and all its storables.
