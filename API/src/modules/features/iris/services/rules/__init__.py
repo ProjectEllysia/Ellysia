@@ -20,17 +20,5 @@ decorators, populating the registry — see ``registry.py``.
 """
 
 from ..registry import iris_rules, RuleResult
-from . import (
-    attachment_media_rules,
-    auth_rules,
-    body_content_rules,
-    body_links_rules,
-    content_trust_rules,
-    received_timing_rules,
-    recipient_rules,
-    reply_path_rules,
-    sender_identity_rules,
-    thread_rules,
-)
 
 __all__ = ["iris_rules", "RuleResult"]
