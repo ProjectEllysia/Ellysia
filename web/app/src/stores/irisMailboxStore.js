@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { useApi } from '@/composables/useApi'
 import { useToastStore } from '@/stores/toastStore'
 
@@ -12,6 +12,10 @@ export const useIrisMailboxStore = defineStore('irisMailbox', () => {
   const loading = ref(false)
   const listError = ref(null)
   const connecting = ref(false)
+  // IDs de conexión con un sondeo manual en curso — alimenta el estado de
+  // "ocupado" por fila (antes no existía ninguno) mientras se espera a que
+  // el worker de iris.ingest, que corre aparte, termine de verdad.
+  const syncingIds = reactive(new Set())
 
   async function fetchProviders() {
     const res = await apiFetch('/iris/mailbox/providers')
@@ -89,14 +93,31 @@ export const useIrisMailboxStore = defineStore('irisMailbox', () => {
     return true
   }
 
+  /**
+   * Antes esta función no refetcheaba nunca — "Sondear ahora" parecía no
+   * hacer nada porque `lastSyncAt` en la lista se quedaba congelado hasta
+   * la próxima recarga manual de la página. El sondeo real corre en un
+   * worker de `iris.ingest` aparte (encolado, no síncrono con este POST),
+   * así que una única foto inmediata normalmente todavía no lo refleja:
+   * se refetchea una vez al encolar y una segunda vez tras un margen para
+   * capturar el resultado real, y `syncingIds` da al usuario una señal
+   * visual de que algo está en marcha durante ese margen.
+   */
   async function syncConnection(id) {
-    const res = await apiFetch(`/iris/mailbox/connections/${id}/sync`, { method: 'POST' })
-    if (!res?.ok) {
-      toast.show(await apiError(res, 'No se pudo sincronizar la conexión.'), 'error')
-      return false
+    syncingIds.add(id)
+    try {
+      const res = await apiFetch(`/iris/mailbox/connections/${id}/sync`, { method: 'POST' })
+      if (!res?.ok) {
+        toast.show(await apiError(res, 'No se pudo sincronizar la conexión.'), 'error')
+        return false
+      }
+      toast.show('Sincronización en cola.', 'success')
+      await fetchConnections()
+      setTimeout(() => { fetchConnections() }, 3000)
+      return true
+    } finally {
+      setTimeout(() => { syncingIds.delete(id) }, 3000)
     }
-    toast.show('Sincronización en cola.', 'success')
-    return true
   }
 
   function $reset() {
@@ -105,10 +126,11 @@ export const useIrisMailboxStore = defineStore('irisMailbox', () => {
     loading.value = false
     listError.value = null
     connecting.value = false
+    syncingIds.clear()
   }
 
   return {
-    providers, connections, loading, listError, connecting,
+    providers, connections, loading, listError, connecting, syncingIds,
     fetchProviders, fetchConnections, connect, updateConnection, deleteConnection, syncConnection,
     $reset,
   }

@@ -42,15 +42,18 @@
         <button type="button" @click="store.fetchResults()">Reintentar</button>
       </div>
       <IrisHistoryStrip
-        :items="sortedAnalyses"
+        :items="store.analyses"
         :active-id="store.currentId"
-        :sort="sortMode"
-        :has-more="store.hasMore"
-        :loading-more="store.loadingMore"
+        :total="store.totalCount"
         @select="store.selectAnalysis"
-        @sort="handleSort"
         @delete="handleDelete"
-        @load-more="handleLoadMore"
+        @open-archive="archiveOpen = true"
+      />
+
+      <IrisArchiveModal
+        :show="archiveOpen"
+        @close="archiveOpen = false"
+        @select="store.selectAnalysis"
       />
 
       <router-link to="/iris/conexiones" class="back-link connections-link">
@@ -93,6 +96,7 @@ import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
 import AppToast from '@/components/shared/AppToast.vue'
 import IrisHistoryStrip from '@/components/iris/IrisHistoryStrip.vue'
+import IrisArchiveModal from '@/components/iris/IrisArchiveModal.vue'
 import IrisReportViewer from '@/components/iris/IrisReportViewer.vue'
 import IrisForm from '@/components/iris/IrisForm.vue'
 import { useIrisStore } from '@/stores/irisStore'
@@ -102,6 +106,7 @@ import { parseEml } from '@/composables/useEml'
 const store = useIrisStore()
 const toast = useToastStore()
 const formKey = ref(0)
+const archiveOpen = ref(false)
 
 // Relleno automático del formulario a partir de un .eml arrastrado.
 const prefill = ref(null)
@@ -193,32 +198,25 @@ async function onDrop(e) {
   }
 }
 
+// Ctrl/Cmd+K abre el archivo desde cualquier punto de la vista — el resto
+// de atajos (Esc, "/", flechas, Enter) viven dentro de IrisArchiveModal
+// mismo, que solo escucha mientras está abierto.
+function handleGlobalShortcut(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault()
+    archiveOpen.value = true
+  }
+}
+
 onBeforeUnmount(() => {
   clearTimeout(rejectTimer)
   store.stopPolling()
   store.stopDocumentPolling()
-})
-
-const sortMode = computed({
-  get: () => store.sortMode || 'date-desc',
-  set: (v) => { store.sortMode = v },
-})
-
-const sortedAnalyses = computed(() => {
-  const items = [...store.analyses]
-  switch (sortMode.value) {
-    case 'date-asc':
-      return items.sort((a, b) => new Date(a.startedAt || 0) - new Date(b.startedAt || 0))
-    case 'score-desc':
-      return items.sort((a, b) => (b.totalScore ?? -999) - (a.totalScore ?? -999))
-    case 'score-asc':
-      return items.sort((a, b) => (a.totalScore ?? -999) - (b.totalScore ?? -999))
-    default:
-      return items.sort((a, b) => new Date(b.startedAt || 0) - new Date(a.startedAt || 0))
-  }
+  window.removeEventListener('keydown', handleGlobalShortcut)
 })
 
 onMounted(async () => {
+  window.addEventListener('keydown', handleGlobalShortcut)
   await store.fetchResults()
   const last = store.analyses[0]
   if (last && (last.status === 'running' || last.status === 'pending')) {
@@ -242,14 +240,6 @@ async function handleCancel() {
 
 async function handleDelete(id) {
   await store.deleteAnalysis(id)
-}
-
-function handleLoadMore() {
-  store.fetchMoreResults()
-}
-
-function handleSort(mode) {
-  sortMode.value = mode
 }
 </script>
 
