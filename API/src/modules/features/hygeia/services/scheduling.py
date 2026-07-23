@@ -20,7 +20,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 import src.modules.system.config_reading as CR
-from src.modules.infrastructure.unit_of_work import close_all
+from src.modules.infrastructure.scheduling import make_background_scheduler, scheduler_job
 
 from ..managers import HygeiaMaintenanceManager
 
@@ -38,14 +38,7 @@ class HygeiaScheduler:
         if cls._scheduler is not None:
             return
 
-        # timezone=UTC y misfire_grace_time, por la misma razón que en el
-        # Scheduler de Themis: alinea next_run_time con las columnas naive-UTC
-        # del esquema, y da margen para que un retraso mínimo del hilo del
-        # scheduler no descarte el disparo en vez de ejecutarlo tarde.
-        cls._scheduler = BackgroundScheduler(
-            timezone=timezone.utc,
-            job_defaults={"misfire_grace_time": 60},
-        )
+        cls._scheduler = make_background_scheduler()
         cls._scheduler.add_job(
             func=cls._run_presence_check,
             trigger="interval",
@@ -76,29 +69,14 @@ class HygeiaScheduler:
         logger.info("Scheduler de Hygeia detenido")
 
     @staticmethod
+    @scheduler_job(logger, "Error en el chequeo de presencia de Hygeia")
     def _run_presence_check() -> None:
-        """Entry point del job de presencia: aísla errores y libera la sesión del hilo.
-
-        APScheduler corre en un hilo de vida larga y ``scoped_session`` está
-        keyed por hilo: sin el ``close_all()`` del ``finally``, la sesión de
-        este disparo quedaría pegada al hilo y un estado abortado
-        envenenaría el siguiente (mismo razonamiento que ``Scheduler.execute``
-        en Themis).
-        """
-        try:
-            HygeiaMaintenanceManager.execute_presence_check()
-        except Exception:
-            logger.exception("Error en el chequeo de presencia de Hygeia")
-        finally:
-            close_all()
+        """Entry point del job de presencia (aislamiento de errores y cierre de sesión vía ``scheduler_job``)."""
+        HygeiaMaintenanceManager.execute_presence_check()
 
     @staticmethod
+    @scheduler_job(logger, "Error en la poda de snapshots de Hygeia")
     def _run_retention() -> None:
-        """Entry point del job de retención: aísla errores y libera la sesión del hilo."""
-        try:
-            deleted = HygeiaMaintenanceManager.execute_retention()
-            logger.info("Retención de Hygeia: %d snapshot(s) eliminado(s)", deleted)
-        except Exception:
-            logger.exception("Error en la poda de snapshots de Hygeia")
-        finally:
-            close_all()
+        """Entry point del job de retención (aislamiento de errores y cierre de sesión vía ``scheduler_job``)."""
+        deleted = HygeiaMaintenanceManager.execute_retention()
+        logger.info("Retención de Hygeia: %d snapshot(s) eliminado(s)", deleted)

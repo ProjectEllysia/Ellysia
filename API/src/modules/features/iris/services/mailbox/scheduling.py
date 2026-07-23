@@ -14,14 +14,13 @@ proceso worker aislado.
 from __future__ import annotations
 
 import logging
-from datetime import timezone
 from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
 import src.modules.system.config_reading as CR
 from src.modules.infrastructure.session import build_repository
-from src.modules.infrastructure.unit_of_work import close_all
+from src.modules.infrastructure.scheduling import make_background_scheduler, scheduler_job
 
 from ...mailbox_managers import IrisMailboxManager
 from ...repositories import IrisMailboxConnectionRepository
@@ -41,10 +40,7 @@ class IrisMailboxScheduler:
             return
 
         interval = CR.get_iris_poll_interval_minutes()
-        cls._scheduler = BackgroundScheduler(
-            timezone=timezone.utc,
-            job_defaults={"misfire_grace_time": 60},
-        )
+        cls._scheduler = make_background_scheduler()
         cls._scheduler.add_job(
             func=cls._poll_connections,
             trigger="interval",
@@ -67,20 +63,13 @@ class IrisMailboxScheduler:
         logger.info("Scheduler de buzones de Iris detenido")
 
     @staticmethod
+    @scheduler_job(logger, "Error sondeando conexiones de buzón de Iris")
     def _poll_connections() -> None:
-        """Entry point del job: aísla errores y libera la sesión del hilo
-        (mismo razonamiento que ``HygeiaScheduler._run_presence_check`` —
-        APScheduler corre en un hilo de vida larga y ``scoped_session`` está
-        keyed por hilo)."""
-        try:
-            interval = CR.get_iris_poll_interval_minutes()
-            due = build_repository(IrisMailboxConnectionRepository).get_due_for_sync(interval)
-            manager = IrisMailboxManager()
-            for connection in due:
-                manager.submit_sync(connection.id)
-            if due:
-                logger.info("Sondeo de buzones de Iris: %d conexión(es) encolada(s)", len(due))
-        except Exception:
-            logger.exception("Error sondeando conexiones de buzón de Iris")
-        finally:
-            close_all()
+        """Entry point del job (aislamiento de errores y cierre de sesión vía ``scheduler_job``)."""
+        interval = CR.get_iris_poll_interval_minutes()
+        due = build_repository(IrisMailboxConnectionRepository).get_due_for_sync(interval)
+        manager = IrisMailboxManager()
+        for connection in due:
+            manager.submit_sync(connection.id)
+        if due:
+            logger.info("Sondeo de buzones de Iris: %d conexión(es) encolada(s)", len(due))
