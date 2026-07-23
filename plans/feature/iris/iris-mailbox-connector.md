@@ -1253,6 +1253,106 @@ expectativa, aunque nosotros ya no lo guardemos.
 
 ---
 
+## Hallazgos post-desarrollo (2026-07-22/23, tras implementar Fases 2-5)
+
+Fases 2-5 se implementaron y probaron manualmente contra Google real (rama
+`feature/iris/rules-fine-tunning`; Fase 1 ya estaba commiteada, Fases 2-5
+quedan pendientes de commit hasta este punto). Verificado en vivo:
+`POST /iris/mailbox/connect` genera una `authorizeUrl` real y Google la
+acepta (reconoce "Ellysia", sin error de `client_id`/`redirect_uri`). Esta
+sección recoge lo que la implementación y las pruebas manuales encontraron
+que el diseño original no prevé — no son ideas nuevas, son hechos
+verificados contra el código/la UI ya construidos.
+
+### Desviaciones deliberadas del diseño de Fase 5
+
+- **Redirect de página completa, no ventana nueva.** El texto original decía
+  "un botón que abre el flujo OAuth en una ventana nueva". Se implementó
+  como redirect de página completa (`window.location.href`) porque el
+  backend ya cierra el flujo con un redirect de servidor tras el callback
+  (`GET /iris/mailbox/callback` → `{PUBLIC_WEB_URL}/iris/conexiones`) — usar
+  una ventana emergente habría exigido además `postMessage`/gestión de
+  ventana para que la SPA principal se enterase de que terminó. Más simple
+  y con el mismo resultado percibido por el usuario.
+- **El historial de análisis NO distingue todavía origen manual vs. buzón.**
+  El diseño original de `IrisView.vue` lo daba por hecho ("distingue el
+  origen... y permite filtrar por conexión"). El dato ya existe
+  (`IrisAnalysis.connection_id`/`source_message_uid`, persistido desde
+  Fase 3) pero no se expone en `AnalysisListItemSchema` ni se renderiza en
+  `IrisHistoryStrip.vue`. Ofrecido al usuario como siguiente paso, no
+  implementado en esta sesión.
+
+### Bug real encontrado, sin arreglar todavía
+
+- **`IrisAnalysis.connection_id` no tiene `ondelete` en el FK hacia
+  `IrisMailboxConnection.id`** (`API/src/modules/features/iris/model.py`).
+  En Postgres esto es `RESTRICT` por defecto: en cuanto una conexión tenga
+  al menos un análisis asociado (es decir, siempre que haya sobrevivido a un
+  sondeo), `IrisMailboxManager.delete_connection()` →
+  `DELETE /iris/mailbox/connections/<id>` falla con un error de integridad
+  en vez de borrar la fila. **"Desconectar" está roto para el caso de uso
+  real.** Los tests existentes no lo cazan porque ninguno crea una
+  `IrisMailboxConnection` con análisis asociados antes de borrarla. Arreglo
+  previsto: `ondelete="SET NULL"` en el FK (conserva el histórico de
+  análisis, solo desvincula la conexión borrada) + migración Alembic nueva.
+
+### Riesgo estructural para SaaS multi-réplica
+
+- **`IrisMailboxScheduler` es un `BackgroundScheduler` en memoria, por
+  proceso** (mismo patrón que `HygeiaScheduler`/`Scheduler` de Themis, que
+  tienen el mismo límite). Con una sola réplica de la API funciona bien; en
+  cuanto se escale horizontalmente (el escenario normal de un SaaS), cada
+  réplica sondea las mismas conexiones de forma independiente →
+  sondeos/análisis duplicados. No es un bug de esta Fase 4 en particular,
+  es un límite de arquitectura que ya existía y que este trabajo hereda sin
+  resolver. Solución real: mover el disparo periódico a un scheduler
+  externo compartido (cron del sistema pegando a un endpoint interno, o un
+  job de APScheduler con `jobstore` en Postgres/Redis en vez de en memoria)
+  antes de correr más de una réplica.
+
+### Gaps de producto (no de código) para vender esto como SaaS
+
+- **Calibración del motor de detección incompleta.** La auditoría de Fase 1
+  (`iris-rules-audit-fase1`) encontró y arregló los bypasses y los falsos
+  positivos más tóxicos, pero dejó fuera deliberadamente la recalibración
+  completa de pesos y la fusión de reglas (C1/F6/N2 — ver el bloque de
+  estado al inicio de la Fase 1) por falta de la tabla de pesos del consejo.
+  Para un producto que se vende como "detector de phishing", la precisión
+  percibida es el producto.
+- **Sin medición de uso ni facturación por tenant.** Las cuotas actuales
+  (`iris.maxConnectionsPerUser`, `iris.maxIngestedPerDay`) son límites de
+  protección, no un contador de uso facturable.
+- **Sin notificación activa cuando una conexión pasa a `reauth_required`.**
+  Hoy el usuario solo se entera si entra a `/iris/conexiones` a mirar; para
+  un producto en el que "que siga funcionando solo" es la propuesta de
+  valor, un fallo silencioso es especialmente malo.
+- **Aviso legal/RGPD pendiente.** Analizar automáticamente el correo de un
+  usuario (aunque solo sean cabeceras, ver Fase 2.3 "qué se guarda y qué
+  no") es tratamiento de datos que requiere política de privacidad y
+  consentimiento explícito antes de vender esto a usuarios en la UE — el
+  diseño de datos mínimos ya construido es una condición necesaria, no
+  suficiente.
+
+### Bugs de interfaz encontrados en pruebas manuales (ya arreglados)
+
+- **Tipografía inconsistente.** `MailboxConnectionList.vue` se copió de
+  `components/hygeia/AssetList.vue`, que usa una escala de fuente pequeña a
+  propósito (lista de monitorización densa) — pero Iris usa una escala
+  mayor en sus propios componentes (`IrisHistoryStrip.vue` usa `--fs-lg`).
+  Arreglado subiendo la escala de la lista de conexiones para igualar el
+  resto de Iris.
+- **El enlace "Conexiones de buzón" rompía el estilo visual.** Se había
+  escrito una clase CSS nueva (`.connections-link`) en vez de reutilizar
+  `.back-link`, ya existente en `assets/css/shared.css` y usada por el
+  "Volver" del Topbar. Arreglado reutilizando la clase global; verificado
+  que el font-size computado coincide exactamente (18px) con el resto de
+  los enlaces de navegación de la app.
+- **Posición del enlace.** Quedaba entre la cabecera y el historial,
+  interfiriendo visualmente con ambos. Movido a debajo de
+  `IrisHistoryStrip`, antes del panel principal.
+
+---
+
 ## Referencias
 
 - `API/src/modules/features/iris/ROADMAP.md` — hoja de ruta del motor. **I4** ("Integración de
