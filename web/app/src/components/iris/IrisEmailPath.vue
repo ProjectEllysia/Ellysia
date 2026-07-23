@@ -148,7 +148,7 @@ function formatTime(iso) {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem 0.7rem;
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   color: var(--text-muted);
   font-family: var(--font-mono);
   letter-spacing: 0.04em;
@@ -254,7 +254,7 @@ function formatTime(iso) {
 }
 
 .iep-node-by {
-  font-size: var(--fs-xl);
+  font-size: var(--fs-lg);
   font-weight: 700;
   font-family: var(--font-mono);
   color: var(--text);
@@ -266,7 +266,7 @@ function formatTime(iso) {
 
 .iep-node-ip {
   font-family: var(--font-mono);
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   color: var(--text-dim);
 }
 
@@ -289,7 +289,7 @@ function formatTime(iso) {
   padding: 0 0.35rem;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   min-width: 64px;
   justify-content: center;
 }

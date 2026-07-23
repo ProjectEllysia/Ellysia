@@ -457,7 +457,7 @@ function trapFocus(e) {
   display: flex; align-items: center; gap: 0.3rem;
   padding: 0.32rem 0.6rem;
   background: none; border: none; border-radius: 6px;
-  color: var(--text-muted); font-size: var(--fs-sm); font-weight: 500;
+  color: var(--text-muted); font-size: var(--fs-md); font-weight: 500;
   cursor: pointer; transition: all 0.15s; white-space: nowrap;
 }
 .pill:hover { color: var(--text-dim); }

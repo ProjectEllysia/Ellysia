@@ -133,7 +133,7 @@ defineEmits(['refresh', 'reconnect', 'toggle-pause', 'sync', 'delete'])
 const reauthConnections = computed(() => props.connections.filter(c => c.status === 'reauth_required'))
 const normalConnections = computed(() => props.connections.filter(c => c.status !== 'reauth_required'))
 
-const PROVIDER_LABELS = { gmail: 'Gmail', microsoft: 'Microsoft 365' }
+const PROVIDER_LABELS = { microsoft: 'Microsoft 365', gmail: 'Gmail' }
 function providerLabel(provider) { return PROVIDER_LABELS[provider] || provider }
 
 const STATUS_LABELS = {

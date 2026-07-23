@@ -105,14 +105,14 @@ function formatDetailValue(v) {
 }
 
 .rule-name {
-  font-size: var(--fs-md);
+  font-size: var(--fs-lg);
   font-weight: 600;
   color: var(--text);
   white-space: nowrap;
 }
 
 .rule-category {
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-muted);
   background: var(--surface-2);

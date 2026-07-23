@@ -231,7 +231,7 @@ function handleDelete(id) {
 
 function originLabel(item) {
   if (!item?.connectionId) return 'Manual'
-  const providerNames = { gmail: 'Gmail', microsoft: 'Microsoft 365' }
+  const providerNames = { microsoft: 'Microsoft 365', gmail: 'Gmail' }
   const provider = providerNames[item.provider] || item.provider || 'Buzón'
   return item.accountEmail ? `${provider} (${item.accountEmail})` : provider
 }
@@ -374,6 +374,7 @@ function verdictClass(v) {
   top: calc(100% + 8px);
   transform: translateX(-50%);
   z-index: 100;
+  width: 20%;
   min-width: 220px;
   background: var(--surface);
   border: 1px solid var(--border-solid);
@@ -414,7 +415,7 @@ function verdictClass(v) {
   color: var(--text-dim);
   text-align: right;
   word-break: break-word;
-  max-width: 140px;
+  max-width: 70%;
 }
 
 .card-value--title {

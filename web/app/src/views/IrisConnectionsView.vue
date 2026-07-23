@@ -94,7 +94,7 @@ const router = useRouter()
 
 const pendingDelete = ref(null)
 
-const PROVIDER_LABELS = { gmail: 'Gmail', microsoft: 'Microsoft 365' }
+const PROVIDER_LABELS = { microsoft: 'Microsoft 365', gmail: 'Gmail' }
 function providerLabel(provider) { return PROVIDER_LABELS[provider] || provider }
 
 const CALLBACK_ERROR_MESSAGES = {
