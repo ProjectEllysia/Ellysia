@@ -253,6 +253,31 @@ def get_mfa_config() -> dict:
     }
 
 
+def get_encryption_key(purpose: str) -> str:
+    """Clave Fernet de cifrado en reposo para un ``purpose`` dado (``shared._crypto``).
+
+    Convención de nombre, no dato configurable: el env var es
+    ``f"{purpose.upper()}_ENCRYPTION_KEY"`` — ``purpose="mfa"`` da
+    ``MFA_ENCRYPTION_KEY`` (la que ya usaba ``users/services/secrets.py``
+    directamente), ``purpose="iris_mailbox"`` da
+    ``IRIS_MAILBOX_ENCRYPTION_KEY``. Siempre en ``.env``, nunca en
+    ``SecOpsConfig.json`` — es un secreto.
+
+    Raises:
+        ValueError: Si falta la variable de entorno correspondiente.
+    """
+    env_var = f"{purpose.upper()}_ENCRYPTION_KEY"
+    key = os.getenv(env_var)
+    if not key:
+        logger.error(f"Falta la variable de entorno {env_var}")
+        raise ValueError(
+            f"Falta la variable de entorno {env_var}. "
+            "Defínela en el archivo .env (clave Fernet: "
+            "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\")."
+        )
+    return key
+
+
 def get_openvas_environment() -> dict[str, str]:
     """Solo variables de entorno."""
     hostname    = os.getenv("OPENVAS_HOST")
