@@ -23,7 +23,12 @@ from src.modules.users import (
     require_oauth_token, require_attributes, AttributeType, get_current_user,
 )
 
-from .exceptions import AnomalyNotFoundError, AssetNotFoundError, HygeiaError
+from .exceptions import (
+    AnomalyNotFoundError,
+    AnomalyStillOpenError,
+    AssetNotFoundError,
+    HygeiaError,
+)
 from .managers import HygeiaAlertManager, HygeiaAssetManager, HygeiaIngestManager
 from .schemas import (
     AnomalyListResponseSchema,
@@ -228,6 +233,25 @@ def resolve_alert(anomaly_id):
     result = mgr.resolve_alert(anomaly_id)
     logger.info(f"Anomalía {anomaly_id} resuelta manualmente | user={current_actor()}")
     return result
+
+
+@hygeia_blp.delete("/alerts/<int:anomaly_id>")
+@hygeia_blp.response(200, description="Anomalía eliminada")
+@hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@hygeia_blp.alt_response(404, schema=ErrorSchema, description="Anomaly not found")
+@hygeia_blp.alt_response(409, schema=ErrorSchema, description="Anomaly still open")
+@limiter.limit("60 per hour")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.HYGEIA_DELETE])
+@handle_exceptions(default_exception=AnomalyNotFoundError, logger=logger)
+def delete_alert(anomaly_id):
+    """Borrar una anomalía ya reconocida o resuelta"""
+    user = get_current_user()
+    mgr = HygeiaAlertManager(user)
+    mgr.delete_alert(anomaly_id)
+    logger.info(f"Anomalía {anomaly_id} eliminada | user={current_actor()}")
+    return {"message": "Anomalía eliminada correctamente"}
 
 
 # ============================================================================

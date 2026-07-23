@@ -8,7 +8,8 @@ Hierarchy:
     ├── IngestPayloadTooLargeError (413)
     ├── IngestClockSkewError      (400)
     ├── IngestTooFrequentError    (429)
-    └── AnomalyNotFoundError      (404)
+    ├── AnomalyNotFoundError      (404)
+    └── AnomalyStillOpenError     (409)
 """
 
 from __future__ import annotations
@@ -106,4 +107,22 @@ class AnomalyNotFoundError(HygeiaError):
             message=f"Anomalía {anomaly_id} no encontrada",
             details={"anomaly_id": anomaly_id},
             user_message="Anomalía no encontrada.",
+        )
+
+
+class AnomalyStillOpenError(HygeiaError):
+    """Se lanza al intentar borrar una anomalía que sigue en estado ``open``.
+
+    Solo se puede borrar una anomalía ya reconocida o resuelta: una abierta
+    todavía representa una condición activa sin atender, y borrarla la
+    haría desaparecer del panel sin que nadie la haya visto ni resuelto.
+    """
+    default_code = ErrorCode.CONSTRAINT_VIOLATION
+    default_status_code = 409
+
+    def __init__(self, anomaly_id: int) -> None:
+        super().__init__(
+            message=f"Anomalía {anomaly_id} sigue abierta, no se puede borrar",
+            details={"anomaly_id": anomaly_id},
+            user_message="Solo se pueden borrar anomalías reconocidas o resueltas.",
         )

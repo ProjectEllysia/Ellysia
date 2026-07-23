@@ -25,6 +25,7 @@ from src.modules.users.model import User
 
 from .exceptions import (
     AnomalyNotFoundError,
+    AnomalyStillOpenError,
     AssetNotFoundError,
     AssetQuotaExceededError,
     IngestTooFrequentError,
@@ -494,6 +495,27 @@ class HygeiaAlertManager:
             anomaly.resolved_at = utcnow_naive()
             repo.update(anomaly)
             return anomaly.to_dict()
+
+    def delete_alert(self, anomaly_id: int) -> None:
+        """
+        Borra una anomalía ya reconocida o resuelta.
+
+        Una anomalía ``open`` no se puede borrar (§ver ``AnomalyStillOpenError``):
+        primero hay que reconocerla o resolverla, para que el borrado sea
+        siempre sobre algo que el dueño ya atendió, nunca un descarte
+        silencioso de una condición activa sin ver.
+
+        Raises:
+            AnomalyNotFoundError: Si la anomalía no existe o pertenece a
+                otro usuario (misma excepción en ambos casos).
+            AnomalyStillOpenError: Si la anomalía sigue en estado ``open``.
+        """
+        with UnitOfWork() as uow:
+            repo = AnomalyRepository(uow)
+            anomaly = self._get_owned_anomaly(repo, anomaly_id, self.user.id)
+            if anomaly.state == "open":
+                raise AnomalyStillOpenError(anomaly_id)
+            repo.delete(anomaly)
 
     @staticmethod
     def _get_owned_anomaly(repo: AnomalyRepository, anomaly_id: int, user_id: int) -> Anomaly:
