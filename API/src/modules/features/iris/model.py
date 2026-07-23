@@ -72,7 +72,7 @@ class IrisAnalysis(Base):
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
-    connection_id = Column(Integer, ForeignKey("IrisMailboxConnection.id"), nullable=True)
+    connection_id = Column(Integer, ForeignKey("IrisMailboxConnection.id", ondelete="SET NULL"), nullable=True)
     source_message_uid = Column(String(255), nullable=True)
 
     user = relationship("User", back_populates="analyses")

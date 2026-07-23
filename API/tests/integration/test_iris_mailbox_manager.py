@@ -19,7 +19,7 @@ from src.modules.features.iris.exceptions import (
     IrisMailboxQuotaExceededError,
 )
 from src.modules.features.iris.mailbox_managers import IrisMailboxManager
-from src.modules.features.iris.model import IrisMailboxConnection
+from src.modules.features.iris.model import IrisAnalysis, IrisMailboxConnection
 from src.modules.features.iris.repositories import IrisAnalysisRepository, IrisMailboxConnectionRepository
 from src.modules.features.iris.services.mailbox.base import MessageRef, TokenSet
 from src.modules.infrastructure import UnitOfWork
@@ -236,6 +236,34 @@ def test_delete_connection_revokes_then_deletes_even_if_revoke_fails(app, regula
         assert fake_connector.revoked_tokens == ["old-refresh-token"]
         with UnitOfWork() as uow:
             assert IrisMailboxConnectionRepository(uow).get_by_id(connection_id) is None
+
+
+def test_delete_connection_with_associated_analyses_succeeds(app, regular_user):
+    """El FK IrisAnalysis.connection_id lleva ondelete=SET NULL: borrar una
+    conexión que ya tiene análisis asociados (el caso normal tras un sondeo)
+    no debe fallar por integridad, y el histórico de análisis sobrevive con
+    connection_id a NULL.
+    """
+    with app.app_context():
+        connection_id = _save(app, _connection(regular_user.id))
+
+        with UnitOfWork() as uow:
+            analysis = IrisAnalysis(
+                user_id=regular_user.id, raw_headers="From: a@b.com\r\nSubject: Hi\r\n",
+                status="finished", connection_id=connection_id, source_message_uid="msg-1",
+            )
+            IrisAnalysisRepository(uow).save(analysis)
+            analysis_id = analysis.id
+
+        fake_connector = _FakeConnector()
+        with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=fake_connector):
+            IrisMailboxManager().delete_connection(connection_id, regular_user.id)
+
+        with UnitOfWork() as uow:
+            assert IrisMailboxConnectionRepository(uow).get_by_id(connection_id) is None
+            surviving = IrisAnalysisRepository(uow).get_by_id(analysis_id)
+            assert surviving is not None
+            assert surviving.connection_id is None
 
 
 # ------------------------------------------------------------------- sync
