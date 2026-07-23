@@ -74,8 +74,6 @@
       @confirm="confirmDelete"
       @cancel="pendingDelete = null"
     />
-
-    <AppToast />
   </div>
 </template>
 
@@ -84,7 +82,6 @@ import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
-import AppToast from '@/components/shared/AppToast.vue'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 import MailboxConnectionList from '@/components/iris/MailboxConnectionList.vue'
 import { useIrisMailboxStore } from '@/stores/irisMailboxStore'

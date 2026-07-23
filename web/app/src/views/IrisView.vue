@@ -85,8 +85,6 @@
         </IrisReportViewer>
       </main>
     </div>
-
-    <AppToast />
   </div>
 </template>
 
@@ -94,7 +92,6 @@
 import { onMounted, onBeforeUnmount, computed, ref } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
-import AppToast from '@/components/shared/AppToast.vue'
 import IrisHistoryStrip from '@/components/iris/IrisHistoryStrip.vue'
 import IrisArchiveModal from '@/components/iris/IrisArchiveModal.vue'
 import IrisReportViewer from '@/components/iris/IrisReportViewer.vue'

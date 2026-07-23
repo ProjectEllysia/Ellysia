@@ -68,8 +68,6 @@
       @confirm="handleRotateConfirm"
       @cancel="pendingRotateId = null"
     />
-
-    <AppToast />
   </div>
 </template>
 
@@ -77,7 +75,6 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
-import AppToast from '@/components/shared/AppToast.vue'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 import AssetList from '@/components/hygeia/AssetList.vue'
 import AssetDetail from '@/components/hygeia/AssetDetail.vue'
