@@ -37,15 +37,7 @@ alimentan.
      `validate_kind_fields`) con los campos camelCase obligatorios del tipo.
 
 3. **Migración Alembic** — `alembic revision --autogenerate -m "add <Tipo>
-   storable"` genera la tabla nueva, pero **hay que editar el resultado a
-   mano**: los `ForeignKey("Storable.id")` de este fichero no declaran
-   `ondelete` en Python (por eso `--autogenerate` no lo detecta), pero en la
-   base de datos real todas las subclases existentes sí tienen
-   `ON DELETE CASCADE` — se añadió aparte, una sola vez, en la migración
-   `c3d4e5f6g7h8_add_cascade_delete_vaults`. Añadir `ondelete='CASCADE'` al
-   `sa.ForeignKeyConstraint(['id'], ['Storable.id'], ...)` generado para que
-   el tipo nuevo respete la misma convención (borrar un `Vault` debe borrar
-   en cascada todos sus `Storable`, del tipo que sean).
+   storable"` genera la tabla nueva.
 
 4. **Frontend** (fuera de este módulo, pero necesario para que el tipo sea
    utilizable) — `web/app/src/acheron/storableTypes.js` y
