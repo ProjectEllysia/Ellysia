@@ -8,7 +8,10 @@ the output of every individual rule that was executed during the analysis.
 
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, SmallInteger, String, Text
+from sqlalchemy import (
+    Boolean, Column, Date, DateTime, Float, ForeignKey, Integer,
+    SmallInteger, String, Text, UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
@@ -43,6 +46,16 @@ class IrisAnalysis(Base):
         user_id: Foreign key to the owning User.
         user: SQLAlchemy relationship to User.
         rule_results: Ordered list of IrisRuleResult (per-rule outcomes).
+        connection_id: FK to the IrisMailboxConnection that ingested this
+                 message automatically; NULL for manual submissions (the
+                 original, still-default flow).
+        source_message_uid: Provider-specific message id, set only when
+                 connection_id is set. Together with connection_id, a
+                 UNIQUE constraint gives idempotency for free — a mailbox
+                 sync retry that resubmits the same message is a no-op at
+                 the DB level rather than a duplicate analysis. Two manual
+                 submissions (connection_id NULL) never collide: standard
+                 SQL UNIQUE treats NULL as distinct from every other NULL.
     """
     __tablename__ = "IrisAnalysis"
 
@@ -59,7 +72,11 @@ class IrisAnalysis(Base):
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
+    connection_id = Column(Integer, ForeignKey("IrisMailboxConnection.id"), nullable=True)
+    source_message_uid = Column(String(255), nullable=True)
+
     user = relationship("User", back_populates="analyses")
+    connection = relationship("IrisMailboxConnection", back_populates="analyses")
     rule_results = relationship(
         "IrisRuleResult", back_populates="analysis",
         order_by="IrisRuleResult.position",
@@ -68,6 +85,91 @@ class IrisAnalysis(Base):
     documents = relationship(
         "IrisDocument", back_populates="analysis",
         cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("connection_id", "source_message_uid",
+                          name="uq_iris_analysis_connection_source_message"),
+    )
+
+
+class IrisMailboxConnection(Base):
+    """An external mailbox (Gmail / Microsoft 365) connected by a user for
+    automatic Iris ingestion.
+
+    Stores the minimum needed to re-request access later — never the
+    mailbox content itself. See ``plans/feature/iris/iris-mailbox-connector.md``
+    Fase 2/3 for the full design rationale (why this can't live in Acheron,
+    why the refresh token is encrypted with ``shared._crypto`` instead).
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        user_id: Foreign key to the owning User.
+        provider: "gmail" | "microsoft".
+        account_email: The connected mailbox's address (plaintext — not a
+                 secret, needed to show "which account is this").
+        scopes: Space-separated OAuth scopes actually granted.
+        refresh_token_enc: Refresh token, encrypted at rest
+                 (``shared._crypto.encrypt_at_rest(..., purpose="iris_mailbox")``).
+                 Never returned by any endpoint.
+        access_token_enc: Cached access token, encrypted at rest; NULL when
+                 not cached or expired. Optional — the connector can always
+                 fall back to ``refresh()``.
+        access_token_expires_at: Expiry of the cached access token.
+        folder: Provider-specific folder/label to watch; NULL = default
+                 inbox.
+        full_message_mode: If True, fetch the complete raw message
+                 (attachments/body included) instead of headers only. Off
+                 by default — the user must opt in explicitly per
+                 connection (see Fase 5 frontend design: this is a
+                 deliberate, not a hidden, choice).
+        sync_cursor: Opaque provider cursor (Gmail historyId / Graph
+                 deltaLink) marking how far ingestion has progressed. NULL
+                 until the first bootstrap sync runs (see
+                 ``services/mailbox`` connectors: the first sync never
+                 backfills historical mail, it only captures the starting
+                 cursor).
+        status: "active" | "reauth_required" | "revoked" | "paused".
+        ingested_today / ingested_reset_date: Per-connection daily ingest
+                 counter enforcing ``iris.maxIngestedPerDay`` — reset when
+                 ``ingested_reset_date`` is no longer today.
+        last_sync_at: Timestamp of the last successful sync attempt
+                 (successful or not — used to schedule the next poll).
+        last_error: Human-readable last error, if any (e.g. why the
+                 connection is ``reauth_required``).
+        created_at: When the connection was established.
+        user: SQLAlchemy relationship to User.
+        analyses: Analyses ingested through this connection.
+    """
+    __tablename__ = "IrisMailboxConnection"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
+    provider = Column(String(20), nullable=False)
+    account_email = Column(String(320), nullable=False)
+    scopes = Column(String(512), nullable=False)
+
+    refresh_token_enc = Column(Text, nullable=False)
+    access_token_enc = Column(Text, nullable=True)
+    access_token_expires_at = Column(DateTime, nullable=True)
+
+    folder = Column(String(255), nullable=True)
+    full_message_mode = Column(Boolean, nullable=False, default=False)
+    sync_cursor = Column(String(255), nullable=True)
+
+    status = Column(String(20), nullable=False, default="active")
+    ingested_today = Column(Integer, nullable=False, default=0)
+    ingested_reset_date = Column(Date, nullable=True)
+    last_sync_at = Column(DateTime, nullable=True)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    user = relationship("User")
+    analyses = relationship("IrisAnalysis", back_populates="connection")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", "account_email",
+                          name="uq_iris_mailbox_connection_user_provider_email"),
     )
 
 

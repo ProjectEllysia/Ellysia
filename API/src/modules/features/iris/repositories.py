@@ -7,11 +7,13 @@ IrisRuleResult models.
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from datetime import timedelta
+from typing import List, Optional, Tuple
 
 from src.modules.infrastructure import BaseRepository, UnitOfWork
+from src.modules.shared import utcnow_naive
 
-from .model import IrisAnalysis, IrisRuleResult, IrisDocument
+from .model import IrisAnalysis, IrisMailboxConnection, IrisRuleResult, IrisDocument
 
 
 class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
@@ -65,6 +67,62 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
             .all()
         )
         return items, total
+
+
+class IrisMailboxConnectionRepository(BaseRepository[IrisMailboxConnection]):
+    """Data-access layer for IrisMailboxConnection records."""
+
+    def __init__(self, uow: UnitOfWork | None = None, session=None) -> None:
+        super().__init__(IrisMailboxConnection, uow=uow, session=session)
+
+    def get_by_user(self, user_id: int) -> List[IrisMailboxConnection]:
+        """Return all connections belonging to a user, newest first."""
+        return (
+            self._session.query(IrisMailboxConnection)
+            .filter(IrisMailboxConnection.user_id == user_id)
+            .order_by(IrisMailboxConnection.created_at.desc())
+            .all()
+        )
+
+    def count_for_user(self, user_id: int) -> int:
+        """Number of connections a user already has (for the quota check)."""
+        return (
+            self._session.query(IrisMailboxConnection)
+            .filter(IrisMailboxConnection.user_id == user_id)
+            .count()
+        )
+
+    def get_by_user_provider_email(
+        self, user_id: int, provider: str, account_email: str
+    ) -> Optional[IrisMailboxConnection]:
+        """Look up an existing connection for the same (user, provider, account)."""
+        return (
+            self._session.query(IrisMailboxConnection)
+            .filter(
+                IrisMailboxConnection.user_id == user_id,
+                IrisMailboxConnection.provider == provider,
+                IrisMailboxConnection.account_email == account_email,
+            )
+            .first()
+        )
+
+    def get_due_for_sync(self, older_than_minutes: int) -> List[IrisMailboxConnection]:
+        """Active connections whose last sync is stale enough to poll again.
+
+        Includes connections that have never synced (``last_sync_at`` is
+        NULL) — the scheduler must give every new connection its bootstrap
+        sync.
+        """
+        cutoff = utcnow_naive() - timedelta(minutes=older_than_minutes)
+        return (
+            self._session.query(IrisMailboxConnection)
+            .filter(
+                IrisMailboxConnection.status == "active",
+                (IrisMailboxConnection.last_sync_at.is_(None))
+                | (IrisMailboxConnection.last_sync_at < cutoff),
+            )
+            .all()
+        )
 
 
 class IrisRuleResultRepository(BaseRepository[IrisRuleResult]):
