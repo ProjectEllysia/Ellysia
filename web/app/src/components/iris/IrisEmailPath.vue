@@ -319,6 +319,7 @@ function formatTime(iso) {
 .iep-detail-title {
   font-family: var(--font-display);
   font-weight: 700;
+  font-size: var(--fs-xl);
   color: var(--text);
 }
 
