@@ -16,7 +16,7 @@
         <div v-if="rule.details && Object.keys(rule.details).length" class="rule-details">
           <div v-for="(v, k) in rule.details" :key="k" class="detail-row">
             <span class="detail-key">{{ k }}</span>
-            <span class="detail-val">{{ typeof v === 'object' ? JSON.stringify(v) : v }}</span>
+            <span class="detail-val" :class="{ 'detail-val--empty': isEmptyValue(v) }">{{ formatDetailValue(v) }}</span>
           </div>
         </div>
         <div v-if="rule.recommendation" class="rule-recommendation">
@@ -46,6 +46,19 @@ function scoreClass(s, v) {
   if (s < 0) return 'score--neg'
   if (v === 'pass') return 'score--pos'
   return 'score--neutral'
+}
+
+/** Un array vacío es una respuesta válida ("se buscó y no se encontró
+ * nada"), no la ausencia de dato — antes se renderizaba como el literal
+ * "[]", que a simple vista parece una celda sin valor. */
+function isEmptyValue(v) {
+  return Array.isArray(v) && v.length === 0
+}
+
+function formatDetailValue(v) {
+  if (Array.isArray(v)) return v.length ? v.join(', ') : '—'
+  if (v && typeof v === 'object') return JSON.stringify(v)
+  return v
 }
 </script>
 
@@ -128,7 +141,7 @@ function scoreClass(s, v) {
 .score--neutral { color: var(--text-muted); }
 
 .rule-verdict {
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   font-weight: 600;
   padding: 3px 9px;
   border-radius: 5px;
@@ -193,30 +206,41 @@ function scoreClass(s, v) {
   border-top: 1px solid var(--border);
 }
 
+/* Grid, no flex: con flex cada .detail-row calcula el ancho de su propia
+   clave por separado, así que la columna de valores arranca en una
+   posición distinta según lo larga que sea cada clave ("hidden_text" vs
+   "phrases_found"). El grid comparte una sola pista de columna ("max-content")
+   calculada sobre TODAS las filas a la vez, así que los valores quedan
+   alineados sin importar la longitud de cada clave. */
 .rule-details {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  row-gap: 0.4rem;
+  column-gap: 0.75rem;
   margin-bottom: 0.6rem;
 }
 
 .detail-row {
-  display: flex;
-  gap: 0.5rem;
-  font-size: var(--fs-lg);
-  line-height: 1.6;
+  display: contents;
 }
 
 .detail-key {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  flex-shrink: 0;
-  min-width: 100px;
+  font-size: var(--fs-md);
+  line-height: 1.6;
 }
 
 .detail-val {
   color: var(--text-dim);
+  font-size: var(--fs-lg);
+  line-height: 1.6;
   word-break: break-word;
+}
+
+.detail-val--empty {
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .rule-recommendation {

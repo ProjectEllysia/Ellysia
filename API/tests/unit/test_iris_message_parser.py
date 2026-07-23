@@ -365,6 +365,12 @@ def test_body_content_flags_hidden_link():
     result = check_body_content(ctx)
     assert result.verdict == "fail"
     assert result.details["hidden_text"] is True
+    # Este texto no contiene ninguna frase de credential_phrases -- el
+    # mensaje al usuario no debe afirmar que sí ("frases típicas de
+    # phishing") cuando phrases_found está vacío.
+    assert result.details["phrases_found"] == []
+    assert "frases" not in result.recommendation
+    assert "texto oculto" in result.recommendation
 
 
 def test_body_content_flags_hidden_credential_phrase():

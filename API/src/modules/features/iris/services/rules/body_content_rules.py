@@ -173,13 +173,20 @@ def check_body_content(context) -> RuleResult:
     if hidden:
         score -= 10
 
+    # El mensaje describe solo lo que de verdad disparó -- antes afirmaba
+    # "frases típicas de phishing" incluso en la rama donde solo se detectó
+    # texto oculto (found == [], hidden == True), contradiciendo el propio
+    # `phrases_found` vacío que se muestra en el mismo resultado.
+    clauses = []
+    if found:
+        clauses.append("frases típicas de phishing")
+    if hidden:
+        clauses.append("texto oculto")
+
     return RuleResult(
         score=score, verdict="fail",
         details={"phrases_found": found, "hidden_text": hidden},
-        recommendation=(
-            "El cuerpo del correo contiene frases típicas de phishing"
-            + (" y texto oculto." if hidden else ".")
-        ),
+        recommendation=f"El cuerpo del correo contiene {' y '.join(clauses)}.",
     )
 
 
