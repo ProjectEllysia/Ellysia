@@ -70,6 +70,13 @@ class IrisMailboxManager:
     TASK_CATEGORY = "iris.ingest"
     EXTERNAL_ID_PREFIX = "iris-mailbox-sync:"
 
+    #: Orden de presentación en /iris/mailbox/providers — no es alfabético a
+    #: propósito: Microsoft no exige verificación de Google para salir de
+    #: modo "testing", así que es el conector que de verdad funciona de cara
+    #: al lanzamiento y debe encabezar la lista. Cualquier provider nuevo que
+    #: no esté aquí se añade al final, alfabéticamente.
+    _PROVIDER_DISPLAY_ORDER = ("microsoft", "gmail")
+
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
 
@@ -79,7 +86,9 @@ class IrisMailboxManager:
 
     @staticmethod
     def list_providers() -> list[str]:
-        return sorted(MAILBOX_CONNECTORS)
+        ordered = [p for p in IrisMailboxManager._PROVIDER_DISPLAY_ORDER if p in MAILBOX_CONNECTORS]
+        remaining = sorted(MAILBOX_CONNECTORS.keys() - set(ordered))
+        return ordered + remaining
 
     @staticmethod
     def _redirect_uri() -> str:
