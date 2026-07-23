@@ -498,20 +498,35 @@ class IrisManager(TaskTrackingMixin):
                 return True
         return False
 
-    def get_analyses_for_user(self, user_id: int, page: int = 1, per_page: int = 10):
+    def get_analyses_for_user(
+        self, user_id: int, page: int = 1, per_page: int = 10, *,
+        search: str | None = None, verdict: str | None = None,
+        status: str | None = None, source: str | None = None,
+        sort_by: str = "date", sort_dir: str = "desc",
+    ):
         """Return a paginated, formatted list of analyses for a user.
 
         Args:
             user_id:  Owner of the analyses.
             page:     1‑based page number.
             per_page: Items per page.
+            search/verdict/status/source: Optional filters — see
+                ``IrisAnalysisRepository.get_by_user_paginated``.
+            sort_by/sort_dir: Server-side ordering — see same.
 
         Returns:
-            Tuple of (formatted_results: list[dict], total_count: int).
+            Tuple of (formatted_results: list[dict], total_count: int,
+            thresholds: dict).
         """
         items, total = build_repository(IrisAnalysisRepository).get_by_user_paginated(
-            user_id, page, per_page
+            user_id, page, per_page,
+            search=search, verdict=verdict, status=status, source=source,
+            sort_by=sort_by, sort_dir=sort_dir,
         )
+        thresholds = {
+            "legitimate": CR.get_iris_legitimate_threshold(),
+            "suspicious": CR.get_iris_suspicious_threshold(),
+        }
         results = [
             {
                 "analysisId": a.id,
@@ -521,10 +536,13 @@ class IrisManager(TaskTrackingMixin):
                 "verdict": a.verdict,
                 "startedAt": isoformat_utc(a.started_at), # type: ignore
                 "finishedAt": isoformat_utc(a.finished_at), # type: ignore
+                "connectionId": a.connection_id,
+                "provider": a.connection.provider if a.connection else None,
+                "accountEmail": a.connection.account_email if a.connection else None,
             }
             for a in items
         ]
-        return results, total
+        return results, total, thresholds
 
     @classmethod
     def assert_analysis_ownership(cls, analysis_id: int, user_id: int) -> IrisAnalysis:

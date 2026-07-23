@@ -10,6 +10,9 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import List, Optional, Tuple
 
+from sqlalchemy import asc, desc, nullslast
+from sqlalchemy.orm import joinedload
+
 from src.modules.infrastructure import BaseRepository, UnitOfWork
 from src.modules.shared import utcnow_naive
 
@@ -44,24 +47,66 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
             .all()
         )
 
-    def get_by_user_paginated(self, user_id: int, page: int, per_page: int) -> Tuple[List[IrisAnalysis], int]:
+    #: Columnas ordenables expuestas por ``sort_by`` — nunca se acepta el
+    #: nombre de columna directamente desde la query string.
+    _SORTABLE_COLUMNS = {
+        "date": IrisAnalysis.created_at,
+        "score": IrisAnalysis.total_score,
+        "verdict": IrisAnalysis.verdict,
+        "title": IrisAnalysis.title,
+        "status": IrisAnalysis.status,
+    }
+
+    def get_by_user_paginated(
+        self, user_id: int, page: int, per_page: int, *,
+        search: str | None = None, verdict: str | None = None,
+        status: str | None = None, source: str | None = None,
+        sort_by: str = "date", sort_dir: str = "desc",
+    ) -> Tuple[List[IrisAnalysis], int]:
         """Return a page of analyses for a user plus the total count.
 
         Args:
             user_id: Owner of the analyses.
             page: 1‑based page number.
             per_page: Maximum items per page.
+            search: Optional case-insensitive substring match on ``title``.
+            verdict: Optional exact match on ``verdict``.
+            status: Optional exact match on ``status``.
+            source: "manual" (``connection_id IS NULL``) or "mailbox"
+                (``connection_id IS NOT NULL``); ``None`` = no filter.
+            sort_by: One of ``_SORTABLE_COLUMNS`` — validated upstream by
+                ``ResultsQuerySchema``.
+            sort_dir: "asc" or "desc".
 
         Returns:
             Tuple of (items, total_count).
         """
         query = (
             self._session.query(IrisAnalysis)
+            .options(joinedload(IrisAnalysis.connection))
             .filter(IrisAnalysis.user_id == user_id)
         )
+        if search:
+            query = query.filter(IrisAnalysis.title.ilike(f"%{search}%"))
+        if verdict:
+            query = query.filter(IrisAnalysis.verdict == verdict)
+        if status:
+            query = query.filter(IrisAnalysis.status == status)
+        if source == "manual":
+            query = query.filter(IrisAnalysis.connection_id.is_(None))
+        elif source == "mailbox":
+            query = query.filter(IrisAnalysis.connection_id.isnot(None))
+
         total = query.count()
+
+        column = self._SORTABLE_COLUMNS.get(sort_by, IrisAnalysis.created_at)
+        direction = asc if sort_dir == "asc" else desc
+        # nullslast en todos los campos ordenables salvo la fecha (nunca nula):
+        # un análisis pendiente sin score/verdict aún no debe contaminar la
+        # rampa de riesgo del extremo "peor" ni "mejor" del orden por score.
+        order_clause = nullslast(direction(column)) if column is not IrisAnalysis.created_at else direction(column)
         items = (
-            query.order_by(IrisAnalysis.created_at.desc())
+            query.order_by(order_clause, IrisAnalysis.created_at.desc())
             .limit(per_page)
             .offset((page - 1) * per_page)
             .all()

@@ -159,20 +159,24 @@ def get_analysis_status(args: dict):
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
 def list_analyses(args):
-    """Listar todos los analisis del usuario con paginacion"""
+    """Listar todos los analisis del usuario con paginacion, filtros y orden"""
     page = args["page"]
     per_page = args["per_page"]
     user = get_current_user()
 
     manager = IrisManager()
-    results, total = manager.get_analyses_for_user(user.id, page, per_page)
-    total_pages = (total + per_page - 1) // per_page
+    results, total, thresholds = manager.get_analyses_for_user(
+        user.id, page, per_page,
+        search=args["search"], verdict=args["verdict"], status=args["status"], source=args["source"],
+        sort_by=args["sort_by"], sort_dir=args["sort_dir"],
+    )
 
     return {
         "analyses": results,
         "total": total,
         "page": page,
         "perPage": per_page,
+        "thresholds": thresholds,
     }
 
 

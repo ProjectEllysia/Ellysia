@@ -56,9 +56,25 @@ class AnalysisIdQuerySchema(Schema):
 
 
 class ResultsQuerySchema(Schema):
-    """Query parameters for the paginated results list."""
+    """Query parameters for the paginated results list.
+
+    ``search``/``verdict``/``status``/``source`` are optional filters (all
+    default to "no filter" so existing callers are unaffected); ``sort_by``/
+    ``sort_dir`` control server-side ordering — previously the endpoint only
+    ever returned ``created_at DESC``, so any client-side "sort by score"
+    only reordered whatever page happened to be loaded.
+    """
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))
     per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
+    search = fields.String(load_default=None, validate=validate.Length(max=120))
+    verdict = fields.String(load_default=None,
+                             validate=validate.OneOf(["Legitimate", "Suspicious", "Phishing"]))
+    status = fields.String(load_default=None,
+                            validate=validate.OneOf(["pending", "running", "finished", "failed", "cancelled"]))
+    source = fields.String(load_default=None, validate=validate.OneOf(["manual", "mailbox"]))
+    sort_by = fields.String(load_default="date",
+                             validate=validate.OneOf(["date", "score", "verdict", "title", "status"]))
+    sort_dir = fields.String(load_default="desc", validate=validate.OneOf(["asc", "desc"]))
 
 
 class AnalyzeResponseSchema(Schema):
@@ -133,6 +149,18 @@ class AnalysisListItemSchema(Schema):
     verdict = fields.String(load_default=None)
     startedAt = fields.String(load_default=None)
     finishedAt = fields.String(load_default=None)
+    connectionId = fields.Integer(load_default=None)
+    provider = fields.String(load_default=None)
+    accountEmail = fields.String(load_default=None)
+
+
+class VerdictThresholdsSchema(Schema):
+    """Score thresholds used to classify a verdict — sent alongside the list
+    so the frontend can render them (e.g. a score rail) without hardcoding
+    ``iris.legitimate_threshold``/``iris.suspicious_threshold``.
+    """
+    legitimate = fields.Float()
+    suspicious = fields.Float()
 
 
 class AnalysisListResponseSchema(Schema):
@@ -141,6 +169,7 @@ class AnalysisListResponseSchema(Schema):
     total = fields.Integer()
     page = fields.Integer()
     perPage = fields.Integer()
+    thresholds = fields.Nested(VerdictThresholdsSchema)
 
 
 class AnalysisDeleteResponseSchema(Schema):
