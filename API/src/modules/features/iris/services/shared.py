@@ -292,7 +292,7 @@ _DEFAULTS: dict[str, Any] = {
         "new bank account", "new routing number", "new wire instructions",
         "change of vendor payment", "vendor banking update",
         "confidential transaction", "do not notify", "keep this confidential",
-        "do this while i'm out", "while i'm in a meeting", "asap",
+        "do this while i'm out", "while i'm in a meeting",
         "w-2 form", "w2 form", "employee tax forms", "1099 form",
         "transferencia urgente", "transferencia bancaria urgente",
         "realizar el pago", "procesar el pago", "pago pendiente",
