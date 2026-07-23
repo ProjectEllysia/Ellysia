@@ -53,6 +53,14 @@
         @load-more="handleLoadMore"
       />
 
+      <router-link to="/iris/conexiones" class="back-link connections-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <rect x="2" y="4" width="20" height="16" rx="2" />
+          <path d="m2 7 10 6 10-6" />
+        </svg>
+        Conexiones de buzón
+      </router-link>
+
       <main class="iris-main">
         <IrisReportViewer
           :report-id="store.currentId"
@@ -259,6 +267,14 @@ function handleSort(mode) {
   height: calc(100vh - var(--topbar-h));
   position: relative;
   z-index: 1;
+}
+
+/* .back-link ya trae tipografía/color/hover del sistema de diseño
+   (assets/css/shared.css) — solo se ajusta la posición dentro del layout. */
+.connections-link {
+  align-self: flex-end;
+  margin: 0.5rem 1rem 0;
+  flex-shrink: 0;
 }
 
 .history-error-banner {

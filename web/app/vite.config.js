@@ -48,6 +48,7 @@ const FRONTEND_SUBROUTES = new Set([
   '/themis/escaneos',
   '/aegis/generador',
   '/iris/analisis',
+  '/iris/conexiones',
   '/acheron/boveda',
   '/hygeia/activos',
 ])
