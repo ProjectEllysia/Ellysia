@@ -133,16 +133,36 @@ def test_received_chain_neutral_when_absent():
 
 
 def test_received_chain_flags_private_origin_ip():
+    # Recalibración de pesos: una cadena ENTERAMENTE interna (RFC1918) está
+    # exenta -- es el relay corporativo normal. Este fixture mezcla un hop
+    # público real (203.0.113.9) con el origen privado para seguir probando
+    # el caso que sí es anómalo: una IP interna colándose en lo que por lo
+    # demás es una cadena de entrega externa.
     ctx = MessageContext(
         headers={"date": "Wed, 25 Jun 2025 10:00:00 +0000"},
         received_headers=[
             "from mx.example.com by mx2.example.com; Wed, 25 Jun 2025 10:00:00 +0000",
-            "from [10.0.0.5] by mx.example.com; Wed, 25 Jun 2025 09:59:00 +0000",
+            "from mx3.example.com ([203.0.113.9]) by mx.example.com; Wed, 25 Jun 2025 09:59:30 +0000",
+            "from [10.0.0.5] by mx3.example.com; Wed, 25 Jun 2025 09:59:00 +0000",
         ],
     )
     result = check_received_chain(ctx)
     assert result.verdict == "fail"
     assert result.score < 0
+
+
+def test_received_chain_exempts_fully_internal_origin():
+    # El mismo hecho (IP de origen privada) pero con la cadena ENTERAMENTE
+    # en RFC1918 -- un relay corporativo interno normal, no debe penalizar.
+    ctx = MessageContext(
+        headers={"date": "Wed, 25 Jun 2025 10:00:00 +0000"},
+        received_headers=[
+            "from mail1.internal (mail1.internal [10.0.1.5]) by mx.acme.com; Wed, 25 Jun 2025 10:00:00 +0000",
+            "from [10.0.0.5] by mail1.internal; Wed, 25 Jun 2025 09:59:00 +0000",
+        ],
+    )
+    result = check_received_chain(ctx)
+    assert result.verdict != "fail"
 
 
 def test_received_chain_flags_date_mismatch():

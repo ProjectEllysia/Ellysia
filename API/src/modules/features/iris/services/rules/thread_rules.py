@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import re
 
+import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
 from ..shared import esp_msgid_domains, extract_domain, registrable_domain
+from ..parsers import parse_received_line
 
 REPLY_PREFIXES = [
     r"re(?:\[\d+\])?:",     # Re:, Re[2]:, RE:
@@ -81,8 +83,12 @@ def check_fake_reply_chain(headers: dict) -> RuleResult:
             recommendation=None,
         )
 
+    # Recalibración de pesos (SOC): señal débil que solapaba con
+    # Self-Referencing In-Reply-To (el caso fuerte de threading fabricado,
+    # que sí gatea). Se mantiene informativa en el informe (verdict "fail")
+    # pero deja de restar -- no cambia ningún veredicto por sí sola.
     return RuleResult(
-        score=-4, verdict="fail",
+        score=0, verdict="fail",
         details={
             "subject": subject,
             "reply_prefix": reply_prefix,
@@ -136,7 +142,7 @@ def check_self_referencing_in_reply_to(headers: dict) -> RuleResult:
 
     if in_reply_to and in_reply_to == message_id:
         return RuleResult(
-            score=-12, verdict="fail",
+            score=CR.get_iris_scoring_weight("self_referencing_thread.fail", -12), verdict="fail",
             details={
                 "message_id": message_id,
                 "in_reply_to": in_reply_to,
@@ -157,7 +163,7 @@ def check_self_referencing_in_reply_to(headers: dict) -> RuleResult:
             first_ref = ref_match.group(1).strip()
     if first_ref and first_ref == message_id:
         return RuleResult(
-            score=-12, verdict="fail",
+            score=CR.get_iris_scoring_weight("self_referencing_thread.fail", -12), verdict="fail",
             details={
                 "message_id": message_id,
                 "first_reference": first_ref,
@@ -185,8 +191,11 @@ def check_message_id(headers: dict) -> RuleResult:
     message_id = headers.get("message-id", "")
 
     if not message_id or len(message_id.strip()) < 5:
+        # Recalibración de pesos (SOC): correo automatizado legítimo genera
+        # Message-IDs cortos/ausentes con frecuencia; ruido puro de log,
+        # nunca decide un veredicto por sí solo.
         return RuleResult(
-            score=-4, verdict="fail",
+            score=0, verdict="fail",
             details={"message_id": message_id or "missing", "length": len(message_id.strip())},
             recommendation="El Message-ID está ausente o es sospechosamente corto. "
                            "Los mensajes legítimos suelen tener un Message-ID único y completo.",
@@ -238,12 +247,67 @@ def check_msgid_domain(headers: dict) -> RuleResult:
             recommendation=None,
         )
 
+    # Recalibración de pesos (SOC): residuo benigno una vez el ESP está
+    # exento arriba; informativo, no decide un veredicto por sí solo.
     return RuleResult(
-        score=-3, verdict="fail",
+        score=0, verdict="fail",
         details={"msgid_domain": msgid_domain, "from_domain": from_domain},
         recommendation=(
             f"El dominio del Message-ID ({msgid_domain}) no coincide con el del remitente "
             f"({from_domain}). Puede ser legítimo (algunos servicios de envío generan el "
             "Message-ID en su propia infraestructura), pero también es un indicio de falsificación."
+        ),
+    )
+
+
+@iris_rules.register(
+    name="Message-ID Received Correlation",
+    category="header_analysis",
+    description=(
+        "Comprueba que el dominio del Message-ID aparezca en algún host "
+        "`by`/`from` de la propia cadena Received -- un Message-ID acuñado "
+        "por un host completamente ausente de la cadena es una señal débil "
+        "de fabricación de cabeceras, corroborante, no decisiva en solitario."
+    ),
+    needs_context=True,
+)
+def check_msgid_received_correlation(context) -> RuleResult:
+    headers = context.headers
+    message_id = headers.get("message-id", "")
+    match = re.search(r"@([\w.-]+)", message_id)
+    msgid_domain = registrable_domain(match.group(1).lower()) if match else None
+
+    if not msgid_domain or not context.received_headers:
+        return RuleResult(score=0, verdict="neutral", details={})
+
+    # Mismo criterio que check_msgid_domain: los ESPs generan el Message-ID
+    # en su propia infraestructura, nunca en la del remitente ni en ningún
+    # salto Received -- exento igual, para no duplicar el mismo ruido.
+    if msgid_domain in esp_msgid_domains():
+        return RuleResult(score=0, verdict="pass", details={"msgid_domain": msgid_domain, "esp": True})
+
+    chain_domains: set[str] = set()
+    for line in context.received_headers:
+        parsed = parse_received_line(line)
+        for field in ("by", "from"):
+            host = (parsed.get(field) or "").strip().rstrip(".,;")
+            if host:
+                dom = registrable_domain(host)
+                if dom:
+                    chain_domains.add(dom)
+
+    if not chain_domains:
+        return RuleResult(score=0, verdict="neutral", details={"reason": "no hosts in Received chain"})
+
+    if msgid_domain in chain_domains:
+        return RuleResult(score=0, verdict="pass", details={"msgid_domain": msgid_domain})
+
+    return RuleResult(
+        score=CR.get_iris_scoring_weight("msgid_received_correlation.fail", -4), verdict="fail",
+        details={"msgid_domain": msgid_domain, "chain_domains": sorted(chain_domains)},
+        recommendation=(
+            f"El dominio del Message-ID ({msgid_domain}) no aparece en ningún salto de la "
+            "propia cadena Received. Señal débil de fabricación de cabeceras; corrobora "
+            "otras señales, no es decisiva en solitario."
         ),
     )

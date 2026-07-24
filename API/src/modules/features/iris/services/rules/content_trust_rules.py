@@ -1,50 +1,20 @@
 """
-Content-type and bulk-mail trust signals — soft, mostly-informational
-checks that never carry much weight on their own.
+Bulk-mail trust signals — soft, mostly-informational checks that never
+carry much weight on their own.
 
-- **Content-Type check**: informational report of the body MIME type.
-  Plain-text-only used to be treated as a mild phishing signal, but a huge
-  volume of legitimate transactional mail is plain-text only while modern
-  phishing is almost always HTML — the discriminating power is ~zero, so
-  this rule never penalises, only reports.
 - **List-Unsubscribe**: presence of a well-formed unsubscribe mechanism
   (RFC 8058 one-click) is a weak *positive* legitimacy signal for bulk
   mail — reputable senders include it, targeted phishing rarely bothers.
   Forgeable, so the weight stays small and never negative.
+
+Recalibración de pesos (F6): "Content-Type check" vivía aquí y se ha
+retirado -- confirmado código muerto (siempre devolvía score=0, nunca
+aportaba señal real; el propio módulo lo documentaba como informativo puro).
 """
 
 from __future__ import annotations
 
 from ..registry import iris_rules, RuleResult
-
-
-@iris_rules.register(
-    name="Content-Type check", category="header_analysis",
-    description="Informa del tipo de contenido del correo (texto plano vs multipart/HTML)",
-)
-def check_content_type(headers: dict) -> RuleResult:
-    content_type = headers.get("content-type", "")
-
-    if not content_type:
-        return RuleResult(
-            score=0, verdict="neutral",
-            details={"content_type": "missing"},
-            recommendation=None,
-        )
-
-    if "multipart" not in content_type.lower() and "text/plain" in content_type.lower():
-        # Plain-text-only: informational, not a penalty (very common in legit mail).
-        return RuleResult(
-            score=0, verdict="pass",
-            details={"content_type": "text/plain only (no HTML alternative)"},
-            recommendation=None,
-        )
-
-    return RuleResult(
-        score=0, verdict="pass",
-        details={"content_type": content_type},
-        recommendation=None,
-    )
 
 
 @iris_rules.register(

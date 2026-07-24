@@ -951,6 +951,19 @@ def get_iris_prompts() -> dict:
     """
     return _cfg("iris.prompts", {})
 
+@_lazy_load
+def get_iris_scoring_weight(weight_key: str, default: float) -> float:
+    """Peso de scoring configurable de una regla de Iris (recalibración §19/S6).
+
+    ``iris.scoring.<weight_key>`` en SecOpsConfig.json puede pisar la
+    magnitud de penalización que una regla define en código sin necesidad de
+    redeploy -- el propio ``default`` que cada llamada pasa (el valor
+    calibrado por el consejo, ver STUDY.md) es el que se usa si la clave no
+    está presente en la config, así que el comportamiento no cambia hasta
+    que alguien la añade explícitamente.
+    """
+    return _cfg(f"iris.scoring.{weight_key}", default, float)
+
 
 # =============================================================================
 # CONECTOR DE BUZÓN DE IRIS (Fase 3-4 del plan mailbox-connector)

@@ -53,7 +53,7 @@ def test_display_name_email_mismatch_flags_random_local():
         "from": "PayPal Support <x8hd92kj.thx@gmail.com>",
     })
     assert result.verdict == "fail"
-    assert result.score <= -10
+    assert result.score <= -5
     assert result.details["domain"] == "gmail.com"
 
 
@@ -175,7 +175,9 @@ def test_bec_flags_wire_with_corporate_sender():
     )
     result = check_bec_wire_pattern(ctx)
     assert result.verdict == "fail"
-    assert result.score <= -12
+    # Recalibración de pesos: la detección real recae en los gates
+    # (bec_free/bec_corporate_redirect), no en el score en solitario.
+    assert result.score <= -8
 
 
 def test_bec_flags_banking_change_pattern():
@@ -323,7 +325,7 @@ def test_image_only_email_flags_single_external_image():
     )
     result = check_image_only_email(ctx)
     assert result.verdict == "fail"
-    assert result.score <= -10
+    assert result.score <= -6
 
 
 def test_image_only_email_passes_rich_text_newsletter():

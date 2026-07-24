@@ -386,6 +386,21 @@ _DEFAULTS: dict[str, Any] = {
         "typeform.com", "airtable.com",
     ],
 
+    # Lenguaje de pago/facturación/suscripción/soporte combinable con un
+    # número de teléfono para el patrón TOAD (Telephone-Oriented Attack
+    # Delivery, G-D): "su suscripción se renovó, llame para cancelar" -- sin
+    # enlaces ni adjuntos, invisible al resto de reglas.
+    "toad_phrases": [
+        "subscription", "auto-renewal", "auto renewal", "renewal", "renewed",
+        "billing issue", "billing department", "unauthorized charge",
+        "unrecognized charge", "customer support", "customer service",
+        "call us", "call the number below", "call to cancel",
+        "suscripcion", "suscripción", "renovacion automatica",
+        "renovación automática", "se ha renovado", "cargo no autorizado",
+        "cargo no reconocido", "atencion al cliente", "atención al cliente",
+        "llamenos", "llámenos", "llame al", "para cancelar",
+    ],
+
     # Patrones de destinatarios ocultos en el To.
     "undisclosed_patterns": [
         "undisclosed", "undisclosed-recipients", "undisclosed recipients",
@@ -458,6 +473,9 @@ def action_verbs() -> tuple[str, ...]:
 
 def bec_phrases() -> tuple[str, ...]:
     return _cached_tuple("bec_phrases")
+
+def toad_phrases() -> tuple[str, ...]:
+    return _cached_tuple("toad_phrases")
 
 def subdomain_action_words() -> frozenset[str]:
     return _cached_set("subdomain_action_words")
@@ -814,14 +832,23 @@ def analyze_url(href: str, sender_domain: Optional[str] = None,
             })
             score -= 12
 
+    # Recalibración de pesos: un enlace de tracking de un ESP conocido tiene
+    # subdominios profundos (click.e.mailchimp.com) y codificación densa por
+    # diseño (URL-encodea la URL de destino real en la query) — ninguna de
+    # las dos cosas es evasión ahí, es la forma estructural normal de la
+    # infraestructura de click-tracking. brand_impersonation/cloaked_link/
+    # credential-harvest siguen activos sin excepción: un ESP comprometido
+    # sigue siendo detectable por esas señales.
+    is_esp_host = host in esp_tracker_domains() or registrable_domain(host) in esp_tracker_domains()
+
     # Unusually deep host — structurally weird even when no single label
     # matches a known brand. Low weight: legitimate deep CDN/infra
     # subdomains do exist, this is a soft additive signal, not a gate.
-    if len(host.split(".")) > URL_MAX_NORMAL_HOST_LABELS:
+    if not is_esp_host and len(host.split(".")) > URL_MAX_NORMAL_HOST_LABELS:
         findings.append({"type": "excessive_subdomains", "href": href, "host": host})
         score -= 5
 
-    if _has_dense_encoding(href):
+    if not is_esp_host and _has_dense_encoding(href):
         findings.append({"type": "dense_encoding", "href": href})
         score -= 6
 

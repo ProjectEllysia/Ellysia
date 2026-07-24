@@ -34,12 +34,14 @@ from __future__ import annotations
 
 import re
 
+import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
 from ..shared import extract_domain, registrable_domain
+from ..parsers import parse_received_line
 
 
 @iris_rules.register(
-    name="SPF", category="authentication",
+    name="SPF", category="authentication", family="auth",
     description="Verifica que el servidor remitente esté autorizado por el SPF del dominio",
 )
 def check_spf(headers: dict) -> RuleResult:
@@ -94,22 +96,29 @@ def check_spf(headers: dict) -> RuleResult:
         )
 
     if spf_status in ("fail", "hardfail"):
+        # Recalibración de pesos: el cluster de auth (SPF+DKIM+DMARC+Align)
+        # cobraba hasta -55 por el MISMO hecho ("no autenticado"); DMARC ya
+        # integra SPF+DKIM por definición (RFC 7489), así que SPF pasa a
+        # subordinado y el techo de familia (managers._aggregate_score)
+        # limita la suma del cluster a -25 sin importar cuántas de las
+        # cuatro reglas disparen. La detección real sigue en los gates
+        # (spf_fail→Suspicious; auth_fail∧spoof→Phishing), no en el peso.
         return RuleResult(
-            score=-20, verdict="fail",
+            score=CR.get_iris_scoring_weight("spf.fail", -8), verdict="fail",
             details={"spf": spf_status, "source": auth_results or received_spf},
             recommendation="El servidor de envío no está autorizado por el registro SPF del dominio remitente. Esto es un fuerte indicador de suplantación (spoofing).",
         )
 
     if spf_status in ("softfail", "neutral"):
         return RuleResult(
-            score=-5, verdict=spf_status,
+            score=CR.get_iris_scoring_weight("spf.softfail", -3), verdict=spf_status,
             details={"spf": spf_status, "source": auth_results or received_spf},
             recommendation="El SPF no está configurado de forma estricta (softfail/neutral). El correo podría no ser legítimo.",
         )
 
     if spf_status in ("permerror", "temperror"):
         return RuleResult(
-            score=-3, verdict="error",
+            score=CR.get_iris_scoring_weight("spf.error", -3), verdict="error",
             details={"spf": spf_status, "source": auth_results or received_spf},
             recommendation="Error al consultar el registro SPF del dominio (error temporal o permanente de DNS).",
         )
@@ -125,7 +134,7 @@ def check_spf(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="DKIM", category="authentication",
+    name="DKIM", category="authentication", family="auth",
     description="Verifica la firma DKIM del correo",
 )
 def check_dkim(headers: dict) -> RuleResult:
@@ -137,7 +146,7 @@ def check_dkim(headers: dict) -> RuleResult:
         - ``missing`` (score -3) when no DKIM-Signature header exists.
         - ``neutral`` (score 0) when a signature is present but the status is unknown.
     """
-    auth_lower = headers.get("authentication-results", "").lower()
+    auth_lower  = headers.get("authentication-results", "").lower()
     dkim_header = headers.get("dkim-signature", "")
 
     if "dkim=pass" in auth_lower:
@@ -148,8 +157,9 @@ def check_dkim(headers: dict) -> RuleResult:
         )
 
     if "dkim=fail" in auth_lower:
+        # Recalibración de pesos: subordinado a DMARC, ver nota en check_spf.
         return RuleResult(
-            score=-15, verdict="fail",
+            score=CR.get_iris_scoring_weight("dkim.fail", -8), verdict="fail",
             details={"dkim": "fail", "source": headers.get("authentication-results", "")},
             recommendation="La firma DKIM no es válida. El mensaje pudo haber sido alterado después de su envío original.",
         )
@@ -171,7 +181,7 @@ def check_dkim(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="DMARC", category="authentication",
+    name="DMARC", category="authentication", family="auth",
     description="Verifica la política DMARC del dominio remitente",
 )
 def check_dmarc(headers: dict) -> RuleResult:
@@ -199,8 +209,12 @@ def check_dmarc(headers: dict) -> RuleResult:
         )
 
     if "dmarc=fail" in combined:
+        # Recalibración de pesos: DMARC es el veredicto integrador del
+        # cluster auth (RFC 7489) -- ancla del techo de familia -25, el
+        # peso más alto del grupo pero ya no -20+lo que sumen SPF/DKIM
+        # aparte por el mismo hecho.
         return RuleResult(
-            score=-20, verdict="fail",
+            score=CR.get_iris_scoring_weight("dmarc.fail", -15), verdict="fail",
             details={"dmarc": "fail", "source": auth_results},
             recommendation="DMARC ha fallado. Esto significa que ni SPF ni DKIM están alineados con el dominio 'De' (From). Fuerte indicador de phishing.",
         )
@@ -214,7 +228,7 @@ def check_dmarc(headers: dict) -> RuleResult:
 
     if "dmarc=none" in combined:
         return RuleResult(
-            score=-3, verdict="none",
+            score=CR.get_iris_scoring_weight("dmarc.none", -2), verdict="none",
             details={"dmarc": "none", "source": auth_results},
             recommendation="La política DMARC del dominio remitente es 'none' (sin protección). El dominio puede ser suplantado sin consecuencias.",
         )
@@ -256,7 +270,7 @@ def _spf_mailfrom_domain(headers: dict) -> str | None:
 
 
 @iris_rules.register(
-    name="Domain Alignment", category="authentication",
+    name="Domain Alignment", category="authentication", family="auth",
     description="Comprueba que el dominio autenticado por SPF/DKIM coincide con el dominio del remitente (alineación DMARC)",
 )
 def check_domain_alignment(headers: dict) -> RuleResult:
@@ -329,7 +343,7 @@ def check_domain_alignment(headers: dict) -> RuleResult:
         )
 
     return RuleResult(
-        score=-15, verdict="fail",
+        score=CR.get_iris_scoring_weight("domain_alignment.fail", -12), verdict="fail",
         details={
             "from_domain": from_domain,
             "authenticated_domains": candidates,
@@ -400,8 +414,11 @@ def check_arc_chain(headers: dict) -> RuleResult:
         )
 
     if cv == "fail":
+        # Fuera del techo de familia de auth: un hop ARC declarando su
+        # propia autenticación rota es un hecho distinto ("un intermediario
+        # certificó el problema"), no otra forma de "no autenticado".
         return RuleResult(
-            score=-8, verdict="fail",
+            score=CR.get_iris_scoring_weight("arc_chain.fail", -6), verdict="fail",
             details={"cv": cv},
             recommendation=(
                 "La cadena ARC (Authenticated Received Chain) declara que la "
@@ -415,4 +432,78 @@ def check_arc_chain(headers: dict) -> RuleResult:
         score=0, verdict="neutral",
         details={"cv": cv or "unknown"},
         recommendation=None,
+    )
+
+
+# ``authserv-id`` is the token before the first ``;`` in Authentication-Results
+# (RFC 8601 §2.2) -- the identity of the server that performed the check.
+_AUTHSERV_STATUS_RE = re.compile(r"\b(spf|dkim|dmarc)=(\w+)", re.IGNORECASE)
+
+
+@iris_rules.register(
+    name="Auth Results Provenance", category="authentication", family="auth",
+    description=(
+        "Comprueba que el authserv-id de Authentication-Results pertenezca a "
+        "algún host `by` de la propia cadena Received del mensaje -- una "
+        "línea que declara 'pass' pero fue estampada por un servidor que "
+        "nunca tocó el mensaje es forjada por el propio remitente."
+    ),
+    needs_context=True,
+)
+def check_auth_results_provenance(context) -> RuleResult:
+    """Recalibración de pesos, gate G-A (forense): SPF/DKIM/DMARC/Alignment
+    solo leen el *contenido* de Authentication-Results, nunca verifican
+    quién lo escribió -- un atacante puede añadir su propia línea
+    ``spf=pass; dkim=pass; dmarc=pass`` al correo que él mismo envía, y las
+    cinco reglas de auth se la creen. Esta regla ata esa cabecera a un
+    hecho que el atacante SÍ controla mucho menos: la cadena Received real
+    del mensaje. Si el authserv-id que reclama "pass" no aparece como host
+    `by` de ningún salto, la línea es forjada.
+    """
+    headers = context.headers
+    auth_results = headers.get("authentication-results", "")
+    if not auth_results.strip():
+        return RuleResult(score=0, verdict="neutral", details={"reason": "no Authentication-Results header"})
+
+    authserv_id = auth_results.split(";", 1)[0].strip().lower()
+    if not authserv_id or "." not in authserv_id:
+        return RuleResult(score=0, verdict="neutral", details={"reason": "authserv-id ausente o no es un hostname"})
+
+    statuses = {m.group(1).lower(): m.group(2).lower() for m in _AUTHSERV_STATUS_RE.finditer(auth_results)}
+    if not any(v == "pass" for v in statuses.values()):
+        # Sin ningún "pass" reclamado no hay incentivo para forjar la
+        # cabecera -- fallar la autenticación no le compra nada al atacante.
+        return RuleResult(score=0, verdict="neutral", details={"authserv_id": authserv_id, "statuses": statuses})
+
+    by_domains: set[str] = set()
+    for line in context.received_headers:
+        by_host = (parse_received_line(line).get("by") or "").strip().rstrip(".,;")
+        if by_host:
+            dom = registrable_domain(by_host)
+            if dom:
+                by_domains.add(dom)
+
+    if not by_domains:
+        # Sin cadena Received que verificar, no hay base para acusar de
+        # forjado -- neutral, no "sospechoso por defecto".
+        return RuleResult(score=0, verdict="neutral", details={"reason": "no hay cadena Received que verificar"})
+
+    authserv_reg = registrable_domain(authserv_id)
+    if authserv_reg in by_domains:
+        return RuleResult(score=0, verdict="pass", details={"authserv_id": authserv_id})
+
+    return RuleResult(
+        score=CR.get_iris_scoring_weight("auth_provenance.forged", -12), verdict="fail",
+        details={
+            "authserv_id": authserv_id,
+            "statuses": statuses,
+            "received_by_domains": sorted(by_domains),
+        },
+        recommendation=(
+            f"La cabecera Authentication-Results declara autenticación 'pass' pero fue "
+            f"estampada por '{authserv_id}', un servidor que no aparece en ningún salto "
+            "de la propia cadena Received del mensaje. Un remitente puede añadir esta "
+            "línea a su propio correo para simular una autenticación que nunca ocurrió; "
+            "trátala como forjada."
+        ),
     )

@@ -9,6 +9,7 @@ Recipient rules — who was this message actually addressed to?
 
 from __future__ import annotations
 
+import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
 from ..shared import undisclosed_patterns
 
@@ -29,7 +30,7 @@ def check_undisclosed_recipients(headers: dict) -> RuleResult:
 
     if is_to_empty and not cc_stripped:
         return RuleResult(
-            score=-6, verdict="empty",
+            score=CR.get_iris_scoring_weight("undisclosed_recipients.empty", -3), verdict="empty",  # recalibración de pesos
             details={
                 "to": to_addr or "missing",
                 "cc": cc_addr or "missing",
@@ -45,7 +46,7 @@ def check_undisclosed_recipients(headers: dict) -> RuleResult:
 
     if is_undisclosed:
         return RuleResult(
-            score=-5, verdict="undisclosed",
+            score=CR.get_iris_scoring_weight("undisclosed_recipients.undisclosed", -3), verdict="undisclosed",  # recalibración de pesos
             details={
                 "to": to_stripped,
                 "reason": "To header set to undisclosed recipients",
@@ -60,7 +61,7 @@ def check_undisclosed_recipients(headers: dict) -> RuleResult:
 
     if is_to_empty and cc_stripped:
         return RuleResult(
-            score=-2, verdict="empty_to",
+            score=0, verdict="empty_to",  # recalibración de pesos
             details={
                 "to": "missing",
                 "cc": cc_stripped,

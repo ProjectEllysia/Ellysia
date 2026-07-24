@@ -23,6 +23,7 @@ import io
 import re
 import zipfile
 
+import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
 from ..shared import (
     dangerous_extensions, esp_tracker_domains, extract_domain,
@@ -36,7 +37,7 @@ _IMG_SRC_RE = re.compile(r'<img\b[^>]*src\s*=\s*["\']([^"\']+)["\']',
 
 @iris_rules.register(
     name="External Image Tracking",
-    category="content_analysis",
+    category="content_analysis", family="attachment",
     description=(
         "Detecta imágenes (u otros recursos) embebidos desde un dominio "
         "externo que no es el From ni un ESP/marketing conocido. Patrón "
@@ -77,7 +78,11 @@ def check_external_image_tracking(context) -> RuleResult:
         )
 
     unique_hosts = {f["registrable"] for f in findings if f["registrable"]}
-    score = -5 if len(unique_hosts) == 1 else -8
+    score = (
+        CR.get_iris_scoring_weight("external_image_tracking.single_host", -3)
+        if len(unique_hosts) == 1
+        else CR.get_iris_scoring_weight("external_image_tracking.multi_host", -5)
+    )  # recalibración de pesos
 
     return RuleResult(
         score=score, verdict="fail",
@@ -104,7 +109,7 @@ _SRC_RE = re.compile(r'src\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 
 @iris_rules.register(
     name="Image-Only Email",
-    category="content_analysis",
+    category="content_analysis", family="attachment",
     description=(
         "Detecta correos cuyo contenido visible es esencialmente una sola "
         "imagen (técnica típica anti-scanner: el payload está en la imagen "
@@ -152,7 +157,7 @@ def check_image_only_email(context) -> RuleResult:
         )
 
     return RuleResult(
-        score=-10, verdict="fail",
+        score=CR.get_iris_scoring_weight("image_only_email.fail", -6), verdict="fail",  # recalibración de pesos
         details={
             "img_count": img_count,
             "external_img_count": external_img_count,
@@ -172,7 +177,8 @@ def check_image_only_email(context) -> RuleResult:
 ZIP_EXTENSIONS = {".zip"}
 ZIP_MIME_TYPES = {"application/zip", "application/x-zip-compressed"}
 
-ATTACHMENT_SCORE_FLOOR = -25
+def _attachment_score_floor() -> float:
+    return CR.get_iris_scoring_weight("attachment.floor", -25)
 
 
 def _extract_filename(content_disposition: str) -> str | None:
@@ -240,13 +246,14 @@ def _inspect_real_attachment(att) -> dict | None:
     return None
 
 
-_REASON_SCORES = {
-    "dangerous_extension": -8,
-    "double_extension": -8,
-    "macro_enabled": -10,
-    "html_attachment_possible_smuggling": -6,
-    "archive_contains_executable": -12,
-}
+def _reason_scores() -> dict[str, float]:
+    return {
+        "dangerous_extension": CR.get_iris_scoring_weight("attachment.dangerous_extension", -8),
+        "double_extension": CR.get_iris_scoring_weight("attachment.double_extension", -8),
+        "macro_enabled": CR.get_iris_scoring_weight("attachment.macro_enabled", -10),
+        "html_attachment_possible_smuggling": CR.get_iris_scoring_weight("attachment.html_smuggling", -6),
+        "archive_contains_executable": CR.get_iris_scoring_weight("attachment.archive_contains_executable", -12),
+    }
 
 
 def _check_headers_fallback(headers: dict) -> RuleResult:
@@ -294,13 +301,13 @@ def _check_headers_fallback(headers: dict) -> RuleResult:
         if "extension" in f:
             ext_descriptions.append(f["extension"])
             if f.get("double_extension"):
-                score -= 2
-            score -= 6
+                score += CR.get_iris_scoring_weight("attachment_header_fallback.double_extension_bonus", -2)
+            score += CR.get_iris_scoring_weight("attachment_header_fallback.dangerous_extension", -6)
         if "mime_type" in f:
             ext_descriptions.append(f["mime_type"])
-            score -= 5
+            score += CR.get_iris_scoring_weight("attachment_header_fallback.suspicious_mime", -5)
 
-    score = max(score, ATTACHMENT_SCORE_FLOOR)
+    score = max(score, _attachment_score_floor())
     return RuleResult(
         score=score, verdict="fail",
         details={
@@ -318,7 +325,7 @@ def _check_headers_fallback(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Suspicious Attachments", category="content_analysis",
+    name="Suspicious Attachments", category="content_analysis", family="attachment",
     description=(
         "Inspecciona los adjuntos MIME reales (extensiones peligrosas, doble "
         "extensión, macros, HTML smuggling, ZIP con ejecutables); recurre a la "
@@ -345,8 +352,9 @@ def check_suspicious_attachments(context) -> RuleResult:
     if not findings:
         return RuleResult(score=0, verdict="pass", details={"attachment_count": len(attachments)})
 
-    score = sum(_REASON_SCORES[f["reason"]] for f in findings)
-    score = max(score, ATTACHMENT_SCORE_FLOOR)
+    reason_scores = _reason_scores()
+    score = sum(reason_scores[f["reason"]] for f in findings)
+    score = max(score, _attachment_score_floor())
 
     return RuleResult(
         score=score, verdict="fail",

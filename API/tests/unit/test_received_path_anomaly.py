@@ -3,9 +3,9 @@
 Cubre todas las ramas:
 - Sin chain (headers-only) → neutral
 - Cadena limpia 2 hops → pass +2
-- TLS downgrade → fail -6
-- Cadena larga (≥5 hops) → fail -4
-- Missing timestamps parcial → suspicious -3
+- TLS downgrade → fail -4
+- Cadena larga (≥5 hops) → fail -2
+- Missing timestamps parcial → suspicious -1
 - Señales combinadas → score acumulativo
 """
 
@@ -90,7 +90,7 @@ def test_tls_downgrade():
     ]
     result = check_received_path_anomaly(_ctx(chain))
     assert result.verdict == "fail"
-    assert result.score == -6
+    assert result.score == -4
     assert "tls_downgrade" in result.details["unique_signals"]
     assert len(result.details["tls_downgrade_hops"]) == 1
 
@@ -103,7 +103,7 @@ def test_tls_downgrade_multi_hop():
     ]
     result = check_received_path_anomaly(_ctx(chain))
     assert result.verdict == "fail"
-    assert result.score == -6  # single downgrade penalty (only 1->2)
+    assert result.score == -4  # single downgrade penalty (only 1->2)
     assert len(result.details["tls_downgrade_hops"]) == 1
 
 
@@ -144,7 +144,7 @@ def test_long_chain_5_hops_unique_ips():
     ]
     result = check_received_path_anomaly(_ctx(chain))
     assert result.verdict == "fail"
-    assert result.score == -4
+    assert result.score == -2
     assert "long_chain" in result.details["unique_signals"]
 
 
@@ -174,7 +174,7 @@ def test_missing_timestamps_3_hops():
     result = check_received_path_anomaly(_ctx(chain))
     # TLS downgrade (SMTP → ESMTPS) dominates → fail, not suspicious
     assert result.verdict == "fail"
-    assert result.score == -9
+    assert result.score == -5
     assert "tls_downgrade" in result.details["unique_signals"]
     assert "missing_timestamps" in result.details["unique_signals"]
 
@@ -206,8 +206,8 @@ def test_tls_downgrade_and_long_chain():
     ]
     result = check_received_path_anomaly(_ctx(chain))
     assert result.verdict == "fail"
-    # tls_downgrade -6 + long_chain -4 = -10
-    assert result.score == -10
+    # tls_downgrade -4 + long_chain -2 = -6
+    assert result.score == -6
     assert "tls_downgrade" in result.details["unique_signals"]
     assert "long_chain" in result.details["unique_signals"]
 
@@ -220,7 +220,7 @@ def test_downgrade_and_missing_ts():
     ]
     result = check_received_path_anomaly(_ctx(chain))
     assert result.verdict == "fail"  # tls_downgrade dominates
-    assert result.score == -9
+    assert result.score == -5
 
 
 # ======================================================================

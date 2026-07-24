@@ -20,7 +20,6 @@ from src.modules.features.iris.services.rules.thread_rules import check_msgid_do
 from src.modules.features.iris.services.rules.content_trust_rules import check_list_unsubscribe
 from src.modules.features.iris.services.rules.body_content_rules import check_alarming_keywords
 from src.modules.features.iris.services.rules.sender_identity_rules import check_misspelled_brands
-from src.modules.features.iris.services.rules.content_trust_rules import check_content_type
 from src.modules.features.iris.services.registry import RuleResult
 from src.modules.features.iris.managers import IrisManager
 
@@ -36,9 +35,12 @@ def test_spf_pass_is_positive():
 
 
 def test_spf_fail_is_strongly_negative():
+    # Recalibración de pesos: subordinado a DMARC (que ya integra SPF+DKIM,
+    # RFC 7489) -- el peso bajó, la detección real la sostiene el gate
+    # spf_fail→Suspicious, no el score en solitario.
     result = check_spf({"authentication-results": "spf=fail smtp.mailfrom=evil@b.com"})
     assert result.verdict == "fail"
-    assert result.score <= -20
+    assert result.score <= -8
 
 
 def test_spf_softfail_is_mildly_negative():
@@ -77,9 +79,10 @@ def test_dkim_pass_is_positive():
 
 
 def test_dkim_fail_is_strongly_negative():
+    # Recalibración de pesos: subordinado a DMARC, ver test_spf_fail arriba.
     result = check_dkim({"authentication-results": "mx; dkim=fail header.d=example.com"})
     assert result.verdict == "fail"
-    assert result.score <= -15
+    assert result.score <= -8
 
 
 def test_dkim_missing_signature_is_neutral():
@@ -104,9 +107,11 @@ def test_dmarc_pass_is_positive():
 
 
 def test_dmarc_fail_is_strongly_negative():
+    # Recalibración de pesos: DMARC sigue siendo el ancla del cluster auth
+    # (el peso más alto de los cuatro), pero bajo el techo de familia -25.
     result = check_dmarc({"authentication-results": "mx; dmarc=fail"})
     assert result.verdict == "fail"
-    assert result.score <= -20
+    assert result.score <= -15
 
 
 def test_dmarc_none_policy_is_mildly_negative():
@@ -193,13 +198,14 @@ def test_empty_subject_is_neutral():
 
 def test_domain_alignment_flags_misaligned_dkim():
     # DKIM passes but signs a third-party domain, not the visible From.
+    # Recalibración de pesos: -15→-12, dentro del techo de familia auth.
     result = check_domain_alignment({
         "from": "CEO <ceo@victima.com>",
         "authentication-results": "mx; dkim=pass header.d=sendgrid.net",
         "dkim-signature": "v=1; a=rsa-sha256; d=sendgrid.net; s=s1",
     })
     assert result.verdict == "fail"
-    assert result.score <= -15
+    assert result.score <= -12
 
 
 def test_domain_alignment_passes_when_aligned():
@@ -337,14 +343,6 @@ def test_misspelled_brand_ignores_common_word_aviso():
     assert result.score == 0
 
 
-# -------------------------------------------------------------- Content-Type check
-
-def test_content_type_plain_text_not_penalised():
-    # Plain-text-only is common in legit transactional mail — no penalty.
-    result = check_content_type({"content-type": "text/plain; charset=UTF-8"})
-    assert result.score == 0
-
-
 # ----------------------------------------------------------------- List-Unsubscribe
 
 def test_list_unsubscribe_is_legitimacy_signal():
@@ -444,9 +442,37 @@ def test_gating_forces_phishing_on_bec_from_free_provider():
     assert _gated("Legitimate", named) == "Phishing"
 
 
-def test_gating_caps_at_suspicious_on_corporate_bec():
-    # A BEC from a corporate (non-free) sender is at least Suspicious.
+def test_gating_does_not_flag_corporate_bec_without_redirect_or_auth_fail():
+    # Recalibración de pesos: un BEC corporativo (dominio propio, autentica
+    # limpio) que solo dispara por texto -- sin redirect de Reply-To/Return-
+    # Path ni fallo de auth -- dependía al 100% de la lista de frases; correo
+    # interno legítimo de nómina/facturación la dispara con la misma
+    # frecuencia. Sin corroboración estructural, ya no gatea en solitario.
     named = {"BEC Wire Transfer Pattern": _rr("fail", from_domain="acme.com", reply_domain="acme.com")}
+    assert _gated("Legitimate", named) == "Legitimate"
+
+
+def test_gating_forces_phishing_on_corporate_bec_with_redirect():
+    # El mismo BEC corporativo, pero con Reply-To/Return-Path redirigiendo a
+    # otro dominio -- la misma intención de desvío que bec_free, solo que sin
+    # el tell de webmail gratuito. Esa corroboración estructural gatea igual
+    # de fuerte que bec_free: a Phishing, no solo a Suspicious.
+    named = {
+        "BEC Wire Transfer Pattern": _rr(
+            "fail", from_domain="acme.com", reply_domain="external.com",
+            redirect_to_external_reply=True,
+        ),
+    }
+    assert _gated("Legitimate", named) == "Phishing"
+
+
+def test_gating_caps_at_suspicious_on_corporate_bec_with_auth_fail():
+    # Idem, pero la corroboración es un fallo de autenticación en vez de un
+    # redirect de reply-path.
+    named = {
+        "BEC Wire Transfer Pattern": _rr("fail", from_domain="acme.com", reply_domain="acme.com"),
+        "SPF": _rr("fail"),
+    }
     assert _gated("Legitimate", named) == "Suspicious"
 
 
@@ -522,6 +548,12 @@ def test_top_signals_caps_at_limit_and_keeps_original_index():
 
 # ----------------------------------------------------- Subtractive scoring model
 
+def _unfamilied_defs(count: int) -> list[dict]:
+    # No `family` key -> passes through _aggregate_score's family-cap logic
+    # untouched, matching these tests' original (pre-§18) intent.
+    return [{"name": f"Rule{i}", "family": ""} for i in range(count)]
+
+
 def test_aggregate_score_clamps_positive_credits():
     # Passing rules (positive scores) contribute nothing; only penalties count.
     results = [
@@ -531,17 +563,17 @@ def test_aggregate_score_clamps_positive_credits():
         RuleResult(score=-5, verdict="fail", details={}),
     ]
     # 100 + min(0,5) + min(0,3) + (-15) + (-5) == 80
-    assert IrisManager._aggregate_score(results) == 80
+    assert IrisManager._aggregate_score(_unfamilied_defs(len(results)), results) == 80
 
 
 def test_aggregate_score_clean_message_stays_at_ceiling():
     results = [RuleResult(score=5, verdict="pass", details={}) for _ in range(10)]
-    assert IrisManager._aggregate_score(results) == 100
+    assert IrisManager._aggregate_score(_unfamilied_defs(len(results)), results) == 100
 
 
 def test_aggregate_score_floored_at_zero():
     results = [RuleResult(score=-80, verdict="fail", details={}) for _ in range(3)]
-    assert IrisManager._aggregate_score(results) == 0
+    assert IrisManager._aggregate_score(_unfamilied_defs(len(results)), results) == 0
 
 
 # ----------------------------------------------------------- IOC extraction (O1)

@@ -57,6 +57,26 @@ _VERDICT_SEVERITY = {v: i for i, v in enumerate(_VERDICT_ORDER)}
 # from Gmail used to net *positive* despite a -23 risk payload underneath.
 _CEILING = 100.0
 
+# Recalibración de pesos (§18): techos de familia. Varias reglas dentro del
+# mismo cluster suelen corroborar el mismo hecho subyacente (p.ej. SPF+DKIM+
+# DMARC+Domain Alignment todas fallando describen UN fallo de autenticación,
+# no cuatro independientes) -- sin techo, sumarlas todas exagera la
+# confianza del score en un solo hecho. Cada techo es el mínimo (más
+# negativo) que la suma de penalizaciones de esa familia puede alcanzar;
+# reglas sin `family` (Threading, Recipient, List-Unsubscribe) no tienen
+# techo -- ya son individualmente pequeñas. ARC Chain se queda fuera de
+# "auth" a propósito (forense: describe un hecho distinto, la cadena de
+# reenvío, no la autenticación del propio mensaje).
+_FAMILY_SCORE_FLOORS = {
+    "auth": -25.0,
+    "identity": -28.0,
+    "reply_path": -15.0,
+    "content": -25.0,
+    "links": -30.0,
+    "received": -12.0,
+    "attachment": -28.0,
+}
+
 
 class IrisManager(TaskTrackingMixin):
     """Orchestrates the lifecycle of an Iris email-header analysis.
@@ -697,7 +717,7 @@ class IrisManager(TaskTrackingMixin):
                     completed_steps += 1
                     job.progress(int((completed_steps / total_steps) * 100))
 
-                total_score = self._aggregate_score(results)
+                total_score = self._aggregate_score(rules_defs, results)
                 base_verdict = self._determine_verdict(total_score)
                 verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
                 evaluations.append((verdict, total_score, gate_reasons, results))
@@ -760,15 +780,35 @@ class IrisManager(TaskTrackingMixin):
             analysis_repo.update(analysis)
 
     @staticmethod
-    def _aggregate_score(results: List[RuleResult]) -> float:
+    def _aggregate_score(rules_defs: List[dict], results: List[RuleResult]) -> float:
         """Combine per-rule results into a single 0–100 score.
 
         Subtractive model: start at :data:`_CEILING` and add only the
         *negative* part of each rule's score (``min(0, score)``), so passing
         a rule never inflates the total. Clamped to ``[0, _CEILING]``.
+
+        Recalibración de pesos (§18): before summing, each rule's penalty is
+        attributed to its ``family`` (if any) and the family's total is
+        floored at ``_FAMILY_SCORE_FLOORS[family]`` — a cluster of rules
+        corroborating the same underlying fact can't out-vote its own cap.
+        Rules with no family pass through unfloored.
         """
-        penalties = sum(min(0.0, r.score) for r in results)
-        return max(0.0, _CEILING + penalties)
+        family_penalties: Dict[str, float] = {}
+        unfamilied_penalties = 0.0
+        for rule_def, result in zip(rules_defs, results):
+            penalty = min(0.0, float(result.score))
+            family = rule_def.get("family") or ""
+            if family:
+                family_penalties[family] = family_penalties.get(family, 0.0) + penalty
+            else:
+                unfamilied_penalties += penalty
+
+        capped_total = unfamilied_penalties
+        for family, penalty in family_penalties.items():
+            floor = _FAMILY_SCORE_FLOORS.get(family)
+            capped_total += max(floor, penalty) if floor is not None else penalty
+
+        return max(0.0, _CEILING + capped_total)
 
     def _determine_verdict(self, total_score: float) -> str:
         """Map a numeric 0–100 score to a textual verdict.
@@ -820,6 +860,13 @@ class IrisManager(TaskTrackingMixin):
         dmarc_fail = verdict_is("DMARC", "fail") and not arc_pass
         align_fail = verdict_is("Domain Alignment", "fail") and not arc_pass
 
+        # G-A (forense, recalibración de pesos): un authserv-id que reclama
+        # "pass" pero no aparece en ningún salto de la propia cadena
+        # Received del mensaje es una línea forjada por el remitente --
+        # cierra el bypass de confiar ciegamente en Authentication-Results
+        # sin verificar quién lo escribió.
+        auth_forged = verdict_is("Auth Results Provenance", "fail")
+
         # D1 (quishing): a QR code that decodes to a suspicious URL is a
         # high-confidence signal on its own -- a QR is specifically a way
         # to smuggle a URL past every text/link-based check, so if one
@@ -842,6 +889,15 @@ class IrisManager(TaskTrackingMixin):
             is_free_provider(bec.details.get("from_domain"))
             or is_free_provider(bec.details.get("reply_domain"))
         )
+        # A corporate (non-free) BEC sender whose Reply-To/Return-Path
+        # redirects elsewhere is the same intent-to-divert pattern as
+        # bec_free, just without the free-webmail tell — before this, the
+        # BEC gate depended 100% on the phrase list alone for a corporate
+        # sender, with no structural corroboration.
+        bec_corporate_redirect = (
+            bec_fail and not bec_free
+            and bool(bec.details.get("redirect_to_external_reply"))
+        )
 
         body_links = res("Body Links")
         link_types = (body_links.details.get("types") or []) if body_links is not None else []
@@ -849,12 +905,64 @@ class IrisManager(TaskTrackingMixin):
         cloaked_link_any = body_links_failed and "cloaked_link" in link_types
         link_impersonation = body_links_failed and "brand_impersonation" in link_types
 
+        # Recalibración de pesos: texto oculto evasivo es un hecho
+        # estructural (alguien escondió deliberadamente un enlace/frase),
+        # no lenguaje que el correo legítimo produzca por accidente -- a
+        # diferencia de las "frases encontradas" puras, sigue gateando en
+        # solitario incluso cuando `body_content_fail` pasa a requerir combo.
+        body_content = res("Body Content")
+        body_content_hidden_text = (
+            body_content is not None and bool(body_content.details.get("hidden_text"))
+        )
+
         path_anomaly = res("Received Path Anomaly")
         path_anomaly_fail = path_anomaly is not None and path_anomaly.verdict == "fail"
         path_signals = (
             (path_anomaly.details.get("unique_signals") or [])
             if path_anomaly is not None else []
         )
+
+        # Recalibración de pesos: estas tres señales eran, a peso actual,
+        # el único separador de su ataque -- ya dejaban pasar el correo en
+        # solitario antes de tocar ningún peso (red team). Se promueven a
+        # gate ANTES de suavizar sus pesos, o la suavización abre un
+        # agujero real en vez de solo ordenar mejor el score.
+        subdomain = res("Subdomain Impersonation")
+        subdomain_brand_in_subdomain = (
+            subdomain is not None and subdomain.verdict == "fail"
+            and any(f.get("type") == "brand_in_subdomain" for f in (subdomain.details.get("findings") or []))
+        )
+
+        # G-B (red team, máxima prioridad): lookalike del dominio del
+        # DESTINATARIO, no de una marca -- el vector BEC nº1, hoy invisible
+        # porque Lookalike Sender Domain solo compara contra
+        # `canonical_brands`.
+        recipient_lookalike = verdict_is("Recipient Domain Lookalike", "fail")
+
+        # G-C (red team): el display name ES una dirección de otro dominio
+        # (`"ceo@acme.com" <attacker@evil.com>`). Escala a Phishing solo
+        # cuando esa dirección falsa suplanta la propia organización
+        # destinataria o una marca conocida -- si no, queda en Suspicious.
+        display_foreign = res("Display Name Foreign Address")
+        display_foreign_fail = display_foreign is not None and display_foreign.verdict == "fail"
+        display_foreign_impersonates_target = (
+            display_foreign_fail and bool(display_foreign.details.get("impersonates_target"))
+        )
+
+        # G-D (red team): TOAD/callback -- teléfono + lenguaje de pago sin
+        # enlaces/adjuntos/hilo previo, una clase de ataque hoy invisible.
+        toad_callback = verdict_is("TOAD Callback Pattern", "fail")
+
+        # G-E (red team): urgencia fuerte combinada con un enlace del cuerpo
+        # a un dominio ajeno al remitente -- aproxima el "primo autenticado"
+        # (dominio propio, auth limpia, marca fuera de la lista) sin
+        # depender de `canonical_brands`.
+        external_login_link = verdict_is("External Login Link", "fail")
+
+        # Comprobación forense adicional (§5): aproximación offline de
+        # coherencia HELO -- ruidosa en solitario (nombres de host varían
+        # mucho de forma legítima), solo se combina con un fallo de auth.
+        origin_helo_mismatch = verdict_is("Origin HELO Coherence", "fail")
 
         return {
             "spf_fail": spf_fail,
@@ -872,12 +980,24 @@ class IrisManager(TaskTrackingMixin):
             "link_impersonation": link_impersonation,
             "body_links_fail": verdict_is("Body Links", "fail"),
             "body_content_fail": verdict_is("Body Content", "fail"),
+            "body_content_hidden_text": body_content_hidden_text,
             "received_chain_fail": verdict_is("Received Chain", "fail"),
             "path_tls_downgrade": path_anomaly_fail and "tls_downgrade" in path_signals,
             "path_long_chain": path_anomaly_fail and "long_chain" in path_signals,
             "auth_fail": spf_fail or dmarc_fail or align_fail,
             "bec_fail": bec_fail,
             "bec_free": bec_free,
+            "bec_corporate_redirect": bec_corporate_redirect,
+            "subdomain_brand_in_subdomain": subdomain_brand_in_subdomain,
+            "auth_forged": auth_forged,
+            "recipient_lookalike": recipient_lookalike,
+            "display_foreign_fail": display_foreign_fail,
+            "display_foreign_impersonates_target": display_foreign_impersonates_target,
+            "toad_callback": toad_callback,
+            "external_login_link": external_login_link,
+            "origin_helo_mismatch": origin_helo_mismatch,
+            "encoded_word_abuse": verdict_is("Encoded-Word Abuse", "fail"),
+            "display_name_email_mismatch": verdict_is("Display Name Email Mismatch", "fail"),
             # G6/F2: these four are structural forgeries no legitimate mail
             # client ever produces by accident (a self-citing In-Reply-To, a
             # Received chain that runs backwards in time, RLO/mixed-script
@@ -927,6 +1047,13 @@ class IrisManager(TaskTrackingMixin):
         gate(signals["cloaked_link_any"], "Phishing", "cloaked body link (visible domain differs from href)")
         gate(signals["link_impersonation"], "Phishing", "body link impersonates a brand/sender via subdomain trick")
         gate(signals["qr_suspicious"], "Phishing", "QR code decodes to a suspicious URL (quishing)")
+        gate(signals["auth_forged"], "Phishing", "Authentication-Results claims pass but its authserv-id never touched the message (forged)")
+        gate(signals["recipient_lookalike"], "Phishing", "sender domain is a typosquat/homoglyph of the recipient organisation's own domain")
+        gate(signals["display_foreign_fail"], "Suspicious", "display name is itself an email address on a different domain than From")
+        gate(signals["display_foreign_impersonates_target"], "Phishing", "display-name address impersonates the recipient's own domain or a known brand")
+        gate(signals["toad_callback"], "Suspicious", "phone number combined with payment/billing/support language, no links/attachments/prior thread (TOAD)")
+        gate(alarming_strong and signals["external_login_link"], "Suspicious", "urgent/alarming language combined with a body link to a domain unrelated to the sender")
+        gate(signals["origin_helo_mismatch"] and auth_fail, "Suspicious", "origin server's HELO/EHLO domain matches nothing else in the message, combined with an authentication failure")
         gate(spoof_any, "Suspicious", "display-name brand spoofing")
         gate(align_fail, "Suspicious", "SPF/DKIM not aligned with From")
         gate(attach, "Suspicious", "dangerous attachment")
@@ -937,10 +1064,36 @@ class IrisManager(TaskTrackingMixin):
         gate(signals["unicode_evasion"], "Suspicious", "Unicode bidi/mixed-script evasion characters")
         gate(signals["triangulation_fail"], "Suspicious", "From/Reply-To/Return-Path point to three distinct domains")
         gate(body_links_fail, "Suspicious", "suspicious body links")
-        gate(signals["body_content_fail"], "Suspicious", "phishing phrasing or hidden text in body")
+        # Recalibración de pesos (calibración/FP): "verifique su cuenta" es
+        # lenguaje de banca legítima real, no solo de phishing -- gatear en
+        # solitario marcaba alertas bancarias reales como Suspicious pese a
+        # autenticar limpio. El texto oculto (evasión real) sigue gateando
+        # sin combo porque ese es un hecho estructural, no de lenguaje; la
+        # combinación solo relaja el caso de "frases encontradas" puro.
+        gate(signals["body_content_fail"] and (auth_fail or spoof_any or body_links_fail or signals["body_content_hidden_text"]),
+             "Suspicious", "phishing phrasing or hidden text in body")
         gate(signals["received_chain_fail"], "Suspicious", "Received chain anomaly")
-        gate(signals["bec_fail"], "Suspicious", "BEC financial-action request in body")
+        # Recalibración de pesos: un BEC corporativo (dominio propio,
+        # autentica limpio) que solo dispara por texto, sin redirect ni
+        # fallo de auth, dependía al 100% de la lista de frases -- correo
+        # interno legítimo de nómina/facturación la dispara con la misma
+        # frecuencia. bec_free (webmail gratuito) sigue gateando aparte,
+        # sin este combo.
+        gate(signals["bec_fail"] and not signals["bec_free"]
+             and (signals["bec_corporate_redirect"] or auth_fail),
+             "Suspicious", "BEC financial-action request in body")
         gate(signals["arc_fail"], "Suspicious", "ARC chain declares a previous hop's authentication broken (cv=fail)")
+        gate(signals["encoded_word_abuse"], "Suspicious", "RFC 2047 encoded-word abuse (chained blocks, exotic charset, or a URL only revealed on decode)")
+        gate(signals["display_name_email_mismatch"], "Suspicious", "display name claims an organisation but the address is a random local-part on an unrelated domain")
+
+        # Recalibración de pesos (red team): a peso actual estas dos ya eran
+        # el único separador de su ataque en solitario -- promovidas a gate
+        # antes de suavizar su peso, para que la suavización no abra un
+        # agujero real.
+        gate(signals["subdomain_brand_in_subdomain"], "Phishing",
+             "known brand embedded as a subdomain label of an attacker-controlled domain")
+        gate(signals["bec_corporate_redirect"], "Phishing",
+             "BEC financial-action request whose reply target redirects to a different domain")
 
         # Combinations that escalate to Phishing.
         gate(signals["bec_free"], "Phishing",

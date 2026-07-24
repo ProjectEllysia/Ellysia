@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 
+import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
 from ..shared import (
     alarming_emojis, exotic_charsets, extract_display_name, extract_domain,
@@ -40,21 +41,27 @@ def _score_by_weight(weight: int) -> tuple[float, str, str | None]:
     ``weight`` counts each high-signal hit as 2 and each low-signal hit
     (and alarming emoji) as 1.
     """
+    # Recalibración de pesos: la urgencia es lenguaje estándar en banca y
+    # marketing legítimos; el tramo "low" era ruido puro (bajado a 0), y
+    # "high"/"medium" bajan porque la detección real recae en el combo
+    # `alarming_strong ∧ (auth_fail ∨ spoof)` → Phishing, no en este score.
     if weight >= 5:
-        return (-15, "high", "El asunto y/o nombre del remitente contiene múltiples palabras o frases "
+        return (CR.get_iris_scoring_weight("alarming_keywords.high", -8), "high",
+                "El asunto y/o nombre del remitente contiene múltiples palabras o frases "
                          "alarmantes que son características de campañas de phishing con alta urgencia.")
     if weight >= 3:
-        return (-10, "medium", "Se detectaron varias palabras o frases alarmantes en el asunto o "
+        return (CR.get_iris_scoring_weight("alarming_keywords.medium", -5), "medium",
+                "Se detectaron varias palabras o frases alarmantes en el asunto o "
                          "nombre del remitente. Esto es común en correos de phishing que buscan "
                          "provocar una reacción impulsiva.")
     if weight >= 1:
-        return (-5, "low", "Se detectó lenguaje de urgencia en el asunto o nombre del remitente. "
+        return (0, "low", "Se detectó lenguaje de urgencia en el asunto o nombre del remitente. "
                          "Podría ser legítimo (marketing), pero merece atención.")
     return (0, "pass", None)
 
 
 @iris_rules.register(
-    name="Alarming Keywords", category="content_analysis",
+    name="Alarming Keywords", category="content_analysis", family="content",
     description="Detecta palabras y frases alarmantes en el asunto y nombre del remitente (inglés/español)",
 )
 def check_alarming_keywords(headers: dict) -> RuleResult:
@@ -146,7 +153,7 @@ def _has_evasive_hidden_text(body_html: str) -> bool:
 
 
 @iris_rules.register(
-    name="Body Content", category="content_analysis",
+    name="Body Content", category="content_analysis", family="content",
     description=(
         "Escanea el cuerpo del correo en busca de frases de phishing "
         "(credenciales/pago) y técnicas de texto oculto."
@@ -167,11 +174,16 @@ def check_body_content(context) -> RuleResult:
     if not found and not hidden:
         return RuleResult(score=0, verdict="pass", details={})
 
+    # Recalibración de pesos: "verifique su cuenta" es lenguaje de banca
+    # legítima real, no solo de phishing -- se suaviza. El texto oculto SÍ
+    # es evasión estructural deliberada (nadie esconde texto por accidente)
+    # y se mantiene en -10; el gate body_content_fail también distingue los
+    # dos casos (ver managers._extract_verdict_signals).
     score = 0
     if found:
-        score -= 5 * min(len(found), 3)
+        score += CR.get_iris_scoring_weight("body_content.phrase_match", -3) * min(len(found), 2)
     if hidden:
-        score -= 10
+        score += CR.get_iris_scoring_weight("body_content.hidden_text", -10)
 
     # El mensaje describe solo lo que de verdad disparó -- antes afirmaba
     # "frases típicas de phishing" incluso en la rama donde solo se detectó
@@ -192,7 +204,7 @@ def check_body_content(context) -> RuleResult:
 
 @iris_rules.register(
     name="BEC Wire Transfer Pattern",
-    category="content_analysis",
+    category="content_analysis", family="content",
     description=(
         "Detecta el patrón típico de BEC (Business Email Compromise): "
         "remitente con dominio corporativo y cuerpo pidiendo wire transfer, "
@@ -222,11 +234,15 @@ def check_bec_wire_pattern(context) -> RuleResult:
         reply_domain and reply_domain != from_domain
     )
 
-    base = -15
+    # Recalibración de pesos: el peso ya no sostiene el veredicto -- BEC
+    # desde webmail gratuito gatea vía `bec_free`→Phishing y BEC corporativo
+    # con redirect gatea vía `bec_corporate_redirect`→Phishing (ambos en
+    # managers._evaluate_gates); el score solo ordena severidad relativa.
+    base = CR.get_iris_scoring_weight("bec_wire.base", -8)
     if len(matches) >= 2:
-        base -= 6
+        base += CR.get_iris_scoring_weight("bec_wire.multi_match_bonus", -3)
     if suspicious_redirect:
-        base -= 4
+        base += CR.get_iris_scoring_weight("bec_wire.redirect_bonus", -2)
 
     # B2: the rule's own recommendation used to assert "sender uses a
     # corporate domain" unconditionally — from_domain is just whatever's
@@ -265,7 +281,7 @@ def check_bec_wire_pattern(context) -> RuleResult:
 
 @iris_rules.register(
     name="Generic Greeting",
-    category="content_analysis",
+    category="content_analysis", family="content",
     description=(
         "Detecta el patrón clásico de phishing masivo: saludo genérico "
         "('Dear customer') combinado con un verbo de acción sospechoso "
@@ -292,9 +308,14 @@ def check_generic_greeting(context) -> RuleResult:
             recommendation=None,
         )
 
-    score = -8
+    # Recalibración de pesos: el contaminante nº1 identificado por el
+    # consejo -- "Estimado cliente/usuario" + un verbo de acción está en
+    # casi todo correo transaccional/de cuenta legítimo (RRHH, banca,
+    # e-commerce). Baja fuerte; sigue siendo señal, no ruido a 0, porque
+    # corrobora otras familias.
+    score = CR.get_iris_scoring_weight("generic_greeting.base", -3)
     if len(action_hits) >= 2:
-        score -= 3
+        score += CR.get_iris_scoring_weight("generic_greeting.multi_action_bonus", -2)
 
     return RuleResult(
         score=score, verdict="fail",
@@ -332,7 +353,7 @@ def _contains_url(text: str) -> list[str]:
 
 
 @iris_rules.register(
-    name="URL in Subject", category="content_analysis",
+    name="URL in Subject", category="content_analysis", family="content",
     description="Detecta si el asunto del correo contiene URLs (común en phishing)",
 )
 def check_url_in_subject(headers: dict) -> RuleResult:
@@ -357,7 +378,7 @@ def check_url_in_subject(headers: dict) -> RuleResult:
     count = len(urls_found)
 
     return RuleResult(
-        score=-5 * min(count, 2),
+        score=CR.get_iris_scoring_weight("url_in_subject.per_url", -3) * min(count, 2),
         verdict="fail",
         details={
             "subject": subject,
@@ -373,7 +394,9 @@ def check_url_in_subject(headers: dict) -> RuleResult:
     )
 
 
-_UNICODE_EVASION_SCORE_FLOOR = -30
+# recalibración de pesos -- gatea (unicode_evasion), floor menor
+def _unicode_evasion_score_floor() -> float:
+    return CR.get_iris_scoring_weight("unicode_evasion.floor", -20)
 
 # Bidirectional format/override control characters. U+202E (RLO) is the
 # one abused for filename spoofing; the rest are included because any of
@@ -414,7 +437,7 @@ def _mixed_script(text: str) -> str | None:
 
 
 @iris_rules.register(
-    name="Unicode Evasion", category="content_analysis",
+    name="Unicode Evasion", category="content_analysis", family="content",
     description=(
         "Detecta caracteres de control bidireccional (RLO/LRO - spoofing de "
         "extension de archivo) y mezcla de scripts confusables (cirilico/"
@@ -436,7 +459,7 @@ def check_unicode_evasion(context) -> RuleResult:
         controls = _find_bidi_controls(value)
         if controls:
             findings.append({"type": "bidi_control", "field": field_name, "controls": controls})
-            score -= 15
+            score += CR.get_iris_scoring_weight("unicode_evasion.bidi_control", -15)
 
     for att in context.attachments:
         filename = att.filename or ""
@@ -446,25 +469,25 @@ def check_unicode_evasion(context) -> RuleResult:
                 "type": "bidi_control", "field": "filename",
                 "filename": filename, "controls": controls,
             })
-            score -= 15
+            score += CR.get_iris_scoring_weight("unicode_evasion.bidi_control_filename", -15)
 
     for field_name, value in (("display_name", display_name), ("subject", subject)):
         script = _mixed_script(value)
         if script:
             findings.append({"type": "mixed_script", "field": field_name, "script": script, "value": value})
-            score -= 10
+            score += CR.get_iris_scoring_weight("unicode_evasion.mixed_script", -10)
 
     domain_script = _mixed_script(domain)
     if domain_script:
         findings.append({"type": "mixed_script", "field": "domain", "script": domain_script, "value": domain})
-        score -= 12
+        score += CR.get_iris_scoring_weight("unicode_evasion.mixed_script_domain", -12)
 
     if not findings:
         return RuleResult(score=1, verdict="pass", details={})
 
     types = sorted({f["type"] for f in findings})
     return RuleResult(
-        score=max(score, _UNICODE_EVASION_SCORE_FLOOR), verdict="fail",
+        score=max(score, _unicode_evasion_score_floor()), verdict="fail",
         details={"findings": findings, "types": types},
         recommendation=(
             "Se detectaron caracteres Unicode sospechosos (controles de "
@@ -476,7 +499,9 @@ def check_unicode_evasion(context) -> RuleResult:
     )
 
 
-_ENCODED_WORD_SCORE_FLOOR = -30
+# recalibración de pesos -- ya promovida a gate (encoded_word_abuse), floor menor
+def _encoded_word_score_floor() -> float:
+    return CR.get_iris_scoring_weight("encoded_word_abuse.floor", -15)
 
 # ``=?charset?B|Q?encoded-text?=`` per RFC 2047 §2.
 _ENCODED_WORD_RE = re.compile(r"=\?([^?]+)\?([bBqQ])\?([^?]*)\?=")
@@ -540,16 +565,17 @@ def _inspect_encoded_header(field_name: str, raw_value: str) -> list[dict]:
     return findings
 
 
-_ENCODED_WORD_FINDING_SCORES = {
-    "chained_encoded_words": -8,
-    "exotic_charset": -10,
-    "mixed_charsets": -6,
-    "decoded_reveals_url": -12,
-}
+def _encoded_word_finding_scores() -> dict[str, float]:
+    return {
+        "chained_encoded_words": CR.get_iris_scoring_weight("encoded_word_abuse.chained_encoded_words", -8),
+        "exotic_charset": CR.get_iris_scoring_weight("encoded_word_abuse.exotic_charset", -10),
+        "mixed_charsets": CR.get_iris_scoring_weight("encoded_word_abuse.mixed_charsets", -6),
+        "decoded_reveals_url": CR.get_iris_scoring_weight("encoded_word_abuse.decoded_reveals_url", -12),
+    }
 
 
 @iris_rules.register(
-    name="Encoded-Word Abuse", category="content_analysis",
+    name="Encoded-Word Abuse", category="content_analysis", family="content",
     description=(
         "Detecta abuso de encoded-words RFC 2047 en Subject/From: bloques "
         "encadenados para evadir filtros de keywords, charsets exoticos "
@@ -564,11 +590,12 @@ def check_encoded_word_abuse(headers: dict) -> RuleResult:
     if not findings:
         return RuleResult(score=1, verdict="pass", details={})
 
-    score = sum(_ENCODED_WORD_FINDING_SCORES[f["type"]] for f in findings)
+    finding_scores = _encoded_word_finding_scores()
+    score = sum(finding_scores[f["type"]] for f in findings)
     types = sorted({f["type"] for f in findings})
 
     return RuleResult(
-        score=max(score, _ENCODED_WORD_SCORE_FLOOR), verdict="fail",
+        score=max(score, _encoded_word_score_floor()), verdict="fail",
         details={"findings": findings, "types": types},
         recommendation=(
             "El correo usa codificacion RFC 2047 (encoded-words) de forma "
@@ -576,5 +603,69 @@ def check_encoded_word_abuse(headers: dict) -> RuleResult:
             "raramente legitimos, o contenido que solo se revela al "
             "decodificar. Es una tecnica conocida para evadir filtros "
             "automaticos; revisa el contenido decodificado con atencion."
+        ),
+    )
+
+
+# Heurística laxa de teléfono: prefijo internacional opcional + grupos de
+# dígitos separados por espacio/guion/paréntesis, con al menos 9 dígitos en
+# total (filtra fechas y números de factura cortos, aplicado tras el match).
+_PHONE_RE = re.compile(r"(?:\+\d{1,3}[\s.-]?)?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{2,4}\b")
+
+
+@iris_rules.register(
+    name="TOAD Callback Pattern",
+    category="content_analysis", family="content",
+    description=(
+        "Detecta el patron TOAD (Telephone-Oriented Attack Delivery): un "
+        "numero de telefono combinado con lenguaje de pago/factura/"
+        "suscripcion/soporte, sin enlaces, sin adjuntos y sin hilo de "
+        "conversacion previo -- una clase de ataque invisible al resto de "
+        "reglas porque nunca hay un enlace ni un adjunto que analizar."
+    ),
+    needs_context=True,
+)
+def check_toad_callback_pattern(context) -> RuleResult:
+    headers = context.headers
+    body_html = context.body_html or ""
+    body_text = context.body_text or ""
+    text = (body_text + " " + strip_html(body_html)).lower()
+
+    if not text.strip():
+        return RuleResult(score=0, verdict="neutral", details={"reason": "empty body"})
+
+    has_thread = bool(headers.get("in-reply-to", "").strip()) or bool(headers.get("references", "").strip())
+    if has_thread:
+        return RuleResult(score=0, verdict="neutral", details={"reason": "has prior thread"})
+
+    phones = [p for p in _PHONE_RE.findall(text) if sum(c.isdigit() for c in p) >= 9]
+    if not phones:
+        return RuleResult(score=0, verdict="pass", details={"phones_found": 0})
+
+    keyword_hits = phrase_matches("toad_phrases", text)
+    if not keyword_hits:
+        return RuleResult(score=0, verdict="pass", details={"phones_found": len(phones), "keywords_found": []})
+
+    # El patron es especificamente para el caso SIN enlaces ni adjuntos --
+    # si los hay, Body Links/Suspicious Attachments ya cubren el mensaje.
+    if context.links or context.attachments:
+        return RuleResult(
+            score=0, verdict="pass",
+            details={
+                "phones_found": len(phones), "keywords_found": keyword_hits,
+                "reason": "has links/attachments, other rules cover it",
+            },
+        )
+
+    return RuleResult(
+        score=CR.get_iris_scoring_weight("toad_callback.fail", -8), verdict="fail",
+        details={"phones_found": phones[:3], "keywords_found": keyword_hits},
+        recommendation=(
+            "El correo combina un numero de telefono con lenguaje de pago, factura, "
+            "suscripcion o soporte, sin enlaces, sin adjuntos y sin ser parte de una "
+            "conversacion previa. Es el patron TOAD (Telephone-Oriented Attack "
+            "Delivery): en vez de un enlace de phishing, el ataque continua por "
+            "telefono. No llames al numero del correo; busca el telefono oficial "
+            "por otro medio (la web oficial, el reverso de tu tarjeta, etc.)."
         ),
     )

@@ -24,15 +24,17 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import List
 
+import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
-from ..parsers import _hop_timestamp, _is_private_ip, build_path
+from ..parsers import _hop_timestamp, _is_private_ip, build_path, parse_received_line
+from ..shared import extract_domain, registrable_domain
 
 MAX_FUTURE_DAYS = 1
 MAX_PAST_DAYS = 365
 
 
 @iris_rules.register(
-    name="Date Header Anomaly", category="header_analysis",
+    name="Date Header Anomaly", category="header_analysis", family="received",
     description="Detecta si la cabecera Date está ausente, en el futuro lejano o en el pasado remoto",
 )
 def check_date_anomaly(headers: dict) -> RuleResult:
@@ -40,7 +42,7 @@ def check_date_anomaly(headers: dict) -> RuleResult:
 
     if not date_str or not date_str.strip():
         return RuleResult(
-            score=-3, verdict="missing",
+            score=0, verdict="missing",  # recalibración de pesos -- ausencia sola no es señal fuerte
             details={"date": "missing"},
             recommendation="La cabecera Date está ausente. Los correos legítimos siempre incluyen "
                            "una marca de tiempo. Esto puede indicar un correo generado automáticamente "
@@ -51,7 +53,7 @@ def check_date_anomaly(headers: dict) -> RuleResult:
         parsed = parsedate_to_datetime(date_str)
     except (ValueError, TypeError, OverflowError):
         return RuleResult(
-            score=-4, verdict="unparseable",
+            score=CR.get_iris_scoring_weight("date_anomaly.unparseable", -4), verdict="unparseable",
             details={"date": date_str},
             recommendation=f"No se pudo interpretar la cabecera Date: '{date_str}'. "
                            "Un formato de fecha inválido es sospechoso y puede indicar "
@@ -66,7 +68,7 @@ def check_date_anomaly(headers: dict) -> RuleResult:
     if parsed > now + timedelta(days=MAX_FUTURE_DAYS):
         future_days = (parsed - now).days
         return RuleResult(
-            score=-4, verdict="future",
+            score=CR.get_iris_scoring_weight("date_anomaly.future", -4), verdict="future",
             details={
                 "date": date_str,
                 "parsed": parsed.isoformat(),
@@ -81,7 +83,7 @@ def check_date_anomaly(headers: dict) -> RuleResult:
     if parsed < now - timedelta(days=MAX_PAST_DAYS):
         past_days = (now - parsed).days
         return RuleResult(
-            score=-2, verdict="past",
+            score=0, verdict="past",  # recalibración de pesos -- solo "future" es señal real (SOC)
             details={
                 "date": date_str,
                 "parsed": parsed.isoformat(),
@@ -104,7 +106,7 @@ _IP_RE = re.compile(r"\[?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]?")
 
 
 @iris_rules.register(
-    name="Received Chain", category="header_analysis",
+    name="Received Chain", category="header_analysis", family="received",
     description=(
         "Analiza la cadena completa de cabeceras Received: número de saltos, "
         "IP de origen privada/interna, y consistencia temporal con Date."
@@ -124,11 +126,21 @@ def check_received_chain(context) -> RuleResult:
     findings: list[str] = []
     score = 0
 
+    # Recalibración de pesos: una cadena que nunca salió de RFC1918 es un
+    # relay corporativo interno normal -- un correo interno SIEMPRE nace en
+    # un Exchange/relay 10.x, así que una IP de origen privada solo es
+    # anómala cuando el resto de la cadena sugiere un origen externo.
+    # `check_received_path_anomaly` ya aplica esta misma exención para
+    # tls_downgrade/long_chain; replicarla aquí para el mismo hecho evita
+    # que las dos reglas se contradigan sobre si "interno" es normal.
+    hop_ips = [h.get("fromIp") for h in build_path(received)["hops"] if h.get("fromIp")]
+    all_internal = bool(hop_ips) and all(_is_private_ip(ip) for ip in hop_ips)
+
     origin_hop = received[-1]
     ip_match = _IP_RE.search(origin_hop)
-    if ip_match and _is_private_ip(ip_match.group(1)):
+    if ip_match and _is_private_ip(ip_match.group(1)) and not all_internal:
         findings.append(f"IP de origen privada/interna: {ip_match.group(1)}")
-        score -= 5
+        score += CR.get_iris_scoring_weight("received_chain.private_origin_ip", -5)
 
     date_header = headers.get("date", "")
     top_ts = _hop_timestamp(received[0])
@@ -143,7 +155,7 @@ def check_received_chain(context) -> RuleResult:
             findings.append(
                 f"Desfase de {delta_hours:.1f}h entre Date y el primer salto Received"
             )
-            score -= 5
+            score += CR.get_iris_scoring_weight("received_chain.date_mismatch", -3)  # recalibración de pesos
 
     if not findings:
         return RuleResult(score=1, verdict="pass", details={"hops": len(received)})
@@ -157,7 +169,7 @@ def check_received_chain(context) -> RuleResult:
 
 @iris_rules.register(
     name="Received Chain Temporal Inconsistency",
-    category="header_analysis",
+    category="header_analysis", family="received",
     description=(
         "Detecta cadenas Received: con marcas de tiempo no monótonamente "
         "crecientes desde el origen hasta el destino, una firma de "
@@ -208,7 +220,11 @@ def check_received_chain_temporal_inconsistency(context) -> RuleResult:
             recommendation=None,
         )
 
-    score = -10 if len(inversions) == 1 else -15
+    score = (
+        CR.get_iris_scoring_weight("received_chain_temporal.single_inversion", -8)
+        if len(inversions) == 1
+        else CR.get_iris_scoring_weight("received_chain_temporal.multi_inversion", -12)
+    )  # recalibración de pesos -- gatea (received_time_inversion)
 
     return RuleResult(
         score=score, verdict="fail",
@@ -234,7 +250,7 @@ MISSING_TS_MIN_HOPS = 3
 
 @iris_rules.register(
     name="Received Path Anomaly",
-    category="header_analysis",
+    category="header_analysis", family="received",
     description=(
         "Evalúa el recorrido Received: del correo — número de saltos, "
         "downgrades TLS entre hops, cadenas excesivamente largas y "
@@ -311,11 +327,11 @@ def check_received_path_anomaly(context) -> RuleResult:
     else:
         score = 0
         if "tls_downgrade" in unique_signals:
-            score -= 6
+            score += CR.get_iris_scoring_weight("received_path_anomaly.tls_downgrade", -4)  # recalibración de pesos
         if "long_chain" in unique_signals:
-            score -= 4
+            score += CR.get_iris_scoring_weight("received_path_anomaly.long_chain", -2)  # recalibración de pesos
         if "missing_timestamps" in unique_signals:
-            score -= 3
+            score += CR.get_iris_scoring_weight("received_path_anomaly.missing_timestamps", -1)  # recalibración de pesos
 
         # Soft-fail vs hard-fail: tls_downgrade is a stronger signal
         # than just missing timestamps.
@@ -351,4 +367,69 @@ def check_received_path_anomaly(context) -> RuleResult:
         verdict=verdict,
         details=details,
         recommendation=recommendation,
+    )
+
+
+# Hostname con forma de dominio dentro del texto libre de un token `from`
+# de Received (que puede venir como "smtp.example.com (smtp.example.com
+# [1.2.3.4])" o variantes).
+_HOSTNAME_RE = re.compile(r"[a-zA-Z0-9][\w.-]*\.[a-zA-Z]{2,}")
+
+
+@iris_rules.register(
+    name="Origin HELO Coherence",
+    category="header_analysis", family="received",
+    description=(
+        "Aproximación offline (Iris no resuelve DNS/PTR real) de coherencia "
+        "HELO/EHLO: el hop de origen declara un hostname que no coincide "
+        "con el From, el Message-ID ni ningún host `by` posterior de la "
+        "cadena -- corrobora, no decide en solitario, y solo se combina "
+        "con un fallo de autenticación."
+    ),
+    needs_context=True,
+)
+def check_origin_helo_coherence(context) -> RuleResult:
+    received = context.received_headers or []
+    if not received:
+        return RuleResult(score=0, verdict="neutral", details={"reason": "no Received chain"})
+
+    origin = parse_received_line(received[-1])
+    helo = (origin.get("from") or "").strip()
+    if not helo:
+        return RuleResult(score=0, verdict="neutral", details={"reason": "no HELO declared at origin"})
+
+    helo_match = _HOSTNAME_RE.search(helo)
+    if not helo_match:
+        return RuleResult(score=0, verdict="neutral", details={"reason": "HELO sin forma de hostname"})
+    helo_domain = registrable_domain(helo_match.group(0).lower())
+    if not helo_domain:
+        return RuleResult(score=0, verdict="neutral", details={})
+
+    from_domain = registrable_domain(extract_domain(context.headers.get("from", "")))
+
+    message_id = context.headers.get("message-id", "")
+    msgid_match = re.search(r"@([\w.-]+)", message_id)
+    msgid_domain = registrable_domain(msgid_match.group(1).lower()) if msgid_match else None
+
+    chain_domains: set[str] = set()
+    for line in received:
+        by_host = (parse_received_line(line).get("by") or "").strip().rstrip(".,;")
+        if by_host:
+            dom = registrable_domain(by_host)
+            if dom:
+                chain_domains.add(dom)
+
+    known_domains = {d for d in (from_domain, msgid_domain) if d} | chain_domains
+    if not known_domains or helo_domain in known_domains:
+        return RuleResult(score=0, verdict="pass", details={"helo_domain": helo_domain})
+
+    return RuleResult(
+        score=CR.get_iris_scoring_weight("origin_helo_coherence.mismatch", -5), verdict="fail",
+        details={"helo_domain": helo_domain, "known_domains": sorted(known_domains)},
+        recommendation=(
+            f"El servidor de origen se identifica como '{helo_domain}' (HELO/EHLO), un "
+            "dominio que no coincide con el remitente, el Message-ID ni ningún salto "
+            "posterior de la cadena Received. Iris no realiza resolución DNS/PTR real; "
+            "esto es una aproximación offline, corroborante -- no decisiva en solitario."
+        ),
     )
