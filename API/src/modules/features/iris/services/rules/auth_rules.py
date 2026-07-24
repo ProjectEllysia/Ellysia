@@ -40,6 +40,19 @@ from ..shared import extract_domain, registrable_domain
 from ..parsers import parse_received_line
 
 
+def _dmarc_is_conclusive(auth_lower: str) -> bool:
+    """True cuando DMARC ya dio un veredicto explícito (pass o fail).
+
+    Recalibración de pesos (§2): SPF y DKIM son subordinados de DMARC (RFC
+    7489 ya los integra) -- cuando DMARC es concluyente, el hecho "no
+    autenticado" ya lo pesó DMARC en solitario y SPF/DKIM solo aportan un
+    matiz menor. Con DMARC ausente (o solo `none`/`bestguesspass`/policy sin
+    veredicto propio), SPF/DKIM vuelven a ser la única evidencia disponible
+    y recuperan su peso completo.
+    """
+    return "dmarc=pass" in auth_lower or "dmarc=fail" in auth_lower
+
+
 @iris_rules.register(
     name="SPF", category="authentication", family="auth",
     description="Verifica que el servidor remitente esté autorizado por el SPF del dominio",
@@ -103,8 +116,12 @@ def check_spf(headers: dict) -> RuleResult:
         # limita la suma del cluster a -25 sin importar cuántas de las
         # cuatro reglas disparen. La detección real sigue en los gates
         # (spf_fail→Suspicious; auth_fail∧spoof→Phishing), no en el peso.
+        if _dmarc_is_conclusive(auth_lower):
+            score = CR.get_iris_scoring_weight("spf.fail_dmarc_conclusive", -3)
+        else:
+            score = CR.get_iris_scoring_weight("spf.fail", -8)
         return RuleResult(
-            score=CR.get_iris_scoring_weight("spf.fail", -8), verdict="fail",
+            score=score, verdict="fail",
             details={"spf": spf_status, "source": auth_results or received_spf},
             recommendation="El servidor de envío no está autorizado por el registro SPF del dominio remitente. Esto es un fuerte indicador de suplantación (spoofing).",
         )
@@ -118,7 +135,7 @@ def check_spf(headers: dict) -> RuleResult:
 
     if spf_status in ("permerror", "temperror"):
         return RuleResult(
-            score=CR.get_iris_scoring_weight("spf.error", -3), verdict="error",
+            score=CR.get_iris_scoring_weight("spf.error", 0), verdict="error",  # recalibración de pesos
             details={"spf": spf_status, "source": auth_results or received_spf},
             recommendation="Error al consultar el registro SPF del dominio (error temporal o permanente de DNS).",
         )
@@ -157,9 +174,13 @@ def check_dkim(headers: dict) -> RuleResult:
         )
 
     if "dkim=fail" in auth_lower:
-        # Recalibración de pesos: subordinado a DMARC, ver nota en check_spf.
+        # Recalibración de pesos: subordinado a DMARC, ver _dmarc_is_conclusive.
+        if _dmarc_is_conclusive(auth_lower):
+            score = CR.get_iris_scoring_weight("dkim.fail_dmarc_conclusive", -3)
+        else:
+            score = CR.get_iris_scoring_weight("dkim.fail", -8)
         return RuleResult(
-            score=CR.get_iris_scoring_weight("dkim.fail", -8), verdict="fail",
+            score=score, verdict="fail",
             details={"dkim": "fail", "source": headers.get("authentication-results", "")},
             recommendation="La firma DKIM no es válida. El mensaje pudo haber sido alterado después de su envío original.",
         )

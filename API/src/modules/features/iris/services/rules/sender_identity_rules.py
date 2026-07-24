@@ -223,7 +223,7 @@ def check_display_name_email_mismatch(headers: dict) -> RuleResult:
         return RuleResult(score=0, verdict="neutral", details={"from": from_header}, recommendation=None)
 
     return RuleResult(
-        score=CR.get_iris_scoring_weight("display_name_email_mismatch.random_local", -5), verdict="fail",
+        score=CR.get_iris_scoring_weight("display_name_email_mismatch.random_local", -8), verdict="fail",
         details={
             "from": from_header,
             "display_name": display_name,
@@ -396,7 +396,7 @@ def check_subdomain_impersonation(headers: dict) -> RuleResult:
 
     types = sorted({f["type"] for f in findings})
     score = (
-        CR.get_iris_scoring_weight("subdomain_impersonation.brand_in_subdomain", -12)
+        CR.get_iris_scoring_weight("subdomain_impersonation.brand_in_subdomain", -10)
         if any(f["type"] == "brand_in_subdomain" for f in findings)
         else CR.get_iris_scoring_weight("subdomain_impersonation.brand_action_combo", -8)
     )
@@ -560,8 +560,15 @@ def check_suspicious_tld(headers: dict) -> RuleResult:
     domains_str = ", ".join(d["domain"] for d in found_tlds)
     tlds_str = ", ".join(d["tld"] for d in found_tlds)
 
+    # Recalibración de pesos: techo máx -10 -- corroboración honesta, no
+    # debe poder salirse del techo de familia identidad por acumular TLDs.
+    score = max(
+        CR.get_iris_scoring_weight("suspicious_tld.max", -10),
+        CR.get_iris_scoring_weight("suspicious_tld.per_domain", -5) * count,
+    )
+
     return RuleResult(
-        score=CR.get_iris_scoring_weight("suspicious_tld.per_domain", -5) * count,
+        score=score,
         verdict="fail",
         details={
             "suspicious_tlds_found": found_tlds,

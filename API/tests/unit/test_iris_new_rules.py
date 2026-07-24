@@ -287,7 +287,7 @@ def test_triangulation_flags_three_distinct_domains():
         "return-path": "<bounce@mailer-c.net>",
     })
     assert result.verdict == "fail"
-    assert result.score <= -12
+    assert result.score <= -10
     assert result.details["distinct_count"] == 3
 
 
@@ -373,6 +373,20 @@ def test_temporal_inconsistency_flags_inverted_hops():
     assert result.verdict == "fail"
     assert result.score < 0
     assert len(result.details["inversions"]) >= 1
+
+
+def test_temporal_inconsistency_tolerates_small_clock_skew():
+    # Recalibración de pesos: una inversión < 300s entre hops consecutivos
+    # es clock skew normal entre servidores, no manipulación.
+    ctx = MessageContext(
+        headers={"from": "a@b.com"},
+        received_headers=[
+            "from mx.b.com by mx2.b.com; Wed, 25 Jun 2025 10:00:00 +0000",
+            "from [192.0.2.1] by mx.b.com; Wed, 25 Jun 2025 10:00:30 +0000",
+        ],
+    )
+    result = check_received_chain_temporal_inconsistency(ctx)
+    assert result.verdict == "pass"
 
 
 def test_temporal_inconsistency_passes_monotonic_chain():

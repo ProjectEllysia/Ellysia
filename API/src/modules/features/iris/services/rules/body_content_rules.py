@@ -46,7 +46,7 @@ def _score_by_weight(weight: int) -> tuple[float, str, str | None]:
     # "high"/"medium" bajan porque la detección real recae en el combo
     # `alarming_strong ∧ (auth_fail ∨ spoof)` → Phishing, no en este score.
     if weight >= 5:
-        return (CR.get_iris_scoring_weight("alarming_keywords.high", -8), "high",
+        return (CR.get_iris_scoring_weight("alarming_keywords.high", -10), "high",
                 "El asunto y/o nombre del remitente contiene múltiples palabras o frases "
                          "alarmantes que son características de campañas de phishing con alta urgencia.")
     if weight >= 3:

@@ -308,7 +308,7 @@ def check_triangulation(headers: dict) -> RuleResult:
         )
 
     return RuleResult(
-        score=CR.get_iris_scoring_weight("triangulation.fail", -12), verdict="fail",
+        score=CR.get_iris_scoring_weight("triangulation.fail", -10), verdict="fail",
         details={
             "from_domain": from_dom,
             "reply_to_domain": reply_dom,

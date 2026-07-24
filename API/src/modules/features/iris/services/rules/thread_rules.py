@@ -248,9 +248,10 @@ def check_msgid_domain(headers: dict) -> RuleResult:
         )
 
     # Recalibración de pesos (SOC): residuo benigno una vez el ESP está
-    # exento arriba; informativo, no decide un veredicto por sí solo.
+    # exento arriba, pero gana valor de corroboración junto a la nueva
+    # correlación Message-ID <-> cadena Received (check_msgid_received_correlation).
     return RuleResult(
-        score=0, verdict="fail",
+        score=CR.get_iris_scoring_weight("msgid_domain.fail", -2), verdict="fail",
         details={"msgid_domain": msgid_domain, "from_domain": from_domain},
         recommendation=(
             f"El dominio del Message-ID ({msgid_domain}) no coincide con el del remitente "

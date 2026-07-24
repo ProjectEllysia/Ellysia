@@ -32,6 +32,10 @@ from ..shared import extract_domain, registrable_domain
 MAX_FUTURE_DAYS = 1
 MAX_PAST_DAYS = 365
 
+# Recalibración de pesos: margen de clock skew entre hops consecutivos de
+# la cadena Received antes de considerar una inversión temporal real.
+CLOCK_SKEW_TOLERANCE_SECONDS = 300
+
 
 @iris_rules.register(
     name="Date Header Anomaly", category="header_analysis", family="received",
@@ -42,7 +46,7 @@ def check_date_anomaly(headers: dict) -> RuleResult:
 
     if not date_str or not date_str.strip():
         return RuleResult(
-            score=0, verdict="missing",  # recalibración de pesos -- ausencia sola no es señal fuerte
+            score=CR.get_iris_scoring_weight("date_anomaly.missing", -2), verdict="missing",  # recalibración de pesos
             details={"date": "missing"},
             recommendation="La cabecera Date está ausente. Los correos legítimos siempre incluyen "
                            "una marca de tiempo. Esto puede indicar un correo generado automáticamente "
@@ -200,13 +204,17 @@ def check_received_chain_temporal_inconsistency(context) -> RuleResult:
 
     # Origin (oldest) is the last entry; destination (newest) is the first.
     # We expect timestamps[0] >= timestamps[1] >= ... >= timestamps[-1].
+    # Recalibración de pesos: tolerancia de 300s -- dos servidores con
+    # relojes no perfectamente sincronizados (clock skew) pueden producir
+    # una inversión de unos segundos entre hops consecutivos sin que haya
+    # manipulación real; solo una inversión que exceda ese margen es señal.
     inversions: list[dict] = []
     for i in range(len(timestamps) - 1):
         a, b = timestamps[i], timestamps[i + 1]
         if a is None or b is None:
             continue
-        if a < b:
-            delta = (b - a).total_seconds()
+        delta = (b - a).total_seconds()
+        if delta >= CLOCK_SKEW_TOLERANCE_SECONDS:
             inversions.append({
                 "from_hop": i,
                 "to_hop": i + 1,
@@ -329,9 +337,9 @@ def check_received_path_anomaly(context) -> RuleResult:
         if "tls_downgrade" in unique_signals:
             score += CR.get_iris_scoring_weight("received_path_anomaly.tls_downgrade", -4)  # recalibración de pesos
         if "long_chain" in unique_signals:
-            score += CR.get_iris_scoring_weight("received_path_anomaly.long_chain", -2)  # recalibración de pesos
+            score += CR.get_iris_scoring_weight("received_path_anomaly.long_chain", -3)  # recalibración de pesos
         if "missing_timestamps" in unique_signals:
-            score += CR.get_iris_scoring_weight("received_path_anomaly.missing_timestamps", -1)  # recalibración de pesos
+            score += CR.get_iris_scoring_weight("received_path_anomaly.missing_timestamps", 0)  # recalibración de pesos
 
         # Soft-fail vs hard-fail: tls_downgrade is a stronger signal
         # than just missing timestamps.
