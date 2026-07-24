@@ -22,6 +22,79 @@ cuándo es indicio de phishing y cuándo es un falso positivo (legítimo).
 > fuera del alcance de la Fase 1 (bajo impacto en tiempo de ejecución); esta
 > nota es la corrección mínima para que no siga afirmando algo falso.
 
+> **Recalibración de pesos (ver `plans/feature/iris/iris-rule-weight-recalibration.md`).**
+> Además del desfase D1-D3 de arriba, las tablas **"Score IRIS"** de cada regla
+> más abajo documentan los pesos **anteriores** a la recalibración de pesos —
+> quedan como referencia histórica de la lógica de cada rama (qué dispara
+> pass/fail/neutral no cambió), pero las **magnitudes numéricas** ya no son
+> las del código. El registro real ahora tiene **46 reglas** (39 tras
+> retirar `Content-Type check` como muerta, + 7 nuevas de la recalibración).
+> Referencia rápida y vigente:
+>
+> - **Techos de familia** (`IrisManager._FAMILY_SCORE_FLOORS` en
+>   `managers.py`): varias reglas que corroboran el mismo hecho ya no pueden
+>   sumar sin límite. `auth` −25, `identity` −28, `reply_path` −15,
+>   `content` −25, `links` −30, `received` −12, `attachment` −28.
+>   `ARC Chain` queda deliberadamente fuera de `auth` (es un hecho distinto:
+>   una ruptura de autenticación *previa*, declarada por un intermediario,
+>   no la autenticación del propio mensaje). Threading/Recipient/List-
+>   Unsubscribe no tienen techo — ya son individualmente pequeñas.
+> - **Pesos configurables** (`iris.scoring.*` en `SecOpsConfig.json`, vía
+>   `CR.get_iris_scoring_weight(weight_key, default)`): toda magnitud de
+>   penalización de este documento es ahora un *default* que se puede pisar
+>   sin redeploy. Los valores de las tablas de abajo son esos defaults.
+> - **Tabla consolidada de pesos actuales** (cluster → regla → score):
+>
+>   | Cluster | Regla | Score actual |
+>   |---|---|---|
+>   | Auth (techo −25) | SPF fail | −8 (−3 si DMARC concluyente) |
+>   | | DKIM fail | −8 (−3 si DMARC concluyente) |
+>   | | DMARC fail / none | −15 / −2 |
+>   | | Domain Alignment fail | −12 |
+>   | | ARC Chain fail (fuera del techo) | −6 |
+>   | | Auth Results Provenance (nueva, G-A) | −12 |
+>   | Identidad (techo −28) | From header check | −5 |
+>   | | Display Name Spoofing | −12 / −8 |
+>   | | Display Name Email Mismatch | −8 |
+>   | | Lookalike Sender Domain | −15 |
+>   | | Subdomain Impersonation | −10 (subdominio) / −8 (combo) |
+>   | | Misspelled Brand Names | −4·min(n,2) |
+>   | | Suspicious TLD | −5·n, techo máx −10 |
+>   | | Recipient Domain Lookalike (nueva, G-B) | −18 |
+>   | | Display Name Foreign Address (nueva, G-C) | −10 |
+>   | Reply-path (techo −15) | Triangulation | −10 |
+>   | | Reply-To Free Provider | −8 |
+>   | | Reply-To check | −6 (suprimido si triangula) |
+>   | | Return-Path mismatch | −4 |
+>   | Threading (sin techo) | Self-Referencing In-Reply-To | −12 |
+>   | | Fake Reply Chain | 0 (informativo) |
+>   | | Message-ID check | 0 (informativo) |
+>   | | Message-ID Domain | −2 |
+>   | | Message-ID Received Correlation (nueva) | −4 |
+>   | Contenido (techo −25) | BEC Wire Transfer (base) | −8 |
+>   | | Alarming Keywords | −10 / −5 / 0 (high/med/low) |
+>   | | Body Content (frases / oculto) | −3·min(n,2) / −10 |
+>   | | Generic Greeting | −3 / −5 |
+>   | | Unicode Evasion (floor) | −20 |
+>   | | Encoded-Word Abuse (floor) | −15 |
+>   | | URL in Subject | −3·min(n,2) (máx −6) |
+>   | | TOAD Callback Pattern (nueva, G-D) | −8 |
+>   | Enlaces (techo −30) | Body Links (floor) | −25 |
+>   | | Compromised Legit Domain | −6 / −9 |
+>   | | External Login Link (nueva, G-E, informativa) | 0 (combina con Alarming Keywords) |
+>   | Recibido (techo −12) | Received Chain Temporal Inconsistency | −8 / −12 (tolerancia 300s clock skew) |
+>   | | Received Chain (IP privada / desfase) | 0 exento interno / −3 |
+>   | | Received Path Anomaly | −4 tls / −3 cadena larga / 0 timestamps |
+>   | | Date Header Anomaly | −2 ausente / −4 no parseable / −4 futuro / 0 pasado |
+>   | | Origin HELO Coherence (nueva, forense) | −5 |
+>   | Destinatario / Adjunto | Undisclosed Recipients | −3 / −3 / 0 |
+>   | | Suspicious Attachments (floor) | −25 |
+>   | | Image-Only Email | −6 |
+>   | | External Image Tracking | −3 / −5 |
+>
+>   Cuando una tabla de una sección concreta más abajo discrepe de esta, esta
+>   tabla consolidada manda.
+
 ---
 
 ## Tabla de Contenidos
@@ -37,6 +110,7 @@ cuándo es indicio de phishing y cuándo es un falso positivo (legítimo).
 9. [Análisis de Enlaces en el Cuerpo](#9-análisis-de-enlaces-en-el-cuerpo)
 10. [Análisis de Imágenes y Adjuntos](#10-análisis-de-imágenes-y-adjuntos)
 11. [Resumen de Scores y Severidades](#11-resumen-de-scores-y-severidades)
+12. [Gates, Techos de Familia y Reglas Nuevas de la Recalibración](#12-gates-techos-de-familia-y-reglas-nuevas-de-la-recalibración)
 
 ---
 
@@ -2210,6 +2284,12 @@ extensión, ZIP conteniendo ejecutables, macros en Office, HTML smuggling.
 
 ## 11. Resumen de Scores y Severidades
 
+> Las tres tablas de esta sección conservan los pesos **anteriores** a la
+> recalibración (útiles como referencia de qué solía pesar más que qué);
+> para las magnitudes vigentes usa la tabla consolidada de la nota de
+> recalibración al principio del documento, o directamente
+> `iris_rules.get_rules()` / los ficheros de `services/rules/`.
+
 ### Escala de Scores en IRIS
 
 IRIS usa un modelo **sustractivo**: cada correo empieza con un score base y
@@ -2314,6 +2394,131 @@ Muchas reglas tienen salvaguardas explícitas contra falsos positivos:
   analizan con Levenshtein por riesgo de colisiones con palabras comunes.
 - **Texto oculto contextual**: Solo se penaliza el texto oculto que contiene
   enlaces o frases de phishing, no el CSS responsive normal.
+
+---
+
+## 12. Gates, Techos de Familia y Reglas Nuevas de la Recalibración
+
+La recalibración de pesos (`plans/feature/iris/iris-rule-weight-recalibration.md`)
+no solo bajó magnitudes: reforzó la detección real trasladándola a **gates**
+(veredictos independientes del score, que solo pueden escalar la severidad,
+nunca bajarla — ver `IrisManager._apply_verdict_gates`) y añadió 7 reglas
+nuevas. Los pesos de la Sección 11 nunca fueron el mecanismo de detección
+principal; ahora esto es explícito.
+
+### 12.1 Por qué el score se suavizó
+
+Antes de la recalibración, un cluster entero de reglas correlacionadas podía
+sumar hasta −55 por el **mismo hecho** (p.ej. SPF fail + DKIM fail + DMARC
+fail + Domain Alignment fail, las cuatro describiendo "este correo no está
+autenticado"). Esto aplastaba el rango dinámico del score: correo legítimo
+con una sola señal débil terminaba en el mismo rango que phishing evidente.
+La solución tiene dos partes:
+
+1. **Pesos por rama subordinados**: dentro del cluster de autenticación, SPF
+   y DKIM caen a −3 cuando DMARC ya dio un veredicto concluyente (pass o
+   fail) — DMARC integra a ambos por definición (RFC 7489), así que no hace
+   falta que los tres penalicen el mismo hecho a peso completo.
+2. **Techos de familia** (`IrisManager._FAMILY_SCORE_FLOORS` en
+   `managers.py`, aplicado en `_aggregate_score`): cada regla se registra
+   con un `family` (ver `iris_rules.register(..., family=...)` en
+   `registry.py`); la suma de penalizaciones de una misma familia queda
+   limitada a un mínimo (más negativo) fijo, sin importar cuántas reglas de
+   esa familia disparen. Esto es el mecanismo estructural nuevo: ya no
+   depende de que cada regla individual "sepa" ceder ante sus vecinas.
+
+La detección real se sostiene por otro lado — ver 12.2.
+
+### 12.2 Gates nuevos
+
+Estos gates cierran huecos que ninguna combinación de pesos suavizados podía
+compensar: cada uno ataca una clase de ataque que antes de la recalibración
+o bien no se detectaba en absoluto, o dependía de que una sola regla de score
+la atrapara en solitario.
+
+**G-A — Auth Results Provenance** (`auth_rules.py::check_auth_results_provenance`).
+SPF/DKIM/DMARC/Domain Alignment solo leen el *contenido* de la cabecera
+`Authentication-Results`; ninguno verifica quién la escribió. Un atacante
+puede añadir su propia línea `spf=pass; dkim=pass; dmarc=pass` al correo que
+él mismo envía, y las cuatro reglas se la creen. Esta regla compara el
+`authserv-id` (el host antes del primer `;`) contra los hosts `by` de la
+propia cadena `Received:` del mensaje: si un "pass" fue estampado por un
+servidor que nunca tocó el mensaje, la línea es forjada. Score −12;
+gatea a Phishing cuando hay un "pass" forjado.
+
+**G-B — Recipient Domain Lookalike** (`sender_identity_rules.py::check_recipient_domain_lookalike`).
+`Lookalike Sender Domain` solo compara el dominio del `From` contra una
+lista fija de marcas conocidas — nunca contra el dominio de la propia
+organización destinataria. Es el vector BEC más común (typosquat del
+dominio de tu propia empresa) y antes de esta regla era completamente
+invisible. Compara el dominio registrable del `From` contra el del
+destinatario (homoglifo, typo, distancia de edición 1); se exime cuando el
+destinatario usa un proveedor gratuito. Score −18; gatea a Phishing.
+
+**G-C — Display Name Foreign Address** (`sender_identity_rules.py::check_display_name_foreign_address`).
+Detecta cuando el *display name* del remitente ES en sí mismo una dirección
+de correo cuyo dominio difiere del dominio real de `From`
+(`"ceo@acme.com" <attacker@evil.com>`) — spoofing genérico que no depende
+de una lista de marcas. Score −10; escala a Phishing cuando el dominio
+foráneo coincide con el propio dominio del destinatario o con una marca
+canónica (`details["impersonates_target"]`).
+
+**G-D — TOAD Callback Pattern** (`body_content_rules.py::check_toad_callback_pattern`).
+TOAD (Telephone-Oriented Attack Delivery): un número de teléfono combinado
+con lenguaje de pago/factura/suscripción/soporte, sin hilo previo (`In-
+Reply-To`/`References` ausentes) y sin enlaces ni adjuntos. Antes de esta
+regla, un correo así puntuaba 100 (nada que analizar: sin auth que falle,
+sin enlaces que inspeccionar). Score −8.
+
+**G-E — External Login Link** (`body_links_rules.py::check_external_login_link`).
+Aproxima el patrón "primo autenticado" (dominio propio con auth limpia,
+pero marca fuera de la lista canónica) sin depender de esa lista: señal
+puramente informativa (score 0 siempre) que se combina en `managers.py`
+con `Alarming Keywords` fuerte para gatear a Suspicious cuando además hay
+un enlace del cuerpo con dominio registrable distinto del `From` y no es un
+ESP conocido.
+
+### 12.3 Comprobaciones forenses nuevas (corroboran, no gatean solas)
+
+**Message-ID Received Correlation** (`thread_rules.py::check_msgid_received_correlation`).
+El dominio del `Message-ID` debería aparecer en algún host `by`/`from` de la
+propia cadena `Received:` — un Message-ID acuñado por un host ausente de
+toda la cadena es ruidoso pero corroborante. Score −4; no gatea en
+solitario.
+
+**Origin HELO Coherence** (`received_timing_rules.py::check_origin_helo_coherence`).
+Aproximación offline (IRIS no resuelve DNS/PTR real) de coherencia HELO/PTR:
+compara el hostname que el hop de origen declaró en el saludo SMTP contra
+el `From`, el `Message-ID` y los hosts `by` posteriores de la cadena. Un
+HELO que no coincide con ninguno es la firma clásica de un open-relay o
+spoof. Score −5; solo gatea a Suspicious en combinación con un fallo de
+autenticación (`auth_fail`).
+
+### 12.4 Gates promovidos y estrechados
+
+Ver el módulo docstring de `managers.py::_evaluate_gates` y
+`_extract_verdict_signals` para el detalle línea a línea. Resumen:
+
+- **Promovidos a gate** (antes solo bajaban el score, dejando pasar el
+  ataque si el resto del correo estaba limpio): `Subdomain Impersonation`
+  (marca en subdominio), `Encoded-Word Abuse`, `Display Name Email
+  Mismatch` (local-part aleatorio), y un gate nuevo para BEC corporativo con
+  reply/return-path redirigido a un dominio externo.
+- **Estrechados** (gateaban con evidencia demasiado débil, marcando correo
+  legítimo real como Suspicious): `received_chain_fail` ahora exime cadenas
+  100% RFC1918 (relay interno normal); `body_content_fail` exige combinarse
+  con auth fail/spoof/body links fail salvo que el hallazgo sea texto
+  oculto (que sigue gateando solo); `bec_fail` corporativo (dominio propio,
+  no gratuito) ya no gatea solo — necesita redirect externo o auth fail.
+
+### 12.5 Pesos configurables
+
+Todo peso de este documento (Sección 11 incluida, aunque desactualizada en
+magnitud) es ahora un *default* de código: `CR.get_iris_scoring_weight
+(weight_key, default)` en `config_reading.py` lee `iris.scoring.<weight_key>`
+de `SecOpsConfig.json` si existe, y si no, usa el `default` que cada regla
+pasa (el valor calibrado). Permite ajustar magnitudes sin redeploy; no
+existía como mecanismo antes de la recalibración.
 
 ---
 
