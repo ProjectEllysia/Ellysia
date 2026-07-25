@@ -32,9 +32,9 @@ import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
 from ..shared import (
     brand_trusted_domains, canonical_brands, extract_display_name,
-    extract_domain, is_free_provider, levenshtein, multi_level_tlds,
-    normalize_homoglyphs, registrable_domain, registrable_label,
-    subdomain_action_words, suspicious_tlds,
+    extract_domain, is_free_provider, is_plausible_typo, levenshtein,
+    multi_level_tlds, normalize_homoglyphs, registrable_domain,
+    registrable_label, subdomain_action_words, suspicious_tlds,
 )
 from ..parsers import decode_mime_words
 
@@ -299,7 +299,7 @@ def check_lookalike_domain(headers: dict) -> RuleResult:
         for brand in brands:
             if len(brand) < 5 or abs(len(token) - len(brand)) > 1:
                 continue
-            if levenshtein(token, brand) == 1:
+            if is_plausible_typo(token, brand):
                 findings.append({"token": token, "brand": brand, "type": "typo"})
                 break
 
@@ -638,7 +638,7 @@ def check_recipient_domain_lookalike(headers: dict) -> RuleResult:
 
     is_typo = False
     if not is_homoglyph and len(recipient_label) >= 5 and abs(len(from_label) - len(recipient_label)) <= 1:
-        is_typo = levenshtein(from_label, recipient_label) == 1
+        is_typo = is_plausible_typo(from_label, recipient_label)
 
     if not (is_homoglyph or is_typo):
         return RuleResult(score=0, verdict="neutral", details={}, recommendation=None)

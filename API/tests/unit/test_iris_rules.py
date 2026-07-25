@@ -255,6 +255,24 @@ def test_lookalike_ordinary_domain_passes():
     assert result.verdict == "pass"
 
 
+def test_lookalike_typo_requires_keyboard_adjacent_substitution():
+    # Calibración FP: "email" está a distancia de edición 1 de "gmail" (e->g)
+    # por pura coincidencia de diccionario -- 'e' y 'g' ni siquiera son
+    # vecinas en un teclado QWERTY, así que nadie la teclea por error. Una
+    # sustitución de un solo carácter solo cuenta como typo plausible cuando
+    # las dos teclas SÍ son vecinas (ver shared.is_plausible_typo).
+    result = check_lookalike_domain({"from": "MANGO <news@email.mango>"})
+    assert result.verdict == "pass"
+
+
+def test_lookalike_typo_still_flags_keyboard_adjacent_substitution():
+    # Control negativo: "gnail" (m->n, vecinas en QWERTY) debe seguir
+    # detectándose -- la calibración no debe debilitar el typo real.
+    result = check_lookalike_domain({"from": "a@gnail.com"})
+    assert result.verdict == "fail"
+    assert result.details["findings"][0]["type"] == "typo"
+
+
 # ------------------------------------------------------- Reply-To free provider (BEC)
 
 def test_reply_to_free_provider_flags_bec_pattern():

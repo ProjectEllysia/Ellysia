@@ -615,7 +615,7 @@ watch(
   border-radius: 999px;
   background: var(--accent);
   color: var(--bg);
-  font-size: var(--fs-body);
+  font-size: var(--fs-sm);
   font-weight: 700;
   font-family: var(--font-mono);
   line-height: 1;

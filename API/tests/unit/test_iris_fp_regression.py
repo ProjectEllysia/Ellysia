@@ -463,6 +463,44 @@ def _fintech_terms_update() -> str:
     )
 
 
+def _dotbrand_tld_newsletter() -> str:
+    """Boletín enviado desde un dominio bajo un gTLD propio de la marca
+    (``email.mango``, TLD real ``.mango``) que autentica limpio (análisis
+    #66: el label "email" caía a distancia de edición 1 de la marca "gmail"
+    por coincidencia de diccionario, no por typosquat -- 'e' y 'g' ni
+    siquiera son vecinas en QWERTY -- y ese gate por sí solo bastaba para
+    forzar Phishing). NO se incluye en el corpus "debe dar Legitimate": el
+    resto de la infraestructura de Mango (``a.mango.com``,
+    ``bounce.a.mango.com``, Message-ID en ``xt.local``) sigue sumando ruido
+    de otras reglas (Reply-To/Return-Path/Message-ID) que tratan esos
+    subdominios como organizaciones distintas de ``email.mango`` -- una
+    limitación real y separada de ``registrable_domain()`` con TLDs propios
+    de marca, no cubierta por este arreglo. Ver
+    ``test_dotbrand_tld_no_longer_forces_phishing`` para lo que sí queda
+    verificado aquí: el gate falso desaparece."""
+    date = _recent_date()
+    return (
+        "From: MANGO <news@email.mango>\r\n"
+        "To: <cliente@example.com>\r\n"
+        "Reply-To: Mango <reply-x@a.mango.com>\r\n"
+        "Return-Path: <bounce-x@bounce.a.mango.com>\r\n"
+        "Subject: Exclusivos online recien llegados\r\n"
+        f"Date: {date}\r\n"
+        "Message-ID: <dbeac105-b3b3-4a1f-a7e6@atl1s07mta0784.xt.local>\r\n"
+        "Authentication-Results: mx.example.com; dkim=pass header.i=@email.mango "
+        "header.s=200608; spf=pass (google.com) smtp.mailfrom=bounce.a.mango.com; "
+        "dmarc=pass (p=REJECT) header.from=email.mango\r\n"
+        "Received: from mta3.a.mango.com (mta3.a.mango.com. [13.111.16.170]) "
+        f"by mx.example.com with ESMTPS id af79; {date}\r\n"
+        'Content-Type: text/html; charset="utf-8"\r\n'
+        "\r\n"
+        "<html><body><p>Descubre nuestras novedades de temporada, recien "
+        "llegadas a la tienda online.</p>"
+        '<a href="https://www.mango.com/es/novedades">Ver coleccion</a>'
+        "</body></html>\r\n"
+    )
+
+
 @pytest.mark.parametrize("build_message", [
     _newsletter_via_esp,
     _corporate_internal_notice,
@@ -498,6 +536,18 @@ def test_legitimate_corpus_is_not_flagged(build_message):
         f"esperado Legitimate, se obtuvo {verdict} (score={total_score}, gates={gate_reasons})"
     )
     assert total_score >= 80
+
+
+def test_dotbrand_tld_no_longer_forces_phishing():
+    # Ver _dotbrand_tld_newsletter: solo comprueba lo que este arreglo cubre
+    # -- el gate falso de Lookalike Sender Domain desaparece. El score queda
+    # en Suspicious por ruido de otras reglas (mismatch email.mango vs
+    # a.mango.com/bounce.a.mango.com), un problema real pero distinto.
+    verdict, total_score, gate_reasons = _run_engine(_dotbrand_tld_newsletter())
+    assert verdict != "Phishing", (
+        f"se obtuvo {verdict} (score={total_score}, gates={gate_reasons})"
+    )
+    assert not gate_reasons
 
 
 def _cloaked_brand_link_on_own_domain() -> str:
@@ -565,18 +615,42 @@ def _forged_received_chain() -> str:
     )
 
 
+def _keyboard_adjacent_typosquat() -> str:
+    """Typosquat real de sustitución de tecla vecina en QWERTY (m->n) --
+    debe seguir gateando tras restringir el typo genérico a sustituciones
+    plausibles, o la calibración del análisis #66 sería una regresión de
+    detección disfrazada de arreglo de falso positivo."""
+    date = _recent_date()
+    return (
+        'From: "Google Security" <no-reply@gnail.com>\r\n'
+        "To: victima@empresa.com\r\n"
+        "Subject: Unusual sign-in activity detected\r\n"
+        f"Date: {date}\r\n"
+        "Message-ID: <1@gnail.com>\r\n"
+        "Authentication-Results: mx.empresa.com; spf=pass smtp.mailfrom=gnail.com; "
+        "dkim=pass header.d=gnail.com; dmarc=pass\r\n"
+        'Content-Type: text/html; charset="utf-8"\r\n'
+        "\r\n"
+        "<html><body><p>We detected unusual activity on your account. "
+        "Verify your account now to avoid suspension.</p>"
+        '<a href="https://gnail.com/verify">Verify Now</a></body></html>\r\n'
+    )
+
+
 @pytest.mark.parametrize("build_message", [
     _evident_phishing,
     _bec_from_free_provider,
     _cloaked_brand_link_on_own_domain,
     _bec_crypto_transfer_request,
     _forged_received_chain,
+    _keyboard_adjacent_typosquat,
 ], ids=[
     "evident_phishing",
     "bec_from_free_provider",
     "cloaked_brand_link_on_own_domain",
     "bec_crypto_transfer_request",
     "forged_received_chain",
+    "keyboard_adjacent_typosquat",
 ])
 def test_phishing_corpus_is_still_flagged(build_message):
     # Control negativo: los arreglos de falsos positivos no deben neutralizar

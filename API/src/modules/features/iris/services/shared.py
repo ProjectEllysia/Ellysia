@@ -684,6 +684,47 @@ def levenshtein(a: str, b: str) -> int:
     return dp[n]
 
 
+# Adyacencia física de teclas en un layout QWERTY (la misma tabla que usa
+# dnstwist para su fuzzer "replacement"). Una sustitución de un solo
+# carácter solo es un typo PLAUSIBLE -- lo que un humano tecleando rápido
+# comete por accidente -- cuando las dos teclas están una al lado de la
+# otra. Sin este filtro, `levenshtein(token, brand) == 1` también acepta
+# cualquier sustitución arbitraria entre letras no relacionadas, y una
+# palabra común de 5 letras cae a distancia 1 de *alguna* marca de 5 letras
+# por pura coincidencia de diccionario (p. ej. "email" vs "gmail": la "e" y
+# la "g" ni siquiera son vecinas) -- eso no es typosquatting, es ruido.
+_QWERTY_ADJACENT: dict[str, str] = {
+    "1": "2q", "2": "3wq1", "3": "4ew2", "4": "5re3", "5": "6tr4",
+    "6": "7yt5", "7": "8uy6", "8": "9iu7", "9": "0oi8", "0": "po9",
+    "q": "12wa", "w": "q23esa", "e": "w34rds", "r": "e45tfd", "t": "r56ygf",
+    "y": "t67uhg", "u": "y78ijh", "i": "u89okj", "o": "i90plk", "p": "o0l",
+    "a": "qwsz", "s": "qweadzx", "d": "wersfxc", "f": "ertdgcv", "g": "rtyfhvb",
+    "h": "tyugjbn", "j": "yuihknm", "k": "uiojlm", "l": "iopk",
+    "z": "asx", "x": "zsdc", "c": "xdfv", "v": "cfgb", "b": "vghn",
+    "n": "bhjm", "m": "njk",
+}
+
+
+def is_plausible_typo(a: str, b: str) -> bool:
+    """True cuando ``a`` y ``b`` están a distancia de edición 1 y esa edición
+    es del tipo que un fat-finger real produce.
+
+    Inserción/omisión de un carácter (longitudes distintas) siempre cuenta --
+    "gmai.com"/"ggmail.com" son typos comunes independientes del layout. Una
+    SUSTITUCIÓN (misma longitud) solo cuenta si las dos teclas son vecinas en
+    QWERTY -- de lo contrario es una coincidencia de diccionario, no un typo.
+    """
+    if levenshtein(a, b) != 1:
+        return False
+    if len(a) != len(b):
+        return True
+    diffs = [i for i in range(len(a)) if a[i] != b[i]]
+    if len(diffs) != 1:
+        return False  # defensivo: longitud igual + distancia 1 siempre es una sustitución
+    i = diffs[0]
+    return b[i] in _QWERTY_ADJACENT.get(a[i], "") or a[i] in _QWERTY_ADJACENT.get(b[i], "")
+
+
 def normalize_homoglyphs(text: str) -> str:
     """Sustituye homóglifos comunes (0->o, 1->l, $->s…) y pasa a minúsculas."""
     return text.lower().translate(homoglyph_table())
