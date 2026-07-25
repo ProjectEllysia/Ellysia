@@ -80,6 +80,29 @@ def test_auth_provenance_neutral_without_received_chain():
     assert result.score == 0
 
 
+def test_auth_provenance_neutral_when_m365_omits_authserv_id():
+    # Calibración FP: Exchange Online emite la cabecera SIN authserv-id, así
+    # que el token anterior al primer `;` es el propio resultado SPF. Contiene
+    # puntos (el dominio del smtp.mailfrom), por lo que se colaba como
+    # "hostname" y la regla acusaba de forjada una cabecera legítima.
+    ctx = MessageContext(
+        headers={
+            "authentication-results": (
+                "spf=pass (sender ip is 204.220.183.7) "
+                "smtp.mailfrom=ops.mg.holistics.io; dkim=pass "
+                "header.d=holistics.io; dmarc=pass header.from=holistics.io"
+            ),
+        },
+        received_headers=[
+            "from DU7PR01CA0032.eurprd01.prod.exchangelabs.com by "
+            "VI0P193MB2694.EURP193.PROD.OUTLOOK.COM; Wed, 25 Jun 2025 10:00:00 +0000",
+        ],
+    )
+    result = check_auth_results_provenance(ctx)
+    assert result.verdict == "neutral"
+    assert result.score == 0
+
+
 def test_auth_provenance_neutral_when_nothing_claims_pass():
     ctx = MessageContext(
         headers={"authentication-results": "attacker.example; spf=fail; dmarc=fail"},

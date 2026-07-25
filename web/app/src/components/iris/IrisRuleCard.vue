@@ -55,8 +55,16 @@ function isEmptyValue(v) {
   return Array.isArray(v) && v.length === 0
 }
 
+/** `Array.prototype.join` llama a `toString()` en cada elemento; para un
+ * array de strings eso da el texto esperado, pero para un array de objetos
+ * (p. ej. `findings`) da el literal "[object Object]" por cada uno — hay
+ * que serializar los elementos que sean objeto en vez de dejar que `join`
+ * los stringifique solo. */
 function formatDetailValue(v) {
-  if (Array.isArray(v)) return v.length ? v.join(', ') : '—'
+  if (Array.isArray(v)) {
+    if (!v.length) return '—'
+    return v.map((item) => (item && typeof item === 'object' ? JSON.stringify(item) : item)).join(', ')
+  }
   if (v && typeof v === 'object') return JSON.stringify(v)
   return v
 }

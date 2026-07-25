@@ -281,6 +281,20 @@ def check_msgid_received_correlation(context) -> RuleResult:
     if not msgid_domain or not context.received_headers:
         return RuleResult(score=0, verdict="neutral", details={})
 
+    # Calibración FP: un Message-ID acuñado con el dominio del PROPIO
+    # remitente es el caso normal, no fabricación -- lo genera la aplicación
+    # que compone el correo, que casi nunca es la máquina que aparece en la
+    # cadena Received (relay por ESP, Mailgun/SendGrid/M365...). La señal de
+    # esta regla es un Message-ID de un tercero ajeno tanto al From como a la
+    # cadena; alineado con el From no aporta nada (y `check_msgid_domain` ya
+    # cubre el desalineamiento From <-> Message-ID por separado).
+    from_domain = registrable_domain(extract_domain(headers.get("from", "")))
+    if from_domain and msgid_domain == from_domain:
+        return RuleResult(
+            score=0, verdict="pass",
+            details={"msgid_domain": msgid_domain, "aligned_with_from": True},
+        )
+
     # Mismo criterio que check_msgid_domain: los ESPs generan el Message-ID
     # en su propia infraestructura, nunca en la del remitente ni en ningún
     # salto Received -- exento igual, para no duplicar el mismo ruido.

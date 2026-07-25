@@ -77,9 +77,17 @@ def check_external_image_tracking(context) -> RuleResult:
             recommendation=None,
         )
 
+    # Calibración FP: prácticamente todo correo HTML legítimo sirve sus
+    # imágenes desde el CDN de la marca, que casi nunca es ni el dominio del
+    # From ni un ESP del allowlist (githubassets.com para github.com,
+    # kwcdn.com para temu.com...). Un único host externo era, en la práctica,
+    # una penalización fija a todo el correo maquetado, así que baja a 0: el
+    # hallazgo se sigue reportando (útil como recomendación de "bloquea la
+    # carga de imágenes"), pero deja de empujar el score. Varios hosts
+    # externos distintos sí siguen siendo el patrón de tracking/payload.
     unique_hosts = {f["registrable"] for f in findings if f["registrable"]}
     score = (
-        CR.get_iris_scoring_weight("external_image_tracking.single_host", -3)
+        CR.get_iris_scoring_weight("external_image_tracking.single_host", 0)
         if len(unique_hosts) == 1
         else CR.get_iris_scoring_weight("external_image_tracking.multi_host", -5)
     )  # recalibración de pesos

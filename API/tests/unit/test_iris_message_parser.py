@@ -132,12 +132,12 @@ def test_received_chain_neutral_when_absent():
     assert result.score == 0
 
 
-def test_received_chain_flags_private_origin_ip():
-    # Recalibración de pesos: una cadena ENTERAMENTE interna (RFC1918) está
-    # exenta -- es el relay corporativo normal. Este fixture mezcla un hop
-    # público real (203.0.113.9) con el origen privado para seguir probando
-    # el caso que sí es anómalo: una IP interna colándose en lo que por lo
-    # demás es una cadena de entrega externa.
+def test_received_chain_reports_private_origin_ip_without_penalising():
+    # Calibración FP: la línea Received del origen la escribe el MTA que
+    # aceptó el mensaje, anotando la IP del par que se lo entregó. Si es
+    # RFC1918, ese par estaba en su propia red: es cómo se inyecta TODO el
+    # correo legítimo (API REST de un ESP, relay Exchange, app interna). Se
+    # reporta como observación, sin peso ni gate.
     ctx = MessageContext(
         headers={"date": "Wed, 25 Jun 2025 10:00:00 +0000"},
         received_headers=[
@@ -147,13 +147,14 @@ def test_received_chain_flags_private_origin_ip():
         ],
     )
     result = check_received_chain(ctx)
-    assert result.verdict == "fail"
-    assert result.score < 0
+    assert result.verdict != "fail"
+    assert result.score == 0
+    assert result.details["notes"]
 
 
 def test_received_chain_exempts_fully_internal_origin():
-    # El mismo hecho (IP de origen privada) pero con la cadena ENTERAMENTE
-    # en RFC1918 -- un relay corporativo interno normal, no debe penalizar.
+    # El mismo hecho (IP de origen privada) con la cadena ENTERAMENTE en
+    # RFC1918 -- un relay corporativo interno normal, no debe penalizar.
     ctx = MessageContext(
         headers={"date": "Wed, 25 Jun 2025 10:00:00 +0000"},
         received_headers=[
@@ -163,6 +164,7 @@ def test_received_chain_exempts_fully_internal_origin():
     )
     result = check_received_chain(ctx)
     assert result.verdict != "fail"
+    assert result.score == 0
 
 
 def test_received_chain_flags_date_mismatch():
@@ -202,6 +204,45 @@ def test_body_links_flags_cloaked_link():
     )
     ctx = parse_raw_message(raw)
     result = check_body_links(ctx)
+    assert result.verdict == "fail"
+    assert "cloaked_link" in result.details["types"]
+
+
+def test_body_links_exempts_sender_own_click_tracking():
+    # Calibración FP: el click-tracking reescribe el href a un subdominio
+    # redirector del propio remitente dejando el texto visible intacto. El
+    # destino es quien la víctima ya ve en el From, no un tercero.
+    raw = (
+        "From: hola@boletin.example\r\nSubject: Hi\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n\r\n"
+        '<a href="https://eot.boletin.example/f/a/abc">https://youtu.be/JMezeu2Zl-U</a>\r\n'
+    )
+    result = check_body_links(parse_raw_message(raw))
+    assert "cloaked_link" not in result.details.get("types", [])
+
+
+def test_body_links_exempts_same_registrable_domain_subdomain():
+    # Texto visible y href en el mismo dominio registrable, distinto
+    # subdominio: es la misma organización, no un engaño de destino.
+    raw = (
+        "From: hola@otro.example\r\nSubject: Hi\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n\r\n"
+        '<a href="https://eot.boletin.example/f/a/abc">https://lgtm.boletin.example</a>\r\n'
+    )
+    result = check_body_links(parse_raw_message(raw))
+    assert "cloaked_link" not in result.details.get("types", [])
+
+
+def test_body_links_flags_brand_text_even_on_sender_own_domain():
+    # La exención NO aplica cuando el texto visible promete una marca
+    # conocida: ahí el href al dominio del propio remitente es justo el
+    # cloaking que la señal existe para detectar.
+    raw = (
+        "From: service@paypal-secure-verify.com\r\nSubject: Hi\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n\r\n"
+        '<a href="https://login.paypal-secure-verify.com/signin">https://www.paypal.com</a>\r\n'
+    )
+    result = check_body_links(parse_raw_message(raw))
     assert result.verdict == "fail"
     assert "cloaked_link" in result.details["types"]
 

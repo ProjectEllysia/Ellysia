@@ -314,7 +314,6 @@
         "tarjetas de regalo",
         "enviar bitcoin",
         "transferencia cripto",
-        "criptomonedas",
         "cambiar la cuenta bancaria",
         "nueva cuenta bancaria",
         "número de ruta",
@@ -748,7 +747,9 @@
         "klaviyomail.com",
         "constantcontact.com",
         "ctctemail.com",
-        "hubspotemail.net"
+        "hubspotemail.net",
+        "outlook.com",
+        "protection.outlook.com"
       ],
       "esp_tracker_domains": [
         "sendgrid.net",

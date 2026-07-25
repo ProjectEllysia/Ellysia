@@ -106,14 +106,12 @@ def check_date_anomaly(headers: dict) -> RuleResult:
     )
 
 
-_IP_RE = re.compile(r"\[?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]?")
-
-
 @iris_rules.register(
     name="Received Chain", category="header_analysis", family="received",
     description=(
-        "Analiza la cadena completa de cabeceras Received: número de saltos, "
-        "IP de origen privada/interna, y consistencia temporal con Date."
+        "Analiza la cadena completa de cabeceras Received: número de saltos y "
+        "consistencia temporal con Date. La IP interna del salto de origen se "
+        "reporta como observación, no como anomalía."
     ),
     needs_context=True,
 )
@@ -127,24 +125,26 @@ def check_received_chain(context) -> RuleResult:
             details={"hops": 0, "reason": "no Received chain available"},
         )
 
-    findings: list[str] = []
+    findings: list[str] = []      # anomalías reales -> puntúan y fallan
+    notes: list[str] = []         # observaciones -> se reportan, no puntúan
     score = 0
 
-    # Recalibración de pesos: una cadena que nunca salió de RFC1918 es un
-    # relay corporativo interno normal -- un correo interno SIEMPRE nace en
-    # un Exchange/relay 10.x, así que una IP de origen privada solo es
-    # anómala cuando el resto de la cadena sugiere un origen externo.
-    # `check_received_path_anomaly` ya aplica esta misma exención para
-    # tls_downgrade/long_chain; replicarla aquí para el mismo hecho evita
-    # que las dos reglas se contradigan sobre si "interno" es normal.
-    hop_ips = [h.get("fromIp") for h in build_path(received)["hops"] if h.get("fromIp")]
-    all_internal = bool(hop_ips) and all(_is_private_ip(ip) for ip in hop_ips)
-
-    origin_hop = received[-1]
-    ip_match = _IP_RE.search(origin_hop)
-    if ip_match and _is_private_ip(ip_match.group(1)) and not all_internal:
-        findings.append(f"IP de origen privada/interna: {ip_match.group(1)}")
-        score += CR.get_iris_scoring_weight("received_chain.private_origin_ip", -5)
+    # Calibración FP: una IP RFC1918 en el salto de origen NO es señal de
+    # phishing. Esa línea Received la escribe el MTA que aceptó el mensaje,
+    # anotando la IP del par que se lo entregó: si es privada, el par estaba
+    # en la propia red de ese MTA, o sea infraestructura de confianza. Es
+    # literalmente cómo se inyecta TODO el correo legítimo -- por API REST de
+    # un ESP (`from [10.x] by ...prd.sparkpost with REST`), desde el relay
+    # Exchange corporativo, o desde el nodo interno de una aplicación. Un
+    # suplantador desde Internet no puede hacer que el MTA receptor anote una
+    # IP privada; si forja la línea entera, lo delatan las reglas que sí miran
+    # coherencia (inversión temporal, HELO, provenance de auth, correlación
+    # Message-ID), no esta. Se mantiene como observación en el informe, sin
+    # peso ni gate.
+    origin_hop_parsed = build_path(received)["hops"][0]
+    origin_ip = origin_hop_parsed.get("fromIp")
+    if origin_ip and _is_private_ip(origin_ip):
+        notes.append(f"El salto de origen se inyectó desde una IP interna: {origin_ip}")
 
     date_header = headers.get("date", "")
     top_ts = _hop_timestamp(received[0])
@@ -162,11 +162,20 @@ def check_received_chain(context) -> RuleResult:
             score += CR.get_iris_scoring_weight("received_chain.date_mismatch", -3)  # recalibración de pesos
 
     if not findings:
+        if notes:
+            return RuleResult(
+                score=0, verdict="neutral",
+                details={"hops": len(received), "notes": notes},
+                recommendation="; ".join(notes) + ".",
+            )
         return RuleResult(score=1, verdict="pass", details={"hops": len(received)})
 
+    details = {"hops": len(received), "findings": findings}
+    if notes:
+        details["notes"] = notes
     return RuleResult(
         score=score, verdict="fail",
-        details={"hops": len(received), "findings": findings},
+        details=details,
         recommendation="La cadena Received presenta anomalías: " + "; ".join(findings),
     )
 
@@ -252,7 +261,12 @@ def check_received_chain_temporal_inconsistency(context) -> RuleResult:
     )
 
 
-LONG_CHAIN_THRESHOLD = 5
+# Calibración FP: una entrega normal vía Microsoft 365 / Google Workspace ya
+# encadena 5-6 saltos con IPs distintas (relay del ESP -> frontend regional ->
+# exchangelabs -> mailbox), así que el umbral de 5 marcaba "cadena inusualmente
+# larga" en correo verificado corriente. 7 deja margen a esa ruta normal y
+# sigue capturando la cadena artificialmente inflada.
+LONG_CHAIN_THRESHOLD = 7
 MISSING_TS_MIN_HOPS = 3
 
 

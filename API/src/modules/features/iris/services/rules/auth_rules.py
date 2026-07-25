@@ -460,6 +460,18 @@ def check_arc_chain(headers: dict) -> RuleResult:
 # (RFC 8601 §2.2) -- the identity of the server that performed the check.
 _AUTHSERV_STATUS_RE = re.compile(r"\b(spf|dkim|dmarc)=(\w+)", re.IGNORECASE)
 
+# Un authserv-id es un hostname a secas (`mx.google.com`, `mx.acme.com`).
+# Calibración FP: Exchange Online / Microsoft 365 emite la cabecera SIN
+# authserv-id (`Authentication-Results: spf=pass (sender ip is 1.2.3.4)
+# smtp.mailfrom=dominio; dkim=pass ...`), así que el token anterior al primer
+# `;` es el propio resultado SPF -- que contiene puntos y por tanto pasaba el
+# viejo chequeo `"." in authserv_id`. `registrable_domain()` lo reducía
+# entonces al dominio del `smtp.mailfrom` (nunca un host `by` de la cadena) y
+# la regla acusaba de forjada la cabecera legítima de M365, gateando a
+# Phishing correo verificado. Sin authserv-id no hay provenance que verificar:
+# neutral.
+_AUTHSERV_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*\.[a-z]{2,}$")
+
 
 @iris_rules.register(
     name="Auth Results Provenance", category="authentication", family="auth",
@@ -487,7 +499,7 @@ def check_auth_results_provenance(context) -> RuleResult:
         return RuleResult(score=0, verdict="neutral", details={"reason": "no Authentication-Results header"})
 
     authserv_id = auth_results.split(";", 1)[0].strip().lower()
-    if not authserv_id or "." not in authserv_id:
+    if not _AUTHSERV_ID_RE.match(authserv_id):
         return RuleResult(score=0, verdict="neutral", details={"reason": "authserv-id ausente o no es un hostname"})
 
     statuses = {m.group(1).lower(): m.group(2).lower() for m in _AUTHSERV_STATUS_RE.finditer(auth_results)}

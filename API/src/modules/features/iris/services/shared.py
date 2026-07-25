@@ -298,7 +298,12 @@ _DEFAULTS: dict[str, Any] = {
         "realizar el pago", "procesar el pago", "pago pendiente",
         "factura pendiente", "factura vencida", "saldo pendiente",
         "comprar tarjetas de regalo", "tarjetas de regalo",
-        "enviar bitcoin", "transferencia cripto", "criptomonedas",
+        # Calibración FP: el sustantivo suelto "criptomonedas" era la única
+        # entrada no-accionable de la lista y matcheaba el pie regulatorio de
+        # cualquier fintech ("los productos de criptomonedas son
+        # proporcionados por..."). El patrón BEC es la PETICIÓN de transferir,
+        # que ya cubren "enviar bitcoin"/"transferencia cripto"/"send crypto".
+        "enviar bitcoin", "transferencia cripto",
         "cambiar la cuenta bancaria", "nueva cuenta bancaria",
         "número de ruta", "datos bancarios nuevos",
         "no notifiques", "no informar a",
@@ -343,6 +348,11 @@ _DEFAULTS: dict[str, Any] = {
         "mailjet.com", "mlsend.com", "sailthru.com", "exct.net", "cmail19.com",
         "cmail20.com", "icpbounce.com", "infusionmail.com", "klaviyomail.com",
         "constantcontact.com", "ctctemail.com", "hubspotemail.net",
+        # Exchange Online / Microsoft 365 acuña el Message-ID con el nombre
+        # del propio buzón (AS8P193MB1861.EURP193.PROD.OUTLOOK.COM), no con
+        # el dominio del tenant -- exactamente el mismo patrón legítimo que
+        # un ESP, y el caso de todo correo enviado desde M365.
+        "outlook.com", "protection.outlook.com",
     ],
 
     # Parámetros de query típicos de open redirectors.
@@ -824,7 +834,26 @@ def analyze_url(href: str, sender_domain: Optional[str] = None,
     text_domain_match = _URL_DOMAIN_IN_TEXT_RE.search(visible_text or "")
     if text_domain_match:
         claimed = text_domain_match.group(1).lower()
-        if claimed != host and not host.endswith("." + claimed) and claimed not in host:
+        mismatch = claimed != host and not host.endswith("." + claimed) and claimed not in host
+        # Calibración FP: el click-tracking reescribe el href a un subdominio
+        # redirector dejando intacto el texto visible, así que un "mismatch"
+        # literal es la forma NORMAL de todo boletín con tracking. Dos casos
+        # son estructuralmente inocuos:
+        #   1. claimed y host son el mismo dominio registrable (el redirector
+        #      es otro subdominio de la misma organización);
+        #   2. el href apunta al dominio registrable del PROPIO remitente --
+        #      el destino es quien la víctima ya ve en el From, no un tercero.
+        # El caso 2 NO se exime cuando el dominio del texto visible es una
+        # marca conocida: ahí el texto sí promete una identidad ajena
+        # ("paypal.com" visible, href al dominio del atacante), que es
+        # exactamente el cloaking que esta señal existe para gatear.
+        same_organisation = registrable_domain(claimed) == host_reg
+        sender_owned_redirect = (
+            sender_domain is not None
+            and host_reg == sender_domain
+            and registrable_label(claimed) not in brands
+        )
+        if mismatch and not same_organisation and not sender_owned_redirect:
             findings.append({
                 "type": "cloaked_link",
                 "visible_text": visible_text.strip(),

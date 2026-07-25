@@ -105,12 +105,29 @@ _STYLE_BLOCK_RE = re.compile(r"<style\b[^>]*>.*?</style>", re.IGNORECASE | re.DO
 
 # Tags whose opening attributes carry an inline hidden-text style, captured
 # together with their content so we can judge *what* is being hidden.
-_HIDDEN_TAG_RE = re.compile(
-    r'<(?P<tag>\w+)\b(?P<attrs>[^>]*?style\s*=\s*"[^"]*'
-    r"(?:display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?:px)?\b|opacity\s*:\s*0\b)"
-    r'[^"]*"[^>]*)>(?P<inner>.*?)</\1>',
-    re.IGNORECASE | re.DOTALL,
+def _hidden_tag_re(style_alternation: str) -> re.Pattern:
+    return re.compile(
+        r'<(?P<tag>\w+)\b(?P<attrs>[^>]*?style\s*=\s*"[^"]*'
+        rf"(?:{style_alternation})"
+        r'[^"]*"[^>]*)>(?P<inner>.*?)</\1>',
+        re.IGNORECASE | re.DOTALL,
+    )
+
+
+# Estilos que ocultan el elemento COMPLETO (texto, imágenes y enlaces).
+_HIDDEN_TAG_RE = _hidden_tag_re(
+    r"display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0\b"
 )
+
+# `font-size:0` solo oculta TEXTO: un enlace con una imagen dentro sigue
+# perfectamente visible. Y es, además, el truco de maquetación estándar de
+# MJML/Outlook — todo generador de correo HTML lo pone en los `<td>`/`<div>`
+# contenedores para eliminar el espacio entre columnas inline-block, con el
+# botón y su enlace visibles dentro. Tratarlo como "enlace oculto" marcaba
+# como evasión cualquier newsletter maquetada. Se conserva solo para el caso
+# que sí es evasión real: texto de credenciales/pago invisible al usuario
+# (keyword stuffing / envenenamiento de scanners).
+_ZERO_FONT_TAG_RE = _hidden_tag_re(r"font-size\s*:\s*0(?:px)?\b")
 
 _HIDDEN_LINK_RE = re.compile(r"<a\b[^>]*\bhref\s*=", re.IGNORECASE)
 
@@ -141,12 +158,21 @@ def _has_evasive_hidden_text(body_html: str) -> bool:
     cloaking technique) or a **credential/payment phrase** (keyword-stuffed
     or scanner-evading body text). Hidden prose, whitespace, ZWNJ padding or
     images alone are ignored.
+
+    Y el enlace solo cuenta bajo un estilo que oculte el elemento entero
+    (``display:none``/``visibility:hidden``/``opacity:0``): ``font-size:0``
+    es maquetación normal y no esconde el enlace (ver ``_ZERO_FONT_TAG_RE``),
+    así que ahí solo pesa la frase de credenciales/pago.
     """
     for match in _HIDDEN_TAG_RE.finditer(body_html):
         inner = match.group("inner")
         if _HIDDEN_LINK_RE.search(inner):
             return True
         inner_text = strip_html(inner).lower()
+        if phrase_matches("credential_phrases", inner_text):
+            return True
+    for match in _ZERO_FONT_TAG_RE.finditer(body_html):
+        inner_text = strip_html(match.group("inner")).lower()
         if phrase_matches("credential_phrases", inner_text):
             return True
     return False
