@@ -1,5 +1,49 @@
 """
 Database models for Acheron encrypted vault module.
+
+Cómo añadir un tipo nuevo de Storable
+──────────────────────────────────────
+Añadir la subclase aquí (siguiendo el patrón de ``Account``/``CreditCard``/...:
+tabla propia, ``id = Column(Integer, ForeignKey("Storable.id"), primary_key=True)``,
+sus campos — todos ``String``/``Text``, nunca se descifran en el servidor — y
+``__mapper_args__ = {"polymorphic_identity": "<kind>"}``) es solo el primer
+paso. El resto del backend está deliberadamente **data-driven**: no hay que
+tocar la lógica de negocio, solo describir el tipo nuevo en los sitios que la
+alimentan.
+
+1. **`storable_specs.py`** — añadir una entrada a ``STORABLE_SPECS`` con
+   ``model`` (la subclase de arriba), ``json_list_key`` (la clave bajo la que
+   vive en el JSON del vault, p.ej. ``"accounts"``) y ``fields`` (tupla de
+   pares ``(atributo_python, claveJSON)``). Con esto ``managers.py`` ya sabe
+   crear, actualizar, exportar y hacer *bulk update* del tipo nuevo —
+   ``upsert_vault_from_json``, ``export_vault_to_json``, ``add_storable_to_vault``,
+   ``update_storable`` y ``bulk_update_storables`` iteran ``STORABLE_SPECS``/
+   ``SPEC_BY_MODEL``/``JSON_TO_ATTR`` en vez de tener un ``if kind == ...`` por
+   tipo. **No hace falta tocar `managers.py`, `repositories.py` ni
+   `endpoints.py`** — todos son genéricos sobre ``Storable`` y leen el tipo a
+   través de esta spec. (Ignora ``VaultRepository.save_with_storables`` en
+   `repositories.py`: construye `Account`/`CreditCard` a mano, es código
+   legacy sin llamadores, no es el patrón a seguir.)
+
+2. **`schemas.py`** — `StorableCreateSchema` es un único schema plano para
+   los 7 tipos (no valida polimórficamente contra `storable_specs`, así que
+   hay que tocarlo a mano en tres sitios):
+   - añadir el nuevo `kind` al `validate.OneOf([...])` del campo `kind`;
+   - declarar como `fields.String(allow_none=True)` cualquier campo camelCase
+     que no exista ya en el schema (los nombres se comparten entre tipos —
+     si el tipo nuevo reutiliza un nombre existente, p.ej. `password`, no
+     hace falta duplicarlo);
+   - añadir una entrada en `required_by_kind` (dentro de
+     `validate_kind_fields`) con los campos camelCase obligatorios del tipo.
+
+3. **Migración Alembic** — `alembic revision --autogenerate -m "add <Tipo>
+   storable"` genera la tabla nueva.
+
+4. **Frontend** (fuera de este módulo, pero necesario para que el tipo sea
+   utilizable) — `web/app/src/acheron/storableTypes.js` y
+   `storableFields.js` mapean cada `kind` a su formulario; sin una entrada
+   ahí, `StorableFormModal.vue` no sabrá renderizar el tipo nuevo aunque el
+   backend ya lo acepte.
 """
 
 from sqlalchemy import (

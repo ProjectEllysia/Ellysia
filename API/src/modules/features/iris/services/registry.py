@@ -43,10 +43,17 @@ class RuleRegistry:
     rule modules are imported — just add a new ``.py`` file under
     ``services/rules/`` and import it in ``services/rules/__init__.py``.
     """
-    _rules: List[Dict] = []
+
+    def __init__(self) -> None:
+        # Instance attribute, not class attribute: the latter is shared
+        # across every RuleRegistry (in practice just the ``iris_rules``
+        # singleton, but ``clear()`` — used in tests — mutated it as
+        # global state regardless, making test order matter (C6).
+        self._rules: List[Dict] = []
 
     def register(self, name: str, category: str = "general",
-                 description: str = "", needs_context: bool = False):
+                 description: str = "", needs_context: bool = False,
+                 family: str = ""):
         """Decorator that registers a function as an analysis rule.
 
         Args:
@@ -57,6 +64,11 @@ class RuleRegistry:
                 ``services.parsers.MessageContext`` (headers + body
                 + links + attachments) instead of the plain ``headers``
                 dict. Used by rules that inspect the full message body.
+            family: Recalibración de pesos -- techo de familia (§18): agrupa
+                reglas que corroboran el mismo hecho subyacente (p.ej. "auth",
+                "identity") para que ``_aggregate_score`` limite la suma de
+                penalizaciones de la familia y no cuente el mismo hecho varias
+                veces. Cadena vacía = sin techo.
 
         Returns:
             A decorator that appends the function to the internal rule list.
@@ -68,6 +80,7 @@ class RuleRegistry:
                 "category": category,
                 "description": description,
                 "needs_context": needs_context,
+                "family": family,
             })
             return func
         return decorator

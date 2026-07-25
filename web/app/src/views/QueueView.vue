@@ -79,8 +79,6 @@
 
       <AppPagination :current="store.currentPage" :total="store.totalCount" :per-page="store.perPage" @go="store.goToPage" />
     </main>
-
-    <AppToast />
   </div>
 </template>
 
@@ -88,7 +86,6 @@
 import { onMounted } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
-import AppToast from '@/components/shared/AppToast.vue'
 import AppPagination from '@/components/shared/AppPagination.vue'
 import { useQueueStore } from '@/stores/queueStore'
 import { useUtils } from '@/composables/useUtils'

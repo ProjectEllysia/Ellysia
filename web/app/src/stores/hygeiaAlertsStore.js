@@ -55,10 +55,20 @@ export const useHygeiaAlertsStore = defineStore('hygeiaAlerts', () => {
     } catch { state.error = 'No se pudo conectar con la API.'; return false }
   }
 
+  /** Borra una anomalía ya reconocida o resuelta (la API rechaza una abierta). */
+  async function deleteAlert(id) {
+    try {
+      const res = await apiFetch(`/hygeia/alerts/${id}`, { method: 'DELETE' })
+      if (!res?.ok) { state.error = await apiError(res, 'No se pudo borrar la anomalía.'); return false }
+      state.anomalies = state.anomalies.filter((a) => a.id !== id)
+      return true
+    } catch { state.error = 'No se pudo conectar con la API.'; return false }
+  }
+
   /** Limpia el estado (logout SPA sin recarga dura). */
   function $reset() {
     Object.assign(state, { anomalies: [], loading: false, error: null })
   }
 
-  return { state, fetchAlerts, ackAlert, resolveAlert, $reset }
+  return { state, fetchAlerts, ackAlert, resolveAlert, deleteAlert, $reset }
 })

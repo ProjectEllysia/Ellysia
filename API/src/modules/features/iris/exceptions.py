@@ -62,3 +62,35 @@ class IrisInvalidInputError(IrisError):
     to perform a meaningful analysis."""
     default_code = ErrorCode.VALIDATION_ERROR
     default_status_code = 400
+
+
+class IrisMailboxConnectionNotFoundError(IrisError):
+    """Raised when a mailbox connection id does not exist or is not owned
+    by the user (same error for both, prevents ID enumeration)."""
+    default_code = ErrorCode.ENTITY_NOT_FOUND
+    default_status_code = 404
+
+    def __init__(self, connection_id: int) -> None:
+        super().__init__(f"Mailbox connection {connection_id} not found")
+
+
+class IrisMailboxInvalidProviderError(IrisError):
+    """Raised when connecting to an unsupported mailbox provider."""
+    default_code = ErrorCode.VALIDATION_ERROR
+    default_status_code = 400
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"Unsupported mailbox provider: {provider}")
+
+
+class IrisMailboxQuotaExceededError(IrisError):
+    """Raised when a user tries to connect more mailboxes than iris.maxConnectionsPerUser."""
+    default_code = ErrorCode.VALIDATION_ERROR
+    default_status_code = 400
+
+
+class IrisMailboxOAuthStateError(IrisError):
+    """Raised when the OAuth callback's `state` fails to verify — expired,
+    tampered, or never issued by start_connect (CSRF protection)."""
+    default_code = ErrorCode.AUTHENTICATION_ERROR
+    default_status_code = 400

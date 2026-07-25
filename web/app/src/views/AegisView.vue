@@ -73,8 +73,6 @@
       :doc="store.viewerDoc.data"
       @close="store.closeCampaignModal()"
     />
-
-    <AppToast />
   </div>
 </template>
 
@@ -82,7 +80,6 @@
 import { computed, onMounted } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
-import AppToast from '@/components/shared/AppToast.vue'
 import { useAegisStore } from '@/stores/aegisStore'
 import { usePanelCollapse } from '@/composables/usePanelCollapse'
 import OrgProfilePanel from '@/components/aegis/OrgProfilePanel.vue'

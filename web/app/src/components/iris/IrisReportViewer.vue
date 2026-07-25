@@ -459,14 +459,14 @@ watch(
 }
 
 .progress-label {
-  font-size: var(--fs-xl);
+  font-size: var(--fs-lg);
   color: var(--text-dim);
   font-family: var(--font-mono);
 }
 
 .btn-cancel {
   padding: 0.6rem 1.3rem;
-  font-size: var(--fs-xl);
+  font-size: var(--fs-lg);
   font-weight: 600;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -544,7 +544,7 @@ watch(
 
 .analysis-id {
   font-family: var(--font-mono);
-  font-size: var(--fs-xl);
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--text-dim);
   background: var(--surface-2);
@@ -727,7 +727,7 @@ watch(
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text);
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   cursor: pointer;
   transition: border-color 0.2s, transform 0.15s;
   font-family: var(--font-body);
@@ -811,7 +811,7 @@ watch(
   border-radius: 10px;
   background: color-mix(in srgb, var(--danger) 6%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border));
-  font-size: var(--fs-xl);
+  font-size: var(--fs-md);
   line-height: 1.6;
   color: var(--text);
 }
@@ -847,7 +847,7 @@ watch(
   border-radius: 10px;
   background: var(--surface);
   border: 1px solid var(--border);
-  font-size: var(--fs-xl);
+  font-size: var(--fs-lg);
   line-height: 1.6;
   color: var(--text-dim);
 }

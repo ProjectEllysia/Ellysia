@@ -37,154 +37,165 @@
       </div>
     </dl>
 
-    <section class="section">
-      <h4 class="section-title">Constantes</h4>
-      <p v-if="metricsLoading" class="state-msg">Cargando métricas…</p>
-      <p v-else-if="metricsError" class="state-msg state-msg--error">{{ metricsError }}</p>
-      <MetricsChart v-else :snapshots="metrics" :truncated="metricsTruncated" />
-    </section>
+    <AssetTabs
+      :active="activeTab"
+      :anomaly-count="openAnomalyCount"
+      :stats-warning="statsWarning"
+      @switch="activeTab = $event"
+    />
 
-    <p v-if="latestError" class="state-msg state-msg--error">{{ latestError }}</p>
+    <div v-show="activeTab === 'graficas'" class="tab-panel">
+      <section class="section">
+        <h4 class="section-title">Constantes</h4>
+        <p v-if="metricsLoading" class="state-msg">Cargando métricas…</p>
+        <p v-else-if="metricsError" class="state-msg state-msg--error">{{ metricsError }}</p>
+        <MetricsChart v-else :snapshots="metrics" :truncated="metricsTruncated" />
+      </section>
+    </div>
 
     <!-- Todo lo que sigue es el último heartbeat: tiene cardinalidad por
          entidad (montaje, interfaz, proceso, núcleo) y solo tiene sentido
          "ahora", así que no viaja en la serie temporal. -->
-    <template v-if="m">
-      <section v-if="memory" class="section">
-        <h4 class="section-title">Memoria</h4>
-        <dl class="readout">
-          <div class="readout-item">
-            <dt>En uso</dt>
-            <dd>{{ used.text }}<small class="unit--wide">{{ used.unit }}</small></dd>
-          </div>
-          <div class="readout-item">
-            <dt>Total</dt>
-            <dd>{{ totalMem.text }}<small class="unit--wide">{{ totalMem.unit }}</small></dd>
-          </div>
-          <div v-if="memory.swapUsedPct !== null && memory.swapUsedPct !== undefined" class="readout-item">
-            <dt>Swap</dt>
-            <dd>{{ fmtPct(memory.swapUsedPct) }}<small>%</small></dd>
-          </div>
-        </dl>
-      </section>
+    <div v-show="activeTab === 'estadisticas'" class="tab-panel">
+      <p v-if="latestError" class="state-msg state-msg--error">{{ latestError }}</p>
 
-      <section v-if="disks.length" class="section">
-        <h4 class="section-title">Almacenamiento</h4>
-        <ul class="rows">
-          <li v-for="d in disks" :key="d.mount" class="row row--disk">
-            <span class="row-name" :title="d.mount">{{ d.mount }}</span>
-            <span class="bar" :class="{ 'bar--hot': d.usagePct >= 85 }">
-              <span class="bar-fill" :style="{ width: `${Math.min(100, d.usagePct)}%` }"></span>
-            </span>
-            <span class="row-value">{{ fmtPct(d.usagePct) }}%</span>
-            <span class="row-note">{{ free(d).text }} {{ free(d).unit }} libres</span>
+      <template v-if="m">
+        <section v-if="memory" class="section">
+          <h4 class="section-title">Memoria</h4>
+          <dl class="readout">
+            <div class="readout-item">
+              <dt>En uso</dt>
+              <dd>{{ used.text }}<small class="unit--wide">{{ used.unit }}</small></dd>
+            </div>
+            <div class="readout-item">
+              <dt>Total</dt>
+              <dd>{{ totalMem.text }}<small class="unit--wide">{{ totalMem.unit }}</small></dd>
+            </div>
+            <div v-if="memory.swapUsedPct !== null && memory.swapUsedPct !== undefined" class="readout-item">
+              <dt>Swap</dt>
+              <dd>{{ fmtPct(memory.swapUsedPct) }}<small>%</small></dd>
+            </div>
+          </dl>
+        </section>
+
+        <section v-if="disks.length" class="section">
+          <h4 class="section-title">Almacenamiento</h4>
+          <ul class="rows">
+            <li v-for="d in disks" :key="d.mount" class="row row--disk">
+              <span class="row-name" :title="d.mount">{{ d.mount }}</span>
+              <span class="bar" :class="{ 'bar--hot': d.usagePct >= 85 }">
+                <span class="bar-fill" :style="{ width: `${Math.min(100, d.usagePct)}%` }"></span>
+              </span>
+              <span class="row-value">{{ fmtPct(d.usagePct) }}%</span>
+              <span class="row-note">{{ free(d).text }} {{ free(d).unit }} libres</span>
+            </li>
+          </ul>
+        </section>
+
+        <section v-if="nets.length" class="section">
+          <h4 class="section-title">
+            Red
+            <span class="hint">el gráfico suma solo las no-loopback</span>
+          </h4>
+          <ul class="rows">
+            <li v-for="n in nets" :key="n.iface" class="row row--net">
+              <span class="row-name" :title="n.iface">{{ n.iface }}</span>
+              <span class="row-value">↓ {{ rate(n.rxBytesPerSec).text }} <small>{{ rate(n.rxBytesPerSec).unit }}</small></span>
+              <span class="row-value">↑ {{ rate(n.txBytesPerSec).text }} <small>{{ rate(n.txBytesPerSec).unit }}</small></span>
+              <span v-if="errorsOf(n)" class="row-note row-note--bad">{{ errorsOf(n) }} err</span>
+            </li>
+          </ul>
+        </section>
+
+        <section v-if="topCpu.length || topMem.length || cores.length" class="section">
+          <h4 class="section-title">
+            Procesos
+            <span v-if="procTotal !== null" class="count">{{ procTotal }}</span>
+          </h4>
+
+          <div v-if="cores.length" class="cores-block">
+            <div class="cores">
+              <span
+                v-for="(pct, i) in cores"
+                :key="i"
+                class="core"
+                :class="{ 'core--hot': pct >= 85 }"
+                :title="`Núcleo ${i}: ${fmtPct(pct)} %`"
+              >
+                <span class="core-fill" :style="{ height: `${Math.min(100, pct)}%` }"></span>
+              </span>
+            </div>
+            <p v-if="hiddenCores" class="hint hint--block">+{{ hiddenCores }} núcleos más sin representar</p>
+          </div>
+
+          <div class="proc-cols">
+            <div v-if="topCpu.length" class="proc-col">
+              <h5 class="proc-head">Por CPU</h5>
+              <TransitionGroup tag="ul" name="proc-row" class="rows">
+                <li v-for="p in topCpu" :key="`c${p.pid}`" class="row row--proc">
+                  <span class="row-name" :title="p.name">{{ p.name }}</span>
+                  <span class="row-pid">{{ p.pid }}</span>
+                  <span class="row-value">{{ fmtPct(p.cpuPct) }}%</span>
+                </li>
+              </TransitionGroup>
+            </div>
+
+            <div v-if="topMem.length" class="proc-col">
+              <h5 class="proc-head">Por memoria</h5>
+              <TransitionGroup tag="ul" name="proc-row" class="rows">
+                <li v-for="p in topMem" :key="`m${p.pid}`" class="row row--proc">
+                  <span class="row-name" :title="p.name">{{ p.name }}</span>
+                  <span class="row-pid">{{ p.pid }}</span>
+                  <span class="row-value">{{ fmtPct(p.memPct) }}%</span>
+                </li>
+              </TransitionGroup>
+            </div>
+          </div>
+
+          <p v-if="zombies" class="hint hint--block">{{ zombies }} en estado zombi</p>
+        </section>
+      </template>
+    </div>
+
+    <div v-show="activeTab === 'anomalias'" class="tab-panel">
+      <section class="section">
+        <h4 class="section-title">
+          Anomalías
+          <span v-if="anomalies.length" class="count">{{ anomalies.length }}</span>
+        </h4>
+
+        <p v-if="!anomalies.length" class="state-msg">Ninguna anomalía registrada. El activo está sano.</p>
+
+        <TransitionGroup v-else tag="ul" name="anomaly-row" class="anomalies">
+          <li v-for="a in anomalies" :key="a.id" class="anomaly" :class="`anomaly--${a.severity}`">
+            <div class="anomaly-top">
+              <span class="anomaly-kind">{{ kindLabel(a.kind) }}</span>
+              <span class="anomaly-state" :class="`anomaly-state--${a.state}`">{{ stateLabel(a.state) }}</span>
+            </div>
+
+            <p v-if="a.metric" class="anomaly-reading">
+              <span class="reading-value">{{ a.value }}%</span>
+              <span class="reading-ctx">{{ a.metric }} · umbral {{ a.threshold }}%</span>
+            </p>
+
+            <p class="anomaly-time">Abierta {{ timeAgo(a.openedAt) }}</p>
+
+            <div class="anomaly-actions">
+              <button v-if="a.state === 'open'" class="btn-sm" @click="$emit('ack', a.id)">Reconocer</button>
+              <button v-if="a.state !== 'resolved'" class="btn-sm btn-sm--primary" @click="$emit('resolve', a.id)">Resolver</button>
+              <button v-if="a.state !== 'open'" class="btn-sm btn-sm--danger" @click="$emit('delete', a.id)">Borrar</button>
+            </div>
           </li>
-        </ul>
+        </TransitionGroup>
       </section>
-
-      <section v-if="nets.length" class="section">
-        <h4 class="section-title">
-          Red
-          <span class="hint">el gráfico suma solo las no-loopback</span>
-        </h4>
-        <ul class="rows">
-          <li v-for="n in nets" :key="n.iface" class="row row--net">
-            <span class="row-name" :title="n.iface">{{ n.iface }}</span>
-            <span class="row-value">↓ {{ rate(n.rxBytesPerSec).text }} <small>{{ rate(n.rxBytesPerSec).unit }}</small></span>
-            <span class="row-value">↑ {{ rate(n.txBytesPerSec).text }} <small>{{ rate(n.txBytesPerSec).unit }}</small></span>
-            <span v-if="errorsOf(n)" class="row-note row-note--bad">{{ errorsOf(n) }} err</span>
-          </li>
-        </ul>
-      </section>
-
-      <section v-if="cores.length" class="section">
-        <h4 class="section-title">
-          Núcleos
-          <span class="count">{{ coreCount }}</span>
-        </h4>
-        <div class="cores">
-          <span
-            v-for="(pct, i) in cores"
-            :key="i"
-            class="core"
-            :class="{ 'core--hot': pct >= 85 }"
-            :title="`Núcleo ${i}: ${fmtPct(pct)} %`"
-          >
-            <span class="core-fill" :style="{ height: `${Math.min(100, pct)}%` }"></span>
-          </span>
-        </div>
-        <p v-if="hiddenCores" class="hint hint--block">+{{ hiddenCores }} núcleos más sin representar</p>
-      </section>
-
-      <section v-if="topCpu.length || topMem.length" class="section">
-        <h4 class="section-title">
-          Procesos
-          <span v-if="procTotal !== null" class="count">{{ procTotal }}</span>
-        </h4>
-
-        <div class="proc-cols">
-          <div v-if="topCpu.length" class="proc-col">
-            <h5 class="proc-head">Por CPU</h5>
-            <TransitionGroup tag="ul" name="proc-row" class="rows">
-              <li v-for="p in topCpu" :key="`c${p.pid}`" class="row row--proc">
-                <span class="row-name" :title="p.name">{{ p.name }}</span>
-                <span class="row-pid">{{ p.pid }}</span>
-                <span class="row-value">{{ fmtPct(p.cpuPct) }}%</span>
-              </li>
-            </TransitionGroup>
-          </div>
-
-          <div v-if="topMem.length" class="proc-col">
-            <h5 class="proc-head">Por memoria</h5>
-            <TransitionGroup tag="ul" name="proc-row" class="rows">
-              <li v-for="p in topMem" :key="`m${p.pid}`" class="row row--proc">
-                <span class="row-name" :title="p.name">{{ p.name }}</span>
-                <span class="row-pid">{{ p.pid }}</span>
-                <span class="row-value">{{ fmtPct(p.memPct) }}%</span>
-              </li>
-            </TransitionGroup>
-          </div>
-        </div>
-
-        <p v-if="zombies" class="hint hint--block">{{ zombies }} en estado zombi</p>
-      </section>
-    </template>
-
-    <section class="section">
-      <h4 class="section-title">
-        Anomalías
-        <span v-if="anomalies.length" class="count">{{ anomalies.length }}</span>
-      </h4>
-
-      <p v-if="!anomalies.length" class="state-msg">Ninguna anomalía registrada. El activo está sano.</p>
-
-      <ul v-else class="anomalies">
-        <li v-for="a in anomalies" :key="a.id" class="anomaly" :class="`anomaly--${a.severity}`">
-          <div class="anomaly-top">
-            <span class="anomaly-kind">{{ kindLabel(a.kind) }}</span>
-            <span class="anomaly-state" :class="`anomaly-state--${a.state}`">{{ stateLabel(a.state) }}</span>
-          </div>
-
-          <p v-if="a.metric" class="anomaly-reading">
-            <span class="reading-value">{{ a.value }}%</span>
-            <span class="reading-ctx">{{ a.metric }} · umbral {{ a.threshold }}%</span>
-          </p>
-
-          <p class="anomaly-time">Abierta {{ timeAgo(a.openedAt) }}</p>
-
-          <div v-if="a.state !== 'resolved'" class="anomaly-actions">
-            <button v-if="a.state === 'open'" class="btn-sm" @click="$emit('ack', a.id)">Reconocer</button>
-            <button class="btn-sm btn-sm--primary" @click="$emit('resolve', a.id)">Resolver</button>
-          </div>
-        </li>
-      </ul>
-    </section>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import MetricsChart from '@/components/hygeia/MetricsChart.vue'
+import AssetTabs from '@/components/hygeia/AssetTabs.vue'
 import { useUtils } from '@/composables/useUtils'
 import { fmtBytes, fmtPct, fmtRate, timeAgo } from './format'
 
@@ -200,9 +211,48 @@ const props = defineProps({
   latestError: { type: String, default: null },
   anomalies: { type: Array, default: () => [] },
 })
-defineEmits(['ack', 'resolve'])
+defineEmits(['ack', 'resolve', 'delete'])
 
 const { formatDate } = useUtils()
+
+const TAB_IDS = ['graficas', 'estadisticas', 'anomalias']
+const TAB_STORAGE_PREFIX = 'ellysia:hygeia:lastTab:'
+
+const activeTab = ref('graficas')
+/** Al cambiar de activo se recupera la última pestaña que se miró en ESE
+ *  host (persistida por id), no la que quedó abierta en el anterior. */
+watch(() => props.asset?.id, (id) => {
+  const stored = id ? localStorage.getItem(TAB_STORAGE_PREFIX + id) : null
+  activeTab.value = TAB_IDS.includes(stored) ? stored : 'graficas'
+}, { immediate: true })
+
+watch(activeTab, (tab) => {
+  const id = props.asset?.id
+  if (id) localStorage.setItem(TAB_STORAGE_PREFIX + id, tab)
+})
+
+const KEY_TO_TAB = { '1': 'graficas', '2': 'estadisticas', '3': 'anomalias' }
+
+function isTypingTarget(el) {
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+}
+
+/** Atajos 1/2/3 para saltar de pestaña sin ratón; se ignoran mientras se
+ *  escribe en un campo o con teclas modificadoras (para no pisar otros
+ *  atajos del navegador). */
+function handleTabShortcut(event) {
+  if (!props.asset || event.ctrlKey || event.metaKey || event.altKey) return
+  if (isTypingTarget(event.target)) return
+  const tab = KEY_TO_TAB[event.key]
+  if (tab) activeTab.value = tab
+}
+
+onMounted(() => window.addEventListener('keydown', handleTabShortcut))
+onUnmounted(() => window.removeEventListener('keydown', handleTabShortcut))
+
+const openAnomalyCount = computed(() =>
+  props.anomalies.filter((a) => a.state !== 'resolved').length
+)
 
 /**
  * Un host con muchos núcleos re-renderizaría cientos de barras cada 15 s. El
@@ -234,6 +284,13 @@ const nets = computed(() => m.value?.network ?? [])
 
 const cores = computed(() => (m.value?.cpu?.perCorePct ?? []).slice(0, MAX_CORES))
 const coreCount = computed(() => (m.value?.cpu?.perCorePct ?? []).length)
+
+/** Mismo umbral que ya pinta discos y núcleos en rojo (`>= 85`) — el punto
+ *  de la pestaña "Estadísticas" es solo un adelanto de que hay algo así
+ *  dentro, sin duplicar el criterio. */
+const statsWarning = computed(() =>
+  disks.value.some((d) => d.usagePct >= 85) || cores.value.some((pct) => pct >= 85)
+)
 const hiddenCores = computed(() => Math.max(0, coreCount.value - MAX_CORES))
 
 const topCpu = computed(() => m.value?.processes?.topCpu ?? [])
@@ -328,6 +385,8 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
   font-size: var(--fs-sm); letter-spacing: 0;
 }
 
+.tab-panel { display: flex; flex-direction: column; gap: 1.3rem; }
+
 .state-msg { margin: 0; padding: 1.4rem 1rem; text-align: center; color: var(--text-muted); font-size: var(--fs-body); }
 .state-msg--error { color: var(--danger); }
 
@@ -386,9 +445,13 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 .bar--hot .bar-fill { background: var(--danger); }
 
 /* ── Núcleos ──
+   Viven dentro de la sección "Procesos", a ancho completo, justo debajo de
+   su cabecera y antes de las columnas por CPU/memoria: son el contexto
+   inmediato de esos rankings, no una sección aparte.
    Antes tan pequeños (8×26px) que la sección quedaba enana junto al resto de
    monitores; se agrandan a un tamaño comparable a las barras de disco. El
    relleno transiciona en vez de saltar entre heartbeats. */
+.cores-block { margin-bottom: 0.9rem; }
 .cores { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 4px; }
 .core {
   display: flex; align-items: flex-end;
@@ -438,7 +501,33 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 }
 
 /* ── Anomalías ── */
-.anomalies { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.anomalies { position: relative; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+
+/* Al borrar, la tarjeta se saca del flujo (`position: absolute`) para que el
+   resto reacomode con `.anomaly-row-move` mientras ella se desvanece hacia
+   la derecha en su sitio. A diferencia de `.proc-row-*` (que a propósito NO
+   usa `position: absolute` por el bug de churn rápido documentado ahí
+   arriba), aquí no hay reordenamiento continuo — solo un borrado puntual —
+   así que la técnica estándar de Vue es segura. */
+.anomaly-row-move {
+  transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.anomaly-row-enter-active {
+  transition: opacity 0.3s ease;
+}
+.anomaly-row-leave-active {
+  transition: opacity 0.35s ease, transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  position: absolute;
+  width: 100%;
+}
+.anomaly-row-enter-from {
+  opacity: 0;
+}
+.anomaly-row-leave-to {
+  opacity: 0;
+  transform: translateX(28px);
+}
+
 .anomaly {
   padding: 0.65rem 0.85rem;
   background: var(--surface-2);
@@ -456,13 +545,14 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 .anomaly-state--acknowledged { background: var(--warn-dim); color: var(--warn); }
 .anomaly-state--resolved { background: var(--success-dim); color: var(--success); }
 
-.anomaly-reading { display: flex; align-items: baseline; gap: 0.5rem; margin: 0.4rem 0 0; }
+.anomaly-reading { display: flex; flex-direction: column; margin: 0.4rem 0 0; }
 .reading-value {
   font-family: var(--font-mono); font-size: var(--fs-xl); font-weight: 600;
   color: var(--text); font-variant-numeric: tabular-nums;
+  margin: -0rem 0 -0.7rem 0;
 }
 .reading-ctx { font-size: var(--fs-sm); color: var(--text-muted); }
-.anomaly-time { margin: 0.2rem 0 0; font-size: var(--fs-sm); color: var(--text-muted); }
+.anomaly-time { margin: 0.3rem 0 0; font-size: var(--fs-sm); color: var(--text-muted); }
 
 .anomaly-actions { display: flex; gap: 0.4rem; margin-top: 0.6rem; }
 .btn-sm {
@@ -474,6 +564,8 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 .btn-sm:hover { border-color: var(--text-muted); color: var(--text); }
 .btn-sm--primary { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-bright); }
 .btn-sm--primary:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.btn-sm--danger { border-color: var(--danger-dim); color: var(--danger); }
+.btn-sm--danger:hover { background: var(--danger-dim); border-color: var(--danger); color: var(--danger); }
 
 .btn-sm:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 </style>

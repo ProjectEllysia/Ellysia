@@ -142,6 +142,13 @@ def _run_shutdown_cleanup() -> None:
     except Exception as e:
         _logger.error(f"Error deteniendo scheduler de Hygeia: {e}")
 
+    _logger.info("[Shutdown] Deteniendo scheduler de buzones de Iris...")
+    try:
+        from src.modules.features.iris.services.mailbox.scheduling import IrisMailboxScheduler
+        IrisMailboxScheduler.stop()
+    except Exception as e:
+        _logger.error(f"Error deteniendo scheduler de buzones de Iris: {e}")
+
     _logger.info("[Shutdown] Cerrando sesiones de base de datos...")
     try:
         unit_of_work.close_all()
@@ -199,6 +206,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     """
     from src.modules.features.themis.services.scheduling import Scheduler
     from src.modules.features.hygeia.services.scheduling import HygeiaScheduler
+    from src.modules.features.iris.services.mailbox.scheduling import IrisMailboxScheduler
     from werkzeug.middleware.proxy_fix import ProxyFix
 
     configure_logging()
@@ -303,6 +311,9 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
 
         _logger.info("Arrancando scheduler de Hygeia...")
         HygeiaScheduler.start()
+
+        _logger.info("Arrancando scheduler de buzones de Iris...")
+        IrisMailboxScheduler.start()
 
     _logger.info("Verificando conexion a Redis...")
     import redis as redis_lib

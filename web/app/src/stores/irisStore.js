@@ -9,13 +9,22 @@ export const useIrisStore = defineStore('iris', () => {
   const { triggerDownload, filenameFromResponse } = useUtils()
   const toast = useToastStore()
 
+  // "Banco de trabajo": los BENCH_SIZE análisis más recientes, siempre por
+  // fecha — es lo que muestra IrisHistoryStrip. El histórico completo con
+  // filtros/orden vive aparte, en `archive` (ver más abajo), paginado en
+  // servidor para no cargar miles de análisis en el navegador.
+  const BENCH_SIZE = 5
+
   const analyses = ref([])
   const loading = ref(false)
   const listError = ref(null)
   const submitting = ref(false)
   const totalCount = ref(0)
-  const page = ref(1)
-  const perPage = ref(10)
+
+  // Umbrales de veredicto (iris.legitimate_threshold/suspicious_threshold),
+  // servidos junto a la lista para que el raíl de score del archivo no los
+  // hardcodee. Los valores por defecto solo se usan hasta el primer fetch.
+  const thresholds = reactive({ legitimate: 80, suspicious: 55 })
 
   const currentId = ref(null)
   const currentReport = reactive({ loading: false, data: null })
@@ -63,16 +72,23 @@ export const useIrisStore = defineStore('iris', () => {
     }
   }
 
-  async function fetchResults(pg = page.value, pp = perPage.value) {
+  // Siempre página 1, siempre BENCH_SIZE, siempre fecha desc: el bench no
+  // pagina ni ordena — eso es el archivo. Antes esta función tomaba
+  // `page.value` como valor por defecto, así que cualquier mutación
+  // (borrar, cancelar, el polling…) que llamara a `fetchResults()` sin
+  // argumentos colapsaba la lista completa a la última página cargada por
+  // `fetchMoreResults`. Al no existir ya paginación acumulada en el bench,
+  // ese bug queda cerrado por construcción.
+  async function fetchResults() {
     loading.value = true
     try {
-      const params = new URLSearchParams({ page: pg, per_page: pp })
+      const params = new URLSearchParams({ page: 1, per_page: BENCH_SIZE })
       const res = await apiFetch(`/iris/results?${params}`)
       if (!res?.ok) { analyses.value = []; listError.value = 'No se pudieron cargar los análisis.'; return }
       const data = await res.json()
       analyses.value = data.analyses ?? []
       totalCount.value = data.total ?? 0
-      page.value = pg
+      if (data.thresholds) Object.assign(thresholds, data.thresholds)
       listError.value = null
     } catch {
       analyses.value = []
@@ -82,25 +98,85 @@ export const useIrisStore = defineStore('iris', () => {
     }
   }
 
-  const loadingMore = ref(false)
+  /* ══════════════════════ ARCHIVO (histórico completo) ══════════════════
+   * Estado propio, deliberadamente aislado del bench: el archivo pagina,
+   * filtra y ordena contra el servidor (ver ResultsQuerySchema), así que
+   * nada de esto debe tocar `analyses`/`totalCount` del bench ni viceversa.
+   */
+  const ARCHIVE_PER_PAGE = 20
 
-  const hasMore = computed(() => analyses.value.length < totalCount.value)
+  const archive = reactive({
+    items: [],
+    total: 0,
+    page: 1,
+    perPage: ARCHIVE_PER_PAGE,
+    loading: false,
+    error: null,
+    filters: { search: '', verdict: '', status: '', source: '' },
+    sort: { by: 'date', dir: 'desc' },
+  })
 
-  async function fetchMoreResults() {
-    if (loadingMore.value || analyses.value.length >= totalCount.value) return
-    loadingMore.value = true
-    const nextPage = page.value + 1
-    try {
-      const params = new URLSearchParams({ page: nextPage, per_page: perPage.value })
-      const res = await apiFetch(`/iris/results?${params}`)
-      if (!res?.ok) return
-      const data = await res.json()
-      analyses.value = [...analyses.value, ...(data.analyses ?? [])]
-      totalCount.value = data.total ?? totalCount.value
-      page.value = nextPage
-    } finally {
-      loadingMore.value = false
+  const archiveHasFilters = computed(() => Object.values(archive.filters).some(v => v))
+
+  function _archiveParams() {
+    const params = new URLSearchParams({
+      page: archive.page, per_page: archive.perPage,
+      sort_by: archive.sort.by, sort_dir: archive.sort.dir,
+    })
+    for (const [key, value] of Object.entries(archive.filters)) {
+      if (value) params.set(key, value)
     }
+    return params
+  }
+
+  async function fetchArchive() {
+    archive.loading = true
+    try {
+      const res = await apiFetch(`/iris/results?${_archiveParams()}`)
+      if (!res?.ok) { archive.error = 'No se pudieron cargar los análisis.'; return }
+      const data = await res.json()
+      archive.items = data.analyses ?? []
+      archive.total = data.total ?? 0
+      if (data.thresholds) Object.assign(thresholds, data.thresholds)
+      archive.error = null
+    } catch {
+      archive.error = 'Error de conexión al cargar los análisis.'
+    } finally {
+      archive.loading = false
+    }
+  }
+
+  /** Aplica un parche de filtros (p.ej. `{ verdict: 'Phishing' }`), vuelve a
+   * página 1 y refetchea. Pasar `''` en un campo lo despeja. */
+  function setArchiveFilters(patch) {
+    Object.assign(archive.filters, patch)
+    archive.page = 1
+    fetchArchive()
+  }
+
+  function resetArchiveFilters() {
+    archive.filters = { search: '', verdict: '', status: '', source: '' }
+    archive.page = 1
+    fetchArchive()
+  }
+
+  /** Clic en una cabecera de columna ordenable: si ya se ordenaba por ese
+   * campo, invierte la dirección; si no, lo adopta con la dirección más
+   * útil por defecto (recientes/mayor score primero, título A→Z). */
+  function setArchiveSort(field) {
+    if (archive.sort.by === field) {
+      archive.sort.dir = archive.sort.dir === 'asc' ? 'desc' : 'asc'
+    } else {
+      archive.sort.by = field
+      archive.sort.dir = field === 'title' ? 'asc' : 'desc'
+    }
+    archive.page = 1
+    fetchArchive()
+  }
+
+  function goToArchivePage(pg) {
+    archive.page = pg
+    fetchArchive()
   }
 
   async function getReport(id) {
@@ -363,11 +439,6 @@ export const useIrisStore = defineStore('iris', () => {
     }
   }
 
-  function goToPage(pg) {
-    page.value = pg
-    fetchResults()
-  }
-
   /* ════════════════════════════════ DOCUMENTOS (PDF) ════════════════════ */
 
   /** Pone en cola la generación del informe PDF de un análisis finalizado. */
@@ -465,8 +536,15 @@ export const useIrisStore = defineStore('iris', () => {
     listError.value = null
     submitting.value = false
     totalCount.value = 0
-    page.value = 1
-    loadingMore.value = false
+    Object.assign(thresholds, { legitimate: 80, suspicious: 55 })
+
+    archive.items = []
+    archive.total = 0
+    archive.page = 1
+    archive.loading = false
+    archive.error = null
+    archive.filters = { search: '', verdict: '', status: '', source: '' }
+    archive.sort = { by: 'date', dir: 'desc' }
 
     currentId.value = null
     Object.assign(currentReport, { loading: false, data: null })
@@ -482,13 +560,16 @@ export const useIrisStore = defineStore('iris', () => {
   }
 
   return {
-    analyses, loading, listError, submitting, totalCount, page, perPage, loadingMore, hasMore,
+    BENCH_SIZE,
+    analyses, loading, listError, submitting, totalCount, thresholds,
     currentId, currentReport, currentStatus, aiSummaryLoading,
     documents, documentsLoading,
-    submitAnalysis, fetchResults, fetchMoreResults, getReport, getStatus, pathFor, iocsFor,
+    archive, archiveHasFilters,
+    fetchArchive, setArchiveFilters, resetArchiveFilters, setArchiveSort, goToArchivePage,
+    submitAnalysis, fetchResults, getReport, getStatus, pathFor, iocsFor,
     resolvedPathFor, isPathLoadingFor, resolvedIocsFor, isIocsLoadingFor,
     generateAiSummary, checkAiSummary,
-    cancelAnalysis, deleteAnalysis, reanalyzeAnalysis, selectAnalysis, goToPage,
+    cancelAnalysis, deleteAnalysis, reanalyzeAnalysis, selectAnalysis,
     startPolling, stopPolling,
     generateDocument, fetchDocuments, getDocumentStatus, downloadDocument, deleteDocument,
     stopDocumentPolling,

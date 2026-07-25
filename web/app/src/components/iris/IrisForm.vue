@@ -106,7 +106,7 @@ function handleSubmit() {
 }
 
 .form-hint {
-  font-size: var(--fs-xl);
+  font-size: var(--fs-lg);
   color: var(--text-dim);
   line-height: 1.5;
   margin: 0;
@@ -165,6 +165,7 @@ function handleSubmit() {
 
 .form-textarea::placeholder {
   color: var(--text-muted);
+  font-size: var(--fs-md);
   opacity: 0.35;
   font-family: var(--font-mono);
 }
@@ -177,7 +178,7 @@ function handleSubmit() {
 }
 
 .char-count {
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
@@ -187,7 +188,7 @@ function handleSubmit() {
   align-items: center;
   gap: 0.55rem;
   padding: 0.75rem 1.5rem;
-  font-size: var(--fs-xl);
+  font-size: var(--fs-md);
   font-weight: 700;
   border-radius: 10px;
   border: none;

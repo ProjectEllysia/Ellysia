@@ -24,12 +24,31 @@ from __future__ import annotations
 
 import re
 
+import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
-from ..shared import extract_domain, is_free_provider, registrable_domain
+from ..shared import (
+    esp_msgid_domains, esp_tracker_domains, extract_domain,
+    is_free_provider, registrable_domain,
+)
+
+
+def _is_esp_domain(domain: str | None) -> bool:
+    """True when *domain* is a known ESP infrastructure domain (B3).
+
+    A newsletter sent via Mailchimp/SendGrid legitimately has three
+    distinct registrable domains across From/Reply-To/Return-Path — that
+    is the ESP's normal architecture, not evidence of anything. Reuses
+    the allowlists already trusted for Message-ID and image-tracking
+    checks so this doesn't drift into a fourth copy of "is this a known
+    ESP domain".
+    """
+    if not domain:
+        return False
+    return domain in esp_msgid_domains() or domain in esp_tracker_domains()
 
 
 @iris_rules.register(
-    name="Reply-To check", category="header_analysis",
+    name="Reply-To check", category="header_analysis", family="reply_path",
     description="Detecta si Reply-To difiere del remitente real",
 )
 def check_reply_to(headers: dict) -> RuleResult:
@@ -68,9 +87,31 @@ def check_reply_to(headers: dict) -> RuleResult:
     from_domain = from_addr.split("@")[-1].rstrip(">").strip() if "@" in from_addr else from_addr
     reply_domain = reply_to.split("@")[-1].rstrip(">").strip() if "@" in reply_to else reply_to
 
-    if registrable_domain(from_domain) != registrable_domain(reply_domain):
+    if _is_esp_domain(registrable_domain(reply_domain)):
         return RuleResult(
-            score=-10, verdict="fail",
+            score=1, verdict="pass",
+            details={"from": from_addr, "reply_to": reply_to, "esp": True},
+            recommendation=None,
+        )
+
+    if registrable_domain(from_domain) != registrable_domain(reply_domain):
+        # Recalibración de pesos (F3): si además Return-Path diverge, las
+        # tres cabeceras difieren y Triangulation ya puntúa exactamente
+        # este mismo hecho con su propio peso -- suprimir aquí evita
+        # cobrarlo dos veces. El hallazgo se conserva (verdict "fail") para
+        # que el informe siga mostrándolo, solo deja de restar.
+        if _triangulation_would_fire(headers):
+            return RuleResult(
+                score=0, verdict="fail",
+                details={
+                    "from": from_addr, "reply_to": reply_to,
+                    "from_domain": from_domain, "reply_domain": reply_domain,
+                    "suppressed_by": "triangulation",
+                },
+                recommendation=None,
+            )
+        return RuleResult(
+            score=CR.get_iris_scoring_weight("reply_to.mismatch", -6), verdict="fail",
             details={
                 "from": from_addr,
                 "reply_to": reply_to,
@@ -90,7 +131,7 @@ def check_reply_to(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Reply-To Free Provider", category="header_analysis",
+    name="Reply-To Free Provider", category="header_analysis", family="reply_path",
     description="Detecta el patrón BEC: remitente con dominio corporativo pero Reply-To/Return-Path apuntando a un correo gratuito",
 )
 def check_reply_to_free_provider(headers: dict) -> RuleResult:
@@ -119,7 +160,7 @@ def check_reply_to_free_provider(headers: dict) -> RuleResult:
         return RuleResult(score=1, verdict="pass", details={"from_domain": from_domain}, recommendation=None)
 
     return RuleResult(
-        score=-8, verdict="fail",
+        score=CR.get_iris_scoring_weight("reply_to_free_provider.fail", -8), verdict="fail",
         details={"from_domain": from_domain, "free_reply_targets": redirect_targets},
         recommendation=(
             f"El remitente usa un dominio corporativo ({from_domain}) pero las respuestas se "
@@ -131,7 +172,7 @@ def check_reply_to_free_provider(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Return-Path mismatch", category="header_analysis",
+    name="Return-Path mismatch", category="header_analysis", family="reply_path",
     description="Detecta si el dominio en Return-Path difiere del remitente visible",
 )
 def check_return_path(headers: dict) -> RuleResult:
@@ -152,12 +193,28 @@ def check_return_path(headers: dict) -> RuleResult:
             recommendation=None,
         )
 
-    rp_domain = extract_domain(return_path)
-    from_domain = extract_domain(from_addr)
+    # F4: compared at the registrable-domain level, matching check_reply_to's
+    # sibling logic — a full-hostname compare flags every ESP/bounce
+    # subdomain (``bounce.mail.paypal.com`` vs ``paypal.com``) as a mismatch,
+    # which is the normal shape of transactional/bulk mail, not spoofing.
+    rp_domain = registrable_domain(extract_domain(return_path))
+    from_domain = registrable_domain(extract_domain(from_addr))
 
-    if rp_domain and from_domain and rp_domain != from_domain:
+    if rp_domain and from_domain and rp_domain != from_domain and not _is_esp_domain(rp_domain):
+        # Recalibración de pesos (F3): igual que Reply-To check, se suprime
+        # cuando Triangulation ya puntúa el mismo hecho de fondo.
+        if _triangulation_would_fire(headers):
+            return RuleResult(
+                score=0, verdict="fail",
+                details={
+                    "return_path_domain": rp_domain, "from_domain": from_domain,
+                    "return_path": return_path, "from": from_addr,
+                    "suppressed_by": "triangulation",
+                },
+                recommendation=None,
+            )
         return RuleResult(
-            score=-8, verdict="fail",
+            score=CR.get_iris_scoring_weight("return_path.mismatch", -4), verdict="fail",
             details={
                 "return_path_domain": rp_domain,
                 "from_domain": from_domain,
@@ -170,7 +227,10 @@ def check_return_path(headers: dict) -> RuleResult:
 
     return RuleResult(
         score=2, verdict="pass",
-        details={"return_path_domain": rp_domain, "from_domain": from_domain, "match": True},
+        details={
+            "return_path_domain": rp_domain, "from_domain": from_domain,
+            "match": rp_domain == from_domain,
+        },
         recommendation=None,
     )
 
@@ -184,9 +244,29 @@ def _email_domain(header_value: str) -> str | None:
     return registrable_domain(extract_domain(match.group(0)))
 
 
+def _triangulation_would_fire(headers: dict) -> bool:
+    """True cuando From/Reply-To/Return-Path apuntan a tres dominios
+    organizativos distintos y ninguno es un ESP -- la misma condición que
+    dispara ``check_triangulation`` más abajo. ``check_reply_to`` y
+    ``check_return_path`` la consultan para suprimirse cuando triangula:
+    Triangulation ya puntúa ese mismo hecho con su propio peso (F3), así
+    que los pairwise no vuelven a cobrarlo.
+    """
+    from_dom = _email_domain(headers.get("from", ""))
+    if not from_dom:
+        return False
+    reply_dom = _email_domain(headers.get("reply-to", ""))
+    return_dom = _email_domain(
+        headers.get("return-path", "") or headers.get("envelope-from", "") or headers.get("sender", "")
+    )
+    distinct = {d for d in (from_dom, reply_dom, return_dom) if d}
+    esp_involved = _is_esp_domain(reply_dom) or _is_esp_domain(return_dom)
+    return len(distinct) >= 3 and not esp_involved
+
+
 @iris_rules.register(
     name="From Reply-To Return-Path Triangulation",
-    category="header_analysis",
+    category="header_analysis", family="reply_path",
     description=(
         "Detecta mensajes donde From, Reply-To y Return-Path apuntan a tres "
         "dominios organizativos diferentes, una firma estructural de "
@@ -208,7 +288,13 @@ def check_triangulation(headers: dict) -> RuleResult:
     present = [d for d in (from_dom, reply_dom, return_dom) if d]
     distinct = set(present)
 
-    if len(distinct) < 3:
+    # B3: a Reply-To/Return-Path on a known ESP domain is exactly what
+    # legitimate bulk mail looks like (From=company.com, Reply-To on the
+    # ESP's reply infra, Return-Path on the ESP's bounce infra) — three
+    # distinct domains by design, not a triangulation attack.
+    esp_involved = _is_esp_domain(reply_dom) or _is_esp_domain(return_dom)
+
+    if len(distinct) < 3 or esp_involved:
         return RuleResult(
             score=0, verdict="neutral",
             details={
@@ -216,12 +302,13 @@ def check_triangulation(headers: dict) -> RuleResult:
                 "reply_to_domain": reply_dom,
                 "return_path_domain": return_dom,
                 "distinct_count": len(distinct),
+                "esp": esp_involved,
             },
             recommendation=None,
         )
 
     return RuleResult(
-        score=-12, verdict="fail",
+        score=CR.get_iris_scoring_weight("triangulation.fail", -10), verdict="fail",
         details={
             "from_domain": from_dom,
             "reply_to_domain": reply_dom,

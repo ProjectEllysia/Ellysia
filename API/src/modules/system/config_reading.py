@@ -253,6 +253,31 @@ def get_mfa_config() -> dict:
     }
 
 
+def get_encryption_key(purpose: str) -> str:
+    """Clave Fernet de cifrado en reposo para un ``purpose`` dado (``shared._crypto``).
+
+    Convención de nombre, no dato configurable: el env var es
+    ``f"{purpose.upper()}_ENCRYPTION_KEY"`` — ``purpose="mfa"`` da
+    ``MFA_ENCRYPTION_KEY`` (la que ya usaba ``users/services/secrets.py``
+    directamente), ``purpose="iris_mailbox"`` da
+    ``IRIS_MAILBOX_ENCRYPTION_KEY``. Siempre en ``.env``, nunca en
+    ``SecOpsConfig.json`` — es un secreto.
+
+    Raises:
+        ValueError: Si falta la variable de entorno correspondiente.
+    """
+    env_var = f"{purpose.upper()}_ENCRYPTION_KEY"
+    key = os.getenv(env_var)
+    if not key:
+        logger.error(f"Falta la variable de entorno {env_var}")
+        raise ValueError(
+            f"Falta la variable de entorno {env_var}. "
+            "Defínela en el archivo .env (clave Fernet: "
+            "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\")."
+        )
+    return key
+
+
 def get_openvas_environment() -> dict[str, str]:
     """Solo variables de entorno."""
     hostname    = os.getenv("OPENVAS_HOST")
@@ -899,6 +924,15 @@ def get_iris_min_headers() -> int:
     return _cfg("iris.min_headers", 2, int)
 
 @_lazy_load
+def get_iris_max_message_bytes() -> int:
+    # C4: AnalyzeRequestSchema had no upper bound at all — a multi-MB .eml
+    # (attachments included) was accepted whole into a Text column and
+    # re-parsed, base64 decoding included, on every subsequent read
+    # (get_analysis_results/path/iocs). 10 MB comfortably covers a real
+    # email with attachments while capping the re-parse cost.
+    return _cfg("iris.maxMessageBytes", 10 * 1024 * 1024, int)
+
+@_lazy_load
 def get_iris_data(key: str):
     """Dataset de detección de Iris desde ``iris.data.<key>`` (o None si falta).
 
@@ -916,6 +950,87 @@ def get_iris_prompts() -> dict:
     para el módulo Iris: ``iris.prompts.summary.{system,userTemplate}``.
     """
     return _cfg("iris.prompts", {})
+
+@_lazy_load
+def get_iris_scoring_weight(weight_key: str, default: float) -> float:
+    """Peso de scoring configurable de una regla de Iris (recalibración §19/S6).
+
+    ``iris.scoring.<weight_key>`` en SecOpsConfig.json puede pisar la
+    magnitud de penalización que una regla define en código sin necesidad de
+    redeploy -- el propio ``default`` que cada llamada pasa (el valor
+    calibrado por el consejo, ver STUDY.md) es el que se usa si la clave no
+    está presente en la config, así que el comportamiento no cambia hasta
+    que alguien la añade explícitamente.
+    """
+    return _cfg(f"iris.scoring.{weight_key}", default, float)
+
+
+# =============================================================================
+# CONECTOR DE BUZÓN DE IRIS (Fase 3-4 del plan mailbox-connector)
+# =============================================================================
+
+@_lazy_load
+def get_iris_max_connections_per_user() -> int:
+    """Máximo de cuentas de correo que un usuario puede conectar a la vez."""
+    return _cfg("iris.maxConnectionsPerUser", 5, int)
+
+
+@_lazy_load
+def get_iris_poll_interval_minutes() -> int:
+    """Intervalo (minutos) del scheduler que sondea las conexiones activas."""
+    return _cfg("iris.pollIntervalMinutes", 5, int)
+
+
+@_lazy_load
+def get_iris_max_ingested_per_day() -> int:
+    """Tope diario de análisis auto-ingeridos, por conexión (no global).
+
+    Una conexión mal configurada (carpeta ruidosa, bucle de reenvíos) no
+    debe poder generar analisis sin límite — ver roadmap-ellysia.md §8.1.
+    """
+    return _cfg("iris.maxIngestedPerDay", 200, int)
+
+
+def get_gmail_environment() -> dict[str, str]:
+    """Credenciales OAuth de la app de Gmail desde variables de entorno.
+
+    Returns:
+        dict con 'client_id' y 'client_secret'.
+
+    Raises:
+        ValueError: Si falta alguna de las dos.
+    """
+    client_id = os.getenv("GMAIL_CLIENT_ID")
+    client_secret = os.getenv("GMAIL_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise ValueError(
+            "Faltan GMAIL_CLIENT_ID/GMAIL_CLIENT_SECRET en el archivo .env. "
+            "Regístralos en Google Cloud Console (OAuth client, tipo 'Web "
+            "application') antes de conectar una cuenta Gmail."
+        )
+    return {"client_id": client_id, "client_secret": client_secret}
+
+
+def get_graph_environment() -> dict[str, str]:
+    """Credenciales OAuth de la app registrada en Microsoft Entra ID.
+
+    Returns:
+        dict con 'client_id', 'client_secret' y 'tenant' (por defecto
+        "common": cuentas personales y de cualquier organización).
+
+    Raises:
+        ValueError: Si falta client_id o client_secret.
+    """
+    client_id = os.getenv("GRAPH_CLIENT_ID")
+    client_secret = os.getenv("GRAPH_CLIENT_SECRET")
+    tenant = os.getenv("GRAPH_TENANT_ID", "common")
+    if not client_id or not client_secret:
+        raise ValueError(
+            "Faltan GRAPH_CLIENT_ID/GRAPH_CLIENT_SECRET en el archivo .env. "
+            "Regístralos como app registration en Microsoft Entra ID (Azure "
+            "AD) antes de conectar una cuenta Microsoft 365."
+        )
+    return {"client_id": client_id, "client_secret": client_secret, "tenant": tenant}
 
 
 # =============================================================================

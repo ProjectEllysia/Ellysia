@@ -36,8 +36,6 @@
 
     <CreateUserModal :show="showCreateModal" @close="showCreateModal = false" @created="handleCreateUser" ref="createModal" />
     <UserDetailsModal :show="showDetailsModal" :user-id="selectedUserId" @close="showDetailsModal = false" @refresh="store.loadUsers()" />
-
-    <AppToast />
   </div>
 </template>
 
@@ -45,7 +43,6 @@
 import { ref, onMounted } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
-import AppToast from '@/components/shared/AppToast.vue'
 import { useUsersStore } from '@/stores/usersStore'
 import UserCard from '@/components/users/UserCard.vue'
 import CreateUserModal from '@/components/users/CreateUserModal.vue'

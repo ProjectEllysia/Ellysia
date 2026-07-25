@@ -53,7 +53,7 @@ def test_display_name_email_mismatch_flags_random_local():
         "from": "PayPal Support <x8hd92kj.thx@gmail.com>",
     })
     assert result.verdict == "fail"
-    assert result.score <= -10
+    assert result.score <= -5
     assert result.details["domain"] == "gmail.com"
 
 
@@ -175,7 +175,9 @@ def test_bec_flags_wire_with_corporate_sender():
     )
     result = check_bec_wire_pattern(ctx)
     assert result.verdict == "fail"
-    assert result.score <= -12
+    # Recalibración de pesos: la detección real recae en los gates
+    # (bec_free/bec_corporate_redirect), no en el score en solitario.
+    assert result.score <= -8
 
 
 def test_bec_flags_banking_change_pattern():
@@ -285,7 +287,7 @@ def test_triangulation_flags_three_distinct_domains():
         "return-path": "<bounce@mailer-c.net>",
     })
     assert result.verdict == "fail"
-    assert result.score <= -12
+    assert result.score <= -10
     assert result.details["distinct_count"] == 3
 
 
@@ -323,7 +325,7 @@ def test_image_only_email_flags_single_external_image():
     )
     result = check_image_only_email(ctx)
     assert result.verdict == "fail"
-    assert result.score <= -10
+    assert result.score <= -6
 
 
 def test_image_only_email_passes_rich_text_newsletter():
@@ -371,6 +373,20 @@ def test_temporal_inconsistency_flags_inverted_hops():
     assert result.verdict == "fail"
     assert result.score < 0
     assert len(result.details["inversions"]) >= 1
+
+
+def test_temporal_inconsistency_tolerates_small_clock_skew():
+    # Recalibración de pesos: una inversión < 300s entre hops consecutivos
+    # es clock skew normal entre servidores, no manipulación.
+    ctx = MessageContext(
+        headers={"from": "a@b.com"},
+        received_headers=[
+            "from mx.b.com by mx2.b.com; Wed, 25 Jun 2025 10:00:00 +0000",
+            "from [192.0.2.1] by mx.b.com; Wed, 25 Jun 2025 10:00:30 +0000",
+        ],
+    )
+    result = check_received_chain_temporal_inconsistency(ctx)
+    assert result.verdict == "pass"
 
 
 def test_temporal_inconsistency_passes_monotonic_chain():

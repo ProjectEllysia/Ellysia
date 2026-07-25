@@ -57,6 +57,26 @@ _VERDICT_SEVERITY = {v: i for i, v in enumerate(_VERDICT_ORDER)}
 # from Gmail used to net *positive* despite a -23 risk payload underneath.
 _CEILING = 100.0
 
+# Recalibración de pesos (§18): techos de familia. Varias reglas dentro del
+# mismo cluster suelen corroborar el mismo hecho subyacente (p.ej. SPF+DKIM+
+# DMARC+Domain Alignment todas fallando describen UN fallo de autenticación,
+# no cuatro independientes) -- sin techo, sumarlas todas exagera la
+# confianza del score en un solo hecho. Cada techo es el mínimo (más
+# negativo) que la suma de penalizaciones de esa familia puede alcanzar;
+# reglas sin `family` (Threading, Recipient, List-Unsubscribe) no tienen
+# techo -- ya son individualmente pequeñas. ARC Chain se queda fuera de
+# "auth" a propósito (forense: describe un hecho distinto, la cadena de
+# reenvío, no la autenticación del propio mensaje).
+_FAMILY_SCORE_FLOORS = {
+    "auth": -25.0,
+    "identity": -28.0,
+    "reply_path": -15.0,
+    "content": -25.0,
+    "links": -30.0,
+    "received": -12.0,
+    "attachment": -28.0,
+}
+
 
 class IrisManager(TaskTrackingMixin):
     """Orchestrates the lifecycle of an Iris email-header analysis.
@@ -85,7 +105,9 @@ class IrisManager(TaskTrackingMixin):
         raw_headers: str | None,
         user_id: int,
         title: str | None = None,
-        raw_message: str | None = None
+        raw_message: str | None = None,
+        connection_id: int | None = None,
+        source_message_uid: str | None = None,
     ) -> int:
         """Submit raw email headers (or a full message) for background analysis.
 
@@ -103,6 +125,14 @@ class IrisManager(TaskTrackingMixin):
                          given, since it's a superset of the header data.
                          Rules that need body/links/attachments only see
                          them when this is provided.
+            connection_id: IrisMailboxConnection this message was ingested
+                         through (Fase 3-4). None for manual submissions —
+                         the original, still-default flow.
+            source_message_uid: Provider-specific message id, set only
+                         together with connection_id. The (connection_id,
+                         source_message_uid) pair is UNIQUE at the DB level,
+                         so a mailbox sync retry that resubmits the same
+                         message raises instead of duplicating the analysis.
 
         Returns:
             The new IrisAnalysis primary key (``analysis_id``).  The
@@ -122,7 +152,10 @@ class IrisManager(TaskTrackingMixin):
             )
 
         self._validate_headers_pre(raw_input)
-        analysis_id = self._create_analysis_record(raw_input, user_id, title=title)
+        analysis_id = self._create_analysis_record(
+            raw_input, user_id, title=title,
+            connection_id=connection_id, source_message_uid=source_message_uid,
+        )
         logger.info(f"Iris analysis {analysis_id} created for user {user_id}")
 
         if self.TASK_CATEGORY is None:
@@ -485,20 +518,35 @@ class IrisManager(TaskTrackingMixin):
                 return True
         return False
 
-    def get_analyses_for_user(self, user_id: int, page: int = 1, per_page: int = 10):
+    def get_analyses_for_user(
+        self, user_id: int, page: int = 1, per_page: int = 10, *,
+        search: str | None = None, verdict: str | None = None,
+        status: str | None = None, source: str | None = None,
+        sort_by: str = "date", sort_dir: str = "desc",
+    ):
         """Return a paginated, formatted list of analyses for a user.
 
         Args:
             user_id:  Owner of the analyses.
             page:     1‑based page number.
             per_page: Items per page.
+            search/verdict/status/source: Optional filters — see
+                ``IrisAnalysisRepository.get_by_user_paginated``.
+            sort_by/sort_dir: Server-side ordering — see same.
 
         Returns:
-            Tuple of (formatted_results: list[dict], total_count: int).
+            Tuple of (formatted_results: list[dict], total_count: int,
+            thresholds: dict).
         """
         items, total = build_repository(IrisAnalysisRepository).get_by_user_paginated(
-            user_id, page, per_page
+            user_id, page, per_page,
+            search=search, verdict=verdict, status=status, source=source,
+            sort_by=sort_by, sort_dir=sort_dir,
         )
+        thresholds = {
+            "legitimate": CR.get_iris_legitimate_threshold(),
+            "suspicious": CR.get_iris_suspicious_threshold(),
+        }
         results = [
             {
                 "analysisId": a.id,
@@ -508,10 +556,13 @@ class IrisManager(TaskTrackingMixin):
                 "verdict": a.verdict,
                 "startedAt": isoformat_utc(a.started_at), # type: ignore
                 "finishedAt": isoformat_utc(a.finished_at), # type: ignore
+                "connectionId": a.connection_id,
+                "provider": a.connection.provider if a.connection else None,
+                "accountEmail": a.connection.account_email if a.connection else None,
             }
             for a in items
         ]
-        return results, total
+        return results, total, thresholds
 
     @classmethod
     def assert_analysis_ownership(cls, analysis_id: int, user_id: int) -> IrisAnalysis:
@@ -527,13 +578,17 @@ class IrisManager(TaskTrackingMixin):
     # INTERNAL
     # =========================================================================
 
-    def _create_analysis_record(self, raw_headers: str, user_id: int, title: str | None = None) -> int:
+    def _create_analysis_record(self, raw_headers: str, user_id: int, title: str | None = None,
+                                 connection_id: int | None = None,
+                                 source_message_uid: str | None = None) -> int:
         """Persist a new IrisAnalysis row in ``pending`` state."""
         analysis = IrisAnalysis(
             raw_headers=raw_headers,
             user_id=user_id,
             title=title.strip()[:120] if title and title.strip() else None,
             status="pending",
+            connection_id=connection_id,
+            source_message_uid=source_message_uid,
         )
         with UnitOfWork() as uow:
             repo = IrisAnalysisRepository(uow)
@@ -584,15 +639,14 @@ class IrisManager(TaskTrackingMixin):
            — Fase 2 rules). ``raw_input`` may be a headers-only block or
            a full ``.eml`` message; the context degrades gracefully to
            empty body/links/attachments in the former case.
-        3. Iterates over every registered rule, dispatching ``headers``
-           or ``context`` depending on each rule's ``needs_context`` flag,
-           and collects RuleResults.
-        4. Updates the TaskQueue task progress after each rule.
-        5. Computes the total score and verdict.
-        6. Persists the final state (``finished`` + score + verdict).
-
-        If cancellation is detected between rule executions, the task
-        exits early without saving results.
+        3. Runs every registered rule against the message (N1: against
+           *both* the message and its ``message/rfc822`` wrapper when one
+           is present, keeping the worse verdict — see
+           ``_evaluate_context``).
+        4. Persists the winning context's rule results and the final
+           score/verdict in a single transaction (C2/C3: no partial rows
+           survive a mid-run cancellation, and there's one commit per
+           analysis instead of one per rule).
         """
         with job_context() as job:
             logger.info(f"Starting analysis {analysis_id}")
@@ -611,57 +665,76 @@ class IrisManager(TaskTrackingMixin):
             # parse_raw_headers(raw_input) here would silently re-introduce
             # the envelope's headers and analyze the wrong message.
             context = parse_raw_message(raw_input)
-            headers = context.headers
-            self._validate_headers_parsed(headers)
+            self._validate_headers_parsed(context.headers)
+
+            # N1: a "report phishing" forward is safe to unwrap unconditionally
+            # for a human-submitted analysis, but the same message/rfc822
+            # mechanism lets an attacker send their own phishing as the outer
+            # message and staple a benign .eml on as an attachment — analyzing
+            # only the unwrapped inner message would then score the wrong
+            # mail entirely. Evaluate both when a wrapper exists and keep the
+            # worse verdict; this matters most for unattended ingestion
+            # (Fase 3+), where there is no human eyeballing the wrapper first.
+            contexts_to_evaluate = [context]
+            if context.wrapper_context is not None:
+                contexts_to_evaluate.append(context.wrapper_context)
 
             rules_defs = iris_rules.get_rules()
-            total_rules = len(rules_defs)
-            results: List[RuleResult] = []
-            named_results: Dict[str, RuleResult] = {}
+            total_steps = len(rules_defs) * len(contexts_to_evaluate)
+            completed_steps = 0
 
-            for idx, rule_def in enumerate(rules_defs):
-                if job.cancelled():
-                    logger.info(f"Analysis {analysis_id} was cancelled")
-                    return
+            evaluations: List[tuple[str, float, list[str], List[RuleResult]]] = []
+            for ctx in contexts_to_evaluate:
+                results: List[RuleResult] = []
+                named_results: Dict[str, RuleResult] = {}
 
-                try:
-                    rule_input = context if rule_def.get("needs_context") else headers
-                    result = rule_def["func"](rule_input)
-                except Exception as e:
-                    logger.error(f"Rule '{rule_def['name']}' failed for analysis {analysis_id}: {e}", exc_info=True)
-                    result = RuleResult(
-                        score=0, verdict="error",
-                        details={"error": str(e)},
-                        recommendation=f"La regla '{rule_def['name']}' falló durante la ejecución.",
-                    )
+                for rule_def in rules_defs:
+                    if job.cancelled():
+                        logger.info(f"Analysis {analysis_id} was cancelled")
+                        return
 
-                # Subtractive contract: a rule can only *subtract*. Whatever a
-                # rule returns on a pass (historically +5/+3/+1 "credibility"
-                # bonuses), the score it contributes — and the score shown in
-                # the UI — is clamped to <= 0. Passing a rule means "no
-                # deduction", never a bonus. The verdict/details are untouched.
-                result = replace(result, score=min(0.0, float(result.score)))
+                    try:
+                        rule_input = ctx if rule_def.get("needs_context") else ctx.headers
+                        result = rule_def["func"](rule_input)
+                    except Exception as e:
+                        logger.error(f"Rule '{rule_def['name']}' failed for analysis {analysis_id}: {e}", exc_info=True)
+                        result = RuleResult(
+                            score=0, verdict="error",
+                            details={"error": str(e)},
+                            recommendation=f"La regla '{rule_def['name']}' falló durante la ejecución.",
+                        )
 
-                self._persist_rule_result(analysis_id, rule_def, result, idx)
-                results.append(result)
-                named_results[rule_def["name"]] = result
+                    # Subtractive contract: a rule can only *subtract*. Whatever a
+                    # rule returns on a pass (historically +5/+3/+1 "credibility"
+                    # bonuses), the score it contributes — and the score shown in
+                    # the UI — is clamped to <= 0. Passing a rule means "no
+                    # deduction", never a bonus. The verdict/details are untouched.
+                    result = replace(result, score=min(0.0, float(result.score)))
 
-                progress = int(((idx + 1) / total_rules) * 100)
-                job.progress(progress)
+                    results.append(result)
+                    named_results[rule_def["name"]] = result
 
-            total_score = self._aggregate_score(results)
-            base_verdict = self._determine_verdict(total_score)
-            verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
+                    completed_steps += 1
+                    job.progress(int((completed_steps / total_steps) * 100))
+
+                total_score = self._aggregate_score(rules_defs, results)
+                base_verdict = self._determine_verdict(total_score)
+                verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
+                evaluations.append((verdict, total_score, gate_reasons, results))
+
+            # Worse verdict wins across contexts; on a tie, keep the first
+            # (the unwrapped/inner message — the one ``contexts_to_evaluate``
+            # is ordered by, and the one every other persisted field
+            # describes) rather than the wrapper.
+            chosen = evaluations[0]
+            for evaluation in evaluations[1:]:
+                if _VERDICT_SEVERITY[evaluation[0]] > _VERDICT_SEVERITY[chosen[0]]:
+                    chosen = evaluation
+            verdict, total_score, gate_reasons, results = chosen
 
             try:
-                self._update_analysis(
-                    analysis_id,
-                    status="finished",
-                    total_score=total_score,
-                    verdict=verdict,
-                    gate_reasons=gate_reasons,
-                    finished_at=utcnow_naive(),
-                )
+                self._persist_analysis_results(analysis_id, rules_defs, results,
+                                                verdict, total_score, gate_reasons)
             except Exception as e:
                 logger.error(f"Failed to finalise analysis {analysis_id}: {e}", exc_info=True)
                 self._fail_analysis(analysis_id)
@@ -669,40 +742,73 @@ class IrisManager(TaskTrackingMixin):
 
             logger.info(f"Analysis {analysis_id} completed: score={total_score}, verdict={verdict}")
 
-    def _persist_rule_result(self, analysis_id: int, rule_def: dict,
-                              result: RuleResult, position: int) -> None:
-        """Save a single rule's outcome to the IrisRuleResult table.
+    @staticmethod
+    def _persist_analysis_results(analysis_id: int, rules_defs: List[dict], results: List[RuleResult],
+                                   verdict: str, total_score: float, gate_reasons: list[str]) -> None:
+        """Persist every rule row and the final analysis state in one transaction.
 
-        Failures are logged but do not interrupt the analysis — the
-        rule is treated as a neutral (zero-score) result.
+        Previously each rule opened (and committed) its own
+        ``UnitOfWork`` — ~40 commits per analysis, and a cancellation
+        mid-loop left the already-committed rows of a ``cancelled``
+        analysis dangling (C2/C3). One transaction for the whole batch
+        fixes both: it's atomic, and a ``return`` before this point
+        (cancellation) now leaves nothing committed at all.
         """
-        try:
-            with UnitOfWork() as uow:
-                repo = IrisRuleResultRepository(uow)
-                result = IrisRuleResult(
+        with UnitOfWork() as uow:
+            rule_repo = IrisRuleResultRepository(uow)
+            for position, (rule_def, rule_result) in enumerate(zip(rules_defs, results)):
+                rule_repo.save(IrisRuleResult(
                     analysis_id=analysis_id,
                     rule_name=rule_def["name"],
                     category=rule_def["category"],
-                    score=result.score,
-                    verdict=result.verdict,
-                    details=result.details,
-                    recommendation=result.recommendation,
+                    score=rule_result.score,
+                    verdict=rule_result.verdict,
+                    details=rule_result.details,
+                    recommendation=rule_result.recommendation,
                     position=position,
-                )
-                repo.save(result)
-        except Exception as e:
-            logger.error(f"Failed to persist rule result for analysis {analysis_id}: {e}", exc_info=True)
+                ))
+
+            analysis_repo = IrisAnalysisRepository(uow)
+            analysis = analysis_repo.get_by_id(analysis_id)
+            if analysis is None:
+                return
+            analysis.status = "finished"
+            analysis.total_score = total_score
+            analysis.verdict = verdict
+            analysis.gate_reasons = gate_reasons
+            analysis.finished_at = utcnow_naive()
+            analysis_repo.update(analysis)
 
     @staticmethod
-    def _aggregate_score(results: List[RuleResult]) -> float:
+    def _aggregate_score(rules_defs: List[dict], results: List[RuleResult]) -> float:
         """Combine per-rule results into a single 0–100 score.
 
         Subtractive model: start at :data:`_CEILING` and add only the
         *negative* part of each rule's score (``min(0, score)``), so passing
         a rule never inflates the total. Clamped to ``[0, _CEILING]``.
+
+        Recalibración de pesos (§18): before summing, each rule's penalty is
+        attributed to its ``family`` (if any) and the family's total is
+        floored at ``_FAMILY_SCORE_FLOORS[family]`` — a cluster of rules
+        corroborating the same underlying fact can't out-vote its own cap.
+        Rules with no family pass through unfloored.
         """
-        penalties = sum(min(0.0, r.score) for r in results)
-        return max(0.0, _CEILING + penalties)
+        family_penalties: Dict[str, float] = {}
+        unfamilied_penalties = 0.0
+        for rule_def, result in zip(rules_defs, results):
+            penalty = min(0.0, float(result.score))
+            family = rule_def.get("family") or ""
+            if family:
+                family_penalties[family] = family_penalties.get(family, 0.0) + penalty
+            else:
+                unfamilied_penalties += penalty
+
+        capped_total = unfamilied_penalties
+        for family, penalty in family_penalties.items():
+            floor = _FAMILY_SCORE_FLOORS.get(family)
+            capped_total += max(floor, penalty) if floor is not None else penalty
+
+        return max(0.0, _CEILING + capped_total)
 
     def _determine_verdict(self, total_score: float) -> str:
         """Map a numeric 0–100 score to a textual verdict.
@@ -754,6 +860,13 @@ class IrisManager(TaskTrackingMixin):
         dmarc_fail = verdict_is("DMARC", "fail") and not arc_pass
         align_fail = verdict_is("Domain Alignment", "fail") and not arc_pass
 
+        # G-A (forense, recalibración de pesos): un authserv-id que reclama
+        # "pass" pero no aparece en ningún salto de la propia cadena
+        # Received del mensaje es una línea forjada por el remitente --
+        # cierra el bypass de confiar ciegamente en Authentication-Results
+        # sin verificar quién lo escribió.
+        auth_forged = verdict_is("Auth Results Provenance", "fail")
+
         # D1 (quishing): a QR code that decodes to a suspicious URL is a
         # high-confidence signal on its own -- a QR is specifically a way
         # to smuggle a URL past every text/link-based check, so if one
@@ -776,6 +889,15 @@ class IrisManager(TaskTrackingMixin):
             is_free_provider(bec.details.get("from_domain"))
             or is_free_provider(bec.details.get("reply_domain"))
         )
+        # A corporate (non-free) BEC sender whose Reply-To/Return-Path
+        # redirects elsewhere is the same intent-to-divert pattern as
+        # bec_free, just without the free-webmail tell — before this, the
+        # BEC gate depended 100% on the phrase list alone for a corporate
+        # sender, with no structural corroboration.
+        bec_corporate_redirect = (
+            bec_fail and not bec_free
+            and bool(bec.details.get("redirect_to_external_reply"))
+        )
 
         body_links = res("Body Links")
         link_types = (body_links.details.get("types") or []) if body_links is not None else []
@@ -783,12 +905,64 @@ class IrisManager(TaskTrackingMixin):
         cloaked_link_any = body_links_failed and "cloaked_link" in link_types
         link_impersonation = body_links_failed and "brand_impersonation" in link_types
 
+        # Recalibración de pesos: texto oculto evasivo es un hecho
+        # estructural (alguien escondió deliberadamente un enlace/frase),
+        # no lenguaje que el correo legítimo produzca por accidente -- a
+        # diferencia de las "frases encontradas" puras, sigue gateando en
+        # solitario incluso cuando `body_content_fail` pasa a requerir combo.
+        body_content = res("Body Content")
+        body_content_hidden_text = (
+            body_content is not None and bool(body_content.details.get("hidden_text"))
+        )
+
         path_anomaly = res("Received Path Anomaly")
         path_anomaly_fail = path_anomaly is not None and path_anomaly.verdict == "fail"
         path_signals = (
             (path_anomaly.details.get("unique_signals") or [])
             if path_anomaly is not None else []
         )
+
+        # Recalibración de pesos: estas tres señales eran, a peso actual,
+        # el único separador de su ataque -- ya dejaban pasar el correo en
+        # solitario antes de tocar ningún peso (red team). Se promueven a
+        # gate ANTES de suavizar sus pesos, o la suavización abre un
+        # agujero real en vez de solo ordenar mejor el score.
+        subdomain = res("Subdomain Impersonation")
+        subdomain_brand_in_subdomain = (
+            subdomain is not None and subdomain.verdict == "fail"
+            and any(f.get("type") == "brand_in_subdomain" for f in (subdomain.details.get("findings") or []))
+        )
+
+        # G-B (red team, máxima prioridad): lookalike del dominio del
+        # DESTINATARIO, no de una marca -- el vector BEC nº1, hoy invisible
+        # porque Lookalike Sender Domain solo compara contra
+        # `canonical_brands`.
+        recipient_lookalike = verdict_is("Recipient Domain Lookalike", "fail")
+
+        # G-C (red team): el display name ES una dirección de otro dominio
+        # (`"ceo@acme.com" <attacker@evil.com>`). Escala a Phishing solo
+        # cuando esa dirección falsa suplanta la propia organización
+        # destinataria o una marca conocida -- si no, queda en Suspicious.
+        display_foreign = res("Display Name Foreign Address")
+        display_foreign_fail = display_foreign is not None and display_foreign.verdict == "fail"
+        display_foreign_impersonates_target = (
+            display_foreign_fail and bool(display_foreign.details.get("impersonates_target"))
+        )
+
+        # G-D (red team): TOAD/callback -- teléfono + lenguaje de pago sin
+        # enlaces/adjuntos/hilo previo, una clase de ataque hoy invisible.
+        toad_callback = verdict_is("TOAD Callback Pattern", "fail")
+
+        # G-E (red team): urgencia fuerte combinada con un enlace del cuerpo
+        # a un dominio ajeno al remitente -- aproxima el "primo autenticado"
+        # (dominio propio, auth limpia, marca fuera de la lista) sin
+        # depender de `canonical_brands`.
+        external_login_link = verdict_is("External Login Link", "fail")
+
+        # Comprobación forense adicional (§5): aproximación offline de
+        # coherencia HELO -- ruidosa en solitario (nombres de host varían
+        # mucho de forma legítima), solo se combina con un fallo de auth.
+        origin_helo_mismatch = verdict_is("Origin HELO Coherence", "fail")
 
         return {
             "spf_fail": spf_fail,
@@ -806,12 +980,37 @@ class IrisManager(TaskTrackingMixin):
             "link_impersonation": link_impersonation,
             "body_links_fail": verdict_is("Body Links", "fail"),
             "body_content_fail": verdict_is("Body Content", "fail"),
+            "body_content_hidden_text": body_content_hidden_text,
             "received_chain_fail": verdict_is("Received Chain", "fail"),
             "path_tls_downgrade": path_anomaly_fail and "tls_downgrade" in path_signals,
             "path_long_chain": path_anomaly_fail and "long_chain" in path_signals,
             "auth_fail": spf_fail or dmarc_fail or align_fail,
             "bec_fail": bec_fail,
             "bec_free": bec_free,
+            "bec_corporate_redirect": bec_corporate_redirect,
+            "subdomain_brand_in_subdomain": subdomain_brand_in_subdomain,
+            "auth_forged": auth_forged,
+            "recipient_lookalike": recipient_lookalike,
+            "display_foreign_fail": display_foreign_fail,
+            "display_foreign_impersonates_target": display_foreign_impersonates_target,
+            "toad_callback": toad_callback,
+            "external_login_link": external_login_link,
+            "origin_helo_mismatch": origin_helo_mismatch,
+            "encoded_word_abuse": verdict_is("Encoded-Word Abuse", "fail"),
+            "display_name_email_mismatch": verdict_is("Display Name Email Mismatch", "fail"),
+            # G6/F2: these four are structural forgeries no legitimate mail
+            # client ever produces by accident (a self-citing In-Reply-To, a
+            # Received chain that runs backwards in time, RLO/mixed-script
+            # control characters, three mutually distinct identity domains).
+            # Previously they only subtracted score, so a message could carry
+            # one of these unambiguous tells and still net "Legitimate" once
+            # a handful of small positive-turned-zero checks passed —
+            # promoted here to a minimum-severity gate like every other
+            # high-confidence signal.
+            "self_referencing_threading": verdict_is("Self-Referencing In-Reply-To", "fail"),
+            "received_time_inversion": verdict_is("Received Chain Temporal Inconsistency", "fail"),
+            "unicode_evasion": verdict_is("Unicode Evasion", "fail"),
+            "triangulation_fail": verdict_is("From Reply-To Return-Path Triangulation", "fail"),
         }
 
     @staticmethod
@@ -848,16 +1047,53 @@ class IrisManager(TaskTrackingMixin):
         gate(signals["cloaked_link_any"], "Phishing", "cloaked body link (visible domain differs from href)")
         gate(signals["link_impersonation"], "Phishing", "body link impersonates a brand/sender via subdomain trick")
         gate(signals["qr_suspicious"], "Phishing", "QR code decodes to a suspicious URL (quishing)")
+        gate(signals["auth_forged"], "Phishing", "Authentication-Results claims pass but its authserv-id never touched the message (forged)")
+        gate(signals["recipient_lookalike"], "Phishing", "sender domain is a typosquat/homoglyph of the recipient organisation's own domain")
+        gate(signals["display_foreign_fail"], "Suspicious", "display name is itself an email address on a different domain than From")
+        gate(signals["display_foreign_impersonates_target"], "Phishing", "display-name address impersonates the recipient's own domain or a known brand")
+        gate(signals["toad_callback"], "Suspicious", "phone number combined with payment/billing/support language, no links/attachments/prior thread (TOAD)")
+        gate(alarming_strong and signals["external_login_link"], "Suspicious", "urgent/alarming language combined with a body link to a domain unrelated to the sender")
+        gate(signals["origin_helo_mismatch"] and auth_fail, "Suspicious", "origin server's HELO/EHLO domain matches nothing else in the message, combined with an authentication failure")
         gate(spoof_any, "Suspicious", "display-name brand spoofing")
         gate(align_fail, "Suspicious", "SPF/DKIM not aligned with From")
         gate(attach, "Suspicious", "dangerous attachment")
         gate(spf_fail or dmarc_fail, "Suspicious", "SPF/DMARC failure")
         gate(signals["replyfree"], "Suspicious", "reply target is free webmail")
+        gate(signals["self_referencing_threading"], "Suspicious", "forged threading headers (self-referencing In-Reply-To/References)")
+        gate(signals["received_time_inversion"], "Suspicious", "Received chain timestamps run backwards (fabricated hop)")
+        gate(signals["unicode_evasion"], "Suspicious", "Unicode bidi/mixed-script evasion characters")
+        gate(signals["triangulation_fail"], "Suspicious", "From/Reply-To/Return-Path point to three distinct domains")
         gate(body_links_fail, "Suspicious", "suspicious body links")
-        gate(signals["body_content_fail"], "Suspicious", "phishing phrasing or hidden text in body")
+        # Recalibración de pesos (calibración/FP): "verifique su cuenta" es
+        # lenguaje de banca legítima real, no solo de phishing -- gatear en
+        # solitario marcaba alertas bancarias reales como Suspicious pese a
+        # autenticar limpio. El texto oculto (evasión real) sigue gateando
+        # sin combo porque ese es un hecho estructural, no de lenguaje; la
+        # combinación solo relaja el caso de "frases encontradas" puro.
+        gate(signals["body_content_fail"] and (auth_fail or spoof_any or body_links_fail or signals["body_content_hidden_text"]),
+             "Suspicious", "phishing phrasing or hidden text in body")
         gate(signals["received_chain_fail"], "Suspicious", "Received chain anomaly")
-        gate(signals["bec_fail"], "Suspicious", "BEC financial-action request in body")
+        # Recalibración de pesos: un BEC corporativo (dominio propio,
+        # autentica limpio) que solo dispara por texto, sin redirect ni
+        # fallo de auth, dependía al 100% de la lista de frases -- correo
+        # interno legítimo de nómina/facturación la dispara con la misma
+        # frecuencia. bec_free (webmail gratuito) sigue gateando aparte,
+        # sin este combo.
+        gate(signals["bec_fail"] and not signals["bec_free"]
+             and (signals["bec_corporate_redirect"] or auth_fail),
+             "Suspicious", "BEC financial-action request in body")
         gate(signals["arc_fail"], "Suspicious", "ARC chain declares a previous hop's authentication broken (cv=fail)")
+        gate(signals["encoded_word_abuse"], "Suspicious", "RFC 2047 encoded-word abuse (chained blocks, exotic charset, or a URL only revealed on decode)")
+        gate(signals["display_name_email_mismatch"], "Suspicious", "display name claims an organisation but the address is a random local-part on an unrelated domain")
+
+        # Recalibración de pesos (red team): a peso actual estas dos ya eran
+        # el único separador de su ataque en solitario -- promovidas a gate
+        # antes de suavizar su peso, para que la suavización no abra un
+        # agujero real.
+        gate(signals["subdomain_brand_in_subdomain"], "Phishing",
+             "known brand embedded as a subdomain label of an attacker-controlled domain")
+        gate(signals["bec_corporate_redirect"], "Phishing",
+             "BEC financial-action request whose reply target redirects to a different domain")
 
         # Combinations that escalate to Phishing.
         gate(signals["bec_free"], "Phishing",

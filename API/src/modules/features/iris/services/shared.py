@@ -292,17 +292,22 @@ _DEFAULTS: dict[str, Any] = {
         "new bank account", "new routing number", "new wire instructions",
         "change of vendor payment", "vendor banking update",
         "confidential transaction", "do not notify", "keep this confidential",
-        "do this while i'm out", "while i'm in a meeting", "asap",
+        "do this while i'm out", "while i'm in a meeting",
         "w-2 form", "w2 form", "employee tax forms", "1099 form",
         "transferencia urgente", "transferencia bancaria urgente",
         "realizar el pago", "procesar el pago", "pago pendiente",
         "factura pendiente", "factura vencida", "saldo pendiente",
         "comprar tarjetas de regalo", "tarjetas de regalo",
-        "enviar bitcoin", "transferencia cripto", "criptomonedas",
+        # Calibración FP: el sustantivo suelto "criptomonedas" era la única
+        # entrada no-accionable de la lista y matcheaba el pie regulatorio de
+        # cualquier fintech ("los productos de criptomonedas son
+        # proporcionados por..."). El patrón BEC es la PETICIÓN de transferir,
+        # que ya cubren "enviar bitcoin"/"transferencia cripto"/"send crypto".
+        "enviar bitcoin", "transferencia cripto",
         "cambiar la cuenta bancaria", "nueva cuenta bancaria",
         "número de ruta", "datos bancarios nuevos",
-        "confidencial", "no notifiques", "no informar a",
-        "mientras estoy en reunión", "con urgencia", "lo antes posible",
+        "no notifiques", "no informar a",
+        "mientras estoy en reunión",
     ],
 
     # Action-words combinables con marcas en subdominios (secure-paypal…).
@@ -327,6 +332,11 @@ _DEFAULTS: dict[str, Any] = {
         "s7.addthis.com", "addthis.com", "tracking.mi-al.it",
         "mta-in.com", "rs6.net", "t.sendgrid.net", "click.mi-al.it",
         "link.mi-al.it", "open.mi-al.it",
+        # CDNs mainstream usadas por correo legítimo para servir imágenes
+        # (logos, banners) — "imagen externa" no ESP-específica no es señal
+        # de phishing por sí sola (F5).
+        "akamaized.net", "akamaihd.net", "fastly.net", "cloudinary.com",
+        "imgix.net",
     ],
 
     # ESPs que estampan el Message-ID con su propio dominio (legítimo).
@@ -338,6 +348,11 @@ _DEFAULTS: dict[str, Any] = {
         "mailjet.com", "mlsend.com", "sailthru.com", "exct.net", "cmail19.com",
         "cmail20.com", "icpbounce.com", "infusionmail.com", "klaviyomail.com",
         "constantcontact.com", "ctctemail.com", "hubspotemail.net",
+        # Exchange Online / Microsoft 365 acuña el Message-ID con el nombre
+        # del propio buzón (AS8P193MB1861.EURP193.PROD.OUTLOOK.COM), no con
+        # el dominio del tenant -- exactamente el mismo patrón legítimo que
+        # un ESP, y el caso de todo correo enviado desde M365.
+        "outlook.com", "protection.outlook.com",
     ],
 
     # Parámetros de query típicos de open redirectors.
@@ -366,6 +381,34 @@ _DEFAULTS: dict[str, Any] = {
     # penalizar correo internacional real.
     "exotic_charsets": [
         "utf-7", "unicode-1-1-utf-7", "csunicode11utf7", "x-unicode-2-0-utf-7",
+    ],
+
+    # Servicios de hosting multi-tenant abusables: el registrable_label es
+    # de la marca (google.com, sharepoint.com...) pero el path/subdominio
+    # es de un usuario cualquiera, así que una página de cosecha de
+    # credenciales alojada ahí hoy se salta el chequeo pensado solo para
+    # "es la propia web de la marca" (N3).
+    "multitenant_hosting_domains": [
+        "docs.google.com", "forms.gle", "forms.office.com", "drive.google.com",
+        "sites.google.com", "sharepoint.com", "onedrive.live.com",
+        "notion.site", "web.app", "pages.dev", "vercel.app", "netlify.app",
+        "t.me", "cdn.discordapp.com", "firebasestorage.googleapis.com",
+        "typeform.com", "airtable.com",
+    ],
+
+    # Lenguaje de pago/facturación/suscripción/soporte combinable con un
+    # número de teléfono para el patrón TOAD (Telephone-Oriented Attack
+    # Delivery, G-D): "su suscripción se renovó, llame para cancelar" -- sin
+    # enlaces ni adjuntos, invisible al resto de reglas.
+    "toad_phrases": [
+        "subscription", "auto-renewal", "auto renewal", "renewal", "renewed",
+        "billing issue", "billing department", "unauthorized charge",
+        "unrecognized charge", "customer support", "customer service",
+        "call us", "call the number below", "call to cancel",
+        "suscripcion", "suscripción", "renovacion automatica",
+        "renovación automática", "se ha renovado", "cargo no autorizado",
+        "cargo no reconocido", "atencion al cliente", "atención al cliente",
+        "llamenos", "llámenos", "llame al", "para cancelar",
     ],
 
     # Patrones de destinatarios ocultos en el To.
@@ -441,6 +484,9 @@ def action_verbs() -> tuple[str, ...]:
 def bec_phrases() -> tuple[str, ...]:
     return _cached_tuple("bec_phrases")
 
+def toad_phrases() -> tuple[str, ...]:
+    return _cached_tuple("toad_phrases")
+
 def subdomain_action_words() -> frozenset[str]:
     return _cached_set("subdomain_action_words")
 
@@ -458,6 +504,9 @@ def undisclosed_patterns() -> tuple[str, ...]:
 
 def url_phishing_keywords() -> tuple[str, ...]:
     return _cached_tuple("url_phishing_keywords")
+
+def multitenant_hosting_domains() -> frozenset[str]:
+    return _cached_set("multitenant_hosting_domains")
 
 def exotic_charsets() -> tuple[str, ...]:
     return _cached_tuple("exotic_charsets")
@@ -477,6 +526,37 @@ def brand_trusted_domains() -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ..
         (tuple(entry["keywords"]), tuple(entry["domains"]))
         for entry in _data("brand_trusted_domains")
     )
+
+
+# =============================================================================
+# MATCHING DE FRASES CON LÍMITES DE PALABRA (B1)
+# =============================================================================
+#
+# Los datasets de frases (bec_phrases, credential_phrases, high/low_signal_
+# keywords, generic_greetings, action_verbs) se comparaban históricamente con
+# `kw in texto`, lo que hace matchear "you won" dentro de "you won't" o
+# "free" dentro de "freelance"/"free shipping". `phrase_matches` compila cada
+# dataset una vez (cacheado) como alternancia regex con límites `\b` y
+# devuelve las frases del dataset que de verdad aparecen como palabra(s)
+# completa(s), en el mismo orden que el dataset (para no cambiar el
+# comportamiento de "primeros N matches" que ya consumían las reglas).
+
+@lru_cache(maxsize=None)
+def _phrase_pattern(key: str) -> re.Pattern:
+    phrases = sorted(_data(key), key=len, reverse=True)
+    alternation = "|".join(re.escape(p) for p in phrases)
+    return re.compile(rf"\b(?:{alternation})\b", re.IGNORECASE)
+
+
+def phrase_matches(key: str, text: str) -> list[str]:
+    """Frases del dataset ``key`` presentes en *text* como palabra(s) completa(s).
+
+    *text* debe venir ya en minúsculas (mismo contrato que los datasets).
+    """
+    if not text:
+        return []
+    hits = {m.lower() for m in _phrase_pattern(key).findall(text)}
+    return [p for p in _data(key) if p.lower() in hits]
 
 
 # =============================================================================
@@ -538,7 +618,11 @@ def extract_display_name(from_header: str) -> str:
 
 
 def url_host(url: str) -> Optional[str]:
-    """Hostname (lowercase, sin credenciales ni puerto) de una URL, o None."""
+    """Hostname (lowercase, sin credenciales ni puerto) de una URL, o None.
+
+    Soporta netloc IPv6 entre corchetes (``[::1]:8080``) — un ``.split(":")``
+    ingenuo lo destroza y deja solo ``"["`` (N4).
+    """
     try:
         parsed = urlparse(url)
     except ValueError:
@@ -546,7 +630,30 @@ def url_host(url: str) -> Optional[str]:
     netloc = parsed.netloc
     if not netloc:
         return None
-    return netloc.split("@")[-1].split(":")[0].lower() or None
+    netloc = netloc.split("@")[-1]
+    if netloc.startswith("["):
+        return netloc.split("]")[0].lstrip("[").lower() or None
+    return netloc.split(":")[0].lower() or None
+
+
+# Host numérico decimal (``http://2130706433/``) — rango completo de un IPv4.
+_DECIMAL_IP_HOST_RE = re.compile(r"^\d{7,10}$")
+# Host numérico hex (``http://0x7f000001/``).
+_HEX_IP_HOST_RE = re.compile(r"^0x[0-9a-f]{1,8}$", re.IGNORECASE)
+
+
+def is_obfuscated_ip_host(host: str) -> bool:
+    """True cuando *host* es un literal IPv4 disfrazado de decimal u hex (N4).
+
+    ``_URL_IP_HOST_RE`` (dotted-quad) no detecta estas formas — un enlace de
+    phishing puede usarlas para evadir el chequeo de "IP literal" a simple vista.
+    """
+    if _DECIMAL_IP_HOST_RE.match(host):
+        try:
+            return 0 <= int(host) <= 0xFFFFFFFF
+        except ValueError:
+            return False
+    return bool(_HEX_IP_HOST_RE.match(host))
 
 
 def strip_html(html: str) -> str:
@@ -716,7 +823,7 @@ def analyze_url(href: str, sender_domain: Optional[str] = None,
         findings.append({"type": "punycode", "href": href})
         score -= 8
 
-    if _URL_IP_HOST_RE.match(host):
+    if _URL_IP_HOST_RE.match(host) or is_obfuscated_ip_host(host):
         findings.append({"type": "ip_literal", "href": href})
         score -= 6
 
@@ -727,7 +834,26 @@ def analyze_url(href: str, sender_domain: Optional[str] = None,
     text_domain_match = _URL_DOMAIN_IN_TEXT_RE.search(visible_text or "")
     if text_domain_match:
         claimed = text_domain_match.group(1).lower()
-        if claimed != host and not host.endswith("." + claimed) and claimed not in host:
+        mismatch = claimed != host and not host.endswith("." + claimed) and claimed not in host
+        # Calibración FP: el click-tracking reescribe el href a un subdominio
+        # redirector dejando intacto el texto visible, así que un "mismatch"
+        # literal es la forma NORMAL de todo boletín con tracking. Dos casos
+        # son estructuralmente inocuos:
+        #   1. claimed y host son el mismo dominio registrable (el redirector
+        #      es otro subdominio de la misma organización);
+        #   2. el href apunta al dominio registrable del PROPIO remitente --
+        #      el destino es quien la víctima ya ve en el From, no un tercero.
+        # El caso 2 NO se exime cuando el dominio del texto visible es una
+        # marca conocida: ahí el texto sí promete una identidad ajena
+        # ("paypal.com" visible, href al dominio del atacante), que es
+        # exactamente el cloaking que esta señal existe para gatear.
+        same_organisation = registrable_domain(claimed) == host_reg
+        sender_owned_redirect = (
+            sender_domain is not None
+            and host_reg == sender_domain
+            and registrable_label(claimed) not in brands
+        )
+        if mismatch and not same_organisation and not sender_owned_redirect:
             findings.append({
                 "type": "cloaked_link",
                 "visible_text": visible_text.strip(),
@@ -735,14 +861,23 @@ def analyze_url(href: str, sender_domain: Optional[str] = None,
             })
             score -= 12
 
+    # Recalibración de pesos: un enlace de tracking de un ESP conocido tiene
+    # subdominios profundos (click.e.mailchimp.com) y codificación densa por
+    # diseño (URL-encodea la URL de destino real en la query) — ninguna de
+    # las dos cosas es evasión ahí, es la forma estructural normal de la
+    # infraestructura de click-tracking. brand_impersonation/cloaked_link/
+    # credential-harvest siguen activos sin excepción: un ESP comprometido
+    # sigue siendo detectable por esas señales.
+    is_esp_host = host in esp_tracker_domains() or registrable_domain(host) in esp_tracker_domains()
+
     # Unusually deep host — structurally weird even when no single label
     # matches a known brand. Low weight: legitimate deep CDN/infra
     # subdomains do exist, this is a soft additive signal, not a gate.
-    if len(host.split(".")) > URL_MAX_NORMAL_HOST_LABELS:
+    if not is_esp_host and len(host.split(".")) > URL_MAX_NORMAL_HOST_LABELS:
         findings.append({"type": "excessive_subdomains", "href": href, "host": host})
         score -= 5
 
-    if _has_dense_encoding(href):
+    if not is_esp_host and _has_dense_encoding(href):
         findings.append({"type": "dense_encoding", "href": href})
         score -= 6
 
@@ -751,13 +886,31 @@ def analyze_url(href: str, sender_domain: Optional[str] = None,
     # brand's domain, since "login"/"verify"/"account" are completely
     # normal on a company's own site. An insecure (http) page asking for
     # credentials on top of that is the textbook harvesting-page pattern.
-    if host_reg != sender_domain and registrable_label(host) not in brands:
+    #
+    # N3: that "known brand's domain" carve-out is also what let a
+    # credential-harvest form hosted on ``docs.google.com`` or
+    # ``sharepoint.com`` through with zero findings — those are
+    # multi-tenant hosting services where the path/subdomain is
+    # attacker-controlled even though the registrable domain genuinely
+    # belongs to the brand. Multi-tenant hosts are checked regardless of
+    # the brand carve-out, at a lower weight (it can still be a
+    # legitimate form) and tagged distinctly so the report doesn't read
+    # as "the sender's own site is malicious".
+    is_multitenant_host = any(
+        host == d or host.endswith("." + d) for d in multitenant_hosting_domains()
+    )
+    if is_multitenant_host or (host_reg != sender_domain and registrable_label(host) not in brands):
         path_and_query = f"{parsed.path} {parsed.query}".lower()
         kw_hits = [kw for kw in phishing_keywords if kw in path_and_query]
         if kw_hits:
-            is_insecure = parsed.scheme == "http"
-            finding_type = "insecure_credential_page" if is_insecure else "credential_harvest_path"
+            if is_multitenant_host:
+                finding_type = "multitenant_credential_page"
+                penalty = 8
+            else:
+                is_insecure = parsed.scheme == "http"
+                finding_type = "insecure_credential_page" if is_insecure else "credential_harvest_path"
+                penalty = 10 if is_insecure else 6
             findings.append({"type": finding_type, "href": href, "keywords": kw_hits})
-            score -= 10 if is_insecure else 6
+            score -= penalty
 
     return findings, score

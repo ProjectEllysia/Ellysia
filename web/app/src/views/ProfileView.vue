@@ -100,8 +100,6 @@
       @confirm="handleConfirmMfa"
       @cancel="mfa.cancelSetup()"
     />
-
-    <AppToast />
   </div>
 </template>
 
@@ -110,7 +108,6 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
-import AppToast from '@/components/shared/AppToast.vue'
 import MfaSetupModal from '@/components/shared/MfaSetupModal.vue'
 import { useProfileStore } from '@/stores/profileStore'
 import { useAuthStore } from '@/stores/authStore'
