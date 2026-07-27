@@ -27,6 +27,10 @@
           :metrics-error="store.state.metricsError"
           :latest="store.state.latest"
           :latest-error="store.state.latestError"
+          :inventory="store.state.inventory"
+          :inventory-collected-at="store.state.inventoryCollectedAt"
+          :inventory-loading="store.state.inventoryLoading"
+          :inventory-error="store.state.inventoryError"
           :anomalies="assetAnomalies"
           @ack="handleAck"
           @resolve="handleResolve"
@@ -196,6 +200,7 @@ async function refreshNow() {
   await Promise.all([
     store.fetchMetrics(id),
     store.fetchLatest(id),
+    store.fetchInventory(id),
   ])
 }
 

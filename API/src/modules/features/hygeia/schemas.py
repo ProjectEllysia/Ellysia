@@ -163,6 +163,42 @@ class MetricsSchema(_IngestSchema):
             )
 
 
+class SoftwareSchema(_IngestSchema):
+    """Una aplicación instalada, tal como la reporta el escaneo de inventario del agente."""
+    name = fields.String(required=True, validate=validate.Length(min=1, max=512))
+    type = fields.String(load_default=None, validate=validate.Length(max=32))
+    vendor = fields.String(load_default=None, validate=validate.Length(max=256))
+    version = fields.String(load_default=None, validate=validate.Length(max=128))
+    guid = fields.String(load_default=None, validate=validate.Length(max=128))
+    # String, no DateTime: viaja tal cual dentro del JSONB `inventory` (nunca
+    # se computa contra ella, a diferencia de `collectedAt`), y un `datetime`
+    # ahí dentro no sería serializable a JSON al guardar la fila.
+    installedAt = fields.String(load_default=None, allow_none=True, validate=validate.Length(max=32))
+    installPath = fields.String(load_default=None, validate=validate.Length(max=1024))
+    architecture = fields.String(load_default=None, validate=validate.Length(max=16))
+    sizeBytes = fields.Integer(load_default=None, validate=validate.Range(min=0))
+    status = fields.String(load_default=None, validate=validate.Length(max=32))
+    source = fields.String(load_default=None, validate=validate.Length(max=32))
+
+
+class InventorySchema(_IngestSchema):
+    """Inventario de software de un escaneo (§ contrato de ingesta v1.0).
+
+    Sin "delta": cada escaneo trae el estado completo de software instalado,
+    nunca un diff — el backend reemplaza por completo el inventario anterior.
+    """
+    software = fields.List(fields.Nested(SoftwareSchema), required=True)
+
+    @validates_schema
+    def validate_max_items(self, data, **kwargs):
+        """Acota ``software`` contra ``hygeia.limits.maxInventoryItems`` (§16.1)."""
+        max_items = CR.get_hygeia_max_inventory_items()
+        if len(data.get("software", [])) > max_items:
+            raise ValidationError(
+                f"software excede el máximo de {max_items} elementos", field_name="software",
+            )
+
+
 class IngestRequestSchema(_IngestSchema):
     """Heartbeat completo enviado por un agente Hygeia (§11)."""
     agentVersion = fields.String(required=True, validate=validate.Length(min=1, max=32))
@@ -170,6 +206,9 @@ class IngestRequestSchema(_IngestSchema):
     host = fields.Nested(HostInfoSchema, required=True)
     metrics = fields.Nested(MetricsSchema, required=True)
     localAlerts = fields.List(fields.Raw(), load_default=list)
+    # Opcional (omitempty en el agente): solo presente tras un escaneo de
+    # software reciente, no en cada heartbeat (§ contrato de ingesta v1.0).
+    inventory = fields.Nested(InventorySchema, load_default=None, allow_none=True)
 
     @post_load
     def normalize_collected_at(self, data, **kwargs):
@@ -300,3 +339,33 @@ class AssetLatestResponseSchema(Schema):
     collectedAt = UTCDateTime(allow_none=True)
     receivedAt = UTCDateTime(allow_none=True)
     metrics = fields.Nested(MetricsSchema, allow_none=True)
+
+
+# =============================================================================
+# INVENTARIO DE SOFTWARE — reemplaza por completo en cada escaneo, sin delta
+# =============================================================================
+
+class SoftwareViewSchema(Schema):
+    """Vista de una aplicación instalada (respuesta, no ingesta)."""
+    name = fields.String()
+    type = fields.String(allow_none=True)
+    vendor = fields.String(allow_none=True)
+    version = fields.String(allow_none=True)
+    guid = fields.String(allow_none=True)
+    installedAt = fields.String(allow_none=True)
+    installPath = fields.String(allow_none=True)
+    architecture = fields.String(allow_none=True)
+    sizeBytes = fields.Integer(allow_none=True)
+    status = fields.String(allow_none=True)
+    source = fields.String(allow_none=True)
+
+
+class AssetInventoryResponseSchema(Schema):
+    """Último inventario de software conocido de un activo.
+
+    ``collectedAt`` y ``software`` son nulos/vacíos si el activo nunca ha
+    mandado un escaneo de inventario (agente antiguo, o aún no le tocó el
+    primer escaneo) — no es un error, es un estado legítimo.
+    """
+    collectedAt = UTCDateTime(allow_none=True)
+    software = fields.List(fields.Nested(SoftwareViewSchema))

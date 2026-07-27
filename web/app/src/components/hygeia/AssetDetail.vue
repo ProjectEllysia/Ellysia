@@ -157,6 +157,56 @@
       </template>
     </div>
 
+    <div v-show="activeTab === 'inventario'" class="tab-panel">
+      <section class="section">
+        <h4 class="section-title">
+          Inventario de software
+          <span v-if="inventory.length" class="count">{{ inventory.length }}</span>
+        </h4>
+
+        <p v-if="inventoryError" class="state-msg state-msg--error">{{ inventoryError }}</p>
+        <p v-else-if="inventoryLoading" class="state-msg">Cargando inventario…</p>
+
+        <template v-else>
+          <p v-if="inventoryCollectedAt" class="inventory-scanned">
+            Escaneado {{ timeAgo(inventoryCollectedAt) }}
+          </p>
+
+          <p v-if="!inventory.length && !inventoryCollectedAt" class="state-msg">
+            Este activo aún no ha reportado un escaneo de inventario.
+          </p>
+          <p v-else-if="!inventory.length" class="state-msg">
+            El último escaneo no encontró software instalado.
+          </p>
+
+          <template v-else>
+            <input
+              v-model="inventoryFilter"
+              type="search"
+              class="inventory-filter"
+              placeholder="Filtrar por nombre o fabricante…"
+            />
+
+            <p v-if="!filteredInventory.length" class="state-msg">Ningún resultado para «{{ inventoryFilter }}».</p>
+
+            <ul v-else class="rows inventory-rows">
+              <li v-for="(sw, i) in filteredInventory" :key="`${sw.name}-${i}`" class="row row--software">
+                <div class="sw-main">
+                  <span class="row-name" :title="sw.name">{{ sw.name }}</span>
+                  <span v-if="sw.version" class="sw-version">{{ sw.version }}</span>
+                </div>
+                <span v-if="sw.vendor" class="sw-vendor" :title="sw.vendor">{{ sw.vendor }}</span>
+                <span v-if="sw.sizeBytes" class="row-value sw-size">
+                  {{ fmtBytes(sw.sizeBytes).text }}<small>{{ fmtBytes(sw.sizeBytes).unit }}</small>
+                </span>
+                <span v-if="sw.installedAt" class="row-note sw-installed">{{ formatDate(sw.installedAt) }}</span>
+              </li>
+            </ul>
+          </template>
+        </template>
+      </section>
+    </div>
+
     <div v-show="activeTab === 'anomalias'" class="tab-panel">
       <section class="section">
         <h4 class="section-title">
@@ -209,13 +259,20 @@ const props = defineProps({
   // llega a null mientras el activo no haya reportado nunca.
   latest: { type: Object, default: null },
   latestError: { type: String, default: null },
+  // Último inventario de software conocido (§ contrato de ingesta v1.0):
+  // reemplaza por completo en cada escaneo, sin delta. `inventoryCollectedAt`
+  // null significa que el activo nunca ha mandado un escaneo.
+  inventory: { type: Array, default: () => [] },
+  inventoryCollectedAt: { type: String, default: null },
+  inventoryLoading: { type: Boolean, default: false },
+  inventoryError: { type: String, default: null },
   anomalies: { type: Array, default: () => [] },
 })
 defineEmits(['ack', 'resolve', 'delete'])
 
 const { formatDate } = useUtils()
 
-const TAB_IDS = ['graficas', 'estadisticas', 'anomalias']
+const TAB_IDS = ['graficas', 'estadisticas', 'inventario', 'anomalias']
 const TAB_STORAGE_PREFIX = 'ellysia:hygeia:lastTab:'
 
 const activeTab = ref('graficas')
@@ -231,7 +288,7 @@ watch(activeTab, (tab) => {
   if (id) localStorage.setItem(TAB_STORAGE_PREFIX + id, tab)
 })
 
-const KEY_TO_TAB = { '1': 'graficas', '2': 'estadisticas', '3': 'anomalias' }
+const KEY_TO_TAB = { '1': 'graficas', '2': 'estadisticas', '3': 'inventario', '4': 'anomalias' }
 
 function isTypingTarget(el) {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
@@ -253,6 +310,19 @@ onUnmounted(() => window.removeEventListener('keydown', handleTabShortcut))
 const openAnomalyCount = computed(() =>
   props.anomalies.filter((a) => a.state !== 'resolved').length
 )
+
+const inventoryFilter = ref('')
+/** Al cambiar de activo se descarta el filtro anterior: no tiene sentido
+ *  conservar un texto de búsqueda escrito para un host distinto. */
+watch(() => props.asset?.id, () => { inventoryFilter.value = '' })
+
+const filteredInventory = computed(() => {
+  const needle = inventoryFilter.value.trim().toLowerCase()
+  if (!needle) return props.inventory
+  return props.inventory.filter((sw) =>
+    sw.name?.toLowerCase().includes(needle) || sw.vendor?.toLowerCase().includes(needle)
+  )
+})
 
 /**
  * Un host con muchos núcleos re-renderizaría cientos de barras cada 15 s. El
@@ -413,7 +483,7 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 .rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
 .row {
   display: flex; align-items: center; gap: 0.6rem;
-  padding: 0.3rem 0.5rem; border-radius: 6px;
+  padding: 0.5rem 0.5rem; border-radius: 6px;
   background: var(--surface-2);
   font-size: var(--fs-sm);
 }
@@ -433,6 +503,29 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 
 .row--disk .row-name { flex: 0 1 8rem; }
 .row--net .row-value { min-width: 5.5rem; text-align: right; }
+
+/* ── Inventario de software ── */
+.inventory-scanned { margin: -0.3rem 0 0.7rem; font-size: var(--fs-sm); color: var(--text-muted); }
+
+.inventory-filter {
+  width: 100%; margin-bottom: 0.7rem;
+  padding: 0.45rem 0.7rem; border-radius: 6px;
+  background: var(--surface-2); border: 1px solid var(--border-med);
+  color: var(--text); font-size: var(--fs-body);
+}
+.inventory-filter:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 1px; }
+
+.inventory-rows { max-height: 26rem; overflow-y: auto; }
+
+.row--software { flex-wrap: wrap; }
+.sw-main { display: flex; align-items: baseline; gap: 0.5rem; flex: 1 1 12rem; min-width: 0; }
+.sw-version { flex-shrink: 0; font-size: var(--fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.sw-vendor {
+  flex: 1 1 10rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-sm); color: var(--text-muted);
+}
+.sw-size { min-width: 4.5rem; text-align: right; }
+.sw-installed { min-width: 5.5rem; text-align: right; font-size: var(--fs-md)}
 
 .bar {
   flex: 1 1 0; min-width: 3rem; height: 6px;

@@ -866,6 +866,11 @@ def get_hygeia_max_net_interfaces() -> int:
     return _cfg("hygeia.limits.maxNetInterfaces", 64, int)
 
 @_lazy_load
+def get_hygeia_max_inventory_items() -> int:
+    """Máximo de aplicaciones en un escaneo de inventario de software (§16.1)."""
+    return _cfg("hygeia.limits.maxInventoryItems", 2000, int)
+
+@_lazy_load
 def get_hygeia_min_interval_sec() -> int:
     """Suelo de cadencia entre heartbeats de una misma clave, en segundos (§16.2)."""
     return _cfg("hygeia.limits.minIntervalSec", 5, int)

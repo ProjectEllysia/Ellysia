@@ -194,15 +194,16 @@
       "swapPct": { "warning": 40, "critical": 70 }
     },
     "limits": {
-      "maxBodyBytes": 262144,
-      "maxDecompressedBytes": 1048576,
+      "maxBodyBytes": 1048576,
+      "maxDecompressedBytes": 4194304,
       "maxProcesses": 20,
       "maxDiskMounts": 64,
       "maxNetInterfaces": 64,
       "maxSeriesPoints": 1000,
       "minIntervalSec": 5,
       "clockSkewSec": 300,
-      "maxAssetsPerUser": 500
+      "maxAssetsPerUser": 500,
+      "maxInventoryItems": 2000
     }
   },
   "iris": {

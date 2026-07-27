@@ -78,6 +78,19 @@ class MonitoredAsset(Base):
         thresholds: Umbrales específicos de este activo, en el mismo formato
             que el bloque ``hygeia.thresholds`` de la configuración global.
             Si una métrica no aparece aquí, se usa el umbral global.
+        inventory: Lista de software instalado (``Software[]`` del contrato
+            de ingesta), tal como llegó en el último escaneo del agente. No
+            hay histórico: cada escaneo es el estado completo, así que un
+            escaneo nuevo reemplaza por completo al anterior, nunca se
+            fusiona. ``None`` significa "el agente nunca ha escaneado
+            software" (agente antiguo, o primer heartbeat aún no procesado);
+            una lista vacía significa "escaneó y no encontró nada" (stub de
+            Linux/macOS, o un host realmente sin software registrado).
+        inventory_collected_at: Instante (reloj del servidor) del heartbeat
+            que trajo el último ``inventory``. Vive aparte de ``last_seen_at``
+            porque el inventario solo viaja cada
+            ``InventoryIntervalSec`` (típicamente 6h), muchísimo más
+            espaciado que el heartbeat.
         user_id: Clave foránea al usuario dueño del activo.
         created_at: Instante de alta del activo.
         snapshots: Heartbeats recibidos de este activo.
@@ -102,6 +115,9 @@ class MonitoredAsset(Base):
     heartbeat_interval_sec = Column(Integer, nullable=True)
     breach_counters        = Column(JSONB, nullable=True)
     thresholds             = Column(JSONB, nullable=True)
+
+    inventory               = Column(JSONB, nullable=True)
+    inventory_collected_at  = Column(DateTime, nullable=True)
 
     user_id    = Column(Integer, ForeignKey("User.id"), nullable=False)
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)

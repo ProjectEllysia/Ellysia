@@ -169,6 +169,29 @@ class HygeiaAssetManager:
             "metrics":     snapshot.metrics,
         }
 
+    def get_inventory(self, asset_id: int) -> dict:
+        """
+        Devuelve el último inventario de software conocido de un activo del usuario.
+
+        No hay histórico (§ contrato de ingesta v1.0): lo que se guarda es
+        siempre el resultado íntegro del último escaneo, así que no hay nada
+        que paginar ni filtrar por rango temporal aquí.
+
+        Un activo que nunca ha mandado un escaneo de inventario (agente
+        antiguo, o el primero aún no le llegó) devuelve ``collectedAt: null``
+        y ``software: []`` — no es un error, igual que ``get_latest_metrics``
+        con un activo que aún no ha reportado.
+
+        Raises:
+            AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
+        """
+        repo = build_repository(MonitoredAssetRepository)
+        asset = self._get_owned_asset(repo, asset_id, self.user.id)
+        return {
+            "collectedAt": asset.inventory_collected_at,
+            "software": asset.inventory or [],
+        }
+
     def get_asset(self, asset_id: int) -> dict:
         """
         Devuelve el detalle de un activo del usuario.
@@ -311,6 +334,14 @@ class HygeiaIngestManager:
             # que se sobreescribe siempre — un None ahí también es información.
             asset.kernel = payload["host"]["kernel"] or asset.kernel
             asset.uptime_sec = payload["host"]["uptimeSec"]
+            # `inventory` es opcional (omitempty en el agente) y, cuando llega,
+            # es el estado COMPLETO del software instalado, nunca un delta: se
+            # reemplaza sin fusionar. `None` = el agente no escaneó en este
+            # heartbeat (se conserva el inventario anterior); `[]` sí es un
+            # reemplazo válido (host sin software, o stub Linux/macOS).
+            if payload["inventory"] is not None:
+                asset.inventory = payload["inventory"]["software"]
+                asset.inventory_collected_at = now
             asset_repo.update(asset)
 
             self._resolve_host_down_if_open(uow, asset.id)
