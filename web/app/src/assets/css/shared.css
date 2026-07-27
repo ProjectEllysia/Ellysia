@@ -414,9 +414,10 @@ select option { background: var(--surface); color: var(--text); }
 .alert-success { background: var(--success-dim); border: 1px solid var(--success); color: var(--success); }
 .alert svg     { flex-shrink: 0; margin-top: 1px; }
 
-::-webkit-scrollbar       { width: 3px; height: 3px; }
+::-webkit-scrollbar       { width: 15px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 2px; }
+::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-med); background-clip: padding-box; }
 
 @keyframes seq-pulse {
   0%, 100% { opacity: 1; }

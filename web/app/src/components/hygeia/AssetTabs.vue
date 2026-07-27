@@ -25,7 +25,8 @@ defineEmits(['switch'])
 const tabs = [
   { id: 'graficas', label: 'Gráficas', hint: 'Atajo: 1' },
   { id: 'estadisticas', label: 'Estadísticas', hint: 'Atajo: 2' },
-  { id: 'anomalias', label: 'Anomalías', hint: 'Atajo: 3' },
+  { id: 'inventario', label: 'Inventario', hint: 'Atajo: 3' },
+  { id: 'anomalias', label: 'Anomalías', hint: 'Atajo: 4' },
 ]
 </script>
 

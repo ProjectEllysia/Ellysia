@@ -36,6 +36,7 @@ from .schemas import (
     AnomalySchema,
     AssetCreateRequestSchema,
     AssetCreatedResponseSchema,
+    AssetInventoryResponseSchema,
     AssetLatestResponseSchema,
     AssetListResponseSchema,
     AssetMetricsQuerySchema,
@@ -142,6 +143,22 @@ def get_asset_latest_metrics(asset_id):
     user = get_current_user()
     mgr = HygeiaAssetManager(user)
     return mgr.get_latest_metrics(asset_id)
+
+
+@hygeia_blp.get("/assets/<int:asset_id>/inventory")
+@hygeia_blp.response(200, AssetInventoryResponseSchema, description="Último inventario de software del activo")
+@hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@hygeia_blp.alt_response(404, schema=ErrorSchema, description="Asset not found")
+@limiter.limit("600 per hour")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.HYGEIA_READ])
+@handle_exceptions(default_exception=AssetNotFoundError, logger=logger)
+def get_asset_inventory(asset_id):
+    """Obtener el último inventario de software conocido de un activo"""
+    user = get_current_user()
+    mgr = HygeiaAssetManager(user)
+    return mgr.get_inventory(asset_id)
 
 
 @hygeia_blp.delete("/assets/<int:asset_id>")

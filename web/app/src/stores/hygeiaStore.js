@@ -18,6 +18,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     selectedId: null,
     metrics: [], metricsTruncated: false, metricsLoading: false, metricsError: null,
     latest: null, latestError: null,
+    inventory: [], inventoryCollectedAt: null, inventoryLoading: false, inventoryError: null,
     lastAgentKey: null,
   })
 
@@ -86,7 +87,10 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     state.metricsError = null
     state.latest = null
     state.latestError = null
-    if (id) { fetchMetrics(id); fetchLatest(id) }
+    state.inventory = []
+    state.inventoryCollectedAt = null
+    state.inventoryError = null
+    if (id) { fetchMetrics(id); fetchLatest(id); fetchInventory(id) }
   }
 
   /**
@@ -135,6 +139,29 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     } catch { if (state.selectedId === id) state.latestError = 'No se pudo conectar con la API.' }
   }
 
+  /**
+   * Carga el último inventario de software conocido del activo dado.
+   *
+   * No tiene variante `silent`: el inventario solo cambia cada horas (§
+   * contrato de ingesta v1.0, cadencia típica 6h), así que no lo toca el
+   * sondeo de 15s de la vista — solo la selección de activo y el refresco manual.
+   *
+   * @param {number} id - Id del activo.
+   */
+  async function fetchInventory(id) {
+    state.inventoryLoading = true
+    try {
+      const res = await apiFetch(`/hygeia/assets/${id}/inventory`)
+      if (state.selectedId !== id) return
+      if (!res?.ok) { state.inventoryError = await apiError(res, 'No se pudo cargar el inventario.'); return }
+      const data = await res.json()
+      state.inventory = data.software ?? []
+      state.inventoryCollectedAt = data.collectedAt ?? null
+      state.inventoryError = null
+    } catch { if (state.selectedId === id) state.inventoryError = 'No se pudo conectar con la API.' }
+    finally { if (state.selectedId === id) state.inventoryLoading = false }
+  }
+
   /** Descarta la clave de agente mostrada — llamar al cerrar el modal de una sola vez. */
   function clearAgentKey() { state.lastAgentKey = null }
 
@@ -145,6 +172,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
       selectedId: null,
       metrics: [], metricsTruncated: false, metricsLoading: false, metricsError: null,
       latest: null, latestError: null,
+      inventory: [], inventoryCollectedAt: null, inventoryLoading: false, inventoryError: null,
       lastAgentKey: null,
     })
   }
@@ -152,7 +180,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
   return {
     state,
     fetchAssets, createAsset, deleteAsset, rotateKey,
-    selectAsset, fetchMetrics, fetchLatest, clearAgentKey,
+    selectAsset, fetchMetrics, fetchLatest, fetchInventory, clearAgentKey,
     $reset,
   }
 })
