@@ -17,6 +17,24 @@ import redis as redis_lib
 
 import src.modules.system.config_reading as CR
 
+_logger = CR.get_logger(__name__)
+
+def ping_redis() -> bool:
+    try:
+        redis_cfg = CR.get_redis_config()
+        r = redis_lib.Redis(
+            host=redis_cfg["host"],
+            port=redis_cfg["port"],
+            db=redis_cfg["db"],
+            password=redis_cfg["password"],
+            socket_connect_timeout=redis_cfg.get("socket_connect_timeout", 2),
+        )
+        r.ping()
+        r.close()
+        _logger.info("Redis conectado correctamente")
+    except Exception as e:
+        _logger.warning("Redis no disponible — la cola de tareas no funcionara: %s", e)
+
 
 class RedisConnectionFactory:
     """Crea conexiones Redis a partir de la configuración central."""

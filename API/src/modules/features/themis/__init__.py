@@ -50,7 +50,7 @@ from .services import (
     NiktoPrintingStrategy,
     OpenVASPrintingStrategy,
     PDFCreator,
-    Scheduler,
+    ThemisScheduler,
 )
 
 from .endpoints import themis_blp
@@ -70,5 +70,5 @@ __all__ = [
     "themis_blp",
     "PDFCreator", "NmapPrintingStrategy", "NiktoPrintingStrategy",
     "OpenVASPrintingStrategy",
-    "Scheduler",
+    "ThemisScheduler",
 ]
