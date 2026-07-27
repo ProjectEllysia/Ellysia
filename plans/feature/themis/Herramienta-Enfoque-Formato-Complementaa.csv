@@ -1,0 +1,5 @@
+"Herramienta","Enfoque","Formato","Complementa a"
+"Nuclei","CVEs, misconfig, paneles expuestos rootsec","CLI, plantillas YAML","Nmap (recon) + Nikto"
+"Wapiti","Fuzzing web (SQLi, XSS, LFI) github","CLI puro Python","Nikto (mismo dominio)"
+"WPScan","Vulnerabilidades WordPress","CLI","Nikto en targets CMS"
+"testssl.sh","Auditoría TLS/SSL","Script CLI","Nmap (puertos 443/8443)"
