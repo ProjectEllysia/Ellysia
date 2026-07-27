@@ -191,6 +191,29 @@ def _graceful_shutdown(signum, *args) -> None:
     os._exit(0)
 
 
+def _build_cors(app: Flask) -> None:
+    _logger.info("Inicializando CORS...")
+
+    raw     = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173")
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if config_reading.is_development():
+        origins.append("http://127.0.0.1:5173")
+    CORS(app, origins=origins, supports_credentials=True)
+
+
+def _register_blueprints(app: Flask) -> None:
+    _logger.info("Añadiendo endpoints...")
+    flask_smorest_api = FlaskSmorestApi(app)
+    flask_smorest_api.register_blueprint(system_blp,    url_prefix="/system")
+    flask_smorest_api.register_blueprint(oauth_blp,     url_prefix="/oauth")
+    flask_smorest_api.register_blueprint(users_blp,     url_prefix="/users")
+    flask_smorest_api.register_blueprint(themis_blp,    url_prefix="/themis")
+    flask_smorest_api.register_blueprint(acheron_blp,   url_prefix="/acheron")
+    flask_smorest_api.register_blueprint(aegis_blp,     url_prefix="/aegis")
+    flask_smorest_api.register_blueprint(iris_blp,      url_prefix="/iris")
+    flask_smorest_api.register_blueprint(hygeia_blp,    url_prefix="/hygeia")
+
+
 def _register_error_handlers(app: Flask) -> None:
     """
     Registra manejadores de errores HTTP globales para la aplicación.
@@ -207,6 +230,8 @@ def _register_error_handlers(app: Flask) -> None:
         - 429 Too Many Requests: Rate limit superado.
         - 500 Internal Server Error: Errores inesperados.
     """
+    _logger.info("Registrando manejadores de error globales...")
+    
     @app.errorhandler(404)
     def not_found(error):
         _logger.warning(f"Ruta no encontrada: {request.method} {request.url}")
@@ -294,6 +319,7 @@ def _register_request_audit(app: Flask) -> None:
     Args:
         app: Instancia de la aplicación Flask.
     """
+    _logger.info("Registrando auditoría de peticiones...")
     audit_logger = logging.getLogger("ellysia.audit")
 
     @app.before_request
@@ -322,6 +348,39 @@ def _register_request_audit(app: Flask) -> None:
             duration_ms,
         )
         return response
+
+
+def _configure_scheduling() -> None:
+    from src.modules.features.themis.services.scheduling import ThemisScheduler
+    from src.modules.features.hygeia.services.scheduling import HygeiaScheduler
+    from src.modules.features.iris.services.mailbox.scheduling import IrisMailboxScheduler
+    
+    _logger.info("Reconciliando escaneos huérfanos...")
+    try:
+        from src.modules.features.themis.managers import ScanManager
+        fixed = ScanManager.reconcile_orphaned_scans()
+        if fixed:
+            _logger.info("Se marcaron %d escaneo(s) huérfano(s) como FAILED", fixed)
+    except Exception as e:
+        _logger.warning("No se pudo reconciliar escaneos huérfanos: %s", e)
+
+    _logger.info("Reconciliando análisis Iris huérfanos...")
+    try:
+        from src.modules.features.iris.managers import IrisManager
+        fixed_iris = IrisManager.reconcile_orphaned_analyses()
+        if fixed_iris:
+            _logger.info("Se marcaron %d análisis Iris huérfano(s) como failed", fixed_iris)
+    except Exception as e:
+        _logger.warning("No se pudo reconciliar análisis Iris huérfanos: %s", e)
+
+    _logger.info("Arrancando scheduler de tareas programadas...")
+    ThemisScheduler.start()
+
+    _logger.info("Arrancando scheduler de Hygeia...")
+    HygeiaScheduler.start()
+
+    _logger.info("Arrancando scheduler de buzones de Iris...")
+    IrisMailboxScheduler.start()
 
 
 def _run_migrations() -> None:
@@ -444,6 +503,20 @@ def _init_db() -> None:
     )
 
 
+def _run_workers() -> None:
+    popen_kwargs = {
+        "cwd": os.path.dirname(os.path.abspath(__file__)),
+        "start_new_session": True,
+    }
+
+    command = [sys.executable, "-m", "src.modules.system.taskqueue.worker"]
+    _WORKER["proc"] = subprocess.Popen(
+        command,
+        **popen_kwargs,
+    )
+    _logger.info("Worker iniciado como subproceso (PID %d)", _WORKER["proc"].pid)
+
+
 def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_migrations: bool = True) -> Flask:
     """
     Factory de la aplicación Flask Ellysia.
@@ -451,15 +524,14 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     Configura todos los componentes necesarios para servir la API REST.
 
     Args:
-        fresh_db_init: Si True, reinicializa la base de datos completamente
-                        (destructivo). Por defecto False.
+        fresh_db_init: Si ``True``, reinicializa la base de datos completamente
+                        (destructivo). Por defecto ``False``.
+        start_scheduler: Si ``True``, arranca los schedulers de tareas programadas. Por defecto ``True``
+        run_migrations: Si ``True``, aplica migraciones pendientes de Alembic.
 
     Returns:
         Flask: Aplicación completamente configurada y lista para servir.
     """
-    from src.modules.features.themis.services.scheduling import ThemisScheduler
-    from src.modules.features.hygeia.services.scheduling import HygeiaScheduler
-    from src.modules.features.iris.services.mailbox.scheduling import IrisMailboxScheduler
     from werkzeug.middleware.proxy_fix import ProxyFix
 
     configure_logging()
@@ -468,14 +540,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1) # type: ignore
 
     _logger.info("Inicializando la aplicación Ellysia...")
-    _logger.info("Inicializando CORS...")
-
-    raw     = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173")
-    origins = [o.strip() for o in raw.split(",") if o.strip()]
-    if config_reading.is_development():
-        origins.append("http://127.0.0.1:5173")
-    CORS(app, origins=origins, supports_credentials=True)
-
+    _build_cors(app)
     _logger.info("Inicializando rate limiting...")
 
     storage_uri = os.environ.get("RATELIMIT_STORAGE_URI")
@@ -493,22 +558,9 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     app.config["OPENAPI_URL_PREFIX"]    = "/api-docs"
     app.config["OPENAPI_SWAGGER_UI_PATH"] = "/swagger"
     app.config["OPENAPI_SWAGGER_UI_URL"] = "https://cdn.jsdelivr.net/npm/swagger-ui-dist/"
-    flask_smorest_api = FlaskSmorestApi(app)
 
-    _logger.info("Añadiendo endpoints...")
-    flask_smorest_api.register_blueprint(system_blp,    url_prefix="/system")
-    flask_smorest_api.register_blueprint(oauth_blp,     url_prefix="/oauth")
-    flask_smorest_api.register_blueprint(users_blp,     url_prefix="/users")
-    flask_smorest_api.register_blueprint(themis_blp,    url_prefix="/themis")
-    flask_smorest_api.register_blueprint(acheron_blp,   url_prefix="/acheron")
-    flask_smorest_api.register_blueprint(aegis_blp,     url_prefix="/aegis")
-    flask_smorest_api.register_blueprint(iris_blp,      url_prefix="/iris")
-    flask_smorest_api.register_blueprint(hygeia_blp,    url_prefix="/hygeia")
-
-    _logger.info("Registrando manejadores de error globales...")
+    _register_blueprints(app)
     _register_error_handlers(app)
-
-    _logger.info("Registrando auditoría de peticiones...")
     _register_request_audit(app)
 
     if fresh_db_init:
@@ -530,32 +582,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
     app.teardown_request(shutdown_request_session)
 
     if start_scheduler:
-        _logger.info("Reconciliando escaneos huérfanos...")
-        try:
-            from src.modules.features.themis.managers import ScanManager
-            fixed = ScanManager.reconcile_orphaned_scans()
-            if fixed:
-                _logger.info("Se marcaron %d escaneo(s) huérfano(s) como FAILED", fixed)
-        except Exception as e:
-            _logger.warning("No se pudo reconciliar escaneos huérfanos: %s", e)
-
-        _logger.info("Reconciliando análisis Iris huérfanos...")
-        try:
-            from src.modules.features.iris.managers import IrisManager
-            fixed_iris = IrisManager.reconcile_orphaned_analyses()
-            if fixed_iris:
-                _logger.info("Se marcaron %d análisis Iris huérfano(s) como failed", fixed_iris)
-        except Exception as e:
-            _logger.warning("No se pudo reconciliar análisis Iris huérfanos: %s", e)
-
-        _logger.info("Arrancando scheduler de tareas programadas...")
-        ThemisScheduler.start()
-
-        _logger.info("Arrancando scheduler de Hygeia...")
-        HygeiaScheduler.start()
-
-        _logger.info("Arrancando scheduler de buzones de Iris...")
-        IrisMailboxScheduler.start()
+        _configure_scheduling()
 
     _logger.info("Verificando conexion a Redis...")
     ping_redis()
@@ -571,34 +598,27 @@ if __name__ == "__main__":
     _args, _ = parser.parse_known_args()
 
     signal.signal(
-        signal.SIGTERM,
-        _graceful_shutdown
+        signalnum   = signal.SIGTERM,
+        handler     = _graceful_shutdown
     )
     signal.signal(
-        signal.SIGINT,
-        _graceful_shutdown
+        signalnum   = signal.SIGINT,
+        handler     = _graceful_shutdown
     )
 
-    app = create_app(APP_CONTEXT.create_database)
+    app = create_app(
+        fresh_db_init = APP_CONTEXT.create_database
+    )
 
     if _args.with_worker:
-        popen_kwargs = {
-            "cwd": os.path.dirname(os.path.abspath(__file__)),
-            "start_new_session": True,
-        }
-
-        _WORKER["proc"] = subprocess.Popen( # type: ignore
-            [sys.executable, "-m", "src.modules.system.taskqueue.worker"],
-            **popen_kwargs,
-        )
-        _logger.info("Worker iniciado como subproceso (PID %d)", _WORKER["proc"].pid)
+        _run_workers()
 
     try:
         app.run(
-            debug=APP_CONTEXT.debug,
-            host=APP_CONTEXT.host,
-            port=APP_CONTEXT.port,
-            use_reloader=False
+            debug           = APP_CONTEXT.debug,
+            host            = APP_CONTEXT.host,
+            port            = APP_CONTEXT.port,
+            use_reloader    = False
         )
     except KeyboardInterrupt:
         _logger.info("KeyboardInterrupt caught, initiating shutdown...")
