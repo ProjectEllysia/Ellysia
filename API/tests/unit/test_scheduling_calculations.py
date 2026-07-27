@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from src.modules.features.themis.services.scheduling import Scheduler
+from src.modules.features.themis.services.scheduling import ThemisScheduler
 
 pytestmark = pytest.mark.unit
 
@@ -19,7 +19,7 @@ pytestmark = pytest.mark.unit
 
 def test_interval_advances_by_configured_unit():
     last_run = datetime(2026, 1, 1, 12, 0, 0)
-    next_run = Scheduler.calculate_next_run(
+    next_run = ThemisScheduler.calculate_next_run(
         schedule_type="interval",
         schedule_config={"every": 5, "unit": "minutes"},
         last_run=last_run,
@@ -30,21 +30,21 @@ def test_interval_advances_by_configured_unit():
 def test_interval_supports_hours_and_days():
     last_run = datetime(2026, 1, 1, 12, 0, 0)
 
-    hours = Scheduler.calculate_next_run("interval", {"every": 2, "unit": "hours"}, last_run)
+    hours = ThemisScheduler.calculate_next_run("interval", {"every": 2, "unit": "hours"}, last_run)
     assert hours == last_run + timedelta(hours=2)
 
-    days = Scheduler.calculate_next_run("interval", {"every": 1, "unit": "days"}, last_run)
+    days = ThemisScheduler.calculate_next_run("interval", {"every": 1, "unit": "days"}, last_run)
     assert days == last_run + timedelta(days=1)
 
 
 def test_interval_invalid_unit_raises_value_error():
     with pytest.raises(ValueError):
-        Scheduler.calculate_next_run("interval", {"every": 1, "unit": "fortnights"}, datetime.utcnow())
+        ThemisScheduler.calculate_next_run("interval", {"every": 1, "unit": "fortnights"}, datetime.utcnow())
 
 
 def test_interval_without_last_run_uses_now():
     before = datetime.utcnow()
-    next_run = Scheduler.calculate_next_run("interval", {"every": 10, "unit": "minutes"})
+    next_run = ThemisScheduler.calculate_next_run("interval", {"every": 10, "unit": "minutes"})
     after = datetime.utcnow()
 
     assert before + timedelta(minutes=10) <= next_run <= after + timedelta(minutes=10)
@@ -56,7 +56,7 @@ def test_interval_without_last_run_uses_now():
 
 def test_cron_returns_next_occurrence_after_reference():
     last_run = datetime(2026, 1, 1, 12, 0, 0)
-    next_run = Scheduler.calculate_next_run(
+    next_run = ThemisScheduler.calculate_next_run(
         schedule_type="cron",
         schedule_config={"cron": "0 0 * * *"},  # diario a medianoche
         last_run=last_run,
@@ -70,7 +70,7 @@ def test_cron_without_last_run_does_not_run_immediately():
     cron, lo que disparaba el escaneo en el primer tick del scheduler en
     lugar de esperar a la próxima ocurrencia real del cron."""
     before = datetime.utcnow()
-    next_run = Scheduler.calculate_next_run("cron", {"cron": "0 0 * * *"})
+    next_run = ThemisScheduler.calculate_next_run("cron", {"cron": "0 0 * * *"})
     assert next_run > before
 
 
@@ -78,4 +78,4 @@ def test_cron_without_last_run_does_not_run_immediately():
 
 def test_unknown_schedule_type_raises_value_error():
     with pytest.raises(ValueError):
-        Scheduler.calculate_next_run("weekly", {}, datetime.utcnow())
+        ThemisScheduler.calculate_next_run("weekly", {}, datetime.utcnow())

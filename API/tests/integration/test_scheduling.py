@@ -23,7 +23,7 @@ from src.modules.features.themis.exceptions import InvalidProgramedTaskArgumentE
 from src.modules.features.themis.managers import LybraEngineManager, NmapScanManager, ProgramedScanManager
 from src.modules.features.themis.model import NmapScan, ScanStatus, ScanType
 from src.modules.features.themis.repositories import ProgramedScanRepository, ScanRepository
-from src.modules.features.themis.services.scheduling import Scheduler
+from src.modules.features.themis.services.scheduling import ThemisScheduler
 
 pytestmark = pytest.mark.integration
 
@@ -55,7 +55,7 @@ def test_execute_persists_run_timestamps_to_the_database(app, regular_user):
 
     with mock.patch.object(NmapScanManager, "run_scan", return_value=999) as mock_run:
         with app.app_context():
-            Scheduler.execute(ps_id)
+            ThemisScheduler.execute(ps_id)
 
     mock_run.assert_called_once()
     _, kwargs = mock_run.call_args
@@ -85,7 +85,7 @@ def test_execute_skips_when_a_run_is_already_active(app, regular_user):
 
     with mock.patch.object(NmapScanManager, "run_scan") as mock_run:
         with app.app_context():
-            Scheduler.execute(ps_id)
+            ThemisScheduler.execute(ps_id)
 
     mock_run.assert_not_called()
     assert _fetch(app, ps_id).last_run_at is None
@@ -103,7 +103,7 @@ def test_execute_skips_inactive_programed_scan(app, regular_user):
 
     with mock.patch.object(NmapScanManager, "run_scan") as mock_run:
         with app.app_context():
-            Scheduler.execute(ps_id)
+            ThemisScheduler.execute(ps_id)
 
     mock_run.assert_not_called()
     assert _fetch(app, ps_id).last_run_at is None
@@ -112,7 +112,7 @@ def test_execute_skips_inactive_programed_scan(app, regular_user):
 def test_execute_on_missing_programed_scan_does_not_raise(app):
     with mock.patch.object(NmapScanManager, "run_scan") as mock_run:
         with app.app_context():
-            Scheduler.execute(999_999)  # ya no existe / nunca existió
+            ThemisScheduler.execute(999_999)  # ya no existe / nunca existió
 
     mock_run.assert_not_called()
 
@@ -148,9 +148,9 @@ def test_sync_from_db_refreshes_stale_next_run_on_restart(app, regular_user):
             repo.update(ps)
 
     with app.app_context():
-        Scheduler.stop()  # parte de un estado limpio (singleton de clase)
+        ThemisScheduler.stop()  # parte de un estado limpio (singleton de clase)
         try:
-            Scheduler.start()  # arranca el scheduler real y llama a _sync_from_db
+            ThemisScheduler.start()  # arranca el scheduler real y llama a _sync_from_db
             with UnitOfWork() as uow:
                 refreshed = ProgramedScanRepository(uow).get_by_id(ps_id)
                 next_run = refreshed.next_run_at
@@ -160,7 +160,7 @@ def test_sync_from_db_refreshes_stale_next_run_on_restart(app, regular_user):
             expected = datetime.utcnow() + timedelta(minutes=5)
             assert abs((next_run - expected).total_seconds()) < 60
         finally:
-            Scheduler.stop()
+            ThemisScheduler.stop()
 
 
 def test_lybra_scan_type_is_schedulable(app, regular_user):
@@ -180,7 +180,7 @@ def test_lybra_scan_type_is_schedulable(app, regular_user):
 
     with mock.patch.object(LybraEngineManager, "run_scan", return_value=999) as mock_run:
         with app.app_context():
-            Scheduler.execute(ps_id)
+            ThemisScheduler.execute(ps_id)
 
     mock_run.assert_called_once()
     _, kwargs = mock_run.call_args
@@ -208,7 +208,7 @@ def test_build_trigger_uses_utc(app):
     """Los triggers deben fijar UTC explícito; por defecto APScheduler usaría la
     zona local del servidor y el cron dispararía a una hora distinta de la que
     calcula croniter/la BD (UTC)."""
-    interval = Scheduler._build_trigger("interval", {"every": 5, "unit": "minutes"})
-    cron = Scheduler._build_trigger("cron", {"cron": "0 2 * * *"})
+    interval = ThemisScheduler._build_trigger("interval", {"every": 5, "unit": "minutes"})
+    cron = ThemisScheduler._build_trigger("cron", {"cron": "0 2 * * *"})
     assert str(interval.timezone) == "UTC"
     assert str(cron.timezone) == "UTC"

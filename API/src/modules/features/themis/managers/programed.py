@@ -10,7 +10,7 @@ from ..model import (
     ProgramedScan,
     ScanType,
 )
-from ..services import Scheduler
+from ..services import ThemisScheduler
 from ..exceptions import (
     InvalidProgramedTaskArgumentError,
     ProgramedScanNotFoundError,
@@ -46,7 +46,7 @@ class ProgramedScanManager():
             schedule_type=schedule_type,
             schedule_config=schedule_config
         )
-        next_run = Scheduler.calculate_next_run(
+        next_run = ThemisScheduler.calculate_next_run(
             schedule_type=schedule_type,
             schedule_config=schedule_config,
         )
@@ -61,7 +61,7 @@ class ProgramedScanManager():
                 next_run_at=next_run,
             )
 
-        Scheduler.schedule(
+        ThemisScheduler.schedule(
             ps_id=ps.id,
             scan_type=ps.scan_type,
             user_id=ps.user_id,
@@ -136,7 +136,7 @@ class ProgramedScanManager():
 
     @classmethod
     def revoke(cls, ps_id: int, user_id: int) -> None:
-        Scheduler.unschedule(ps_id)
+        ThemisScheduler.unschedule(ps_id)
         with UnitOfWork() as uow:
             repo = ProgramedScanRepository(uow)
             ps = repo.get_by_id(ps_id)
@@ -149,7 +149,7 @@ class ProgramedScanManager():
 
     @classmethod
     def delete(cls, ps_id: int, user_id: int) -> None:
-        Scheduler.unschedule(ps_id)
+        ThemisScheduler.unschedule(ps_id)
         with UnitOfWork() as uow:
             repo = ProgramedScanRepository(uow)
             ps = repo.get_by_id(ps_id)

@@ -115,7 +115,7 @@ def _run_lybra_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None
     logger.info("Lybra scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
 
 
-class Scheduler:
+class ThemisScheduler:
 
     _TASK_MAPPING: dict[ScanType, Callable[[int, int, dict[str, Any]], None]] = {
         ScanType.NMAP:    _run_nmap_scan,

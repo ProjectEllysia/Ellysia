@@ -156,8 +156,8 @@ def test_scheduler_execute_removes_session(monkeypatch):
     monkeypatch.setattr(scheduling, "close_all", lambda: calls.__setitem__("n", calls["n"] + 1))
     # Skip the launch entirely: load phase returns None.
     monkeypatch.setattr(
-        scheduling.Scheduler, "_load_and_guard", classmethod(lambda cls, ps_id: None)
+        scheduling.ThemisScheduler, "_load_and_guard", classmethod(lambda cls, ps_id: None)
     )
 
-    scheduling.Scheduler.execute(999)
+    scheduling.ThemisScheduler.execute(999)
     assert calls["n"] == 1

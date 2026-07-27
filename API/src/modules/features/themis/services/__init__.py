@@ -32,7 +32,7 @@ from .csv_logger import (
     OpenVASScanLogger,
 )
 
-from .scheduling import Scheduler
+from .scheduling import ThemisScheduler
 
 from .parsing import validate_ip, validate_port, reject_private_ip
 
@@ -62,7 +62,7 @@ __all__ = [
     NmapScanLogger,
     NiktoScanLogger,
     OpenVASScanLogger,
-    Scheduler,
+    ThemisScheduler,
     validate_ip,
     validate_port,
     reject_private_ip,
