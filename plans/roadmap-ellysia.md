@@ -1,6 +1,6 @@
 # Ellysia — Plan de producto y roadmap
 
-> Documento de gobierno del proyecto. Ordena al resto de planes (`vulnengineroadmap.md`,
+> Documento de gobierno del proyecto. Ordena al resto de planes (`lybra-engine-roadmap.md`,
 > `feature/hygeia/*`, `improvements/*`) y decide qué se construye, qué se congela y qué no se
 > construye. Sustituye por completo al antiguo plan de viabilidad SaaS, cuyas dos premisas
 > centrales dejaron de ser ciertas: decía que Themis era "un envoltorio de Nmap/Nikto/OpenVAS"
@@ -54,7 +54,7 @@ Verificado directamente contra el código, no contra planes anteriores.
 | SPA Vue | 77 vistas, ~21.000 líneas | Incluye hubs públicos y páginas legales |
 | Tests | 60 ficheros, 708 tests | Unit + integration, SQLite con externos mockeados |
 
-### 2.2 Lybra — el motor propio (`vulnengineroadmap.md`)
+### 2.2 Lybra — el motor propio (`lybra-engine-roadmap.md`)
 
 Es, objetivamente, la pieza más valiosa del repositorio y la que justifica que Ellysia exista
 como algo más que una integración de herramientas ajenas.
@@ -233,28 +233,49 @@ la plataforma. No es urgente, pero es la mejor relación valor/esfuerzo de la Et
 
 ---
 
-## 6. OpenVAS: congelado
+## 6. OpenVAS: se elimina
 
-**Decisión: se queda en el código, sale del producto.** No se elimina, no se promociona, no
-recibe más trabajo.
+**Decisión (actualizada el 2026-07-28; sustituye a la decisión anterior de "congelado, no se
+borra"): se elimina del código, no solo del producto.** El plan de desmontaje y de sustitución
+de su cobertura vive en `lybra-engine-roadmap.md` (§§1, 7 y 8); aquí queda el razonamiento de
+gobierno, resumido.
 
-El razonamiento es el que ya se discutió y sigue siendo válido. OpenVAS/Greenbone es una
+El motivo de fondo no cambia respecto a la decisión anterior. OpenVAS/Greenbone es una
 plataforma completa con su propio protocolo de gestión, su propio ciclo de escaneo y su propia
 base de NVTs; integrarla es hacer de proxy autenticado hacia otra API, no añadir capacidad
 propia. Frente a Nmap y Nikto —binarios cuya salida Ellysia parsea para construir su propio
-modelo— OpenVAS no deja margen para aportar nada encima. Contradice la razón de ser de Lybra.
+modelo— OpenVAS no deja margen para aportar nada encima. Contradice la razón de ser de Lybra, y
+sigue siendo con diferencia el servicio más pesado del `docker-compose` (feed de NVTs con ~15
+minutos de arranque en frío, un solo host por escaneo, `NET_ADMIN` + `NET_RAW`, 1 GiB de
+memoria compartida).
 
-A eso se suma el coste operativo: el feed de NVTs tarda ~15 minutos en el primer arranque,
-acepta un solo host por escaneo (sin rangos), y es con diferencia el servicio más pesado del
-`docker-compose`. En una instancia compartida, cada usuario compitiendo por la misma instancia
-de Greenbone es el problema del vecino ruidoso en su forma más aguda.
+**Qué cambió respecto a "congelar":** dos hallazgos, al revisar el plan del motor con la
+pregunta "¿qué nos haría falta para prescindir de OpenVAS?", abarataron el borrado por debajo
+del umbral que justificaba dejarlo estático:
 
-**Por qué congelar y no borrar:** son ~200 referencias repartidas por 20 ficheros de Themis,
-con tests que pasan y una capacidad que funciona. Arrancarlo es varias sesiones de refactor
-cuyo único beneficio es estético mientras el proyecto no se despliegue para nadie. Si algún
-día se despliega, la decisión ya está tomada: OpenVAS no entra en ningún tier. Y si algún
-cliente lo pidiera expresamente, la única forma sensata sería una instancia dedicada suya,
-facturada aparte.
+1. El banco de pruebas de Lybra (`API/tests/oracle/`) nunca usó a OpenVAS como oráculo de
+   detección, pese a que un plan anterior lo daba por hecho — verificado contra el código, no
+   contra el plan. Borrarlo no deja a Lybra sin instrumento de medición; el sustituto (verdad
+   por etiqueta conocida en imágenes vulnerables + Nuclei como oráculo diferencial) no depende
+   de OpenVAS en absoluto.
+2. La brecha de cobertura real que deja no son "cien mil NVTs", sino cinco cosas concretas y
+   acotadas (protocolos no-HTTP, escaneo autenticado, verdad del proveedor sobre backports,
+   credenciales por defecto, y una cola larga de appliances de nicho que se descarta a
+   propósito). Cuatro de las cinco ya eran fases de este roadmap; la Fase N
+   (`lybra-engine-roadmap.md`) pasa a liderar precisamente para cerrar la única que de verdad
+   importa antes de que el borrado duela.
+
+Como el proyecto no tiene usuarios ni contacto comercial (§1), nadie pierde cobertura real al
+borrarlo ya: el coste de mantenerlo conectado (arranque lento, un corroborador de hasta 4 h
+disparándose en cada análisis profundo del motor propio) es presente y cierto; la pérdida de
+cobertura es hipotética y, en la práctica, ya cubierta por las fases en marcha. Por eso el
+desmontaje empieza por desconectarlo de inmediato (paso E0 de `lybra-engine-roadmap.md`) en
+lugar de esperar a que las fases de sustitución terminen.
+
+**Qué no cambia respecto a la decisión anterior:** si algún día hay un cliente real que lo pida
+expresamente, la única forma sensata seguiría siendo una instancia dedicada suya, facturada
+aparte — eso ya no es una opción de este roadmap una vez borrado el código, sino una
+reintegración desde cero si llegara a hacer falta.
 
 ---
 

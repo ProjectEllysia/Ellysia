@@ -21,7 +21,7 @@
 Un flujo *push*: agentes ligeros en los hosts empujan snapshots de métricas cada N
 segundos; el backend los persiste, evalúa reglas de umbral/baseline y abre incidencias.
 
-**NO es** (trampas de alcance, estilo `vulnengineroadmap.md`):
+**NO es** (trampas de alcance, estilo `lybra-engine-roadmap.md`):
 
 - No es un Prometheus/Grafana/Datadog. No construyas un TSDB propio, ni un lenguaje de
   consulta tipo PromQL, ni dashboards de gráficas arbitrarias. Postgres + JSONB basta
@@ -562,13 +562,13 @@ en la DB. A partir de ahí, Fase 2 es la que convierte "datos" en "alertas".
 ### 14.1 Por qué es viable — no es una capacidad nueva de Lybra, es un origen nuevo del dato
 
 Lybra ya separa "de dónde sale la lista de servicios" de "qué hace con ella". Su Fase 1 —
-el matcher CPE→CVE (`normalize_product_to_cpe` + `cves_for_cpe`, `vulnengineroadmap.md`
+el matcher CPE→CVE (`normalize_product_to_cpe` + `cves_for_cpe`, `lybra-engine-roadmap.md`
 §Fase 1, **ya implementada**) — toma como entrada una lista de `(host, puerto, producto,
 versión)` y no le importa si esa lista la generó Nmap, un `LybraEngineTask` manual, o —lo
 que proponemos aquí— el propio agente Hygeia leyendo paquetes instalados.
 
 Más aún: el roadmap del motor **ya había anticipado exactamente este problema**, solo que
-por otra vía. Su **Fase 4 — "el escaneo autenticado"** (`vulnengineroadmap.md` §Fase 4,
+por otra vía. Su **Fase 4 — "el escaneo autenticado"** (`lybra-engine-roadmap.md` §Fase 4,
 *avanzada y opcional, planificada*) propone entrar por SSH con una credencial del vault de
 Acheron para leer `dpkg -l`/`rpm -qa` y así resolver de raíz el problema de los backports
 (un banner de versión no siempre coincide con el paquete real instalado — la causa nº 1 de
@@ -603,7 +603,7 @@ en cada heartbeat.
 2. **Identidad de activo compartida con Themis.** El roadmap del motor ya resolvió este
    mismo problema para el caso Nmap-vs-Nmap: `ScanRepository.get_host_by_ip` evita que un
    mismo dispositivo físico se duplique en dos filas de `Host` cuando se le ve por IP y por
-   hostname (`vulnengineroadmap.md`, decisión de diseño del 2026-07-11, §Fase 5). Al dar de
+   hostname (`lybra-engine-roadmap.md`, decisión de diseño del 2026-07-11, §Fase 5). Al dar de
    alta un `MonitoredAsset` (§5, `POST /hygeia/assets`), hay que resolver o crear el `Host`
    de Themis correspondiente (por IP conocida o por hostname) y guardar esa referencia
    (`MonitoredAsset.host_id`, nullable — no todo activo Hygeia tiene por qué tener un `Host`
@@ -614,7 +614,7 @@ en cada heartbeat.
    cada paquete del inventario en la forma `Service` que consume `LybraEngineTask`. Diferencia
    clave frente al caso de red: aquí el **puerto es opcional** — una librería vulnerable no
    tiene por qué escuchar en ningún puerto. El modelo de `Finding` ya lo contempla en la
-   práctica: la categoría `outdated_software` (`vulnengineroadmap.md` §Modelo de datos, línea
+   práctica: la categoría `outdated_software` (`lybra-engine-roadmap.md` §Modelo de datos, línea
    139) no depende conceptualmente de un puerto, solo de un CPE resuelto y una versión.
 4. **Disparo del análisis.** Tras persistir un inventario nuevo (o distinto del anterior),
    encolar una tarea en `system/taskqueue` que invoque `LybraEngineManager.execute_lybra_scan`
