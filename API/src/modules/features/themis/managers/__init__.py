@@ -37,7 +37,8 @@ from .scan_folder import ScanFolderManager
 from .scan_history import ScanHistoryManager
 from .traceroute import TracerouteManager
 from .thirdparty_scans_managers import NmapScanManager, NiktoScanManager, OpenVASScanManager
-from .lybra_engine import LybraEngineManager, AuthorizedTargetManager
+from .authorized_target import AuthorizedTargetManager
+from .lybra_engine import LybraEngineManager
 from .kb import KbSyncManager
 from .reports import ThemisReportManager
 

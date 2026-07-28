@@ -17,7 +17,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from ..checks import Response
+from ..checks import HttpProbe, Response, is_http_service
+from .dispatch import Dissector, DissectorResult
+from .registry import register_dissector
 
 
 @dataclass(frozen=True)
@@ -216,3 +218,31 @@ def fingerprint_http(
         product=product, version=version, title=title,
         favicon_hash=favicon_hash, technologies=technologies, confidence=confidence,
     )
+
+
+@register_dissector
+class HttpDissector(Dissector):
+    """Fase F's highest-value protocol: GET /, its favicon, and a nonexistent
+    path (for error-page-only vendor signatures), combined into one fingerprint."""
+
+    label = "HTTP"
+
+    def __init__(self, probe: Optional[HttpProbe] = None) -> None:
+        self._probe = probe or HttpProbe()
+
+    def applies(self, service) -> bool:
+        return is_http_service(service)
+
+    def probe(self, target, service, rate_limiter):
+        rate_limiter.acquire(target)
+        resp = self._probe.fetch(target, service.port, "GET", "/")
+        if resp is None:
+            return None
+        rate_limiter.acquire(target)
+        favicon = self._probe.fetch_bytes(target, service.port, "/favicon.ico")
+        rate_limiter.acquire(target)
+        # Some vendors brand their error page more than their homepage (a
+        # SonicWall's 404 body says so, its "/" doesn't) — see fingerprint_http.
+        error_resp = self._probe.fetch(target, service.port, "GET", "/lybra-nonexistent-check")
+        fp = fingerprint_http(resp, favicon, error_resp)
+        return DissectorResult(fp.product, fp.version, self.label)

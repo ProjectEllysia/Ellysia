@@ -492,6 +492,22 @@ def _seed_kb_vsftpd_cve(app):
             )
 
 
+def _seed_kb_mysql_cve(app):
+    """Seed the KB with a made-up CVE for mysql 8.0.34, for the Fase N MySQL
+    dissector's CPE-gap-filling test."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            repo.upsert_cve(
+                {"cve_id": "CVE-2023-99999", "cvss_score": 7.5,
+                 "cvss_vector": "CVSS:3.1/AV:N", "severity": "HIGH",
+                 "description": "MySQL test CVE", "cwe_ids": ["CWE-284"], "source": "nvd"},
+                [{"vendor": "mysql", "product": "mysql", "exact_version": "8.0.34",
+                  "version_start_including": None, "version_start_excluding": None,
+                  "version_end_including": None, "version_end_excluding": None}],
+            )
+
+
 def test_lybra_version_match_produces_cve_finding(app, admin_user):
     _seed_kb_apache_cve(app)
     nmap_id = _seed_nmap_scan(app, admin_user.id)  # port 80 = Apache 2.4.49 with CPE
@@ -793,6 +809,40 @@ def test_lybra_ftp_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user,
     fingerprints = [f for f in findings if f.category == "fingerprint"]
     assert len(fingerprints) == 1
     assert "vsFTPd 2.3.4" in fingerprints[0].title
+
+
+def test_lybra_mysql_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, monkeypatch):
+    """Fase N's dissector registry, exercised end to end through the manager:
+    MySQL identification flows through _fingerprint_services exactly like
+    HTTP/SSH/FTP do, with no special-casing anywhere above the registry."""
+    import src.modules.system.config_reading as CR
+    from src.modules.features.themis.lybra import MysqlProbe
+
+    _seed_kb_mysql_cve(app)
+    monkeypatch.setattr(CR, "is_lybra_fingerprinting_enabled", lambda: True)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports", lambda self, target, ports: [3306])
+    monkeypatch.setattr(
+        MysqlProbe, "fetch",
+        lambda self, host, port: bytes([0x0A]) + b"8.0.34\x00" + b"\x00" * 13,
+    )
+    _authorize_target(app, admin_user.id)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=None)
+        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vulns = [f for f in findings if f.category == "outdated_software"]
+    assert len(vulns) == 1
+    assert vulns[0].cve_ids == ["CVE-2023-99999"]
+    assert vulns[0].qod == 70
+    fingerprints = [f for f in findings if f.category == "fingerprint"]
+    assert len(fingerprints) == 1
+    assert "MySQL 8.0.34" in fingerprints[0].title
 
 
 def test_lybra_scan_surfaces_in_results_endpoint(client, app, admin_user, auth_headers):

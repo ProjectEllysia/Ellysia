@@ -1,6 +1,5 @@
 """LybraEngineManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
-import ipaddress
 import logging
 from dataclasses import replace
 from typing import List, Optional
@@ -12,7 +11,6 @@ from src.modules.shared import utcnow_naive, isoformat_utc
 from ..repositories import (
     ScanRepository,
     KbRepository,
-    AuthorizedTargetRepository,
 )
 from ..model import (
     Finding,
@@ -20,101 +18,42 @@ from ..model import (
     Scan,
     ScanStatus,
     ScanType,
-    AuthorizedTarget,
 )
 from ..lybra import (
     LybraEngine,
     Service,
-    services_from_open_ports,
-    services_from_discovered_ports,
     compute_dedup_key,
     merge_findings,
     apply_lifecycle,
     classify_exposure,
     score_finding,
     QOD_OPEN_PORT,
+    QOD_FINGERPRINT,
+    default_dissectors,
+    agrees_with_nmap,
+    HostRateLimiter,
+    load_checks,
+    CheckRuntime,
+    HttpProbe,
+    TlsProbe,
+    NetworkProbe,
+    is_http_service,
+    DEFAULT_PORTS,
+    scan_ports_sync,
 )
 from ..services import _Task, LybraPrintingStrategy
 from ..exceptions import (
     ScanNotFoundError,
     FindingNotFoundError,
-    TargetNotAuthorizedError,
-    AuthorizedTargetNotFoundError,
-    DuplicateAuthorizedTargetError,
-    IPValidationError,
 )
 
 from .scan import ScanManager
 from .thirdparty_scans_managers import NmapScanManager, NiktoScanManager, OpenVASScanManager
-
+from .lybra_sources import ServiceSource
+from .authorized_target import AuthorizedTargetManager
 
 
 logger = logging.getLogger(__name__)
-
-
-class AuthorizedTargetManager:
-    """CRUD y comprobación de pertenencia para el registro de objetivos autorizados.
-
-    Registro de objetivos autorizados (roadmap §6). Antes de que Lybra ejecute
-    cualquier operación que toque la red del objetivo (autodescubrimiento propio,
-    fingerprinting propio, comprobaciones activas del runtime), el objetivo debe
-    estar en este registro por usuario. Es un gate legal, no de red o de
-    privilegios: complementa, no sustituye, el rechazo de IPs privadas que ya
-    hace ``ScanManager.validate_ip``.
-    """
-
-    @staticmethod
-    def _normalize(target: str) -> str:
-        """Valida ``target`` como IP o CIDR y devuelve su forma canónica."""
-        try:
-            return str(ipaddress.ip_network(target.strip(), strict=False))
-        except ValueError as exc:
-            raise IPValidationError(
-                message=f"'{target}' no es una IP ni un CIDR válido",
-                ip_spec=target,
-            ) from exc
-
-    def add(self, user_id: int, target: str, label: str | None = None) -> AuthorizedTarget:
-        """Añade un objetivo al registro del usuario. Rechaza duplicados."""
-        normalized = self._normalize(target)
-        with UnitOfWork() as uow:
-            repo = AuthorizedTargetRepository(uow)
-            if repo.get_by_target_and_user(normalized, user_id):
-                raise DuplicateAuthorizedTargetError(normalized)
-            entry = AuthorizedTarget(user_id=user_id, target=normalized, label=label or None)
-            repo.save(entry)
-        logger.info(f"Objetivo autorizado '{normalized}' añadido por usuario {user_id}")
-        return entry
-
-    def list(self, user_id: int) -> list[AuthorizedTarget]:
-        """Lista el registro completo del usuario."""
-        return build_repository(AuthorizedTargetRepository).get_by_user(user_id)
-
-    def remove(self, target_id: int, user_id: int) -> str:
-        """Elimina una entrada del registro, verificando propiedad.
-
-        Returns:
-            El target (IP/CIDR) de la entrada eliminada.
-        """
-        with UnitOfWork() as uow:
-            repo = AuthorizedTargetRepository(uow)
-            entry = repo.get_by_id_and_user(target_id, user_id)
-            if entry is None:
-                raise AuthorizedTargetNotFoundError(target_id)
-            target = entry.target
-            repo.delete(entry)
-        logger.info(f"Objetivo autorizado {target_id} eliminado por usuario {user_id}")
-        return target
-
-    @staticmethod
-    def is_authorized(user_id: int, target: str) -> bool:
-        """True si ``target`` (una IP) cae dentro de alguna entrada autorizada del usuario."""
-        try:
-            ip = ipaddress.ip_address(target.strip())
-        except ValueError:
-            return False
-        entries = build_repository(AuthorizedTargetRepository).get_by_user(user_id)
-        return any(ip in ipaddress.ip_network(entry.target, strict=False) for entry in entries)
 
 
 @ScanManager.register(ScanType.LYBRA)
@@ -155,6 +94,7 @@ class LybraEngineManager(ScanManager):
         deep: bool = False,
         timeout: int = 120,
         programed_scan_id: Optional[int] = None,
+        asset_id: Optional[int] = None,
     ) -> int:
         """
         Start an Lybra engine scan in one of three modes.
@@ -183,32 +123,23 @@ class LybraEngineManager(ScanManager):
                 validated (see ``_run_lybra``).
             programed_scan_id: Set when launched by the scheduler (Themis
                 scheduled scans), same convention as the other scan managers.
+            asset_id: Fase I — the Hygeia asset whose inventory produced
+                ``services``. Recorded on the scan row for provenance and
+                grouping; it is never an input to the analysis itself, which
+                is why it does not travel in the TaskQueue args.
 
         Returns:
             Primary key of the created LybraScan record.
         """
-        if source_scan_id is not None:
-            with UnitOfWork() as uow:
-                source = ScanRepository(uow).get_by_id(source_scan_id)
-                if not source:
-                    raise ScanNotFoundError(source_scan_id)
-                scan_target = source.target
-        elif services is not None:
-            if not target:
-                raise ValueError("run_scan requires a target when services is set")
-            scan_target = target
-        elif target is not None:
-            scan_target = target
-            if not AuthorizedTargetManager.is_authorized(user_id, scan_target):
-                raise TargetNotAuthorizedError(scan_target)
-        else:
-            raise ValueError("run_scan requires source_scan_id, services, or target")
+        source = ServiceSource.for_args(source_scan_id, services, discover_ports)
+        scan_target = source.scan_target(user_id, target)
 
         scan = self._create_scan_record(
             target=scan_target,
             user_id=user_id,
             source_scan_id=source_scan_id, # type: ignore
             programed_scan_id=programed_scan_id,
+            asset_id=asset_id,
         )
         scan_id = scan.id
 
@@ -221,21 +152,15 @@ class LybraEngineManager(ScanManager):
             timeout=timeout + self._scan_timeout_margin,
         )
 
-        if source_scan_id:
-            mode = f"fuente Nmap {source_scan_id}"
-        elif services is not None:
-            mode = "payload externo"
-        else:
-            mode = "descubrimiento propio"
-        mode += " + análisis profundo" if deep else ""
+        mode = source.label + (" + análisis profundo" if deep else "")
         logger.info(f"Escaneo Lybra {scan_id} iniciado ({mode})")
         return scan_id  # type: ignore
 
     @staticmethod
     def execute_lybra_scan(
-        scan_id: int, 
+        scan_id: int,
         source_scan_id: Optional[int] = None,
-        discover_ports: Optional[list] = None, 
+        discover_ports: Optional[list] = None,
         deep: bool = False,
         services: Optional[List[Service]] = None
     ) -> None:
@@ -251,7 +176,7 @@ class LybraEngineManager(ScanManager):
             )
 
     def _run_lybra(
-        self, 
+        self,
         scan_id: int,
         source_scan_id: Optional[int] = None,
         discover_ports: Optional[list] = None,
@@ -265,8 +190,7 @@ class LybraEngineManager(ScanManager):
         worker.
         """
 
-        uses_existing_source: bool = source_scan_id is not None
-        uses_payload: bool = services_payload is not None
+        source = ServiceSource.for_args(source_scan_id, services_payload, discover_ports)
         try:
             self.update_scan_status(scan_id, ScanStatus.RUNNING)
 
@@ -277,76 +201,33 @@ class LybraEngineManager(ScanManager):
                 lybra_scan = scan_repo.get_by_id(scan_id)
                 source_target = lybra_scan.target if lybra_scan else None
                 user_id = lybra_scan.user_id if lybra_scan else None
-                
+
                 is_target_authorized = bool(
                     user_id and source_target
                     and AuthorizedTargetManager.is_authorized(user_id, source_target)
                 )
-                
+
+                resolved = source.resolve(scan_repo, self, source_target)
+                if resolved is None:
+                    self.update_scan_status(scan_id, ScanStatus.FAILED)
+                    return
+                services, source_host_id, source_target = resolved.services, resolved.host_id, resolved.target
+
                 fingerprint_findings: list = []
-                surface_findings: list = []
-                
-                if uses_existing_source:
-                    open_ports = scan_repo.get_open_ports_for_scan(source_scan_id)
-                    source = scan_repo.get_by_id(source_scan_id)
-                    source_host_id = source.host_id if source else None
-                    source_target = source.target if source else source_target
-                    services = services_from_open_ports(open_ports)
-                elif uses_payload:
-                    host = None
-                    if source_target:
-                        host = scan_repo.get_host_by_ip(source_target) or scan_repo.get_or_create_host(
-                            hostname=source_target, ip_address=source_target,
-                        )
-                    source_host_id = host.id if host else None
-                    services = list(services_payload)
-                else:
-                    discovered_ports: list = []
-                    if not uses_existing_source and source_target:
-                        check_reachability = CR.is_host_reachability_check_enabled()
-                        is_host_reacheable = self.is_host_reachable(
-                            source_target,
-                            port=CR.get_host_reachability_check_port(),
-                            timeout=CR.get_host_reachability_check_timeout(),
-                        )
-
-                        if check_reachability and not is_host_reacheable:
-                            logger.warning(
-                                f"Host '{source_target}' inalcanzable. Marcando escaneo Lybra {scan_id} como FAILED"
-                            )
-                            self.update_scan_status(scan_id, ScanStatus.FAILED)
-                            return
-
-                        discovered = self._discover_ports(source_target, discover_ports)
-                        if discovered is None:
-                            logger.error(f"Descubrimiento de puertos fallido para el escaneo Lybra {scan_id}")
-                            self.update_scan_status(scan_id, ScanStatus.FAILED)
-                            return
-
-                        discovered_ports = discovered
-
-                    source_target = source_target
-                    host = None
-                    if source_target:
-                        host = scan_repo.get_host_by_ip(source_target) or scan_repo.get_or_create_host(
-                            hostname=source_target, ip_address=source_target,
-                        )
-                    source_host_id = host.id if host else None
-                    services = services_from_discovered_ports(discovered_ports)
-
                 if (
-                    not uses_payload and 
-                    source_target and 
-                    is_target_authorized and 
-                    CR.is_lybra_fingerprinting_enabled()
+                    source.probes_target_network
+                    and source_target
+                    and is_target_authorized
+                    and CR.is_lybra_fingerprinting_enabled()
                 ):
                     services, fingerprint_findings = self._fingerprint_services(
-                        source_target, 
+                        source_target,
                         services
                     )
 
                 previous_map = self._previous_findings_map(scan_repo, user_id, source_target, scan_id)
 
+                surface_findings: list = []
                 if source_host_id:
                     surface_findings = self._detect_surface_changes(scan_repo, source_host_id, services)
 
@@ -359,18 +240,18 @@ class LybraEngineManager(ScanManager):
                 findings_data.extend(fingerprint_findings)
                 findings_data.extend(surface_findings)
 
-            if not uses_payload and source_target and is_target_authorized and CR.is_lybra_active_checks_enabled():
+            if source.probes_target_network and source_target and is_target_authorized and CR.is_lybra_active_checks_enabled():
                 findings_data.extend(self._run_active_checks(source_target, services))
 
             deep_scan_ids: list = []
             if deep and source_target:
-                if uses_payload and not is_target_authorized:
+                if source.deep_requires_authorization and not is_target_authorized:
                     logger.info(
                         f"Análisis profundo omitido para el escaneo Lybra {scan_id}: objetivo no autorizado"
                     )
                 else:
                     deep_scan_ids = self._launch_deep_corroborators(
-                        user_id, source_target, source_scan_id, services
+                        user_id, source_target, source, services
                     )
 
             for finding in findings_data:
@@ -412,7 +293,6 @@ class LybraEngineManager(ScanManager):
         closed" would falsely mark previously-open findings as fixed once
         lifecycle correlation runs.
         """
-        from ..lybra import scan_ports_sync
         try:
             return scan_ports_sync(target, discover_ports)
         except Exception:
@@ -426,7 +306,6 @@ class LybraEngineManager(ScanManager):
         Best-effort: a runtime failure (unreachable host, etc.) yields no active
         findings rather than failing the whole scan. Safe mode only.
         """
-        from ..lybra import load_checks, CheckRuntime, HttpProbe, HostRateLimiter, TlsProbe, NetworkProbe
         try:
             runtime = CheckRuntime(
                 load_checks(),
@@ -459,63 +338,38 @@ class LybraEngineManager(ScanManager):
           Nmap-sourced reading would (``qod=70`` in the matcher, same as
           today) — nothing here inflates confidence, it only supplies input.
 
-        Best-effort per service; a probe failure just skips that service.
+        Best-effort per service; a probe failure just skips that service. The
+        dissector selection itself is a registry lookup
+        (:func:`~..lybra.default_dissectors`), not an if/elif chain — adding
+        protocol N+1 to Fase N never touches this method again, only that
+        registry.
 
         Returns:
             A ``(services, findings)`` tuple: the service list with any newly
             identified product/version filled in, and the informational
             fingerprint findings.
         """
-        from ..lybra import (
-            HttpProbe, SshProbe, FtpProbe, HostRateLimiter, is_http_service, is_ftp_service,
-            fingerprint_http, fingerprint_ssh, fingerprint_ftp,
-        )
-        http_probe = HttpProbe()
-        ssh_probe = SshProbe()
-        ftp_probe = FtpProbe()
+        dissectors = default_dissectors()
         rate_limiter = HostRateLimiter()
         findings = []
         updated: list = []
 
         for service in services:
-            fp, label = None, None
-            try:
-                if is_http_service(service):
-                    rate_limiter.acquire(target)
-                    resp = http_probe.fetch(target, service.port, "GET", "/")
-                    if resp is not None:
-                        rate_limiter.acquire(target)
-                        favicon = http_probe.fetch_bytes(target, service.port, "/favicon.ico")
-                        rate_limiter.acquire(target)
-                        # Some vendors brand their error page more than their
-                        # homepage (a SonicWall's 404 body says so, its "/"
-                        # doesn't) — a deliberately nonexistent path lets the
-                        # tech-signature feed's error_body matchers see it.
-                        error_resp = http_probe.fetch(target, service.port, "GET", "/lybra-nonexistent-check")
-                        fp, label = fingerprint_http(resp, favicon, error_resp), "HTTP"
-                elif (service.name or "").lower() == "ssh" or service.port == 22:
-                    rate_limiter.acquire(target)
-                    probed = ssh_probe.fetch(target, service.port or 22)
-                    if probed is not None:
-                        banner, kexinit_payload = probed
-                        fp, label = fingerprint_ssh(banner, kexinit_payload), "SSH"
-                elif is_ftp_service(service):
-                    # Fase N's opening move (roadmap §"Fase N"): FTP volunteers
-                    # its whole banner unprompted, no framing or negotiation.
-                    rate_limiter.acquire(target)
-                    banner = ftp_probe.fetch(target, service.port or 21)
-                    if banner is not None:
-                        fp, label = fingerprint_ftp(banner), "FTP"
-            except Exception:
-                logger.debug("Fingerprinting failed for %s:%s", target, service.port, exc_info=True)
+            dissector = next((d for d in dissectors if d.applies(service)), None)
+            result = None
+            if dissector is not None:
+                try:
+                    result = dissector.probe(target, service, rate_limiter)
+                except Exception:
+                    logger.debug("Fingerprinting failed for %s:%s", target, service.port, exc_info=True)
 
-            if fp is None:
+            if result is None:
                 updated.append(service)
                 continue
 
-            findings.append(self._fingerprint_finding(service, fp.product, fp.version, label))
-            if not service.product and fp.product and fp.version:
-                service = replace(service, product=fp.product, version=fp.version)
+            findings.append(self._fingerprint_finding(service, result.product, result.version, result.label))
+            if not service.product and result.product and result.version:
+                service = replace(service, product=result.product, version=result.version)
             updated.append(service)
 
         return updated, findings
@@ -530,7 +384,6 @@ class LybraEngineManager(ScanManager):
         which reads as "we disagree with Nmap" even though there is nothing to
         compare. That case gets its own honest phrasing instead.
         """
-        from ..lybra import agrees_with_nmap, QOD_FINGERPRINT
         own = f"{product or '?'} {version or ''}".strip()
         if service.product:
             agrees = agrees_with_nmap(product, version, service.product, service.version)
@@ -574,18 +427,59 @@ class LybraEngineManager(ScanManager):
         for service in services:
             protocol = service.protocol or "tcp"
             prior = existing.get(self._surface_key(service))
-            if prior and had_baseline:
-                findings.append(service.as_new_finding())
+            if prior is None:
+                if had_baseline:
+                    findings.append(self._surface_finding(service, self._new_surface_title(service, protocol)))
             elif service.product and prior.product and (
                 service.product != prior.product or service.version != prior.version
             ):
-                findings.append(service.as_old_finding())
+                findings.append(self._surface_finding(
+                    service, self._changed_surface_title(service, prior)
+                ))
             scan_repo.upsert_host_service(
                 host_id=host_id, port=service.port, protocol=protocol,
                 name=service.name or None, product=service.product or None,
                 version=service.version or None, cpe=service.cpe or None,
             )
         return findings
+
+    @staticmethod
+    def _new_surface_title(service, protocol: str) -> str:
+        """Title for a first-seen port or package (Fase 0.9 adds the latter)."""
+        if service.port is not None:
+            return f"Nuevo puerto abierto: {service.port}/{protocol} ({service.name or 'desconocido'})"
+        return f"Nuevo paquete instalado: {service.label}"
+
+    @staticmethod
+    def _changed_surface_title(service, prior) -> str:
+        """Title for a product/version change on a tracked port or package."""
+        change = f"{prior.product} {prior.version or ''} -> {service.product} {service.version or ''}".strip()
+        if service.port is not None:
+            return f"Cambio de versión detectado en el puerto {service.port}: {change}"
+        return f"Cambio de versión detectado en el paquete {service.product}: {change}"
+
+    @staticmethod
+    def _surface_finding(service, title: str) -> dict:
+        """Build an informational Finding for an attack-surface change (Fase 5).
+
+        ``service`` falls back to ``product`` when there is no service name —
+        for a portless (inventory-origin) service this is also what
+        ``compute_dedup_key`` uses to disambiguate two different packages that
+        would otherwise both hash to the same "port=None" identity (Fase 0.9).
+        Mirrors the same fallback in ``engine.py``'s finding builders.
+        """
+        return {
+            "title":        title,
+            "category":     "surface_change",
+            "port":         service.port,
+            "service":      service.name or service.product or None,
+            "source":       "lybra",
+            "check_id":     "lybra:surface-change@1",
+            "feed_version": "lybra-surface-1",
+            "qod":          QOD_OPEN_PORT,
+            "confirmed":    True,
+            "state":        "open",
+        }
 
     @staticmethod
     def _surface_key(service_or_row) -> tuple:
@@ -608,9 +502,9 @@ class LybraEngineManager(ScanManager):
         return (None, protocol, service_or_row.product or None)
 
     def _launch_deep_corroborators(
-        self, user_id: int, 
+        self, user_id: int,
         target: str,
-        source_scan_id: Optional[int], 
+        source: "ServiceSource",
         services: list[Service]
     ) -> list:
         """Fire off Nmap/Nikto/OpenVAS as independent corroborator scans (Fase 6).
@@ -622,19 +516,18 @@ class LybraEngineManager(ScanManager):
         returned ids are stored on the Lybra scan so ``format_scan`` can later
         merge in whichever corroborator ``Finding`` rows are ready.
 
-        - Nmap only when ``source_scan_id`` is None (self-discovery mode) — a
-          fresh Nmap run is redundant when Lybra already has Nmap-sourced
-          ports for this scan.
+        - Nmap only when ``source.launches_nmap_corroborator`` — a fresh Nmap
+          run is redundant when Lybra already has Nmap-sourced ports for this
+          scan (the Nmap-source mode is the only one that says no).
         - Nikto only if at least one HTTP-like service was found.
         - OpenVAS always.
 
         Best-effort per corroborator: a launch failure for one does not affect
         the others or the Lybra scan itself.
         """
-        from ..lybra import is_http_service, DEFAULT_PORTS
         ids: list = []
 
-        if source_scan_id is None:
+        if source.launches_nmap_corroborator:
             try:
                 ports_str = ",".join(str(p) for p in sorted(set(DEFAULT_PORTS)))
                 ids.append(NmapScanManager().run_scan(
@@ -698,7 +591,7 @@ class LybraEngineManager(ScanManager):
 
     def _create_scan_record(
         self, target: str, user_id: int, source_scan_id: Optional[int] = None,
-        programed_scan_id: Optional[int] = None,
+        programed_scan_id: Optional[int] = None, asset_id: Optional[int] = None,
     ) -> LybraScan:  # pylint: disable=arguments-differ
         """Create and persist an LybraScan row linked to its source Nmap scan."""
         scan = LybraScan(
@@ -707,6 +600,7 @@ class LybraEngineManager(ScanManager):
             started_at=utcnow_naive(),
             source_scan_id=source_scan_id,
             programed_scan_id=programed_scan_id,
+            asset_id=asset_id,
         )
         with UnitOfWork() as uow:
             ScanRepository(uow).save(scan)
@@ -715,6 +609,68 @@ class LybraEngineManager(ScanManager):
     def _persist_scan_results(self, uow, scan, domain_data) -> None:
         """Persist the engine's findings (``domain_data`` is a list of dicts)."""
         ScanRepository(uow).persist_findings(scan, domain_data)
+
+    def get_scans_paginated(  # pylint: disable=arguments-differ
+        self, user_id: int, page: int = 1, per_page: int = 10,
+        asset_id=ScanRepository.PANEL_SCANS,
+    ):
+        """Paginated Lybra scans, split by origin (Fase I).
+
+        Overrides the base implementation, which filters by ``scan_type``
+        alone, so that the ordinary Lybra feed shows only what the user
+        launched from the Themis panel. Scans produced from a Hygeia asset's
+        software inventory are browsed per-agent instead — mixing them into
+        the same list would bury the handful of scans a user actually asked
+        for under one per agent per re-analysis.
+
+        Args:
+            asset_id: ``ScanRepository.PANEL_SCANS`` (default) for panel-launched
+                scans, an ``int`` for one asset's scans, or ``None`` for all.
+        """
+        repo = build_repository(ScanRepository)
+        items, total_count = repo.get_lybra_scans_paginated(user_id, page, per_page, asset_id)
+        return [self.format_scan(item.id, _scan=item) for item in items], total_count
+
+    def delete_scans_for_asset(self, asset_id: int) -> int:
+        """Delete every Lybra scan produced from a Hygeia asset's inventory.
+
+        The explicit cleanup that ``LybraScan.asset_id`` needs for lack of a
+        ``ForeignKey`` cascade (see the model). Goes through ``delete_scan``
+        per scan so each one's generated PDFs are removed from disk too.
+
+        This is the Themis-side entry point Hygeia calls when an asset is
+        deleted; Themis itself never invokes it.
+
+        Returns:
+            How many scans were deleted.
+        """
+        scan_ids = build_repository(ScanRepository).get_lybra_scan_ids_for_asset(asset_id)
+        deleted = sum(1 for scan_id in scan_ids if self.delete_scan(scan_id))
+        if deleted:
+            logger.info(f"Eliminados {deleted} escaneos Lybra del activo Hygeia {asset_id}")
+        return deleted
+
+    @staticmethod
+    def exposure_for(scan) -> str:
+        """Contextual exposure of a Lybra scan, for Fase 5's priority scoring.
+
+        Normally that is just ``classify_exposure(target)``. An inventory scan
+        (Fase I) is the exception: it never observed the target's network at
+        all, so its "target" is a Hygeia asset's bare hostname, not a reachable
+        surface. ``classify_exposure`` recognises internal *suffixes*
+        (``.local``, ``.lan``...) but not a bare ``DESKTOP-ABC``, so it would
+        call such a host "public" and push every finding up one severity band
+        on the strength of a naming artefact. Reporting these as private is
+        both safer and more honest: an installed package says nothing about
+        what the host exposes — that remains Themis's territory, not Hygeia's.
+
+        Lives here rather than in ``correlation.py`` because it needs the scan
+        row, and that module is deliberately ORM-free (pure functions over
+        plain values).
+        """
+        if getattr(scan, "asset_id", None):
+            return "private"
+        return classify_exposure(scan.target)
 
     def format_scan(self, scan_id: int, _scan=None) -> dict:
         scan = _scan or self.get_scan_by_id(scan_id)
@@ -735,7 +691,7 @@ class LybraEngineManager(ScanManager):
         else:
             display_findings = own_findings
 
-        exposure = classify_exposure(scan.target)
+        exposure = self.exposure_for(scan)
         target_authorized = bool(
             scan.target and AuthorizedTargetManager.is_authorized(scan.user_id, scan.target)
         )
@@ -752,6 +708,7 @@ class LybraEngineManager(ScanManager):
             "scanType": "lybra",
             "target": scan.target,
             "sourceScanId": scan.source_scan_id,
+            "assetId": scan.asset_id,
             "deep": bool(deep_scan_ids),
             "deepScanIds": deep_scan_ids,
             "exposure": exposure,

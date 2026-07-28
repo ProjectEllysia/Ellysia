@@ -1,5 +1,5 @@
 {
-  "feedVersion": "lybra-checks-2",
+  "feedVersion": "lybra-checks-3",
   "checks": [
     {
       "id": "git-config-exposure",
@@ -322,6 +322,30 @@
       ],
       "finding": {
         "title": "FTP: login anónimo permitido",
+        "qod": 99,
+        "confirmed": true
+      }
+    },
+    {
+      "id": "redis-unauthenticated-access",
+      "version": 1,
+      "type": "network",
+      "category": "default_credentials",
+      "severity": "CRITICAL",
+      "service": "redis",
+      "mode": "safe",
+      "requests": [
+        {
+          "send": "INFO\r\n",
+          "matchers-condition": "and",
+          "matchers": [
+            { "type": "word", "part": "body", "words": ["redis_version"] },
+            { "type": "word", "part": "body", "words": ["NOAUTH"], "negative": true }
+          ]
+        }
+      ],
+      "finding": {
+        "title": "Redis: acceso sin autenticación (comando INFO permitido)",
         "qod": 99,
         "confirmed": true
       }

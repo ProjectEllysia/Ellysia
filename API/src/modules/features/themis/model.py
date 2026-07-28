@@ -811,12 +811,22 @@ class LybraScan(Scan):
             each is an ordinary, independently-tracked Scan; their Finding rows
             are merged in only at read time (see LybraEngineManager.format_scan),
             never copied into this scan's own Finding rows.
+        asset_id: Fase I — the Hygeia MonitoredAsset whose software inventory
+            originated this scan, or None when it was launched from the Themis
+            panel. Deliberately a plain Integer with no ForeignKey: it is a
+            soft reference that keeps Themis's *schema* independent of
+            Hygeia's (no module under features/ depends on another today, and
+            this column must not be what changes that). Cleanup when an asset
+            is deleted is therefore explicit, in HygeiaAssetManager.delete_asset.
+            Non-null also means "keep this out of the ordinary Lybra feed" —
+            these scans are browsed per-agent instead.
     """
     __tablename__ = "LybraScan"
 
     id             = Column(Integer, ForeignKey("Scan.id"), primary_key=True)
     source_scan_id = Column(Integer, ForeignKey("Scan.id"), nullable=True)
     deep_scan_ids  = Column(JSONB, nullable=True)
+    asset_id       = Column(Integer, nullable=True, index=True)
 
     __mapper_args__ = {
         "polymorphic_identity": ScanType.LYBRA,
@@ -940,9 +950,6 @@ class Finding(Base):
             "qod": self.qod, 
             "confirmed": self.confirmed,
         }
-        
-    def title(self) -> str:
-        
 
     def __repr__(self):
         return f"<Finding(id={self.id}, scan_id={self.scan_id}, category='{self.category}', title='{self.title[:40]}')>"

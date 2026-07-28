@@ -15,6 +15,9 @@ import struct
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
+from .dispatch import Dissector, DissectorResult
+from .registry import register_dissector
+
 logger = logging.getLogger(__name__)
 
 # The SSH message code for a key-exchange-init packet (RFC 4253).
@@ -298,3 +301,25 @@ class SshProbe:
                 sock.close()
             except OSError:
                 pass
+
+
+@register_dissector
+class SshDissector(Dissector):
+    """Banner plus HASSH in one probe — see the module docstring."""
+
+    label = "SSH"
+
+    def __init__(self, probe: Optional[SshProbe] = None) -> None:
+        self._probe = probe or SshProbe()
+
+    def applies(self, service) -> bool:
+        return (service.name or "").lower() == "ssh" or service.port == 22
+
+    def probe(self, target, service, rate_limiter):
+        rate_limiter.acquire(target)
+        probed = self._probe.fetch(target, service.port or 22)
+        if probed is None:
+            return None
+        banner, kexinit_payload = probed
+        fp = fingerprint_ssh(banner, kexinit_payload)
+        return DissectorResult(fp.product, fp.version, self.label)

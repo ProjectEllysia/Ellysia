@@ -28,6 +28,10 @@ import socket
 from dataclasses import dataclass
 from typing import Callable, Optional, Tuple
 
+from ..checks import is_ftp_service
+from .dispatch import Dissector, DissectorResult
+from .registry import register_dissector
+
 logger = logging.getLogger(__name__)
 
 # "220 (vsFTPd 2.3.4)" — a parenthesised "Product Version" pair.
@@ -156,3 +160,24 @@ class FtpProbe:
                 sock.close()
             except OSError:
                 pass
+
+
+@register_dissector
+class FtpDissector(Dissector):
+    """Reads the unprompted welcome banner — see the module docstring."""
+
+    label = "FTP"
+
+    def __init__(self, probe: Optional[FtpProbe] = None) -> None:
+        self._probe = probe or FtpProbe()
+
+    def applies(self, service) -> bool:
+        return is_ftp_service(service)
+
+    def probe(self, target, service, rate_limiter):
+        rate_limiter.acquire(target)
+        banner = self._probe.fetch(target, service.port or 21)
+        if banner is None:
+            return None
+        fp = fingerprint_ftp(banner)
+        return DissectorResult(fp.product, fp.version, self.label)

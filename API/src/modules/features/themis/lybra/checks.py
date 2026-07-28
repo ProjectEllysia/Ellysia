@@ -38,18 +38,19 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from .engine import Service
 
 logger = logging.getLogger(__name__)
 
 # The version stamped onto every finding this runtime produces, for
-# traceability. Bumped whenever the feed gains a new check family (Fase N's
-# "ftp-anonymous-login", the first ``type: "network"`` check, is what earned
-# checks-2) — never for a fix to an existing check, which bumps that check's
-# own ``version`` instead (see ``Check.check_id``).
-CHECKS_FEED_VERSION = "lybra-checks-2"
+# traceability. Bumped whenever the feed gains a new check family or a new
+# protocol under an existing one (checks-2: "ftp-anonymous-login", the first
+# ``type: "network"`` check; checks-3: "redis-unauthenticated-access", the
+# second ``network`` protocol) — never for a fix to an existing check, which
+# bumps that check's own ``version`` instead (see ``Check.check_id``).
+CHECKS_FEED_VERSION = "lybra-checks-3"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -65,6 +66,22 @@ _TLS_PORTS = {443, 8443}
 # Service names and ports for FTP — Fase N's first ``type: "network"`` family.
 _FTP_SERVICE_NAMES = {"ftp"}
 _FTP_PORTS = {21}
+# Fase N's remaining priority-1/2 protocols — same "name or well-known port"
+# applicability shape as HTTP/FTP above.
+_SMTP_SERVICE_NAMES = {"smtp", "submission", "smtps"}
+_SMTP_PORTS = {25, 465, 587}
+_IMAP_SERVICE_NAMES = {"imap", "imaps"}
+_IMAP_PORTS = {143, 993}
+_POP3_SERVICE_NAMES = {"pop3", "pop3s"}
+_POP3_PORTS = {110, 995}
+_SMB_SERVICE_NAMES = {"microsoft-ds", "netbios-ssn"}
+_SMB_PORTS = {139, 445}
+_MYSQL_SERVICE_NAMES = {"mysql"}
+_MYSQL_PORTS = {3306}
+_REDIS_SERVICE_NAMES = {"redis"}
+_REDIS_PORTS = {6379}
+_VNC_SERVICE_NAMES = {"vnc"}
+_VNC_PORTS = {5900}
 
 
 # =========================================================================
@@ -317,12 +334,49 @@ def is_ftp_service(service: Service) -> bool:
     return (service.name or "").lower() in _FTP_SERVICE_NAMES or service.port in _FTP_PORTS
 
 
+def is_smtp_service(service: Service) -> bool:
+    """Return whether a service should be probed by the SMTP dissector."""
+    return (service.name or "").lower() in _SMTP_SERVICE_NAMES or service.port in _SMTP_PORTS
+
+
+def is_imap_service(service: Service) -> bool:
+    """Return whether a service should be probed by the IMAP dissector."""
+    return (service.name or "").lower() in _IMAP_SERVICE_NAMES or service.port in _IMAP_PORTS
+
+
+def is_pop3_service(service: Service) -> bool:
+    """Return whether a service should be probed by the POP3 dissector."""
+    return (service.name or "").lower() in _POP3_SERVICE_NAMES or service.port in _POP3_PORTS
+
+
+def is_smb_service(service: Service) -> bool:
+    """Return whether a service should be probed by the SMB dissector."""
+    return (service.name or "").lower() in _SMB_SERVICE_NAMES or service.port in _SMB_PORTS
+
+
+def is_mysql_service(service: Service) -> bool:
+    """Return whether a service should be probed by the MySQL dissector."""
+    return (service.name or "").lower() in _MYSQL_SERVICE_NAMES or service.port in _MYSQL_PORTS
+
+
+def is_redis_service(service: Service) -> bool:
+    """Return whether a service should be probed by the Redis dissector or
+    ``type: "network"`` checks (Fase N)."""
+    return (service.name or "").lower() in _REDIS_SERVICE_NAMES or service.port in _REDIS_PORTS
+
+
+def is_vnc_service(service: Service) -> bool:
+    """Return whether a service should be probed by the VNC dissector."""
+    return (service.name or "").lower() in _VNC_SERVICE_NAMES or service.port in _VNC_PORTS
+
+
 # Maps a ``type: "network"`` check's declared ``service`` (the feed's plain
 # string, e.g. ``"ftp"``) to the predicate that decides whether a discovered
 # Service is that protocol. One entry per protocol Fase N adds — the runtime
 # itself (``CheckRuntime._applies_network``) stays protocol-agnostic.
 _NETWORK_SERVICE_MATCHERS: Dict[str, Callable[[Service], bool]] = {
     "ftp": is_ftp_service,
+    "redis": is_redis_service,
 }
 
 
@@ -339,6 +393,23 @@ _TLS_RULES: Dict[str, Callable] = {
     "expiring_soon": lambda info: not info.expired and info.days_until_expiry is not None and info.days_until_expiry <= 30,
     "deprecated_protocol": lambda info: info.protocol in _WEAK_TLS_PROTOCOLS,
 }
+
+
+@dataclass(frozen=True)
+class _CheckFamily:
+    """One check ``type`` (http/tls/network) as the runtime's uniform loop sees it.
+
+    Where :meth:`CheckRuntime.run` used to be three near-identical loops — one
+    literally written per check type — each type now supplies one of these
+    instead: whether it wants a look at a given service at all
+    (``applies_to_service``), whether one specific check within that type
+    applies (``check_matches``), and how to actually run it
+    (``run_check``). Adding a fourth type (Fase R's planned ``script``) means
+    adding one more family, not a fourth loop.
+    """
+    applies_to_service: Callable[[Service], bool]
+    check_matches: Callable[[Check, Service], bool]
+    run_check: Callable[[Check, str, Service], Optional[dict]]
 
 
 class CheckRuntime:
@@ -382,6 +453,23 @@ class CheckRuntime:
         self._rl = rate_limiter
         self._tls_fetch = tls_fetch
         self._network_open = network_open
+        self._families: Tuple[_CheckFamily, ...] = (
+            _CheckFamily(
+                applies_to_service=is_http_service,
+                check_matches=lambda check, service: self._applies(check),
+                run_check=self._run_check,
+            ),
+            _CheckFamily(
+                applies_to_service=lambda service: self._tls_fetch is not None and is_tls_service(service),
+                check_matches=lambda check, service: self._applies_tls(check),
+                run_check=self._run_tls_check,
+            ),
+            _CheckFamily(
+                applies_to_service=lambda service: self._network_open is not None,
+                check_matches=self._applies_network,
+                run_check=self._run_network_check,
+            ),
+        )
 
     def run(self, host: str, services: Iterable[Service]) -> List[dict]:
         """Run every applicable check against a host's HTTP, TLS and network services.
@@ -396,31 +484,19 @@ class CheckRuntime:
         """
         findings: List[dict] = []
         for service in services:
-            if is_http_service(service):
+            for family in self._families:
+                if not family.applies_to_service(service):
+                    continue
                 for check in self._checks:
-                    if not self._applies(check):
+                    if not family.check_matches(check, service):
                         continue
-                    finding = self._run_check(check, host, service)
-                    if finding is not None:
-                        findings.append(finding)
-            if self._tls_fetch is not None and is_tls_service(service):
-                for check in self._checks:
-                    if not self._applies_tls(check):
-                        continue
-                    finding = self._run_tls_check(check, host, service)
-                    if finding is not None:
-                        findings.append(finding)
-            if self._network_open is not None:
-                for check in self._checks:
-                    if not self._applies_network(check, service):
-                        continue
-                    finding = self._run_network_check(check, host, service)
+                    finding = family.run_check(check, host, service)
                     if finding is not None:
                         findings.append(finding)
         return findings
 
     def _applies(self, check: Check) -> bool:
-        """Return whether a check should run against a service in the current mode."""
+        """Return whether an ``http`` check should run in the current mode."""
         if check.type != "http":
             return False
         return self._applies_mode(check)

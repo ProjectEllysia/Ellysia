@@ -17,6 +17,7 @@ from src.modules.features.themis.lybra import (
     Response,
     is_http_service,
     is_ftp_service,
+    is_redis_service,
     Service,
 )
 
@@ -199,6 +200,38 @@ def test_only_ftp_services_are_probed_by_network_checks():
 
     assert is_ftp_service(_FTP) is True
     assert is_ftp_service(_HTTP) is False
+
+
+# ---------------------------------------- redis-unauthenticated-access (Fase N)
+
+_REDIS = Service(6379, "tcp", "redis", "", "", None)
+
+
+def test_redis_unauthenticated_access_confirmed_when_info_succeeds():
+    reply = "$120\r\n# Server\r\nredis_version:7.0.11\r\nredis_mode:standalone\r\n"
+    open_ = _network_open_for([reply])
+    findings = CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_REDIS])
+
+    redis_findings = [f for f in findings if f["check_id"] == "lybra:redis-unauthenticated-access@1"]
+    assert len(redis_findings) == 1
+    assert redis_findings[0]["qod"] == 99 and redis_findings[0]["confirmed"] is True
+    assert redis_findings[0]["category"] == "default_credentials"
+    assert open_.session.sent == ["INFO\r\n"]
+
+
+def test_redis_unauthenticated_access_absent_when_auth_required():
+    open_ = _network_open_for(["-NOAUTH Authentication required.\r\n"])
+    findings = CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_REDIS])
+    assert not any(f["check_id"] == "lybra:redis-unauthenticated-access@1" for f in findings)
+
+
+def test_only_redis_services_are_probed_by_redis_check():
+    open_ = _network_open_for(["$40\r\nredis_version:7.0.11\r\n"])
+    CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_HTTP])
+    assert open_.session.sent == []            # nothing exchanged for a non-Redis service
+
+    assert is_redis_service(_REDIS) is True
+    assert is_redis_service(_HTTP) is False
 
 
 # --------------------------------------------- NetworkProbe (fake socket)
