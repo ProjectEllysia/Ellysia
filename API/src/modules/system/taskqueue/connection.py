@@ -13,11 +13,13 @@ se dupliquen entre la cola y el worker.
 
 from __future__ import annotations
 
+import logging
+
 import redis as redis_lib
 
 import src.modules.system.config_reading as CR
 
-_logger = CR.get_logger(__name__)
+_logger = logging.getLogger(__name__)
 
 def ping_redis() -> bool:
     try:
