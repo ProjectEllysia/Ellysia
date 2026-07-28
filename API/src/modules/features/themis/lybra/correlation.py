@@ -95,7 +95,21 @@ def compute_dedup_key(finding: dict) -> str:
         identity = "check:" + str(finding["check_id"])
     else:
         identity = "cat:" + str(finding.get("category"))
-    return hashlib.sha256(f"{host}|{port}|{identity}".encode()).hexdigest()[:32]
+    material = f"{host}|{port}|{identity}"
+    if port is None:
+        # A portless finding (Fase 0.9 — an inventory-origin service, e.g. an
+        # installed package with nothing listening) has no port to
+        # disambiguate different assets that happen to share the same
+        # check/category identity, or even the same CVE. ``service`` carries
+        # the product name in that case (engine.py falls back to it when
+        # there is no service name), which stays stable across a version
+        # bump — mirroring how a port's own identity already stays stable
+        # across a network service's product/version changing. Only
+        # reachable for a case that never existed before Fase 0.9 (port was
+        # always populated until now), so this cannot collide with any
+        # pre-existing dedup_key.
+        material += "|" + (finding.get("service") or "")
+    return hashlib.sha256(material.encode()).hexdigest()[:32]
 
 
 def _union_cves(a: Optional[list], b: Optional[list]) -> Optional[list]:

@@ -13,7 +13,9 @@ from src.modules.features.themis.lybra import (
     LybraEngine,
     Service,
     services_from_open_ports,
+    services_from_payload,
     QOD_OPEN_PORT,
+    QOD_INVENTORY_MATCH,
 )
 from src.modules.features.themis.services.processors import NmapResultProcessor
 
@@ -194,3 +196,78 @@ def test_no_version_finding_without_a_concrete_version():
 
     assert calls == []
     assert [f["category"] for f in findings] == ["open_port"]
+
+
+# ----------------------------------------------- Fase 0.9: external payload
+
+def test_version_finding_from_inventory_origin_is_confirmed_with_high_qod():
+    # A service read straight off a package manager (Service.origin=="inventory")
+    # is a verified fact, not a banner guess: it should be born confirmed at a
+    # higher qod than the default network-inferred hypothesis.
+    engine = LybraEngine(cve_lookup=_lookup_for(("openbsd", "openssh")))
+    service = Service(port=None, protocol="", name="", product="OpenSSH",
+                      version="7.4", cpe=None, origin="inventory")
+
+    findings = engine.analyze([service])
+
+    vuln = findings[1]
+    assert vuln["category"] == "outdated_software"
+    assert vuln["qod"] == QOD_INVENTORY_MATCH == 95
+    assert vuln["confirmed"] is True
+
+
+def test_version_finding_from_network_origin_stays_a_hypothesis():
+    # Default origin ("network") behaviour is unchanged by Fase 0.9.
+    engine = LybraEngine(cve_lookup=_lookup_for(("openbsd", "openssh")))
+    findings = engine.analyze([Service(22, "tcp", "ssh", "OpenSSH", "7.4", None)])
+
+    vuln = findings[1]
+    assert vuln["qod"] == 70
+    assert vuln["confirmed"] is False
+
+
+def test_informational_finding_for_portless_inventory_service():
+    # A library with no listening port must not read as "Puerto None abierto".
+    service = Service(port=None, protocol="", name="", product="openssl",
+                      version="1.1.1", cpe=None, origin="inventory")
+
+    finding = LybraEngine().analyze([service])[0]
+
+    assert finding["category"] == "installed_package"
+    assert finding["title"] == "Paquete instalado — openssl 1.1.1"
+    assert finding["port"] is None
+
+
+def test_informational_finding_for_inventory_service_with_a_port_is_unaffected():
+    # A daemon read from inventory that *does* have a port (rare, but the
+    # dataclass allows it) keeps the ordinary "open port" phrasing — the
+    # special case is specifically "no port to report", not "origin=inventory".
+    service = Service(port=22, protocol="tcp", name="ssh", product="OpenSSH",
+                      version="7.4", cpe=None, origin="inventory")
+
+    finding = LybraEngine().analyze([service])[0]
+
+    assert finding["category"] == "open_port"
+    assert "22/tcp" in finding["title"]
+
+
+def test_services_from_payload_builds_services_and_defaults_origin():
+    services = services_from_payload([
+        {"port": 21, "protocol": "tcp", "name": "ftp", "product": "vsftpd", "version": "2.3.4"},
+    ])
+
+    assert services == [Service(port=21, protocol="tcp", name="ftp",
+                                product="vsftpd", version="2.3.4", cpe=None, origin="network")]
+
+
+def test_services_from_payload_respects_explicit_origin_and_missing_port():
+    services = services_from_payload([
+        {"product": "openssl", "version": "1.1.1", "origin": "inventory"},
+    ])
+
+    assert services == [Service(port=None, protocol="", name="", product="openssl",
+                                version="1.1.1", cpe=None, origin="inventory")]
+
+
+def test_services_from_payload_empty_returns_empty():
+    assert services_from_payload([]) == []

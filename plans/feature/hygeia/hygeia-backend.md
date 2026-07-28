@@ -617,12 +617,19 @@ en cada heartbeat.
    práctica: la categoría `outdated_software` (`lybra-engine-roadmap.md` §Modelo de datos, línea
    139) no depende conceptualmente de un puerto, solo de un CPE resuelto y una versión.
 4. **Disparo del análisis.** Tras persistir un inventario nuevo (o distinto del anterior),
-   encolar una tarea en `system/taskqueue` que invoque `LybraEngineManager.execute_lybra_scan`
-   pasándole como entrada la lista de servicios ya traducida — el mismo punto de entrada que
-   hoy usa un Lybra Scan alimentado por Nmap (§Fase 6 del roadmap, "Fases 0–T-1"). Los
-   `Finding` resultantes caen en el mismo `Host` que Themis, así que heredan gratis dedup
-   multi-fuente, ciclo de vida (`open`/`fixed`/`regressed`) y scoring contextual — no hay que
-   reimplementar nada de la Fase 5.
+   encolar una tarea en `system/taskqueue` que invoque
+   `LybraEngineManager.run_scan(..., services=...)` pasándole como entrada la lista de
+   servicios ya traducida. **Corrección respecto a una versión anterior de esta sección:**
+   ese punto de entrada no existe todavía — hoy `run_scan` solo sabe construir la lista de
+   servicios leyendo un escaneo Nmap previo o descubriendo puertos por su cuenta. El modo por
+   payload que esta fase necesita es una **pre-fase propia del roadmap del motor**, la
+   **Fase 0.9** (`lybra-engine-roadmap.md` §Fase 0.9), que además define `Service.origin` para
+   que un hallazgo de inventario nazca `confirmed=true`/`qod=95` en vez de compartir el
+   `qod=70` genérico de una hipótesis por banner. Esta Fase H2 depende de que la 0.9 esté
+   construida primero; el adaptador de este punto solo tiene que marcar `origin="inventory"`
+   al traducir cada paquete. Los `Finding` resultantes caen en el mismo `Host` que Themis, así
+   que heredan gratis dedup multi-fuente, ciclo de vida (`open`/`fixed`/`regressed`) y scoring
+   contextual — no hay que reimplementar nada de la Fase 5.
 
 ### 14.3 Qué gana cada lado
 
@@ -648,7 +655,7 @@ en cada heartbeat.
 |---|---|---|
 | **H0** | Colector de paquetes instalados en el agente + `POST /hygeia/inventory` | El backend recibe listados de software por activo |
 | **H1** | `MonitoredAsset.host_id` — resolución/creación del `Host` de Themis al dar de alta el activo | Un `MonitoredAsset` y un `Host` de Themis son la misma entidad de identidad |
-| **H2** | Adaptador inventario→servicios + disparo de `LybraEngineManager.execute_lybra_scan` con esa entrada | Hallazgos CVE por inventario, visibles en el mismo árbol Host→Service→Finding que Themis |
+| **H2** | Adaptador inventario→servicios (marca `origin="inventory"`) + disparo de `LybraEngineManager.run_scan(services=...)` — requiere la Fase 0.9 de `lybra-engine-roadmap.md` ya construida | Hallazgos CVE por inventario, visibles en el mismo árbol Host→Service→Finding que Themis, con `confirmed=true`/`qod=95` |
 | **H3** (opcional) | Envío diferencial (solo cuando el hash del inventario cambia) | Menos tráfico/ruido; no reprocesar un inventario idéntico |
 
 > **ponytail: no antes de que Hygeia y Lybra estén ambos estables por separado.** Esta

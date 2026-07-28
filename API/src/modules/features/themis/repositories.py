@@ -629,7 +629,7 @@ class ScanRepository(BaseRepository[Scan]):
         )
 
     def upsert_host_service(
-        self, host_id: int, port: int, protocol: str,
+        self, host_id: int, port: Optional[int], protocol: str,
         name: Optional[str], product: Optional[str], version: Optional[str], cpe: Optional[str],
     ) -> None:
         """Record a service as currently open, creating or refreshing its row.
@@ -638,14 +638,24 @@ class ScanRepository(BaseRepository[Scan]):
         scan actually resolved something — an unresolved rescan must not erase
         a product/version a previous scan already found) on every call, so a
         service's row always reflects its most recent observation.
+
+        ``port`` is ``None`` for a portless, ``origin="inventory"`` service
+        (Fase 0.9) — an installed package with nothing listening. A port
+        already uniquely identifies which row to touch; without a port, the
+        lookup keys on ``product`` too, otherwise two different packages on
+        the same host would collide on the same ``(host, NULL, protocol)``
+        row and silently overwrite each other.
         """
+        filters = [
+            HostService.host_id == host_id,
+            HostService.port == port,
+            HostService.protocol == protocol,
+        ]
+        if port is None:
+            filters.append(HostService.product == product)
         existing = (
             self._session.query(HostService)
-            .filter(
-                HostService.host_id == host_id,
-                HostService.port == port,
-                HostService.protocol == protocol,
-            )
+            .filter(*filters)
             .first()
         )
         now = utcnow_naive()

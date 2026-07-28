@@ -121,7 +121,7 @@ Desglosado, lo que OpenVAS aporta hoy y Lybra no cubre se reduce a cinco brechas
 
 | # | Brecha | Qué significa | ¿Se cierra? |
 |---|---|---|---|
-| **G1** | **Protocolos no-HTTP** | El fingerprint de Lybra habla HTTP, TLS y SSH (`lybra/fingerprint.py`). No habla SMB, RDP, SNMP, FTP, SMTP/IMAP, MySQL/PostgreSQL/MSSQL, LDAP, VNC, Telnet ni RPC. Sin fingerprint no hay CPE; sin CPE no hay detección por versión. **Un puerto 445 abierto hoy produce un hallazgo informativo y nada más.** | **Sí — Fase N.** Es la brecha nº 1 y la que de verdad decide si se puede prescindir |
+| **G1** | **Protocolos no-HTTP** | El fingerprint de Lybra habla HTTP, TLS y SSH (`lybra/fingerprinting/`). No habla SMB, RDP, SNMP, FTP, SMTP/IMAP, MySQL/PostgreSQL/MSSQL, LDAP, VNC, Telnet ni RPC. Sin fingerprint no hay CPE; sin CPE no hay detección por versión. **Un puerto 445 abierto hoy produce un hallazgo informativo y nada más.** | **Sí — Fase N.** Es la brecha nº 1 y la que de verdad decide si se puede prescindir |
 | **G2** | **Escaneo autenticado (LSC)** | Leer las versiones reales de los paquetes instalados en vez de fiarse del banner. Es lo que resuelve de raíz los falsos positivos por backport | **Sí, y mejor — Fase I.** El agente de Hygeia ya está instalado en el host; el inventario de paquetes cubre esto sin credenciales nuevas y llega incluso a hosts tras NAT |
 | **G3** | **Verdad del proveedor sobre backports** | El equivalente de Notus: saber que Debian parcheó sin subir el número de versión visible | **Sí — Fase O.** Feeds OVAL/CSAF de Debian/RHEL/SUSE en la KB, sin tocar el host |
 | **G4** | **Credenciales por defecto y checks activos no-web** | Probar `tomcat/tomcat`, FTP anónimo, paneles de administración con credenciales de fábrica | **Sí — Fase D**, con las guardas de seguridad que la fase describe |
@@ -269,7 +269,7 @@ La pista de **correlación** está completa; la de **bajo nivel** está a medias
 | **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; faltan SYN sin estado, sondas UDP y control de tasa AIMD |
 | **4**, DAST y Etapa 2 (P, E, C, O, A, B, D, G, S, X) | Ambas | ○ planificadas |
 
-El feed actual (`lybra/checks_feed.json`, versión `lybra-checks-1`) tiene 13 checks en 3 familias:
+El feed actual (`lybra/feeds/checks_feed.json`, versión `lybra-checks-1`) tiene 13 checks en 3 familias:
 `exposed_path` ×7, `security_header` ×3, `tls` ×3 — todos de tipo `http` o `tls`. Ése es literalmente
 el mapa de la brecha G1: **el runtime no tiene ni un solo check que hable un protocolo que no sea
 HTTP o TLS.**
@@ -282,8 +282,9 @@ El resultado es esta reordenación, que es el cambio de fondo de esta revisión:
 
 | Orden | Fase | Brecha que cierra | Por qué aquí |
 |---|---|---|---|
+| **0.º** | **0.9 — Contrato de entrada externa de servicios** (nueva, pre-fase) | — | No cierra ninguna brecha por sí sola; es el cable que hace posible que la Fase I lo haga. Barata, aislada, sin riesgo para lo que ya funciona |
 | **1.º** | **N — Dissectors y checks de red no-HTTP** (nueva) | **G1** | Sin ella, "prescindir de OpenVAS" significa perder de verdad cobertura. Con ella, la detección por versión se extiende a toda la superficie no-web sin escribir un solo check por CVE |
-| **2.º** | **I — Inventario de Hygeia → Lybra** (H0–H2) | **G2** | Es la prioridad nº 1 del documento de gobierno por razones de producto, y resulta que además es el sustituto del escaneo autenticado de OpenVAS. Dos motivos independientes apuntando al mismo trabajo |
+| **2.º** | **I — Inventario de Hygeia → Lybra** (H0–H2) | **G2** | Es la prioridad nº 1 del documento de gobierno por razones de producto, y resulta que además es el sustituto del escaneo autenticado de OpenVAS. Dos motivos independientes apuntando al mismo trabajo — bloqueada por la Fase 0.9 |
 | **3.º** | **R (cierre) — tipos `network` y `script`, feed en YAML** | G1, G4 | El tipo `network` es el vehículo declarativo de la Fase N; sin él, cada sonda nueva es código |
 | **4.º** | **O — Backports por feed de distribución** | **G3** | Ataca la causa nº 1 de falsos positivos sin tocar el host ni pedir credenciales |
 | **5.º** | **D — Credenciales por defecto** | **G4** | Cobertura clásica de OpenVAS, con guardas propias (lockout, tasa, evidencia sin plaintext) |
@@ -296,22 +297,24 @@ opcional y dependiente del uso real.
 
 ---
 
-### Fase N — Dissectors y checks de red no-HTTP · pista de bajo nivel · ○ planificada · **la que cierra la brecha**
+### Fase N — Dissectors y checks de red no-HTTP · pista de bajo nivel · ◐ parcial · **la que cierra la brecha**
 
 **El objetivo** es que Lybra sepa identificar y comprobar los servicios que no son web. Es la fase
 que convierte "eliminamos OpenVAS" en una decisión sin pérdida de cobertura, y por eso lidera.
 
 **Qué ya existe y qué falta.** `transport.py` descubre puertos abiertos y `engine.py` emite un
 hallazgo informativo por cada uno, así que la superficie *se ve*. Lo que falta es leerla:
-`fingerprint.py` tiene `fingerprint_http`, `fingerprint_ssh` (banner + HASSH) y `TlsProbe`, y nada
-más. Un puerto 445, 3389, 3306 o 161 abierto hoy produce un `Finding` de categoría `open_port` con
-`qod=30` y se acaba ahí. Con un dissector que extraiga producto y versión, ese mismo puerto entra
-automáticamente en la maquinaria de las Fases 1 y 2 y produce sus CVEs sin que haya que escribir un
-check por vulnerabilidad — que es exactamente el apalancamiento que hace viable esta fase.
+`lybra/fingerprinting/` (dividido en un módulo por protocolo — `http.py`, `ssh.py`, `tls.py`,
+`concordance.py` — desde esta misma ronda) tiene `fingerprint_http`, `fingerprint_ssh` (banner +
+HASSH) y `TlsProbe`, y nada más. Un puerto 445, 3389, 3306 o 161 abierto hoy produce un `Finding`
+de categoría `open_port` con `qod=30` y se acaba ahí. Con un dissector que extraiga producto y
+versión, ese mismo puerto entra automáticamente en la maquinaria de las Fases 1 y 2 y produce sus
+CVEs sin que haya que escribir un check por vulnerabilidad — que es exactamente el apalancamiento
+que hace viable esta fase.
 
-**Qué construir.** Dissectors propios en `lybra/fingerprint.py` (o un submódulo `lybra/dissectors/`
-cuando el fichero lo pida), priorizados por relación entre valor y coste sobre la superficie que de
-verdad vamos a ver:
+**Qué construir.** Un módulo nuevo por protocolo dentro de `lybra/fingerprinting/` (el patrón que ya
+sigue el paquete), priorizados por relación entre valor y coste sobre la superficie que de verdad
+vamos a ver:
 
 | Prioridad | Protocolo | Qué se extrae | Coste |
 |---|---|---|---|
@@ -339,6 +342,192 @@ datos abiertos identifica producto y versión de los cuatro, emite sus CVEs por 
 local, y detecta al menos tres hallazgos de configuración de red (por ejemplo SMB sin firma, FTP
 anónimo y Redis sin auth) — todo sin Nmap `-sV` de por medio y sin OpenVAS existiendo.
 
+**Estado (2026-07-28):** arrancada por el protocolo más barato, tal como proponía el apartado 12.
+`lybra/fingerprinting/ftp.py` añade el dissector: `parse_ftp_banner` reconoce las dos formas de
+banner más comunes (`"220 (vsFTPd 2.3.4)"` con paréntesis, `"220 ProFTPD 1.3.5 Server (Debian)..."`
+en bruto) y deja sin identificar, a propósito, un banner sin versión como el de Pure-FTPd por
+defecto — ninguna CPE inventada. `FtpProbe` lee el banner con un socket crudo, mismo patrón que
+`SshProbe`. Está enchufado en `LybraEngineManager._fingerprint_services`, así que un puerto FTP
+autodescubierto (Fase T, sin Nmap) ya rellena el hueco de CPE exactamente igual que HTTP/SSH.
+
+El tipo de check `network` que el runtime (Fase R) todavía no tenía ya existe: `Request` gana un
+campo `send` (el payload a escribir, `None` para solo leer), y `NetworkProbe`/`NetworkSession`
+abren una única conexión TCP por check y encadenan cada petición sobre ella — lo que hace falta
+para una secuencia de login como la de FTP. El primer check declarativo,
+`ftp-anonymous-login` (`checks_feed.json`, `feedVersion` subido a `lybra-checks-2`), envía
+`USER anonymous` → espera `331`, luego `PASS ...` → espera `230`, reutilizando el mismo sistema de
+matchers `and`/`or` que ya tenían los checks HTTP, sin abstracción nueva.
+
+Lo que falta, documentado y no descubierto por sorpresa: los otros seis protocolos de la tabla
+(SMB, SMTP/IMAP/POP3, SNMP, las bases de datos, RDP, LDAP/VNC/Telnet/RPC) — FTP demuestra el patrón
+completo de extremo a extremo, pero cada protocolo nuevo sigue siendo trabajo por hacer, no un
+efecto colateral gratuito. Tampoco se ha ampliado todavía el catálogo Docker del banco de
+concordancia (`test_lybra_concordance_bench.py`) con un contenedor `vsftpd` — la Fase N no tiene
+todavía un número de concordancia no-HTTP propio, solo los tests unitarios/de integración
+verificando la mecánica.
+
+---
+
+### Fase 0.9 — El contrato de entrada externa de servicios · pista de correlación · ✓ implementada · **pre-fase para Hygeia**
+
+**El objetivo** no es detectar nada nuevo: es terminar una promesa que la Fase 0 dejó a medias. Su
+texto original decía que la lista de servicios que alimenta al motor "puede venir de un escaneo Nmap
+anterior, de parámetros directos, o de cualquier otra fuente". Verificado contra el código, eso es
+solo parcialmente cierto hoy: `LybraEngine.analyze()` (`lybra/engine.py`) ya es agnóstico al origen
+—recibe un `Iterable[Service]` y no le importa quién lo llenó—, pero la capa que hay encima,
+`LybraEngineManager._run_lybra()` (`managers/lybra_engine.py`), solo sabe construir esa lista de dos
+formas: leyendo filas `OpenPort` de un escaneo Nmap ya guardado (`source_scan_id`), o descubriendo
+puertos por su cuenta (`target`, la Fase T). No existe una tercera vía de "aquí tienes ya la lista,
+analízala". Es un hueco pequeño —vive enteramente en la capa de orquestación, no en el motor— pero es
+el que bloquea a la Fase I: su descripción actual da por hecho un punto de entrada que todavía no
+existe.
+
+**Por qué es una fase aparte y no un detalle de la Fase I.** El payload de la Fase I —un inventario de
+paquetes de Hygeia— es solo *un* productor posible de esta lista. El contrato de entrada en sí es más
+general: cualquier dato ya resuelto sobre los servicios de un host, venga de donde venga —un
+`fingerprint` propio de Themis ejecutado fuera del flujo normal, la salida ya parseada de otra
+herramienta, o el inventario de un agente—, debería poder alimentar el motor sin pasar por una fila de
+Nmap en la base de datos. Separarlo deja a la Fase I con una sola responsabilidad: el adaptador
+específico de Hygeia, no el mecanismo genérico de entrada.
+
+**Alcance de esta pre-fase, decidido explícitamente:**
+
+- **Solo interno.** No se añade ningún endpoint REST nuevo. El nuevo parámetro es invocable únicamente
+  desde código Python del propio backend —hoy sin ningún llamador real, mañana el trigger de la Fase
+  I—, así que no hace falta un schema Marshmallow de validación HTTP: el contrato es un tipo Python
+  (`List[Service]`), no un formato de red. Si más adelante aparece un caso de uso externo genuino
+  (un script que quiera enviar un dataset por HTTP), se añade el endpoint entonces, como una capa fina
+  encima de este mismo mecanismo.
+- **La procedencia se modela ya, no se pospone.** Un servicio que viene de un inventario de paquetes es
+  un hecho verificado —el paquete está instalado—; uno que viene de un fingerprint de red es una
+  inferencia sobre un banner. Hoy el motor no distingue: todo hallazgo por versión nace con `qod=70` y
+  `confirmed=false` sin importar de dónde salió el dato. Congelar el contrato sin esta distinción
+  obligaría a Fase I a reabrirlo para meterla con calzador; se resuelve aquí, cuando el contrato
+  todavía es nuevo.
+
+**Qué construir.**
+
+1. `Service` (`lybra/engine.py`) gana un campo de procedencia, con vocabulario cerrado a dos valores
+   —no una puntuación numérica, que invitaría a calibrar un número sin datos que lo respalden—:
+
+   ```python
+   @dataclass(frozen=True)
+   class Service:
+       port: Optional[int]
+       protocol: str
+       name: str = ""
+       product: str = ""
+       version: str = ""
+       cpe: Optional[str] = None
+       origin: str = "network"   # "network" (inferido: banner/CPE) | "inventory" (verificado: paquete instalado)
+   ```
+
+   Los dos productores existentes (`services_from_open_ports`, `services_from_discovered_ports`) no
+   cambian: al no pasar `origin`, siguen valiendo por defecto `"network"`, que es exactamente lo que son
+   hoy. Ningún llamador existente se entera del cambio.
+
+2. `LybraEngine._version_finding` deja de fijar `qod`/`confirmed` a un valor constante y los deriva del
+   `origin` del servicio:
+
+   ```python
+   QOD_INVENTORY_MATCH = 95   # dato verificado del propio host, no una hipótesis por banner
+
+   def _version_finding(self, service: Service, cve, cpe23: str) -> dict:
+       verified = service.origin == "inventory"
+       return {
+           ...
+           "qod":       QOD_INVENTORY_MATCH if verified else QOD_VERSION_MATCH,
+           "confirmed": verified,
+           ...
+       }
+   ```
+
+   Y `_informational_finding` deja de asumir que todo servicio tiene un puerto: cuando
+   `origin == "inventory"` y `port is None` —el caso normal de un paquete de biblioteca sin proceso
+   escuchando—, el título deja de decir "Puerto ... abierto" (que no tiene sentido ahí) y pasa a
+   "Paquete instalado — {label}", con `category="installed_package"` en vez de `"open_port"`. El `qod`
+   informativo se mantiene igual de bajo (30): que un paquete esté instalado no es, por sí mismo, más
+   que un dato de inventario.
+
+3. Un traductor nuevo, simétrico a los dos que ya existen, para productores que tienen los datos como
+   diccionarios sueltos en vez de objetos `Service` ya construidos (el caso típico de un adaptador que
+   lee filas de un modelo ORM propio, como hará el de Hygeia):
+
+   ```python
+   def services_from_payload(raw: Iterable[dict]) -> List[Service]:
+       """Construye Service a partir de un dataset externo ya resuelto.
+
+       A diferencia de los otros dos traductores, respeta el "origin" que el
+       propio payload declare (por defecto "network", para no romper a un
+       productor que aún no lo setea).
+       """
+   ```
+
+   Es opcional para un productor que ya construye `Service` directamente (el traductor solo ahorra el
+   paso de desempaquetar diccionarios); el contrato real de entrada al manager es `List[Service]`, no
+   un formato serializado.
+
+4. `LybraEngineManager.run_scan` / `execute_lybra_scan` / `_run_lybra` ganan un tercer modo, aditivo a
+   los dos existentes —ninguna firma ni comportamiento actual cambia—:
+
+   ```python
+   def run_scan(self, user_id: int,
+       source_scan_id: Optional[int] = None,
+       target: Optional[str] = None,
+       services: Optional[List[Service]] = None,   # NUEVO — tercer modo
+       discover_ports: Optional[list] = None,
+       deep: bool = False, timeout: int = 120,
+       programed_scan_id: Optional[int] = None,
+   ) -> int:
+   ```
+
+   Dentro de `_run_lybra`, el nuevo modo se resuelve como una tercera rama junto a
+   `uses_existing_source` y el autodescubrimiento: `target` sigue siendo obligatorio —es la identidad
+   del host que ata los hallazgos a un `Host` vía `get_host_by_ip`/`get_or_create_host`, ya reutilizados
+   tal cual—, pero `_discover_ports` no se llama nunca. Dos consecuencias de diseño, no accidentes:
+
+   - **El fingerprinting propio (Fase F, `_fingerprint_services`) y las comprobaciones activas (Fase R,
+     `_run_active_checks`) se saltan siempre en este modo**, sin mirar siquiera el registro de objetivos
+     autorizados. La razón no es una restricción de permisos: es que el modo payload existe
+     *precisamente* para los casos en los que no hace falta, ni a veces se puede, tocar la red del
+     objetivo —un host tras NAT que Hygeia ve pero Themis nunca podría escanear es el caso de uso que
+     motiva toda la Fase I—. Reactivar el fingerprinting encima de un dato ya verificado sería, además
+     de redundante, potencialmente incorrecto: sobrescribiría un hecho con una inferencia peor.
+   - **El seguimiento de superficie (Fase 5, `_detect_surface_changes` sobre `HostService`) sigue
+     activo sin cambios**, porque ya opera solo sobre `services` + `source_host_id` y es agnóstico al
+     origen. Esto es, de hecho, el motivo por el que vale la pena señalarlo: un paquete nuevo en el
+     inventario o un cambio de versión se detecta como evento de superficie exactamente igual que un
+     puerto nuevo, sin escribir nada adicional.
+   - **Los corroboradores del análisis profundo (`deep=True`) sí tocan la red**, así que para este modo
+     exigen explícitamente que `target` esté en el registro de objetivos autorizados antes de lanzarse
+     —a diferencia del modo `source_scan_id`, donde el objetivo ya fue validado por el escaneo Nmap
+     previo—. Es la misma regla que ya aplica al autodescubrimiento, aplicada aquí por primera vez a
+     este modo.
+
+**Qué NO incluye esta pre-fase**, para que no se disperse: ningún colector de datos nuevo (eso es el H0
+de Hygeia, en su propio repositorio), ningún adaptador inventario→`Service` (eso es la Fase I), ningún
+endpoint público, y ninguna columna nueva en `LybraScan` para registrar el modo de entrada del escaneo
+—se puede añadir después como observabilidad pura, sin que nada de lo anterior dependa de ella—.
+
+**Damos la fase por hecha cuando** un test de integración construye una lista de `Service` a mano con
+`origin="inventory"`, la pasa a `LybraEngineManager().run_scan(user_id=..., target=..., services=...)`,
+y el escaneo resultante produce `Finding` con `confirmed=true`/`qod=95` para los que tienen CVE
+conocida y `category="installed_package"` para los informativos sin puerto — sin que se dispare ninguna
+llamada de red hacia el objetivo. Ese test es, literalmente, la Fase I simulada sin que Hygeia exista
+todavía.
+
+**Estado (2026-07-28):** implementada tal como se diseñó. `Service.origin` existe con sus dos
+valores; `_version_finding`/`_informational_finding` derivan `qod`/`confirmed`/`category` de él;
+`services_from_payload` traduce diccionarios sueltos; `run_scan`/`execute_lybra_scan`/`_run_lybra`
+tienen el tercer modo, con los tres guardas de red descritos (fingerprinting y comprobaciones
+activas nunca corren en este modo; los corroboradores profundos exigen autorización explícita). Un
+hallazgo real durante la implementación, no anticipado en el diseño: `HostService` (Fase 5) y
+`compute_dedup_key` (Fase 5) identificaban un servicio por `(host, puerto, protocolo)` — una
+identidad que colapsa para dos servicios de inventario distintos, ambos con `puerto=None`. Se
+corrigió en ambos sitios (clave de respaldo por `product`/`service` cuando el puerto falta; migración
+de `HostService.port` a nullable) antes de dar la fase por cerrada — sin este arreglo, un segundo
+paquete instalado en el mismo host habría sobrescrito silenciosamente el hallazgo del primero.
+
 ---
 
 ### Fase I — El inventario de Hygeia como escaneo autenticado · pista de correlación · ○ planificada
@@ -347,7 +536,8 @@ anónimo y Redis sin auth) — todo sin Nmap `-sV` de por medio y sin OpenVAS ex
 que Ellysia ya tiene medio construido y que además es estrictamente mejor. Es la fase **H0–H2** del
 plan de Hygeia (`plans/feature/hygeia/hygeia-backend.md`) y la prioridad nº 1 del documento de
 gobierno; aquí se registra su segunda justificación, independiente de la de producto: **es lo que
-cierra la brecha G2.**
+cierra la brecha G2.** Depende de la Fase 0.9: sin el modo de entrada por payload, no hay dónde
+enchufar el adaptador que describe esta fase.
 
 **Por qué es mejor que el escaneo autenticado clásico.** OpenVAS (y la Fase 4 de este plan) resuelven
 los backports entrando en la máquina por SSH con una credencial guardada. Eso exige gestionar
@@ -361,15 +551,17 @@ podría escanear jamás**. Es una ventaja estructural sobre el modelo de OpenVAS
 de payload que la ingesta actual · columna `MonitoredAsset.host_id` con resolución o creación del
 `Host` de Themis (reutilizando `ScanRepository.get_host_by_ip`, que ya existe precisamente para que un
 mismo dispositivo visto por IP y por hostname no se duplique) · un adaptador inventario→`Service`
-—simétrico a los de Nikto que ya existen, pero con puerto opcional, porque un paquete instalado no
-tiene puerto— · disparo de `LybraEngineManager` vía TaskQueue · envío diferencial por hash del
-listado para no repetir el payload entero cada vez. Requiere trabajo en el repositorio del agente
-además de en éste.
+—simétrico a los de Nikto que ya existen, pero con puerto opcional, y que marca cada `Service` con
+`origin="inventory"` (Fase 0.9) para que el motor lo trate como dato verificado— · disparo de
+`LybraEngineManager.run_scan(..., services=...)` (el modo de la Fase 0.9, no uno nuevo) vía TaskQueue ·
+envío diferencial por hash del listado para no repetir el payload entero cada vez. Requiere trabajo en
+el repositorio del agente además de en éste.
 
 Los hallazgos caen en el mismo árbol `Host → Service → Finding` y heredan gratis la deduplicación
-multi-fuente, el ciclo de vida y el scoring de la Fase 5. Un `Finding` procedente del inventario nace
-con `confirmed=true` y `qod` alto, porque la versión del paquete no es una hipótesis por banner: es
-el dato real.
+multi-fuente, el ciclo de vida y el scoring de la Fase 5. Gracias a la Fase 0.9, un `Finding`
+procedente del inventario nace con `confirmed=true` y `qod=95` sin lógica adicional aquí: la
+distinción ya vive en el motor, esta fase solo tiene que marcar correctamente el `origin` al construir
+cada `Service`.
 
 **Damos la fase por hecha cuando** un host con agente instalado produce hallazgos de CVE a partir de
 su inventario de paquetes, sin escaneo de red de por medio, y esos hallazgos se funden por
@@ -1005,6 +1197,7 @@ Fase R, la Fase O y la Fase D.
 | Fase | Pista | Capa | Qué entrega | Brecha / independencia |
 |---|---|---|---|---|
 | 0 | Correlación | — | CPE persistido, `ScanType.LYBRA`, modelo `Finding` | ✓ hecha |
+| **0.9** | Correlación | — | **Modo de entrada por payload en `run_scan`; `Service.origin`; qod/confirmed derivados** | **✓ implementada — desbloquea la Fase I** |
 | 1 | Correlación | L3 | El matcher de CPE a CVE (detección por versión) | ✓ hecha |
 | 2 | Correlación | L3 | La KB local (NVD, KEV, EPSS, CPE Dictionary) | ✓ hecha — CIRCL/NVD en tiempo de escaneo |
 | 5 | Correlación | L3 | Dedup multi-fuente, ciclo de vida, scoring, `HostService` | ✓ hecha |
@@ -1097,6 +1290,11 @@ realmente corregido en cada release. La fuente de verdad de la Fase O.
 
 **Backport** — La práctica de las distribuciones de aplicar el parche de una vulnerabilidad sin subir
 el número de versión visible. Causa principal de los falsos positivos por versión.
+
+**`Service.origin`** — El campo que la Fase 0.9 añade a `Service` para distinguir un dato inferido de
+la red (`"network"`, el único valor que existía hasta ahora) de un dato verificado en el propio host
+(`"inventory"`, el caso de un inventario de paquetes). Es lo que permite que un hallazgo por inventario
+nazca `confirmed=true` en vez de compartir el `qod=70` genérico de una hipótesis por banner.
 
 **Finding** *(hallazgo)* — El modelo de datos normalizado que unifica los resultados de todas las
 fuentes en una sola tabla. La pieza central de la arquitectura, y lo que hace que eliminar OpenVAS no

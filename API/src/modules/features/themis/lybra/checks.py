@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import socket
 import ssl
 import threading
 import time
@@ -43,19 +44,27 @@ from .engine import Service
 
 logger = logging.getLogger(__name__)
 
-# The version stamped onto every finding this runtime produces, for traceability.
-CHECKS_FEED_VERSION = "lybra-checks-1"
+# The version stamped onto every finding this runtime produces, for
+# traceability. Bumped whenever the feed gains a new check family (Fase N's
+# "ftp-anonymous-login", the first ``type: "network"`` check, is what earned
+# checks-2) — never for a fix to an existing check, which bumps that check's
+# own ``version`` instead (see ``Check.check_id``).
+CHECKS_FEED_VERSION = "lybra-checks-2"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
 
-# The JSON feed shipped alongside this module.
-_BUNDLED_FEED = Path(__file__).parent / "checks_feed.json"
+# The JSON feed shipped in the package's feeds/ directory, alongside every
+# other Lybra feed (tech_signatures.json for the HTTP dissector, ...).
+_BUNDLED_FEED = Path(__file__).parent / "feeds" / "checks_feed.json"
 # Service names and ports that indicate an HTTP-speaking service worth probing.
 _HTTP_SERVICE_NAMES = {"http", "https", "http-proxy", "https-alt", "http-alt"}
 _HTTP_PORTS = {80, 443, 8080, 8443, 8000, 8888, 8008}
 # Ports we should reach over TLS.
 _TLS_PORTS = {443, 8443}
+# Service names and ports for FTP — Fase N's first ``type: "network"`` family.
+_FTP_SERVICE_NAMES = {"ftp"}
+_FTP_PORTS = {21}
 
 
 # =========================================================================
@@ -134,17 +143,28 @@ class Matcher:
 class Request:
     """A single request plus the matchers that decide whether it fired.
 
+    ``method``/``path`` drive a ``type: "http"`` check; ``send`` drives a
+    ``type: "network"`` one instead — a raw payload written to the check's
+    (single, shared across all of a check's requests) TCP connection, with the
+    server's reply matched exactly like an HTTP response. ``send=None`` means
+    "write nothing, just read" — the shape a banner-only check needs, since a
+    protocol like FTP volunteers its banner unprompted.
+
     Attributes:
-        method: The HTTP method.
-        path: The request path.
+        method: The HTTP method. Unused by ``type: "network"``.
+        path: The request path. Unused by ``type: "network"``.
         matchers: The matchers to evaluate against the response.
         condition: How to combine the matchers — ``"and"`` (all must match) or
             ``"or"`` (any).
+        send: For ``type: "network"``, the raw payload to write before
+            reading a reply (e.g. ``"USER anonymous\\r\\n"``). ``None`` reads
+            without writing anything first. Unused by ``type: "http"``.
     """
     method: str = "GET"
     path: str = "/"
     matchers: tuple = ()
     condition: str = "and"
+    send: Optional[str] = None
 
     def evaluate(self, resp: Response) -> bool:
         """Return whether this request's matchers are satisfied by a response.
@@ -230,6 +250,7 @@ def _parse_check(c: dict) -> Check:
             method=r.get("method", "GET"),
             path=r.get("path", "/"),
             condition=r.get("matchers-condition", "and"),
+            send=r.get("send"),
             matchers=tuple(
                 Matcher(
                     type=m["type"],
@@ -284,6 +305,27 @@ def is_tls_service(service: Service) -> bool:
     return service.port in _TLS_PORTS
 
 
+def is_ftp_service(service: Service) -> bool:
+    """Return whether a service should be probed by FTP ``type: "network"`` checks.
+
+    Args:
+        service: The service to test.
+
+    Returns:
+        ``True`` if the service's name or port looks like FTP.
+    """
+    return (service.name or "").lower() in _FTP_SERVICE_NAMES or service.port in _FTP_PORTS
+
+
+# Maps a ``type: "network"`` check's declared ``service`` (the feed's plain
+# string, e.g. ``"ftp"``) to the predicate that decides whether a discovered
+# Service is that protocol. One entry per protocol Fase N adds — the runtime
+# itself (``CheckRuntime._applies_network``) stays protocol-agnostic.
+_NETWORK_SERVICE_MATCHERS: Dict[str, Callable[[Service], bool]] = {
+    "ftp": is_ftp_service,
+}
+
+
 # Protocol versions considered deprecated/weak for a service exposed today.
 _WEAK_TLS_PROTOCOLS = {"SSLv2", "SSLv3", "TLSv1", "TLSv1.1"}
 
@@ -316,6 +358,13 @@ class CheckRuntime:
         tls_fetch: An optional ``(host, port) -> TlsInfo | None`` callable for
             ``type: "tls"`` checks. When omitted, TLS checks are simply skipped
             — callers that never wire a TLS probe pay nothing for this family.
+        network_open: An optional ``(host, port) -> NetworkSession | None``
+            callable for ``type: "network"`` checks (Fase N). One session is
+            opened per check per service and every request in that check is
+            exchanged over the *same* connection, in order — this is what
+            makes a login sequence like FTP's ``USER``/``PASS`` work. Omitted
+            the same way ``tls_fetch`` is: callers that never wire a network
+            probe pay nothing for this family.
     """
 
     def __init__(
@@ -325,15 +374,17 @@ class CheckRuntime:
         mode: str = "safe",
         rate_limiter: Optional["HostRateLimiter"] = None,
         tls_fetch: Optional[Callable[[str, int], object]] = None,
+        network_open: Optional[Callable[[str, int], Optional["NetworkSession"]]] = None,
     ) -> None:
         self._checks = list(checks)
         self._fetch = fetch
         self._mode = mode
         self._rl = rate_limiter
         self._tls_fetch = tls_fetch
+        self._network_open = network_open
 
     def run(self, host: str, services: Iterable[Service]) -> List[dict]:
-        """Run every applicable check against a host's HTTP and TLS services.
+        """Run every applicable check against a host's HTTP, TLS and network services.
 
         Args:
             host: The target host.
@@ -347,7 +398,7 @@ class CheckRuntime:
         for service in services:
             if is_http_service(service):
                 for check in self._checks:
-                    if not self._applies(check, service):
+                    if not self._applies(check):
                         continue
                     finding = self._run_check(check, host, service)
                     if finding is not None:
@@ -359,9 +410,16 @@ class CheckRuntime:
                     finding = self._run_tls_check(check, host, service)
                     if finding is not None:
                         findings.append(finding)
+            if self._network_open is not None:
+                for check in self._checks:
+                    if not self._applies_network(check, service):
+                        continue
+                    finding = self._run_network_check(check, host, service)
+                    if finding is not None:
+                        findings.append(finding)
         return findings
 
-    def _applies(self, check: Check, service: Service) -> bool:
+    def _applies(self, check: Check) -> bool:
         """Return whether a check should run against a service in the current mode."""
         if check.type != "http":
             return False
@@ -370,6 +428,21 @@ class CheckRuntime:
     def _applies_tls(self, check: Check) -> bool:
         """Return whether a TLS check should run in the current mode."""
         if check.type != "tls" or check.tls_rule not in _TLS_RULES:
+            return False
+        return self._applies_mode(check)
+
+    def _applies_network(self, check: Check, service: Service) -> bool:
+        """Return whether a ``type: "network"`` check should run against a service.
+
+        Dispatches on the check's declared ``service`` (e.g. ``"ftp"``) via
+        :data:`_NETWORK_SERVICE_MATCHERS`, so the runtime itself never needs to
+        know about a specific protocol — only each protocol's applicability
+        predicate does.
+        """
+        if check.type != "network":
+            return False
+        matches = _NETWORK_SERVICE_MATCHERS.get(check.service)
+        if matches is None or not matches(service):
             return False
         return self._applies_mode(check)
 
@@ -405,6 +478,28 @@ class CheckRuntime:
             return None
         return self._finding(check, service)
 
+    def _run_network_check(self, check: Check, host: str, service: Service) -> Optional[dict]:
+        """Run one network check against one service, returning a finding if it fired.
+
+        Opens a single session and exchanges every request's ``send`` payload
+        over it in order (combined with AND, same as ``_run_check``) — the
+        session, not a fresh connection per request, is what lets a login
+        sequence like FTP's ``USER``/``PASS`` see its own prior state.
+        """
+        if self._rl is not None:
+            self._rl.acquire(host)
+        session = self._network_open(host, service.port)
+        if session is None:
+            return None
+        try:
+            for request in check.requests:
+                resp = session.exchange(request.send)
+                if resp is None or not request.evaluate(resp):
+                    return None
+            return self._finding(check, service)
+        finally:
+            session.close()
+
     def _finding(self, check: Check, service: Service) -> dict:
         """Build the finding dict for a check that fired against a service."""
         f = check.finding
@@ -412,7 +507,7 @@ class CheckRuntime:
             "title":        f.get("title", check.id),
             "category":     check.category,
             "port":         service.port,
-            "service":      service.name or "http",
+            "service":      service.name or check.service,
             "cve_ids":      f.get("cve_ids"),
             "source":       "lybra",
             "check_id":     check.check_id,
@@ -551,3 +646,97 @@ class HttpProbe:
         text = body.decode("utf-8", "replace") if isinstance(body, bytes) else str(body)
         header_map = {str(k).lower(): str(v) for k, v in dict(headers).items()}
         return Response(status=status, body=text, headers=header_map)
+
+
+# =========================================================================
+# NETWORK PROBE (the network edge for ``type: "network"`` checks — Fase N)
+# =========================================================================
+
+class NetworkSession:
+    """One TCP connection, shared across every request of a single check run.
+
+    Deliberately protocol-agnostic: it knows nothing about FTP, SMB or any
+    other protocol a future check targets — it only writes a payload (if any)
+    and reads back one line, decoded as text so the existing word/regex
+    matchers can evaluate it exactly like an HTTP response (``status=0`` and
+    empty ``headers``, since neither concept exists here).
+
+    Args:
+        sock: The connected socket this session wraps.
+        max_bytes: The maximum number of bytes to read per line.
+    """
+
+    def __init__(self, sock, max_bytes: int = 4096) -> None:
+        self._sock = sock
+        self._max_bytes = max_bytes
+
+    def exchange(self, send: Optional[str]) -> Optional[Response]:
+        """Write ``send`` (if any), then read and return one line of reply.
+
+        Args:
+            send: The raw payload to write first, or ``None`` to only read —
+                the shape a banner-only check needs, since some protocols
+                (FTP) volunteer a line unprompted right after connecting.
+
+        Returns:
+            A :class:`Response` wrapping the decoded line (``status=0``,
+            empty ``headers``), or ``None`` on any transport failure.
+        """
+        try:
+            if send is not None:
+                self._sock.sendall(send.encode("utf-8"))
+            data = b""
+            while not data.endswith(b"\n") and len(data) < self._max_bytes:
+                chunk = self._sock.recv(1)
+                if not chunk:
+                    break
+                data += chunk
+        except OSError as err:
+            logger.debug("Network check exchange failed: %s", err)
+            return None
+        text = data.decode("utf-8", "ignore").strip()
+        if not text:
+            return None
+        return Response(status=0, body=text, headers={})
+
+    def close(self) -> None:
+        """Close the underlying socket, ignoring any error."""
+        try:
+            self._sock.close()
+        except OSError:
+            pass
+
+
+class NetworkProbe:
+    """Opens the raw TCP connection a :class:`NetworkSession` wraps.
+
+    The connection function is injectable — it defaults to
+    ``socket.create_connection`` but a test can pass a fake — the same pattern
+    :class:`~.fingerprinting.ssh.SshProbe` and :class:`~.fingerprinting.tls.TlsProbe`
+    already use.
+
+    Args:
+        timeout: The connection timeout, in seconds.
+        connect: An injectable ``(address, timeout) -> socket`` callable.
+    """
+
+    def __init__(self, timeout: float = 5.0, connect: Optional[Callable] = None) -> None:
+        self._timeout = timeout
+        self._connect = connect or socket.create_connection
+
+    def open(self, host: str, port: Optional[int]) -> Optional[NetworkSession]:
+        """Connect to ``host:port`` and return a session, or ``None`` on failure.
+
+        Args:
+            host: The target host.
+            port: The target port.
+
+        Returns:
+            A :class:`NetworkSession`, or ``None`` if the connection failed.
+        """
+        try:
+            sock = self._connect((host, port), self._timeout)
+        except OSError as err:
+            logger.debug("Network probe connect failed for %s:%s: %s", host, port, err)
+            return None
+        return NetworkSession(sock)

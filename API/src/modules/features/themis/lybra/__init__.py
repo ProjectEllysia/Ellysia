@@ -12,9 +12,9 @@ them:
     Discovers which ports are open (the L0 layer) — an unprivileged asyncio
     connect scan.
 
-``fingerprint``
-    Identifies what is running on a port (L1) — HTTP and SSH dissectors,
-    calibrated against Nmap.
+``fingerprinting``
+    Identifies what is running on a port (L1) — one dissector module per
+    protocol (HTTP, SSH, TLS...), calibrated against Nmap.
 
 ``engine``
     The detection core (L2): turns discovered services into findings, including
@@ -48,7 +48,9 @@ from .engine import (
     LybraEngine,
     Service,
     services_from_open_ports,
+    services_from_payload,
     QOD_OPEN_PORT,
+    QOD_INVENTORY_MATCH,
 )
 from .kb import (
     version_compare,
@@ -67,9 +69,12 @@ from .checks import (
     CheckRuntime,
     HttpProbe,
     HostRateLimiter,
+    NetworkProbe,
+    NetworkSession,
     Response,
     is_http_service,
     is_tls_service,
+    is_ftp_service,
     CHECKS_FEED_VERSION,
     QOD_CONFIRMED,
 )
@@ -81,7 +86,7 @@ from .correlation import (
     score_finding,
     PRIORITY_LADDER,
 )
-from .fingerprint import (
+from .fingerprinting import (
     fingerprint_http,
     fingerprint_ssh,
     parse_ssh_banner,
@@ -95,6 +100,10 @@ from .fingerprint import (
     TlsInfo,
     TechSignature,
     TechMatcher,
+    FtpFingerprint,
+    parse_ftp_banner,
+    fingerprint_ftp,
+    FtpProbe,
     agrees_with_nmap,
     concordance_rate,
     QOD_FINGERPRINT,
@@ -116,7 +125,9 @@ __all__ = [
     "LybraEngine",
     "Service",
     "services_from_open_ports",
+    "services_from_payload",
     "QOD_OPEN_PORT",
+    "QOD_INVENTORY_MATCH",
     "version_compare",
     "version_in_range",
     "normalize_cpe_to_23",
@@ -131,9 +142,12 @@ __all__ = [
     "CheckRuntime",
     "HttpProbe",
     "HostRateLimiter",
+    "NetworkProbe",
+    "NetworkSession",
     "Response",
     "is_http_service",
     "is_tls_service",
+    "is_ftp_service",
     "CHECKS_FEED_VERSION",
     "QOD_CONFIRMED",
     "classify_exposure",
@@ -155,6 +169,10 @@ __all__ = [
     "TlsInfo",
     "TechSignature",
     "TechMatcher",
+    "FtpFingerprint",
+    "parse_ftp_banner",
+    "fingerprint_ftp",
+    "FtpProbe",
     "agrees_with_nmap",
     "concordance_rate",
     "QOD_FINGERPRINT",

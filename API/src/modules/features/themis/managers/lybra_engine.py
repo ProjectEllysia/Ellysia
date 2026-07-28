@@ -3,7 +3,7 @@
 import ipaddress
 import logging
 from dataclasses import replace
-from typing import Optional
+from typing import List, Optional
 import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import ITaskQueue, job_context
 from src.modules.infrastructure import UnitOfWork
@@ -23,6 +23,7 @@ from ..model import (
 )
 from ..lybra import (
     LybraEngine,
+    Service,
     services_from_open_ports,
     services_from_discovered_ports,
     compute_dedup_key,
@@ -148,16 +149,25 @@ class LybraEngineManager(ScanManager):
         user_id: int,
         source_scan_id: Optional[int] = None,  # pylint: disable=arguments-differ
         target: Optional[str] = None,
+        services: Optional[List[Service]] = None,
         discover_ports: Optional[list] = None,
         deep: bool = False,
         timeout: int = 120,
         programed_scan_id: Optional[int] = None,
     ) -> int:
         """
-        Start an Lybra engine scan in one of two modes.
+        Start an Lybra engine scan in one of three modes.
 
         - **Over a prior Nmap scan** (``source_scan_id``): analyse the services
           that scan already discovered. Ownership/type validated by the caller.
+        - **External payload** (``services`` + ``target``, Fase 0.9): analyse a
+          services list the caller already resolved — a Hygeia inventory
+          adapter is the motivating case, but any in-process producer of a
+          ``List[Service]`` qualifies. No network discovery, fingerprinting or
+          active checks run in this mode by default (see ``_run_lybra``); it
+          exists precisely for services data that came from *not* touching the
+          target's network. ``target`` is still required — it is the host
+          identity findings get attached to.
         - **Self-discovery** (``target``, optional ``discover_ports``): Lybra
           discovers the open ports itself with its own connect scan (Fase T),
           no Nmap needed. The caller validates the target (reject private, etc.).
@@ -165,7 +175,11 @@ class LybraEngineManager(ScanManager):
         Args:
             deep: Fase 6 "análisis profundo" — also launch Nmap/Nikto/OpenVAS as
                 independent corroborator scans (fire-and-forget; their Finding
-                rows merge in at read time, see ``format_scan``).
+                rows merge in at read time, see ``format_scan``). In the
+                external-payload mode, this additionally requires ``target`` to
+                be in the authorized-targets register, since deep corroborators
+                touch the network and payload targets are otherwise never
+                validated (see ``_run_lybra``).
             programed_scan_id: Set when launched by the scheduler (Themis
                 scheduled scans), same convention as the other scan managers.
 
@@ -178,6 +192,17 @@ class LybraEngineManager(ScanManager):
                 if not source:
                     raise ScanNotFoundError(source_scan_id)
                 scan_target = source.target
+        elif services is not None:
+            # Fase 0.9 — external payload: the target is only an identity key
+            # here, never touched by this call. Deliberately no
+            # AuthorizedTargetManager gate at launch, unlike self-discovery
+            # below — this mode does not by itself contact the target's
+            # network (_run_lybra skips fingerprinting/active checks for it);
+            # the gate reappears, scoped to deep corroborators only, in
+            # _run_lybra.
+            if not target:
+                raise ValueError("run_scan requires a target when services is set")
+            scan_target = target
         elif target is not None:
             # Self-discovery (Fase T) touches the target directly — requires
             # an authorized-targets register entry (roadmap §6), unlike
@@ -186,7 +211,7 @@ class LybraEngineManager(ScanManager):
             if not AuthorizedTargetManager.is_authorized(user_id, scan_target):
                 raise TargetNotAuthorizedError(scan_target)
         else:
-            raise ValueError("run_scan requires source_scan_id or target")
+            raise ValueError("run_scan requires source_scan_id, services, or target")
 
         scan = self._create_scan_record(
             target=scan_target,
@@ -198,21 +223,27 @@ class LybraEngineManager(ScanManager):
 
         self._tq.submit(
             func=LybraEngineManager.execute_lybra_scan, # type: ignore
-            args=(scan_id, source_scan_id, discover_ports, deep),
+            args=(scan_id, source_scan_id, discover_ports, deep, services),
             name=f"LybraScan-{scan_id}",
             category=self.TASK_CATEGORY, # type: ignore
             external_id=self.external_id_for(scan_id),
             timeout=timeout + self._scan_timeout_margin,
         )
 
-        mode = f"fuente Nmap {source_scan_id}" if source_scan_id else "descubrimiento propio"
+        if source_scan_id:
+            mode = f"fuente Nmap {source_scan_id}"
+        elif services is not None:
+            mode = "payload externo"
+        else:
+            mode = "descubrimiento propio"
         mode += " + análisis profundo" if deep else ""
         logger.info(f"Escaneo Lybra {scan_id} iniciado ({mode})")
         return scan_id  # type: ignore
 
     @staticmethod
     def execute_lybra_scan(scan_id: int, source_scan_id: Optional[int] = None,
-                             discover_ports: Optional[list] = None, deep: bool = False) -> None:
+                             discover_ports: Optional[list] = None, deep: bool = False,
+                             services: Optional[List[Service]] = None) -> None:
         """Entry point submitted to the TaskQueue. Runs the engine in the worker."""
         with job_context():
             manager = LybraEngineManager()
@@ -220,16 +251,18 @@ class LybraEngineManager(ScanManager):
                 scan_id,
                 source_scan_id,
                 discover_ports,
-                deep
+                deep,
+                services,
             )
 
     def _run_lybra(
         self, scan_id: int,
         source_scan_id: Optional[int] = None,
         discover_ports: Optional[list] = None,
-        deep: bool = False
+        deep: bool = False,
+        services_payload: Optional[List[Service]] = None,
     ) -> None:
-        """Resolve services (from Nmap or own discovery), detect, and persist.
+        """Resolve services (from Nmap, own discovery, or a payload), detect, persist.
 
         This is the testable body of the scan (the ``execute_* seam → _run_*``
         pattern). Runs synchronously; safe to call directly in tests without a
@@ -237,6 +270,7 @@ class LybraEngineManager(ScanManager):
         """
 
         uses_existing_source: bool = source_scan_id is not None
+        uses_payload: bool = services_payload is not None
         try:
             self.update_scan_status(scan_id, ScanStatus.RUNNING)
 
@@ -259,6 +293,21 @@ class LybraEngineManager(ScanManager):
                     source_host_id = source.host_id if source else None
                     source_target = source.target if source else scan_target
                     services = services_from_open_ports(open_ports)
+                elif uses_payload:
+                    # Fase 0.9 — external payload: the caller already resolved
+                    # the services (e.g. a future Hygeia inventory adapter), so
+                    # there is no port discovery here at all. Host resolution
+                    # reuses the same identity lookup self-discovery uses below,
+                    # so a device already known by IP or hostname is not
+                    # duplicated into a second Host row.
+                    source_target = scan_target
+                    host = None
+                    if scan_target:
+                        host = scan_repo.get_host_by_ip(scan_target) or scan_repo.get_or_create_host(
+                            hostname=scan_target, ip_address=scan_target,
+                        )
+                    source_host_id = host.id if host else None
+                    services = list(services_payload)
                 else:
                     # Phase 0 — self-discovery (network) happens outside any transaction.
                     discovered_ports: list = []
@@ -309,9 +358,12 @@ class LybraEngineManager(ScanManager):
                 # product/version at all; without this, the matcher below would
                 # have nothing to look up and a self-discovery-only scan would
                 # never find a single CVE. This never overrides a Nmap-sourced
-                # reading — see _fingerprint_services.
+                # reading — see _fingerprint_services. Never runs in payload mode
+                # (Fase 0.9): that data is already a verified fact, not something
+                # to re-infer over the network — and payload mode exists
+                # precisely for hosts this step might not even be able to reach.
                 fingerprint_findings: list = []
-                if source_target and target_authorized and CR.is_lybra_fingerprinting_enabled():
+                if not uses_payload and source_target and target_authorized and CR.is_lybra_fingerprinting_enabled():
                     services, fingerprint_findings = self._fingerprint_services(source_target, services)
 
                 previous_map = self._previous_findings_map(scan_repo, user_id, source_target, scan_id)
@@ -335,7 +387,9 @@ class LybraEngineManager(ScanManager):
 
             # Phase 2 — active checks over the network, outside any transaction.
             # Opt-in (they touch the target; see roadmap §6 authorized targets).
-            if source_target and target_authorized and CR.is_lybra_active_checks_enabled():
+            # Never in payload mode — same rationale as the fingerprinting guard
+            # above (Fase 0.9).
+            if not uses_payload and source_target and target_authorized and CR.is_lybra_active_checks_enabled():
                 findings_data.extend(self._run_active_checks(source_target, services))
 
             # Phase 2.7 — deep analysis (Fase 6): launch Nmap/Nikto/OpenVAS as
@@ -344,7 +398,19 @@ class LybraEngineManager(ScanManager):
             # into this scan's own findings_data.
             deep_scan_ids: list = []
             if deep and source_target:
-                deep_scan_ids = self._launch_deep_corroborators(user_id, source_target, source_scan_id, services)
+                # A payload-mode target was never validated by anything before
+                # reaching here — unlike source_scan_id (already scanned by a
+                # prior Nmap run) or self-discovery (gated by run_scan at
+                # launch). Deep corroborators touch the network, so this mode
+                # alone requires the authorized-targets register here (Fase 0.9).
+                if uses_payload and not target_authorized:
+                    logger.info(
+                        f"Análisis profundo omitido para el escaneo Lybra {scan_id}: objetivo no autorizado"
+                    )
+                else:
+                    deep_scan_ids = self._launch_deep_corroborators(
+                        user_id, source_target, source_scan_id, services
+                    )
 
             # Phase 2.5 — correlation: key, merge duplicates/sources, set lifecycle.
             for finding in findings_data:
@@ -402,12 +468,13 @@ class LybraEngineManager(ScanManager):
             return None
 
     def _run_active_checks(self, target: str, services) -> list:
-        """Run the declarative check runtime against the target's HTTP and TLS services.
+        """Run the declarative check runtime against the target's HTTP, TLS and
+        network (Fase N) services.
 
         Best-effort: a runtime failure (unreachable host, etc.) yields no active
         findings rather than failing the whole scan. Safe mode only.
         """
-        from ..lybra import load_checks, CheckRuntime, HttpProbe, HostRateLimiter, TlsProbe
+        from ..lybra import load_checks, CheckRuntime, HttpProbe, HostRateLimiter, TlsProbe, NetworkProbe
         try:
             runtime = CheckRuntime(
                 load_checks(),
@@ -415,6 +482,7 @@ class LybraEngineManager(ScanManager):
                 mode="safe",
                 rate_limiter=HostRateLimiter(),
                 tls_fetch=TlsProbe().fetch,
+                network_open=NetworkProbe().open,
             )
             return runtime.run(target, services)
         except Exception:
@@ -422,7 +490,7 @@ class LybraEngineManager(ScanManager):
             return []
 
     def _fingerprint_services(self, target: str, services: list) -> tuple:
-        """Run Lybra's own HTTP/SSH dissectors; fill identification gaps and
+        """Run Lybra's own HTTP/SSH/FTP dissectors; fill identification gaps and
         record agreement with Nmap.
 
         Fase F, two jobs at once:
@@ -447,11 +515,12 @@ class LybraEngineManager(ScanManager):
             fingerprint findings.
         """
         from ..lybra import (
-            HttpProbe, SshProbe, HostRateLimiter, is_http_service,
-            fingerprint_http, fingerprint_ssh,
+            HttpProbe, SshProbe, FtpProbe, HostRateLimiter, is_http_service, is_ftp_service,
+            fingerprint_http, fingerprint_ssh, fingerprint_ftp,
         )
         http_probe = HttpProbe()
         ssh_probe = SshProbe()
+        ftp_probe = FtpProbe()
         rate_limiter = HostRateLimiter()
         findings = []
         updated: list = []
@@ -478,6 +547,13 @@ class LybraEngineManager(ScanManager):
                     if probed is not None:
                         banner, kexinit_payload = probed
                         fp, label = fingerprint_ssh(banner, kexinit_payload), "SSH"
+                elif is_ftp_service(service):
+                    # Fase N's opening move (roadmap §"Fase N"): FTP volunteers
+                    # its whole banner unprompted, no framing or negotiation.
+                    rate_limiter.acquire(target)
+                    banner = ftp_probe.fetch(target, service.port or 21)
+                    if banner is not None:
+                        fp, label = fingerprint_ftp(banner), "FTP"
             except Exception:
                 logger.debug("Fingerprinting failed for %s:%s", target, service.port, exc_info=True)
 
@@ -528,13 +604,15 @@ class LybraEngineManager(ScanManager):
         """Diff this scan's services against the host's tracked surface (Fase 5).
 
         Emits an informational finding for a port opening for the first time,
-        or for a service's product/version changing since it was last seen —
-        attack-surface events in their own right, not vulnerability guesses.
-        Always upserts every current service afterwards, so the surface stays
-        current regardless of whether anything changed.
+        for a package appearing for the first time (an ``origin="inventory"``
+        service with no port, Fase 0.9), or for either kind's product/version
+        changing since it was last seen — attack-surface events in their own
+        right, not vulnerability guesses. Always upserts every current service
+        afterwards, so the surface stays current regardless of whether
+        anything changed.
         """
         existing = {
-            (s.port, s.protocol): s for s in scan_repo.get_host_services(host_id)
+            self._surface_key(s): s for s in scan_repo.get_host_services(host_id)
         }
         # A host's very first Lybra scan establishes the baseline surface, not
         # a change to it — every port would otherwise be "new" by definition,
@@ -543,19 +621,15 @@ class LybraEngineManager(ScanManager):
         findings: list = []
         for service in services:
             protocol = service.protocol or "tcp"
-            prior = existing.get((service.port, protocol))
+            prior = existing.get(self._surface_key(service))
             if prior is None:
                 if had_baseline:
-                    findings.append(self._surface_finding(
-                        service, f"Nuevo puerto abierto: {service.port}/{protocol} ({service.name or 'desconocido'})"
-                    ))
+                    findings.append(self._surface_finding(service, self._new_surface_title(service, protocol)))
             elif service.product and prior.product and (
                 service.product != prior.product or service.version != prior.version
             ):
                 findings.append(self._surface_finding(
-                    service,
-                    f"Cambio de versión detectado en el puerto {service.port}: "
-                    f"{prior.product} {prior.version or ''} -> {service.product} {service.version or ''}".strip()
+                    service, self._changed_surface_title(service, prior)
                 ))
             scan_repo.upsert_host_service(
                 host_id=host_id, port=service.port, protocol=protocol,
@@ -565,13 +639,55 @@ class LybraEngineManager(ScanManager):
         return findings
 
     @staticmethod
+    def _surface_key(service_or_row) -> tuple:
+        """Identity key for surface tracking: ``(port, protocol)`` for a
+        networked service, or ``(None, protocol, product)`` for a portless
+        inventory service (Fase 0.9).
+
+        A port already uniquely identifies a listening socket, so the product
+        is deliberately excluded there — that is what lets a version bump on
+        the *same* port read as "changed", not "closed + reopened". A
+        portless service has no such anchor: without folding the product into
+        the key, two different installed packages on the same host would
+        collide on ``(None, protocol)`` and silently overwrite each other's
+        tracked row. Works identically for a ``Service`` and a stored
+        ``HostService`` row — both expose the same three attributes.
+        """
+        protocol = service_or_row.protocol or "tcp"
+        if service_or_row.port is not None:
+            return (service_or_row.port, protocol, None)
+        return (None, protocol, service_or_row.product or None)
+
+    @staticmethod
+    def _new_surface_title(service, protocol: str) -> str:
+        """Title for a first-seen port or package (Fase 0.9 adds the latter)."""
+        if service.port is not None:
+            return f"Nuevo puerto abierto: {service.port}/{protocol} ({service.name or 'desconocido'})"
+        return f"Nuevo paquete instalado: {service.label}"
+
+    @staticmethod
+    def _changed_surface_title(service, prior) -> str:
+        """Title for a product/version change on a tracked port or package."""
+        change = f"{prior.product} {prior.version or ''} -> {service.product} {service.version or ''}".strip()
+        if service.port is not None:
+            return f"Cambio de versión detectado en el puerto {service.port}: {change}"
+        return f"Cambio de versión detectado en el paquete {service.product}: {change}"
+
+    @staticmethod
     def _surface_finding(service, title: str) -> dict:
-        """Build an informational Finding for an attack-surface change (Fase 5)."""
+        """Build an informational Finding for an attack-surface change (Fase 5).
+
+        ``service`` falls back to ``product`` when there is no service name —
+        for a portless (inventory-origin) service this is also what
+        ``compute_dedup_key`` uses to disambiguate two different packages that
+        would otherwise both hash to the same "port=None" identity (Fase 0.9).
+        Mirrors the same fallback in ``engine.py``'s finding builders.
+        """
         return {
             "title":        title,
             "category":     "surface_change",
             "port":         service.port,
-            "service":      service.name or None,
+            "service":      service.name or service.product or None,
             "source":       "lybra",
             "check_id":     "lybra:surface-change@1",
             "feed_version": "lybra-surface-1",

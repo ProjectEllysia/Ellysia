@@ -1,8 +1,9 @@
 """Unit tests for the Lybra active-check runtime (Fase R).
 
-Pure: an injected ``fetch`` returns crafted responses, so no network. Exercises
-the bundled feed, the matchers, HTTP-service selection and the safe/aggressive
-gate.
+Pure: an injected ``fetch``/``network_open`` returns crafted responses, so no
+real network. Exercises the bundled feed, the matchers, HTTP-service
+selection, the safe/aggressive gate, and the ``type: "network"`` family Fase N
+adds (a fake, in-memory session standing in for a real TCP connection).
 """
 
 import json
@@ -12,8 +13,10 @@ import pytest
 from src.modules.features.themis.lybra import (
     load_checks,
     CheckRuntime,
+    NetworkProbe,
     Response,
     is_http_service,
+    is_ftp_service,
     Service,
 )
 
@@ -118,3 +121,136 @@ def test_safe_mode_skips_aggressive_checks(tmp_path):
     assert CheckRuntime(checks, fetch, mode="safe").run("h", [_HTTP]) == []
     aggressive = CheckRuntime(checks, fetch, mode="aggressive").run("h", [_HTTP])
     assert len(aggressive) == 1
+
+
+# --------------------------------------------------- network checks (Fase N)
+
+_FTP = Service(21, "tcp", "ftp", "", "", None)
+
+
+class _FakeNetworkSession:
+    """A scripted stand-in for a real TCP connection: each ``exchange`` call
+    consumes the next canned reply, in order — exactly what a login sequence
+    like FTP's USER/PASS needs from a single, shared connection."""
+
+    def __init__(self, replies):
+        self._replies = list(replies)
+        self.sent: list = []
+        self.closed = False
+
+    def exchange(self, send):
+        self.sent.append(send)
+        if not self._replies:
+            return None
+        reply = self._replies.pop(0)
+        return Response(status=0, body=reply, headers={}) if reply is not None else None
+
+    def close(self):
+        self.closed = True
+
+
+def _network_open_for(replies):
+    """A ``network_open`` that hands out one fresh scripted session."""
+    session = _FakeNetworkSession(replies)
+
+    def open_(host, port):
+        return session
+    open_.session = session
+    return open_
+
+
+def test_ftp_anonymous_login_confirmed_when_both_steps_succeed():
+    open_ = _network_open_for(["331 Please specify the password.", "230 Login successful."])
+    findings = CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_FTP])
+
+    ftp = [f for f in findings if f["check_id"] == "lybra:ftp-anonymous-login@1"]
+    assert len(ftp) == 1
+    assert ftp[0]["qod"] == 99 and ftp[0]["confirmed"] is True
+    assert ftp[0]["category"] == "default_credentials"
+    assert ftp[0]["port"] == 21
+    # Both steps of the login sequence went over the same session, in order.
+    assert open_.session.sent == ["USER anonymous\r\n", "PASS anonymous@lybra.local\r\n"]
+
+
+def test_ftp_anonymous_login_absent_when_credentials_rejected():
+    open_ = _network_open_for(["331 Please specify the password.", "530 Login incorrect."])
+    findings = CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_FTP])
+    assert not any(f["check_id"] == "lybra:ftp-anonymous-login@1" for f in findings)
+
+
+def test_ftp_anonymous_login_abandoned_on_connect_failure():
+    findings = CheckRuntime(
+        load_checks(), lambda *a: None, network_open=lambda host, port: None
+    ).run("h", [_FTP])
+    assert not any(f["check_id"] == "lybra:ftp-anonymous-login@1" for f in findings)
+
+
+def test_network_checks_never_run_without_a_network_open_callable():
+    # Mirrors test_only_http_services_are_probed: omitting network_open must
+    # cost nothing, not silently probe with some default.
+    findings = CheckRuntime(load_checks(), lambda *a: None).run("h", [_FTP])
+    assert findings == []
+
+
+def test_only_ftp_services_are_probed_by_network_checks():
+    open_ = _network_open_for(["331 x", "230 x"])
+    CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_HTTP])
+    assert open_.session.sent == []            # nothing exchanged for a non-FTP service
+
+    assert is_ftp_service(_FTP) is True
+    assert is_ftp_service(_HTTP) is False
+
+
+# --------------------------------------------- NetworkProbe (fake socket)
+
+class _FakeNetSocket:
+    """A byte-stream-backed stand-in for a real network-check socket."""
+
+    def __init__(self, data: bytes):
+        self._buf = data
+        self.sent = b""
+        self.closed = False
+
+    def recv(self, n: int) -> bytes:
+        chunk, self._buf = self._buf[:n], self._buf[n:]
+        return chunk
+
+    def sendall(self, data: bytes) -> None:
+        self.sent += data
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_network_probe_session_reads_banner_without_sending():
+    fake_sock = _FakeNetSocket(b"220 (vsFTPd 2.3.4)\r\n")
+    session = NetworkProbe(connect=lambda addr, timeout: fake_sock).open("10.0.0.5", 21)
+
+    resp = session.exchange(None)
+
+    assert resp.body == "220 (vsFTPd 2.3.4)"
+    assert fake_sock.sent == b""               # nothing written for a banner-only read
+
+
+def test_network_probe_session_sends_then_reads():
+    fake_sock = _FakeNetSocket(b"331 Please specify the password.\r\n")
+    session = NetworkProbe(connect=lambda addr, timeout: fake_sock).open("10.0.0.5", 21)
+
+    resp = session.exchange("USER anonymous\r\n")
+
+    assert fake_sock.sent == b"USER anonymous\r\n"
+    assert resp.body == "331 Please specify the password."
+    session.close()
+    assert fake_sock.closed is True
+
+
+def test_network_probe_returns_none_on_connect_failure():
+    def failing_connect(addr, timeout):
+        raise OSError("connection refused")
+    assert NetworkProbe(connect=failing_connect).open("10.0.0.5", 21) is None
+
+
+def test_network_session_exchange_returns_none_on_empty_read():
+    fake_sock = _FakeNetSocket(b"")
+    session = NetworkProbe(connect=lambda addr, timeout: fake_sock).open("10.0.0.5", 21)
+    assert session.exchange(None) is None

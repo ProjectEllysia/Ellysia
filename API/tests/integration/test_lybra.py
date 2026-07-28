@@ -15,6 +15,7 @@ from src.modules.infrastructure import UnitOfWork
 from src.modules.features.themis.model import NmapScan, NiktoScan, ScanStatus
 from src.modules.features.themis.repositories import ScanRepository, KbRepository
 from src.modules.features.themis.managers import LybraEngineManager, ScanManager, AuthorizedTargetManager
+from src.modules.features.themis.lybra import Service
 
 pytestmark = pytest.mark.integration
 
@@ -226,6 +227,153 @@ def test_lybra_self_discovery_reuses_host_created_by_nmap(app, admin_user):
         assert len(all_hosts) == 1                       # no duplicate
 
 
+# ------------------------------------------------- Fase 0.9: external payload
+
+def test_lybra_run_scan_payload_mode_requires_target(app, admin_user):
+    from unittest import mock
+
+    with app.app_context():
+        with pytest.raises(ValueError):
+            LybraEngineManager(task_queue=mock.Mock()).run_scan(
+                user_id=admin_user.id,
+                services=[Service(port=None, protocol="", product="openssl", version="1.1.1")],
+            )
+
+
+def test_lybra_run_scan_payload_mode_does_not_require_authorization(app, admin_user):
+    # Unlike self-discovery, launching a payload-mode scan never gates on the
+    # authorized-targets register at launch: the mode does not by itself touch
+    # the target's network (the register only matters later, and only for the
+    # optional deep corroborators — see the test below).
+    from unittest import mock
+
+    with app.app_context():
+        scan_id = LybraEngineManager(task_queue=mock.Mock()).run_scan(
+            user_id=admin_user.id, target="10.9.9.9",
+            services=[Service(port=None, protocol="", product="openssl",
+                              version="1.1.1", origin="inventory")],
+        )
+        assert scan_id is not None
+
+
+def test_lybra_payload_mode_produces_confirmed_inventory_findings(app, admin_user, monkeypatch):
+    """End to end: a payload of origin="inventory" services, with no source Nmap
+    scan and no network discovery, produces confirmed/high-qod CVE findings and
+    never invokes fingerprinting or active checks."""
+    _seed_kb_apache_cve(app)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("payload mode must never fingerprint or actively check the target")
+    monkeypatch.setattr(LybraEngineManager, "_fingerprint_services", _boom)
+    monkeypatch.setattr(LybraEngineManager, "_run_active_checks", _boom)
+
+    services = [
+        Service(port=None, protocol="", name="", product="Apache httpd",
+                version="2.4.49", cpe="cpe:/a:apache:http_server:2.4.49", origin="inventory"),
+        Service(port=None, protocol="", name="", product="openssl",
+                version="1.1.1", origin="inventory"),
+    ]
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.9.9.9", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None,
+                       deep=False, services_payload=services)
+
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            findings = repo.get_findings_by_scan(escan.id)
+            escan = repo.get_by_id(escan.id)
+
+    assert escan.status == ScanStatus.FINISHED.value
+    # Host resolved by IP identity, same helper self-discovery uses.
+    assert all(f.host_id is not None for f in findings)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    assert vuln.cve_ids == ["CVE-2021-41773"]
+    assert vuln.qod == 95
+    assert vuln.confirmed is True
+
+    packages = [f for f in findings if f.category == "installed_package"]
+    assert any("openssl 1.1.1" in f.title for f in packages)
+    assert all(f.port is None for f in packages)
+
+
+def test_lybra_payload_mode_surface_tracking_distinguishes_portless_packages(app, admin_user):
+    """Regression: two different installed packages both have port=None, so
+    surface tracking cannot key on (port, protocol) alone for them (Fase 0.9)
+    — it must fall back to product, or the second package's upsert would
+    silently overwrite the first package's tracked row."""
+    with app.app_context():
+        mgr = LybraEngineManager()
+
+        baseline_services = [
+            Service(port=None, protocol="", product="openssl", version="1.1.1", origin="inventory"),
+            Service(port=None, protocol="", product="curl", version="7.68.0", origin="inventory"),
+        ]
+        baseline = mgr._create_scan_record(target="10.9.9.20", user_id=admin_user.id)
+        mgr._run_lybra(baseline.id, source_scan_id=None, discover_ports=None,
+                       deep=False, services_payload=baseline_services)
+
+        with UnitOfWork() as uow:
+            tracked = ScanRepository(uow).get_host_services(
+                ScanRepository(uow).get_by_id(baseline.id).host_id
+            )
+        # Both packages kept their own row — no collision on (None, "tcp").
+        assert {t.product for t in tracked} == {"openssl", "curl"}
+
+        rescan_services = [
+            Service(port=None, protocol="", product="openssl", version="1.1.1n", origin="inventory"),
+            Service(port=None, protocol="", product="curl", version="7.68.0", origin="inventory"),
+            Service(port=None, protocol="", product="sqlite", version="3.31.1", origin="inventory"),
+        ]
+        rescan = mgr._create_scan_record(target="10.9.9.20", user_id=admin_user.id)
+        mgr._run_lybra(rescan.id, source_scan_id=None, discover_ports=None,
+                       deep=False, services_payload=rescan_services)
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(rescan.id)
+
+    surface = {f.title for f in findings if f.category == "surface_change"}
+    assert len(surface) == 2
+    assert any("openssl" in t and "1.1.1 -> openssl 1.1.1n" in t for t in surface)
+    assert any(t == "Nuevo paquete instalado: sqlite 3.31.1" for t in surface)
+    # curl was unchanged — must not appear as a spurious "version change".
+    assert not any("curl" in t for t in surface)
+
+
+def test_lybra_payload_mode_deep_corroborators_require_authorization(app, admin_user, monkeypatch):
+    """Deep corroborators touch the network, so — unlike fingerprinting/active
+    checks, which never run at all in payload mode — they specifically require
+    the authorized-targets register, since a payload target was never
+    validated by anything else before reaching this point."""
+    calls = []
+    monkeypatch.setattr(
+        LybraEngineManager, "_launch_deep_corroborators",
+        lambda self, user_id, target, source_scan_id, services: calls.append(target) or [999],
+    )
+    services = [Service(port=None, protocol="", product="openssl", version="1.1.1", origin="inventory")]
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+
+        # Not authorized: skipped entirely, no corroborator ids recorded.
+        escan = mgr._create_scan_record(target="10.9.9.10", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None,
+                       deep=True, services_payload=services)
+        assert calls == []
+        with UnitOfWork() as uow:
+            escan = ScanRepository(uow).get_by_id(escan.id)
+        assert not escan.deep_scan_ids
+
+        # Authorized: launches as usual.
+        AuthorizedTargetManager().add(admin_user.id, "10.9.9.11")
+        escan2 = mgr._create_scan_record(target="10.9.9.11", user_id=admin_user.id)
+        mgr._run_lybra(escan2.id, source_scan_id=None, discover_ports=None,
+                       deep=True, services_payload=services)
+        assert calls == ["10.9.9.11"]
+
+
 def test_lybra_rejects_non_nmap_source(client, app, admin_user, auth_headers):
     nikto_id = _seed_nikto_scan(app, admin_user.id)
     resp = client.post("/themis/lybra", headers=auth_headers(admin_user),
@@ -329,6 +477,21 @@ def _seed_kb_apache_cve(app):
                               "percentile": 0.99, "scored_at": None})
 
 
+def _seed_kb_vsftpd_cve(app):
+    """Seed the KB with CVE-2011-2523 (the vsftpd 2.3.4 backdoor)."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            repo.upsert_cve(
+                {"cve_id": "CVE-2011-2523", "cvss_score": 10.0,
+                 "cvss_vector": "CVSS:2.0/AV:N", "severity": "CRITICAL",
+                 "description": "vsftpd backdoor", "cwe_ids": ["CWE-78"], "source": "nvd"},
+                [{"vendor": "vsftpd_project", "product": "vsftpd", "exact_version": "2.3.4",
+                  "version_start_including": None, "version_start_excluding": None,
+                  "version_end_including": None, "version_end_excluding": None}],
+            )
+
+
 def test_lybra_version_match_produces_cve_finding(app, admin_user):
     _seed_kb_apache_cve(app)
     nmap_id = _seed_nmap_scan(app, admin_user.id)  # port 80 = Apache 2.4.49 with CPE
@@ -387,6 +550,51 @@ def test_lybra_active_check_persists_confirmed_finding(app, admin_user, monkeypa
     assert active[0].qod == 99
     assert active[0].confirmed is True
     assert active[0].category == "exposed_path"
+
+
+def test_lybra_active_check_ftp_anonymous_login_persists_confirmed_finding(app, admin_user, monkeypatch):
+    """Fase N: the runtime's first ``type: "network"`` check, wired end to
+    end through the real manager (not a bare ``CheckRuntime``) — a scripted
+    fake session stands in for the raw TCP connection."""
+    import src.modules.system.config_reading as CR
+    from src.modules.features.themis.lybra import checks as checks_mod
+
+    monkeypatch.setattr(CR, "is_lybra_active_checks_enabled", lambda: True)
+
+    class _FakeSession:
+        def __init__(self):
+            self._replies = iter(["331 Please specify the password.", "230 Login successful."])
+
+        def exchange(self, send):
+            return checks_mod.Response(status=0, body=next(self._replies), headers={})
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(checks_mod.NetworkProbe, "open", lambda self, host, port: _FakeSession())
+
+    ftp_ports = [
+        {"protocol": "21/tcp", "reason": "syn-ack", "product": "vsftpd",
+         "version": "2.3.4", "given_use": "ftp", "cpe": ""},
+    ]
+    nmap_id = _seed_nmap_scan(app, admin_user.id, ports=ftp_ports)
+    _authorize_target(app, admin_user.id)
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(
+            target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id,
+        )
+        mgr._run_lybra(escan.id, nmap_id)
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    active = [f for f in findings if f.check_id == "lybra:ftp-anonymous-login@1"]
+    assert len(active) == 1
+    assert active[0].qod == 99
+    assert active[0].confirmed is True
+    assert active[0].category == "default_credentials"
+    assert active[0].port == 21
 
 
 def test_lybra_lifecycle_marks_fixed_when_cve_gone(app, admin_user):
@@ -555,6 +763,36 @@ def test_lybra_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, mon
     fingerprints = [f for f in findings if f.category == "fingerprint"]
     assert len(fingerprints) == 1
     assert "sin datos de Nmap para comparar" in fingerprints[0].title
+
+
+def test_lybra_ftp_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, monkeypatch):
+    """Fase N: FTP joins HTTP/SSH as a dissector that fills the CPE gap for a
+    self-discovered service (Fase T, no Nmap involved at all)."""
+    import src.modules.system.config_reading as CR
+    from src.modules.features.themis.lybra import FtpProbe
+
+    _seed_kb_vsftpd_cve(app)
+    monkeypatch.setattr(CR, "is_lybra_fingerprinting_enabled", lambda: True)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports", lambda self, target, ports: [21])
+    monkeypatch.setattr(FtpProbe, "fetch", lambda self, host, port: "220 (vsFTPd 2.3.4)")
+    _authorize_target(app, admin_user.id)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=None)
+        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vulns = [f for f in findings if f.category == "outdated_software"]
+    assert len(vulns) == 1
+    assert vulns[0].cve_ids == ["CVE-2011-2523"]
+    assert vulns[0].qod == 70
+    fingerprints = [f for f in findings if f.category == "fingerprint"]
+    assert len(fingerprints) == 1
+    assert "vsFTPd 2.3.4" in fingerprints[0].title
 
 
 def test_lybra_scan_surfaces_in_results_endpoint(client, app, admin_user, auth_headers):

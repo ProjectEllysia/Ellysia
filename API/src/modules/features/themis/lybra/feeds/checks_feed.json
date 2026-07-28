@@ -1,5 +1,5 @@
 {
-  "feedVersion": "lybra-checks-1",
+  "feedVersion": "lybra-checks-2",
   "checks": [
     {
       "id": "git-config-exposure",
@@ -292,6 +292,36 @@
       "tlsRule": "deprecated_protocol",
       "finding": {
         "title": "Protocolo TLS obsoleto negociado (SSLv3/TLSv1.0/TLSv1.1)",
+        "qod": 99,
+        "confirmed": true
+      }
+    },
+    {
+      "id": "ftp-anonymous-login",
+      "version": 1,
+      "type": "network",
+      "category": "default_credentials",
+      "severity": "HIGH",
+      "service": "ftp",
+      "mode": "safe",
+      "requests": [
+        {
+          "send": "USER anonymous\r\n",
+          "matchers-condition": "and",
+          "matchers": [
+            { "type": "word", "part": "body", "words": ["331"] }
+          ]
+        },
+        {
+          "send": "PASS anonymous@lybra.local\r\n",
+          "matchers-condition": "and",
+          "matchers": [
+            { "type": "word", "part": "body", "words": ["230"] }
+          ]
+        }
+      ],
+      "finding": {
+        "title": "FTP: login anónimo permitido",
         "qod": 99,
         "confirmed": true
       }

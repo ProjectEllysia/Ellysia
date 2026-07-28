@@ -38,12 +38,20 @@ QOD_OPEN_PORT = 30
 # without changing the version number.
 QOD_VERSION_MATCH = 70
 
+# Quality of Detection for a version-based match built from a Service whose
+# origin is "inventory" (Fase 0.9) — a package an agent read directly off the
+# host, not a guess from a network banner. There is no back-port ambiguity to
+# hedge against here: the installed version *is* the version, so the match is
+# both confirmed and scored close to an actively-confirmed check (QOD_CONFIRMED
+# in checks.py), without claiming the exploit was actually reproduced.
+QOD_INVENTORY_MATCH = 95
+
 
 # Maps a product string (lowercased) to the (vendor, product) pair CPE uses.
 # Consulted whenever a service has no usable CPE of its own — whether the
 # product/version came from Nmap's own naming ("Apache httpd") or from
 # Lybra's own HTTP/SSH fingerprint reading the Server header or SSH banner
-# directly ("Apache", "OpenSSH" — see lybra.fingerprint). Both spellings for
+# directly ("Apache", "OpenSSH" — see lybra.fingerprinting). Both spellings for
 # the same product are kept as separate keys rather than normalized, since
 # that keeps this table a flat, auditable list. This is a small, hand-curated
 # seed; it grows by one line each time a real scan turns up a product we do
@@ -72,12 +80,22 @@ class Service:
 
     Attributes:
         port: The TCP/UDP port number, or ``None`` if it could not be parsed.
-        protocol: The transport protocol, ``"tcp"`` or ``"udp"``.
+            Commonly ``None`` for an ``origin="inventory"`` service — an
+            installed library is not listening anywhere.
+        protocol: The transport protocol, ``"tcp"`` or ``"udp"``. May be empty
+            for an ``origin="inventory"`` service, which has no transport.
         name: The service name as identified, e.g. ``"http"`` or ``"ssh"``. May
             be empty when unknown.
         product: The product name, e.g. ``"Apache httpd"``. May be empty.
         version: The product version, e.g. ``"2.4.49"``. May be empty.
         cpe: A CPE string for the service if one is known, else ``None``.
+        origin: Where this reading came from — ``"network"`` (the only value
+            that existed before Fase 0.9): inferred from a banner, a CPE Nmap
+            emitted, or Lybra's own fingerprint. Or ``"inventory"``: a fact
+            read directly off the host (e.g. a package manager), not a guess.
+            The engine uses this to decide how much to trust a version match
+            (see :data:`QOD_INVENTORY_MATCH`) — it is not network vs. local in
+            the transport sense, it is inferred vs. verified.
     """
     port: Optional[int]
     protocol: str
@@ -85,6 +103,7 @@ class Service:
     product: str = ""
     version: str = ""
     cpe: Optional[str] = None
+    origin: str = "network"
 
     @property
     def label(self) -> str:
@@ -166,13 +185,20 @@ class LybraEngine:
         return findings
 
     def _version_finding(self, service: Service, cve, cpe23: str) -> dict:
-        """Build a single version-match finding for a service and one CVE."""
+        """Build a single version-match finding for a service and one CVE.
+
+        An ``origin="inventory"`` service (Fase 0.9) is a verified fact, not a
+        banner guess, so it earns a higher ``qod`` and is born ``confirmed`` —
+        there is no back-port ambiguity to hedge against when the version came
+        straight from the package manager.
+        """
         cve_id = cve.cve_id
+        verified = service.origin == "inventory"
         return {
             "title":        f"{service.label} — {cve_id}",
             "category":     "outdated_software",
             "port":         service.port,
-            "service":      service.name or None,
+            "service":      service.name or service.product or None,
             "cpe":          cpe23,
             "cve_ids":      [cve_id],
             "cvss_score":   cve.cvss_score,
@@ -182,22 +208,31 @@ class LybraEngine:
             "source":       "lybra",
             "check_id":     "lybra:version-match@1",
             "feed_version": self.FEED_VERSION,
-            "qod":          QOD_VERSION_MATCH,
-            "confirmed":    False,   # a version match is a hypothesis; Fase R confirms it actively
+            "qod":          QOD_INVENTORY_MATCH if verified else QOD_VERSION_MATCH,
+            "confirmed":    verified,   # a network-inferred match stays a hypothesis; Fase R confirms it actively
             "state":        "open",
         }
 
     def _informational_finding(self, service: Service) -> dict:
-        """Build the "open port" informational finding for one service."""
-        where = f"{service.port}/{service.protocol}" if service.port else service.protocol
+        """Build the baseline informational finding for one service.
+
+        A network-origin service is described as an open port, as before. An
+        inventory-origin service commonly has no port at all (a library is not
+        listening anywhere), so that case gets its own phrasing and category
+        instead of a nonsensical "Puerto None abierto".
+        """
+        if service.origin == "inventory" and service.port is None:
+            title = f"Paquete instalado — {service.label}"
+            category = "installed_package"
+        else:
+            where = f"{service.port}/{service.protocol}" if service.port else service.protocol
+            title = f"Puerto {where} abierto — {service.label}"
+            category = "open_port"
         return {
-            "title":        f"Puerto {where} abierto — {service.label}",
-            "category":     "open_port",
+            "title":        title,
+            "category":     category,
             "port":         service.port,
-            "service":      service.name or None,
-            # Normalized to 2.3 to match the version-match finding's cpe, so a
-            # consumer that groups findings by cpe sees one consistent format
-            # rather than Nmap's raw 2.2 URI here and the 2.3 form elsewhere.
+            "service":      service.name or service.product or None,
             "cpe":          normalize_cpe_to_23(service.cpe) if service.cpe else None,
             "source":       "lybra",
             "check_id":     "lybra:open-port@1",
@@ -233,6 +268,44 @@ def services_from_open_ports(open_ports: Iterable) -> List[Service]:
             product=(op.product or "").strip(),
             version=(op.version or "").strip(),
             cpe=(op.cpe or None),
+        ))
+    return services
+
+
+def services_from_payload(raw: Iterable[dict]) -> List[Service]:
+    """Build engine :class:`Service` values from an externally-supplied dataset.
+
+    Fase 0.9's third input mode: a convenience for a producer whose data
+    arrives as plain dicts rather than already-built ``Service`` instances —
+    the shape a future Hygeia inventory adapter, or any other in-process
+    caller, is likely to have. A caller that already builds ``Service``
+    directly does not need this at all; ``LybraEngineManager.run_scan``
+    accepts either.
+
+    Unlike :func:`services_from_open_ports` and
+    :func:`services_from_discovered_ports`, this trusts an explicit
+    ``"origin"`` key if the payload sets one, defaulting to ``"network"`` so a
+    producer that predates Fase 0.9 (there are none yet) would behave exactly
+    as those two functions do.
+
+    Args:
+        raw: An iterable of dicts with the same keys as :class:`Service`'s
+            fields (all optional except none are required — missing keys
+            fall back to the same defaults ``Service`` itself uses).
+
+    Returns:
+        The corresponding list of :class:`Service` values.
+    """
+    services: List[Service] = []
+    for item in raw:
+        services.append(Service(
+            port=item.get("port"),
+            protocol=item.get("protocol") or "",
+            name=(item.get("name") or "").strip(),
+            product=(item.get("product") or "").strip(),
+            version=(item.get("version") or "").strip(),
+            cpe=item.get("cpe") or None,
+            origin=item.get("origin") or "network",
         ))
     return services
 

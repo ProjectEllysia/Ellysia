@@ -163,7 +163,8 @@ class HostService(Base):
     Attributes:
         id: Primary key.
         host_id: The asset this service belongs to.
-        port: The port number.
+        port: The port number, or ``None`` for a portless, ``origin="inventory"``
+            service (Fase 0.9) — an installed package has nothing listening.
         protocol: ``"tcp"`` or ``"udp"``.
         name: The service's conventional name (``"http"``, ``"ssh"``...).
         product: The identified product, or ``None`` if never resolved.
@@ -180,7 +181,7 @@ class HostService(Base):
 
     id            = Column(Integer, primary_key=True, autoincrement=True)
     host_id       = Column(Integer, ForeignKey("Host.id", ondelete="CASCADE"), nullable=False, index=True)
-    port          = Column(Integer, nullable=False)
+    port          = Column(Integer, nullable=True)
     protocol      = Column(String(8), nullable=False, default="tcp")
     name          = Column(String(64), nullable=True)
     product       = Column(String(128), nullable=True)
