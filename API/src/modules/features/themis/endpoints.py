@@ -4,7 +4,7 @@ import logging
 import os
 import ipaddress
 
-from flask import request, send_file
+from flask import send_file
 from flask_smorest import Blueprint as SmorestBlueprint
 
 from src.modules.users import require_oauth_token, require_attributes, AttributeType, get_current_user
@@ -141,22 +141,6 @@ def _serialize_document(doc) -> dict:
         "downloadUrl": _download_url_for(doc),
     }
 
-
-def validate_targets(raw: str, max_hosts: int = 10) -> list[str]:
-    """
-    Validate ``raw`` as a target spec via ``ScanManager.validate_ip``,
-    translating its domain exceptions into the HTTP-facing ones.
-    """
-    try:
-        return ScanManager.validate_ip(raw, max_hosts=max_hosts)
-    except IPValidationError as exc:
-        raise ValidationError(field="target", message=str(exc), value=raw) from exc
-    except MaxHostsExceededError as exc:
-        raise ValidationError(str(exc.user_message or exc))
-    except PrivateIPRequested as exc:
-        raise EllysiaException(str(exc.user_message or exc), status_code=403)
-
-
 def validate_nikto_target(raw: str) -> None:
     """
     Nikto escanea por hostname/URL, no por un spec de CIDR/rango, así que no
@@ -270,7 +254,7 @@ def start_nmap_scan(data: dict):
     user = get_current_user()
 
     nmap_manager = NmapScanManager()
-    hosts = validate_targets(host)
+    hosts = ScanManager.validate_targets(host)
 
     try:
         ScanManager.validate_port(ports)
@@ -345,7 +329,7 @@ def start_openvas_scan(data):
     if user is None:
         raise IllegalStateError("'user' detectado como None")
 
-    hosts = validate_targets(target, max_hosts=1)
+    hosts = ScanManager.validate_targets(target, max_hosts=1)
 
     openvas_manager = OpenVASScanManager()
     target_ip = hosts[0]
@@ -402,15 +386,21 @@ def start_lybra_scan(data):
     else:
         # Autodescubrimiento: valida el objetivo (rechaza IPs privadas, etc.)
         # igual que un escaneo Nmap, ya que el transporte propio toca el objetivo.
-        target = validate_targets(data["target"], max_hosts=1)[0]
+        target = ScanManager.validate_targets(data["target"], max_hosts=1)[0]
         discover_ports = None
         if data.get("ports"):
             try:
                 discover_ports = ScanManager.validate_port(data["ports"])
             except PortValidationError as exc:
                 raise ValidationError(field="ports", message=str(exc), value=data["ports"]) from exc
-        scan_id = manager.run_scan(user_id=user.id, target=target, discover_ports=discover_ports,
-                                   deep=deep, timeout=timeout)
+            
+        scan_id = manager.run_scan(
+            user_id=user.id, 
+            target=target, 
+            discover_ports=discover_ports,
+            deep=deep, 
+            timeout=timeout
+        )
         logger.info(f"Lybra lanzado: ID={scan_id} autodescubrimiento target={target} deep={deep} user={user.username}")
 
     return {

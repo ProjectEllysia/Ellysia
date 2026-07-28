@@ -917,6 +917,32 @@ class Finding(Base):
     first_seen_at = Column(DateTime, default=utcnow_naive)
     last_seen_at  = Column(DateTime, default=utcnow_naive)
     state         = Column(String(20), default="open")
+    
+    @property
+    def snapshot(self) -> dict:
+        return {
+            "host_id": self.host_id, 
+            "title": self.title, 
+            "category": self.category,
+            "port": self.port, 
+            "service": self.service, 
+            "cpe": self.cpe, 
+            "cve_ids": self.cve_ids,
+            "cvss_score": self.cvss_score, 
+            "cvss_vector": self.cvss_vector,
+            "epss_score": self.epss_score, 
+            "in_kev": self.in_kev,
+            "exploit_maturity": self.exploit_maturity, 
+            "source": self.source,
+            "check_id": self.check_id, 
+            "feed_version": self.feed_version,
+            "dedup_key": self.dedup_key, 
+            "qod": self.qod, 
+            "confirmed": self.confirmed,
+        }
+        
+    def title(self) -> str:
+        
 
     def __repr__(self):
         return f"<Finding(id={self.id}, scan_id={self.scan_id}, category='{self.category}', title='{self.title[:40]}')>"

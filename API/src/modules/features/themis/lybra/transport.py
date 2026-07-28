@@ -1,4 +1,5 @@
-"""Lybra's own port discovery — the transport layer.
+"""
+Lybra's own port discovery — the transport layer.
 
 This is the always-available foundation of the roadmap's transport plan: an
 unprivileged TCP ``connect`` scan built on asyncio. It lets an Lybra scan find

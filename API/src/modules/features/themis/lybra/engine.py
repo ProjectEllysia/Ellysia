@@ -22,7 +22,7 @@ findings.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Optional
+from typing import Any, Callable, Iterable, List, Optional
 
 from .kb import normalize_cpe_to_23, parse_cpe23
 
@@ -114,6 +114,52 @@ class Service:
         """
         product_version = " ".join(p for p in (self.product, self.version) if p)
         return product_version or self.name or "servicio desconocido"
+    
+    def as_new_finding(self) -> dict[str, Any]:
+        """A short string describing the service for surface-change reporting.
+
+        Prefers "product version" (e.g. "Apache httpd 2.4.49"), falls back to the
+        service name, and finally to a generic placeholder.
+        """
+        title = f"Paquete instalado: {self.label}"
+        if self.port is not None:
+            title = f"Puerto abierto: {self.port}/{self.protocol} ({self.name or 'desconocido'})"
+        
+        return {
+            "title":        title,
+            "category":     "surface_change",
+            "port":         self.port,
+            "service":      self.name or self.product or None,
+            "source":       "lybra",
+            "check_id":     "lybra:surface-change@1",
+            "feed_version": "lybra-surface-1",
+            "qod":          QOD_OPEN_PORT,
+            "confirmed":    True,
+            "state":        "open",
+        }
+    
+    def as_old_finding(self) -> dict[str, Any]:
+        """A short string describing the service for surface-change reporting.
+
+        Prefers "product version" (e.g. "Apache httpd 2.4.49"), falls back to the
+        service name, and finally to a generic placeholder.
+        """
+        title = f"Cambio de versión detectado en el paquete {self.product}: {change}"
+        if self.port is not None:
+            title = f"Cambio de versión detectado en el puerto {self.port}: {change}"
+                        
+        return {
+            "title":        title,
+            "category":     "surface_change",
+            "port":         self.port,
+            "service":      self.name or self.product or None,
+            "source":       "lybra",
+            "check_id":     "lybra:surface-change@1",
+            "feed_version": "lybra-surface-1",
+            "qod":          QOD_OPEN_PORT,
+            "confirmed":    True,
+            "state":        "closed",
+        }
 
 
 class LybraEngine:

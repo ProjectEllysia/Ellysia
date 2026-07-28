@@ -4,7 +4,10 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urlparse
+
 import src.modules.system.config_reading as CR
+
+from src.modules.shared._exceptions import EllysiaException, ValidationError
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
@@ -24,7 +27,7 @@ from ..services import (
     _Task,
 )
 from ..services import parsing, reachability
-from ..exceptions import ScanError, ScanNotFoundError
+from ..exceptions import IPValidationError, MaxHostsExceededError, PrivateIPRequested, ScanError, ScanNotFoundError
 
 
 logger = logging.getLogger(__name__)
@@ -729,6 +732,21 @@ class ScanManager(TaskTrackingMixin, ABC):
         if doc:
             result["documentId"] = doc.id
             result["documentStatus"] = doc.status
+    
+    @classmethod
+    def validate_targets(cls, raw: str, max_hosts: int = 10) -> list[str]:
+        """
+        Validate ``raw`` as a target spec via ``ScanManager.validate_ip``,
+        translating its domain exceptions into the HTTP-facing ones.
+        """
+        try:
+            return cls.validate_ip(raw, max_hosts=max_hosts)
+        except IPValidationError as exc:
+            raise ValidationError(field="target", message=str(exc), value=raw) from exc
+        except MaxHostsExceededError as exc:
+            raise ValidationError(str(exc.user_message or exc))
+        except PrivateIPRequested as exc:
+            raise EllysiaException(str(exc.user_message or exc), status_code=403)
 
     @staticmethod
     def validate_ip(ips_str: str, max_hosts: int = 10) -> List[str]:
