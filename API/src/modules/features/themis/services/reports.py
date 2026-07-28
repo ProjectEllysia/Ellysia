@@ -1978,10 +1978,13 @@ class LybraPrintingStrategy(PrintingStrategy):
     def append_body(self, theme: "ReportTheme", elements: list, ai_report: bool = False) -> None:
         from src.modules.infrastructure.session import build_repository
         from ..repositories import ScanRepository
-        from ..lybra import classify_exposure, score_finding
+        from ..lybra import score_finding
+        # Diferido como el resto de imports de esta función: `managers` importa
+        # `services`, así que a nivel de módulo sería un ciclo.
+        from ..managers.lybra_engine import LybraEngineManager
 
         rows = build_repository(ScanRepository).get_findings_by_scan(self.scan.id)
-        exposure = classify_exposure(self.scan.target)
+        exposure = LybraEngineManager.exposure_for(self.scan)
 
         findings = [{
             "title": f.title, "category": f.category, "port": f.port, "service": f.service,
@@ -1997,6 +2000,7 @@ class LybraPrintingStrategy(PrintingStrategy):
 
         if findings:
             self._append_lybra_summary(theme, elements, findings)
+        self._append_cpe_coverage_note(theme, elements, findings)
 
         elements.append(Paragraph("Hallazgos", theme.subtitle))
         elements.append(Spacer(1, 0.1 * inch))
@@ -2145,6 +2149,49 @@ class LybraPrintingStrategy(PrintingStrategy):
         ]))
         elements.append(table)
         elements.append(Spacer(1, 0.3 * inch))
+
+    def _append_cpe_coverage_note(self, theme: "ReportTheme", elements: list, findings: list) -> None:
+        """Advierte cuando un análisis de inventario no produjo ni una detección.
+
+        Un escaneo por inventario (Fase I) emite un hallazgo
+        ``installed_package`` por **cada** paquete, se le haya podido resolver
+        un CPE o no — así que "cero ``outdated_software``" no distingue por sí
+        solo entre "comprobado y limpio" y "no se llegó a comprobar nada".
+        Hoy las dos causas de lo segundo son:
+
+        - **La KB local está vacía o desactualizada.** Sin CVEs espejadas, el
+          matcher consulta y no encuentra nada aunque el CPE se resuelva bien.
+        - **El nombre del producto no se pudo resolver a un CPE.** El
+          inventario nunca trae CPE embebido, así que ``_resolve_cpe`` depende
+          de ``CPE_PRODUCT_OVERRIDES`` — una tabla de una docena de demonios de
+          servidor, ninguno de los cuales aparece en un inventario de
+          escritorio (7-Zip, navegadores, runtimes...).
+
+        El informe no puede distinguirlas con los datos que persiste hoy (ver
+        la Fase I del roadmap, "correlación inventario↔KB"), así que la nota
+        nombra ambas en vez de afirmar una. Solo aparece cuando hay paquetes y
+        ninguna detección: con al menos un CVE encontrado, ya hay evidencia de
+        que la cadena funciona y el aviso sobraría.
+        """
+        packages = sum(1 for f in findings if f["category"] == "installed_package")
+        detected = sum(1 for f in findings if f["category"] == "outdated_software")
+        if not packages or detected:
+            return
+
+        note_style = ParagraphStyle(
+            "CpeCoverageNote", parent=theme.body, textColor=colors.HexColor("#8a6d1f"),
+            backColor=colors.HexColor("#fff8e1"), borderColor=colors.HexColor("#e0c34a"),
+            borderWidth=0.75, borderPadding=6, alignment=TA_LEFT,
+        )
+        elements.append(Paragraph(
+            f"<b>Nota de cobertura:</b> ninguno de los {packages} paquetes inventariados produjo una "
+            "detección. Antes de leer esto como &quot;equipo limpio&quot;, conviene descartar dos causas: que la "
+            "base de vulnerabilidades local no esté sincronizada, y que el motor no sepa identificar "
+            "estos productos por su nombre (hoy solo reconoce software de servidor). Ausencia de CVEs "
+            "no equivale a software verificado como seguro.",
+            note_style,
+        ))
+        elements.append(Spacer(1, 0.25 * inch))
 
     def _append_lybra_finding_card(self, theme: "ReportTheme", elements: list, finding: dict, idx: int) -> None:
         """Tarjeta de un hallazgo: cabecera de prioridad, nombre, detalles,

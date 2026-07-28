@@ -653,10 +653,33 @@ en cada heartbeat.
 
 | Fase | Entregable | Estado que habilita |
 |---|---|---|
-| **H0** | Colector de paquetes instalados en el agente + `POST /hygeia/inventory` | El backend recibe listados de software por activo |
-| **H1** | `MonitoredAsset.host_id` — resolución/creación del `Host` de Themis al dar de alta el activo | Un `MonitoredAsset` y un `Host` de Themis son la misma entidad de identidad |
-| **H2** | Adaptador inventario→servicios (marca `origin="inventory"`) + disparo de `LybraEngineManager.run_scan(services=...)` — requiere la Fase 0.9 de `lybra-engine-roadmap.md` ya construida | Hallazgos CVE por inventario, visibles en el mismo árbol Host→Service→Finding que Themis, con `confirmed=true`/`qod=95` |
-| **H3** (opcional) | Envío diferencial (solo cuando el hash del inventario cambia) | Menos tráfico/ruido; no reprocesar un inventario idéntico |
+| **H0** ✓ | Colector de paquetes instalados en el agente + `POST /hygeia/inventory` | El backend recibe listados de software por activo |
+| **H1** ○ | `MonitoredAsset.host_id` — resolución/creación del `Host` de Themis al dar de alta el activo | Un `MonitoredAsset` y un `Host` de Themis son la misma entidad de identidad |
+| **H2** ◐ | Adaptador inventario→servicios (marca `origin="inventory"`) + disparo de `LybraEngineManager.run_scan(services=...)` — requiere la Fase 0.9 de `lybra-engine-roadmap.md` ya construida | Hallazgos CVE por inventario, visibles en el mismo árbol Host→Service→Finding que Themis, con `confirmed=true`/`qod=95` |
+| **H3** (opcional) ○ | Envío diferencial (solo cuando el hash del inventario cambia) | Menos tráfico/ruido; no reprocesar un inventario idéntico |
+
+**Estado (2026-07-28).** H0 y H2 cerradas; el detalle completo, con las decisiones de diseño que se
+apartan de lo escrito arriba, vive en la Fase I de
+[`../themis/lybra-engine-roadmap.md`](../themis/lybra-engine-roadmap.md). Tres correcciones a esta
+tabla, verificadas contra el código:
+
+- **H0 no necesitó construirse.** El `POST /hygeia/inventory` que proponía ya estaba cubierto: el
+  inventario viaja como campo opcional del heartbeat y se persiste en `MonitoredAsset.inventory`.
+  El colector del agente sí es trabajo del repositorio hermano, y ese sigue siendo su sitio.
+- **H1 queda diferido a propósito.** El modo payload de Lybra resuelve o crea el `Host` por hostname
+  él solo, así que H2 no lo necesitaba. `host_id` solo importa para fundir por `dedup_key` un mismo
+  host físico visto por IP (Nmap) y por hostname (Hygeia), y eso pide una UX propia de reconciliación
+  de identidad que no existe todavía.
+- **El disparo de H2 es manual**, un botón en la pestaña de inventario, no automático al ingerir.
+  H3 pierde por tanto casi toda su urgencia: sin disparo automático no hay reproceso de un
+  inventario idéntico que evitar.
+- **H2 queda ◐ parcial, no ✓.** La tubería funciona de extremo a extremo, pero el motor todavía no
+  sabe traducir un nombre de paquete de Windows (`"7-Zip 25.01 (x64)"`) al CPE que NVD entiende
+  (`7-zip:7-zip`), así que el inventario llega pero no se reconoce. El primer análisis real dio 242
+  paquetes y 0 detecciones. El trabajo pendiente —normalización de nombres, índice derivado de
+  `CpeMatch`, feed de alias— está desglosado en "La brecha que queda (Fase I-b)" del roadmap de
+  Lybra. Hasta que se cierre, un informe de inventario sin CVEs **no** significa equipo limpio, y
+  así se advierte explícitamente en el PDF y en la interfaz.
 
 > **ponytail: no antes de que Hygeia y Lybra estén ambos estables por separado.** Esta
 > integración acopla dos módulos que hoy son independientes; hacerlo antes de que cada uno

@@ -369,3 +369,36 @@ class AssetInventoryResponseSchema(Schema):
     """
     collectedAt = UTCDateTime(allow_none=True)
     software = fields.List(fields.Nested(SoftwareViewSchema))
+
+
+# =============================================================================
+# ANÁLISIS DEL INVENTARIO CON LYBRA (Fase I) — el resumen; el desglose vive
+# en Themis, que ya tiene la interfaz para presentarlo
+# =============================================================================
+
+class AnalyzeInventoryResponseSchema(Schema):
+    """Confirmación de que el análisis se ha encolado."""
+    scanId = fields.Integer()
+
+
+class InventoryAnalysisSummarySchema(Schema):
+    """Resumen del último análisis de inventario de un activo.
+
+    ``scanId`` nulo significa "nunca se ha analizado" — estado inicial de
+    todo activo, no un error. Con un escaneo en curso (``status`` a
+    ``pending``/``running``) los recuentos llegan a cero hasta que termina.
+    """
+    scanId          = fields.Integer(allow_none=True)
+    status          = fields.String(allow_none=True)
+    startedAt       = fields.String(allow_none=True)
+    finishedAt      = fields.String(allow_none=True)
+    totalFindings   = fields.Integer(load_default=0)
+    # {"CRITICAL": 2, "HIGH": 5, ...} — solo los niveles con al menos un
+    # hallazgo, para no obligar al cliente a filtrar ceros.
+    byPriority      = fields.Dict(keys=fields.String(), values=fields.Integer())
+    confirmedCount  = fields.Integer(load_default=0)
+    vulnerableCount = fields.Integer(load_default=0)
+    # Paquetes inventariados analizados (uno por entrada del inventario, se le
+    # haya resuelto un CPE o no). Con `vulnerableCount` a cero permite avisar
+    # de que "sin detecciones" no equivale a "verificado limpio".
+    packageCount    = fields.Integer(load_default=0)

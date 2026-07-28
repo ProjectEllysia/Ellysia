@@ -31,6 +31,7 @@ from .exceptions import (
 )
 from .managers import HygeiaAlertManager, HygeiaAssetManager, HygeiaIngestManager
 from .schemas import (
+    AnalyzeInventoryResponseSchema,
     AnomalyListResponseSchema,
     AnomalyQuerySchema,
     AnomalySchema,
@@ -44,6 +45,7 @@ from .schemas import (
     AssetSchema,
     IngestRequestSchema,
     IngestResponseSchema,
+    InventoryAnalysisSummarySchema,
     RotateKeyResponseSchema,
 )
 from .services import agent_key_id_from_request, enforce_ingest_limits, require_agent_key
@@ -159,6 +161,44 @@ def get_asset_inventory(asset_id):
     user = get_current_user()
     mgr = HygeiaAssetManager(user)
     return mgr.get_inventory(asset_id)
+
+
+@hygeia_blp.post("/assets/<int:asset_id>/analyze")
+@hygeia_blp.response(202, AnalyzeInventoryResponseSchema, description="Análisis de inventario encolado")
+@hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@hygeia_blp.alt_response(404, schema=ErrorSchema, description="Asset not found")
+@hygeia_blp.alt_response(409, schema=ErrorSchema, description="Asset has no inventory to analyse")
+@limiter.limit("20 per hour; 100 per day")
+@require_oauth_token
+# Exige AMBOS atributos a propósito: la acción vive en Hygeia pero lo que crea
+# es un escaneo de Themis, así que quien no puede lanzar escaneos allí tampoco
+# debe poder lanzarlos por esta puerta.
+@require_attributes(all_required=[AttributeType.HYGEIA_UPDATE, AttributeType.THEMIS_CREATE])
+@handle_exceptions(default_exception=HygeiaError, logger=logger)
+def analyze_asset_inventory(asset_id):
+    """Analizar el inventario de software de un activo con el motor Lybra"""
+    user = get_current_user()
+    mgr = HygeiaAssetManager(user)
+    result = mgr.analyze_inventory(asset_id)
+    logger.info(f"Análisis de inventario del activo {asset_id} lanzado por {user.username}")
+    return result
+
+
+@hygeia_blp.get("/assets/<int:asset_id>/analysis")
+@hygeia_blp.response(200, InventoryAnalysisSummarySchema, description="Resumen del último análisis de inventario")
+@hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@hygeia_blp.alt_response(404, schema=ErrorSchema, description="Asset not found")
+@limiter.limit("600 per hour")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.HYGEIA_READ])
+@handle_exceptions(default_exception=AssetNotFoundError, logger=logger)
+def get_asset_analysis(asset_id):
+    """Obtener el resumen del último análisis de inventario de un activo"""
+    user = get_current_user()
+    mgr = HygeiaAssetManager(user)
+    return mgr.get_analysis_summary(asset_id)
 
 
 @hygeia_blp.delete("/assets/<int:asset_id>")

@@ -264,8 +264,8 @@ La pista de **correlación** está completa; la de **bajo nivel** está a medias
 | **2** — KB local (NVD, CPE Dictionary, KEV, EPSS) | Correlación | ✓ implementada |
 | **5** — Dedup multi-fuente, ciclo de vida, scoring, `HostService` | Correlación | ✓ implementada |
 | **6** — Pipeline orquestado | Convergencia | ✓ implementada |
-| **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — 13 checks, tipos `http` y `tls`; faltan `network` y `script`; el feed es JSON, no el YAML estilo Nuclei del diseño |
-| **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP (cabecera `Server`, título, favicon, 15 firmas de tecnología), SSH (banner + HASSH), TLS (certificado); falta JARM y **todo lo no-HTTP** |
+| **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — 15 checks, tipos `http`/`tls`/`network`; falta `script`; el feed es JSON, no el YAML estilo Nuclei del diseño. Detalle actualizado en la sección Fase R más abajo |
+| **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS, y (Fase N) FTP, SMTP/IMAP/POP3, SMB, MySQL/MariaDB, Redis, VNC; falta JARM, SNMP (sin sonda UDP), PostgreSQL/MSSQL/MongoDB, RDP, LDAP, Telnet, RPC. Detalle actualizado en la sección Fase N más abajo |
 | **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; faltan SYN sin estado, sondas UDP y control de tasa AIMD |
 | **4**, DAST y Etapa 2 (P, E, C, O, A, B, D, G, S, X) | Ambas | ○ planificadas |
 
@@ -284,7 +284,7 @@ El resultado es esta reordenación, que es el cambio de fondo de esta revisión:
 |---|---|---|---|
 | **0.º** | **0.9 — Contrato de entrada externa de servicios** (nueva, pre-fase) | — | No cierra ninguna brecha por sí sola; es el cable que hace posible que la Fase I lo haga. Barata, aislada, sin riesgo para lo que ya funciona |
 | **1.º** | **N — Dissectors y checks de red no-HTTP** (nueva) | **G1** | Sin ella, "prescindir de OpenVAS" significa perder de verdad cobertura. Con ella, la detección por versión se extiende a toda la superficie no-web sin escribir un solo check por CVE |
-| **2.º** | **I — Inventario de Hygeia → Lybra** (H0–H2) | **G2** | Es la prioridad nº 1 del documento de gobierno por razones de producto, y resulta que además es el sustituto del escaneo autenticado de OpenVAS. Dos motivos independientes apuntando al mismo trabajo — bloqueada por la Fase 0.9 |
+| **2.º** | **I — Inventario de Hygeia → Lybra** (H0–H2) — ◐ parcial | **G2** | Es la prioridad nº 1 del documento de gobierno por razones de producto, y resulta que además es el sustituto del escaneo autenticado de OpenVAS. Dos motivos independientes apuntando al mismo trabajo. La tubería está construida (2026-07-28); falta la **resolución de nombre de paquete → CPE** (Fase I-b), sin la cual el motor recibe el inventario pero no sabe reconocerlo |
 | **3.º** | **R (cierre) — tipos `network` y `script`, feed en YAML** | G1, G4 | El tipo `network` es el vehículo declarativo de la Fase N; sin él, cada sonda nueva es código |
 | **4.º** | **O — Backports por feed de distribución** | **G3** | Ataca la causa nº 1 de falsos positivos sin tocar el host ni pedir credenciales |
 | **5.º** | **D — Credenciales por defecto** | **G4** | Cobertura clásica de OpenVAS, con guardas propias (lockout, tasa, evidencia sin plaintext) |
@@ -358,13 +358,59 @@ para una secuencia de login como la de FTP. El primer check declarativo,
 `USER anonymous` → espera `331`, luego `PASS ...` → espera `230`, reutilizando el mismo sistema de
 matchers `and`/`or` que ya tenían los checks HTTP, sin abstracción nueva.
 
-Lo que falta, documentado y no descubierto por sorpresa: los otros seis protocolos de la tabla
-(SMB, SMTP/IMAP/POP3, SNMP, las bases de datos, RDP, LDAP/VNC/Telnet/RPC) — FTP demuestra el patrón
-completo de extremo a extremo, pero cada protocolo nuevo sigue siendo trabajo por hacer, no un
-efecto colateral gratuito. Tampoco se ha ampliado todavía el catálogo Docker del banco de
-concordancia (`test_lybra_concordance_bench.py`) con un contenedor `vsftpd` — la Fase N no tiene
-todavía un número de concordancia no-HTTP propio, solo los tests unitarios/de integración
-verificando la mecánica.
+**Estado (2026-07-28, continuación):** ampliada a seis protocolos más, siguiendo el mismo patrón
+"volunteer un dato, léelo, no adivines" que FTP demostró. Antes de esta ronda, la selección de
+dissector en `LybraEngineManager._fingerprint_services` era un `if`/`elif` por protocolo —
+igual de rígido que el que el apartado 5.2 de este documento ya había señalado en el gestor de
+origen de servicios (§0.9). Se sustituyó por un registro (`lybra/fingerprinting/dispatch.py`:
+clase `Dissector` con `applies`/`probe`, más `default_dissectors()`), así que cada protocolo nuevo
+es una entrada en una lista, no una rama nueva en el manager. El mismo criterio se aplicó al
+`CheckRuntime.run` de `checks.py`, que tenía el mismo bucle triplicado una vez por tipo de check
+(`http`/`tls`/`network`); ahora es un único bucle sobre `_CheckFamily`, con un tipo `script` futuro
+(Fase R) entrando como una entrada más, no un cuarto bucle.
+
+Protocolos añadidos, todos con dissector + test unitario con socket falso (mismo patrón que FTP —
+sin red real):
+
+- **SMTP/IMAP/POP3** (`lybra/fingerprinting/mail.py`) — banner sin negociar, igual que FTP. SMTP
+  extrae `Producto Versión` tras `"ESMTP "` (`"Exim 4.94.2"`); Postfix omite versión a propósito y
+  se respeta (sin CPE inventada). IMAP/POP3 solo dan producto (`"Dovecot ready."` → `Dovecot`), con
+  una lista de palabras vacías (`"pop3"`, `"server"`...) para no confundir el nombre del protocolo
+  con un producto.
+- **SMB** (`lybra/fingerprinting/smb.py`) — el protocolo de mayor valor por frecuencia de puerto de
+  la tabla, y el único de esta ronda que no se limita a leer: envía un `SMB2 NEGOTIATE` mínimo
+  (dialectos `0x0202`–`0x0302`, sin `0x0311`/SMB 3.1.1 para evitar los "negotiate contexts" que esa
+  versión exige) y parsea `DialectRevision`/`SecurityMode` de la respuesta. Cuando la firma no es
+  obligatoria lo dice en el propio título del fingerprint (`"SMB2 (firma no requerida)"`) — un hecho
+  observado directamente, no una inferencia. **Sin verificar contra un servidor real**: el offset de
+  bytes sigue MS-SMB2 §2.2.3/§2.2.4 y el test cubre el formato con un fixture construido a mano, pero
+  no hay Samba/Windows en este entorno para confirmarlo — pendiente antes de confiar en ello en
+  producción. Las comprobaciones activas "SMB sin firma"/"SMBv1 habilitado" que la tabla original
+  pedía siguen sin construirse: el runtime declarativo actual solo compara texto decodificado, y una
+  respuesta SMB2 es binaria.
+- **MySQL/MariaDB** (`lybra/fingerprinting/mysql.py`) — el paquete de saludo inicial (protocolo 10)
+  trae la versión en claro sin autenticar; se reconoce y despoja el prefijo de compatibilidad
+  `"5.5.5-"` que MariaDB antepone, para no reportar un MariaDB 10.6 como "MySQL 5.5.5".
+- **Redis** (`lybra/fingerprinting/redis_probe.py`, nombrado así para no coincidir con el paquete
+  `redis` de terceros) — a diferencia de los anteriores, Redis no ofrece nada sin pedirlo: se envía
+  `INFO` (de solo lectura, misma clase de acción que un `GET /` HTTP) y se lee `redis_version:` de
+  la respuesta. Ese mismo patrón, declarativo esta vez, es el check activo nuevo
+  `redis-unauthenticated-access` (`checks_feed.json`, `feedVersion` subido a `lybra-checks-3`): si
+  `INFO` responde sin pedir credenciales, es un hallazgo por sí mismo.
+- **VNC** (`lybra/fingerprinting/vnc.py`) — el banner de versión RFB (`"RFB 003.008\n"`, 12 bytes
+  fijos) es la excepción a la regla "sin valor sin frecuencia" del apartado siguiente: no hay
+  producto/vendor que leer, pero la versión de protocolo en sí ya distingue un respondedor legado.
+
+Lo que sigue fuera, documentado y no descubierto por sorpresa: **SNMP** (necesita la sonda UDP que
+la Fase T todavía no construye — no hay con qué probar hasta que eso exista); **PostgreSQL, MSSQL,
+MongoDB** (a diferencia de MySQL/Redis, exigen un handshake negociado en vez de un banner ofrecido,
+mayor coste/riesgo que valor añadido en esta ronda); **RDP, LDAP, Telnet, RPC** — Telnet en concreto
+se evaluó y se descartó explícitamente: su negociación IAC no deja un texto identificable de forma
+fiable sin inventar patrones, así que un dissector ahí no aportaría nada sobre el `open_port` que ya
+existe. Tampoco se ha ampliado el catálogo Docker del banco de concordancia
+(`test_lybra_concordance_bench.py`) con contenedores de los protocolos nuevos — sigue sin haber un
+número de concordancia no-HTTP propio, solo los tests unitarios/de integración verificando la
+mecánica, igual que quedó FTP.
 
 ---
 
@@ -530,7 +576,7 @@ paquete instalado en el mismo host habría sobrescrito silenciosamente el hallaz
 
 ---
 
-### Fase I — El inventario de Hygeia como escaneo autenticado · pista de correlación · ○ planificada
+### Fase I — El inventario de Hygeia como escaneo autenticado · pista de correlación · ◐ parcial
 
 **El objetivo** es sustituir el escaneo autenticado de OpenVAS (los Local Security Checks) por algo
 que Ellysia ya tiene medio construido y que además es estrictamente mejor. Es la fase **H0–H2** del
@@ -566,6 +612,160 @@ cada `Service`.
 **Damos la fase por hecha cuando** un host con agente instalado produce hallazgos de CVE a partir de
 su inventario de paquetes, sin escaneo de red de por medio, y esos hallazgos se funden por
 `dedup_key` con los que el escaneo remoto ya producía sobre el mismo activo.
+
+**Estado (2026-07-28): ◐ parcial.** La *tubería* está construida y probada de extremo a extremo —
+un inventario de Hygeia llega al motor, produce `Finding` y se navega por agente. Lo que **no**
+está resuelto es el último eslabón, y sin él la fase no cumple su propia Definición de Hecho: el
+motor no sabe *reconocer* el software que Hygeia le entrega. Ver "La brecha que queda" más abajo.
+
+Cinco decisiones de lo construido que se apartan del diseño de arriba, cada una respondiendo a algo
+que se verificó contra el código:
+
+1. **El H0 ya estaba hecho.** El `POST /hygeia/inventory` que este apartado pedía no hacía falta:
+   el inventario ya viaja dentro del heartbeat (campo opcional `inventory` de `IngestRequestSchema`)
+   y está persistido en `MonitoredAsset.inventory`/`inventory_collected_at`. No se construyó
+   endpoint de ingesta nuevo.
+2. **El disparo es manual, no automático.** El diseño encolaba el análisis al persistir un
+   inventario nuevo. En su lugar hay un botón en la pestaña de inventario del panel de Hygeia
+   (`POST /hygeia/assets/<id>/analyze`). El automático puede añadirse después encima de este mismo
+   mecanismo; de momento nada se ejecuta sin que el usuario lo pida.
+3. **`MonitoredAsset.host_id` (el H1) queda diferido.** El modo payload ya resuelve o crea el
+   `Host` por hostname él solo, que es cuanto necesita esta funcionalidad. `host_id` solo aporta
+   cuando el *mismo* host físico se ha visto además por IP desde un Nmap, y fundir esas dos
+   identidades necesita su propia UX ("¿qué IP es este hostname?"). Deuda consciente, no olvido.
+4. **Procedencia y feed propia.** `LybraScan` gana `asset_id` (Integer nullable indexado, **sin
+   ForeignKey**, para no acoplar el esquema de Themis al de Hygeia). No nulo ⇒ vino de un agente ⇒
+   fuera de la feed de Lybra del panel, y agrupado bajo la tarjeta de ese agente en el tercer mundo
+   de `ThemisView` ("Agentes"), que reutiliza `LybraResults.vue` tal cual. Como no hay cascada de
+   base de datos, borrar un activo limpia sus escaneos explícitamente
+   (`HygeiaAssetManager.delete_asset` → `LybraEngineManager.delete_scans_for_asset`, que pasa por
+   `delete_scan` para no dejar PDFs huérfanos).
+5. **Un escaneo de inventario se puntúa como `private`.** `classify_exposure` reconoce sufijos
+   internos (`.local`, `.lan`...) pero no un hostname pelado tipo `DESKTOP-ABC`, así que lo habría
+   llamado "public" e inflado una banda toda la prioridad por un artefacto del nombre. La regla
+   vive en `LybraEngineManager.exposure_for(scan)`, que sustituye a las tres llamadas sueltas a
+   `classify_exposure` que había (manager, `analyzers.py` y el PDF de `reports.py`) — repartida
+   por tres sitios se habría olvidado en uno.
+
+**Dos cosas que "volver a analizar" NO hace, a propósito:** no borra el análisis anterior (sin el
+escaneo previo, `get_previous_lybra_findings` no encuentra nada y el ciclo de vida `fixed`/
+`regressed` queda muerto — hay un test que se cae si alguien reintroduce el borrado), y no descarta
+paquetes por estar repetidos. Sí se descartan los que no traen versión: sin versión no hay CPE que
+resolver, así que solo producirían un `installed_package` informativo cada uno, y un inventario de
+Windows trae cientos.
+
+**Nota arquitectónica.** El import `hygeia.managers → themis.managers.LybraEngineManager` es el
+**primer y único import entre módulos de `features/`** de todo el backend (verificado por `grep`
+antes de escribirlo). Es unidireccional y así debe seguir: Themis no importa nada de Hygeia ni sabe
+que existe. Está comentado en el propio fichero para que no se lea como precedente libre. Del lado
+del frontend no hay acoplamiento nuevo en backend: `ThemisView` consume `hygeiaStore` para pintar
+las tarjetas de agentes.
+
+**Lo que queda fuera:** el envío diferencial por hash (H3), el disparo automático, `host_id` (H1),
+y la fusión por `dedup_key` con los hallazgos de red del *mismo* activo — que depende de H1, porque
+hoy un mismo host visto por IP (Nmap) y por hostname (Hygeia) son dos filas de `Host` distintas.
+
+#### La brecha que queda: Themis no entiende el vocabulario de Hygeia (Fase I-b)
+
+**El síntoma, medido.** Primer análisis real, sobre un escritorio Windows (`PC-Gabriel`,
+escaneo #2): **242 paquetes, 242 hallazgos, todos `INFO`/`installed_package`, cero CVEs, cero
+confirmados**. Un informe que a primera vista se lee como "equipo limpio" y que en realidad no
+comprobó absolutamente nada.
+
+**Las dos causas, que son independientes** y conviene no confundir, porque una es operativa y la
+otra es trabajo de ingeniería:
+
+1. **La KB local estaba vacía.** Verificado en Postgres el 2026-07-28: `CveEntry` = 0,
+   `CpeMatch` = 0, `KevEntry` = 0, `EpssScore` = 0. Con la KB vacía **ningún** escaneo Lybra puede
+   detectar nada, venga de Hygeia o de Nmap — no es un problema de la Fase I, pero conviene
+   resolverlo antes de medir cuánto pesa la brecha I-b de verdad.
+
+   **Ojo con la trampa operativa:** el job programado (`themis.kb.syncCron`, 03:00, ya
+   `enabled: true`) llama a `KbSyncManager.sync_all()`, pero eso ejecuta `sync_nvd(window_days=8)`
+   — el sync **incremental**, que solo trae CVEs *modificadas* en los últimos 8 días. Dejar que el
+   cron corra no rellena el catálogo histórico (no habría dado con CVE-2021-41773, por ejemplo).
+   Hace falta `KbSyncManager().sync_nvd_backfill(base_url, start=<fecha antigua>)` — el propio
+   docstring del método lo llama "an operational one-off... meant to be run manually", y no hay
+   endpoint ni UI para lanzarlo, solo una llamada de consola dentro del contexto de la app. NVD
+   limita las ventanas seguras a 14 días con una pausa de 6s entre cada una
+   (`KbSyncManager._NVD_MAX_WINDOW_DAYS`), así que un backfill de todo el histórico (CVEs desde
+   1999) son varios cientos de tramos — cuenta con que tarde del orden de una hora o más, no algo
+   instantáneo. Pendiente de ejecutar; no se ha lanzado en esta sesión.
+2. **El matcher no sabe resolver nombres de software de escritorio a un CPE.** Ésta sí es la
+   brecha de la Fase I, y es la que este apartado documenta.
+
+**Por qué falla la resolución.** `LybraEngine._resolve_cpe` (`lybra/engine.py`) solo tiene dos
+estrategias, y ninguna sirve para un inventario:
+
+| # | Estrategia | Por qué no aplica al inventario de Hygeia |
+|---|---|---|
+| 1 | Confiar en el CPE que traiga el propio servicio | El inventario nunca trae CPE: el contrato de ingesta (`SoftwareSchema`) tiene `name`, `vendor`, `version`, `guid`… pero no `cpe`. El adaptador no puede inventar uno |
+| 2 | Buscar el producto en `CPE_PRODUCT_OVERRIDES` | Es una tabla escrita a mano de **13 entradas**, todas demonios de red de servidor (`apache httpd`, `nginx`, `openssh`, `mysql`, `vsftpd`…). Ni una sola aparece en un inventario de escritorio |
+
+Sin CPE, `_version_findings` corta antes de consultar la KB. El paquete no se "aprueba": no se
+examina. Y como `_informational_finding` emite un `installed_package` por **cada** paquete —se le
+haya resuelto CPE o no—, el resultado es indistinguible de un análisis que sí comprobó y no
+encontró nada. De ahí la nota de cobertura que se añadió al PDF y a la UI: no arregla la brecha,
+pero impide que se lea como una garantía que no es.
+
+Esta brecha existía desde la Fase 1, pero era **invisible**: un escaneo de red identifica servicios
+por banner/CPE de Nmap, que casi siempre caen dentro de esos 13 productos de servidor. Al enchufar
+Hygeia, el caso excepcional pasó a ser el caso normal.
+
+**Qué hay que construir — tres pasos, del más barato al más completo.** Son acumulativos: cada uno
+funciona por sí solo y deja al siguiente menos trabajo.
+
+**Paso 1 — Normalización de nombres (barato, alto retorno inmediato).**
+El problema no es solo qué productos conocemos, sino cómo se escriben. Hygeia reporta
+`"7-Zip 25.01 (x64)"`; NVD lo conoce como `7-zip:7-zip`. Hace falta una función pura
+—en `lybra/kb.py`, junto al resto de lógica de CPE— que canonice un nombre de paquete antes de
+buscarlo: minúsculas, quitar sufijos de arquitectura (`(x64)`, `(x86)`, `64-bit`), quitar la
+versión repetida dentro del nombre, quitar palabras de relleno (`Redistributable`, `Runtime`,
+`Setup`), colapsar separadores (` `, `-`, `_`) a uno solo. Es una función pura, así que se prueba
+con una tabla de casos reales sacados del inventario de un equipo de verdad. Sin esto, los dos
+pasos siguientes fallan igual aunque el producto sí esté en la base.
+
+**Paso 2 — Índice de productos derivado de `CpeMatch` (el atajo que evita espejar el CPE Dictionary).**
+La observación clave: **no hace falta el CPE Dictionary completo de NVD** (~1,4 M de entradas,
+un espejo caro de mantener). El único vocabulario que importa es el de productos que *tienen al
+menos una CVE*, y ése ya está en la base de datos: `CpeMatch` guarda `(vendor, product)` por cada
+regla de aplicabilidad de cada CVE espejada. Un producto que no aparezca ahí jamás podría producir
+un hallazgo, así que resolverlo no aportaría nada.
+
+El trabajo, entonces, es una tercera estrategia en `_resolve_cpe`: normalizar el nombre del paquete
+(paso 1) y buscarlo contra los `product` distintos de `CpeMatch`, también normalizados. Conviene
+materializarlo en una tabla-índice propia (`CpeProductAlias`: `normalized_name` → `(vendor,
+product)`, con índice único) reconstruida al final de cada `sync_nvd`, en vez de normalizar en
+cada consulta: son cientos de miles de filas y la resolución ocurre una vez por paquete y escaneo.
+
+Reglas de seguridad que **no** se pueden saltar aquí, porque un falso positivo por mala resolución
+es peor que no detectar:
+- Coincidencia **exacta sobre el nombre normalizado**, nunca parcial ni por subcadena. `"Java"`
+  no debe casar con `oracle:jdk` por que una contenga a la otra.
+- Un nombre normalizado que resuelva a **más de un `(vendor, product)`** se descarta (o se marca
+  como ambiguo y no se usa), en vez de elegir uno. Ambigüedad conocida ≠ licencia para adivinar.
+- El `vendor` que reporta Hygeia (`"Microsoft Corporation"`) se usa como **desempate** cuando lo
+  hay, no como parte obligatoria de la clave: muchos inventarios lo traen vacío o inconsistente.
+
+**Paso 3 — Alias curados para lo que la normalización no alcanza (cola larga).**
+Siempre quedará software cuyo nombre comercial no se parece a su CPE (`"Microsoft Visual C++ 2022
+X64 Runtime"` → `microsoft:visual_c++`). Eso es un fichero de alias en `lybra/feeds/`, con la misma
+filosofía de feed versionado que `tech_signatures.json` y `checks_feed.json`: una entrada JSON, no
+un cambio de código, cada vez que un inventario real destape un producto frecuente sin resolver.
+Es también donde `CPE_PRODUCT_OVERRIDES` debería acabar mudándose, para no tener dos tablas de
+alias haciendo lo mismo en sitios distintos.
+
+**Observabilidad, que hoy no existe y hace falta para dirigir el paso 3.** El motor debe registrar
+*por qué* un paquete no produjo detección. Basta con distinguir en el propio `Finding` informativo
+entre "CPE resuelto, KB consultada, sin CVEs" y "CPE no resuelto" — un campo en el snapshot, o dos
+categorías distintas. Con eso, la nota de cobertura puede dejar de enumerar causas posibles y decir
+la real, y sobre todo se puede sacar la lista de los productos sin resolver más frecuentes, que es
+exactamente el orden en el que conviene rellenar el feed de alias.
+
+**Damos la Fase I por cerrada (✓) cuando** un análisis del inventario de un escritorio Windows real,
+con la KB sincronizada, resuelve a CPE una mayoría de sus paquetes y emite al menos una detección
+por versión verificable a mano contra NVD — y cuando un paquete sin resolver se distingue en los
+datos de uno comprobado y limpio.
 
 ---
 

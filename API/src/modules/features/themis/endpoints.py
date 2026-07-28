@@ -523,7 +523,12 @@ def retrieve_all_scans(args):
 
     if scan_type != "all":
         mgr = ScanManager.get_manager_for_type(scan_type)
-        results, total_count = mgr.get_scans_paginated(uid, page, per_page)
+        # `assetId` solo lo entiende Lybra (Fase I): es el que separa los
+        # escaneos de un agente Hygeia de los lanzados desde el panel.
+        if scan_type == "lybra" and args.get("assetId") is not None:
+            results, total_count = mgr.get_scans_paginated(uid, page, per_page, asset_id=args["assetId"])
+        else:
+            results, total_count = mgr.get_scans_paginated(uid, page, per_page)
         total_pages = (total_count + per_page - 1) // per_page
 
         return {

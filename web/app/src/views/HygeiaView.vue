@@ -31,10 +31,15 @@
           :inventory-collected-at="store.state.inventoryCollectedAt"
           :inventory-loading="store.state.inventoryLoading"
           :inventory-error="store.state.inventoryError"
+          :analysis="store.state.analysis"
+          :analyzing="store.state.analyzing"
           :anomalies="assetAnomalies"
           @ack="handleAck"
           @resolve="handleResolve"
           @delete="handleDeleteAnomalyRequest"
+          @analyze="handleAnalyze"
+          @reanalyze="pendingReanalyze = true"
+          @view-analysis="showAnalysisModal = true"
         />
       </section>
     </main>
@@ -83,11 +88,31 @@
       @confirm="handleDeleteAnomalyConfirm"
       @cancel="pendingDeleteAnomalyId = null"
     />
+
+    <!-- No advierte de un borrado: el análisis anterior se conserva, y es
+         justamente eso lo que permite al motor marcar como corregido lo que
+         ya no aparece (correlación de ciclo de vida). -->
+    <ConfirmModal
+      :show="pendingReanalyze"
+      title="Volver a analizar"
+      message="Se lanzará un análisis nuevo sobre el inventario actual. El resultado vigente pasará a ser el anterior, y los hallazgos que ya no aparezcan se marcarán como corregidos."
+      confirm-label="Analizar"
+      @confirm="handleReanalyzeConfirm"
+      @cancel="pendingReanalyze = false"
+    />
+
+    <InventoryAnalysisModal
+      :show="showAnalysisModal"
+      :analysis="store.state.analysis"
+      @close="showAnalysisModal = false"
+      @open-in-themis="goToThemis"
+    />
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
@@ -95,6 +120,7 @@ import AssetList from '@/components/hygeia/AssetList.vue'
 import AssetDetail from '@/components/hygeia/AssetDetail.vue'
 import CreateAssetModal from '@/components/hygeia/CreateAssetModal.vue'
 import AgentKeyModal from '@/components/hygeia/AgentKeyModal.vue'
+import InventoryAnalysisModal from '@/components/hygeia/InventoryAnalysisModal.vue'
 import { useHygeiaStore } from '@/stores/hygeiaStore'
 import { useHygeiaAlertsStore } from '@/stores/hygeiaAlertsStore'
 import { useToastStore } from '@/stores/toastStore'
@@ -102,12 +128,15 @@ import { useToastStore } from '@/stores/toastStore'
 const store = useHygeiaStore()
 const alerts = useHygeiaAlertsStore()
 const toast = useToastStore()
+const router = useRouter()
 
 const showCreateModal = ref(false)
 const creating = ref(false)
 const pendingDeleteId = ref(null)
 const pendingRotateId = ref(null)
 const pendingDeleteAnomalyId = ref(null)
+const pendingReanalyze = ref(false)
+const showAnalysisModal = ref(false)
 
 const selectedAsset = computed(() =>
   store.state.assets.find((a) => a.id === store.state.selectedId) || null
@@ -183,6 +212,32 @@ async function handleDeleteAnomalyConfirm() {
   toast.show(ok ? 'Anomalía eliminada.' : (alerts.state.error || 'No se pudo borrar la anomalía.'), ok ? 'success' : 'error')
 }
 
+/* ── Análisis del inventario con Lybra (Fase I) ── */
+
+async function handleAnalyze() {
+  const id = store.state.selectedId
+  if (!id) return
+  const scanId = await store.analyzeInventory(id)
+  toast.show(
+    scanId ? `Análisis iniciado (escaneo ${scanId}). El resumen se actualizará al terminar.`
+           : (store.state.analysisError || 'No se pudo lanzar el análisis.'),
+    scanId ? 'success' : 'error',
+  )
+}
+
+async function handleReanalyzeConfirm() {
+  pendingReanalyze.value = false
+  await handleAnalyze()
+}
+
+/** Salta al desglose completo en Themis, en el mundo de agentes y con la
+ *  tarjeta de este activo ya seleccionada. */
+function goToThemis() {
+  const id = store.state.selectedId
+  showAnalysisModal.value = false
+  router.push({ path: '/themis', query: { world: 'agents', asset: id } })
+}
+
 /**
  * Cadencia del sondeo en vivo. El agente late cada 15 s por defecto
  * (`hygeia.heartbeatIntervalSec`), así que refrescar a ese ritmo mantiene la
@@ -201,6 +256,7 @@ async function refreshNow() {
     store.fetchMetrics(id),
     store.fetchLatest(id),
     store.fetchInventory(id),
+    store.fetchAnalysis(id),
   ])
 }
 
@@ -210,11 +266,18 @@ async function poll() {
   await store.fetchAssets({ silent: true })
   const id = store.state.selectedId
   if (!id) return
-  await Promise.all([
+  const tasks = [
     store.fetchMetrics(id, { silent: true }),
     store.fetchLatest(id),
     alerts.fetchAlerts({ assetId: id }),
-  ])
+  ]
+  // El análisis solo se re-pide mientras hay uno corriendo: es un escaneo
+  // puntual lanzado a mano, no un dato vivo como las métricas, así que
+  // sondearlo siempre sería una petición de más cada 15 s por nada.
+  if (['pending', 'running'].includes(store.state.analysis?.status)) {
+    tasks.push(store.fetchAnalysis(id, { silent: true }))
+  }
+  await Promise.all(tasks)
 }
 
 onMounted(async () => {

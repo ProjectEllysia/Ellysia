@@ -108,9 +108,23 @@
                 </Transition>
               </template>
 
-              <div v-if="scan.status === 'finished' && scan.targetAuthorized === false" class="body-unauth-hint">
+              <!-- No se muestra para un escaneo de agente (Fase I, `assetId`): ahí el
+                   fingerprinting y las comprobaciones activas están desactivados
+                   siempre, por diseño (modo payload) — autorizar el objetivo no
+                   cambiaría nada, así que sugerirlo sería un consejo sin efecto. -->
+              <div v-if="scan.status === 'finished' && scan.targetAuthorized === false && !scan.assetId" class="body-unauth-hint">
                 Objetivo no autorizado: el fingerprinting propio y las comprobaciones activas de Lybra no se
                 ejecutaron sobre '{{ scan.target }}'. Autorízalo en el panel de lanzamiento para un análisis más completo.
+              </div>
+
+              <!-- Solo cuando hay paquetes y ninguna detección: con al menos un CVE
+                   encontrado ya hay evidencia de que la cadena funciona. -->
+              <div v-if="scan.status === 'finished' && coverageGap(scan)" class="body-coverage-hint">
+                Nota de cobertura: ninguno de los {{ coverageGap(scan).packages }} paquetes
+                inventariados produjo una detección. Antes de leerlo como «equipo limpio», descarta
+                que la base de vulnerabilidades local no esté sincronizada y que el motor no sepa
+                identificar estos productos por su nombre. Ausencia de CVEs no equivale a software
+                verificado como seguro.
               </div>
 
               <div v-if="scan.status === 'finished'" class="doc-section">
@@ -237,6 +251,26 @@ function summary(scan) {
   const out = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 }
   for (const f of scan.findings || []) out[f.priority] = (out[f.priority] || 0) + 1
   return out
+}
+
+/**
+ * Detecta un análisis de inventario (Fase I) que no produjo ni una detección.
+ *
+ * Ojo: `installed_package` se emite por CADA paquete, se le haya resuelto un
+ * CPE o no, así que este recuento son los paquetes analizados — no los "no
+ * identificados". Con los datos que se persisten hoy no se puede distinguir
+ * si la causa fue una KB sin sincronizar o un producto irreconocible, así que
+ * el aviso nombra ambas (ver Fase I del roadmap, "correlación inventario↔KB").
+ *
+ * Devuelve `null` si no aplica (sin paquetes, o ya hay alguna detección real),
+ * o `{ packages }` cuando el aviso debe mostrarse.
+ */
+function coverageGap(scan) {
+  const findings = scan.findings || []
+  const packages = findings.filter(f => f.category === 'installed_package').length
+  const detected = findings.filter(f => f.category === 'outdated_software').length
+  if (!packages || detected) return null
+  return { packages }
 }
 
 /** Ordena los hallazgos por prioridad (crítico primero), luego confirmados antes. */
@@ -372,6 +406,7 @@ function fmtDate(iso) {
 .f-tag.src { color: var(--info); background: var(--info-dim); }
 
 .body-unauth-hint { margin-top: 0.6rem; padding: 0.55rem 0.7rem; font-size: var(--fs-md); line-height: 1.4; color: var(--warn); background: var(--warn-dim); border: 1px dashed var(--warn); border-radius: 7px; }
+.body-coverage-hint { margin-top: 0.6rem; padding: 0.55rem 0.7rem; font-size: var(--fs-md); line-height: 1.4; color: var(--warn); background: var(--warn-dim); border: 1px dashed var(--warn); border-radius: 7px; }
 
 /* ── Documentos PDF ── */
 .doc-section { margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--border); }

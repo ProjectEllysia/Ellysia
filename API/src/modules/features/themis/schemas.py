@@ -81,6 +81,11 @@ class ResultsQuerySchema(Schema):
     type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "openvas", "lybra", "all"]))
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))
     per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
+    # Fase I, solo con type=lybra: acota la lista a los escaneos originados por
+    # el inventario de un activo de Hygeia. Omitirlo devuelve los escaneos
+    # lanzados desde el panel de Themis (los de agente se ven por agente, no
+    # mezclados en la feed general).
+    assetId = fields.Integer(load_default=None, allow_none=True)
 
 
 class GeneratePdfRequestSchema(Schema):

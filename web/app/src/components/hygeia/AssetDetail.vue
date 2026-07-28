@@ -172,6 +172,42 @@
             Escaneado {{ timeAgo(inventoryCollectedAt) }}
           </p>
 
+          <!-- Análisis con Lybra (Fase I). Solo se ofrece si hay algo que
+               analizar: sin inventario el backend responde 409, así que el
+               botón no debe existir siquiera. -->
+          <div v-if="inventory.length" class="analysis-bar">
+            <div class="analysis-state">
+              <template v-if="hasAnalysis">
+                <span class="analysis-dot" :class="analysisTone"></span>
+                <span class="analysis-text">
+                  <template v-if="analysisRunning">Analizando el inventario…</template>
+                  <template v-else-if="analysis.vulnerableCount">
+                    {{ analysis.vulnerableCount }} {{ analysis.vulnerableCount === 1 ? 'paquete' : 'paquetes' }} con CVE conocida
+                  </template>
+                  <template v-else>Sin vulnerabilidades conocidas</template>
+                </span>
+              </template>
+              <span v-else class="analysis-text analysis-text--muted">
+                Sin analizar contra la base de vulnerabilidades
+              </span>
+            </div>
+
+            <div class="analysis-actions">
+              <button v-if="hasAnalysis" type="button" class="btn-analysis" @click="$emit('view-analysis')">
+                Ver análisis
+              </button>
+              <button
+                type="button"
+                class="btn-analysis btn-analysis--primary"
+                :disabled="analyzing || analysisRunning"
+                @click="$emit(hasAnalysis ? 'reanalyze' : 'analyze')"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spin: analyzing }"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                {{ hasAnalysis ? 'Volver a analizar' : 'Analizar con Lybra' }}
+              </button>
+            </div>
+          </div>
+
           <p v-if="!inventory.length && !inventoryCollectedAt" class="state-msg">
             Este activo aún no ha reportado un escaneo de inventario.
           </p>
@@ -266,9 +302,13 @@ const props = defineProps({
   inventoryCollectedAt: { type: String, default: null },
   inventoryLoading: { type: Boolean, default: false },
   inventoryError: { type: String, default: null },
+  // Resumen del último análisis del inventario con Lybra (Fase I). `null` o
+  // `scanId` nulo = nunca analizado.
+  analysis: { type: Object, default: null },
+  analyzing: { type: Boolean, default: false },
   anomalies: { type: Array, default: () => [] },
 })
-defineEmits(['ack', 'resolve', 'delete'])
+defineEmits(['ack', 'resolve', 'delete', 'analyze', 'reanalyze', 'view-analysis'])
 
 const { formatDate } = useUtils()
 
@@ -322,6 +362,15 @@ const filteredInventory = computed(() => {
   return props.inventory.filter((sw) =>
     sw.name?.toLowerCase().includes(needle) || sw.vendor?.toLowerCase().includes(needle)
   )
+})
+
+/* ── Análisis del inventario con Lybra (Fase I) ── */
+const hasAnalysis = computed(() => !!props.analysis?.scanId)
+const analysisRunning = computed(() => ['pending', 'running'].includes(props.analysis?.status))
+const analysisTone = computed(() => {
+  if (analysisRunning.value) return 'running'
+  if (props.analysis?.status === 'failed') return 'failed'
+  return props.analysis?.vulnerableCount ? 'vulnerable' : 'clean'
 })
 
 /**
@@ -506,6 +555,36 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 
 /* ── Inventario de software ── */
 .inventory-scanned { margin: -0.3rem 0 0.7rem; font-size: var(--fs-sm); color: var(--text-muted); }
+
+/* ── Análisis con Lybra (Fase I) ── */
+.analysis-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+  flex-wrap: wrap; margin-bottom: 0.8rem; padding: 0.6rem 0.75rem;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+}
+.analysis-state { display: flex; align-items: center; gap: 0.45rem; min-width: 0; }
+.analysis-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.analysis-dot.clean { background: var(--success); }
+.analysis-dot.vulnerable { background: var(--danger); }
+.analysis-dot.running { background: var(--info); }
+.analysis-dot.failed { background: var(--warn); }
+.analysis-text { font-size: var(--fs-md); color: var(--text-dim); }
+.analysis-text--muted { color: var(--text-muted); }
+.analysis-actions { display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; }
+.btn-analysis {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.35rem 0.7rem; border-radius: 6px; cursor: pointer;
+  font-size: var(--fs-md); font-weight: 600;
+  background: none; border: 1px solid var(--border-solid); color: var(--text-dim);
+  transition: all 0.2s;
+}
+.btn-analysis:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+.btn-analysis--primary { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-bright); }
+.btn-analysis--primary:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
+.btn-analysis:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-analysis svg { width: 12px; height: 12px; }
+.btn-analysis .spin { animation: seq-spin 0.8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .btn-analysis .spin { animation: none; } }
 
 .inventory-filter {
   width: 100%; margin-bottom: 0.7rem;

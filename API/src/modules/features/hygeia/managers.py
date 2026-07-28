@@ -29,10 +29,27 @@ from .exceptions import (
     AssetNotFoundError,
     AssetQuotaExceededError,
     IngestTooFrequentError,
+    InventoryNotAvailableError,
 )
 from .model import Anomaly, MonitoredAsset, AssetSnapshot
 from .repositories import AnomalyRepository, AssetSnapshotRepository, MonitoredAssetRepository
-from .services import check_clock_skew, denormalize, evaluate, generate_agent_key
+from .services import check_clock_skew, denormalize, evaluate, generate_agent_key, services_from_inventory
+
+# ---------------------------------------------------------------------------
+# Dependencia de Hygeia sobre Themis (Fase I del roadmap de Lybra).
+#
+# Es el ÚNICO import entre módulos de ``features/`` en todo el backend, y es
+# deliberado: Hygeia sabe leer lo que hay instalado en un host, pero no sabe
+# nada de CVEs; el motor de detección ya existe y vive en Themis. Consumirlo
+# es infinitamente mejor que duplicarlo.
+#
+# La dependencia es UNIDIRECCIONAL y así debe seguir: Themis no importa nada
+# de Hygeia ni sabe que existe (la columna ``LybraScan.asset_id`` es un
+# entero sin ForeignKey, precisamente para no acoplar el esquema). Antes de
+# tomar esto como precedente para un import en la otra dirección, o entre
+# otro par de módulos, conviene tener una razón igual de fuerte.
+# ---------------------------------------------------------------------------
+from src.modules.features.themis.managers import LybraEngineManager
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +226,103 @@ class HygeiaAssetManager:
         asset = self._get_owned_asset(repo, asset_id, self.user.id)
         return asset.to_dict()
 
+    def analyze_inventory(self, asset_id: int) -> dict:
+        """
+        Lanza un análisis de vulnerabilidades de Lybra sobre el inventario del activo.
+
+        Es el "escaneo autenticado" del roadmap (Fase I) sin escaneo ni
+        autenticación remota: el agente ya vive dentro del host y ya reportó
+        qué hay instalado, así que basta con traducir ese listado a la forma
+        que el motor consume y encolarlo. **No se manda ni un paquete al
+        activo** — el modo payload de Lybra (Fase 0.9) tiene desactivados por
+        contrato el fingerprinting y las comprobaciones activas.
+
+        Cada llamada crea un escaneo nuevo; los anteriores se conservan. Eso
+        es lo que permite al motor marcar como ``fixed`` un hallazgo que ya no
+        aparece (correlación de ciclo de vida, Fase 5), algo que se perdería
+        si cada re-análisis borrase al anterior.
+
+        Returns:
+            Diccionario con ``scanId`` del escaneo encolado.
+
+        Raises:
+            AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
+            InventoryNotAvailableError: Si el activo aún no ha reportado
+                inventario, o si ninguno de sus paquetes trae versión (sin
+                versión no hay CPE que resolver, así que el análisis no
+                produciría ni una sola detección).
+        """
+        repo = build_repository(MonitoredAssetRepository)
+        asset = self._get_owned_asset(repo, asset_id, self.user.id)
+
+        services = services_from_inventory(asset.inventory or [])
+        if not services:
+            raise InventoryNotAvailableError(asset_id)
+
+        scan_id = LybraEngineManager().run_scan(
+            user_id=self.user.id,
+            target=asset.hostname,
+            services=services,
+            asset_id=asset.id,
+        )
+        logger.info(
+            f"Análisis de inventario lanzado: escaneo Lybra {scan_id} "
+            f"para el activo {asset_id} ('{asset.hostname}', {len(services)} paquetes)"
+        )
+        return {"scanId": scan_id}
+
+    def get_analysis_summary(self, asset_id: int) -> dict:
+        """
+        Resume el último análisis de inventario del activo, si lo hay.
+
+        Solo el recuento por prioridad, no la lista de hallazgos: el desglose
+        completo se consulta en Themis (que ya tiene la interfaz para ello),
+        y traerlo aquí duplicaría ese componente por un panel que solo quiere
+        responder "¿cómo de mal está este activo?".
+
+        Returns:
+            El resumen, o ``{"scanId": None}`` si el activo nunca se analizó
+            — no es un error, es el estado inicial de todo activo.
+
+        Raises:
+            AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
+        """
+        repo = build_repository(MonitoredAssetRepository)
+        self._get_owned_asset(repo, asset_id, self.user.id)
+
+        manager = LybraEngineManager()
+        scans, _total = manager.get_scans_paginated(
+            self.user.id, page=1, per_page=1, asset_id=asset_id,
+        )
+        if not scans:
+            return {"scanId": None}
+
+        scan = scans[0]
+        findings = scan.get("findings") or []
+        by_priority: dict = {}
+        for finding in findings:
+            level = finding.get("priority") or "INFO"
+            by_priority[level] = by_priority.get(level, 0) + 1
+
+        # Paquetes analizados: el motor emite un "installed_package" por cada
+        # uno, se le haya podido resolver un CPE o no. Junto con
+        # `vulnerableCount` a cero, deja al frontend advertir de que un
+        # análisis sin detecciones no equivale a un equipo verificado limpio
+        # (ver Fase I del roadmap, "correlación inventario↔KB").
+        package_count = sum(1 for f in findings if f.get("category") == "installed_package")
+
+        return {
+            "scanId":          scan["id"],
+            "status":          scan.get("status"),
+            "startedAt":       scan.get("startedAt"),
+            "finishedAt":      scan.get("finishedAt"),
+            "totalFindings":   len(findings),
+            "byPriority":      by_priority,
+            "confirmedCount":  sum(1 for f in findings if f.get("confirmed")),
+            "vulnerableCount": sum(1 for f in findings if f.get("category") == "outdated_software"),
+            "packageCount":    package_count,
+        }
+
     def delete_asset(self, asset_id: int) -> None:
         """
         Da de baja un activo, revocando su clave de agente.
@@ -218,13 +332,26 @@ class HygeiaAssetManager:
         en ``require_agent_key`` con el mismo 401 genérico que una clave
         nunca emitida.
 
+        Borra además los escaneos Lybra que el inventario de este activo
+        originó (Fase I). Va explícito aquí y no como cascada de base de
+        datos porque ``LybraScan.asset_id`` es una referencia blanda sin
+        ForeignKey, para no acoplar el esquema de Themis al de Hygeia. Se
+        hace *antes* de borrar el activo: si fallara, el activo sigue en pie
+        y la operación se puede reintentar, en vez de dejar escaneos
+        huérfanos apuntando a un id que ya no existe.
+
         Raises:
             AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
         """
+        repo = build_repository(MonitoredAssetRepository)
+        self._get_owned_asset(repo, asset_id, self.user.id)
+
+        LybraEngineManager().delete_scans_for_asset(asset_id)
+
         with UnitOfWork() as uow:
-            repo = MonitoredAssetRepository(uow)
-            asset = self._get_owned_asset(repo, asset_id, self.user.id)
-            repo.delete(asset)
+            write_repo = MonitoredAssetRepository(uow)
+            asset = self._get_owned_asset(write_repo, asset_id, self.user.id)
+            write_repo.delete(asset)
 
     def rotate_key(self, asset_id: int) -> dict:
         """

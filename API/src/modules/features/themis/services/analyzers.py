@@ -795,12 +795,14 @@ class LybraAIWriter:
         """
         from src.modules.infrastructure.session import build_repository
         from ..repositories import ScanRepository
-        from ..lybra import classify_exposure
+        # Diferido como el resto de imports de esta función: `managers` importa
+        # `services`, así que a nivel de módulo sería un ciclo.
+        from ..managers.lybra_engine import LybraEngineManager
 
         scan_data = {
             "target": scan.target,
             "started_at": scan.started_at.isoformat() if getattr(scan, 'started_at', None) else "N/A",
-            "exposure": classify_exposure(scan.target),
+            "exposure": LybraEngineManager.exposure_for(scan),
         }
 
         rows = build_repository(ScanRepository).get_findings_by_scan(scan.id)

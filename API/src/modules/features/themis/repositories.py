@@ -202,6 +202,68 @@ class ScanRepository(BaseRepository[Scan]):
             order_by=Scan.started_at.desc(),
         )
 
+    # Sentinela de "solo los lanzados desde el panel de Themis" para
+    # ``get_lybra_scans_paginated``. Hace falta un valor propio porque ``None``
+    # ya significa otra cosa ahí ("no filtres, dame todos"), y lo que hay que
+    # expresar es un ``asset_id IS NULL`` — que ``paginate`` no sabe formular,
+    # ya que filtra por igualdad.
+    PANEL_SCANS = "panel"
+
+    def get_lybra_scans_paginated(
+        self,
+        user_id: int,
+        page: int = 1,
+        per_page: int = 10,
+        asset_id=PANEL_SCANS,
+    ):
+        """
+        Paginated Lybra scans for a user, filtered by where they came from.
+
+        Args:
+            user_id:  Owner user primary key.
+            page:     1-based page number.
+            per_page: Items per page.
+            asset_id: :data:`PANEL_SCANS` (the default) for the scans launched
+                from the Themis panel — those with no Hygeia asset behind them;
+                an ``int`` for one asset's inventory scans (Fase I); or ``None``
+                for every Lybra scan regardless of origin.
+
+        Returns:
+            Tuple of (items: List[LybraScan], total_count: int).
+        """
+        query = self._session.query(LybraScan).filter(LybraScan.user_id == user_id)
+        if asset_id is self.PANEL_SCANS:
+            query = query.filter(LybraScan.asset_id.is_(None))
+        elif asset_id is not None:
+            query = query.filter(LybraScan.asset_id == asset_id)
+
+        total_count = query.count()
+        items = (
+            query.order_by(LybraScan.started_at.desc())
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+            .all()
+        )
+        return items, total_count
+
+    def get_lybra_scan_ids_for_asset(self, asset_id: int) -> List[int]:
+        """Ids of every Lybra scan produced from one Hygeia asset's inventory.
+
+        The counterpart to ``LybraScan.asset_id`` being a soft reference with
+        no ``ForeignKey``: there is no database-level cascade to lean on, so
+        the asset's owner module has to clean up explicitly. Only the ids are
+        returned because the actual deletion goes through
+        ``LybraEngineManager.delete_scans_for_asset`` → ``delete_scan``, which
+        also removes each scan's generated PDFs from disk — a bulk row delete
+        here would leave those orphaned.
+        """
+        rows = (
+            self._session.query(LybraScan.id)
+            .filter(LybraScan.asset_id == asset_id)
+            .all()
+        )
+        return [row[0] for row in rows]
+
     def get_stats(self, user_id: int) -> dict:
         """
         Return scan counts grouped by type for a user.

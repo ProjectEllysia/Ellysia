@@ -14,6 +14,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
           <span class="world-label">Escáneres externos</span>
         </button>
+        <button class="world-opt" :class="{ active: store.world === 'agents' }" role="tab" :aria-selected="store.world === 'agents'" @click="store.setWorld('agents')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          <span class="world-label">Agentes</span>
+        </button>
       </div>
 
       <!-- Sin Transition envolvente aquí a propósito: es un cambio de "mundo"
@@ -58,6 +62,27 @@
           <ScheduledScansPanel :scheduled="scheduledStore.scheduled" :scheduling="scheduledStore.scheduling" active-tab="lybra"
             @create="handleCreateScheduled" @deactivate="handleDeactivateScheduled" @delete="handleDeleteScheduled" @toggle-form="scheduledStore.toggleScheduledForm()" />
         </template>
+      </div>
+
+      <!-- ═══════════ MUNDO: AGENTES (Fase I) ═══════════ -->
+      <div v-else-if="store.world === 'agents'" key="agents" class="world-block">
+        <AgentScansPanel
+          :assets="hygeiaStore.state.assets"
+          :assets-loading="hygeiaStore.state.loading"
+          :selected-asset-id="store.selectedAssetId"
+          :scans="store.scans.agentLybra.results"
+          :loading="store.scans.agentLybra.loading"
+          :total-count="store.scans.agentLybra.totalCount"
+          :docs-by-scan="store.lybraDocs"
+          @select="store.selectAgentAsset"
+          @refresh-assets="hygeiaStore.fetchAssets()"
+          @refresh-scans="store.loadAgentScans()"
+          @load-more="store.loadMoreLybraScans('agentLybra')"
+          @delete="handleDeleteAgentScan"
+          @load-docs="store.loadLybraDocs"
+          @generate-pdf="handleLybraGeneratePdf"
+          @download-doc="store.downloadDocument"
+          @delete-doc="handleLybraDeleteDoc" />
       </div>
 
       <!-- ═══════════ MUNDO: ESCÁNERES EXTERNOS ═══════════ -->
@@ -166,7 +191,9 @@
       title="Eliminar"
       :message="pendingConfirm?.type === 'delete-lybra'
         ? '¿Eliminar este escaneo Lybra y sus hallazgos?'
-        : '¿Eliminar esta carpeta? Los escaneos no se borrarán, solo quedarán sin carpeta.'"
+        : pendingConfirm?.type === 'delete-agent-scan'
+          ? '¿Eliminar este análisis de inventario y sus hallazgos? El activo de Hygeia no se borra.'
+          : '¿Eliminar esta carpeta? Los escaneos no se borrarán, solo quedarán sin carpeta.'"
       confirm-label="Eliminar"
       danger
       @confirm="runPendingConfirm"
@@ -193,16 +220,22 @@ import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 import ScheduledScansPanel from '@/components/themis/ScheduledScansPanel.vue'
 import LybraLaunchPanel from '@/components/themis/lybra/LybraLaunchPanel.vue'
 import LybraResults from '@/components/themis/lybra/LybraResults.vue'
+import AgentScansPanel from '@/components/themis/lybra/AgentScansPanel.vue'
 import { useRoute } from 'vue-router'
 import { useThemisStore } from '@/stores/themisStore'
 import { useThemisScheduledStore } from '@/stores/themisScheduledStore'
 import { useThemisFoldersStore } from '@/stores/themisFoldersStore'
+// Las tarjetas del mundo de agentes son los activos de Hygeia. La vista
+// consume el store del otro módulo directamente: es una lectura que ya
+// existe, y así el backend de Themis sigue sin saber que Hygeia existe.
+import { useHygeiaStore } from '@/stores/hygeiaStore'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 
 const route = useRoute()
 const store = useThemisStore()
 const scheduledStore = useThemisScheduledStore()
 const foldersStore = useThemisFoldersStore()
+const hygeiaStore = useHygeiaStore()
 const { selectedIds: batchSelectedIds, selectedCount: batchSelectedCount, selectedArray: batchSelectedArray, toggle: batchToggle, selectAll: batchSelectAll, clear: batchClear } = useBatchSelection()
 const currentData = computed(() => store.scans[store.activeTab])
 
@@ -233,8 +266,12 @@ const selectableFolders = computed(() =>
 // del roadmap). El hub de Themis puede forzar un mundo/vista concretos vía
 // query params (?world=external&view=history) para sus atajos rápidos.
 onMounted(() => {
-  store.setWorld(route.query.world === 'external' ? 'external' : 'lybra')
+  const world = ['external', 'agents'].includes(route.query.world) ? route.query.world : 'lybra'
+  store.setWorld(world)
   if (route.query.view === 'history' || route.query.view === 'folders') store.setViewMode(route.query.view)
+  // ?asset=N (el salto desde el modal de Hygeia) preselecciona esa tarjeta.
+  const assetId = Number(route.query.asset)
+  if (world === 'agents' && Number.isInteger(assetId) && assetId > 0) store.selectAgentAsset(assetId)
   store.loadStats(); store.loadScans(store.activeTab); scheduledStore.loadScheduledScans(); foldersStore.loadFolders()
 })
 onBeforeUnmount(() => store.stopScanPolling())
@@ -242,16 +279,22 @@ onBeforeUnmount(() => store.stopScanPolling())
 // Carga la lista de Lybra y el registro de objetivos autorizados la primera
 // vez que se entra a su mundo.
 let lybraLoaded = false
+let agentsLoaded = false
 watch(() => store.world, (w) => {
   if (w === 'lybra' && !lybraLoaded) {
     lybraLoaded = true
     store.loadLybraScans()
     store.loadAuthorizedTargets()
   }
+  if (w === 'agents' && !agentsLoaded) {
+    agentsLoaded = true
+    hygeiaStore.fetchAssets()
+  }
 }, { immediate: true })
 
 async function handleLaunchLybra(payload) { await store.launchLybra(payload) }
 function handleDeleteLybra(id) { pendingConfirm.value = { type: 'delete-lybra', id } }
+function handleDeleteAgentScan(id) { pendingConfirm.value = { type: 'delete-agent-scan', id } }
 async function handleLybraGeneratePdf(scanId, useAi) { await store.generateLybraPdf(scanId, useAi) }
 async function handleLybraDeleteDoc(scanId, docId) { await store.deleteLybraDoc(scanId, docId) }
 async function handleAddAuthorizedTarget({ target, label }) { await store.addAuthorizedTarget(target, label) }
@@ -298,12 +341,13 @@ function handleRenameFolder(folder) { foldersStore.folderForms.rename = { show: 
 function handleDeleteFolder(folderId) { pendingConfirm.value = { type: 'delete-folder', id: folderId } }
 
 // Q7: modal propio en vez de confirm() nativo del navegador.
-const pendingConfirm = ref(null) // { type: 'delete-lybra'|'delete-folder', id }
+const pendingConfirm = ref(null) // { type: 'delete-lybra'|'delete-agent-scan'|'delete-folder', id }
 async function runPendingConfirm() {
   const action = pendingConfirm.value
   pendingConfirm.value = null
   if (!action) return
   if (action.type === 'delete-lybra') await store.deleteLybraScan(action.id)
+  else if (action.type === 'delete-agent-scan') await store.deleteLybraScan(action.id, 'agentLybra')
   else if (action.type === 'delete-folder') await foldersStore.deleteFolder(action.id)
 }
 function handleOpenMoveScan(scanId, folderId) { foldersStore.openMoveScan(scanId, folderId) }

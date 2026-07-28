@@ -19,6 +19,10 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     metrics: [], metricsTruncated: false, metricsLoading: false, metricsError: null,
     latest: null, latestError: null,
     inventory: [], inventoryCollectedAt: null, inventoryLoading: false, inventoryError: null,
+    // Resumen del último análisis del inventario con Lybra (Fase I). `scanId`
+    // nulo = nunca analizado, que es el estado inicial de todo activo, no un
+    // error. El desglose completo vive en Themis; aquí solo los recuentos.
+    analysis: null, analysisLoading: false, analyzing: false, analysisError: null,
     lastAgentKey: null,
   })
 
@@ -90,7 +94,9 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     state.inventory = []
     state.inventoryCollectedAt = null
     state.inventoryError = null
-    if (id) { fetchMetrics(id); fetchLatest(id); fetchInventory(id) }
+    state.analysis = null
+    state.analysisError = null
+    if (id) { fetchMetrics(id); fetchLatest(id); fetchInventory(id); fetchAnalysis(id) }
   }
 
   /**
@@ -162,6 +168,49 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     finally { if (state.selectedId === id) state.inventoryLoading = false }
   }
 
+  /**
+   * Carga el resumen del último análisis de inventario del activo (Fase I).
+   *
+   * @param {number} id - Id del activo.
+   * @param {object} [opts]
+   * @param {boolean} [opts.silent=false] - No levanta el flag de carga. Lo usa
+   *   el sondeo mientras un análisis está en curso, para no parpadear.
+   */
+  async function fetchAnalysis(id, { silent = false } = {}) {
+    if (!silent) state.analysisLoading = true
+    try {
+      const res = await apiFetch(`/hygeia/assets/${id}/analysis`)
+      // La selección puede haber cambiado mientras la petición volaba.
+      if (state.selectedId !== id) return
+      if (!res?.ok) { state.analysisError = await apiError(res, 'No se pudo cargar el análisis.'); return }
+      state.analysis = await res.json()
+      state.analysisError = null
+    } catch { if (state.selectedId === id) state.analysisError = 'No se pudo conectar con la API.' }
+    finally { if (state.selectedId === id) state.analysisLoading = false }
+  }
+
+  /**
+   * Lanza un análisis del inventario del activo con el motor Lybra (Fase I).
+   *
+   * El escaneo corre en la TaskQueue, así que al volver solo hay un id: el
+   * sondeo de la vista es quien refresca el resumen hasta que termine.
+   *
+   * @param {number} id - Id del activo.
+   * @returns {Promise<number|null>} Id del escaneo lanzado, o null si falló.
+   */
+  async function analyzeInventory(id) {
+    state.analyzing = true
+    try {
+      const res = await apiFetch(`/hygeia/assets/${id}/analyze`, { method: 'POST' })
+      if (!res?.ok) { state.analysisError = await apiError(res, 'No se pudo lanzar el análisis.'); return null }
+      const data = await res.json()
+      state.analysisError = null
+      await fetchAnalysis(id)
+      return data.scanId ?? null
+    } catch { state.analysisError = 'No se pudo conectar con la API.'; return null }
+    finally { state.analyzing = false }
+  }
+
   /** Descarta la clave de agente mostrada — llamar al cerrar el modal de una sola vez. */
   function clearAgentKey() { state.lastAgentKey = null }
 
@@ -173,6 +222,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
       metrics: [], metricsTruncated: false, metricsLoading: false, metricsError: null,
       latest: null, latestError: null,
       inventory: [], inventoryCollectedAt: null, inventoryLoading: false, inventoryError: null,
+      analysis: null, analysisLoading: false, analyzing: false, analysisError: null,
       lastAgentKey: null,
     })
   }
@@ -181,6 +231,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     state,
     fetchAssets, createAsset, deleteAsset, rotateKey,
     selectAsset, fetchMetrics, fetchLatest, fetchInventory, clearAgentKey,
+    fetchAnalysis, analyzeInventory,
     $reset,
   }
 })
