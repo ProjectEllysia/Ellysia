@@ -66,6 +66,19 @@ os.environ.setdefault("SHUTDOWN_TIMEOUT", "30")
 # la app (que sigue mockeando Redis para create_app()).
 os.environ.setdefault("RATELIMIT_STORAGE_URI", "memory://")
 
+# T5: aislar Redis del de desarrollo. Solo se mockean `ping`/`close` (arriba)
+# para que create_app() arranque sin depender de un Redis real -- cualquier
+# otra operación (p. ej. un TaskQueue.submit() no mockeado en algún test) sí
+# llega a un Redis de verdad. Sin esto, esos tests encolaban jobs reales en la
+# MISMA base Redis que usa el servidor de desarrollo (REDIS_HOST/DB comparten
+# valor con .env), dejando jobs huérfanos que un worker real recogía más
+# tarde y fallaban con FK violation contra una fila que solo existió en el
+# SQLite efímero del test. Redis soporta 16 bases lógicas (0-15); moviendo los
+# tests a la 15 quedan en un espacio de claves separado del de dev (DB 0) sin
+# necesitar un Redis distinto. Asignación incondicional (no `setdefault`):
+# tiene que ganar aunque `.env` ya fije REDIS_DB.
+os.environ["REDIS_DB"] = "15"
+
 # Redis/Ollama/OpenVAS: valores inertes; los servicios se mockean.
 os.environ.setdefault("REDIS_HOST", "localhost")
 os.environ.setdefault("OLLAMA_HOST", "http://localhost:11434")
