@@ -1990,7 +1990,7 @@ class LybraPrintingStrategy(PrintingStrategy):
             "title": f.title, "category": f.category, "port": f.port, "service": f.service,
             "cpe": f.cpe, "cve_ids": f.cve_ids or [], "cvss_score": f.cvss_score,
             "epss_score": f.epss_score, "in_kev": f.in_kev, "qod": f.qod, "confirmed": f.confirmed,
-            "source": f.source, "state": f.state,
+            "source": f.source, "state": f.state, "cpe_resolved": f.cpe_resolved,
         } for f in rows]
         for f in findings:
             f["priority"] = score_finding(f, exposure)
@@ -2151,31 +2151,25 @@ class LybraPrintingStrategy(PrintingStrategy):
         elements.append(Spacer(1, 0.3 * inch))
 
     def _append_cpe_coverage_note(self, theme: "ReportTheme", elements: list, findings: list) -> None:
-        """Advierte cuando un análisis de inventario no produjo ni una detección.
+        """Advierte cuando el matcher no pudo identificar parte del inventario.
 
         Un escaneo por inventario (Fase I) emite un hallazgo
         ``installed_package`` por **cada** paquete, se le haya podido resolver
-        un CPE o no — así que "cero ``outdated_software``" no distingue por sí
-        solo entre "comprobado y limpio" y "no se llegó a comprobar nada".
-        Hoy las dos causas de lo segundo son:
-
-        - **La KB local está vacía o desactualizada.** Sin CVEs espejadas, el
-          matcher consulta y no encuentra nada aunque el CPE se resuelva bien.
-        - **El nombre del producto no se pudo resolver a un CPE.** El
-          inventario nunca trae CPE embebido, así que ``_resolve_cpe`` depende
-          de ``CPE_PRODUCT_OVERRIDES`` — una tabla de una docena de demonios de
-          servidor, ninguno de los cuales aparece en un inventario de
-          escritorio (7-Zip, navegadores, runtimes...).
-
-        El informe no puede distinguirlas con los datos que persiste hoy (ver
-        la Fase I del roadmap, "correlación inventario↔KB"), así que la nota
-        nombra ambas en vez de afirmar una. Solo aparece cuando hay paquetes y
-        ninguna detección: con al menos un CVE encontrado, ya hay evidencia de
-        que la cadena funciona y el aviso sobraría.
+        un CPE o no. Antes de la observabilidad de la Fase I-b
+        (``Finding.cpe_resolved``) esto era indistinguible de "comprobado y
+        limpio" salvo por una heurística ("cero ``outdated_software``") que
+        mezclaba dos causas sin poder nombrar cuál. Ahora el dato es exacto:
+        cuántos de los paquetes inventariados no se pudieron ni identificar
+        contra el catálogo CPE — la KB local puede seguir sin tener CVEs para
+        los que sí se resolvieron, pero eso ya no es ambiguo, es "comprobado y
+        sin hallazgos".
         """
         packages = sum(1 for f in findings if f["category"] == "installed_package")
-        detected = sum(1 for f in findings if f["category"] == "outdated_software")
-        if not packages or detected:
+        unresolved = sum(
+            1 for f in findings
+            if f["category"] == "installed_package" and f.get("cpe_resolved") is False
+        )
+        if not packages or not unresolved:
             return
 
         note_style = ParagraphStyle(
@@ -2184,11 +2178,10 @@ class LybraPrintingStrategy(PrintingStrategy):
             borderWidth=0.75, borderPadding=6, alignment=TA_LEFT,
         )
         elements.append(Paragraph(
-            f"<b>Nota de cobertura:</b> ninguno de los {packages} paquetes inventariados produjo una "
-            "detección. Antes de leer esto como &quot;equipo limpio&quot;, conviene descartar dos causas: que la "
-            "base de vulnerabilidades local no esté sincronizada, y que el motor no sepa identificar "
-            "estos productos por su nombre (hoy solo reconoce software de servidor). Ausencia de CVEs "
-            "no equivale a software verificado como seguro.",
+            f"<b>Nota de cobertura:</b> {unresolved} de los {packages} paquetes inventariados no se "
+            "pudieron identificar contra el catálogo de vulnerabilidades (nombre de producto sin "
+            "resolución conocida), así que no se comprobaron. El resto sí se comprobó — su ausencia "
+            "de hallazgos es una verificación real, no una laguna.",
             note_style,
         ))
         elements.append(Spacer(1, 0.25 * inch))

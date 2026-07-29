@@ -133,6 +133,12 @@ class KbSyncManager:
             for cve_row, cpe_matches in batch:
                 repo.upsert_cve(cve_row, cpe_matches)
 
+    def rebuild_cpe_product_index(self) -> int:
+        """Rebuild the CPE product-name index (Fase I-b, paso 2). See
+        ``KbRepository.rebuild_cpe_product_index`` for the algorithm."""
+        with UnitOfWork() as uow:
+            return KbRepository(uow).rebuild_cpe_product_index()
+
     def sync_all(self) -> dict:
         """Run every configured source once; return a per-source count summary."""
         sources = CR.get_kb_sources()
@@ -147,6 +153,9 @@ class KbSyncManager:
                 window_days=CR.get_kb_nvd_window_days(),
                 api_key=CR.get_kb_nvd_api_key(),
             )
+            # Only worth rebuilding when NVD's CpeMatch rows might have
+            # changed — the index is entirely derived from that table.
+            summary["cpeProductAliases"] = self.rebuild_cpe_product_index()
         logger.info("KB sync complete: %s", summary)
         return summary
 

@@ -111,6 +111,7 @@ Changes to `SecOpsConfig.json` require an app restart (values are cached) unless
 
 - `.env` files hold credentials — never commit. `API/.env`, `API/src/data/`, and `docs/` are gitignored.
 - **First deploy only**: `CREATE_DATABASE=True` runs the destructive `_init_db()` (drops + recreates DB, seeds root user + Topic rows). Set it back to `False` afterward or you lose data on next restart. Subsequent schema changes go through Alembic (auto-applied on startup, non-destructive).
+- **Do not run `CREATE_DATABASE=True` / reset the local dev DB.** As of 2026-07-29 it holds a real NVD/KEV/EPSS knowledge-base backfill (`CveEntry`/`CpeMatch`/`KevEntry`/`EpssScore`, ~350k CVEs — the full historical catalog, not just a window) that took over an hour to pull under NVD's unauthenticated rate limit (see `lybra-engine-roadmap.md`, Fase I-b). Re-running it is pure lost time, not a correctness issue — but there's no reason to pay that cost twice.
 - PostgreSQL is on port **15432** locally (container maps 5432→15432), not the standard 5432.
 - Async tasks silently never run if no RQ **worker** is up.
 - `themis/services/tasks.py` defines its **own** `TaskStatus` enum — distinct from `taskqueue.TaskStatus`. Don't conflate them.

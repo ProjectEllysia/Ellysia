@@ -402,3 +402,7 @@ class InventoryAnalysisSummarySchema(Schema):
     # haya resuelto un CPE o no). Con `vulnerableCount` a cero permite avisar
     # de que "sin detecciones" no equivale a "verificado limpio".
     packageCount    = fields.Integer(load_default=0)
+    # De esos, cuántos el matcher no pudo ni identificar (Fase I-b,
+    # `Finding.cpe_resolved=False`) — el número real detrás del aviso, en vez
+    # de "puede que alguno no se haya reconocido".
+    unresolvedCount = fields.Integer(load_default=0)

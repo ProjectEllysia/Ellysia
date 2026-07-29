@@ -198,6 +198,82 @@ def test_no_version_finding_without_a_concrete_version():
     assert [f["category"] for f in findings] == ["open_port"]
 
 
+# --------------------------------- Fase I-b: the automated CPE index (paso 2)
+
+def test_version_finding_via_product_alias_lookup_when_override_misses():
+    """The third strategy: a product the curated table has never heard of,
+    resolved through the injected KB-backed index instead."""
+    calls = []
+
+    def alias_lookup(normalized_name):
+        assert normalized_name == "docker desktop"  # already normalized before the call
+        return ("docker", "docker_desktop")
+
+    engine = LybraEngine(
+        cve_lookup=_lookup_for(("docker", "docker_desktop"), calls),
+        product_alias_lookup=alias_lookup,
+    )
+    findings = engine.analyze([
+        Service(port=None, protocol="", product="Docker Desktop", version="4.80.0", origin="inventory"),
+    ])
+
+    assert calls == [("docker", "docker_desktop", "4.80.0")]
+    assert findings[1]["cpe"] == "cpe:2.3:a:docker:docker_desktop:4.80.0:*:*:*:*:*:*:*"
+
+
+def test_product_alias_lookup_never_called_when_curated_override_already_hit():
+    """Strategy 2 (curated feed) wins over strategy 3 — the index is the
+    fallback, not consulted when the hand-verified table already resolved it."""
+    calls = []
+
+    def alias_lookup(_normalized_name):
+        calls.append(_normalized_name)
+        return ("wrong", "vendor")  # would prove the index was consulted if it were
+
+    engine = LybraEngine(
+        cve_lookup=lambda vendor, product, version: [],
+        product_alias_lookup=alias_lookup,
+    )
+    engine.analyze([Service(22, "tcp", "ssh", "OpenSSH", "7.4", None)])  # in the curated feed
+
+    assert calls == []
+
+
+def test_product_alias_lookup_not_consulted_without_a_concrete_version():
+    calls = []
+
+    def alias_lookup(_normalized_name):
+        calls.append(_normalized_name)
+        return None
+
+    engine = LybraEngine(cve_lookup=lambda *a: [], product_alias_lookup=alias_lookup)
+    engine.analyze([Service(port=None, protocol="", product="Some App", version="*", origin="inventory")])
+
+    assert calls == []
+
+
+def test_embedded_version_in_the_product_name_still_resolves():
+    """The real bug this session found: a Windows inventory entry that bakes
+    the version straight into the name ("7-Zip 25.01 (x64)") must still
+    normalize down to something the KB's clean "7-zip" product can match."""
+    calls = []
+
+    def alias_lookup(normalized_name):
+        assert normalized_name == "7 zip"
+        return ("7-zip", "7-zip")
+
+    engine = LybraEngine(
+        cve_lookup=_lookup_for(("7-zip", "7-zip"), calls),
+        product_alias_lookup=alias_lookup,
+    )
+    findings = engine.analyze([
+        Service(port=None, protocol="", product="7-Zip 25.01 (x64)", version="25.01", origin="inventory"),
+    ])
+
+    assert calls == [("7-zip", "7-zip", "25.01")]
+    assert findings[1]["category"] == "outdated_software"
+
+
 # ----------------------------------------------- Fase 0.9: external payload
 
 def test_version_finding_from_inventory_origin_is_confirmed_with_high_qod():
@@ -249,6 +325,40 @@ def test_informational_finding_for_inventory_service_with_a_port_is_unaffected()
 
     assert finding["category"] == "open_port"
     assert "22/tcp" in finding["title"]
+
+
+# --------------------------------------- cpe_resolved observability (Fase I-b)
+
+def test_informational_finding_flags_unresolved_cpe():
+    # No override, no alias index wired: cannot resolve -> the informational
+    # finding must say so explicitly instead of reading like a clean scan.
+    service = Service(port=None, protocol="", product="Some Unknown App",
+                       version="1.0", origin="inventory")
+
+    finding = LybraEngine().analyze([service])[0]
+
+    assert finding["category"] == "installed_package"
+    assert finding["cpe_resolved"] is False
+
+
+def test_informational_finding_flags_resolved_cpe():
+    # In the curated feed (OpenSSH) -> resolvable even without a CVE hit.
+    service = Service(port=None, protocol="", product="OpenSSH", version="7.4",
+                       origin="inventory")
+
+    finding = LybraEngine().analyze([service])[0]
+
+    assert finding["cpe_resolved"] is True
+
+
+def test_version_finding_carries_cpe_resolved_true():
+    calls = []
+    engine = LybraEngine(cve_lookup=_lookup_for(("openbsd", "openssh"), calls))
+
+    findings = engine.analyze([Service(22, "tcp", "ssh", "OpenSSH", "7.4", None)])
+
+    version_finding = next(f for f in findings if f["category"] == "outdated_software")
+    assert version_finding["cpe_resolved"] is True
 
 
 def test_services_from_payload_builds_services_and_defaults_origin():

@@ -44,13 +44,12 @@
                   Ningún hallazgo. El software instalado está limpio.
                 </p>
 
-                <!-- Solo cuando no hubo ninguna detección real: si vulnerableCount>0,
-                     el matcher ya demostró que funcionó para parte del inventario. -->
-                <p v-else-if="!analysis.vulnerableCount && analysis.packageCount" class="coverage-note">
-                  <strong>Nota de cobertura:</strong> ninguno de los {{ analysis.packageCount }} paquetes
-                  inventariados produjo una detección. Antes de leerlo como «equipo limpio», descarta que
-                  la base de vulnerabilidades local no esté sincronizada y que el motor no sepa identificar
-                  estos productos por su nombre. Ausencia de CVEs no equivale a software verificado como seguro.
+                <!-- Solo cuando el matcher no pudo identificar parte del inventario. -->
+                <p v-else-if="analysis.unresolvedCount" class="coverage-note">
+                  <strong>Nota de cobertura:</strong> {{ analysis.unresolvedCount }} de los
+                  {{ analysis.packageCount }} paquetes inventariados no se pudieron identificar contra el
+                  catálogo de vulnerabilidades, así que no se comprobaron. El resto sí se comprobó — su
+                  ausencia de hallazgos es una verificación real.
                 </p>
 
                 <ul v-else class="prio-list">
@@ -165,7 +164,7 @@ function fmtDate(iso) {
 .prio-fill.info     { background: var(--text-muted); }
 
 .scope-note { margin: 0.9rem 0 0; font-size: var(--fs-sm); line-height: 1.45; color: var(--text-muted); border-left: 2px solid var(--border-solid); padding-left: 0.6rem; }
-.coverage-note { margin: 0 0 0.6rem; padding: 0.55rem 0.7rem; font-size: var(--fs-sm); line-height: 1.45; color: var(--warn); background: var(--warn-dim); border: 1px dashed var(--warn); border-radius: 7px; }
+.coverage-note { margin: 0 0 0.6rem; padding: 0.55rem 0.7rem; font-size: var(--fs-md); line-height: 1.45; color: var(--warn); background: var(--warn-dim); border: 1px dashed var(--warn); border-radius: 7px; }
 
 .modal-footer { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 0.85rem 1.1rem; border-top: 1px solid var(--border); }
 .btn-ghost { background: none; border: 1px solid var(--border-solid); color: var(--text-dim); padding: 0.45rem 0.9rem; border-radius: 6px; cursor: pointer; }

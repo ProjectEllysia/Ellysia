@@ -235,6 +235,7 @@ class LybraEngineManager(ScanManager):
                     cve_lookup=kb_repo.cves_for_cpe,
                     kev_lookup=lambda cve_id: kb_repo.get_kev(cve_id) is not None,
                     epss_lookup=lambda cve_id: getattr(kb_repo.get_epss(cve_id), "score", None),
+                    product_alias_lookup=kb_repo.resolve_product_alias,
                 )
                 findings_data = engine.analyze(services)
                 findings_data.extend(fingerprint_findings)
@@ -730,6 +731,7 @@ class LybraEngineManager(ScanManager):
                     "inKev": f.get("in_kev"),
                     "qod": f.get("qod"),
                     "confirmed": f.get("confirmed"),
+                    "cpeResolved": f.get("cpe_resolved"),
                     "source": f.get("source"),
                     "state": f.get("state"),
                     "dedupKey": f.get("dedup_key"),

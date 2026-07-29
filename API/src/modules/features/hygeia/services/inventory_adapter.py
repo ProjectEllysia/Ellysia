@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from typing import List
 
-from src.modules.features.themis.lybra import Service, services_from_payload
+from src.modules.features.themis.lybra import Service, extract_trailing_version, services_from_payload
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,22 @@ def services_from_inventory(software: list) -> List[Service]:
       informativo por entrada. Un inventario de Windows trae cientos, y
       ahogarían la lista de hallazgos con ruido sin aportar detección.
 
+    Una cuarta decisión, encontrada al analizar un inventario real (Fase
+    I-b): **la versión incrustada en el nombre gana a la del campo
+    ``version``, cuando ambas existen y no coinciden.** JetBrains es el caso
+    verificado — su instalador registra el *build interno*
+    (``"252.26199.169"``) como ``version`` de Windows, mientras que la
+    versión de marketing contra la que NVD expresa sus rangos
+    (``"2025.2.2"``) solo aparece incrustada en el propio ``name``
+    (``"IntelliJ IDEA 2025.2.2"``). Comparar el build interno contra esos
+    rangos no solo pierde coincidencias reales: las inventa — un build
+    number ordena como "más antiguo que cualquier año", así que casa con
+    prácticamente cualquier rango del tipo "afecta a versiones anteriores a
+    X" (visto en producción: ~50 CVEs falsos para una sola instalación). En
+    el resto del inventario observado, ambas fuentes ya coinciden cuando las
+    dos existen, así que preferir la incrustada no cambia nada — solo
+    corrige el caso donde discrepan.
+
     Args:
         software: Lista de aplicaciones tal como las guarda
             ``MonitoredAsset.inventory`` (claves del ``SoftwareSchema``:
@@ -51,20 +67,24 @@ def services_from_inventory(software: list) -> List[Service]:
     Returns:
         Los ``Service`` correspondientes, uno por paquete con versión.
     """
-    payload = [
-        {
+    payload = []
+    for item in (software or []):
+        name = (item.get("name") or "").strip()
+        if not name:
+            continue
+        version = extract_trailing_version(name) or (item.get("version") or "").strip()
+        if not version:
+            continue
+        payload.append({
             "port":     None,
             "protocol": "",
             # El nombre del paquete es lo que la tabla CPE_PRODUCT_OVERRIDES
             # del motor intenta casar, así que va como `product`, no como
             # `name` (que en un Service es el nombre del *servicio* de red).
-            "product":  (item.get("name") or "").strip(),
-            "version":  (item.get("version") or "").strip(),
+            "product":  name,
+            "version":  version,
             "origin":   "inventory",
-        }
-        for item in (software or [])
-        if (item.get("name") or "").strip() and (item.get("version") or "").strip()
-    ]
+        })
     services = services_from_payload(payload)
     logger.debug(
         "Inventario adaptado: %d paquetes -> %d servicios con versión",

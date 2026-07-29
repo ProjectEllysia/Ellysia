@@ -892,6 +892,12 @@ class Finding(Base):
         dedup_key: hash(host, port, cpe|check_id, cve) for multi-source merge.
         qod: Quality of Detection 0-100.
         confirmed: Actively confirmed vs version-only deduction.
+        cpe_resolved: Whether Lybra's matcher could resolve this service to a
+            CPE at all (Fase I-b observability). ``None`` for finding sources
+            that never attempt CPE resolution (Nikto, OpenVAS); ``True``/
+            ``False`` for Lybra findings — distinguishes "checked, no CVEs"
+            from "could not even identify the package" in the same data that
+            otherwise reads identically as an ``installed_package`` row.
         first_seen_at / last_seen_at / state: Lifecycle (open|fixed|regressed|accepted).
     """
     __tablename__ = "Finding"
@@ -922,6 +928,7 @@ class Finding(Base):
     dedup_key    = Column(String(64), index=True)
     qod          = Column(Integer)
     confirmed    = Column(Boolean, default=False)
+    cpe_resolved = Column(Boolean, nullable=True)
 
     # Lifecycle
     first_seen_at = Column(DateTime, default=utcnow_naive)
@@ -946,9 +953,10 @@ class Finding(Base):
             "source": self.source,
             "check_id": self.check_id, 
             "feed_version": self.feed_version,
-            "dedup_key": self.dedup_key, 
-            "qod": self.qod, 
+            "dedup_key": self.dedup_key,
+            "qod": self.qod,
             "confirmed": self.confirmed,
+            "cpe_resolved": self.cpe_resolved,
         }
 
     def __repr__(self):
@@ -1014,6 +1022,38 @@ class CpeMatch(Base):
 
     def __repr__(self):
         return f"<CpeMatch(cve_id={self.cve_id}, {self.vendor}:{self.product})>"
+
+
+class CpeProductAlias(Base):
+    """A normalized product name -> (vendor, product) index, derived from
+    ``CpeMatch`` (Fase I-b, paso 2 del roadmap de Lybra).
+
+    This is deliberately *not* a mirror of NVD's full CPE Dictionary (~1.4M
+    entries, expensive to keep in sync): it only indexes products that
+    already have at least one CVE in ``CpeMatch``, because a product with
+    none could never produce a detection anyway — resolving it would be
+    pointless. Rebuilt wholesale after every ``KbSyncManager.sync_nvd`` (see
+    ``KbRepository.rebuild_cpe_product_index``), never written to
+    incrementally: a full rebuild is what lets a ``(vendor, product)`` pair
+    that stops being unique (a name that used to be unambiguous, until a
+    same-named product with a different vendor showed up in a later sync)
+    correctly disappear from the index instead of silently going stale.
+
+    ``normalized_name`` is unique by construction: the rebuild discards any
+    name that maps to more than one distinct ``(vendor, product)`` pair
+    rather than picking one — guessing here risks a false-positive CVE
+    match, worse than staying unresolved (see
+    ``lybra.kb.normalize_product_name``'s docstring for why).
+    """
+    __tablename__ = "CpeProductAlias"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    normalized_name = Column(String(256), nullable=False, unique=True, index=True)
+    vendor          = Column(String(128), nullable=False)
+    product         = Column(String(128), nullable=False)
+
+    def __repr__(self):
+        return f"<CpeProductAlias({self.normalized_name!r} -> {self.vendor}:{self.product})>"
 
 
 class KevEntry(Base):

@@ -117,14 +117,12 @@
                 ejecutaron sobre '{{ scan.target }}'. Autorízalo en el panel de lanzamiento para un análisis más completo.
               </div>
 
-              <!-- Solo cuando hay paquetes y ninguna detección: con al menos un CVE
-                   encontrado ya hay evidencia de que la cadena funciona. -->
+              <!-- Solo cuando hay paquetes que el matcher no pudo ni identificar. -->
               <div v-if="scan.status === 'finished' && coverageGap(scan)" class="body-coverage-hint">
-                Nota de cobertura: ninguno de los {{ coverageGap(scan).packages }} paquetes
-                inventariados produjo una detección. Antes de leerlo como «equipo limpio», descarta
-                que la base de vulnerabilidades local no esté sincronizada y que el motor no sepa
-                identificar estos productos por su nombre. Ausencia de CVEs no equivale a software
-                verificado como seguro.
+                Nota de cobertura: {{ coverageGap(scan).unresolved }} de los {{ coverageGap(scan).packages }}
+                paquetes inventariados no se pudieron identificar contra el catálogo de vulnerabilidades,
+                así que no se comprobaron. El resto sí se comprobó — su ausencia de hallazgos es una
+                verificación real.
               </div>
 
               <div v-if="scan.status === 'finished'" class="doc-section">
@@ -254,23 +252,22 @@ function summary(scan) {
 }
 
 /**
- * Detecta un análisis de inventario (Fase I) que no produjo ni una detección.
+ * Detecta un análisis de inventario (Fase I) con paquetes sin identificar.
  *
- * Ojo: `installed_package` se emite por CADA paquete, se le haya resuelto un
- * CPE o no, así que este recuento son los paquetes analizados — no los "no
- * identificados". Con los datos que se persisten hoy no se puede distinguir
- * si la causa fue una KB sin sincronizar o un producto irreconocible, así que
- * el aviso nombra ambas (ver Fase I del roadmap, "correlación inventario↔KB").
+ * `cpeResolved` (Fase I-b, `Finding.cpe_resolved`) da el número exacto de
+ * paquetes que el matcher no pudo ni resolver a un CPE — ya no es una
+ * heurística sobre ausencia de detecciones, que mezclaba eso con "KB sin
+ * sincronizar" o simplemente "comprobado y limpio".
  *
- * Devuelve `null` si no aplica (sin paquetes, o ya hay alguna detección real),
- * o `{ packages }` cuando el aviso debe mostrarse.
+ * Devuelve `null` si no aplica (sin paquetes, o todos resueltos), o
+ * `{ packages, unresolved }` cuando el aviso debe mostrarse.
  */
 function coverageGap(scan) {
   const findings = scan.findings || []
   const packages = findings.filter(f => f.category === 'installed_package').length
-  const detected = findings.filter(f => f.category === 'outdated_software').length
-  if (!packages || detected) return null
-  return { packages }
+  const unresolved = findings.filter(f => f.category === 'installed_package' && f.cpeResolved === false).length
+  if (!packages || !unresolved) return null
+  return { packages, unresolved }
 }
 
 /** Ordena los hallazgos por prioridad (crítico primero), luego confirmados antes. */

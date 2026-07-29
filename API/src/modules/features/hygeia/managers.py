@@ -305,11 +305,16 @@ class HygeiaAssetManager:
             by_priority[level] = by_priority.get(level, 0) + 1
 
         # Paquetes analizados: el motor emite un "installed_package" por cada
-        # uno, se le haya podido resolver un CPE o no. Junto con
-        # `vulnerableCount` a cero, deja al frontend advertir de que un
-        # análisis sin detecciones no equivale a un equipo verificado limpio
-        # (ver Fase I del roadmap, "correlación inventario↔KB").
+        # uno, se le haya podido resolver un CPE o no. `unresolvedCount` (Fase
+        # I-b observability, `Finding.cpe_resolved`) es el número real de los
+        # que no se pudieron identificar — antes era una advertencia genérica
+        # cuando `vulnerableCount` daba cero; ahora el frontend puede decir
+        # cuántos, en vez de "puede que alguno".
         package_count = sum(1 for f in findings if f.get("category") == "installed_package")
+        unresolved_count = sum(
+            1 for f in findings
+            if f.get("category") == "installed_package" and f.get("cpeResolved") is False
+        )
 
         return {
             "scanId":          scan["id"],
@@ -321,6 +326,7 @@ class HygeiaAssetManager:
             "confirmedCount":  sum(1 for f in findings if f.get("confirmed")),
             "vulnerableCount": sum(1 for f in findings if f.get("category") == "outdated_software"),
             "packageCount":    package_count,
+            "unresolvedCount": unresolved_count,
         }
 
     def delete_asset(self, asset_id: int) -> None:

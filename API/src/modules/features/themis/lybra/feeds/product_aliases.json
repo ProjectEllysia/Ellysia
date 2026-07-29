@@ -1,0 +1,22 @@
+{
+  "feedVersion": "lybra-aliases-2",
+  "aliases": [
+    { "match": "apache httpd",        "vendor": "apache",             "product": "http_server" },
+    { "match": "apache",              "vendor": "apache",             "product": "http_server" },
+    { "match": "openssh",             "vendor": "openbsd",            "product": "openssh" },
+    { "match": "nginx",               "vendor": "nginx",              "product": "nginx" },
+    { "match": "microsoft iis httpd", "vendor": "microsoft",          "product": "internet_information_services" },
+    { "match": "mysql",               "vendor": "mysql",              "product": "mysql" },
+    { "match": "mariadb",             "vendor": "mariadb",            "product": "mariadb" },
+    { "match": "vsftpd",              "vendor": "vsftpd_project",     "product": "vsftpd" },
+    { "match": "proftpd",             "vendor": "proftpd",            "product": "proftpd" },
+    { "match": "postfix smtpd",       "vendor": "postfix",            "product": "postfix" },
+    { "match": "dovecot imapd",       "vendor": "dovecot",            "product": "dovecot" },
+    { "match": "pure ftpd",           "vendor": "pureftpd",           "product": "pure-ftpd" },
+    { "match": "exim smtpd",          "vendor": "exim",               "product": "exim" },
+
+    { "match": "git",                 "vendor": "git-scm",            "product": "git" },
+    { "match": "vlc media player",    "vendor": "videolan",           "product": "vlc_media_player" },
+    { "match": "7 zip",               "vendor": "7-zip",              "product": "7-zip" }
+  ]
+}

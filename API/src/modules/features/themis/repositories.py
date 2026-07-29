@@ -24,8 +24,9 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session, joinedload
@@ -35,6 +36,7 @@ from src.modules.shared import utcnow_naive
 from .model import (
     AuthorizedTarget,
     CpeMatch,
+    CpeProductAlias,
     CveEntry,
     LybraScan,
     EpssScore,
@@ -58,6 +60,8 @@ from .model import (
     ThemisDocument,
     Traceroute,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ScanRepository(BaseRepository[Scan]):
@@ -892,6 +896,91 @@ class KbRepository(BaseRepository[CveEntry]):
                 seen.add(match.cve_id)
                 result.append(match.cve)
         return result
+
+    def resolve_product_alias(self, normalized_name: str) -> Optional[Tuple[str, str]]:
+        """Look up a normalized product name in the automated CPE index (Fase I-b, paso 2).
+
+        The third and last strategy ``LybraEngine._resolve_cpe`` tries, after
+        an embedded CPE and the curated alias feed both miss. See
+        :meth:`rebuild_cpe_product_index` for how the index is built and why a
+        name that used to be ambiguous is never in it.
+        """
+        row = (
+            self._session.query(CpeProductAlias)
+            .filter(CpeProductAlias.normalized_name == normalized_name)
+            .one_or_none()
+        )
+        return (row.vendor, row.product) if row else None
+
+    def rebuild_cpe_product_index(self) -> int:
+        """Rebuild ``CpeProductAlias`` from the current ``CpeMatch`` table (Fase I-b, paso 2).
+
+        Indexes every distinct ``(vendor, product)`` pair in ``CpeMatch`` under
+        **two** normalized keys (:func:`~.lybra.kb.normalize_product_name`),
+        because a desktop inventory and NVD name the same software differently:
+
+        1. The product alone — ``microsoft:edge`` → ``"edge"``. This is NVD's
+           own vocabulary, read literally.
+        2. Vendor and product together — ``microsoft:edge`` → ``"microsoft
+           edge"``. Windows inventories overwhelmingly prefix the vendor into
+           the display name ("Microsoft Edge", "Adobe Acrobat", "GitHub CLI",
+           "Oracle VirtualBox"), which key 1 alone can never match: NVD's
+           ``product`` column almost never repeats the vendor.
+
+        Key 1 **wins on collision**: it is the direct reading, while key 2 is a
+        derived convenience, so where both exist the direct one is kept and the
+        derived one only fills genuine gaps. This mirrors the precedence
+        ``LybraEngine._resolve_cpe`` already applies across its three
+        strategies (more-direct evidence first), and it is what makes adding
+        key 2 a pure addition — measured against a full NVD mirror it adds
+        ~118k resolvable names while removing exactly zero.
+
+        Ambiguity is discarded **within each key space independently**: a
+        normalized name that more than one distinct pair maps to is dropped
+        entirely rather than resolved to either candidate — e.g. the literal
+        NVD product ``"git"`` belongs to at least half a dozen unrelated
+        vendors (a Jenkins plugin, a firmware component, the real Git SCM...),
+        and picking one at random would risk matching CVEs against the wrong
+        software. That specific, verified case is exactly what
+        ``feeds/product_aliases.json`` (paso 3) exists to override by hand.
+
+        A full delete-and-reinsert rather than an incremental diff: this runs
+        once per KB sync (nightly, at most), so the cost is a non-issue, and it
+        is what lets a pair that stops being unique correctly fall back out of
+        the index instead of a stale row lingering.
+
+        Returns:
+            The number of alias rows written.
+        """
+        from .lybra import normalize_product_name
+
+        pairs = self._session.query(CpeMatch.vendor, CpeMatch.product).distinct().all()
+        by_product: dict[str, set] = {}
+        by_vendor_product: dict[str, set] = {}
+        for vendor, product in pairs:
+            key = normalize_product_name(product)
+            if key:
+                by_product.setdefault(key, set()).add((vendor, product))
+            vendor_key = normalize_product_name(f"{vendor} {product}")
+            if vendor_key:
+                by_vendor_product.setdefault(vendor_key, set()).add((vendor, product))
+
+        def unambiguous(grouped: dict) -> dict:
+            return {key: next(iter(c)) for key, c in grouped.items() if len(c) == 1}
+
+        resolved = unambiguous(by_product)
+        for key, pair in unambiguous(by_vendor_product).items():
+            resolved.setdefault(key, pair)   # key 1 wins; key 2 only fills gaps
+
+        self._session.query(CpeProductAlias).delete()
+        for key, (vendor, product) in resolved.items():
+            self._session.add(CpeProductAlias(normalized_name=key, vendor=vendor, product=product))
+        self._session.flush()
+        logger.info(
+            "KB: CPE product index rebuilt (%d aliases: %d product names, %d vendor-qualified)",
+            len(resolved), len(by_product), len(by_vendor_product),
+        )
+        return len(resolved)
 
     def get_kev(self, cve_id: str) -> Optional[KevEntry]:
         return self._session.query(KevEntry).filter(KevEntry.cve_id == cve_id).one_or_none()

@@ -690,7 +690,22 @@ otra es trabajo de ingeniería:
    limita las ventanas seguras a 14 días con una pausa de 6s entre cada una
    (`KbSyncManager._NVD_MAX_WINDOW_DAYS`), así que un backfill de todo el histórico (CVEs desde
    1999) son varios cientos de tramos — cuenta con que tarde del orden de una hora o más, no algo
-   instantáneo. Pendiente de ejecutar; no se ha lanzado en esta sesión.
+   instantáneo.
+
+   **Estado (2026-07-29): ejecutado.** Se lanzó un backfill pensado para los últimos 3 años
+   (`start = hoy - 3 años`), pero el primer tramo de 14 días disparó la trampa que el propio
+   docstring de `_NVD_MAX_WINDOW_DAYS` ya documentaba como riesgo por encima de 20-25 días — NVD
+   descartó el filtro de fecha igualmente y devolvió el catálogo histórico completo. Verificado en
+   Postgres mientras corría (dos lecturas con 60s de diferencia, para confirmar que avanzaba y no
+   estaba colgado): `CveEntry` subiendo en bloques de 2.000 cada 20-30s, hasta terminar en
+   **~350.000 CVEs / ~2 M de filas `CpeMatch`** — el histórico completo de NVD, no solo 3 años. Tardó
+   más de una hora en total (~5 min de CPU real; el resto son las pausas obligatorias del
+   rate-limit sin API key).
+
+   **⚠️ No resetear la base de datos de desarrollo** (nada de `CREATE_DATABASE=True`, ni un
+   `docker compose down -v` sobre el volumen de Postgres) sin ser consciente de que eso borra este
+   backfill entero — repetirlo cuesta más de una hora de nuevo. Aviso gemelo en el `CLAUDE.md` raíz,
+   sección "Things that bite".
 2. **El matcher no sabe resolver nombres de software de escritorio a un CPE.** Ésta sí es la
    brecha de la Fase I, y es la que este apartado documenta.
 
@@ -766,6 +781,122 @@ exactamente el orden en el que conviene rellenar el feed de alias.
 con la KB sincronizada, resuelve a CPE una mayoría de sus paquetes y emite al menos una detección
 por versión verificable a mano contra NVD — y cuando un paquete sin resolver se distingue en los
 datos de uno comprobado y limpio.
+
+**Estado (2026-07-29): pasos 1–3 implementados y verificados contra un inventario real.**
+
+- **Paso 1** — `normalize_product_name`/`extract_trailing_version` en `lybra/kb.py`: quita
+  paréntesis/corchetes, ruido de arquitectura (`x64`, `x86`, `setup`, `installer`…), colapsa
+  separadores y recorta la versión final repetida en el nombre.
+- **Paso 2** — `CpeProductAlias` (tabla nueva, migración `e6f7a8b9c0d1`) + `rebuild_cpe_product_index`
+  en `KbRepository`, enganchado al final de `KbSyncManager.sync_all()`. Descarta cualquier nombre
+  normalizado que resuelva a más de un `(vendor, product)` en vez de adivinar. Reconstruido una vez
+  contra el backfill completo: **107.519 alias inequívocos**.
+- **Paso 3** — `lybra/feeds/product_aliases.json` (`feedVersion: "lybra-aliases-2"`), migrando las
+  13 entradas de servidor de `CPE_PRODUCT_OVERRIDES` más ~15 curadas a mano, incluida `"7 zip"` y
+  `"git"` — casos donde el propio NVD tiene más de un vendor para el mismo producto y el paso 2 los
+  descarta correctamente por ambiguos; se resuelven aquí porque un humano sí sabe cuál es.
+
+`_resolve_cpe` (`engine.py`) encadena las tres estrategias sobre la **misma** clave normalizada
+(antes el paso 3 comparaba contra el string crudo en minúsculas, lo que lo dejaba casi inútil para
+nombres de escritorio con versión embebida — corregido en esta pasada).
+
+**Verificado contra el inventario real de `PC-Gabriel`** (289 paquetes, 255 con versión utilizable,
+escaneo #6): **29 hallazgos vulnerables en 6 productos** — 7-Zip×9, IntelliJ IDEA×12, WireGuard×2,
+Git×1, Java SE JDK×1, WSL×4. Un CVE espoteado a mano (`CVE-2025-68269` sobre IntelliJ,
+`CVE-2026-64812` sobre `2025.2.2` sí, rango `version_end_excluding=2026.2`) confirmado correcto
+contra el rango real de NVD por `psql`.
+
+Probar contra datos reales, no sintéticos, encontró dos bugs genuinos que la suite de tests no
+había previsto:
+
+1. **La normalización no recortaba la versión final del nombre** (`"7-Zip 25.01 (x64)"` →
+   `"7 zip 25.01"` en vez de `"7 zip"`) — corregido con `_TRAILING_VERSION_RE`.
+2. **JetBrains registra el build interno como `DisplayVersion` de Windows** (`"252.26199.169"`),
+   no la versión de marketing contra la que NVD expresa sus rangos (`"2025.2.2"`, visible solo
+   dentro del propio nombre). Sin corregirlo, IntelliJ IDEA producía **~50 CVEs** arrastrados desde
+   2009 hasta 2026 — un falso positivo masivo por comparar contra la versión equivocada. Corregido
+   en `services_from_inventory` (`hygeia/services/inventory_adapter.py`): prefiere la versión
+   embebida en el nombre cuando existe (`extract_trailing_version`), cae al campo `version` si no.
+   Bajó a **12 CVEs**, verificados uno a uno como genuinos. Comprobado que no es un patrón general
+   muestreando el resto del inventario (name/version coinciden en casi todos los demás casos) antes
+   de generalizar el fix.
+
+#### Observabilidad: `Finding.cpe_resolved` (implementado)
+
+La brecha que el apartado anterior dejaba pendiente ya está cerrada. `Finding` gana una columna
+`cpe_resolved` (Boolean nullable, migración `2d58f913333b`) que el motor rellena en el hallazgo
+informativo de **cada** paquete: `True` si `_resolve_cpe` encontró un CPE, `False` si no, `None`
+para las fuentes que ni lo intentan (Nikto, OpenVAS). La resolución se calcula una sola vez por
+servicio en `analyze()` y se comparte entre el hallazgo informativo y el de detección.
+
+Con eso, "comprobado y limpio" y "ni se llegó a identificar" dejan de ser indistinguibles en los
+datos, y la nota de cobertura del PDF, del modal de Hygeia y del desglose de Themis pasa de una
+heurística que enumeraba causas posibles ("puede que la KB no esté sincronizada, puede que el
+nombre no se reconozca") a un número exacto: *N de M paquetes no se pudieron identificar*.
+`get_analysis_summary` lo expone como `unresolvedCount`.
+
+#### Dos bugs sistémicos que la observabilidad destapó (2026-07-29)
+
+Poder *contar* los no resueltos convirtió "parece poco" en una pregunta contestable, y al tirar del
+hilo aparecieron dos fallos independientes, ambos de alcance global y ninguno específico de Hygeia:
+
+**1. El índice no podía casar nombres con el vendor como prefijo.** Windows escribe "Microsoft
+Edge", "Adobe Acrobat", "GitHub CLI", "Oracle VirtualBox"; la columna `product` de NVD casi nunca
+repite el vendor (`edge`, `acrobat`, `cli`, `virtualbox`). El índice del paso 2 solo indexaba por
+`normalize_product_name(product)`, así que esas dos formas no podían encontrarse jamás.
+`rebuild_cpe_product_index` pasa a indexar cada par bajo **dos** claves —el producto solo y
+`vendor + product`—, con la clave directa ganando en caso de colisión y el descarte por ambigüedad
+aplicado dentro de cada espacio de claves por separado. Medido sobre el espejo completo de NVD:
+**+118.648 claves (107.459 → 226.132), cero pérdidas**. Sobre el inventario real, paquetes
+resueltos **10 → 21**.
+
+> La precedencia importa y se midió: fundir ambas claves en un mismo espacio con descarte por
+> ambigüedad destruía 626 claves que hoy funcionan (`adobe reader`, `apache tomcat`… donde NVD
+> nombra el mismo software de las dos formas). Con la clave directa ganando, el cambio es
+> aditivo puro.
+
+**2. Una regla de aplicabilidad sin ningún límite de versión casaba con todo.** `version_in_range`
+devolvía `True` cuando la regla no traía ni versión exacta ni ninguno de los cuatro límites. NVD
+lee eso como "todas las versiones", pero **el 14,6% del espejo completo (370.855 de 2,5 M de filas)
+es así**, y se concentra justo en el software de escritorio autoactualizable que llena un
+inventario. El efecto medido: **695 CVEs para un único Microsoft Edge al día**, 9 para OneDrive, y
+`CVE-2009-1099` resucitada contra un JDK de 2026. Ahora devuelve `False`: una regla sin información
+de versión no puede sostener la única afirmación que un `outdated_software` hace —que *esta*
+versión es vulnerable—. Coste medido: **708 hallazgos falsos fuera, 0 detecciones legítimas
+perdidas** (las 22 que venían de rangos reales siguen intactas).
+
+**Resultado final sobre el inventario real** (`PC-Gabriel`, 289 paquetes → 242 hallazgos
+informativos, 21 resueltos): **32 hallazgos abiertos** en 8 productos — IntelliJ IDEA×12,
+7-Zip×9, Adobe Acrobat×4, WireGuard×2, WSL×2, GIGABYTE Control Center×1, GIGABYTE Performance
+Library×1, Git×1.
+
+#### Limitación conocida, no resuelta: NVD mezcla esquemas de versión bajo un mismo CPE
+
+De esos 32, **4 son falsos positivos y la causa está en los datos de NVD, no en el motor**. Los
+cuatro hallazgos de Adobe Acrobat corresponden a componentes de Acrobat *embebidos en un
+navegador* —"Acrobat for Edge", "Adobe Acrobat PDF Extension (Chrome)"—, que NVD archiva bajo
+`adobe:acrobat` pero versiona con el número del **navegador** (`120.0.2210.91`, `126.0.2592.81`),
+no con el de Acrobat (`24.001.30235`). El Acrobat de escritorio instalado (`26.001.21691`) compara
+numéricamente por debajo de esos techos y entra en el rango.
+
+No se ha intentado arreglar, deliberadamente. La única señal disponible sería heurística
+(desajuste en el número de segmentos de la versión, o en la escala del major), y aplicarla de
+forma global suprimiría detecciones legítimas en todo el software que mezcla `1.2.3` y `1.2.3.4`
+para el mismo producto — cambiar un falso positivo acotado por un falso negativo de alcance
+desconocido. Queda documentado como límite del espejo de NVD; si algún día molesta lo bastante, el
+sitio natural para tratarlo es el feed curado (paso 3), que ya existe precisamente para corregir a
+mano lo que la automatización no puede saber.
+
+**¿Se cumple el criterio de cierre?** Ahora sí es medible, y el resultado es honesto pero no
+redondo: **21 de 242 paquetes resuelven a CPE (8,7%)** — muy lejos de "una mayoría". Ahora bien,
+inspeccionados a mano, la gran mayoría de los 221 restantes son drivers OEM (AMD, GIGABYTE, ENE),
+redistribuibles de Visual C++ y componentes del SDK de .NET que **no existen como producto en
+NVD**: resolverlos no es posible ni útil, porque jamás podrían producir un hallazgo. El criterio
+"mayoría resuelta" estaba mal formulado: lo que importa no es qué fracción del inventario resuelve,
+sino que no quede fuera nada que *sí* tenga CVEs publicadas. Se deja la fase en **◐ parcial** con
+esa corrección anotada, y el siguiente paso natural —ya barato con `cpe_resolved` en su sitio— es
+sacar el ranking de nombres sin resolver más frecuentes entre varios inventarios reales para dirigir
+el feed curado con datos en vez de por intuición.
 
 ---
 

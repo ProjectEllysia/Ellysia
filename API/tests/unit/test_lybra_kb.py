@@ -11,6 +11,9 @@ from src.modules.features.themis.lybra import (
     version_compare,
     version_in_range,
     normalize_cpe_to_23,
+    normalize_product_name,
+    extract_trailing_version,
+    load_product_aliases,
     parse_cpe23,
     ingest_nvd_cve,
     ingest_kev,
@@ -61,8 +64,15 @@ def test_range_start_excluding_end_including():
     assert version_in_range("2.0.1", m) is False
 
 
-def test_range_unbounded_matches_any_version():
-    assert version_in_range("9.9.9", {}) is True
+def test_range_with_no_version_information_never_matches():
+    """A rule with no exact version and no bound cannot support a version-based
+    claim. NVD means "all versions" by it, but honouring that turned a single
+    up-to-date Microsoft Edge into 695 findings and matched CVE-2009-1099
+    against a 2026 JDK — see ``version_in_range``'s docstring for the measured
+    impact."""
+    assert version_in_range("9.9.9", {}) is False
+    # A rule that bounds the range on even one side still works normally.
+    assert version_in_range("9.9.9", {"version_start_including": "1.0"}) is True
 
 
 def test_range_empty_version_never_matches():
@@ -174,3 +184,70 @@ def test_parse_epss_rows_skips_comment_header():
     assert rows[0]["cve_id"] == "CVE-2021-41773"
     assert rows[0]["score"] == 0.97
     assert rows[0]["scored_at"].year == 2026
+
+
+# --------------------------------------- product name normalization (Fase I-b)
+
+@pytest.mark.parametrize("raw,expected", [
+    # The real case that motivated this: a Hygeia inventory entry bakes the
+    # version into the name itself, and NVD's product string never does.
+    ("7-Zip 25.01 (x64)", "7 zip"),
+    ("7-zip", "7 zip"),
+    # Doubled-up version some Windows registry entries produce.
+    ("GBT_Dynamic_Lighting_Lib_UC 25.07.21.01 25.07.21.01", "gbt dynamic lighting lib uc"),
+    # A trailing bare digit is NOT a version — must survive intact.
+    ("Half-Life 2", "half life 2"),
+    ("Python 3", "python 3"),
+    # Architecture noise, not identity.
+    ("Docker Desktop (x64)", "docker desktop"),
+    ("Microsoft Visual C++ 2022 X64 Setup", "microsoft visual c++ 2022 setup"),
+    # "Setup"/"Installer" are NOT stripped: NVD has real products whose name
+    # contains them (adobe:photoshop_installer), so dropping the word would
+    # collapse a distinct product onto another one. "Visual Studio Installer"
+    # (a 4.x bootstrapper) must never normalize onto "visual studio" (17.x).
+    ("Microsoft Visual Studio Installer", "microsoft visual studio installer"),
+    # "msi" is far more often the hardware vendor than a file extension.
+    ("MSI Center", "msi center"),
+    # Already-clean NVD-style names pass through unchanged.
+    ("docker_desktop", "docker desktop"),
+    ("", ""),
+    (None, ""),
+])
+def test_normalize_product_name(raw, expected):
+    assert normalize_product_name(raw) == expected
+
+
+def test_normalize_product_name_is_idempotent():
+    # Applying it twice must be a no-op — both sides of a comparison
+    # (inventory name, NVD product) run through it independently.
+    once = normalize_product_name("7-Zip 25.01 (x64)")
+    assert normalize_product_name(once) == once
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("7-Zip 25.01 (x64)", "25.01"),
+    ("IntelliJ IDEA 2025.2.2", "2025.2.2"),
+    ("GBT_Dynamic_Lighting_Lib_UC 25.07.21.01 25.07.21.01", "25.07.21.01"),  # doubled -> first token
+    ("Half-Life 2", None),     # a single bare digit is not a version
+    ("Docker Desktop", None),  # no trailing number at all
+    ("", None),
+    (None, None),
+])
+def test_extract_trailing_version(raw, expected):
+    assert extract_trailing_version(raw) == expected
+
+
+# ---------------------------------------------- curated alias feed (paso 3)
+
+def test_load_product_aliases_covers_known_entries():
+    aliases = load_product_aliases()
+    # Server-side entries migrated from the old hand-written CPE_PRODUCT_OVERRIDES.
+    assert aliases["openssh"] == ("openbsd", "openssh")
+    assert aliases["nginx"] == ("nginx", "nginx")
+    # A case NVD itself makes ambiguous (multiple vendors for "git") that the
+    # automated index (paso 2) correctly refuses to guess — resolved here by hand.
+    assert aliases["git"] == ("git-scm", "git")
+    # Feed keys are normalized-name shaped (spaces, not hyphens) so they line
+    # up with what normalize_product_name actually produces.
+    assert "pure ftpd" in aliases
+    assert "pure-ftpd" not in aliases
