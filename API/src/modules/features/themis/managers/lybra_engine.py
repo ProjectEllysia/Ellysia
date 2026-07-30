@@ -48,7 +48,7 @@ from ..exceptions import (
 )
 
 from .scan import ScanManager
-from .thirdparty_scans_managers import NmapScanManager, NiktoScanManager, OpenVASScanManager
+from .thirdparty_scans_managers import NmapScanManager, NiktoScanManager, NucleiScanManager, OpenVASScanManager
 from .lybra_sources import ServiceSource
 from .authorized_target import AuthorizedTargetManager
 
@@ -520,7 +520,10 @@ class LybraEngineManager(ScanManager):
         - Nmap only when ``source.launches_nmap_corroborator`` — a fresh Nmap
           run is redundant when Lybra already has Nmap-sourced ports for this
           scan (the Nmap-source mode is the only one that says no).
-        - Nikto only if at least one HTTP-like service was found.
+        - Nikto and Nuclei only if at least one HTTP-like service was found —
+          both are HTTP-only tools (Fase U2: Nuclei gains the exact same
+          condition that already gates Nikto, now that U1 gives it a
+          ``run_scan`` of its own).
         - OpenVAS always.
 
         Best-effort per corroborator: a launch failure for one does not affect
@@ -542,6 +545,11 @@ class LybraEngineManager(ScanManager):
                 ids.append(NiktoScanManager().run_scan(target_domain=target, user_id=user_id))
             except Exception:
                 logger.exception("Análisis profundo: fallo al lanzar Nikto corroborador para %s", target)
+
+            try:
+                ids.append(NucleiScanManager().run_scan(target=target, user_id=user_id))
+            except Exception:
+                logger.exception("Análisis profundo: fallo al lanzar Nuclei corroborador para %s", target)
 
         try:
             ids.append(OpenVASScanManager().run_scan(target=target, user_id=user_id))

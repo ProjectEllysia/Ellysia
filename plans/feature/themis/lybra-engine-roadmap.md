@@ -272,7 +272,7 @@ La pista de **correlación** está completa; la de **bajo nivel** está a medias
 | **2** — KB local (NVD, CPE Dictionary, KEV, EPSS) | Correlación | ✓ implementada |
 | **5** — Dedup multi-fuente, ciclo de vida, scoring, `HostService` | Correlación | ✓ implementada |
 | **6** — Pipeline orquestado | Convergencia | ✓ implementada |
-| **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ◐ parcial — U1 hecha (rama `feature/themis/nuclei-engine`), U2/U3/U4 sin empezar. **U4 sigue siendo prerrequisito del cierre de R**. Detalle en la sección Fase U más abajo |
+| **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ◐ parcial — U1 y U2 hechas, U3/U4 sin empezar. **U4 sigue siendo prerrequisito del cierre de R**. Detalle en la sección Fase U más abajo |
 | **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — 15 checks, tipos `http`/`tls`/`network`; falta `script`; el feed es JSON, no el YAML estilo Nuclei del diseño. Su cierre depende de la Fase U. Detalle actualizado en la sección Fase R más abajo |
 | **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS, y (Fase N) FTP, SMTP/IMAP/POP3, SMB, MySQL/MariaDB, Redis, VNC; falta JARM, SNMP (sin sonda UDP), PostgreSQL/MSSQL/MongoDB, RDP, LDAP, Telnet, RPC. Detalle actualizado en la sección Fase N más abajo |
 | **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; faltan SYN sin estado, sondas UDP y control de tasa AIMD |
@@ -1091,8 +1091,8 @@ colateral" que este mismo apartado anticipaba. En el frontend, Nuclei es una cua
 mundo de escáneres externos, registrada en `constants/scanTypes.js`.
 
 Lo que esta pasada **no** cierra, a propósito: **U2** (Nuclei como corroborador del análisis
-profundo, ver más abajo — sigue sin tocarse `_launch_deep_corroborators`), **U3** (el oráculo
-diferencial de `tests/oracle/`) y **U4** (ingesta de plantillas). Tampoco hay cron de
+profundo — cerrada en una pasada posterior, ver más abajo), **U3** (el oráculo diferencial de
+`tests/oracle/`) y **U4** (ingesta de plantillas). Tampoco hay cron de
 sincronización del feed de plantillas: se hornean en la imagen y envejecen hasta el siguiente build;
 el patrón a seguir cuando se aborde es el de `KbSyncManager` + `ThemisScheduler._schedule_kb_sync`.
 
@@ -1100,6 +1100,19 @@ el patrón a seguir cuando se aborde es el de `KbSyncManager` + `ThemisScheduler
 
 Una vez existe U1, `LybraEngineManager._launch_deep_corroborators` gana a Nuclei con la misma
 condición que hoy dispara a Nikto (hay algún servicio HTTP). Es una línea.
+
+**Estado (2026-07-30): ✓ hecha.** Literalmente una línea más un `try/except` a juego con el resto de
+corroboradores (`_launch_deep_corroborators`, `managers/lybra_engine.py`): Nuclei se lanza dentro del
+mismo `if any(is_http_service(s) for s in services)` que ya gobierna a Nikto, con el mismo perfil de
+severidad acotado por defecto que U1 le dio (`severities=None` → `CR.get_nuclei_default_severities()`
+dentro de `NucleiScanTask`), y el mismo blindaje *best-effort*: un fallo al lanzarlo no hunde el
+escaneo Lybra ni a los demás corroboradores. La autorización del objetivo no se re-comprueba aquí
+porque `_launch_deep_corroborators` solo se invoca cuando `is_target_authorized` ya es verdad en la
+llamada — el mismo tratamiento que Nikto ya tenía, no una excepción nueva para Nuclei.
+
+Los tests de `test_lybra_deep_analysis.py` pasaron de fijar el conjunto de corroboradores a tres
+(`{nmap, nikto, openvas}`) a cuatro, y el escenario "sin servicio HTTP" ahora comprueba que Nikto
+**y** Nuclei se saltan igual, no solo Nikto.
 
 **Y aquí aparece una consecuencia de producto que conviene afrontar en vez de dejarla implícita: en
 cuanto Nuclei está en el pool, Nikto se queda sin trabajo.** Cubre menos superficie, con datos de peor

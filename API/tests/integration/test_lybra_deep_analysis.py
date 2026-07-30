@@ -1,17 +1,21 @@
 """Integration tests for Lybra Fase 6 ("análisis profundo").
 
 Two things to prove:
-1. Corroborator selection/launch: which of Nmap/Nikto/OpenVAS get fired given
-   the scan's mode and discovered services, and that a launch failure for one
-   never breaks the Lybra scan itself.
+1. Corroborator selection/launch: which of Nmap/Nikto/Nuclei/OpenVAS get fired
+   given the scan's mode and discovered services, and that a launch failure
+   for one never breaks the Lybra scan itself.
 2. Read-time merge: format_scan fuses Lybra's own findings with the linked
    corroborators' Finding rows (merge_findings, Fase 5) without persisting
-   anything new — the actual payoff of the roadmap's "Nmap/Nikto/OpenVAS become
-   complements of Lybra, not the other way around".
+   anything new — the actual payoff of the roadmap's "Nmap/Nikto/Nuclei/OpenVAS
+   become complements of Lybra, not the other way around".
 
 Corroborator managers' run_scan is always monkeypatched: it calls
 TaskQueue.submit (real RQ+Redis), which this suite never runs against (see
 conftest.py — only redis.Redis.ping/close are stubbed for app startup).
+
+Nuclei (Fase U2) shares Nikto's gate exactly — both are HTTP-only tools, both
+fire only when at least one HTTP-like service was found — so it rides along in
+the same scenarios rather than getting a parallel set of tests.
 """
 
 from datetime import datetime
@@ -23,7 +27,7 @@ from src.modules.features.themis.model import NmapScan, NiktoScan, OpenVASScan, 
 from src.modules.features.themis.repositories import ScanRepository, KbRepository
 from src.modules.features.themis.managers import (
     LybraEngineManager, ScanManager,
-    NmapScanManager, NiktoScanManager, OpenVASScanManager,
+    NmapScanManager, NiktoScanManager, NucleiScanManager, OpenVASScanManager,
 )
 from src.modules.features.themis.lybra import DEFAULT_PORTS
 from src.modules.features.themis.services.parsing import validate_port
@@ -100,7 +104,7 @@ def _seed_kb_apache_cve(app):
 # ------------------------------------------------------- corroborator launch
 
 def _patch_corroborators(monkeypatch, calls: dict):
-    """Stub run_scan on all three corroborator managers; records calls, never
+    """Stub run_scan on all four corroborator managers; records calls, never
     touches the (Redis-backed) TaskQueue."""
     def make_stub(name, next_id):
         def stub(self, **kwargs):
@@ -110,9 +114,10 @@ def _patch_corroborators(monkeypatch, calls: dict):
     monkeypatch.setattr(NmapScanManager, "run_scan", make_stub("nmap", 901))
     monkeypatch.setattr(NiktoScanManager, "run_scan", make_stub("nikto", 902))
     monkeypatch.setattr(OpenVASScanManager, "run_scan", make_stub("openvas", 903))
+    monkeypatch.setattr(NucleiScanManager, "run_scan", make_stub("nuclei", 904))
 
 
-def test_deep_self_discovery_launches_all_three_with_http_service(app, admin_user, monkeypatch):
+def test_deep_self_discovery_launches_all_four_with_http_service(app, admin_user, monkeypatch):
     calls: dict = {}
     _patch_corroborators(monkeypatch, calls)
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
@@ -127,8 +132,8 @@ def test_deep_self_discovery_launches_all_three_with_http_service(app, admin_use
         with UnitOfWork() as uow:
             escan = ScanRepository(uow).get_by_id(escan.id)
 
-    assert set(calls.keys()) == {"nmap", "nikto", "openvas"}
-    assert sorted(escan.deep_scan_ids) == [901, 902, 903]
+    assert set(calls.keys()) == {"nmap", "nikto", "nuclei", "openvas"}
+    assert sorted(escan.deep_scan_ids) == [901, 902, 903, 904]
 
 
 def test_deep_skips_nmap_when_source_scan_id_present(app, admin_user, monkeypatch):
@@ -143,10 +148,10 @@ def test_deep_skips_nmap_when_source_scan_id_present(app, admin_user, monkeypatc
 
     # A fresh Nmap corroborator would be redundant: Lybra already has Nmap ports.
     assert "nmap" not in calls
-    assert "nikto" in calls and "openvas" in calls
+    assert "nikto" in calls and "nuclei" in calls and "openvas" in calls
 
 
-def test_deep_skips_nikto_without_http_service(app, admin_user, monkeypatch):
+def test_deep_skips_nikto_and_nuclei_without_http_service(app, admin_user, monkeypatch):
     calls: dict = {}
     _patch_corroborators(monkeypatch, calls)
     nmap_id = _seed_nmap_scan(app, admin_user.id, ports=_SSH_ONLY_PORTS)
@@ -157,6 +162,7 @@ def test_deep_skips_nikto_without_http_service(app, admin_user, monkeypatch):
         mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=True)
 
     assert "nikto" not in calls
+    assert "nuclei" not in calls       # same HTTP-only gate as Nikto
     assert "openvas" in calls          # unconditional
 
 
@@ -183,6 +189,7 @@ def test_deep_one_corroborator_failure_does_not_fail_the_scan(app, admin_user, m
     monkeypatch.setattr(NiktoScanManager, "run_scan", failing_nikto)
     monkeypatch.setattr(NmapScanManager, "run_scan", lambda self, **k: 901)
     monkeypatch.setattr(OpenVASScanManager, "run_scan", lambda self, **k: 903)
+    monkeypatch.setattr(NucleiScanManager, "run_scan", lambda self, **k: 904)
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [80])
@@ -196,7 +203,7 @@ def test_deep_one_corroborator_failure_does_not_fail_the_scan(app, admin_user, m
             escan = ScanRepository(uow).get_by_id(escan.id)
 
     assert escan.status == ScanStatus.FINISHED.value   # Nikto's failure didn't sink the scan
-    assert sorted(escan.deep_scan_ids) == [901, 903]    # only the two that succeeded
+    assert sorted(escan.deep_scan_ids) == [901, 903, 904]  # only the ones that succeeded
 
 
 def test_deep_nmap_port_string_is_valid():
