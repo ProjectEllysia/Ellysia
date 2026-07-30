@@ -392,6 +392,110 @@ class NiktoScanTask(_Task):
             raise
 
 
+class NucleiScanTask(_Task):
+    """Implementación concreta para escaneos Nuclei (roadmap Fase U1).
+
+    Modelada sobre ``NiktoScanTask``: mismo patrón de fichero de salida
+    temporal + progreso vía stdout. Dos diferencias que sí importan:
+
+    - El feed de plantillas se hornea en la imagen (``-duc``, sin
+      autoactualización en tiempo de ejecución — una llamada de red a mitad
+      de un escaneo dentro de un worker sería latencia y un fallo posible
+      nuevo). ``_check_output_line`` captura la versión real de plantillas
+      del propio banner de arranque del binario, que es el dato más fiable
+      posible: es lo que el binario está usando de verdad en este escaneo,
+      no un valor de configuración que podría haber quedado desincronizado.
+    - Nuclei no crea el fichero de export cuando el escaneo termina limpio
+      sin ningún hallazgo — a diferencia de Nikto, cuyo XML siempre existe.
+      ``_process_results`` distingue ese caso (resultado ``[]``, escaneo
+      limpio) de uno realmente fallido (fichero ausente pero el proceso
+      falló), para no marcar como FAILED todo escaneo sin hallazgos.
+    """
+
+    _TEMPLATES_VERSION_RE = re.compile(r"Nuclei Templates Version:\s*(v?[\d.]+)", re.IGNORECASE)
+
+    def __init__(
+        self,
+        target: str,
+        severities: Optional[List[str]] = None,
+        tags: Optional[List[str]] = None,
+        rate_limit: Optional[int] = None,
+        request_timeout: Optional[int] = None,
+        timeout: Optional[int] = None,
+        progress_callback: Optional[Callable[[int], None]] = None,
+    ):
+        resolved_timeout = timeout if timeout is not None else CR.get_nuclei_task_timeout()
+        super().__init__(target, resolved_timeout, progress_callback=progress_callback)
+
+        timestamp = int(time.time() * 1000)
+        self.temp_path = (
+            CR.verify_directory(directory=CR.DirectoryType.TEMP)
+            /
+            f"nuclei_scan_{timestamp}.jsonl"
+        )
+        self._output_file = self.temp_path
+
+        self.severities = severities or CR.get_nuclei_default_severities()
+        self.tags = tags or []
+        self.rate_limit = rate_limit or CR.get_nuclei_rate_limit()
+        self.request_timeout = request_timeout or CR.get_nuclei_request_timeout()
+        self._binary = CR.get_nuclei_binary_path()
+        self._templates_dir = CR.get_nuclei_templates_dir()
+
+        # Rellenado por _check_output_line al ver el banner de arranque; si el
+        # escaneo termina sin que aparezca (binario silencioso, formato de
+        # banner distinto entre versiones), el manager cae al valor de
+        # configuración y, en último término, a un marcador explícito de
+        # "desconocido" — nunca se inventa un número.
+        self.templates_version: Optional[str] = None
+
+    def _build_command(self) -> List[str]:
+        cmd = [
+            self._binary,
+            "-target", self.target,
+            "-jsonl-export", str(self.temp_path),
+            "-duc", "-nc",
+            "-stats", "-stats-interval", "1",
+            "-rate-limit", str(self.rate_limit),
+            "-timeout", str(self.request_timeout),
+        ]
+        if self.severities:
+            cmd += ["-severity", ",".join(self.severities)]
+        if self.tags:
+            cmd += ["-tags", ",".join(self.tags)]
+        if self._templates_dir:
+            cmd += ["-templates", self._templates_dir]
+        return cmd
+
+    def _check_output_line(self, line: str) -> None:
+        if self.templates_version is None:
+            match = self._TEMPLATES_VERSION_RE.search(line)
+            if match:
+                self.templates_version = match.group(1)
+
+    def _process_results(self) -> None:
+        try:
+            # _Task.wait() only reaches _process_results() once the process
+            # has already exited with code 0 and neither cancellation nor a
+            # timeout was hit (see the checks above this call) — so getting
+            # here at all already means the scan itself succeeded. Nuclei
+            # simply does not write the export file when it found nothing,
+            # unlike Nikto's XML (which always exists); absence of the file
+            # at this point is therefore a clean scan, not a failure.
+            if not self.temp_path.exists() or self.temp_path.stat().st_size == 0:
+                self.results = []
+                logger.info("Escaneo Nuclei sin hallazgos")
+                return
+
+            self.results = str(self.temp_path)
+            logger.info("Resultados Nuclei procesados")
+
+        except (OSError, IOError) as e:
+            logger.error(f"Error procesando resultados Nuclei: {e}", exc_info=True)
+            self.results = None
+            raise
+
+
 class OpenVASTask(_Task):
     """
     Tarea de escaneo OpenVAS mediante la API GMP (no CLI).
