@@ -272,7 +272,7 @@ La pista de **correlación** está completa; la de **bajo nivel** está a medias
 | **2** — KB local (NVD, CPE Dictionary, KEV, EPSS) | Correlación | ✓ implementada |
 | **5** — Dedup multi-fuente, ciclo de vida, scoring, `HostService` | Correlación | ✓ implementada |
 | **6** — Pipeline orquestado | Convergencia | ✓ implementada |
-| **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ◐ parcial — U1 y U2 hechas, U3/U4 sin empezar. **U4 sigue siendo prerrequisito del cierre de R**. Detalle en la sección Fase U más abajo |
+| **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ◐ parcial — U1, U2 y U3 hechas, U4 sin empezar. **U4 sigue siendo prerrequisito del cierre de R**. Detalle en la sección Fase U más abajo |
 | **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — 15 checks, tipos `http`/`tls`/`network`; falta `script`; el feed es JSON, no el YAML estilo Nuclei del diseño. Su cierre depende de la Fase U. Detalle actualizado en la sección Fase R más abajo |
 | **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS, y (Fase N) FTP, SMTP/IMAP/POP3, SMB, MySQL/MariaDB, Redis, VNC; falta JARM, SNMP (sin sonda UDP), PostgreSQL/MSSQL/MongoDB, RDP, LDAP, Telnet, RPC. Detalle actualizado en la sección Fase N más abajo |
 | **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; faltan SYN sin estado, sondas UDP y control de tasa AIMD |
@@ -1131,6 +1131,53 @@ no puede medir: **falsos positivos** en objetivos sin etiqueta previa, y hallazg
 Nunca corre en producción como oráculo; el binario que sí corre en producción es el de U1, que es otro
 uso y otro riesgo.
 
+**Estado (2026-07-30): ✓ hecha**, `tests/oracle/test_lybra_nuclei_differential_bench.py`. Requiere
+Docker y un binario `nuclei` real con plantillas ya descargadas (`nuclei -update-templates`, una vez);
+se salta entero si falta cualquiera de los dos, igual que el resto del paquete `oracle`. El método:
+lanzar un escaneo Lybra de autodescubrimiento y, por separado, el binario real de Nuclei —ambos contra
+el mismo contenedor, por la red real— y comparar el conjunto de CVE que cada uno reporta. El traductor
+es literalmente el mismo `nuclei_result_to_finding` de U1 (`lybra/adapters.py`), invocado directo sobre
+el JSONL sin pasar por `NucleiScanManager`/TaskQueue — el mismo criterio que el resto de tests evita
+Redis real (`conftest.py`, T5).
+
+**Los objetivos son los tres que `test_lybra_oracle_bench.py` ya levanta** (`httpd:2.4.49`, el nginx
+con `.git/config` expuesto, el nginx TLS autofirmado) — reimportados como fixtures tal cual, sin
+duplicar contenedores. "Sin etiqueta previa" (§8) describe el **método**, no una exigencia de
+contenedor nuevo: la comparación deriva su propia verdad de Nuclei en tiempo real, sin consultar la
+lista de CVEs que el otro módulo ya conoce de antemano.
+
+**El número, medido:** sobre los tres objetivos, **0 CVE corroborados, 0 hallazgos de Nuclei que se
+escapan, 1 posible falso positivo** (`CVE-2021-41773` en `httpd_2449_port`, solo del lado de Lybra).
+
+Ese resultado no es un fallo del banco ni del motor — es el hallazgo real que motivó reescribir la
+guarda de cordura del módulo. La aserción original esperaba que Nuclei corroborase `CVE-2021-41773`
+contra el mismo `httpd:2.4.49` que el banco de verdad-por-etiqueta usa, y falló. Investigado a mano
+(`nuclei -id CVE-2021-41773 -debug`): la plantilla de Nuclei para esa CVE es una **explotación activa**
+(RCE vía `mod_cgi`, un `POST /cgi-bin/../../../bin/sh`) que exige `ExecCGI` habilitado — algo que ni
+`httpd:2.4.49` vanilla ni siquiera `vulhub/httpd:2.4.49` traen listo con un `docker run` suelto (vulhub
+monta configuración extra vía `docker-compose`, que este banco no reproduce). La detección de Lybra,
+en cambio, es por versión/banner vía la KB — nunca intenta explotar nada. Son **señales distintas que
+no tienen por qué coincidir**: una CVE puede estar presente por versión sin que el contenedor concreto
+esté configurado de forma explotable. Descubrir esto es exactamente el trabajo que un oráculo
+diferencial promete, aunque el resultado no fuera el esperado de entrada.
+
+La guarda de cordura del módulo (que si fallara apuntaría a un banco roto, no a un motor que falla en
+silencio) se reescribió sobre una señal que sí es puramente pasiva en ambos lados: la exposición de
+`.git/config`. Nuclei tiene una plantilla (`git-config`) que solo hace un `GET` y compara contenido,
+igual que el check propio de Lybra — sin condición de explotación de por medio. Verificado por separado
+que dispara de forma fiable contra el fixture (`test_nuclei_translator_pipeline_corroborates_a_real_exposure`),
+confirmando que el subproceso, el parseo del JSONL y el traductor funcionan de punta a punta — el "1
+falso positivo" de arriba es limpio: no es un artefacto de la tubería de medición.
+
+**Consecuencia para U4 y para el pool objetivo declarado en U2.** El único CVE con explotación activa
+disponible en el banco actual no era genuinamente explotable, así que esta pasada no aporta evidencia
+sobre cuántas CVE activas Nuclei y Lybra coinciden de verdad — el banco necesita al menos un contenedor
+correctamente configurado como explotable (siguiendo el `docker-compose.yml` real de vulhub, no un
+`docker run` suelto) antes de que el número de falsos positivos sea representativo. Es deuda anotada,
+no bloqueante: la mecánica completa (banco, traductor, comparación, guarda de cordura) ya está
+verificada y funcionando; lo que falta es un catálogo de objetivos más rico, el mismo "hay que
+escalar" que el §8 ya señalaba para la primera pata.
+
 #### U4 — La ingesta de plantillas, medida antes de decidirse
 
 Éste es el papel que **no** entrega esta fase, y conviene ser explícito sobre por qué. El
@@ -1184,12 +1231,18 @@ nativa para Nuclei — por decisión, no por omisión.
 #### Definición de hecho
 
 **Damos la Fase U por hecha cuando** (1) un usuario lanza un escaneo de Nuclei desde el panel, con
-perfil acotado y objetivo autorizado, y descarga su PDF; (2) sus hallazgos llegan a `Finding` con
-`cve_ids`, `cvss_score`, `check_id` y `feed_version` poblados, y se deduplican con los de otras
-fuentes sobre el mismo activo; (3) el análisis profundo de Lybra lo dispara como corroborador; (4) el
-banco produce un número de falsos positivos frente a Nuclei sobre al menos tres objetivos sin etiqueta
-previa; y (5) existe el histograma de ingestibilidad del feed de plantillas, con una recomendación
-escrita de sí o no para U4.
+perfil acotado y objetivo autorizado, y descarga su PDF — **✓**; (2) sus hallazgos llegan a `Finding`
+con `cve_ids`, `cvss_score`, `check_id` y `feed_version` poblados, y se deduplican con los de otras
+fuentes sobre el mismo activo — **✓**; (3) el análisis profundo de Lybra lo dispara como corroborador
+— **✓**; (4) el banco produce un número de falsos positivos frente a Nuclei sobre al menos tres
+objetivos sin etiqueta previa — **✓, medido: 0 corroborados / 0 se escapan / 1 posible falso positivo,
+con la salvedad anotada arriba de que el catálogo de objetivos explotables sigue siendo pobre**; y (5)
+existe el histograma de ingestibilidad del feed de plantillas, con una recomendación escrita de sí o no
+para U4 — **pendiente, es U4 en sí y no se ha empezado**.
+
+La Fase U completa sigue en ◐ parcial: los cuatro primeros criterios están cerrados, mide una vara real
+— pero el quinto es U4, y U4 explícitamente no entrega código de producto en esta pasada, solo la
+medición que decide si vale la pena.
 
 ---
 
