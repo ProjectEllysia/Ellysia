@@ -29,6 +29,7 @@ from .managers import (
     NmapScanManager,
     NiktoScanManager,
     OpenVASScanManager,
+    NucleiScanManager,
     LybraEngineManager,
     ProgramedScanManager,
     ThemisReportManager,
@@ -54,12 +55,14 @@ from .exceptions import (
     ScanAlreadyInFolderError,
     AuthorizedTargetNotFoundError,
     DuplicateAuthorizedTargetError,
+    TargetNotAuthorizedError,
 )
 from .schemas import (
     ScanIdQuerySchema,
     NmapScanRequestSchema,
     NiktoScanRequestSchema,
     OpenVASScanRequestSchema,
+    NucleiScanRequestSchema,
     LybraScanRequestSchema,
     FindingStateRequestSchema,
     FindingStateResponseSchema,
@@ -103,7 +106,7 @@ from .schemas import (
 
 themis_blp = SmorestBlueprint(
     "themis", __name__,
-    description="Escaneos de seguridad (Nmap, Nikto, OpenVAS) y PDFs"
+    description="Escaneos de seguridad (Nmap, Nikto, OpenVAS, Nuclei) y PDFs"
 )
 logger = logging.getLogger(__name__)
 
@@ -141,12 +144,18 @@ def _serialize_document(doc) -> dict:
         "downloadUrl": _download_url_for(doc),
     }
 
-def validate_nikto_target(raw: str) -> None:
+def validate_web_target(raw: str) -> str:
     """
-    Nikto escanea por hostname/URL, no por un spec de CIDR/rango, así que no
-    puede reusar ``validate_targets``. Resuelve el target a IP y rechaza esa
-    IP si es privada — cierra el hueco SSRF donde un hostname/DNS resuelve a
-    una dirección local o de metadata (127.0.0.1, 169.254.169.254, ...).
+    Nikto y Nuclei escanean por hostname/URL, no por un spec de CIDR/rango, así
+    que ninguno puede reusar ``validate_targets``. Resuelve el target a IP y
+    rechaza esa IP si es privada — cierra el hueco SSRF donde un hostname/DNS
+    resuelve a una dirección local o de metadata (127.0.0.1, 169.254.169.254,
+    ...).
+
+    Returns:
+        La IP resuelta — Nuclei la necesita además para el gate de objetivos
+        autorizados (``AuthorizedTargetManager.is_authorized`` solo entiende
+        IPs desnudas, no URLs).
     """
     try:
         ip, _ = normalize_target(raw)
@@ -156,6 +165,7 @@ def validate_nikto_target(raw: str) -> None:
         ScanManager.reject_private_ip(ip)
     except PrivateIPRequested as exc:
         raise EllysiaException(str(exc.user_message or exc), status_code=403)
+    return ip
 
 
 @themis_blp.get("/scan-status")
@@ -297,7 +307,7 @@ def start_nikto_scan(data):
     timeout = data["timeout"]
     user = get_current_user()
 
-    validate_nikto_target(target)
+    validate_web_target(target)
 
     nikto_manager = NiktoScanManager()
     scan_id = nikto_manager.run_scan(target, user_id=user.id, timeout=timeout)
@@ -350,6 +360,49 @@ def start_openvas_scan(data):
         "scanConfig": scan_config,
         "user": user.username,
         "note": "Use /themis/scan-status para verificar el progreso.",
+    }
+
+
+@themis_blp.post("/nuclei")
+@themis_blp.arguments(NucleiScanRequestSchema)
+@themis_blp.response(201, ScanResponseSchema, description="Nuclei scan started")
+@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions / target not authorized")
+@limiter.limit("20 per hour; 100 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.THEMIS_CREATE])
+@handle_exceptions(default_exception=ScanExecutionError, logger=logger)
+def start_nuclei_scan(data):
+    """Lanzar un escaneo Nuclei (roadmap Fase U1).
+
+    A diferencia de Nikto, Nuclei toca el objetivo bastante más — nace sujeto
+    al registro de objetivos autorizados desde el día uno, no se le añade
+    después (roadmap Fase U1, punto 3).
+    """
+    target = data["target"]
+    user = get_current_user()
+
+    ip = validate_web_target(target)
+    if not AuthorizedTargetManager.is_authorized(user.id, ip):
+        raise TargetNotAuthorizedError(target)
+
+    nuclei_manager = NucleiScanManager()
+    scan_id = nuclei_manager.run_scan(
+        target=target,
+        user_id=user.id,
+        severities=data.get("severities"),
+        tags=data.get("tags"),
+        rate_limit=data.get("rateLimit"),
+        request_timeout=data.get("requestTimeout"),
+        timeout=data.get("timeout"),
+    )
+    logger.info(f"Nuclei lanzado: ID={scan_id} target={target} user={user.username}")
+    return {
+        "message": "Escaneo Nuclei iniciado correctamente",
+        "scanId": scan_id,
+        "scanType": "nuclei",
+        "user": user.username,
     }
 
 
