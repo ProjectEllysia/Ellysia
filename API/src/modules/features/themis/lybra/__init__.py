@@ -154,6 +154,8 @@ from .fingerprinting import (
 from .adapters import (
     nikto_incident_to_finding,
     openvas_result_to_finding,
+    nuclei_result_to_finding,
+    QOD_NUCLEI_MATCH,
 )
 from .transport import (
     AsyncConnectScanner,
@@ -263,6 +265,8 @@ __all__ = [
     "QOD_FINGERPRINT",
     "nikto_incident_to_finding",
     "openvas_result_to_finding",
+    "nuclei_result_to_finding",
+    "QOD_NUCLEI_MATCH",
     "AsyncConnectScanner",
     "scan_ports_sync",
     "services_from_discovered_ports",
