@@ -36,7 +36,7 @@ from .programed import ProgramedScanManager
 from .scan_folder import ScanFolderManager
 from .scan_history import ScanHistoryManager
 from .traceroute import TracerouteManager
-from .thirdparty_scans_managers import NmapScanManager, NiktoScanManager, OpenVASScanManager
+from .thirdparty_scans_managers import NmapScanManager, NiktoScanManager, OpenVASScanManager, NucleiScanManager
 from .authorized_target import AuthorizedTargetManager
 from .lybra_engine import LybraEngineManager
 from .kb import KbSyncManager
@@ -52,6 +52,7 @@ __all__ = [
     "NmapScanManager",
     "NiktoScanManager",
     "OpenVASScanManager",
+    "NucleiScanManager",
     "LybraEngineManager",
     "KbSyncManager",
     "AuthorizedTargetManager",
