@@ -85,6 +85,14 @@ class VaultPasswordChangeSchema(Schema):
 class VaultUpsertResponseSchema(Schema):
     message = fields.String()
     vaultId = fields.Integer()
+    # Revisión resultante: el cliente la guarda y la manda en el If-Match de su
+    # siguiente escritura, sin tener que releer el vault entero.
+    revision = fields.Integer()
+
+
+class VaultRevisionSchema(Schema):
+    """Respuesta de la sonda GET /acheron/vault/revision."""
+    revision = fields.Integer()
 
 
 class StorableResponseSchema(Schema):
@@ -93,11 +101,13 @@ class StorableResponseSchema(Schema):
     internalId = fields.String()
     vaultId = fields.Integer()
     kind = fields.String()
+    revision = fields.Integer()
 
 
 class BulkUpdateResponseSchema(Schema):
     message = fields.String()
     results = fields.List(fields.Raw())
+    revision = fields.Integer()
 
 
 class GeneratePasswordQuerySchema(Schema):

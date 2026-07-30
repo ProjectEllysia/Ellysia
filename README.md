@@ -235,14 +235,18 @@ Aegis combines AI-generated awareness content with current CVE alerts from INCIB
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/acheron/vault` | Retrieve vault (encrypted blob) |
-| `POST` | `/acheron/vault` | Create or replace entire vault |
+| `GET` | `/acheron/vault` | Retrieve vault (encrypted blob); returns `revision` and an `ETag` |
+| `GET` | `/acheron/vault/revision` | Cheap probe: current `revision` only, no ciphertext |
+| `POST` | `/acheron/vault` | Create the vault; on an existing one it is a **full replace** and requires `?mode=replace` + `If-Match` |
 | `POST` | `/acheron/storables` | Add an `Account` or `CreditCard` |
 | `PATCH` | `/acheron/storables` | Bulk update only modified fields |
 | `DELETE` | `/acheron/storables` | Delete a Storable by `internalId` |
 
 > [!NOTE]
 > Encryption happens **client-side** (AcheronCore — see [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) for the Android implementation). The server stores only ciphertext. Internal IDs are deterministic SHA-256 hex hashes of encrypted content — collision-free across offline devices.
+
+> [!IMPORTANT]
+> **Optimistic concurrency.** `Vault.revision` is bumped on every content mutation and exposed as `ETag` / `revision`. Send it back as `If-Match: "N"` on writes: if it no longer matches, the write is rejected with `409 vault_revision_mismatch` (body carries `currentRevision`) and **nothing is mutated** — a client holding a stale snapshot can no longer wipe another device's edits. `If-Match` is mandatory on the destructive `POST /acheron/vault` replace; on the granular endpoints it is optional for now (transition window for already-deployed apps). Distinct from `metadataVersion`, which only tracks master-password rotation.
 
 ### Hygeia — infrastructure monitoring
 
