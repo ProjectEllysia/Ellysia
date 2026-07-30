@@ -24,6 +24,23 @@ class OpenVASScanRequestSchema(Schema):
     scanConfig = fields.String(load_default="full_fast", validate=validate.OneOf(["full_fast", "full_deep", "full_ultimate"]))
 
 
+class NucleiScanRequestSchema(Schema):
+    target = fields.String(required=True)
+    # Perfil acotado por defecto (roadmap Fase U1, punto 1): sin esto, Nuclei
+    # con el feed completo contra un solo host son miles de peticiones. "info"
+    # queda fuera del default a propósito — son miles de plantillas de
+    # tech-detect y, al ser confirmed=True sin CVSS, el suelo de
+    # score_finding las subiría todas a MEDIUM.
+    severities = fields.List(
+        fields.String(validate=validate.OneOf(["info", "low", "medium", "high", "critical"])),
+        load_default=None,
+    )
+    tags = fields.List(fields.String(), load_default=None)
+    rateLimit = fields.Integer(load_default=None, validate=validate.Range(min=1, max=1000))
+    requestTimeout = fields.Integer(load_default=None, validate=validate.Range(min=1, max=120))
+    timeout = fields.Integer(load_default=None, validate=validate.Range(min=1))
+
+
 class LybraScanRequestSchema(Schema):
     # Two modes: analyse a prior Nmap scan (sourceScanId) OR self-discover a
     # target's ports (target [+ optional ports]). Exactly one must be provided.
@@ -78,7 +95,7 @@ class AuthorizedTargetActionResponseSchema(Schema):
 
 
 class ResultsQuerySchema(Schema):
-    type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "openvas", "lybra", "all"]))
+    type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "openvas", "lybra", "nuclei", "all"]))
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))
     per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
     # Fase I, solo con type=lybra: acota la lista a los escaneos originados por

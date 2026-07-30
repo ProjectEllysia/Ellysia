@@ -1261,6 +1261,27 @@
         "userTemplate": "Analiza el estado de seguridad del siguiente objetivo escaneado con Nmap.\n\nOBJETIVO: {{target}}\nFECHA DEL ESCANEO: {{started}}\nTOTAL DE PUERTOS ABIERTOS: {{total_ports}}\nDISTRIBUCIÓN: {{distribution}}\nPERFIL HEURÍSTICO: {{profile_type}}\n\nSERVICIOS DETECTADOS:\n{{ports_json}}\n\n--- RAZONAMIENTO OBLIGATORIO (no incluir en el JSON de salida) ---\nEjecuta estos pasos EN ORDEN. No puedes saltarlos.\n\nPASO 1 — TIPO DE RED (determina esto primero, condiciona todo lo demás):\n¿El target {{target}} es una IP privada (10.x, 172.16-31.x, 192.168.x)?\n→ SÍ: Host en LAN. risk_level máximo permitido = MEDIO. HTTP, SSH y DNS en LAN son BAJO por definición.\n→ NO: Host público. Aplica la tabla de riesgo estándar.\n\nPASO 2 — REVISIÓN DE SERVICIOS:\nPara cada servicio en los datos, consulta la tabla del sistema.\n¿Hay evidencia observable de misconfiguration (Telnet activo, FTP anónimo, acceso sin auth)?\n→ SÍ: Documenta la evidencia exacta y asigna el nivel según la tabla.\n→ NO: Asigna BAJO a ese servicio. No inventes problemas.\n\nPASO 3 — NIVEL FINAL:\nrisk_level = MAX de los niveles del Paso 2, con el techo del Paso 1 aplicado.\nSi en LAN y sin anomalías confirmadas → risk_level = BAJO.\n\nPASO 4 — RECOMENDACIONES:\nSolo genera recomendaciones para servicios con anomalías observadas en los datos.\nNo generes recomendaciones para SSH estándar, HTTP estándar en LAN, ni DNS estándar.\n--- FIN DEL RAZONAMIENTO ---\n\nFORMATO DE RESPUESTA (JSON estricto, sin ningún texto antes ni después del JSON):\n{\n    \"executive_summary\": \"Resumen del perfil de seguridad en 2-3 frases. Indica si el host está en red privada o pública, describe los servicios detectados y el riesgo real observado. Sin inventar problemas.\",\n    \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n    \"technical_analysis\": \"Análisis por cada servicio detectado: función esperada, anomalía observable si existe y riesgo real en el contexto de red. Si no hay anomalías confirmadas, indícalo explícitamente. Menciona si el host es LAN o público. Mínimo 350 caracteres, máximo 900 caracteres.\",\n    \"recommendations\": [\n        {\"title\": \"Título\", \"description\": \"Descripción\", \"remediation\": \"Acción específica\", \"priority\": \"ALTA|MEDIA|BAJA\"}\n    ],\n    \"conclusions\": \"Conclusión ponderada de 1-2 frases.\"\n}"
       }
     },
+    "nuclei": {
+      "binaryPath": "nuclei",
+      "templatesDir": "",
+      "templatesVersion": "",
+      "defaultSeverities": ["critical", "high", "medium"],
+      "rateLimit": 150,
+      "requestTimeout": 10,
+      "timeout": 1800,
+      "colorPalette": {
+        "black": "#0d1b2a",
+        "dark": "#1b4965",
+        "light": "#bee9e8",
+        "main": "#2b7fb8",
+        "secondary": "#5fa8d3",
+        "white": "#f0f8ff"
+      },
+      "prompts": {
+        "system": "Eres un analista senior de seguridad ofensiva redactando la sección ejecutiva de un informe de pentest. Analizas la salida ya estructurada del escáner de plantillas Nuclei: cada hallazgo trae su plantilla, su CVE, CVSS, EPSS (probabilidad de explotación en 30 días) y si está en la lista CISA KEV (explotación activa confirmada). A diferencia de un escáner heurístico, cada hallazgo de Nuclei es un matcher estructurado contra una respuesta real (código de estado, patrón de texto, expresión regular) — por eso todos llegan marcados como 'confirmado', no como hipótesis.\n\nREGLAS ABSOLUTAS:\n1. Generas EXCLUSIVAMENTE JSON válido, sin markdown, sin texto antes ni después.\n2. NUNCA inventas un CVE, CVSS o EPSS que no esté en los datos proporcionados. Si un hallazgo no trae CVSS, no le asignes uno.\n3. 'en_kev=true' es la señal más fuerte de urgencia (se explota activamente en el mundo real) y debe mencionarse explícitamente si aparece en algún hallazgo.\n4. El 'risk_level' es un techo, no un promedio: si existe al menos un hallazgo en KEV o con CVSS alto, el nivel debe reflejarlo aunque el resto de hallazgos sean informativos.\n5. Las 'recommendations' deben ser accionables y concretas (qué actualizar, qué cerrar, qué comprobar), nunca genéricas tipo 'mejorar la seguridad'.\n6. Si la mayoría de hallazgos son de categoría 'web_finding' o 'tls' sin CVEs, dilo explícitamente: es higiene de configuración, no necesariamente una vulnerabilidad explotable.\n\nFORMATO DE RESPUESTA (JSON estricto):\n{\n  \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n  \"executive_summary\": \"3-5 frases en español, para un lector no técnico: qué se encontró y por qué importa.\",\n  \"technical_analysis\": \"Análisis técnico más detallado, citando los CVEs/CVSS/EPSS concretos de los datos.\",\n  \"recommendations\": [\n    {\"title\": \"...\", \"description\": \"...\", \"priority\": \"ALTA|MEDIA|BAJA\", \"remediation\": \"acción concreta\", \"cve_refs\": [\"CVE-YYYY-NNNNN\"]}\n  ],\n  \"conclusions\": \"1-2 frases de cierre.\"\n}",
+        "userTemplate": "Escaneo Nuclei sobre {{target}} (exposición: {{exposure}}), iniciado el {{started}}.\n\nTotal de hallazgos: {{total_findings}} | Confirmados activamente: {{confirmed_count}} | En CISA KEV: {{kev_count}}\n\nHallazgos (los confirmados y los de KEV van siempre incluidos; el resto es una muestra representativa):\n{{findings_json}}\n\nGenera el análisis en el formato JSON indicado en las instrucciones del sistema."
+      }
+    },
     "openvas": {
       "timeout": 14400,
       "maxWaitTimeout": 28800,

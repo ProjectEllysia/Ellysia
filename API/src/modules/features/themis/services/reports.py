@@ -13,6 +13,9 @@ Classes:
     NmapPrintingStrategy: Strategy for Nmap scan reports.
     OpenVASPrintingStrategy: Strategy for OpenVAS scan reports.
     NiktoPrintingStrategy: Strategy for Nikto scan reports.
+    FindingsPrintingStrategy: Shared base for scan types living entirely in `Finding`.
+    LybraPrintingStrategy: Strategy for Lybra engine scan reports.
+    NucleiPrintingStrategy: Strategy for Nuclei scan reports (Fase U1).
     NmapAIWriter: AI writer for Nmap scan analysis.
     NiktoAIWriter: AI writer for Nikto scan analysis.
     OpenVASAIWriter: AI writer for OpenVAS scan analysis.
@@ -59,6 +62,7 @@ class ThemisTool(Enum):
     NIKTO   = "nikto"
     OPENVAS = "openvas"
     LYBRA   = "lybra"
+    NUCLEI  = "nuclei"
 
 
 class ColorType(Enum):
@@ -389,6 +393,7 @@ class PrintingStrategy(ABC):
         prompts = CR.get_prompts_config()
         tool_key = {
             'NmapScan': 'nmap', 'NiktoScan': 'nikto', 'OpenVASScan': 'openvas', 'LybraScan': 'lybra',
+            'NucleiScan': 'nuclei',
         }.get(scan_type, 'nmap')
         tool_prompts = prompts.get(tool_key, {})
 
@@ -1933,46 +1938,89 @@ class NiktoPrintingStrategy(PrintingStrategy):
         return "Análisis de Vulnerabilidades Web"
 
 
-@PrintingStrategy.register(ScanType.LYBRA)
-class LybraPrintingStrategy(PrintingStrategy):
-    """Printing strategy for Lybra engine scan reports.
+class FindingsPrintingStrategy(PrintingStrategy):
+    """Shared PDF renderer for scan types whose data lives entirely in the
+    unified `Finding` table rather than a tool-specific incident/vulnerability
+    model — Lybra originally, and now Nuclei (roadmap Fase U1).
 
-    Unlike the other three strategies, the source data is the unified
-    `Finding` table rather than a tool-specific incident/vulnerability model,
-    fetched via the repository since `LybraScan` deliberately carries no ORM
-    relationship to it (see `repositories.py`). Cards are sorted by the same
-    `priority` ladder the web UI uses, computed the same way
-    (`score_finding`), so the PDF and the web view never disagree.
+    Extracted from what used to be a single, Lybra-only class: Nuclei's JSONL
+    output maps onto `Finding` almost as completely as Lybra's own engine does
+    (`cve_ids`, `cvss_score`, `check_id` all populated — see
+    `lybra/adapters.py::nuclei_result_to_finding`), so its PDF is "the exact
+    same card renderer, a different identity and palette" rather than a fourth
+    near-duplicate `PrintingStrategy`. A subclass fixes the small set of class
+    attributes below; everything else — fetching findings via the repository
+    (neither `LybraScan` nor `NucleiScan` carries an ORM relationship to
+    `Finding`), scoring, sorting, the summary table, the CVE-context
+    enrichment and the per-finding card — is identical.
 
-    Color palette: Green theme, matching Lybra's own UI identity.
+    Cards are sorted by the same `priority` ladder the web UI uses, computed
+    the same way (`score_finding`), so the PDF and the web view never
+    disagree.
+
+    Subclass contract (all required, no defaults — each identity must be a
+    deliberate choice, not an inherited accident):
+        _TOOL:              ``ThemisTool`` member, for ``CR.get_tool_color_palette``.
+        _WRITER_CLASS:       AI writer class to instantiate (both tools reuse
+                             ``LybraAIWriter`` today — its logic only reads
+                             already-structured findings, nothing Lybra-specific).
+        _WRITER_PROMPT_KEY:  Which ``SecOpsConfig.json`` prompt pair to read
+                             (``"lybra"`` / ``"nuclei"``).
+        _OWN_SOURCE:         This tool's own ``Finding.source`` value, so a
+                             finding corroborated by *another* scanner is
+                             correctly flagged ("Corroborado por: ...") instead
+                             of always comparing against the literal "lybra".
+        _HEADER_TITLE:       In-body report title (``theme.title`` paragraph).
+        _REPORT_TITLE:       PDF metadata / cover title (``get_report_title``).
+        _FILENAME_SUFFIX:    Download filename suffix (``get_filename_suffix``).
+        _PICTURE_BASE:       Background image basename, before ``Light``/``Dark.png``.
+        _DEFAULT_PALETTE:    Fallback color dict when ``SecOpsConfig.json``
+                             carries no ``colorPalette`` for ``_TOOL``.
 
     Attributes:
-        writer: LybraAIWriter instance for AI analysis.
-        color_palette: Green color palette for the report.
+        writer: ``_WRITER_CLASS`` instance for AI analysis.
+        color_palette: This tool's color palette for the report.
     """
 
     _PRIORITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
     _PRIORITY_LABEL = {"CRITICAL": "CRÍTICA", "HIGH": "ALTA", "MEDIUM": "MEDIA", "LOW": "BAJA", "INFO": "INFO"}
     _STATE_LABEL = {"open": "Abierto", "fixed": "Corregido", "regressed": "Regresado", "accepted": "Aceptado"}
 
-    def __init__(self, scan: LybraScan) -> None:
-        """Initialize Lybra printing strategy.
+    # Bare annotations, no defaults on purpose (see the "Subclass contract"
+    # docstring above): each subclass must set every one of these explicitly,
+    # the same way ScanManager._MODEL/_RICH_LOADER declare the contract a
+    # concrete subclass fills in. Declaring them here (rather than leaving
+    # them only in prose) is what lets static analysis resolve `self._TOOL`
+    # etc. inside this class's own methods.
+    _TOOL: "ThemisTool"
+    _WRITER_CLASS: type
+    _WRITER_PROMPT_KEY: str
+    _OWN_SOURCE: str
+    _HEADER_TITLE: str
+    _REPORT_TITLE: str
+    _FILENAME_SUFFIX: str
+    _PICTURE_BASE: str
+    _DEFAULT_PALETTE: Dict[str, str]
+
+    def __init__(self, scan) -> None:
+        """Initialize the printing strategy.
 
         Args:
-            scan: LybraScan instance to generate report from.
+            scan: LybraScan or NucleiScan instance to generate the report from.
         """
         super().__init__(scan)
-        self.writer = LybraAIWriter()
+        self.writer = self._WRITER_CLASS(prompt_key=self._WRITER_PROMPT_KEY)
 
-        palette_config = CR.get_tool_color_palette(ThemisTool.LYBRA)
+        palette_config = CR.get_tool_color_palette(self._TOOL)
+        defaults = self._DEFAULT_PALETTE
 
         self.color_palette = {
-            ColorType.BLACK: palette_config.get("black", "#1A2410"),
-            ColorType.DARK: palette_config.get("dark", "#4A6132"),
-            ColorType.MAIN: palette_config.get("main", "#7CA163"),
-            ColorType.SECONDARY: palette_config.get("secondary", "#A8C98F"),
-            ColorType.LIGHT: palette_config.get("light", "#D4E8C4"),
-            ColorType.WHITE: palette_config.get("white", "#F3F8EE"),
+            ColorType.BLACK: palette_config.get("black", defaults["black"]),
+            ColorType.DARK: palette_config.get("dark", defaults["dark"]),
+            ColorType.MAIN: palette_config.get("main", defaults["main"]),
+            ColorType.SECONDARY: palette_config.get("secondary", defaults["secondary"]),
+            ColorType.LIGHT: palette_config.get("light", defaults["light"]),
+            ColorType.WHITE: palette_config.get("white", defaults["white"]),
         }
 
     def append_body(self, theme: "ReportTheme", elements: list, ai_report: bool = False) -> None:
@@ -1996,10 +2044,10 @@ class LybraPrintingStrategy(PrintingStrategy):
             f["priority"] = score_finding(f, exposure)
         self._enrich_with_cve_context(findings)
 
-        self._append_lybra_header(theme, elements, findings, exposure)
+        self._append_finding_header(theme, elements, findings, exposure)
 
         if findings:
-            self._append_lybra_summary(theme, elements, findings)
+            self._append_finding_summary(theme, elements, findings)
         self._append_cpe_coverage_note(theme, elements, findings)
 
         elements.append(Paragraph("Hallazgos", theme.subtitle))
@@ -2020,14 +2068,14 @@ class LybraPrintingStrategy(PrintingStrategy):
                 ),
             )
             for idx, f in enumerate(sorted_findings, start=1):
-                self._append_lybra_finding_card(theme, elements, f, idx)
+                self._append_finding_card(theme, elements, f, idx)
 
         if ai_report:
             self._append_ai_analysis(elements, theme)
 
-        # ponytail: no per-target history chart for Lybra yet — _append_history_stats'
+        # ponytail: no per-target history chart yet — _append_history_stats'
         # tool_map only knows the Nmap/Nikto/OpenVAS scan classes, since it relies on
-        # a MetricExtractor for each; a Finding-based one for Lybra is separate scope
+        # a MetricExtractor for each; a Finding-based one is separate scope
         # from wiring the PDF itself. Add it when that's needed.
 
     def _enrich_with_cve_context(self, findings: list) -> None:
@@ -2078,11 +2126,11 @@ class LybraPrintingStrategy(PrintingStrategy):
                     return m.version_end_including
         return None
 
-    def _append_lybra_header(self, theme: "ReportTheme", elements: list, findings: list, exposure: str) -> None:
+    def _append_finding_header(self, theme: "ReportTheme", elements: list, findings: list, exposure: str) -> None:
         """Cabecera del informe: título y tablas de objetivo/escaneo."""
         scan = self.scan
 
-        elements.append(Paragraph("Informe del Motor Lybra", theme.title))
+        elements.append(Paragraph(self._HEADER_TITLE, theme.title))
         elements.append(Spacer(1, 0.1 * inch))
 
         exposure_label = "Pública" if exposure == "public" else "Privada" if exposure == "private" else "Desconocida"
@@ -2110,7 +2158,7 @@ class LybraPrintingStrategy(PrintingStrategy):
         elements.append(info_table)
         elements.append(Spacer(1, 0.3 * inch))
 
-    def _append_lybra_summary(self, theme: "ReportTheme", elements: list, findings: list) -> None:
+    def _append_finding_summary(self, theme: "ReportTheme", elements: list, findings: list) -> None:
         """Tabla resumen: cantidad de hallazgos por prioridad."""
         palette = self.color_palette
         dark = colors.HexColor(palette[ColorType.DARK])
@@ -2193,7 +2241,7 @@ class LybraPrintingStrategy(PrintingStrategy):
         ))
         elements.append(Spacer(1, 0.25 * inch))
 
-    def _append_lybra_finding_card(self, theme: "ReportTheme", elements: list, finding: dict, idx: int) -> None:
+    def _append_finding_card(self, theme: "ReportTheme", elements: list, finding: dict, idx: int) -> None:
         """Tarjeta de un hallazgo: cabecera de prioridad, nombre, detalles,
         descripción y referencias (mismo lenguaje visual que Nmap/Nikto/OpenVAS:
         cada bloque lleva su propio borde, no solo la cabecera)."""
@@ -2254,7 +2302,7 @@ class LybraPrintingStrategy(PrintingStrategy):
             details.append(["Corregido en:", f"{finding['fixed_version']} o superior"])
         if finding.get("state") and finding["state"] != "open":
             details.append(["Estado:", self._STATE_LABEL.get(finding["state"], finding["state"])])
-        if finding.get("source") and finding["source"] != "lybra":
+        if finding.get("source") and finding["source"] != self._OWN_SOURCE:
             details.append(["Corroborado por:", finding["source"]])
 
         if details:
@@ -2295,11 +2343,62 @@ class LybraPrintingStrategy(PrintingStrategy):
         elements.append(Spacer(1, 0.2 * inch))
 
     def get_filename_suffix(self) -> str:
-        return "_Lybra.pdf"
+        return self._FILENAME_SUFFIX
 
     def get_picture_name(self, dark: bool = False) -> str:
-        picture_name = "Themis-Green-Bg"
-        return picture_name + "Dark.png" if dark else picture_name + "Light.png"
+        return self._PICTURE_BASE + ("Dark.png" if dark else "Light.png")
 
     def get_report_title(self) -> str:
-        return "Veredicto del Motor Lybra"
+        return self._REPORT_TITLE
+
+
+@PrintingStrategy.register(ScanType.LYBRA)
+class LybraPrintingStrategy(FindingsPrintingStrategy):
+    """Printing strategy for Lybra engine scan reports.
+
+    Color palette: Green theme, matching Lybra's own UI identity. All the
+    rendering logic lives in `FindingsPrintingStrategy`; this class only fixes
+    Lybra's identity — behaviour is unchanged from before the Fase U1 extract.
+    """
+
+    _TOOL = ThemisTool.LYBRA
+    _WRITER_CLASS = LybraAIWriter
+    _WRITER_PROMPT_KEY = "lybra"
+    _OWN_SOURCE = "lybra"
+    _HEADER_TITLE = "Informe del Motor Lybra"
+    _REPORT_TITLE = "Veredicto del Motor Lybra"
+    _FILENAME_SUFFIX = "_Lybra.pdf"
+    _PICTURE_BASE = "Themis-Green-Bg"
+    _DEFAULT_PALETTE = {
+        "black": "#1A2410", "dark": "#4A6132", "main": "#7CA163",
+        "secondary": "#A8C98F", "light": "#D4E8C4", "white": "#F3F8EE",
+    }
+
+
+@PrintingStrategy.register(ScanType.NUCLEI)
+class NucleiPrintingStrategy(FindingsPrintingStrategy):
+    """Printing strategy for Nuclei scan reports (roadmap Fase U1).
+
+    Nuclei's JSONL output maps onto `Finding` almost as completely as Lybra's
+    own engine (`cve_ids`, `cvss_score`, `check_id` all populated by
+    `nuclei_result_to_finding`), so this reuses `FindingsPrintingStrategy`
+    wholesale — the "beneficio colateral nada menor" the roadmap's Fase U
+    called out: the PDF is the hardest part of adding a scanner, and here it
+    costs a dozen class attributes.
+
+    Color palette: Blue theme, distinct from Lybra's green and OpenVAS's
+    salmon so the two coexist without visual confusion in the tool picker.
+    """
+
+    _TOOL = ThemisTool.NUCLEI
+    _WRITER_CLASS = LybraAIWriter
+    _WRITER_PROMPT_KEY = "nuclei"
+    _OWN_SOURCE = "nuclei"
+    _HEADER_TITLE = "Informe de Nuclei"
+    _REPORT_TITLE = "Veredicto de Nuclei"
+    _FILENAME_SUFFIX = "_Nuclei.pdf"
+    _PICTURE_BASE = "Themis-Blue-Bg"
+    _DEFAULT_PALETTE = {
+        "black": "#0d1b2a", "dark": "#1b4965", "main": "#2b7fb8",
+        "secondary": "#5fa8d3", "light": "#bee9e8", "white": "#f0f8ff",
+    }

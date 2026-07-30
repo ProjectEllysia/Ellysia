@@ -31,6 +31,7 @@
           <th v-if="type === 'nmap'">Puertos</th>
           <th v-if="type === 'nikto'">Incidencias</th>
           <template v-if="type === 'openvas'"><th>Vulns</th><th>Críticas</th><th>Altas</th></template>
+          <template v-if="type === 'nuclei'"><th>Hallazgos</th><th>Críticos</th><th>Altos</th></template>
           <th>Fecha</th><th>Acciones</th>
         </tr></thead>
         <TransitionGroup name="row" tag="tbody">
@@ -43,6 +44,11 @@
             <td v-if="type === 'nikto'" class="mono">{{ row.totalIncidents ?? 0 }} <span class="muted">hallazgos</span></td>
             <template v-if="type === 'openvas'">
               <td class="mono">{{ row.totalVulnerabilities ?? 0 }}</td>
+              <td class="sev-critical"><span v-if="row.criticalCount">{{ row.criticalCount }}</span><span v-else class="muted">0</span></td>
+              <td class="sev-high"><span v-if="row.highCount">{{ row.highCount }}</span><span v-else class="muted">0</span></td>
+            </template>
+            <template v-if="type === 'nuclei'">
+              <td class="mono">{{ row.totalFindings ?? 0 }}</td>
               <td class="sev-critical"><span v-if="row.criticalCount">{{ row.criticalCount }}</span><span v-else class="muted">0</span></td>
               <td class="sev-high"><span v-if="row.highCount">{{ row.highCount }}</span><span v-else class="muted">0</span></td>
             </template>

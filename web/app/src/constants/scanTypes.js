@@ -56,6 +56,17 @@ export const SCAN_TYPES = {
     defaultArgs: { target: '' },
     formatArgs: (args) => args?.target || '—',
   },
+  nuclei: {
+    label: 'Nuclei',
+    fullLabel: 'Nuclei (plantillas)',
+    previewLabel: 'Vista Previa — Nuclei',
+    chartColor: 'var(--info)',
+    scheduleFields: [
+      { key: 'target', label: 'Target URL', size: 'lg', placeholder: 'https://example.com' },
+    ],
+    defaultArgs: { target: '' },
+    formatArgs: (args) => args?.target || '—',
+  },
 }
 
 export const SCAN_TYPE_ORDER = Object.keys(SCAN_TYPES)

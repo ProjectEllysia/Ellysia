@@ -101,11 +101,13 @@ class ScanType(str, Enum):
         NIKTO:   Nikto web server vulnerability scanner.
         OPENVAS: OpenVAS comprehensive vulnerability manager.
         LYBRA: Lybra's own vulnerability engine (native detection).
+        NUCLEI: Nuclei template-based vulnerability scanner (Fase U1).
     """
     NMAP    = "nmap"
     NIKTO   = "nikto"
     OPENVAS = "openvas"
     LYBRA = "lybra"
+    NUCLEI = "nuclei"
 
 
 # =========================================================================
@@ -835,6 +837,32 @@ class LybraScan(Scan):
 
     def __repr__(self):
         return f"<LybraScan(id={self.id}, target='{self.target}', source={self.source_scan_id})>"
+
+
+class NucleiScan(Scan):
+    """Scan launched via the Nuclei template-based scanner (roadmap Fase U1).
+
+    Follows the same design ``LybraScan`` already established rather than the
+    Nmap/Nikto/OpenVAS one: no result table of its own. Nuclei's JSONL output
+    maps almost 1:1 onto ``Finding`` (``cve_ids``, ``cvss_score``, ``check_id``
+    all come straight from the tool), so building a parallel ``NucleiFinding``
+    table would only recreate the scaffolding the roadmap's §7 is dismantling
+    for OpenVAS — not something to add fresh in a brand new scan type. Unlike
+    ``LybraScan`` there is no second identifying column (no ``source_scan_id``
+    equivalent), so no ``inherit_condition`` override is needed: SQLAlchemy
+    resolves the join against ``Scan.id`` on its own.
+
+    Attributes:
+        id: Primary key (foreign key to Scan.id).
+    """
+    __tablename__ = "NucleiScan"
+
+    id = Column(Integer, ForeignKey("Scan.id"), primary_key=True)
+
+    __mapper_args__ = {"polymorphic_identity": ScanType.NUCLEI}
+
+    def __repr__(self):
+        return f"<NucleiScan(id={self.id}, target='{self.target}')>"
 
 
 class AuthorizedTarget(Base):
