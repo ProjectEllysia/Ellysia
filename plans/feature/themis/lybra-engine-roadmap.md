@@ -272,7 +272,7 @@ La pista de **correlación** está completa; la de **bajo nivel** está a medias
 | **2** — KB local (NVD, CPE Dictionary, KEV, EPSS) | Correlación | ✓ implementada |
 | **5** — Dedup multi-fuente, ciclo de vida, scoring, `HostService` | Correlación | ✓ implementada |
 | **6** — Pipeline orquestado | Convergencia | ✓ implementada |
-| **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ○ planificada — **prerrequisito del cierre de R**. Detalle en la sección Fase U más abajo |
+| **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ◐ parcial — U1 hecha (rama `feature/themis/nuclei-engine`), U2/U3/U4 sin empezar. **U4 sigue siendo prerrequisito del cierre de R**. Detalle en la sección Fase U más abajo |
 | **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — 15 checks, tipos `http`/`tls`/`network`; falta `script`; el feed es JSON, no el YAML estilo Nuclei del diseño. Su cierre depende de la Fase U. Detalle actualizado en la sección Fase R más abajo |
 | **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS, y (Fase N) FTP, SMTP/IMAP/POP3, SMB, MySQL/MariaDB, Redis, VNC; falta JARM, SNMP (sin sonda UDP), PostgreSQL/MSSQL/MongoDB, RDP, LDAP, Telnet, RPC. Detalle actualizado en la sección Fase N más abajo |
 | **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; faltan SYN sin estado, sondas UDP y control de tasa AIMD |
@@ -779,7 +779,7 @@ datos de uno comprobado y limpio.
 
 ---
 
-### Fase U — Nuclei como herramienta, corroborador y oráculo · pista de bajo nivel · ○ planificada · **prerrequisito del cierre de la Fase R**
+### Fase U — Nuclei como herramienta, corroborador y oráculo · pista de bajo nivel · ◐ parcial (U1 hecha) · **prerrequisito del cierre de la Fase R**
 
 **El objetivo** es incorporar Nuclei a Ellysia en sus cuatro papeles posibles de una vez, porque los
 cuatro comparten la misma pieza de trabajo y separarlos sería escribirla cuatro veces. Es la única
@@ -882,6 +882,28 @@ añadir Lybra dejó claro el problema de las listas duplicadas—, y los compone
 intervenga, obtiene su PDF, y los hallazgos resultantes aparecen deduplicados por `dedup_key` junto a
 los de un escaneo previo del mismo activo, con su `cve_ids` y su `cvss_score` poblados desde la
 salida de la herramienta.
+
+**Estado (2026-07-30): ✓ hecha**, en la rama `feature/themis/nuclei-engine`. `ScanType.NUCLEI` +
+`NucleiScan` siguen la forma Lybra (sin tabla de resultados propia); `nuclei_result_to_finding`
+(`lybra/adapters.py`) normaliza las CVE de Nuclei a mayúsculas —sin eso la fusión por `dedup_key` con
+Lybra/OpenVAS nunca ocurriría— y marca cada hallazgo `confirmed=True` con un QoD fijo, por ser una
+aserción de un matcher estructurado y no un patrón de texto como el de Nikto. `NucleiScanTask` corre
+con un perfil de severidad acotado por defecto (excluye `info` a propósito), `-duc` (plantillas
+horneadas en el Dockerfile, sin red a mitad de escaneo) y lee la versión real del feed del propio
+banner de arranque del binario. `NucleiScanManager` fusiona los hallazgos dentro del escaneo (Nuclei
+repite la misma plantilla por cada `matched-at`) y aplica el ciclo de vida contra el Nuclei anterior
+del mismo objetivo. El gate de objetivos autorizados (punto 3 de arriba) está aplicado desde el
+endpoint `POST /themis/nuclei`, reutilizando `TargetNotAuthorizedError`. El renderizador de PDF de
+Lybra se generalizó a una `FindingsPrintingStrategy` compartida (Lybra queda con el mismo
+comportamiento exacto) de la que `NucleiPrintingStrategy` es una subclase fina — el "beneficio
+colateral" que este mismo apartado anticipaba. En el frontend, Nuclei es una cuarta pestaña del
+mundo de escáneres externos, registrada en `constants/scanTypes.js`.
+
+Lo que esta pasada **no** cierra, a propósito: **U2** (Nuclei como corroborador del análisis
+profundo, ver más abajo — sigue sin tocarse `_launch_deep_corroborators`), **U3** (el oráculo
+diferencial de `tests/oracle/`) y **U4** (ingesta de plantillas). Tampoco hay cron de
+sincronización del feed de plantillas: se hornean en la imagen y envejecen hasta el siguiente build;
+el patrón a seguir cuando se aborde es el de `KbSyncManager` + `ThemisScheduler._schedule_kb_sync`.
 
 #### U2 — Corroborador del análisis profundo
 
