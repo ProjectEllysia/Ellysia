@@ -739,13 +739,26 @@ class LybraAIWriter:
         _generator: scribe AIGenerator used for model calling.
     """
 
-    def __init__(self, generator: Optional[AIGenerator] = None) -> None:
-        """Initialize Lybra AI writer."""
+    def __init__(self, generator: Optional[AIGenerator] = None, prompt_key: str = "lybra") -> None:
+        """Initialize the writer.
+
+        Args:
+            generator:  Injected scribe generator (tests) — defaults to the
+                configured one.
+            prompt_key: Which entry of ``get_prompts_config()`` to read
+                (``"lybra"``, ``"nuclei"``...). The writer's logic is generic
+                over the source — it only reads already-structured ``Finding``
+                rows (``cve_ids``, ``cvss``, ``epss``, ``confirmed``...) — so a
+                second tool with the same shape (Nuclei, Fase U1) reuses this
+                class instead of duplicating it, distinguished only by which
+                prompt pair it reads.
+        """
         self._generator = generator or build_generator("themis")
+        self._prompt_key = prompt_key
 
     def _build_system_prompt(self) -> str:
         prompts_config = CR.get_prompts_config()
-        return prompts_config.get("lybra", {}).get("system", "")
+        return prompts_config.get(self._prompt_key, {}).get("system", "")
 
     def _build_user_prompt(self, scan_data: dict, findings: list) -> str:
         target = scan_data.get("target", "desconocido")
@@ -775,7 +788,7 @@ class LybraAIWriter:
         } for f in sample]
 
         prompts_config = CR.get_prompts_config()
-        template = prompts_config.get("lybra", {}).get("userTemplate", "")
+        template = prompts_config.get(self._prompt_key, {}).get("userTemplate", "")
 
         return template.replace("{{target}}", str(target)) \
                     .replace("{{started}}", str(started)) \
@@ -785,13 +798,17 @@ class LybraAIWriter:
                     .replace("{{kev_count}}", str(len(kev))) \
                     .replace("{{findings_json}}", json.dumps(findings_for_ai, indent=2, ensure_ascii=False))
 
-    def generate(self, scan: LybraScan) -> dict:
-        """Generate AI security analysis for a Lybra scan.
+    def generate(self, scan) -> dict:
+        """Generate AI security analysis for a Lybra or Nuclei scan.
 
         Reads the scan's own `Finding` rows directly via the repository —
-        `LybraScan` deliberately carries no ORM relationship to `Finding`
-        (see `repositories.py`), so this mirrors how the manager/report code
-        already fetches them rather than adding one just for this writer.
+        neither `LybraScan` nor `NucleiScan` carries an ORM relationship to
+        `Finding` (see `repositories.py`), so this mirrors how the manager/
+        report code already fetches them rather than adding one just for this
+        writer. ``LybraEngineManager.exposure_for`` is reused as-is: it reads
+        only ``scan.target`` and an optional ``asset_id`` (absent on
+        ``NucleiScan``, so it degrades to the plain ``classify_exposure`` path),
+        so it works for either scan type without a Nuclei-specific branch.
         """
         from src.modules.infrastructure.session import build_repository
         from ..repositories import ScanRepository
