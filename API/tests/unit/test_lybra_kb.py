@@ -251,3 +251,33 @@ def test_load_product_aliases_covers_known_entries():
     # up with what normalize_product_name actually produces.
     assert "pure ftpd" in aliases
     assert "pure-ftpd" not in aliases
+
+
+def test_curated_feed_keys_are_what_normalization_actually_produces():
+    """Every key must survive normalize_product_name unchanged — a key the
+    normalizer would rewrite can never be looked up, since _resolve_cpe only
+    ever queries the feed with an already-normalized name."""
+    for key in load_product_aliases():
+        assert normalize_product_name(key) == key, f"clave no normalizada: {key!r}"
+
+
+@pytest.mark.parametrize("raw_name,expected", [
+    # El sufijo comercial "CE" impedia casar con oracle:mysql_workbench.
+    ("MySQL Workbench 8.0 CE 8.0.45", ("oracle", "mysql_workbench")),
+    # La version del runtime (8.0.19) es la escala que NVD usa en sus rangos.
+    ("Microsoft .NET Runtime - 8.0.19 (x64)", ("microsoft", ".net")),
+    ("Microsoft Windows Desktop Runtime - 8.0.19 (x64)", ("microsoft", ".net")),
+])
+def test_desktop_aliases_added_from_real_inventory(raw_name, expected):
+    assert load_product_aliases()[normalize_product_name(raw_name)] == expected
+
+
+@pytest.mark.parametrize("raw_name", [
+    # Su version pertenece a OTRA escala que la de microsoft:.net (el SDK
+    # 8.0.413 empaqueta el runtime 8.0.19; .NET Standard 2.1 no es .NET 2.1).
+    # Aliasarlos repetiria el fallo de esquemas mezclados de Adobe Acrobat.
+    "Microsoft .NET SDK 8.0.413 (x64)",
+    "Microsoft .NET Standard Targeting Pack - 2.1.0 (x64)",
+])
+def test_version_scheme_mismatches_are_deliberately_not_aliased(raw_name):
+    assert normalize_product_name(raw_name) not in load_product_aliases()

@@ -897,6 +897,66 @@ desconocido. Queda documentado como límite del espejo de NVD; si algún día mo
 sitio natural para tratarlo es el feed curado (paso 3), que ya existe precisamente para corregir a
 mano lo que la automatización no puede saber.
 
+#### El análisis de "casi-aciertos": dirigir el feed curado con datos (2026-07-30)
+
+El apartado anterior daba por hecho que medir la cobertura exigía varios inventarios. Es falso: con
+**uno solo** se puede contestar la pregunta que de verdad importa, que no es *"¿qué se repite entre
+equipos?"* sino ***"¿qué hay aquí que debería resolver y no resuelve?"***. Basta recortar palabras
+por los extremos de cada nombre sin resolver y ver si alguna forma más corta existe en el índice.
+
+De los 221 sin resolver, **58 quedan a un recorte de una clave del índice**. El resultado es, sobre
+todo, **la validación empírica de la regla "coincidencia exacta, nunca por subcadena"** que este
+documento fijó por intuición en el paso 2. Relajarla habría producido esto:
+
+| Paquete real | A lo que habría casado |
+|---|---|
+| `ENE_MousePad_HAL` | `cnrs:hal` — el repositorio académico francés |
+| `NVIDIA Container` | `apple:container` |
+| `Windows SDK for Windows Store Apps Contracts` | `openzeppelin:contracts` — contratos de Solidity |
+| `LockHunter 3.4, 32/64 bit` | `bit_project:bit` |
+| `WD P40 Game Drive` | `google:drive` |
+| `Epic Games Launcher` | `organizedthemes:epic` — un tema de WordPress |
+
+**Lo añadido al feed** (`lybra-aliases-3`), tras verificar cada uno contra la KB:
+
+| Alias | Resuelve a | Por qué |
+|---|---|---|
+| `mysql workbench 8.0 ce` | `oracle:mysql_workbench` | El sufijo comercial "CE" impedía la coincidencia. 42 reglas en NVD, todas acotadas |
+| `microsoft .net runtime` | `microsoft:.net` | La versión del runtime (`8.0.19`) es exactamente la que NVD usa en sus rangos |
+| `microsoft windows desktop runtime` | `microsoft:.net` | Es el .NET Desktop Runtime; NVD no le da producto propio y versiona igual (`8.0.19`) |
+
+**Lo descartado, y por qué** — importa más que lo añadido, porque son trampas:
+
+- **`.NET SDK` (`8.0.413`) y `.NET Standard Targeting Pack` (`2.1.0`)**: sus versiones pertenecen a
+  *otra escala* que la que `microsoft:.net` usa en sus rangos (el SDK 8.0.413 lleva dentro el
+  runtime 8.0.19; .NET Standard 2.1 no es .NET 2.1). Aliasarlos repetiría exactamente el fallo de
+  esquemas mezclados documentado arriba con Acrobat, pero esta vez por decisión propia.
+- **`ASP.NET Core`**: su nombre en Windows lleva la versión *incrustada en medio*
+  (`Microsoft ASP.NET Core 8.0.19 Shared Framework`), y `normalize_product_name` solo recorta la
+  del final. La clave resultante sería específica de la versión y habría que añadir una nueva con
+  cada parche — un alias que se pudre solo. Queda pendiente de que la normalización sepa recortar
+  versiones intercaladas, que es un cambio de radio mucho mayor y no se hace de pasada.
+
+Nota operativa: MySQL Workbench 8.0.45 está por encima del techo más alto que NVD registra (8.0.28),
+así que el alias **no produce hallazgos hoy** — y es justo lo que se busca: el paquete pasa de
+"sin identificar" a "comprobado y limpio", que es la distinción entera que `cpe_resolved` existe
+para poder hacer.
+
+Resultado: paquetes resueltos **21 → 24**, y **32 hallazgos nuevos legítimos** en .NET — verificados
+a mano contra los rangos reales (`[8.0.0, 8.0.21)`, `[8.0.0, 8.0.24)`, `[8.0.0, 8.0.26)`…, con el
+8.0.19 instalado dentro de todos ellos, y descartando correctamente los tramos `9.0.x`/`10.0.x` de
+las mismas CVEs).
+
+**Efecto secundario conocido: los dos alias de .NET duplican sus hallazgos.** `.NET Runtime` y
+`Windows Desktop Runtime` son dos paquetes instalados por separado que resuelven al mismo
+`microsoft:.net:8.0.19`, así que cada CVE sale dos veces (64 filas donde 32 bastarían).
+`compute_dedup_key` no los fusiona, y **no es un fallo**: incluye el nombre del paquete a propósito
+(ver el docstring de `_surface_finding`) para que dos paquetes *distintos* sin puerto no colisionen
+todos bajo la misma identidad `port=None` — una decisión de la Fase 0.9. La tensión es real y no
+tiene solución obvia: afinar la clave para fusionar estos dos arriesga fusionar paquetes que no lo
+son. Se conservan ambos alias porque el coste de quitarlos sería no detectar nada en un equipo que
+solo tenga el Desktop Runtime; duplicar es cosmético, no detectar no lo es.
+
 **¿Se cumple el criterio de cierre?** Ahora sí es medible, y el resultado es honesto pero no
 redondo: **21 de 242 paquetes resuelven a CPE (8,7%)** — muy lejos de "una mayoría". Ahora bien,
 inspeccionados a mano, la gran mayoría de los 221 restantes son drivers OEM (AMD, GIGABYTE, ENE),

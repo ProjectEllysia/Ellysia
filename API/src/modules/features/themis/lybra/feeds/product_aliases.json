@@ -1,5 +1,5 @@
 {
-  "feedVersion": "lybra-aliases-2",
+  "feedVersion": "lybra-aliases-3",
   "aliases": [
     { "match": "apache httpd",        "vendor": "apache",             "product": "http_server" },
     { "match": "apache",              "vendor": "apache",             "product": "http_server" },
@@ -17,6 +17,10 @@
 
     { "match": "git",                 "vendor": "git-scm",            "product": "git" },
     { "match": "vlc media player",    "vendor": "videolan",           "product": "vlc_media_player" },
-    { "match": "7 zip",               "vendor": "7-zip",              "product": "7-zip" }
+    { "match": "7 zip",               "vendor": "7-zip",              "product": "7-zip" },
+
+    { "match": "mysql workbench 8.0 ce",       "vendor": "oracle",    "product": "mysql_workbench" },
+    { "match": "microsoft .net runtime",       "vendor": "microsoft", "product": ".net" },
+    { "match": "microsoft windows desktop runtime", "vendor": "microsoft", "product": ".net" }
   ]
 }
