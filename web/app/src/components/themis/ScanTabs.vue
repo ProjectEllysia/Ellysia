@@ -16,6 +16,7 @@ const tabs = [
   { id: 'nmap', label: 'Nmap' },
   { id: 'nikto', label: 'Nikto' },
   { id: 'openvas', label: 'OpenVAS' },
+  { id: 'nuclei', label: 'Nuclei' },
 ]
 </script>
 
@@ -28,4 +29,5 @@ const tabs = [
 .nmap .tab-dot { background: var(--success); }
 .nikto .tab-dot { background: var(--warn); }
 .openvas .tab-dot { background: var(--danger); }
+.nuclei .tab-dot { background: var(--info); }
 </style>

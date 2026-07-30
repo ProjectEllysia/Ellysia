@@ -552,6 +552,7 @@ def get_prompts_config() -> dict:
         "nikto": themis.get("nikto", {}).get("prompts", {}),
         "openvas": themis.get("openvas", {}).get("prompts", {}),
         "lybra": themis.get("lybra", {}).get("prompts", {}),
+        "nuclei": themis.get("nuclei", {}).get("prompts", {}),
     }
 
 @_lazy_load
@@ -670,6 +671,72 @@ def is_lybra_fingerprinting_enabled() -> bool:
     # register (roadmap §6) gates it per-target; this flag is just the
     # operator-level kill switch.
     return _as_bool(_cfg("themis.lybra.fingerprintingEnabled", True))
+
+
+# --- Nuclei (Fase U1) ---
+
+@_lazy_load
+def get_nuclei_binary_path() -> str:
+    """Ruta o nombre del binario ``nuclei`` (resuelto vía PATH por defecto)."""
+    return _cfg("themis.nuclei.binaryPath", "nuclei")
+
+@_lazy_load
+def get_nuclei_templates_dir() -> str:
+    """Directorio de plantillas explícito, o cadena vacía para dejar que
+    Nuclei use su ubicación por defecto (``~/.local/nuclei-templates`` o
+    equivalente, horneada en la imagen — ver Dockerfile)."""
+    return _cfg("themis.nuclei.templatesDir", "")
+
+@_lazy_load
+def get_nuclei_default_severities() -> list:
+    """Perfil acotado por defecto cuando el caller no especifica severidades.
+
+    Excluye ``info`` a propósito (roadmap Fase U1, punto 1): son miles de
+    plantillas de tech-detect, y al ser ``confirmed=True`` sin CVSS el suelo
+    de ``score_finding`` las subiría todas a MEDIO. Activarlas es una elección
+    explícita del usuario en el formulario, no un default.
+    """
+    return _cfg("themis.nuclei.defaultSeverities", ["critical", "high", "medium"])
+
+@_lazy_load
+def get_nuclei_rate_limit() -> int:
+    """Peticiones/segundo máximas por defecto."""
+    return _cfg("themis.nuclei.rateLimit", 150, int)
+
+@_lazy_load
+def get_nuclei_request_timeout() -> int:
+    """Timeout por petición HTTP individual (segundos)."""
+    return _cfg("themis.nuclei.requestTimeout", 10, int)
+
+@_lazy_load
+def get_nuclei_task_timeout() -> float:
+    """Timeout (s) por defecto del escaneo completo cuando el caller no
+    especifica uno explícito — también usado como timeout del job en
+    ``NucleiScanManager.run_scan``."""
+    return _cfg("themis.nuclei.timeout", 1800, float)
+
+@_lazy_load
+def get_nuclei_templates_version() -> str:
+    """Versión de plantillas usada como fallback hasta que ``NucleiScanTask``
+    capture la versión real del banner de arranque del binario (ver
+    ``NucleiScanManager._execute_scan``, que corrige el ``feed_version`` de
+    cada ``Finding`` post-hoc con ese dato más fiable).
+
+    Prioridad: 1) el fichero que el Dockerfile vuelca al hornear las
+    plantillas en build (``/app/resources/nuclei_templates_version.txt`` —
+    más fiable que un valor de configuración estático porque refleja lo que
+    de verdad se sincronizó en esa imagen), 2) ``themis.nuclei.templatesVersion``
+    en ``SecOpsConfig.json``, 3) un marcador explícito de "desconocido".
+    """
+    version_file = Path(get_directory_of(DirectoryType.RESOURCES_THEMIS)).parent / "nuclei_templates_version.txt"
+    try:
+        from_file = version_file.read_text(encoding="utf-8").strip()
+        if from_file:
+            return f"nuclei-templates-{from_file}"
+    except (OSError, IOError):
+        pass
+    configured = _cfg("themis.nuclei.templatesVersion", "")
+    return f"nuclei-templates-{configured}" if configured else "nuclei-templates-unknown"
 
 
 @_lazy_load

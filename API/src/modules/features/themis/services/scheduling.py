@@ -94,6 +94,26 @@ def _run_openvas_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> No
     logger.info("OpenVAS scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
 
 
+def _run_nuclei_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None:
+    _require_args(arguments, ["target"], "nuclei")
+
+    logger.info("Launching Nuclei scheduled scan #%d: %s", ps_id, arguments["target"])
+
+    from ..managers import NucleiScanManager
+
+    scan_id = NucleiScanManager().run_scan(
+        target=arguments["target"],
+        severities=arguments.get("severities"),
+        tags=arguments.get("tags"),
+        rate_limit=arguments.get("rate_limit"),
+        request_timeout=arguments.get("request_timeout"),
+        user_id=user_id,
+        programed_scan_id=ps_id,
+    )
+
+    logger.info("Nuclei scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
+
+
 def _run_lybra_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None:
     _require_args(arguments, ["target"], "lybra")
 
@@ -122,6 +142,7 @@ class ThemisScheduler:
         ScanType.NIKTO:   _run_nikto_scan,
         ScanType.OPENVAS: _run_openvas_scan,
         ScanType.LYBRA:   _run_lybra_scan,
+        ScanType.NUCLEI:  _run_nuclei_scan,
     }
 
     _scheduler: Optional[_BgScheduler] = None

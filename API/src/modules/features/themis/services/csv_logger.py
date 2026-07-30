@@ -236,6 +236,42 @@ class OpenVASScanLogger(BaseScanLogger):
         super().log(log_data)
 
 
+class NucleiScanLogger(BaseScanLogger):
+    _csv_name = "nuclei"
+
+    @property
+    def columns(self) -> list[str]:
+        return [
+            "timestamp",
+            "target",
+            "severities",
+            "tags",
+            "rate_limit",
+            "timeout_sec",
+            "duration_sec",
+            "concurrent_tasks",
+            "status",
+        ]
+
+    @property
+    def scan_type(self) -> str:
+        return "nuclei"
+
+    def log(self, data: dict) -> None:
+        log_data = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "target": data.get("target", ""),
+            "severities": data.get("severities", ""),
+            "tags": data.get("tags", ""),
+            "rate_limit": data.get("rate_limit", ""),
+            "timeout_sec": data.get("timeout_sec", ""),
+            "duration_sec": data.get("duration_sec", ""),
+            "concurrent_tasks": data.get("concurrent_tasks", ""),
+            "status": data.get("status", ""),
+        }
+        super().log(log_data)
+
+
 class ScanLoggerFactory:
     """
     Factory central para loggers CSV de escaneos.
@@ -259,6 +295,7 @@ class ScanLoggerFactory:
         cls.register("nmap", NmapScanLogger())
         cls.register("nikto", NiktoScanLogger())
         cls.register("openvas", OpenVASScanLogger())
+        cls.register("nuclei", NucleiScanLogger())
 
 
 ScanLoggerFactory.register_defaults()
@@ -271,4 +308,5 @@ __all__ = [
     "NmapScanLogger",
     "NiktoScanLogger",
     "OpenVASScanLogger",
+    "NucleiScanLogger",
 ]

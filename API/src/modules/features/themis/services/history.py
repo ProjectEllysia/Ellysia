@@ -26,7 +26,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Set, Type
 
-from ..model import LybraScan, NiktoScan, NmapScan, OpenVASScan, Scan, ScanType
+from ..model import LybraScan, NiktoScan, NmapScan, NucleiScan, OpenVASScan, Scan, ScanType
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,24 @@ class LybraMetricExtractor(MetricExtractor):
     metric_label = "Hallazgos"
 
     def identities(self, scan: LybraScan) -> Set[str]:
+        return {
+            f.dedup_key or f"finding:{f.id}"
+            for f in (scan.findings or [])
+        }
+
+
+@MetricExtractor.register(ScanType.NUCLEI)
+class NucleiMetricExtractor(MetricExtractor):
+    """Metric: findings. Identity: dedup_key, or the row id for one without.
+
+    Identical shape to ``LybraMetricExtractor`` — both scan types live
+    entirely in ``Finding`` (roadmap Fase U1), so there is nothing
+    Nuclei-specific to add here beyond the label.
+    """
+
+    metric_label = "Hallazgos"
+
+    def identities(self, scan: NucleiScan) -> Set[str]:
         return {
             f.dedup_key or f"finding:{f.id}"
             for f in (scan.findings or [])

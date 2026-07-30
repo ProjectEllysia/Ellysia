@@ -8,12 +8,14 @@ from typing import Callable, Optional
 import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import job_context
 from src.modules.infrastructure import UnitOfWork
+from src.modules.infrastructure.session import build_repository
 from src.modules.shared import utcnow_naive, isoformat_utc
 from ..repositories import ScanRepository
 from ..model import (
     NmapScan,
     NiktoScan,
     OpenVASScan,
+    NucleiScan,
     Scan,
     ScanType,
 )
@@ -21,6 +23,11 @@ from ..lybra import (
     compute_dedup_key,
     nikto_incident_to_finding,
     openvas_result_to_finding,
+    nuclei_result_to_finding,
+    merge_findings,
+    apply_lifecycle,
+    classify_exposure,
+    score_finding,
 )
 from ..services import (
     NmapResultProcessor,
@@ -30,6 +37,8 @@ from ..services import (
     OpenVASResultProcessor,
     OpenVASPrintingStrategy,
     OpenVASTask,
+    NucleiResultProcessor,
+    NucleiPrintingStrategy,
     _Task,
 )
 from ..exceptions import ScanNotFoundError
@@ -554,3 +563,273 @@ class OpenVASScanManager(ScanManager):
     def append_csv_data(self, data: dict, scan: Scan, task: "_Task") -> None:
         data["scan_config"] = getattr(scan, "scan_config_name", "")
         data["skip_normalize"] = getattr(scan, "skip_normalize", False)
+
+
+@ScanManager.register(ScanType.NUCLEI)
+class NucleiScanManager(ScanManager):
+    """
+    Manager for Nuclei template-based vulnerability scans (roadmap Fase U1).
+
+    Unlike Nikto/OpenVAS, Nuclei writes no result table of its own — every
+    hallazgo vive directamente en ``Finding`` vía ``nuclei_result_to_finding``,
+    la misma forma que ``LybraEngineManager`` ya adoptó. Eso es lo que le deja
+    entrar gratis en la deduplicación multifuente, el ciclo de vida
+    ``open``/``fixed``/``regressed`` y el scoring contextual de la Fase 5.
+
+    Example:
+    >>> manager = NucleiScanManager()
+    >>> scan_id = manager.run_scan(target="https://example.com", user_id=1)
+    """
+    SCAN_TYPE = ScanType.NUCLEI
+    _MODEL = NucleiScan
+    _strategy_class = NucleiPrintingStrategy
+    # _RICH_LOADER no se define: sin relaciones ORM propias que precargar,
+    # igual que LybraScan (ver ScanManager._RICH_LOADER).
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.result_processor = NucleiResultProcessor()
+
+    def run_scan(  # pylint: disable=arguments-differ
+        self,
+        target: str,
+        user_id: int,
+        severities: Optional[list] = None,
+        tags: Optional[list] = None,
+        rate_limit: Optional[int] = None,
+        request_timeout: Optional[int] = None,
+        timeout: Optional[int] = None,
+        programed_scan_id: Optional[int] = None,
+    ) -> int:
+        """
+        Start a Nuclei scan in a background thread.
+
+        Args:
+            target:          Target URL/host — se resuelve y se autoriza antes
+                de llegar aquí (ver ``endpoints.start_nuclei_scan``).
+            severities:      Perfil acotado de severidades (p. ej.
+                ``["critical", "high", "medium"]``). Sin esto, Nuclei con el
+                feed completo son miles de peticiones — no es un detalle de
+                afinado, es la diferencia entre una herramienta usable y una
+                que satura al objetivo en su primer uso.
+            tags:            Tags de plantillas opcionales (p. ej. ``["cve"]``).
+            rate_limit:      Peticiones/segundo máximas.
+            request_timeout: Timeout por petición HTTP individual (segundos).
+            timeout:         Timeout total del escaneo (segundos).
+
+        Returns:
+            Primary key of the created NucleiScan record.
+        """
+        try:
+            resolved_timeout = int(timeout) if timeout is not None else int(CR.get_nuclei_task_timeout())
+            scan = self._create_scan_record(
+                target=target,
+                user_id=user_id,
+                programed_scan_id=programed_scan_id,
+            )
+            scan_id = scan.id
+
+            self._tq.submit(
+                func=NucleiScanManager.execute_nuclei_scan,
+                args=(scan_id, target, severities, tags, rate_limit, request_timeout, resolved_timeout),
+                name=f"NucleiScan-{scan_id}",
+                category=self.TASK_CATEGORY,
+                external_id=self.external_id_for(scan_id),
+                timeout=resolved_timeout + self._scan_timeout_margin,
+            )
+
+            logger.info(f"Escaneo Nuclei {scan_id} iniciado")
+            return scan_id
+
+        except (OSError, RuntimeError) as e:
+            logger.error(f"Error iniciando escaneo Nuclei: {e}", exc_info=True)
+            raise
+
+    @staticmethod
+    def execute_nuclei_scan(
+        scan_id: int, target: str,
+        severities: Optional[list], tags: Optional[list],
+        rate_limit: Optional[int], request_timeout: Optional[int],
+        timeout: int,
+    ) -> None:
+        """Entry point submitted to the TaskQueue. Executes the Nuclei scan with progress and cancellation support."""
+        with job_context() as job:
+            from src.modules.features.themis.services.tasks import NucleiScanTask
+
+            task = NucleiScanTask(
+                target=target,
+                severities=severities,
+                tags=tags,
+                rate_limit=rate_limit,
+                request_timeout=request_timeout,
+                timeout=timeout,
+                progress_callback=job.progress,
+            )
+            NucleiScanManager()._execute_scan(scan_id, task, cancel_check=job.cancelled)
+
+    def _create_scan_record(self, target: str, user_id: int, programed_scan_id: Optional[int] = None) -> NucleiScan:  # pylint: disable=arguments-differ
+        """Create and persist a NucleiScan row."""
+        scan = NucleiScan(target=target, user_id=user_id, started_at=utcnow_naive(), programed_scan_id=programed_scan_id)
+        with UnitOfWork() as uow:
+            ScanRepository(uow).save(scan)
+            # Durable antes de encolar: el worker corre en otro proceso.
+            uow.commit_for_handoff()
+        return scan
+
+    def _execute_scan(
+        self,
+        scan_id: int,
+        task,
+        skip_normalize: bool = False,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> None:
+        """
+        Override: after the base execution, patch every Finding's
+        ``feed_version`` with the live templates version the binary reported.
+
+        ``_persist_scan_results`` (called inside the base ``_execute_scan``,
+        on a *different* manager instance — ``thread_manager =
+        self.__class__()``) has no access to this ``task``, so findings are
+        persisted first with the config-level fallback
+        (``CR.get_nuclei_templates_version()``) and corrected here once the
+        real value is available. Mirrors how ``OpenVASScanManager`` patches
+        ``task_id``/``report_id`` onto the scan row post-hoc, for the same
+        structural reason.
+        """
+        super()._execute_scan(scan_id, task, skip_normalize, cancel_check)
+
+        templates_version = getattr(task, "templates_version", None)
+        if templates_version:
+            try:
+                with UnitOfWork() as uow:
+                    ScanRepository(uow).set_feed_version_for_scan(
+                        scan_id, f"nuclei-templates-{templates_version}"
+                    )
+            except (OSError, RuntimeError) as e:
+                logger.error(
+                    f"Error actualizando feed_version para escaneo Nuclei {scan_id}: {e}",
+                    exc_info=True,
+                )
+
+    def _persist_scan_results(self, uow, scan, domain_data) -> None:
+        """Persist Nuclei findings as normalized Finding rows.
+
+        Three things happen beyond the raw adapter mapping: results sharing a
+        template collapse via ``merge_findings`` (Nuclei repeats the same
+        template once per ``matched-at``, so one exposed path found on three
+        URLs of the same host would otherwise become three rows), and
+        ``apply_lifecycle`` compares against this target's previous Nuclei
+        scan so ``state`` is genuinely ``fixed``/``regressed``/``open`` instead
+        of always ``open`` — the two things that make Nuclei "enter for free"
+        into Fase 5's correlation, per the roadmap.
+        """
+        results_data = domain_data
+        scan_repo = ScanRepository(uow)
+
+        from src.modules.shared._endpoints import normalize_target
+        ip, host = normalize_target(scan.target, resolve_hostname=True)
+        host_row = scan_repo.get_or_create_host(
+            hostname   = host or ip or scan.target,
+            ip_address = ip or scan.target,
+        )
+
+        previous_map = self._previous_findings_map(scan_repo, scan.user_id, scan.target, scan.id)
+
+        # Fallback usado hasta que _execute_scan lo corrija con la versión
+        # real leída del binario (ver el override de arriba).
+        default_feed_version = CR.get_nuclei_templates_version()
+
+        findings = []
+        for result_data in results_data:
+            finding = nuclei_result_to_finding(result_data, feed_version=default_feed_version)
+            finding["host_id"] = host_row.id
+            finding["dedup_key"] = compute_dedup_key(finding)
+            findings.append(finding)
+
+        findings = merge_findings(findings)
+        findings = apply_lifecycle(findings, previous_map)
+
+        scan_repo.persist_findings(scan, findings)
+
+    @staticmethod
+    def _previous_findings_map(scan_repo: ScanRepository, user_id: int, target: str, exclude_scan_id: int) -> dict:
+        """Build ``dedup_key -> {state, snapshot}`` from the previous Nuclei
+        scan of this target, for lifecycle comparison. Mirrors
+        ``LybraEngineManager._previous_findings_map`` — same shape, own scan
+        type."""
+        if not user_id or not target:
+            return {}
+        result: dict = {}
+        for pf in scan_repo.get_previous_findings(user_id, target, ScanType.NUCLEI.value, exclude_scan_id):
+            snapshot = pf.snapshot
+            key = pf.dedup_key or compute_dedup_key(snapshot)
+            snapshot["dedup_key"] = key
+            result[key] = {"state": pf.state or "open", "snapshot": snapshot}
+        return result
+
+    def format_scan(self, scan_id: int, _scan=None) -> dict:
+        scan = _scan or self.get_scan_by_id(scan_id)
+        if not scan:
+            raise ScanNotFoundError(scan_id)
+
+        repo = build_repository(ScanRepository)
+        exposure = classify_exposure(scan.target)
+
+        def _priority(f: dict) -> str:
+            return score_finding(
+                {"cvss_score": f.get("cvss_score"), "in_kev": f.get("in_kev"),
+                 "epss_score": f.get("epss_score"), "confirmed": f.get("confirmed")},
+                exposure,
+            )
+
+        findings = []
+        for f in repo.get_findings_by_scan(scan_id):
+            d = f.snapshot
+            d["id"] = f.id
+            d["state"] = f.state
+            d["priority"] = _priority(d)
+            findings.append(d)
+
+        result = {
+            "id": scan.id,
+            "scanType": "nuclei",
+            "target": scan.target,
+            "exposure": exposure,
+            "status": getattr(scan, "status", "unknown"),
+            "startedAt": isoformat_utc(scan.started_at),
+            "finishedAt": isoformat_utc(scan.finished_at),  # type: ignore
+            "findings": [
+                {
+                    "id": f.get("id"),
+                    "title": f.get("title"),
+                    "category": f.get("category"),
+                    "port": f.get("port"),
+                    "service": f.get("service"),
+                    "cpe": f.get("cpe"),
+                    "cveIds": f.get("cve_ids"),
+                    "cvssScore": f.get("cvss_score"),
+                    "epssScore": f.get("epss_score"),
+                    "inKev": f.get("in_kev"),
+                    "qod": f.get("qod"),
+                    "confirmed": f.get("confirmed"),
+                    "source": f.get("source"),
+                    "state": f.get("state"),
+                    "dedupKey": f.get("dedup_key"),
+                    "priority": f.get("priority"),
+                }
+                for f in findings
+            ],
+            "totalFindings": len(findings),
+            "criticalCount": sum(1 for f in findings if f.get("priority") == "CRITICAL"),
+            "highCount": sum(1 for f in findings if f.get("priority") == "HIGH"),
+            "confirmedFindings": sum(1 for f in findings if f.get("confirmed")),
+        }
+        self._append_document_info(scan, result)
+        return result
+
+    def append_csv_data(self, data: dict, scan: Scan, task: "_Task") -> None:
+        data["target"] = scan.target
+        data["severities"] = ",".join(getattr(task, "severities", None) or [])
+        data["tags"] = ",".join(getattr(task, "tags", None) or [])
+        data["rate_limit"] = getattr(task, "rate_limit", "")
+        data["timeout_sec"] = task.timeout

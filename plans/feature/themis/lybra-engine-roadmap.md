@@ -198,9 +198,17 @@ tarea, un procesador de resultados y un gestor— y tras la eliminación la tabl
 ```
 ScanType.NMAP    → NmapScanTask     → NmapResultProcessor   → NmapScanManager
 ScanType.NIKTO   → NiktoScanTask    → NiktoResultProcessor  → NiktoScanManager
+ScanType.NUCLEI  → NucleiScanTask   → NucleiResultProcessor → NucleiScanManager    ← Fase U
 ScanType.LYBRA   → LybraEngineTask  → LybraResultProcessor  → LybraEngineManager   ← el motor
 ScanType.OPENVAS → ✂ eliminado (§7)
 ```
+
+Sobre la persistencia hay dos formas en el repositorio, y la Fase U elige a conciencia. Nmap, Nikto y
+OpenVAS tienen **tablas de resultados propias** además del `Finding` aditivo; `LybraScan` es una
+subclase fina de `Scan` **sin tabla de resultados ninguna**, y todo lo suyo vive en `Finding`.
+`NucleiScan` sigue la forma de Lybra, por la razón que el §5.3 y el paso E3 del §7 ya demuestran: las
+tablas nativas son andamiaje que este mismo plan está desmontando en otro sitio, y no tiene sentido
+construirlo nuevo en 2026.
 
 El registro por decorador (`@ScanManager.register(ScanType.LYBRA)`) sobre el modelo polimórfico
 (`polymorphic_on=scan_type`) es lo que hace que el motor herede sin escribir una línea la cancelación
@@ -264,7 +272,8 @@ La pista de **correlación** está completa; la de **bajo nivel** está a medias
 | **2** — KB local (NVD, CPE Dictionary, KEV, EPSS) | Correlación | ✓ implementada |
 | **5** — Dedup multi-fuente, ciclo de vida, scoring, `HostService` | Correlación | ✓ implementada |
 | **6** — Pipeline orquestado | Convergencia | ✓ implementada |
-| **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — 15 checks, tipos `http`/`tls`/`network`; falta `script`; el feed es JSON, no el YAML estilo Nuclei del diseño. Detalle actualizado en la sección Fase R más abajo |
+| **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ◐ parcial — U1 hecha (rama `feature/themis/nuclei-engine`), U2/U3/U4 sin empezar. **U4 sigue siendo prerrequisito del cierre de R**. Detalle en la sección Fase U más abajo |
+| **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — 15 checks, tipos `http`/`tls`/`network`; falta `script`; el feed es JSON, no el YAML estilo Nuclei del diseño. Su cierre depende de la Fase U. Detalle actualizado en la sección Fase R más abajo |
 | **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS, y (Fase N) FTP, SMTP/IMAP/POP3, SMB, MySQL/MariaDB, Redis, VNC; falta JARM, SNMP (sin sonda UDP), PostgreSQL/MSSQL/MongoDB, RDP, LDAP, Telnet, RPC. Detalle actualizado en la sección Fase N más abajo |
 | **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; faltan SYN sin estado, sondas UDP y control de tasa AIMD |
 | **4**, DAST y Etapa 2 (P, E, C, O, A, B, D, G, S, X) | Ambas | ○ planificadas |
@@ -285,10 +294,11 @@ El resultado es esta reordenación, que es el cambio de fondo de esta revisión:
 | **0.º** | **0.9 — Contrato de entrada externa de servicios** (nueva, pre-fase) | — | No cierra ninguna brecha por sí sola; es el cable que hace posible que la Fase I lo haga. Barata, aislada, sin riesgo para lo que ya funciona |
 | **1.º** | **N — Dissectors y checks de red no-HTTP** (nueva) | **G1** | Sin ella, "prescindir de OpenVAS" significa perder de verdad cobertura. Con ella, la detección por versión se extiende a toda la superficie no-web sin escribir un solo check por CVE |
 | **2.º** | **I — Inventario de Hygeia → Lybra** (H0–H2) — ◐ parcial | **G2** | Es la prioridad nº 1 del documento de gobierno por razones de producto, y resulta que además es el sustituto del escaneo autenticado de OpenVAS. Dos motivos independientes apuntando al mismo trabajo. La tubería está construida (2026-07-28); falta la **resolución de nombre de paquete → CPE** (Fase I-b), sin la cual el motor recibe el inventario pero no sabe reconocerlo |
-| **3.º** | **R (cierre) — tipos `network` y `script`, feed en YAML** | G1, G4 | El tipo `network` es el vehículo declarativo de la Fase N; sin él, cada sonda nueva es código |
-| **4.º** | **O — Backports por feed de distribución** | **G3** | Ataca la causa nº 1 de falsos positivos sin tocar el host ni pedir credenciales |
-| **5.º** | **D — Credenciales por defecto** | **G4** | Cobertura clásica de OpenVAS, con guardas propias (lockout, tasa, evidencia sin plaintext) |
-| **6.º** | **F y T (cierre) — JARM, SYN sin estado, UDP, AIMD** | — | Independiza de Nmap, no de OpenVAS. Trabajo de identidad y disfrute, no de necesidad |
+| **3.º** | **U — Nuclei como herramienta, corroborador y oráculo** (nueva) | G4 parcial, y **la vara de medir** | Entrega una herramienta de producto completa a coste bajo, sustituye a Nikto como corroborador con datos mucho mejores (CVE + CVSS frente a OSVDB), y da el oráculo de falsos positivos que el §8 admite que falta. Va antes que el cierre de R porque es quien lo hace medible |
+| **4.º** | **R (cierre) — tipo `script`, feed en YAML, ingesta de plantillas** | G1, G4 | El tipo `network` **ya existe** (lo aportó la Fase N). Lo que queda —YAML, ingesta y el umbral de precisión— depende de la Fase U; `script` no |
+| **5.º** | **O — Backports por feed de distribución** | **G3** | Ataca la causa nº 1 de falsos positivos sin tocar el host ni pedir credenciales |
+| **6.º** | **D — Credenciales por defecto** | **G4** | Cobertura clásica de OpenVAS, con guardas propias (lockout, tasa, evidencia sin plaintext) |
+| **7.º** | **F y T (cierre) — JARM, SYN sin estado, UDP, AIMD** | — | Independiza de Nmap, no de OpenVAS. Trabajo de identidad y disfrute, no de necesidad |
 | resto | Etapa 2 (P, E, C, A, B, G, S, X) | — | Capacidades nuevas, ninguna condicionada por la salida de OpenVAS |
 
 Las fases **4** (escaneo autenticado por SSH) y **DAST** bajan de prioridad de forma explícita: la
@@ -900,7 +910,217 @@ el feed curado con datos en vez de por intuición.
 
 ---
 
-### Fase R — El runtime de detección propio · pista de bajo nivel · ◐ parcial
+### Fase U — Nuclei como herramienta, corroborador y oráculo · pista de bajo nivel · ◐ parcial (U1 hecha) · **prerrequisito del cierre de la Fase R**
+
+**El objetivo** es incorporar Nuclei a Ellysia en sus cuatro papeles posibles de una vez, porque los
+cuatro comparten la misma pieza de trabajo y separarlos sería escribirla cuatro veces. Es la única
+fase de este documento que **añade** una dependencia externa en lugar de retirarla, y por eso conviene
+justificar primero por qué no contradice la premisa.
+
+**Por qué Nuclei sí y OpenVAS no.** El §1 estableció que la distinción no es de tamaño ni de calidad,
+sino **de naturaleza**: un binario de línea de comandos cuya salida parseamos frente a una plataforma
+entera con su protocolo, su ciclo de vida y su base de datos. Nuclei pasa ese examen con holgura y por
+el mismo lado que Nmap y Nikto: se invoca, escupe JSONL, se parsea, se traduce a `Finding`, se
+descarta el proceso. Sin daemon, sin puertos publicados, sin `NET_ADMIN`, sin `shm_size`, sin
+`depends_on` en `api` y `worker`, sin quince minutos de sincronización en frío, sin cuatro secretos de
+entorno, sin el problema del vecino ruidoso. Comparado con la tabla de costes del §1, no está en la
+misma categoría. El §8 ya lo había anticipado en una frase —*"Nuclei es un binario de línea de
+comandos con un feed de datos, no una plataforma"*—; esta fase se limita a ejecutar esa conclusión.
+
+**Los cuatro papeles, y qué comparten.**
+
+| # | Papel | Dónde vive | Qué necesita |
+|---|---|---|---|
+| **U1** | **Herramienta de primera clase** — `ScanType.NUCLEI`, lanzable solo desde el panel, con su PDF, su vista previa, su historial y su programación | Junto a Nmap y Nikto | El patrón de 4 piezas + el traductor a `Finding` |
+| **U2** | **Corroborador del análisis profundo** de Lybra (Fase 6) | `_launch_deep_corroborators` | Una línea, si U1 existe |
+| **U3** | **Oráculo diferencial** del banco: medir falsos positivos y hallazgos que se nos escapan | `tests/oracle/` | El mismo traductor de U1, en un contenedor efímero |
+| **U4** | **Fuente de plantillas ingeribles** al `CheckRuntime` propio | Fase R | El subconjunto del lenguaje de Nuclei — **caro, y por eso queda en R** |
+
+La observación que ordena la fase: **U1, U2 y U3 comparten el traductor de la salida de Nuclei a
+`Finding`, y esa pieza es pequeña.** U4 es el único caro, es el único que necesita entender el
+*lenguaje* de las plantillas en vez de la *salida* del binario, y es el que se queda en la Fase R como
+su trabajo pendiente. Esta fase entrega los tres primeros y deja al cuarto medido y decidible.
+
+#### U1 — Nuclei como escaneo de primera clase
+
+**Por qué encaja mejor que Nikto en el modelo `Finding`.** Ésta es la razón de fondo por la que la
+fase merece la pena más allá del producto. Lo que `nikto_incident_to_finding` (`lybra/adapters.py`)
+tiene para trabajar es `osvdb_id` —una base de datos muerta desde 2016—, `method`, `url`,
+`description` y `severity`: sin CVE, sin CVSS, sin CPE. Ese `Finding` entra en la maquinaria de la
+Fase 5 prácticamente vacío. La salida JSONL de Nuclei trae `template-id`, `info.severity`,
+`info.classification.cve-id`, `cvss-score`, `cvss-metrics`, `info.tags`, `matched-at` y
+`extracted-results`. El mapeo es casi 1:1 con el `Finding`, **incluidos `cve_ids`, `cvss_score` y
+`check_id`**, lo que significa que un escaneo de Nuclei entra gratis en la deduplicación multifuente,
+el ciclo de vida `open`/`fixed`/`regressed`, el scoring contextual con EPSS/KEV y la clasificación de
+exposición de la Fase 5. Nikto nunca pudo. **El escaneo individual que el usuario lanza desde el panel
+es, simultáneamente, el mejor alimentador de `Finding` que va a tener el sistema**, y no hay tensión
+entre las dos cosas: Nikto ya funciona exactamente así hoy —el usuario lo lanza solo y el adapter
+escribe en `Finding` de forma aditiva, sin que Lybra intervenga.
+
+**La decisión de diseño que gobierna el resto: sin tablas nativas.** El repositorio contiene hoy dos
+formas de añadir un `ScanType`, y hay que elegir a conciencia:
+
+| Forma | Ejemplo | Qué persiste |
+|---|---|---|
+| **Nikto/OpenVAS** | `NiktoScan` + `NiktoIncident` (`model.py`) | Tablas de resultados propias **más** un `Finding` aditivo — doble persistencia |
+| **Lybra** | `LybraScan` (`model.py`), una subclase fina de `Scan` sin tabla de resultados | Solo `Finding` |
+
+**Se adopta la forma Lybra**, y la razón es que el propio documento ya la demostró: el paso **E3 del
+desmontaje** (§7) consiste literalmente en borrar las tres tablas nativas de OpenVAS y quedarse con
+los `Finding`, con la conclusión de que *"no se pierde información de valor: se pierde el andamiaje
+que la producía"* (§5.3). Construir `NucleiScan` + `NucleiFinding` sería crear a sabiendas, en una
+fase nueva, exactamente el andamiaje que otra fase de este mismo plan está desmontando. `NucleiScan`
+es por tanto una subclase de `Scan` con poco más que su `id`, y todos sus resultados viven en
+`Finding` desde el primer día. Beneficio colateral nada menor: **el PDF puede reutilizar el
+renderizador de `Finding` que Lybra ya tiene** en vez de escribir un bloque específico, que es la
+parte más tediosa de dar de alta un escáner.
+
+**Qué construir.** El patrón de cuatro piezas, con la plantilla ya escrita dos veces:
+
+- `NucleiScanTask` (`services/tasks.py`) — comando, fichero temporal de salida, progreso. Modelar
+  sobre `NiktoScanTask`.
+- `NucleiResultProcessor` + `NucleiPrintingStrategy` (`services/processors.py`) — parseo de JSONL
+  (una línea por hallazgo, no un documento XML: más simple que Nikto).
+- `NucleiScanManager` (`managers/thirdparty_scans_managers.py`) — orquestación y persistencia vía
+  `nuclei_result_to_finding` (`lybra/adapters.py`) + `ScanRepository.persist_findings`.
+- `NucleiScan` + `ScanType.NUCLEI` (`model.py`), con su migración de Alembic.
+
+Más el registro y la lectura: endpoint y schema, `worker.py`, `config_reading.py` y `SecOpsConfig.json`
+(`themis.nuclei.*`), y del lado de lectura `reports.py`, `csv_logger.py`, `analyzers.py`, `history.py`
+y `scheduling.py`. En la SPA, **una entrada nueva en `constants/scanTypes.js`** cubre la mayor parte:
+ese registro existe precisamente para esto —lo dice su propio comentario de cabecera, escrito cuando
+añadir Lybra dejó claro el problema de las listas duplicadas—, y los componentes restantes leen de él.
+
+**Las cuatro cosas que van a morder, nombradas por adelantado:**
+
+1. **El tiempo de escaneo y la presión sobre el objetivo.** Nuclei con el feed completo contra un solo
+   host son miles de peticiones. Hace falta un **perfil acotado por defecto** —por `-severity`, por
+   `-tags`, o un subconjunto curado— expuesto en el formulario de lanzamiento, más `-rate-limit`. Nikto
+   no obligaba a pensar esto; Nuclei sí, y no es un detalle de afinado: es la diferencia entre una
+   herramienta usable y una que satura al objetivo en su primer uso.
+2. **La actualización del feed de plantillas.** Nuclei se autoactualiza por red al arrancar. Dentro de
+   un worker eso es una llamada saliente en mitad de un escaneo, con su latencia y su fallo posible:
+   se desactiva (`-duc`) y el feed pasa a tener su propio ciclo de sincronización, del mismo modo que
+   `KbSyncManager` lo tiene para la KB. Dónde vive y quién lo refresca es una decisión de esta fase,
+   no una que se descubra en producción.
+3. **El gate de objetivos autorizados** (§9). Nuclei toca el objetivo bastante más que Nikto. Nace
+   sujeto al registro de autorizados desde el día uno, no se le añade después.
+4. **`feed_version`.** El `Finding` debe registrar la versión del feed de plantillas con la que se
+   produjo, igual que `CHECKS_FEED_VERSION` hace para los checks propios. Sin eso, el escaneo no es
+   reproducible y se rompe la garantía del §9.
+
+**Damos U1 por hecho cuando** un usuario lanza un escaneo de Nuclei desde el panel sin que Lybra
+intervenga, obtiene su PDF, y los hallazgos resultantes aparecen deduplicados por `dedup_key` junto a
+los de un escaneo previo del mismo activo, con su `cve_ids` y su `cvss_score` poblados desde la
+salida de la herramienta.
+
+**Estado (2026-07-30): ✓ hecha**, en la rama `feature/themis/nuclei-engine`. `ScanType.NUCLEI` +
+`NucleiScan` siguen la forma Lybra (sin tabla de resultados propia); `nuclei_result_to_finding`
+(`lybra/adapters.py`) normaliza las CVE de Nuclei a mayúsculas —sin eso la fusión por `dedup_key` con
+Lybra/OpenVAS nunca ocurriría— y marca cada hallazgo `confirmed=True` con un QoD fijo, por ser una
+aserción de un matcher estructurado y no un patrón de texto como el de Nikto. `NucleiScanTask` corre
+con un perfil de severidad acotado por defecto (excluye `info` a propósito), `-duc` (plantillas
+horneadas en el Dockerfile, sin red a mitad de escaneo) y lee la versión real del feed del propio
+banner de arranque del binario. `NucleiScanManager` fusiona los hallazgos dentro del escaneo (Nuclei
+repite la misma plantilla por cada `matched-at`) y aplica el ciclo de vida contra el Nuclei anterior
+del mismo objetivo. El gate de objetivos autorizados (punto 3 de arriba) está aplicado desde el
+endpoint `POST /themis/nuclei`, reutilizando `TargetNotAuthorizedError`. El renderizador de PDF de
+Lybra se generalizó a una `FindingsPrintingStrategy` compartida (Lybra queda con el mismo
+comportamiento exacto) de la que `NucleiPrintingStrategy` es una subclase fina — el "beneficio
+colateral" que este mismo apartado anticipaba. En el frontend, Nuclei es una cuarta pestaña del
+mundo de escáneres externos, registrada en `constants/scanTypes.js`.
+
+Lo que esta pasada **no** cierra, a propósito: **U2** (Nuclei como corroborador del análisis
+profundo, ver más abajo — sigue sin tocarse `_launch_deep_corroborators`), **U3** (el oráculo
+diferencial de `tests/oracle/`) y **U4** (ingesta de plantillas). Tampoco hay cron de
+sincronización del feed de plantillas: se hornean en la imagen y envejecen hasta el siguiente build;
+el patrón a seguir cuando se aborde es el de `KbSyncManager` + `ThemisScheduler._schedule_kb_sync`.
+
+#### U2 — Corroborador del análisis profundo
+
+Una vez existe U1, `LybraEngineManager._launch_deep_corroborators` gana a Nuclei con la misma
+condición que hoy dispara a Nikto (hay algún servicio HTTP). Es una línea.
+
+**Y aquí aparece una consecuencia de producto que conviene afrontar en vez de dejarla implícita: en
+cuanto Nuclei está en el pool, Nikto se queda sin trabajo.** Cubre menos superficie, con datos de peor
+calidad (OSVDB frente a CVE + CVSS), y deja de ser el corroborador web. El glosario decía que Nikto
+"se queda como corroborador hasta que la Fase R alcance su umbral de precisión"; esta fase adelanta
+esa fecha por una vía que no estaba prevista. **La retirada de Nikto no se ejecuta en esta fase** —no
+hay prisa y no cuesta nada mantenerlo mientras se compara—, pero sí se declara la intención: el pool
+objetivo de herramientas externas es **Nmap + Nuclei**, más limpio que los tres actuales. La decisión
+se toma con el número de U3, no con una fecha.
+
+#### U3 — El oráculo diferencial
+
+Es la segunda pata del §8, y con U1 hecha es casi gratis: el traductor ya existe, solo hay que
+ejecutarlo en un contenedor efímero del banco y comparar. Mide lo que la verdad por etiqueta conocida
+no puede medir: **falsos positivos** en objetivos sin etiqueta previa, y hallazgos que se nos escapan.
+Nunca corre en producción como oráculo; el binario que sí corre en producción es el de U1, que es otro
+uso y otro riesgo.
+
+#### U4 — La ingesta de plantillas, medida antes de decidirse
+
+Éste es el papel que **no** entrega esta fase, y conviene ser explícito sobre por qué. El
+`CheckRuntime` actual (`lybra/checks.py`) entiende un subconjunto pequeño del lenguaje de Nuclei:
+
+| Nuclei | `CheckRuntime` hoy |
+|---|---|
+| Matchers `status`, `word`, `regex` | ✓ |
+| Matchers `binary`, `size`, `dsl`, `favicon` | ✗ — `dsl` es un lenguaje de expresiones entero |
+| `extractors` + interpolación `{{var}}` | ✗ |
+| `payloads` + `attack: batteringram/pitchfork/clusterbomb` | ✗ |
+| `condition: and` **dentro** de un matcher de words | ✗ — `Matcher._raw_match` fija `any()` |
+| `req-condition`, `stop-at-first-match` entre peticiones | ✗ — `_run_check` combina siempre con AND |
+| `interactsh` (out-of-band) | ✗, y debe seguir así |
+| `code:`, `flow:` (JavaScript) | ✗, y debe seguir así — ya descartado en la Fase R |
+| `network` con `inputs`/`type: hex` (payload binario) | ✗ — `Request.send` es `str` y se codifica en UTF-8 |
+
+Esa última fila tiene premio, y es la convergencia que justifica tratar U y R como piezas del mismo
+trabajo: la Fase N dejó registrado que los checks "SMB sin firma" y "SMBv1 habilitado" **no se pudieron
+construir** porque *"el runtime declarativo actual solo compara texto decodificado, y una respuesta
+SMB2 es binaria"*. **Adoptar el esquema `network` de Nuclei —`inputs` con `type: hex` más un matcher
+`binary`— desbloquea exactamente ese hueco ya documentado.** No es una coincidencia forzada: es la
+misma carencia vista desde dos sitios.
+
+Por tanto, "ingerir el feed de Nuclei" nunca va a significar ingerirlo entero, sino **la fracción que
+use solo el subconjunto que soportemos**, descartando el resto. Y esa fracción hoy no la sabemos. El
+entregable de U4 en esta fase no es código de producto: es **la medición**. Un script que clone
+`projectdiscovery/nuclei-templates`, parsee las plantillas y las clasifique por las características que
+requieren, produciendo un histograma —cuántas se ingieren hoy tal cual, cuántas necesitan
+`extractors`, cuántas `dsl`, cuántas son `code`/`flow` y quedan descartadas por diseño—. Ese número
+decide la Fase R:
+
+- **Fracción alta** → la migración del feed a YAML y la ingesta selectiva valen la pena, y R las
+  acomete con el esquema de Nuclei como referencia.
+- **Fracción baja** → R renuncia a ingerir, se queda con `network` y `script`, y sigue siendo un buen
+  resultado. El feed propio puede migrar a YAML igualmente, por legibilidad, pero deja de ser una
+  promesa de compatibilidad.
+
+Dos cautelas que no se descuidan: **auditar la licencia** del repositorio de plantillas antes de
+redistribuir nada en un feed propio, y **ingerir en tiempo de sincronización, no vendorizar** — el
+repositorio cambia a diario y meterlo en el checkout es peso y superficie de suministro que no
+queremos; el patrón de `KbSyncManager` ya existe para esto.
+
+#### Qué NO incluye esta fase
+
+Para que no se disperse: no incluye la ingesta real de plantillas (es U4→Fase R, condicionada a la
+medición), no incluye la migración del feed propio a YAML (Fase R), no incluye la retirada de Nikto
+(se declara la intención, se ejecuta con el número de U3), y no incluye ninguna tabla de resultados
+nativa para Nuclei — por decisión, no por omisión.
+
+#### Definición de hecho
+
+**Damos la Fase U por hecha cuando** (1) un usuario lanza un escaneo de Nuclei desde el panel, con
+perfil acotado y objetivo autorizado, y descarga su PDF; (2) sus hallazgos llegan a `Finding` con
+`cve_ids`, `cvss_score`, `check_id` y `feed_version` poblados, y se deduplican con los de otras
+fuentes sobre el mismo activo; (3) el análisis profundo de Lybra lo dispara como corroborador; (4) el
+banco produce un número de falsos positivos frente a Nuclei sobre al menos tres objetivos sin etiqueta
+previa; y (5) existe el histograma de ingestibilidad del feed de plantillas, con una recomendación
+escrita de sí o no para U4.
+
+---
+
+### Fase R — El runtime de detección propio · pista de bajo nivel · ◐ parcial · **su cierre depende de la Fase U**
 
 Ésta es la capa de identidad, la L2. Es lo que convierte a Lybra de un correlacionador en un motor
 con criterio propio de detección: un runtime único de comprobaciones —versionado, extensible y
@@ -972,6 +1192,22 @@ plugins de terceros, la vía es aislarlos en un subproceso con `rlimit`/seccomp 
 **Damos la fase por hecha cuando** el motor detecta por versión y confirma activamente al menos las
 tres primeras familias, existen los tipos `network` y `script`, el feed vive en YAML, y el `qod` sube
 de 70 a 99 en lo confirmado.
+
+**El prerrequisito de la Fase U, delimitado con precisión.** Tres de los cuatro entregables que quedan
+para cerrar esta fase dependen de que la Fase U se haya hecho antes, y uno no:
+
+| Lo que falta de R | ¿Depende de U? | Por qué |
+|---|---|---|
+| **Migración del feed a YAML** | **Sí** | El esquema al que se migra es el de Nuclei; migrar antes de saber qué fracción del lenguaje vamos a soportar (U4) es elegir la forma a ciegas y arriesgarse a migrar dos veces |
+| **Ingesta de plantillas externas** | **Sí** | Es literalmente U4. Sin el histograma de ingestibilidad no se sabe si vale la pena construirla |
+| **Precisión ≥ 0,9 medida** | **Sí** | El numerador de falsos positivos lo da el oráculo diferencial (U3). Sin él, "precisión 0,9" sigue siendo una frase, como reconoce el §8 |
+| **El tipo de check `script`** | **No** | Es un plugin de primera parte en Python, sin relación con Nuclei. Se puede construir en cualquier momento |
+
+Y una delimitación en la otra dirección, para que el prerrequisito no estrangule al roadmap: **la Fase
+U no bloquea a la Fase N.** El tipo de check `network` que N necesitaba como vehículo declarativo **ya
+está construido** (lo aportó la propia Fase N, ver su nota de estado), así que N puede seguir avanzando
+—dissectors nuevos, checks de configuración de red— sin esperar a nada de esto. Lo único que la Fase U
+condiciona es el **cierre** de R, no su existencia ni la fase prioritaria que se apoya en ella.
 
 **Estado (2026-07-11, sigue vigente):** la mecánica está completa — 13 checks activos en 3 familias,
 todas bajo el mismo `CheckRuntime`, todas `confirmed=true`/`qod=99` cuando disparan, feed versionado
@@ -1376,9 +1612,19 @@ positivos* y descubrir hallazgos que se nos escapan en objetivos sin etiqueta pr
 OpenVAS no encajaba, por la misma razón que gobierna todo este documento: **Nuclei es un binario de
 línea de comandos con un feed de datos**, no una plataforma con su propio protocolo, su ciclo de vida
 y su base de datos. Se ejecuta en un contenedor efímero del banco de pruebas, se compara su salida
-con la nuestra, y se descarta. Nunca corre en producción, nunca es una dependencia de tiempo de
-ejecución, y su feed es además el mismo que la Fase R quiere ingerir como plantillas — así que el
-trabajo se aprovecha dos veces.
+con la nuestra, y se descarta.
+
+**Esa segunda pata es ahora el papel U3 de la Fase U**, y conviene señalar el cambio de encuadre que
+esa fase introduce: cuando este apartado se escribió, "Nuclei nunca corre en producción" era una
+propiedad del diseño. Con la Fase U deja de serlo — Nuclei pasa a ser también una herramienta de
+primera clase que el usuario lanza (U1) y un corroborador del análisis profundo (U2). **La distinción
+que se mantiene no es "en producción sí o no", sino "dependencia de tiempo de ejecución del motor sí o
+no"**: Lybra sigue sin necesitar a Nuclei para funcionar, exactamente igual que no necesita a Nmap ni
+a Nikto. Lo que se gana a cambio es que el traductor de la salida de Nuclei a `Finding` se escribe una
+sola vez y sirve para los tres papeles, y que el número de falsos positivos deja de ser un ejercicio
+de laboratorio para medirse sobre los mismos objetivos que el usuario escanea de verdad. El feed de
+plantillas es además el mismo que la Fase R quiere ingerir (U4) — así que el trabajo se aprovecha
+cuatro veces, no dos.
 
 **Nmap sigue siendo el oráculo de descubrimiento y fingerprinting**, exactamente como hasta ahora, y
 sigue midiéndose con `test_lybra_concordance_bench.py`. Con la Fase N, el catálogo de ese banco tiene
@@ -1450,14 +1696,18 @@ Los números que dan cada fase por hecha:
 |---|---|
 | **N** | Producto y versión extraídos en ≥ 4 protocolos no-HTTP con concordancia ≥ 0,90 frente a `nmap -sV`, en laboratorio **y** en objetivos reales; ≥ 3 checks de configuración de red disparando con `qod=99` |
 | **I** | Hallazgos de CVE producidos desde el inventario de un host con agente, fusionados por `dedup_key` con los del escaneo remoto del mismo activo |
-| **R** | Familias de TLS, cabeceras y paths con precisión ≥ 0,9 medida contra el catálogo de imágenes etiquetadas; tipos `network` y `script` existentes; feed en YAML |
+| **U** | Un escaneo de Nuclei lanzable solo, con PDF, cuyos `Finding` traen `cve_ids`/`cvss_score`/`feed_version` y deduplican con los de otras fuentes; falsos positivos medidos sobre ≥ 3 objetivos sin etiqueta; histograma de ingestibilidad del feed de plantillas con recomendación escrita |
+| **R** | Familias de TLS, cabeceras y paths con precisión ≥ 0,9 medida contra el catálogo de imágenes etiquetadas **y contra el oráculo diferencial de la Fase U**; tipos `network` y `script` existentes; feed en YAML |
 | **O** | Falsos positivos del banco −40 % en imágenes Debian/RHEL |
 | **D** | Detección en laboratorio con límite de intentos respetado y cero plaintext persistido |
 | **F** | Concordancia de fingerprint ≥ 0,90 con Nmap por familia, laboratorio **y** real |
 | **T** | Concordancia de puertos ≥ 0,95 con Nmap, laboratorio **y** real; degradación sin `CAP_NET_RAW` probada |
 
-Y las decisiones grandes se toman con un umbral, no con una fecha. ¿Retiramos Nikto? Solo cuando las
-tres primeras familias de la Fase R alcancen precisión 0,9. ¿Construimos el repositorio nativo? Solo
+Y las decisiones grandes se toman con un umbral, no con una fecha. ¿Retiramos Nikto? Cuando la Fase U
+demuestre con el número de U3 que Nuclei lo cubre —una vía más rápida que la prevista, que era esperar
+a la precisión 0,9 de las tres primeras familias de la Fase R. ¿Ingerimos plantillas de Nuclei
+(U4/Fase R)? Solo si el histograma de ingestibilidad de la Fase U da una fracción que lo justifique.
+¿Construimos el repositorio nativo? Solo
 cuando el laboratorio demuestre el techo de rendimiento en Python. ¿Abrimos el análisis web activo?
 Solo si el uso real es web y existe el registro de autorización.
 
@@ -1479,7 +1729,10 @@ su registro de objetivos autorizados.
 | **Pérdida de cobertura al eliminar OpenVAS antes de cerrar G1** | Aceptada conscientemente: no hay usuarios apoyándose en ella (§7). La Fase N lidera el roadmap precisamente por esto |
 | Falsos positivos por versión (backports) | El par `qod`/`confirmed`; los confirmadores de la Fase R; las Fases O e I, que lo atacan por dos caminos independientes |
 | La Fase N se convierte en un pozo sin fondo de protocolos | Lista priorizada y cerrada (7 familias, 3 niveles); la cola larga de appliances es anti-meta declarada (G5) |
-| Coste de mantenimiento del diccionario de CPE y los checks | Los alias como "una línea nueva"; la ingesta de plantillas de Nuclei; el feed versionado con CI |
+| Coste de mantenimiento del diccionario de CPE y los checks | Los alias como "una línea nueva"; la ingesta de plantillas de Nuclei (U4); el feed versionado con CI |
+| **Que la Fase U reintroduzca por la puerta de atrás la dependencia que el §1 expulsa** | Nuclei pasa el examen de naturaleza del §1 (binario + feed, no plataforma) y no es dependencia de tiempo de ejecución del motor: Lybra funciona sin él igual que sin Nmap. La señal de alarma sería que Lybra dejase de detectar por su cuenta y se limitase a envolver la salida de Nuclei — el §4 ya lo nombra como anti-meta |
+| **Que Nuclei haga irrelevante al `CheckRuntime` propio (Fase R)** | Riesgo real y asumido: Nuclei es abrumadoramente HTTP, y lo que R aporta que él no tiene es el encadenamiento versión→confirmador contra la KB local, el tipo `network` sobre los dissectors de la Fase N y el tipo `script`. Si el histograma de U4 sale bajo, R se estrecha a eso y renuncia a competir en la familia `http` — un resultado más honesto que mantener 10 checks frente a un feed comunitario vivo |
+| **Escaneos de Nuclei que saturan al objetivo o tardan una eternidad** | Perfil acotado por defecto (`-severity`/`-tags`/subconjunto curado) más `-rate-limit`, decididos en la propia Fase U y no descubiertos en producción; el registro de objetivos autorizados como prerrequisito |
 | Riesgo legal: las Fases N, R, T y D tocan el objetivo | El registro de objetivos autorizados como prerrequisito; el modo `safe` por defecto; el presupuesto de intentos de la Fase D |
 | Deriva de alcance hacia "clonar OpenVAS" | Las anti-metas del §4; el beachhead estrecho; la disciplina del 80/20 |
 | Coste del repositorio nativo | Aparcado hasta tener evidencia de rendimiento; el fallback en Python siempre presente |
@@ -1516,8 +1769,16 @@ El camino crítico, en orden, para el primer resultado tangible bajo esta premis
 5. Y solo entonces, **E1 y E2** del desmontaje, con la tranquilidad de que la primera pieza del
    sustituto ya está en pie.
 
-A partir de ahí, el orden del §6.2: el resto de dissectors de la Fase N, la Fase I, el cierre de la
-Fase R, la Fase O y la Fase D.
+A partir de ahí, el orden del §6.2: el resto de dissectors de la Fase N, la Fase I, **la Fase U**, el
+cierre de la Fase R, la Fase O y la Fase D.
+
+**Una nota sobre por dónde entrar en la Fase U**, porque tiene un orden interno que no es obvio. Lo
+tentador es empezar por el histograma de ingestibilidad (U4), que es lo intelectualmente interesante;
+lo correcto es empezar por **U1**, que es lo que entrega producto. El traductor de la salida de Nuclei
+a `Finding` es la pieza de la que cuelgan U2 y U3 casi gratis, y el histograma se puede hacer en
+cualquier momento porque no depende de nada del backend — es un script suelto sobre un clon del
+repositorio de plantillas. Orden: U1 (herramienta + PDF) → U2 (una línea en el corroborador) → U3 (el
+banco, reusando el traductor) → U4 (el histograma y su recomendación).
 
 ---
 
@@ -1535,7 +1796,8 @@ Fase R, la Fase O y la Fase D.
 | 6 | — | L4 | El pipeline orquestado | ✓ hecha |
 | **N** | Bajo nivel | L1+L2 | **Dissectors y checks no-HTTP (SMB, FTP, SMTP, SNMP, BD, RDP…)** | **G1 — la brecha decisiva** |
 | **I** | Correlación | L3 | **Inventario de Hygeia → `Service` → motor** | **G2 — mejor que el escaneo autenticado** |
-| R | Bajo nivel | L2 | Runtime de checks; faltan `network`, `script` y el YAML | G1, G4 — **Nikto** |
+| **U** | Bajo nivel | L2 | **`ScanType.NUCLEI` de primera clase (sin tablas nativas), corroborador, oráculo diferencial y medición de ingestibilidad** | **La vara de medir de R; jubila a Nikto** |
+| R | Bajo nivel | L2 | Runtime de checks; faltan `script` y el YAML (`network` ya hecho) — **su cierre requiere U** | G1, G4 — **Nikto** |
 | O | Correlación | L3 | Backports por feeds OVAL/CSAF de distribución | **G3 — el Notus propio** |
 | D | Bajo nivel | L2 | Credenciales por defecto, lockout-safe, sin plaintext | **G4** |
 | F | Bajo nivel | L1 | Fingerprint propio; falta JARM | `nmap -sV`, que pasa a oráculo |
@@ -1579,7 +1841,10 @@ lógica de detección propia. Es lo que Themis era, y lo que este plan supera.
 identificar servicios y versiones. **Se queda** como corroborador y como oráculo del banco.
 
 **Nikto** — Escáner de vulnerabilidades web que comprueba rutas y configuraciones peligrosas
-conocidas. **Se queda** como corroborador hasta que la Fase R alcance su umbral de precisión.
+conocidas. **Se queda** como corroborador, pero con fecha de caducidad más cercana de lo previsto: la
+Fase U introduce a Nuclei, que cubre la misma superficie con datos mucho mejores (CVE y CVSS frente al
+OSVDB de Nikto, muerto desde 2016). El pool objetivo de herramientas externas es **Nmap + Nuclei**; la
+retirada se decide con el número del oráculo (U3), no con una fecha.
 
 **OpenVAS / Greenbone** — Suite completa de gestión de vulnerabilidades, con protocolo propio (GMP),
 ciclo de escaneo propio y feed de NVTs. **Se elimina** (§7): es una plataforma, no una herramienta.
@@ -1594,8 +1859,10 @@ las versiones reales de los paquetes. Lo sustituye la Fase I.
 cada distribución. Su equivalente propio es la Fase O.
 
 **Nuclei** — Motor que ejecuta plantillas de detección declarativas en YAML, con un gran feed
-comunitario. Es un binario CLI con un feed de datos, no una plataforma: por eso sí encaja, como
-oráculo diferencial del banco (§8) y como fuente de plantillas ingeribles (Fase R).
+comunitario. Es un binario CLI con un feed de datos, no una plataforma: por eso sí encaja, y la
+**Fase U** lo incorpora en sus cuatro papeles — herramienta de primera clase lanzable por el usuario
+(U1), corroborador del análisis profundo (U2), oráculo diferencial del banco (U3, el §8) y fuente de
+plantillas ingeribles (U4, que queda en la Fase R condicionado a una medición previa).
 
 **CVE** — El identificador estándar de una vulnerabilidad concreta, p. ej. CVE-2021-41773.
 

@@ -273,7 +273,7 @@ class ScanRepository(BaseRepository[Scan]):
         Return scan counts grouped by type for a user.
 
         Returns:
-            Dict with keys ``total``, ``nmap``, ``nikto``, ``openvas``.
+            Dict with keys ``total``, ``nmap``, ``nikto``, ``openvas``, ``lybra``, ``nuclei``.
         """
         from sqlalchemy import func
 
@@ -283,7 +283,7 @@ class ScanRepository(BaseRepository[Scan]):
             .group_by(Scan.scan_type)
             .all()
         )
-        counts = {"nmap": 0, "nikto": 0, "openvas": 0, "lybra": 0}
+        counts = {"nmap": 0, "nikto": 0, "openvas": 0, "lybra": 0, "nuclei": 0}
         for scan_type_val, count in results:
             key = scan_type_val.value if hasattr(scan_type_val, "value") else str(scan_type_val)
             if key in counts:
@@ -668,23 +668,54 @@ class ScanRepository(BaseRepository[Scan]):
         """Return a single finding by id (or None)."""
         return self._session.get(Finding, finding_id)
 
+    def get_previous_findings(
+        self, user_id: int, target: str, scan_type: str, exclude_scan_id: int
+    ) -> List[Finding]:
+        """Return the findings of the user's previous finished scan of a given
+        type against a target (for lifecycle comparison), or an empty list if
+        there is none. Generic over ``scan_type`` — the version any scanner's
+        manager (Lybra, Nuclei, ...) can share instead of each hand-rolling its
+        own "find the previous scan" query.
+        """
+        prev = (
+            self._session.query(Scan)
+            .filter(
+                Scan.user_id == user_id,
+                Scan.target == target,
+                Scan.scan_type == scan_type,
+                Scan.status == ScanStatus.FINISHED.value,
+                Scan.id != exclude_scan_id,
+            )
+            .order_by(Scan.started_at.desc())
+            .first()
+        )
+        return self.get_findings_by_scan(prev.id) if prev else []
+
     def get_previous_lybra_findings(
         self, user_id: int, target: str, exclude_scan_id: int
     ) -> List[Finding]:
         """Return the findings of the user's previous finished Lybra scan of a
-        target (for lifecycle comparison), or an empty list if there is none."""
-        prev = (
-            self._session.query(LybraScan)
-            .filter(
-                LybraScan.user_id == user_id,
-                LybraScan.target == target,
-                LybraScan.status == ScanStatus.FINISHED.value,
-                LybraScan.id != exclude_scan_id,
-            )
-            .order_by(LybraScan.started_at.desc())
-            .first()
+        target (for lifecycle comparison), or an empty list if there is none.
+
+        Thin wrapper kept for its existing call sites — the real query is now
+        the type-generic ``get_previous_findings``.
+        """
+        return self.get_previous_findings(user_id, target, ScanType.LYBRA.value, exclude_scan_id)
+
+    def set_feed_version_for_scan(self, scan_id: int, feed_version: str) -> None:
+        """Bulk-update every Finding's ``feed_version`` for a scan.
+
+        Used by ``NucleiScanManager`` to correct the reproducibility marker
+        after the fact: findings are persisted with a config-level fallback
+        during ``_persist_scan_results`` (before the live ``templates_version``
+        banner from the running binary is captured), then patched here once
+        the outer ``_execute_scan`` override has it. Mirrors how
+        ``OpenVASScanManager`` patches ``task_id``/``report_id`` onto the scan
+        row post-hoc, for the same structural reason.
+        """
+        self._session.query(Finding).filter(Finding.scan_id == scan_id).update(
+            {"feed_version": feed_version}
         )
-        return self.get_findings_by_scan(prev.id) if prev else []
 
     def get_host_services(self, host_id: int) -> List[HostService]:
         """Return a host's currently-tracked attack surface (Fase 5)."""

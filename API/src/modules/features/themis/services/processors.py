@@ -403,6 +403,51 @@ class NiktoResultProcessor(ScanResultProcessor):
             return []
 
 
+class NucleiResultProcessor(ScanResultProcessor):
+    """Procesa resultados de escaneos Nuclei (JSONL, una línea por hallazgo)."""
+
+    def process(self, raw_data: List[dict] | str) -> List[Dict[str, Any]]:
+        """Extrae los hallazgos de un fichero JSONL de Nuclei.
+
+        Args:
+            raw_data: Ruta al fichero ``.jsonl``, o una lista ya vacía (el caso
+                "escaneo limpio, Nuclei no escribió fichero" que
+                ``NucleiScanTask._process_results`` produce directamente).
+
+        Returns:
+            Lista de diccionarios, uno por línea JSONL decodificada. Más
+            simple que Nikto: sin XML, sin ``DOCTYPE`` que limpiar. Una línea
+            corrupta se salta con log en vez de tumbar el escaneo entero.
+        """
+        if isinstance(raw_data, str):
+            return self._parse_nuclei_jsonl(raw_data)
+        return list(raw_data or [])
+
+    def _parse_nuclei_jsonl(self, jsonl_path: str) -> List[Dict[str, Any]]:
+        path = Path(jsonl_path)
+        if not path.is_file():
+            return []
+
+        results: List[Dict[str, Any]] = []
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, IOError) as e:
+            logger.error(f"Error leyendo JSONL de Nuclei: {e}", exc_info=True)
+            return []
+
+        for line_number, raw_line in enumerate(content.splitlines(), start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                results.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                logger.warning(f"Línea {line_number} del JSONL de Nuclei corrupta, se salta: {e}")
+                continue
+
+        return results
+
+
 class OpenVASResultProcessor(ScanResultProcessor):
     """Procesa resultados de escaneos OpenVAS/GVM."""
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 from typing import Optional
+from urllib.parse import urlparse
 
 
 # Nikto's severity classification (its ``_classify_threat_level``) is a pattern
@@ -42,6 +43,38 @@ _OPENVAS_SEVERITY_QOD = {
     "Medium":   60,
     "Low":      40,
     "Log":      30,
+}
+
+# A Nuclei matcher is a structured assertion against a real response (a status
+# code, a regex, a word match) — the same kind of certainty an active check in
+# Lybra's own runtime carries, not a text-pattern heuristic like Nikto's. Every
+# Nuclei finding is therefore "confirmed" at this fixed QoD, the same way
+# ``lybra/checks.py``'s own active checks are.
+QOD_NUCLEI_MATCH = 90
+
+# Fallback CVSS band for a Nuclei finding whose template carries no
+# ``info.classification`` (no CVE, no explicit cvss-score) — the common case for
+# misconfiguration/exposure templates. Derived from the template author's own
+# ``info.severity`` rating, on the same scale ``openvas_result_to_finding``
+# already uses when an NVT lacks its own ``cvss_base_score`` (falling back to
+# ``severity_score``): a precedent already in this file, not a new invention.
+# This is *not* an NVD CVSS score — it is the author's severity judgement
+# expressed on the CVSS numeric scale, so priority scoring has something to
+# work with instead of treating every CVE-less finding as a flat zero.
+_NUCLEI_SEVERITY_CVSS = {
+    "critical": 9.5,
+    "high":     8.0,
+    "medium":   5.5,
+    "low":      3.0,
+    "info":     None,
+}
+
+# Nuclei's own "type" families that do not map to a CVE, bucketed into the
+# Finding categories the rest of the system already understands.
+_NUCLEI_TYPE_CATEGORY = {
+    "http": "web_finding",
+    "ssl":  "tls",
+    "tls":  "tls",
 }
 
 
@@ -122,6 +155,99 @@ def openvas_result_to_finding(vuln, result: dict) -> dict:
         "confirmed":    qod >= 80,
         "state":        "open",
     }
+
+
+def nuclei_result_to_finding(result: dict, feed_version: str = "nuclei-templates-unknown") -> dict:
+    """Adapt one Nuclei JSONL result line into a Finding dict.
+
+    Nuclei's output maps almost 1:1 onto ``Finding`` — unlike Nikto's
+    ``osvdb_id``, a matched template can carry a real CVE, CVSS and EPSS score
+    straight from its ``info.classification`` block. That is what lets a Nuclei
+    scan enter the multi-source deduplication (Fase 5) for free.
+
+    Args:
+        result: One decoded JSONL line, as produced by ``NucleiResultProcessor``.
+        feed_version: The templates version the scan ran with (read from the
+            binary's own startup banner by ``NucleiScanTask``, so it reflects
+            what actually ran, not a config default).
+
+    Returns:
+        A dict of ``Finding`` column values. The caller still attaches
+        ``host_id`` and ``dedup_key`` before persisting.
+    """
+    info = result.get("info") or {}
+    classification = info.get("classification") or {}
+
+    # Nuclei emits CVE ids lowercase ("cve-2021-41773"). compute_dedup_key
+    # builds its identity from "cve:" + sorted(cve_ids) — without normalizing
+    # here, the same CVE reported by Lybra ("CVE-2021-41773") and Nuclei would
+    # hash to two different keys and never merge, which is the entire point of
+    # giving Nuclei this adapter in the first place.
+    raw_cve_ids = classification.get("cve-id") or []
+    cve_ids = sorted({c.upper() for c in raw_cve_ids if c}) or None
+
+    cvss_score = classification.get("cvss-score")
+    if cvss_score is None:
+        severity = (info.get("severity") or "").strip().lower()
+        cvss_score = _NUCLEI_SEVERITY_CVSS.get(severity)
+
+    template_id = result.get("template-id") or "unknown"
+    title = info.get("name") or template_id
+
+    template_type = (result.get("type") or "").strip().lower()
+    category = "outdated_software" if cve_ids else _NUCLEI_TYPE_CATEGORY.get(template_type, "vulnerability")
+
+    tags = info.get("tags") or []
+    in_kev = "kev" in [str(t).strip().lower() for t in tags]
+
+    return {
+        "title":        title,
+        "category":     category,
+        "port":         _nuclei_port(result),
+        "service":      template_type or None,
+        "cpe":          classification.get("cpe"),
+        "cve_ids":      cve_ids,
+        "cvss_score":   cvss_score,
+        "cvss_vector":  classification.get("cvss-metrics"),
+        "epss_score":   classification.get("epss-score"),
+        "in_kev":       in_kev,
+        "source":       "nuclei",
+        "check_id":     f"nuclei:{template_id}",
+        "feed_version": feed_version,
+        # A matcher (status/word/regex/binary) is a structured assertion
+        # against a real response — always actively confirmed, never a guess.
+        "qod":          QOD_NUCLEI_MATCH,
+        "confirmed":    True,
+        "state":        "open",
+    }
+
+
+def _nuclei_port(result: dict) -> Optional[int]:
+    """Best-effort port extraction for a Nuclei result.
+
+    Nuclei does not always carry an explicit ``port`` field; when present it
+    is reused directly, otherwise the scheme's URL (``matched-at`` first, then
+    ``host``) is parsed for an explicit port. Never raises — returns ``None``
+    when nothing can be resolved.
+    """
+    port = result.get("port")
+    if port:
+        try:
+            return int(port)
+        except (TypeError, ValueError):
+            pass
+
+    for field in ("matched-at", "host"):
+        value = result.get(field)
+        if not value:
+            continue
+        try:
+            parsed = urlparse(value if "://" in value else f"//{value}")
+            if parsed.port:
+                return parsed.port
+        except ValueError:
+            continue
+    return None
 
 
 def _parse_port(port_str: Optional[str]) -> Optional[int]:

@@ -27,6 +27,7 @@ class ProgramedScanManager():
         ScanType.NIKTO:     ["target_domain"],
         ScanType.OPENVAS:   ["target"],
         ScanType.LYBRA:     ["target"],
+        ScanType.NUCLEI:    ["target"],
     }
 
     @classmethod
