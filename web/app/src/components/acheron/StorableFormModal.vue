@@ -203,14 +203,14 @@ function submit() {
 }
 .modal-card {
   width: 100%; max-width: 480px; max-height: 88vh; overflow-y: auto;
-  background: #15161d; border: 1px solid rgba(160, 122, 192, 0.28);
+  background: var(--surface); border: 1px solid rgba(160, 122, 192, 0.28);
   border-radius: 16px; box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6);
 }
 .modal-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border);
 }
-.modal-title { font-family: var(--font-display); font-size: var(--fs-xl); color: var(--text); }
+.modal-title { font-family: var(--font-display); font-size: var(--fs-lg); color: var(--text); }
 .modal-close {
   background: none; border: none; color: var(--text-muted); cursor: pointer;
   padding: 0.25rem; display: grid; place-items: center;
@@ -229,23 +229,23 @@ function submit() {
   border-radius: 10px; transition: all 0.18s ease;
 }
 .type-btn:hover { background: rgba(160, 122, 192, 0.14); border-color: rgba(160, 122, 192, 0.45); }
-.type-btn-label { color: var(--text); font-weight: 600; font-size: var(--fs-xl); }
-.type-btn-sub { color: var(--text-muted); font-size: var(--fs-md); }
+.type-btn-label { color: var(--text); font-weight: 600; font-size: var(--fs-lg); }
+.type-btn-sub { color: var(--text-muted); font-size: var(--fs-body); }
 
 /* Formulario */
 .modal-form { padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
 .form-field { display: flex; flex-direction: column; gap: 0.35rem; }
 .form-label {
-  font-family: var(--font-mono); font-size: var(--fs-md); text-transform: uppercase;
+  font-family: var(--font-mono); font-size: var(--fs-body); text-transform: uppercase;
   letter-spacing: 0.06em; color: var(--text-muted);
 }
 .form-hint { text-transform: none; letter-spacing: 0; color: var(--text-muted); opacity: 0.8; }
 .form-input { position: relative; display: flex; align-items: center; }
 .modal-form input,
 .modal-form textarea {
-  width: 100%; padding: 0.65rem 0.8rem; background: rgba(0, 0, 0, 0.25);
+  width: 100%; padding: 0.65rem 0.8rem; background: var(--surface-2);
   border: 1px solid var(--border-med); border-radius: 9px; color: var(--text);
-  font-size: var(--fs-input); font-family: var(--font-mono); transition: border-color 0.2s ease;
+  font-size: var(--fs-md); font-family: var(--font-mono); transition: border-color 0.2s ease;
 }
 .modal-form input { padding-right: 2.4rem; }
 .modal-form textarea { resize: vertical; line-height: 1.5; }
@@ -259,7 +259,7 @@ function submit() {
 .reveal-btn svg { width: 17px; height: 17px; }
 
 .form-error {
-  color: var(--danger); font-size: var(--fs-lg);
+  color: var(--danger); font-size: var(--fs-md);
   background: var(--danger-dim); border: 1px solid rgba(217, 108, 108, 0.25);
   border-radius: 8px; padding: 0.5rem 0.7rem;
 }
@@ -269,13 +269,13 @@ function submit() {
 .btn-ghost {
   padding: 0.6rem 0.9rem; border-radius: 9px; cursor: pointer;
   background: none; border: 1px solid var(--border-med); color: var(--text-dim);
-  font-size: var(--fs-lg); transition: all 0.18s ease;
+  font-size: var(--fs-md); transition: all 0.18s ease;
 }
 .btn-ghost:hover:not(:disabled) { color: var(--text); border-color: var(--border-solid); }
 .btn-primary {
   padding: 0.6rem 1.2rem; border: none; border-radius: 9px; cursor: pointer;
   background: linear-gradient(135deg, #a07ac0, #7d5aa0); color: #fff;
-  font-size: var(--fs-lg); font-weight: 600;
+  font-size: var(--fs-md); font-weight: 600;
   display: inline-flex; align-items: center; gap: 0.5rem;
   transition: filter 0.18s ease;
 }
