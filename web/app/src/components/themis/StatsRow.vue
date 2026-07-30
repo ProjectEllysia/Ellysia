@@ -20,6 +20,11 @@
       <div class="stat-label">OpenVAS</div>
       <div class="stat-sub">análisis de vulns</div>
     </div>
+    <div class="stat-card blue">
+      <div class="stat-value"><Transition name="num-flip" mode="out-in"><span :key="nuclei">{{ nuclei }}</span></Transition></div>
+      <div class="stat-label">Nuclei</div>
+      <div class="stat-sub">plantillas</div>
+    </div>
   </div>
 </template>
 
@@ -29,6 +34,7 @@ defineProps({
   nmap:    { type: Number, default: 0 },
   nikto:   { type: Number, default: 0 },
   openvas: { type: Number, default: 0 },
+  nuclei:  { type: Number, default: 0 },
 })
 </script>
 

@@ -38,7 +38,7 @@ export const useThemisStore = defineStore('themis', () => {
   const activeTab = ref('nmap')
 
   /* ════════════════════════════════ STATS ══════════════════════════════ */
-  const stats = reactive({ total: 0, nmap: 0, nikto: 0, openvas: 0, lybra: 0 })
+  const stats = reactive({ total: 0, nmap: 0, nikto: 0, openvas: 0, lybra: 0, nuclei: 0 })
   const loadingStats = ref(false)
   const statsError = ref(null)
 
@@ -48,6 +48,7 @@ export const useThemisStore = defineStore('themis', () => {
     nikto:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
     openvas: { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
     lybra:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
+    nuclei:  { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
     // Fase I: los escaneos del activo Hygeia seleccionado. Mismo tipo de
     // escaneo que `lybra` y misma forma de estado —por eso `LybraResults` se
     // reutiliza tal cual—, pero su propia lista: el backend los sirve por
@@ -90,6 +91,7 @@ export const useThemisStore = defineStore('themis', () => {
       stats.nikto   = data.nikto   ?? 0
       stats.openvas = data.openvas ?? 0
       stats.lybra   = data.lybra   ?? 0
+      stats.nuclei  = data.nuclei  ?? 0
       stats.total   = data.total   ?? 0
       statsError.value = null
     } catch { statsError.value = 'Error de conexión al cargar las estadísticas.' }
@@ -203,6 +205,10 @@ export const useThemisStore = defineStore('themis', () => {
   /** Lanza un escaneo OpenVAS. */
   async function launchOpenvas(payload) {
     return _launch('/themis/openvas', payload, 'openvas')
+  }
+  /** Lanza un escaneo Nuclei (roadmap Fase U1). */
+  async function launchNuclei(payload) {
+    return _launch('/themis/nuclei', payload, 'nuclei')
   }
 
   /* ── LYBRA (el motor propio) ── */
@@ -757,11 +763,11 @@ export const useThemisStore = defineStore('themis', () => {
     launching.value = false
     selectedAssetId.value = null
 
-    Object.assign(stats, { total: 0, nmap: 0, nikto: 0, openvas: 0, lybra: 0 })
+    Object.assign(stats, { total: 0, nmap: 0, nikto: 0, openvas: 0, lybra: 0, nuclei: 0 })
     loadingStats.value = false
     statsError.value = null
 
-    for (const type of ['nmap', 'nikto', 'openvas', 'lybra', 'agentLybra']) {
+    for (const type of ['nmap', 'nikto', 'openvas', 'lybra', 'nuclei', 'agentLybra']) {
       Object.assign(scans[type], { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null })
     }
 
@@ -781,7 +787,7 @@ export const useThemisStore = defineStore('themis', () => {
     preview, details,
     viewMode,
     loadStats, loadScans, switchTab, refreshCurrent, goToPage, stopScanPolling,
-    launchNmap, launchNikto, launchOpenvas,
+    launchNmap, launchNikto, launchOpenvas, launchNuclei,
     launchLybra, loadLybraScans, loadMoreLybraScans, loadSourceNmapScans, deleteLybraScan,
     selectedAssetId, selectAgentAsset, loadAgentScans,
     lybraDocs, loadLybraDocs, generateLybraPdf, deleteLybraDoc,

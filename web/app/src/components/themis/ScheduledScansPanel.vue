@@ -154,6 +154,7 @@ function formatDate(iso) { if (!iso) return '—'; return new Date(iso).toLocale
 .type-badge.nikto { color: var(--warn); background: var(--warn-dim); }
 .type-badge.openvas { color: var(--danger); background: var(--danger-dim); }
 .type-badge.lybra { color: var(--accent-bright); background: var(--accent-dim); }
+.type-badge.nuclei { color: var(--info); background: var(--info-dim); }
 .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 0.3rem; }
 .status-dot.active { background: var(--success); }
 .status-dot.revoked { background: var(--text-muted); }
