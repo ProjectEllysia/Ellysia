@@ -553,64 +553,60 @@ def aegis_config() -> AegisConfig:
 
 
 # =============================================================================
-# CONFIGURACIÓN DE IA (scribe)
+# CONFIGURACIÓN DE LAS HERRAMIENTAS (scribe / herald)
 # =============================================================================
+#
+# Scribe (generación con IA) y Herald (envío de correo) comparten la misma
+# forma: una estrategia por defecto, un override por módulo consumidor y unos
+# ajustes por estrategia. De ahí la clase base común — no es abstracción
+# preventiva, son dos bloques que ya existen y ya son idénticos.
 
-@_lazy_load
-def get_ai_config() -> dict:
-    """Devuelve el bloque 'ai' de SecOpsConfig.json (puede estar vacío)."""
-    return _cfg("tools.scribe", {})
+@dataclass(frozen=True)
+class _StrategySelection:
+    """Selección de estrategia de una herramienta enchufable."""
 
+    default_strategy: str = ""
+    """Estrategia usada cuando el módulo no tiene override propio."""
 
-@_lazy_load
-def get_ai_strategy_for(module: str | None = None) -> str:
-    """Resuelve la estrategia de IA para un módulo.
+    modules: dict[str, str] = field(default_factory=dict)
+    """Override por módulo consumidor: ``{"aegis": "openai", …}``."""
 
-    Busca primero un override por módulo en ``ai.modules.<module>`` y, si no
-    existe, devuelve ``ai.defaultStrategy`` (o 'ollama' como último recurso).
+    strategies: dict[str, dict] = field(default_factory=dict)
+    """Ajustes propios de cada estrategia (modelo, host SMTP, remitente…)."""
 
-    Args:
-        module: Nombre del módulo consumidor ('aegis', 'themis', …).
+    def strategy_for(self, module: Optional[str] = None) -> str:
+        """Estrategia que le toca a ``module``, o la de por defecto."""
+        if module:
+            return self.modules.get(module, self.default_strategy)
+        return self.default_strategy
 
-    Returns:
-        Nombre de la estrategia ('ollama' | 'openai' | …).
-    """
-    ai_cfg = get_ai_config()
-    default = ai_cfg.get("defaultStrategy", "ollama")
-    if module:
-        return ai_cfg.get("modules", {}).get(module, default)
-    return default
-
-
-# =============================================================================
-# CONFIGURACIÓN DE CORREO (herald)
-# =============================================================================
-
-@_lazy_load
-def get_email_config() -> dict:
-    """Devuelve el bloque 'email' de SecOpsConfig.json (puede estar vacío)."""
-    return _cfg("tools.herald", {})
+    def options_for(self, strategy_name: str) -> dict:
+        """Ajustes declarados para ``strategy_name`` (vacío si no hay)."""
+        return self.strategies.get(strategy_name, {})
 
 
-@_lazy_load
-def get_email_strategy_for(module: str | None = None) -> str:
-    """Resuelve la estrategia de correo para un módulo.
+@config_block("tools.scribe")
+@dataclass(frozen=True)
+class ScribeConfig(_StrategySelection):
+    """Capa de generación con IA (Ollama / OpenAI / Google)."""
 
-    Busca primero un override por módulo en ``email.modules.<module>`` y, si
-    no existe, devuelve ``email.defaultStrategy`` (o 'smtp' como último
-    recurso). Espejo de ``get_ai_strategy_for``.
+    default_strategy: str = "ollama"
 
-    Args:
-        module: Nombre del módulo consumidor ('aegis', …).
 
-    Returns:
-        Nombre de la estrategia ('smtp' | …).
-    """
-    email_cfg = get_email_config()
-    default = email_cfg.get("defaultStrategy", "smtp")
-    if module:
-        return email_cfg.get("modules", {}).get(module, default)
-    return default
+@config_block("tools.herald")
+@dataclass(frozen=True)
+class HeraldConfig(_StrategySelection):
+    """Capa de envío de correo (relay SMTP)."""
+
+    default_strategy: str = "smtp"
+
+
+def scribe_config() -> ScribeConfig:
+    return load_block(ScribeConfig)
+
+
+def herald_config() -> HeraldConfig:
+    return load_block(HeraldConfig)
 
 
 def get_smtp_environment() -> dict[str, str]:

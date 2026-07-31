@@ -5,7 +5,7 @@ Follows the same pattern as ``themis/services/analyzers.py``'s
 ``NmapAIWriter``/``NiktoAIWriter``/``OpenVASAIWriter``: model calling is
 delegated to an injected scribe ``AIGenerator``, prompts live in
 SecOpsConfig.json (``features.iris.prompts.summary``), and the strategy (Ollama/
-OpenAI) is resolved per module via ``get_ai_strategy_for("iris")``.
+OpenAI) is resolved per module via ``CR.scribe_config().strategy_for("iris")``.
 
 Unlike Themis — where the AI narrative is generated inline while building
 the PDF and never persisted on its own — Iris's web report viewer is a live

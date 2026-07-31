@@ -102,25 +102,25 @@ def test_mailer_send_bulk_isolates_individual_failures():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Config: bloque 'email' / estrategia por módulo
+# Config: bloque 'tools.herald' / estrategia por módulo
 # ─────────────────────────────────────────────────────────────────────────
 
-def test_get_email_config_reads_smtp_block():
-    cfg = CR.get_email_config()
-    assert cfg["defaultStrategy"] == "smtp"
-    assert cfg["strategies"]["smtp"]["host"] == "smtp-relay.brevo.com"
+def test_herald_config_reads_the_smtp_block():
+    config = CR.herald_config()
+    assert config.default_strategy == "smtp"
+    assert config.options_for("smtp")["host"] == "smtp-relay.brevo.com"
 
 
-def test_get_email_strategy_for_module_override():
-    assert CR.get_email_strategy_for("aegis") == "smtp"
+def test_strategy_for_module_override():
+    assert CR.herald_config().strategy_for("aegis") == "smtp"
 
 
-def test_get_email_strategy_for_unknown_module_falls_back_to_default():
-    assert CR.get_email_strategy_for("unknown-module") == "smtp"
+def test_strategy_for_unknown_module_falls_back_to_default():
+    assert CR.herald_config().strategy_for("unknown-module") == "smtp"
 
 
-def test_get_email_strategy_for_no_module_returns_default():
-    assert CR.get_email_strategy_for() == "smtp"
+def test_strategy_for_no_module_returns_default():
+    assert CR.herald_config().strategy_for() == "smtp"
 
 
 def test_get_smtp_environment_reads_env(monkeypatch):

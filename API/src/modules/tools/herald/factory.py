@@ -26,8 +26,7 @@ logger = logging.getLogger(__name__)
 def _build_strategy(name: str) -> EmailStrategy:
     """Instancia la estrategia ``name`` con credenciales de entorno/config."""
     name = (name or "smtp").lower()
-    email_cfg = CR.get_email_config()
-    overrides = email_cfg.get("strategies", {}).get(name, {})
+    overrides = CR.herald_config().options_for(name)
 
     if name == "smtp":
         creds = CR.get_smtp_environment()
@@ -55,7 +54,7 @@ def build_mailer(module: Optional[str] = None) -> Mailer:
     Returns:
         Un Mailer listo para ``send``/``send_bulk``.
     """
-    strategy_name = CR.get_email_strategy_for(module)
+    strategy_name = CR.herald_config().strategy_for(module)
     logger.info("[herald] módulo=%s → estrategia=%s", module, strategy_name)
     strategy = _build_strategy(strategy_name)
     return Mailer(strategy=strategy)

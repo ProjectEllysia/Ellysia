@@ -149,18 +149,19 @@ def test_getter_reads_its_documented_path(raw_config, getter, dotted_path, monke
     )
 
 
-@pytest.mark.parametrize("strategy_getter, dotted_path", [
-    (CR.get_ai_strategy_for,    "tools.scribe.modules.themis"),
-    (CR.get_email_strategy_for, "tools.herald.modules.aegis"),
+@pytest.mark.parametrize("tool_accessor, dotted_path", [
+    (CR.scribe_config, "tools.scribe.modules.themis"),
+    (CR.herald_config, "tools.herald.modules.aegis"),
 ])
 def test_strategy_resolution_reads_the_tools_branch(
-    raw_config, strategy_getter, dotted_path, monkeypatch
+    raw_config, tool_accessor, dotted_path, monkeypatch
 ):
+    """``strategy_for`` resuelve el override por módulo desde la rama correcta."""
     module_name = dotted_path.rsplit(".", 1)[1]
-    baseline = strategy_getter(module_name)
+    baseline = tool_accessor().strategy_for(module_name)
     monkeypatch.setattr(CR, "_configs", _with_sentinel_at(raw_config, dotted_path))
 
-    assert strategy_getter(module_name) != baseline
+    assert tool_accessor().strategy_for(module_name) != baseline
 
 
 # =============================================================================
@@ -185,6 +186,8 @@ CONFIG_BLOCKS = [
     (CR.NucleiConfig, CR.nuclei_config),
     (CR.AegisConfig, CR.aegis_config),
     (CR.IrisConfig, CR.iris_config),
+    (CR.ScribeConfig, CR.scribe_config),
+    (CR.HeraldConfig, CR.herald_config),
 ]
 
 

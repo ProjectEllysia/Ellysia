@@ -96,9 +96,10 @@ def local_email_config(monkeypatch, smtp_catcher):
     controller, handler = smtp_catcher
     import src.modules.system.config_reading as CR
 
-    fake_email_cfg = {
-        "defaultStrategy": "smtp",
-        "strategies": {
+    fake_herald_config = CR.HeraldConfig(
+        default_strategy="smtp",
+        modules={"aegis": "smtp"},
+        strategies={
             "smtp": {
                 "host": controller.hostname,
                 "port": controller.port,
@@ -107,9 +108,8 @@ def local_email_config(monkeypatch, smtp_catcher):
                 "fromName": "Ellysia Test",
             }
         },
-        "modules": {"aegis": "smtp"},
-    }
-    monkeypatch.setattr(CR, "get_email_config", lambda: fake_email_cfg)
+    )
+    monkeypatch.setattr(CR, "herald_config", lambda: fake_herald_config)
     monkeypatch.setattr(CR, "get_smtp_environment", lambda: {"username": "", "password": ""})
     monkeypatch.setattr(CR, "get_public_web_url", lambda: "http://localhost:5173")
     return handler

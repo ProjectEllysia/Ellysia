@@ -26,8 +26,7 @@ logger = logging.getLogger(__name__)
 def _build_strategy(name: str) -> ModelStrategy:
     """Instancia la estrategia ``name`` con credenciales de entorno/config."""
     name = (name or "ollama").lower()
-    ai_cfg = CR.get_ai_config()
-    overrides = ai_cfg.get("strategies", {}).get(name, {})
+    overrides = CR.scribe_config().options_for(name)
 
     if name == "ollama":
         host, model = CR.get_ollama_environment()
@@ -62,6 +61,6 @@ def build_generator(module: Optional[str] = None) -> AIGenerator:
     Returns:
         Un AIGenerator listo para ``digest``.
     """
-    strategy_name = CR.get_ai_strategy_for(module)
+    strategy_name = CR.scribe_config().strategy_for(module)
     logger.info("[scribe] módulo=%s → estrategia=%s", module, strategy_name)
     return AIGenerator(_build_strategy(strategy_name))
