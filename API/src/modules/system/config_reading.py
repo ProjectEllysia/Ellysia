@@ -1255,7 +1255,7 @@ def taskqueue_config() -> TaskQueueConfig:
 
 @config_block("features.hygeia.limits")
 @dataclass(frozen=True)
-class HygeiaLimits:
+class HygeiaLimits:  # pylint: disable=too-many-instance-attributes
     """Topes defensivos sobre lo que un agente puede mandar en un heartbeat.
 
     No son ajustes de comodidad: cada uno acota un recurso que un agente
@@ -1332,7 +1332,7 @@ def hygeia_limits() -> HygeiaLimits:
 
 @config_block("features.iris")
 @dataclass(frozen=True)
-class IrisConfig:
+class IrisConfig:  # pylint: disable=too-many-instance-attributes
     """Análisis anti-phishing de correo."""
 
     legitimate_threshold: float = 80

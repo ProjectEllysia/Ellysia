@@ -14,10 +14,10 @@ copiar ni resolver la ruta por su cuenta.
   corresponde a la versión que de verdad corre en producción.
 
 **Dónde está el árbol no se decide aquí.** La ruta efectiva la resuelve
-``config_reading.get_nuclei_templates_dir()``, junto a su getter hermano
-``get_nuclei_templates_version()`` y con la misma forma de cadena de fallbacks
-que el resto de ese módulo ya usa. Este módulo no es la autoridad sobre *dónde*
-están las plantillas, sino sobre *cómo se recorren y se leen*.
+``config_reading.NucleiConfig.templates_dir``, junto a su propiedad hermana
+``templates_version`` y con la misma cadena de respaldos que el resto de ese
+módulo ya usa. Este módulo no es la autoridad sobre *dónde* están las
+plantillas, sino sobre *cómo se recorren y se leen*.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ class NucleiTemplateStore:
 
     Args:
         path: Ruta al árbol. Si se omite, se pide a
-            ``config_reading.get_nuclei_templates_dir()``. Inyectable para que
+            ``config_reading.nuclei_config().templates_dir``. Inyectable para que
             los tests trabajen sobre un árbol de mentira en un directorio
             temporal, sin necesitar plantillas reales instaladas.
     """

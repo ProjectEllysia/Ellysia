@@ -332,10 +332,10 @@ class OpenVASScanManager(ScanManager):
     ... scan_id = manager.run_scan(target="192.168.1.1")
     """
 
-    # A8: propiedades en vez de atributos de clase — CR.get_openvas_*() ya
-    # cachea con @_lazy_load, así que leerlas en el punto de uso es igual de
-    # barato pero recoge cambios de config aplicados vía PUT /system sin
-    # reiniciar el proceso (antes solo se leían una vez, al importar la clase).
+    # A8: propiedades en vez de atributos de clase — los bloques de config ya
+    # vienen cacheados, así que leerlos en el punto de uso es igual de barato
+    # pero recoge los cambios aplicados vía PUT /system sin reiniciar el proceso
+    # (antes solo se leían una vez, al importar la clase).
     @property
     def SCAN_CONFIGS(self) -> dict:
         return CR.openvas_tool_configs().scan_configs
