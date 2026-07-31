@@ -440,7 +440,13 @@ class NucleiScanTask(_Task):
         self.rate_limit = rate_limit or CR.get_nuclei_rate_limit()
         self.request_timeout = request_timeout or CR.get_nuclei_request_timeout()
         self._binary = CR.get_nuclei_binary_path()
-        self._templates_dir = CR.get_nuclei_templates_dir()
+        # Única fuente de verdad sobre dónde vive el árbol de plantillas, la
+        # misma que usan la ingesta (Fase R) y el censo (Fase U4) para leerlo.
+        # ``None`` significa "no se pudo resolver ninguno", y entonces se omite
+        # ``-templates`` y decide el binario — el mismo comportamiento que había
+        # cuando el valor de configuración venía vacío.
+        templates_dir = CR.get_nuclei_templates_dir()
+        self._templates_dir = str(templates_dir) if templates_dir else ""
 
         # Rellenado por _check_output_line al ver el banner de arranque; si el
         # escaneo termina sin que aparezca (binario silencioso, formato de

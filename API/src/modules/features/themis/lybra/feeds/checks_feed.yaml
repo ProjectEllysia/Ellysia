@@ -1,0 +1,354 @@
+# Feed de checks declarativos de Lybra (roadmap Fase R).
+#
+# YAML y no JSON a proposito: es el formato de las plantillas de Nuclei, con
+# las que este esquema se disena para ser razonablemente compatible, y admite
+# comentarios — que en un feed de reglas es la diferencia entre poder explicar
+# por que un check existe y no poder.
+#
+# feedVersion sube cuando el feed gana una familia nueva o un protocolo nuevo
+# bajo una existente; el arreglo de un check ya presente sube el 'version' de
+# ese check, no esta cadena. Ver CHECKS_FEED_VERSION en checks.py.
+feedVersion: lybra-checks-4
+checks:
+  - id: git-config-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: HIGH
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /.git/config
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - '[core]'
+              - repositoryformatversion
+    finding:
+      title: Repositorio Git expuesto (.git/config accesible)
+      qod: 99
+      confirmed: true
+  - id: dotenv-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: HIGH
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /.env
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: regex
+            part: body
+            regex:
+              - (?m)^[A-Z][A-Z0-9_]*=
+    finding:
+      title: Fichero .env expuesto (posibles secretos accesibles)
+      qod: 99
+      confirmed: true
+  - id: phpinfo-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: HIGH
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /phpinfo.php
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - phpinfo()
+              - PHP Version
+    finding:
+      title: phpinfo() expuesto (revela configuración interna del servidor)
+      qod: 99
+      confirmed: true
+  - id: wpconfig-source-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: CRITICAL
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /wp-config.php
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - DB_PASSWORD
+              - DB_NAME
+    finding:
+      title: wp-config.php servido como texto plano (credenciales de BD expuestas)
+      qod: 99
+      confirmed: true
+  - id: ssh-private-key-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: CRITICAL
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /id_rsa
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - PRIVATE KEY-----
+    finding:
+      title: Clave privada SSH expuesta
+      qod: 99
+      confirmed: true
+  - id: sql-backup-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: CRITICAL
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /backup.sql
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - INSERT INTO
+              - CREATE TABLE
+              - -- MySQL dump
+    finding:
+      title: Volcado de base de datos (.sql) expuesto
+      qod: 99
+      confirmed: true
+  - id: apache-server-status-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: MEDIUM
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /server-status
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - Apache Server Status
+    finding:
+      title: mod_status de Apache expuesto (server-status revela peticiones y rutas internas)
+      qod: 99
+      confirmed: true
+  - id: missing-hsts-header
+    version: 1
+    type: http
+    category: security_header
+    severity: MEDIUM
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+              - 301
+              - 302
+          - type: word
+            part: header
+            words:
+              - strict-transport-security
+            negative: true
+    finding:
+      title: Cabecera HSTS (Strict-Transport-Security) ausente
+      qod: 99
+      confirmed: true
+  - id: missing-x-frame-options-header
+    version: 1
+    type: http
+    category: security_header
+    severity: MEDIUM
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+              - 301
+              - 302
+          - type: word
+            part: header
+            words:
+              - x-frame-options
+            negative: true
+    finding:
+      title: Cabecera X-Frame-Options ausente (posible clickjacking)
+      qod: 99
+      confirmed: true
+  - id: missing-x-content-type-options-header
+    version: 1
+    type: http
+    category: security_header
+    severity: LOW
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+              - 301
+              - 302
+          - type: word
+            part: header
+            words:
+              - x-content-type-options
+            negative: true
+    finding:
+      title: Cabecera X-Content-Type-Options ausente (permite MIME sniffing)
+      qod: 99
+      confirmed: true
+  - id: tls-self-signed-cert
+    version: 1
+    type: tls
+    category: tls
+    severity: MEDIUM
+    service: https
+    mode: safe
+    tlsRule: self_signed
+    finding:
+      title: Certificado TLS autofirmado
+      qod: 99
+      confirmed: true
+  - id: tls-expired-cert
+    version: 1
+    type: tls
+    category: tls
+    severity: HIGH
+    service: https
+    mode: safe
+    tlsRule: expired
+    finding:
+      title: Certificado TLS caducado
+      qod: 99
+      confirmed: true
+  - id: tls-deprecated-protocol
+    version: 1
+    type: tls
+    category: tls
+    severity: MEDIUM
+    service: https
+    mode: safe
+    tlsRule: deprecated_protocol
+    finding:
+      title: Protocolo TLS obsoleto negociado (SSLv3/TLSv1.0/TLSv1.1)
+      qod: 99
+      confirmed: true
+  - id: ftp-anonymous-login
+    version: 1
+    type: network
+    category: default_credentials
+    severity: HIGH
+    service: ftp
+    mode: safe
+    requests:
+      - send: "USER anonymous\r\n"
+        matchers-condition: and
+        matchers:
+          - type: word
+            part: body
+            words:
+              - '331'
+      - send: "PASS anonymous@lybra.local\r\n"
+        matchers-condition: and
+        matchers:
+          - type: word
+            part: body
+            words:
+              - '230'
+    finding:
+      title: 'FTP: login anónimo permitido'
+      qod: 99
+      confirmed: true
+  - id: redis-unauthenticated-access
+    version: 1
+    type: network
+    category: default_credentials
+    severity: CRITICAL
+    service: redis
+    mode: safe
+    requests:
+      - send: "INFO\r\n"
+        matchers-condition: and
+        matchers:
+          - type: word
+            part: body
+            words:
+              - redis_version
+          - type: word
+            part: body
+            words:
+              - NOAUTH
+            negative: true
+    finding:
+      title: 'Redis: acceso sin autenticación (comando INFO permitido)'
+      qod: 99
+      confirmed: true
+  - id: smb-signing-not-required
+    version: 1
+    type: script
+    script: smb-signing-not-required
+    category: network_config
+    severity: MEDIUM
+    service: smb
+    mode: safe
+    finding:
+      title: 'SMB: firma de mensajes no requerida'
+      qod: 99
+      confirmed: true

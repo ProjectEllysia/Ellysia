@@ -22,6 +22,11 @@ python-nmap==0.7.1
 lxml>=4.9.3
 xmltodict==0.13.0
 
+# YAML: plantillas de Nuclei (almacén/ingesta, roadmap Fases U4 y R). Estaba
+# disponible de forma transitiva; se declara explícito ahora que hay código
+# de primera parte que lo importa.
+PyYAML>=6.0
+
 # Logging & Utilities
 python-dateutil==2.8.2
 

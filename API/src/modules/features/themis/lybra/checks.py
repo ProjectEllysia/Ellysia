@@ -6,17 +6,19 @@ and, when one fires, emits a finding marked confirmed with a high Quality of
 Detection — a real, observed problem rather than a suspicion.
 
 A check describes an HTTP request and the conditions ("matchers") that decide
-whether it fired. The checks are stored as JSON in a bundled feed file. The
-schema deliberately mirrors the shape of Nuclei's YAML templates, but is
-serialized as JSON so the feed needs no extra dependency; ingesting Nuclei's
-own YAML templates is left for a later phase.
+whether it fired. The checks live in a bundled YAML feed whose schema
+deliberately mirrors the shape of Nuclei's own templates. JSON is still
+accepted by the loader — the two are the same object graph, and an external
+feed may arrive as either — but the first-party feed is YAML.
 
 The scope of this layer covers the three highest-value, lowest-cost families the
 roadmap names first: exposed paths (like ``/.git/config``), missing security
 headers, and TLS/certificate hygiene (self-signed, expired, deprecated
 protocol — a ``type: "tls"`` check, evaluated against a handshake instead of an
-HTTP request/response). Request chaining, payloads/fuzzing and first-party
-script plugins are deliberate follow-ups.
+HTTP request/response), plus the raw protocol probes of ``type: "network"``
+(Fase N) and the first-party plugins of ``type: "script"`` (Fase R) for what no
+text matcher can express — a binary protocol, a multi-step negotiation. Request
+chaining and payloads/fuzzing are deliberate follow-ups.
 
 The runtime is pure given an injected ``fetch`` callable, so it can be
 unit-tested with hand-crafted responses and never touches the network in tests.
@@ -40,6 +42,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
+import yaml
+
 from .engine import Service
 
 logger = logging.getLogger(__name__)
@@ -48,16 +52,21 @@ logger = logging.getLogger(__name__)
 # traceability. Bumped whenever the feed gains a new check family or a new
 # protocol under an existing one (checks-2: "ftp-anonymous-login", the first
 # ``type: "network"`` check; checks-3: "redis-unauthenticated-access", the
-# second ``network`` protocol) — never for a fix to an existing check, which
+# second ``network`` protocol; checks-4: "smb-signing-not-required", the first
+# ``type: "script"`` check) — never for a fix to an existing check, which
 # bumps that check's own ``version`` instead (see ``Check.check_id``).
-CHECKS_FEED_VERSION = "lybra-checks-3"
+CHECKS_FEED_VERSION = "lybra-checks-4"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
 
-# The JSON feed shipped in the package's feeds/ directory, alongside every
-# other Lybra feed (tech_signatures.json for the HTTP dissector, ...).
-_BUNDLED_FEED = Path(__file__).parent / "feeds" / "checks_feed.json"
+# The feed shipped in the package's feeds/ directory, alongside every other
+# Lybra feed (tech_signatures.json for the HTTP dissector, ...). YAML rather
+# than JSON since Fase R: it is Nuclei's own format — which this schema aims to
+# stay reasonably compatible with — and it takes comments, which in a feed of
+# detection rules is the difference between being able to explain why a check
+# exists and not.
+_BUNDLED_FEED = Path(__file__).parent / "feeds" / "checks_feed.yaml"
 # Service names and ports that indicate an HTTP-speaking service worth probing.
 _HTTP_SERVICE_NAMES = {"http", "https", "http-proxy", "https-alt", "http-alt"}
 _HTTP_PORTS = {80, 443, 8080, 8443, 8000, 8888, 8008}
@@ -219,6 +228,22 @@ class Check:
             into the emitted finding.
         tls_rule: For ``type: "tls"`` checks, which hygiene rule to evaluate
             (see ``_TLS_RULES``). Unused by ``type: "http"`` checks.
+        script: For ``type: "script"`` checks, the id of the first-party plugin
+            that implements it (see ``script_checks.default_script_plugins``).
+            Unused by every other type.
+        namespace: Who authored this check — ``"lybra"`` for the first-party
+            feed, ``"nuclei"`` for one translated from an upstream template.
+            A translated check is not ours and must not claim to be: it shows
+            up in ``check_id`` so a finding's provenance is readable.
+        feed_version: The version of the feed this check came from, or ``None``
+            to fall back to :data:`CHECKS_FEED_VERSION`. A single global
+            constant stopped being truthful once checks could come from two
+            feeds with independent version lines.
+        tags: Free-form labels (Nuclei's ``info.tags``, plus vendor/product
+            metadata). Not used by the runtime, which runs whatever it is
+            given: they exist so a *selector* can decide which of thousands of
+            ingested checks are worth running against a given service before
+            the runtime ever sees them (see ``ingest.selector``).
     """
     id: str
     version: int
@@ -230,34 +255,59 @@ class Check:
     requests: tuple
     finding: dict
     tls_rule: Optional[str] = None
+    script: Optional[str] = None
+    namespace: str = "lybra"
+    feed_version: Optional[str] = None
+    tags: tuple = ()
 
     @property
     def check_id(self) -> str:
         """The fully-qualified, versioned check id, e.g. ``lybra:git-config@1``."""
-        return f"lybra:{self.id}@{self.version}"
+        return f"{self.namespace}:{self.id}@{self.version}"
 
 
 # =========================================================================
 # FEED LOADING
 # =========================================================================
 
+def load_feed_document(path: Path) -> dict:
+    """Read a feed file into its raw document, dispatching on the extension.
+
+    YAML is the feed's own format (Fase R); JSON is still accepted because the
+    two shapes are the same object graph, and an externally-supplied feed may
+    arrive as either. Only the deserializer differs — :func:`_parse_check` is
+    given identical dicts in both cases, which is what makes the migration a
+    format change rather than a behaviour one.
+
+    Args:
+        path: The feed file.
+
+    Returns:
+        The parsed document.
+    """
+    text = path.read_text(encoding="utf-8")
+    if path.suffix.lower() in (".yaml", ".yml"):
+        return yaml.safe_load(text) or {}
+    return json.loads(text)
+
+
 def load_checks(path: Optional[str] = None) -> List[Check]:
     """Load and parse a check feed.
 
     Args:
-        path: Path to a JSON feed file. Defaults to the feed bundled with this
-            module.
+        path: Path to a feed file, YAML or JSON. Defaults to the feed bundled
+            with this module.
 
     Returns:
         The parsed checks.
     """
     feed_path = Path(path) if path else _BUNDLED_FEED
-    data = json.loads(feed_path.read_text(encoding="utf-8"))
+    data = load_feed_document(feed_path)
     return [_parse_check(c) for c in data.get("checks", [])]
 
 
 def _parse_check(c: dict) -> Check:
-    """Build a :class:`Check` from its raw JSON representation.
+    """Build a :class:`Check` from its raw document representation.
 
     Applies sensible defaults for optional fields and accepts a matcher's target
     values under any of ``words`` / ``regex`` / ``value``.
@@ -291,6 +341,7 @@ def _parse_check(c: dict) -> Check:
         requests=requests,
         finding=c.get("finding", {}),
         tls_rule=c.get("tlsRule"),
+        script=c.get("script"),
     )
 
 
@@ -396,6 +447,70 @@ _TLS_RULES: Dict[str, Callable] = {
 
 
 @dataclass(frozen=True)
+class ScriptContext:
+    """The restricted API a ``type: "script"`` plugin runs against (Fase R).
+
+    A script check exists for what a declarative one cannot express: binary
+    protocols, multi-step negotiations, anything needing real logic. What it
+    does *not* get is free rein — a plugin never opens its own connections at
+    its own pace, it receives the same pieces the runtime already holds. That
+    keeps one rate policy and one place where the engine touches the network.
+
+    The class lives here, next to the runtime, rather than beside the concrete
+    plugins: those import applicability predicates from this module, so putting
+    the base here is what keeps the dependency one-way.
+
+    Attributes:
+        target: The host the check runs against.
+        service: The specific service being evaluated.
+        rate_limiter: The per-host limiter; a plugin acquires it before each
+            network exchange, exactly as the dissectors do.
+        mode: ``"safe"`` or ``"aggressive"`` — the mode the runtime already
+            authorised this check under, in case a plugin wants to adapt.
+    """
+    target: str
+    service: Service
+    rate_limiter: Optional["HostRateLimiter"] = None
+    mode: str = "safe"
+
+    def acquire(self) -> None:
+        """Respect the host's rate limit before touching the network."""
+        if self.rate_limiter is not None:
+            self.rate_limiter.acquire(self.target)
+
+
+class ScriptPlugin:
+    """The logic behind a ``type: "script"`` check.
+
+    Same shape as :class:`~.fingerprinting.dispatch.Dissector` — applicability
+    plus action — so knowing one means knowing the other.
+
+    **First-party only.** Only plugins we write and review are accepted here.
+    Third-party Python is never executed in-process, because Python cannot be
+    sandboxed with any guarantee inside the same process; the route for that,
+    if it were ever wanted, is a subprocess with ``rlimit``/seccomp and narrow
+    IPC — not this registry.
+    """
+
+    plugin_id: str = ""
+
+    def applies(self, service: Service) -> bool:
+        """Return whether this plugin should evaluate ``service`` at all."""
+        raise NotImplementedError
+
+    def run(self, context: ScriptContext) -> bool:
+        """Run the check.
+
+        Returns:
+            ``True`` if the check fires. ``False`` both when the condition does
+            not hold and when no evidence could be gathered — no evidence means
+            no finding, the same rule the declarative families follow on a
+            transport failure.
+        """
+        raise NotImplementedError
+
+
+@dataclass(frozen=True)
 class _CheckFamily:
     """One check ``type`` (http/tls/network) as the runtime's uniform loop sees it.
 
@@ -436,6 +551,12 @@ class CheckRuntime:
             makes a login sequence like FTP's ``USER``/``PASS`` work. Omitted
             the same way ``tls_fetch`` is: callers that never wire a network
             probe pay nothing for this family.
+        script_plugins: An optional ``{plugin_id: ScriptPlugin}`` registry for
+            ``type: "script"`` checks (Fase R). Injected rather than imported
+            so this module never has to import the fingerprinting package,
+            which would close an import cycle (the dissectors import their
+            applicability predicates from here). Omitted the same way the two
+            above are.
     """
 
     def __init__(
@@ -446,6 +567,7 @@ class CheckRuntime:
         rate_limiter: Optional["HostRateLimiter"] = None,
         tls_fetch: Optional[Callable[[str, int], object]] = None,
         network_open: Optional[Callable[[str, int], Optional["NetworkSession"]]] = None,
+        script_plugins: Optional[Dict[str, object]] = None,
     ) -> None:
         self._checks = list(checks)
         self._fetch = fetch
@@ -453,6 +575,7 @@ class CheckRuntime:
         self._rl = rate_limiter
         self._tls_fetch = tls_fetch
         self._network_open = network_open
+        self._script_plugins = dict(script_plugins or {})
         self._families: Tuple[_CheckFamily, ...] = (
             _CheckFamily(
                 applies_to_service=is_http_service,
@@ -468,6 +591,11 @@ class CheckRuntime:
                 applies_to_service=lambda service: self._network_open is not None,
                 check_matches=self._applies_network,
                 run_check=self._run_network_check,
+            ),
+            _CheckFamily(
+                applies_to_service=lambda service: bool(self._script_plugins),
+                check_matches=self._applies_script,
+                run_check=self._run_script_check,
             ),
         )
 
@@ -519,6 +647,20 @@ class CheckRuntime:
             return False
         matches = _NETWORK_SERVICE_MATCHERS.get(check.service)
         if matches is None or not matches(service):
+            return False
+        return self._applies_mode(check)
+
+    def _applies_script(self, check: Check, service: Service) -> bool:
+        """Return whether a ``type: "script"`` check should run against a service.
+
+        Applicability is delegated to the plugin itself (``plugin.applies``),
+        the same way a ``network`` check delegates to its protocol predicate —
+        the runtime stays ignorant of what SMB, or any other protocol, is.
+        """
+        if check.type != "script":
+            return False
+        plugin = self._script_plugins.get(check.script)
+        if plugin is None or not plugin.applies(service):
             return False
         return self._applies_mode(check)
 
@@ -576,6 +718,32 @@ class CheckRuntime:
         finally:
             session.close()
 
+    def _run_script_check(self, check: Check, host: str, service: Service) -> Optional[dict]:
+        """Run one ``type: "script"`` check against one service (Fase R).
+
+        The plugin handles its own rate limiting through the context, since
+        only it knows how many exchanges it needs — unlike the declarative
+        families, where the runtime knows because the feed spells it out.
+
+        A plugin that raises is contained here rather than being allowed to sink
+        the whole scan: these are first-party plugins, but they run arbitrary
+        multi-step protocol logic, and one throwing on a malformed reply from
+        some appliance must cost that one check and nothing more.
+        """
+        plugin = self._script_plugins.get(check.script)
+        context = ScriptContext(
+            target=host,
+            service=service,
+            rate_limiter=self._rl,
+            mode=self._mode,
+        )
+        try:
+            fired = plugin.run(context)
+        except Exception:  # noqa: BLE001 - a broken plugin costs its own check, not the scan
+            logger.exception("Script check %s failed against %s", check.check_id, host)
+            return None
+        return self._finding(check, service) if fired else None
+
     def _finding(self, check: Check, service: Service) -> dict:
         """Build the finding dict for a check that fired against a service."""
         f = check.finding
@@ -587,7 +755,7 @@ class CheckRuntime:
             "cve_ids":      f.get("cve_ids"),
             "source":       "lybra",
             "check_id":     check.check_id,
-            "feed_version": CHECKS_FEED_VERSION,
+            "feed_version": check.feed_version or CHECKS_FEED_VERSION,
             "qod":          f.get("qod", QOD_CONFIRMED),
             "confirmed":    f.get("confirmed", True),
             "state":        "open",

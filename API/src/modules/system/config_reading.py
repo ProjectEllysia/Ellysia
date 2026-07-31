@@ -665,6 +665,34 @@ def is_lybra_active_checks_enabled() -> bool:
 
 # --- Lybra own fingerprinting (Fase F) ---
 
+# --- Ingesta de plantillas de Nuclei al runtime propio (Fase R) ---
+
+@_lazy_load
+def is_lybra_template_ingest_enabled() -> bool:
+    """Si Lybra ingiere plantillas de Nuclei a su propio runtime.
+
+    **Por defecto desactivado, y a conciencia.** El código está construido y
+    probado, pero la decisión de si la ingesta merece la pena la toma el número
+    del censo de la Fase U4 (`tools/nuclei_template_census.py`), que solo puede
+    medirse en una máquina con el feed instalado. Hasta que ese número exista,
+    el interruptor existe pero no se activa: el flag decide la *activación*, no
+    la existencia del código.
+    """
+    return _as_bool(_cfg("themis.lybra.ingest.enabled", False))
+
+
+@_lazy_load
+def get_lybra_ingest_min_severity() -> str:
+    """Severidad mínima de una plantilla ingerida para llegar a ejecutarse."""
+    return _cfg("themis.lybra.ingest.minSeverity", "MEDIUM", str)
+
+
+@_lazy_load
+def get_lybra_ingest_max_checks() -> int:
+    """Tope duro de checks ingeridos por escaneo (la red de seguridad final)."""
+    return _cfg("themis.lybra.ingest.maxChecks", 300, int)
+
+
 @_lazy_load
 def is_lybra_fingerprinting_enabled() -> bool:
     # Same story as active checks: on by default now that the authorized-targets
@@ -680,12 +708,59 @@ def get_nuclei_binary_path() -> str:
     """Ruta o nombre del binario ``nuclei`` (resuelto vía PATH por defecto)."""
     return _cfg("themis.nuclei.binaryPath", "nuclei")
 
+def _nuclei_default_template_locations() -> tuple[Path, ...]:
+    """Ubicaciones por defecto de Nuclei, resueltas en el momento de llamar.
+
+    Se calculan aquí y no en una constante de módulo a propósito: ``Path.home()``
+    en una constante se congelaría al importar, y entonces ni un test podría
+    simular otro ``HOME`` ni un worker heredaría un entorno distinto al del
+    proceso que lo importó. En la imagen Docker esto resuelve a
+    ``/root/.local/nuclei-templates``, que es donde el ``nuclei -update-templates``
+    del Dockerfile las deja.
+    """
+    home = Path.home()
+    return (home / ".local" / "nuclei-templates", home / "nuclei-templates")
+
+
 @_lazy_load
-def get_nuclei_templates_dir() -> str:
-    """Directorio de plantillas explícito, o cadena vacía para dejar que
-    Nuclei use su ubicación por defecto (``~/.local/nuclei-templates`` o
-    equivalente, horneada en la imagen — ver Dockerfile)."""
-    return _cfg("themis.nuclei.templatesDir", "")
+def get_nuclei_templates_dir() -> Optional[Path]:
+    """Directorio efectivo del **único** árbol de plantillas de Nuclei de Themis.
+
+    Themis tiene una sola copia de las plantillas, y este getter es quien dice
+    dónde está. Tres consumidores dependen de esa respuesta y ninguno debe
+    resolverla por su cuenta: ``NucleiScanTask`` (que se la pasa al binario por
+    ``-templates``), la ingesta de plantillas al runtime propio y el censo de
+    ingestibilidad (roadmap Fases R y U4).
+
+    Prioridad, de más explícito a más implícito — mismo estilo de cadena que
+    ``get_nuclei_templates_version()``, su getter hermano:
+    1) ``themis.nuclei.templatesDir`` en SecOpsConfig.json, 2) la variable de
+    entorno ``NUCLEI_TEMPLATES_DIR``, 3) las ubicaciones por defecto de Nuclei.
+
+    Returns:
+        La ruta al árbol, o ``None`` si ninguna candidata existe en disco.
+        Nunca una ruta inventada: quien pasa el flag al binario omite
+        ``-templates`` y deja que decida él, y quien necesita *leer* las
+        plantillas no puede hacer nada y debe poder saberlo.
+    """
+    configured = (_cfg("themis.nuclei.templatesDir", "") or "").strip()
+    if configured:
+        path = Path(configured)
+        if path.is_dir():
+            return path
+        # Una ruta configurada que no existe es un error de despliegue, no algo
+        # que deba degradarse en silencio a otra ubicación: se avisa y se sigue
+        # buscando, para no dejar un escaneo sin plantillas sin explicación.
+        logger.warning(
+            "themis.nuclei.templatesDir apunta a '%s', que no existe; "
+            "se buscarán las ubicaciones por defecto de Nuclei", configured
+        )
+
+    from_environment = (os.environ.get("NUCLEI_TEMPLATES_DIR") or "").strip()
+    if from_environment and Path(from_environment).is_dir():
+        return Path(from_environment)
+
+    return next((c for c in _nuclei_default_template_locations() if c.is_dir()), None)
 
 @_lazy_load
 def get_nuclei_default_severities() -> list:

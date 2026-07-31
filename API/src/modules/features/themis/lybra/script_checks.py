@@ -1,0 +1,89 @@
+"""Checks de tipo ``script`` — el cuarto tipo del runtime (Fase R).
+
+Un check declarativo compara texto: pide algo y mira si la respuesta contiene
+un patrón. Eso cubre el 90 % de lo web, pero deja fuera todo lo que exige
+lógica: un protocolo binario, una negociación de varios pasos cuyo resultado
+hay que interpretar, o un hecho que ya se dedujo pero que ningún matcher de
+texto puede expresar. Para eso está este tipo.
+
+**Un caso concreto, que es el que motiva el módulo.** La Fase N dejó anotado que
+los checks "SMB sin firma" y "SMBv1 habilitado" *no se pudieron construir*
+porque «el runtime declarativo actual solo compara texto decodificado, y una
+respuesta SMB2 es binaria». Pero el dissector de SMB ya negocia con el servidor
+y ya lee su ``SecurityMode``: el hecho está observado, solo faltaba un vehículo
+para convertirlo en un hallazgo. Un plugin de primera parte es ese vehículo, y
+llega mucho antes que el camino alternativo (adoptar el esquema ``network`` de
+Nuclei con ``type: hex`` y un matcher ``binary``, que depende de la medición de
+U4).
+
+**Por qué los plugins se inyectan y no se importan.** ``checks.py`` no importa
+``fingerprinting`` a propósito — lo dice su propio comentario en ``_TLS_RULES``:
+importarlo crearía un ciclo, porque los dissectors importan de ``checks`` sus
+predicados de aplicabilidad (``is_smb_service`` y compañía). Este módulo sí
+puede importar ambos, y el runtime recibe el registro ya construido por el
+mismo mecanismo de inyección con el que ya recibe ``tls_fetch`` y
+``network_open``. El runtime sigue sin conocer ningún protocolo concreto.
+
+El reparto es el mismo que ya existe para los dissectors: la clase base
+(:class:`~.checks.ScriptPlugin`) y su contexto viven junto al runtime, igual que
+``Dissector`` vive en ``dispatch.py``; los plugins concretos viven aquí, igual
+que ``SmbDissector`` vive en ``smb.py``.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Dict, Optional
+
+from .checks import ScriptContext, ScriptPlugin, is_smb_service
+from .engine import Service
+from .fingerprinting.smb import SmbProbe, fingerprint_smb
+
+logger = logging.getLogger(__name__)
+
+
+class SmbSigningNotRequiredPlugin(ScriptPlugin):
+    """Detecta un servicio SMB que no exige firma de mensajes.
+
+    Sin firma obligatoria, un atacante en posición de intermediario puede
+    manipular el tráfico SMB (la familia de ataques de relay). El dato no se
+    infiere: sale del ``SecurityMode`` que el propio servidor devuelve en su
+    respuesta NEGOTIATE, así que el hallazgo nace ``confirmed``.
+
+    Args:
+        probe: Sonda inyectable, para que un test use un socket falso — mismo
+            patrón que :class:`~.fingerprinting.smb.SmbDissector`.
+    """
+
+    plugin_id = "smb-signing-not-required"
+
+    def __init__(self, probe: Optional[SmbProbe] = None) -> None:
+        self._probe = probe or SmbProbe()
+
+    def applies(self, service: Service) -> bool:
+        return is_smb_service(service)
+
+    def run(self, context: ScriptContext) -> bool:
+        context.acquire()
+        result = self._probe.fetch(context.target, context.service.port or 445)
+        if result is None:
+            # Sin negociación no hay evidencia, y sin evidencia no hay hallazgo.
+            return False
+        dialect_revision, security_mode = result
+        fingerprint = fingerprint_smb(dialect_revision, security_mode)
+        if fingerprint.product is None:
+            # Respuesta no reconocible: se ignora en vez de asumir lo peor. Un
+            # dialecto desconocido no es prueba de que la firma no se exija.
+            return False
+        return "firma no requerida" in fingerprint.product
+
+
+def default_script_plugins() -> Dict[str, ScriptPlugin]:
+    """Construye el registro de plugins de primera parte, indexado por ``plugin_id``.
+
+    Returns:
+        Un mapa ``plugin_id -> plugin``, que es lo que ``CheckRuntime`` espera
+        recibir por inyección. Añadir un plugin es añadir una entrada aquí.
+    """
+    plugins = (SmbSigningNotRequiredPlugin(),)
+    return {plugin.plugin_id: plugin for plugin in plugins}
