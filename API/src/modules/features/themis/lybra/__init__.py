@@ -89,6 +89,12 @@ from .checks import (
     is_vnc_service,
     CHECKS_FEED_VERSION,
     QOD_CONFIRMED,
+    ScriptContext,
+    ScriptPlugin,
+)
+from .script_checks import (
+    SmbSigningNotRequiredPlugin,
+    default_script_plugins,
 )
 from .correlation import (
     classify_exposure,
@@ -210,6 +216,10 @@ __all__ = [
     "is_vnc_service",
     "CHECKS_FEED_VERSION",
     "QOD_CONFIRMED",
+    "ScriptContext",
+    "ScriptPlugin",
+    "SmbSigningNotRequiredPlugin",
+    "default_script_plugins",
     "classify_exposure",
     "compute_dedup_key",
     "merge_findings",

@@ -1,5 +1,5 @@
 {
-  "feedVersion": "lybra-checks-3",
+  "feedVersion": "lybra-checks-4",
   "checks": [
     {
       "id": "git-config-exposure",
@@ -346,6 +346,21 @@
       ],
       "finding": {
         "title": "Redis: acceso sin autenticación (comando INFO permitido)",
+        "qod": 99,
+        "confirmed": true
+      }
+    },
+    {
+      "id": "smb-signing-not-required",
+      "version": 1,
+      "type": "script",
+      "script": "smb-signing-not-required",
+      "category": "network_config",
+      "severity": "MEDIUM",
+      "service": "smb",
+      "mode": "safe",
+      "finding": {
+        "title": "SMB: firma de mensajes no requerida",
         "qod": 99,
         "confirmed": true
       }

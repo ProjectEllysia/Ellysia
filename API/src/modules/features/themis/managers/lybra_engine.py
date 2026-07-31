@@ -37,6 +37,7 @@ from ..lybra import (
     HttpProbe,
     TlsProbe,
     NetworkProbe,
+    default_script_plugins,
     is_http_service,
     DEFAULT_PORTS,
     scan_ports_sync,
@@ -301,8 +302,8 @@ class LybraEngineManager(ScanManager):
             return None
 
     def _run_active_checks(self, target: str, services) -> list:
-        """Run the declarative check runtime against the target's HTTP, TLS and
-        network (Fase N) services.
+        """Run the check runtime against the target's HTTP, TLS, network (Fase N)
+        and script (Fase R) services.
 
         Best-effort: a runtime failure (unreachable host, etc.) yields no active
         findings rather than failing the whole scan. Safe mode only.
@@ -315,6 +316,7 @@ class LybraEngineManager(ScanManager):
                 rate_limiter=HostRateLimiter(),
                 tls_fetch=TlsProbe().fetch,
                 network_open=NetworkProbe().open,
+                script_plugins=default_script_plugins(),
             )
             return runtime.run(target, services)
         except Exception:

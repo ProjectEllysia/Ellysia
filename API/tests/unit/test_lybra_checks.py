@@ -15,6 +15,8 @@ from src.modules.features.themis.lybra import (
     CheckRuntime,
     NetworkProbe,
     Response,
+    SmbSigningNotRequiredPlugin,
+    default_script_plugins,
     is_http_service,
     is_ftp_service,
     is_redis_service,
@@ -287,3 +289,100 @@ def test_network_session_exchange_returns_none_on_empty_read():
     fake_sock = _FakeNetSocket(b"")
     session = NetworkProbe(connect=lambda addr, timeout: fake_sock).open("10.0.0.5", 21)
     assert session.exchange(None) is None
+
+
+# --------------------------------------------------- ``type: "script"`` (Fase R)
+
+class _FakeSmbProbe:
+    """Stands in for SmbProbe: returns a canned (dialect, security_mode) pair.
+
+    ``None`` models a failed negotiation (unreachable, or a reply that did not
+    parse), which must never be read as "signing is not required".
+    """
+
+    def __init__(self, result):
+        self._result = result
+        self.calls = []
+
+    def fetch(self, host, port=445):
+        self.calls.append((host, port))
+        return self._result
+
+
+_SMB = Service(445, "tcp", "microsoft-ds", "", "", None)
+
+# MS-SMB2 §2.2.4: SecurityMode bit 0x0002 is SIGNING_REQUIRED; 0x0001 alone is
+# SIGNING_ENABLED, i.e. offered but not enforced — exactly the finding's target.
+_DIALECT_302 = 0x0302
+_SIGNING_ENABLED_ONLY = 0x0001
+_SIGNING_REQUIRED = 0x0003
+
+
+def _script_runtime(probe, mode="safe"):
+    plugins = {"smb-signing-not-required": SmbSigningNotRequiredPlugin(probe=probe)}
+    return CheckRuntime(
+        load_checks(),
+        _fetcher({}),
+        mode=mode,
+        script_plugins=plugins,
+    )
+
+
+def test_smb_signing_not_required_fires_when_signing_is_only_enabled():
+    probe = _FakeSmbProbe((_DIALECT_302, _SIGNING_ENABLED_ONLY))
+    findings = _script_runtime(probe).run("10.0.0.5", [_SMB])
+
+    smb = [f for f in findings if f["check_id"] == "lybra:smb-signing-not-required@1"]
+    assert len(smb) == 1
+    assert smb[0]["confirmed"] is True
+    assert smb[0]["qod"] == 99
+    assert smb[0]["port"] == 445
+    assert probe.calls == [("10.0.0.5", 445)]
+
+
+def test_smb_signing_not_required_silent_when_signing_is_enforced():
+    probe = _FakeSmbProbe((_DIALECT_302, _SIGNING_REQUIRED))
+    findings = _script_runtime(probe).run("10.0.0.5", [_SMB])
+    assert findings == []
+
+
+def test_smb_script_check_abandoned_when_negotiation_fails():
+    """No evidence must never be read as a positive — the rule every family follows."""
+    findings = _script_runtime(_FakeSmbProbe(None)).run("10.0.0.5", [_SMB])
+    assert findings == []
+
+
+def test_smb_script_check_silent_on_unrecognised_dialect():
+    probe = _FakeSmbProbe((0xFFFF, _SIGNING_ENABLED_ONLY))
+    findings = _script_runtime(probe).run("10.0.0.5", [_SMB])
+    assert findings == []
+
+
+def test_script_checks_never_run_without_plugins_injected():
+    """The default wiring of a caller that knows nothing about scripts."""
+    findings = CheckRuntime(load_checks(), _fetcher({})).run("10.0.0.5", [_SMB])
+    assert findings == []
+
+
+def test_only_smb_services_are_probed_by_the_smb_script_check():
+    probe = _FakeSmbProbe((_DIALECT_302, _SIGNING_ENABLED_ONLY))
+    findings = _script_runtime(probe).run("10.0.0.5", [_HTTP])
+
+    assert probe.calls == []
+    assert [f for f in findings if f["check_id"].startswith("lybra:smb-")] == []
+
+
+def test_a_raising_plugin_costs_its_own_check_not_the_scan():
+    class _ExplodingProbe:
+        def fetch(self, host, port=445):
+            raise RuntimeError("malformed reply from some appliance")
+
+    findings = _script_runtime(_ExplodingProbe()).run("10.0.0.5", [_SMB])
+    assert findings == []
+
+
+def test_script_check_declares_its_plugin_in_the_bundled_feed():
+    """The feed entry and the registry must agree, or the check silently never runs."""
+    check = next(c for c in load_checks() if c.id == "smb-signing-not-required")
+    assert check.type == "script"
+    assert check.script in default_script_plugins()

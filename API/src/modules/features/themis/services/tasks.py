@@ -21,6 +21,7 @@ import logging
 
 import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import TaskStatus
+from .nuclei_templates import NucleiTemplateStore
 
 
 logger = logging.getLogger(__name__)
@@ -440,7 +441,14 @@ class NucleiScanTask(_Task):
         self.rate_limit = rate_limit or CR.get_nuclei_rate_limit()
         self.request_timeout = request_timeout or CR.get_nuclei_request_timeout()
         self._binary = CR.get_nuclei_binary_path()
-        self._templates_dir = CR.get_nuclei_templates_dir()
+        # La ruta se pide al almacén, nunca a la configuración directamente:
+        # es la misma pieza que la ingesta (Fase R) y el censo (Fase U4) usan
+        # para *leer* este árbol, y así no puede haber dos ideas distintas de
+        # dónde viven las plantillas. Un ``None`` significa "no se pudo
+        # resolver", y entonces se omite ``-templates`` — exactamente el
+        # comportamiento que había cuando el valor de configuración venía vacío.
+        templates_dir = NucleiTemplateStore().path
+        self._templates_dir = str(templates_dir) if templates_dir else ""
 
         # Rellenado por _check_output_line al ver el banner de arranque; si el
         # escaneo termina sin que aparezca (binario silencioso, formato de
