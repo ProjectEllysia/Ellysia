@@ -8,6 +8,8 @@ adds (a fake, in-memory session standing in for a real TCP connection).
 
 import json
 
+import yaml
+
 import pytest
 
 from src.modules.features.themis.lybra import (
@@ -386,3 +388,86 @@ def test_script_check_declares_its_plugin_in_the_bundled_feed():
     check = next(c for c in load_checks() if c.id == "smb-signing-not-required")
     assert check.type == "script"
     assert check.script in default_script_plugins()
+
+
+# ------------------------------------------- feed en YAML y compatibilidad (Fase R)
+
+def test_bundled_feed_is_yaml():
+    """El feed propio vive en YAML desde la Fase R; el JSON se retiró."""
+    from src.modules.features.themis.lybra.checks import _BUNDLED_FEED
+    assert _BUNDLED_FEED.suffix == ".yaml"
+    assert _BUNDLED_FEED.exists()
+
+
+def test_yaml_and_json_feeds_parse_to_identical_checks(tmp_path):
+    """La migración es un cambio de formato, no de comportamiento.
+
+    Ambos deserializadores alimentan el mismo ``_parse_check`` con dicts
+    idénticos, así que un feed escrito en cualquiera de los dos formatos debe
+    producir objetos ``Check`` iguales campo a campo. Es lo que convirtió la
+    migración del feed propio en algo verificable en vez de un acto de fe.
+    """
+    document = {
+        "feedVersion": "test-feed-1",
+        "checks": [
+            {
+                "id": "some-check", "version": 2, "type": "http",
+                "category": "exposed_path", "severity": "HIGH", "service": "http",
+                "mode": "safe",
+                "requests": [{
+                    "method": "GET", "path": "/x", "matchers-condition": "or",
+                    "matchers": [
+                        {"type": "status", "value": [200, 302]},
+                        {"type": "word", "part": "header", "words": ["a"], "negative": True},
+                    ],
+                }],
+                "finding": {"title": "T", "qod": 99, "confirmed": True},
+            },
+            {
+                "id": "a-tls-check", "version": 1, "type": "tls",
+                "category": "tls", "severity": "LOW", "service": "https",
+                "mode": "aggressive", "tlsRule": "expired",
+                "finding": {"title": "T2"},
+            },
+        ],
+    }
+    as_json = tmp_path / "feed.json"
+    as_yaml = tmp_path / "feed.yaml"
+    as_json.write_text(json.dumps(document), encoding="utf-8")
+    as_yaml.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+    assert load_checks(str(as_json)) == load_checks(str(as_yaml))
+
+
+def test_yml_extension_is_accepted_too(tmp_path):
+    feed = tmp_path / "feed.yml"
+    feed.write_text(yaml.safe_dump(_AGGRESSIVE_FEED), encoding="utf-8")
+    assert len(load_checks(str(feed))) == 1
+
+
+def test_an_empty_yaml_feed_yields_no_checks(tmp_path):
+    """Un fichero vacío parsea a None en YAML; no debe reventar el cargador."""
+    feed = tmp_path / "feed.yaml"
+    feed.write_text("", encoding="utf-8")
+    assert load_checks(str(feed)) == []
+
+
+def test_yaml_feed_supports_comments(tmp_path):
+    """La razón de fondo de la migración: poder explicar por qué existe un check."""
+    feed = tmp_path / "feed.yaml"
+    feed.write_text(
+        "# Este comentario es el motivo de que el feed sea YAML.\n"
+        "feedVersion: commented-1\n"
+        "checks:\n"
+        "  - id: documented-check   # y este también\n"
+        "    version: 1\n"
+        "    type: http\n"
+        "    requests:\n"
+        "      - path: /x\n"
+        "        matchers:\n"
+        "          - {type: status, value: [200]}\n"
+        "    finding: {title: T}\n",
+        encoding="utf-8",
+    )
+    checks = load_checks(str(feed))
+    assert [c.id for c in checks] == ["documented-check"]

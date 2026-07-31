@@ -6,10 +6,10 @@ and, when one fires, emits a finding marked confirmed with a high Quality of
 Detection — a real, observed problem rather than a suspicion.
 
 A check describes an HTTP request and the conditions ("matchers") that decide
-whether it fired. The checks are stored as JSON in a bundled feed file. The
-schema deliberately mirrors the shape of Nuclei's YAML templates, but is
-serialized as JSON so the feed needs no extra dependency; ingesting Nuclei's
-own YAML templates is left for a later phase.
+whether it fired. The checks live in a bundled YAML feed whose schema
+deliberately mirrors the shape of Nuclei's own templates. JSON is still
+accepted by the loader — the two are the same object graph, and an external
+feed may arrive as either — but the first-party feed is YAML.
 
 The scope of this layer covers the three highest-value, lowest-cost families the
 roadmap names first: exposed paths (like ``/.git/config``), missing security
@@ -42,6 +42,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
+import yaml
+
 from .engine import Service
 
 logger = logging.getLogger(__name__)
@@ -58,9 +60,13 @@ CHECKS_FEED_VERSION = "lybra-checks-4"
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
 
-# The JSON feed shipped in the package's feeds/ directory, alongside every
-# other Lybra feed (tech_signatures.json for the HTTP dissector, ...).
-_BUNDLED_FEED = Path(__file__).parent / "feeds" / "checks_feed.json"
+# The feed shipped in the package's feeds/ directory, alongside every other
+# Lybra feed (tech_signatures.json for the HTTP dissector, ...). YAML rather
+# than JSON since Fase R: it is Nuclei's own format — which this schema aims to
+# stay reasonably compatible with — and it takes comments, which in a feed of
+# detection rules is the difference between being able to explain why a check
+# exists and not.
+_BUNDLED_FEED = Path(__file__).parent / "feeds" / "checks_feed.yaml"
 # Service names and ports that indicate an HTTP-speaking service worth probing.
 _HTTP_SERVICE_NAMES = {"http", "https", "http-proxy", "https-alt", "http-alt"}
 _HTTP_PORTS = {80, 443, 8080, 8443, 8000, 8888, 8008}
@@ -225,6 +231,19 @@ class Check:
         script: For ``type: "script"`` checks, the id of the first-party plugin
             that implements it (see ``script_checks.default_script_plugins``).
             Unused by every other type.
+        namespace: Who authored this check — ``"lybra"`` for the first-party
+            feed, ``"nuclei"`` for one translated from an upstream template.
+            A translated check is not ours and must not claim to be: it shows
+            up in ``check_id`` so a finding's provenance is readable.
+        feed_version: The version of the feed this check came from, or ``None``
+            to fall back to :data:`CHECKS_FEED_VERSION`. A single global
+            constant stopped being truthful once checks could come from two
+            feeds with independent version lines.
+        tags: Free-form labels (Nuclei's ``info.tags``, plus vendor/product
+            metadata). Not used by the runtime, which runs whatever it is
+            given: they exist so a *selector* can decide which of thousands of
+            ingested checks are worth running against a given service before
+            the runtime ever sees them (see ``ingest.selector``).
     """
     id: str
     version: int
@@ -237,34 +256,58 @@ class Check:
     finding: dict
     tls_rule: Optional[str] = None
     script: Optional[str] = None
+    namespace: str = "lybra"
+    feed_version: Optional[str] = None
+    tags: tuple = ()
 
     @property
     def check_id(self) -> str:
         """The fully-qualified, versioned check id, e.g. ``lybra:git-config@1``."""
-        return f"lybra:{self.id}@{self.version}"
+        return f"{self.namespace}:{self.id}@{self.version}"
 
 
 # =========================================================================
 # FEED LOADING
 # =========================================================================
 
+def load_feed_document(path: Path) -> dict:
+    """Read a feed file into its raw document, dispatching on the extension.
+
+    YAML is the feed's own format (Fase R); JSON is still accepted because the
+    two shapes are the same object graph, and an externally-supplied feed may
+    arrive as either. Only the deserializer differs — :func:`_parse_check` is
+    given identical dicts in both cases, which is what makes the migration a
+    format change rather than a behaviour one.
+
+    Args:
+        path: The feed file.
+
+    Returns:
+        The parsed document.
+    """
+    text = path.read_text(encoding="utf-8")
+    if path.suffix.lower() in (".yaml", ".yml"):
+        return yaml.safe_load(text) or {}
+    return json.loads(text)
+
+
 def load_checks(path: Optional[str] = None) -> List[Check]:
     """Load and parse a check feed.
 
     Args:
-        path: Path to a JSON feed file. Defaults to the feed bundled with this
-            module.
+        path: Path to a feed file, YAML or JSON. Defaults to the feed bundled
+            with this module.
 
     Returns:
         The parsed checks.
     """
     feed_path = Path(path) if path else _BUNDLED_FEED
-    data = json.loads(feed_path.read_text(encoding="utf-8"))
+    data = load_feed_document(feed_path)
     return [_parse_check(c) for c in data.get("checks", [])]
 
 
 def _parse_check(c: dict) -> Check:
-    """Build a :class:`Check` from its raw JSON representation.
+    """Build a :class:`Check` from its raw document representation.
 
     Applies sensible defaults for optional fields and accepts a matcher's target
     values under any of ``words`` / ``regex`` / ``value``.
@@ -712,7 +755,7 @@ class CheckRuntime:
             "cve_ids":      f.get("cve_ids"),
             "source":       "lybra",
             "check_id":     check.check_id,
-            "feed_version": CHECKS_FEED_VERSION,
+            "feed_version": check.feed_version or CHECKS_FEED_VERSION,
             "qod":          f.get("qod", QOD_CONFIRMED),
             "confirmed":    f.get("confirmed", True),
             "state":        "open",
