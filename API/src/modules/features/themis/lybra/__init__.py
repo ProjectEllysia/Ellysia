@@ -1,7 +1,7 @@
 """Lybra's own vulnerability engine — the code that makes it a scanner.
 
 This package holds everything that makes Lybra a scanner in its own right,
-rather than an orchestrator that just runs Nmap, Nikto and OpenVAS. By project
+rather than an orchestrator that just runs Nmap and Nikto. By project
 convention the managers live in ``themis/managers.py`` and the repositories in
 ``themis/repositories.py``; the detection logic lives here.
 
@@ -34,7 +34,7 @@ them:
     into vulnerability state on an asset over time.
 
 ``adapters``
-    Bridges Nikto and OpenVAS results into the shared ``Finding`` model, so every
+    Bridges Nikto and Nuclei results into the shared ``Finding`` model, so every
     scanner can be correlated together.
 
 Everything here is deliberately free of the ORM and of network side effects
@@ -94,6 +94,7 @@ from .checks import (
 )
 from .script_checks import (
     SmbSigningNotRequiredPlugin,
+    SnmpDefaultCommunityPlugin,
     default_script_plugins,
 )
 from .correlation import (
@@ -157,22 +158,28 @@ from .fingerprinting import (
     fingerprint_vnc,
     VncProbe,
     VncDissector,
+    SnmpFingerprint,
+    parse_snmp_sysdescr,
+    fingerprint_snmp,
+    SnmpProbe,
+    SnmpDissector,
     agrees_with_nmap,
     concordance_rate,
     QOD_FINGERPRINT,
 )
 from .adapters import (
     nikto_incident_to_finding,
-    openvas_result_to_finding,
     nuclei_result_to_finding,
     QOD_NUCLEI_MATCH,
 )
 from .transport import (
     AsyncConnectScanner,
     scan_ports_sync,
+    scan_udp_ports_sync,
     services_from_discovered_ports,
     port_concordance,
     DEFAULT_PORTS,
+    UDP_PROBES,
     WELL_KNOWN_PORTS,
 )
 
@@ -219,6 +226,7 @@ __all__ = [
     "ScriptContext",
     "ScriptPlugin",
     "SmbSigningNotRequiredPlugin",
+    "SnmpDefaultCommunityPlugin",
     "default_script_plugins",
     "classify_exposure",
     "compute_dedup_key",
@@ -278,17 +286,23 @@ __all__ = [
     "fingerprint_vnc",
     "VncProbe",
     "VncDissector",
+    "SnmpFingerprint",
+    "parse_snmp_sysdescr",
+    "fingerprint_snmp",
+    "SnmpProbe",
+    "SnmpDissector",
     "agrees_with_nmap",
     "concordance_rate",
     "QOD_FINGERPRINT",
     "nikto_incident_to_finding",
-    "openvas_result_to_finding",
     "nuclei_result_to_finding",
     "QOD_NUCLEI_MATCH",
     "AsyncConnectScanner",
     "scan_ports_sync",
+    "scan_udp_ports_sync",
     "services_from_discovered_ports",
     "port_concordance",
     "DEFAULT_PORTS",
+    "UDP_PROBES",
     "WELL_KNOWN_PORTS",
 ]

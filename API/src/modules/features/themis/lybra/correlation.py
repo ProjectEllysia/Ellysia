@@ -7,7 +7,7 @@ just running three scanners and reading three reports.
 Everything here is a pure function over finding dicts, so it can be unit-tested
 without a database and works no matter which scanner produced a finding. That
 scanner-independence is exactly what lets several sources fold into a single
-finding once Nikto and OpenVAS also write to the shared ``Finding`` table.
+finding once Nikto and Nuclei also write to the shared ``Finding`` table.
 
 The module covers three concerns:
 
@@ -96,6 +96,15 @@ def compute_dedup_key(finding: dict) -> str:
     else:
         identity = "cat:" + str(finding.get("category"))
     material = f"{host}|{port}|{identity}"
+    protocol = (finding.get("protocol") or "tcp").lower()
+    if protocol != "tcp":
+        # Ronda 1 (roadmap §6.3): la sonda UDP puede abrir el mismo número de
+        # puerto que ya vigilábamos por TCP (161 es el caso real: SNMP). Sin
+        # esto, un 161/tcp y un 161/udp del mismo host colisionarían bajo la
+        # misma identidad ("check:lybra:open-port@1") y uno pisaría al otro en
+        # el merge. Condicionado a "no tcp" para que cada dedup_key ya
+        # almacenada quede intacta: hasta esta ronda todo hallazgo era TCP.
+        material += "|" + protocol
     if port is None:
         # A portless finding (Fase 0.9 — an inventory-origin service, e.g. an
         # installed package with nothing listening) has no port to
@@ -124,7 +133,7 @@ def merge_findings(findings: List[dict]) -> List[dict]:
     When several findings describe the same issue, the merged result keeps the
     highest ``qod`` (along with that finding's title and CVSS score), is marked
     ``confirmed`` / ``in_kev`` if *any* input was, unions the CVE ids, and joins
-    the distinct sources into ``source`` (e.g. ``"lybra,openvas"``). This is the
+    the distinct sources into ``source`` (e.g. ``"lybra,nuclei"``). This is the
     mechanism behind both within-scan dedup and the read-time fusion of
     corroborator scans.
 

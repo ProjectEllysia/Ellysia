@@ -27,6 +27,12 @@ best value-for-effort in the roadmap:
     NEGOTIATE exchange. See its own module docstring for the documented
     simplifications and the "unverified against a live server" caveat.
 
+``snmp``
+    Fase N/Ronda 1's first UDP protocol — a ``sysDescr.0`` GetRequest (the
+    encoder lives in ``transport.py``, imported back here; see the module's
+    own docstring for why). Deliberately never yields a version, only a
+    product string — see ``fingerprint_snmp``.
+
 ``dispatch``
     The :class:`Dissector` base every protocol module above implements.
 
@@ -57,13 +63,11 @@ confidence beyond what the matcher already assigns any version-based guess.
 Two techniques are deliberately left for later: full JARM fingerprinting (too
 large and risky to ship without a live TLS lab to validate it against) and OS
 fingerprinting (which the roadmap itself rates low value). Both stay
-oracle-only — handled by Nmap — until picked up. SNMP is also deliberately
-absent: its identification lives in a UDP ``sysDescr`` read, and Fase T has
-not built a UDP transport yet (see ``transport.py``) — nothing to probe with
-until that lands. RDP, LDAP, VNC's full protocol beyond its version banner,
-and RPC stay oracle-only too, per the roadmap's own priority-3 rating for
-that group; PostgreSQL/MSSQL/MongoDB (unlike MySQL/Redis) need a negotiated
-handshake rather than a volunteered banner and are deferred alongside them.
+oracle-only — handled by Nmap — until picked up. RDP, LDAP, VNC's full
+protocol beyond its version banner, and RPC stay oracle-only too, per the
+roadmap's own priority-3 rating for that group; PostgreSQL/MSSQL/MongoDB
+(unlike MySQL/Redis) need a negotiated handshake rather than a volunteered
+banner and are deferred alongside them.
 """
 
 from __future__ import annotations
@@ -138,6 +142,13 @@ from .vnc import (
     VncProbe,
     VncDissector,
 )
+from .snmp import (
+    SnmpFingerprint,
+    parse_snmp_sysdescr,
+    fingerprint_snmp,
+    SnmpProbe,
+    SnmpDissector,
+)
 from .concordance import (
     QOD_FINGERPRINT,
     agrees_with_nmap,
@@ -199,6 +210,11 @@ __all__ = [
     "fingerprint_vnc",
     "VncProbe",
     "VncDissector",
+    "SnmpFingerprint",
+    "parse_snmp_sysdescr",
+    "fingerprint_snmp",
+    "SnmpProbe",
+    "SnmpDissector",
     "QOD_FINGERPRINT",
     "agrees_with_nmap",
     "concordance_rate",

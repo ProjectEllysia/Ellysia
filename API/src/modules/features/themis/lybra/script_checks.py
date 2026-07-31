@@ -35,9 +35,10 @@ from __future__ import annotations
 import logging
 from typing import Dict, Optional
 
-from .checks import ScriptContext, ScriptPlugin, is_smb_service
+from .checks import ScriptContext, ScriptPlugin, is_smb_service, is_snmp_service
 from .engine import Service
 from .fingerprinting.smb import SmbProbe, fingerprint_smb
+from .fingerprinting.snmp import SnmpProbe
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,33 @@ class SmbSigningNotRequiredPlugin(ScriptPlugin):
         return "firma no requerida" in fingerprint.product
 
 
+class SnmpDefaultCommunityPlugin(ScriptPlugin):
+    """Detecta un servicio SNMP que acepta la comunidad por defecto ``public``.
+
+    Comparte la sonda con el dissector SNMP (Fase N/Ronda 1, roadmap §6.3) a
+    propósito: que ``sysDescr`` conteste a ``public`` ES la evidencia del
+    hallazgo, no una comprobación aparte — no tiene sentido mandar el mismo
+    datagrama dos veces con dos sondas distintas.
+
+    Args:
+        probe: Sonda inyectable, mismo patrón que
+            :class:`~.fingerprinting.snmp.SnmpDissector`.
+    """
+
+    plugin_id = "snmp-default-community"
+
+    def __init__(self, probe: Optional[SnmpProbe] = None) -> None:
+        self._probe = probe or SnmpProbe()
+
+    def applies(self, service: Service) -> bool:
+        return is_snmp_service(service)
+
+    def run(self, context: ScriptContext) -> bool:
+        context.acquire()
+        sysdescr = self._probe.fetch(context.target, context.service.port or 161)
+        return sysdescr is not None
+
+
 def default_script_plugins() -> Dict[str, ScriptPlugin]:
     """Construye el registro de plugins de primera parte, indexado por ``plugin_id``.
 
@@ -85,5 +113,5 @@ def default_script_plugins() -> Dict[str, ScriptPlugin]:
         Un mapa ``plugin_id -> plugin``, que es lo que ``CheckRuntime`` espera
         recibir por inyección. Añadir un plugin es añadir una entrada aquí.
     """
-    plugins = (SmbSigningNotRequiredPlugin(),)
+    plugins = (SmbSigningNotRequiredPlugin(), SnmpDefaultCommunityPlugin())
     return {plugin.plugin_id: plugin for plugin in plugins}

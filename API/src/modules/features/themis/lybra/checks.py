@@ -53,9 +53,10 @@ logger = logging.getLogger(__name__)
 # protocol under an existing one (checks-2: "ftp-anonymous-login", the first
 # ``type: "network"`` check; checks-3: "redis-unauthenticated-access", the
 # second ``network`` protocol; checks-4: "smb-signing-not-required", the first
-# ``type: "script"`` check) — never for a fix to an existing check, which
-# bumps that check's own ``version`` instead (see ``Check.check_id``).
-CHECKS_FEED_VERSION = "lybra-checks-4"
+# ``type: "script"`` check; checks-5: "snmp-default-community", the first
+# check over UDP) — never for a fix to an existing check, which bumps that
+# check's own ``version`` instead (see ``Check.check_id``).
+CHECKS_FEED_VERSION = "lybra-checks-5"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -91,6 +92,13 @@ _REDIS_SERVICE_NAMES = {"redis"}
 _REDIS_PORTS = {6379}
 _VNC_SERVICE_NAMES = {"vnc"}
 _VNC_PORTS = {5900}
+# SNMP — el primer protocolo de esta tabla que habla UDP (Fase N/Ronda 1,
+# roadmap §6.3). 161 también aparece en WELL_KNOWN_PORTS como TCP, así que
+# is_snmp_service (más abajo) es el único predicado de este módulo que mira
+# service.protocol: sin esa guarda, un 161/tcp abierto arrastraría al
+# dissector y al check a un datagrama que ese servicio nunca contestará.
+_SNMP_SERVICE_NAMES = {"snmp"}
+_SNMP_PORTS = {161}
 
 
 # =========================================================================
@@ -419,6 +427,22 @@ def is_redis_service(service: Service) -> bool:
 def is_vnc_service(service: Service) -> bool:
     """Return whether a service should be probed by the VNC dissector."""
     return (service.name or "").lower() in _VNC_SERVICE_NAMES or service.port in _VNC_PORTS
+
+
+def is_snmp_service(service: Service) -> bool:
+    """Return whether a service should be probed by the SNMP dissector/check.
+
+    The only predicate in this module that inspects ``service.protocol``: 161
+    is a recognised TCP port too (``WELL_KNOWN_PORTS``), and the SNMP probe
+    speaks UDP exclusively, so without this guard a 161/tcp open port would
+    be handed a datagram it can never answer — and would collide on
+    ``dedup_key`` with the genuine 161/udp finding (see
+    ``lybra/correlation.py::compute_dedup_key``). ``protocol or "tcp"``
+    defaults an inventory-origin service (empty protocol) to non-UDP too.
+    """
+    if (service.protocol or "tcp").lower() != "udp":
+        return False
+    return (service.name or "").lower() in _SNMP_SERVICE_NAMES or service.port in _SNMP_PORTS
 
 
 # Maps a ``type: "network"`` check's declared ``service`` (the feed's plain
@@ -752,6 +776,7 @@ class CheckRuntime:
             "category":     check.category,
             "port":         service.port,
             "service":      service.name or check.service,
+            "protocol":     service.protocol,
             "cve_ids":      f.get("cve_ids"),
             "source":       "lybra",
             "check_id":     check.check_id,
