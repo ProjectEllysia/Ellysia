@@ -329,7 +329,7 @@ def aegis_get_topics():
 @handle_exceptions(default_exception=DocumentError, logger=logger)
 def aegis_get_brands():
     """Catalogo de marcas disponibles para filtrado de alertas"""
-    brands = CR.get_aegis_brands()
+    brands = CR.aegis_config().brands
     return {"count": len(brands), "brands": brands}
 
 

@@ -523,25 +523,33 @@ def get_directory_of(directory_type) -> str:
 # CONFIGURACIÓN DE AEGIS
 # =============================================================================
 
-@_lazy_load
-def get_aegis_config() -> dict:
-    return _cfg("features.aegis", {})
+@config_block("features.aegis")
+@dataclass(frozen=True)
+class AegisConfig:
+    """Generación de píldoras de concienciación y campañas."""
 
-@_lazy_load
-def get_aegis_tips_amount() -> int:
-    return _cfg("features.aegis.tipsAmount", 7, int)
+    enabled: bool = True
 
-@_lazy_load
-def get_aegis_vulnerabilities_antiquity() -> int:
-    return _cfg("features.aegis.vulnerabilitiesAntiquity", 5, int)
+    tips_amount: int = 7
+    """Consejos que se le piden a la IA por píldora."""
 
-@_lazy_load
-def get_aegis_brands() -> list[dict]:
-    return _cfg("features.aegis.brands", [], list)
+    vulnerabilities_antiquity: int = 5
+    """Antigüedad máxima (años) de una alerta para seguir considerándola vigente."""
 
-@_lazy_load
-def get_aegis_prompts() -> dict:
-    return _cfg("features.aegis.prompts", {})
+    brands: list[dict] = field(default_factory=list)
+    """Catálogo de fabricantes vigilados, con su equivalencia en CIRCL.
+
+    Cada entrada lleva ``label``, ``circl_vendor``, ``circl_product`` y una lista
+    de ``aliases`` para resolver los nombres que la gente escribe de otra forma
+    ("hewlett packard enterprise" → HPE).
+    """
+
+    prompts: dict = field(default_factory=dict)
+    """Par ``system`` / ``userTemplate`` que se le pasa a Scribe."""
+
+
+def aegis_config() -> AegisConfig:
+    return load_block(AegisConfig)
 
 
 # =============================================================================

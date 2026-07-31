@@ -97,8 +97,6 @@ GETTERS_AND_PATHS = [
     (CR.get_iris_legitimate_threshold,      "features.iris.legitimateThreshold"),
     (CR.get_iris_max_ingested_per_day,      "features.iris.maxIngestedPerDay"),
     (CR.get_iris_prompts,                   "features.iris.prompts"),
-    (CR.get_aegis_brands,                   "features.aegis.brands"),
-    (CR.get_aegis_prompts,                  "features.aegis.prompts"),
 ]
 
 
@@ -188,6 +186,7 @@ CONFIG_BLOCKS = [
     (CR.LybraConfig, CR.lybra_config),
     (CR.LybraIngestConfig, CR.lybra_ingest_config),
     (CR.NucleiConfig, CR.nuclei_config),
+    (CR.AegisConfig, CR.aegis_config),
 ]
 
 

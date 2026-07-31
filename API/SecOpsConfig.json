@@ -27,7 +27,10 @@
   },
   "infrastructure": {
     "database": {
-      "isolation_level": "READ COMMITTED"
+      "isolation_level": "READ COMMITTED",
+      "pool_size": 10,
+      "max_overflow": 20,
+      "pool_timeout": 30
     },
     "redis": {
       "db": 0,
@@ -217,6 +220,8 @@
     },
     "aegis": {
       "enabled": true,
+      "tipsAmount": 7,
+      "vulnerabilitiesAntiquity": 5,
       "directories": {
         "output": "data/aegis/output",
         "stack": "data/aegis/stack"
@@ -361,6 +366,7 @@
       "legitimateThreshold": 80,
       "suspiciousThreshold": 55,
       "minHeaders": 2,
+      "maxMessageBytes": 10485760,
       "maxConnectionsPerUser": 5,
       "maxIngestedPerDay": 200,
       "pollIntervalMinutes": 5,
