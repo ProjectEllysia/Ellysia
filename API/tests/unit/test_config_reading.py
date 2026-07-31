@@ -7,45 +7,57 @@ import src.modules.system.config_reading as CR
 pytestmark = pytest.mark.unit
 
 
-def test_get_redis_config_reads_env(monkeypatch):
+def test_redis_config_prefers_the_environment(monkeypatch):
     monkeypatch.setenv("REDIS_HOST", "redis.internal")
     monkeypatch.setenv("REDIS_PORT", "6380")
     monkeypatch.setenv("REDIS_DB", "2")
     monkeypatch.delenv("REDIS_PASSWORD", raising=False)
 
-    cfg = CR.get_redis_config()
-    assert cfg["host"] == "redis.internal"
-    assert cfg["port"] == 6380
-    assert cfg["db"] == 2
-    assert cfg["password"] is None
+    config = CR.redis_config()
+    assert config.host == "redis.internal"
+    assert config.port == 6380
+    assert config.db == 2
+    assert config.password is None
 
 
-def test_get_oauth_config_from_env():
-    access, refresh, secret, algorithm = CR.get_oauth_config()
-    assert secret == "test-secret-key-not-for-production"
-    assert algorithm == "HS256"
-    assert access == 30.0
-    assert refresh == 7.0
+def test_jwt_config_from_env():
+    config = CR.jwt_config()
+    assert config.secret == "test-secret-key-not-for-production"
+    assert config.algorithm == "HS256"
+    assert config.access_token_expiry_minutes == 30.0
+    assert config.refresh_token_expiry_days == 7.0
 
 
-def test_get_oauth_config_missing_var_raises(monkeypatch):
+def test_jwt_secret_missing_var_raises(monkeypatch):
     monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
     with pytest.raises(ValueError):
-        CR.get_oauth_config()
+        _ = CR.jwt_config().secret
 
 
-def test_get_oauth_config_rejects_disallowed_algorithm(monkeypatch):
+def test_jwt_algorithm_rejects_disallowed_algorithm(monkeypatch):
     # S8: sin allowlist, un JWT_ALGORITHM mal puesto (typo, "none", un
     # algoritmo asimétrico que necesita un par de claves) pasaba silencioso.
     monkeypatch.setenv("JWT_ALGORITHM", "none")
     with pytest.raises(ValueError):
-        CR.get_oauth_config()
+        _ = CR.jwt_config().algorithm
 
 
-def test_get_oauth_config_accepts_allowed_hs_algorithm(monkeypatch):
+def test_jwt_algorithm_accepts_allowed_hs_algorithm(monkeypatch):
     monkeypatch.setenv("JWT_ALGORITHM", "HS512")
-    _, _, _, algorithm = CR.get_oauth_config()
-    assert algorithm == "HS512"
+    assert CR.jwt_config().algorithm == "HS512"
+
+
+def test_taskqueue_max_workers_does_not_leak_into_the_cached_config(monkeypatch):
+    """El override de entorno no debe escribirse dentro de la config cargada.
+
+    Antes se resolvía asignándolo al dict cacheado, con lo que un valor que solo
+    existía en el entorno aparecía en ``GET /system`` y acababa persistido en
+    SecOpsConfig.json al primer guardado desde el SPA.
+    """
+    monkeypatch.setenv("TASKQUEUE_MAX_WORKERS", "99")
+
+    assert CR.taskqueue_config().max_workers == 99
+    assert CR.get_full_config()["infrastructure"]["taskqueue"]["max_workers"] != 99
 
 
 def test_is_development_reflects_flask_env(monkeypatch):

@@ -100,14 +100,14 @@ class IrisMailboxManager:
         frontend ya proxya las rutas de la API (ver ``npm run dev`` en
         ``web/app``), así que esta URL llega al backend igual en dev y prod.
         """
-        return f"{CR.get_public_web_url()}/iris/mailbox/callback"
+        return f"{CR.general_config().public_url}/iris/mailbox/callback"
 
     @staticmethod
     def _state_serializer() -> URLSafeTimedSerializer:
         # Reutiliza JWT_SECRET_KEY (ya es un secreto fuerte existente) en vez
         # de introducir uno nuevo solo para firmar el state -- distinto
         # "salt" evita que una firma de state sea válida como JWT y viceversa.
-        _, _, secret, _ = CR.get_oauth_config()
+        secret = CR.jwt_config().secret
         return URLSafeTimedSerializer(secret, salt=_STATE_SALT)
 
     @classmethod

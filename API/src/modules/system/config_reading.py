@@ -9,13 +9,13 @@ import json
 import logging
 import os
 
+from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
 from functools import wraps
 from pathlib import Path
-from dotenv import load_dotenv
-from dataclasses import dataclass, field, fields, is_dataclass
-
 from typing import Optional, TypeVar, get_origin
+
+from dotenv import load_dotenv
 
 from src.modules.shared._exceptions import IllegalStateError
 
@@ -264,77 +264,6 @@ def get_google_environment() -> dict[str, str]:
         )
 
     return {"api_key": api_key, "model": model}
-
-
-_ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
-
-
-@_lazy_load
-def get_oauth_config() -> tuple[float, float, Optional[str], Optional[str]]:
-    """Configuración OAuth/JWT.
-
-    El secreto (``JWT_SECRET_KEY``) vive exclusivamente en .env.
-    ``algorithm``, ``access_token_expiry_minutes`` y
-    ``refresh_token_expiry_days`` provienen de ``general.security.jwt`` en
-    SecOpsConfig.json; las env vars ``JWT_ALGORITHM``,
-    ``ACCESS_TOKEN_EXPIRY_MINUTES`` y ``REFRESH_TOKEN_EXPIRY_DAYS``
-    sobreescriben la config si están presentes (override útil para
-    contenedores / 12-factor).
-    """
-    secret = os.getenv("JWT_SECRET_KEY")
-    if not secret:
-        logger.error("Falta la variable de entorno JWT_SECRET_KEY")
-        raise ValueError(
-            "Falta la variable de entorno JWT_SECRET_KEY. "
-            "Defínela en el archivo .env (es un secreto, no va en "
-            "SecOpsConfig.json)."
-        )
-
-    jwt_cfg = _cfg("general.security.jwt", {})
-    algorithm = os.getenv("JWT_ALGORITHM") or str(jwt_cfg.get("algorithm", "HS256"))
-    # S8: JWT_ALGORITHM es override por entorno sin validar — un typo o un
-    # despliegue mal configurado con "none" (o un algoritmo asimétrico que
-    # necesita un par de claves, no un secreto simétrico) rompería la
-    # verificación de tokens en producción. Firmamos con un único secreto
-    # simétrico, así que solo la familia HS* tiene sentido aquí.
-    if algorithm not in _ALLOWED_JWT_ALGORITHMS:
-        raise ValueError(
-            f"JWT_ALGORITHM '{algorithm}' no permitido. "
-            f"Debe ser uno de: {', '.join(sorted(_ALLOWED_JWT_ALGORITHMS))}."
-        )
-    access    = os.getenv("ACCESS_TOKEN_EXPIRY_MINUTES") or jwt_cfg.get("access_token_expiry_minutes", 30)
-    refresh   = os.getenv("REFRESH_TOKEN_EXPIRY_DAYS") or jwt_cfg.get("refresh_token_expiry_days", 7)
-
-    return (float(access), float(refresh), secret, algorithm)
-
-
-@_lazy_load
-def get_mfa_config() -> dict:
-    """Configuración de MFA (TOTP + códigos de recuperación).
-
-    ``MFA_ENCRYPTION_KEY`` (clave Fernet para cifrar en reposo el secreto TOTP)
-    vive exclusivamente en .env, igual que ``JWT_SECRET_KEY`` — a diferencia del
-    resto de secretos de Acheron, el servidor SÍ necesita poder leer este valor
-    para poder calcular el código TOTP vigente y verificarlo. El resto de
-    parámetros provienen de ``general.security.mfa`` en SecOpsConfig.json.
-    """
-    encryption_key = os.getenv("MFA_ENCRYPTION_KEY")
-    if not encryption_key:
-        logger.error("Falta la variable de entorno MFA_ENCRYPTION_KEY")
-        raise ValueError(
-            "Falta la variable de entorno MFA_ENCRYPTION_KEY. "
-            "Defínela en el archivo .env (clave Fernet: "
-            "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\")."
-        )
-
-    mfa_cfg = _cfg("general.security.mfa", {})
-    return {
-        "encryption_key": encryption_key,
-        "issuer": str(mfa_cfg.get("issuer", "Ellysia")),
-        "challenge_expiry_minutes": int(mfa_cfg.get("challenge_expiry_minutes", 5)),
-        "max_challenge_attempts": int(mfa_cfg.get("max_challenge_attempts", 5)),
-        "recovery_codes_count": int(mfa_cfg.get("recovery_codes_count", 10)),
-    }
 
 
 def get_encryption_key(purpose: str) -> str:
@@ -1048,58 +977,277 @@ def save_full_config(new_config: dict, expected_version: Optional[str] = None) -
     return new_config
 
 
+# ============================================================================= 
+# CONFIGURACIÓN GENERAL
 # =============================================================================
-# CONFIGURACIÓN DE TASKQUEUE
+
+@config_block("general")
+@dataclass(frozen=True)
+class GeneralConfig:
+    configured_public_url: str = field(
+        default="http://localhost:5173", metadata={"key": "publicUrl"}
+    )
+    """Respaldo en fichero de la URL pública. Ver ``public_url``."""
+
+    @property
+    def public_url(self) -> str:
+        """Base URL pública del SPA, usada para construir enlaces en los correos
+        salientes (p. ej. el del quiz de una campaña de Aegis).
+
+        ``PUBLIC_WEB_URL`` en .env manda sobre el fichero; sin ninguno de los
+        dos, cae al valor de desarrollo de Vite. Siempre sin barra final.
+        """
+        return (os.getenv("PUBLIC_WEB_URL") or self.configured_public_url).rstrip("/")
+
+
+def general_config() -> GeneralConfig:
+    return load_block(GeneralConfig)
+
+
 # =============================================================================
+# CONFIGURACIÓN DE SEGURIDAD
+# =============================================================================
+#
+# Las tres ramas de ``general.security`` usan snake_case en el JSON, no la
+# convención camelCase del resto: sus claves se pasan tal cual como kwargs a
+# argon2 y a PyJWT, y traducirlas solo añadiría una capa que se puede
+# desincronizar. De ahí el ``metadata={"key": ...}`` en cada campo.
 
-@_lazy_load
-def get_redis_config() -> dict:
-    """Devuelve la configuración de conexión Redis.
+@config_block("general.security.argon2")
+@dataclass(frozen=True)
+class Argon2Config:
+    """Parámetros de Argon2id para el hash de contraseñas."""
 
-    Valores no secretos (host, port, db, socket_connect_timeout) provienen de
-    SecOpsConfig.json. El password (secreto) proviene de la variable de entorno
-    REDIS_PASSWORD. Las env vars REDIS_HOST/PORT/DB sobreescriben la config si
-    están presentes (útil en contenedores).
+    time_cost: int = field(default=3, metadata={"key": "time_cost"})
+    memory_cost: int = field(default=65536, metadata={"key": "memory_cost"})
+    parallelism: int = field(default=4, metadata={"key": "parallelism"})
+
+    def as_kwargs(self) -> dict[str, int]:
+        """Los tres parámetros tal como los espera ``argon2.PasswordHasher``."""
+        return {
+            "time_cost": self.time_cost,
+            "memory_cost": self.memory_cost,
+            "parallelism": self.parallelism,
+        }
+
+# TODO: Sería interesante que este campo estuviera en la configuración
+_ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
+
+
+@config_block("general.security.jwt")
+@dataclass(frozen=True)
+class JwtConfig:
+    """Firma y caducidad de los tokens OAuth.
+
+    Los tres valores del fichero son pisables por entorno (útil en contenedores
+    / 12-factor); el secreto no está en el fichero en absoluto.
     """
-    cfg = _cfg("infrastructure.redis", {})
-    host    = os.getenv("REDIS_HOST", str(cfg.get("host", "localhost")))
-    port    = int(os.getenv("REDIS_PORT", str(cfg.get("port", 6379))))
-    db      = int(os.getenv("REDIS_DB",   str(cfg.get("db", 0))))
-    timeout = int(cfg.get("socket_connect_timeout", 2))
-    password = os.getenv("REDIS_PASSWORD", "")
 
-    return {
-        "host":                  host,
-        "port":                  port,
-        "db":                    db,
-        "socket_connect_timeout": timeout,
-        "password":              password or None,
-    }
+    configured_algorithm: str = field(default="HS256", metadata={"key": "algorithm"})
+    configured_access_token_expiry_minutes: float = field(
+        default=30, metadata={"key": "access_token_expiry_minutes"}
+    )
+    configured_refresh_token_expiry_days: float = field(
+        default=7, metadata={"key": "refresh_token_expiry_days"}
+    )
 
-@_lazy_load
-def get_taskqueue_config() -> dict:
-    cfg = _cfg("infrastructure.taskqueue", {})
-    max_workers_env = os.getenv("TASKQUEUE_MAX_WORKERS")
-    if max_workers_env is not None:
-        cfg["max_workers"] = int(max_workers_env)
+    @property
+    def secret(self) -> str:
+        """``JWT_SECRET_KEY``, que vive exclusivamente en .env.
 
-    return cfg
+        Raises:
+            ValueError: Si falta. Es una propiedad y no un campo justo por esto:
+                arrancar sin secreto debe fallar cuando alguien va a firmar un
+                token, no al construir el bloque.
+        """
+        secret = os.getenv("JWT_SECRET_KEY")
+        if not secret:
+            logger.error("Falta la variable de entorno JWT_SECRET_KEY")
+            raise ValueError(
+                "Falta la variable de entorno JWT_SECRET_KEY. "
+                "Defínela en el archivo .env (es un secreto, no va en "
+                "SecOpsConfig.json)."
+            )
+        return secret
+
+    @property
+    def algorithm(self) -> str:
+        """Algoritmo de firma, validado contra la familia HS*.
+
+        S8: ``JWT_ALGORITHM`` era un override de entorno sin validar — un typo, o
+        un despliegue mal configurado con "none" (o con un algoritmo asimétrico,
+        que necesita un par de claves y no un secreto simétrico), rompería la
+        verificación de tokens en producción. Firmamos con un único secreto
+        simétrico, así que solo HS* tiene sentido aquí.
+        """
+        algorithm = os.getenv("JWT_ALGORITHM") or self.configured_algorithm
+        if algorithm not in _ALLOWED_JWT_ALGORITHMS:
+            raise ValueError(
+                f"JWT_ALGORITHM '{algorithm}' no permitido. "
+                f"Debe ser uno de: {', '.join(sorted(_ALLOWED_JWT_ALGORITHMS))}."
+            )
+        return algorithm
+
+    @property
+    def access_token_expiry_minutes(self) -> float:
+        return float(
+            os.getenv("ACCESS_TOKEN_EXPIRY_MINUTES")
+            or self.configured_access_token_expiry_minutes
+        )
+
+    @property
+    def refresh_token_expiry_days(self) -> float:
+        return float(
+            os.getenv("REFRESH_TOKEN_EXPIRY_DAYS")
+            or self.configured_refresh_token_expiry_days
+        )
 
 
-@_lazy_load
-def get_public_web_url() -> str:
-    """Base URL pública del frontend (SPA), usada para construir enlaces
-    en emails salientes (p. ej. el enlace del quiz de una campaña Aegis).
+@config_block("general.security.mfa")
+@dataclass(frozen=True)
+class MfaConfig:
+    """Segundo factor: TOTP y códigos de recuperación."""
 
-    ``PUBLIC_WEB_URL`` en .env tiene prioridad sobre ``general.publicUrl``
-    en SecOpsConfig.json; sin ninguno de los dos, cae al valor de desarrollo
-    de Vite. Sin barra final.
-    """
-    env_override = os.getenv("PUBLIC_WEB_URL")
-    if env_override:
-        return env_override.rstrip("/")
+    issuer: str = "Ellysia"
+    """Nombre que muestra la app de autenticación."""
 
-    return _cfg("general.publicUrl", "http://localhost:5173", str).rstrip("/")
+    challenge_expiry_minutes: int = field(
+        default=5, metadata={"key": "challenge_expiry_minutes"}
+    )
+    max_challenge_attempts: int = field(
+        default=5, metadata={"key": "max_challenge_attempts"}
+    )
+    recovery_codes_count: int = field(
+        default=10, metadata={"key": "recovery_codes_count"}
+    )
+
+    @property
+    def encryption_key(self) -> str:
+        """Clave Fernet con la que se cifra en reposo el secreto TOTP.
+
+        Vive solo en .env, igual que ``JWT_SECRET_KEY``: a diferencia del resto
+        de secretos de Acheron, el servidor sí necesita poder leer este valor
+        para calcular el TOTP vigente y verificarlo.
+        """
+        return get_encryption_key("mfa")
+
+
+def argon2_config() -> Argon2Config:
+    return load_block(Argon2Config)
+
+
+def jwt_config() -> JwtConfig:
+    return load_block(JwtConfig)
+
+
+def mfa_config() -> MfaConfig:
+    return load_block(MfaConfig)
+
+
+# =============================================================================
+# CONFIGURACIÓN DE INFRAESTRUCTURA
+# =============================================================================
+#
+# Igual que en seguridad, estas claves son snake_case en el JSON porque se pasan
+# tal cual a SQLAlchemy y a redis-py.
+
+@config_block("infrastructure.database")
+@dataclass(frozen=True)
+class DatabaseConfig:
+    """Ajustes no secretos de SQLAlchemy. Las credenciales van en .env."""
+
+    isolation_level: str = field(
+        default="READ COMMITTED", metadata={"key": "isolation_level"}
+    )
+    pool_size: int = field(default=10, metadata={"key": "pool_size"})
+    max_overflow: int = field(default=20, metadata={"key": "max_overflow"})
+    pool_timeout: int = field(default=30, metadata={"key": "pool_timeout"})
+
+    def pool_kwargs(self) -> dict[str, int]:
+        """El pool tal como lo espera ``create_engine``."""
+        return {
+            "pool_size": self.pool_size,
+            "max_overflow": self.max_overflow,
+            "pool_timeout": self.pool_timeout,
+        }
+
+
+@config_block("infrastructure.redis")
+@dataclass(frozen=True)
+class RedisConfig:
+    """Conexión a Redis: lo no secreto del fichero, el resto del entorno."""
+
+    configured_host: str = field(default="localhost", metadata={"key": "host"})
+    configured_port: int = field(default=6379, metadata={"key": "port"})
+    configured_db: int = field(default=0, metadata={"key": "db"})
+
+    socket_connect_timeout: int = field(
+        default=2, metadata={"key": "socket_connect_timeout"}
+    )
+
+    @property
+    def host(self) -> str:
+        return os.getenv("REDIS_HOST", self.configured_host)
+
+    @property
+    def port(self) -> int:
+        return int(os.getenv("REDIS_PORT", str(self.configured_port)))
+
+    @property
+    def db(self) -> int:
+        return int(os.getenv("REDIS_DB", str(self.configured_db)))
+
+    @property
+    def password(self) -> Optional[str]:
+        """``REDIS_PASSWORD``, o ``None`` si la instancia no lleva contraseña."""
+        return os.getenv("REDIS_PASSWORD", "") or None
+
+    def connection_kwargs(self) -> dict:
+        """La conexión tal como la esperan ``redis.Redis`` y RQ."""
+        return {
+            "host": self.host,
+            "port": self.port,
+            "db": self.db,
+            "socket_connect_timeout": self.socket_connect_timeout,
+            "password": self.password,
+        }
+
+
+@config_block("infrastructure.taskqueue")
+@dataclass(frozen=True)
+class TaskQueueConfig:
+    """Cola de trabajos sobre RQ."""
+
+    configured_max_workers: int = field(default=4, metadata={"key": "max_workers"})
+
+    history_ttl_seconds: int = field(
+        default=3600, metadata={"key": "history_ttl_seconds"}
+    )
+    history_max_items: int = field(default=200, metadata={"key": "history_max_items"})
+
+    @property
+    def max_workers(self) -> int:
+        """Procesos worker a levantar.
+
+        ``TASKQUEUE_MAX_WORKERS`` manda sobre el fichero. Antes esto se resolvía
+        escribiendo el valor del entorno *dentro* del dict cacheado de la
+        configuración, con lo que se colaba en la respuesta de ``GET /system`` y
+        acababa persistido en el fichero al primer guardado desde el SPA.
+        """
+        return int(os.getenv("TASKQUEUE_MAX_WORKERS") or self.configured_max_workers)
+
+
+def database_config() -> DatabaseConfig:
+    return load_block(DatabaseConfig)
+
+
+def redis_config() -> RedisConfig:
+    return load_block(RedisConfig)
+
+
+def taskqueue_config() -> TaskQueueConfig:
+    return load_block(TaskQueueConfig)
+
 
 # =============================================================================
 # CONFIGURACIÓN DE HYGEIA
@@ -1318,41 +1466,6 @@ def get_graph_environment() -> dict[str, str]:
 def get_app_version() -> str:
     """Versión de la aplicación desde SecOpsConfig.json."""
     return _cfg("appVersion", "0.0.0", str)
-
-
-# =============================================================================
-# CONFIGURACIÓN DE BASE DE DATOS (no secretos)
-# =============================================================================
-
-@_lazy_load
-def get_db_isolation_level() -> str:
-    """Devuelve el isolation level de SQLAlchemy desde SecOpsConfig.json."""
-    return _cfg("infrastructure.database.isolation_level", "READ COMMITTED")
-
-
-@_lazy_load
-def get_db_pool_config() -> dict:
-    """Devuelve la configuración del pool de conexiones desde SecOpsConfig.json.
-
-    Claves: pool_size, max_overflow, pool_timeout. Aplica defaults sensatos si
-    faltan, de modo que el sistema arranca aunque el bloque no esté completo.
-    """
-    return {
-        "pool_size": _cfg("infrastructure.database.pool_size", 10, int),
-        "max_overflow": _cfg("infrastructure.database.max_overflow", 20, int),
-        "pool_timeout": _cfg("infrastructure.database.pool_timeout", 30, int),
-    }
-
-
-# =============================================================================
-# CONFIGURACIÓN DE SEGURIDAD
-# =============================================================================
-
-@_lazy_load
-def get_argon2_config() -> dict:
-    """Devuelve los parámetros de Argon2id para hashing de contraseñas."""
-    defaults = {"time_cost": 3, "memory_cost": 65536, "parallelism": 4}
-    return {**defaults, **_cfg("general.security.argon2", {})}
 
 
 # =============================================================================

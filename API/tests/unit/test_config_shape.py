@@ -90,10 +90,6 @@ def test_every_scanner_has_its_own_block(raw_config):
 # getters, al menos uno de estos casos cae.
 GETTERS_AND_PATHS = [
     (CR.get_app_version,                    "appVersion"),
-    (CR.get_public_web_url,                 "general.publicUrl"),
-    (CR.get_argon2_config,                  "general.security.argon2"),
-    (CR.get_db_isolation_level,             "infrastructure.database.isolation_level"),
-    (CR.get_redis_config,                   "infrastructure.redis.socket_connect_timeout"),
 ]
 
 
@@ -125,21 +121,10 @@ def _with_sentinel_at(config: dict, dotted_path: str):
     return probed
 
 
-# Getters con override por entorno: con la env var puesta (y ``PUBLIC_WEB_URL``
-# lo está en cualquier .env real) el fichero no se llega a leer, así que el
-# centinela sería invisible y el test fallaría sin que nada esté roto.
-ENV_OVERRIDES = {
-    "get_public_web_url": ("PUBLIC_WEB_URL",),
-    "get_redis_config":   ("REDIS_HOST", "REDIS_PORT", "REDIS_DB"),
-}
-
-
 @pytest.mark.parametrize(
     "getter, dotted_path", GETTERS_AND_PATHS, ids=[g.__name__ for g, _ in GETTERS_AND_PATHS]
 )
 def test_getter_reads_its_documented_path(raw_config, getter, dotted_path, monkeypatch):
-    for env_var in ENV_OVERRIDES.get(getter.__name__, ()):
-        monkeypatch.delenv(env_var, raising=False)
     baseline = getter()
     monkeypatch.setattr(CR, "_configs", _with_sentinel_at(raw_config, dotted_path))
 
@@ -188,6 +173,13 @@ CONFIG_BLOCKS = [
     (CR.IrisConfig, CR.iris_config),
     (CR.ScribeConfig, CR.scribe_config),
     (CR.HeraldConfig, CR.herald_config),
+    (CR.GeneralConfig, CR.general_config),
+    (CR.Argon2Config, CR.argon2_config),
+    (CR.JwtConfig, CR.jwt_config),
+    (CR.MfaConfig, CR.mfa_config),
+    (CR.DatabaseConfig, CR.database_config),
+    (CR.RedisConfig, CR.redis_config),
+    (CR.TaskQueueConfig, CR.taskqueue_config),
 ]
 
 
@@ -224,6 +216,60 @@ def test_block_covers_its_branch_exactly(raw_config, block_type, _accessor):
         f"campos sin clave en el JSON: {sorted(declared - configured)}; "
         f"claves del JSON que ningún campo lee: {sorted(configured - declared)}"
     )
+
+
+# Cada propiedad que antepone el entorno al fichero, con la env var que la pisa
+# y el valor de fichero que debe quedar ignorado. Es la mitad del diseño que el
+# recorrido de campos no puede ver: los campos guardan el valor crudo, así que
+# comparar bloques nunca ejercita la resolución.
+ENV_BACKED_PROPERTIES = [
+    ("PUBLIC_WEB_URL", "https://ellysia.example", "public_url",
+     lambda: CR.GeneralConfig(configured_public_url="http://del-fichero"), "https://ellysia.example"),
+    ("REDIS_HOST", "redis.interno", "host",
+     lambda: CR.RedisConfig(configured_host="del-fichero"), "redis.interno"),
+    ("REDIS_PORT", "6380", "port",
+     lambda: CR.RedisConfig(configured_port=6379), 6380),
+    ("TASKQUEUE_MAX_WORKERS", "12", "max_workers",
+     lambda: CR.TaskQueueConfig(configured_max_workers=4), 12),
+    ("JWT_ALGORITHM", "HS512", "algorithm",
+     lambda: CR.JwtConfig(configured_algorithm="HS256"), "HS512"),
+    ("ACCESS_TOKEN_EXPIRY_MINUTES", "45", "access_token_expiry_minutes",
+     lambda: CR.JwtConfig(configured_access_token_expiry_minutes=30), 45.0),
+    ("NVD_API_KEY", "del-entorno", "nvd_api_key",
+     lambda: CR.KnowledgeBaseConfig(configured_nvd_api_key="del-fichero"), "del-entorno"),
+]
+
+
+@pytest.mark.parametrize(
+    "env_var, env_value, property_name, build_block, expected",
+    ENV_BACKED_PROPERTIES,
+    ids=[f"{env}->{prop}" for env, _, prop, _, _ in ENV_BACKED_PROPERTIES],
+)
+def test_environment_wins_over_the_configured_value(
+    env_var, env_value, property_name, build_block, expected, monkeypatch
+):
+    monkeypatch.setenv(env_var, env_value)
+
+    assert getattr(build_block(), property_name) == expected
+
+
+@pytest.mark.parametrize("env_var, property_name, build_block, expected", [
+    ("PUBLIC_WEB_URL", "public_url",
+     lambda: CR.GeneralConfig(configured_public_url="http://del-fichero/"), "http://del-fichero"),
+    ("REDIS_HOST", "host",
+     lambda: CR.RedisConfig(configured_host="del-fichero"), "del-fichero"),
+    ("TASKQUEUE_MAX_WORKERS", "max_workers",
+     lambda: CR.TaskQueueConfig(configured_max_workers=4), 4),
+    ("NVD_API_KEY", "nvd_api_key",
+     lambda: CR.KnowledgeBaseConfig(configured_nvd_api_key=""), None),
+], ids=["public_url", "redis_host", "max_workers", "nvd_api_key"])
+def test_falls_back_to_the_configured_value_without_the_environment(
+    env_var, property_name, build_block, expected, monkeypatch
+):
+    """Sin la env var manda el fichero (y ``public_url`` pierde la barra final)."""
+    monkeypatch.delenv(env_var, raising=False)
+
+    assert getattr(build_block(), property_name) == expected
 
 
 @pytest.mark.parametrize("snake_case_name, expected", [
@@ -305,23 +351,7 @@ def test_blocks_rebuild_when_the_config_changes(raw_config, monkeypatch):
     assert after.max_processes == before.max_processes + 7
 
 
-def test_taskqueue_config_reads_the_infrastructure_branch(raw_config, monkeypatch):
-    monkeypatch.delenv("TASKQUEUE_MAX_WORKERS", raising=False)
-    assert CR.get_taskqueue_config() == _value_at(raw_config, "infrastructure.taskqueue")
 
-
-def test_oauth_config_reads_the_security_branch(raw_config, monkeypatch):
-    """``general.security.jwt`` aparte: sus tres valores son pisables por
-    entorno, y con el override puesto el centinela del fichero no se vería."""
-    for env_var in ("JWT_ALGORITHM", "ACCESS_TOKEN_EXPIRY_MINUTES", "REFRESH_TOKEN_EXPIRY_DAYS"):
-        monkeypatch.delenv(env_var, raising=False)
-    baseline = CR.get_oauth_config()
-    monkeypatch.setattr(
-        CR, "_configs",
-        _with_sentinel_at(raw_config, "general.security.jwt.access_token_expiry_minutes"),
-    )
-
-    assert CR.get_oauth_config() != baseline
 
 
 # =============================================================================

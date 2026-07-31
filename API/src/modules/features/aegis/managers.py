@@ -890,7 +890,7 @@ class CampaignManager(TaskTrackingMixin):
                 logger.info(f"Campaña {campaign_id}: no hay destinatarios pendientes de envío")
                 return
 
-            base_url = CR.get_public_web_url()
+            base_url = CR.general_config().public_url
             mailer = self.mailer or build_mailer("aegis")
             pill_title = doc.subtitle or doc.title if doc else "Formación de concienciación"
 

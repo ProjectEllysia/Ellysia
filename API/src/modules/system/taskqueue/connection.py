@@ -23,14 +23,7 @@ _logger = logging.getLogger(__name__)
 
 def ping_redis() -> bool:
     try:
-        redis_cfg = CR.get_redis_config()
-        r = redis_lib.Redis(
-            host=redis_cfg["host"],
-            port=redis_cfg["port"],
-            db=redis_cfg["db"],
-            password=redis_cfg["password"],
-            socket_connect_timeout=redis_cfg.get("socket_connect_timeout", 2),
-        )
+        r = redis_lib.Redis(**CR.redis_config().connection_kwargs())
         r.ping()
         r.close()
         _logger.info("Redis conectado correctamente")
@@ -43,12 +36,12 @@ class RedisConnectionFactory:
 
     @staticmethod
     def _kwargs(blocking: bool = False) -> dict:
-        cfg = CR.get_redis_config()
+        cfg = CR.redis_config()
         kwargs = {
-            "host": cfg["host"],
-            "port": cfg["port"],
-            "db": cfg["db"],
-            "password": cfg["password"],
+            "host": cfg.host,
+            "port": cfg.port,
+            "db": cfg.db,
+            "password": cfg.password,
             # Sin connect timeout, un Redis caído bloquearía indefinidamente al
             # conectar, dejando el API colgado y "comiéndose" los CTRL+C.
             "socket_connect_timeout": 5,

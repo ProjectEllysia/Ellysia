@@ -114,7 +114,24 @@ features/      themis, aegis, iris, hygeia   # one per feature module
 
 Themis' five scanners each get their own block under `features.themis.scanners.<tool>` (`nmap`, `nikto`, `openvas`, `lybra`, `nuclei`), all with `prompts` + `colorPalette`. The tuple `CR.THEMIS_SCANNERS` must stay in sync with them — `tests/unit/test_config_shape.py` enforces it.
 
-**Beware the silent failure**: `_cfg()` returns the *default* when a path doesn't resolve, so a mistyped prefix disables a whole config block without raising. Any key you move must be updated in three places — the `_cfg()` path in `config_reading.py`, the literal path in `web/app/src/views/ConfigView.vue`, and `test_config_shape.py`.
+### Reading config: blocks, not getters
+
+Values are read through **frozen dataclasses bound to a branch of the tree** with `@config_block`, not one getter per value:
+
+```python
+CR.nuclei_config().rate_limit          # features.themis.scanners.nuclei.rateLimit
+CR.hygeia_limits().max_body_bytes      # features.hygeia.limits.maxBodyBytes
+```
+
+- Field names are `snake_case` and map to the JSON's `camelCase` automatically (`max_body_bytes` → `maxBodyBytes`). For keys that must keep another shape — the ones passed straight as kwargs to argon2/SQLAlchemy/redis-py — declare it: `field(default=10, metadata={"key": "pool_size"})`.
+- **Defaults live only in the field.** They used to be written twice (getter + JSON) and drifted.
+- Values with an env override or their own resolution are a `@property` over a `configured_*` field: `CR.general_config().public_url` prefers `PUBLIC_WEB_URL`, `CR.jwt_config().secret` raises if `JWT_SECRET_KEY` is missing (lazily — so a deploy without OpenAI credentials still boots).
+- Blocks are cached and rebuilt automatically when `_configs` changes (`reload()`, `PUT /system`, a monkeypatched config in tests) — nothing has to invalidate by hand.
+- Adding a block: define it, add an accessor, and register it in `CONFIG_BLOCKS` in `tests/unit/test_config_shape.py`.
+
+A few things stay plain functions on purpose: env-only credentials (`get_*_environment`), and lookups parameterized by key rather than by field (`get_iris_data`, `get_iris_scoring_weight`, `get_tool_prompts`) — declaring those as fields would mean editing `config_reading.py` every time a rule is added.
+
+**Beware the silent failure**: `_cfg()` returns the *default* when a path doesn't resolve, so a mistyped prefix disables a whole config block without raising. Any key you move must be updated in three places — the `@config_block` path (or `_cfg()` call) in `config_reading.py`, the literal path in `web/app/src/views/ConfigView.vue`, and `test_config_shape.py`.
 
 ## Naming conventions
 

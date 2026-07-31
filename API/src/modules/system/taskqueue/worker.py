@@ -248,8 +248,7 @@ def start_worker() -> None:
     # se desregistraron (p. ej. tras un kill -9) antes de crear los nuevos.
     _purge_dead_workers()
 
-    taskqueue_cfg = CR.get_taskqueue_config()
-    max_workers = int(taskqueue_cfg.get("max_workers", 4))
+    max_workers = CR.taskqueue_config().max_workers
     # Nota: max_workers se lee solo aquí, al arrancar el proceso worker. Si se
     # cambia vía PUT /system/tasks/config, el cambio entra en vigor solo cuando
     # se reinicia este proceso (contenedor docker-compose up, o Ctrl+C + python -m).

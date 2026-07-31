@@ -124,6 +124,7 @@
                 <div class="form-group"><label>Umbral legítimo</label><input v-model.number="store.configFlat['features.iris.legitimateThreshold']" type="number" class="inp" /></div>
                 <div class="form-group"><label>Umbral sospechoso</label><input v-model.number="store.configFlat['features.iris.suspiciousThreshold']" type="number" class="inp" /></div>
                 <div class="form-group"><label>Cabeceras mínimas</label><input v-model.number="store.configFlat['features.iris.minHeaders']" type="number" min="0" max="50" class="inp" /></div>
+                <div class="form-group"><label>Tamaño máx. del mensaje (bytes)</label><input v-model.number="store.configFlat['features.iris.maxMessageBytes']" type="number" min="1024" step="1024" class="inp" /><span class="field-hint">10485760 = 10 MiB</span></div>
               </div>
             </div>
           </section>
@@ -182,6 +183,10 @@
             <div class="section-body">
               <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.aegis.enabled']" type="checkbox" class="toggle" /><span>Habilitado</span></label></div>
               <div class="cfg-grid">
+                <div class="form-group"><label>Consejos por píldora</label><input v-model.number="store.configFlat['features.aegis.tipsAmount']" type="number" min="1" max="20" class="inp" /></div>
+                <div class="form-group"><label>Antigüedad máx. de alertas (años)</label><input v-model.number="store.configFlat['features.aegis.vulnerabilitiesAntiquity']" type="number" min="1" max="30" class="inp" /></div>
+              </div>
+              <div class="grid">
                 <div class="form-group"><label>Directorio de salida</label><input v-model="store.configFlat['features.aegis.directories.output']" type="text" class="inp" /></div>
                 <div class="form-group"><label>Stack de documentos</label><input v-model="store.configFlat['features.aegis.directories.stack']" type="text" class="inp" /></div>
               </div>
