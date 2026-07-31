@@ -1222,6 +1222,36 @@ redistribuir nada en un feed propio, y **ingerir en tiempo de sincronización, n
 repositorio cambia a diario y meterlo en el checkout es peso y superficie de suministro que no
 queremos; el patrón de `KbSyncManager` ya existe para esto.
 
+**Estado (2026-07-31): el instrumento está construido; falta pasarlo.**
+`tools/nuclei_template_census.py` clasifica el árbol y emite el histograma, apoyado en
+`lybra/ingest/classifier.py`. Tres decisiones de lo construido:
+
+1. **El censo no clona el repositorio upstream**, al contrario de lo que este mismo apartado daba
+   por hecho al escribirse. Lee el árbol que el binario usa en producción, vía el getter único de
+   la ruta — que es la consecuencia directa de la restricción de copia única. El número medido pasa
+   a corresponder a la versión que de verdad corre, no a `main` del día del clon.
+2. **El clasificador es la misma pieza que usará la ingesta** (`is_ingestible`). Si el censo y la
+   ingesta midieran con criterios distintos, el número no describiría lo que la ingesta acabaría
+   haciendo; compartiendo módulo no pueden discrepar.
+3. **El umbral se fijó por escrito antes de medir**, que era la cautela que este plan se había
+   impuesto: **≥ 25 % de las plantillas HTTP en el cubo `ingestible_now`**. Está en el docstring y
+   en una constante, y el script imprime el veredicto él solo — no hay margen para racionalizar el
+   resultado a posteriori.
+
+Los cubos son cinco, ordenados por esfuerzo, y una plantilla cae en el del *peor* obstáculo que
+presenta: `ingestible_now` · `needs_extractors` (extractors e interpolación real — `{{BaseURL}}` no
+cuenta, aparece en casi todas y el runtime ya la resuelve) · `needs_payloads_or_binary` (payloads,
+matchers `binary`/`size`/`dsl`, `inputs` con `type: hex`, `condition` dentro de un matcher,
+`req-condition`) · `rejected_by_design` (`code`, `flow`, `javascript`) · `out_of_scope` (`dns`,
+`headless`, `whois`...). El histograma cuenta además cada obstáculo por separado, así que dirá no
+solo cuántas plantillas fallan sino **por qué** — y en particular cuántas usan `input-hex`, que es
+la señal que decide si el camino binario de la Fase N merece la pena.
+
+⚠ **El número sigue pendiente del equipo completo**: exige el feed instalado. Los tests de aquí
+cubren el criterio de clasificación (25 casos con plantillas escritas a mano), no el resultado del
+censo. El quinto criterio de la Definición de Hecho de esta fase sigue abierto hasta que alguien
+ejecute el script en esa máquina y anote el veredicto.
+
 #### Una sola copia de las plantillas, y qué no se puede verificar en este equipo
 
 Dos restricciones que gobiernan cómo se ejecutan U4 y el cierre de R, anotadas antes de escribir
@@ -1287,7 +1317,7 @@ qué se está verificando de verdad en cada sitio:
 | Trabajo | Verificable en el equipo de desarrollo | ⚠ Requiere el equipo completo |
 |---|---|---|
 | **R — tipo de check `script`** | Runtime, registro y tests con socket falso (el patrón que `smb.py` ya usa) | Disparo real contra Samba/Windows — el dissector SMB **ya estaba sin verificar** contra un servidor real |
-| **U4 — el censo** | La lógica del clasificador, con plantillas de muestra escritas a mano | ⚠ **El número en sí**: exige el árbol de plantillas real |
+| **U4 — el censo** | La lógica del clasificador, con plantillas de muestra escritas a mano (✓ hecho) | ⚠ **El número en sí**: exige el árbol de plantillas real. Ejecutar `python tools/nuclei_template_census.py` y anotar el veredicto |
 | **El almacén de plantillas** | Resolución de rutas y parseo contra un directorio de prueba | ⚠ Que la ruta resuelta sea la misma que el binario usa de verdad |
 | **R — migración del feed a YAML** | Todo (parseo, equivalencia con el JSON actual) | — |
 | **R — ingesta de plantillas** | Traductor plantilla→`Check`, índice de selección | ⚠ Ejecución de los checks ingeridos contra objetivos reales |
@@ -1317,7 +1347,8 @@ fuentes sobre el mismo activo — **✓**; (3) el análisis profundo de Lybra lo
 objetivos sin etiqueta previa — **✓, medido: 0 corroborados / 0 se escapan / 1 posible falso positivo,
 con la salvedad anotada arriba de que el catálogo de objetivos explotables sigue siendo pobre**; y (5)
 existe el histograma de ingestibilidad del feed de plantillas, con una recomendación escrita de sí o no
-para U4 — **pendiente, es U4 en sí y no se ha empezado**.
+para U4 — **el instrumento existe y el umbral está fijado (2026-07-31); falta ejecutarlo en la máquina
+con el feed instalado y anotar el veredicto**.
 
 La Fase U completa sigue en ◐ parcial: los cuatro primeros criterios están cerrados, mide una vara real
 — pero el quinto es U4, y U4 explícitamente no entrega código de producto en esta pasada, solo la
