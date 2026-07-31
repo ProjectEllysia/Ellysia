@@ -1356,7 +1356,7 @@ medición que decide si vale la pena.
 
 ---
 
-### Fase R — El runtime de detección propio · pista de bajo nivel · ◐ parcial · **su cierre depende de la Fase U**
+### Fase R — El runtime de detección propio · pista de bajo nivel · ◐ parcial (solo falta la precisión medida) · **su cierre depende de la Fase U**
 
 Ésta es la capa de identidad, la L2. Es lo que convierte a Lybra de un correlacionador en un motor
 con criterio propio de detección: un runtime único de comprobaciones —versionado, extensible y
@@ -1373,8 +1373,9 @@ El runtime maneja cinco tipos de comprobación bajo el mismo motor:
 | `script` | Lógica compleja, multipaso o binaria | Plugin en Python, de primera parte y revisado | ✓ 1 check (2026-07-31) |
 
 El grueso de las comprobaciones debe escribirse de forma **declarativa**, con un esquema
-razonablemente compatible con las plantillas de Nuclei. El feed actual es JSON; el diseño pide YAML.
-Así se lee un check típico:
+razonablemente compatible con las plantillas de Nuclei. El feed vive en YAML desde el 2026-07-31 (ver
+la nota de estado más abajo); admite comentarios, que era la razón de fondo de migrarlo. Así se lee un
+check típico:
 
 ```yaml
 id: apache-2449-path-traversal
@@ -1468,15 +1469,26 @@ la *activación*, no la existencia del código. Quien la enciende es el número 
 sigue pendiente del equipo con el feed instalado. ⚠ La ejecución real de checks ingeridos contra
 objetivos tampoco se ha probado aquí — los tests cubren traducción, procedencia y selección.
 
-**El prerrequisito de la Fase U, delimitado con precisión.** Tres de los cuatro entregables que quedan
-para cerrar esta fase dependen de que la Fase U se haya hecho antes, y uno no:
+**El prerrequisito de la Fase U, delimitado con precisión — y ya superado en la práctica.** De los
+cuatro entregables que le quedaban a esta fase, tres se han construido sin esperar al número de U4, y
+el único que de verdad lo necesitaba (activar la ingesta) quedó resuelto separando "el código existe"
+de "el código está encendido":
 
-| Lo que falta de R | ¿Depende de U? | Por qué |
+| Lo que faltaba de R | ¿Dependía de U? | Estado |
 |---|---|---|
-| **Migración del feed a YAML** | **Sí** | El esquema al que se migra es el de Nuclei; migrar antes de saber qué fracción del lenguaje vamos a soportar (U4) es elegir la forma a ciegas y arriesgarse a migrar dos veces |
-| **Ingesta de plantillas externas** | **Sí** | Es literalmente U4. Sin el histograma de ingestibilidad no se sabe si vale la pena construirla |
-| **Precisión ≥ 0,9 medida** | **Sí** | El numerador de falsos positivos lo da el oráculo diferencial (U3). Sin él, "precisión 0,9" sigue siendo una frase, como reconoce el §8 |
-| **El tipo de check `script`** | **No** | Es un plugin de primera parte en Python, sin relación con Nuclei. Se puede construir en cualquier momento — **✓ hecho el 2026-07-31**, ver nota de estado |
+| **Migración del feed a YAML** | En el diseño, sí — se migraba al esquema de Nuclei | **✓ hecho (2026-07-31), sin esperar al número.** El esquema no cambió, solo el formato; se verificó por equivalencia de objetos `Check` antes de retirar el JSON |
+| **Ingesta de plantillas externas** | Sí, para decidir si *merece la pena* | **✓ construida (2026-07-31), apagada por flag.** El código no esperó al número; la *activación* sí lo hace — `themis.lybra.ingest.enabled=false` hasta que el censo se ejecute |
+| **Precisión ≥ 0,9 medida** | **Sí, de verdad** | ○ Pendiente. Depende del catálogo del banco (U3), no de más código de esta fase |
+| **El tipo de check `script`** | No — plugin de primera parte, sin relación con Nuclei | **✓ hecho (2026-07-31)** |
+
+**Lo que esto cambia respecto al diseño original:** la premisa de que YAML e ingesta debían *esperar*
+al histograma resultó más conservadora de lo necesario. El clasificador que produce el histograma
+(`lybra/ingest/classifier.py`) es la misma pieza que decide, plantilla a plantilla, si el traductor la
+acepta — así que construir el traductor no exigía conocer el número agregado de antemano, solo que
+ambos compartieran criterio. Migrar a YAML tampoco exigía esperar: el feed propio no iba a dejar de
+usar el subconjunto que ya soporta, gane o pierda la ingesta. Lo único que de verdad necesita el
+número es la decisión binaria de **encender** la ingesta, y esa sigue bloqueada — correctamente — tras
+el flag.
 
 Y una delimitación en la otra dirección, para que el prerrequisito no estrangule al roadmap: **la Fase
 U no bloquea a la Fase N.** El tipo de check `network` que N necesitaba como vehículo declarativo **ya
@@ -1507,19 +1519,19 @@ sonda falsa (dispara sin firma obligatoria, calla con ella, calla sin negociaci�
 dialecto desconocido, y el feed y el registro concuerdan). ⚠ **El disparo contra un Samba/Windows real
 sigue pendiente del equipo completo** — la misma deuda que el dissector ya arrastraba.
 
-**Estado (2026-07-11, sigue vigente en lo demás):** la mecánica está completa — hoy son **16 checks
-en 5 familias** (`exposed_path` ×7, `security_header` ×3, `tls` ×3, `network` ×2, `script` ×1;
-el recuento de "13 en 3 familias" de esta nota se quedó desfasado al añadirse `network` y `script`),
+**Estado (2026-07-11, actualizado 2026-07-31):** la mecánica está completa — hoy son **16 checks
+en 5 familias** (`exposed_path` ×7, `security_header` ×3, `tls` ×3, `network` ×2, `script` ×1),
 todas bajo el mismo `CheckRuntime`, todas `confirmed=true`/`qod=99` cuando disparan, feed versionado
-(`lybra-checks-1`). La familia `tls` tiene banco automatizado: dos fixtures de contenedor local
-(nginx con certificado autofirmado generado en el arranque, sin bind-mount) cubren
-`tls-self-signed-cert` y `tls-expired-cert` con aserciones contra un handshake real — el segundo
-genera el certificado bajo `libfaketime` con el reloj adelantado a 2020 (sin necesitar
-`CAP_SYS_TIME`) para producirlo ya caducado. La fixture "sana" sirve de control negativo.
-`tls-deprecated-protocol` queda sin cubrir a propósito: el OpenSSL moderno de la imagen base rechaza
-negociar SSLv3/TLSv1.0/TLSv1.1 aunque se fuerce por configuración — hueco documentado, no descubierto
-por sorpresa. Lo que falta para cerrarla es la medición formal de precisión ≥0,9 a escala, más los
-dos tipos de check pendientes y la migración a YAML.
+(`lybra-checks-4`, en YAML desde el 2026-07-31 — ver la nota de estado más arriba). La familia `tls`
+tiene banco automatizado: dos fixtures de contenedor local (nginx con certificado autofirmado
+generado en el arranque, sin bind-mount) cubren `tls-self-signed-cert` y `tls-expired-cert` con
+aserciones contra un handshake real — el segundo genera el certificado bajo `libfaketime` con el
+reloj adelantado a 2020 (sin necesitar `CAP_SYS_TIME`) para producirlo ya caducado. La fixture "sana"
+sirve de control negativo. `tls-deprecated-protocol` queda sin cubrir a propósito: el OpenSSL moderno
+de la imagen base rechaza negociar SSLv3/TLSv1.0/TLSv1.1 aunque se fuerce por configuración — hueco
+documentado, no descubierto por sorpresa. **Lo único que falta para cerrar la fase entera es la
+medición formal de precisión ≥0,9 a escala** (el banco de U3, con su catálogo de objetivos
+explotables aún pobre) — los tipos de check y la migración a YAML ya no son parte de esa lista.
 
 ---
 
