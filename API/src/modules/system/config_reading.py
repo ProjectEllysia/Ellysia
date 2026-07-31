@@ -630,167 +630,162 @@ def get_smtp_environment() -> dict[str, str]:
 # CONFIGURACIÓN DE THEMIS
 # =============================================================================
 
-@_lazy_load
-def get_themis_config() -> dict:
-    return _cfg("features.themis", {})
-
 # Los cinco escáneres de Themis, cada uno con su propio bloque bajo
 # ``features.themis.scanners``: mismos ``prompts`` y ``colorPalette``, más los
 # ajustes que cada herramienta necesite.
 THEMIS_SCANNERS = ("nmap", "nikto", "openvas", "lybra", "nuclei")
 
 
-@_lazy_load
-def get_prompts_config() -> dict:
-    return {
-        scanner: _cfg(f"features.themis.scanners.{scanner}.prompts", {})
-        for scanner in THEMIS_SCANNERS
-    }
+@config_block("features.themis")
+@dataclass(frozen=True)
+class ThemisConfig:
+    """Ajustes generales del módulo de escaneo."""
 
-@_lazy_load
-def get_tool_prompts(tool: str) -> dict:
-    prompts = get_prompts_config()
-    return prompts.get(tool, {})
+    enabled: bool = True
 
-@_lazy_load
-def get_tool_color_palette(tool) -> dict:
-    # Accepts a ThemisTool enum member or a plain string; without this, a
-    # dict lookup with an Enum instance against string keys always misses
-    # and silently returns {} (bug: every caller has been getting the
-    # hardcoded per-strategy fallback colors instead of SecOpsConfig's).
-    tool_key = tool.value if hasattr(tool, "value") else tool
-    return _cfg(f"features.themis.scanners.{tool_key}.colorPalette", {})
+    are_local_ips_allowed: bool = False
+    """Si se permite escanear IPs privadas/loopback.
 
-@_lazy_load
-def are_local_ips_allowed() -> bool:
-    return _as_bool(_cfg("features.themis.areLocalIpsAllowed", False))
-
-@_lazy_load
-def get_openvas_scan_configs() -> dict[str, str]:
-    return _cfg("features.themis.scanners.openvas.toolConfigs.scanConfigs", {})
-
-@_lazy_load
-def get_openvas_port_list() -> dict[str, str]:
-    return _cfg("features.themis.scanners.openvas.toolConfigs.portList", {})
-
-@_lazy_load
-def is_host_reachability_check_enabled() -> bool:
-    return _as_bool(_cfg("features.themis.hostReachabilityCheck.enabled", True))
-
-@_lazy_load
-def get_host_reachability_check_timeout() -> float:
-    return _cfg("features.themis.hostReachabilityCheck.timeout", 3.0, float)
-
-@_lazy_load
-def get_host_reachability_check_port() -> int:
-    return _cfg("features.themis.hostReachabilityCheck.port", 80, int)
-
-@_lazy_load
-def get_themis_csv_dir() -> str:
-    return get_directory_of(DirectoryType.CSV_THEMIS)
-
-
-# --- Task timeouts (Q2: números mágicos movidos desde themis/services/tasks.py) ---
-
-@_lazy_load
-def get_themis_task_default_timeout() -> float:
-    """Timeout (s) de ``_Task`` cuando el caller no especifica uno explícito."""
-    return _cfg("features.themis.taskDefaults.timeout", 200000, float)
-
-@_lazy_load
-def get_openvas_task_timeout() -> float:
-    """Timeout (s) por defecto de ``OpenVASTask`` — también usado como timeout
-    del job en ``OpenVASScanManager.run_scan`` (deben coincidir: si el job de
-    RQ expira antes que el escaneo interno, se mata a mitad de sondeo)."""
-    return _cfg("features.themis.scanners.openvas.timeout", 14400, float)
-
-@_lazy_load
-def get_openvas_max_wait_timeout() -> float:
-    """Techo aplicado en ``OpenVASTask.wait()`` al timeout recibido."""
-    return _cfg("features.themis.scanners.openvas.maxWaitTimeout", 28800, float)
-
-
-# --- Lybra knowledge base (local NVD/KEV/EPSS mirror) ---
-
-@_lazy_load
-def is_kb_sync_enabled() -> bool:
-    return _as_bool(_cfg("features.themis.kb.enabled", False))
-
-@_lazy_load
-def get_kb_sources() -> dict:
-    return _cfg("features.themis.kb.sources", {})
-
-@_lazy_load
-def get_kb_sync_cron() -> str:
-    return _cfg("features.themis.kb.syncCron", "0 3 * * *")
-
-@_lazy_load
-def get_kb_nvd_window_days() -> int:
-    return _cfg("features.themis.kb.nvdWindowDays", 8, int)
-
-@_lazy_load
-def get_kb_nvd_api_key():
-    # Secret → prefer the environment, per the config convention.
-    import os
-    return os.environ.get("NVD_API_KEY") or (_cfg("features.themis.kb.nvdApiKey", "") or None)
-
-
-# --- Lybra active detection checks (Fase R) ---
-
-@_lazy_load
-def is_lybra_active_checks_enabled() -> bool:
-    # Global switch, on by default: active checks touch the target, but the
-    # per-user authorized-targets register (roadmap §6, AuthorizedTargetManager)
-    # is the real gate — LybraEngineManager only runs these against a target the
-    # caller has explicitly authorized, regardless of this flag. This exists as
-    # an operator-level kill switch to disable the whole feature deployment-wide.
-    return _as_bool(_cfg("features.themis.scanners.lybra.activeChecks", True))
-
-
-# --- Lybra own fingerprinting (Fase F) ---
-
-# --- Ingesta de plantillas de Nuclei al runtime propio (Fase R) ---
-
-@_lazy_load
-def is_lybra_template_ingest_enabled() -> bool:
-    """Si Lybra ingiere plantillas de Nuclei a su propio runtime.
-
-    **Por defecto desactivado, y a conciencia.** El código está construido y
-    probado, pero la decisión de si la ingesta merece la pena la toma el número
-    del censo de la Fase U4 (`tools/nuclei_template_census.py`), que solo puede
-    medirse en una máquina con el feed instalado. Hasta que ese número exista,
-    el interruptor existe pero no se activa: el flag decide la *activación*, no
-    la existencia del código.
+    Es la defensa anti-SSRF del módulo: con ``True`` un usuario puede apuntar un
+    escaneo a la red interna del servidor o al endpoint de metadatos del cloud.
+    Se pone a ``True`` solo para desarrollo local contra IPs privadas.
     """
-    return _as_bool(_cfg("features.themis.scanners.lybra.ingest.enabled", False))
 
 
-@_lazy_load
-def get_lybra_ingest_min_severity() -> str:
+@config_block("features.themis.folders")
+@dataclass(frozen=True)
+class ThemisFolders:
+    default_folder_name: str = "Sin carpeta"
+    """Nombre mostrado para la carpeta virtual de escaneos sin agrupar."""
+
+
+@config_block("features.themis.history")
+@dataclass(frozen=True)
+class ThemisHistory:
+    max_scans: int = 5
+    """Escaneos recientes que se promedian en las estadísticas históricas."""
+
+
+@config_block("features.themis.taskDefaults")
+@dataclass(frozen=True)
+class ThemisTaskDefaults:
+    timeout: float = 200000
+    """Timeout (s) de ``_Task`` cuando el caller no especifica uno explícito."""
+
+
+@config_block("features.themis.hostReachabilityCheck")
+@dataclass(frozen=True)
+class HostReachabilityCheck:
+    """Sondeo previo que evita lanzar un escaneo largo contra un host caído."""
+
+    enabled: bool = True
+    timeout: float = 3.0
+    port: int = 80
+
+
+@config_block("features.themis.traceroute")
+@dataclass(frozen=True)
+class TracerouteConfig:
+    cache_hours: float = 24
+    """Horas que una ruta cacheada se considera válida antes de recalcularse."""
+
+    max_hops: int = 30
+    """Número máximo de saltos a sondear (``-m`` en traceroute)."""
+
+    timeout: float = 60
+    """Tiempo máximo total (segundos) para el comando traceroute."""
+
+    retry_failed_minutes: float = 15
+    """Minutos que una ruta fallida (sin saltos) se cachea antes de reintentar.
+
+    Mucho más corto que ``cache_hours``: evita re-sondear un host inalcanzable
+    en cada apertura del detalle, pero permite reintentar pronto (o de inmediato
+    con el botón de refresco).
+    """
+
+
+@config_block("features.themis.kb")
+@dataclass(frozen=True)
+class KnowledgeBaseConfig:
+    """Espejo local de NVD/KEV/EPSS que alimenta a Lybra."""
+
+    enabled: bool = False
+    sources: dict = field(default_factory=dict)
+    sync_cron: str = "0 3 * * *"
+    nvd_window_days: int = 8
+
+    configured_nvd_api_key: str = field(
+        default="", metadata={"key": "nvdApiKey", "optional": True}
+    )
+    """Respaldo en fichero de la API key de NVD. Ver ``nvd_api_key``."""
+
+    @property
+    def nvd_api_key(self) -> Optional[str]:
+        """La API key efectiva, o ``None`` si no hay ninguna.
+
+        Es un secreto, así que ``NVD_API_KEY`` en el entorno manda; la clave del
+        fichero existe solo como respaldo y no está en SecOpsConfig.json a
+        propósito (los secretos no se versionan).
+        """
+        return os.environ.get("NVD_API_KEY") or (self.configured_nvd_api_key or None)
+
+
+@config_block("features.themis.scanners.openvas")
+@dataclass(frozen=True)
+class OpenVASConfig:
+    timeout: float = 14400
+    """Timeout (s) por defecto de ``OpenVASTask``, también usado como timeout del
+    job en ``OpenVASScanManager.run_scan``: deben coincidir, porque si el job de
+    RQ expira antes que el escaneo interno, se mata a mitad de sondeo."""
+
+    max_wait_timeout: float = 28800
+    """Techo aplicado en ``OpenVASTask.wait()`` al timeout recibido."""
+
+
+@config_block("features.themis.scanners.openvas.toolConfigs")
+@dataclass(frozen=True)
+class OpenVASToolConfigs:
+    """UUIDs de los objetos que OpenVAS trae creados de fábrica."""
+
+    scan_configs: dict[str, str] = field(default_factory=dict)
+    port_list: dict[str, str] = field(default_factory=dict)
+
+
+@config_block("features.themis.scanners.lybra")
+@dataclass(frozen=True)
+class LybraConfig:
+    """Interruptores de operador del motor propio.
+
+    Ambos van a ``True`` por defecto: el registro de objetivos autorizados por
+    usuario (roadmap §6, ``AuthorizedTargetManager``) es la verdadera puerta —
+    Lybra solo toca un objetivo que el llamante haya autorizado explícitamente,
+    valga lo que valga este flag. Existen como interruptor de emergencia para
+    desactivar la funcionalidad en todo el despliegue.
+    """
+
+    active_checks: bool = True
+    fingerprinting_enabled: bool = True
+
+
+@config_block("features.themis.scanners.lybra.ingest")
+@dataclass(frozen=True)
+class LybraIngestConfig:
+    """Ingesta de plantillas de Nuclei al runtime propio de Lybra (Fase R)."""
+
+    enabled: bool = False
+    """**Por defecto desactivado, y a conciencia.** El código está construido y
+    probado, pero la decisión de si la ingesta merece la pena la toma el número
+    del censo de la Fase U4 (``tools/nuclei_template_census.py``), que solo puede
+    medirse en una máquina con el feed instalado. Hasta que ese número exista, el
+    interruptor existe pero no se activa: el flag decide la *activación*, no la
+    existencia del código."""
+
+    min_severity: str = "MEDIUM"
     """Severidad mínima de una plantilla ingerida para llegar a ejecutarse."""
-    return _cfg("features.themis.scanners.lybra.ingest.minSeverity", "MEDIUM", str)
 
-
-@_lazy_load
-def get_lybra_ingest_max_checks() -> int:
+    max_checks: int = 300
     """Tope duro de checks ingeridos por escaneo (la red de seguridad final)."""
-    return _cfg("features.themis.scanners.lybra.ingest.maxChecks", 300, int)
 
-
-@_lazy_load
-def is_lybra_fingerprinting_enabled() -> bool:
-    # Same story as active checks: on by default now that the authorized-targets
-    # register (roadmap §6) gates it per-target; this flag is just the
-    # operator-level kill switch.
-    return _as_bool(_cfg("features.themis.scanners.lybra.fingerprintingEnabled", True))
-
-
-# --- Nuclei (Fase U1) ---
-
-@_lazy_load
-def get_nuclei_binary_path() -> str:
-    """Ruta o nombre del binario ``nuclei`` (resuelto vía PATH por defecto)."""
-    return _cfg("features.themis.scanners.nuclei.binaryPath", "nuclei")
 
 def _nuclei_default_template_locations() -> tuple[Path, ...]:
     """Ubicaciones por defecto de Nuclei, resueltas en el momento de llamar.
@@ -806,136 +801,190 @@ def _nuclei_default_template_locations() -> tuple[Path, ...]:
     return (home / ".local" / "nuclei-templates", home / "nuclei-templates")
 
 
-@_lazy_load
-def get_nuclei_templates_dir() -> Optional[Path]:
-    """Directorio efectivo del **único** árbol de plantillas de Nuclei de Themis.
+@config_block("features.themis.scanners.nuclei")
+@dataclass(frozen=True)
+class NucleiConfig:
+    binary_path: str = "nuclei"
+    """Ruta o nombre del binario ``nuclei`` (resuelto vía PATH por defecto)."""
 
-    Themis tiene una sola copia de las plantillas, y este getter es quien dice
-    dónde está. Tres consumidores dependen de esa respuesta y ninguno debe
-    resolverla por su cuenta: ``NucleiScanTask`` (que se la pasa al binario por
-    ``-templates``), la ingesta de plantillas al runtime propio y el censo de
-    ingestibilidad (roadmap Fases R y U4).
-
-    Prioridad, de más explícito a más implícito — mismo estilo de cadena que
-    ``get_nuclei_templates_version()``, su getter hermano:
-    1) ``themis.nuclei.templatesDir`` en SecOpsConfig.json, 2) la variable de
-    entorno ``NUCLEI_TEMPLATES_DIR``, 3) las ubicaciones por defecto de Nuclei.
-
-    Returns:
-        La ruta al árbol, o ``None`` si ninguna candidata existe en disco.
-        Nunca una ruta inventada: quien pasa el flag al binario omite
-        ``-templates`` y deja que decida él, y quien necesita *leer* las
-        plantillas no puede hacer nada y debe poder saberlo.
-    """
-    configured = (_cfg("features.themis.scanners.nuclei.templatesDir", "") or "").strip()
-    if configured:
-        path = Path(configured)
-        if path.is_dir():
-            return path
-        # Una ruta configurada que no existe es un error de despliegue, no algo
-        # que deba degradarse en silencio a otra ubicación: se avisa y se sigue
-        # buscando, para no dejar un escaneo sin plantillas sin explicación.
-        logger.warning(
-            "themis.nuclei.templatesDir apunta a '%s', que no existe; "
-            "se buscarán las ubicaciones por defecto de Nuclei", configured
-        )
-
-    from_environment = (os.environ.get("NUCLEI_TEMPLATES_DIR") or "").strip()
-    if from_environment and Path(from_environment).is_dir():
-        return Path(from_environment)
-
-    return next((c for c in _nuclei_default_template_locations() if c.is_dir()), None)
-
-@_lazy_load
-def get_nuclei_default_severities() -> list:
+    default_severities: list = field(
+        default_factory=lambda: ["critical", "high", "medium"]
+    )
     """Perfil acotado por defecto cuando el caller no especifica severidades.
 
     Excluye ``info`` a propósito (roadmap Fase U1, punto 1): son miles de
-    plantillas de tech-detect, y al ser ``confirmed=True`` sin CVSS el suelo
-    de ``score_finding`` las subiría todas a MEDIO. Activarlas es una elección
+    plantillas de tech-detect, y al ser ``confirmed=True`` sin CVSS el suelo de
+    ``score_finding`` las subiría todas a MEDIO. Activarlas es una elección
     explícita del usuario en el formulario, no un default.
     """
-    return _cfg("features.themis.scanners.nuclei.defaultSeverities", ["critical", "high", "medium"])
 
-@_lazy_load
-def get_nuclei_rate_limit() -> int:
+    rate_limit: int = 150
     """Peticiones/segundo máximas por defecto."""
-    return _cfg("features.themis.scanners.nuclei.rateLimit", 150, int)
 
-@_lazy_load
-def get_nuclei_request_timeout() -> int:
+    request_timeout: int = 10
     """Timeout por petición HTTP individual (segundos)."""
-    return _cfg("features.themis.scanners.nuclei.requestTimeout", 10, int)
+
+    timeout: float = 1800
+    """Timeout (s) del escaneo completo cuando el caller no especifica uno —
+    también usado como timeout del job en ``NucleiScanManager.run_scan``."""
+
+    configured_templates_dir: str = field(default="", metadata={"key": "templatesDir"})
+    """Respaldo en fichero del árbol de plantillas. Ver ``templates_dir``."""
+
+    configured_templates_version: str = field(
+        default="", metadata={"key": "templatesVersion"}
+    )
+    """Respaldo en fichero de la versión del feed. Ver ``templates_version``."""
+
+    @property
+    def templates_dir(self) -> Optional[Path]:
+        """Directorio efectivo del **único** árbol de plantillas de Themis.
+
+        Themis tiene una sola copia de las plantillas, y esta propiedad es quien
+        dice dónde está. Tres consumidores dependen de esa respuesta y ninguno
+        debe resolverla por su cuenta: ``NucleiScanTask`` (que se la pasa al
+        binario por ``-templates``), la ingesta de plantillas al runtime propio y
+        el censo de ingestibilidad (roadmap Fases R y U4).
+
+        Prioridad, de más explícito a más implícito: 1) ``templatesDir`` en
+        SecOpsConfig.json, 2) ``NUCLEI_TEMPLATES_DIR`` en el entorno, 3) las
+        ubicaciones por defecto de Nuclei.
+
+        Returns:
+            La ruta al árbol, o ``None`` si ninguna candidata existe en disco.
+            Nunca una ruta inventada: quien pasa el flag al binario omite
+            ``-templates`` y deja que decida él, y quien necesita *leer* las
+            plantillas no puede hacer nada y debe poder saberlo.
+        """
+        configured = self.configured_templates_dir.strip()
+        if configured:
+            path = Path(configured)
+            if path.is_dir():
+                return path
+            # Una ruta configurada que no existe es un error de despliegue, no
+            # algo que deba degradarse en silencio a otra ubicación: se avisa y
+            # se sigue buscando, para no dejar un escaneo sin plantillas sin
+            # explicación.
+            logger.warning(
+                "features.themis.scanners.nuclei.templatesDir apunta a '%s', que "
+                "no existe; se buscarán las ubicaciones por defecto de Nuclei",
+                configured,
+            )
+
+        from_environment = (os.environ.get("NUCLEI_TEMPLATES_DIR") or "").strip()
+        if from_environment and Path(from_environment).is_dir():
+            return Path(from_environment)
+
+        return next((c for c in _nuclei_default_template_locations() if c.is_dir()), None)
+
+    @property
+    def templates_version(self) -> str:
+        """Versión del feed, usada como respaldo hasta que ``NucleiScanTask``
+        capture la real del banner de arranque del binario (ver
+        ``NucleiScanManager._execute_scan``, que corrige el ``feed_version`` de
+        cada ``Finding`` post-hoc con ese dato, más fiable).
+
+        Prioridad: 1) el fichero que el Dockerfile vuelca al hornear las
+        plantillas en build (``/app/resources/nuclei_templates_version.txt``, más
+        fiable que un valor estático porque refleja lo que de verdad se
+        sincronizó en esa imagen), 2) ``templatesVersion`` en SecOpsConfig.json,
+        3) un marcador explícito de "desconocido".
+        """
+        version_file = (
+            Path(get_directory_of(DirectoryType.RESOURCES_THEMIS)).parent
+            / "nuclei_templates_version.txt"
+        )
+        try:
+            from_file = version_file.read_text(encoding="utf-8").strip()
+            if from_file:
+                return f"nuclei-templates-{from_file}"
+        except (OSError, IOError):
+            pass
+        configured = self.configured_templates_version
+        return f"nuclei-templates-{configured}" if configured else "nuclei-templates-unknown"
+
+
+def themis_config() -> ThemisConfig:
+    return load_block(ThemisConfig)
+
+
+def themis_folders() -> ThemisFolders:
+    return load_block(ThemisFolders)
+
+
+def themis_history() -> ThemisHistory:
+    return load_block(ThemisHistory)
+
+
+def themis_task_defaults() -> ThemisTaskDefaults:
+    return load_block(ThemisTaskDefaults)
+
+
+def host_reachability_check() -> HostReachabilityCheck:
+    return load_block(HostReachabilityCheck)
+
+
+def traceroute_config() -> TracerouteConfig:
+    return load_block(TracerouteConfig)
+
+
+def knowledge_base_config() -> KnowledgeBaseConfig:
+    return load_block(KnowledgeBaseConfig)
+
+
+def openvas_config() -> OpenVASConfig:
+    return load_block(OpenVASConfig)
+
+
+def openvas_tool_configs() -> OpenVASToolConfigs:
+    return load_block(OpenVASToolConfigs)
+
+
+def lybra_config() -> LybraConfig:
+    return load_block(LybraConfig)
+
+
+def lybra_ingest_config() -> LybraIngestConfig:
+    return load_block(LybraIngestConfig)
+
+
+def nuclei_config() -> NucleiConfig:
+    return load_block(NucleiConfig)
+
+
+# --- Prompts y paletas: parametrizados por herramienta, no por bloque --------
+#
+# Los cinco escáneres comparten la misma forma (``prompts`` + ``colorPalette``)
+# y los consumidores los piden por herramienta, no por nombre fijo: una
+# dataclass por escáner solo para esto serían cinco clases idénticas.
 
 @_lazy_load
-def get_nuclei_task_timeout() -> float:
-    """Timeout (s) por defecto del escaneo completo cuando el caller no
-    especifica uno explícito — también usado como timeout del job en
-    ``NucleiScanManager.run_scan``."""
-    return _cfg("features.themis.scanners.nuclei.timeout", 1800, float)
-
-@_lazy_load
-def get_nuclei_templates_version() -> str:
-    """Versión de plantillas usada como fallback hasta que ``NucleiScanTask``
-    capture la versión real del banner de arranque del binario (ver
-    ``NucleiScanManager._execute_scan``, que corrige el ``feed_version`` de
-    cada ``Finding`` post-hoc con ese dato más fiable).
-
-    Prioridad: 1) el fichero que el Dockerfile vuelca al hornear las
-    plantillas en build (``/app/resources/nuclei_templates_version.txt`` —
-    más fiable que un valor de configuración estático porque refleja lo que
-    de verdad se sincronizó en esa imagen), 2) ``themis.nuclei.templatesVersion``
-    en ``SecOpsConfig.json``, 3) un marcador explícito de "desconocido".
-    """
-    version_file = Path(get_directory_of(DirectoryType.RESOURCES_THEMIS)).parent / "nuclei_templates_version.txt"
-    try:
-        from_file = version_file.read_text(encoding="utf-8").strip()
-        if from_file:
-            return f"nuclei-templates-{from_file}"
-    except (OSError, IOError):
-        pass
-    configured = _cfg("features.themis.scanners.nuclei.templatesVersion", "")
-    return f"nuclei-templates-{configured}" if configured else "nuclei-templates-unknown"
+def get_prompts_config() -> dict:
+    return {
+        scanner: _cfg(f"features.themis.scanners.{scanner}.prompts", {})
+        for scanner in THEMIS_SCANNERS
+    }
 
 
 @_lazy_load
-def get_themis_default_folder_name() -> str:
-    """Devuelve el nombre mostrado para la carpeta virtual de escaneos sueltos."""
-    return _cfg("features.themis.folders.defaultFolderName", "Sin carpeta")
+def get_tool_prompts(tool: str) -> dict:
+    prompts = get_prompts_config()
+    return prompts.get(tool, {})
 
 
 @_lazy_load
-def get_themis_history_size() -> int:
-    """Número de escaneos recientes a considerar en las estadísticas históricas."""
-    return _cfg("features.themis.history.maxScans", 5, int)
+def get_tool_color_palette(tool) -> dict:
+    # Accepts a ThemisTool enum member or a plain string; without this, a
+    # dict lookup with an Enum instance against string keys always misses
+    # and silently returns {} (bug: every caller has been getting the
+    # hardcoded per-strategy fallback colors instead of SecOpsConfig's).
+    tool_key = tool.value if hasattr(tool, "value") else tool
+    return _cfg(f"features.themis.scanners.{tool_key}.colorPalette", {})
 
 
 @_lazy_load
-def get_themis_traceroute_cache_hours() -> float:
-    """Horas que una ruta cacheada se considera válida antes de recalcularse."""
-    return _cfg("features.themis.traceroute.cacheHours", 24, float)
-
-
-@_lazy_load
-def get_themis_traceroute_max_hops() -> int:
-    """Número máximo de saltos a sondear (``-m`` en traceroute)."""
-    return _cfg("features.themis.traceroute.maxHops", 30, int)
-
-
-@_lazy_load
-def get_themis_traceroute_timeout() -> float:
-    """Tiempo máximo total (segundos) para el comando traceroute."""
-    return _cfg("features.themis.traceroute.timeout", 60, float)
-
-
-@_lazy_load
-def get_themis_traceroute_retry_failed_minutes() -> float:
-    """Minutos que una ruta fallida (sin saltos) se cachea antes de reintentar.
-
-    Mucho más corto que ``cacheHours``: evita re-sondear un host inalcanzable en
-    cada apertura del detalle, pero permite reintentar pronto (o de inmediato con
-    el botón de refresco)."""
-    return _cfg("features.themis.traceroute.retryFailedMinutes", 15, float)
+def get_themis_csv_dir() -> str:
+    return get_directory_of(DirectoryType.CSV_THEMIS)
 
 
 # =============================================================================

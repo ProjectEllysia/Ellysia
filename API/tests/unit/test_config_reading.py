@@ -78,59 +78,52 @@ def test_get_app_context_uses_false_defaults_when_envs_absent(monkeypatch):
 
 
 # --------------------------------- Nuclei: el único árbol de plantillas (U4/R)
+#
+# ``templates_dir`` es una propiedad pura dado el campo del bloque, así que
+# estos tests construyen el ``NucleiConfig`` a mano en vez de monkeypatchear el
+# lector de configuración: lo que se prueba es la cadena de prioridad
+# (fichero → entorno → ubicaciones por defecto), no de dónde salió el valor.
 
-def _no_config_dir(monkeypatch):
-    """Deja ``features.themis.scanners.nuclei.templatesDir`` vacío sin tocar SecOpsConfig.json."""
-    monkeypatch.setattr(CR, "_cfg", lambda path, default=None, cast=None: (
-        "" if path == "features.themis.scanners.nuclei.templatesDir" else default
-    ))
-
-
-def test_nuclei_templates_dir_prefers_the_configured_path(tmp_path, monkeypatch):
+def test_nuclei_templates_dir_prefers_the_configured_path(tmp_path):
     configured = tmp_path / "configured"
     configured.mkdir()
-    monkeypatch.setattr(CR, "_cfg", lambda path, default=None, cast=None: (
-        str(configured) if path == "features.themis.scanners.nuclei.templatesDir" else default
-    ))
 
-    assert CR.get_nuclei_templates_dir() == configured
+    config = CR.NucleiConfig(configured_templates_dir=str(configured))
+
+    assert config.templates_dir == configured
 
 
 def test_nuclei_templates_dir_falls_back_to_the_environment(tmp_path, monkeypatch):
     from_env = tmp_path / "from-env"
     from_env.mkdir()
-    _no_config_dir(monkeypatch)
     monkeypatch.setenv("NUCLEI_TEMPLATES_DIR", str(from_env))
 
-    assert CR.get_nuclei_templates_dir() == from_env
+    assert CR.NucleiConfig().templates_dir == from_env
 
 
 def test_nuclei_templates_dir_falls_back_to_the_nuclei_default(tmp_path, monkeypatch):
     """The Docker image's real case: nothing configured, templates under $HOME."""
     default_location = tmp_path / ".local" / "nuclei-templates"
     default_location.mkdir(parents=True)
-    _no_config_dir(monkeypatch)
     monkeypatch.delenv("NUCLEI_TEMPLATES_DIR", raising=False)
     monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path))
 
-    assert CR.get_nuclei_templates_dir() == default_location
+    assert CR.NucleiConfig().templates_dir == default_location
 
 
 def test_nuclei_templates_dir_is_none_when_nothing_resolves(tmp_path, monkeypatch):
     """A missing tree is reported as such, never as an invented path."""
-    _no_config_dir(monkeypatch)
     monkeypatch.delenv("NUCLEI_TEMPLATES_DIR", raising=False)
     monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path / "empty"))
 
-    assert CR.get_nuclei_templates_dir() is None
+    assert CR.NucleiConfig().templates_dir is None
 
 
 def test_nuclei_templates_dir_ignores_a_configured_path_that_does_not_exist(tmp_path, monkeypatch):
     """A deployment typo must not silently look like a working template tree."""
-    monkeypatch.setattr(CR, "_cfg", lambda path, default=None, cast=None: (
-        str(tmp_path / "does-not-exist") if path == "features.themis.scanners.nuclei.templatesDir" else default
-    ))
     monkeypatch.delenv("NUCLEI_TEMPLATES_DIR", raising=False)
     monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path / "empty"))
 
-    assert CR.get_nuclei_templates_dir() is None
+    config = CR.NucleiConfig(configured_templates_dir=str(tmp_path / "does-not-exist"))
+
+    assert config.templates_dir is None

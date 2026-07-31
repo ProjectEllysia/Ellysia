@@ -171,7 +171,7 @@ def _expand_single_ip_segment(segmento: str) -> List[str]:
 
 def _reject_private_ips(lista_ips: List[str]) -> None:
     """Raise if any IP is private and local IPs aren't allowed by config."""
-    if not CR.are_local_ips_allowed():
+    if not CR.themis_config().are_local_ips_allowed:
         private_ips = [
             ip for ip in lista_ips
             if ipaddress.ip_address(ip).is_private

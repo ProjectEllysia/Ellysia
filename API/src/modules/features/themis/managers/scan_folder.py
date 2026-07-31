@@ -150,7 +150,7 @@ class ScanFolderManager:
         Returns:
             Dict with keys ``folders`` (list) and ``unfoldered`` (dict).
         """
-        default_name = CR.get_themis_default_folder_name()
+        default_name = CR.themis_folders().default_folder_name
 
         with UnitOfWork() as uow:
             folder_repo = ScanFolderRepository(uow)

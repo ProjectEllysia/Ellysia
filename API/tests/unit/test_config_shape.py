@@ -99,18 +99,6 @@ GETTERS_AND_PATHS = [
     (CR.get_iris_prompts,                   "features.iris.prompts"),
     (CR.get_aegis_brands,                   "features.aegis.brands"),
     (CR.get_aegis_prompts,                  "features.aegis.prompts"),
-    (CR.get_themis_traceroute_max_hops,     "features.themis.traceroute.maxHops"),
-    (CR.get_host_reachability_check_port,   "features.themis.hostReachabilityCheck.port"),
-    (CR.get_themis_default_folder_name,     "features.themis.folders.defaultFolderName"),
-    (CR.get_themis_history_size,            "features.themis.history.maxScans"),
-    (CR.get_kb_sources,                     "features.themis.kb.sources"),
-    (CR.get_kb_sync_cron,                   "features.themis.kb.syncCron"),
-    (CR.get_nuclei_rate_limit,              "features.themis.scanners.nuclei.rateLimit"),
-    (CR.get_nuclei_default_severities,      "features.themis.scanners.nuclei.defaultSeverities"),
-    (CR.get_openvas_task_timeout,           "features.themis.scanners.openvas.timeout"),
-    (CR.get_openvas_scan_configs,           "features.themis.scanners.openvas.toolConfigs.scanConfigs"),
-    (CR.get_openvas_port_list,              "features.themis.scanners.openvas.toolConfigs.portList"),
-    (CR.get_lybra_ingest_max_checks,        "features.themis.scanners.lybra.ingest.maxChecks"),
 ]
 
 
@@ -188,6 +176,18 @@ def test_strategy_resolution_reads_the_tools_branch(
 CONFIG_BLOCKS = [
     (CR.HygeiaConfig, CR.hygeia_config),
     (CR.HygeiaLimits, CR.hygeia_limits),
+    (CR.ThemisConfig, CR.themis_config),
+    (CR.ThemisFolders, CR.themis_folders),
+    (CR.ThemisHistory, CR.themis_history),
+    (CR.ThemisTaskDefaults, CR.themis_task_defaults),
+    (CR.HostReachabilityCheck, CR.host_reachability_check),
+    (CR.TracerouteConfig, CR.traceroute_config),
+    (CR.KnowledgeBaseConfig, CR.knowledge_base_config),
+    (CR.OpenVASConfig, CR.openvas_config),
+    (CR.OpenVASToolConfigs, CR.openvas_tool_configs),
+    (CR.LybraConfig, CR.lybra_config),
+    (CR.LybraIngestConfig, CR.lybra_ingest_config),
+    (CR.NucleiConfig, CR.nuclei_config),
 ]
 
 
@@ -207,9 +207,15 @@ def test_block_covers_its_branch_exactly(raw_config, block_type, _accessor):
     plantaría — el test pasaría sin probar nada. Comparando conjuntos, un campo
     huérfano (default silencioso) y una clave del JSON que nadie lee (config
     muerta) se ven los dos.
+
+    Los campos marcados ``optional`` quedan fuera: son los que a propósito no
+    están en el fichero, porque son secretos y su sitio es el ``.env``.
     """
     branch = _value_at(raw_config, block_type.__config_path__)
-    declared = {expected_key(f) for f in dataclasses.fields(block_type)}
+    declared = {
+        expected_key(f) for f in dataclasses.fields(block_type)
+        if not f.metadata.get("optional")
+    }
     configured = {key for key, value in branch.items() if not isinstance(value, dict)}
     # Las sub-ramas (dicts) o son un campo del bloque o son otro bloque aparte.
     configured |= {key for key in branch if key in declared}

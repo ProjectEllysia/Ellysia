@@ -108,7 +108,7 @@ def themis_creator(make_user):
 
 @pytest.fixture(autouse=True)
 def _reject_local_ips(monkeypatch):
-    monkeypatch.setattr(CR, "are_local_ips_allowed", lambda: False)
+    monkeypatch.setattr(CR, "themis_config", lambda: CR.ThemisConfig(are_local_ips_allowed=False))
 
 
 def test_nikto_rejects_loopback_target(client, themis_creator, auth_headers):

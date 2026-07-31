@@ -51,7 +51,7 @@ class NucleiTemplateStore:
     """
 
     def __init__(self, path: Optional[Path] = None) -> None:
-        self._path = path if path is not None else CR.get_nuclei_templates_dir()
+        self._path = path if path is not None else CR.nuclei_config().templates_dir
 
     @property
     def path(self) -> Optional[Path]:
@@ -70,7 +70,7 @@ class NucleiTemplateStore:
         Delega en ``config_reading``, que ya implementa la cadena de fallbacks
         (fichero horneado en build → configuración → marcador de desconocido).
         """
-        return CR.get_nuclei_templates_version()
+        return CR.nuclei_config().templates_version
 
     def iter_template_paths(self) -> Iterator[Path]:
         """Itera las rutas de todas las plantillas del árbol.

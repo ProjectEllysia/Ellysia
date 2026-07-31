@@ -192,10 +192,10 @@ class SelfDiscovery(ServiceSource):
     def resolve(self, scan_repo: ScanRepository, manager, target: Optional[str]) -> Optional[ResolvedServices]:
         discovered_ports: list = []
         if target:
-            if CR.is_host_reachability_check_enabled() and not manager.is_host_reachable(
+            if CR.host_reachability_check().enabled and not manager.is_host_reachable(
                 target,
-                port=CR.get_host_reachability_check_port(),
-                timeout=CR.get_host_reachability_check_timeout(),
+                port=CR.host_reachability_check().port,
+                timeout=CR.host_reachability_check().timeout,
             ):
                 logger.warning(f"Host '{target}' inalcanzable.")
                 return None

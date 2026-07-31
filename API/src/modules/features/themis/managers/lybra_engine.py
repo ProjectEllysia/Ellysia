@@ -221,7 +221,7 @@ class LybraEngineManager(ScanManager):
                     source.probes_target_network
                     and source_target
                     and is_target_authorized
-                    and CR.is_lybra_fingerprinting_enabled()
+                    and CR.lybra_config().fingerprinting_enabled
                 ):
                     services, fingerprint_findings = self._fingerprint_services(
                         source_target,
@@ -244,7 +244,7 @@ class LybraEngineManager(ScanManager):
                 findings_data.extend(fingerprint_findings)
                 findings_data.extend(surface_findings)
 
-            if source.probes_target_network and source_target and is_target_authorized and CR.is_lybra_active_checks_enabled():
+            if source.probes_target_network and source_target and is_target_authorized and CR.lybra_config().active_checks:
                 findings_data.extend(self._run_active_checks(source_target, services))
 
             deep_scan_ids: list = []
@@ -341,7 +341,7 @@ class LybraEngineManager(ScanManager):
         Best-effort igual que el resto del método: si el árbol no está o algo
         falla, se sigue con el feed propio en vez de hundir el escaneo.
         """
-        if not CR.is_lybra_template_ingest_enabled():
+        if not CR.lybra_ingest_config().enabled:
             return []
         try:
             store = NucleiTemplateStore()
@@ -358,8 +358,8 @@ class LybraEngineManager(ScanManager):
             return select_for_services(
                 translated,
                 services,
-                min_severity=CR.get_lybra_ingest_min_severity(),
-                max_checks=CR.get_lybra_ingest_max_checks(),
+                min_severity=CR.lybra_ingest_config().min_severity,
+                max_checks=CR.lybra_ingest_config().max_checks,
             )
         except Exception:
             logger.exception("Fallo ingiriendo plantillas de Nuclei; se sigue con el feed propio")

@@ -101,7 +101,7 @@ class TracerouteManager(TaskTrackingMixin):
         be RQ-safe (letters, numbers, _, -); external_id can have other chars.
         """
         key = self._trace_key(user_id, target)
-        timeout = int(CR.get_themis_traceroute_timeout()) + 30
+        timeout = int(CR.traceroute_config().timeout) + 30
         self._tq.submit(
             func=TracerouteManager.execute_traceroute,
             args=(user_id, target),
@@ -124,9 +124,9 @@ class TracerouteManager(TaskTrackingMixin):
             if trace is None:
                 return None
             if trace.hops:
-                max_age = timedelta(hours=CR.get_themis_traceroute_cache_hours())
+                max_age = timedelta(hours=CR.traceroute_config().cache_hours)
             else:
-                max_age = timedelta(minutes=CR.get_themis_traceroute_retry_failed_minutes())
+                max_age = timedelta(minutes=CR.traceroute_config().retry_failed_minutes)
             if utcnow_naive() - trace.created_at > max_age:
                 return None
             return self._format(trace, cached_hit=True)

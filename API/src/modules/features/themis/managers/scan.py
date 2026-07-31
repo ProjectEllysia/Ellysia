@@ -467,12 +467,12 @@ class ScanManager(TaskTrackingMixin, ABC):
             thread_manager.update_scan_status(scan_id, ScanStatus.RUNNING)
             logger.info(f"Iniciando escaneo {scan_id}")
 
-            if CR.is_host_reachability_check_enabled():
+            if CR.host_reachability_check().enabled:
                 raw_target = target if "://" in target else f"tcp://{target}"
                 parsed_target = urlparse(url=raw_target) # type: ignore
                 host = parsed_target.hostname or target
-                reachable_port = parsed_target.port or CR.get_host_reachability_check_port()
-                reachable_timeout = CR.get_host_reachability_check_timeout()
+                reachable_port = parsed_target.port or CR.host_reachability_check().port
+                reachable_timeout = CR.host_reachability_check().timeout
                 if not self.is_host_reachable(host=host, port=reachable_port, timeout=reachable_timeout): # type: ignore
                     logger.warning(
                         f"Host '{host}' inalcanzable en puerto {reachable_port}. "

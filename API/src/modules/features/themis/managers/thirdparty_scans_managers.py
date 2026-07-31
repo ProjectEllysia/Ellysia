@@ -338,11 +338,11 @@ class OpenVASScanManager(ScanManager):
     # reiniciar el proceso (antes solo se leían una vez, al importar la clase).
     @property
     def SCAN_CONFIGS(self) -> dict:
-        return CR.get_openvas_scan_configs()
+        return CR.openvas_tool_configs().scan_configs
 
     @property
     def PORT_LISTS(self) -> dict:
-        return CR.get_openvas_port_list()
+        return CR.openvas_tool_configs().port_list
 
     SCAN_TYPE = ScanType.OPENVAS
     _MODEL = OpenVASScan
@@ -404,7 +404,7 @@ class OpenVASScanManager(ScanManager):
                 name=f"OpenVASScan-{scan_id}",
                 category=self.TASK_CATEGORY,
                 external_id=self.external_id_for(scan_id),
-                timeout=CR.get_openvas_task_timeout(),
+                timeout=CR.openvas_config().timeout,
             )
 
             logger.info(f"Escaneo OpenVAS {scan_id} iniciado")
@@ -621,7 +621,7 @@ class NucleiScanManager(ScanManager):
             Primary key of the created NucleiScan record.
         """
         try:
-            resolved_timeout = int(timeout) if timeout is not None else int(CR.get_nuclei_task_timeout())
+            resolved_timeout = int(timeout) if timeout is not None else int(CR.nuclei_config().timeout)
             scan = self._create_scan_record(
                 target=target,
                 user_id=user_id,
@@ -691,7 +691,7 @@ class NucleiScanManager(ScanManager):
         on a *different* manager instance — ``thread_manager =
         self.__class__()``) has no access to this ``task``, so findings are
         persisted first with the config-level fallback
-        (``CR.get_nuclei_templates_version()``) and corrected here once the
+        (``CR.nuclei_config().templates_version``) and corrected here once the
         real value is available. Mirrors how ``OpenVASScanManager`` patches
         ``task_id``/``report_id`` onto the scan row post-hoc, for the same
         structural reason.
@@ -737,7 +737,7 @@ class NucleiScanManager(ScanManager):
 
         # Fallback usado hasta que _execute_scan lo corrija con la versión
         # real leída del binario (ver el override de arriba).
-        default_feed_version = CR.get_nuclei_templates_version()
+        default_feed_version = CR.nuclei_config().templates_version
 
         findings = []
         for result_data in results_data:

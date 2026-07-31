@@ -52,7 +52,7 @@ class ScanHistoryManager:
             JSON-serializable statistics payload (see HistoryStatsService.build).
         """
         scan_type = ScanType(scan_type)
-        limit = CR.get_themis_history_size()
+        limit = CR.themis_history().max_scans
         with UnitOfWork() as uow:
             scans = ScanRepository(uow).get_recent_finished(
                 user_id, target, scan_type, limit

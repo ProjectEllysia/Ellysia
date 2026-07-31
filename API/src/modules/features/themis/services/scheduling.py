@@ -251,18 +251,18 @@ class ThemisScheduler:
         the per-user ProgramedScan jobs.
         """
         import src.modules.system.config_reading as CR
-        if not CR.is_kb_sync_enabled():
+        if not CR.knowledge_base_config().enabled:
             return
         from ..managers import KbSyncManager
         cls._scheduler.add_job(  # type: ignore[union-attr]
             func=KbSyncManager.execute_kb_sync,
-            trigger=CronTrigger.from_crontab(CR.get_kb_sync_cron(), timezone=timezone.utc),
+            trigger=CronTrigger.from_crontab(CR.knowledge_base_config().sync_cron, timezone=timezone.utc),
             id="lybra_kb_sync",
             replace_existing=True,
             max_instances=1,
             name="Lybra KB sync",
         )
-        logger.info("Scheduled Lybra KB sync (%s)", CR.get_kb_sync_cron())
+        logger.info("Scheduled Lybra KB sync (%s)", CR.knowledge_base_config().sync_cron)
 
     @classmethod
     def _sync_from_db(cls) -> None:
