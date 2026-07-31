@@ -273,7 +273,7 @@ La pista de **correlación** está completa; la de **bajo nivel** está a medias
 | **5** — Dedup multi-fuente, ciclo de vida, scoring, `HostService` | Correlación | ✓ implementada |
 | **6** — Pipeline orquestado | Convergencia | ✓ implementada |
 | **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ◐ parcial — U1, U2 y U3 hechas, U4 sin empezar. **U4 sigue siendo prerrequisito del cierre de R**. Detalle en la sección Fase U más abajo |
-| **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — 15 checks, tipos `http`/`tls`/`network`; falta `script`; el feed es JSON, no el YAML estilo Nuclei del diseño. Su cierre depende de la Fase U. Detalle actualizado en la sección Fase R más abajo |
+| **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — 16 checks; los cuatro tipos activos (`http`/`tls`/`network`/`script`) ya existen; el feed sigue siendo JSON, no el YAML estilo Nuclei del diseño. Lo que queda de su cierre (YAML, ingesta, precisión medida) depende de la Fase U. Detalle actualizado en la sección Fase R más abajo |
 | **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS, y (Fase N) FTP, SMTP/IMAP/POP3, SMB, MySQL/MariaDB, Redis, VNC; falta JARM, SNMP (sin sonda UDP), PostgreSQL/MSSQL/MongoDB, RDP, LDAP, Telnet, RPC. Detalle actualizado en la sección Fase N más abajo |
 | **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; faltan SYN sin estado, sondas UDP y control de tasa AIMD |
 | **4**, DAST y Etapa 2 (P, E, C, O, A, B, D, G, S, X) | Ambas | ○ planificadas |
@@ -1204,9 +1204,10 @@ misma carencia vista desde dos sitios.
 
 Por tanto, "ingerir el feed de Nuclei" nunca va a significar ingerirlo entero, sino **la fracción que
 use solo el subconjunto que soportemos**, descartando el resto. Y esa fracción hoy no la sabemos. El
-entregable de U4 en esta fase no es código de producto: es **la medición**. Un script que clone
-`projectdiscovery/nuclei-templates`, parsee las plantillas y las clasifique por las características que
-requieren, produciendo un histograma —cuántas se ingieren hoy tal cual, cuántas necesitan
+entregable de U4 en esta fase no es código de producto: es **la medición**. Un script que lea el
+árbol de plantillas **ya instalado** —el mismo que el binario de U1 usa, ver la subsección de la
+copia única más abajo; no un clon aparte de `projectdiscovery/nuclei-templates`—, parsee las
+plantillas y las clasifique por las características que requieren, produciendo un histograma —cuántas se ingieren hoy tal cual, cuántas necesitan
 `extractors`, cuántas `dsl`, cuántas son `code`/`flow` y quedan descartadas por diseño—. Ese número
 decide la Fase R:
 
@@ -1220,6 +1221,84 @@ Dos cautelas que no se descuidan: **auditar la licencia** del repositorio de pla
 redistribuir nada en un feed propio, y **ingerir en tiempo de sincronización, no vendorizar** — el
 repositorio cambia a diario y meterlo en el checkout es peso y superficie de suministro que no
 queremos; el patrón de `KbSyncManager` ya existe para esto.
+
+#### Una sola copia de las plantillas, y qué no se puede verificar en este equipo
+
+Dos restricciones que gobiernan cómo se ejecutan U4 y el cierre de R, anotadas antes de escribir
+nada para que no se descubran a mitad.
+
+**La primera es de diseño: Themis tiene una única copia de las plantillas de Nuclei.** Con U1 ya
+entregada, el binario que el usuario lanza desde el panel y la ingesta que la Fase R contempla
+apuntan al *mismo* árbol de ficheros — no a dos, y desde luego no a uno copiado del otro. Hoy la
+ubicación ya tiene un único punto de verdad, `CR.get_nuclei_templates_dir()`, pero su valor por
+defecto es la cadena vacía, que significa "deja que el binario use su ubicación propia": un
+contrato que el binario entiende y que Python no puede resolver. En cuanto haya un segundo
+consumidor que necesite *leer* las plantillas en vez de solo pasárselas por `-templates`, ese
+vacío deja de valer.
+
+**Estado (2026-07-31): el almacén está construido.**
+`themis/services/nuclei_templates.py` (`NucleiTemplateStore` + `resolve_templates_dir`) es la
+autoridad única, y `NucleiScanTask` ya le pide la ruta en vez de leer la configuración por su
+cuenta. La resolución no obligó a tocar el `Dockerfile`: la tercera prioridad
+(`~/.local/nuclei-templates`) es exactamente donde su `nuclei -update-templates` deja las
+plantillas cuando corre como root, así que el árbol horneado se encuentra solo. Fijar
+`templatesDir` explícitamente sigue siendo endurecimiento recomendable, pero exige verificar el
+nombre del flag de descarga contra el binario fijado (convención `Q_NUCLEI` del propio Dockerfile),
+y por eso no se hizo a ciegas desde un equipo sin la imagen. `PyYAML` pasa a estar declarado en
+`requirements.txt`: estaba disponible de forma transitiva, y ahora hay código de primera parte que
+lo importa.
+
+De ahí sale una pieza pequeña y previa a todo lo demás: un **almacén de plantillas** con tres
+consumidores y ningún duplicado — `NucleiScanTask`, que le pide la ruta efectiva; la ingesta de
+Lybra, que itera y parsea esa misma ruta; y el censo de U4, que mide sobre esa misma ruta. Cuatro
+consecuencias, cada una decidida aquí y no más adelante:
+
+1. **El censo de U4 no clona el repositorio de plantillas**, al contrario de lo que la primera
+   redacción de U4 daba por hecho: lee el árbol ya instalado. El número medido pasa a
+   corresponder a la versión que corre de verdad en producción, no a `main` del día del clon.
+2. **`templatesDir` deja de poder estar vacío.** El almacén necesita resolución explícita, y lo
+   limpio es fijarla en el `Dockerfile`/`SecOpsConfig.json` para que el binario y el lector no
+   puedan discrepar nunca en silencio.
+3. **La ingesta traduce en memoria; no escribe plantillas traducidas.** `checks_feed.json` sigue
+   siendo *solo* el feed propio. Como mucho, una caché de índice invalidada por versión de
+   plantillas — nunca el cuerpo de una plantilla ajena copiado a nuestro lado.
+4. **La procedencia se separa, lo que resuelve de paso el `feed_version` global.** Los checks
+   propios siguen siendo `lybra:{id}@{v}` + `CHECKS_FEED_VERSION`; los ingeridos son
+   `nuclei:{template-id}@{templatesVersion}` + `get_nuclei_templates_version()`. Dos orígenes, dos
+   versiones, un solo árbol en disco.
+
+Y una decisión de producto que la copia única destapa y que **se toma con el número de U4, no
+antes**: si Lybra ingiere las mismas plantillas que el binario ejecuta como corroborador (U2), en
+un `deep=True` el mismo check toca el objetivo dos veces. `dedup_key` fundirá los hallazgos, pero
+el tráfico se duplica igual. Las dos salidas razonables son que el subconjunto ingerido sea el
+complementario de lo que el binario ya cubre, o que la ingesta sirva sobre todo a despliegues sin
+binario.
+
+*(Nota de infraestructura: hoy `api` y `ellysia-worker` construyen del mismo Dockerfile y hornean
+copias idénticas en build, así que son coherentes por construcción. Si el refresco de plantillas
+pasa algún día a tiempo de ejecución —la deuda del cron que el propio Dockerfile documenta—,
+`templatesDir` **tiene que** ser un volumen nombrado compartido entre ambos, o los dos contenedores
+divergen sin que nada avise.)*
+
+**La segunda restricción es de entorno.** El checkout de trabajo es Windows, sin binario `nuclei`,
+sin las plantillas horneadas y **sin la KB poblada**. Eso no impide avanzar, pero sí obliga a saber
+qué se está verificando de verdad en cada sitio:
+
+| Trabajo | Verificable en el equipo de desarrollo | ⚠ Requiere el equipo completo |
+|---|---|---|
+| **R — tipo de check `script`** | Runtime, registro y tests con socket falso (el patrón que `smb.py` ya usa) | Disparo real contra Samba/Windows — el dissector SMB **ya estaba sin verificar** contra un servidor real |
+| **U4 — el censo** | La lógica del clasificador, con plantillas de muestra escritas a mano | ⚠ **El número en sí**: exige el árbol de plantillas real |
+| **El almacén de plantillas** | Resolución de rutas y parseo contra un directorio de prueba | ⚠ Que la ruta resuelta sea la misma que el binario usa de verdad |
+| **R — migración del feed a YAML** | Todo (parseo, equivalencia con el JSON actual) | — |
+| **R — ingesta de plantillas** | Traductor plantilla→`Check`, índice de selección | ⚠ Ejecución de los checks ingeridos contra objetivos reales |
+| **R — precisión ≥ 0,9 medida** | Nada | ⚠ **Todo**: `tests/oracle/` exige Docker y un `nuclei` con plantillas |
+| **Cualquier CPE→CVE de extremo a extremo** | Nada | ⚠ **Todo**: sin KB poblada el motor no falla, devuelve vacío — que es peor, porque se lee como "objetivo limpio" |
+| **`nuclei_templates_version.txt`** | Nada | ⚠ El `Dockerfile` vuelca ahí la salida de `nuclei -version`, que es la versión **del motor**, no la de plantillas — mientras que el regex de `_check_output_line` sí captura la de plantillas. Probable etiqueta equivocada en el *fallback*; sin la imagen no se puede confirmar |
+
+La consecuencia práctica de la fila de la KB gobierna a todas las demás: **un test que aquí dé
+"0 hallazgos" no es evidencia de nada.** Lo que se escriba en el equipo de desarrollo asevera sobre
+mocks de KB o sobre la mecánica —¿se seleccionó el check?, ¿se parseó la plantilla?—, nunca sobre el
+recuento final de CVEs.
 
 #### Qué NO incluye esta fase
 
@@ -1259,8 +1338,8 @@ El runtime maneja cinco tipos de comprobación bajo el mismo motor:
 | `version` | Detección por CPE→CVE (Fase 1) | La KB local, sin tocar el objetivo | ✓ |
 | `http` | Petición más matchers (el 90 % de web/banner) | Cliente HTTP propio, declarativo | ✓ 10 checks |
 | `ssl` | Higiene de TLS | Python de primera parte (`ssl`/`cryptography`) | ✓ 3 checks |
-| `network` | **Sondas de protocolo crudas** | Socket propio, declarativo | ✗ **— vehículo de la Fase N** |
-| `script` | Lógica compleja, multipaso o binaria | Plugin en Python, de primera parte y revisado | ✗ |
+| `network` | **Sondas de protocolo crudas** | Socket propio, declarativo | ✓ 2 checks (lo aportó la Fase N) |
+| `script` | Lógica compleja, multipaso o binaria | Plugin en Python, de primera parte y revisado | ✓ 1 check (2026-07-31) |
 
 El grueso de las comprobaciones debe escribirse de forma **declarativa**, con un esquema
 razonablemente compatible con las plantillas de Nuclei. El feed actual es JSON; el diseño pide YAML.
@@ -1327,7 +1406,7 @@ para cerrar esta fase dependen de que la Fase U se haya hecho antes, y uno no:
 | **Migración del feed a YAML** | **Sí** | El esquema al que se migra es el de Nuclei; migrar antes de saber qué fracción del lenguaje vamos a soportar (U4) es elegir la forma a ciegas y arriesgarse a migrar dos veces |
 | **Ingesta de plantillas externas** | **Sí** | Es literalmente U4. Sin el histograma de ingestibilidad no se sabe si vale la pena construirla |
 | **Precisión ≥ 0,9 medida** | **Sí** | El numerador de falsos positivos lo da el oráculo diferencial (U3). Sin él, "precisión 0,9" sigue siendo una frase, como reconoce el §8 |
-| **El tipo de check `script`** | **No** | Es un plugin de primera parte en Python, sin relación con Nuclei. Se puede construir en cualquier momento |
+| **El tipo de check `script`** | **No** | Es un plugin de primera parte en Python, sin relación con Nuclei. Se puede construir en cualquier momento — **✓ hecho el 2026-07-31**, ver nota de estado |
 
 Y una delimitación en la otra dirección, para que el prerrequisito no estrangule al roadmap: **la Fase
 U no bloquea a la Fase N.** El tipo de check `network` que N necesitaba como vehículo declarativo **ya
@@ -1335,7 +1414,32 @@ está construido** (lo aportó la propia Fase N, ver su nota de estado), así qu
 —dissectors nuevos, checks de configuración de red— sin esperar a nada de esto. Lo único que la Fase U
 condiciona es el **cierre** de R, no su existencia ni la fase prioritaria que se apoya en ella.
 
-**Estado (2026-07-11, sigue vigente):** la mecánica está completa — 13 checks activos en 3 familias,
+**Estado (2026-07-31): el tipo `script` existe.** `lybra/script_checks.py` aporta los plugins de
+primera parte y `CheckRuntime` los recibe **por inyección** (`script_plugins=`), no por importación:
+`checks.py` no puede importar `fingerprinting` sin cerrar un ciclo, porque los dissectors importan de
+él sus predicados de aplicabilidad. El reparto acabó siendo el mismo que ya existía para los
+dissectors — la clase base (`ScriptPlugin`) y su contexto restringido (`ScriptContext`) viven junto al
+runtime, igual que `Dissector` vive en `dispatch.py`; los plugins concretos viven aparte, igual que
+`SmbDissector` vive en `smb.py`.
+
+El primer plugin, `smb-signing-not-required` (feed subido a `lybra-checks-4`), cierra **la mitad** del
+hueco que la Fase N había dejado anotado: el dissector de SMB ya negociaba y ya leía el `SecurityMode`
+del servidor, así que el hecho estaba observado y solo faltaba un vehículo para convertirlo en
+hallazgo — sin necesitar el matcher `binary` ni el esquema `type: hex`, que dependen de la medición de
+U4. **La otra mitad, "SMBv1 habilitado", sigue sin construirse y no salía gratis aquí:** `SmbProbe`
+solo ofrece dialectos SMB2, y detectar SMBv1 exige un paquete `NEGOTIATE` de SMB1 que es trabajo nuevo
+en `smb.py`.
+
+Un plugin que lance una excepción se contiene en su propio check en vez de hundir el escaneo: son de
+primera parte, pero ejecutan lógica de protocolo multipaso, y que uno reviente ante la respuesta
+malformada de algún appliance debe costar ese check y nada más. Los tests cubren la mecánica con una
+sonda falsa (dispara sin firma obligatoria, calla con ella, calla sin negociación, calla ante un
+dialecto desconocido, y el feed y el registro concuerdan). ⚠ **El disparo contra un Samba/Windows real
+sigue pendiente del equipo completo** — la misma deuda que el dissector ya arrastraba.
+
+**Estado (2026-07-11, sigue vigente en lo demás):** la mecánica está completa — hoy son **16 checks
+en 5 familias** (`exposed_path` ×7, `security_header` ×3, `tls` ×3, `network` ×2, `script` ×1;
+el recuento de "13 en 3 familias" de esta nota se quedó desfasado al añadirse `network` y `script`),
 todas bajo el mismo `CheckRuntime`, todas `confirmed=true`/`qod=99` cuando disparan, feed versionado
 (`lybra-checks-1`). La familia `tls` tiene banco automatizado: dos fixtures de contenedor local
 (nginx con certificado autofirmado generado en el arranque, sin bind-mount) cubren
