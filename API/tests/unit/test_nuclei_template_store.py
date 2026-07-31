@@ -2,17 +2,18 @@
 
 Pure: every test builds a fake template tree under ``tmp_path``, so nothing
 here needs a real ``nuclei`` install or its multi-thousand-file feed. What is
-being verified is the *mechanics* — path resolution order, which files count as
-templates, and tolerance to a malformed one — not the content of any real
-template, which can only be checked on a machine that has the feed installed.
+being verified is the *mechanics* — which files count as templates, and
+tolerance to a malformed one — not the content of any real template, which can
+only be checked on a machine that has the feed installed.
+
+Resolving *where* the tree lives is not this module's job (it belongs to
+``config_reading.get_nuclei_templates_dir``), so those tests live in
+``test_config_reading.py``.
 """
 
 import pytest
 
-from src.modules.features.themis.services.nuclei_templates import (
-    NucleiTemplateStore,
-    resolve_templates_dir,
-)
+from src.modules.features.themis.services.nuclei_templates import NucleiTemplateStore
 
 pytestmark = pytest.mark.unit
 
@@ -33,67 +34,6 @@ http:
     path:
       - "{{BaseURL}}/.git/config"
 """
-
-
-# ------------------------------------------------------------- path resolution
-
-def test_configured_directory_wins(tmp_path, monkeypatch):
-    configured = tmp_path / "configured"
-    configured.mkdir()
-    monkeypatch.setattr(
-        "src.modules.features.themis.services.nuclei_templates.CR.get_nuclei_templates_dir",
-        lambda: str(configured),
-    )
-    assert resolve_templates_dir() == configured
-
-
-def test_environment_variable_used_when_config_is_empty(tmp_path, monkeypatch):
-    from_env = tmp_path / "from-env"
-    from_env.mkdir()
-    monkeypatch.setattr(
-        "src.modules.features.themis.services.nuclei_templates.CR.get_nuclei_templates_dir",
-        lambda: "",
-    )
-    monkeypatch.setenv("NUCLEI_TEMPLATES_DIR", str(from_env))
-    assert resolve_templates_dir() == from_env
-
-
-def test_falls_back_to_nuclei_default_location(tmp_path, monkeypatch):
-    """The Docker image's real case: nothing configured, templates under $HOME."""
-    default_location = tmp_path / ".local" / "nuclei-templates"
-    default_location.mkdir(parents=True)
-    monkeypatch.setattr(
-        "src.modules.features.themis.services.nuclei_templates.CR.get_nuclei_templates_dir",
-        lambda: "",
-    )
-    monkeypatch.delenv("NUCLEI_TEMPLATES_DIR", raising=False)
-    monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path))
-
-    assert resolve_templates_dir() == default_location
-
-
-def test_returns_none_when_nothing_resolves(tmp_path, monkeypatch):
-    """A missing tree is reported as such, never as an invented path."""
-    monkeypatch.setattr(
-        "src.modules.features.themis.services.nuclei_templates.CR.get_nuclei_templates_dir",
-        lambda: "",
-    )
-    monkeypatch.delenv("NUCLEI_TEMPLATES_DIR", raising=False)
-    monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path / "empty"))
-
-    assert resolve_templates_dir() is None
-
-
-def test_configured_but_missing_directory_falls_through(tmp_path, monkeypatch):
-    """A deployment typo must not silently yield a working-looking store."""
-    monkeypatch.setattr(
-        "src.modules.features.themis.services.nuclei_templates.CR.get_nuclei_templates_dir",
-        lambda: str(tmp_path / "does-not-exist"),
-    )
-    monkeypatch.delenv("NUCLEI_TEMPLATES_DIR", raising=False)
-    monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path / "empty"))
-
-    assert resolve_templates_dir() is None
 
 
 # ------------------------------------------------------------------ iteration
