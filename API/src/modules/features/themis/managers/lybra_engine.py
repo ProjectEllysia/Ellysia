@@ -42,7 +42,9 @@ from ..lybra import (
     DEFAULT_PORTS,
     scan_ports_sync,
 )
+from ..lybra.ingest import select_for_services, translate_all
 from ..services import _Task, LybraPrintingStrategy
+from ..services.nuclei_templates import NucleiTemplateStore
 from ..exceptions import (
     ScanNotFoundError,
     FindingNotFoundError,
@@ -310,7 +312,7 @@ class LybraEngineManager(ScanManager):
         """
         try:
             runtime = CheckRuntime(
-                load_checks(),
+                load_checks() + self._ingested_checks(services),
                 HttpProbe().fetch,
                 mode="safe",
                 rate_limiter=HostRateLimiter(),
@@ -321,6 +323,46 @@ class LybraEngineManager(ScanManager):
             return runtime.run(target, services)
         except Exception:
             logger.exception("Lybra active checks failed for %s", target)
+            return []
+
+    def _ingested_checks(self, services) -> list:
+        """Checks traducidos del árbol de plantillas de Nuclei (Fase R).
+
+        Desactivado por defecto: hasta que el censo de la Fase U4 diga que la
+        ingesta merece la pena, esto devuelve una lista vacía y el motor corre
+        exactamente con su feed propio, como hasta ahora.
+
+        La selección (:func:`select_for_services`) se aplica **aquí**, antes de
+        construir el runtime, y no dentro de él: el feed propio no debe pagar
+        nada por que esta capa exista. Sin ese filtro previo, miles de
+        plantillas por servicio a 0,2 s de limitador serían horas de tráfico
+        contra el objetivo.
+
+        Best-effort igual que el resto del método: si el árbol no está o algo
+        falla, se sigue con el feed propio en vez de hundir el escaneo.
+        """
+        if not CR.is_lybra_template_ingest_enabled():
+            return []
+        try:
+            store = NucleiTemplateStore()
+            if not store.is_available:
+                logger.warning(
+                    "Ingesta de plantillas activada pero no hay árbol de plantillas; "
+                    "se sigue solo con el feed propio"
+                )
+                return []
+            translated = translate_all(
+                (document for _path, document in store.iter_templates()),
+                store.version,
+            )
+            return select_for_services(
+                translated,
+                services,
+                min_severity=CR.get_lybra_ingest_min_severity(),
+                max_checks=CR.get_lybra_ingest_max_checks(),
+            )
+        except Exception:
+            logger.exception("Fallo ingiriendo plantillas de Nuclei; se sigue con el feed propio")
             return []
 
     def _fingerprint_services(self, target: str, services: list) -> tuple:

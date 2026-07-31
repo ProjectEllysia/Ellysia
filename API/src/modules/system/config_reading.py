@@ -665,6 +665,34 @@ def is_lybra_active_checks_enabled() -> bool:
 
 # --- Lybra own fingerprinting (Fase F) ---
 
+# --- Ingesta de plantillas de Nuclei al runtime propio (Fase R) ---
+
+@_lazy_load
+def is_lybra_template_ingest_enabled() -> bool:
+    """Si Lybra ingiere plantillas de Nuclei a su propio runtime.
+
+    **Por defecto desactivado, y a conciencia.** El código está construido y
+    probado, pero la decisión de si la ingesta merece la pena la toma el número
+    del censo de la Fase U4 (`tools/nuclei_template_census.py`), que solo puede
+    medirse en una máquina con el feed instalado. Hasta que ese número exista,
+    el interruptor existe pero no se activa: el flag decide la *activación*, no
+    la existencia del código.
+    """
+    return _as_bool(_cfg("themis.lybra.ingest.enabled", False))
+
+
+@_lazy_load
+def get_lybra_ingest_min_severity() -> str:
+    """Severidad mínima de una plantilla ingerida para llegar a ejecutarse."""
+    return _cfg("themis.lybra.ingest.minSeverity", "MEDIUM", str)
+
+
+@_lazy_load
+def get_lybra_ingest_max_checks() -> int:
+    """Tope duro de checks ingeridos por escaneo (la red de seguridad final)."""
+    return _cfg("themis.lybra.ingest.maxChecks", 300, int)
+
+
 @_lazy_load
 def is_lybra_fingerprinting_enabled() -> bool:
     # Same story as active checks: on by default now that the authorized-targets

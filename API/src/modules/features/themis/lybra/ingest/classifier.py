@@ -42,12 +42,12 @@ _SCRIPTING_KEYS = ("code", "flow", "javascript")
 _OUT_OF_SCOPE_KEYS = ("dns", "file", "headless", "whois", "ssl", "websocket")
 
 # Matchers que el runtime evalúa hoy (``CheckRuntime``/``Matcher._raw_match``).
+# Cualquier otro (``binary``, ``size``, ``dsl``, ``favicon``) es un obstáculo, y
+# se registra con su propio nombre (``matcher:dsl``) en vez de agruparse: el
+# coste de soportarlos es muy distinto —``binary`` y ``size`` son pequeños y
+# acotados, ``dsl`` es un lenguaje de expresiones entero— así que el histograma
+# tiene que poder distinguirlos para que la decisión sea informada.
 _SUPPORTED_MATCHERS = frozenset({"status", "word", "regex"})
-# Matchers que existen en Nuclei y el runtime no implementa. Se distinguen del
-# resto porque cada uno tiene un coste muy distinto: ``binary`` y ``size`` son
-# pequeños y acotados, ``dsl`` es un lenguaje de expresiones entero.
-_BINARY_MATCHERS = frozenset({"binary", "size"})
-_EXPRESSION_MATCHERS = frozenset({"dsl", "favicon"})
 
 
 class Bucket(Enum):
@@ -124,6 +124,47 @@ def _has_interpolation(value) -> bool:
     return False
 
 
+def _inspect_matchers(requests: List[dict]):
+    """Recorre los matchers y devuelve ``(tipos_usados, obstáculos)``."""
+    matcher_types: Set[str] = set()
+    blockers: Set[str] = set()
+
+    for request, matcher in _iter_matchers(requests):
+        matcher_type = str(matcher.get("type") or "")
+        matcher_types.add(matcher_type)
+        if matcher_type not in _SUPPORTED_MATCHERS:
+            blockers.add(f"matcher:{matcher_type or 'sin-tipo'}")
+        # ``condition`` DENTRO de un matcher (no el ``matchers-condition`` entre
+        # matchers, que sí se soporta): ``Matcher._raw_match`` fija ``any()``
+        # sobre la lista de palabras, así que un "and" interno cambiaría el
+        # resultado en silencio en vez de fallar. Se cuenta como obstáculo.
+        if matcher.get("condition") == "and":
+            blockers.add("matcher-condition-interna")
+        if request.get("req-condition") or request.get("stop-at-first-match"):
+            blockers.add("condicion-entre-peticiones")
+
+    return matcher_types, blockers
+
+
+def _inspect_requests(requests: List[dict]) -> Set[str]:
+    """Recorre las peticiones y devuelve los obstáculos de nivel de petición."""
+    blockers: Set[str] = set()
+    for request in requests:
+        if not isinstance(request, dict):
+            continue
+        if request.get("payloads") or request.get("attack") or request.get("fuzzing"):
+            blockers.add("payloads")
+        if request.get("extractors"):
+            blockers.add("extractors")
+        # El esquema binario de una sonda de red: ``inputs`` con ``type: hex``.
+        # Es justo lo que desbloquearía los checks de SMB que la Fase N no pudo
+        # construir, así que interesa contarlo por separado.
+        for entry in request.get("inputs") or []:
+            if isinstance(entry, dict) and entry.get("type") == "hex":
+                blockers.add("input-hex")
+    return blockers
+
+
 def classify_template(document: dict) -> TemplateProfile:
     """Clasifica una plantilla de Nuclei por lo que exigiría del runtime propio.
 
@@ -164,41 +205,8 @@ def classify_template(document: dict) -> TemplateProfile:
     if not isinstance(requests, list):
         requests = []
 
-    matcher_types: Set[str] = set()
-    blockers: Set[str] = set()
-
-    for request, matcher in _iter_matchers(requests):
-        matcher_type = str(matcher.get("type") or "")
-        matcher_types.add(matcher_type)
-        if matcher_type in _EXPRESSION_MATCHERS:
-            blockers.add(f"matcher:{matcher_type}")
-        elif matcher_type in _BINARY_MATCHERS:
-            blockers.add(f"matcher:{matcher_type}")
-        elif matcher_type not in _SUPPORTED_MATCHERS:
-            blockers.add(f"matcher:{matcher_type or 'sin-tipo'}")
-        # ``condition`` DENTRO de un matcher (no el ``matchers-condition`` entre
-        # matchers, que sí se soporta): ``Matcher._raw_match`` fija ``any()``
-        # sobre la lista de palabras, así que un "and" interno cambiaría el
-        # resultado en silencio en vez de fallar. Se cuenta como obstáculo.
-        if matcher.get("condition") == "and":
-            blockers.add("matcher-condition-interna")
-        if request.get("req-condition") or request.get("stop-at-first-match"):
-            blockers.add("condicion-entre-peticiones")
-
-    for request in requests:
-        if not isinstance(request, dict):
-            continue
-        if request.get("payloads") or request.get("attack") or request.get("fuzzing"):
-            blockers.add("payloads")
-        if request.get("extractors"):
-            blockers.add("extractors")
-        # El esquema binario de una sonda de red: ``inputs`` con ``type: hex``.
-        # Es justo lo que desbloquearía los checks de SMB que la Fase N no pudo
-        # construir, así que interesa contarlo por separado.
-        for entry in request.get("inputs") or []:
-            if isinstance(entry, dict) and entry.get("type") == "hex":
-                blockers.add("input-hex")
-
+    matcher_types, blockers = _inspect_matchers(requests)
+    blockers |= _inspect_requests(requests)
     if _has_interpolation(requests):
         blockers.add("interpolacion")
 
