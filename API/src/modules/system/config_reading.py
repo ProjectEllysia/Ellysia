@@ -113,7 +113,7 @@ def _require_configs() -> dict:
 def _cfg(path: str, default=None, cast=None):
     """Lee un valor anidado de la config por ruta con puntos.
 
-    ``_cfg("themis.traceroute.cacheHours", 24, float)`` es el equivalente de
+    ``_cfg("features.themis.traceroute.cacheHours", 24, float)`` es el equivalente de
     ``_require_configs().get("themis", {}).get("traceroute", {}).get("cacheHours", 24)``
     convertido a ``float``. Requiere llamarse desde una función decorada con
     ``@_lazy_load`` (o después de que la config ya esté cargada).
@@ -191,7 +191,7 @@ def get_oauth_config() -> tuple[float, float, Optional[str], Optional[str]]:
 
     El secreto (``JWT_SECRET_KEY``) vive exclusivamente en .env.
     ``algorithm``, ``access_token_expiry_minutes`` y
-    ``refresh_token_expiry_days`` provienen de ``security.jwt`` en
+    ``refresh_token_expiry_days`` provienen de ``general.security.jwt`` en
     SecOpsConfig.json; las env vars ``JWT_ALGORITHM``,
     ``ACCESS_TOKEN_EXPIRY_MINUTES`` y ``REFRESH_TOKEN_EXPIRY_DAYS``
     sobreescriben la config si están presentes (override útil para
@@ -206,7 +206,7 @@ def get_oauth_config() -> tuple[float, float, Optional[str], Optional[str]]:
             "SecOpsConfig.json)."
         )
 
-    jwt_cfg = _require_configs().get("security", {}).get("jwt", {})
+    jwt_cfg = _cfg("general.security.jwt", {})
     algorithm = os.getenv("JWT_ALGORITHM") or str(jwt_cfg.get("algorithm", "HS256"))
     # S8: JWT_ALGORITHM es override por entorno sin validar — un typo o un
     # despliegue mal configurado con "none" (o un algoritmo asimétrico que
@@ -232,7 +232,7 @@ def get_mfa_config() -> dict:
     vive exclusivamente en .env, igual que ``JWT_SECRET_KEY`` — a diferencia del
     resto de secretos de Acheron, el servidor SÍ necesita poder leer este valor
     para poder calcular el código TOTP vigente y verificarlo. El resto de
-    parámetros provienen de ``security.mfa`` en SecOpsConfig.json.
+    parámetros provienen de ``general.security.mfa`` en SecOpsConfig.json.
     """
     encryption_key = os.getenv("MFA_ENCRYPTION_KEY")
     if not encryption_key:
@@ -243,7 +243,7 @@ def get_mfa_config() -> dict:
             "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\")."
         )
 
-    mfa_cfg = _require_configs().get("security", {}).get("mfa", {})
+    mfa_cfg = _cfg("general.security.mfa", {})
     return {
         "encryption_key": encryption_key,
         "issuer": str(mfa_cfg.get("issuer", "Ellysia")),
@@ -389,15 +389,22 @@ def _env_override_for(dir_key: str) -> Optional[str]:
 
 
 def _lookup_raw_path(cfg: dict, dir_key: str) -> str:
-    """Resuelve la ruta cruda en la config: rama anidada ``module.subkey`` o plana ``general``."""
+    """Resuelve la ruta cruda en la config.
+
+    Un ``dir_key`` con punto (``themis.csv``) es el directorio de un módulo y
+    vive en ``features.<módulo>.directories.<sub_key>``; uno plano
+    (``tempdir``) es transversal y vive en ``general.directories``. Ojo: el
+    ``dir_key`` **no** es una ruta del árbol de configuración, sino la clave
+    del enum ``DirectoryType`` — de ahí que se traduzca aquí y no en ``_cfg``.
+    """
     if "." in dir_key:
         module_key, sub_key = dir_key.split(".")
-        if module_key not in cfg:
+        module_config = cfg.get("features", {}).get(module_key)
+        if module_config is None:
             raise ValueError(f"Módulo '{module_key}' no encontrado en la configuración.")
-        module_config = cfg[module_key]
-        if "directories" not in module_config:
+        directories = module_config.get("directories")
+        if directories is None:
             raise ValueError(f"Directorio '{dir_key}' no encontrado en la configuración.")
-        directories = module_config["directories"]
         if sub_key not in directories:
             raise ValueError(f"Directorio '{sub_key}' no encontrado en la configuración.")
         return directories[sub_key]
@@ -434,23 +441,23 @@ def get_directory_of(directory_type) -> str:
 
 @_lazy_load
 def get_aegis_config() -> dict:
-    return _cfg("aegis", {})
+    return _cfg("features.aegis", {})
 
 @_lazy_load
 def get_aegis_tips_amount() -> int:
-    return _cfg("aegis.tipsAmount", 7, int)
+    return _cfg("features.aegis.tipsAmount", 7, int)
 
 @_lazy_load
 def get_aegis_vulnerabilities_antiquity() -> int:
-    return _cfg("aegis.vulnerabilitiesAntiquity", 5, int)
+    return _cfg("features.aegis.vulnerabilitiesAntiquity", 5, int)
 
 @_lazy_load
 def get_aegis_brands() -> list[dict]:
-    return _cfg("aegis.brands", [], list)
+    return _cfg("features.aegis.brands", [], list)
 
 @_lazy_load
 def get_aegis_prompts() -> dict:
-    return _cfg("aegis.prompts", {})
+    return _cfg("features.aegis.prompts", {})
 
 
 # =============================================================================
@@ -460,7 +467,7 @@ def get_aegis_prompts() -> dict:
 @_lazy_load
 def get_ai_config() -> dict:
     """Devuelve el bloque 'ai' de SecOpsConfig.json (puede estar vacío)."""
-    return _cfg("ai", {})
+    return _cfg("tools.scribe", {})
 
 
 @_lazy_load
@@ -490,7 +497,7 @@ def get_ai_strategy_for(module: str | None = None) -> str:
 @_lazy_load
 def get_email_config() -> dict:
     """Devuelve el bloque 'email' de SecOpsConfig.json (puede estar vacío)."""
-    return _cfg("email", {})
+    return _cfg("tools.herald", {})
 
 
 @_lazy_load
@@ -541,18 +548,19 @@ def get_smtp_environment() -> dict[str, str]:
 
 @_lazy_load
 def get_themis_config() -> dict:
-    return _cfg("themis", {})
+    return _cfg("features.themis", {})
+
+# Los cinco escáneres de Themis, cada uno con su propio bloque bajo
+# ``features.themis.scanners``: mismos ``prompts`` y ``colorPalette``, más los
+# ajustes que cada herramienta necesite.
+THEMIS_SCANNERS = ("nmap", "nikto", "openvas", "lybra", "nuclei")
+
 
 @_lazy_load
 def get_prompts_config() -> dict:
-    themis = _require_configs().get("themis", {})
-
     return {
-        "nmap": themis.get("nmap", {}).get("prompts", {}),
-        "nikto": themis.get("nikto", {}).get("prompts", {}),
-        "openvas": themis.get("openvas", {}).get("prompts", {}),
-        "lybra": themis.get("lybra", {}).get("prompts", {}),
-        "nuclei": themis.get("nuclei", {}).get("prompts", {}),
+        scanner: _cfg(f"features.themis.scanners.{scanner}.prompts", {})
+        for scanner in THEMIS_SCANNERS
     }
 
 @_lazy_load
@@ -562,44 +570,36 @@ def get_tool_prompts(tool: str) -> dict:
 
 @_lazy_load
 def get_tool_color_palette(tool) -> dict:
-    themis = _require_configs().get("themis", {})
-
     # Accepts a ThemisTool enum member or a plain string; without this, a
     # dict lookup with an Enum instance against string keys always misses
     # and silently returns {} (bug: every caller has been getting the
     # hardcoded per-strategy fallback colors instead of SecOpsConfig's).
     tool_key = tool.value if hasattr(tool, "value") else tool
-    if tool_key not in themis:
-        return {}
-
-    tool_config = themis[tool_key]
-    return tool_config.get("colorPalette", {})
+    return _cfg(f"features.themis.scanners.{tool_key}.colorPalette", {})
 
 @_lazy_load
 def are_local_ips_allowed() -> bool:
-    return _as_bool(_cfg("themis.areLocalIpsAllowed", False))
+    return _as_bool(_cfg("features.themis.areLocalIpsAllowed", False))
 
 @_lazy_load
 def get_openvas_scan_configs() -> dict[str, str]:
-    configs = get_themis_config()
-    return configs["openvas"]["toolConfigs"]["scanConfigs"]
+    return _cfg("features.themis.scanners.openvas.toolConfigs.scanConfigs", {})
 
 @_lazy_load
 def get_openvas_port_list() -> dict[str, str]:
-    configs = get_themis_config()
-    return configs["openvas"]["toolConfigs"]["portList"]
+    return _cfg("features.themis.scanners.openvas.toolConfigs.portList", {})
 
 @_lazy_load
 def is_host_reachability_check_enabled() -> bool:
-    return _as_bool(_cfg("themis.hostReachabilityCheck.enabled", True))
+    return _as_bool(_cfg("features.themis.hostReachabilityCheck.enabled", True))
 
 @_lazy_load
 def get_host_reachability_check_timeout() -> float:
-    return _cfg("themis.hostReachabilityCheck.timeout", 3.0, float)
+    return _cfg("features.themis.hostReachabilityCheck.timeout", 3.0, float)
 
 @_lazy_load
 def get_host_reachability_check_port() -> int:
-    return _cfg("themis.hostReachabilityCheck.port", 80, int)
+    return _cfg("features.themis.hostReachabilityCheck.port", 80, int)
 
 @_lazy_load
 def get_themis_csv_dir() -> str:
@@ -611,44 +611,44 @@ def get_themis_csv_dir() -> str:
 @_lazy_load
 def get_themis_task_default_timeout() -> float:
     """Timeout (s) de ``_Task`` cuando el caller no especifica uno explícito."""
-    return _cfg("themis.taskDefaults.timeout", 200000, float)
+    return _cfg("features.themis.taskDefaults.timeout", 200000, float)
 
 @_lazy_load
 def get_openvas_task_timeout() -> float:
     """Timeout (s) por defecto de ``OpenVASTask`` — también usado como timeout
     del job en ``OpenVASScanManager.run_scan`` (deben coincidir: si el job de
     RQ expira antes que el escaneo interno, se mata a mitad de sondeo)."""
-    return _cfg("themis.openvas.timeout", 14400, float)
+    return _cfg("features.themis.scanners.openvas.timeout", 14400, float)
 
 @_lazy_load
 def get_openvas_max_wait_timeout() -> float:
     """Techo aplicado en ``OpenVASTask.wait()`` al timeout recibido."""
-    return _cfg("themis.openvas.maxWaitTimeout", 28800, float)
+    return _cfg("features.themis.scanners.openvas.maxWaitTimeout", 28800, float)
 
 
 # --- Lybra knowledge base (local NVD/KEV/EPSS mirror) ---
 
 @_lazy_load
 def is_kb_sync_enabled() -> bool:
-    return _as_bool(_cfg("themis.kb.enabled", False))
+    return _as_bool(_cfg("features.themis.kb.enabled", False))
 
 @_lazy_load
 def get_kb_sources() -> dict:
-    return _cfg("themis.kb.sources", {})
+    return _cfg("features.themis.kb.sources", {})
 
 @_lazy_load
 def get_kb_sync_cron() -> str:
-    return _cfg("themis.kb.syncCron", "0 3 * * *")
+    return _cfg("features.themis.kb.syncCron", "0 3 * * *")
 
 @_lazy_load
 def get_kb_nvd_window_days() -> int:
-    return _cfg("themis.kb.nvdWindowDays", 8, int)
+    return _cfg("features.themis.kb.nvdWindowDays", 8, int)
 
 @_lazy_load
 def get_kb_nvd_api_key():
     # Secret → prefer the environment, per the config convention.
     import os
-    return os.environ.get("NVD_API_KEY") or (_cfg("themis.kb.nvdApiKey", "") or None)
+    return os.environ.get("NVD_API_KEY") or (_cfg("features.themis.kb.nvdApiKey", "") or None)
 
 
 # --- Lybra active detection checks (Fase R) ---
@@ -660,7 +660,7 @@ def is_lybra_active_checks_enabled() -> bool:
     # is the real gate — LybraEngineManager only runs these against a target the
     # caller has explicitly authorized, regardless of this flag. This exists as
     # an operator-level kill switch to disable the whole feature deployment-wide.
-    return _as_bool(_cfg("themis.lybra.activeChecks", True))
+    return _as_bool(_cfg("features.themis.scanners.lybra.activeChecks", True))
 
 
 # --- Lybra own fingerprinting (Fase F) ---
@@ -678,19 +678,19 @@ def is_lybra_template_ingest_enabled() -> bool:
     el interruptor existe pero no se activa: el flag decide la *activación*, no
     la existencia del código.
     """
-    return _as_bool(_cfg("themis.lybra.ingest.enabled", False))
+    return _as_bool(_cfg("features.themis.scanners.lybra.ingest.enabled", False))
 
 
 @_lazy_load
 def get_lybra_ingest_min_severity() -> str:
     """Severidad mínima de una plantilla ingerida para llegar a ejecutarse."""
-    return _cfg("themis.lybra.ingest.minSeverity", "MEDIUM", str)
+    return _cfg("features.themis.scanners.lybra.ingest.minSeverity", "MEDIUM", str)
 
 
 @_lazy_load
 def get_lybra_ingest_max_checks() -> int:
     """Tope duro de checks ingeridos por escaneo (la red de seguridad final)."""
-    return _cfg("themis.lybra.ingest.maxChecks", 300, int)
+    return _cfg("features.themis.scanners.lybra.ingest.maxChecks", 300, int)
 
 
 @_lazy_load
@@ -698,7 +698,7 @@ def is_lybra_fingerprinting_enabled() -> bool:
     # Same story as active checks: on by default now that the authorized-targets
     # register (roadmap §6) gates it per-target; this flag is just the
     # operator-level kill switch.
-    return _as_bool(_cfg("themis.lybra.fingerprintingEnabled", True))
+    return _as_bool(_cfg("features.themis.scanners.lybra.fingerprintingEnabled", True))
 
 
 # --- Nuclei (Fase U1) ---
@@ -706,7 +706,7 @@ def is_lybra_fingerprinting_enabled() -> bool:
 @_lazy_load
 def get_nuclei_binary_path() -> str:
     """Ruta o nombre del binario ``nuclei`` (resuelto vía PATH por defecto)."""
-    return _cfg("themis.nuclei.binaryPath", "nuclei")
+    return _cfg("features.themis.scanners.nuclei.binaryPath", "nuclei")
 
 def _nuclei_default_template_locations() -> tuple[Path, ...]:
     """Ubicaciones por defecto de Nuclei, resueltas en el momento de llamar.
@@ -743,7 +743,7 @@ def get_nuclei_templates_dir() -> Optional[Path]:
         ``-templates`` y deja que decida él, y quien necesita *leer* las
         plantillas no puede hacer nada y debe poder saberlo.
     """
-    configured = (_cfg("themis.nuclei.templatesDir", "") or "").strip()
+    configured = (_cfg("features.themis.scanners.nuclei.templatesDir", "") or "").strip()
     if configured:
         path = Path(configured)
         if path.is_dir():
@@ -771,24 +771,24 @@ def get_nuclei_default_severities() -> list:
     de ``score_finding`` las subiría todas a MEDIO. Activarlas es una elección
     explícita del usuario en el formulario, no un default.
     """
-    return _cfg("themis.nuclei.defaultSeverities", ["critical", "high", "medium"])
+    return _cfg("features.themis.scanners.nuclei.defaultSeverities", ["critical", "high", "medium"])
 
 @_lazy_load
 def get_nuclei_rate_limit() -> int:
     """Peticiones/segundo máximas por defecto."""
-    return _cfg("themis.nuclei.rateLimit", 150, int)
+    return _cfg("features.themis.scanners.nuclei.rateLimit", 150, int)
 
 @_lazy_load
 def get_nuclei_request_timeout() -> int:
     """Timeout por petición HTTP individual (segundos)."""
-    return _cfg("themis.nuclei.requestTimeout", 10, int)
+    return _cfg("features.themis.scanners.nuclei.requestTimeout", 10, int)
 
 @_lazy_load
 def get_nuclei_task_timeout() -> float:
     """Timeout (s) por defecto del escaneo completo cuando el caller no
     especifica uno explícito — también usado como timeout del job en
     ``NucleiScanManager.run_scan``."""
-    return _cfg("themis.nuclei.timeout", 1800, float)
+    return _cfg("features.themis.scanners.nuclei.timeout", 1800, float)
 
 @_lazy_load
 def get_nuclei_templates_version() -> str:
@@ -810,38 +810,38 @@ def get_nuclei_templates_version() -> str:
             return f"nuclei-templates-{from_file}"
     except (OSError, IOError):
         pass
-    configured = _cfg("themis.nuclei.templatesVersion", "")
+    configured = _cfg("features.themis.scanners.nuclei.templatesVersion", "")
     return f"nuclei-templates-{configured}" if configured else "nuclei-templates-unknown"
 
 
 @_lazy_load
 def get_themis_default_folder_name() -> str:
     """Devuelve el nombre mostrado para la carpeta virtual de escaneos sueltos."""
-    return _cfg("themis.folders.defaultFolderName", "Sin carpeta")
+    return _cfg("features.themis.folders.defaultFolderName", "Sin carpeta")
 
 
 @_lazy_load
 def get_themis_history_size() -> int:
     """Número de escaneos recientes a considerar en las estadísticas históricas."""
-    return _cfg("themis.history.maxScans", 5, int)
+    return _cfg("features.themis.history.maxScans", 5, int)
 
 
 @_lazy_load
 def get_themis_traceroute_cache_hours() -> float:
     """Horas que una ruta cacheada se considera válida antes de recalcularse."""
-    return _cfg("themis.traceroute.cacheHours", 24, float)
+    return _cfg("features.themis.traceroute.cacheHours", 24, float)
 
 
 @_lazy_load
 def get_themis_traceroute_max_hops() -> int:
     """Número máximo de saltos a sondear (``-m`` en traceroute)."""
-    return _cfg("themis.traceroute.maxHops", 30, int)
+    return _cfg("features.themis.traceroute.maxHops", 30, int)
 
 
 @_lazy_load
 def get_themis_traceroute_timeout() -> float:
     """Tiempo máximo total (segundos) para el comando traceroute."""
-    return _cfg("themis.traceroute.timeout", 60, float)
+    return _cfg("features.themis.traceroute.timeout", 60, float)
 
 
 @_lazy_load
@@ -851,7 +851,7 @@ def get_themis_traceroute_retry_failed_minutes() -> float:
     Mucho más corto que ``cacheHours``: evita re-sondear un host inalcanzable en
     cada apertura del detalle, pero permite reintentar pronto (o de inmediato con
     el botón de refresco)."""
-    return _cfg("themis.traceroute.retryFailedMinutes", 15, float)
+    return _cfg("features.themis.traceroute.retryFailedMinutes", 15, float)
 
 
 # =============================================================================
@@ -924,7 +924,7 @@ def get_redis_config() -> dict:
     REDIS_PASSWORD. Las env vars REDIS_HOST/PORT/DB sobreescriben la config si
     están presentes (útil en contenedores).
     """
-    cfg = _cfg("redis", {})
+    cfg = _cfg("infrastructure.redis", {})
     host    = os.getenv("REDIS_HOST", str(cfg.get("host", "localhost")))
     port    = int(os.getenv("REDIS_PORT", str(cfg.get("port", 6379))))
     db      = int(os.getenv("REDIS_DB",   str(cfg.get("db", 0))))
@@ -941,7 +941,7 @@ def get_redis_config() -> dict:
 
 @_lazy_load
 def get_taskqueue_config() -> dict:
-    cfg = _cfg("general.taskqueue", {})
+    cfg = _cfg("infrastructure.taskqueue", {})
     max_workers_env = os.getenv("TASKQUEUE_MAX_WORKERS")
     if max_workers_env is not None:
         cfg["max_workers"] = int(max_workers_env)
@@ -970,82 +970,82 @@ def get_public_web_url() -> str:
 
 @_lazy_load
 def get_hygeia_config() -> dict:
-    return _cfg("hygeia", {})
+    return _cfg("features.hygeia", {})
 
 @_lazy_load
 def get_hygeia_heartbeat_interval_sec() -> int:
     """Intervalo de heartbeat esperado del agente, en segundos (por defecto, 15)."""
-    return _cfg("hygeia.heartbeatIntervalSec", 15, int)
+    return _cfg("features.hygeia.heartbeatIntervalSec", 15, int)
 
 @_lazy_load
 def get_hygeia_max_assets_per_user() -> int:
     """Cuota de activos monitorizados que puede dar de alta un mismo usuario (§16.4)."""
-    return _cfg("hygeia.limits.maxAssetsPerUser", 500, int)
+    return _cfg("features.hygeia.limits.maxAssetsPerUser", 500, int)
 
 @_lazy_load
 def get_hygeia_max_body_bytes() -> int:
     """Tamaño máximo (comprimido) del cuerpo de un heartbeat, en bytes (§16.1)."""
-    return _cfg("hygeia.limits.maxBodyBytes", 262144, int)
+    return _cfg("features.hygeia.limits.maxBodyBytes", 262144, int)
 
 @_lazy_load
 def get_hygeia_max_decompressed_bytes() -> int:
     """Tope de descompresión de un heartbeat gzip, en bytes (defensa anti gzip-bomb, §16.1)."""
-    return _cfg("hygeia.limits.maxDecompressedBytes", 1048576, int)
+    return _cfg("features.hygeia.limits.maxDecompressedBytes", 1048576, int)
 
 @_lazy_load
 def get_hygeia_max_processes() -> int:
     """Máximo de procesos en topCpu/topMem por heartbeat (§16.1)."""
-    return _cfg("hygeia.limits.maxProcesses", 20, int)
+    return _cfg("features.hygeia.limits.maxProcesses", 20, int)
 
 @_lazy_load
 def get_hygeia_max_disk_mounts() -> int:
     """Máximo de puntos de montaje reportados por heartbeat (§16.1)."""
-    return _cfg("hygeia.limits.maxDiskMounts", 64, int)
+    return _cfg("features.hygeia.limits.maxDiskMounts", 64, int)
 
 @_lazy_load
 def get_hygeia_max_net_interfaces() -> int:
     """Máximo de interfaces de red reportadas por heartbeat (§16.1)."""
-    return _cfg("hygeia.limits.maxNetInterfaces", 64, int)
+    return _cfg("features.hygeia.limits.maxNetInterfaces", 64, int)
 
 @_lazy_load
 def get_hygeia_max_inventory_items() -> int:
     """Máximo de aplicaciones en un escaneo de inventario de software (§16.1)."""
-    return _cfg("hygeia.limits.maxInventoryItems", 2000, int)
+    return _cfg("features.hygeia.limits.maxInventoryItems", 2000, int)
 
 @_lazy_load
 def get_hygeia_min_interval_sec() -> int:
     """Suelo de cadencia entre heartbeats de una misma clave, en segundos (§16.2)."""
-    return _cfg("hygeia.limits.minIntervalSec", 5, int)
+    return _cfg("features.hygeia.limits.minIntervalSec", 5, int)
 
 @_lazy_load
 def get_hygeia_clock_skew_sec() -> int:
     """Ventana de cordura (± segundos) para el ``collectedAt`` del agente (§16.3)."""
-    return _cfg("hygeia.limits.clockSkewSec", 300, int)
+    return _cfg("features.hygeia.limits.clockSkewSec", 300, int)
 
 @_lazy_load
 def get_hygeia_max_series_points() -> int:
     """Máximo de puntos devueltos por la serie temporal de un activo (§5)."""
-    return _cfg("hygeia.limits.maxSeriesPoints", 1000, int)
+    return _cfg("features.hygeia.limits.maxSeriesPoints", 1000, int)
 
 @_lazy_load
 def get_hygeia_thresholds() -> dict[str, dict[str, int]]:
     """Umbrales globales por defecto de Hygeia (``hygeia.thresholds``); override por activo en DB."""
-    return _cfg("hygeia.thresholds", {})
+    return _cfg("features.hygeia.thresholds", {})
 
 @_lazy_load
 def get_hygeia_offline_after_missed() -> int:
     """Heartbeats perdidos (sobre el intervalo efectivo) para pasar de stale a offline."""
-    return _cfg("hygeia.offlineAfterMissed", 4, int)
+    return _cfg("features.hygeia.offlineAfterMissed", 4, int)
 
 @_lazy_load
 def get_hygeia_retention_days() -> int:
     """Antigüedad máxima de un AssetSnapshot antes de podarlo (§7.3)."""
-    return _cfg("hygeia.retentionDays", 30, int)
+    return _cfg("features.hygeia.retentionDays", 30, int)
 
 @_lazy_load
 def get_hygeia_retention_cron() -> str:
     """Expresión cron del job diario de poda de snapshots."""
-    return _cfg("hygeia.retentionCron", "0 4 * * *", str)
+    return _cfg("features.hygeia.retentionCron", "0 4 * * *", str)
 
 
 # =============================================================================
@@ -1054,21 +1054,21 @@ def get_hygeia_retention_cron() -> str:
 
 @_lazy_load
 def get_iris_config() -> dict:
-    return _cfg("iris", {})
+    return _cfg("features.iris", {})
 
 @_lazy_load
 def get_iris_legitimate_threshold() -> float:
     # 0–100 subtractive scale: >= 80 is Legitimate (see IrisManager._aggregate_score).
-    return _cfg("iris.legitimate_threshold", 80, float)
+    return _cfg("features.iris.legitimateThreshold", 80, float)
 
 @_lazy_load
 def get_iris_suspicious_threshold() -> float:
     # 0–100 subtractive scale: >= 55 is Suspicious, below is Phishing.
-    return _cfg("iris.suspicious_threshold", 55, float)
+    return _cfg("features.iris.suspiciousThreshold", 55, float)
 
 @_lazy_load
 def get_iris_min_headers() -> int:
-    return _cfg("iris.min_headers", 2, int)
+    return _cfg("features.iris.minHeaders", 2, int)
 
 @_lazy_load
 def get_iris_max_message_bytes() -> int:
@@ -1077,7 +1077,7 @@ def get_iris_max_message_bytes() -> int:
     # re-parsed, base64 decoding included, on every subsequent read
     # (get_analysis_results/path/iocs). 10 MB comfortably covers a real
     # email with attachments while capping the re-parse cost.
-    return _cfg("iris.maxMessageBytes", 10 * 1024 * 1024, int)
+    return _cfg("features.iris.maxMessageBytes", 10 * 1024 * 1024, int)
 
 @_lazy_load
 def get_iris_data(key: str):
@@ -1087,7 +1087,7 @@ def get_iris_data(key: str):
     ``iris.data`` de SecOpsConfig.json; los defaults de respaldo están en
     ``src/modules/features/iris/services/shared.py``, que es el único consumidor previsto.
     """
-    return _cfg(f"iris.data.{key}")
+    return _cfg(f"features.iris.data.{key}")
 
 @_lazy_load
 def get_iris_prompts() -> dict:
@@ -1096,7 +1096,7 @@ def get_iris_prompts() -> dict:
     Espejo de ``get_prompts_config()`` (que solo mira el bloque ``themis``)
     para el módulo Iris: ``iris.prompts.summary.{system,userTemplate}``.
     """
-    return _cfg("iris.prompts", {})
+    return _cfg("features.iris.prompts", {})
 
 @_lazy_load
 def get_iris_scoring_weight(weight_key: str, default: float) -> float:
@@ -1109,7 +1109,7 @@ def get_iris_scoring_weight(weight_key: str, default: float) -> float:
     está presente en la config, así que el comportamiento no cambia hasta
     que alguien la añade explícitamente.
     """
-    return _cfg(f"iris.scoring.{weight_key}", default, float)
+    return _cfg(f"features.iris.scoring.{weight_key}", default, float)
 
 
 # =============================================================================
@@ -1119,13 +1119,13 @@ def get_iris_scoring_weight(weight_key: str, default: float) -> float:
 @_lazy_load
 def get_iris_max_connections_per_user() -> int:
     """Máximo de cuentas de correo que un usuario puede conectar a la vez."""
-    return _cfg("iris.maxConnectionsPerUser", 5, int)
+    return _cfg("features.iris.maxConnectionsPerUser", 5, int)
 
 
 @_lazy_load
 def get_iris_poll_interval_minutes() -> int:
     """Intervalo (minutos) del scheduler que sondea las conexiones activas."""
-    return _cfg("iris.pollIntervalMinutes", 5, int)
+    return _cfg("features.iris.pollIntervalMinutes", 5, int)
 
 
 @_lazy_load
@@ -1135,7 +1135,7 @@ def get_iris_max_ingested_per_day() -> int:
     Una conexión mal configurada (carpeta ruidosa, bucle de reenvíos) no
     debe poder generar analisis sin límite — ver roadmap-ellysia.md §8.1.
     """
-    return _cfg("iris.maxIngestedPerDay", 200, int)
+    return _cfg("features.iris.maxIngestedPerDay", 200, int)
 
 
 def get_gmail_environment() -> dict[str, str]:
@@ -1197,7 +1197,7 @@ def get_app_version() -> str:
 @_lazy_load
 def get_db_isolation_level() -> str:
     """Devuelve el isolation level de SQLAlchemy desde SecOpsConfig.json."""
-    return _cfg("database.isolation_level", "READ COMMITTED")
+    return _cfg("infrastructure.database.isolation_level", "READ COMMITTED")
 
 
 @_lazy_load
@@ -1208,9 +1208,9 @@ def get_db_pool_config() -> dict:
     faltan, de modo que el sistema arranca aunque el bloque no esté completo.
     """
     return {
-        "pool_size": _cfg("database.pool_size", 10, int),
-        "max_overflow": _cfg("database.max_overflow", 20, int),
-        "pool_timeout": _cfg("database.pool_timeout", 30, int),
+        "pool_size": _cfg("infrastructure.database.pool_size", 10, int),
+        "max_overflow": _cfg("infrastructure.database.max_overflow", 20, int),
+        "pool_timeout": _cfg("infrastructure.database.pool_timeout", 30, int),
     }
 
 
@@ -1222,7 +1222,7 @@ def get_db_pool_config() -> dict:
 def get_argon2_config() -> dict:
     """Devuelve los parámetros de Argon2id para hashing de contraseñas."""
     defaults = {"time_cost": 3, "memory_cost": 65536, "parallelism": 4}
-    return {**defaults, **_cfg("security.argon2", {})}
+    return {**defaults, **_cfg("general.security.argon2", {})}
 
 
 # =============================================================================

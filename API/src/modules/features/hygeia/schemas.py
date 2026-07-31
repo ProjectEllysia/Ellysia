@@ -133,7 +133,7 @@ class MetricsSchema(_IngestSchema):
     def validate_array_limits(self, data, **kwargs):
         """
         Acota disk/network/topCpu/topMem contra los límites configurables de
-        ``hygeia.limits`` (§16.1).
+        ``features.hygeia.limits`` (§16.1).
 
         Se leen con ``CR`` en cada validación (no se hornean al importar el
         módulo) para que un cambio vía ``PUT /system`` surta efecto sin
@@ -191,7 +191,7 @@ class InventorySchema(_IngestSchema):
 
     @validates_schema
     def validate_max_items(self, data, **kwargs):
-        """Acota ``software`` contra ``hygeia.limits.maxInventoryItems`` (§16.1)."""
+        """Acota ``software`` contra ``features.hygeia.limits.maxInventoryItems`` (§16.1)."""
         max_items = CR.get_hygeia_max_inventory_items()
         if len(data.get("software", [])) > max_items:
             raise ValidationError(

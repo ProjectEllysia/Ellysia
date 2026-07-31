@@ -4,7 +4,7 @@ scribe.factory
 Construcción de ``AIGenerator`` por inyección de dependencias.
 
 ``build_generator(module)`` decide qué estrategia usar leyendo
-``SecOpsConfig.json`` (bloque ``ai``) — permitiendo una estrategia distinta por
+``SecOpsConfig.json`` (bloque ``tools.scribe``) — permitiendo una estrategia distinta por
 módulo, p.ej. Ollama para Themis y OpenAI para Aegis — y la construye con las
 credenciales del ``.env``. El modelo puede sobreescribirse desde la config.
 """

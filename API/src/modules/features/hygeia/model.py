@@ -76,7 +76,7 @@ class MonitoredAsset(Base):
             la histéresis de ``services/detection.py`` para decidir cuándo
             abrir una anomalía sin tener que releer snapshots históricos.
         thresholds: Umbrales específicos de este activo, en el mismo formato
-            que el bloque ``hygeia.thresholds`` de la configuración global.
+            que el bloque ``features.hygeia.thresholds`` de la configuración global.
             Si una métrica no aparece aquí, se usa el umbral global.
         inventory: Lista de software instalado (``Software[]`` del contrato
             de ingesta), tal como llegó en el último escaneo del agente. No

@@ -6,7 +6,7 @@ regla nunca importa de otra regla — si dos reglas necesitan el mismo
 símbolo, vive aquí (ver ROADMAP.md, reglas transversales).
 
 Los datasets de detección (marcas, dominios, keywords, extensiones…) se
-leen de ``SecOpsConfig.json`` (bloque ``iris.data.*``) a través de
+leen de ``SecOpsConfig.json`` (bloque ``features.iris.data.*``) a través de
 ``config_reading.get_iris_data``. Cada dataset tiene un default embebido
 en ``_DEFAULTS`` para que la aplicación arranque aunque la clave falte en
 el JSON; el valor del JSON, cuando existe, tiene prioridad. Los regex se
@@ -24,7 +24,7 @@ import src.modules.system.config_reading as CR
 
 
 # =============================================================================
-# DEFAULTS DE DATASETS (fallback si SecOpsConfig.json no define iris.data.<key>)
+# DEFAULTS DE DATASETS (fallback si SecOpsConfig.json no define features.iris.data.<key>)
 # =============================================================================
 
 _DEFAULTS: dict[str, Any] = {
@@ -422,7 +422,7 @@ _DEFAULTS: dict[str, Any] = {
 
 
 def _data(key: str) -> Any:
-    """Dataset ``iris.data.<key>``: valor del JSON si existe, si no el default."""
+    """Dataset ``features.iris.data.<key>``: valor del JSON si existe, si no el default."""
     value = CR.get_iris_data(key)
     return value if value is not None else _DEFAULTS[key]
 

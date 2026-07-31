@@ -143,7 +143,7 @@ def select_for_services(
     if len(relevant) > max_checks:
         logger.info(
             "Selección de checks ingeridos recortada por el tope: %d de %d "
-            "(sube themis.lybra.ingest.maxChecks si de verdad hace falta)",
+            "(sube features.themis.scanners.lybra.ingest.maxChecks si de verdad hace falta)",
             max_checks, len(relevant),
         )
         relevant = relevant[:max_checks]

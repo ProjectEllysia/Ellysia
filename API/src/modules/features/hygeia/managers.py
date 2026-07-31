@@ -82,7 +82,7 @@ class HygeiaAssetManager:
 
         Raises:
             AssetQuotaExceededError: Si el usuario ya alcanzó el máximo de
-                activos permitido (``hygeia.limits.maxAssetsPerUser``).
+                activos permitido (``features.hygeia.limits.maxAssetsPerUser``).
         """
         with UnitOfWork() as uow:
             repo = MonitoredAssetRepository(uow)
@@ -516,7 +516,7 @@ class HygeiaIngestManager:
     def _enforce_min_interval(asset: MonitoredAsset, now) -> None:
         """Rechaza un heartbeat que llega antes del suelo de cadencia (§16.2);
         es decir, que el tiempo entre el hearthbeat actual y el último registrado es menor que
-        el tiempo dado: ``hygeia.minIntervalSec``.
+        el tiempo dado: ``features.hygeia.limits.minIntervalSec``.
 
         No persiste nada: se comprueba antes de tocar el activo o el
         snapshot, así que un heartbeat rechazado no deja rastro alguno.
@@ -553,7 +553,7 @@ class HygeiaIngestManager:
 
         Los umbrales por activo (``MonitoredAsset.thresholds``) sustituyen
         por completo — métrica a métrica — a los globales de
-        ``hygeia.thresholds``; no se fusionan campo a campo dentro de una
+        ``features.hygeia.thresholds``; no se fusionan campo a campo dentro de una
         misma métrica.
 
         Returns:
@@ -763,7 +763,7 @@ class HygeiaMaintenanceManager:
     @staticmethod
     def execute_retention() -> int:
         """
-        Elimina los ``AssetSnapshot`` anteriores a ``hygeia.retentionDays`` (§7.3).
+        Elimina los ``AssetSnapshot`` anteriores a ``features.hygeia.retentionDays`` (§7.3).
 
         Returns:
             Número de filas eliminadas.

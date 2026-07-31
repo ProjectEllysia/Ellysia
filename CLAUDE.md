@@ -77,8 +77,8 @@ Blueprints are registered in `run.py` (`/system`, `/oauth`, `/users`, `/themis`,
 **Cross-cutting modules:**
 - `infrastructure/` — `UnitOfWork` (transaction boundary), `base_repository`, engine/session singletons. UnitOfWork does **not** own sessions: lifecycle lives at the two edges — `teardown_request` for HTTP, `job_context`/`Scheduler.execute` for background work. In a request `__exit__` is a no-op (teardown commits, one atomic transaction); in a background context it commits on clean exit / rolls back on error. Never manage sessions directly outside repositories.
 - `shared/` — base model, exceptions, `handle_exceptions`, rate limiter, `Document` base.
-- `tools/scribe/` — pluggable **AI generation** strategy layer (Ollama / OpenAI). Consumers hand it inputs; it knows nothing about them. Strategy chosen per-module in `SecOpsConfig.json` → `ai.modules`.
-- `tools/herald/` — pluggable **email sending** strategy layer (SMTP relay), same philosophy as `scribe`. Chosen per-module in `SecOpsConfig.json` → `email.modules`. Used by Aegis campaigns.
+- `tools/scribe/` — pluggable **AI generation** strategy layer (Ollama / OpenAI). Consumers hand it inputs; it knows nothing about them. Strategy chosen per-module in `SecOpsConfig.json` → `tools.scribe.modules`.
+- `tools/herald/` — pluggable **email sending** strategy layer (SMTP relay), same philosophy as `scribe`. Chosen per-module in `SecOpsConfig.json` → `tools.herald.modules`. Used by Aegis campaigns.
 
 ### TaskQueue (RQ + Redis) — `system/taskqueue/`
 Replaces the legacy in-process queue. Jobs persist in Redis (survive API restarts) and run in **isolated OS worker processes**, not threads.
@@ -96,11 +96,25 @@ OAuth 2.0 + JWT (PyJWT). `POST /oauth/token` with `{"grantType":"password", ...}
 ## Configuration
 
 Layered, read via `system/config_reading.py` (imported as `CR`, lazily cached with `@_lazy_load`):
-1. **`API/SecOpsConfig.json`** — base config: prompts, directories, taskqueue defaults, `ai`/`email` strategy selection, non-secret JWT tuning (`security.jwt`), `appVersion` (→ `CR.get_app_version()`).
+1. **`API/SecOpsConfig.json`** — base config: prompts, directories, taskqueue defaults, `tools.scribe`/`tools.herald` strategy selection, non-secret JWT tuning (`general.security.jwt`), `appVersion` (→ `CR.get_app_version()`).
 2. **`API/.env`** — env vars that **override** JSON. Required for secrets: `JWT_SECRET_KEY`, DB / Redis / SMTP / OpenAI / OpenVAS credentials, `PUBLIC_WEB_URL`.
 3. **Root `.env`** — docker-compose only (Postgres/Redis/OpenVAS creds), not read by the API.
 
 Changes to `SecOpsConfig.json` require an app restart (values are cached) unless applied via `PUT /system`.
+
+`SecOpsConfig.json` has exactly five root entries — put new keys under the right one rather than at the root:
+
+```
+appVersion                      # required at the root; read by create_app()
+general/       publicUrl, directories (tempdir/logdir), security (argon2/jwt/mfa)
+infrastructure/ database, redis, taskqueue
+tools/         scribe (AI), herald (email)   # names match src/modules/tools/
+features/      themis, aegis, iris, hygeia   # one per feature module
+```
+
+Themis' five scanners each get their own block under `features.themis.scanners.<tool>` (`nmap`, `nikto`, `openvas`, `lybra`, `nuclei`), all with `prompts` + `colorPalette`. The tuple `CR.THEMIS_SCANNERS` must stay in sync with them — `tests/unit/test_config_shape.py` enforces it.
+
+**Beware the silent failure**: `_cfg()` returns the *default* when a path doesn't resolve, so a mistyped prefix disables a whole config block without raising. Any key you move must be updated in three places — the `_cfg()` path in `config_reading.py`, the literal path in `web/app/src/views/ConfigView.vue`, and `test_config_shape.py`.
 
 ## Naming conventions
 
@@ -117,4 +131,4 @@ Changes to `SecOpsConfig.json` require an app restart (values are cached) unless
 - `themis/services/tasks.py` defines its **own** `TaskStatus` enum — distinct from `taskqueue.TaskStatus`. Don't conflate them.
 - OpenVAS accepts **one host per scan** (no CIDR ranges) and takes ~15 min on first start (NVT feed).
 - API version is config-driven: `create_app()` reads it via `CR.get_app_version()` from `appVersion` in `SecOpsConfig.json` (currently `4.2`) — it is not hardcoded.
-- `themis.areLocalIpsAllowed` is set to `true` in `SecOpsConfig.json` (intentional, for local dev against private IPs) — with it `true`, 4 SSRF tests don't trigger (`test_nikto_rejects_loopback_target`, `test_nikto_rejects_cloud_metadata_target`, `test_nmap_rejects_private_ip_target`, `test_openvas_scheduled_flow_rejects_private_ip`; not a regression). **Must be reverted to `false` before any real deployment**, or the anti-SSRF defense stays disabled in production.
+- `features.themis.areLocalIpsAllowed` is set to `true` in `SecOpsConfig.json` (intentional, for local dev against private IPs) — with it `true`, 4 SSRF tests don't trigger (`test_nikto_rejects_loopback_target`, `test_nikto_rejects_cloud_metadata_target`, `test_nmap_rejects_private_ip_target`, `test_openvas_scheduled_flow_rejects_private_ip`; not a regression). **Must be reverted to `false` before any real deployment**, or the anti-SSRF defense stays disabled in production.

@@ -4,7 +4,7 @@ IrisAIWriter — AI-generated executive narrative for a finished Iris analysis.
 Follows the same pattern as ``themis/services/analyzers.py``'s
 ``NmapAIWriter``/``NiktoAIWriter``/``OpenVASAIWriter``: model calling is
 delegated to an injected scribe ``AIGenerator``, prompts live in
-SecOpsConfig.json (``iris.prompts.summary``), and the strategy (Ollama/
+SecOpsConfig.json (``features.iris.prompts.summary``), and the strategy (Ollama/
 OpenAI) is resolved per module via ``get_ai_strategy_for("iris")``.
 
 Unlike Themis — where the AI narrative is generated inline while building
@@ -100,7 +100,7 @@ class IrisAIWriter:
         """
         prompts = self._build_prompts()
         if not prompts.get("system"):
-            raise AIResponseError("Prompt 'iris.prompts.summary.system' no configurado", attempt=0)
+            raise AIResponseError("Prompt 'features.iris.prompts.summary.system' no configurado", attempt=0)
 
         ai_input = AIInput(
             system_prompt=prompts["system"],

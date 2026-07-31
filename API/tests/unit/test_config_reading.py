@@ -80,9 +80,9 @@ def test_get_app_context_uses_false_defaults_when_envs_absent(monkeypatch):
 # --------------------------------- Nuclei: el único árbol de plantillas (U4/R)
 
 def _no_config_dir(monkeypatch):
-    """Deja ``themis.nuclei.templatesDir`` vacío sin tocar SecOpsConfig.json."""
+    """Deja ``features.themis.scanners.nuclei.templatesDir`` vacío sin tocar SecOpsConfig.json."""
     monkeypatch.setattr(CR, "_cfg", lambda path, default=None, cast=None: (
-        "" if path == "themis.nuclei.templatesDir" else default
+        "" if path == "features.themis.scanners.nuclei.templatesDir" else default
     ))
 
 
@@ -90,7 +90,7 @@ def test_nuclei_templates_dir_prefers_the_configured_path(tmp_path, monkeypatch)
     configured = tmp_path / "configured"
     configured.mkdir()
     monkeypatch.setattr(CR, "_cfg", lambda path, default=None, cast=None: (
-        str(configured) if path == "themis.nuclei.templatesDir" else default
+        str(configured) if path == "features.themis.scanners.nuclei.templatesDir" else default
     ))
 
     assert CR.get_nuclei_templates_dir() == configured
@@ -128,7 +128,7 @@ def test_nuclei_templates_dir_is_none_when_nothing_resolves(tmp_path, monkeypatc
 def test_nuclei_templates_dir_ignores_a_configured_path_that_does_not_exist(tmp_path, monkeypatch):
     """A deployment typo must not silently look like a working template tree."""
     monkeypatch.setattr(CR, "_cfg", lambda path, default=None, cast=None: (
-        str(tmp_path / "does-not-exist") if path == "themis.nuclei.templatesDir" else default
+        str(tmp_path / "does-not-exist") if path == "features.themis.scanners.nuclei.templatesDir" else default
     ))
     monkeypatch.delenv("NUCLEI_TEMPLATES_DIR", raising=False)
     monkeypatch.setattr("pathlib.Path.home", classmethod(lambda cls: tmp_path / "empty"))

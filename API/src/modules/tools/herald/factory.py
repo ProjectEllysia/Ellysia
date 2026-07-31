@@ -4,7 +4,7 @@ herald.factory
 Construcción de ``Mailer`` por inyección de dependencias.
 
 ``build_mailer(module)`` decide qué estrategia usar leyendo
-``SecOpsConfig.json`` (bloque ``email``) — permitiendo una estrategia
+``SecOpsConfig.json`` (bloque ``tools.herald``) — permitiendo una estrategia
 distinta por módulo — y la construye con las credenciales del ``.env``.
 Espejo exacto de ``scribe.factory.build_generator``.
 """
