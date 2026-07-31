@@ -273,7 +273,7 @@ La pista de **correlación** está completa; la de **bajo nivel** está a medias
 | **5** — Dedup multi-fuente, ciclo de vida, scoring, `HostService` | Correlación | ✓ implementada |
 | **6** — Pipeline orquestado | Convergencia | ✓ implementada |
 | **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ◐ parcial — U1, U2 y U3 hechas, U4 sin empezar. **U4 sigue siendo prerrequisito del cierre de R**. Detalle en la sección Fase U más abajo |
-| **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — 16 checks; los cuatro tipos activos (`http`/`tls`/`network`/`script`) ya existen; el feed sigue siendo JSON, no el YAML estilo Nuclei del diseño. Lo que queda de su cierre (YAML, ingesta, precisión medida) depende de la Fase U. Detalle actualizado en la sección Fase R más abajo |
+| **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — 16 checks; los cuatro tipos activos (`http`/`tls`/`network`/`script`) existen, el feed vive en YAML y la ingesta está construida pero apagada. **Solo queda la precisión ≥0,9 medida**, que depende del banco (U3) y no de más código. Detalle actualizado en la sección Fase R más abajo |
 | **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS, y (Fase N) FTP, SMTP/IMAP/POP3, SMB, MySQL/MariaDB, Redis, VNC; falta JARM, SNMP (sin sonda UDP), PostgreSQL/MSSQL/MongoDB, RDP, LDAP, Telnet, RPC. Detalle actualizado en la sección Fase N más abajo |
 | **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; faltan SYN sin estado, sondas UDP y control de tasa AIMD |
 | **4**, DAST y Etapa 2 (P, E, C, O, A, B, D, G, S, X) | Ambas | ○ planificadas |
@@ -1319,8 +1319,8 @@ qué se está verificando de verdad en cada sitio:
 | **R — tipo de check `script`** | Runtime, registro y tests con socket falso (el patrón que `smb.py` ya usa) | Disparo real contra Samba/Windows — el dissector SMB **ya estaba sin verificar** contra un servidor real |
 | **U4 — el censo** | La lógica del clasificador, con plantillas de muestra escritas a mano (✓ hecho) | ⚠ **El número en sí**: exige el árbol de plantillas real. Ejecutar `python tools/nuclei_template_census.py` y anotar el veredicto |
 | **El almacén de plantillas** | Resolución de rutas y parseo contra un directorio de prueba | ⚠ Que la ruta resuelta sea la misma que el binario usa de verdad |
-| **R — migración del feed a YAML** | Todo (parseo, equivalencia con el JSON actual) | — |
-| **R — ingesta de plantillas** | Traductor plantilla→`Check`, índice de selección | ⚠ Ejecución de los checks ingeridos contra objetivos reales |
+| **R — migración del feed a YAML** | Todo (parseo, equivalencia con el JSON actual) — ✓ hecho | — |
+| **R — ingesta de plantillas** | Traductor plantilla→`Check`, índice de selección (✓ hecho, apagado por defecto) | ⚠ Ejecución de los checks ingeridos contra objetivos reales, y la decisión de encender el flag (depende del censo) |
 | **R — precisión ≥ 0,9 medida** | Nada | ⚠ **Todo**: `tests/oracle/` exige Docker y un `nuclei` con plantillas |
 | **Cualquier CPE→CVE de extremo a extremo** | Nada | ⚠ **Todo**: sin KB poblada el motor no falla, devuelve vacío — que es peor, porque se lee como "objetivo limpio" |
 | **`nuclei_templates_version.txt`** | Nada | ⚠ El `Dockerfile` vuelca ahí la salida de `nuclei -version`, que es la versión **del motor**, no la de plantillas — mientras que el regex de `_check_output_line` sí captura la de plantillas. Probable etiqueta equivocada en el *fallback*; sin la imagen no se puede confirmar |
@@ -1428,6 +1428,45 @@ plugins de terceros, la vía es aislarlos en un subproceso con `rlimit`/seccomp 
 **Damos la fase por hecha cuando** el motor detecta por versión y confirma activamente al menos las
 tres primeras familias, existen los tipos `network` y `script`, el feed vive en YAML, y el `qod` sube
 de 70 a 99 en lo confirmado.
+
+**Estado (2026-07-31): el feed vive en YAML y la ingesta está construida (apagada).**
+
+*La migración a YAML* fue un cambio de formato y no de comportamiento, y eso se verificó en vez de
+suponerse: ambos deserializadores alimentan el mismo `_parse_check`, así que se comprobó que el JSON
+antiguo y el YAML nuevo producen objetos `Check` **idénticos campo a campo** antes de retirar el
+JSON. El cargador conserva las dos rutas (despacha por extensión) porque un feed externo puede venir
+en cualquiera de los dos formatos. La razón de fondo de la migración, más allá de la compatibilidad
+con Nuclei, es que **YAML admite comentarios** — en un feed de reglas de detección, eso es la
+diferencia entre poder explicar por qué existe un check y no poder.
+
+*La ingesta* son tres piezas en `lybra/ingest/`: el clasificador (compartido con el censo de U4), el
+traductor y el selector. Tres decisiones que conviene dejar escritas:
+
+1. **Traducir a medias no es una opción.** Una plantilla con extractors o payloads podría "casi"
+   traducirse ignorando esas partes, y el resultado sería un check que corre, no falla, y comprueba
+   algo distinto de lo que la plantilla dice — la peor clase de error en un motor de detección,
+   porque produce hallazgos con la confianza de un check confirmado. Ante la duda se descarta. El
+   mismo criterio retira las plantillas HTTP **multi-ruta**: Nuclei dispara si *alguna* ruta casa y
+   el runtime combina con AND, así que traducirla la volvería más estricta que el original.
+2. **Procedencia, no autoría.** `Check` gana `namespace` y `feed_version` (con defaults que no
+   cambian nada de lo existente). Un check traducido nace `nuclei:git-config@1`, no `lybra:...`, y
+   sella la versión del árbol de plantillas en vez del `CHECKS_FEED_VERSION` propio — que era el
+   problema real que se había identificado: un único global deja de ser verdad en cuanto hay dos
+   feeds con líneas de versión independientes. Y toda plantilla externa entra en `mode="safe"` sin
+   excepción, porque no las hemos revisado una a una.
+3. **El selector, que el diseño original no había estimado.** `CheckRuntime.run` es
+   O(servicios × checks) y el limitador impone 0,2 s por petición y host: 3.000 plantillas contra un
+   solo servicio son más de diez minutos de tráfico, y contra un host con cuatro puertos web, casi
+   una hora. Sin esta capa, activar la ingesta no sería una mejora sino un disparo en el pie. Filtra
+   por severidad mínima, por relevancia de etiqueta (un check de WordPress no se lanza contra un
+   nginx; uno *sin* etiquetas de producto sí, porque es genérico y son justo los más aplicables) y
+   por un tope duro, ordenando por severidad para que lo que el tope recorte sea lo menos grave. Se
+   aplica **antes** de construir el runtime, así que el feed propio no paga nada por que exista.
+
+**Está apagada por defecto (`themis.lybra.ingest.enabled = false`), y a conciencia:** el flag decide
+la *activación*, no la existencia del código. Quien la enciende es el número del censo de U4, que
+sigue pendiente del equipo con el feed instalado. ⚠ La ejecución real de checks ingeridos contra
+objetivos tampoco se ha probado aquí — los tests cubren traducción, procedencia y selección.
 
 **El prerrequisito de la Fase U, delimitado con precisión.** Tres de los cuatro entregables que quedan
 para cerrar esta fase dependen de que la Fase U se haya hecho antes, y uno no:
