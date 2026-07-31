@@ -57,7 +57,7 @@ class IrisAIWriter:
         self._generator = generator or build_generator("iris")
 
     def _build_prompts(self) -> dict:
-        return CR.get_iris_prompts().get("summary", {})
+        return CR.iris_config().prompts.get("summary", {})
 
     def _build_user_prompt(self, report: Dict[str, Any]) -> str:
         failed_rules = [

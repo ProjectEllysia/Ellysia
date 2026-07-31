@@ -1186,62 +1186,82 @@ def hygeia_limits() -> HygeiaLimits:
 # CONFIGURACIÓN DE IRIS
 # =============================================================================
 
-@_lazy_load
-def get_iris_config() -> dict:
-    return _cfg("features.iris", {})
+@config_block("features.iris")
+@dataclass(frozen=True)
+class IrisConfig:
+    """Análisis anti-phishing de correo."""
 
-@_lazy_load
-def get_iris_legitimate_threshold() -> float:
-    # 0–100 subtractive scale: >= 80 is Legitimate (see IrisManager._aggregate_score).
-    return _cfg("features.iris.legitimateThreshold", 80, float)
+    legitimate_threshold: float = 80
+    """Escala sustractiva 0–100: a partir de aquí el veredicto es Legítimo
+    (ver ``IrisManager._aggregate_score``)."""
 
-@_lazy_load
-def get_iris_suspicious_threshold() -> float:
-    # 0–100 subtractive scale: >= 55 is Suspicious, below is Phishing.
-    return _cfg("features.iris.suspiciousThreshold", 55, float)
+    suspicious_threshold: float = 55
+    """Por debajo de ``legitimate_threshold`` y a partir de aquí, Sospechoso;
+    por debajo de aquí, Phishing."""
 
-@_lazy_load
-def get_iris_min_headers() -> int:
-    return _cfg("features.iris.minHeaders", 2, int)
+    min_headers: int = 2
+    """Cabeceras mínimas para considerar analizable un mensaje."""
 
-@_lazy_load
-def get_iris_max_message_bytes() -> int:
-    # C4: AnalyzeRequestSchema had no upper bound at all — a multi-MB .eml
-    # (attachments included) was accepted whole into a Text column and
-    # re-parsed, base64 decoding included, on every subsequent read
-    # (get_analysis_results/path/iocs). 10 MB comfortably covers a real
-    # email with attachments while capping the re-parse cost.
-    return _cfg("features.iris.maxMessageBytes", 10 * 1024 * 1024, int)
+    max_message_bytes: int = 10 * 1024 * 1024
+    """Tamaño máximo de un ``.eml`` aceptado (C4).
+
+    ``AnalyzeRequestSchema`` no tenía ningún tope: un correo de varios MB con
+    adjuntos entraba entero en una columna Text y se re-parseaba —decodificando
+    base64 incluido— en cada lectura posterior (``get_analysis_results``,
+    ``path``, ``iocs``). 10 MB cubre de sobra un correo real con adjuntos y a la
+    vez acota el coste de ese re-parseo.
+    """
+
+    max_connections_per_user: int = 5
+    """Máximo de cuentas de correo que un usuario puede conectar a la vez."""
+
+    poll_interval_minutes: int = 5
+    """Intervalo (minutos) del scheduler que sondea las conexiones activas."""
+
+    max_ingested_per_day: int = 200
+    """Tope diario de análisis auto-ingeridos, **por conexión** (no global).
+
+    Una conexión mal configurada (carpeta ruidosa, bucle de reenvíos) no debe
+    poder generar análisis sin límite — ver roadmap-ellysia.md §8.1.
+    """
+
+    prompts: dict = field(default_factory=dict)
+    """Prompts de ``IrisAIWriter`` (IA1): ``summary.{system,userTemplate}``."""
+
+
+def iris_config() -> IrisConfig:
+    return load_block(IrisConfig)
+
+
+# --- Datasets y pesos: buscados por clave, no por campo ---------------------
+#
+# Ninguno de los dos encaja en un bloque: los datasets son dos docenas de listas
+# que solo ``iris/services/shared.py`` consume, y los pesos de scoring son un
+# mapa abierto donde cada regla trae su propio default calibrado. En ambos casos
+# el consumidor sabe qué clave quiere, y declararlas como campos obligaría a
+# tocar este módulo cada vez que se añade una regla.
 
 @_lazy_load
 def get_iris_data(key: str):
-    """Dataset de detección de Iris desde ``iris.data.<key>`` (o None si falta).
+    """Dataset de detección desde ``features.iris.data.<key>`` (o None si falta).
 
     Los datasets (marcas, dominios, keywords, extensiones…) viven en el bloque
-    ``iris.data`` de SecOpsConfig.json; los defaults de respaldo están en
-    ``src/modules/features/iris/services/shared.py``, que es el único consumidor previsto.
+    ``features.iris.data``; los defaults de respaldo están en
+    ``src/modules/features/iris/services/shared.py``, que es el único consumidor
+    previsto.
     """
     return _cfg(f"features.iris.data.{key}")
 
-@_lazy_load
-def get_iris_prompts() -> dict:
-    """Prompts de IrisAIWriter (IA1) desde ``iris.prompts.<key>``.
-
-    Espejo de ``get_prompts_config()`` (que solo mira el bloque ``themis``)
-    para el módulo Iris: ``iris.prompts.summary.{system,userTemplate}``.
-    """
-    return _cfg("features.iris.prompts", {})
 
 @_lazy_load
 def get_iris_scoring_weight(weight_key: str, default: float) -> float:
     """Peso de scoring configurable de una regla de Iris (recalibración §19/S6).
 
-    ``iris.scoring.<weight_key>`` en SecOpsConfig.json puede pisar la
-    magnitud de penalización que una regla define en código sin necesidad de
-    redeploy -- el propio ``default`` que cada llamada pasa (el valor
-    calibrado por el consejo, ver STUDY.md) es el que se usa si la clave no
-    está presente en la config, así que el comportamiento no cambia hasta
-    que alguien la añade explícitamente.
+    ``features.iris.scoring.<weight_key>`` puede pisar la magnitud de
+    penalización que una regla define en código sin necesidad de redeploy. El
+    propio ``default`` que cada llamada pasa (el valor calibrado por el consejo,
+    ver STUDY.md) es el que se usa si la clave no está en la config, así que el
+    comportamiento no cambia hasta que alguien la añade explícitamente.
     """
     return _cfg(f"features.iris.scoring.{weight_key}", default, float)
 
@@ -1249,28 +1269,8 @@ def get_iris_scoring_weight(weight_key: str, default: float) -> float:
 # =============================================================================
 # CONECTOR DE BUZÓN DE IRIS (Fase 3-4 del plan mailbox-connector)
 # =============================================================================
-
-@_lazy_load
-def get_iris_max_connections_per_user() -> int:
-    """Máximo de cuentas de correo que un usuario puede conectar a la vez."""
-    return _cfg("features.iris.maxConnectionsPerUser", 5, int)
-
-
-@_lazy_load
-def get_iris_poll_interval_minutes() -> int:
-    """Intervalo (minutos) del scheduler que sondea las conexiones activas."""
-    return _cfg("features.iris.pollIntervalMinutes", 5, int)
-
-
-@_lazy_load
-def get_iris_max_ingested_per_day() -> int:
-    """Tope diario de análisis auto-ingeridos, por conexión (no global).
-
-    Una conexión mal configurada (carpeta ruidosa, bucle de reenvíos) no
-    debe poder generar analisis sin límite — ver roadmap-ellysia.md §8.1.
-    """
-    return _cfg("features.iris.maxIngestedPerDay", 200, int)
-
+# Los ajustes del conector (cuotas, cadencia de sondeo) viven en ``IrisConfig``;
+# aquí solo quedan las credenciales OAuth de las apps, que son secretos de .env.
 
 def get_gmail_environment() -> dict[str, str]:
     """Credenciales OAuth de la app de Gmail desde variables de entorno.

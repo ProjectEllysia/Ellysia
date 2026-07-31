@@ -161,7 +161,7 @@ class IrisMailboxManager:
             raise IrisMailboxInvalidProviderError(provider)
 
         existing = build_repository(IrisMailboxConnectionRepository).count_for_user(user_id)
-        max_connections = CR.get_iris_max_connections_per_user()
+        max_connections = CR.iris_config().max_connections_per_user
         if existing >= max_connections:
             raise IrisMailboxQuotaExceededError(
                 f"Ya tienes {existing} conexiones activas (máximo {max_connections})."
@@ -324,7 +324,7 @@ class IrisMailboxManager:
             self._record_sync_error(connection_id, str(e))
             return
 
-        max_per_day = CR.get_iris_max_ingested_per_day()
+        max_per_day = CR.iris_config().max_ingested_per_day
         ingested_today, reset_date = self._current_daily_counter(connection)
 
         for ref in refs:

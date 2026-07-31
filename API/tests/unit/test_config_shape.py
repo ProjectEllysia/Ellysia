@@ -94,9 +94,6 @@ GETTERS_AND_PATHS = [
     (CR.get_argon2_config,                  "general.security.argon2"),
     (CR.get_db_isolation_level,             "infrastructure.database.isolation_level"),
     (CR.get_redis_config,                   "infrastructure.redis.socket_connect_timeout"),
-    (CR.get_iris_legitimate_threshold,      "features.iris.legitimateThreshold"),
-    (CR.get_iris_max_ingested_per_day,      "features.iris.maxIngestedPerDay"),
-    (CR.get_iris_prompts,                   "features.iris.prompts"),
 ]
 
 
@@ -187,6 +184,7 @@ CONFIG_BLOCKS = [
     (CR.LybraIngestConfig, CR.lybra_ingest_config),
     (CR.NucleiConfig, CR.nuclei_config),
     (CR.AegisConfig, CR.aegis_config),
+    (CR.IrisConfig, CR.iris_config),
 ]
 
 
