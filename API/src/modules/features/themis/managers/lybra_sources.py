@@ -28,6 +28,7 @@ from ..repositories import ScanRepository
 from ..exceptions import ScanNotFoundError, TargetNotAuthorizedError
 from ..lybra import Service, services_from_open_ports, services_from_discovered_ports
 from .authorized_target import AuthorizedTargetManager
+from .scan import ScanManager
 
 logger = logging.getLogger(__name__)
 
@@ -185,12 +186,21 @@ class SelfDiscovery(ServiceSource):
             raise ValueError("run_scan requires source_scan_id, services, or target")
         # Self-discovery touches the target directly, unlike analysing a prior
         # Nmap scan's already-collected services (roadmap §6).
+        #
+        # Rechazo de IP privada aquí (no solo en el endpoint HTTP, ver
+        # validate_targets en start_lybra_scan): el flujo programado
+        # (scheduling._run_lybra_scan) llama a run_scan() directo, sin pasar
+        # por el endpoint. El registro de objetivos autorizados es un gate
+        # legal, no de red: no sustituye este rechazo (ver
+        # AuthorizedTargetManager).
+        ScanManager.reject_private_ip(target)
         if not AuthorizedTargetManager.is_authorized(user_id, target):
             raise TargetNotAuthorizedError(target)
         return target
 
     def resolve(self, scan_repo: ScanRepository, manager, target: Optional[str]) -> Optional[ResolvedServices]:
         discovered_ports: list = []
+        udp_ports: list = []
         if target:
             if CR.host_reachability_check().enabled and not manager.is_host_reachable(
                 target,
@@ -205,9 +215,17 @@ class SelfDiscovery(ServiceSource):
                 logger.error("Descubrimiento de puertos fallido para %s", target)
                 return None
             discovered_ports = discovered
+            # UDP (Fase N/Ronda 1, roadmap §6.3): sonda curada aparte, nunca a
+            # partir de la lista TCP del usuario — self.discover_ports es una
+            # lista de puertos TCP. Best-effort por diseño de
+            # _discover_udp_ports: nunca aborta el descubrimiento TCP.
+            udp_ports = manager._discover_udp_ports(target)  # pylint: disable=protected-access
+
+        services = services_from_discovered_ports(discovered_ports)
+        services += services_from_discovered_ports(udp_ports, protocol="udp")
 
         return ResolvedServices(
-            services=services_from_discovered_ports(discovered_ports),
+            services=services,
             host_id=self._resolve_host(scan_repo, target),
             target=target,
         )

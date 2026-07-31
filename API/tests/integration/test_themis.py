@@ -215,6 +215,45 @@ def test_openvas_scheduled_flow_rejects_private_ip(app):
             OpenVASScanManager().run_scan(target="10.0.0.5", user_id=1)
 
 
+def test_nmap_scheduled_flow_rejects_private_ip(app):
+    # Mismo hueco que C3 (OpenVAS) pero en Nmap: scheduling._run_nmap_scan
+    # llama a NmapScanManager.run_scan() directo, sin pasar por
+    # validate_targets() del endpoint HTTP.
+    from src.modules.features.themis.exceptions import PrivateIPRequested
+    from src.modules.features.themis.managers import NmapScanManager
+
+    with app.app_context():
+        with pytest.raises(PrivateIPRequested):
+            NmapScanManager().run_scan(target_host="10.0.0.5", target_ports="80", user_id=1)
+
+
+def test_nikto_scheduled_flow_rejects_private_ip(app):
+    # Mismo hueco que C3 (OpenVAS) pero en Nikto: scheduling._run_nikto_scan
+    # llama a NiktoScanManager.run_scan() directo, sin pasar por
+    # validate_nikto_target() del endpoint HTTP.
+    from src.modules.features.themis.exceptions import PrivateIPRequested
+    from src.modules.features.themis.managers import NiktoScanManager
+
+    with app.app_context():
+        with pytest.raises(PrivateIPRequested):
+            NiktoScanManager().run_scan(target_domain="10.0.0.5", user_id=1)
+
+
+def test_lybra_scheduled_flow_rejects_private_ip(app):
+    # Mismo hueco que C3 (OpenVAS) pero en Lybra (autodescubrimiento):
+    # scheduling._run_lybra_scan llama a run_scan() directo, sin pasar por
+    # validate_targets() del endpoint HTTP. El registro de objetivos
+    # autorizados (AuthorizedTargetManager) es un gate legal, no de red: no
+    # sustituye el rechazo de IP privada, así que debe fallar antes de
+    # siquiera comprobar autorización.
+    from src.modules.features.themis.exceptions import PrivateIPRequested
+    from src.modules.features.themis.managers import LybraEngineManager
+
+    with app.app_context():
+        with pytest.raises(PrivateIPRequested):
+            LybraEngineManager().run_scan(target="10.0.0.5", user_id=1)
+
+
 # --------------------------------------------------------------- N1 IDOR docs
 # get_documents_by_scan y document-status (por scan_id) no verificaban
 # ownership: cualquier usuario con THEMIS_READ podía enumerar los documentos

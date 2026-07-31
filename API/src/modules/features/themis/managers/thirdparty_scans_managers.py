@@ -41,7 +41,7 @@ from ..services import (
     NucleiPrintingStrategy,
     _Task,
 )
-from ..exceptions import ScanNotFoundError
+from ..exceptions import ScanNotFoundError, TargetNotAuthorizedError
 
 from .scan import ScanManager
 
@@ -90,6 +90,12 @@ class NmapScanManager(ScanManager):
             Primary key of the created NmapScan record.
         """
         try:
+            # Rechazo de IP privada aquí (no solo en el endpoint HTTP): el
+            # flujo programado (scheduling._run_nmap_scan) llama a run_scan()
+            # directo, sin pasar por validate_targets() — mismo hueco que C3
+            # (OpenVAS), mismo patrón de cierre.
+            ScanManager.reject_private_ip(target_host)
+
             scan    = self._create_scan_record(
                 target=target_host,
                 user_id=user_id,
@@ -211,6 +217,15 @@ class NiktoScanManager(ScanManager):
             Primary key of the created NiktoScan record.
         """
         try:
+            # Rechazo de IP privada aquí (no solo en el endpoint HTTP, ver
+            # validate_web_target): el flujo programado
+            # (scheduling._run_nikto_scan) llama a run_scan() directo — mismo
+            # hueco que C3 (OpenVAS), mismo patrón de cierre. Nikto escanea
+            # por hostname/URL, así que hay que resolver antes de rechazar.
+            from src.modules.shared import normalize_target
+            resolved_ip, _ = normalize_target(target_domain)
+            ScanManager.reject_private_ip(resolved_ip)
+
             scan = self._create_scan_record(
                 target=target_domain,
                 user_id=user_id,
@@ -621,6 +636,21 @@ class NucleiScanManager(ScanManager):
             Primary key of the created NucleiScan record.
         """
         try:
+            # Rechazo de IP privada + gate de objetivos autorizados aquí (no
+            # solo en el endpoint HTTP, ver validate_web_target y
+            # start_nuclei_scan): el flujo programado
+            # (scheduling._run_nuclei_scan) llama a run_scan() directo — mismo
+            # hueco que C3 (OpenVAS), mismo patrón de cierre. Nuclei toca el
+            # objetivo desde el día uno, así que además del rechazo de IP
+            # privada exige estar en el registro de objetivos autorizados,
+            # igual que hace el endpoint.
+            from src.modules.shared import normalize_target
+            from .authorized_target import AuthorizedTargetManager
+            resolved_ip, _ = normalize_target(target)
+            ScanManager.reject_private_ip(resolved_ip)
+            if not AuthorizedTargetManager.is_authorized(user_id, resolved_ip):
+                raise TargetNotAuthorizedError(target)
+
             resolved_timeout = int(timeout) if timeout is not None else int(CR.nuclei_config().timeout)
             scan = self._create_scan_record(
                 target=target,
