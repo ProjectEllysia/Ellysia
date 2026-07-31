@@ -20,6 +20,7 @@ Dos capas, y las dos hacen falta:
 """
 
 import copy
+import dataclasses
 import json
 from pathlib import Path
 
@@ -93,10 +94,6 @@ GETTERS_AND_PATHS = [
     (CR.get_argon2_config,                  "general.security.argon2"),
     (CR.get_db_isolation_level,             "infrastructure.database.isolation_level"),
     (CR.get_redis_config,                   "infrastructure.redis.socket_connect_timeout"),
-    (CR.get_hygeia_heartbeat_interval_sec,  "features.hygeia.heartbeatIntervalSec"),
-    (CR.get_hygeia_retention_cron,          "features.hygeia.retentionCron"),
-    (CR.get_hygeia_thresholds,              "features.hygeia.thresholds"),
-    (CR.get_hygeia_max_body_bytes,          "features.hygeia.limits.maxBodyBytes"),
     (CR.get_iris_legitimate_threshold,      "features.iris.legitimateThreshold"),
     (CR.get_iris_max_ingested_per_day,      "features.iris.maxIngestedPerDay"),
     (CR.get_iris_prompts,                   "features.iris.prompts"),
@@ -181,6 +178,125 @@ def test_strategy_resolution_reads_the_tools_branch(
     monkeypatch.setattr(CR, "_configs", _with_sentinel_at(raw_config, dotted_path))
 
     assert strategy_getter(module_name) != baseline
+
+
+# =============================================================================
+# BLOQUES (dataclasses)
+# =============================================================================
+
+# Cada bloque registrado, con el accesor por el que lo piden los consumidores.
+CONFIG_BLOCKS = [
+    (CR.HygeiaConfig, CR.hygeia_config),
+    (CR.HygeiaLimits, CR.hygeia_limits),
+]
+
+
+def expected_key(field_info) -> str:
+    """La clave del JSON que le corresponde a un campo del bloque."""
+    return field_info.metadata.get("key") or CR._to_camel_case(field_info.name)
+
+
+@pytest.mark.parametrize(
+    "block_type, _accessor", CONFIG_BLOCKS, ids=[b.__name__ for b, _ in CONFIG_BLOCKS]
+)
+def test_block_covers_its_branch_exactly(raw_config, block_type, _accessor):
+    """Los campos del bloque y las claves de su rama son el mismo conjunto.
+
+    Cierra el hueco que el test de centinela no puede cerrar solo: si un campo
+    se llamara mal, su clave no existiría en el JSON y el centinela nunca se
+    plantaría — el test pasaría sin probar nada. Comparando conjuntos, un campo
+    huérfano (default silencioso) y una clave del JSON que nadie lee (config
+    muerta) se ven los dos.
+    """
+    branch = _value_at(raw_config, block_type.__config_path__)
+    declared = {expected_key(f) for f in dataclasses.fields(block_type)}
+    configured = {key for key, value in branch.items() if not isinstance(value, dict)}
+    # Las sub-ramas (dicts) o son un campo del bloque o son otro bloque aparte.
+    configured |= {key for key in branch if key in declared}
+
+    assert declared == configured, (
+        f"campos sin clave en el JSON: {sorted(declared - configured)}; "
+        f"claves del JSON que ningún campo lee: {sorted(configured - declared)}"
+    )
+
+
+@pytest.mark.parametrize("snake_case_name, expected", [
+    ("max_body_bytes",   "maxBodyBytes"),
+    ("thresholds",       "thresholds"),
+    ("clock_skew_sec",   "clockSkewSec"),
+    ("min_interval_sec", "minIntervalSec"),
+])
+def test_to_camel_case(snake_case_name, expected):
+    assert CR._to_camel_case(snake_case_name) == expected
+
+BLOCK_FIELDS = [
+    (block_type, accessor, field_info)
+    for block_type, accessor in CONFIG_BLOCKS
+    for field_info in dataclasses.fields(block_type)
+]
+
+
+@pytest.mark.parametrize(
+    "block_type, accessor, field_info", BLOCK_FIELDS,
+    ids=[f"{b.__name__}.{f.name}" for b, _, f in BLOCK_FIELDS],
+)
+def test_block_field_maps_to_its_json_key(raw_config, block_type, accessor, field_info, monkeypatch):
+    """Cada campo del bloque lee la clave que le toca, o documenta que no está.
+
+    La traducción ``snake_case`` → ``camelCase`` es automática, y ahí está el
+    riesgo: un campo mal nombrado no falla, se queda con su default en
+    silencio. Si la clave existe en el JSON, plantamos un centinela y exigimos
+    que el bloque lo vea; si no existe, comprobamos que efectivamente cae al
+    default declarado — que es información útil, no un fallo.
+    """
+    dotted_path = f"{block_type.__config_path__}.{expected_key(field_info)}"
+    declared_default = (
+        field_info.default_factory() if field_info.default is dataclasses.MISSING
+        else field_info.default
+    )
+
+    try:
+        _value_at(raw_config, dotted_path)
+    except AssertionError:
+        assert getattr(accessor(), field_info.name) == declared_default, (
+            f"'{dotted_path}' no está en SecOpsConfig.json pero el bloque "
+            f"tampoco devuelve el default declarado"
+        )
+        return
+
+    baseline = accessor()
+    monkeypatch.setattr(CR, "_configs", _with_sentinel_at(raw_config, dotted_path))
+
+    assert accessor() != baseline, (
+        f"{block_type.__name__}.{field_info.name} no reaccionó a un cambio en "
+        f"'{dotted_path}': el campo está leyendo otra clave"
+    )
+
+
+def test_blocks_are_frozen_and_cached():
+    """El bloque es inmutable (nadie puede pisar la config desde un consumidor)
+    y se reutiliza mientras la config no cambie."""
+    limits = CR.hygeia_limits()
+    assert CR.hygeia_limits() is limits
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        limits.max_body_bytes = 1
+
+
+def test_blocks_rebuild_when_the_config_changes(raw_config, monkeypatch):
+    """La caché se invalida sola al cambiar ``_configs``.
+
+    Es el punto delicado de todo esto: la config es mutable en caliente
+    (``PUT /system`` → ``reload()``), y un bloque cacheado de por vida serviría
+    valores rancios después de guardar.
+    """
+    before = CR.hygeia_limits()
+    monkeypatch.setattr(
+        CR, "_configs", _with_sentinel_at(raw_config, "features.hygeia.limits.maxProcesses")
+    )
+    after = CR.hygeia_limits()
+
+    assert after is not before
+    assert after.max_processes == before.max_processes + 7
 
 
 def test_taskqueue_config_reads_the_infrastructure_branch(raw_config, monkeypatch):

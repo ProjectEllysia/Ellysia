@@ -87,7 +87,7 @@ class HygeiaAssetManager:
         with UnitOfWork() as uow:
             repo = MonitoredAssetRepository(uow)
 
-            max_assets = CR.get_hygeia_max_assets_per_user()
+            max_assets = CR.hygeia_limits().max_assets_per_user
             if repo.count_by_user(self.user.id) >= max_assets:
                 raise AssetQuotaExceededError(max_assets)
 
@@ -98,7 +98,7 @@ class HygeiaAssetManager:
                 labels=labels,
                 agent_key_id=key_id,
                 agent_key_hash=secret_hash,
-                heartbeat_interval_sec=CR.get_hygeia_heartbeat_interval_sec(),
+                heartbeat_interval_sec=CR.hygeia_config().heartbeat_interval_sec,
                 user_id=self.user.id,
             )
             saved = repo.save(asset)
@@ -141,7 +141,7 @@ class HygeiaAssetManager:
         asset_repo = build_repository(MonitoredAssetRepository)
         self._get_owned_asset(asset_repo, asset_id, self.user.id)
 
-        limit = CR.get_hygeia_max_series_points()
+        limit = CR.hygeia_limits().max_series_points
         snapshot_repo = build_repository(AssetSnapshotRepository)
         snapshots = snapshot_repo.get_series(
             asset_id, since=since, until=until, limit=limit,
@@ -494,7 +494,7 @@ class HygeiaIngestManager:
 
             critical_anomaly_ids = self._evaluate_thresholds(uow, asset, metrics)
 
-            next_interval = asset.heartbeat_interval_sec or CR.get_hygeia_heartbeat_interval_sec()
+            next_interval = asset.heartbeat_interval_sec or CR.hygeia_config().heartbeat_interval_sec
 
             if critical_anomaly_ids:
                 # Durable antes de encolar (§8): el worker de notificación
@@ -523,7 +523,7 @@ class HygeiaIngestManager:
         """
         if asset.last_seen_at is None:
             return
-        min_interval = CR.get_hygeia_min_interval_sec()
+        min_interval = CR.hygeia_limits().min_interval_sec
         elapsed = (now - asset.last_seen_at).total_seconds()
         if elapsed < min_interval:
             raise IngestTooFrequentError(min_interval)
@@ -562,7 +562,7 @@ class HygeiaIngestManager:
             **después** de confirmar esta transacción (§8) — nunca desde
             aquí, que todavía vive dentro del ``UnitOfWork``.
         """
-        thresholds = {**CR.get_hygeia_thresholds(), **(asset.thresholds or {})}
+        thresholds = {**CR.hygeia_config().thresholds, **(asset.thresholds or {})}
 
         anomaly_repo = AnomalyRepository(uow)
         active_anomalies = {
@@ -737,10 +737,10 @@ class HygeiaMaintenanceManager:
             asset_repo = MonitoredAssetRepository(uow)
             anomaly_repo = AnomalyRepository(uow)
             now = utcnow_naive()
-            offline_after_missed = CR.get_hygeia_offline_after_missed()
+            offline_after_missed = CR.hygeia_config().offline_after_missed
 
             for asset in asset_repo.get_active_for_presence_check():
-                interval = asset.heartbeat_interval_sec or CR.get_hygeia_heartbeat_interval_sec()
+                interval = asset.heartbeat_interval_sec or CR.hygeia_config().heartbeat_interval_sec
 
                 if asset.status == "online":
                     stale_cutoff = now - timedelta(seconds=interval)
@@ -768,7 +768,7 @@ class HygeiaMaintenanceManager:
         Returns:
             Número de filas eliminadas.
         """
-        cutoff = utcnow_naive() - timedelta(days=CR.get_hygeia_retention_days())
+        cutoff = utcnow_naive() - timedelta(days=CR.hygeia_config().retention_days)
         with UnitOfWork() as uow:
             repo = AssetSnapshotRepository(uow)
             rows_affected = repo.delete_older_than(cutoff)

@@ -13,9 +13,9 @@ from enum import Enum
 from functools import wraps
 from pathlib import Path
 from dotenv import load_dotenv
-from dataclasses import dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 
-from typing import Optional
+from typing import Optional, TypeVar, get_origin
 
 from src.modules.shared._exceptions import IllegalStateError
 
@@ -114,9 +114,9 @@ def _cfg(path: str, default=None, cast=None):
     """Lee un valor anidado de la config por ruta con puntos.
 
     ``_cfg("features.themis.traceroute.cacheHours", 24, float)`` es el equivalente de
-    ``_require_configs().get("themis", {}).get("traceroute", {}).get("cacheHours", 24)``
-    convertido a ``float``. Requiere llamarse desde una función decorada con
-    ``@_lazy_load`` (o después de que la config ya esté cargada).
+    ``_require_configs().get("features", {}).get("themis", {}).get("traceroute", {})
+    .get("cacheHours", 24)`` convertido a ``float``. Requiere llamarse desde una
+    función decorada con ``@_lazy_load`` (o después de que la config ya esté cargada).
     """
     node = _require_configs()
     for key in path.split("."):
@@ -124,6 +124,90 @@ def _cfg(path: str, default=None, cast=None):
             return default
         node = node[key]
     return cast(node) if cast else node
+
+
+# =============================================================================
+# BLOQUES DE CONFIGURACIÓN
+# =============================================================================
+#
+# Un "bloque" es una dataclass ``frozen`` atada a una rama del JSON: declara sus
+# campos con el tipo y el valor por defecto, y ``config_block`` se encarga de
+# leerlos. Sustituye al patrón de un getter por valor, que tenía dos problemas
+# concretos:
+#
+#   - El default se escribía dos veces (en el getter y en SecOpsConfig.json) y
+#     acababa divergiendo sin que nadie lo notara, porque el del fichero gana.
+#     Aquí se declara una sola vez, en el campo.
+#   - Sin tipos, cada consumidor tenía que recordar qué devolvía cada getter.
+#
+# Los bloques son planos a propósito: no hay un ``ThemisConfig`` que contenga a
+# los demás. Ningún consumidor quiere "todo Themis" — quiere Nuclei, o quiere
+# traceroute — y un árbol obligaría a construir las ramas que nadie ha pedido.
+
+_ConfigBlock = TypeVar("_ConfigBlock")
+
+# El bloque construido, junto al dict del que salió. Se compara por identidad
+# (``is``) en vez de invalidar a mano: así reload(), save_full_config() y un
+# ``_configs`` monkeypatcheado en un test invalidan la caché solos, sin que
+# ninguno de los tres tenga que acordarse de avisar.
+_block_cache: dict[type, tuple[dict, object]] = {}
+
+
+def _to_camel_case(snake_case_name: str) -> str:
+    """``max_body_bytes`` → ``maxBodyBytes``, la convención de claves del JSON."""
+    head, *tail = snake_case_name.split("_")
+    return head + "".join(word.capitalize() for word in tail)
+
+
+def config_block(path: str):
+    """Ata una dataclass ``frozen`` a la rama ``path`` de SecOpsConfig.json.
+
+    Cada campo se lee de ``<path>.<campoEnCamelCase>``; si la clave no está, se
+    queda con el valor por defecto declarado en el campo. Para las claves que no
+    siguen la convención (las que se pasan tal cual como kwargs a una librería,
+    como ``isolation_level``) se indica el nombre explícito::
+
+        pool_size: int = field(default=10, metadata={"key": "pool_size"})
+    """
+    def decorator(block_type):
+        if not is_dataclass(block_type):
+            raise TypeError(f"{block_type.__name__} debe ser una dataclass")
+        block_type.__config_path__ = path
+        return block_type
+    return decorator
+
+
+def _coerce(field_type, raw_value):
+    """Convierte el valor del JSON al tipo declarado en el campo.
+
+    ``bool`` primero: en Python ``bool`` es subclase de ``int``, y sin este
+    orden un ``"true"`` acabaría en ``int("true")``.
+    """
+    origin_type = get_origin(field_type) or field_type
+    if origin_type is bool:
+        return _as_bool(raw_value)
+    if origin_type in (int, float, str):
+        return origin_type(raw_value)
+    return raw_value
+
+
+@_lazy_load
+def load_block(block_type: type[_ConfigBlock]) -> _ConfigBlock:
+    """Devuelve la instancia (cacheada) del bloque, leída de la config actual."""
+    source, cached = _block_cache.get(block_type, (None, None))
+    if source is _configs:
+        return cached  # type: ignore[return-value]
+
+    branch = _cfg(block_type.__config_path__, {})  # type: ignore[attr-defined]
+    values = {}
+    for field_info in fields(block_type):  # type: ignore[arg-type]
+        key = field_info.metadata.get("key") or _to_camel_case(field_info.name)
+        if isinstance(branch, dict) and key in branch:
+            values[field_info.name] = _coerce(field_info.type, branch[key])
+
+    built = block_type(**values)
+    _block_cache[block_type] = (_configs, built)
+    return built
 
 
 # =============================================================================
@@ -968,84 +1052,77 @@ def get_public_web_url() -> str:
 # CONFIGURACIÓN DE HYGEIA
 # =============================================================================
 
-@_lazy_load
-def get_hygeia_config() -> dict:
-    return _cfg("features.hygeia", {})
+@config_block("features.hygeia.limits")
+@dataclass(frozen=True)
+class HygeiaLimits:
+    """Topes defensivos sobre lo que un agente puede mandar en un heartbeat.
 
-@_lazy_load
-def get_hygeia_heartbeat_interval_sec() -> int:
-    """Intervalo de heartbeat esperado del agente, en segundos (por defecto, 15)."""
-    return _cfg("features.hygeia.heartbeatIntervalSec", 15, int)
+    No son ajustes de comodidad: cada uno acota un recurso que un agente
+    comprometido —o simplemente mal configurado— podría agotar (§16).
+    """
 
-@_lazy_load
-def get_hygeia_max_assets_per_user() -> int:
-    """Cuota de activos monitorizados que puede dar de alta un mismo usuario (§16.4)."""
-    return _cfg("features.hygeia.limits.maxAssetsPerUser", 500, int)
-
-@_lazy_load
-def get_hygeia_max_body_bytes() -> int:
+    max_body_bytes: int = 1048576
     """Tamaño máximo (comprimido) del cuerpo de un heartbeat, en bytes (§16.1)."""
-    return _cfg("features.hygeia.limits.maxBodyBytes", 262144, int)
 
-@_lazy_load
-def get_hygeia_max_decompressed_bytes() -> int:
-    """Tope de descompresión de un heartbeat gzip, en bytes (defensa anti gzip-bomb, §16.1)."""
-    return _cfg("features.hygeia.limits.maxDecompressedBytes", 1048576, int)
+    max_decompressed_bytes: int = 4194304
+    """Tope de descompresión de un heartbeat gzip (defensa anti gzip-bomb, §16.1)."""
 
-@_lazy_load
-def get_hygeia_max_processes() -> int:
+    max_processes: int = 20
     """Máximo de procesos en topCpu/topMem por heartbeat (§16.1)."""
-    return _cfg("features.hygeia.limits.maxProcesses", 20, int)
 
-@_lazy_load
-def get_hygeia_max_disk_mounts() -> int:
+    max_disk_mounts: int = 64
     """Máximo de puntos de montaje reportados por heartbeat (§16.1)."""
-    return _cfg("features.hygeia.limits.maxDiskMounts", 64, int)
 
-@_lazy_load
-def get_hygeia_max_net_interfaces() -> int:
+    max_net_interfaces: int = 64
     """Máximo de interfaces de red reportadas por heartbeat (§16.1)."""
-    return _cfg("features.hygeia.limits.maxNetInterfaces", 64, int)
 
-@_lazy_load
-def get_hygeia_max_inventory_items() -> int:
+    max_inventory_items: int = 2000
     """Máximo de aplicaciones en un escaneo de inventario de software (§16.1)."""
-    return _cfg("features.hygeia.limits.maxInventoryItems", 2000, int)
 
-@_lazy_load
-def get_hygeia_min_interval_sec() -> int:
-    """Suelo de cadencia entre heartbeats de una misma clave, en segundos (§16.2)."""
-    return _cfg("features.hygeia.limits.minIntervalSec", 5, int)
-
-@_lazy_load
-def get_hygeia_clock_skew_sec() -> int:
-    """Ventana de cordura (± segundos) para el ``collectedAt`` del agente (§16.3)."""
-    return _cfg("features.hygeia.limits.clockSkewSec", 300, int)
-
-@_lazy_load
-def get_hygeia_max_series_points() -> int:
+    max_series_points: int = 1000
     """Máximo de puntos devueltos por la serie temporal de un activo (§5)."""
-    return _cfg("features.hygeia.limits.maxSeriesPoints", 1000, int)
 
-@_lazy_load
-def get_hygeia_thresholds() -> dict[str, dict[str, int]]:
-    """Umbrales globales por defecto de Hygeia (``hygeia.thresholds``); override por activo en DB."""
-    return _cfg("features.hygeia.thresholds", {})
+    min_interval_sec: int = 5
+    """Suelo de cadencia entre heartbeats de una misma clave, en segundos (§16.2)."""
 
-@_lazy_load
-def get_hygeia_offline_after_missed() -> int:
+    clock_skew_sec: int = 300
+    """Ventana de cordura (± segundos) para el ``collectedAt`` del agente (§16.3)."""
+
+    max_assets_per_user: int = 500
+    """Cuota de activos monitorizados que puede dar de alta un usuario (§16.4)."""
+
+
+@config_block("features.hygeia")
+@dataclass(frozen=True)
+class HygeiaConfig:
+    """Cadencia y retención del monitor de activos."""
+
+    heartbeat_interval_sec: int = 15
+    """Intervalo de heartbeat esperado del agente, en segundos."""
+
+    offline_after_missed: int = 4
     """Heartbeats perdidos (sobre el intervalo efectivo) para pasar de stale a offline."""
-    return _cfg("features.hygeia.offlineAfterMissed", 4, int)
 
-@_lazy_load
-def get_hygeia_retention_days() -> int:
+    retention_days: int = 30
     """Antigüedad máxima de un AssetSnapshot antes de podarlo (§7.3)."""
-    return _cfg("features.hygeia.retentionDays", 30, int)
 
-@_lazy_load
-def get_hygeia_retention_cron() -> str:
+    retention_cron: str = "0 4 * * *"
     """Expresión cron del job diario de poda de snapshots."""
-    return _cfg("features.hygeia.retentionCron", "0 4 * * *", str)
+
+    thresholds: dict[str, dict[str, int]] = field(default_factory=dict)
+    """Umbrales globales por defecto; cada activo puede pisarlos desde la DB.
+
+    Mapa libre de métrica (``cpuPct``, ``memPct``…) a sus cortes, así que se
+    queda como dict: las claves las decide la configuración, no este módulo.
+    """
+
+
+def hygeia_config() -> HygeiaConfig:
+    return load_block(HygeiaConfig)
+
+
+def hygeia_limits() -> HygeiaLimits:
+    return load_block(HygeiaLimits)
 
 
 # =============================================================================
