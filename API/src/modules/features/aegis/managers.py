@@ -563,10 +563,9 @@ class AegisManager(TaskTrackingMixin):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         ollama_host, ollama_model = CR.get_ollama_environment()
-        aegis = CR.get_aegis_config() or {}
 
         return {
-            "enabled":          bool(aegis.get("enabled", True)),
+            "enabled":          CR.aegis_config().enabled,
             "ollama_host":      ollama_host,
             "ollama_model":     ollama_model,
             "timeout_seconds":  120,
@@ -891,7 +890,7 @@ class CampaignManager(TaskTrackingMixin):
                 logger.info(f"Campaña {campaign_id}: no hay destinatarios pendientes de envío")
                 return
 
-            base_url = CR.get_public_web_url()
+            base_url = CR.general_config().public_url
             mailer = self.mailer or build_mailer("aegis")
             pill_title = doc.subtitle or doc.title if doc else "Formación de concienciación"
 

@@ -329,7 +329,7 @@ class TaskQueue:
     _instance_lock = threading.Lock()
 
     def __init__(self) -> None:
-        taskqueue_cfg = CR.get_taskqueue_config()
+        taskqueue_cfg = CR.taskqueue_config()
 
         self._redis = RedisConnectionFactory.raw()
         self._decoded = RedisConnectionFactory.decoded()
@@ -338,8 +338,8 @@ class TaskQueue:
         self._cancel = CancellationStore(self._decoded)
         self._history = HistoryStore(
             self._decoded,
-            int(taskqueue_cfg.get("history_max_items", 200)),
-            int(taskqueue_cfg.get("history_ttl_seconds", 3600)),
+            taskqueue_cfg.history_max_items,
+            taskqueue_cfg.history_ttl_seconds,
         )
 
         self._queue_cache: Dict[str, rq.Queue] = {}
@@ -613,7 +613,7 @@ class TaskQueue:
             pending_count = 0
 
         return {
-            "maxWorkers":    CR.get_taskqueue_config().get("max_workers", 4),
+            "maxWorkers":    CR.taskqueue_config().max_workers,
             "aliveWorkers":  self._count_alive_workers(),
             "runningCount":  running_count,
             "pendingCount":  pending_count,

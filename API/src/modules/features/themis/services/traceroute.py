@@ -58,8 +58,8 @@ class TracerouteService:
             Ordered list of hop dicts (see module docstring). Empty list if the
             traceroute binary is unavailable or produced no parseable hops.
         """
-        max_hops = CR.get_themis_traceroute_max_hops()
-        timeout = CR.get_themis_traceroute_timeout()
+        max_hops = CR.traceroute_config().max_hops
+        timeout = CR.traceroute_config().timeout
 
         cmd = self._build_command(target, max_hops)
         if cmd is None:

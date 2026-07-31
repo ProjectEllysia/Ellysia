@@ -141,7 +141,7 @@ class KbSyncManager:
 
     def sync_all(self) -> dict:
         """Run every configured source once; return a per-source count summary."""
-        sources = CR.get_kb_sources()
+        sources = CR.knowledge_base_config().sources
         summary: dict = {}
         if sources.get("kev"):
             summary["kev"] = self.sync_kev(sources["kev"])
@@ -150,8 +150,8 @@ class KbSyncManager:
         if sources.get("nvd"):
             summary["nvd"] = self.sync_nvd(
                 sources["nvd"],
-                window_days=CR.get_kb_nvd_window_days(),
-                api_key=CR.get_kb_nvd_api_key(),
+                window_days=CR.knowledge_base_config().nvd_window_days,
+                api_key=CR.knowledge_base_config().nvd_api_key,
             )
             # Only worth rebuilding when NVD's CpeMatch rows might have
             # changed — the index is entirely derived from that table.

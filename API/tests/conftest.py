@@ -42,7 +42,7 @@ if str(_API_DIR) not in sys.path:
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-not-for-production"
 os.environ.setdefault("JWT_ALGORITHM", "HS256")
 # Clave Fernet válida (32 bytes urlsafe-base64) solo para tests — ver
-# users.services.secrets.encrypt_totp_secret / config_reading.get_mfa_config().
+# users.services.secrets.encrypt_totp_secret / config_reading.MfaConfig.
 os.environ.setdefault("MFA_ENCRYPTION_KEY", "oZrC9aq99vdSaSW5nk55KNJFr9flChUBjs16fNhpfuU=")
 # Clave Fernet distinta de MFA_ENCRYPTION_KEY (purposes no intercambiables,
 # ver shared._crypto) para el refresh token del conector de buzón de Iris.

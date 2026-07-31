@@ -29,7 +29,7 @@ def generate_totp_secret() -> str:
 
 def totp_provisioning_uri(secret: str, username: str) -> str:
     """Build the otpauth:// URI an authenticator app scans as a QR code."""
-    issuer = CR.get_mfa_config()["issuer"]
+    issuer = CR.mfa_config().issuer
     return pyotp.TOTP(secret).provisioning_uri(name=username, issuer_name=issuer)
 
 

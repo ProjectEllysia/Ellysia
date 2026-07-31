@@ -325,7 +325,7 @@ class MFAChallenge(Base):
     Attributes:
         token: Opaque random string handed to the client (not a JWT).
         user_id: Foreign key to User.id.
-        expires_at: Short expiry (minutes, see config_reading.get_mfa_config).
+        expires_at: Short expiry (minutes, see config_reading.MfaConfig).
         attempts: Number of failed verification attempts so far.
         created_at: Issuance timestamp.
     """

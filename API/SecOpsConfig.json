@@ -1,1325 +1,1357 @@
 {
-  "aegis": {
-    "brands": [
-      {
-        "aliases": [],
-        "circl_product": "windows",
-        "circl_vendor": "microsoft",
-        "label": "Microsoft"
-      },
-      {
-        "aliases": [],
-        "circl_product": "ios",
-        "circl_vendor": "cisco",
-        "label": "Cisco"
-      },
-      {
-        "aliases": [],
-        "circl_product": "macos",
-        "circl_vendor": "apple",
-        "label": "Apple"
-      },
-      {
-        "aliases": [],
-        "circl_product": "chrome",
-        "circl_vendor": "google",
-        "label": "Google"
-      },
-      {
-        "aliases": [],
-        "circl_product": "acrobat",
-        "circl_vendor": "adobe",
-        "label": "Adobe"
-      },
-      {
-        "aliases": [],
-        "circl_product": "android",
-        "circl_vendor": "google",
-        "label": "Android"
-      },
-      {
-        "aliases": [
-          "hewlett packard enterprise",
-          "hewlett-packard enterprise",
-          "hp enterprise"
-        ],
-        "circl_product": "hpe",
-        "circl_vendor": "hpe",
-        "label": "HPE"
-      },
-      {
-        "aliases": [],
-        "circl_product": "sonicos",
-        "circl_vendor": "sonicwall",
-        "label": "SonicWall"
-      },
-      {
-        "aliases": [
-          "konica minolta",
-          "konicaminolta"
-        ],
-        "circl_product": "printer",
-        "circl_vendor": "konicaminolta",
-        "label": "Konica"
-      },
-      {
-        "aliases": [],
-        "circl_product": "junos",
-        "circl_vendor": "juniper",
-        "label": "Juniper"
-      },
-      {
-        "aliases": [],
-        "circl_product": "esxi",
-        "circl_vendor": "vmware",
-        "label": "VMware"
-      },
-      {
-        "aliases": [
-          "palo alto networks",
-          "paloaltonetworks"
-        ],
-        "circl_product": "pan-os",
-        "circl_vendor": "paloaltonetworks",
-        "label": "Palo Alto"
-      },
-      {
-        "aliases": [],
-        "circl_product": "netweaver",
-        "circl_vendor": "sap",
-        "label": "SAP"
-      },
-      {
-        "aliases": [],
-        "circl_product": "database",
-        "circl_vendor": "oracle",
-        "label": "Oracle"
-      },
-      {
-        "aliases": [],
-        "circl_product": "firefox",
-        "circl_vendor": "mozilla",
-        "label": "Mozilla"
-      },
-      {
-        "aliases": [],
-        "circl_product": "kernel",
-        "circl_vendor": "linux",
-        "label": "Linux"
-      },
-      {
-        "aliases": [],
-        "circl_product": "fortios",
-        "circl_vendor": "fortinet",
-        "label": "Fortinet"
-      },
-      {
-        "aliases": [],
-        "circl_product": "",
-        "circl_vendor": "ibm",
-        "label": "IBM"
-      },
-      {
-        "aliases": [
-          "google chrome"
-        ],
-        "circl_product": "chrome",
-        "circl_vendor": "google",
-        "label": "Chrome"
-      }
-    ],
-    "directories": {
-      "output": "data/aegis/output",
-      "stack": "data/aegis/stack"
-    },
-    "enabled": true,
-    "prompts": {
-      "system": "Eres un redactor senior de concienciación en ciberseguridad con 15 años de experiencia en comunicación corporativa. Tu especialidad es transformar conceptos técnicos complejos en consejos prácticos y accionables para empleados no técnicos.\n\nREGLAS ABSOLUTAS:\n1. Generas EXCLUSIVAMENTE JSON válido, sin markdown, sin explicaciones previas ni posteriores.\n2. NUNCA inventas URLs. Si no tienes fuentes verificadas, usa array vacío [].\n3. La 'intro' DEBE ser EXTENSA y DETALLADA (mínimo 1500 caracteres, ideal 1800-2200). Desarrolla el contexto empresarial en profundidad: explica el vector de ataque, las consecuencias reales con ejemplos concretos del sector, el impacto económico y reputacional, y por qué esta amenaza es especialmente relevante para la empresa destinataria. Desarrolla el contexto empresarial, las consecuencias del riesgo y por qué es relevante para la empresa.\n4. Priorizas la precisión técnica sobre la creatividad cuando haya conflicto.\n5. Adaptas el nivel de detalle al perfil de audiencia especificado.\n6. Mantienes un tono profesional pero cercano, evitando alarmismo innecesario.\n7. Cumples estrictamente el formato JSON solicitado, sin campos adicionales.\n8. El 'subtitle' DEBE ser creativo, atractivo y ORIGINAL. NUNCA repitas literalmente el nombre del tema.\n9. Si el tema es \"Phishing\", el subtitle podría ser \"No muerdas el anzuelo: Protección contra ataques de ingeniería social\".\n10. Genera SIEMPRE exactamente 7 tips (consejos) por píldora. Nunca menos de 7. Cada tip debe tener un headline único y un body de al menos 80 palabras con contenido práctico y accionable.\n11. Genera SIEMPRE un quiz de opción múltiple de 2 a 3 preguntas (campo 'questions') que evalúen la comprensión de los tips generados. Cada pregunta tiene 'prompt' (el enunciado, una frase clara y concreta), 'options' (entre 2 y 4 respuestas posibles, solo una correcta) y 'correctIndex' (índice 0-based de la respuesta correcta dentro de 'options'). No repitas literalmente el texto de un tip como enunciado; formula la pregunta como un caso o situación práctica.",
-      "userTemplate": "Ejemplo de output válido para tema \"Phishing Empresarial\":\n\n{\n    \"subtitle\": \"No muerdas el anzuelo: Protección contra el phishing moderno\",\n    \"intro\": \"El phishing representa una de las amenazas cibernéticas más persistentes y evolutivas del panorama actual de seguridad empresarial. Lo que comenzó hace décadas como correos electrónicos obvios y mal escritos se ha transformado en campañas sofisticadas de ingeniería social que explotan la psicología humana y el contexto organizacional. En entornos corporativos modernos, los atacantes han perfeccionado técnicas de suplantación que imitan con precisión alarmante a compañeros de trabajo, directivos e incluso proveedores de confianza, utilizando dominios similares y contextos conversacionales robados de brechas previas. Un solo clic en un enlace malicioso puede desencadenar una cascada de compromisos: desde el robo de credenciales corporativas hasta la instalación de ransomware que paraliza operaciones críticas, pasando por el acceso lateral a sistemas financieros y bases de datos de clientes. Las consecuencias económicas y reputacionales son devastadoras, con costes promedio que superan el millón de euros en medianas empresas. Esta píldora de concienciación profundiza en las señales de alerta sutiles que distinguen un correo legítimo de una trampa diseñada por ciberdelincuentes, proporcionando marcos prácticos de verificación y protocolos de respuesta que todo empleado debe internalizar para proteger los activos digitales de la organización.\",\n    \"tips\": [\n        {\n            \"headline\": \"Verifica siempre el remitente real, no solo el nombre visible\",\n            \"body\": \"Los atacantes configuran nombres de display que imitan a directivos o IT support. Haz clic en el nombre del remitente para ver la dirección email real. Desconfía de dominios similares como 'company-it.com' en lugar de 'company.com'. Una dirección legítima de tu empresa nunca usará dominios externos para comunicaciones internas sensibles.\",\n            \"links\": []\n        },\n        {\n            \"headline\": \"No hagas clic en enlaces: navega directamente desde el navegador\",\n            \"body\": \"Si el correo pide acceder a un servicio (banco, RRHH, portal corporativo), escribe la URL directamente en la barra del navegador en lugar de hacer clic en el enlace. Los enlaces de phishing pueden redirigirte a sitios que imitan perfectamente la apariencia del portal legítimo pero capturan tus credenciales en el momento en que las introduces.\",\n            \"links\": []\n        },\n        {\n            \"headline\": \"Desconfía de la urgencia artificial y las amenazas\",\n            \"body\": \"Los mensajes de phishing suelen crear una falsa sensación de urgencia: 'Tu cuenta será bloqueada en 24 horas' o 'Acción requerida de inmediato'. Las empresas legítimas raramente exigen acciones críticas por correo con plazos muy cortos. Ante cualquier mensaje urgente, verifica su legitimidad contactando directamente al supuesto remitente por teléfono o por un canal independiente.\",\n            \"links\": []\n        },\n        {\n            \"headline\": \"Comprueba los archivos adjuntos antes de abrirlos\",\n            \"body\": \"Los adjuntos maliciosos pueden contener macros, ejecutables o exploits embebidos en documentos Office o PDF. Nunca abras un adjunto que no esperabas recibir, especialmente si el correo te pide 'habilitar macros' o 'activar el contenido'. En caso de duda, sube el archivo a VirusTotal o consulta con el equipo de IT antes de abrirlo bajo ningún concepto.\",\n            \"links\": []\n        },\n        {\n            \"headline\": \"Activa la autenticación en dos factores (2FA) en todas tus cuentas\",\n            \"body\": \"Incluso si un atacante consigue tu contraseña mediante phishing, el segundo factor de autenticación actúa como barrera adicional que bloquea el acceso. Usa aplicaciones de autenticación (Microsoft Authenticator, Google Authenticator) en lugar de SMS, ya que el SIM swapping puede comprometer la verificación por mensaje de texto. El 2FA es especialmente crítico para el correo corporativo y la VPN.\",\n            \"links\": []\n        },\n        {\n            \"headline\": \"Reporta los correos sospechosos en lugar de ignorarlos\",\n            \"body\": \"Si identificas un correo de phishing, no lo elimines simplemente: repórtalo al equipo de seguridad usando el botón habilitado en tu cliente de correo. Un correo reportado permite al equipo bloquear el dominio malicioso para todos los empleados y alertar a compañeros que puedan haber recibido el mismo mensaje. Tu reporte puede evitar que otros caigan en la trampa y proteger a toda la organización.\",\n            \"links\": []\n        },\n        {\n            \"headline\": \"Mantén tu software actualizado para cerrar las puertas que el phishing intenta abrir\",\n            \"body\": \"Muchos ataques de phishing no solo buscan credenciales: también intentan explotar vulnerabilidades en el navegador, visor de PDF o cliente de correo al renderizar el contenido malicioso. Mantener el sistema operativo, navegadores y aplicaciones actualizadas cierra estas vías de entrada. Activa las actualizaciones automáticas siempre que sea posible y aplica los parches de seguridad sin demora cuando aparezcan.\",\n            \"links\": []\n        }\n    ],\n    \"closing\": \"La prevención del phishing es responsabilidad de todos. Cuando tengas dudas sobre un correo sospechoso, contacta directamente al remitente por un canal alternativo antes de interactuar con el mensaje.\",\n    \"contactEmail\": \"seguridad@empresa.com\",\n    \"questions\": [\n        {\n            \"prompt\": \"Recibes un correo de 'IT-Soporte' pidiendo que confirmes tu contraseña haciendo clic en un enlace. ¿Qué deberías hacer primero?\",\n            \"options\": [\"Hacer clic y confirmar la contraseña de inmediato\", \"Verificar la dirección de remitente real y contactar a IT por un canal alternativo\", \"Reenviar el correo a un compañero para pedir opinión\"],\n            \"correctIndex\": 1\n        },\n        {\n            \"prompt\": \"Un correo urgente pide autorizar una transferencia bancaria antes de que termine el día. ¿Cuál es la señal de alerta más clara?\",\n            \"options\": [\"El remitente usa tu nombre completo\", \"La urgencia artificial y la presión de tiempo\", \"El correo incluye el logo de la empresa\"],\n            \"correctIndex\": 1\n        }\n    ]\n}\n\nAhora genera el contenido para el tema: {{topic_title}}\n\nSector al que va dirigido: {{sector}}\n\nPerfil de audiencia: {{audience}}\n{{intro_context}}\n\nRespondes EXCLUSIVAMENTE en JSON, sin markdown, sin texto antes del JSON."
-    }
-  },
-  "ai": {
-    "defaultStrategy": "openai",
-    "modules": {
-      "aegis": "openai",
-      "themis": "openai"
-    },
-    "strategies": {
-      "google": {
-        "model": ""
-      }
-    }
-  },
   "appVersion": "4.2",
-  "database": {
-    "isolation_level": "READ COMMITTED"
-  },
-  "email": {
-    "defaultStrategy": "smtp",
-    "modules": {
-      "aegis": "smtp",
-      "hygeia": "smtp"
-    },
-    "strategies": {
-      "smtp": {
-        "fromAddress": "noreply@tudominio.com",
-        "fromName": "Ellysia Awareness",
-        "host": "smtp-relay.brevo.com",
-        "port": 587,
-        "useTls": true
-      }
-    }
-  },
   "general": {
+    "publicUrl": "http://localhost:5173",
     "directories": {
       "logdir": "..",
       "tempdir": "./tmp/secapp"
     },
-    "publicUrl": "http://localhost:5173",
+    "security": {
+      "argon2": {
+        "memory_cost": 65536,
+        "parallelism": 4,
+        "time_cost": 3
+      },
+      "jwt": {
+        "access_token_expiry_minutes": 30,
+        "algorithm": "HS256",
+        "refresh_token_expiry_days": 7
+      },
+      "mfa": {
+        "challenge_expiry_minutes": 5,
+        "issuer": "Ellysia",
+        "max_challenge_attempts": 5,
+        "recovery_codes_count": 10
+      }
+    }
+  },
+  "infrastructure": {
+    "database": {
+      "isolation_level": "READ COMMITTED",
+      "pool_size": 10,
+      "max_overflow": 20,
+      "pool_timeout": 30
+    },
+    "redis": {
+      "db": 0,
+      "host": "localhost",
+      "port": 6379,
+      "socket_connect_timeout": 2
+    },
     "taskqueue": {
       "history_max_items": 200,
       "history_ttl_seconds": 3600,
       "max_workers": 4
     }
   },
-  "hygeia": {
-    "heartbeatIntervalSec": 15,
-    "offlineAfterMissed": 4,
-    "retentionDays": 30,
-    "retentionCron": "0 4 * * *",
-    "thresholds": {
-      "cpuPct":  { "warning": 85, "critical": 95, "sustainedHeartbeats": 3 },
-      "memPct":  { "warning": 85, "critical": 95, "sustainedHeartbeats": 3 },
-      "diskPct": { "warning": 85, "critical": 95 },
-      "swapPct": { "warning": 40, "critical": 70 }
-    },
-    "limits": {
-      "maxBodyBytes": 1048576,
-      "maxDecompressedBytes": 4194304,
-      "maxProcesses": 20,
-      "maxDiskMounts": 64,
-      "maxNetInterfaces": 64,
-      "maxSeriesPoints": 1000,
-      "minIntervalSec": 5,
-      "clockSkewSec": 300,
-      "maxAssetsPerUser": 500,
-      "maxInventoryItems": 2000
-    }
-  },
-  "iris": {
-    "data": {
-      "action_verbs": [
-        "verify your account",
-        "verify your identity",
-        "verify your password",
-        "verify your email",
-        "verify your information",
-        "verify your payment",
-        "confirm your account",
-        "confirm your identity",
-        "confirm your password",
-        "confirm your information",
-        "confirm your payment",
-        "confirm your billing",
-        "confirm your details",
-        "update your account",
-        "update your billing",
-        "update your payment",
-        "update your information",
-        "update your password",
-        "reactivate your account",
-        "re-activate your account",
-        "unlock your account",
-        "restore your account",
-        "secure your account",
-        "validate your account",
-        "click here to verify",
-        "click the link below",
-        "click below to",
-        "log in to verify",
-        "sign in to confirm",
-        "verifica tu cuenta",
-        "verifica tu identidad",
-        "verifica tu contraseña",
-        "verifica tu correo",
-        "verifica tu información",
-        "verifica tu pago",
-        "confirma tu cuenta",
-        "confirma tu identidad",
-        "confirma tu contraseña",
-        "confirma tu información",
-        "confirma los datos de su cuenta",
-        "actualiza tu cuenta",
-        "actualiza tu información",
-        "actualiza tu contraseña",
-        "actualiza tus datos",
-        "actualiza tu pago",
-        "reactiva tu cuenta",
-        "desbloquea tu cuenta",
-        "asegura tu cuenta",
-        "valida tu cuenta",
-        "haz clic aquí para verificar",
-        "inicia sesión para verificar"
-      ],
-      "alarming_emojis": [
-        "‼",
-        "⁉",
-        "❌",
-        "⚠"
-      ],
-      "bec_phrases": [
-        "wire transfer",
-        "wire the funds",
-        "initiate a wire",
-        "send the payment",
-        "process the payment",
-        "urgent payment",
-        "outstanding invoice",
-        "overdue invoice",
-        "pay this invoice",
-        "outstanding balance",
-        "settle the balance",
-        "make the deposit",
-        "send gift cards",
-        "buy gift cards",
-        "purchase gift cards",
-        "send bitcoin",
-        "send crypto",
-        "wire cryptocurrency",
-        "usdt transfer",
-        "change the bank account",
-        "update our banking details",
-        "new bank account",
-        "new routing number",
-        "new wire instructions",
-        "change of vendor payment",
-        "vendor banking update",
-        "confidential transaction",
-        "do not notify",
-        "keep this confidential",
-        "do this while i'm out",
-        "while i'm in a meeting",
-        "w-2 form",
-        "w2 form",
-        "employee tax forms",
-        "1099 form",
-        "transferencia urgente",
-        "transferencia bancaria urgente",
-        "realizar el pago",
-        "procesar el pago",
-        "pago pendiente",
-        "factura pendiente",
-        "factura vencida",
-        "saldo pendiente",
-        "comprar tarjetas de regalo",
-        "tarjetas de regalo",
-        "enviar bitcoin",
-        "transferencia cripto",
-        "cambiar la cuenta bancaria",
-        "nueva cuenta bancaria",
-        "número de ruta",
-        "datos bancarios nuevos",
-        "no notifiques",
-        "no informar a",
-        "mientras estoy en reunión"
-      ],
-      "brand_trusted_domains": [
-        {
-          "domains": [
-            "microsoft.com",
-            "microsoftsupport.com",
-            "office.com",
-            "office365.com",
-            "outlook.com",
-            "hotmail.com",
-            "live.com",
-            "azure.com",
-            "msn.com",
-            "windows.com",
-            "xbox.com",
-            "microsoftonline.com",
-            "sharepoint.com",
-            "teams.microsoft.com"
-          ],
-          "keywords": [
-            "microsoft",
-            "windows",
-            "office 365",
-            "microsoft 365",
-            "outlook",
-            "azure",
-            "msn"
-          ]
-        },
-        {
-          "domains": [
-            "paypal.com",
-            "paypal.de",
-            "paypal.fr",
-            "paypal.es",
-            "paypal.com.mx",
-            "paypal.co.uk"
-          ],
-          "keywords": [
-            "paypal"
-          ]
-        },
-        {
-          "domains": [
-            "netflix.com",
-            "nflx.com"
-          ],
-          "keywords": [
-            "netflix"
-          ]
-        },
-        {
-          "domains": [
-            "amazon.com",
-            "amazon.co.uk",
-            "amazon.de",
-            "amazon.fr",
-            "amazon.es",
-            "amazon.it",
-            "amazon.ca",
-            "amazon.co.jp",
-            "amazonaws.com",
-            "aws.amazon.com"
-          ],
-          "keywords": [
-            "amazon",
-            "amazon prime",
-            "amazon web services",
-            "aws"
-          ]
-        },
-        {
-          "domains": [
-            "google.com",
-            "gmail.com",
-            "youtube.com",
-            "googlemail.com",
-            "googleusercontent.com",
-            "googleapis.com"
-          ],
-          "keywords": [
-            "google",
-            "gmail",
-            "youtube",
-            "google drive"
-          ]
-        },
-        {
-          "domains": [
-            "apple.com",
-            "icloud.com",
-            "me.com",
-            "mac.com"
-          ],
-          "keywords": [
-            "apple",
-            "icloud",
-            "itunes",
-            "app store",
-            "apple store"
-          ]
-        },
-        {
-          "domains": [
-            "facebook.com",
-            "fb.com",
-            "fbcdn.net",
-            "meta.com",
-            "instagram.com",
-            "whatsapp.com",
-            "messenger.com"
-          ],
-          "keywords": [
-            "facebook",
-            "meta",
-            "instagram",
-            "whatsapp",
-            "messenger"
-          ]
-        },
-        {
-          "domains": [
-            "linkedin.com",
-            "linkedin-mail.com"
-          ],
-          "keywords": [
-            "linkedin"
-          ]
-        },
-        {
-          "domains": [
-            "twitter.com",
-            "x.com"
-          ],
-          "keywords": [
-            "twitter",
-            "x.com"
-          ]
-        },
-        {
-          "domains": [
-            "dropbox.com",
-            "dropboxmail.com"
-          ],
-          "keywords": [
-            "dropbox"
-          ]
-        },
-        {
-          "domains": [
-            "adobe.com",
-            "adobeemail.com"
-          ],
-          "keywords": [
-            "adobe"
-          ]
-        },
-        {
-          "domains": [
-            "bankofamerica.com",
-            "ml.com"
-          ],
-          "keywords": [
-            "bank of america",
-            "boa"
-          ]
-        },
-        {
-          "domains": [
-            "chase.com",
-            "jpmorgan.com"
-          ],
-          "keywords": [
-            "chase",
-            "jpmorgan"
-          ]
-        },
-        {
-          "domains": [
-            "wellsfargo.com"
-          ],
-          "keywords": [
-            "wells fargo"
-          ]
-        },
-        {
-          "domains": [
-            "bbva.com",
-            "bbva.com.mx",
-            "bbvanet.com.mx"
-          ],
-          "keywords": [
-            "bbva",
-            "bancomer"
-          ]
-        },
-        {
-          "domains": [
-            "santander.com",
-            "santander.com.mx",
-            "santander.es",
-            "openbank.com"
-          ],
-          "keywords": [
-            "santander"
-          ]
-        },
-        {
-          "domains": [
-            "mercadopago.com",
-            "mercadolibre.com",
-            "mercadolibre.com.mx"
-          ],
-          "keywords": [
-            "mercadopago",
-            "mercadolibre"
-          ]
-        }
-      ],
-      "canonical_brands": [
-        "microsoft",
-        "paypal",
-        "netflix",
-        "amazon",
-        "google",
-        "apple",
-        "facebook",
-        "instagram",
-        "linkedin",
-        "twitter",
-        "whatsapp",
-        "adobe",
-        "dropbox",
-        "spotify",
-        "yahoo",
-        "outlook",
-        "hotmail",
-        "gmail",
-        "youtube",
-        "tiktok",
-        "snapchat",
-        "pinterest",
-        "telegram",
-        "signal",
-        "discord",
-        "github",
-        "gitlab",
-        "bitbucket",
-        "salesforce",
-        "oracle",
-        "ibm",
-        "intel",
-        "nvidia",
-        "amd",
-        "cisco",
-        "vmware",
-        "sap",
-        "accenture",
-        "deloitte",
-        "pwc",
-        "kpmg",
-        "ey",
-        "mercadopago",
-        "bbva",
-        "santander",
-        "banamex",
-        "bancomer",
-        "hsbc",
-        "amex",
-        "mastercard",
-        "visa",
-        "wellsfargo",
-        "chase",
-        "bankofamerica",
-        "alibaba",
-        "aliexpress",
-        "ebay",
-        "shopify",
-        "etsy",
-        "walmart",
-        "target",
-        "costco",
-        "homedepot",
-        "bestbuy",
-        "nike",
-        "adidas",
-        "zara",
-        "hm",
-        "uniqlo",
-        "uber",
-        "lyft",
-        "airbnb",
-        "booking",
-        "expedia",
-        "hulu",
-        "disney",
-        "hbomax",
-        "primevideo",
-        "wechat",
-        "messenger",
-        "skype",
-        "zoom",
-        "teams",
-        "slack",
-        "notion",
-        "trello",
-        "wordpress",
-        "wix",
-        "godaddy",
-        "cloudflare",
-        "digitalocean",
-        "aws",
-        "azure",
-        "gcp"
-      ],
-      "credential_phrases": [
-        "verify your password",
-        "confirm your password",
-        "enter your password",
-        "verify your account",
-        "your account has been locked",
-        "update your billing",
-        "confirm your identity",
-        "log in to verify",
-        "click the link below to verify",
-        "your account will be suspended",
-        "unusual activity detected",
-        "wire transfer",
-        "payment is overdue",
-        "outstanding invoice attached",
-        "verify your social security",
-        "update your payment information",
-        "confirma tu contraseña",
-        "verifica tu cuenta",
-        "tu cuenta ha sido bloqueada",
-        "actualiza tu información de pago",
-        "transferencia bancaria urgente"
-      ],
-      "dangerous_extensions": [
-        ".exe",
-        ".dll",
-        ".scr",
-        ".bat",
-        ".cmd",
-        ".com",
-        ".msi",
-        ".msp",
-        ".mst",
-        ".cpl",
-        ".pif",
-        ".gadget",
-        ".js",
-        ".jse",
-        ".vbs",
-        ".vbe",
-        ".ps1",
-        ".psm1",
-        ".psd1",
-        ".ps1xml",
-        ".wsf",
-        ".wsh",
-        ".wsc",
-        ".sct",
-        ".hta",
-        ".py",
-        ".rb",
-        ".pl",
-        ".sh",
-        ".bash",
-        ".zsh",
-        ".docm",
-        ".xlsm",
-        ".pptm",
-        ".dotm",
-        ".xlam",
-        ".xla",
-        ".ppa",
-        ".ppam",
-        ".sldm",
-        ".lnk",
-        ".url",
-        ".website",
-        ".iso",
-        ".img",
-        ".vhd",
-        ".vhdx",
-        ".vmdk",
-        ".ova",
-        ".ovf",
-        ".jar",
-        ".reg",
-        ".appref-ms",
-        ".settingcontent-ms",
-        ".searchconnector-ms",
-        ".application",
-        ".xps"
-      ],
-      "esp_msgid_domains": [
-        "amazonses.com",
-        "sendgrid.net",
-        "sendgrid.com",
-        "mailchimp.com",
-        "mcsv.net",
-        "rsgsv.net",
-        "mcdlv.net",
-        "mandrillapp.com",
-        "mailgun.org",
-        "mailgun.net",
-        "sparkpostmail.com",
-        "mtasv.net",
-        "sendinblue.com",
-        "sendibm1.com",
-        "smtp.sendinblue.com",
-        "postmarkapp.com",
-        "mtaroutes.com",
-        "mailjet.com",
-        "mlsend.com",
-        "sailthru.com",
-        "exct.net",
-        "cmail19.com",
-        "cmail20.com",
-        "icpbounce.com",
-        "infusionmail.com",
-        "klaviyomail.com",
-        "constantcontact.com",
-        "ctctemail.com",
-        "hubspotemail.net",
-        "outlook.com",
-        "protection.outlook.com"
-      ],
-      "esp_tracker_domains": [
-        "sendgrid.net",
-        "mailgun.org",
-        "mailchimp.com",
-        "constantcontact.com",
-        "hubspot.com",
-        "hubspotusercontent-na1.net",
-        "hubspotusercontent-eu1.net",
-        "marketo.com",
-        "eloqua.com",
-        "exacttarget.com",
-        "responsys.net",
-        "mailerlite.com",
-        "mailjet.com",
-        "postmarkapp.com",
-        "smtp.com",
-        "amazonaws.com",
-        "cloudfront.net",
-        "googleusercontent.com",
-        "s3.amazonaws.com",
-        "mailchimpusercontent.com",
-        "list-manage.com",
-        "mktoresp.com",
-        "en25.com",
-        "s4.exacttarget.com",
-        "s7.addthis.com",
-        "addthis.com",
-        "tracking.mi-al.it",
-        "mta-in.com",
-        "rs6.net",
-        "t.sendgrid.net",
-        "click.mi-al.it",
-        "link.mi-al.it",
-        "open.mi-al.it",
-        "akamaized.net",
-        "akamaihd.net",
-        "fastly.net",
-        "cloudinary.com",
-        "imgix.net"
-      ],
-      "exotic_charsets": [
-        "utf-7",
-        "unicode-1-1-utf-7",
-        "csunicode11utf7",
-        "x-unicode-2-0-utf-7"
-      ],
-      "free_provider_domains": [
-        "gmail.com",
-        "googlemail.com",
-        "outlook.com",
-        "hotmail.com",
-        "live.com",
-        "msn.com",
-        "yahoo.com",
-        "yahoo.com.mx",
-        "yahoo.es",
-        "ymail.com",
-        "aol.com",
-        "aim.com",
-        "protonmail.com",
-        "proton.me",
-        "mail.com",
-        "email.com",
-        "icloud.com",
-        "me.com",
-        "zoho.com",
-        "yandex.com",
-        "gmx.com",
-        "gmx.es",
-        "tutanota.com",
-        "tutanota.de",
-        "fastmail.com",
-        "rediffmail.com",
-        "mail.ru"
-      ],
-      "generic_greetings": [
-        "dear customer",
-        "dear user",
-        "dear member",
-        "dear sir",
-        "dear madam",
-        "dear sir or madam",
-        "dear sir/madam",
-        "dear account holder",
-        "dear valued customer",
-        "dear client",
-        "dear subscriber",
-        "dear email owner",
-        "hello dear",
-        "hello customer",
-        "hello user",
-        "attention customer",
-        "attention user",
-        "important notice to all",
-        "to our valued customer",
-        "to whom it may concern",
-        "estimado cliente",
-        "estimado usuario",
-        "estimado miembro",
-        "estimado cliente de",
-        "distinguido cliente",
-        "querido usuario",
-        "hola cliente",
-        "hola usuario",
-        "atención cliente",
-        "atención usuario",
-        "a quien corresponda",
-        "a todos los usuarios",
-        "notificación para todos",
-        "apreciable cliente",
-        "apreciable usuario"
-      ],
-      "high_signal_keywords": [
-        "action required",
-        "acción requerida",
-        "act now",
-        "actúa ahora",
-        "verify now",
-        "verifica ahora",
-        "verification required",
-        "verificación requerida",
-        "account suspended",
-        "cuenta suspendida",
-        "account blocked",
-        "cuenta bloqueada",
-        "password expired",
-        "contraseña expirada",
-        "security alert",
-        "alerta de seguridad",
-        "unauthorized access",
-        "acceso no autorizado",
-        "confirm your account",
-        "confirma tu cuenta",
-        "last warning",
-        "último aviso",
-        "final notice",
-        "aviso final",
-        "suspension notice",
-        "aviso de suspensión",
-        "reactivate",
-        "reactivar",
-        "billing issue",
-        "problema de facturación",
-        "payment failed",
-        "pago fallido",
-        "claim your prize",
-        "reclama tu premio",
-        "you won",
-        "has ganado"
-      ],
-      "homoglyph_map": {
-        "0": "o",
-        "1": "l",
-        "2": "z",
-        "3": "e",
-        "4": "a",
-        "5": "s",
-        "7": "t",
-        "8": "b",
-        "9": "g",
-        "$": "s",
-        "@": "a",
-        "€": "e"
+  "tools": {
+    "scribe": {
+      "defaultStrategy": "openai",
+      "modules": {
+        "aegis": "openai",
+        "themis": "openai"
       },
-      "low_signal_keywords": [
-        "urgent",
-        "urgente",
-        "immediate",
-        "inmediato",
-        "password reset",
-        "restablecer contraseña",
-        "limited time",
-        "tiempo limitado",
-        "expires soon",
-        "vence pronto",
-        "update required",
-        "actualización requerida",
-        "click here",
-        "haz clic aquí",
-        "download now",
-        "descarga ahora",
-        "exclusive offer",
-        "oferta exclusiva",
-        "free",
-        "gratis",
-        "dear customer",
-        "estimado cliente",
-        "dear user",
-        "estimado usuario"
-      ],
-      "macro_extensions": [
-        ".docm",
-        ".xlsm",
-        ".pptm",
-        ".dotm",
-        ".xlam",
-        ".ppam",
-        ".sldm"
-      ],
-      "multi_level_tlds": [
-        "co.uk",
-        "org.uk",
-        "gov.uk",
-        "ac.uk",
-        "co.jp",
-        "com.mx",
-        "com.br",
-        "com.ar",
-        "com.au",
-        "com.es",
-        "co.in",
-        "co.nz",
-        "com.tr",
-        "com.co"
-      ],
-      "redirect_params": [
-        "url",
-        "u",
-        "redirect",
-        "redirect_uri",
-        "redirecturl",
-        "redirect_url",
-        "redir",
-        "redirurl",
-        "r",
-        "return",
-        "returnurl",
-        "return_url",
-        "next",
-        "nexturl",
-        "next_url",
-        "continue",
-        "dest",
-        "destination",
-        "target",
-        "to",
-        "link",
-        "goto",
-        "go",
-        "out",
-        "view",
-        "ref",
-        "referer",
-        "forward",
-        "forwarding",
-        "external",
-        "site",
-        "page",
-        "load",
-        "loadurl"
-      ],
-      "shortener_domains": [
-        "bit.ly",
-        "tinyurl.com",
-        "t.co",
-        "goo.gl",
-        "ow.ly",
-        "is.gd",
-        "buff.ly",
-        "rebrand.ly",
-        "cutt.ly",
-        "shorturl.at",
-        "rb.gy",
-        "tiny.cc",
-        "lnkd.in",
-        "soo.gd",
-        "s.id",
-        "v.gd"
-      ],
-      "subdomain_action_words": [
-        "login",
-        "log-in",
-        "signin",
-        "sign-in",
-        "secure",
-        "security",
-        "verify",
-        "verification",
-        "verification1",
-        "account",
-        "accounts",
-        "support",
-        "billing",
-        "invoice",
-        "update",
-        "confirm",
-        "auth",
-        "authenticate",
-        "service",
-        "help",
-        "alert",
-        "alerts",
-        "notification",
-        "notifications",
-        "online",
-        "web",
-        "portal",
-        "office",
-        "365",
-        "mail",
-        "team",
-        "reset",
-        "unlock",
-        "recovery"
-      ],
-      "suspicious_mime_types": [
-        "application/x-msdownload",
-        "application/x-msdos-program",
-        "application/x-msi",
-        "application/x-javascript",
-        "application/javascript",
-        "application/x-vb",
-        "application/x-vbs",
-        "application/x-powershell",
-        "application/x-sh",
-        "application/x-bat",
-        "application/x-ms-shortcut",
-        "application/x-iso9660-image",
-        "application/java-archive",
-        "application/octet-stream"
-      ],
-      "suspicious_tlds": [
-        ".tk",
-        ".ml",
-        ".ga",
-        ".cf",
-        ".gq",
-        ".xyz",
-        ".club",
-        ".top",
-        ".loan",
-        ".work",
-        ".click",
-        ".zip",
-        ".download",
-        ".review",
-        ".country",
-        ".kim",
-        ".men",
-        ".bid",
-        ".trade",
-        ".webcam",
-        ".party",
-        ".date",
-        ".science",
-        ".racing",
-        ".win",
-        ".faith",
-        ".stream",
-        ".accountant",
-        ".cricket",
-        ".pro",
-        ".lol",
-        ".mom",
-        ".bar",
-        ".name",
-        ".info",
-        ".mobi",
-        ".pw"
-      ],
-      "undisclosed_patterns": [
-        "undisclosed",
-        "undisclosed-recipients",
-        "undisclosed recipients",
-        "recipients not shown",
-        "hidden recipients",
-        "destinatarios no mostrados",
-        "destinatarios ocultos",
-        "para no mostrado"
-      ],
-      "url_phishing_keywords": [
-        "login",
-        "log-in",
-        "signin",
-        "sign-in",
-        "verify",
-        "verification",
-        "secure",
-        "security",
-        "account",
-        "update",
-        "confirm",
-        "password",
-        "credential",
-        "authenticate",
-        "unlock",
-        "recovery",
-        "billing",
-        "invoice",
-        "wallet",
-        "suspended"
-      ]
-    },
-    "directories": {
-      "output": "data/iris/output"
-    },
-    "legitimate_threshold": 80,
-    "maxConnectionsPerUser": 5,
-    "maxIngestedPerDay": 200,
-    "min_headers": 2,
-    "pollIntervalMinutes": 5,
-    "prompts": {
-      "summary": {
-        "system": "Eres un analista anti-phishing especializado en interpretar los resultados de un motor de reglas heurísticas (Iris) que analiza cabeceras y contenido de correo electrónico.\nTu tarea es producir una narrativa CALIBRADA: ni alarmista ni complaciente. Respondes EXCLUSIVAMENTE en el formato JSON indicado. No añades texto fuera del JSON.\n\n════════════════════════════════════════\nPRINCIPIO FUNDAMENTAL: EXPLICA LO QUE YA SE DETECTÓ, NO INVENTES NADA NUEVO\n════════════════════════════════════════\nRecibes el veredicto, el score y la lista de reglas que fallaron (con su categoría, penalización y recomendación técnica) que el motor de Iris ya calculó de forma determinista.\nTu trabajo NO es re-evaluar el riesgo ni inventar hallazgos que no aparezcan en los datos — es traducir esas señales técnicas en una narrativa legible para un analista o un usuario no técnico, e inferir la intención más probable del atacante a partir de la COMBINACIÓN de señales presentes.\nNUNCA inventes dominios, URLs, remitentes o técnicas que no figuren en los datos proporcionados. Si el veredicto es Legitimate, dilo con la misma calibración: no busques problemas donde el motor no encontró ninguno.\n\n════════════════════════════════════════\nCÓMO INFERIR attacker_intent\n════════════════════════════════════════\nBasándote en las categorías de reglas falladas, identifica el patrón de ataque más probable:\n- Fallos de autenticación (SPF/DKIM/DMARC/Domain Alignment) + suplantación de marca → robo de credenciales suplantando una marca conocida.\n- BEC Wire Transfer Pattern / dominio corporativo + lenguaje financiero → fraude del CEO / desvío de pago.\n- Enlaces/QR sospechosos + urgencia → phishing de credenciales con cebo de clic.\n- Adjuntos peligrosos/macros → distribución de malware.\n- Solo señales débiles o dispersas sin patrón claro → indica explícitamente que no hay un patrón de ataque dominante, no fuerces una narrativa.\n\n════════════════════════════════════════\nNIVELES DE CONFIDENCE VÁLIDOS\n════════════════════════════════════════\nALTA | MEDIA | BAJA\n- ALTA: gates de alta confianza disparados (gate_reasons no vacío) o múltiples señales fuertes coincidentes.\n- MEDIA: veredicto Suspicious con señales moderadas, sin gate de alta confianza.\n- BAJA: score cercano al umbral, señales débiles o contradictorias entre sí.\n\nFORMATO DE RESPUESTA (JSON estricto, sin texto antes ni después):\n{\n    \"executive_summary\": \"3-4 frases en español dirigidas a quien recibió el correo: qué se detectó, por qué es (o no es) sospechoso, sin jerga innecesaria.\",\n    \"attacker_intent\": \"1-2 frases describiendo el objetivo más probable del atacante según las señales presentes, o indicando explícitamente que no hay patrón claro si el veredicto es Legitimate o las señales son dispersas.\",\n    \"recommendations\": [\"acción concreta 1\", \"acción concreta 2\"],\n    \"confidence\": \"ALTA|MEDIA|BAJA\"\n}",
-        "userTemplate": "Analiza el siguiente resultado de un análisis Iris de correo electrónico.\n\nVEREDICTO: {{verdict}}\nSCORE: {{score}} / 100\n\nRAZONES DE GATES DE ALTA CONFIANZA (si vacío, ningún gate se disparó):\n{{gate_reasons_json}}\n\nREGLAS QUE FALLARON (nombre, categoría, penalización, recomendación técnica):\n{{failed_rules_json}}\n\nFORMATO DE RESPUESTA (JSON estricto, sin ningún texto antes ni después del JSON):\n{\n    \"executive_summary\": \"...\",\n    \"attacker_intent\": \"...\",\n    \"recommendations\": [\"...\"],\n    \"confidence\": \"ALTA|MEDIA|BAJA\"\n}"
-      }
-    },
-    "suspicious_threshold": 55
-  },
-  "redis": {
-    "db": 0,
-    "host": "localhost",
-    "port": 6379,
-    "socket_connect_timeout": 2
-  },
-  "security": {
-    "argon2": {
-      "memory_cost": 65536,
-      "parallelism": 4,
-      "time_cost": 3
-    },
-    "jwt": {
-      "access_token_expiry_minutes": 30,
-      "algorithm": "HS256",
-      "refresh_token_expiry_days": 7
-    },
-    "mfa": {
-      "challenge_expiry_minutes": 5,
-      "issuer": "Ellysia",
-      "max_challenge_attempts": 5,
-      "recovery_codes_count": 10
-    }
-  },
-  "themis": {
-    "areLocalIpsAllowed": true,
-    "directories": {
-      "csv": "data/themis/csv",
-      "output": "data/themis/output",
-      "resources": "../resources/themis"
-    },
-    "enabled": true,
-    "folders": {
-      "defaultFolderName": "Sin carpeta"
-    },
-    "history": {
-      "maxScans": 5
-    },
-    "taskDefaults": {
-      "timeout": 200000
-    },
-    "hostReachabilityCheck": {
-      "enabled": true,
-      "port": 80,
-      "timeout": 3
-    },
-    "kb": {
-      "enabled": true,
-      "nvdWindowDays": 8,
-      "sources": {
-        "epss": "https://epss.cyentia.com/epss_scores-current.csv.gz",
-        "kev": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
-        "nvd": "https://services.nvd.nist.gov/rest/json/cves/2.0"
-      },
-      "syncCron": "0 3 * * *"
-    },
-    "lybra": {
-      "activeChecks": true,
-      "colorPalette": {
-        "black": "#1a2410",
-        "dark": "#4a6132",
-        "light": "#d4e8c4",
-        "main": "#7ca163",
-        "secondary": "#a8c98f",
-        "white": "#f3f8ee"
-      },
-      "fingerprintingEnabled": true,
-      "ingest": {
-        "enabled": false,
-        "minSeverity": "MEDIUM",
-        "maxChecks": 300
-      },
-      "prompts": {
-        "system": "Eres un analista senior de seguridad ofensiva redactando la sección ejecutiva de un informe de pentest. Analizas la salida ya estructurada del motor de detección Lybra: cada hallazgo trae su CVE, CVSS, EPSS (probabilidad de explotación en 30 días), si está en la lista CISA KEV (explotación activa confirmada), y si fue 'confirmado' activamente o es una 'hipótesis' por versión de banner.\n\nREGLAS ABSOLUTAS:\n1. Generas EXCLUSIVAMENTE JSON válido, sin markdown, sin texto antes ni después.\n2. NUNCA inventas un CVE, CVSS o EPSS que no esté en los datos proporcionados. Si un hallazgo no trae CVSS, no le asignes uno.\n3. Un hallazgo 'confirmado=true' es un hecho verificado; uno 'confirmado=false' es una hipótesis por versión que puede ser un falso positivo (backport). Nunca los trates con el mismo nivel de certeza en el texto.\n4. 'en_kev=true' es la señal más fuerte de urgencia (se explota activamente en el mundo real) y debe mencionarse explícitamente si aparece en algún hallazgo.\n5. El 'risk_level' es un techo, no un promedio: si existe al menos un hallazgo confirmado o en KEV con CVSS alto, el nivel debe reflejarlo aunque el resto de hallazgos sean informativos.\n6. Las 'recommendations' deben ser accionables y concretas (qué actualizar, qué cerrar, qué comprobar), nunca genéricas tipo 'mejorar la seguridad'.\n7. Si prácticamente todos los hallazgos son de categoría 'open_port' sin CVEs, dilo explícitamente: es un mapa de superficie, no una lista de vulnerabilidades.\n\nFORMATO DE RESPUESTA (JSON estricto):\n{\n  \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n  \"executive_summary\": \"3-5 frases en español, para un lector no técnico: qué se encontró y por qué importa.\",\n  \"technical_analysis\": \"Análisis técnico más detallado, citando los CVEs/CVSS/EPSS concretos de los datos.\",\n  \"recommendations\": [\n    {\"title\": \"...\", \"description\": \"...\", \"priority\": \"ALTA|MEDIA|BAJA\", \"remediation\": \"acción concreta\", \"cve_refs\": [\"CVE-YYYY-NNNNN\"]}\n  ],\n  \"conclusions\": \"1-2 frases de cierre.\"\n}",
-        "userTemplate": "Escaneo Lybra sobre {{target}} (exposición: {{exposure}}), iniciado el {{started}}.\n\nTotal de hallazgos: {{total_findings}} | Confirmados activamente: {{confirmed_count}} | En CISA KEV: {{kev_count}}\n\nHallazgos (los confirmados y los de KEV van siempre incluidos; el resto es una muestra representativa):\n{{findings_json}}\n\nGenera el análisis en el formato JSON indicado en las instrucciones del sistema."
-      }
-    },
-    "nikto": {
-      "colorPalette": {
-        "black": "#4b2500",
-        "dark": "#8e3d0a",
-        "light": "#f9b49a",
-        "main": "#c75b12",
-        "secondary": "#fa8072",
-        "white": "#fff5f0"
-      },
-      "prompts": {
-        "system": "Eres un analista de seguridad web especializado en interpretar resultados de escáneres automáticos (Nikto).\nTu tarea es producir evaluaciones CALIBRADAS: ni alarmistas ni complacientes.\nRespondes EXCLUSIVAMENTE en el formato JSON indicado. No añades texto fuera del JSON.\n\n════════════════════════════════════════\nPRINCIPIO FUNDAMENTAL: CONTROLS, NOT COUNTS\n════════════════════════════════════════\nNikto reporta instancias, no vulnerabilidades independientes.\n- 12 directorios accesibles en robots.txt = UN control de configuración con deficiencias.\n- 2 cookies sin HttpOnly = UN problema de gestión de sesiones.\n- Nunca sumes instancias para escalar el riesgo. El riesgo lo determina el TIPO de control afectado, no el número de hallazgos.\n\n════════════════════════════════════════\nCONTROLS EVALUATED AND THEIR INTRINSIC RISK\n════════════════════════════════════════\n\n[TRANSPORT_SECURITY] — Base Risk: HIGH when failing\n- SSL certificate doesn't match hostname → risk HIGH (allows MITM if attacker is positioned)\n- EXCEPTION: If certificate is clearly a hosting panel placeholder (e.g., Plesk, cPanel, DirectAdmin),\nthe actual risk is MEDIUM because context indicates server default config, not vulnerable communication.\nIndicate this distinction in analysis.\n- Absence of HSTS → risk LOW-MEDIUM (facilitates downgrade, not direct exploitation)\n\n[SESSION_MANAGEMENT] — Base Risk: MEDIUM when failing\n- Session cookie without HttpOnly flag → risk MEDIUM (session theft via XSS requires prior XSS vulnerability)\n- Cookie without Secure flag in HTTPS context → risk LOW (cookie transmitted only via HTTPS anyway)\n- RULE: Absence of HttpOnly is MEDIUM, never HIGH, unless there's confirmed XSS evidence.\n\n[CLIENT_PROTECTION] — Base Risk: LOW when failing\n- Absence of X-Frame-Options / CSP / X-Content-Type-Options → risk LOW (hardening, not critical protection)\n- Presence of X-Frame-Options SAMEORIGIN is a CORRECT control. Don't report it as deficient.\n\n[ACCESS_CONTROL] — Base Risk: MEDIUM when failing\n- Exposed backup files, sensitive dirs → risk MEDIUM (information disclosure)\n- TRACE/TRACK methods enabled → risk LOW (hardening)\n\n[CONFIGURATION] — Base Risk: LOW when failing\n- Exposed config files, server signatures → risk LOW (information disclosure)\n\n════════════════════════════════════════\nSEVERIDAD ORIGINAL DE NIKTO — NUNCA REBAJAR\n════════════════════════════════════════\nCada control te llega con el campo \"severidad_original_nikto\": la severidad que el propio escáner Nikto (CRITICAL/HIGH/MEDIUM/LOW/INFO) ya asignó a sus hallazgos, y \"techo_teorico\" ya incorpora esa severidad como suelo mínimo.\nSi \"severidad_original_nikto\" contiene CRITICAL o HIGH (p.ej. credenciales expuestas como .htpasswd/.bash_history, o un panel admin vulnerable), ese control NO puede evaluarse por debajo de su techo_teorico ni diluirse en el resumen ejecutivo. Debes nombrarlo explícitamente en technical_analysis y generar una recomendación de prioridad ALTA para él, salvo que documentes evidencia concreta de que el hallazgo es un falso positivo.\nEl riesgo agregado (CONTROLS, NOT COUNTS) sigue aplicando entre controles, pero nunca sirve para esconder un hallazgo individual que Nikto ya calificó como CRITICAL/HIGH.\n\n════════════════════════════════════════\nNIVELES DE RIESGO VALIDOS\n════════════════════════════════════════\nCRÍTICO | ALTO | MEDIO | BAJO | INFORMATIVO\n\nFORMATO DE RECOMENDACIONES:\n[\n    {\n        \"title\": \"Título descriptivo y accionable\",\n        \"description\": \"Qué vulnerabilidad/condición se detecta y por qué es relevante\",\n        \"remediation\": \"Cómo mitigarla (no genérico)\",\n        \"priority\": \"ALTA|MEDIA|BAJA\"\n    }\n]\n\nNo inventes vulnerabilidades. Si no hay hallazgos significativos, indica risk_level INFORMATIVO.",
-        "userTemplate": "Analiza el estado de seguridad del siguiente objetivo escaneado con Nikto.\n\nOBJETIVO: {{target}}\nFECHA DEL ESCANEO: {{started}}\n\nRESUMEN DE MÉTRICAS:\n- Hallazgos brutos totales: {{total_raw}}\n- Filtrados como ruido técnico: {{noise_filtered}}\n- Hallazgos válidos agrupados por control: {{effective_findings}}\n\nESTADO POR CONTROL (el campo \"techo_teorico\" indica el impacto máximo posible del control,\nNO el nivel de riesgo final — ese debes determinarlo tú aplicando las reglas del sistema):\n{{controls_json}}\n\n--- RAZONAMIENTO PREVIO (no incluir en el JSON de salida) ---\nAntes de elegir risk_level, responde internamente estas preguntas:\n0. Revisa \"severidad_original_nikto\" en cada control. ¿Alguno contiene CRITICAL o HIGH?\nSi sí → ese control fija un suelo obligatorio (CRÍTICO/ALTO respectivamente) que risk_level no puede ignorar, y debe mencionarse explícitamente en technical_analysis con una recomendación ALTA asociada.\n1. ¿El certificado inválido corresponde a un placeholder de hosting (Plesk, cPanel, DirectAdmin)?\nSi sí → transport_security es MEDIO como máximo, nunca ALTO.\n2. ¿Hay evidencia de XSS confirmado que explote las cookies sin HttpOnly?\nSi no → session_management es MEDIO como máximo.\n3. ¿Hay métodos HTTP peligrosos con evidencia funcional de escritura o ejecución?\nSi no → access_control no escala el riesgo.\n4. Con esas respuestas, consulta la tabla de niveles del sistema y elige el nivel justificado.\n--- FIN DEL RAZONAMIENTO ---\n\nFORMATO DE RESPUESTA (JSON estricto, sin ningún texto antes ni después del JSON):\n{{\n    \"executive_summary\": \"Descripción del perfil de seguridad en 3-4 frases. Contextualiza el tipo de aplicación detectada, los controles con deficiencias y su impacto general. Sin conteos de hallazgos individuales.\",\n    \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n    \"technical_analysis\": \"Análisis detallado por cada control evaluado: qué protección debería ofrecer, qué debilidad concreta presenta y qué riesgo real acepta esa debilidad en el contexto detectado. Distingue entre hardening ausente y protección crítica ausente. Para cada control relevante deduce 2-3 frases. Mínimo 400 caracteres, máximo 900 caracteres.\",\n    \"recommendations\": [\n        {\"title\": \"Título\", \"description\": \"Descripción\", \"remediation\": \"Acción\", \"priority\": \"ALTA|MEDIA|BAJA\"}\n    ],\n    \"conclusions\": \"Resumen de 1-2 frases.\"\n}}"
-      }
-    },
-    "nmap": {
-      "colorPalette": {
-        "black": "#121212",
-        "dark": "#01375a",
-        "light": "#4a90e2",
-        "main": "#014f86",
-        "secondary": "#555b6e",
-        "white": "#f5f5f5"
-      },
-      "prompts": {
-        "system": "Eres un analista de seguridad de infraestructura con enfoque en evaluación objetiva de superficies de ataque.\nTu tarea es producir evaluaciones CALIBRADAS: ni alarmistas ni complacientes.\nRespondes EXCLUSIVAMENTE en el formato JSON indicado. No añades texto fuera del JSON.\n\n════════════════════════════════════════\nPRINCIPIO FUNDAMENTAL: EXPOSICIÓN ≠ VULNERABILIDAD\n════════════════════════════════════════\nUn puerto abierto es un canal de comunicación configurado intencionalmente, no una vulnerabilidad.\nNUNCA escales el riesgo por el número de puertos. El riesgo lo determina el TIPO de servicio y su configuración observable.\nNUNCA asumas autenticación débil, cifrado ausente o misconfiguration sin evidencia directa en los datos del escaneo.\nNUNCA inventes CVEs. Solo menciona CVE si aparece literalmente en los datos del escaneo.\n\n════════════════════════════════════════\nREGLA CRÍTICA: CONTEXTO DE RED — APLICA SIEMPRE ANTES DE CUALQUIER OTRA REGLA\n════════════════════════════════════════\nPASO OBLIGATORIO: Determina el tipo de red del target ANTES de asignar niveles de riesgo.\n\nSi el target es una IP privada (10.x.x.x, 172.16.x.x–172.31.x.x, 192.168.x.x) o un hostname interno:\n→ El host está en LAN. No está expuesto a internet.\n→ MÁXIMO risk_level permitido en LAN sin anomalías confirmadas: MEDIO.\n→ SSH en LAN = BAJO. HTTP en LAN = BAJO. DNS en LAN = BAJO.\n→ \"HTTP sin HTTPS en LAN\" NO es riesgo ALTO ni MEDIO. Es una observación de hardening → BAJO.\n→ Solo escala a MEDIO en LAN si hay un servicio activamente inseguro por diseño (Telnet, FTP anónimo confirmado).\n\nSi el target es una IP pública o dominio externo:\n→ Aplica la tabla de riesgo estándar sin reducción.\n\n════════════════════════════════════════\nTABLA DE RIESGO POR TIPO DE SERVICIO (para IPs públicas)\n════════════════════════════════════════\n[ACCESO_REMOTO] SSH (22), RDP (3389), Telnet (23)\n- SSH estándar sin evidencia de auth débil → BAJO\n- Telnet activo (texto plano confirmado) → MEDIO\n- RDP expuesto a internet → MEDIO\n\n[WEB] HTTP (80), HTTPS (443)\n- HTTP sin evidencia de contenido sensible → BAJO\n- HTTP sin redirección HTTPS → BAJO-MEDIO (hardening recomendado, no vulnerabilidad)\n\n[DNS] Puerto 53\n- DNS con versión conocida sin anomalías → BAJO\n\n[BASE_DE_DATOS] MySQL (3306), PostgreSQL (5432), Redis (6379)\n- Expuesto sin evidencia de acceso anónimo → MEDIO\n- Acceso anónimo confirmado → ALTO\n\n[SERVICIOS_SISTEMA] SNMP (161), NTP (123)\n- SNMP community 'public' confirmado → MEDIO\n- Resto sin evidencia de misconfiguration → BAJO\n\n════════════════════════════════════════\nREGLAS DE NIVEL DE RIESGO FINAL\n════════════════════════════════════════\nrisk_level final = MAX de los niveles asignados aplicando las reglas anteriores.\nEn LAN (IP privada): risk_level máximo = MEDIO, y solo si hay servicio activamente inseguro.\nPROHIBIDO asignar ALTO o CRÍTICO sin evidencia directa de vulnerabilidad confirmada en los datos del escaneo.",
-        "userTemplate": "Analiza el estado de seguridad del siguiente objetivo escaneado con Nmap.\n\nOBJETIVO: {{target}}\nFECHA DEL ESCANEO: {{started}}\nTOTAL DE PUERTOS ABIERTOS: {{total_ports}}\nDISTRIBUCIÓN: {{distribution}}\nPERFIL HEURÍSTICO: {{profile_type}}\n\nSERVICIOS DETECTADOS:\n{{ports_json}}\n\n--- RAZONAMIENTO OBLIGATORIO (no incluir en el JSON de salida) ---\nEjecuta estos pasos EN ORDEN. No puedes saltarlos.\n\nPASO 1 — TIPO DE RED (determina esto primero, condiciona todo lo demás):\n¿El target {{target}} es una IP privada (10.x, 172.16-31.x, 192.168.x)?\n→ SÍ: Host en LAN. risk_level máximo permitido = MEDIO. HTTP, SSH y DNS en LAN son BAJO por definición.\n→ NO: Host público. Aplica la tabla de riesgo estándar.\n\nPASO 2 — REVISIÓN DE SERVICIOS:\nPara cada servicio en los datos, consulta la tabla del sistema.\n¿Hay evidencia observable de misconfiguration (Telnet activo, FTP anónimo, acceso sin auth)?\n→ SÍ: Documenta la evidencia exacta y asigna el nivel según la tabla.\n→ NO: Asigna BAJO a ese servicio. No inventes problemas.\n\nPASO 3 — NIVEL FINAL:\nrisk_level = MAX de los niveles del Paso 2, con el techo del Paso 1 aplicado.\nSi en LAN y sin anomalías confirmadas → risk_level = BAJO.\n\nPASO 4 — RECOMENDACIONES:\nSolo genera recomendaciones para servicios con anomalías observadas en los datos.\nNo generes recomendaciones para SSH estándar, HTTP estándar en LAN, ni DNS estándar.\n--- FIN DEL RAZONAMIENTO ---\n\nFORMATO DE RESPUESTA (JSON estricto, sin ningún texto antes ni después del JSON):\n{\n    \"executive_summary\": \"Resumen del perfil de seguridad en 2-3 frases. Indica si el host está en red privada o pública, describe los servicios detectados y el riesgo real observado. Sin inventar problemas.\",\n    \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n    \"technical_analysis\": \"Análisis por cada servicio detectado: función esperada, anomalía observable si existe y riesgo real en el contexto de red. Si no hay anomalías confirmadas, indícalo explícitamente. Menciona si el host es LAN o público. Mínimo 350 caracteres, máximo 900 caracteres.\",\n    \"recommendations\": [\n        {\"title\": \"Título\", \"description\": \"Descripción\", \"remediation\": \"Acción específica\", \"priority\": \"ALTA|MEDIA|BAJA\"}\n    ],\n    \"conclusions\": \"Conclusión ponderada de 1-2 frases.\"\n}"
-      }
-    },
-    "nuclei": {
-      "binaryPath": "nuclei",
-      "templatesDir": "",
-      "templatesVersion": "",
-      "defaultSeverities": ["critical", "high", "medium"],
-      "rateLimit": 150,
-      "requestTimeout": 10,
-      "timeout": 1800,
-      "colorPalette": {
-        "black": "#0d1b2a",
-        "dark": "#1b4965",
-        "light": "#bee9e8",
-        "main": "#2b7fb8",
-        "secondary": "#5fa8d3",
-        "white": "#f0f8ff"
-      },
-      "prompts": {
-        "system": "Eres un analista senior de seguridad ofensiva redactando la sección ejecutiva de un informe de pentest. Analizas la salida ya estructurada del escáner de plantillas Nuclei: cada hallazgo trae su plantilla, su CVE, CVSS, EPSS (probabilidad de explotación en 30 días) y si está en la lista CISA KEV (explotación activa confirmada). A diferencia de un escáner heurístico, cada hallazgo de Nuclei es un matcher estructurado contra una respuesta real (código de estado, patrón de texto, expresión regular) — por eso todos llegan marcados como 'confirmado', no como hipótesis.\n\nREGLAS ABSOLUTAS:\n1. Generas EXCLUSIVAMENTE JSON válido, sin markdown, sin texto antes ni después.\n2. NUNCA inventas un CVE, CVSS o EPSS que no esté en los datos proporcionados. Si un hallazgo no trae CVSS, no le asignes uno.\n3. 'en_kev=true' es la señal más fuerte de urgencia (se explota activamente en el mundo real) y debe mencionarse explícitamente si aparece en algún hallazgo.\n4. El 'risk_level' es un techo, no un promedio: si existe al menos un hallazgo en KEV o con CVSS alto, el nivel debe reflejarlo aunque el resto de hallazgos sean informativos.\n5. Las 'recommendations' deben ser accionables y concretas (qué actualizar, qué cerrar, qué comprobar), nunca genéricas tipo 'mejorar la seguridad'.\n6. Si la mayoría de hallazgos son de categoría 'web_finding' o 'tls' sin CVEs, dilo explícitamente: es higiene de configuración, no necesariamente una vulnerabilidad explotable.\n\nFORMATO DE RESPUESTA (JSON estricto):\n{\n  \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n  \"executive_summary\": \"3-5 frases en español, para un lector no técnico: qué se encontró y por qué importa.\",\n  \"technical_analysis\": \"Análisis técnico más detallado, citando los CVEs/CVSS/EPSS concretos de los datos.\",\n  \"recommendations\": [\n    {\"title\": \"...\", \"description\": \"...\", \"priority\": \"ALTA|MEDIA|BAJA\", \"remediation\": \"acción concreta\", \"cve_refs\": [\"CVE-YYYY-NNNNN\"]}\n  ],\n  \"conclusions\": \"1-2 frases de cierre.\"\n}",
-        "userTemplate": "Escaneo Nuclei sobre {{target}} (exposición: {{exposure}}), iniciado el {{started}}.\n\nTotal de hallazgos: {{total_findings}} | Confirmados activamente: {{confirmed_count}} | En CISA KEV: {{kev_count}}\n\nHallazgos (los confirmados y los de KEV van siempre incluidos; el resto es una muestra representativa):\n{{findings_json}}\n\nGenera el análisis en el formato JSON indicado en las instrucciones del sistema."
-      }
-    },
-    "openvas": {
-      "timeout": 14400,
-      "maxWaitTimeout": 28800,
-      "colorPalette": {
-        "black": "#0d2818",
-        "dark": "#1b5e20",
-        "light": "#66bb6a",
-        "main": "#2e7d32",
-        "secondary": "#43a047",
-        "white": "#e8f5e9"
-      },
-      "prompts": {
-        "system": "Eres un analista de seguridad de infraestructura especializado en interpretar resultados de escáneres de vulnerabilidades (OpenVAS/Greenbone).\nTu tarea es producir evaluaciones CALIBRADAS: ni alarmistas ni complacientes.\nRespondes EXCLUSIVAMENTE en el formato JSON indicado. No añades texto fuera del JSON.\n\n════════════════════════════════════════\nPRINCIPIO FUNDAMENTAL: CONTROLS, NOT COUNTS\n════════════════════════════════════════\nOpenVAS reporta instancias, muchas de ellas son hallazgos de detección/inventario (LOG, CVSS 0.0) sin valor de riesgo.\n- 20 entradas LOG de detección de servicios = CERO riesgo añadido. Ignóralas.\n- 1 protocolo TLS deprecado (TLSv1.0/1.1) = UN control criptográfico con deficiencia MEDIA.\n- 2 timestamps expuestos (TCP + ICMP) = UN control de information disclosure con riesgo BAJO.\nNunca sumes instancias para escalar el riesgo. El riesgo lo determina el TIPO de control afectado, no el número de hallazgos.\n\n════════════════════════════════════════\nCLASIFICACIÓN DE HALLAZGOS POR TIPO\n════════════════════════════════════════\n\n[LOG / CVSS 0.0] — Ruido de escaneo, IGNORAR para cálculo de riesgo\n- CPE Inventory, Service Detection, OS Detection Consolidation → son auxiliares del escáner, no vulnerabilidades.\n- Hostname Determination, Traceroute, SSL/TLS Report (cipher suites, PFS, version detection) → informativos.\n- RPC Portmapper Detection, OpenVAS Detection → self-detection del escáner.\nREGLA: Si severity_class == LOG y cvss_score == 0.0, excluye ese hallazgo del análisis de riesgo.\n\n[CRYPTOGRAPHY] — Riesgo base MEDIO cuando falla\n- TLSv1.0 / TLSv1.1 deprecado → riesgo MEDIO (requiere posición de red privilegiada para explotar POODLE/BEAST).\n- TLSv1.2 ausente con solo TLSv1.0 disponible → riesgo ALTO (sin versión segura disponible).\n- Certificado autofirmado o no confiable → riesgo BAJO-MEDIO (contexto interno vs. público).\n- Certificate client required → LOG, sin riesgo (feature de seguridad).\n\n[INFORMATION_DISCLOSURE] — Riesgo base BAJO cuando falla\n- TCP Timestamps → riesgo BAJO (permite estimar uptime; requiere AC:H, no explotable directamente).\n- ICMP Timestamp Reply → riesgo BAJO (AV:L, requiere acceso local o a la red; CVE-1999-0524 es informativo).\n- IP Forwarding enabled → riesgo BAJO-MEDIO según contexto (puede facilitar routing no deseado).\n- Banner disclosure → riesgo BAJO.\n\n[AUTHENTICATION / ACCESS_CONTROL] — Riesgo base ALTO cuando falla\n- Solo marcar como ALTO si hay evidencia directa en el escaneo (credenciales por defecto, anonymous access).\n- Sin evidencia directa → no escales el nivel.\n\n[INPUT_VALIDATION] — Riesgo base CRÍTICO cuando confirmado\n- Solo si OpenVAS confirma inyección o ejecución remota con CVE específico y CVSS >= 7.0.\n\n════════════════════════════════════════\nREGLAS DE NIVEL DE RIESGO FINAL\n════════════════════════════════════════\n\nTabla de referencia (por control, no por conteo de instancias):\n- cryptography con TLS deprecado: MEDIO\n- information_disclosure (timestamps, ICMP): BAJO\n- access_control sin evidencia directa: BAJO-MEDIO\n- authentication con evidencia directa: ALTO\n- input_validation confirmado: CRÍTICO\n- Solo LOG (CVSS 0.0): INFORMATIVO\n\nrisk_level final = MAX de los controles afectados con hallazgos reales (CVSS > 0).\nSi todos los hallazgos son LOG / CVSS 0.0 → risk_level = INFORMATIVO.\n\n════════════════════════════════════════\nFORMATO DE SALIDA\n════════════════════════════════════════\n{{\n    \"executive_summary\": \"Resumen ejecutivo de 3-4 frases sobre el perfil de seguridad del objetivo. Contextualiza el propósito detectado del host, los controles con deficiencias reales y su impacto general sin contar instancias individuales.\",\n    \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n    \"technical_analysis\": \"Análisis técnico por cada control con hallazgos reales (CVSS > 0): qué protección debería ofrecer, qué debilidad concreta presenta, y qué riesgo real implica esa debilidad en el contexto detectado. Excluye explícitamente los hallazgos LOG/CVSS 0.0 del análisis de riesgo. Mínimo 350 caracteres, máximo 900 caracteres.\",\n    \"recommendations\": [\n        {{\"title\": \"Recomendación\", \"description\": \"Descripción y justificación técnica\", \"priority\": \"ALTA|MEDIA|BAJA\", \"remediation\": \"Acción específica y verificable\"}}\n    ],\n    \"conclusions\": \"Conclusión ponderada del estado de seguridad: balance entre los riesgos reales identificados, el contexto operacional del host y la postura general de seguridad.\"\n}}",
-        "userTemplate": "Analiza el estado de seguridad del siguiente objetivo escaneado con OpenVAS/Greenbone.\n\nOBJETIVO: {{target}}\nFECHA DEL ESCANEO: {{started}}\n\nRESUMEN DE MÉTRICAS:\n- Total de hallazgos brutos: {{total_vulns}}\n- Distribución por severidad (excluye LOG): {{severity_counts}}\n\nHALLAZGOS AGRUPADOS POR CONTROL DE SEGURIDAD:\n(Solo se incluyen hallazgos con CVSS > 0 o un representante LOG por control como contexto.\nLos hallazgos LOG con cvss_score == 0.0 son ruido de detección — no los uses para escalar el riesgo.)\n{{vulns_json}}\n\n--- RAZONAMIENTO OBLIGATORIO (no incluir en el JSON de salida) ---\nRealiza estos pasos EN ORDEN antes de asignar risk_level:\n\nPASO 1 — FILTRADO DE RUIDO:\nIdentifica todos los hallazgos con cvss_score == 0.0 (LOG). Estos son informativos del escáner.\nEjemplos típicos: CPE Inventory, OS Detection, Service Detection, SSL/TLS Report suites, Traceroute.\nACCIÓN: Márcalos mentalmente como 'ruido' y EXCLÚYELOS del cálculo de riesgo.\n\nPASO 2 — CONTROLES CON RIESGO REAL:\nLista solo los controles donde hay hallazgos con cvss_score > 0.0.\nPara cada uno, aplica la tabla de riesgos del sistema (TLS deprecado → MEDIO, Timestamps → BAJO, etc.).\n\nPASO 3 — NIVEL FINAL:\nrisk_level = MAX de los niveles de los controles con riesgo real.\nSi no hay ningún hallazgo con cvss_score > 0 → risk_level = INFORMATIVO.\n\nPASO 4 — RECOMENDACIONES:\nGenera solo recomendaciones para hallazgos con cvss_score > 0, con acciones específicas y verificables.\nEvita recomendaciones genéricas como 'revisar la configuración'. Sé concreto: versión exacta, comando, configuración.\n--- FIN DEL RAZONAMIENTO ---\n\nFORMATO DE RESPUESTA (JSON estricto, sin ningún texto antes ni después del JSON):\n{{\n    \"executive_summary\": \"Descripción del perfil de seguridad en 3-4 frases. Contextualiza el host analizado, los controles con deficiencias reales y su impacto ajustado. Sin conteos de hallazgos individuales.\",\n    \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n    \"technical_analysis\": \"Análisis por control con hallazgos reales: qué debilidad presenta, qué riesgo implica en el contexto del host y cómo se encadena con otros hallazgos si procede. Menciona explícitamente que los hallazgos LOG han sido excluidos del cálculo de riesgo. Mínimo 400 caracteres, máximo 900 caracteres.\",\n    \"recommendations\": [\n        {{\"title\": \"Título descriptivo\", \"description\": \"Qué significa y por qué afecta\", \"priority\": \"ALTA|MEDIA|BAJA\", \"remediation\": \"Acción específica\"}}\n    ],\n    \"conclusions\": \"Conclusión ponderada del balance riesgo/contexto.\"\n}}"
-      },
-      "toolConfigs": {
-        "portList": {
-          "tcp_all": "33d0cd82-57c6-11e1-8ed1-406186ea4fc5",
-          "tcp_all_udp_top100": "730ef368-57e2-11e1-a90f-406186ea4fc5",
-          "tcp_udp_all": "4a4717fe-57d2-11e1-9a26-406186ea4fc5"
-        },
-        "scanConfigs": {
-          "full_deep": "8715c877-47a0-438d-98a3-27c7a6ab2196",
-          "full_fast": "daba56c8-73ec-11df-a475-002264764cea",
-          "full_ultimate": "085569ce-73ed-11df-83c3-002264764cea"
+      "strategies": {
+        "google": {
+          "model": ""
         }
       }
     },
-    "traceroute": {
-      "cacheHours": 24,
-      "maxHops": 30,
-      "retryFailedMinutes": 15,
-      "timeout": 60
+    "herald": {
+      "defaultStrategy": "smtp",
+      "modules": {
+        "aegis": "smtp",
+        "hygeia": "smtp"
+      },
+      "strategies": {
+        "smtp": {
+          "fromAddress": "noreply@ellysia.com",
+          "fromName": "Ellysia Awareness",
+          "host": "smtp-relay.brevo.com",
+          "port": 587,
+          "useTls": true
+        }
+      }
+    }
+  },
+  "features": {
+    "themis": {
+      "enabled": true,
+      "areLocalIpsAllowed": true,
+      "directories": {
+        "csv": "data/themis/csv",
+        "output": "data/themis/output",
+        "resources": "../resources/themis"
+      },
+      "folders": {
+        "defaultFolderName": "Sin carpeta"
+      },
+      "history": {
+        "maxScans": 5
+      },
+      "taskDefaults": {
+        "timeout": 200000
+      },
+      "hostReachabilityCheck": {
+        "enabled": true,
+        "port": 80,
+        "timeout": 3
+      },
+      "traceroute": {
+        "cacheHours": 24,
+        "maxHops": 30,
+        "retryFailedMinutes": 15,
+        "timeout": 60
+      },
+      "kb": {
+        "enabled": true,
+        "nvdWindowDays": 8,
+        "sources": {
+          "epss": "https://epss.cyentia.com/epss_scores-current.csv.gz",
+          "kev": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+          "nvd": "https://services.nvd.nist.gov/rest/json/cves/2.0"
+        },
+        "syncCron": "0 3 * * *"
+      },
+      "scanners": {
+        "nmap": {
+          "colorPalette": {
+            "black": "#121212",
+            "dark": "#01375a",
+            "light": "#4a90e2",
+            "main": "#014f86",
+            "secondary": "#555b6e",
+            "white": "#f5f5f5"
+          },
+          "prompts": {
+            "system": "Eres un analista de seguridad de infraestructura con enfoque en evaluación objetiva de superficies de ataque.\nTu tarea es producir evaluaciones CALIBRADAS: ni alarmistas ni complacientes.\nRespondes EXCLUSIVAMENTE en el formato JSON indicado. No añades texto fuera del JSON.\n\n════════════════════════════════════════\nPRINCIPIO FUNDAMENTAL: EXPOSICIÓN ≠ VULNERABILIDAD\n════════════════════════════════════════\nUn puerto abierto es un canal de comunicación configurado intencionalmente, no una vulnerabilidad.\nNUNCA escales el riesgo por el número de puertos. El riesgo lo determina el TIPO de servicio y su configuración observable.\nNUNCA asumas autenticación débil, cifrado ausente o misconfiguration sin evidencia directa en los datos del escaneo.\nNUNCA inventes CVEs. Solo menciona CVE si aparece literalmente en los datos del escaneo.\n\n════════════════════════════════════════\nREGLA CRÍTICA: CONTEXTO DE RED — APLICA SIEMPRE ANTES DE CUALQUIER OTRA REGLA\n════════════════════════════════════════\nPASO OBLIGATORIO: Determina el tipo de red del target ANTES de asignar niveles de riesgo.\n\nSi el target es una IP privada (10.x.x.x, 172.16.x.x–172.31.x.x, 192.168.x.x) o un hostname interno:\n→ El host está en LAN. No está expuesto a internet.\n→ MÁXIMO risk_level permitido en LAN sin anomalías confirmadas: MEDIO.\n→ SSH en LAN = BAJO. HTTP en LAN = BAJO. DNS en LAN = BAJO.\n→ \"HTTP sin HTTPS en LAN\" NO es riesgo ALTO ni MEDIO. Es una observación de hardening → BAJO.\n→ Solo escala a MEDIO en LAN si hay un servicio activamente inseguro por diseño (Telnet, FTP anónimo confirmado).\n\nSi el target es una IP pública o dominio externo:\n→ Aplica la tabla de riesgo estándar sin reducción.\n\n════════════════════════════════════════\nTABLA DE RIESGO POR TIPO DE SERVICIO (para IPs públicas)\n════════════════════════════════════════\n[ACCESO_REMOTO] SSH (22), RDP (3389), Telnet (23)\n- SSH estándar sin evidencia de auth débil → BAJO\n- Telnet activo (texto plano confirmado) → MEDIO\n- RDP expuesto a internet → MEDIO\n\n[WEB] HTTP (80), HTTPS (443)\n- HTTP sin evidencia de contenido sensible → BAJO\n- HTTP sin redirección HTTPS → BAJO-MEDIO (hardening recomendado, no vulnerabilidad)\n\n[DNS] Puerto 53\n- DNS con versión conocida sin anomalías → BAJO\n\n[BASE_DE_DATOS] MySQL (3306), PostgreSQL (5432), Redis (6379)\n- Expuesto sin evidencia de acceso anónimo → MEDIO\n- Acceso anónimo confirmado → ALTO\n\n[SERVICIOS_SISTEMA] SNMP (161), NTP (123)\n- SNMP community 'public' confirmado → MEDIO\n- Resto sin evidencia de misconfiguration → BAJO\n\n════════════════════════════════════════\nREGLAS DE NIVEL DE RIESGO FINAL\n════════════════════════════════════════\nrisk_level final = MAX de los niveles asignados aplicando las reglas anteriores.\nEn LAN (IP privada): risk_level máximo = MEDIO, y solo si hay servicio activamente inseguro.\nPROHIBIDO asignar ALTO o CRÍTICO sin evidencia directa de vulnerabilidad confirmada en los datos del escaneo.",
+            "userTemplate": "Analiza el estado de seguridad del siguiente objetivo escaneado con Nmap.\n\nOBJETIVO: {{target}}\nFECHA DEL ESCANEO: {{started}}\nTOTAL DE PUERTOS ABIERTOS: {{total_ports}}\nDISTRIBUCIÓN: {{distribution}}\nPERFIL HEURÍSTICO: {{profile_type}}\n\nSERVICIOS DETECTADOS:\n{{ports_json}}\n\n--- RAZONAMIENTO OBLIGATORIO (no incluir en el JSON de salida) ---\nEjecuta estos pasos EN ORDEN. No puedes saltarlos.\n\nPASO 1 — TIPO DE RED (determina esto primero, condiciona todo lo demás):\n¿El target {{target}} es una IP privada (10.x, 172.16-31.x, 192.168.x)?\n→ SÍ: Host en LAN. risk_level máximo permitido = MEDIO. HTTP, SSH y DNS en LAN son BAJO por definición.\n→ NO: Host público. Aplica la tabla de riesgo estándar.\n\nPASO 2 — REVISIÓN DE SERVICIOS:\nPara cada servicio en los datos, consulta la tabla del sistema.\n¿Hay evidencia observable de misconfiguration (Telnet activo, FTP anónimo, acceso sin auth)?\n→ SÍ: Documenta la evidencia exacta y asigna el nivel según la tabla.\n→ NO: Asigna BAJO a ese servicio. No inventes problemas.\n\nPASO 3 — NIVEL FINAL:\nrisk_level = MAX de los niveles del Paso 2, con el techo del Paso 1 aplicado.\nSi en LAN y sin anomalías confirmadas → risk_level = BAJO.\n\nPASO 4 — RECOMENDACIONES:\nSolo genera recomendaciones para servicios con anomalías observadas en los datos.\nNo generes recomendaciones para SSH estándar, HTTP estándar en LAN, ni DNS estándar.\n--- FIN DEL RAZONAMIENTO ---\n\nFORMATO DE RESPUESTA (JSON estricto, sin ningún texto antes ni después del JSON):\n{\n    \"executive_summary\": \"Resumen del perfil de seguridad en 2-3 frases. Indica si el host está en red privada o pública, describe los servicios detectados y el riesgo real observado. Sin inventar problemas.\",\n    \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n    \"technical_analysis\": \"Análisis por cada servicio detectado: función esperada, anomalía observable si existe y riesgo real en el contexto de red. Si no hay anomalías confirmadas, indícalo explícitamente. Menciona si el host es LAN o público. Mínimo 350 caracteres, máximo 900 caracteres.\",\n    \"recommendations\": [\n        {\"title\": \"Título\", \"description\": \"Descripción\", \"remediation\": \"Acción específica\", \"priority\": \"ALTA|MEDIA|BAJA\"}\n    ],\n    \"conclusions\": \"Conclusión ponderada de 1-2 frases.\"\n}"
+          }
+        },
+        "nikto": {
+          "colorPalette": {
+            "black": "#4b2500",
+            "dark": "#8e3d0a",
+            "light": "#f9b49a",
+            "main": "#c75b12",
+            "secondary": "#fa8072",
+            "white": "#fff5f0"
+          },
+          "prompts": {
+            "system": "Eres un analista de seguridad web especializado en interpretar resultados de escáneres automáticos (Nikto).\nTu tarea es producir evaluaciones CALIBRADAS: ni alarmistas ni complacientes.\nRespondes EXCLUSIVAMENTE en el formato JSON indicado. No añades texto fuera del JSON.\n\n════════════════════════════════════════\nPRINCIPIO FUNDAMENTAL: CONTROLS, NOT COUNTS\n════════════════════════════════════════\nNikto reporta instancias, no vulnerabilidades independientes.\n- 12 directorios accesibles en robots.txt = UN control de configuración con deficiencias.\n- 2 cookies sin HttpOnly = UN problema de gestión de sesiones.\n- Nunca sumes instancias para escalar el riesgo. El riesgo lo determina el TIPO de control afectado, no el número de hallazgos.\n\n════════════════════════════════════════\nCONTROLS EVALUATED AND THEIR INTRINSIC RISK\n════════════════════════════════════════\n\n[TRANSPORT_SECURITY] — Base Risk: HIGH when failing\n- SSL certificate doesn't match hostname → risk HIGH (allows MITM if attacker is positioned)\n- EXCEPTION: If certificate is clearly a hosting panel placeholder (e.g., Plesk, cPanel, DirectAdmin),\nthe actual risk is MEDIUM because context indicates server default config, not vulnerable communication.\nIndicate this distinction in analysis.\n- Absence of HSTS → risk LOW-MEDIUM (facilitates downgrade, not direct exploitation)\n\n[SESSION_MANAGEMENT] — Base Risk: MEDIUM when failing\n- Session cookie without HttpOnly flag → risk MEDIUM (session theft via XSS requires prior XSS vulnerability)\n- Cookie without Secure flag in HTTPS context → risk LOW (cookie transmitted only via HTTPS anyway)\n- RULE: Absence of HttpOnly is MEDIUM, never HIGH, unless there's confirmed XSS evidence.\n\n[CLIENT_PROTECTION] — Base Risk: LOW when failing\n- Absence of X-Frame-Options / CSP / X-Content-Type-Options → risk LOW (hardening, not critical protection)\n- Presence of X-Frame-Options SAMEORIGIN is a CORRECT control. Don't report it as deficient.\n\n[ACCESS_CONTROL] — Base Risk: MEDIUM when failing\n- Exposed backup files, sensitive dirs → risk MEDIUM (information disclosure)\n- TRACE/TRACK methods enabled → risk LOW (hardening)\n\n[CONFIGURATION] — Base Risk: LOW when failing\n- Exposed config files, server signatures → risk LOW (information disclosure)\n\n════════════════════════════════════════\nSEVERIDAD ORIGINAL DE NIKTO — NUNCA REBAJAR\n════════════════════════════════════════\nCada control te llega con el campo \"severidad_original_nikto\": la severidad que el propio escáner Nikto (CRITICAL/HIGH/MEDIUM/LOW/INFO) ya asignó a sus hallazgos, y \"techo_teorico\" ya incorpora esa severidad como suelo mínimo.\nSi \"severidad_original_nikto\" contiene CRITICAL o HIGH (p.ej. credenciales expuestas como .htpasswd/.bash_history, o un panel admin vulnerable), ese control NO puede evaluarse por debajo de su techo_teorico ni diluirse en el resumen ejecutivo. Debes nombrarlo explícitamente en technical_analysis y generar una recomendación de prioridad ALTA para él, salvo que documentes evidencia concreta de que el hallazgo es un falso positivo.\nEl riesgo agregado (CONTROLS, NOT COUNTS) sigue aplicando entre controles, pero nunca sirve para esconder un hallazgo individual que Nikto ya calificó como CRITICAL/HIGH.\n\n════════════════════════════════════════\nNIVELES DE RIESGO VALIDOS\n════════════════════════════════════════\nCRÍTICO | ALTO | MEDIO | BAJO | INFORMATIVO\n\nFORMATO DE RECOMENDACIONES:\n[\n    {\n        \"title\": \"Título descriptivo y accionable\",\n        \"description\": \"Qué vulnerabilidad/condición se detecta y por qué es relevante\",\n        \"remediation\": \"Cómo mitigarla (no genérico)\",\n        \"priority\": \"ALTA|MEDIA|BAJA\"\n    }\n]\n\nNo inventes vulnerabilidades. Si no hay hallazgos significativos, indica risk_level INFORMATIVO.",
+            "userTemplate": "Analiza el estado de seguridad del siguiente objetivo escaneado con Nikto.\n\nOBJETIVO: {{target}}\nFECHA DEL ESCANEO: {{started}}\n\nRESUMEN DE MÉTRICAS:\n- Hallazgos brutos totales: {{total_raw}}\n- Filtrados como ruido técnico: {{noise_filtered}}\n- Hallazgos válidos agrupados por control: {{effective_findings}}\n\nESTADO POR CONTROL (el campo \"techo_teorico\" indica el impacto máximo posible del control,\nNO el nivel de riesgo final — ese debes determinarlo tú aplicando las reglas del sistema):\n{{controls_json}}\n\n--- RAZONAMIENTO PREVIO (no incluir en el JSON de salida) ---\nAntes de elegir risk_level, responde internamente estas preguntas:\n0. Revisa \"severidad_original_nikto\" en cada control. ¿Alguno contiene CRITICAL o HIGH?\nSi sí → ese control fija un suelo obligatorio (CRÍTICO/ALTO respectivamente) que risk_level no puede ignorar, y debe mencionarse explícitamente en technical_analysis con una recomendación ALTA asociada.\n1. ¿El certificado inválido corresponde a un placeholder de hosting (Plesk, cPanel, DirectAdmin)?\nSi sí → transport_security es MEDIO como máximo, nunca ALTO.\n2. ¿Hay evidencia de XSS confirmado que explote las cookies sin HttpOnly?\nSi no → session_management es MEDIO como máximo.\n3. ¿Hay métodos HTTP peligrosos con evidencia funcional de escritura o ejecución?\nSi no → access_control no escala el riesgo.\n4. Con esas respuestas, consulta la tabla de niveles del sistema y elige el nivel justificado.\n--- FIN DEL RAZONAMIENTO ---\n\nFORMATO DE RESPUESTA (JSON estricto, sin ningún texto antes ni después del JSON):\n{{\n    \"executive_summary\": \"Descripción del perfil de seguridad en 3-4 frases. Contextualiza el tipo de aplicación detectada, los controles con deficiencias y su impacto general. Sin conteos de hallazgos individuales.\",\n    \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n    \"technical_analysis\": \"Análisis detallado por cada control evaluado: qué protección debería ofrecer, qué debilidad concreta presenta y qué riesgo real acepta esa debilidad en el contexto detectado. Distingue entre hardening ausente y protección crítica ausente. Para cada control relevante deduce 2-3 frases. Mínimo 400 caracteres, máximo 900 caracteres.\",\n    \"recommendations\": [\n        {\"title\": \"Título\", \"description\": \"Descripción\", \"remediation\": \"Acción\", \"priority\": \"ALTA|MEDIA|BAJA\"}\n    ],\n    \"conclusions\": \"Resumen de 1-2 frases.\"\n}}"
+          }
+        },
+        "openvas": {
+          "timeout": 14400,
+          "maxWaitTimeout": 28800,
+          "colorPalette": {
+            "black": "#0d2818",
+            "dark": "#1b5e20",
+            "light": "#66bb6a",
+            "main": "#2e7d32",
+            "secondary": "#43a047",
+            "white": "#e8f5e9"
+          },
+          "prompts": {
+            "system": "Eres un analista de seguridad de infraestructura especializado en interpretar resultados de escáneres de vulnerabilidades (OpenVAS/Greenbone).\nTu tarea es producir evaluaciones CALIBRADAS: ni alarmistas ni complacientes.\nRespondes EXCLUSIVAMENTE en el formato JSON indicado. No añades texto fuera del JSON.\n\n════════════════════════════════════════\nPRINCIPIO FUNDAMENTAL: CONTROLS, NOT COUNTS\n════════════════════════════════════════\nOpenVAS reporta instancias, muchas de ellas son hallazgos de detección/inventario (LOG, CVSS 0.0) sin valor de riesgo.\n- 20 entradas LOG de detección de servicios = CERO riesgo añadido. Ignóralas.\n- 1 protocolo TLS deprecado (TLSv1.0/1.1) = UN control criptográfico con deficiencia MEDIA.\n- 2 timestamps expuestos (TCP + ICMP) = UN control de information disclosure con riesgo BAJO.\nNunca sumes instancias para escalar el riesgo. El riesgo lo determina el TIPO de control afectado, no el número de hallazgos.\n\n════════════════════════════════════════\nCLASIFICACIÓN DE HALLAZGOS POR TIPO\n════════════════════════════════════════\n\n[LOG / CVSS 0.0] — Ruido de escaneo, IGNORAR para cálculo de riesgo\n- CPE Inventory, Service Detection, OS Detection Consolidation → son auxiliares del escáner, no vulnerabilidades.\n- Hostname Determination, Traceroute, SSL/TLS Report (cipher suites, PFS, version detection) → informativos.\n- RPC Portmapper Detection, OpenVAS Detection → self-detection del escáner.\nREGLA: Si severity_class == LOG y cvss_score == 0.0, excluye ese hallazgo del análisis de riesgo.\n\n[CRYPTOGRAPHY] — Riesgo base MEDIO cuando falla\n- TLSv1.0 / TLSv1.1 deprecado → riesgo MEDIO (requiere posición de red privilegiada para explotar POODLE/BEAST).\n- TLSv1.2 ausente con solo TLSv1.0 disponible → riesgo ALTO (sin versión segura disponible).\n- Certificado autofirmado o no confiable → riesgo BAJO-MEDIO (contexto interno vs. público).\n- Certificate client required → LOG, sin riesgo (feature de seguridad).\n\n[INFORMATION_DISCLOSURE] — Riesgo base BAJO cuando falla\n- TCP Timestamps → riesgo BAJO (permite estimar uptime; requiere AC:H, no explotable directamente).\n- ICMP Timestamp Reply → riesgo BAJO (AV:L, requiere acceso local o a la red; CVE-1999-0524 es informativo).\n- IP Forwarding enabled → riesgo BAJO-MEDIO según contexto (puede facilitar routing no deseado).\n- Banner disclosure → riesgo BAJO.\n\n[AUTHENTICATION / ACCESS_CONTROL] — Riesgo base ALTO cuando falla\n- Solo marcar como ALTO si hay evidencia directa en el escaneo (credenciales por defecto, anonymous access).\n- Sin evidencia directa → no escales el nivel.\n\n[INPUT_VALIDATION] — Riesgo base CRÍTICO cuando confirmado\n- Solo si OpenVAS confirma inyección o ejecución remota con CVE específico y CVSS >= 7.0.\n\n════════════════════════════════════════\nREGLAS DE NIVEL DE RIESGO FINAL\n════════════════════════════════════════\n\nTabla de referencia (por control, no por conteo de instancias):\n- cryptography con TLS deprecado: MEDIO\n- information_disclosure (timestamps, ICMP): BAJO\n- access_control sin evidencia directa: BAJO-MEDIO\n- authentication con evidencia directa: ALTO\n- input_validation confirmado: CRÍTICO\n- Solo LOG (CVSS 0.0): INFORMATIVO\n\nrisk_level final = MAX de los controles afectados con hallazgos reales (CVSS > 0).\nSi todos los hallazgos son LOG / CVSS 0.0 → risk_level = INFORMATIVO.\n\n════════════════════════════════════════\nFORMATO DE SALIDA\n════════════════════════════════════════\n{{\n    \"executive_summary\": \"Resumen ejecutivo de 3-4 frases sobre el perfil de seguridad del objetivo. Contextualiza el propósito detectado del host, los controles con deficiencias reales y su impacto general sin contar instancias individuales.\",\n    \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n    \"technical_analysis\": \"Análisis técnico por cada control con hallazgos reales (CVSS > 0): qué protección debería ofrecer, qué debilidad concreta presenta, y qué riesgo real implica esa debilidad en el contexto detectado. Excluye explícitamente los hallazgos LOG/CVSS 0.0 del análisis de riesgo. Mínimo 350 caracteres, máximo 900 caracteres.\",\n    \"recommendations\": [\n        {{\"title\": \"Recomendación\", \"description\": \"Descripción y justificación técnica\", \"priority\": \"ALTA|MEDIA|BAJA\", \"remediation\": \"Acción específica y verificable\"}}\n    ],\n    \"conclusions\": \"Conclusión ponderada del estado de seguridad: balance entre los riesgos reales identificados, el contexto operacional del host y la postura general de seguridad.\"\n}}",
+            "userTemplate": "Analiza el estado de seguridad del siguiente objetivo escaneado con OpenVAS/Greenbone.\n\nOBJETIVO: {{target}}\nFECHA DEL ESCANEO: {{started}}\n\nRESUMEN DE MÉTRICAS:\n- Total de hallazgos brutos: {{total_vulns}}\n- Distribución por severidad (excluye LOG): {{severity_counts}}\n\nHALLAZGOS AGRUPADOS POR CONTROL DE SEGURIDAD:\n(Solo se incluyen hallazgos con CVSS > 0 o un representante LOG por control como contexto.\nLos hallazgos LOG con cvss_score == 0.0 son ruido de detección — no los uses para escalar el riesgo.)\n{{vulns_json}}\n\n--- RAZONAMIENTO OBLIGATORIO (no incluir en el JSON de salida) ---\nRealiza estos pasos EN ORDEN antes de asignar risk_level:\n\nPASO 1 — FILTRADO DE RUIDO:\nIdentifica todos los hallazgos con cvss_score == 0.0 (LOG). Estos son informativos del escáner.\nEjemplos típicos: CPE Inventory, OS Detection, Service Detection, SSL/TLS Report suites, Traceroute.\nACCIÓN: Márcalos mentalmente como 'ruido' y EXCLÚYELOS del cálculo de riesgo.\n\nPASO 2 — CONTROLES CON RIESGO REAL:\nLista solo los controles donde hay hallazgos con cvss_score > 0.0.\nPara cada uno, aplica la tabla de riesgos del sistema (TLS deprecado → MEDIO, Timestamps → BAJO, etc.).\n\nPASO 3 — NIVEL FINAL:\nrisk_level = MAX de los niveles de los controles con riesgo real.\nSi no hay ningún hallazgo con cvss_score > 0 → risk_level = INFORMATIVO.\n\nPASO 4 — RECOMENDACIONES:\nGenera solo recomendaciones para hallazgos con cvss_score > 0, con acciones específicas y verificables.\nEvita recomendaciones genéricas como 'revisar la configuración'. Sé concreto: versión exacta, comando, configuración.\n--- FIN DEL RAZONAMIENTO ---\n\nFORMATO DE RESPUESTA (JSON estricto, sin ningún texto antes ni después del JSON):\n{{\n    \"executive_summary\": \"Descripción del perfil de seguridad en 3-4 frases. Contextualiza el host analizado, los controles con deficiencias reales y su impacto ajustado. Sin conteos de hallazgos individuales.\",\n    \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n    \"technical_analysis\": \"Análisis por control con hallazgos reales: qué debilidad presenta, qué riesgo implica en el contexto del host y cómo se encadena con otros hallazgos si procede. Menciona explícitamente que los hallazgos LOG han sido excluidos del cálculo de riesgo. Mínimo 400 caracteres, máximo 900 caracteres.\",\n    \"recommendations\": [\n        {{\"title\": \"Título descriptivo\", \"description\": \"Qué significa y por qué afecta\", \"priority\": \"ALTA|MEDIA|BAJA\", \"remediation\": \"Acción específica\"}}\n    ],\n    \"conclusions\": \"Conclusión ponderada del balance riesgo/contexto.\"\n}}"
+          },
+          "toolConfigs": {
+            "portList": {
+              "tcp_all": "33d0cd82-57c6-11e1-8ed1-406186ea4fc5",
+              "tcp_all_udp_top100": "730ef368-57e2-11e1-a90f-406186ea4fc5",
+              "tcp_udp_all": "4a4717fe-57d2-11e1-9a26-406186ea4fc5"
+            },
+            "scanConfigs": {
+              "full_deep": "8715c877-47a0-438d-98a3-27c7a6ab2196",
+              "full_fast": "daba56c8-73ec-11df-a475-002264764cea",
+              "full_ultimate": "085569ce-73ed-11df-83c3-002264764cea"
+            }
+          }
+        },
+        "nuclei": {
+          "binaryPath": "nuclei",
+          "templatesDir": "",
+          "templatesVersion": "",
+          "defaultSeverities": [
+            "critical",
+            "high",
+            "medium"
+          ],
+          "rateLimit": 150,
+          "requestTimeout": 10,
+          "timeout": 1800,
+          "colorPalette": {
+            "black": "#0d1b2a",
+            "dark": "#1b4965",
+            "light": "#bee9e8",
+            "main": "#2b7fb8",
+            "secondary": "#5fa8d3",
+            "white": "#f0f8ff"
+          },
+          "prompts": {
+            "system": "Eres un analista senior de seguridad ofensiva redactando la sección ejecutiva de un informe de pentest. Analizas la salida ya estructurada del escáner de plantillas Nuclei: cada hallazgo trae su plantilla, su CVE, CVSS, EPSS (probabilidad de explotación en 30 días) y si está en la lista CISA KEV (explotación activa confirmada). A diferencia de un escáner heurístico, cada hallazgo de Nuclei es un matcher estructurado contra una respuesta real (código de estado, patrón de texto, expresión regular) — por eso todos llegan marcados como 'confirmado', no como hipótesis.\n\nREGLAS ABSOLUTAS:\n1. Generas EXCLUSIVAMENTE JSON válido, sin markdown, sin texto antes ni después.\n2. NUNCA inventas un CVE, CVSS o EPSS que no esté en los datos proporcionados. Si un hallazgo no trae CVSS, no le asignes uno.\n3. 'en_kev=true' es la señal más fuerte de urgencia (se explota activamente en el mundo real) y debe mencionarse explícitamente si aparece en algún hallazgo.\n4. El 'risk_level' es un techo, no un promedio: si existe al menos un hallazgo en KEV o con CVSS alto, el nivel debe reflejarlo aunque el resto de hallazgos sean informativos.\n5. Las 'recommendations' deben ser accionables y concretas (qué actualizar, qué cerrar, qué comprobar), nunca genéricas tipo 'mejorar la seguridad'.\n6. Si la mayoría de hallazgos son de categoría 'web_finding' o 'tls' sin CVEs, dilo explícitamente: es higiene de configuración, no necesariamente una vulnerabilidad explotable.\n\nFORMATO DE RESPUESTA (JSON estricto):\n{\n  \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n  \"executive_summary\": \"3-5 frases en español, para un lector no técnico: qué se encontró y por qué importa.\",\n  \"technical_analysis\": \"Análisis técnico más detallado, citando los CVEs/CVSS/EPSS concretos de los datos.\",\n  \"recommendations\": [\n    {\"title\": \"...\", \"description\": \"...\", \"priority\": \"ALTA|MEDIA|BAJA\", \"remediation\": \"acción concreta\", \"cve_refs\": [\"CVE-YYYY-NNNNN\"]}\n  ],\n  \"conclusions\": \"1-2 frases de cierre.\"\n}",
+            "userTemplate": "Escaneo Nuclei sobre {{target}} (exposición: {{exposure}}), iniciado el {{started}}.\n\nTotal de hallazgos: {{total_findings}} | Confirmados activamente: {{confirmed_count}} | En CISA KEV: {{kev_count}}\n\nHallazgos (los confirmados y los de KEV van siempre incluidos; el resto es una muestra representativa):\n{{findings_json}}\n\nGenera el análisis en el formato JSON indicado en las instrucciones del sistema."
+          }
+        },
+        "lybra": {
+          "activeChecks": true,
+          "colorPalette": {
+            "black": "#1a2410",
+            "dark": "#4a6132",
+            "light": "#d4e8c4",
+            "main": "#7ca163",
+            "secondary": "#a8c98f",
+            "white": "#f3f8ee"
+          },
+          "fingerprintingEnabled": true,
+          "ingest": {
+            "enabled": false,
+            "minSeverity": "MEDIUM",
+            "maxChecks": 300
+          },
+          "prompts": {
+            "system": "Eres un analista senior de seguridad ofensiva redactando la sección ejecutiva de un informe de pentest. Analizas la salida ya estructurada del motor de detección Lybra: cada hallazgo trae su CVE, CVSS, EPSS (probabilidad de explotación en 30 días), si está en la lista CISA KEV (explotación activa confirmada), y si fue 'confirmado' activamente o es una 'hipótesis' por versión de banner.\n\nREGLAS ABSOLUTAS:\n1. Generas EXCLUSIVAMENTE JSON válido, sin markdown, sin texto antes ni después.\n2. NUNCA inventas un CVE, CVSS o EPSS que no esté en los datos proporcionados. Si un hallazgo no trae CVSS, no le asignes uno.\n3. Un hallazgo 'confirmado=true' es un hecho verificado; uno 'confirmado=false' es una hipótesis por versión que puede ser un falso positivo (backport). Nunca los trates con el mismo nivel de certeza en el texto.\n4. 'en_kev=true' es la señal más fuerte de urgencia (se explota activamente en el mundo real) y debe mencionarse explícitamente si aparece en algún hallazgo.\n5. El 'risk_level' es un techo, no un promedio: si existe al menos un hallazgo confirmado o en KEV con CVSS alto, el nivel debe reflejarlo aunque el resto de hallazgos sean informativos.\n6. Las 'recommendations' deben ser accionables y concretas (qué actualizar, qué cerrar, qué comprobar), nunca genéricas tipo 'mejorar la seguridad'.\n7. Si prácticamente todos los hallazgos son de categoría 'open_port' sin CVEs, dilo explícitamente: es un mapa de superficie, no una lista de vulnerabilidades.\n\nFORMATO DE RESPUESTA (JSON estricto):\n{\n  \"risk_level\": \"CRÍTICO|ALTO|MEDIO|BAJO|INFORMATIVO\",\n  \"executive_summary\": \"3-5 frases en español, para un lector no técnico: qué se encontró y por qué importa.\",\n  \"technical_analysis\": \"Análisis técnico más detallado, citando los CVEs/CVSS/EPSS concretos de los datos.\",\n  \"recommendations\": [\n    {\"title\": \"...\", \"description\": \"...\", \"priority\": \"ALTA|MEDIA|BAJA\", \"remediation\": \"acción concreta\", \"cve_refs\": [\"CVE-YYYY-NNNNN\"]}\n  ],\n  \"conclusions\": \"1-2 frases de cierre.\"\n}",
+            "userTemplate": "Escaneo Lybra sobre {{target}} (exposición: {{exposure}}), iniciado el {{started}}.\n\nTotal de hallazgos: {{total_findings}} | Confirmados activamente: {{confirmed_count}} | En CISA KEV: {{kev_count}}\n\nHallazgos (los confirmados y los de KEV van siempre incluidos; el resto es una muestra representativa):\n{{findings_json}}\n\nGenera el análisis en el formato JSON indicado en las instrucciones del sistema."
+          }
+        }
+      }
+    },
+    "aegis": {
+      "enabled": true,
+      "tipsAmount": 7,
+      "vulnerabilitiesAntiquity": 5,
+      "directories": {
+        "output": "data/aegis/output",
+        "stack": "data/aegis/stack"
+      },
+      "brands": [
+        {
+          "aliases": [],
+          "circl_product": "windows",
+          "circl_vendor": "microsoft",
+          "label": "Microsoft"
+        },
+        {
+          "aliases": [],
+          "circl_product": "ios",
+          "circl_vendor": "cisco",
+          "label": "Cisco"
+        },
+        {
+          "aliases": [],
+          "circl_product": "macos",
+          "circl_vendor": "apple",
+          "label": "Apple"
+        },
+        {
+          "aliases": [],
+          "circl_product": "chrome",
+          "circl_vendor": "google",
+          "label": "Google"
+        },
+        {
+          "aliases": [],
+          "circl_product": "acrobat",
+          "circl_vendor": "adobe",
+          "label": "Adobe"
+        },
+        {
+          "aliases": [],
+          "circl_product": "android",
+          "circl_vendor": "google",
+          "label": "Android"
+        },
+        {
+          "aliases": [
+            "hewlett packard enterprise",
+            "hewlett-packard enterprise",
+            "hp enterprise"
+          ],
+          "circl_product": "hpe",
+          "circl_vendor": "hpe",
+          "label": "HPE"
+        },
+        {
+          "aliases": [],
+          "circl_product": "sonicos",
+          "circl_vendor": "sonicwall",
+          "label": "SonicWall"
+        },
+        {
+          "aliases": [
+            "konica minolta",
+            "konicaminolta"
+          ],
+          "circl_product": "printer",
+          "circl_vendor": "konicaminolta",
+          "label": "Konica"
+        },
+        {
+          "aliases": [],
+          "circl_product": "junos",
+          "circl_vendor": "juniper",
+          "label": "Juniper"
+        },
+        {
+          "aliases": [],
+          "circl_product": "esxi",
+          "circl_vendor": "vmware",
+          "label": "VMware"
+        },
+        {
+          "aliases": [
+            "palo alto networks",
+            "paloaltonetworks"
+          ],
+          "circl_product": "pan-os",
+          "circl_vendor": "paloaltonetworks",
+          "label": "Palo Alto"
+        },
+        {
+          "aliases": [],
+          "circl_product": "netweaver",
+          "circl_vendor": "sap",
+          "label": "SAP"
+        },
+        {
+          "aliases": [],
+          "circl_product": "database",
+          "circl_vendor": "oracle",
+          "label": "Oracle"
+        },
+        {
+          "aliases": [],
+          "circl_product": "firefox",
+          "circl_vendor": "mozilla",
+          "label": "Mozilla"
+        },
+        {
+          "aliases": [],
+          "circl_product": "kernel",
+          "circl_vendor": "linux",
+          "label": "Linux"
+        },
+        {
+          "aliases": [],
+          "circl_product": "fortios",
+          "circl_vendor": "fortinet",
+          "label": "Fortinet"
+        },
+        {
+          "aliases": [],
+          "circl_product": "",
+          "circl_vendor": "ibm",
+          "label": "IBM"
+        },
+        {
+          "aliases": [
+            "google chrome"
+          ],
+          "circl_product": "chrome",
+          "circl_vendor": "google",
+          "label": "Chrome"
+        }
+      ],
+      "prompts": {
+        "system": "Eres un redactor senior de concienciación en ciberseguridad con 15 años de experiencia en comunicación corporativa. Tu especialidad es transformar conceptos técnicos complejos en consejos prácticos y accionables para empleados no técnicos.\n\nREGLAS ABSOLUTAS:\n1. Generas EXCLUSIVAMENTE JSON válido, sin markdown, sin explicaciones previas ni posteriores.\n2. NUNCA inventas URLs. Si no tienes fuentes verificadas, usa array vacío [].\n3. La 'intro' DEBE ser EXTENSA y DETALLADA (mínimo 1500 caracteres, ideal 1800-2200). Desarrolla el contexto empresarial en profundidad: explica el vector de ataque, las consecuencias reales con ejemplos concretos del sector, el impacto económico y reputacional, y por qué esta amenaza es especialmente relevante para la empresa destinataria. Desarrolla el contexto empresarial, las consecuencias del riesgo y por qué es relevante para la empresa.\n4. Priorizas la precisión técnica sobre la creatividad cuando haya conflicto.\n5. Adaptas el nivel de detalle al perfil de audiencia especificado.\n6. Mantienes un tono profesional pero cercano, evitando alarmismo innecesario.\n7. Cumples estrictamente el formato JSON solicitado, sin campos adicionales.\n8. El 'subtitle' DEBE ser creativo, atractivo y ORIGINAL. NUNCA repitas literalmente el nombre del tema.\n9. Si el tema es \"Phishing\", el subtitle podría ser \"No muerdas el anzuelo: Protección contra ataques de ingeniería social\".\n10. Genera SIEMPRE exactamente 7 tips (consejos) por píldora. Nunca menos de 7. Cada tip debe tener un headline único y un body de al menos 80 palabras con contenido práctico y accionable.\n11. Genera SIEMPRE un quiz de opción múltiple de 2 a 3 preguntas (campo 'questions') que evalúen la comprensión de los tips generados. Cada pregunta tiene 'prompt' (el enunciado, una frase clara y concreta), 'options' (entre 2 y 4 respuestas posibles, solo una correcta) y 'correctIndex' (índice 0-based de la respuesta correcta dentro de 'options'). No repitas literalmente el texto de un tip como enunciado; formula la pregunta como un caso o situación práctica.",
+        "userTemplate": "Ejemplo de output válido para tema \"Phishing Empresarial\":\n\n{\n    \"subtitle\": \"No muerdas el anzuelo: Protección contra el phishing moderno\",\n    \"intro\": \"El phishing representa una de las amenazas cibernéticas más persistentes y evolutivas del panorama actual de seguridad empresarial. Lo que comenzó hace décadas como correos electrónicos obvios y mal escritos se ha transformado en campañas sofisticadas de ingeniería social que explotan la psicología humana y el contexto organizacional. En entornos corporativos modernos, los atacantes han perfeccionado técnicas de suplantación que imitan con precisión alarmante a compañeros de trabajo, directivos e incluso proveedores de confianza, utilizando dominios similares y contextos conversacionales robados de brechas previas. Un solo clic en un enlace malicioso puede desencadenar una cascada de compromisos: desde el robo de credenciales corporativas hasta la instalación de ransomware que paraliza operaciones críticas, pasando por el acceso lateral a sistemas financieros y bases de datos de clientes. Las consecuencias económicas y reputacionales son devastadoras, con costes promedio que superan el millón de euros en medianas empresas. Esta píldora de concienciación profundiza en las señales de alerta sutiles que distinguen un correo legítimo de una trampa diseñada por ciberdelincuentes, proporcionando marcos prácticos de verificación y protocolos de respuesta que todo empleado debe internalizar para proteger los activos digitales de la organización.\",\n    \"tips\": [\n        {\n            \"headline\": \"Verifica siempre el remitente real, no solo el nombre visible\",\n            \"body\": \"Los atacantes configuran nombres de display que imitan a directivos o IT support. Haz clic en el nombre del remitente para ver la dirección email real. Desconfía de dominios similares como 'company-it.com' en lugar de 'company.com'. Una dirección legítima de tu empresa nunca usará dominios externos para comunicaciones internas sensibles.\",\n            \"links\": []\n        },\n        {\n            \"headline\": \"No hagas clic en enlaces: navega directamente desde el navegador\",\n            \"body\": \"Si el correo pide acceder a un servicio (banco, RRHH, portal corporativo), escribe la URL directamente en la barra del navegador en lugar de hacer clic en el enlace. Los enlaces de phishing pueden redirigirte a sitios que imitan perfectamente la apariencia del portal legítimo pero capturan tus credenciales en el momento en que las introduces.\",\n            \"links\": []\n        },\n        {\n            \"headline\": \"Desconfía de la urgencia artificial y las amenazas\",\n            \"body\": \"Los mensajes de phishing suelen crear una falsa sensación de urgencia: 'Tu cuenta será bloqueada en 24 horas' o 'Acción requerida de inmediato'. Las empresas legítimas raramente exigen acciones críticas por correo con plazos muy cortos. Ante cualquier mensaje urgente, verifica su legitimidad contactando directamente al supuesto remitente por teléfono o por un canal independiente.\",\n            \"links\": []\n        },\n        {\n            \"headline\": \"Comprueba los archivos adjuntos antes de abrirlos\",\n            \"body\": \"Los adjuntos maliciosos pueden contener macros, ejecutables o exploits embebidos en documentos Office o PDF. Nunca abras un adjunto que no esperabas recibir, especialmente si el correo te pide 'habilitar macros' o 'activar el contenido'. En caso de duda, sube el archivo a VirusTotal o consulta con el equipo de IT antes de abrirlo bajo ningún concepto.\",\n            \"links\": []\n        },\n        {\n            \"headline\": \"Activa la autenticación en dos factores (2FA) en todas tus cuentas\",\n            \"body\": \"Incluso si un atacante consigue tu contraseña mediante phishing, el segundo factor de autenticación actúa como barrera adicional que bloquea el acceso. Usa aplicaciones de autenticación (Microsoft Authenticator, Google Authenticator) en lugar de SMS, ya que el SIM swapping puede comprometer la verificación por mensaje de texto. El 2FA es especialmente crítico para el correo corporativo y la VPN.\",\n            \"links\": []\n        },\n        {\n            \"headline\": \"Reporta los correos sospechosos en lugar de ignorarlos\",\n            \"body\": \"Si identificas un correo de phishing, no lo elimines simplemente: repórtalo al equipo de seguridad usando el botón habilitado en tu cliente de correo. Un correo reportado permite al equipo bloquear el dominio malicioso para todos los empleados y alertar a compañeros que puedan haber recibido el mismo mensaje. Tu reporte puede evitar que otros caigan en la trampa y proteger a toda la organización.\",\n            \"links\": []\n        },\n        {\n            \"headline\": \"Mantén tu software actualizado para cerrar las puertas que el phishing intenta abrir\",\n            \"body\": \"Muchos ataques de phishing no solo buscan credenciales: también intentan explotar vulnerabilidades en el navegador, visor de PDF o cliente de correo al renderizar el contenido malicioso. Mantener el sistema operativo, navegadores y aplicaciones actualizadas cierra estas vías de entrada. Activa las actualizaciones automáticas siempre que sea posible y aplica los parches de seguridad sin demora cuando aparezcan.\",\n            \"links\": []\n        }\n    ],\n    \"closing\": \"La prevención del phishing es responsabilidad de todos. Cuando tengas dudas sobre un correo sospechoso, contacta directamente al remitente por un canal alternativo antes de interactuar con el mensaje.\",\n    \"contactEmail\": \"seguridad@empresa.com\",\n    \"questions\": [\n        {\n            \"prompt\": \"Recibes un correo de 'IT-Soporte' pidiendo que confirmes tu contraseña haciendo clic en un enlace. ¿Qué deberías hacer primero?\",\n            \"options\": [\"Hacer clic y confirmar la contraseña de inmediato\", \"Verificar la dirección de remitente real y contactar a IT por un canal alternativo\", \"Reenviar el correo a un compañero para pedir opinión\"],\n            \"correctIndex\": 1\n        },\n        {\n            \"prompt\": \"Un correo urgente pide autorizar una transferencia bancaria antes de que termine el día. ¿Cuál es la señal de alerta más clara?\",\n            \"options\": [\"El remitente usa tu nombre completo\", \"La urgencia artificial y la presión de tiempo\", \"El correo incluye el logo de la empresa\"],\n            \"correctIndex\": 1\n        }\n    ]\n}\n\nAhora genera el contenido para el tema: {{topic_title}}\n\nSector al que va dirigido: {{sector}}\n\nPerfil de audiencia: {{audience}}\n{{intro_context}}\n\nRespondes EXCLUSIVAMENTE en JSON, sin markdown, sin texto antes del JSON."
+      }
+    },
+    "iris": {
+      "directories": {
+        "output": "data/iris/output"
+      },
+      "legitimateThreshold": 80,
+      "suspiciousThreshold": 55,
+      "minHeaders": 2,
+      "maxMessageBytes": 10485760,
+      "maxConnectionsPerUser": 5,
+      "maxIngestedPerDay": 200,
+      "pollIntervalMinutes": 5,
+      "prompts": {
+        "summary": {
+          "system": "Eres un analista anti-phishing especializado en interpretar los resultados de un motor de reglas heurísticas (Iris) que analiza cabeceras y contenido de correo electrónico.\nTu tarea es producir una narrativa CALIBRADA: ni alarmista ni complaciente. Respondes EXCLUSIVAMENTE en el formato JSON indicado. No añades texto fuera del JSON.\n\n════════════════════════════════════════\nPRINCIPIO FUNDAMENTAL: EXPLICA LO QUE YA SE DETECTÓ, NO INVENTES NADA NUEVO\n════════════════════════════════════════\nRecibes el veredicto, el score y la lista de reglas que fallaron (con su categoría, penalización y recomendación técnica) que el motor de Iris ya calculó de forma determinista.\nTu trabajo NO es re-evaluar el riesgo ni inventar hallazgos que no aparezcan en los datos — es traducir esas señales técnicas en una narrativa legible para un analista o un usuario no técnico, e inferir la intención más probable del atacante a partir de la COMBINACIÓN de señales presentes.\nNUNCA inventes dominios, URLs, remitentes o técnicas que no figuren en los datos proporcionados. Si el veredicto es Legitimate, dilo con la misma calibración: no busques problemas donde el motor no encontró ninguno.\n\n════════════════════════════════════════\nCÓMO INFERIR attacker_intent\n════════════════════════════════════════\nBasándote en las categorías de reglas falladas, identifica el patrón de ataque más probable:\n- Fallos de autenticación (SPF/DKIM/DMARC/Domain Alignment) + suplantación de marca → robo de credenciales suplantando una marca conocida.\n- BEC Wire Transfer Pattern / dominio corporativo + lenguaje financiero → fraude del CEO / desvío de pago.\n- Enlaces/QR sospechosos + urgencia → phishing de credenciales con cebo de clic.\n- Adjuntos peligrosos/macros → distribución de malware.\n- Solo señales débiles o dispersas sin patrón claro → indica explícitamente que no hay un patrón de ataque dominante, no fuerces una narrativa.\n\n════════════════════════════════════════\nNIVELES DE CONFIDENCE VÁLIDOS\n════════════════════════════════════════\nALTA | MEDIA | BAJA\n- ALTA: gates de alta confianza disparados (gate_reasons no vacío) o múltiples señales fuertes coincidentes.\n- MEDIA: veredicto Suspicious con señales moderadas, sin gate de alta confianza.\n- BAJA: score cercano al umbral, señales débiles o contradictorias entre sí.\n\nFORMATO DE RESPUESTA (JSON estricto, sin texto antes ni después):\n{\n    \"executive_summary\": \"3-4 frases en español dirigidas a quien recibió el correo: qué se detectó, por qué es (o no es) sospechoso, sin jerga innecesaria.\",\n    \"attacker_intent\": \"1-2 frases describiendo el objetivo más probable del atacante según las señales presentes, o indicando explícitamente que no hay patrón claro si el veredicto es Legitimate o las señales son dispersas.\",\n    \"recommendations\": [\"acción concreta 1\", \"acción concreta 2\"],\n    \"confidence\": \"ALTA|MEDIA|BAJA\"\n}",
+          "userTemplate": "Analiza el siguiente resultado de un análisis Iris de correo electrónico.\n\nVEREDICTO: {{verdict}}\nSCORE: {{score}} / 100\n\nRAZONES DE GATES DE ALTA CONFIANZA (si vacío, ningún gate se disparó):\n{{gate_reasons_json}}\n\nREGLAS QUE FALLARON (nombre, categoría, penalización, recomendación técnica):\n{{failed_rules_json}}\n\nFORMATO DE RESPUESTA (JSON estricto, sin ningún texto antes ni después del JSON):\n{\n    \"executive_summary\": \"...\",\n    \"attacker_intent\": \"...\",\n    \"recommendations\": [\"...\"],\n    \"confidence\": \"ALTA|MEDIA|BAJA\"\n}"
+        }
+      },
+      "data": {
+        "action_verbs": [
+          "verify your account",
+          "verify your identity",
+          "verify your password",
+          "verify your email",
+          "verify your information",
+          "verify your payment",
+          "confirm your account",
+          "confirm your identity",
+          "confirm your password",
+          "confirm your information",
+          "confirm your payment",
+          "confirm your billing",
+          "confirm your details",
+          "update your account",
+          "update your billing",
+          "update your payment",
+          "update your information",
+          "update your password",
+          "reactivate your account",
+          "re-activate your account",
+          "unlock your account",
+          "restore your account",
+          "secure your account",
+          "validate your account",
+          "click here to verify",
+          "click the link below",
+          "click below to",
+          "log in to verify",
+          "sign in to confirm",
+          "verifica tu cuenta",
+          "verifica tu identidad",
+          "verifica tu contraseña",
+          "verifica tu correo",
+          "verifica tu información",
+          "verifica tu pago",
+          "confirma tu cuenta",
+          "confirma tu identidad",
+          "confirma tu contraseña",
+          "confirma tu información",
+          "confirma los datos de su cuenta",
+          "actualiza tu cuenta",
+          "actualiza tu información",
+          "actualiza tu contraseña",
+          "actualiza tus datos",
+          "actualiza tu pago",
+          "reactiva tu cuenta",
+          "desbloquea tu cuenta",
+          "asegura tu cuenta",
+          "valida tu cuenta",
+          "haz clic aquí para verificar",
+          "inicia sesión para verificar"
+        ],
+        "alarming_emojis": [
+          "‼",
+          "⁉",
+          "❌",
+          "⚠"
+        ],
+        "bec_phrases": [
+          "wire transfer",
+          "wire the funds",
+          "initiate a wire",
+          "send the payment",
+          "process the payment",
+          "urgent payment",
+          "outstanding invoice",
+          "overdue invoice",
+          "pay this invoice",
+          "outstanding balance",
+          "settle the balance",
+          "make the deposit",
+          "send gift cards",
+          "buy gift cards",
+          "purchase gift cards",
+          "send bitcoin",
+          "send crypto",
+          "wire cryptocurrency",
+          "usdt transfer",
+          "change the bank account",
+          "update our banking details",
+          "new bank account",
+          "new routing number",
+          "new wire instructions",
+          "change of vendor payment",
+          "vendor banking update",
+          "confidential transaction",
+          "do not notify",
+          "keep this confidential",
+          "do this while i'm out",
+          "while i'm in a meeting",
+          "w-2 form",
+          "w2 form",
+          "employee tax forms",
+          "1099 form",
+          "transferencia urgente",
+          "transferencia bancaria urgente",
+          "realizar el pago",
+          "procesar el pago",
+          "pago pendiente",
+          "factura pendiente",
+          "factura vencida",
+          "saldo pendiente",
+          "comprar tarjetas de regalo",
+          "tarjetas de regalo",
+          "enviar bitcoin",
+          "transferencia cripto",
+          "cambiar la cuenta bancaria",
+          "nueva cuenta bancaria",
+          "número de ruta",
+          "datos bancarios nuevos",
+          "no notifiques",
+          "no informar a",
+          "mientras estoy en reunión"
+        ],
+        "brand_trusted_domains": [
+          {
+            "domains": [
+              "microsoft.com",
+              "microsoftsupport.com",
+              "office.com",
+              "office365.com",
+              "outlook.com",
+              "hotmail.com",
+              "live.com",
+              "azure.com",
+              "msn.com",
+              "windows.com",
+              "xbox.com",
+              "microsoftonline.com",
+              "sharepoint.com",
+              "teams.microsoft.com"
+            ],
+            "keywords": [
+              "microsoft",
+              "windows",
+              "office 365",
+              "microsoft 365",
+              "outlook",
+              "azure",
+              "msn"
+            ]
+          },
+          {
+            "domains": [
+              "paypal.com",
+              "paypal.de",
+              "paypal.fr",
+              "paypal.es",
+              "paypal.com.mx",
+              "paypal.co.uk"
+            ],
+            "keywords": [
+              "paypal"
+            ]
+          },
+          {
+            "domains": [
+              "netflix.com",
+              "nflx.com"
+            ],
+            "keywords": [
+              "netflix"
+            ]
+          },
+          {
+            "domains": [
+              "amazon.com",
+              "amazon.co.uk",
+              "amazon.de",
+              "amazon.fr",
+              "amazon.es",
+              "amazon.it",
+              "amazon.ca",
+              "amazon.co.jp",
+              "amazonaws.com",
+              "aws.amazon.com"
+            ],
+            "keywords": [
+              "amazon",
+              "amazon prime",
+              "amazon web services",
+              "aws"
+            ]
+          },
+          {
+            "domains": [
+              "google.com",
+              "gmail.com",
+              "youtube.com",
+              "googlemail.com",
+              "googleusercontent.com",
+              "googleapis.com"
+            ],
+            "keywords": [
+              "google",
+              "gmail",
+              "youtube",
+              "google drive"
+            ]
+          },
+          {
+            "domains": [
+              "apple.com",
+              "icloud.com",
+              "me.com",
+              "mac.com"
+            ],
+            "keywords": [
+              "apple",
+              "icloud",
+              "itunes",
+              "app store",
+              "apple store"
+            ]
+          },
+          {
+            "domains": [
+              "facebook.com",
+              "fb.com",
+              "fbcdn.net",
+              "meta.com",
+              "instagram.com",
+              "whatsapp.com",
+              "messenger.com"
+            ],
+            "keywords": [
+              "facebook",
+              "meta",
+              "instagram",
+              "whatsapp",
+              "messenger"
+            ]
+          },
+          {
+            "domains": [
+              "linkedin.com",
+              "linkedin-mail.com"
+            ],
+            "keywords": [
+              "linkedin"
+            ]
+          },
+          {
+            "domains": [
+              "twitter.com",
+              "x.com"
+            ],
+            "keywords": [
+              "twitter",
+              "x.com"
+            ]
+          },
+          {
+            "domains": [
+              "dropbox.com",
+              "dropboxmail.com"
+            ],
+            "keywords": [
+              "dropbox"
+            ]
+          },
+          {
+            "domains": [
+              "adobe.com",
+              "adobeemail.com"
+            ],
+            "keywords": [
+              "adobe"
+            ]
+          },
+          {
+            "domains": [
+              "bankofamerica.com",
+              "ml.com"
+            ],
+            "keywords": [
+              "bank of america",
+              "boa"
+            ]
+          },
+          {
+            "domains": [
+              "chase.com",
+              "jpmorgan.com"
+            ],
+            "keywords": [
+              "chase",
+              "jpmorgan"
+            ]
+          },
+          {
+            "domains": [
+              "wellsfargo.com"
+            ],
+            "keywords": [
+              "wells fargo"
+            ]
+          },
+          {
+            "domains": [
+              "bbva.com",
+              "bbva.com.mx",
+              "bbvanet.com.mx"
+            ],
+            "keywords": [
+              "bbva",
+              "bancomer"
+            ]
+          },
+          {
+            "domains": [
+              "santander.com",
+              "santander.com.mx",
+              "santander.es",
+              "openbank.com"
+            ],
+            "keywords": [
+              "santander"
+            ]
+          },
+          {
+            "domains": [
+              "mercadopago.com",
+              "mercadolibre.com",
+              "mercadolibre.com.mx"
+            ],
+            "keywords": [
+              "mercadopago",
+              "mercadolibre"
+            ]
+          }
+        ],
+        "canonical_brands": [
+          "microsoft",
+          "paypal",
+          "netflix",
+          "amazon",
+          "google",
+          "apple",
+          "facebook",
+          "instagram",
+          "linkedin",
+          "twitter",
+          "whatsapp",
+          "adobe",
+          "dropbox",
+          "spotify",
+          "yahoo",
+          "outlook",
+          "hotmail",
+          "gmail",
+          "youtube",
+          "tiktok",
+          "snapchat",
+          "pinterest",
+          "telegram",
+          "signal",
+          "discord",
+          "github",
+          "gitlab",
+          "bitbucket",
+          "salesforce",
+          "oracle",
+          "ibm",
+          "intel",
+          "nvidia",
+          "amd",
+          "cisco",
+          "vmware",
+          "sap",
+          "accenture",
+          "deloitte",
+          "pwc",
+          "kpmg",
+          "ey",
+          "mercadopago",
+          "bbva",
+          "santander",
+          "banamex",
+          "bancomer",
+          "hsbc",
+          "amex",
+          "mastercard",
+          "visa",
+          "wellsfargo",
+          "chase",
+          "bankofamerica",
+          "alibaba",
+          "aliexpress",
+          "ebay",
+          "shopify",
+          "etsy",
+          "walmart",
+          "target",
+          "costco",
+          "homedepot",
+          "bestbuy",
+          "nike",
+          "adidas",
+          "zara",
+          "hm",
+          "uniqlo",
+          "uber",
+          "lyft",
+          "airbnb",
+          "booking",
+          "expedia",
+          "hulu",
+          "disney",
+          "hbomax",
+          "primevideo",
+          "wechat",
+          "messenger",
+          "skype",
+          "zoom",
+          "teams",
+          "slack",
+          "notion",
+          "trello",
+          "wordpress",
+          "wix",
+          "godaddy",
+          "cloudflare",
+          "digitalocean",
+          "aws",
+          "azure",
+          "gcp"
+        ],
+        "credential_phrases": [
+          "verify your password",
+          "confirm your password",
+          "enter your password",
+          "verify your account",
+          "your account has been locked",
+          "update your billing",
+          "confirm your identity",
+          "log in to verify",
+          "click the link below to verify",
+          "your account will be suspended",
+          "unusual activity detected",
+          "wire transfer",
+          "payment is overdue",
+          "outstanding invoice attached",
+          "verify your social security",
+          "update your payment information",
+          "confirma tu contraseña",
+          "verifica tu cuenta",
+          "tu cuenta ha sido bloqueada",
+          "actualiza tu información de pago",
+          "transferencia bancaria urgente"
+        ],
+        "dangerous_extensions": [
+          ".exe",
+          ".dll",
+          ".scr",
+          ".bat",
+          ".cmd",
+          ".com",
+          ".msi",
+          ".msp",
+          ".mst",
+          ".cpl",
+          ".pif",
+          ".gadget",
+          ".js",
+          ".jse",
+          ".vbs",
+          ".vbe",
+          ".ps1",
+          ".psm1",
+          ".psd1",
+          ".ps1xml",
+          ".wsf",
+          ".wsh",
+          ".wsc",
+          ".sct",
+          ".hta",
+          ".py",
+          ".rb",
+          ".pl",
+          ".sh",
+          ".bash",
+          ".zsh",
+          ".docm",
+          ".xlsm",
+          ".pptm",
+          ".dotm",
+          ".xlam",
+          ".xla",
+          ".ppa",
+          ".ppam",
+          ".sldm",
+          ".lnk",
+          ".url",
+          ".website",
+          ".iso",
+          ".img",
+          ".vhd",
+          ".vhdx",
+          ".vmdk",
+          ".ova",
+          ".ovf",
+          ".jar",
+          ".reg",
+          ".appref-ms",
+          ".settingcontent-ms",
+          ".searchconnector-ms",
+          ".application",
+          ".xps"
+        ],
+        "esp_msgid_domains": [
+          "amazonses.com",
+          "sendgrid.net",
+          "sendgrid.com",
+          "mailchimp.com",
+          "mcsv.net",
+          "rsgsv.net",
+          "mcdlv.net",
+          "mandrillapp.com",
+          "mailgun.org",
+          "mailgun.net",
+          "sparkpostmail.com",
+          "mtasv.net",
+          "sendinblue.com",
+          "sendibm1.com",
+          "smtp.sendinblue.com",
+          "postmarkapp.com",
+          "mtaroutes.com",
+          "mailjet.com",
+          "mlsend.com",
+          "sailthru.com",
+          "exct.net",
+          "cmail19.com",
+          "cmail20.com",
+          "icpbounce.com",
+          "infusionmail.com",
+          "klaviyomail.com",
+          "constantcontact.com",
+          "ctctemail.com",
+          "hubspotemail.net",
+          "outlook.com",
+          "protection.outlook.com"
+        ],
+        "esp_tracker_domains": [
+          "sendgrid.net",
+          "mailgun.org",
+          "mailchimp.com",
+          "constantcontact.com",
+          "hubspot.com",
+          "hubspotusercontent-na1.net",
+          "hubspotusercontent-eu1.net",
+          "marketo.com",
+          "eloqua.com",
+          "exacttarget.com",
+          "responsys.net",
+          "mailerlite.com",
+          "mailjet.com",
+          "postmarkapp.com",
+          "smtp.com",
+          "amazonaws.com",
+          "cloudfront.net",
+          "googleusercontent.com",
+          "s3.amazonaws.com",
+          "mailchimpusercontent.com",
+          "list-manage.com",
+          "mktoresp.com",
+          "en25.com",
+          "s4.exacttarget.com",
+          "s7.addthis.com",
+          "addthis.com",
+          "tracking.mi-al.it",
+          "mta-in.com",
+          "rs6.net",
+          "t.sendgrid.net",
+          "click.mi-al.it",
+          "link.mi-al.it",
+          "open.mi-al.it",
+          "akamaized.net",
+          "akamaihd.net",
+          "fastly.net",
+          "cloudinary.com",
+          "imgix.net"
+        ],
+        "exotic_charsets": [
+          "utf-7",
+          "unicode-1-1-utf-7",
+          "csunicode11utf7",
+          "x-unicode-2-0-utf-7"
+        ],
+        "free_provider_domains": [
+          "gmail.com",
+          "googlemail.com",
+          "outlook.com",
+          "hotmail.com",
+          "live.com",
+          "msn.com",
+          "yahoo.com",
+          "yahoo.com.mx",
+          "yahoo.es",
+          "ymail.com",
+          "aol.com",
+          "aim.com",
+          "protonmail.com",
+          "proton.me",
+          "mail.com",
+          "email.com",
+          "icloud.com",
+          "me.com",
+          "zoho.com",
+          "yandex.com",
+          "gmx.com",
+          "gmx.es",
+          "tutanota.com",
+          "tutanota.de",
+          "fastmail.com",
+          "rediffmail.com",
+          "mail.ru"
+        ],
+        "generic_greetings": [
+          "dear customer",
+          "dear user",
+          "dear member",
+          "dear sir",
+          "dear madam",
+          "dear sir or madam",
+          "dear sir/madam",
+          "dear account holder",
+          "dear valued customer",
+          "dear client",
+          "dear subscriber",
+          "dear email owner",
+          "hello dear",
+          "hello customer",
+          "hello user",
+          "attention customer",
+          "attention user",
+          "important notice to all",
+          "to our valued customer",
+          "to whom it may concern",
+          "estimado cliente",
+          "estimado usuario",
+          "estimado miembro",
+          "estimado cliente de",
+          "distinguido cliente",
+          "querido usuario",
+          "hola cliente",
+          "hola usuario",
+          "atención cliente",
+          "atención usuario",
+          "a quien corresponda",
+          "a todos los usuarios",
+          "notificación para todos",
+          "apreciable cliente",
+          "apreciable usuario"
+        ],
+        "high_signal_keywords": [
+          "action required",
+          "acción requerida",
+          "act now",
+          "actúa ahora",
+          "verify now",
+          "verifica ahora",
+          "verification required",
+          "verificación requerida",
+          "account suspended",
+          "cuenta suspendida",
+          "account blocked",
+          "cuenta bloqueada",
+          "password expired",
+          "contraseña expirada",
+          "security alert",
+          "alerta de seguridad",
+          "unauthorized access",
+          "acceso no autorizado",
+          "confirm your account",
+          "confirma tu cuenta",
+          "last warning",
+          "último aviso",
+          "final notice",
+          "aviso final",
+          "suspension notice",
+          "aviso de suspensión",
+          "reactivate",
+          "reactivar",
+          "billing issue",
+          "problema de facturación",
+          "payment failed",
+          "pago fallido",
+          "claim your prize",
+          "reclama tu premio",
+          "you won",
+          "has ganado"
+        ],
+        "homoglyph_map": {
+          "0": "o",
+          "1": "l",
+          "2": "z",
+          "3": "e",
+          "4": "a",
+          "5": "s",
+          "7": "t",
+          "8": "b",
+          "9": "g",
+          "$": "s",
+          "@": "a",
+          "€": "e"
+        },
+        "low_signal_keywords": [
+          "urgent",
+          "urgente",
+          "immediate",
+          "inmediato",
+          "password reset",
+          "restablecer contraseña",
+          "limited time",
+          "tiempo limitado",
+          "expires soon",
+          "vence pronto",
+          "update required",
+          "actualización requerida",
+          "click here",
+          "haz clic aquí",
+          "download now",
+          "descarga ahora",
+          "exclusive offer",
+          "oferta exclusiva",
+          "free",
+          "gratis",
+          "dear customer",
+          "estimado cliente",
+          "dear user",
+          "estimado usuario"
+        ],
+        "macro_extensions": [
+          ".docm",
+          ".xlsm",
+          ".pptm",
+          ".dotm",
+          ".xlam",
+          ".ppam",
+          ".sldm"
+        ],
+        "multi_level_tlds": [
+          "co.uk",
+          "org.uk",
+          "gov.uk",
+          "ac.uk",
+          "co.jp",
+          "com.mx",
+          "com.br",
+          "com.ar",
+          "com.au",
+          "com.es",
+          "co.in",
+          "co.nz",
+          "com.tr",
+          "com.co"
+        ],
+        "redirect_params": [
+          "url",
+          "u",
+          "redirect",
+          "redirect_uri",
+          "redirecturl",
+          "redirect_url",
+          "redir",
+          "redirurl",
+          "r",
+          "return",
+          "returnurl",
+          "return_url",
+          "next",
+          "nexturl",
+          "next_url",
+          "continue",
+          "dest",
+          "destination",
+          "target",
+          "to",
+          "link",
+          "goto",
+          "go",
+          "out",
+          "view",
+          "ref",
+          "referer",
+          "forward",
+          "forwarding",
+          "external",
+          "site",
+          "page",
+          "load",
+          "loadurl"
+        ],
+        "shortener_domains": [
+          "bit.ly",
+          "tinyurl.com",
+          "t.co",
+          "goo.gl",
+          "ow.ly",
+          "is.gd",
+          "buff.ly",
+          "rebrand.ly",
+          "cutt.ly",
+          "shorturl.at",
+          "rb.gy",
+          "tiny.cc",
+          "lnkd.in",
+          "soo.gd",
+          "s.id",
+          "v.gd"
+        ],
+        "subdomain_action_words": [
+          "login",
+          "log-in",
+          "signin",
+          "sign-in",
+          "secure",
+          "security",
+          "verify",
+          "verification",
+          "verification1",
+          "account",
+          "accounts",
+          "support",
+          "billing",
+          "invoice",
+          "update",
+          "confirm",
+          "auth",
+          "authenticate",
+          "service",
+          "help",
+          "alert",
+          "alerts",
+          "notification",
+          "notifications",
+          "online",
+          "web",
+          "portal",
+          "office",
+          "365",
+          "mail",
+          "team",
+          "reset",
+          "unlock",
+          "recovery"
+        ],
+        "suspicious_mime_types": [
+          "application/x-msdownload",
+          "application/x-msdos-program",
+          "application/x-msi",
+          "application/x-javascript",
+          "application/javascript",
+          "application/x-vb",
+          "application/x-vbs",
+          "application/x-powershell",
+          "application/x-sh",
+          "application/x-bat",
+          "application/x-ms-shortcut",
+          "application/x-iso9660-image",
+          "application/java-archive",
+          "application/octet-stream"
+        ],
+        "suspicious_tlds": [
+          ".tk",
+          ".ml",
+          ".ga",
+          ".cf",
+          ".gq",
+          ".xyz",
+          ".club",
+          ".top",
+          ".loan",
+          ".work",
+          ".click",
+          ".zip",
+          ".download",
+          ".review",
+          ".country",
+          ".kim",
+          ".men",
+          ".bid",
+          ".trade",
+          ".webcam",
+          ".party",
+          ".date",
+          ".science",
+          ".racing",
+          ".win",
+          ".faith",
+          ".stream",
+          ".accountant",
+          ".cricket",
+          ".pro",
+          ".lol",
+          ".mom",
+          ".bar",
+          ".name",
+          ".info",
+          ".mobi",
+          ".pw"
+        ],
+        "undisclosed_patterns": [
+          "undisclosed",
+          "undisclosed-recipients",
+          "undisclosed recipients",
+          "recipients not shown",
+          "hidden recipients",
+          "destinatarios no mostrados",
+          "destinatarios ocultos",
+          "para no mostrado"
+        ],
+        "url_phishing_keywords": [
+          "login",
+          "log-in",
+          "signin",
+          "sign-in",
+          "verify",
+          "verification",
+          "secure",
+          "security",
+          "account",
+          "update",
+          "confirm",
+          "password",
+          "credential",
+          "authenticate",
+          "unlock",
+          "recovery",
+          "billing",
+          "invoice",
+          "wallet",
+          "suspended"
+        ]
+      }
+    },
+    "hygeia": {
+      "heartbeatIntervalSec": 15,
+      "offlineAfterMissed": 4,
+      "retentionDays": 30,
+      "retentionCron": "0 4 * * *",
+      "thresholds": {
+        "cpuPct": {
+          "warning": 85,
+          "critical": 95,
+          "sustainedHeartbeats": 3
+        },
+        "memPct": {
+          "warning": 85,
+          "critical": 95,
+          "sustainedHeartbeats": 3
+        },
+        "diskPct": {
+          "warning": 85,
+          "critical": 95
+        },
+        "swapPct": {
+          "warning": 40,
+          "critical": 70
+        }
+      },
+      "limits": {
+        "maxBodyBytes": 1048576,
+        "maxDecompressedBytes": 4194304,
+        "maxProcesses": 20,
+        "maxDiskMounts": 64,
+        "maxNetInterfaces": 64,
+        "maxSeriesPoints": 1000,
+        "minIntervalSec": 5,
+        "clockSkewSec": 300,
+        "maxAssetsPerUser": 500,
+        "maxInventoryItems": 2000
+      }
     }
   }
 }

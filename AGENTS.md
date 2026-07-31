@@ -68,7 +68,7 @@ Standalone `@staticmethod` entry points on the manager classes (e.g. `NmapScanMa
 
 `API/src/modules/system/config_reading.py` (imported as `CR`):
 1. `API/SecOpsConfig.json` — JSON config (DB fallback, prompts, directories, taskqueue)
-2. `API/.env` — env vars override JSON. Required for secrets (JWT_SECRET_KEY, DB / Redis / SMTP / OpenVAS / OpenAI credentials) and ambient URLs (`PUBLIC_WEB_URL`). Non-secret tuning (algorithm, expirations, timeouts) lives in JSON under `security.jwt`, with optional env override for 12-factor.
+2. `API/.env` — env vars override JSON. Required for secrets (JWT_SECRET_KEY, DB / Redis / SMTP / OpenVAS / OpenAI credentials) and ambient URLs (`PUBLIC_WEB_URL`). Non-secret tuning (algorithm, expirations, timeouts) lives in JSON under `general.security.jwt`, with optional env override for 12-factor.
 3. Root `.env` — for docker-compose only (Postgres, Redis, OpenVAS creds). Not for the API.
 
 All config keys lazily loaded via `@_lazy_load` decorator.

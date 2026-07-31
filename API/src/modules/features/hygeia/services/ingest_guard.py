@@ -45,7 +45,7 @@ def enforce_body_size(content_length: Optional[int]) -> None:
     Raises:
         IngestPayloadTooLargeError: Si falta la cabecera o supera el máximo.
     """
-    max_bytes = CR.get_hygeia_max_body_bytes()
+    max_bytes = CR.hygeia_limits().max_body_bytes
     if content_length is None:
         raise IngestPayloadTooLargeError("falta la cabecera Content-Length")
     if content_length > max_bytes:
@@ -73,7 +73,7 @@ def decompress_gzip_capped(compressed: bytes) -> bytes:
         IngestPayloadTooLargeError: Si el resultado descomprimido supera
             ``maxDecompressedBytes``, o si el cuerpo no es gzip válido.
     """
-    max_bytes = CR.get_hygeia_max_decompressed_bytes()
+    max_bytes = CR.hygeia_limits().max_decompressed_bytes
     chunks: list[bytes] = []
     total = 0
     try:
@@ -112,7 +112,7 @@ def check_clock_skew(collected_at: datetime) -> None:
     Raises:
         IngestClockSkewError: Si la desviación supera ``clockSkewSec``.
     """
-    max_skew = CR.get_hygeia_clock_skew_sec()
+    max_skew = CR.hygeia_limits().clock_skew_sec
     skew_seconds = abs((utcnow_naive() - collected_at).total_seconds())
     if skew_seconds > max_skew:
         raise IngestClockSkewError(collected_at.isoformat())

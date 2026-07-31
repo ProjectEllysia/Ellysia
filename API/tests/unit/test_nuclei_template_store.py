@@ -7,7 +7,7 @@ tolerance to a malformed one — not the content of any real template, which can
 only be checked on a machine that has the feed installed.
 
 Resolving *where* the tree lives is not this module's job (it belongs to
-``config_reading.get_nuclei_templates_dir``), so those tests live in
+``config_reading.NucleiConfig.templates_dir``), so those tests live in
 ``test_config_reading.py``.
 """
 

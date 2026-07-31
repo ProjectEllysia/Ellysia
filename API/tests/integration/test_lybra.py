@@ -541,7 +541,7 @@ def test_lybra_active_check_persists_confirmed_finding(app, admin_user, monkeypa
     from src.modules.features.themis.lybra import checks as checks_mod
     from src.modules.features.themis.lybra.checks import Response
 
-    monkeypatch.setattr(CR, "is_lybra_active_checks_enabled", lambda: True)
+    monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(active_checks=True))
 
     def fake_fetch(self, host, port, method, path):
         if path == "/.git/config":
@@ -575,7 +575,7 @@ def test_lybra_active_check_ftp_anonymous_login_persists_confirmed_finding(app, 
     import src.modules.system.config_reading as CR
     from src.modules.features.themis.lybra import checks as checks_mod
 
-    monkeypatch.setattr(CR, "is_lybra_active_checks_enabled", lambda: True)
+    monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(active_checks=True))
 
     class _FakeSession:
         def __init__(self):
@@ -678,7 +678,7 @@ def test_lybra_fingerprinting_records_agreement_with_nmap(app, admin_user, monke
     import src.modules.system.config_reading as CR
     from src.modules.features.themis.lybra.checks import HttpProbe, Response
 
-    monkeypatch.setattr(CR, "is_lybra_fingerprinting_enabled", lambda: True)
+    monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(fingerprinting_enabled=True))
 
     def fake_fetch(self, host, port, method, path):
         return Response(200, "<html><title>It works</title></html>",
@@ -723,7 +723,7 @@ def test_lybra_fingerprinting_config_flag_still_disables_even_if_authorized(app,
     # The config flag is the operator-level kill switch: even an authorized
     # target must not fingerprint if it's turned off deployment-wide.
     import src.modules.system.config_reading as CR
-    monkeypatch.setattr(CR, "is_lybra_fingerprinting_enabled", lambda: False)
+    monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(fingerprinting_enabled=False))
 
     nmap_id = _seed_nmap_scan(app, admin_user.id)
     _authorize_target(app, admin_user.id)
@@ -748,7 +748,7 @@ def test_lybra_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, mon
     from src.modules.features.themis.lybra.checks import HttpProbe, Response
 
     _seed_kb_apache_cve(app)
-    monkeypatch.setattr(CR, "is_lybra_fingerprinting_enabled", lambda: True)
+    monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(fingerprinting_enabled=True))
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [80])
@@ -788,7 +788,7 @@ def test_lybra_ftp_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user,
     from src.modules.features.themis.lybra import FtpProbe
 
     _seed_kb_vsftpd_cve(app)
-    monkeypatch.setattr(CR, "is_lybra_fingerprinting_enabled", lambda: True)
+    monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(fingerprinting_enabled=True))
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports", lambda self, target, ports: [21])
     monkeypatch.setattr(FtpProbe, "fetch", lambda self, host, port: "220 (vsFTPd 2.3.4)")
@@ -819,7 +819,7 @@ def test_lybra_mysql_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_use
     from src.modules.features.themis.lybra import MysqlProbe
 
     _seed_kb_mysql_cve(app)
-    monkeypatch.setattr(CR, "is_lybra_fingerprinting_enabled", lambda: True)
+    monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(fingerprinting_enabled=True))
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports", lambda self, target, ports: [3306])
     monkeypatch.setattr(

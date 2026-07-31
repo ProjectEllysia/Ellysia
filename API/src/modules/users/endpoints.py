@@ -141,7 +141,7 @@ def oauth_token(data: dict[str, Any]):
         return {
             "access_token": access_token,
             "token_type": "Bearer",
-            "expires_in": CR.get_oauth_config()[0] * 60,
+            "expires_in": CR.jwt_config().access_token_expiry_minutes * 60,
             "refresh_token": refresh_token,
             "role": user.role if user else "role_user",
             "attributes": user_attrs,
@@ -171,7 +171,7 @@ def oauth_token(data: dict[str, Any]):
         return {
             "access_token": access_token,
             "token_type": "Bearer",
-            "expires_in": CR.get_oauth_config()[0] * 60,
+            "expires_in": CR.jwt_config().access_token_expiry_minutes * 60,
             "role": user.role,
             "attributes": user_attrs,
         }
@@ -242,7 +242,7 @@ def oauth_mfa_verify(data: dict[str, Any]):
     return {
         "access_token": access_token,
         "token_type": "Bearer",
-        "expires_in": CR.get_oauth_config()[0] * 60,
+        "expires_in": CR.jwt_config().access_token_expiry_minutes * 60,
         "refresh_token": refresh_token,
         "role": user.role,
         "attributes": user_attrs,

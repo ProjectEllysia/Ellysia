@@ -7,6 +7,7 @@ reales, que exige el equipo con el binario y las plantillas instaladas.
 
 import pytest
 
+import src.modules.system.config_reading as CR
 from src.modules.features.themis.lybra import CheckRuntime, Response, Service
 from src.modules.features.themis.lybra.ingest import (
     DEFAULT_MIN_SEVERITY,
@@ -232,7 +233,7 @@ def test_ingest_is_disabled_by_default():
     accidente.
     """
     import src.modules.system.config_reading as CR
-    assert CR.is_lybra_template_ingest_enabled() is False
+    assert CR.lybra_ingest_config().enabled is False
 
 
 def test_manager_skips_ingestion_entirely_when_disabled(monkeypatch):
@@ -256,8 +257,8 @@ def test_manager_falls_back_to_the_own_feed_when_the_tree_is_missing(monkeypatch
         is_available = False
 
     monkeypatch.setattr(
-        "src.modules.features.themis.managers.lybra_engine.CR.is_lybra_template_ingest_enabled",
-        lambda: True,
+        "src.modules.features.themis.managers.lybra_engine.CR.lybra_ingest_config",
+        lambda: CR.LybraIngestConfig(enabled=True),
     )
     monkeypatch.setattr(
         "src.modules.features.themis.managers.lybra_engine.NucleiTemplateStore",

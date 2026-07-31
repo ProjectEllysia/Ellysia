@@ -187,7 +187,7 @@ def tls_expired_port():
 
 def _run_self_discovery(app, admin_user, target: str, port: int, monkeypatch):
     """Lanza un escaneo Lybra de autodescubrimiento real contra ``target:port``."""
-    monkeypatch.setattr(CR, "is_host_reachability_check_enabled", lambda: False)
+    monkeypatch.setattr(CR, "host_reachability_check", lambda: CR.HostReachabilityCheck(enabled=False))
     with app.app_context():
         AuthorizedTargetManager().add(admin_user.id, target)
         mgr = LybraEngineManager()

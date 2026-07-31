@@ -133,25 +133,25 @@ class MetricsSchema(_IngestSchema):
     def validate_array_limits(self, data, **kwargs):
         """
         Acota disk/network/topCpu/topMem contra los límites configurables de
-        ``hygeia.limits`` (§16.1).
+        ``features.hygeia.limits`` (§16.1).
 
         Se leen con ``CR`` en cada validación (no se hornean al importar el
         módulo) para que un cambio vía ``PUT /system`` surta efecto sin
         reiniciar la API, igual que el resto de la configuración.
         """
-        max_disk = CR.get_hygeia_max_disk_mounts()
+        max_disk = CR.hygeia_limits().max_disk_mounts
         if len(data.get("disk", [])) > max_disk:
             raise ValidationError(
                 f"disk excede el máximo de {max_disk} puntos de montaje", field_name="disk",
             )
 
-        max_net = CR.get_hygeia_max_net_interfaces()
+        max_net = CR.hygeia_limits().max_net_interfaces
         if len(data.get("network", [])) > max_net:
             raise ValidationError(
                 f"network excede el máximo de {max_net} interfaces", field_name="network",
             )
 
-        max_procs = CR.get_hygeia_max_processes()
+        max_procs = CR.hygeia_limits().max_processes
         processes = data.get("processes") or {}
         if len(processes.get("topCpu", [])) > max_procs:
             raise ValidationError(
@@ -191,8 +191,8 @@ class InventorySchema(_IngestSchema):
 
     @validates_schema
     def validate_max_items(self, data, **kwargs):
-        """Acota ``software`` contra ``hygeia.limits.maxInventoryItems`` (§16.1)."""
-        max_items = CR.get_hygeia_max_inventory_items()
+        """Acota ``software`` contra ``features.hygeia.limits.maxInventoryItems`` (§16.1)."""
+        max_items = CR.hygeia_limits().max_inventory_items
         if len(data.get("software", [])) > max_items:
             raise ValidationError(
                 f"software excede el máximo de {max_items} elementos", field_name="software",

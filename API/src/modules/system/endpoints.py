@@ -127,7 +127,7 @@ def get_config():
 @system_blp.alt_response(409, schema=ErrorSchema, description="Config changed since last read")
 @limiter.limit("10 per hour; 20 per day")
 @require_oauth_token
-# S7: root, no admin — un admin no debería poder bajar security.argon2 o
+# S7: root, no admin — un admin no debería poder bajar general.security.argon2 o
 # reactivar areLocalIpsAllowed (reabriría el SSRF cerrado en S1/S2).
 @require_role(minimum_role=Role.ROOT)
 @handle_exceptions(default_exception=IllegalStateError, logger=logger)
@@ -266,7 +266,7 @@ def taskqueue_update_config(json_data):
         raise ValidationError("max_workers must be a positive integer")
 
     cfg = CR.get_full_config()
-    cfg.setdefault("general", {}).setdefault("taskqueue", {})["max_workers"] = max_workers
+    cfg.setdefault("infrastructure", {}).setdefault("taskqueue", {})["max_workers"] = max_workers
     CR.save_full_config(cfg)
     CR.reload()
     TaskQueue._reset_instance()

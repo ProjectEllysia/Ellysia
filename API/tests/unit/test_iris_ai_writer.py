@@ -52,7 +52,7 @@ def _sample_report():
 
 
 def test_generate_parses_clean_json_response(monkeypatch):
-    monkeypatch.setattr(CR, "get_iris_prompts", lambda: _FAKE_PROMPTS)
+    monkeypatch.setattr(CR, "iris_config", lambda: CR.IrisConfig(prompts=_FAKE_PROMPTS))
     raw = (
         '{"executive_summary": "Correo de phishing suplantando una marca.", '
         '"attacker_intent": "Robo de credenciales.", '
@@ -69,7 +69,7 @@ def test_generate_parses_clean_json_response(monkeypatch):
 
 
 def test_generate_recovers_json_from_fenced_block(monkeypatch):
-    monkeypatch.setattr(CR, "get_iris_prompts", lambda: _FAKE_PROMPTS)
+    monkeypatch.setattr(CR, "iris_config", lambda: CR.IrisConfig(prompts=_FAKE_PROMPTS))
     raw = (
         "Aquí tienes el análisis:\n"
         "```json\n"
@@ -84,7 +84,7 @@ def test_generate_recovers_json_from_fenced_block(monkeypatch):
 
 
 def test_generate_defaults_invalid_confidence_to_baja(monkeypatch):
-    monkeypatch.setattr(CR, "get_iris_prompts", lambda: _FAKE_PROMPTS)
+    monkeypatch.setattr(CR, "iris_config", lambda: CR.IrisConfig(prompts=_FAKE_PROMPTS))
     raw = '{"executive_summary": "x", "attacker_intent": "y", "confidence": "URGENTE!"}'
     writer = IrisAIWriter(generator=_FakeGenerator(raw))
     result = writer.generate(_sample_report())
@@ -93,21 +93,21 @@ def test_generate_defaults_invalid_confidence_to_baja(monkeypatch):
 
 
 def test_generate_raises_on_empty_response(monkeypatch):
-    monkeypatch.setattr(CR, "get_iris_prompts", lambda: _FAKE_PROMPTS)
+    monkeypatch.setattr(CR, "iris_config", lambda: CR.IrisConfig(prompts=_FAKE_PROMPTS))
     writer = IrisAIWriter(generator=_FakeGenerator(""))
     with pytest.raises(AIResponseError):
         writer.generate(_sample_report())
 
 
 def test_generate_raises_when_system_prompt_missing(monkeypatch):
-    monkeypatch.setattr(CR, "get_iris_prompts", lambda: {"summary": {}})
+    monkeypatch.setattr(CR, "iris_config", lambda: CR.IrisConfig(prompts={"summary": {}}))
     writer = IrisAIWriter(generator=_FakeGenerator("{}"))
     with pytest.raises(AIResponseError):
         writer.generate(_sample_report())
 
 
 def test_user_prompt_includes_verdict_score_and_only_failed_rules(monkeypatch):
-    monkeypatch.setattr(CR, "get_iris_prompts", lambda: _FAKE_PROMPTS)
+    monkeypatch.setattr(CR, "iris_config", lambda: CR.IrisConfig(prompts=_FAKE_PROMPTS))
     writer = IrisAIWriter(generator=_FakeGenerator("{}"))
     prompt = writer._build_user_prompt(_sample_report())
 

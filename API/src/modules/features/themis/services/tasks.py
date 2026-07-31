@@ -69,7 +69,7 @@ class _Task(ABC):
         # Q2: el default vive en SecOpsConfig.json, no como literal aquí —
         # None solo cuando el caller no pasa timeout explícito (todas las
         # subclases sí lo hacen hoy, pero se mantiene el fallback).
-        self.timeout = timeout if timeout is not None else CR.get_themis_task_default_timeout()
+        self.timeout = timeout if timeout is not None else CR.themis_task_defaults().timeout
         self.status: TaskStatus = TaskStatus.PENDING
         self.progress: int = 0
         self.results: Optional[Any] = None
@@ -424,7 +424,7 @@ class NucleiScanTask(_Task):
         timeout: Optional[int] = None,
         progress_callback: Optional[Callable[[int], None]] = None,
     ):
-        resolved_timeout = timeout if timeout is not None else CR.get_nuclei_task_timeout()
+        resolved_timeout = timeout if timeout is not None else CR.nuclei_config().timeout
         super().__init__(target, resolved_timeout, progress_callback=progress_callback)
 
         timestamp = int(time.time() * 1000)
@@ -435,17 +435,17 @@ class NucleiScanTask(_Task):
         )
         self._output_file = self.temp_path
 
-        self.severities = severities or CR.get_nuclei_default_severities()
+        self.severities = severities or CR.nuclei_config().default_severities
         self.tags = tags or []
-        self.rate_limit = rate_limit or CR.get_nuclei_rate_limit()
-        self.request_timeout = request_timeout or CR.get_nuclei_request_timeout()
-        self._binary = CR.get_nuclei_binary_path()
+        self.rate_limit = rate_limit or CR.nuclei_config().rate_limit
+        self.request_timeout = request_timeout or CR.nuclei_config().request_timeout
+        self._binary = CR.nuclei_config().binary_path
         # Única fuente de verdad sobre dónde vive el árbol de plantillas, la
         # misma que usan la ingesta (Fase R) y el censo (Fase U4) para leerlo.
         # ``None`` significa "no se pudo resolver ninguno", y entonces se omite
         # ``-templates`` y decide el binario — el mismo comportamiento que había
         # cuando el valor de configuración venía vacío.
-        templates_dir = CR.get_nuclei_templates_dir()
+        templates_dir = CR.nuclei_config().templates_dir
         self._templates_dir = str(templates_dir) if templates_dir else ""
 
         # Rellenado por _check_output_line al ver el banner de arranque; si el
@@ -529,7 +529,7 @@ class OpenVASTask(_Task):
     ):
         # Q2: default propio (no el genérico de _Task) — resuelto aquí y no
         # como default de parámetro para no evaluar CR en tiempo de import.
-        resolved_timeout = timeout if timeout is not None else CR.get_openvas_task_timeout()
+        resolved_timeout = timeout if timeout is not None else CR.openvas_config().timeout
         super().__init__(target, resolved_timeout, progress_callback=progress_callback)
         self.hostname = hostname
         self.port = port
@@ -561,7 +561,7 @@ class OpenVASTask(_Task):
     def wait(self, timeout: Optional[float] = None, cancel_check: Optional[Callable[[], bool]] = None) -> bool:
         """Override: OpenVAS gestiona su propio ciclo interno."""
         try:
-            safe_timeout = min(timeout, CR.get_openvas_max_wait_timeout()) if timeout is not None else None
+            safe_timeout = min(timeout, CR.openvas_config().max_wait_timeout) if timeout is not None else None
             granularity = 1.0
             deadline = time.monotonic() + safe_timeout if safe_timeout else None
 
