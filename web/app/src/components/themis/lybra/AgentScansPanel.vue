@@ -153,7 +153,8 @@ function countFor(assetId) {
 .agent-status.offline { background: var(--danger); }
 .agent-host { font-size: var(--fs-lg); font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-meta { display: flex; align-items: center; gap: 0.35rem; font-size: var(--fs-sm); color: var(--text-muted); }
-.agent-os { text-transform: capitalize; }
+.agent-os { text-transform: capitalize; font-size: var(--fs-md);}
+.agent-state-label {font-size: var(--fs-md);}
 .agent-state-label::before { content: '·'; margin-right: 0.35rem; }
 .agent-findings { display: flex; }
 .agent-pill { font-size: var(--fs-sm); font-weight: 600; padding: 0.1rem 0.45rem; border-radius: 5px; }

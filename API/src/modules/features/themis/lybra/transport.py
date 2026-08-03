@@ -175,7 +175,8 @@ def scan_ports_sync(
 
 
 def services_from_discovered_ports(
-    open_ports: Iterable[int], protocol: str = "tcp"
+    open_ports: Iterable[int],
+    protocol: str = "tcp"
 ) -> List[Service]:
     """Build engine :class:`Service` values from a list of discovered ports.
 
@@ -195,8 +196,14 @@ def services_from_discovered_ports(
         One :class:`Service` per port.
     """
     return [
-        Service(port=port, protocol=protocol, name=WELL_KNOWN_PORTS.get(port, ""),
-                product="", version="", cpe=None)
+        Service(
+            port=port,
+            protocol=protocol,
+            name=WELL_KNOWN_PORTS.get(port, ""),
+            product="",
+            version="", 
+            cpe=None
+        )
         for port in open_ports
     ]
 

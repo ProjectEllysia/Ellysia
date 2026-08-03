@@ -22,6 +22,7 @@ import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
+from src.modules.features.themis.managers.lybra_engine import LybraEngineManager
 import src.modules.system.config_reading as CR
 from src.modules.infrastructure import UnitOfWork
 from ..repositories import ScanRepository
@@ -53,27 +54,34 @@ class ServiceSource:
 
     label: str = "desconocido"
 
-    # Whether Fase F (fingerprinting) and Fase R (active checks) may run
-    # against the target for this mode. False only for the external-payload
-    # mode: that data is already a verified fact (Fase 0.9), so re-inferring
-    # it over the network would be redundant at best, and this mode exists
-    # precisely for hosts it might not even be able to reach.
+
     probes_target_network: bool = True
+    """
+    Whether Fase F (fingerprinting) and Fase R (active checks) may run
+    against the target for this mode. False only for the external-payload
+    mode: that data is already a verified fact (Fase 0.9), so re-inferring
+    it over the network would be redundant at best, and this mode exists
+    precisely for hosts it might not even be able to reach.
+    """
 
-    # Whether the deep corroborators (Fase 6) require an explicit
-    # authorized-targets register entry before launching. False for the two
-    # modes that already validated the target some other way (Nmap: the prior
-    # scan; self-discovery: run_scan's own gate at launch) — True only for the
-    # payload mode, whose target nothing else ever validates.
     deep_requires_authorization: bool = False
+    """
+    Whether the deep corroborators (Fase 6) require an explicit
+    authorized-targets register entry before launching. False for the two
+    modes that already validated the target some other way (Nmap: the prior
+    scan; self-discovery: run_scan's own gate at launch) — True only for the
+    payload mode, whose target nothing else ever validates.
+    """
 
-    # Whether the deep corroborators should include a fresh Nmap run. False
-    # only when the scan is already built over a prior Nmap scan's ports — a
-    # second one would be redundant.
     launches_nmap_corroborator: bool = True
+    """
+    Whether the deep corroborators should include a fresh Nmap run. False
+    only when the scan is already built over a prior Nmap scan's ports — a
+    second one would be redundant.
+    """
 
     @classmethod
-    def for_args(
+    def build_for_args(
         cls,
         source_scan_id: Optional[int],
         services: Optional[List[Service]],
@@ -90,7 +98,14 @@ class ServiceSource:
         """Resolve and validate this mode's target, before the scan record exists."""
         raise NotImplementedError
 
-    def resolve(self, scan_repo: ScanRepository, manager, target: Optional[str]) -> Optional[ResolvedServices]:
+    # TODO: Cambiar nombre de la función a algo más descriptivo,
+    # como `resolve_services` o `get_resolved_services`.
+    def resolve_services(
+        self,
+        scan_repo: ScanRepository,
+        manager: LybraEngineManager,
+        target: Optional[str]
+    ) -> Optional[ResolvedServices]:
         """Obtain this mode's services inside the caller's transaction.
 
         ``manager`` is the calling ``LybraEngineManager``— only the
@@ -127,14 +142,25 @@ class NmapSourceScan(ServiceSource):
         self.source_scan_id = source_scan_id
         self.label = f"fuente Nmap {source_scan_id}"
 
-    def scan_target(self, user_id: int, target: Optional[str]) -> str:
+    def scan_target(
+        self,
+        user_id: int,
+        target: Optional[str]
+    ) -> str:
         with UnitOfWork() as uow:
             source = ScanRepository(uow).get_by_id(self.source_scan_id)
             if not source:
                 raise ScanNotFoundError(self.source_scan_id)
             return source.target
 
-    def resolve(self, scan_repo: ScanRepository, manager, target: Optional[str]) -> ResolvedServices:
+        return ""
+
+    def resolve_services(
+        self,
+        scan_repo: ScanRepository,
+        manager: LybraEngineManager,
+        target: Optional[str]
+    ) -> ResolvedServices:
         open_ports = scan_repo.get_open_ports_for_scan(self.source_scan_id)
         source = scan_repo.get_by_id(self.source_scan_id)
         return ResolvedServices(
@@ -164,7 +190,12 @@ class ExternalPayload(ServiceSource):
             raise ValueError("run_scan requires a target when services is set")
         return target
 
-    def resolve(self, scan_repo: ScanRepository, manager, target: Optional[str]) -> ResolvedServices:
+    def resolve_services(
+        self,
+        scan_repo: ScanRepository,
+        manager: LybraEngineManager,
+        target: Optional[str]
+    ) -> ResolvedServices:
         return ResolvedServices(
             services=list(self.services),
             host_id=self._resolve_host(scan_repo, target),
@@ -198,7 +229,12 @@ class SelfDiscovery(ServiceSource):
             raise TargetNotAuthorizedError(target)
         return target
 
-    def resolve(self, scan_repo: ScanRepository, manager, target: Optional[str]) -> Optional[ResolvedServices]:
+    def resolve_services(
+            self,
+            scan_repo: ScanRepository,
+            manager: LybraEngineManager,
+            target: Optional[str]
+    ) -> Optional[ResolvedServices]:
         discovered_ports: list = []
         udp_ports: list = []
         if target:

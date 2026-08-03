@@ -27,7 +27,7 @@ export default defineConfig({
     }
   },
   server: {
-    port: 5173,
+    port: 80,
     proxy: {
       '/oauth':     { target: 'http://localhost:5000', changeOrigin: true },
       '/themis':    { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
@@ -37,7 +37,8 @@ export default defineConfig({
       '/acheron':   { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
       '/iris':      { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
       '/hygeia':    { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
-    }
+    },
+    allowedHosts: ['dev.local.ellysia.es'],
   }
 })
 

@@ -1,4 +1,5 @@
-"""Clasificador de plantillas de Nuclei por lo que exigen del runtime propio.
+"""
+Clasificador de plantillas de Nuclei por lo que exigen del runtime propio.
 
 Esta es la pieza que responde a la pregunta de la Fase U4 —*¿qué fracción del
 feed de Nuclei podríamos ingerir?*— y, más adelante, la que la Fase R usará para
