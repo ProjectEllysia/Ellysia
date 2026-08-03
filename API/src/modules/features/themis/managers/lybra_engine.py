@@ -41,6 +41,7 @@ from ..lybra import (
     is_http_service,
     DEFAULT_PORTS,
     scan_ports_sync,
+    scan_udp_ports_sync,
 )
 from ..lybra.ingest import select_for_services, translate_all
 from ..services import _Task, LybraPrintingStrategy
@@ -51,8 +52,7 @@ from ..exceptions import (
 )
 
 from .scan import ScanManager
-from .thirdparty_scans_managers import NmapScanManager, NiktoScanManager, NucleiScanManager, OpenVASScanManager
-from .lybra_sources import ServiceSource
+from .thirdparty_scans_managers import NmapScanManager, NiktoScanManager, NucleiScanManager
 from .authorized_target import AuthorizedTargetManager
 
 
@@ -104,7 +104,7 @@ class LybraEngineManager(ScanManager):
 
         - **Over a prior Nmap scan** (``source_scan_id``): analyse the services
           that scan already discovered. Ownership/type validated by the caller.
-        - **External payload** (``services`` + ``target``, Fase 0.9): analyse a
+        - **External payload** (``services`` + ``target``): analyse a
           services list the caller already resolved — a Hygeia inventory
           adapter is the motivating case, but any in-process producer of a
           ``List[Service]`` qualifies. No network discovery, fingerprinting or
@@ -117,7 +117,7 @@ class LybraEngineManager(ScanManager):
           no Nmap needed. The caller validates the target (reject private, etc.).
 
         Args:
-            deep: Fase 6 "análisis profundo" — also launch Nmap/Nikto/OpenVAS as
+            deep: Fase 6 "análisis profundo" — also launch Nmap/Nikto/Nuclei as
                 independent corroborator scans (fire-and-forget; their Finding
                 rows merge in at read time, see ``format_scan``). In the
                 external-payload mode, this additionally requires ``target`` to
@@ -192,8 +192,9 @@ class LybraEngineManager(ScanManager):
         pattern). Runs synchronously; safe to call directly in tests without a
         worker.
         """
+        from .lybra_sources import ServiceSource
 
-        source = ServiceSource.for_args(source_scan_id, services_payload, discover_ports)
+        source = ServiceSource.build_for_args(source_scan_id, services_payload, discover_ports)
         try:
             self.update_scan_status(scan_id, ScanStatus.RUNNING)
 
@@ -210,7 +211,7 @@ class LybraEngineManager(ScanManager):
                     and AuthorizedTargetManager.is_authorized(user_id, source_target)
                 )
 
-                resolved = source.resolve(scan_repo, self, source_target)
+                resolved = source.resolve_services(scan_repo, self, source_target)
                 if resolved is None:
                     self.update_scan_status(scan_id, ScanStatus.FAILED)
                     return
@@ -228,7 +229,12 @@ class LybraEngineManager(ScanManager):
                         services
                     )
 
-                previous_map = self._previous_findings_map(scan_repo, user_id, source_target, scan_id)
+                previous_map = self._previous_findings_map(
+                    scan_repo,
+                    user_id,
+                    source_target,
+                    scan_id
+                )
 
                 surface_findings: list = []
                 if source_host_id:
@@ -302,6 +308,22 @@ class LybraEngineManager(ScanManager):
         except Exception:
             logger.exception("Lybra port discovery failed for %s", target)
             return None
+
+    def _discover_udp_ports(self, target: str) -> list:
+        """Discover open UDP ports via the curated probe table (Fase N/Ronda 1).
+
+        Unlike :meth:`_discover_ports`, this never returns ``None``: UDP
+        silence is *by definition* indistinguishable from "nothing there", so
+        a probe failure carries no information that would justify discarding
+        an otherwise good TCP discovery result — best-effort, ``[]`` on any
+        error. Always uses :data:`UDP_PROBES` (never the caller's TCP port
+        list): a user-supplied ``discover_ports`` is a TCP list.
+        """
+        try:
+            return scan_udp_ports_sync(target)
+        except Exception:
+            logger.exception("Lybra UDP port discovery failed for %s", target)
+            return []
 
     def _run_active_checks(self, target: str, services) -> list:
         """Run the check runtime against the target's HTTP, TLS, network (Fase N)
@@ -442,6 +464,7 @@ class LybraEngineManager(ScanManager):
             "category":     "fingerprint",
             "port":         service.port,
             "service":      service.name or None,
+            "protocol":     service.protocol,
             "source":       "lybra",
             "check_id":     "lybra:fingerprint@1",
             "feed_version": "lybra-fingerprint-1",
@@ -518,6 +541,7 @@ class LybraEngineManager(ScanManager):
             "category":     "surface_change",
             "port":         service.port,
             "service":      service.name or service.product or None,
+            "protocol":     service.protocol,
             "source":       "lybra",
             "check_id":     "lybra:surface-change@1",
             "feed_version": "lybra-surface-1",
@@ -552,14 +576,15 @@ class LybraEngineManager(ScanManager):
         source: "ServiceSource",
         services: list[Service]
     ) -> list:
-        """Fire off Nmap/Nikto/OpenVAS as independent corroborator scans (Fase 6).
+        """Fire off Nmap/Nikto/Nuclei as independent corroborator scans (Fase 6).
 
-        Necessarily non-blocking: OpenVAS alone can take up to 4 hours (see its
-        own ``run_scan`` timeout), so this cannot be awaited inside this job.
-        Each corroborator becomes an ordinary, independently-tracked ``Scan`` —
-        visible, cancellable and pollable exactly like a user-launched one. The
-        returned ids are stored on the Lybra scan so ``format_scan`` can later
-        merge in whichever corroborator ``Finding`` rows are ready.
+        Necessarily non-blocking: Nmap and Nikto against a real network target
+        are not instantaneous either, so this cannot be awaited inside this
+        job. Each corroborator becomes an ordinary, independently-tracked
+        ``Scan`` — visible, cancellable and pollable exactly like a
+        user-launched one. The returned ids are stored on the Lybra scan so
+        ``format_scan`` can later merge in whichever corroborator ``Finding``
+        rows are ready.
 
         - Nmap only when ``source.launches_nmap_corroborator`` — a fresh Nmap
           run is redundant when Lybra already has Nmap-sourced ports for this
@@ -568,10 +593,15 @@ class LybraEngineManager(ScanManager):
           both are HTTP-only tools (Fase U2: Nuclei gains the exact same
           condition that already gates Nikto, now that U1 gives it a
           ``run_scan`` of its own).
-        - OpenVAS always.
 
         Best-effort per corroborator: a launch failure for one does not affect
         the others or the Lybra scan itself.
+
+        OpenVAS **used to** launch here unconditionally — the only automatic
+        invocation of it anywhere in the pipeline, and the reason a deep
+        analysis could quietly cost up to four hours. Removed in E0 of the
+        OpenVAS teardown (roadmap §7/§6.3, Ronda 0): with Fase U closed,
+        Nmap + Nikto + Nuclei is the corroborator pool the roadmap targets.
         """
         ids: list = []
 
@@ -594,11 +624,6 @@ class LybraEngineManager(ScanManager):
                 ids.append(NucleiScanManager().run_scan(target=target, user_id=user_id))
             except Exception:
                 logger.exception("Análisis profundo: fallo al lanzar Nuclei corroborador para %s", target)
-
-        try:
-            ids.append(OpenVASScanManager().run_scan(target=target, user_id=user_id))
-        except Exception:
-            logger.exception("Análisis profundo: fallo al lanzar OpenVAS corroborador para %s", target)
 
         if ids:
             logger.info("Análisis profundo: lanzados %d escaneos corroboradores para %s", len(ids), target)
