@@ -34,6 +34,7 @@ from src.modules.features.themis.lybra import nuclei_result_to_finding
 from src.modules.features.themis.services.processors import NucleiResultProcessor
 
 from ._docker_helpers import resolve_docker
+from ._real_kb import seed_from_real_backfill
 # pylint: disable=unused-import
 # Las tres fixtures se usan por nombre (parámetro directo o
 # request.getfixturevalue), que es como pytest las descubre — pylint no lo ve.
@@ -125,13 +126,30 @@ def _differential_report(lybra_cves: set[str], nuclei_cves: set[str]) -> dict:
     }
 
 
+@pytest.fixture(scope="module")
+def real_kb(app):
+    """Puebla la KB del test desde el backfill NVD real (ver ``_real_kb``).
+
+    Sin esto la comparación es vacua: la mitad Lybra del diferencial no tiene
+    ninguna CVE que consultar y devuelve el conjunto vacío, que se lee como
+    "acuerdo perfecto" cuando en realidad no se midió nada. Se salta el módulo
+    entero si el Postgres con el backfill no está levantado, por la misma razón.
+    """
+    with app.app_context():
+        copied = seed_from_real_backfill()
+    if copied is None:
+        pytest.skip("El Postgres con el backfill real de NVD no está disponible")
+    print(f"\n[oráculo diferencial] KB del banco poblada con {copied} CVE reales")
+    return copied
+
+
 @pytest.mark.parametrize("fixture_name,url_template", [
     ("httpd_2449_port", "http://127.0.0.1:{port}"),
     ("git_exposed_port", "http://127.0.0.1:{port}"),
     ("tls_healthy_port", "https://127.0.0.1:{port}"),
 ])
 def test_differential_oracle_against_three_unlabeled_targets(
-    request, app, admin_user, monkeypatch, fixture_name, url_template,
+    request, app, admin_user, monkeypatch, real_kb, fixture_name, url_template,
 ):
     """El banco diferencial de U3: por cada uno de los (al menos) tres
     objetivos, compara Lybra contra Nuclei y deja el desglose en el resumen
