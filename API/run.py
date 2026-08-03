@@ -31,6 +31,8 @@ from flask_smorest          import Api as FlaskSmorestApi
 from sqlalchemy             import create_engine, text
 from urllib.parse           import quote_plus
 
+from dotenv                 import load_dotenv
+
 from src.modules.shared     import limiter
 from src.modules.infrastructure import unit_of_work
 from src.modules.shared._exceptions import (
@@ -66,7 +68,7 @@ _logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", message="Multiple schemas resolved to the name")
 
-
+load_dotenv()  # Carga variables de entorno desde .env (solo en desarrollo)
 
 def _kill_worker_tree() -> None:
     """Mata el subproceso worker y TODOS sus descendientes (nmap, nikto…).
@@ -231,7 +233,7 @@ def _register_error_handlers(app: Flask) -> None:
         - 500 Internal Server Error: Errores inesperados.
     """
     _logger.info("Registrando manejadores de error globales...")
-    
+
     @app.errorhandler(404)
     def not_found(error):
         _logger.warning(f"Ruta no encontrada: {request.method} {request.url}")
@@ -354,7 +356,7 @@ def _configure_scheduling() -> None:
     from src.modules.features.themis.services.scheduling import ThemisScheduler
     from src.modules.features.hygeia.services.scheduling import HygeiaScheduler
     from src.modules.features.iris.services.mailbox.scheduling import IrisMailboxScheduler
-    
+
     _logger.info("Reconciliando escaneos huérfanos...")
     try:
         from src.modules.features.themis.managers import ScanManager
@@ -545,9 +547,9 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
 
     storage_uri = os.environ.get("RATELIMIT_STORAGE_URI")
     if not storage_uri:
-        redis_cfg = CR.get_redis_config()
-        redis_auth = f":{quote_plus(redis_cfg['password'])}@" if redis_cfg.get("password") else ""
-        storage_uri = f"redis://{redis_auth}{redis_cfg['host']}:{redis_cfg['port']}/{redis_cfg['db']}"
+        redis_cfg = CR.redis_config()
+        redis_auth = f":{quote_plus(redis_cfg.password)}@" if redis_cfg.password else ""
+        storage_uri = f"redis://{redis_auth}{redis_cfg.host}:{redis_cfg.port}/{redis_cfg.db}"
     app.config["RATELIMIT_STORAGE_URI"] = storage_uri
     limiter.init_app(app)
 
