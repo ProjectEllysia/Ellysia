@@ -115,7 +115,7 @@ Las siguientes jerarquías usan herencia de tabla unida (polymorphic), que puede
 confundir al autogenerate:
 
 - `Document` → `AegisDocument`, `ThemisDocument`, `IrisDocument`
-- `Scan` → `NmapScan`, `NiktoScan`, `OpenVASScan`
+- `Scan` → `NmapScan`, `NiktoScan`, `LybraScan`, `NucleiScan`
 - `Storable` → `Account`, `CreditCard`, `SecureNote`, `Identity`, `BankAccount`, `WifiNetwork`, `SoftwareLicense`
 
 **Regla:** tras generar una migración que toca estas tablas, revisa que las FK

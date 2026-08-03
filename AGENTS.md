@@ -10,7 +10,7 @@ Monorepo:
 ## Platform
 
 The API assumes **Linux** (native, WSL, or Docker). The scan tools (Nmap, Nikto,
-OpenVAS/Greenbone) are Linux-native — there is no Windows/WSL bridge in the code. On Windows,
+Nuclei) are Linux-native — there is no Windows/WSL bridge in the code. On Windows,
 run the entrypoint inside WSL or use `docker compose`. Scan subprocesses are launched with
 `start_new_session=True` so cancellation kills the full descendant tree via `psutil`.
 
@@ -25,7 +25,7 @@ run the entrypoint inside WSL or use `docker compose`. Scan subprocesses are lau
 6. Signal handlers (SIGTERM/SIGINT) → cancel TaskQueue → stop Scheduler → close DB
 
 ```bash
-docker compose --profile dev up -d   # postgres(15432), redis(6379), ollama, openvas
+docker compose --profile dev up -d   # postgres(15432), redis(6379), ollama
 cd API && python run.py               # 0.0.0.0:5000
 python -m src.modules.system.taskqueue.worker  # RQ worker (separate terminal)
 ```
@@ -45,7 +45,7 @@ Facts:
 - **No callback parameters** — `on_cancel`, `on_complete`, `on_error` were removed
 - Cancellation: sets a Redis key `taskqueue:cancel:{job_id}` checked cooperatively by workers
 - Entry points are `@staticmethod` on each module's manager class (inline in `managers.py`, not separate `services/rq_tasks.py` files) — picklable by reference with no bound instance state; they instantiate a fresh manager inside the worker:
-  - `themis/managers/` → `TracerouteManager.execute_traceroute`, `NmapScanManager.execute_nmap_scan`, `NiktoScanManager.execute_nikto_scan`, `OpenVASScanManager.execute_openvas_scan`, `ThemisReportManager.execute_report_generation`, `LybraEngineManager.execute_lybra_scan` (own-engine, `themis/managers/lybra_engine.py`)
+  - `themis/managers/` → `TracerouteManager.execute_traceroute`, `NmapScanManager.execute_nmap_scan`, `NiktoScanManager.execute_nikto_scan`, `NucleiScanManager.execute_nuclei_scan`, `ThemisReportManager.execute_report_generation`, `LybraEngineManager.execute_lybra_scan` (own-engine, `themis/managers/lybra_engine.py`)
   - `aegis/managers.py` → `AegisManager.execute_aegis_generation`
   - `aegis/campaign_managers.py` → `CampaignManager.execute_campaign_send` (sends via `herald`, not scribe)
   - `iris/managers.py` → `IrisManager.execute_iris_analysis`, `IrisReportManager.execute_report_generation`
@@ -68,8 +68,8 @@ Standalone `@staticmethod` entry points on the manager classes (e.g. `NmapScanMa
 
 `API/src/modules/system/config_reading.py` (imported as `CR`):
 1. `API/SecOpsConfig.json` — JSON config (DB fallback, prompts, directories, taskqueue)
-2. `API/.env` — env vars override JSON. Required for secrets (JWT_SECRET_KEY, DB / Redis / SMTP / OpenVAS / OpenAI credentials) and ambient URLs (`PUBLIC_WEB_URL`). Non-secret tuning (algorithm, expirations, timeouts) lives in JSON under `general.security.jwt`, with optional env override for 12-factor.
-3. Root `.env` — for docker-compose only (Postgres, Redis, OpenVAS creds). Not for the API.
+2. `API/.env` — env vars override JSON. Required for secrets (JWT_SECRET_KEY, DB / Redis / SMTP / OpenAI credentials) and ambient URLs (`PUBLIC_WEB_URL`). Non-secret tuning (algorithm, expirations, timeouts) lives in JSON under `general.security.jwt`, with optional env override for 12-factor.
+3. Root `.env` — for docker-compose only (Postgres, Redis creds). Not for the API.
 
 All config keys lazily loaded via `@_lazy_load` decorator.
 
@@ -92,10 +92,9 @@ Protected endpoints require `Authorization: Bearer <access_token>`. Roles checke
 
 ## Scan System (themis)
 
-- `themis/services/tasks.py`: `_Task` base class → `NmapScanTask`, `NiktoScanTask`, `OpenVASTask`
-- Each scan manager (NmapScanManager, NiktoScanManager, OpenVASScanManager) submits to TaskQueue with `category="themis.scan"` and `external_id=f"scan:{scan_id}"`
-- Cancellation: RQ sets Redis key `taskqueue:cancel:{job_id}` → worker checks `_Task.wait(cancel_check=...)` → triggers `task.cancel()` (subprocess.terminate / GMP stop)
-- OpenVAS: GMP API (not CLI). Uses `python-gvm`. Targets, port lists, scan configs auto-managed.
+- `themis/services/tasks.py`: `_Task` base class → `NmapScanTask`, `NiktoScanTask`, `NucleiScanTask`
+- Each scan manager (NmapScanManager, NiktoScanManager, NucleiScanManager) submits to TaskQueue with `category="themis.scan"` and `external_id=f"scan:{scan_id}"`
+- Cancellation: RQ sets Redis key `taskqueue:cancel:{job_id}` → worker checks `_Task.wait(cancel_check=...)` → triggers `task.cancel()` (subprocess.terminate)
 - Scheduled scans via APScheduler (`themis/services/scheduling.py`). `Scheduler` class with interval/cron triggers. Synced from DB.
 
 ## Aegis
@@ -113,13 +112,12 @@ Protected endpoints require `Authorization: Bearer <access_token>`. Roles checke
 | API | 5000 | `0.0.0.0:5000` |
 | PostgreSQL | 15432 | Container maps 5432→15432 |
 | Redis | 6379 | Container maps 6379→6379 |
-| OpenVAS | 9390/9392 | ~15min first start (NVT feed) |
 | Ollama | 11434 | |
 
 ## Docker
 
 Two profiles:
-- `dev` — infrastructure only (postgres, redis, ollama, openvas)
+- `dev` — infrastructure only (postgres, redis, ollama)
 - `container` — everything including API, worker, and web containers
 
 GPU: `-f docker-compose.gpu-nvidia.yml / .gpu-intel.yml / .gpu-amd.yml`
@@ -129,7 +127,6 @@ GPU: `-f docker-compose.gpu-nvidia.yml / .gpu-intel.yml / .gpu-amd.yml`
 - `.env` files contain credentials — never commit. `API/.env` is gitignored.
 - `API/src/data/` and `docs/` are gitignored.
 - `_init_db()` is destructive — drops and recreates everything.
-- OpenVAS only accepts a single host per scan (not CIDR ranges).
 - `SecOpsConfig.json` values are lazily cached — changes require app restart unless written via `PUT /system` endpoint.
 - `themis/services/tasks.py` has its own `TaskStatus` enum separate from `taskqueue.TaskStatus`.
 - RQ workers must be running for background tasks to execute. Launch with `python -m src.modules.system.taskqueue.worker`.

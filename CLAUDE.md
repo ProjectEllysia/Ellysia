@@ -8,7 +8,7 @@ A detailed agent guide already exists — **`AGENTS.md`** (architecture, TaskQue
 
 ## Platform note
 
-The API assumes **Linux** — scan tools (Nmap, Nikto, OpenVAS/Greenbone) are Linux-native with no Windows bridge in the code. On Windows, run the entrypoint inside **WSL** (`wsl` → `cd API && python run.py`) or use `docker compose`. The repo checkout itself is on Windows; tests and the web build run fine natively, but running the API server does not.
+The API assumes **Linux** — scan tools (Nmap, Nikto, Nuclei) are Linux-native with no Windows bridge in the code. On Windows, run the entrypoint inside **WSL** (`wsl` → `cd API && python run.py`) or use `docker compose`. The repo checkout itself is on Windows; tests and the web build run fine natively, but running the API server does not.
 
 ## Common commands
 
@@ -49,7 +49,7 @@ npm run test:acheron   # crypto interop + CRUD tests for the Acheron vault clien
 
 ### Docker (from repo root)
 ```bash
-docker compose --profile dev up -d        # infra only: postgres(15432), redis(6379), ollama, openvas
+docker compose --profile dev up -d        # infra only: postgres(15432), redis(6379), ollama
 docker compose --profile container up -d  # full stack incl. API, worker, web
 # GPU: add -f docker-compose.gpu-nvidia.yml (or .gpu-intel.yml / .gpu-amd.yml)
 ```
@@ -97,8 +97,8 @@ OAuth 2.0 + JWT (PyJWT). `POST /oauth/token` with `{"grantType":"password", ...}
 
 Layered, read via `system/config_reading.py` (imported as `CR`, lazily cached with `@_lazy_load`):
 1. **`API/SecOpsConfig.json`** — base config: prompts, directories, taskqueue defaults, `tools.scribe`/`tools.herald` strategy selection, non-secret JWT tuning (`general.security.jwt`), `appVersion` (→ `CR.get_app_version()`).
-2. **`API/.env`** — env vars that **override** JSON. Required for secrets: `JWT_SECRET_KEY`, DB / Redis / SMTP / OpenAI / OpenVAS credentials, `PUBLIC_WEB_URL`.
-3. **Root `.env`** — docker-compose only (Postgres/Redis/OpenVAS creds), not read by the API.
+2. **`API/.env`** — env vars that **override** JSON. Required for secrets: `JWT_SECRET_KEY`, DB / Redis / SMTP / OpenAI credentials, `PUBLIC_WEB_URL`.
+3. **Root `.env`** — docker-compose only (Postgres/Redis creds), not read by the API.
 
 Changes to `SecOpsConfig.json` require an app restart (values are cached) unless applied via `PUT /system`.
 
@@ -112,7 +112,7 @@ tools/         scribe (AI), herald (email)   # names match src/modules/tools/
 features/      themis, aegis, iris, hygeia   # one per feature module
 ```
 
-Themis' five scanners each get their own block under `features.themis.scanners.<tool>` (`nmap`, `nikto`, `openvas`, `lybra`, `nuclei`), all with `prompts` + `colorPalette`. The tuple `CR.THEMIS_SCANNERS` must stay in sync with them — `tests/unit/test_config_shape.py` enforces it.
+Themis' four scanners each get their own block under `features.themis.scanners.<tool>` (`nmap`, `nikto`, `lybra`, `nuclei`), all with `prompts` + `colorPalette`. The tuple `CR.THEMIS_SCANNERS` must stay in sync with them — `tests/unit/test_config_shape.py` enforces it.
 
 ### Reading config: blocks, not getters
 
@@ -146,6 +146,6 @@ A few things stay plain functions on purpose: env-only credentials (`get_*_envir
 - PostgreSQL is on port **15432** locally (container maps 5432→15432), not the standard 5432.
 - Async tasks silently never run if no RQ **worker** is up.
 - `themis/services/tasks.py` defines its **own** `TaskStatus` enum — distinct from `taskqueue.TaskStatus`. Don't conflate them.
-- OpenVAS accepts **one host per scan** (no CIDR ranges) and takes ~15 min on first start (NVT feed).
 - API version is config-driven: `create_app()` reads it via `CR.get_app_version()` from `appVersion` in `SecOpsConfig.json` (currently `4.2`) — it is not hardcoded.
-- `features.themis.areLocalIpsAllowed` is set to `true` in `SecOpsConfig.json` (intentional, for local dev against private IPs) — with it `true`, 4 SSRF tests don't trigger (`test_nikto_rejects_loopback_target`, `test_nikto_rejects_cloud_metadata_target`, `test_nmap_rejects_private_ip_target`, `test_openvas_scheduled_flow_rejects_private_ip`; not a regression). **Must be reverted to `false` before any real deployment**, or the anti-SSRF defense stays disabled in production.
+- `features.themis.areLocalIpsAllowed` is set to `true` in `SecOpsConfig.json` (intentional, for local dev against private IPs) — with it `true`, 3 SSRF tests don't trigger (`test_nikto_rejects_loopback_target`, `test_nikto_rejects_cloud_metadata_target`, `test_nmap_rejects_private_ip_target`; not a regression). **Must be reverted to `false` before any real deployment**, or the anti-SSRF defense stays disabled in production.
+- OpenVAS was removed from the product (roadmap `plans/feature/themis/lybra-engine-roadmap.md` §7/§6.3, Ronda 2): its scheduled-flow SSRF fix (`run_scan()` self-validating via `ScanManager.reject_private_ip`) no longer exists, and the surviving scanners (Nmap/Nikto/Nuclei/Lybra) don't have the same self-validation in their own `run_scan()` — they rely on the HTTP endpoint validating first. The scheduled flow (`scheduling.py`) calls `run_scan()` directly, bypassing that. Flagged for a separate audit; not yet fixed.

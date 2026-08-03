@@ -272,16 +272,17 @@ La pista de **correlación** está completa; la de **bajo nivel** está a medias
 | **2** — KB local (NVD, CPE Dictionary, KEV, EPSS) | Correlación | ✓ implementada |
 | **5** — Dedup multi-fuente, ciclo de vida, scoring, `HostService` | Correlación | ✓ implementada |
 | **6** — Pipeline orquestado | Convergencia | ✓ implementada |
-| **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ◐ parcial — U1, U2 y U3 hechas, U4 sin empezar. **U4 sigue siendo prerrequisito del cierre de R**. Detalle en la sección Fase U más abajo |
-| **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — 16 checks; los cuatro tipos activos (`http`/`tls`/`network`/`script`) existen, el feed vive en YAML y la ingesta está construida pero apagada. **Solo queda la precisión ≥0,9 medida**, que depende del banco (U3) y no de más código. Detalle actualizado en la sección Fase R más abajo |
+| **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ✓ implementada — U1, U2 y U3 hechas; **U4 medido el 2026-07-31: 23,37 % de plantillas HTTP ingeribles frente al umbral de 25 % ⇒ no se ingiere**. Detalle en la sección Fase U más abajo |
+| **R** — Runtime de checks propio | Bajo nivel | ✓ implementada — 16 checks; los cuatro tipos activos (`http`/`tls`/`network`/`script`) existen, el feed vive en YAML, la ingesta está construida y apagada por decisión, y la **precisión está medida: 1,000 (TP=30/FP=0) sobre 9 objetivos etiquetados con señuelos**. Detalle en la sección Fase R más abajo |
 | **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS, y (Fase N) FTP, SMTP/IMAP/POP3, SMB, MySQL/MariaDB, Redis, VNC; falta JARM, SNMP (sin sonda UDP), PostgreSQL/MSSQL/MongoDB, RDP, LDAP, Telnet, RPC. Detalle actualizado en la sección Fase N más abajo |
 | **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; faltan SYN sin estado, sondas UDP y control de tasa AIMD |
 | **4**, DAST y Etapa 2 (P, E, C, O, A, B, D, G, S, X) | Ambas | ○ planificadas |
 
-El feed actual (`lybra/feeds/checks_feed.json`, versión `lybra-checks-1`) tiene 13 checks en 3 familias:
-`exposed_path` ×7, `security_header` ×3, `tls` ×3 — todos de tipo `http` o `tls`. Ése es literalmente
-el mapa de la brecha G1: **el runtime no tiene ni un solo check que hable un protocolo que no sea
-HTTP o TLS.**
+El feed actual (`lybra/feeds/checks_feed.yaml`, versión `lybra-checks-4`) tiene 16 checks en 5
+familias: `exposed_path` ×7, `security_header` ×3, `tls` ×3, `network` ×2, `script` ×1. Las Fases N y
+R ya han empezado a llenar el hueco que la redacción original de este párrafo describía —el runtime
+no hablaba ningún protocolo que no fuera HTTP o TLS—, pero con tres checks no-web sigue siendo el
+mapa de la brecha G1.
 
 ### 6.2 El criterio de prioridad, actualizado
 
@@ -295,7 +296,7 @@ El resultado es esta reordenación, que es el cambio de fondo de esta revisión:
 | **1.º** | **N — Dissectors y checks de red no-HTTP** (nueva) | **G1** | Sin ella, "prescindir de OpenVAS" significa perder de verdad cobertura. Con ella, la detección por versión se extiende a toda la superficie no-web sin escribir un solo check por CVE |
 | **2.º** | **I — Inventario de Hygeia → Lybra** (H0–H2) — ◐ parcial | **G2** | Es la prioridad nº 1 del documento de gobierno por razones de producto, y resulta que además es el sustituto del escaneo autenticado de OpenVAS. Dos motivos independientes apuntando al mismo trabajo. La tubería está construida (2026-07-28); falta la **resolución de nombre de paquete → CPE** (Fase I-b), sin la cual el motor recibe el inventario pero no sabe reconocerlo |
 | **3.º** | **U — Nuclei como herramienta, corroborador y oráculo** (nueva) | G4 parcial, y **la vara de medir** | Entrega una herramienta de producto completa a coste bajo, sustituye a Nikto como corroborador con datos mucho mejores (CVE + CVSS frente a OSVDB), y da el oráculo de falsos positivos que el §8 admite que falta. Va antes que el cierre de R porque es quien lo hace medible |
-| **4.º** | **R (cierre) — tipo `script`, feed en YAML, ingesta de plantillas** | G1, G4 | El tipo `network` **ya existe** (lo aportó la Fase N). Lo que queda —YAML, ingesta y el umbral de precisión— depende de la Fase U; `script` no |
+| **4.º** | ~~**R (cierre)**~~ — ✓ cerrada el 2026-07-31 | G1, G4 | `script`, YAML e ingesta construidos; precisión 1,000 medida. La ingesta queda apagada por el veredicto del censo de U4 |
 | **5.º** | **O — Backports por feed de distribución** | **G3** | Ataca la causa nº 1 de falsos positivos sin tocar el host ni pedir credenciales |
 | **6.º** | **D — Credenciales por defecto** | **G4** | Cobertura clásica de OpenVAS, con guardas propias (lockout, tasa, evidencia sin plaintext) |
 | **7.º** | **F y T (cierre) — JARM, SYN sin estado, UDP, AIMD** | — | Independiza de Nmap, no de OpenVAS. Trabajo de identidad y disfrute, no de necesidad |
@@ -304,6 +305,58 @@ El resultado es esta reordenación, que es el cambio de fondo de esta revisión:
 Las fases **4** (escaneo autenticado por SSH) y **DAST** bajan de prioridad de forma explícita: la
 primera porque la Fase I la cubre mejor y sin credenciales nuevas, la segunda porque sigue siendo
 opcional y dependiente del uso real.
+
+### 6.3 El orden de integración de lo que queda antes de la Etapa 2 (2026-07-31)
+
+Con U y R cerradas, el §6.2 deja de ser un orden de fases y pasa a ser una lista de trabajo suelto.
+Este apartado lo convierte en rondas ejecutables. No cambia el criterio de prioridad —sigue mandando
+cuánta brecha con OpenVAS se cierra—; lo que añade son **tres dependencias que el orden original no
+veía**, y que reordenan lo suficiente como para justificar escribirlas.
+
+**Dependencia 1 — La sonda UDP no es trabajo de la Fase T, es la puerta de entrada a la Fase N.**
+El §6.2 pone T en el 7.º puesto, con la etiqueta honesta de "disfrute, no necesidad". Pero SNMP —el
+dissector de mayor valor que queda, porque su `sysDescr` trae producto y versión enteros en una sola
+lectura— no existe sin ella, y la propia Fase N ya lo tenía anotado como su bloqueo. La salida es
+partir T en dos: **la sonda UDP acotada (SNMP, DNS, NTP) sube al primer puesto; el SYN sin estado y
+el AIMD se quedan exactamente donde están**, que es donde el propio plan admite que no hay evidencia
+de necesitarlos. Consecuencia técnica que conviene anticipar: `NetworkProbe`/`NetworkSession`
+(Fase N) son TCP puro, así que el tipo de check `network` tiene que aprender UDP antes de que exista
+un `snmp-default-community`.
+
+**Dependencia 2 — La Fase O no tiene hoy con qué evaluar su propio criterio de cierre.** Su número
+es *"falsos positivos del banco −40 % en imágenes Debian/RHEL"*, y no existe ningún banco que mida
+falsos positivos de detección **por versión**: el de precisión de la Fase R mide las tres familias
+activas, que no producen ni una CVE, y el diferencial de U3 acaba de demostrar que Nuclei no puede
+corroborar detección por versión (0 corroborados sobre 70). Ese baseline hay que construirlo
+**antes** de O, no después, o su −40 % no será comprobable. Ya es barato: `tests/oracle/_real_kb.py`
+trae el backfill real al banco, y hay dos puntos de partida medidos (70 CVE sobre `httpd:2.4.49`, 32
+hallazgos abiertos sobre el inventario de `PC-Gabriel`).
+
+**Dependencia 3 — E0 es lo más barato que queda y ya no tiene contrapartida.** Tres ediciones,
+reversibles, sin pérdida de datos. Con la Fase U cerrada, quitar OpenVAS del análisis profundo deja
+el pool en Nmap + Nikto + Nuclei —el que U2 declaró como objetivo, salvo Nikto—, y es lo único que
+sigue gastando un corroborador de cuatro horas en cada `deep=True`.
+
+**Las rondas:**
+
+| Ronda | Trabajo | Por qué aquí |
+|---|---|---|
+| **0** | **E0** — desconectar OpenVAS (corroborador, `docker-compose`, `.env` raíz) | Medio día, reversible, y el compose de dev pasa de quince minutos a segundos |
+| **1** | **T (sonda UDP mínima) + N (SNMP)** — UDP curado, dissector `sysDescr`, `network` sobre UDP, check de comunidad por defecto | El trozo más grande de G1 que queda, y el de mejor relación valor/coste de todo el backlog |
+| **2** | **E1 + E2** — retirar OpenVAS del producto y del código | Ya sin nada que dependa de él. Diff grande pero mecánico. **E3 se deja aparte**: es el único paso irreversible y no bloquea nada |
+| **3** | **Baseline de FP por versión → Fase O** | Primero la dimensión `outdated_software` en el banco de precisión sobre la KB real; solo entonces la ingesta OVAL/CSAF. Ataca la causa nº 1 de falsos positivos (G3) |
+| **4** | **N (resto) + D** — PostgreSQL/MSSQL/MongoDB, RDP, LDAP; encima, credenciales por defecto | D va detrás de N porque reutiliza sus dissectors, y al final del todo porque es la única fase que **escribe** en el objetivo (G4) |
+| **5** | **F + T (cierre)** — JARM, SYN sin estado, AIMD | Solo si aparece evidencia del techo de Python. Si no aparece, archivarlo explícitamente en vez de arrastrarlo como deuda perpetua |
+
+**I-b queda fuera de las rondas a propósito.** Su siguiente paso —el ranking de nombres sin resolver
+más frecuentes para dirigir el feed curado— no es trabajo de ingeniería sino de datos: necesita el
+agente de Hygeia instalado en más de un equipo. Es una espera operativa, y ponerla en una ronda
+sería fingir que depende de escribir código.
+
+**Dos cosas que este orden no resuelve, y que no se arreglan con código sino con contenedores:** la
+retirada de Nikto sigue sin dato que la respalde (el diferencial no produjo ni un hallazgo web del
+lado de Nuclei sobre los tres objetivos), y el catálogo de objetivos genuinamente explotables del
+banco sigue siendo pobre — la misma deuda que U3 ya tenía anotada.
 
 ---
 
@@ -970,7 +1023,7 @@ el feed curado con datos en vez de por intuición.
 
 ---
 
-### Fase U — Nuclei como herramienta, corroborador y oráculo · pista de bajo nivel · ◐ parcial (U1 hecha) · **prerrequisito del cierre de la Fase R**
+### Fase U — Nuclei como herramienta, corroborador y oráculo · pista de bajo nivel · ✓ implementada
 
 **El objetivo** es incorporar Nuclei a Ellysia en sus cuatro papeles posibles de una vez, porque los
 cuatro comparten la misma pieza de trabajo y separarlos sería escribirla cuatro veces. Es la única
@@ -1247,10 +1300,39 @@ matchers `binary`/`size`/`dsl`, `inputs` con `type: hex`, `condition` dentro de 
 solo cuántas plantillas fallan sino **por qué** — y en particular cuántas usan `input-hex`, que es
 la señal que decide si el camino binario de la Fase N merece la pena.
 
-⚠ **El número sigue pendiente del equipo completo**: exige el feed instalado. Los tests de aquí
-cubren el criterio de clasificación (25 casos con plantillas escritas a mano), no el resultado del
-censo. El quinto criterio de la Definición de Hecho de esta fase sigue abierto hasta que alguien
-ejecute el script en esa máquina y anote el veredicto.
+**Estado (2026-07-31, tarde): el número está medido. El veredicto es NO ingerir.**
+Ejecutado en el equipo con el feed instalado (`~/nuclei-templates`, motor Nuclei v3.11.0, 13.206
+plantillas legibles de 13.391 ficheros):
+
+| Cubo | Plantillas | % |
+|---|---|---|
+| `ingestible_now` | 2.398 | 18,16 % |
+| `needs_extractors` | 1.839 | 13,93 % |
+| `needs_payloads_or_binary` | 6.178 | 46,78 % |
+| `rejected_by_design` | 2.232 | 16,90 % |
+| `out_of_scope` | 559 | 4,23 % |
+
+**El número que decide: 2.369 de 10.137 plantillas HTTP son ingeribles hoy tal cual — 23,37 %,
+por debajo del umbral de 25 % fijado por escrito de antemano.** El script emite el veredicto él
+solo: *la Fase R renuncia a ingerir*. `themis.lybra.ingest.enabled` **se queda en `false`**, y esa
+deja de ser una decisión pendiente para pasar a ser una decisión tomada con un dato.
+
+Queda a 1,63 puntos del umbral, así que conviene decir en voz alta lo que el histograma insinúa y
+por qué **no** se actúa sobre ello ahora: el obstáculo más frecuente de todo el árbol es
+`matcher-condition-interna` (4.711 plantillas), es decir el `condition: and` *dentro* de un matcher
+de words que `Matcher._raw_match` fija a `any()`. Es, con diferencia, la característica más barata
+de las que faltan. Pero cambiar el criterio del clasificador **después** de ver el número es
+exactamente la racionalización a posteriori contra la que este apartado se blindó, así que se
+registra como observación y nada más: si algún día se implementa esa condición por sus propios
+méritos, el censo se vuelve a pasar y el umbral vuelve a decidir sin haberse tocado. Otros datos
+del reparto que sí valen para futuras fases: `input-hex` aparece en 182 plantillas —poco, lo que
+rebaja el atractivo del camino binario que la Fase N dejó anotado para "SMBv1 habilitado"— y
+`matcher:binary` en solo 27.
+
+*(Nota menor observada al ejecutarlo: el almacén resuelve la versión del árbol como
+`nuclei-templates-unknown` cuando las plantillas se instalaron fuera de la imagen Docker. No afecta
+al censo, pero sí sellaría un `feed_version` inútil si la ingesta llegara a encenderse — que ahora
+mismo no va a pasar.)*
 
 #### Una sola copia de las plantillas, y qué no se puede verificar en este equipo
 
@@ -1317,18 +1399,21 @@ qué se está verificando de verdad en cada sitio:
 | Trabajo | Verificable en el equipo de desarrollo | ⚠ Requiere el equipo completo |
 |---|---|---|
 | **R — tipo de check `script`** | Runtime, registro y tests con socket falso (el patrón que `smb.py` ya usa) | Disparo real contra Samba/Windows — el dissector SMB **ya estaba sin verificar** contra un servidor real |
-| **U4 — el censo** | La lógica del clasificador, con plantillas de muestra escritas a mano (✓ hecho) | ⚠ **El número en sí**: exige el árbol de plantillas real. Ejecutar `python tools/nuclei_template_census.py` y anotar el veredicto |
-| **El almacén de plantillas** | Resolución de rutas y parseo contra un directorio de prueba | ⚠ Que la ruta resuelta sea la misma que el binario usa de verdad |
+| **U4 — el censo** | La lógica del clasificador, con plantillas de muestra escritas a mano (✓ hecho) | ✓ **resuelto (2026-07-31)**: ejecutado sobre el árbol real (13.206 plantillas, motor v3.11.0) — 23,37 %, por debajo del umbral |
+| **El almacén de plantillas** | Resolución de rutas y parseo contra un directorio de prueba | ✓ resuelto: resolvió `~/nuclei-templates`, el mismo árbol que el binario usa. Salvedad menor: la *versión* del árbol queda como `nuclei-templates-unknown` fuera de la imagen Docker |
 | **R — migración del feed a YAML** | Todo (parseo, equivalencia con el JSON actual) — ✓ hecho | — |
-| **R — ingesta de plantillas** | Traductor plantilla→`Check`, índice de selección (✓ hecho, apagado por defecto) | ⚠ Ejecución de los checks ingeridos contra objetivos reales, y la decisión de encender el flag (depende del censo) |
-| **R — precisión ≥ 0,9 medida** | Nada | ⚠ **Todo**: `tests/oracle/` exige Docker y un `nuclei` con plantillas |
-| **Cualquier CPE→CVE de extremo a extremo** | Nada | ⚠ **Todo**: sin KB poblada el motor no falla, devuelve vacío — que es peor, porque se lee como "objetivo limpio" |
+| **R — ingesta de plantillas** | Traductor plantilla→`Check`, índice de selección (✓ hecho, apagado por defecto) | ✓ resuelto por la vía contraria: el censo dice que no se enciende, así que ejecutar checks ingeridos deja de ser trabajo pendiente |
+| **R — precisión ≥ 0,9 medida** | Nada | ✓ **medida (2026-07-31)**: 1,000 con `tests/oracle/test_lybra_precision_bench.py` sobre 9 objetivos Docker. No necesitó `nuclei` — las tres familias medidas no producen CVE |
+| **Cualquier CPE→CVE de extremo a extremo** | Nada | ✓ **desbloqueado (2026-07-31)** con `tests/oracle/_real_kb.py`: copia de solo lectura del backfill NVD real del Postgres de desarrollo al SQLite del banco, limitada a los productos del catálogo. Sin ese Postgres levantado, el módulo se salta en vez de medir el vacío |
 | **`nuclei_templates_version.txt`** | Nada | ⚠ El `Dockerfile` vuelca ahí la salida de `nuclei -version`, que es la versión **del motor**, no la de plantillas — mientras que el regex de `_check_output_line` sí captura la de plantillas. Probable etiqueta equivocada en el *fallback*; sin la imagen no se puede confirmar |
 
-La consecuencia práctica de la fila de la KB gobierna a todas las demás: **un test que aquí dé
-"0 hallazgos" no es evidencia de nada.** Lo que se escriba en el equipo de desarrollo asevera sobre
-mocks de KB o sobre la mecánica —¿se seleccionó el check?, ¿se parseó la plantilla?—, nunca sobre el
-recuento final de CVEs.
+La consecuencia práctica de la fila de la KB gobernaba a todas las demás: **un test que aquí dé
+"0 hallazgos" no es evidencia de nada.** Y no era hipotética: el número de U3 registrado más arriba
+(`0/0/0` en los tres objetivos) se midió exactamente así, con la KB vacía, y se leía como acuerdo
+perfecto. Resuelto el 2026-07-31 con el puente de solo lectura al backfill real; sobre `httpd:2.4.49`
+la misma comparación pasó de `0/0/0` a `0 corroborados / 70 solo-Lybra / 0 solo-Nuclei`. La regla que
+sobrevive, y que conviene no olvidar: **un banco que no declara de dónde salen sus datos de
+correlación no está midiendo la correlación.**
 
 #### Qué NO incluye esta fase
 
@@ -1347,16 +1432,47 @@ fuentes sobre el mismo activo — **✓**; (3) el análisis profundo de Lybra lo
 objetivos sin etiqueta previa — **✓, medido: 0 corroborados / 0 se escapan / 1 posible falso positivo,
 con la salvedad anotada arriba de que el catálogo de objetivos explotables sigue siendo pobre**; y (5)
 existe el histograma de ingestibilidad del feed de plantillas, con una recomendación escrita de sí o no
-para U4 — **el instrumento existe y el umbral está fijado (2026-07-31); falta ejecutarlo en la máquina
-con el feed instalado y anotar el veredicto**.
+para U4 — **✓, medido el 2026-07-31: 23,37 % de las plantillas HTTP son ingeribles, por debajo del
+umbral de 25 %; la recomendación escrita es NO ingerir**.
 
-La Fase U completa sigue en ◐ parcial: los cuatro primeros criterios están cerrados, mide una vara real
-— pero el quinto es U4, y U4 explícitamente no entrega código de producto en esta pasada, solo la
-medición que decide si vale la pena.
+**La Fase U queda ✓ hecha.** Los cinco criterios están cerrados. U4 nunca prometió código de
+producto: prometía el número que decide, y el número dice que no. La ingesta construida en la Fase R
+se queda apagada, que es el resultado que el propio diseño contemplaba como perfectamente válido.
+
+**Y el criterio (4) mejora de paso, porque la KB dejó de estar vacía.** El número de U3 que este
+apartado registraba (`0 corroborados / 0 se escapan / 1 posible falso positivo`) se había medido
+sobre un SQLite de test con la KB **vacía** — la fila que la tabla de restricciones de más abajo ya
+señalaba como la que gobierna a todas las demás. Con la KB vacía la mitad Lybra de la comparación
+devuelve el conjunto vacío, y un empate a cero se lee como "acuerdo perfecto" cuando en realidad no
+se midió nada. Resuelto con `tests/oracle/_real_kb.py`: una copia **de solo lectura** del backfill
+NVD real (el Postgres de desarrollo, ~371k CVE / 2,5M reglas de aplicabilidad) hacia el SQLite del
+banco, limitada a los productos que los contenedores hablan de verdad — 370 CVE de
+`apache:http_server` y `*:nginx`. Si ese Postgres no está levantado el módulo se salta, porque medir
+contra una KB vacía es justo lo que hay que evitar.
+
+**El número de U3, ahora sí sobre datos reales (2026-07-31):**
+
+| Objetivo | Corroborados | Solo Lybra | Solo Nuclei |
+|---|---|---|---|
+| `httpd:2.4.49` | 0 | **70** | 0 |
+| nginx con `.git/config` | 0 | 0 | 0 |
+| nginx TLS autofirmado | 0 | 0 | 0 |
+
+Los 70 no son 70 falsos positivos, y confundirlos sería el error de lectura que este banco existe
+para prevenir: son las CVE que la KB conoce para Apache 2.4.49 por rango de versión afectada, y
+Nuclei no corrobora ninguna porque **casi ninguna tiene plantilla de explotación activa** — la misma
+asimetría de señal que la pasada anterior ya había diagnosticado con una sola CVE, ahora visible a
+escala. La lectura correcta es que **el oráculo diferencial no puede validar la detección por
+versión**: mide bien la superficie activa (donde ambos motores hacen lo mismo) y no dice nada sobre
+la correlación por CPE, donde solo uno de los dos juega. Consecuencia para la decisión de retirar
+Nikto (declarada en U2, pendiente "del número de U3"): el número no la respalda ni la contradice,
+porque los tres objetivos del banco no producen ni un hallazgo web del lado de Nuclei — sigue
+haciendo falta el catálogo de objetivos genuinamente explotables que esta misma sección ya anotaba
+como deuda.
 
 ---
 
-### Fase R — El runtime de detección propio · pista de bajo nivel · ◐ parcial (solo falta la precisión medida) · **su cierre depende de la Fase U**
+### Fase R — El runtime de detección propio · pista de bajo nivel · ✓ implementada
 
 Ésta es la capa de identidad, la L2. Es lo que convierte a Lybra de un correlacionador en un motor
 con criterio propio de detección: un runtime único de comprobaciones —versionado, extensible y
@@ -1477,8 +1593,8 @@ de "el código está encendido":
 | Lo que faltaba de R | ¿Dependía de U? | Estado |
 |---|---|---|
 | **Migración del feed a YAML** | En el diseño, sí — se migraba al esquema de Nuclei | **✓ hecho (2026-07-31), sin esperar al número.** El esquema no cambió, solo el formato; se verificó por equivalencia de objetos `Check` antes de retirar el JSON |
-| **Ingesta de plantillas externas** | Sí, para decidir si *merece la pena* | **✓ construida (2026-07-31), apagada por flag.** El código no esperó al número; la *activación* sí lo hace — `themis.lybra.ingest.enabled=false` hasta que el censo se ejecute |
-| **Precisión ≥ 0,9 medida** | **Sí, de verdad** | ○ Pendiente. Depende del catálogo del banco (U3), no de más código de esta fase |
+| **Ingesta de plantillas externas** | Sí, para decidir si *merece la pena* | **✓ construida (2026-07-31), apagada — y ahora apagada *por decisión*.** El censo de U4 dio 23,37 % frente al umbral de 25 %: `themis.lybra.ingest.enabled` se queda en `false` sin fecha de revisión |
+| **Precisión ≥ 0,9 medida** | **Sí, de verdad** | **✓ medida (2026-07-31): 1,000 sobre 9 objetivos etiquetados.** Ver la nota de estado del banco de precisión más abajo |
 | **El tipo de check `script`** | No — plugin de primera parte, sin relación con Nuclei | **✓ hecho (2026-07-31)** |
 
 **Lo que esto cambia respecto al diseño original:** la premisa de que YAML e ingesta debían *esperar*
@@ -1529,9 +1645,52 @@ aserciones contra un handshake real — el segundo genera el certificado bajo `l
 reloj adelantado a 2020 (sin necesitar `CAP_SYS_TIME`) para producirlo ya caducado. La fixture "sana"
 sirve de control negativo. `tls-deprecated-protocol` queda sin cubrir a propósito: el OpenSSL moderno
 de la imagen base rechaza negociar SSLv3/TLSv1.0/TLSv1.1 aunque se fuerce por configuración — hueco
-documentado, no descubierto por sorpresa. **Lo único que falta para cerrar la fase entera es la
-medición formal de precisión ≥0,9 a escala** (el banco de U3, con su catálogo de objetivos
-explotables aún pobre) — los tipos de check y la migración a YAML ya no son parte de esa lista.
+documentado, no descubierto por sorpresa.
+
+**Estado (2026-07-31, tarde): la precisión está medida. La Fase R queda ✓ hecha.**
+
+El número que faltaba no dependía del catálogo de U3, como este documento suponía: el diferencial de
+Nuclei mide desacuerdo sobre CVE, y las tres familias de la Fase R (`tls`, `security_header`,
+`exposed_path`) no producen CVE ninguna. Lo que hacía falta era un banco de **verdad por etiqueta**
+con señuelos, y no existía: `test_lybra_oracle_bench.py` afirmaba objetivo-a-objetivo ("en este
+contenedor debe salir este check"), que es regresión y no medición — no agregaba nada y, sobre todo,
+**no tenía un solo objetivo capaz de generar un falso positivo**, así que el denominador de la
+precisión no podía significar nada.
+
+`tests/oracle/test_lybra_precision_bench.py` es ese banco. Nueve objetivos con el conjunto exacto de
+`check_id` declarado por adelantado, sin imágenes nuevas (`nginx:alpine` y `httpd:2.4.49`, las que el
+banco ya usaba — lo que crece es el número de *escenarios*, que es donde estaba la falta de escala).
+Cuatro de los nueve son señuelos o controles negativos, a propósito: `nginx-endurecido` manda las
+tres cabeceras y **no debe producir nada**, y `nginx-senuelos` sirve un 200 en las siete rutas que
+los checks de `exposed_path` piden pero con un cuerpo que no es lo que el check busca — un
+`.git/config` que no es un config de Git, un `backup.sql` que no es un volcado. Un check que mirase
+solo el código de estado sacaría ahí siete falsos positivos de golpe.
+
+**El resultado: TP=30, FP=0, FN=0 → precisión = 1,000 (umbral 0,9), recall = 1,000.** El desglose se
+imprime por objetivo y va en el mensaje del fallo, así que una regresión futura dice *cuál* objetivo
+la causó.
+
+Dos honestidades sobre ese 1,000, porque un número redondo invita a confiar más de lo que sostiene.
+La primera: 30 detecciones sobre un feed de 16 checks es una medición pequeña; prueba que las tres
+familias no disparan en falso contra los engaños que se les han puesto delante, no que no vayan a
+hacerlo nunca contra la variedad de una red real. La segunda es un hallazgo del propio banco: la
+primera pasada dio **0,833** con seis falsos positivos, y los seis eran artefacto de la medición, no
+del motor. Los nueve objetivos comparten IP (127.0.0.1) y por tanto el mismo `Host`, así que
+`apply_lifecycle` (Fase 5) arrastra a cada escaneo un hallazgo fantasma en estado `fixed` por cada
+uno del escaneo anterior que ya no está — que es exactamente lo que debe hacer, para dejar constancia
+de la remediación. Contarlos como detecciones convertía un mecanismo que funciona en seis falsos
+positivos inventados por el banco. El banco filtra `state == "fixed"` y lo explica en el sitio: un
+hallazgo `fixed` significa literalmente "no observado ahora".
+
+*(Cambio colateral en `test_lybra_oracle_bench.py`: `_run_self_discovery` hace idempotente el alta en
+el registro de objetivos autorizados. Un test que barre varios contenedores con la misma IP lo llama
+una vez por objetivo, y el registro rechaza duplicados; lo que el helper necesita es "que esté
+autorizado", no "que se acabe de añadir".)*
+
+⚠ Lo que sigue sin cubrir, sin cambios respecto a antes: `tls-deprecated-protocol` (el hueco de
+OpenSSL de arriba), el disparo del check `script` de SMB contra un Samba/Windows real, y la ejecución
+de checks ingeridos — esta última ya no es deuda pendiente sino trabajo archivado, porque U4 decidió
+que la ingesta no se enciende.
 
 ---
 
@@ -2027,10 +2186,21 @@ Solo si el uso real es web y existe el registro de autorización.
 —1.00 de concordancia en ambos, sobre 6 objetivos Docker variados— más el lado real anterior
 (`scanme.nmap.org` + 2 reales, también 1.00). Con N modesto, el número prueba sobre todo que el
 mecanismo de medición funciona, más que la confianza de fondo que pide un 0,90/0,95 robusto — pero ya
-no es una medición manual de una vez: es una suite repetible que puede crecer. R tiene las 3 familias
-con banco automatizado (incluida `tls`), pero sin precisión medida formalmente contra un catálogo. Lo
-que falta es escala, y —para F, T y N— el lado real de la paridad, que requiere que el usuario amplíe
-su registro de objetivos autorizados.
+no es una medición manual de una vez: es una suite repetible que puede crecer.
+
+**Actualización (2026-07-31).** R y U tienen ya su número medido, los dos en el equipo con Docker, el
+binario de Nuclei, el feed de plantillas y el backfill NVD real:
+
+| Fase | El número, medido |
+|---|---|
+| **R** | **Precisión 1,000** (TP=30, FP=0, FN=0) sobre 9 objetivos etiquetados —cuatro de ellos señuelos o controles negativos—, familias `tls`/`security_header`/`exposed_path`. Recall 1,000 |
+| **U** | Los cinco criterios cerrados; el histograma da **23,37 %** de plantillas HTTP ingeribles frente al **25 %** fijado de antemano ⇒ recomendación escrita: no ingerir |
+
+Lo que sigue faltando, sin cambios: para F, T y N el lado real de la paridad, que requiere que el
+usuario amplíe su registro de objetivos autorizados; y para el diferencial de U3, un catálogo con
+objetivos genuinamente explotables. Sobre R, el 1,000 es limpio pero pequeño (30 detecciones, feed de
+16 checks): dice que las familias no disparan en falso contra los engaños que se les han puesto
+delante, no que no vayan a hacerlo nunca.
 
 ---
 

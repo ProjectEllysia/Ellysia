@@ -609,8 +609,8 @@ en cada heartbeat.
    (`MonitoredAsset.host_id`, nullable — no todo activo Hygeia tiene por qué tener un `Host`
    de Themis todavía). Sin este vínculo, el inventario de Hygeia y los hallazgos de red de
    Themis viven en dos árboles separados y no se benefician de nada de la Fase 5 del motor.
-3. **Adaptador inventario → servicios.** Una función de traducción, simétrica a los
-   adaptadores que ya existen para Nikto/OpenVAS (`themis/lybra/adapters.py`), que convierte
+3. **Adaptador inventario → servicios.** Una función de traducción, simétrica al
+   adaptador que ya existe para Nikto (`themis/lybra/adapters.py`), que convierte
    cada paquete del inventario en la forma `Service` que consume `LybraEngineTask`. Diferencia
    clave frente al caso de red: aquí el **puerto es opcional** — una librería vulnerable no
    tiene por qué escuchar en ningún puerto. El modelo de `Finding` ya lo contempla en la

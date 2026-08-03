@@ -188,7 +188,7 @@ antemano el problema de los backports que la Fase 4 de Lybra pretendía atacar p
 
 **Alcance:** endpoint `POST /hygeia/inventory` con la misma auth de agente y las mismas guardas
 de payload que la ingesta · columna `MonitoredAsset.host_id` con resolución/creación del `Host`
-· adaptador inventario→servicios (simétrico a los de Nikto/OpenVAS que ya existen, pero con
+· adaptador inventario→servicios (simétrico al de Nikto que ya existe, pero con
 puerto opcional) · disparo de `LybraEngineManager` vía TaskQueue · envío diferencial por hash
 del listado. Requiere trabajo en el repo del agente además de en este.
 
@@ -265,12 +265,15 @@ la plataforma. No es urgente, pero es la mejor relación valor/esfuerzo de la Et
 
 ---
 
-## 6. OpenVAS: se elimina
+## 6. OpenVAS: eliminado
 
-**Decisión (actualizada el 2026-07-28; sustituye a la decisión anterior de "congelado, no se
-borra"): se elimina del código, no solo del producto.** El plan de desmontaje y de sustitución
-de su cobertura vive en `lybra-engine-roadmap.md` (§§1, 7 y 8); aquí queda el razonamiento de
-gobierno, resumido.
+**Estado (2026-07-31): eliminado.** Ejecutado el desmontaje completo descrito en
+`lybra-engine-roadmap.md` §7/§6.3 (Ronda 0 y Ronda 2): desconectado del análisis profundo (E0),
+retirado del producto y del código (E1+E2), y sus tres tablas nativas borradas por migración
+(E3) — la base de desarrollo no tenía ninguna fila que archivar, verificado antes de escribir la
+migración. `grep -ri openvas API/src` no devuelve código, solo comentarios que documentan por
+qué un `Finding.source="openvas"` histórico puede seguir apareciendo. El razonamiento de
+gobierno que motivó la decisión queda abajo, sin cambios.
 
 El motivo de fondo no cambia respecto a la decisión anterior. OpenVAS/Greenbone es una
 plataforma completa con su propio protocolo de gestión, su propio ciclo de escaneo y su propia
@@ -390,8 +393,8 @@ alguien la pida.
 Infraestructura estimada si se desplegara: un VPS único (Hetzner, ~10–35 €/mes) con API,
 worker, Postgres y Redis; Caddy como proxy inverso con TLS automático; Brevo para SMTP con
 SPF/DKIM/DMARC configurados —sin esto las campañas de Aegis y las alertas de Hygeia van a
-spam—; Ollama es opcional porque `scribe` ya usa OpenAI por defecto; OpenVAS no se despliega
-(§6). Total por debajo de 50 €/mes.
+spam—; Ollama es opcional porque `scribe` ya usa OpenAI por defecto; OpenVAS ya no existe en el
+código (§6). Total por debajo de 50 €/mes.
 
 ---
 
