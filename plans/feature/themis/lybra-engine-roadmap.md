@@ -274,8 +274,8 @@ La pista de **correlación** está completa; la de **bajo nivel** está a medias
 | **6** — Pipeline orquestado | Convergencia | ✓ implementada |
 | **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ✓ implementada — U1, U2 y U3 hechas; **U4 medido el 2026-07-31: 23,37 % de plantillas HTTP ingeribles frente al umbral de 25 % ⇒ no se ingiere**. Detalle en la sección Fase U más abajo |
 | **R** — Runtime de checks propio | Bajo nivel | ✓ implementada — 16 checks; los cuatro tipos activos (`http`/`tls`/`network`/`script`) existen, el feed vive en YAML, la ingesta está construida y apagada por decisión, y la **precisión está medida: 1,000 (TP=30/FP=0) sobre 9 objetivos etiquetados con señuelos**. Detalle en la sección Fase R más abajo |
-| **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS, y (Fase N) FTP, SMTP/IMAP/POP3, SMB, MySQL/MariaDB, Redis, VNC; falta JARM, SNMP (sin sonda UDP), PostgreSQL/MSSQL/MongoDB, RDP, LDAP, Telnet, RPC. Detalle actualizado en la sección Fase N más abajo |
-| **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; faltan SYN sin estado, sondas UDP y control de tasa AIMD |
+| **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS, y (Fase N) FTP, SMTP/IMAP/POP3, SMB, MySQL/MariaDB, Redis, VNC, **SNMP (Ronda 1, ✓)**; falta JARM, PostgreSQL/MSSQL/MongoDB, RDP, LDAP, Telnet, RPC. Detalle actualizado en la sección Fase N más abajo |
+| **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; **sonda UDP acotada (SNMP) implementada en la Ronda 1** (`scan_udp_ports_sync`, `UDP_PROBES`); faltan SYN sin estado y control de tasa AIMD |
 | **4**, DAST y Etapa 2 (P, E, C, O, A, B, D, G, S, X) | Ambas | ○ planificadas |
 
 El feed actual (`lybra/feeds/checks_feed.yaml`, versión `lybra-checks-4`) tiene 16 checks en 5
@@ -339,14 +339,14 @@ sigue gastando un corroborador de cuatro horas en cada `deep=True`.
 
 **Las rondas:**
 
-| Ronda | Trabajo | Por qué aquí |
-|---|---|---|
-| **0** | **E0** — desconectar OpenVAS (corroborador, `docker-compose`, `.env` raíz) | Medio día, reversible, y el compose de dev pasa de quince minutos a segundos |
-| **1** | **T (sonda UDP mínima) + N (SNMP)** — UDP curado, dissector `sysDescr`, `network` sobre UDP, check de comunidad por defecto | El trozo más grande de G1 que queda, y el de mejor relación valor/coste de todo el backlog |
-| **2** | **E1 + E2** — retirar OpenVAS del producto y del código | Ya sin nada que dependa de él. Diff grande pero mecánico. **E3 se deja aparte**: es el único paso irreversible y no bloquea nada |
-| **3** | **Baseline de FP por versión → Fase O** | Primero la dimensión `outdated_software` en el banco de precisión sobre la KB real; solo entonces la ingesta OVAL/CSAF. Ataca la causa nº 1 de falsos positivos (G3) |
-| **4** | **N (resto) + D** — PostgreSQL/MSSQL/MongoDB, RDP, LDAP; encima, credenciales por defecto | D va detrás de N porque reutiliza sus dissectors, y al final del todo porque es la única fase que **escribe** en el objetivo (G4) |
-| **5** | **F + T (cierre)** — JARM, SYN sin estado, AIMD | Solo si aparece evidencia del techo de Python. Si no aparece, archivarlo explícitamente en vez de arrastrarlo como deuda perpetua |
+| Ronda | Trabajo | Por qué aquí | Estado |
+|---|---|---|---|
+| **0** | **E0** — desconectar OpenVAS (corroborador, `docker-compose`, `.env` raíz) | Medio día, reversible, y el compose de dev pasa de quince minutos a segundos | ✓ hecha (`07e0d830`, `8bc87d31`) |
+| **1** | **T (sonda UDP mínima) + N (SNMP)** — UDP curado, dissector `sysDescr`, `network` sobre UDP, check de comunidad por defecto | El trozo más grande de G1 que queda, y el de mejor relación valor/coste de todo el backlog | ✓ hecha (`b295fedc`, `e1f6ff91`) |
+| **2** | **E1 + E2** — retirar OpenVAS del producto y del código | Ya sin nada que dependa de él. Diff grande pero mecánico. **E3 se deja aparte**: es el único paso irreversible y no bloquea nada | ✓ hecha, **ampliada a E1+E2+E3+E4** (BD de dev sin filas OpenVAS, no hacía falta backfill) — `9b55cf00`, `d517c821`, `d0fbaf3f`, `1c2d7a97`, `0a351c1f` |
+| **3** | **Baseline de FP por versión → Fase O** | Primero la dimensión `outdated_software` en el banco de precisión sobre la KB real; solo entonces la ingesta OVAL/CSAF. Ataca la causa nº 1 de falsos positivos (G3) | ○ no empezada |
+| **4** | **N (resto) + D** — PostgreSQL/MSSQL/MongoDB, RDP, LDAP; encima, credenciales por defecto | D va detrás de N porque reutiliza sus dissectors, y al final del todo porque es la única fase que **escribe** en el objetivo (G4) | ○ no empezada |
+| **5** | **F + T (cierre)** — JARM, SYN sin estado, AIMD | Solo si aparece evidencia del techo de Python. Si no aparece, archivarlo explícitamente en vez de arrastrarlo como deuda perpetua | ○ no empezada |
 
 **I-b queda fuera de las rondas a propósito.** Su siguiente paso —el ranking de nombres sin resolver
 más frecuentes para dirigir el feed curado— no es trabajo de ingeniería sino de datos: necesita el
@@ -384,7 +384,7 @@ vamos a ver:
 | 1 | **SMB/NetBIOS** (139, 445) | Dialecto negociado, nombre de dominio/host, firma requerida o no, versión de Windows/Samba | Medio — negociación binaria, pero muy documentada |
 | 1 | **FTP** (21) | Banner de bienvenida, soporte de `AUTH TLS`, login anónimo permitido | Bajo — texto plano |
 | 1 | **SMTP/IMAP/POP3** (25, 465, 587, 143, 993, 110) | Banner, `EHLO` capabilities, STARTTLS, relay abierto | Bajo — texto plano |
-| 2 | **SNMP** (161/udp) | Comunidad por defecto (`public`), `sysDescr` — que suele traer el producto y la versión enteros | Bajo, pero necesita la sonda UDP de la Fase T |
+| 2 | **SNMP** (161/udp) | Comunidad por defecto (`public`), `sysDescr` — que suele traer el producto y la versión enteros | ✓ implementado (Ronda 1, `b295fedc`/`e1f6ff91`) |
 | 2 | **MySQL / PostgreSQL / MSSQL / Redis / MongoDB** (3306, 5432, 1433, 6379, 27017) | Paquete de saludo con versión; autenticación no requerida (el caso Redis/Mongo abierto es un hallazgo por sí mismo) | Medio — protocolos binarios propios pero con saludo trivial |
 | 3 | **RDP** (3389) | Versión del protocolo, nivel de seguridad, si NLA está exigido | Medio-alto |
 | 3 | **LDAP, VNC, Telnet, RPC** | Banner y capacidades básicas | Bajo cada uno, poca frecuencia |
@@ -464,8 +464,13 @@ sin red real):
   fijos) es la excepción a la regla "sin valor sin frecuencia" del apartado siguiente: no hay
   producto/vendor que leer, pero la versión de protocolo en sí ya distingue un respondedor legado.
 
-Lo que sigue fuera, documentado y no descubierto por sorpresa: **SNMP** (necesita la sonda UDP que
-la Fase T todavía no construye — no hay con qué probar hasta que eso exista); **PostgreSQL, MSSQL,
+**Actualización (Ronda 1):** SNMP ya no está fuera — `lybra/fingerprinting/snmp.py` añade el
+dissector (`sysDescr` vía GetRequest v2c hecho a mano, sin `pysnmp`) y `transport.py` la sonda UDP
+acotada (`scan_udp_ports_sync`, `UDP_PROBES`) que este apartado daba por no construida. Deliberadamente
+sin versión extraída del `sysDescr` (texto libre, envenenaría el matcher CPE). Ver `checks.py` para el
+check activo `snmp-default-community`.
+
+Lo que sigue fuera, documentado y no descubierto por sorpresa: **PostgreSQL, MSSQL,
 MongoDB** (a diferencia de MySQL/Redis, exigen un handshake negociado en vez de un banner ofrecido,
 mayor coste/riesgo que valor añadido en esta ronda); **RDP, LDAP, Telnet, RPC** — Telnet en concreto
 se evaluó y se descartó explícitamente: su negociación IAC no deja un texto identificable de forma
