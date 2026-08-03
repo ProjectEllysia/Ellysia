@@ -3,8 +3,10 @@
 // Antes cada componente (panel de programados, historial, su gráfico, la
 // vista previa) mantenía su propia lista de tipos escrita a mano, y añadir
 // Lybra a los escaneos programados dejó claro el problema: siempre se
-// quedaba alguna sin actualizar. Añadir un tipo nuevo aquí — y solo aquí —
-// basta para que aparezca correctamente en todos esos sitios.
+// quedaba alguna sin actualizar. HistoryPanel, HistoryChart, ScheduledScansPanel
+// y ScanPreviewModal leen de aquí y solo de aquí. ScanTabs, ScanForm, ScanTable,
+// StatsRow, ThemisView, ThemisHubView y ConfigView todavía tienen su propia
+// lista escrita a mano — retirar un tipo (o añadir uno) exige tocarlos también.
 export const SCAN_TYPES = {
   nmap: {
     label: 'Nmap',
@@ -33,17 +35,6 @@ export const SCAN_TYPES = {
     ],
     defaultArgs: { target_domain: '' },
     formatArgs: (args) => args?.target_domain || '—',
-  },
-  openvas: {
-    label: 'OpenVAS',
-    fullLabel: 'OpenVAS (vulnerabilidades)',
-    previewLabel: 'Vista Previa — OpenVAS',
-    chartColor: 'var(--danger)',
-    scheduleFields: [
-      { key: 'target', label: 'Target (IP)', size: 'lg', placeholder: '192.168.1.1' },
-    ],
-    defaultArgs: { target: '' },
-    formatArgs: (args) => args?.target || '—',
   },
   lybra: {
     label: 'Lybra',

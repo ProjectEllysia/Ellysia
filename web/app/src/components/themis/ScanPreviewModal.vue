@@ -35,10 +35,6 @@
             <template v-if="type === 'nikto'">
               <div class="pv-stat"><span class="pv-stat-val">{{ scan.totalIncidents ?? 0 }}</span><span class="pv-stat-lbl">Incidencias</span></div>
             </template>
-            <template v-if="type === 'openvas'">
-              <div class="pv-stat crit"><span class="pv-stat-val">{{ scan.criticalCount ?? 0 }}</span><span class="pv-stat-lbl">Críticas</span></div>
-              <div class="pv-stat high"><span class="pv-stat-val">{{ scan.highCount ?? 0 }}</span><span class="pv-stat-lbl">Altas</span></div>
-            </template>
             <template v-if="type === 'nuclei'">
               <div class="pv-stat"><span class="pv-stat-val">{{ scan.totalFindings ?? 0 }}</span><span class="pv-stat-lbl">Hallazgos</span></div>
               <div class="pv-stat crit"><span class="pv-stat-val">{{ scan.criticalCount ?? 0 }}</span><span class="pv-stat-lbl">Críticos</span></div>

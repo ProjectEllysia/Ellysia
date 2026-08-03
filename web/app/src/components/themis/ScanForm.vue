@@ -18,18 +18,6 @@
           <div class="field field-sm"><label>Timeout (s)</label>
             <input v-model.number="form.timeout" type="number" min="10" max="86400" class="no-spin" /></div>
         </template>
-        <template v-if="type === 'openvas'">
-          <div class="field field-lg"><label>Target (IP única)</label>
-            <input v-model="form.target" placeholder="192.168.1.1" /></div>
-          <div class="field field-md">
-            <label>Configuración</label>
-            <select v-model="form.config">
-              <option value="full_fast">Full &amp; Fast</option>
-              <option value="full_deep">Full &amp; Deep</option>
-              <option value="full_ultimate">Full &amp; Ultimate</option>
-            </select>
-          </div>
-        </template>
         <template v-if="type === 'nuclei'">
           <div class="field field-lg"><label>Target URL</label>
             <input v-model="form.target" placeholder="https://example.com" /></div>
@@ -96,7 +84,6 @@ const emit = defineEmits(['launch'])
 const DEFAULTS = {
   nmap:    { target: '', ports: '1-1000', timeout: 900,  config: 'full_fast' },
   nikto:   { target: '', ports: '',        timeout: 6000, config: 'full_fast' },
-  openvas: { target: '', ports: '',        timeout: 600,  config: 'full_fast' },
   nuclei:  { target: '', severities: ['critical', 'high', 'medium'], tags: '', rateLimit: 150, requestTimeout: 10 },
 }
 const form = ref({ ...DEFAULTS.nmap })
@@ -137,7 +124,6 @@ function handleLaunch() {
   const payload = { target: form.value.target.trim() }
   if (props.type === 'nmap') { payload.ports = form.value.ports; payload.timeout = form.value.timeout }
   if (props.type === 'nikto') { payload.timeout = form.value.timeout }
-  if (props.type === 'openvas') { payload.scanConfig = form.value.config }
   if (props.type === 'nuclei') {
     if (form.value.severities.length) payload.severities = form.value.severities
     const tags = (form.value.tags || '').split(',').map(t => t.trim()).filter(Boolean)

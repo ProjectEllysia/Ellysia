@@ -10,7 +10,7 @@ import { useThemisHistoryStore } from '@/stores/themisHistoryStore'
  * Store de Themis — gestiona escaneos, estadísticas, modales y documentos.
  *
  * Sustituye al estado disperso en themis.js (1,198 líneas de manipulación DOM
- * directa). Centraliza las listas de resultados por tipo (nmap, nikto, openvas),
+ * directa). Centraliza las listas de resultados por tipo (nmap, nikto, nuclei),
  * la paginación, los modales de vista previa/detalle y los documentos asociados.
  */
 export const useThemisStore = defineStore('themis', () => {
@@ -22,7 +22,7 @@ export const useThemisStore = defineStore('themis', () => {
 
   /* ════════════════════════════════ MUNDOS ═════════════════════════════ */
   // Themis vive en tres mundos: el motor propio (Lybra), los escáneres
-  // externos (Nmap/Nikto/OpenVAS) y los agentes de Hygeia (Fase I: escaneos
+  // externos (Nmap/Nikto/Nuclei) y los agentes de Hygeia (Fase I: escaneos
   // Lybra nacidos del inventario de software de un activo, que se navegan por
   // agente en vez de mezclarse en la feed del motor). El toggle de ThemisView
   // conmuta entre ellos. Lybra es el mundo por defecto (roadmap Fase 6: el
@@ -38,7 +38,7 @@ export const useThemisStore = defineStore('themis', () => {
   const activeTab = ref('nmap')
 
   /* ════════════════════════════════ STATS ══════════════════════════════ */
-  const stats = reactive({ total: 0, nmap: 0, nikto: 0, openvas: 0, lybra: 0, nuclei: 0 })
+  const stats = reactive({ total: 0, nmap: 0, nikto: 0, lybra: 0, nuclei: 0 })
   const loadingStats = ref(false)
   const statsError = ref(null)
 
@@ -46,7 +46,6 @@ export const useThemisStore = defineStore('themis', () => {
   const scans = reactive({
     nmap:    { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
     nikto:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
-    openvas: { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
     lybra:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
     nuclei:  { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
     // Fase I: los escaneos del activo Hygeia seleccionado. Mismo tipo de
@@ -76,7 +75,7 @@ export const useThemisStore = defineStore('themis', () => {
   const viewMode = ref('full') // 'full' | 'folders' | 'history'
 
   /* ── HELPERS ── */
-  /** @param {'nmap'|'nikto'|'openvas'} type */
+  /** @param {'nmap'|'nikto'|'nuclei'} type */
   function _scandata(type) { return scans[type] }
 
   /* ════════════════════════════════ STATS ══════════════════════════════ */
@@ -89,7 +88,6 @@ export const useThemisStore = defineStore('themis', () => {
       const data = await res.json()
       stats.nmap    = data.nmap    ?? 0
       stats.nikto   = data.nikto   ?? 0
-      stats.openvas = data.openvas ?? 0
       stats.lybra   = data.lybra   ?? 0
       stats.nuclei  = data.nuclei  ?? 0
       stats.total   = data.total   ?? 0
@@ -201,10 +199,6 @@ export const useThemisStore = defineStore('themis', () => {
   /** Lanza un escaneo Nikto. */
   async function launchNikto(payload) {
     return _launch('/themis/nikto', payload, 'nikto')
-  }
-  /** Lanza un escaneo OpenVAS. */
-  async function launchOpenvas(payload) {
-    return _launch('/themis/openvas', payload, 'openvas')
   }
   /** Lanza un escaneo Nuclei (roadmap Fase U1). */
   async function launchNuclei(payload) {
@@ -763,11 +757,11 @@ export const useThemisStore = defineStore('themis', () => {
     launching.value = false
     selectedAssetId.value = null
 
-    Object.assign(stats, { total: 0, nmap: 0, nikto: 0, openvas: 0, lybra: 0, nuclei: 0 })
+    Object.assign(stats, { total: 0, nmap: 0, nikto: 0, lybra: 0, nuclei: 0 })
     loadingStats.value = false
     statsError.value = null
 
-    for (const type of ['nmap', 'nikto', 'openvas', 'lybra', 'nuclei', 'agentLybra']) {
+    for (const type of ['nmap', 'nikto', 'lybra', 'nuclei', 'agentLybra']) {
       Object.assign(scans[type], { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null })
     }
 
@@ -787,7 +781,7 @@ export const useThemisStore = defineStore('themis', () => {
     preview, details,
     viewMode,
     loadStats, loadScans, switchTab, refreshCurrent, goToPage, stopScanPolling,
-    launchNmap, launchNikto, launchOpenvas, launchNuclei,
+    launchNmap, launchNikto, launchNuclei,
     launchLybra, loadLybraScans, loadMoreLybraScans, loadSourceNmapScans, deleteLybraScan,
     selectedAssetId, selectAgentAsset, loadAgentScans,
     lybraDocs, loadLybraDocs, generateLybraPdf, deleteLybraDoc,

@@ -15,11 +15,6 @@
       <div class="stat-label">Nikto</div>
       <div class="stat-sub">escaneos web</div>
     </div>
-    <div class="stat-card red">
-      <div class="stat-value"><Transition name="num-flip" mode="out-in"><span :key="openvas">{{ openvas }}</span></Transition></div>
-      <div class="stat-label">OpenVAS</div>
-      <div class="stat-sub">análisis de vulns</div>
-    </div>
     <div class="stat-card blue">
       <div class="stat-value"><Transition name="num-flip" mode="out-in"><span :key="nuclei">{{ nuclei }}</span></Transition></div>
       <div class="stat-label">Nuclei</div>
@@ -33,7 +28,6 @@ defineProps({
   total:   { type: Number, default: 0 },
   nmap:    { type: Number, default: 0 },
   nikto:   { type: Number, default: 0 },
-  openvas: { type: Number, default: 0 },
   nuclei:  { type: Number, default: 0 },
 })
 </script>
@@ -49,7 +43,6 @@ defineProps({
 .green .stat-value { color: var(--success); }
 .blue .stat-value { color: var(--info); }
 .amber .stat-value { color: var(--warn); }
-.red .stat-value { color: var(--danger); }
 
 .num-flip-enter-active, .num-flip-leave-active { transition: opacity 0.22s ease, transform 0.22s ease; }
 .num-flip-enter-from { opacity: 0; transform: translateY(8px); }

@@ -87,7 +87,7 @@
 
       <!-- ═══════════ MUNDO: ESCÁNERES EXTERNOS ═══════════ -->
       <div v-else key="external" class="world-block">
-      <StatsRow :total="store.stats.total" :nmap="store.stats.nmap" :nikto="store.stats.nikto" :openvas="store.stats.openvas" :nuclei="store.stats.nuclei" />
+      <StatsRow :total="store.stats.total" :nmap="store.stats.nmap" :nikto="store.stats.nikto" :nuclei="store.stats.nuclei" />
       <ViewToggle :model-value="store.viewMode" @update:model-value="store.setViewMode" />
       <Transition name="fade-swap" mode="out-in" appear>
         <div v-if="store.viewMode === 'full'" key="full" class="view-block">
@@ -336,7 +336,7 @@ function handleTabSwitch(type) {
 
 async function handleCancel(id) { await store.cancelScan(id) }
 async function handleDelete(id) { await store.deleteScan(id) }
-function handleLaunch(payload) { const fns = { nmap: store.launchNmap, nikto: store.launchNikto, openvas: store.launchOpenvas, nuclei: store.launchNuclei }; const fn = fns[store.activeTab]; if (fn) fn(payload) }
+function handleLaunch(payload) { const fns = { nmap: store.launchNmap, nikto: store.launchNikto, nuclei: store.launchNuclei }; const fn = fns[store.activeTab]; if (fn) fn(payload) }
 function handleRenameFolder(folder) { foldersStore.folderForms.rename = { show: true, folderId: folder.id, name: folder.name, submitting: false } }
 function handleDeleteFolder(folderId) { pendingConfirm.value = { type: 'delete-folder', id: folderId } }
 

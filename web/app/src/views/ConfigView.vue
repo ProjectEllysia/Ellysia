@@ -160,21 +160,6 @@
             <div class="scanner-grid">
               <ScannerCard name="Nmap" icon="scan" :flat="store.configFlat" prefix="features.themis.scanners.nmap" />
               <ScannerCard name="Nikto" icon="web" :flat="store.configFlat" prefix="features.themis.scanners.nikto" />
-              <ScannerCard name="OpenVAS" icon="vuln" :flat="store.configFlat" prefix="features.themis.scanners.openvas" />
-            </div>
-            <div class="section-body openvas-tool-configs">
-              <h3 class="subsection-title">OpenVAS — Configuraciones de escaneo</h3>
-              <div class="cfg-grid">
-                <div class="form-group"><label>Full Deep</label><input v-model="store.configFlat['features.themis.scanners.openvas.toolConfigs.scanConfigs.full_deep']" type="text" class="inp mono" /></div>
-                <div class="form-group"><label>Full Fast</label><input v-model="store.configFlat['features.themis.scanners.openvas.toolConfigs.scanConfigs.full_fast']" type="text" class="inp mono" /></div>
-                <div class="form-group"><label>Full Ultimate</label><input v-model="store.configFlat['features.themis.scanners.openvas.toolConfigs.scanConfigs.full_ultimate']" type="text" class="inp mono" /></div>
-              </div>
-              <h3 class="subsection-title">OpenVAS — Listas de puertos</h3>
-              <div class="cfg-grid">
-                <div class="form-group"><label>TCP All</label><input v-model="store.configFlat['features.themis.scanners.openvas.toolConfigs.portList.tcp_all']" type="text" class="inp mono" /></div>
-                <div class="form-group"><label>TCP All + UDP Top 100</label><input v-model="store.configFlat['features.themis.scanners.openvas.toolConfigs.portList.tcp_all_udp_top100']" type="text" class="inp mono" /></div>
-                <div class="form-group"><label>TCP + UDP All</label><input v-model="store.configFlat['features.themis.scanners.openvas.toolConfigs.portList.tcp_udp_all']" type="text" class="inp mono" /></div>
-              </div>
             </div>
           </section>
 
@@ -311,7 +296,6 @@ function handleSave() { store.saveConfig() }
 .toggle { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 .field-hint { font-size: var(--fs-md); color: var(--text-muted); line-height: 1.5; }
 .field-hint code { font-family: var(--font-mono); font-size: var(--fs-md); background: var(--surface-2); padding: 1px 4px; border-radius: 3px; color: var(--text-dim); }
-.openvas-tool-configs { margin-top: 0.85rem; }
 .form-actions { display: flex; gap: 0.6rem; justify-content: flex-end; position: sticky; bottom: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem 1.1rem; z-index: 10; }
 .loading-block { padding: 5rem 0; display: flex; justify-content: center; width: 100%; }
 .skeleton { background: var(--surface); border-radius: 8px; animation: pulse 1.4s ease-in-out infinite; }
