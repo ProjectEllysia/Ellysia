@@ -79,13 +79,9 @@ os.environ.setdefault("RATELIMIT_STORAGE_URI", "memory://")
 # tiene que ganar aunque `.env` ya fije REDIS_DB.
 os.environ["REDIS_DB"] = "15"
 
-# Redis/Ollama/OpenVAS: valores inertes; los servicios se mockean.
+# Redis/Ollama: valores inertes; los servicios se mockean.
 os.environ.setdefault("REDIS_HOST", "localhost")
 os.environ.setdefault("OLLAMA_HOST", "http://localhost:11434")
-os.environ.setdefault("OPENVAS_HOST", "localhost")
-os.environ.setdefault("OPENVAS_PORT", "9390")
-os.environ.setdefault("OPENVAS_USERNAME", "admin")
-os.environ.setdefault("OPENVAS_PASSWORD", "admin")
 
 from unittest import mock  # noqa: E402
 

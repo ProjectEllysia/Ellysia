@@ -8,7 +8,7 @@ a Nuclei finding shares its ``dedup_key`` with a prior Lybra finding of the
 same CVE on the same host/port. No real ``nuclei`` binary involved: the JSONL
 payload is injected directly, the same pattern
 ``tests/integration/test_scanner_finding_adapters.py`` already uses for
-Nikto/OpenVAS.
+Nikto.
 """
 
 from datetime import datetime

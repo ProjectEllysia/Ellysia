@@ -164,8 +164,6 @@ CONFIG_BLOCKS = [
     (CR.HostReachabilityCheck, CR.host_reachability_check),
     (CR.TracerouteConfig, CR.traceroute_config),
     (CR.KnowledgeBaseConfig, CR.knowledge_base_config),
-    (CR.OpenVASConfig, CR.openvas_config),
-    (CR.OpenVASToolConfigs, CR.openvas_tool_configs),
     (CR.LybraConfig, CR.lybra_config),
     (CR.LybraIngestConfig, CR.lybra_ingest_config),
     (CR.NucleiConfig, CR.nuclei_config),

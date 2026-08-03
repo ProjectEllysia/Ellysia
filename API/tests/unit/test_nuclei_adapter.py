@@ -36,7 +36,7 @@ def _result(**overrides):
 
 def test_cve_ids_normalized_to_uppercase():
     """compute_dedup_key hashes 'cve:' + sorted(cve_ids) — Nuclei's own
-    lowercase ids would never merge with Lybra/OpenVAS's uppercase ones
+    lowercase ids would never merge with Lybra's uppercase ones
     without this normalization (the Definición de Hecho of Fase U1)."""
     f = nuclei_result_to_finding(_result())
     assert f["cve_ids"] == ["CVE-2021-41773"]
