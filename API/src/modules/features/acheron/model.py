@@ -84,6 +84,8 @@ class Vault(Base):
         salt: Cryptographic salt (max 128 characters).
         metadata_version: Counter bumped on each master-password rotation
             (PATCH /acheron/vault); lets other clients detect the change.
+        revision: Counter bumped on *every* mutation of the vault contents;
+            optimistic-concurrency token (If-Match / ETag).
 
     Relationships:
         user: User who owns the vault.
@@ -109,6 +111,14 @@ class Vault(Base):
     # contraseña maestra vía PATCH /acheron/vault). Permite a otros clientes con
     # sesión activa detectar que la maestra cambió y forzar un re-desbloqueo.
     metadata_version = Column(Integer, nullable=False, default=1, server_default="1")
+
+    # Token de concurrencia optimista: se incrementa en TODA mutación del
+    # contenido del vault (upsert completo, rotación de maestra y alta/edición/
+    # baja de storables) desde VaultManager._bump_revision. Se expone como ETag
+    # en GET /acheron/vault y los clientes la devuelven en If-Match; si no
+    # coincide, la escritura se rechaza con 409 en vez de pisar cambios ajenos.
+    # No confundir con metadata_version, que solo marca el cambio de maestra.
+    revision = Column(Integer, nullable=False, default=1, server_default="1")
 
     user = relationship("User", back_populates="vaults", foreign_keys=[user_id])
     storables = relationship(

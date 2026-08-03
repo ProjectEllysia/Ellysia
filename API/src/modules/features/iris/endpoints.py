@@ -587,7 +587,7 @@ def mailbox_oauth_callback(args: dict):
     hace de protección CSRF y liga la petición al usuario que inició
     ``/mailbox/connect`` — es la única identidad que este endpoint necesita.
     """
-    connections_url = f"{CR.get_public_web_url()}/iris/conexiones"
+    connections_url = f"{CR.general_config().public_url}/iris/conexiones"
 
     if args.get("error"):
         logger.info(f"Mailbox OAuth callback: consentimiento denegado ({args['error']})")

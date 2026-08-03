@@ -109,36 +109,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  openvas:
-    image: immauss/openvas:latest
-    container_name: openvas
-    restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    ports:
-      - "127.0.0.1:9392:9392"
-      - "127.0.0.1:9390:9390"
-    environment:
-      USERNAME: ${OPENVAS_USERNAME}
-      PASSWORD: ${OPENVAS_PASSWORD}
-      FEED_SYNC: "true"
-    volumes:
-      - openvas_data:/data
-    shm_size: "1gb"
-    healthcheck:
-      disable: true          # <- anula el HEALTHCHECK del Dockerfile
-    networks:
-      - secops-net
-    profiles:
-      - dev
-      - container
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
   ellysia:
     build:
       context: ./API
@@ -156,8 +126,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      openvas:
-        condition: service_started
     ports:
       - "127.0.0.1:15000:5000"
     environment:
@@ -167,7 +135,6 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       OLLAMA_HOST: http://ollama:11434
-      OPENVAS_HOST: openvas
       TEMP_DIR: /app/temp
       LOG_DIR: /app/logs
       OUTPUT_DIR: /app/data
@@ -201,11 +168,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      openvas:
-        condition: service_started
     command: python -m src.modules.system.taskqueue.worker
     # E5: el HEALTHCHECK del Dockerfile pega a /system/say-hello — el worker
-    # no sirve HTTP, así que se anula (mismo patrón que openvas más arriba).
+    # no sirve HTTP, así que se anula.
     healthcheck:
       disable: true
     environment:
@@ -215,7 +180,6 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       OLLAMA_HOST: http://ollama:11434
-      OPENVAS_HOST: openvas
       TEMP_DIR: /app/temp
       LOG_DIR: /app/logs
       OUTPUT_DIR: /app/data
@@ -259,10 +223,12 @@ services:
 
 volumes:
   postgres_data:
+    name: ellysia_postgres_data
     driver: local
   redis_data:
+    name: ellysia_redis_data
   ollama_models:
-  openvas_data:
+    name: ellysia_ollama_models
   ellysia_data:
   scan_temp:
   scan_logs:

@@ -544,8 +544,8 @@ class IrisManager(TaskTrackingMixin):
             sort_by=sort_by, sort_dir=sort_dir,
         )
         thresholds = {
-            "legitimate": CR.get_iris_legitimate_threshold(),
-            "suspicious": CR.get_iris_suspicious_threshold(),
+            "legitimate": CR.iris_config().legitimate_threshold,
+            "suspicious": CR.iris_config().suspicious_threshold,
         }
         results = [
             {
@@ -605,7 +605,7 @@ class IrisManager(TaskTrackingMixin):
         header entries.  Rejects obviously non-header input early so
         we do not waste a DB row on garbage.
         """
-        min_h = CR.get_iris_min_headers()
+        min_h = CR.iris_config().min_headers
         count = sum(1 for line in raw_headers.split("\n") if ":" in line)
         if count < min_h:
             raise IrisInvalidInputError(
@@ -617,7 +617,7 @@ class IrisManager(TaskTrackingMixin):
     def _validate_headers_parsed(parsed: dict) -> None:
         """Full validation after parsing — ensures the analysis runs on
         enough data to produce meaningful results."""
-        min_h = CR.get_iris_min_headers()
+        min_h = CR.iris_config().min_headers
         if len(parsed) < min_h:
             raise IrisInvalidInputError(
                 f"Tras parsear se obtuvieron {len(parsed)} cabeceras (mínimo: {min_h}). "
@@ -821,8 +821,8 @@ class IrisManager(TaskTrackingMixin):
         only the numeric baseline — high-confidence findings can still push
         the verdict to a worse category via :meth:`_apply_verdict_gates`.
         """
-        legitimate = CR.get_iris_legitimate_threshold()
-        suspicious = CR.get_iris_suspicious_threshold()
+        legitimate = CR.iris_config().legitimate_threshold
+        suspicious = CR.iris_config().suspicious_threshold
 
         if total_score >= legitimate:
             return "Legitimate"

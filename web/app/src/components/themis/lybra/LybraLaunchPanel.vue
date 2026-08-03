@@ -106,12 +106,12 @@
 
       <!-- Segunda opinión + profundidad -->
       <div class="engine-row">
-        <label class="deep-toggle" :title="'Lanza Nmap, Nikto y OpenVAS en paralelo y funde sus hallazgos con los de Lybra'">
+        <label class="deep-toggle" :title="'Lanza Nmap, Nikto y Nuclei en paralelo y funde sus hallazgos con los de Lybra'">
           <input type="checkbox" v-model="deep" />
           <span class="deep-track"><span class="deep-thumb"></span></span>
           <span class="deep-copy">
             <span class="deep-label">Pedir una segunda opinión</span>
-            <span class="deep-sub">Corrobora con Nmap · Nikto · OpenVAS</span>
+            <span class="deep-sub">Corrobora con Nmap · Nikto · Nuclei</span>
           </span>
         </label>
 

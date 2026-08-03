@@ -4,7 +4,10 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urlparse
+
 import src.modules.system.config_reading as CR
+
+from src.modules.shared._exceptions import EllysiaException, ValidationError
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
@@ -24,7 +27,7 @@ from ..services import (
     _Task,
 )
 from ..services import parsing, reachability
-from ..exceptions import ScanError, ScanNotFoundError
+from ..exceptions import IPValidationError, MaxHostsExceededError, PrivateIPRequested, ScanError, ScanNotFoundError
 
 
 logger = logging.getLogger(__name__)
@@ -99,7 +102,7 @@ class ScanManager(TaskTrackingMixin, ABC):
             Scan instance (typed to ``self._MODEL``), or None if not found.
         """
         # Q3: _MODEL es Optional a nivel de la clase base porque solo las
-        # subclases concretas lo fijan (Nmap/Nikto/OpenVAS/Lybra) — nunca es
+        # subclases concretas lo fijan (Nmap/Nikto/Lybra/Nuclei) — nunca es
         # None en una instancia real. El assert lo deja explícito para el
         # checker de tipos y sirve de red si alguna subclase nueva lo olvidara.
         assert self._MODEL is not None, f"{type(self).__name__} no define _MODEL"
@@ -464,12 +467,12 @@ class ScanManager(TaskTrackingMixin, ABC):
             thread_manager.update_scan_status(scan_id, ScanStatus.RUNNING)
             logger.info(f"Iniciando escaneo {scan_id}")
 
-            if CR.is_host_reachability_check_enabled():
+            if CR.host_reachability_check().enabled:
                 raw_target = target if "://" in target else f"tcp://{target}"
                 parsed_target = urlparse(url=raw_target) # type: ignore
                 host = parsed_target.hostname or target
-                reachable_port = parsed_target.port or CR.get_host_reachability_check_port()
-                reachable_timeout = CR.get_host_reachability_check_timeout()
+                reachable_port = parsed_target.port or CR.host_reachability_check().port
+                reachable_timeout = CR.host_reachability_check().timeout
                 if not self.is_host_reachable(host=host, port=reachable_port, timeout=reachable_timeout): # type: ignore
                     logger.warning(
                         f"Host '{host}' inalcanzable en puerto {reachable_port}. "
@@ -705,7 +708,7 @@ class ScanManager(TaskTrackingMixin, ABC):
             scan_id: Id del escaneo a revisar
 
         Returns:
-            Tipo del escaneo ("nmap", "nikto", "openvas")
+            Tipo del escaneo ("nmap", "nikto", "lybra", "nuclei")
         """
 
         with UnitOfWork() as uow:
@@ -729,6 +732,21 @@ class ScanManager(TaskTrackingMixin, ABC):
         if doc:
             result["documentId"] = doc.id
             result["documentStatus"] = doc.status
+    
+    @classmethod
+    def validate_targets(cls, raw: str, max_hosts: int = 10) -> list[str]:
+        """
+        Validate ``raw`` as a target spec via ``ScanManager.validate_ip``,
+        translating its domain exceptions into the HTTP-facing ones.
+        """
+        try:
+            return cls.validate_ip(raw, max_hosts=max_hosts)
+        except IPValidationError as exc:
+            raise ValidationError(field="target", message=str(exc), value=raw) from exc
+        except MaxHostsExceededError as exc:
+            raise ValidationError(str(exc.user_message or exc))
+        except PrivateIPRequested as exc:
+            raise EllysiaException(str(exc.user_message or exc), status_code=403)
 
     @staticmethod
     def validate_ip(ips_str: str, max_hosts: int = 10) -> List[str]:
@@ -752,7 +770,7 @@ class ScanManager(TaskTrackingMixin, ABC):
     def reject_private_ip(ip: str) -> None:
         """Lanza ``PrivateIPRequested`` si ``ip`` es privada y
         'areLocalIpsAllowed' está en falso. Para llamantes que resuelven un
-        hostname/URL ellos mismos (Nikto, OpenVAS) en vez de expandir un
+        hostname/URL ellos mismos (Nikto) en vez de expandir un
         rango vía ``validate_ip``.
         """
         parsing.reject_private_ip(ip)

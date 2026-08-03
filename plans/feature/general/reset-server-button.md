@@ -28,7 +28,7 @@ apagado que ya existe en `run.py`.
   precedente** de ese patrón (grep de `os.execv`/`os.execl` en `src/` devuelve
   cero) e introducirlo nuevo añadiría riesgo sin beneficio real, porque Docker
   ya auto-reinicia el contenedor al salir (ver §6).
-- No es un reinicio de la base de datos, Redis, Ollama ni OpenVAS. Solo la API.
+- No es un reinicio de la base de datos, Redis ni Ollama. Solo la API.
 - No expone `_init_db()` (destrucción de DB) por HTTP. Sigue sin haber endpoint
   para eso; este botón no lo añade.
 - No es un reinicio "en caliente" que recargue `SecOpsConfig.json` sin parar el
@@ -494,7 +494,7 @@ no mate el proceso de test). Pendiente de revisar en fase de implementación.
 - **Reiniciar el worker RQ** desde la UI (endpoint `POST /system/worker/restart`
   o similar). Hoy el worker es proceso/contenedor separado; su reinicio es
   independiente.
-- **Reiniciar contenedores de infra** (postgres, redis, openvas, ollama) desde
+- **Reiniciar contenedores de infra** (postgres, redis, ollama) desde
   la UI — requeriría Docker socket o un sidecar, y eleva mucho el riesgo.
 - **Auto-restart en dev** sin supervisor: un script `run_supervised.sh` que
   envuelva `python run.py` y lo rearranque al salir con código 0, para que el

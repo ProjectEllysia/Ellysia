@@ -9,7 +9,8 @@ Hierarchy:
     ├── IngestClockSkewError      (400)
     ├── IngestTooFrequentError    (429)
     ├── AnomalyNotFoundError      (404)
-    └── AnomalyStillOpenError     (409)
+    ├── AnomalyStillOpenError     (409)
+    └── InventoryNotAvailableError (409)
 """
 
 from __future__ import annotations
@@ -125,4 +126,24 @@ class AnomalyStillOpenError(HygeiaError):
             message=f"Anomalía {anomaly_id} sigue abierta, no se puede borrar",
             details={"anomaly_id": anomaly_id},
             user_message="Solo se pueden borrar anomalías reconocidas o resueltas.",
+        )
+
+
+class InventoryNotAvailableError(HygeiaError):
+    """Se intenta analizar un activo que todavía no ha reportado inventario.
+
+    No es un fallo del sistema sino un estado legítimo del activo (agente
+    recién instalado, o el escaneo de software —que va cada ~6h, no en cada
+    heartbeat— aún no le ha tocado), así que el frontend simplemente no
+    ofrece el botón hasta que haya inventario. Esto es la red de seguridad
+    para la llamada directa.
+    """
+    default_code = ErrorCode.CONSTRAINT_VIOLATION
+    default_status_code = 409
+
+    def __init__(self, asset_id: int) -> None:
+        super().__init__(
+            message=f"El activo {asset_id} no tiene inventario de software que analizar",
+            details={"asset_id": asset_id},
+            user_message="Este activo aún no ha reportado un inventario de software.",
         )

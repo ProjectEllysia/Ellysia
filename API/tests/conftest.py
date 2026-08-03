@@ -42,7 +42,7 @@ if str(_API_DIR) not in sys.path:
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-not-for-production"
 os.environ.setdefault("JWT_ALGORITHM", "HS256")
 # Clave Fernet válida (32 bytes urlsafe-base64) solo para tests — ver
-# users.services.secrets.encrypt_totp_secret / config_reading.get_mfa_config().
+# users.services.secrets.encrypt_totp_secret / config_reading.MfaConfig.
 os.environ.setdefault("MFA_ENCRYPTION_KEY", "oZrC9aq99vdSaSW5nk55KNJFr9flChUBjs16fNhpfuU=")
 # Clave Fernet distinta de MFA_ENCRYPTION_KEY (purposes no intercambiables,
 # ver shared._crypto) para el refresh token del conector de buzón de Iris.
@@ -66,13 +66,22 @@ os.environ.setdefault("SHUTDOWN_TIMEOUT", "30")
 # la app (que sigue mockeando Redis para create_app()).
 os.environ.setdefault("RATELIMIT_STORAGE_URI", "memory://")
 
-# Redis/Ollama/OpenVAS: valores inertes; los servicios se mockean.
+# T5: aislar Redis del de desarrollo. Solo se mockean `ping`/`close` (arriba)
+# para que create_app() arranque sin depender de un Redis real -- cualquier
+# otra operación (p. ej. un TaskQueue.submit() no mockeado en algún test) sí
+# llega a un Redis de verdad. Sin esto, esos tests encolaban jobs reales en la
+# MISMA base Redis que usa el servidor de desarrollo (REDIS_HOST/DB comparten
+# valor con .env), dejando jobs huérfanos que un worker real recogía más
+# tarde y fallaban con FK violation contra una fila que solo existió en el
+# SQLite efímero del test. Redis soporta 16 bases lógicas (0-15); moviendo los
+# tests a la 15 quedan en un espacio de claves separado del de dev (DB 0) sin
+# necesitar un Redis distinto. Asignación incondicional (no `setdefault`):
+# tiene que ganar aunque `.env` ya fije REDIS_DB.
+os.environ["REDIS_DB"] = "15"
+
+# Redis/Ollama: valores inertes; los servicios se mockean.
 os.environ.setdefault("REDIS_HOST", "localhost")
 os.environ.setdefault("OLLAMA_HOST", "http://localhost:11434")
-os.environ.setdefault("OPENVAS_HOST", "localhost")
-os.environ.setdefault("OPENVAS_PORT", "9390")
-os.environ.setdefault("OPENVAS_USERNAME", "admin")
-os.environ.setdefault("OPENVAS_PASSWORD", "admin")
 
 from unittest import mock  # noqa: E402
 

@@ -2,8 +2,8 @@
 Report generation for security scans.
 
 This module provides classes for generating PDF security reports from scan results.
-It includes strategies for different scan types (Nmap, OpenVAS, Nikto) with support
-for AI-powered analysis using Ollama.
+It includes strategies for different scan types (Nmap, Nikto, Lybra, Nuclei) with
+support for AI-powered analysis using Ollama.
 
 Classes:
     ColorType: Enumeration of color palette types.
@@ -11,11 +11,12 @@ Classes:
     PrintingStrategy: Abstract base class for printing strategies.
     PDFCreator: Main class for PDF document generation.
     NmapPrintingStrategy: Strategy for Nmap scan reports.
-    OpenVASPrintingStrategy: Strategy for OpenVAS scan reports.
     NiktoPrintingStrategy: Strategy for Nikto scan reports.
+    FindingsPrintingStrategy: Shared base for scan types living entirely in `Finding`.
+    LybraPrintingStrategy: Strategy for Lybra engine scan reports.
+    NucleiPrintingStrategy: Strategy for Nuclei scan reports (Fase U1).
     NmapAIWriter: AI writer for Nmap scan analysis.
     NiktoAIWriter: AI writer for Nikto scan analysis.
-    OpenVASAIWriter: AI writer for OpenVAS scan analysis.
 """
 
 import os
@@ -49,7 +50,7 @@ from src.modules.shared._exceptions import IllegalStateError, ValidationError
 logger = logging.getLogger(__name__)
 
 from ..model import NmapScan, NiktoScan, LybraScan, Scan, Host, ScanType
-from .analyzers import NmapAIWriter, NiktoAIWriter, OpenVASAIWriter, LybraAIWriter
+from .analyzers import NmapAIWriter, NiktoAIWriter, LybraAIWriter
 
 
 
@@ -57,8 +58,8 @@ class ThemisTool(Enum):
     """Enumeración de herramientas disponibles en Themis"""
     NMAP    = "nmap"
     NIKTO   = "nikto"
-    OPENVAS = "openvas"
     LYBRA   = "lybra"
+    NUCLEI  = "nuclei"
 
 
 class ColorType(Enum):
@@ -388,7 +389,8 @@ class PrintingStrategy(ABC):
 
         prompts = CR.get_prompts_config()
         tool_key = {
-            'NmapScan': 'nmap', 'NiktoScan': 'nikto', 'OpenVASScan': 'openvas', 'LybraScan': 'lybra',
+            'NmapScan': 'nmap', 'NiktoScan': 'nikto', 'LybraScan': 'lybra',
+            'NucleiScan': 'nuclei',
         }.get(scan_type, 'nmap')
         tool_prompts = prompts.get(tool_key, {})
 
@@ -547,7 +549,6 @@ class PrintingStrategy(ABC):
         tool_map = {
             "NmapScan": ScanType.NMAP,
             "NiktoScan": ScanType.NIKTO,
-            "OpenVASScan": ScanType.OPENVAS,
         }
         scan_type = tool_map.get(type(self.scan).__name__)
         if scan_type is None:
@@ -1256,393 +1257,6 @@ class NmapPrintingStrategy(PrintingStrategy):
         return "Análisis de Seguridad de Red"
 
 
-@PrintingStrategy.register(ScanType.OPENVAS)
-class OpenVASPrintingStrategy(PrintingStrategy):
-    """Printing strategy for OpenVAS vulnerability scan reports.
-
-    Generates PDF reports for OpenVAS scans including vulnerability summary,
-    detailed vulnerability cards with CVSS scores, and optional AI analysis.
-
-    Color palette: Green theme for vulnerability management reports.
-
-    Attributes:
-        color_palette: Green color palette for the report.
-    """
-
-    def __init__(self, scan) -> None:
-        """Initialize OpenVAS printing strategy.
-
-        Args:
-            scan: OpenVASScan instance to generate report from.
-        """
-        super().__init__(scan)
-        self.writer = OpenVASAIWriter()
-
-        palette_config = CR.get_tool_color_palette(ThemisTool.OPENVAS)
-
-        self.color_palette = {
-            ColorType.BLACK: palette_config.get("black", "#0D2818"),
-            ColorType.DARK: palette_config.get("dark", "#1B5E20"),
-            ColorType.MAIN: palette_config.get("main", "#2E7D32"),
-            ColorType.SECONDARY: palette_config.get("secondary", "#43A047"),
-            ColorType.LIGHT: palette_config.get("light", "#66BB6A"),
-            ColorType.WHITE: palette_config.get("white", "#E8F5E9"),
-        }
-
-    def append_body(self, theme: "ReportTheme", elements: list, ai_report: bool = False) -> None:
-        """Generate the report body for OpenVAS scans.
-
-        Args:
-            theme: Report theme for styling.
-            elements: List of flowable elements to append to.
-            ai_report: Whether to include AI-generated analysis.
-        """
-        results = getattr(self.scan, "results", []) or []
-
-        self._append_ov_header(theme, elements, results)
-
-        # Resumen de severidad
-        if results:
-            self._append_ov_severity_summary(theme, elements, results)
-
-            # Detalle de vulnerabilidades
-            elements.append(PageBreak())
-            elements.append(Paragraph("Vulnerabilidades detectadas", theme.subtitle))
-            elements.append(Spacer(1, 0.1 * inch))
-
-            if not results:
-                elements.append(Paragraph("No se detectaron vulnerabilidades.", theme.info))
-                return
-
-            severity_priority = {
-                "CRITICAL": 0,
-                "HIGH": 1,
-                "MEDIUM": 2,
-                "LOW": 3,
-                "LOG": 4,
-                "UNKNOWN": 5,
-            }
-
-        def sort_key(res):
-            vuln = res.vulnerability
-            sev_raw = getattr(vuln, "severity_class", None) or "UNKNOWN"
-            sev = str(sev_raw).upper()
-            score = getattr(vuln, "severity_score", None) or 0.0
-            return (severity_priority.get(sev, 5), -float(score))
-
-        sorted_results = sorted(results, key=sort_key)
-
-        # Colores de fondo por severidad
-        severity_bg = {
-            "CRITICAL": colors.HexColor("#ffcccc"),
-            "HIGH": colors.HexColor("#ffe6cc"),
-            "MEDIUM": colors.HexColor("#fff4cc"),
-            "LOW": colors.HexColor("#e6ffe6"),
-            "LOG": colors.HexColor("#e6f7ff"),
-            "UNKNOWN": colors.HexColor("#f0f0f0"),
-        }
-
-        description_style = ParagraphStyle(
-            "OVDescription",
-            parent=theme.body,
-            fontSize=9,
-            leading=12,
-        )
-
-        for idx, result in enumerate(sorted_results, start=1):
-            self._append_ov_vulnerability_card(theme, elements, result, idx, severity_bg, description_style)
-
-        if ai_report:
-            self._append_ai_analysis(elements, theme)
-
-        self._append_history_stats(elements, theme)
-
-    def _append_ov_header(self, theme: "ReportTheme", elements: list, results: list) -> None:
-        """Cabecera del informe: título, tabla de host y tabla de resumen del escaneo."""
-        scan = self.scan
-
-        elements.append(Paragraph("Informe de Escaneo OpenVAS", theme.title))
-        elements.append(Spacer(1, 0.1 * inch))
-
-        if getattr(scan, "host", None):
-            host = scan.host
-            host_info = [
-                ["Host analizado:", str(getattr(host, "ip_address", ""))],
-                ["Nombre de host:", str(getattr(host, "hostname", ""))],
-            ]
-            host_table = theme.kv_table(host_info, col_widths=[2 * inch, 4 * inch])
-            elements.append(host_table)
-            elements.append(Spacer(1, 0.1 * inch))
-
-        started = getattr(scan, "started_at", None)
-        started_str = started.strftime("%d/%m/%Y %H:%M:%S") if started else "N/A"
-
-        scan_info = [
-            ["ID del escaneo:", str(getattr(scan, "id", ""))],
-            ["Task ID:", str(getattr(scan, "task_id", ""))],
-            ["Report ID:", str(getattr(scan, "report_id", ""))],
-            ["Fecha de inicio:", started_str],
-            ["Total de vulnerabilidades:", str(len(results))],
-        ]
-        if getattr(scan, "scan_config_name", None):
-            scan_info.append(["Configuración:", str(scan.scan_config_name)])
-        if getattr(scan, "scanner_name", None):
-            scan_info.append(["Scanner:", str(scan.scanner_name)])
-
-        info_table = theme.kv_table(scan_info, col_widths=[2 * inch, 4 * inch])
-        elements.append(info_table)
-        elements.append(Spacer(1, 0.3 * inch))
-
-    def _append_ov_severity_summary(self, theme: "ReportTheme", elements: list, results: list) -> None:
-        """Tabla resumen: cantidad y score CVSS promedio por severidad."""
-        palette = self.color_palette
-        main = colors.HexColor(palette[ColorType.MAIN])
-        dark = colors.HexColor(palette[ColorType.DARK])
-        white = colors.HexColor(palette[ColorType.WHITE])
-
-        elements.append(Paragraph("Resumen de severidad", theme.subtitle))
-        elements.append(Spacer(1, 0.1 * inch))
-
-        severity_counts: Dict[str, int] = {}
-        scores_by_severity: Dict[str, list] = {}
-
-        for result in results:
-            vuln = result.vulnerability
-            sev_raw = getattr(vuln, "severity_class", None) or "UNKNOWN"
-            severity = str(sev_raw).upper()
-
-            severity_counts[severity] = severity_counts.get(severity, 0) + 1
-
-            score = getattr(vuln, "severity_score", None)
-            if score is not None:
-                scores_by_severity.setdefault(severity, []).append(float(score))
-
-        header = ["Severidad", "Cantidad", "Score promedio"]
-        data = [header]
-
-        severity_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "LOG", "UNKNOWN"]
-        for sev in severity_order:
-            if sev not in severity_counts:
-                continue
-            count = severity_counts[sev]
-            scores = scores_by_severity.get(sev, [])
-            avg = sum(scores) / len(scores) if scores else 0.0
-            data.append([sev, str(count), f"{avg:.1f}"])
-
-        table = Table(data, colWidths=[2.5 * inch, 1.3 * inch, 2.2 * inch], repeatRows=1)
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), main),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 10),
-            ("TOPPADDING", (0, 0), (-1, 0), 8),
-            ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-            ("BACKGROUND", (0, 1), (-1, -1), white),
-            ("TEXTCOLOR", (0, 1), (-1, -1), dark),
-            ("ALIGN", (0, 1), (0, -1), "CENTER"),
-            ("ALIGN", (1, 1), (-1, -1), "CENTER"),
-            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 1), (-1, -1), 9),
-            ("TOPPADDING", (0, 1), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
-            ("GRID", (0, 0), (-1, -1), 0.4, dark),
-        ]))
-        elements.append(table)
-        elements.append(Spacer(1, 0.3 * inch))
-
-    def _append_ov_vulnerability_card(
-        self,
-        theme: "ReportTheme",
-        elements: list,
-        result,
-        idx: int,
-        severity_bg: dict,
-        description_style: ParagraphStyle,
-    ) -> None:
-        """Tarjeta de una vulnerabilidad: cabecera, nombre, detalles técnicos,
-        resumen, impacto, solución y referencias (bloques opcionales según datos)."""
-        palette = self.color_palette
-        main = colors.HexColor(palette[ColorType.MAIN])
-        dark = colors.HexColor(palette[ColorType.DARK])
-        white = colors.HexColor(palette[ColorType.WHITE])
-
-        elements.append(CondPageBreak(3 * inch))
-
-        vuln = result.vulnerability
-        sev_raw = getattr(vuln, "severity_class", None) or "UNKNOWN"
-        severity = str(sev_raw).upper()
-
-        bgcolor = severity_bg.get(severity, severity_bg["UNKNOWN"])
-        cvss = getattr(vuln, "cvss_base_score", None)
-        score_text = f"CVSS: {cvss:.1f}" if cvss is not None else "CVSS: N/A"
-
-        # Cabecera
-        header_table = theme.severity_header_table(
-            left_text=f"Vulnerabilidad #{idx}",
-            right_text=f"Severidad: {severity} | {score_text}",
-            bg_color=bgcolor,
-        )
-        elements.append(header_table)
-
-        # Nombre de la vulnerabilidad en una banda de color principal
-        name_para = Paragraph(str(getattr(vuln, "name", "")), ParagraphStyle(
-            "OVName",
-            parent=theme.styles["Normal"],
-            fontName="Helvetica-Bold",
-            fontSize=10,
-            textColor=colors.whitesmoke,
-            alignment=TA_LEFT,
-        ))
-        name_table = Table([[name_para]], colWidths=[6 * inch])
-        name_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), main),
-            ("LEFTPADDING", (0, 0), (-1, -1), 10),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-            ("TOPPADDING", (0, 0), (-1, -1), 8),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-            ("BOX", (0, 0), (-1, -1), 0.6, dark),
-        ]))
-        elements.append(name_table)
-
-        # Detalles técnicos
-        details = [
-            ["NVT OID:", str(getattr(vuln, "nvt_oid", ""))],
-            ["Host:", str(getattr(result.host, "ip_address", ""))],
-        ]
-        detected = getattr(result, "detected_at", None)
-        if detected:
-            details.append(["Detectado:", detected.strftime("%d/%m/%Y %H:%M:%S")])
-        if getattr(vuln, "family", None):
-            details.append(["Familia:", str(vuln.family)])
-        if getattr(vuln, "cvss_vector", None):
-            details.append(["Vector CVSS:", str(vuln.cvss_vector)])
-        if getattr(vuln, "qod_value", None) is not None:
-            qod_type = getattr(vuln, "qod_type", None) or "N/A"
-            details.append(["QoD:", f"{vuln.qod_value}% ({qod_type})"])
-
-        details_table = Table(details, colWidths=[1.7 * inch, 4.3 * inch])
-        details_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f9f9f9")),
-            ("ALIGN", (0, 0), (0, -1), "LEFT"),
-            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-            ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-        ]))
-        elements.append(details_table)
-
-        # Resumen
-        summary = getattr(vuln, "summary", None)
-        if summary:
-            text = summary[:500] + ("..." if len(summary) > 500 else "")
-            para = Paragraph(f"Resumen: {text}", description_style)
-            table = Table([[para]], colWidths=[6 * inch])
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-            ]))
-            elements.append(table)
-
-        # Impacto
-        impact = getattr(vuln, "impact", None)
-        if impact:
-            text = impact[:400] + ("..." if len(impact) > 400 else "")
-            para = Paragraph(f"Impacto: {text}", description_style)
-            table = Table([[para]], colWidths=[6 * inch])
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fff0f0")),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-            ]))
-            elements.append(table)
-
-        # Solución
-        solution = getattr(vuln, "solution", None)
-        if solution:
-            text = solution[:400] + ("..." if len(solution) > 400 else "")
-            stype = getattr(vuln, "solution_type", None)
-            stype_txt = f" ({stype})" if stype else ""
-            para = Paragraph(f"Solución{stype_txt}: {text}", description_style)
-            table = Table([[para]], colWidths=[6 * inch])
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), white),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-            ]))
-            elements.append(table)
-
-        # Referencias
-        refs_parts = []
-        if getattr(vuln, "cve_ids", None):
-            refs_parts.append(f"CVE: {vuln.cve_ids}")
-        if getattr(vuln, "cert_refs", None):
-            refs_parts.append(f"CERT: {vuln.cert_refs}")
-        if getattr(vuln, "bugtraq_ids", None):
-            refs_parts.append(f"BugTraq: {vuln.bugtraq_ids}")
-        if getattr(vuln, "other_refs", None):
-            refs_parts.append(f"Otros: {vuln.other_refs}")
-
-        if refs_parts:
-            full = " | ".join(refs_parts)
-            text = full[:400] + ("..." if len(full) > 400 else "")
-            para = Paragraph(f"Referencias: {text}", description_style)
-            table = Table([[para]], colWidths=[6 * inch])
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f0f8ff")),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-            ]))
-            elements.append(table)
-
-        elements.append(Spacer(1, 0.2 * inch))
-
-    def get_filename_suffix(self) -> str:
-        """Get the PDF filename suffix.
-
-        Returns:
-            Filename suffix: "_OpenVAS.pdf"
-        """
-        return "_OpenVAS.pdf"
-
-    def get_picture_name(self, dark: bool = False) -> str:
-        """Get the logo image name for OpenVAS reports.
-
-        Args:
-            dark: Whether to use dark variant.
-
-        Returns:
-            Logo filename.
-        """
-        picture_name = "Themis-Green-Bg"
-        return picture_name + "Dark.png" if dark else picture_name + "Light.png"
-
-    def get_report_title(self) -> str:
-        """Get the report title for the cover page.
-
-        Returns:
-            Report title: "Análisis de Vulnerabilidades OpenVAS"
-        """
-        return "Análisis de Vulnerabilidades OpenVAS"
-
-
 @PrintingStrategy.register(ScanType.NIKTO)
 class NiktoPrintingStrategy(PrintingStrategy):
     """Printing strategy for Nikto web vulnerability scan reports.
@@ -1933,70 +1547,117 @@ class NiktoPrintingStrategy(PrintingStrategy):
         return "Análisis de Vulnerabilidades Web"
 
 
-@PrintingStrategy.register(ScanType.LYBRA)
-class LybraPrintingStrategy(PrintingStrategy):
-    """Printing strategy for Lybra engine scan reports.
+class FindingsPrintingStrategy(PrintingStrategy):
+    """Shared PDF renderer for scan types whose data lives entirely in the
+    unified `Finding` table rather than a tool-specific incident/vulnerability
+    model — Lybra originally, and now Nuclei (roadmap Fase U1).
 
-    Unlike the other three strategies, the source data is the unified
-    `Finding` table rather than a tool-specific incident/vulnerability model,
-    fetched via the repository since `LybraScan` deliberately carries no ORM
-    relationship to it (see `repositories.py`). Cards are sorted by the same
-    `priority` ladder the web UI uses, computed the same way
-    (`score_finding`), so the PDF and the web view never disagree.
+    Extracted from what used to be a single, Lybra-only class: Nuclei's JSONL
+    output maps onto `Finding` almost as completely as Lybra's own engine does
+    (`cve_ids`, `cvss_score`, `check_id` all populated — see
+    `lybra/adapters.py::nuclei_result_to_finding`), so its PDF is "the exact
+    same card renderer, a different identity and palette" rather than a fourth
+    near-duplicate `PrintingStrategy`. A subclass fixes the small set of class
+    attributes below; everything else — fetching findings via the repository
+    (neither `LybraScan` nor `NucleiScan` carries an ORM relationship to
+    `Finding`), scoring, sorting, the summary table, the CVE-context
+    enrichment and the per-finding card — is identical.
 
-    Color palette: Green theme, matching Lybra's own UI identity.
+    Cards are sorted by the same `priority` ladder the web UI uses, computed
+    the same way (`score_finding`), so the PDF and the web view never
+    disagree.
+
+    Subclass contract (all required, no defaults — each identity must be a
+    deliberate choice, not an inherited accident):
+        _TOOL:              ``ThemisTool`` member, for ``CR.get_tool_color_palette``.
+        _WRITER_CLASS:       AI writer class to instantiate (both tools reuse
+                             ``LybraAIWriter`` today — its logic only reads
+                             already-structured findings, nothing Lybra-specific).
+        _WRITER_PROMPT_KEY:  Which ``SecOpsConfig.json`` prompt pair to read
+                             (``"lybra"`` / ``"nuclei"``).
+        _OWN_SOURCE:         This tool's own ``Finding.source`` value, so a
+                             finding corroborated by *another* scanner is
+                             correctly flagged ("Corroborado por: ...") instead
+                             of always comparing against the literal "lybra".
+        _HEADER_TITLE:       In-body report title (``theme.title`` paragraph).
+        _REPORT_TITLE:       PDF metadata / cover title (``get_report_title``).
+        _FILENAME_SUFFIX:    Download filename suffix (``get_filename_suffix``).
+        _PICTURE_BASE:       Background image basename, before ``Light``/``Dark.png``.
+        _DEFAULT_PALETTE:    Fallback color dict when ``SecOpsConfig.json``
+                             carries no ``colorPalette`` for ``_TOOL``.
 
     Attributes:
-        writer: LybraAIWriter instance for AI analysis.
-        color_palette: Green color palette for the report.
+        writer: ``_WRITER_CLASS`` instance for AI analysis.
+        color_palette: This tool's color palette for the report.
     """
 
     _PRIORITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
     _PRIORITY_LABEL = {"CRITICAL": "CRÍTICA", "HIGH": "ALTA", "MEDIUM": "MEDIA", "LOW": "BAJA", "INFO": "INFO"}
     _STATE_LABEL = {"open": "Abierto", "fixed": "Corregido", "regressed": "Regresado", "accepted": "Aceptado"}
 
-    def __init__(self, scan: LybraScan) -> None:
-        """Initialize Lybra printing strategy.
+    # Bare annotations, no defaults on purpose (see the "Subclass contract"
+    # docstring above): each subclass must set every one of these explicitly,
+    # the same way ScanManager._MODEL/_RICH_LOADER declare the contract a
+    # concrete subclass fills in. Declaring them here (rather than leaving
+    # them only in prose) is what lets static analysis resolve `self._TOOL`
+    # etc. inside this class's own methods.
+    _TOOL: "ThemisTool"
+    _WRITER_CLASS: type
+    _WRITER_PROMPT_KEY: str
+    _OWN_SOURCE: str
+    _HEADER_TITLE: str
+    _REPORT_TITLE: str
+    _FILENAME_SUFFIX: str
+    _PICTURE_BASE: str
+    _DEFAULT_PALETTE: Dict[str, str]
+
+    def __init__(self, scan) -> None:
+        """Initialize the printing strategy.
 
         Args:
-            scan: LybraScan instance to generate report from.
+            scan: LybraScan or NucleiScan instance to generate the report from.
         """
         super().__init__(scan)
-        self.writer = LybraAIWriter()
+        self.writer = self._WRITER_CLASS(prompt_key=self._WRITER_PROMPT_KEY)
 
-        palette_config = CR.get_tool_color_palette(ThemisTool.LYBRA)
+        palette_config = CR.get_tool_color_palette(self._TOOL)
+        defaults = self._DEFAULT_PALETTE
 
         self.color_palette = {
-            ColorType.BLACK: palette_config.get("black", "#1A2410"),
-            ColorType.DARK: palette_config.get("dark", "#4A6132"),
-            ColorType.MAIN: palette_config.get("main", "#7CA163"),
-            ColorType.SECONDARY: palette_config.get("secondary", "#A8C98F"),
-            ColorType.LIGHT: palette_config.get("light", "#D4E8C4"),
-            ColorType.WHITE: palette_config.get("white", "#F3F8EE"),
+            ColorType.BLACK: palette_config.get("black", defaults["black"]),
+            ColorType.DARK: palette_config.get("dark", defaults["dark"]),
+            ColorType.MAIN: palette_config.get("main", defaults["main"]),
+            ColorType.SECONDARY: palette_config.get("secondary", defaults["secondary"]),
+            ColorType.LIGHT: palette_config.get("light", defaults["light"]),
+            ColorType.WHITE: palette_config.get("white", defaults["white"]),
         }
 
     def append_body(self, theme: "ReportTheme", elements: list, ai_report: bool = False) -> None:
         from src.modules.infrastructure.session import build_repository
         from ..repositories import ScanRepository
-        from ..lybra import classify_exposure, score_finding
+        from ..lybra import score_finding
+        # Diferido como el resto de imports de esta función: `managers` importa
+        # `services`, así que a nivel de módulo sería un ciclo.
+        from ..managers.lybra_engine import LybraEngineManager
 
         rows = build_repository(ScanRepository).get_findings_by_scan(self.scan.id)
-        exposure = classify_exposure(self.scan.target)
+        exposure = LybraEngineManager.exposure_for(self.scan)
 
         findings = [{
             "title": f.title, "category": f.category, "port": f.port, "service": f.service,
             "cpe": f.cpe, "cve_ids": f.cve_ids or [], "cvss_score": f.cvss_score,
             "epss_score": f.epss_score, "in_kev": f.in_kev, "qod": f.qod, "confirmed": f.confirmed,
-            "source": f.source, "state": f.state,
+            "source": f.source, "state": f.state, "cpe_resolved": f.cpe_resolved,
         } for f in rows]
         for f in findings:
             f["priority"] = score_finding(f, exposure)
         self._enrich_with_cve_context(findings)
 
-        self._append_lybra_header(theme, elements, findings, exposure)
+        self._append_finding_header(theme, elements, findings, exposure)
 
         if findings:
-            self._append_lybra_summary(theme, elements, findings)
+            self._append_finding_summary(theme, elements, findings)
+        self._append_cpe_coverage_note(theme, elements, findings)
 
         elements.append(Paragraph("Hallazgos", theme.subtitle))
         elements.append(Spacer(1, 0.1 * inch))
@@ -2016,14 +1677,14 @@ class LybraPrintingStrategy(PrintingStrategy):
                 ),
             )
             for idx, f in enumerate(sorted_findings, start=1):
-                self._append_lybra_finding_card(theme, elements, f, idx)
+                self._append_finding_card(theme, elements, f, idx)
 
         if ai_report:
             self._append_ai_analysis(elements, theme)
 
-        # ponytail: no per-target history chart for Lybra yet — _append_history_stats'
-        # tool_map only knows the Nmap/Nikto/OpenVAS scan classes, since it relies on
-        # a MetricExtractor for each; a Finding-based one for Lybra is separate scope
+        # ponytail: no per-target history chart yet — _append_history_stats'
+        # tool_map only knows the Nmap/Nikto scan classes, since it relies on
+        # a MetricExtractor for each; a Finding-based one is separate scope
         # from wiring the PDF itself. Add it when that's needed.
 
     def _enrich_with_cve_context(self, findings: list) -> None:
@@ -2074,11 +1735,11 @@ class LybraPrintingStrategy(PrintingStrategy):
                     return m.version_end_including
         return None
 
-    def _append_lybra_header(self, theme: "ReportTheme", elements: list, findings: list, exposure: str) -> None:
+    def _append_finding_header(self, theme: "ReportTheme", elements: list, findings: list, exposure: str) -> None:
         """Cabecera del informe: título y tablas de objetivo/escaneo."""
         scan = self.scan
 
-        elements.append(Paragraph("Informe del Motor Lybra", theme.title))
+        elements.append(Paragraph(self._HEADER_TITLE, theme.title))
         elements.append(Spacer(1, 0.1 * inch))
 
         exposure_label = "Pública" if exposure == "public" else "Privada" if exposure == "private" else "Desconocida"
@@ -2106,7 +1767,7 @@ class LybraPrintingStrategy(PrintingStrategy):
         elements.append(info_table)
         elements.append(Spacer(1, 0.3 * inch))
 
-    def _append_lybra_summary(self, theme: "ReportTheme", elements: list, findings: list) -> None:
+    def _append_finding_summary(self, theme: "ReportTheme", elements: list, findings: list) -> None:
         """Tabla resumen: cantidad de hallazgos por prioridad."""
         palette = self.color_palette
         dark = colors.HexColor(palette[ColorType.DARK])
@@ -2146,9 +1807,45 @@ class LybraPrintingStrategy(PrintingStrategy):
         elements.append(table)
         elements.append(Spacer(1, 0.3 * inch))
 
-    def _append_lybra_finding_card(self, theme: "ReportTheme", elements: list, finding: dict, idx: int) -> None:
+    def _append_cpe_coverage_note(self, theme: "ReportTheme", elements: list, findings: list) -> None:
+        """Advierte cuando el matcher no pudo identificar parte del inventario.
+
+        Un escaneo por inventario (Fase I) emite un hallazgo
+        ``installed_package`` por **cada** paquete, se le haya podido resolver
+        un CPE o no. Antes de la observabilidad de la Fase I-b
+        (``Finding.cpe_resolved``) esto era indistinguible de "comprobado y
+        limpio" salvo por una heurística ("cero ``outdated_software``") que
+        mezclaba dos causas sin poder nombrar cuál. Ahora el dato es exacto:
+        cuántos de los paquetes inventariados no se pudieron ni identificar
+        contra el catálogo CPE — la KB local puede seguir sin tener CVEs para
+        los que sí se resolvieron, pero eso ya no es ambiguo, es "comprobado y
+        sin hallazgos".
+        """
+        packages = sum(1 for f in findings if f["category"] == "installed_package")
+        unresolved = sum(
+            1 for f in findings
+            if f["category"] == "installed_package" and f.get("cpe_resolved") is False
+        )
+        if not packages or not unresolved:
+            return
+
+        note_style = ParagraphStyle(
+            "CpeCoverageNote", parent=theme.body, textColor=colors.HexColor("#8a6d1f"),
+            backColor=colors.HexColor("#fff8e1"), borderColor=colors.HexColor("#e0c34a"),
+            borderWidth=0.75, borderPadding=6, alignment=TA_LEFT,
+        )
+        elements.append(Paragraph(
+            f"<b>Nota de cobertura:</b> {unresolved} de los {packages} paquetes inventariados no se "
+            "pudieron identificar contra el catálogo de vulnerabilidades (nombre de producto sin "
+            "resolución conocida), así que no se comprobaron. El resto sí se comprobó — su ausencia "
+            "de hallazgos es una verificación real, no una laguna.",
+            note_style,
+        ))
+        elements.append(Spacer(1, 0.25 * inch))
+
+    def _append_finding_card(self, theme: "ReportTheme", elements: list, finding: dict, idx: int) -> None:
         """Tarjeta de un hallazgo: cabecera de prioridad, nombre, detalles,
-        descripción y referencias (mismo lenguaje visual que Nmap/Nikto/OpenVAS:
+        descripción y referencias (mismo lenguaje visual que Nmap/Nikto:
         cada bloque lleva su propio borde, no solo la cabecera)."""
         severity_bg = {
             "CRITICAL": colors.HexColor("#ffcccc"),
@@ -2174,7 +1871,7 @@ class LybraPrintingStrategy(PrintingStrategy):
         )
         elements.append(header)
 
-        # Título en banda de color principal, igual que el nombre de vulnerabilidad de OpenVAS.
+        # Título en banda de color principal, mismo lenguaje visual que las demás tarjetas.
         title_para = Paragraph(finding["title"], ParagraphStyle(
             "LybraFindingTitle", parent=theme.styles["Normal"], fontName="Helvetica-Bold",
             fontSize=10, textColor=colors.whitesmoke, alignment=TA_LEFT,
@@ -2207,7 +1904,7 @@ class LybraPrintingStrategy(PrintingStrategy):
             details.append(["Corregido en:", f"{finding['fixed_version']} o superior"])
         if finding.get("state") and finding["state"] != "open":
             details.append(["Estado:", self._STATE_LABEL.get(finding["state"], finding["state"])])
-        if finding.get("source") and finding["source"] != "lybra":
+        if finding.get("source") and finding["source"] != self._OWN_SOURCE:
             details.append(["Corroborado por:", finding["source"]])
 
         if details:
@@ -2248,11 +1945,62 @@ class LybraPrintingStrategy(PrintingStrategy):
         elements.append(Spacer(1, 0.2 * inch))
 
     def get_filename_suffix(self) -> str:
-        return "_Lybra.pdf"
+        return self._FILENAME_SUFFIX
 
     def get_picture_name(self, dark: bool = False) -> str:
-        picture_name = "Themis-Green-Bg"
-        return picture_name + "Dark.png" if dark else picture_name + "Light.png"
+        return self._PICTURE_BASE + ("Dark.png" if dark else "Light.png")
 
     def get_report_title(self) -> str:
-        return "Veredicto del Motor Lybra"
+        return self._REPORT_TITLE
+
+
+@PrintingStrategy.register(ScanType.LYBRA)
+class LybraPrintingStrategy(FindingsPrintingStrategy):
+    """Printing strategy for Lybra engine scan reports.
+
+    Color palette: Green theme, matching Lybra's own UI identity. All the
+    rendering logic lives in `FindingsPrintingStrategy`; this class only fixes
+    Lybra's identity — behaviour is unchanged from before the Fase U1 extract.
+    """
+
+    _TOOL = ThemisTool.LYBRA
+    _WRITER_CLASS = LybraAIWriter
+    _WRITER_PROMPT_KEY = "lybra"
+    _OWN_SOURCE = "lybra"
+    _HEADER_TITLE = "Informe del Motor Lybra"
+    _REPORT_TITLE = "Veredicto del Motor Lybra"
+    _FILENAME_SUFFIX = "_Lybra.pdf"
+    _PICTURE_BASE = "Themis-Green-Bg"
+    _DEFAULT_PALETTE = {
+        "black": "#1A2410", "dark": "#4A6132", "main": "#7CA163",
+        "secondary": "#A8C98F", "light": "#D4E8C4", "white": "#F3F8EE",
+    }
+
+
+@PrintingStrategy.register(ScanType.NUCLEI)
+class NucleiPrintingStrategy(FindingsPrintingStrategy):
+    """Printing strategy for Nuclei scan reports (roadmap Fase U1).
+
+    Nuclei's JSONL output maps onto `Finding` almost as completely as Lybra's
+    own engine (`cve_ids`, `cvss_score`, `check_id` all populated by
+    `nuclei_result_to_finding`), so this reuses `FindingsPrintingStrategy`
+    wholesale — the "beneficio colateral nada menor" the roadmap's Fase U
+    called out: the PDF is the hardest part of adding a scanner, and here it
+    costs a dozen class attributes.
+
+    Color palette: Blue theme, distinct from Lybra's green so the two
+    coexist without visual confusion in the tool picker.
+    """
+
+    _TOOL = ThemisTool.NUCLEI
+    _WRITER_CLASS = LybraAIWriter
+    _WRITER_PROMPT_KEY = "nuclei"
+    _OWN_SOURCE = "nuclei"
+    _HEADER_TITLE = "Informe de Nuclei"
+    _REPORT_TITLE = "Veredicto de Nuclei"
+    _FILENAME_SUFFIX = "_Nuclei.pdf"
+    _PICTURE_BASE = "Themis-Blue-Bg"
+    _DEFAULT_PALETTE = {
+        "black": "#0d1b2a", "dark": "#1b4965", "main": "#2b7fb8",
+        "secondary": "#5fa8d3", "light": "#bee9e8", "white": "#f0f8ff",
+    }

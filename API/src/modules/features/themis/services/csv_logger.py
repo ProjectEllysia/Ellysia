@@ -204,16 +204,18 @@ class NiktoScanLogger(BaseScanLogger):
         super().log(log_data)
 
 
-class OpenVASScanLogger(BaseScanLogger):
-    _csv_name = "openvas"
+class NucleiScanLogger(BaseScanLogger):
+    _csv_name = "nuclei"
 
     @property
     def columns(self) -> list[str]:
         return [
             "timestamp",
             "target",
-            "scan_config",
-            "skip_normalize",
+            "severities",
+            "tags",
+            "rate_limit",
+            "timeout_sec",
             "duration_sec",
             "concurrent_tasks",
             "status",
@@ -221,14 +223,16 @@ class OpenVASScanLogger(BaseScanLogger):
 
     @property
     def scan_type(self) -> str:
-        return "openvas"
+        return "nuclei"
 
     def log(self, data: dict) -> None:
         log_data = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "target": data.get("target", ""),
-            "scan_config": data.get("scan_config", ""),
-            "skip_normalize": str(data.get("skip_normalize", "")).lower(),
+            "severities": data.get("severities", ""),
+            "tags": data.get("tags", ""),
+            "rate_limit": data.get("rate_limit", ""),
+            "timeout_sec": data.get("timeout_sec", ""),
             "duration_sec": data.get("duration_sec", ""),
             "concurrent_tasks": data.get("concurrent_tasks", ""),
             "status": data.get("status", ""),
@@ -258,7 +262,7 @@ class ScanLoggerFactory:
     def register_defaults(cls) -> None:
         cls.register("nmap", NmapScanLogger())
         cls.register("nikto", NiktoScanLogger())
-        cls.register("openvas", OpenVASScanLogger())
+        cls.register("nuclei", NucleiScanLogger())
 
 
 ScanLoggerFactory.register_defaults()
@@ -270,5 +274,5 @@ __all__ = [
     "ScanLogger",
     "NmapScanLogger",
     "NiktoScanLogger",
-    "OpenVASScanLogger",
+    "NucleiScanLogger",
 ]

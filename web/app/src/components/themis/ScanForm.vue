@@ -18,17 +18,9 @@
           <div class="field field-sm"><label>Timeout (s)</label>
             <input v-model.number="form.timeout" type="number" min="10" max="86400" class="no-spin" /></div>
         </template>
-        <template v-if="type === 'openvas'">
-          <div class="field field-lg"><label>Target (IP única)</label>
-            <input v-model="form.target" placeholder="192.168.1.1" /></div>
-          <div class="field field-md">
-            <label>Configuración</label>
-            <select v-model="form.config">
-              <option value="full_fast">Full &amp; Fast</option>
-              <option value="full_deep">Full &amp; Deep</option>
-              <option value="full_ultimate">Full &amp; Ultimate</option>
-            </select>
-          </div>
+        <template v-if="type === 'nuclei'">
+          <div class="field field-lg"><label>Target URL</label>
+            <input v-model="form.target" placeholder="https://example.com" /></div>
         </template>
         <button class="btn-launch" :class="launching ? 'loading' : ''" :disabled="launching" @click="handleLaunch">
           <span class="btn-label">Lanzar</span>
@@ -51,6 +43,28 @@
         <div class="field" :class="{ hidden: portMode !== 'custom' }"><label>Rango de puertos</label>
           <input v-model="form.ports" placeholder="80,443 o 1-1000" /></div>
       </div>
+      <div v-if="type === 'nuclei'" class="nuclei-row">
+        <div class="field field-lg">
+          <!-- "info" queda fuera por defecto (roadmap Fase U1, punto 1): son
+               miles de plantillas de tech-detect que, al ser confirmed=true
+               sin CVSS, el suelo de score_finding subiría todas a MEDIO. -->
+          <label>Severidades</label>
+          <div class="strategy-picker" role="group" aria-label="Severidades de Nuclei">
+            <button v-for="sev in NUCLEI_SEVERITIES" :key="sev.id" type="button"
+              class="strategy-chip" :class="[sev.id, { active: form.severities.includes(sev.id) }]"
+              :aria-pressed="form.severities.includes(sev.id)" :title="sev.hint"
+              @click="toggleSeverity(sev.id)">
+              <span class="strategy-label">{{ sev.label }}</span>
+            </button>
+          </div>
+        </div>
+        <div class="field field-md"><label>Tags (opcional)</label>
+          <input v-model="form.tags" placeholder="cve,exposure" /></div>
+        <div class="field field-sm"><label>Rate limit</label>
+          <input v-model.number="form.rateLimit" type="number" min="1" max="1000" class="no-spin" /></div>
+        <div class="field field-sm"><label>Timeout petición (s)</label>
+          <input v-model.number="form.requestTimeout" type="number" min="1" max="120" class="no-spin" /></div>
+      </div>
     </div>
   </div>
 </template>
@@ -70,9 +84,22 @@ const emit = defineEmits(['launch'])
 const DEFAULTS = {
   nmap:    { target: '', ports: '1-1000', timeout: 900,  config: 'full_fast' },
   nikto:   { target: '', ports: '',        timeout: 6000, config: 'full_fast' },
-  openvas: { target: '', ports: '',        timeout: 600,  config: 'full_fast' },
+  nuclei:  { target: '', severities: ['critical', 'high', 'medium'], tags: '', rateLimit: 150, requestTimeout: 10 },
 }
 const form = ref({ ...DEFAULTS.nmap })
+
+const NUCLEI_SEVERITIES = [
+  { id: 'critical', label: 'Crítica', hint: 'Severidad crítica' },
+  { id: 'high', label: 'Alta', hint: 'Severidad alta' },
+  { id: 'medium', label: 'Media', hint: 'Severidad media' },
+  { id: 'low', label: 'Baja', hint: 'Severidad baja' },
+  { id: 'info', label: 'Info', hint: 'Plantillas de tech-detect — miles de peticiones, sin CVSS propio' },
+]
+function toggleSeverity(id) {
+  form.value.severities = form.value.severities.includes(id)
+    ? form.value.severities.filter(s => s !== id)
+    : [...form.value.severities, id]
+}
 
 // Rangos IANA: bien conocidos (0–1023), registrados (1024–49151), privados/dinámicos (49152–65535), y completo (0–65535).
 const PORT_PRESETS = { wellknown: '1-1023', registered: '1024-49151', private: '49152-65535', complete: '1-65535' }
@@ -97,7 +124,13 @@ function handleLaunch() {
   const payload = { target: form.value.target.trim() }
   if (props.type === 'nmap') { payload.ports = form.value.ports; payload.timeout = form.value.timeout }
   if (props.type === 'nikto') { payload.timeout = form.value.timeout }
-  if (props.type === 'openvas') { payload.scanConfig = form.value.config }
+  if (props.type === 'nuclei') {
+    if (form.value.severities.length) payload.severities = form.value.severities
+    const tags = (form.value.tags || '').split(',').map(t => t.trim()).filter(Boolean)
+    if (tags.length) payload.tags = tags
+    if (form.value.rateLimit) payload.rateLimit = form.value.rateLimit
+    if (form.value.requestTimeout) payload.requestTimeout = form.value.requestTimeout
+  }
   emit('launch', payload)
 }
 </script>
@@ -117,6 +150,7 @@ function handleLaunch() {
 .launch-fields { display: flex; flex-direction: column; gap: 0.6rem; }
 .field-row { display: flex; align-items: flex-end; gap: 0.6rem; flex-wrap: wrap; }
 .ports-row { display: grid; grid-template-columns: 1fr; gap: 0.6rem; }
+.nuclei-row { display: flex; align-items: flex-end; gap: 0.6rem; flex-wrap: wrap; }
 .field { display: flex; flex-direction: column; gap: 0.25rem; flex: 1; min-width: 130px; }
 .ports-row .field:nth-child(2) { max-height: 70px; overflow: hidden; transition: max-height 0.2s ease, opacity 0.2s ease; opacity: 1; }
 .ports-row .field.hidden { max-height: 0; opacity: 0; pointer-events: none; }

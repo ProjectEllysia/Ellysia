@@ -20,7 +20,7 @@
       <template v-else-if="store.stats.total">
         <span class="metric-label">Escaneos emitidos</span>
         <span class="metric-value">{{ store.stats.total }}</span>
-        <span class="metric-sub">Lybra {{ store.stats.lybra }} · Nmap {{ store.stats.nmap }} · Nikto {{ store.stats.nikto }} · OpenVAS {{ store.stats.openvas }}</span>
+        <span class="metric-sub">Lybra {{ store.stats.lybra }} · Nmap {{ store.stats.nmap }} · Nikto {{ store.stats.nikto }} · Nuclei {{ store.stats.nuclei }}</span>
       </template>
       <p v-else class="metric-empty">Todavía no has lanzado ningún escaneo. El primero tarda un minuto.</p>
     </template>
@@ -55,7 +55,7 @@ const features = [
   {
     kicker: 'Segunda opinión',
     title: 'Los escáneres clásicos, como testigos',
-    desc: 'Nmap, Nikto y OpenVAS corroboran el mismo objetivo cuando quieres contrastar el veredicto. Un objetivo, todas las miradas.',
+    desc: 'Nmap, Nikto y Nuclei corroboran el mismo objetivo cuando quieres contrastar el veredicto. Un objetivo, todas las miradas.',
   },
   {
     kicker: 'Informes',

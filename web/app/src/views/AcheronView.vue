@@ -141,9 +141,7 @@
             <div class="skeleton-bar skeleton-bar--count"></div>
           </div>
           <div class="vault-head-actions">
-            <div class="skeleton-bar skeleton-bar--btn"></div>
-            <div class="skeleton-bar skeleton-bar--btn"></div>
-            <div class="skeleton-bar skeleton-bar--btn"></div>
+            <div v-for="n in 4" :key="n" class="skeleton-bar skeleton-bar--btn"></div>
           </div>
         </header>
 
@@ -171,6 +169,10 @@
             <button class="add-btn" @click="openAdd">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
               Añadir
+            </button>
+            <button class="lock-btn" :disabled="refreshing" @click="refreshNow">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              {{ refreshing ? 'Actualizando…' : 'Actualizar' }}
             </button>
             <button class="lock-btn" @click="openChangePassword">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1"/></svg>
@@ -276,6 +278,7 @@ import PasswordStrengthMeter from '@/components/acheron/PasswordStrengthMeter.vu
 import { useApi } from '@/composables/useApi'
 import { useAuthStore } from '@/stores/authStore'
 import { openVault, createVault, WrongPasswordError } from '@/acheron/vault.js'
+import { vaultWrite as writeWithRevision, peekJson } from '@/acheron/sync.js'
 import { generatePassword } from '@/acheron/passwordGenerator.js'
 import { STORABLE_CATEGORIES } from '@/acheron/storableFields.js'
 import { TYPE_BY_CATEGORY } from '@/acheron/storableTypes.js'
@@ -310,6 +313,11 @@ let algorithm = null
 // Versión de metadatos con la que se abrió el vault. Si el servidor reporta una
 // mayor, la contraseña maestra cambió en otro dispositivo durante esta sesión.
 let currentMetadataVersion = null
+// Revisión del vault con la que estamos trabajando: viaja en If-Match en toda
+// escritura para que el servidor rechace las nuestras si otro dispositivo
+// escribió mientras tanto (409) en vez de dejarnos pisar su cambio.
+const sync = { revision: null, refresh: () => refreshVault() }
+const refreshing = ref(false)
 
 const modal = reactive({ open: false, mode: 'add', category: null, item: null })
 const saving = ref(false)
@@ -441,6 +449,7 @@ async function unlock() {
     vault = opened
     algorithm = vaultJson.algorithm
     currentMetadataVersion = vaultJson.metadataVersion ?? null
+    sync.revision = vaultJson.revision ?? null
     unlocked.value = true
   } catch (e) {
     if (e instanceof WrongPasswordError) {
@@ -463,36 +472,85 @@ function lock() {
   vault = null
   algorithm = null
   currentMetadataVersion = null
+  sync.revision = null
   unlocked.value = false
   modal.open = false
   nextTick(() => passwordInput.value?.focus())
 }
 
-/* ── detección de cambio de la maestra en otro dispositivo ──
-   El cambio de contraseña maestra incrementa metadataVersion en el servidor
-   (la vaultKey no cambia, así que la sesión abierta sigue operando sin error).
-   Al volver a la pestaña, re-comprobamos: si la versión del servidor es mayor,
-   bloqueamos y pedimos re-desbloquear con la nueva contraseña. */
-async function checkVaultFreshness() {
-  if (!unlocked.value || currentMetadataVersion == null) return
-  let res
-  try {
-    res = await apiFetch('/acheron/vault')
-  } catch {
-    return // problema de red: no molestar
-  }
-  if (!res || !res.ok) return
+/* ── recarga en caliente ──
+   Recargar NO necesita la contraseña maestra: tras el desbloqueo la vaultKey ya
+   está desenvuelta en memoria, así que basta con volver a bajar el ciphertext y
+   descifrarlo con ella. Es lo que sostiene el botón "Actualizar" y el
+   auto-reintento tras un 409. */
+async function refreshVault() {
+  if (!vault) return false
+  const res = await apiFetch('/acheron/vault')
+  if (!res || !res.ok) return false
+
   let vaultJson
   try {
     vaultJson = await res.json()
   } catch {
-    return
+    return false
   }
+
+  // La rotación de la maestra en otro dispositivo sí exige re-desbloqueo: el
+  // checker y el sobre de la vaultKey ya no se corresponden con la contraseña
+  // que introdujimos.
   const serverVersion = vaultJson.metadataVersion ?? null
-  if (serverVersion != null && serverVersion > currentMetadataVersion) {
+  if (currentMetadataVersion != null && serverVersion != null && serverVersion > currentMetadataVersion) {
     lock()
     error.value = 'Tu contraseña maestra cambió en otro dispositivo. Vuelve a introducirla.'
+    return false
   }
+
+  vault.raw = vaultJson
+  const decrypted = await vault.decryptAll()
+  for (const cat of STORABLE_CATEGORIES) entries[cat] = decrypted[cat] || []
+  algorithm = vaultJson.algorithm
+  sync.revision = vaultJson.revision ?? sync.revision
+  return true
+}
+
+async function refreshNow() {
+  if (!vault || refreshing.value) return
+  refreshing.value = true
+  try {
+    if (await refreshVault()) flash('Bóveda actualizada.')
+  } catch (e) {
+    console.error('[Acheron] error al actualizar:', e)
+    flash('No se pudo actualizar la bóveda.', true)
+  } finally {
+    refreshing.value = false
+  }
+}
+
+/* ── escritura con concurrencia optimista ──
+   Manda If-Match con la revisión que creemos tener y, si el servidor la rechaza
+   por obsoleta, recarga en caliente y reintenta una vez (ver acheron/sync.js). */
+function vaultWrite(path, options) {
+  return writeWithRevision(apiFetch, path, options, sync)
+}
+
+/* ── sonda de cambios al volver a la pestaña ──
+   GET /acheron/vault/revision es una sola cifra: si no cambió nada, no bajamos
+   ni desciframos el vault entero. Si cambió, la recarga en caliente trae lo que
+   escribió el otro dispositivo (o bloquea, si lo que cambió fue la maestra). */
+async function checkVaultFreshness() {
+  if (!unlocked.value || sync.revision == null) return
+  let res
+  try {
+    res = await apiFetch('/acheron/vault/revision')
+  } catch {
+    return // problema de red: no molestar
+  }
+  if (!res || !res.ok) return
+
+  const body = await peekJson(res)
+  if (typeof body?.revision !== 'number' || body.revision === sync.revision) return
+
+  if (await refreshVault()) flash('La bóveda cambió en otro dispositivo: actualizada.')
 }
 
 function onVisibilityChange() {
@@ -511,7 +569,7 @@ async function onChangePassword({ current, next }) {
   pwdModal.error = ''
   try {
     const payload = await vault.changePassword(current, next, auth.username())
-    const res = await apiFetch('/acheron/vault', {
+    const { res } = await vaultWrite('/acheron/vault', {
       method: 'PATCH',
       body: JSON.stringify(payload),
     })
@@ -558,12 +616,16 @@ async function onSave({ mode, category, title, fields, item }) {
   try {
     if (mode === 'add') {
       const { payload, item: newItem } = await vault.createStorable(category, title, fields)
-      const res = await apiFetch('/acheron/storables', {
+      const { res, refreshed } = await vaultWrite('/acheron/storables', {
         method: 'POST',
         body: JSON.stringify(payload),
       })
       if (res && (res.status === 201 || res.ok)) {
-        entries[category] = [...(entries[category] || []), newItem]
+        // Tras un conflicto resuelto, resincronizamos en vez de parchear el
+        // estado local: es la única forma de reflejar exactamente lo que quedó
+        // en el servidor, incluido lo que escribió el otro dispositivo.
+        if (refreshed) await refreshVault()
+        else entries[category] = [...(entries[category] || []), newItem]
         modal.open = false
         flash('Elemento añadido.')
       } else {
@@ -577,14 +639,18 @@ async function onSave({ mode, category, title, fields, item }) {
         modal.open = false
         return
       }
-      const res = await apiFetch('/acheron/storables', {
+      const { res, refreshed } = await vaultWrite('/acheron/storables', {
         method: 'PATCH',
         body: JSON.stringify([{ internalId: item.id, changes }]),
       })
       if (res && res.ok) {
-        const list = entries[category]
-        const idx = list.findIndex((e) => e.id === item.id)
-        if (idx !== -1) list[idx] = updated
+        if (refreshed) {
+          await refreshVault()
+        } else {
+          const list = entries[category]
+          const idx = list.findIndex((e) => e.id === item.id)
+          if (idx !== -1) list[idx] = updated
+        }
         modal.open = false
         flash('Cambios guardados.')
       } else {
@@ -603,12 +669,13 @@ async function onSave({ mode, category, title, fields, item }) {
 async function removeItem(category, item) {
   if (!window.confirm(`¿Eliminar «${item.title || item.id}»? No se puede deshacer.`)) return
   try {
-    const res = await apiFetch('/acheron/storables', {
+    const { res, refreshed } = await vaultWrite('/acheron/storables', {
       method: 'DELETE',
       body: JSON.stringify({ internalId: item.id }),
     })
     if (res && res.ok) {
-      entries[category] = (entries[category] || []).filter((e) => e.id !== item.id)
+      if (refreshed) await refreshVault()
+      else entries[category] = (entries[category] || []).filter((e) => e.id !== item.id)
       flash('Elemento eliminado.')
     } else {
       flash(await errMessage(res, 'No se pudo eliminar.'), true)
@@ -621,14 +688,16 @@ async function removeItem(category, item) {
 
 async function errMessage(res, fallback) {
   if (!res) return 'Sesión expirada.'
-  if (res.status === 409) return 'Ya existe un elemento con ese identificador.'
   if (res.status === 403) return 'No tienes permisos para esta acción.'
-  try {
-    const data = await res.json()
-    return data.message || data.error || fallback
-  } catch {
-    return fallback
+  const data = await peekJson(res)
+  if (res.status === 409) {
+    // Dos 409 distintos: colisión de internalId, o revisión obsoleta que ni
+    // siquiera el reintento automático pudo resolver.
+    return data?.error === 'vault_revision_mismatch'
+      ? 'La bóveda cambió en otro dispositivo. Actualiza y vuelve a intentarlo.'
+      : 'Ya existe un elemento con ese identificador.'
   }
+  return data?.error_description || data?.message || data?.error || fallback
 }
 
 onMounted(() => {
@@ -685,13 +754,13 @@ onBeforeUnmount(() => {
   color: #c4a0e0;
 }
 .unlock-icon svg { width: 26px; height: 26px; }
-.unlock-title { font-family: var(--font-display); font-size: var(--fs-2xl); color: var(--text); margin-bottom: 0.5rem; }
-.unlock-sub { font-size: var(--fs-lg); color: var(--text-dim); line-height: 1.5; margin-bottom: 1.5rem; }
+.unlock-title { font-family: var(--font-display); font-size: var(--fs-xl); color: var(--text); margin-bottom: 0.5rem; }
+.unlock-sub { font-size: var(--fs-md); color: var(--text-dim); line-height: 1.5; margin-bottom: 1.5rem; }
 .unlock-sub strong { color: #c4a0e0; font-weight: 600; }
 
 .field { display: block; text-align: left; margin-bottom: 1rem; }
 .field-label {
-  display: block; font-family: var(--font-mono); font-size: var(--fs-md);
+  display: block; font-family: var(--font-mono); font-size: var(--fs-body);
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted);
   margin-bottom: 0.4rem;
 }
@@ -699,7 +768,7 @@ onBeforeUnmount(() => {
 .field-input input {
   width: 100%; padding: 0.7rem 2.6rem 0.7rem 0.85rem;
   background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-med);
-  border-radius: 9px; color: var(--text); font-size: var(--fs-xl);
+  border-radius: 9px; color: var(--text); font-size: var(--fs-lg);
   font-family: var(--font-mono); transition: border-color 0.2s ease;
 }
 .field-input input:focus { outline: none; border-color: rgba(160, 122, 192, 0.55); }
@@ -721,14 +790,14 @@ onBeforeUnmount(() => {
 .gen-btn svg { width: 17px; height: 17px; }
 
 .unlock-error {
-  color: var(--danger); font-size: var(--fs-lg); margin-bottom: 0.9rem;
+  color: var(--danger); font-size: var(--fs-md); margin-bottom: 0.9rem;
   background: var(--danger-dim); border: 1px solid rgba(217, 108, 108, 0.25);
   border-radius: 8px; padding: 0.55rem 0.7rem;
 }
 .unlock-btn {
   width: 100%; padding: 0.8rem; border: none; border-radius: 9px;
   background: linear-gradient(135deg, #a07ac0, #7d5aa0); color: #fff;
-  font-size: var(--fs-xl); font-weight: 600; cursor: pointer;
+  font-size: var(--fs-lg); font-weight: 600; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
   transition: filter 0.2s ease, opacity 0.2s ease;
 }
@@ -802,16 +871,16 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 1.75rem; gap: 1rem; flex-wrap: wrap;
 }
-.vault-title { font-family: var(--font-display); font-size: var(--fs-2xl); color: var(--text); }
+.vault-title { font-family: var(--font-display); font-size: var(--fs-xl); color: var(--text); }
 .vault-count {
-  font-family: var(--font-mono); font-size: var(--fs-md); color: var(--text-muted);
+  font-family: var(--font-mono); font-size: var(--fs-body); color: var(--text-muted);
   letter-spacing: 0.04em;
 }
 .vault-head-actions { display: flex; gap: 0.6rem; }
 .add-btn, .lock-btn {
   display: inline-flex; align-items: center; gap: 0.45rem;
   padding: 0.55rem 1rem; border-radius: 9px; cursor: pointer;
-  font-size: var(--fs-lg); font-weight: 600; transition: filter 0.2s ease, background 0.2s ease;
+  font-size: var(--fs-md); font-weight: 600; transition: filter 0.2s ease, background 0.2s ease;
 }
 .add-btn {
   background: linear-gradient(135deg, #a07ac0, #7d5aa0); border: none; color: #fff;
@@ -823,19 +892,19 @@ onBeforeUnmount(() => {
 .lock-btn:hover { background: rgba(160, 122, 192, 0.18); }
 .add-btn svg, .lock-btn svg { width: 15px; height: 15px; }
 
-.vault-empty { color: var(--text-dim); font-size: var(--fs-xl); text-align: center; padding: 3rem 0; }
+.vault-empty { color: var(--text-dim); font-size: var(--fs-lg); text-align: center; padding: 3rem 0; }
 .vault-empty strong { color: #c4a0e0; }
 
 .vault-section { margin-bottom: 2rem; }
 .section-title {
   display: flex; align-items: center; gap: 0.55rem;
-  font-family: var(--font-mono); font-size: var(--fs-lg); text-transform: uppercase;
+  font-family: var(--font-mono); font-size: var(--fs-md); text-transform: uppercase;
   letter-spacing: 0.1em; color: #c4a0e0; margin-bottom: 0.9rem;
   padding-bottom: 0.5rem; border-bottom: 1px solid rgba(160, 122, 192, 0.15);
 }
 .section-count {
   background: rgba(160, 122, 192, 0.15); color: #c4a0e0;
-  border-radius: 20px; padding: 0.05rem 0.5rem; font-size: var(--fs-md);
+  border-radius: 20px; padding: 0.05rem 0.5rem; font-size: var(--fs-body);
 }
 
 .cards-grid {
@@ -852,18 +921,18 @@ onBeforeUnmount(() => {
   display: flex; align-items: baseline; justify-content: space-between;
   gap: 0.5rem; margin-bottom: 0.8rem;
 }
-.entry-title { font-size: var(--fs-lg); font-weight: 600; color: var(--text); }
+.entry-title { font-size: var(--fs-md); font-weight: 600; color: var(--text); }
 .entry-actions { display: flex; gap: 0.15rem; flex-shrink: 0; }
 
 .entry-fields { display: flex; flex-direction: column; gap: 0.55rem; }
 .entry-field { display: flex; flex-direction: column; gap: 0.15rem; }
 .entry-field dt {
-  font-family: var(--font-mono); font-size: var(--fs-body); text-transform: uppercase;
+  font-family: var(--font-mono); font-size: var(--fs-sm); text-transform: uppercase;
   letter-spacing: 0.06em; color: var(--text-muted);
 }
 .entry-field dd { display: flex; align-items: center; gap: 0.4rem; }
 .field-value {
-  font-size: var(--fs-lg); color: var(--text); word-break: break-all;
+  font-size: var(--fs-md); color: var(--text); word-break: break-all;
   font-family: var(--font-mono); flex: 1;
 }
 .icon-btn {
@@ -879,7 +948,7 @@ onBeforeUnmount(() => {
 .notice {
   position: fixed; left: 50%; bottom: 1.5rem; transform: translateX(-50%);
   z-index: 120; padding: 0.65rem 1.1rem; border-radius: 10px;
-  background: rgba(160, 122, 192, 0.95); color: #fff; font-size: var(--fs-lg); font-weight: 500;
+  background: rgba(160, 122, 192, 0.95); color: #fff; font-size: var(--fs-md); font-weight: 500;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
 }
 .notice--error { background: rgba(200, 70, 70, 0.95); }

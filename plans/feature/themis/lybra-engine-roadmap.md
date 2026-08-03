@@ -121,7 +121,7 @@ Desglosado, lo que OpenVAS aporta hoy y Lybra no cubre se reduce a cinco brechas
 
 | # | Brecha | Qué significa | ¿Se cierra? |
 |---|---|---|---|
-| **G1** | **Protocolos no-HTTP** | El fingerprint de Lybra habla HTTP, TLS y SSH (`lybra/fingerprint.py`). No habla SMB, RDP, SNMP, FTP, SMTP/IMAP, MySQL/PostgreSQL/MSSQL, LDAP, VNC, Telnet ni RPC. Sin fingerprint no hay CPE; sin CPE no hay detección por versión. **Un puerto 445 abierto hoy produce un hallazgo informativo y nada más.** | **Sí — Fase N.** Es la brecha nº 1 y la que de verdad decide si se puede prescindir |
+| **G1** | **Protocolos no-HTTP** | El fingerprint de Lybra habla HTTP, TLS y SSH (`lybra/fingerprinting/`). No habla SMB, RDP, SNMP, FTP, SMTP/IMAP, MySQL/PostgreSQL/MSSQL, LDAP, VNC, Telnet ni RPC. Sin fingerprint no hay CPE; sin CPE no hay detección por versión. **Un puerto 445 abierto hoy produce un hallazgo informativo y nada más.** | **Sí — Fase N.** Es la brecha nº 1 y la que de verdad decide si se puede prescindir |
 | **G2** | **Escaneo autenticado (LSC)** | Leer las versiones reales de los paquetes instalados en vez de fiarse del banner. Es lo que resuelve de raíz los falsos positivos por backport | **Sí, y mejor — Fase I.** El agente de Hygeia ya está instalado en el host; el inventario de paquetes cubre esto sin credenciales nuevas y llega incluso a hosts tras NAT |
 | **G3** | **Verdad del proveedor sobre backports** | El equivalente de Notus: saber que Debian parcheó sin subir el número de versión visible | **Sí — Fase O.** Feeds OVAL/CSAF de Debian/RHEL/SUSE en la KB, sin tocar el host |
 | **G4** | **Credenciales por defecto y checks activos no-web** | Probar `tomcat/tomcat`, FTP anónimo, paneles de administración con credenciales de fábrica | **Sí — Fase D**, con las guardas de seguridad que la fase describe |
@@ -198,9 +198,17 @@ tarea, un procesador de resultados y un gestor— y tras la eliminación la tabl
 ```
 ScanType.NMAP    → NmapScanTask     → NmapResultProcessor   → NmapScanManager
 ScanType.NIKTO   → NiktoScanTask    → NiktoResultProcessor  → NiktoScanManager
+ScanType.NUCLEI  → NucleiScanTask   → NucleiResultProcessor → NucleiScanManager    ← Fase U
 ScanType.LYBRA   → LybraEngineTask  → LybraResultProcessor  → LybraEngineManager   ← el motor
 ScanType.OPENVAS → ✂ eliminado (§7)
 ```
+
+Sobre la persistencia hay dos formas en el repositorio, y la Fase U elige a conciencia. Nmap, Nikto y
+OpenVAS tienen **tablas de resultados propias** además del `Finding` aditivo; `LybraScan` es una
+subclase fina de `Scan` **sin tabla de resultados ninguna**, y todo lo suyo vive en `Finding`.
+`NucleiScan` sigue la forma de Lybra, por la razón que el §5.3 y el paso E3 del §7 ya demuestran: las
+tablas nativas son andamiaje que este mismo plan está desmontando en otro sitio, y no tiene sentido
+construirlo nuevo en 2026.
 
 El registro por decorador (`@ScanManager.register(ScanType.LYBRA)`) sobre el modelo polimórfico
 (`polymorphic_on=scan_type`) es lo que hace que el motor herede sin escribir una línea la cancelación
@@ -264,15 +272,17 @@ La pista de **correlación** está completa; la de **bajo nivel** está a medias
 | **2** — KB local (NVD, CPE Dictionary, KEV, EPSS) | Correlación | ✓ implementada |
 | **5** — Dedup multi-fuente, ciclo de vida, scoring, `HostService` | Correlación | ✓ implementada |
 | **6** — Pipeline orquestado | Convergencia | ✓ implementada |
-| **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — 13 checks, tipos `http` y `tls`; faltan `network` y `script`; el feed es JSON, no el YAML estilo Nuclei del diseño |
-| **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP (cabecera `Server`, título, favicon, 15 firmas de tecnología), SSH (banner + HASSH), TLS (certificado); falta JARM y **todo lo no-HTTP** |
-| **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; faltan SYN sin estado, sondas UDP y control de tasa AIMD |
+| **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ✓ implementada — U1, U2 y U3 hechas; **U4 medido el 2026-07-31: 23,37 % de plantillas HTTP ingeribles frente al umbral de 25 % ⇒ no se ingiere**. Detalle en la sección Fase U más abajo |
+| **R** — Runtime de checks propio | Bajo nivel | ✓ implementada — 16 checks; los cuatro tipos activos (`http`/`tls`/`network`/`script`) existen, el feed vive en YAML, la ingesta está construida y apagada por decisión, y la **precisión está medida: 1,000 (TP=30/FP=0) sobre 9 objetivos etiquetados con señuelos**. Detalle en la sección Fase R más abajo |
+| **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS, y (Fase N) FTP, SMTP/IMAP/POP3, SMB, MySQL/MariaDB, Redis, VNC, **SNMP (Ronda 1, ✓)**; falta JARM, PostgreSQL/MSSQL/MongoDB, RDP, LDAP, Telnet, RPC. Detalle actualizado en la sección Fase N más abajo |
+| **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; **sonda UDP acotada (SNMP) implementada en la Ronda 1** (`scan_udp_ports_sync`, `UDP_PROBES`); faltan SYN sin estado y control de tasa AIMD |
 | **4**, DAST y Etapa 2 (P, E, C, O, A, B, D, G, S, X) | Ambas | ○ planificadas |
 
-El feed actual (`lybra/checks_feed.json`, versión `lybra-checks-1`) tiene 13 checks en 3 familias:
-`exposed_path` ×7, `security_header` ×3, `tls` ×3 — todos de tipo `http` o `tls`. Ése es literalmente
-el mapa de la brecha G1: **el runtime no tiene ni un solo check que hable un protocolo que no sea
-HTTP o TLS.**
+El feed actual (`lybra/feeds/checks_feed.yaml`, versión `lybra-checks-4`) tiene 16 checks en 5
+familias: `exposed_path` ×7, `security_header` ×3, `tls` ×3, `network` ×2, `script` ×1. Las Fases N y
+R ya han empezado a llenar el hueco que la redacción original de este párrafo describía —el runtime
+no hablaba ningún protocolo que no fuera HTTP o TLS—, pero con tres checks no-web sigue siendo el
+mapa de la brecha G1.
 
 ### 6.2 El criterio de prioridad, actualizado
 
@@ -282,43 +292,99 @@ El resultado es esta reordenación, que es el cambio de fondo de esta revisión:
 
 | Orden | Fase | Brecha que cierra | Por qué aquí |
 |---|---|---|---|
+| **0.º** | **0.9 — Contrato de entrada externa de servicios** (nueva, pre-fase) | — | No cierra ninguna brecha por sí sola; es el cable que hace posible que la Fase I lo haga. Barata, aislada, sin riesgo para lo que ya funciona |
 | **1.º** | **N — Dissectors y checks de red no-HTTP** (nueva) | **G1** | Sin ella, "prescindir de OpenVAS" significa perder de verdad cobertura. Con ella, la detección por versión se extiende a toda la superficie no-web sin escribir un solo check por CVE |
-| **2.º** | **I — Inventario de Hygeia → Lybra** (H0–H2) | **G2** | Es la prioridad nº 1 del documento de gobierno por razones de producto, y resulta que además es el sustituto del escaneo autenticado de OpenVAS. Dos motivos independientes apuntando al mismo trabajo |
-| **3.º** | **R (cierre) — tipos `network` y `script`, feed en YAML** | G1, G4 | El tipo `network` es el vehículo declarativo de la Fase N; sin él, cada sonda nueva es código |
-| **4.º** | **O — Backports por feed de distribución** | **G3** | Ataca la causa nº 1 de falsos positivos sin tocar el host ni pedir credenciales |
-| **5.º** | **D — Credenciales por defecto** | **G4** | Cobertura clásica de OpenVAS, con guardas propias (lockout, tasa, evidencia sin plaintext) |
-| **6.º** | **F y T (cierre) — JARM, SYN sin estado, UDP, AIMD** | — | Independiza de Nmap, no de OpenVAS. Trabajo de identidad y disfrute, no de necesidad |
+| **2.º** | **I — Inventario de Hygeia → Lybra** (H0–H2) — ◐ parcial | **G2** | Es la prioridad nº 1 del documento de gobierno por razones de producto, y resulta que además es el sustituto del escaneo autenticado de OpenVAS. Dos motivos independientes apuntando al mismo trabajo. La tubería está construida (2026-07-28); falta la **resolución de nombre de paquete → CPE** (Fase I-b), sin la cual el motor recibe el inventario pero no sabe reconocerlo |
+| **3.º** | **U — Nuclei como herramienta, corroborador y oráculo** (nueva) | G4 parcial, y **la vara de medir** | Entrega una herramienta de producto completa a coste bajo, sustituye a Nikto como corroborador con datos mucho mejores (CVE + CVSS frente a OSVDB), y da el oráculo de falsos positivos que el §8 admite que falta. Va antes que el cierre de R porque es quien lo hace medible |
+| **4.º** | ~~**R (cierre)**~~ — ✓ cerrada el 2026-07-31 | G1, G4 | `script`, YAML e ingesta construidos; precisión 1,000 medida. La ingesta queda apagada por el veredicto del censo de U4 |
+| **5.º** | **O — Backports por feed de distribución** | **G3** | Ataca la causa nº 1 de falsos positivos sin tocar el host ni pedir credenciales |
+| **6.º** | **D — Credenciales por defecto** | **G4** | Cobertura clásica de OpenVAS, con guardas propias (lockout, tasa, evidencia sin plaintext) |
+| **7.º** | **F y T (cierre) — JARM, SYN sin estado, UDP, AIMD** | — | Independiza de Nmap, no de OpenVAS. Trabajo de identidad y disfrute, no de necesidad |
 | resto | Etapa 2 (P, E, C, A, B, G, S, X) | — | Capacidades nuevas, ninguna condicionada por la salida de OpenVAS |
 
 Las fases **4** (escaneo autenticado por SSH) y **DAST** bajan de prioridad de forma explícita: la
 primera porque la Fase I la cubre mejor y sin credenciales nuevas, la segunda porque sigue siendo
 opcional y dependiente del uso real.
 
+### 6.3 El orden de integración de lo que queda antes de la Etapa 2 (2026-07-31)
+
+Con U y R cerradas, el §6.2 deja de ser un orden de fases y pasa a ser una lista de trabajo suelto.
+Este apartado lo convierte en rondas ejecutables. No cambia el criterio de prioridad —sigue mandando
+cuánta brecha con OpenVAS se cierra—; lo que añade son **tres dependencias que el orden original no
+veía**, y que reordenan lo suficiente como para justificar escribirlas.
+
+**Dependencia 1 — La sonda UDP no es trabajo de la Fase T, es la puerta de entrada a la Fase N.**
+El §6.2 pone T en el 7.º puesto, con la etiqueta honesta de "disfrute, no necesidad". Pero SNMP —el
+dissector de mayor valor que queda, porque su `sysDescr` trae producto y versión enteros en una sola
+lectura— no existe sin ella, y la propia Fase N ya lo tenía anotado como su bloqueo. La salida es
+partir T en dos: **la sonda UDP acotada (SNMP, DNS, NTP) sube al primer puesto; el SYN sin estado y
+el AIMD se quedan exactamente donde están**, que es donde el propio plan admite que no hay evidencia
+de necesitarlos. Consecuencia técnica que conviene anticipar: `NetworkProbe`/`NetworkSession`
+(Fase N) son TCP puro, así que el tipo de check `network` tiene que aprender UDP antes de que exista
+un `snmp-default-community`.
+
+**Dependencia 2 — La Fase O no tiene hoy con qué evaluar su propio criterio de cierre.** Su número
+es *"falsos positivos del banco −40 % en imágenes Debian/RHEL"*, y no existe ningún banco que mida
+falsos positivos de detección **por versión**: el de precisión de la Fase R mide las tres familias
+activas, que no producen ni una CVE, y el diferencial de U3 acaba de demostrar que Nuclei no puede
+corroborar detección por versión (0 corroborados sobre 70). Ese baseline hay que construirlo
+**antes** de O, no después, o su −40 % no será comprobable. Ya es barato: `tests/oracle/_real_kb.py`
+trae el backfill real al banco, y hay dos puntos de partida medidos (70 CVE sobre `httpd:2.4.49`, 32
+hallazgos abiertos sobre el inventario de `PC-Gabriel`).
+
+**Dependencia 3 — E0 es lo más barato que queda y ya no tiene contrapartida.** Tres ediciones,
+reversibles, sin pérdida de datos. Con la Fase U cerrada, quitar OpenVAS del análisis profundo deja
+el pool en Nmap + Nikto + Nuclei —el que U2 declaró como objetivo, salvo Nikto—, y es lo único que
+sigue gastando un corroborador de cuatro horas en cada `deep=True`.
+
+**Las rondas:**
+
+| Ronda | Trabajo | Por qué aquí | Estado |
+|---|---|---|---|
+| **0** | **E0** — desconectar OpenVAS (corroborador, `docker-compose`, `.env` raíz) | Medio día, reversible, y el compose de dev pasa de quince minutos a segundos | ✓ hecha (`07e0d830`, `8bc87d31`) |
+| **1** | **T (sonda UDP mínima) + N (SNMP)** — UDP curado, dissector `sysDescr`, `network` sobre UDP, check de comunidad por defecto | El trozo más grande de G1 que queda, y el de mejor relación valor/coste de todo el backlog | ✓ hecha (`b295fedc`, `e1f6ff91`) |
+| **2** | **E1 + E2** — retirar OpenVAS del producto y del código | Ya sin nada que dependa de él. Diff grande pero mecánico. **E3 se deja aparte**: es el único paso irreversible y no bloquea nada | ✓ hecha, **ampliada a E1+E2+E3+E4** (BD de dev sin filas OpenVAS, no hacía falta backfill) — `9b55cf00`, `d517c821`, `d0fbaf3f`, `1c2d7a97`, `0a351c1f` |
+| **3** | **Baseline de FP por versión → Fase O** | Primero la dimensión `outdated_software` en el banco de precisión sobre la KB real; solo entonces la ingesta OVAL/CSAF. Ataca la causa nº 1 de falsos positivos (G3) | ○ no empezada |
+| **4** | **N (resto) + D** — PostgreSQL/MSSQL/MongoDB, RDP, LDAP; encima, credenciales por defecto | D va detrás de N porque reutiliza sus dissectors, y al final del todo porque es la única fase que **escribe** en el objetivo (G4) | ○ no empezada |
+| **5** | **F + T (cierre)** — JARM, SYN sin estado, AIMD | Solo si aparece evidencia del techo de Python. Si no aparece, archivarlo explícitamente en vez de arrastrarlo como deuda perpetua | ○ no empezada |
+
+**I-b queda fuera de las rondas a propósito.** Su siguiente paso —el ranking de nombres sin resolver
+más frecuentes para dirigir el feed curado— no es trabajo de ingeniería sino de datos: necesita el
+agente de Hygeia instalado en más de un equipo. Es una espera operativa, y ponerla en una ronda
+sería fingir que depende de escribir código.
+
+**Dos cosas que este orden no resuelve, y que no se arreglan con código sino con contenedores:** la
+retirada de Nikto sigue sin dato que la respalde (el diferencial no produjo ni un hallazgo web del
+lado de Nuclei sobre los tres objetivos), y el catálogo de objetivos genuinamente explotables del
+banco sigue siendo pobre — la misma deuda que U3 ya tenía anotada.
+
 ---
 
-### Fase N — Dissectors y checks de red no-HTTP · pista de bajo nivel · ○ planificada · **la que cierra la brecha**
+### Fase N — Dissectors y checks de red no-HTTP · pista de bajo nivel · ◐ parcial · **la que cierra la brecha**
 
 **El objetivo** es que Lybra sepa identificar y comprobar los servicios que no son web. Es la fase
 que convierte "eliminamos OpenVAS" en una decisión sin pérdida de cobertura, y por eso lidera.
 
 **Qué ya existe y qué falta.** `transport.py` descubre puertos abiertos y `engine.py` emite un
 hallazgo informativo por cada uno, así que la superficie *se ve*. Lo que falta es leerla:
-`fingerprint.py` tiene `fingerprint_http`, `fingerprint_ssh` (banner + HASSH) y `TlsProbe`, y nada
-más. Un puerto 445, 3389, 3306 o 161 abierto hoy produce un `Finding` de categoría `open_port` con
-`qod=30` y se acaba ahí. Con un dissector que extraiga producto y versión, ese mismo puerto entra
-automáticamente en la maquinaria de las Fases 1 y 2 y produce sus CVEs sin que haya que escribir un
-check por vulnerabilidad — que es exactamente el apalancamiento que hace viable esta fase.
+`lybra/fingerprinting/` (dividido en un módulo por protocolo — `http.py`, `ssh.py`, `tls.py`,
+`concordance.py` — desde esta misma ronda) tiene `fingerprint_http`, `fingerprint_ssh` (banner +
+HASSH) y `TlsProbe`, y nada más. Un puerto 445, 3389, 3306 o 161 abierto hoy produce un `Finding`
+de categoría `open_port` con `qod=30` y se acaba ahí. Con un dissector que extraiga producto y
+versión, ese mismo puerto entra automáticamente en la maquinaria de las Fases 1 y 2 y produce sus
+CVEs sin que haya que escribir un check por vulnerabilidad — que es exactamente el apalancamiento
+que hace viable esta fase.
 
-**Qué construir.** Dissectors propios en `lybra/fingerprint.py` (o un submódulo `lybra/dissectors/`
-cuando el fichero lo pida), priorizados por relación entre valor y coste sobre la superficie que de
-verdad vamos a ver:
+**Qué construir.** Un módulo nuevo por protocolo dentro de `lybra/fingerprinting/` (el patrón que ya
+sigue el paquete), priorizados por relación entre valor y coste sobre la superficie que de verdad
+vamos a ver:
 
 | Prioridad | Protocolo | Qué se extrae | Coste |
 |---|---|---|---|
 | 1 | **SMB/NetBIOS** (139, 445) | Dialecto negociado, nombre de dominio/host, firma requerida o no, versión de Windows/Samba | Medio — negociación binaria, pero muy documentada |
 | 1 | **FTP** (21) | Banner de bienvenida, soporte de `AUTH TLS`, login anónimo permitido | Bajo — texto plano |
 | 1 | **SMTP/IMAP/POP3** (25, 465, 587, 143, 993, 110) | Banner, `EHLO` capabilities, STARTTLS, relay abierto | Bajo — texto plano |
-| 2 | **SNMP** (161/udp) | Comunidad por defecto (`public`), `sysDescr` — que suele traer el producto y la versión enteros | Bajo, pero necesita la sonda UDP de la Fase T |
+| 2 | **SNMP** (161/udp) | Comunidad por defecto (`public`), `sysDescr` — que suele traer el producto y la versión enteros | ✓ implementado (Ronda 1, `b295fedc`/`e1f6ff91`) |
 | 2 | **MySQL / PostgreSQL / MSSQL / Redis / MongoDB** (3306, 5432, 1433, 6379, 27017) | Paquete de saludo con versión; autenticación no requerida (el caso Redis/Mongo abierto es un hallazgo por sí mismo) | Medio — protocolos binarios propios pero con saludo trivial |
 | 3 | **RDP** (3389) | Versión del protocolo, nivel de seguridad, si NLA está exigido | Medio-alto |
 | 3 | **LDAP, VNC, Telnet, RPC** | Banner y capacidades básicas | Bajo cada uno, poca frecuencia |
@@ -339,15 +405,253 @@ datos abiertos identifica producto y versión de los cuatro, emite sus CVEs por 
 local, y detecta al menos tres hallazgos de configuración de red (por ejemplo SMB sin firma, FTP
 anónimo y Redis sin auth) — todo sin Nmap `-sV` de por medio y sin OpenVAS existiendo.
 
+**Estado (2026-07-28):** arrancada por el protocolo más barato, tal como proponía el apartado 12.
+`lybra/fingerprinting/ftp.py` añade el dissector: `parse_ftp_banner` reconoce las dos formas de
+banner más comunes (`"220 (vsFTPd 2.3.4)"` con paréntesis, `"220 ProFTPD 1.3.5 Server (Debian)..."`
+en bruto) y deja sin identificar, a propósito, un banner sin versión como el de Pure-FTPd por
+defecto — ninguna CPE inventada. `FtpProbe` lee el banner con un socket crudo, mismo patrón que
+`SshProbe`. Está enchufado en `LybraEngineManager._fingerprint_services`, así que un puerto FTP
+autodescubierto (Fase T, sin Nmap) ya rellena el hueco de CPE exactamente igual que HTTP/SSH.
+
+El tipo de check `network` que el runtime (Fase R) todavía no tenía ya existe: `Request` gana un
+campo `send` (el payload a escribir, `None` para solo leer), y `NetworkProbe`/`NetworkSession`
+abren una única conexión TCP por check y encadenan cada petición sobre ella — lo que hace falta
+para una secuencia de login como la de FTP. El primer check declarativo,
+`ftp-anonymous-login` (`checks_feed.json`, `feedVersion` subido a `lybra-checks-2`), envía
+`USER anonymous` → espera `331`, luego `PASS ...` → espera `230`, reutilizando el mismo sistema de
+matchers `and`/`or` que ya tenían los checks HTTP, sin abstracción nueva.
+
+**Estado (2026-07-28, continuación):** ampliada a seis protocolos más, siguiendo el mismo patrón
+"volunteer un dato, léelo, no adivines" que FTP demostró. Antes de esta ronda, la selección de
+dissector en `LybraEngineManager._fingerprint_services` era un `if`/`elif` por protocolo —
+igual de rígido que el que el apartado 5.2 de este documento ya había señalado en el gestor de
+origen de servicios (§0.9). Se sustituyó por un registro (`lybra/fingerprinting/dispatch.py`:
+clase `Dissector` con `applies`/`probe`, más `default_dissectors()`), así que cada protocolo nuevo
+es una entrada en una lista, no una rama nueva en el manager. El mismo criterio se aplicó al
+`CheckRuntime.run` de `checks.py`, que tenía el mismo bucle triplicado una vez por tipo de check
+(`http`/`tls`/`network`); ahora es un único bucle sobre `_CheckFamily`, con un tipo `script` futuro
+(Fase R) entrando como una entrada más, no un cuarto bucle.
+
+Protocolos añadidos, todos con dissector + test unitario con socket falso (mismo patrón que FTP —
+sin red real):
+
+- **SMTP/IMAP/POP3** (`lybra/fingerprinting/mail.py`) — banner sin negociar, igual que FTP. SMTP
+  extrae `Producto Versión` tras `"ESMTP "` (`"Exim 4.94.2"`); Postfix omite versión a propósito y
+  se respeta (sin CPE inventada). IMAP/POP3 solo dan producto (`"Dovecot ready."` → `Dovecot`), con
+  una lista de palabras vacías (`"pop3"`, `"server"`...) para no confundir el nombre del protocolo
+  con un producto.
+- **SMB** (`lybra/fingerprinting/smb.py`) — el protocolo de mayor valor por frecuencia de puerto de
+  la tabla, y el único de esta ronda que no se limita a leer: envía un `SMB2 NEGOTIATE` mínimo
+  (dialectos `0x0202`–`0x0302`, sin `0x0311`/SMB 3.1.1 para evitar los "negotiate contexts" que esa
+  versión exige) y parsea `DialectRevision`/`SecurityMode` de la respuesta. Cuando la firma no es
+  obligatoria lo dice en el propio título del fingerprint (`"SMB2 (firma no requerida)"`) — un hecho
+  observado directamente, no una inferencia. **Sin verificar contra un servidor real**: el offset de
+  bytes sigue MS-SMB2 §2.2.3/§2.2.4 y el test cubre el formato con un fixture construido a mano, pero
+  no hay Samba/Windows en este entorno para confirmarlo — pendiente antes de confiar en ello en
+  producción. Las comprobaciones activas "SMB sin firma"/"SMBv1 habilitado" que la tabla original
+  pedía siguen sin construirse: el runtime declarativo actual solo compara texto decodificado, y una
+  respuesta SMB2 es binaria.
+- **MySQL/MariaDB** (`lybra/fingerprinting/mysql.py`) — el paquete de saludo inicial (protocolo 10)
+  trae la versión en claro sin autenticar; se reconoce y despoja el prefijo de compatibilidad
+  `"5.5.5-"` que MariaDB antepone, para no reportar un MariaDB 10.6 como "MySQL 5.5.5".
+- **Redis** (`lybra/fingerprinting/redis_probe.py`, nombrado así para no coincidir con el paquete
+  `redis` de terceros) — a diferencia de los anteriores, Redis no ofrece nada sin pedirlo: se envía
+  `INFO` (de solo lectura, misma clase de acción que un `GET /` HTTP) y se lee `redis_version:` de
+  la respuesta. Ese mismo patrón, declarativo esta vez, es el check activo nuevo
+  `redis-unauthenticated-access` (`checks_feed.json`, `feedVersion` subido a `lybra-checks-3`): si
+  `INFO` responde sin pedir credenciales, es un hallazgo por sí mismo.
+- **VNC** (`lybra/fingerprinting/vnc.py`) — el banner de versión RFB (`"RFB 003.008\n"`, 12 bytes
+  fijos) es la excepción a la regla "sin valor sin frecuencia" del apartado siguiente: no hay
+  producto/vendor que leer, pero la versión de protocolo en sí ya distingue un respondedor legado.
+
+**Actualización (Ronda 1):** SNMP ya no está fuera — `lybra/fingerprinting/snmp.py` añade el
+dissector (`sysDescr` vía GetRequest v2c hecho a mano, sin `pysnmp`) y `transport.py` la sonda UDP
+acotada (`scan_udp_ports_sync`, `UDP_PROBES`) que este apartado daba por no construida. Deliberadamente
+sin versión extraída del `sysDescr` (texto libre, envenenaría el matcher CPE). Ver `checks.py` para el
+check activo `snmp-default-community`.
+
+Lo que sigue fuera, documentado y no descubierto por sorpresa: **PostgreSQL, MSSQL,
+MongoDB** (a diferencia de MySQL/Redis, exigen un handshake negociado en vez de un banner ofrecido,
+mayor coste/riesgo que valor añadido en esta ronda); **RDP, LDAP, Telnet, RPC** — Telnet en concreto
+se evaluó y se descartó explícitamente: su negociación IAC no deja un texto identificable de forma
+fiable sin inventar patrones, así que un dissector ahí no aportaría nada sobre el `open_port` que ya
+existe. Tampoco se ha ampliado el catálogo Docker del banco de concordancia
+(`test_lybra_concordance_bench.py`) con contenedores de los protocolos nuevos — sigue sin haber un
+número de concordancia no-HTTP propio, solo los tests unitarios/de integración verificando la
+mecánica, igual que quedó FTP.
+
 ---
 
-### Fase I — El inventario de Hygeia como escaneo autenticado · pista de correlación · ○ planificada
+### Fase 0.9 — El contrato de entrada externa de servicios · pista de correlación · ✓ implementada · **pre-fase para Hygeia**
+
+**El objetivo** no es detectar nada nuevo: es terminar una promesa que la Fase 0 dejó a medias. Su
+texto original decía que la lista de servicios que alimenta al motor "puede venir de un escaneo Nmap
+anterior, de parámetros directos, o de cualquier otra fuente". Verificado contra el código, eso es
+solo parcialmente cierto hoy: `LybraEngine.analyze()` (`lybra/engine.py`) ya es agnóstico al origen
+—recibe un `Iterable[Service]` y no le importa quién lo llenó—, pero la capa que hay encima,
+`LybraEngineManager._run_lybra()` (`managers/lybra_engine.py`), solo sabe construir esa lista de dos
+formas: leyendo filas `OpenPort` de un escaneo Nmap ya guardado (`source_scan_id`), o descubriendo
+puertos por su cuenta (`target`, la Fase T). No existe una tercera vía de "aquí tienes ya la lista,
+analízala". Es un hueco pequeño —vive enteramente en la capa de orquestación, no en el motor— pero es
+el que bloquea a la Fase I: su descripción actual da por hecho un punto de entrada que todavía no
+existe.
+
+**Por qué es una fase aparte y no un detalle de la Fase I.** El payload de la Fase I —un inventario de
+paquetes de Hygeia— es solo *un* productor posible de esta lista. El contrato de entrada en sí es más
+general: cualquier dato ya resuelto sobre los servicios de un host, venga de donde venga —un
+`fingerprint` propio de Themis ejecutado fuera del flujo normal, la salida ya parseada de otra
+herramienta, o el inventario de un agente—, debería poder alimentar el motor sin pasar por una fila de
+Nmap en la base de datos. Separarlo deja a la Fase I con una sola responsabilidad: el adaptador
+específico de Hygeia, no el mecanismo genérico de entrada.
+
+**Alcance de esta pre-fase, decidido explícitamente:**
+
+- **Solo interno.** No se añade ningún endpoint REST nuevo. El nuevo parámetro es invocable únicamente
+  desde código Python del propio backend —hoy sin ningún llamador real, mañana el trigger de la Fase
+  I—, así que no hace falta un schema Marshmallow de validación HTTP: el contrato es un tipo Python
+  (`List[Service]`), no un formato de red. Si más adelante aparece un caso de uso externo genuino
+  (un script que quiera enviar un dataset por HTTP), se añade el endpoint entonces, como una capa fina
+  encima de este mismo mecanismo.
+- **La procedencia se modela ya, no se pospone.** Un servicio que viene de un inventario de paquetes es
+  un hecho verificado —el paquete está instalado—; uno que viene de un fingerprint de red es una
+  inferencia sobre un banner. Hoy el motor no distingue: todo hallazgo por versión nace con `qod=70` y
+  `confirmed=false` sin importar de dónde salió el dato. Congelar el contrato sin esta distinción
+  obligaría a Fase I a reabrirlo para meterla con calzador; se resuelve aquí, cuando el contrato
+  todavía es nuevo.
+
+**Qué construir.**
+
+1. `Service` (`lybra/engine.py`) gana un campo de procedencia, con vocabulario cerrado a dos valores
+   —no una puntuación numérica, que invitaría a calibrar un número sin datos que lo respalden—:
+
+   ```python
+   @dataclass(frozen=True)
+   class Service:
+       port: Optional[int]
+       protocol: str
+       name: str = ""
+       product: str = ""
+       version: str = ""
+       cpe: Optional[str] = None
+       origin: str = "network"   # "network" (inferido: banner/CPE) | "inventory" (verificado: paquete instalado)
+   ```
+
+   Los dos productores existentes (`services_from_open_ports`, `services_from_discovered_ports`) no
+   cambian: al no pasar `origin`, siguen valiendo por defecto `"network"`, que es exactamente lo que son
+   hoy. Ningún llamador existente se entera del cambio.
+
+2. `LybraEngine._version_finding` deja de fijar `qod`/`confirmed` a un valor constante y los deriva del
+   `origin` del servicio:
+
+   ```python
+   QOD_INVENTORY_MATCH = 95   # dato verificado del propio host, no una hipótesis por banner
+
+   def _version_finding(self, service: Service, cve, cpe23: str) -> dict:
+       verified = service.origin == "inventory"
+       return {
+           ...
+           "qod":       QOD_INVENTORY_MATCH if verified else QOD_VERSION_MATCH,
+           "confirmed": verified,
+           ...
+       }
+   ```
+
+   Y `_informational_finding` deja de asumir que todo servicio tiene un puerto: cuando
+   `origin == "inventory"` y `port is None` —el caso normal de un paquete de biblioteca sin proceso
+   escuchando—, el título deja de decir "Puerto ... abierto" (que no tiene sentido ahí) y pasa a
+   "Paquete instalado — {label}", con `category="installed_package"` en vez de `"open_port"`. El `qod`
+   informativo se mantiene igual de bajo (30): que un paquete esté instalado no es, por sí mismo, más
+   que un dato de inventario.
+
+3. Un traductor nuevo, simétrico a los dos que ya existen, para productores que tienen los datos como
+   diccionarios sueltos en vez de objetos `Service` ya construidos (el caso típico de un adaptador que
+   lee filas de un modelo ORM propio, como hará el de Hygeia):
+
+   ```python
+   def services_from_payload(raw: Iterable[dict]) -> List[Service]:
+       """Construye Service a partir de un dataset externo ya resuelto.
+
+       A diferencia de los otros dos traductores, respeta el "origin" que el
+       propio payload declare (por defecto "network", para no romper a un
+       productor que aún no lo setea).
+       """
+   ```
+
+   Es opcional para un productor que ya construye `Service` directamente (el traductor solo ahorra el
+   paso de desempaquetar diccionarios); el contrato real de entrada al manager es `List[Service]`, no
+   un formato serializado.
+
+4. `LybraEngineManager.run_scan` / `execute_lybra_scan` / `_run_lybra` ganan un tercer modo, aditivo a
+   los dos existentes —ninguna firma ni comportamiento actual cambia—:
+
+   ```python
+   def run_scan(self, user_id: int,
+       source_scan_id: Optional[int] = None,
+       target: Optional[str] = None,
+       services: Optional[List[Service]] = None,   # NUEVO — tercer modo
+       discover_ports: Optional[list] = None,
+       deep: bool = False, timeout: int = 120,
+       programed_scan_id: Optional[int] = None,
+   ) -> int:
+   ```
+
+   Dentro de `_run_lybra`, el nuevo modo se resuelve como una tercera rama junto a
+   `uses_existing_source` y el autodescubrimiento: `target` sigue siendo obligatorio —es la identidad
+   del host que ata los hallazgos a un `Host` vía `get_host_by_ip`/`get_or_create_host`, ya reutilizados
+   tal cual—, pero `_discover_ports` no se llama nunca. Dos consecuencias de diseño, no accidentes:
+
+   - **El fingerprinting propio (Fase F, `_fingerprint_services`) y las comprobaciones activas (Fase R,
+     `_run_active_checks`) se saltan siempre en este modo**, sin mirar siquiera el registro de objetivos
+     autorizados. La razón no es una restricción de permisos: es que el modo payload existe
+     *precisamente* para los casos en los que no hace falta, ni a veces se puede, tocar la red del
+     objetivo —un host tras NAT que Hygeia ve pero Themis nunca podría escanear es el caso de uso que
+     motiva toda la Fase I—. Reactivar el fingerprinting encima de un dato ya verificado sería, además
+     de redundante, potencialmente incorrecto: sobrescribiría un hecho con una inferencia peor.
+   - **El seguimiento de superficie (Fase 5, `_detect_surface_changes` sobre `HostService`) sigue
+     activo sin cambios**, porque ya opera solo sobre `services` + `source_host_id` y es agnóstico al
+     origen. Esto es, de hecho, el motivo por el que vale la pena señalarlo: un paquete nuevo en el
+     inventario o un cambio de versión se detecta como evento de superficie exactamente igual que un
+     puerto nuevo, sin escribir nada adicional.
+   - **Los corroboradores del análisis profundo (`deep=True`) sí tocan la red**, así que para este modo
+     exigen explícitamente que `target` esté en el registro de objetivos autorizados antes de lanzarse
+     —a diferencia del modo `source_scan_id`, donde el objetivo ya fue validado por el escaneo Nmap
+     previo—. Es la misma regla que ya aplica al autodescubrimiento, aplicada aquí por primera vez a
+     este modo.
+
+**Qué NO incluye esta pre-fase**, para que no se disperse: ningún colector de datos nuevo (eso es el H0
+de Hygeia, en su propio repositorio), ningún adaptador inventario→`Service` (eso es la Fase I), ningún
+endpoint público, y ninguna columna nueva en `LybraScan` para registrar el modo de entrada del escaneo
+—se puede añadir después como observabilidad pura, sin que nada de lo anterior dependa de ella—.
+
+**Damos la fase por hecha cuando** un test de integración construye una lista de `Service` a mano con
+`origin="inventory"`, la pasa a `LybraEngineManager().run_scan(user_id=..., target=..., services=...)`,
+y el escaneo resultante produce `Finding` con `confirmed=true`/`qod=95` para los que tienen CVE
+conocida y `category="installed_package"` para los informativos sin puerto — sin que se dispare ninguna
+llamada de red hacia el objetivo. Ese test es, literalmente, la Fase I simulada sin que Hygeia exista
+todavía.
+
+**Estado (2026-07-28):** implementada tal como se diseñó. `Service.origin` existe con sus dos
+valores; `_version_finding`/`_informational_finding` derivan `qod`/`confirmed`/`category` de él;
+`services_from_payload` traduce diccionarios sueltos; `run_scan`/`execute_lybra_scan`/`_run_lybra`
+tienen el tercer modo, con los tres guardas de red descritos (fingerprinting y comprobaciones
+activas nunca corren en este modo; los corroboradores profundos exigen autorización explícita). Un
+hallazgo real durante la implementación, no anticipado en el diseño: `HostService` (Fase 5) y
+`compute_dedup_key` (Fase 5) identificaban un servicio por `(host, puerto, protocolo)` — una
+identidad que colapsa para dos servicios de inventario distintos, ambos con `puerto=None`. Se
+corrigió en ambos sitios (clave de respaldo por `product`/`service` cuando el puerto falta; migración
+de `HostService.port` a nullable) antes de dar la fase por cerrada — sin este arreglo, un segundo
+paquete instalado en el mismo host habría sobrescrito silenciosamente el hallazgo del primero.
+
+---
+
+### Fase I — El inventario de Hygeia como escaneo autenticado · pista de correlación · ◐ parcial
 
 **El objetivo** es sustituir el escaneo autenticado de OpenVAS (los Local Security Checks) por algo
 que Ellysia ya tiene medio construido y que además es estrictamente mejor. Es la fase **H0–H2** del
 plan de Hygeia (`plans/feature/hygeia/hygeia-backend.md`) y la prioridad nº 1 del documento de
 gobierno; aquí se registra su segunda justificación, independiente de la de producto: **es lo que
-cierra la brecha G2.**
+cierra la brecha G2.** Depende de la Fase 0.9: sin el modo de entrada por payload, no hay dónde
+enchufar el adaptador que describe esta fase.
 
 **Por qué es mejor que el escaneo autenticado clásico.** OpenVAS (y la Fase 4 de este plan) resuelven
 los backports entrando en la máquina por SSH con una credencial guardada. Eso exige gestionar
@@ -361,23 +665,819 @@ podría escanear jamás**. Es una ventaja estructural sobre el modelo de OpenVAS
 de payload que la ingesta actual · columna `MonitoredAsset.host_id` con resolución o creación del
 `Host` de Themis (reutilizando `ScanRepository.get_host_by_ip`, que ya existe precisamente para que un
 mismo dispositivo visto por IP y por hostname no se duplique) · un adaptador inventario→`Service`
-—simétrico a los de Nikto que ya existen, pero con puerto opcional, porque un paquete instalado no
-tiene puerto— · disparo de `LybraEngineManager` vía TaskQueue · envío diferencial por hash del
-listado para no repetir el payload entero cada vez. Requiere trabajo en el repositorio del agente
-además de en éste.
+—simétrico a los de Nikto que ya existen, pero con puerto opcional, y que marca cada `Service` con
+`origin="inventory"` (Fase 0.9) para que el motor lo trate como dato verificado— · disparo de
+`LybraEngineManager.run_scan(..., services=...)` (el modo de la Fase 0.9, no uno nuevo) vía TaskQueue ·
+envío diferencial por hash del listado para no repetir el payload entero cada vez. Requiere trabajo en
+el repositorio del agente además de en éste.
 
 Los hallazgos caen en el mismo árbol `Host → Service → Finding` y heredan gratis la deduplicación
-multi-fuente, el ciclo de vida y el scoring de la Fase 5. Un `Finding` procedente del inventario nace
-con `confirmed=true` y `qod` alto, porque la versión del paquete no es una hipótesis por banner: es
-el dato real.
+multi-fuente, el ciclo de vida y el scoring de la Fase 5. Gracias a la Fase 0.9, un `Finding`
+procedente del inventario nace con `confirmed=true` y `qod=95` sin lógica adicional aquí: la
+distinción ya vive en el motor, esta fase solo tiene que marcar correctamente el `origin` al construir
+cada `Service`.
 
 **Damos la fase por hecha cuando** un host con agente instalado produce hallazgos de CVE a partir de
 su inventario de paquetes, sin escaneo de red de por medio, y esos hallazgos se funden por
 `dedup_key` con los que el escaneo remoto ya producía sobre el mismo activo.
 
+**Estado (2026-07-28): ◐ parcial.** La *tubería* está construida y probada de extremo a extremo —
+un inventario de Hygeia llega al motor, produce `Finding` y se navega por agente. Lo que **no**
+está resuelto es el último eslabón, y sin él la fase no cumple su propia Definición de Hecho: el
+motor no sabe *reconocer* el software que Hygeia le entrega. Ver "La brecha que queda" más abajo.
+
+Cinco decisiones de lo construido que se apartan del diseño de arriba, cada una respondiendo a algo
+que se verificó contra el código:
+
+1. **El H0 ya estaba hecho.** El `POST /hygeia/inventory` que este apartado pedía no hacía falta:
+   el inventario ya viaja dentro del heartbeat (campo opcional `inventory` de `IngestRequestSchema`)
+   y está persistido en `MonitoredAsset.inventory`/`inventory_collected_at`. No se construyó
+   endpoint de ingesta nuevo.
+2. **El disparo es manual, no automático.** El diseño encolaba el análisis al persistir un
+   inventario nuevo. En su lugar hay un botón en la pestaña de inventario del panel de Hygeia
+   (`POST /hygeia/assets/<id>/analyze`). El automático puede añadirse después encima de este mismo
+   mecanismo; de momento nada se ejecuta sin que el usuario lo pida.
+3. **`MonitoredAsset.host_id` (el H1) queda diferido.** El modo payload ya resuelve o crea el
+   `Host` por hostname él solo, que es cuanto necesita esta funcionalidad. `host_id` solo aporta
+   cuando el *mismo* host físico se ha visto además por IP desde un Nmap, y fundir esas dos
+   identidades necesita su propia UX ("¿qué IP es este hostname?"). Deuda consciente, no olvido.
+4. **Procedencia y feed propia.** `LybraScan` gana `asset_id` (Integer nullable indexado, **sin
+   ForeignKey**, para no acoplar el esquema de Themis al de Hygeia). No nulo ⇒ vino de un agente ⇒
+   fuera de la feed de Lybra del panel, y agrupado bajo la tarjeta de ese agente en el tercer mundo
+   de `ThemisView` ("Agentes"), que reutiliza `LybraResults.vue` tal cual. Como no hay cascada de
+   base de datos, borrar un activo limpia sus escaneos explícitamente
+   (`HygeiaAssetManager.delete_asset` → `LybraEngineManager.delete_scans_for_asset`, que pasa por
+   `delete_scan` para no dejar PDFs huérfanos).
+5. **Un escaneo de inventario se puntúa como `private`.** `classify_exposure` reconoce sufijos
+   internos (`.local`, `.lan`...) pero no un hostname pelado tipo `DESKTOP-ABC`, así que lo habría
+   llamado "public" e inflado una banda toda la prioridad por un artefacto del nombre. La regla
+   vive en `LybraEngineManager.exposure_for(scan)`, que sustituye a las tres llamadas sueltas a
+   `classify_exposure` que había (manager, `analyzers.py` y el PDF de `reports.py`) — repartida
+   por tres sitios se habría olvidado en uno.
+
+**Dos cosas que "volver a analizar" NO hace, a propósito:** no borra el análisis anterior (sin el
+escaneo previo, `get_previous_lybra_findings` no encuentra nada y el ciclo de vida `fixed`/
+`regressed` queda muerto — hay un test que se cae si alguien reintroduce el borrado), y no descarta
+paquetes por estar repetidos. Sí se descartan los que no traen versión: sin versión no hay CPE que
+resolver, así que solo producirían un `installed_package` informativo cada uno, y un inventario de
+Windows trae cientos.
+
+**Nota arquitectónica.** El import `hygeia.managers → themis.managers.LybraEngineManager` es el
+**primer y único import entre módulos de `features/`** de todo el backend (verificado por `grep`
+antes de escribirlo). Es unidireccional y así debe seguir: Themis no importa nada de Hygeia ni sabe
+que existe. Está comentado en el propio fichero para que no se lea como precedente libre. Del lado
+del frontend no hay acoplamiento nuevo en backend: `ThemisView` consume `hygeiaStore` para pintar
+las tarjetas de agentes.
+
+**Lo que queda fuera:** el envío diferencial por hash (H3), el disparo automático, `host_id` (H1),
+y la fusión por `dedup_key` con los hallazgos de red del *mismo* activo — que depende de H1, porque
+hoy un mismo host visto por IP (Nmap) y por hostname (Hygeia) son dos filas de `Host` distintas.
+
+#### La brecha que queda: Themis no entiende el vocabulario de Hygeia (Fase I-b)
+
+**El síntoma, medido.** Primer análisis real, sobre un escritorio Windows (`PC-Gabriel`,
+escaneo #2): **242 paquetes, 242 hallazgos, todos `INFO`/`installed_package`, cero CVEs, cero
+confirmados**. Un informe que a primera vista se lee como "equipo limpio" y que en realidad no
+comprobó absolutamente nada.
+
+**Las dos causas, que son independientes** y conviene no confundir, porque una es operativa y la
+otra es trabajo de ingeniería:
+
+1. **La KB local estaba vacía.** Verificado en Postgres el 2026-07-28: `CveEntry` = 0,
+   `CpeMatch` = 0, `KevEntry` = 0, `EpssScore` = 0. Con la KB vacía **ningún** escaneo Lybra puede
+   detectar nada, venga de Hygeia o de Nmap — no es un problema de la Fase I, pero conviene
+   resolverlo antes de medir cuánto pesa la brecha I-b de verdad.
+
+   **Ojo con la trampa operativa:** el job programado (`themis.kb.syncCron`, 03:00, ya
+   `enabled: true`) llama a `KbSyncManager.sync_all()`, pero eso ejecuta `sync_nvd(window_days=8)`
+   — el sync **incremental**, que solo trae CVEs *modificadas* en los últimos 8 días. Dejar que el
+   cron corra no rellena el catálogo histórico (no habría dado con CVE-2021-41773, por ejemplo).
+   Hace falta `KbSyncManager().sync_nvd_backfill(base_url, start=<fecha antigua>)` — el propio
+   docstring del método lo llama "an operational one-off... meant to be run manually", y no hay
+   endpoint ni UI para lanzarlo, solo una llamada de consola dentro del contexto de la app. NVD
+   limita las ventanas seguras a 14 días con una pausa de 6s entre cada una
+   (`KbSyncManager._NVD_MAX_WINDOW_DAYS`), así que un backfill de todo el histórico (CVEs desde
+   1999) son varios cientos de tramos — cuenta con que tarde del orden de una hora o más, no algo
+   instantáneo.
+
+   **Estado (2026-07-29): ejecutado.** Se lanzó un backfill pensado para los últimos 3 años
+   (`start = hoy - 3 años`), pero el primer tramo de 14 días disparó la trampa que el propio
+   docstring de `_NVD_MAX_WINDOW_DAYS` ya documentaba como riesgo por encima de 20-25 días — NVD
+   descartó el filtro de fecha igualmente y devolvió el catálogo histórico completo. Verificado en
+   Postgres mientras corría (dos lecturas con 60s de diferencia, para confirmar que avanzaba y no
+   estaba colgado): `CveEntry` subiendo en bloques de 2.000 cada 20-30s, hasta terminar en
+   **~350.000 CVEs / ~2 M de filas `CpeMatch`** — el histórico completo de NVD, no solo 3 años. Tardó
+   más de una hora en total (~5 min de CPU real; el resto son las pausas obligatorias del
+   rate-limit sin API key).
+
+   **⚠️ No resetear la base de datos de desarrollo** (nada de `CREATE_DATABASE=True`, ni un
+   `docker compose down -v` sobre el volumen de Postgres) sin ser consciente de que eso borra este
+   backfill entero — repetirlo cuesta más de una hora de nuevo. Aviso gemelo en el `CLAUDE.md` raíz,
+   sección "Things that bite".
+2. **El matcher no sabe resolver nombres de software de escritorio a un CPE.** Ésta sí es la
+   brecha de la Fase I, y es la que este apartado documenta.
+
+**Por qué falla la resolución.** `LybraEngine._resolve_cpe` (`lybra/engine.py`) solo tiene dos
+estrategias, y ninguna sirve para un inventario:
+
+| # | Estrategia | Por qué no aplica al inventario de Hygeia |
+|---|---|---|
+| 1 | Confiar en el CPE que traiga el propio servicio | El inventario nunca trae CPE: el contrato de ingesta (`SoftwareSchema`) tiene `name`, `vendor`, `version`, `guid`… pero no `cpe`. El adaptador no puede inventar uno |
+| 2 | Buscar el producto en `CPE_PRODUCT_OVERRIDES` | Es una tabla escrita a mano de **13 entradas**, todas demonios de red de servidor (`apache httpd`, `nginx`, `openssh`, `mysql`, `vsftpd`…). Ni una sola aparece en un inventario de escritorio |
+
+Sin CPE, `_version_findings` corta antes de consultar la KB. El paquete no se "aprueba": no se
+examina. Y como `_informational_finding` emite un `installed_package` por **cada** paquete —se le
+haya resuelto CPE o no—, el resultado es indistinguible de un análisis que sí comprobó y no
+encontró nada. De ahí la nota de cobertura que se añadió al PDF y a la UI: no arregla la brecha,
+pero impide que se lea como una garantía que no es.
+
+Esta brecha existía desde la Fase 1, pero era **invisible**: un escaneo de red identifica servicios
+por banner/CPE de Nmap, que casi siempre caen dentro de esos 13 productos de servidor. Al enchufar
+Hygeia, el caso excepcional pasó a ser el caso normal.
+
+**Qué hay que construir — tres pasos, del más barato al más completo.** Son acumulativos: cada uno
+funciona por sí solo y deja al siguiente menos trabajo.
+
+**Paso 1 — Normalización de nombres (barato, alto retorno inmediato).**
+El problema no es solo qué productos conocemos, sino cómo se escriben. Hygeia reporta
+`"7-Zip 25.01 (x64)"`; NVD lo conoce como `7-zip:7-zip`. Hace falta una función pura
+—en `lybra/kb.py`, junto al resto de lógica de CPE— que canonice un nombre de paquete antes de
+buscarlo: minúsculas, quitar sufijos de arquitectura (`(x64)`, `(x86)`, `64-bit`), quitar la
+versión repetida dentro del nombre, quitar palabras de relleno (`Redistributable`, `Runtime`,
+`Setup`), colapsar separadores (` `, `-`, `_`) a uno solo. Es una función pura, así que se prueba
+con una tabla de casos reales sacados del inventario de un equipo de verdad. Sin esto, los dos
+pasos siguientes fallan igual aunque el producto sí esté en la base.
+
+**Paso 2 — Índice de productos derivado de `CpeMatch` (el atajo que evita espejar el CPE Dictionary).**
+La observación clave: **no hace falta el CPE Dictionary completo de NVD** (~1,4 M de entradas,
+un espejo caro de mantener). El único vocabulario que importa es el de productos que *tienen al
+menos una CVE*, y ése ya está en la base de datos: `CpeMatch` guarda `(vendor, product)` por cada
+regla de aplicabilidad de cada CVE espejada. Un producto que no aparezca ahí jamás podría producir
+un hallazgo, así que resolverlo no aportaría nada.
+
+El trabajo, entonces, es una tercera estrategia en `_resolve_cpe`: normalizar el nombre del paquete
+(paso 1) y buscarlo contra los `product` distintos de `CpeMatch`, también normalizados. Conviene
+materializarlo en una tabla-índice propia (`CpeProductAlias`: `normalized_name` → `(vendor,
+product)`, con índice único) reconstruida al final de cada `sync_nvd`, en vez de normalizar en
+cada consulta: son cientos de miles de filas y la resolución ocurre una vez por paquete y escaneo.
+
+Reglas de seguridad que **no** se pueden saltar aquí, porque un falso positivo por mala resolución
+es peor que no detectar:
+- Coincidencia **exacta sobre el nombre normalizado**, nunca parcial ni por subcadena. `"Java"`
+  no debe casar con `oracle:jdk` por que una contenga a la otra.
+- Un nombre normalizado que resuelva a **más de un `(vendor, product)`** se descarta (o se marca
+  como ambiguo y no se usa), en vez de elegir uno. Ambigüedad conocida ≠ licencia para adivinar.
+- El `vendor` que reporta Hygeia (`"Microsoft Corporation"`) se usa como **desempate** cuando lo
+  hay, no como parte obligatoria de la clave: muchos inventarios lo traen vacío o inconsistente.
+
+**Paso 3 — Alias curados para lo que la normalización no alcanza (cola larga).**
+Siempre quedará software cuyo nombre comercial no se parece a su CPE (`"Microsoft Visual C++ 2022
+X64 Runtime"` → `microsoft:visual_c++`). Eso es un fichero de alias en `lybra/feeds/`, con la misma
+filosofía de feed versionado que `tech_signatures.json` y `checks_feed.json`: una entrada JSON, no
+un cambio de código, cada vez que un inventario real destape un producto frecuente sin resolver.
+Es también donde `CPE_PRODUCT_OVERRIDES` debería acabar mudándose, para no tener dos tablas de
+alias haciendo lo mismo en sitios distintos.
+
+**Observabilidad, que hoy no existe y hace falta para dirigir el paso 3.** El motor debe registrar
+*por qué* un paquete no produjo detección. Basta con distinguir en el propio `Finding` informativo
+entre "CPE resuelto, KB consultada, sin CVEs" y "CPE no resuelto" — un campo en el snapshot, o dos
+categorías distintas. Con eso, la nota de cobertura puede dejar de enumerar causas posibles y decir
+la real, y sobre todo se puede sacar la lista de los productos sin resolver más frecuentes, que es
+exactamente el orden en el que conviene rellenar el feed de alias.
+
+**Damos la Fase I por cerrada (✓) cuando** un análisis del inventario de un escritorio Windows real,
+con la KB sincronizada, resuelve a CPE una mayoría de sus paquetes y emite al menos una detección
+por versión verificable a mano contra NVD — y cuando un paquete sin resolver se distingue en los
+datos de uno comprobado y limpio.
+
+**Estado (2026-07-29): pasos 1–3 implementados y verificados contra un inventario real.**
+
+- **Paso 1** — `normalize_product_name`/`extract_trailing_version` en `lybra/kb.py`: quita
+  paréntesis/corchetes, ruido de arquitectura (`x64`, `x86`, `setup`, `installer`…), colapsa
+  separadores y recorta la versión final repetida en el nombre.
+- **Paso 2** — `CpeProductAlias` (tabla nueva, migración `e6f7a8b9c0d1`) + `rebuild_cpe_product_index`
+  en `KbRepository`, enganchado al final de `KbSyncManager.sync_all()`. Descarta cualquier nombre
+  normalizado que resuelva a más de un `(vendor, product)` en vez de adivinar. Reconstruido una vez
+  contra el backfill completo: **107.519 alias inequívocos**.
+- **Paso 3** — `lybra/feeds/product_aliases.json` (`feedVersion: "lybra-aliases-2"`), migrando las
+  13 entradas de servidor de `CPE_PRODUCT_OVERRIDES` más ~15 curadas a mano, incluida `"7 zip"` y
+  `"git"` — casos donde el propio NVD tiene más de un vendor para el mismo producto y el paso 2 los
+  descarta correctamente por ambiguos; se resuelven aquí porque un humano sí sabe cuál es.
+
+`_resolve_cpe` (`engine.py`) encadena las tres estrategias sobre la **misma** clave normalizada
+(antes el paso 3 comparaba contra el string crudo en minúsculas, lo que lo dejaba casi inútil para
+nombres de escritorio con versión embebida — corregido en esta pasada).
+
+**Verificado contra el inventario real de `PC-Gabriel`** (289 paquetes, 255 con versión utilizable,
+escaneo #6): **29 hallazgos vulnerables en 6 productos** — 7-Zip×9, IntelliJ IDEA×12, WireGuard×2,
+Git×1, Java SE JDK×1, WSL×4. Un CVE espoteado a mano (`CVE-2025-68269` sobre IntelliJ,
+`CVE-2026-64812` sobre `2025.2.2` sí, rango `version_end_excluding=2026.2`) confirmado correcto
+contra el rango real de NVD por `psql`.
+
+Probar contra datos reales, no sintéticos, encontró dos bugs genuinos que la suite de tests no
+había previsto:
+
+1. **La normalización no recortaba la versión final del nombre** (`"7-Zip 25.01 (x64)"` →
+   `"7 zip 25.01"` en vez de `"7 zip"`) — corregido con `_TRAILING_VERSION_RE`.
+2. **JetBrains registra el build interno como `DisplayVersion` de Windows** (`"252.26199.169"`),
+   no la versión de marketing contra la que NVD expresa sus rangos (`"2025.2.2"`, visible solo
+   dentro del propio nombre). Sin corregirlo, IntelliJ IDEA producía **~50 CVEs** arrastrados desde
+   2009 hasta 2026 — un falso positivo masivo por comparar contra la versión equivocada. Corregido
+   en `services_from_inventory` (`hygeia/services/inventory_adapter.py`): prefiere la versión
+   embebida en el nombre cuando existe (`extract_trailing_version`), cae al campo `version` si no.
+   Bajó a **12 CVEs**, verificados uno a uno como genuinos. Comprobado que no es un patrón general
+   muestreando el resto del inventario (name/version coinciden en casi todos los demás casos) antes
+   de generalizar el fix.
+
+#### Observabilidad: `Finding.cpe_resolved` (implementado)
+
+La brecha que el apartado anterior dejaba pendiente ya está cerrada. `Finding` gana una columna
+`cpe_resolved` (Boolean nullable, migración `2d58f913333b`) que el motor rellena en el hallazgo
+informativo de **cada** paquete: `True` si `_resolve_cpe` encontró un CPE, `False` si no, `None`
+para las fuentes que ni lo intentan (Nikto, OpenVAS). La resolución se calcula una sola vez por
+servicio en `analyze()` y se comparte entre el hallazgo informativo y el de detección.
+
+Con eso, "comprobado y limpio" y "ni se llegó a identificar" dejan de ser indistinguibles en los
+datos, y la nota de cobertura del PDF, del modal de Hygeia y del desglose de Themis pasa de una
+heurística que enumeraba causas posibles ("puede que la KB no esté sincronizada, puede que el
+nombre no se reconozca") a un número exacto: *N de M paquetes no se pudieron identificar*.
+`get_analysis_summary` lo expone como `unresolvedCount`.
+
+#### Dos bugs sistémicos que la observabilidad destapó (2026-07-29)
+
+Poder *contar* los no resueltos convirtió "parece poco" en una pregunta contestable, y al tirar del
+hilo aparecieron dos fallos independientes, ambos de alcance global y ninguno específico de Hygeia:
+
+**1. El índice no podía casar nombres con el vendor como prefijo.** Windows escribe "Microsoft
+Edge", "Adobe Acrobat", "GitHub CLI", "Oracle VirtualBox"; la columna `product` de NVD casi nunca
+repite el vendor (`edge`, `acrobat`, `cli`, `virtualbox`). El índice del paso 2 solo indexaba por
+`normalize_product_name(product)`, así que esas dos formas no podían encontrarse jamás.
+`rebuild_cpe_product_index` pasa a indexar cada par bajo **dos** claves —el producto solo y
+`vendor + product`—, con la clave directa ganando en caso de colisión y el descarte por ambigüedad
+aplicado dentro de cada espacio de claves por separado. Medido sobre el espejo completo de NVD:
+**+118.648 claves (107.459 → 226.132), cero pérdidas**. Sobre el inventario real, paquetes
+resueltos **10 → 21**.
+
+> La precedencia importa y se midió: fundir ambas claves en un mismo espacio con descarte por
+> ambigüedad destruía 626 claves que hoy funcionan (`adobe reader`, `apache tomcat`… donde NVD
+> nombra el mismo software de las dos formas). Con la clave directa ganando, el cambio es
+> aditivo puro.
+
+**2. Una regla de aplicabilidad sin ningún límite de versión casaba con todo.** `version_in_range`
+devolvía `True` cuando la regla no traía ni versión exacta ni ninguno de los cuatro límites. NVD
+lee eso como "todas las versiones", pero **el 14,6% del espejo completo (370.855 de 2,5 M de filas)
+es así**, y se concentra justo en el software de escritorio autoactualizable que llena un
+inventario. El efecto medido: **695 CVEs para un único Microsoft Edge al día**, 9 para OneDrive, y
+`CVE-2009-1099` resucitada contra un JDK de 2026. Ahora devuelve `False`: una regla sin información
+de versión no puede sostener la única afirmación que un `outdated_software` hace —que *esta*
+versión es vulnerable—. Coste medido: **708 hallazgos falsos fuera, 0 detecciones legítimas
+perdidas** (las 22 que venían de rangos reales siguen intactas).
+
+**Resultado final sobre el inventario real** (`PC-Gabriel`, 289 paquetes → 242 hallazgos
+informativos, 21 resueltos): **32 hallazgos abiertos** en 8 productos — IntelliJ IDEA×12,
+7-Zip×9, Adobe Acrobat×4, WireGuard×2, WSL×2, GIGABYTE Control Center×1, GIGABYTE Performance
+Library×1, Git×1.
+
+#### Limitación conocida, no resuelta: NVD mezcla esquemas de versión bajo un mismo CPE
+
+De esos 32, **4 son falsos positivos y la causa está en los datos de NVD, no en el motor**. Los
+cuatro hallazgos de Adobe Acrobat corresponden a componentes de Acrobat *embebidos en un
+navegador* —"Acrobat for Edge", "Adobe Acrobat PDF Extension (Chrome)"—, que NVD archiva bajo
+`adobe:acrobat` pero versiona con el número del **navegador** (`120.0.2210.91`, `126.0.2592.81`),
+no con el de Acrobat (`24.001.30235`). El Acrobat de escritorio instalado (`26.001.21691`) compara
+numéricamente por debajo de esos techos y entra en el rango.
+
+No se ha intentado arreglar, deliberadamente. La única señal disponible sería heurística
+(desajuste en el número de segmentos de la versión, o en la escala del major), y aplicarla de
+forma global suprimiría detecciones legítimas en todo el software que mezcla `1.2.3` y `1.2.3.4`
+para el mismo producto — cambiar un falso positivo acotado por un falso negativo de alcance
+desconocido. Queda documentado como límite del espejo de NVD; si algún día molesta lo bastante, el
+sitio natural para tratarlo es el feed curado (paso 3), que ya existe precisamente para corregir a
+mano lo que la automatización no puede saber.
+
+#### El análisis de "casi-aciertos": dirigir el feed curado con datos (2026-07-30)
+
+El apartado anterior daba por hecho que medir la cobertura exigía varios inventarios. Es falso: con
+**uno solo** se puede contestar la pregunta que de verdad importa, que no es *"¿qué se repite entre
+equipos?"* sino ***"¿qué hay aquí que debería resolver y no resuelve?"***. Basta recortar palabras
+por los extremos de cada nombre sin resolver y ver si alguna forma más corta existe en el índice.
+
+De los 221 sin resolver, **58 quedan a un recorte de una clave del índice**. El resultado es, sobre
+todo, **la validación empírica de la regla "coincidencia exacta, nunca por subcadena"** que este
+documento fijó por intuición en el paso 2. Relajarla habría producido esto:
+
+| Paquete real | A lo que habría casado |
+|---|---|
+| `ENE_MousePad_HAL` | `cnrs:hal` — el repositorio académico francés |
+| `NVIDIA Container` | `apple:container` |
+| `Windows SDK for Windows Store Apps Contracts` | `openzeppelin:contracts` — contratos de Solidity |
+| `LockHunter 3.4, 32/64 bit` | `bit_project:bit` |
+| `WD P40 Game Drive` | `google:drive` |
+| `Epic Games Launcher` | `organizedthemes:epic` — un tema de WordPress |
+
+**Lo añadido al feed** (`lybra-aliases-3`), tras verificar cada uno contra la KB:
+
+| Alias | Resuelve a | Por qué |
+|---|---|---|
+| `mysql workbench 8.0 ce` | `oracle:mysql_workbench` | El sufijo comercial "CE" impedía la coincidencia. 42 reglas en NVD, todas acotadas |
+| `microsoft .net runtime` | `microsoft:.net` | La versión del runtime (`8.0.19`) es exactamente la que NVD usa en sus rangos |
+| `microsoft windows desktop runtime` | `microsoft:.net` | Es el .NET Desktop Runtime; NVD no le da producto propio y versiona igual (`8.0.19`) |
+
+**Lo descartado, y por qué** — importa más que lo añadido, porque son trampas:
+
+- **`.NET SDK` (`8.0.413`) y `.NET Standard Targeting Pack` (`2.1.0`)**: sus versiones pertenecen a
+  *otra escala* que la que `microsoft:.net` usa en sus rangos (el SDK 8.0.413 lleva dentro el
+  runtime 8.0.19; .NET Standard 2.1 no es .NET 2.1). Aliasarlos repetiría exactamente el fallo de
+  esquemas mezclados documentado arriba con Acrobat, pero esta vez por decisión propia.
+- **`ASP.NET Core`**: su nombre en Windows lleva la versión *incrustada en medio*
+  (`Microsoft ASP.NET Core 8.0.19 Shared Framework`), y `normalize_product_name` solo recorta la
+  del final. La clave resultante sería específica de la versión y habría que añadir una nueva con
+  cada parche — un alias que se pudre solo. Queda pendiente de que la normalización sepa recortar
+  versiones intercaladas, que es un cambio de radio mucho mayor y no se hace de pasada.
+
+Nota operativa: MySQL Workbench 8.0.45 está por encima del techo más alto que NVD registra (8.0.28),
+así que el alias **no produce hallazgos hoy** — y es justo lo que se busca: el paquete pasa de
+"sin identificar" a "comprobado y limpio", que es la distinción entera que `cpe_resolved` existe
+para poder hacer.
+
+Resultado: paquetes resueltos **21 → 24**, y **32 hallazgos nuevos legítimos** en .NET — verificados
+a mano contra los rangos reales (`[8.0.0, 8.0.21)`, `[8.0.0, 8.0.24)`, `[8.0.0, 8.0.26)`…, con el
+8.0.19 instalado dentro de todos ellos, y descartando correctamente los tramos `9.0.x`/`10.0.x` de
+las mismas CVEs).
+
+**Efecto secundario conocido: los dos alias de .NET duplican sus hallazgos.** `.NET Runtime` y
+`Windows Desktop Runtime` son dos paquetes instalados por separado que resuelven al mismo
+`microsoft:.net:8.0.19`, así que cada CVE sale dos veces (64 filas donde 32 bastarían).
+`compute_dedup_key` no los fusiona, y **no es un fallo**: incluye el nombre del paquete a propósito
+(ver el docstring de `_surface_finding`) para que dos paquetes *distintos* sin puerto no colisionen
+todos bajo la misma identidad `port=None` — una decisión de la Fase 0.9. La tensión es real y no
+tiene solución obvia: afinar la clave para fusionar estos dos arriesga fusionar paquetes que no lo
+son. Se conservan ambos alias porque el coste de quitarlos sería no detectar nada en un equipo que
+solo tenga el Desktop Runtime; duplicar es cosmético, no detectar no lo es.
+
+**¿Se cumple el criterio de cierre?** Ahora sí es medible, y el resultado es honesto pero no
+redondo: **21 de 242 paquetes resuelven a CPE (8,7%)** — muy lejos de "una mayoría". Ahora bien,
+inspeccionados a mano, la gran mayoría de los 221 restantes son drivers OEM (AMD, GIGABYTE, ENE),
+redistribuibles de Visual C++ y componentes del SDK de .NET que **no existen como producto en
+NVD**: resolverlos no es posible ni útil, porque jamás podrían producir un hallazgo. El criterio
+"mayoría resuelta" estaba mal formulado: lo que importa no es qué fracción del inventario resuelve,
+sino que no quede fuera nada que *sí* tenga CVEs publicadas. Se deja la fase en **◐ parcial** con
+esa corrección anotada, y el siguiente paso natural —ya barato con `cpe_resolved` en su sitio— es
+sacar el ranking de nombres sin resolver más frecuentes entre varios inventarios reales para dirigir
+el feed curado con datos en vez de por intuición.
+
 ---
 
-### Fase R — El runtime de detección propio · pista de bajo nivel · ◐ parcial
+### Fase U — Nuclei como herramienta, corroborador y oráculo · pista de bajo nivel · ✓ implementada
+
+**El objetivo** es incorporar Nuclei a Ellysia en sus cuatro papeles posibles de una vez, porque los
+cuatro comparten la misma pieza de trabajo y separarlos sería escribirla cuatro veces. Es la única
+fase de este documento que **añade** una dependencia externa en lugar de retirarla, y por eso conviene
+justificar primero por qué no contradice la premisa.
+
+**Por qué Nuclei sí y OpenVAS no.** El §1 estableció que la distinción no es de tamaño ni de calidad,
+sino **de naturaleza**: un binario de línea de comandos cuya salida parseamos frente a una plataforma
+entera con su protocolo, su ciclo de vida y su base de datos. Nuclei pasa ese examen con holgura y por
+el mismo lado que Nmap y Nikto: se invoca, escupe JSONL, se parsea, se traduce a `Finding`, se
+descarta el proceso. Sin daemon, sin puertos publicados, sin `NET_ADMIN`, sin `shm_size`, sin
+`depends_on` en `api` y `worker`, sin quince minutos de sincronización en frío, sin cuatro secretos de
+entorno, sin el problema del vecino ruidoso. Comparado con la tabla de costes del §1, no está en la
+misma categoría. El §8 ya lo había anticipado en una frase —*"Nuclei es un binario de línea de
+comandos con un feed de datos, no una plataforma"*—; esta fase se limita a ejecutar esa conclusión.
+
+**Los cuatro papeles, y qué comparten.**
+
+| # | Papel | Dónde vive | Qué necesita |
+|---|---|---|---|
+| **U1** | **Herramienta de primera clase** — `ScanType.NUCLEI`, lanzable solo desde el panel, con su PDF, su vista previa, su historial y su programación | Junto a Nmap y Nikto | El patrón de 4 piezas + el traductor a `Finding` |
+| **U2** | **Corroborador del análisis profundo** de Lybra (Fase 6) | `_launch_deep_corroborators` | Una línea, si U1 existe |
+| **U3** | **Oráculo diferencial** del banco: medir falsos positivos y hallazgos que se nos escapan | `tests/oracle/` | El mismo traductor de U1, en un contenedor efímero |
+| **U4** | **Fuente de plantillas ingeribles** al `CheckRuntime` propio | Fase R | El subconjunto del lenguaje de Nuclei — **caro, y por eso queda en R** |
+
+La observación que ordena la fase: **U1, U2 y U3 comparten el traductor de la salida de Nuclei a
+`Finding`, y esa pieza es pequeña.** U4 es el único caro, es el único que necesita entender el
+*lenguaje* de las plantillas en vez de la *salida* del binario, y es el que se queda en la Fase R como
+su trabajo pendiente. Esta fase entrega los tres primeros y deja al cuarto medido y decidible.
+
+#### U1 — Nuclei como escaneo de primera clase
+
+**Por qué encaja mejor que Nikto en el modelo `Finding`.** Ésta es la razón de fondo por la que la
+fase merece la pena más allá del producto. Lo que `nikto_incident_to_finding` (`lybra/adapters.py`)
+tiene para trabajar es `osvdb_id` —una base de datos muerta desde 2016—, `method`, `url`,
+`description` y `severity`: sin CVE, sin CVSS, sin CPE. Ese `Finding` entra en la maquinaria de la
+Fase 5 prácticamente vacío. La salida JSONL de Nuclei trae `template-id`, `info.severity`,
+`info.classification.cve-id`, `cvss-score`, `cvss-metrics`, `info.tags`, `matched-at` y
+`extracted-results`. El mapeo es casi 1:1 con el `Finding`, **incluidos `cve_ids`, `cvss_score` y
+`check_id`**, lo que significa que un escaneo de Nuclei entra gratis en la deduplicación multifuente,
+el ciclo de vida `open`/`fixed`/`regressed`, el scoring contextual con EPSS/KEV y la clasificación de
+exposición de la Fase 5. Nikto nunca pudo. **El escaneo individual que el usuario lanza desde el panel
+es, simultáneamente, el mejor alimentador de `Finding` que va a tener el sistema**, y no hay tensión
+entre las dos cosas: Nikto ya funciona exactamente así hoy —el usuario lo lanza solo y el adapter
+escribe en `Finding` de forma aditiva, sin que Lybra intervenga.
+
+**La decisión de diseño que gobierna el resto: sin tablas nativas.** El repositorio contiene hoy dos
+formas de añadir un `ScanType`, y hay que elegir a conciencia:
+
+| Forma | Ejemplo | Qué persiste |
+|---|---|---|
+| **Nikto/OpenVAS** | `NiktoScan` + `NiktoIncident` (`model.py`) | Tablas de resultados propias **más** un `Finding` aditivo — doble persistencia |
+| **Lybra** | `LybraScan` (`model.py`), una subclase fina de `Scan` sin tabla de resultados | Solo `Finding` |
+
+**Se adopta la forma Lybra**, y la razón es que el propio documento ya la demostró: el paso **E3 del
+desmontaje** (§7) consiste literalmente en borrar las tres tablas nativas de OpenVAS y quedarse con
+los `Finding`, con la conclusión de que *"no se pierde información de valor: se pierde el andamiaje
+que la producía"* (§5.3). Construir `NucleiScan` + `NucleiFinding` sería crear a sabiendas, en una
+fase nueva, exactamente el andamiaje que otra fase de este mismo plan está desmontando. `NucleiScan`
+es por tanto una subclase de `Scan` con poco más que su `id`, y todos sus resultados viven en
+`Finding` desde el primer día. Beneficio colateral nada menor: **el PDF puede reutilizar el
+renderizador de `Finding` que Lybra ya tiene** en vez de escribir un bloque específico, que es la
+parte más tediosa de dar de alta un escáner.
+
+**Qué construir.** El patrón de cuatro piezas, con la plantilla ya escrita dos veces:
+
+- `NucleiScanTask` (`services/tasks.py`) — comando, fichero temporal de salida, progreso. Modelar
+  sobre `NiktoScanTask`.
+- `NucleiResultProcessor` + `NucleiPrintingStrategy` (`services/processors.py`) — parseo de JSONL
+  (una línea por hallazgo, no un documento XML: más simple que Nikto).
+- `NucleiScanManager` (`managers/thirdparty_scans_managers.py`) — orquestación y persistencia vía
+  `nuclei_result_to_finding` (`lybra/adapters.py`) + `ScanRepository.persist_findings`.
+- `NucleiScan` + `ScanType.NUCLEI` (`model.py`), con su migración de Alembic.
+
+Más el registro y la lectura: endpoint y schema, `worker.py`, `config_reading.py` y `SecOpsConfig.json`
+(`themis.nuclei.*`), y del lado de lectura `reports.py`, `csv_logger.py`, `analyzers.py`, `history.py`
+y `scheduling.py`. En la SPA, **una entrada nueva en `constants/scanTypes.js`** cubre la mayor parte:
+ese registro existe precisamente para esto —lo dice su propio comentario de cabecera, escrito cuando
+añadir Lybra dejó claro el problema de las listas duplicadas—, y los componentes restantes leen de él.
+
+**Las cuatro cosas que van a morder, nombradas por adelantado:**
+
+1. **El tiempo de escaneo y la presión sobre el objetivo.** Nuclei con el feed completo contra un solo
+   host son miles de peticiones. Hace falta un **perfil acotado por defecto** —por `-severity`, por
+   `-tags`, o un subconjunto curado— expuesto en el formulario de lanzamiento, más `-rate-limit`. Nikto
+   no obligaba a pensar esto; Nuclei sí, y no es un detalle de afinado: es la diferencia entre una
+   herramienta usable y una que satura al objetivo en su primer uso.
+2. **La actualización del feed de plantillas.** Nuclei se autoactualiza por red al arrancar. Dentro de
+   un worker eso es una llamada saliente en mitad de un escaneo, con su latencia y su fallo posible:
+   se desactiva (`-duc`) y el feed pasa a tener su propio ciclo de sincronización, del mismo modo que
+   `KbSyncManager` lo tiene para la KB. Dónde vive y quién lo refresca es una decisión de esta fase,
+   no una que se descubra en producción.
+3. **El gate de objetivos autorizados** (§9). Nuclei toca el objetivo bastante más que Nikto. Nace
+   sujeto al registro de autorizados desde el día uno, no se le añade después.
+4. **`feed_version`.** El `Finding` debe registrar la versión del feed de plantillas con la que se
+   produjo, igual que `CHECKS_FEED_VERSION` hace para los checks propios. Sin eso, el escaneo no es
+   reproducible y se rompe la garantía del §9.
+
+**Damos U1 por hecho cuando** un usuario lanza un escaneo de Nuclei desde el panel sin que Lybra
+intervenga, obtiene su PDF, y los hallazgos resultantes aparecen deduplicados por `dedup_key` junto a
+los de un escaneo previo del mismo activo, con su `cve_ids` y su `cvss_score` poblados desde la
+salida de la herramienta.
+
+**Estado (2026-07-30): ✓ hecha**, en la rama `feature/themis/nuclei-engine`. `ScanType.NUCLEI` +
+`NucleiScan` siguen la forma Lybra (sin tabla de resultados propia); `nuclei_result_to_finding`
+(`lybra/adapters.py`) normaliza las CVE de Nuclei a mayúsculas —sin eso la fusión por `dedup_key` con
+Lybra/OpenVAS nunca ocurriría— y marca cada hallazgo `confirmed=True` con un QoD fijo, por ser una
+aserción de un matcher estructurado y no un patrón de texto como el de Nikto. `NucleiScanTask` corre
+con un perfil de severidad acotado por defecto (excluye `info` a propósito), `-duc` (plantillas
+horneadas en el Dockerfile, sin red a mitad de escaneo) y lee la versión real del feed del propio
+banner de arranque del binario. `NucleiScanManager` fusiona los hallazgos dentro del escaneo (Nuclei
+repite la misma plantilla por cada `matched-at`) y aplica el ciclo de vida contra el Nuclei anterior
+del mismo objetivo. El gate de objetivos autorizados (punto 3 de arriba) está aplicado desde el
+endpoint `POST /themis/nuclei`, reutilizando `TargetNotAuthorizedError`. El renderizador de PDF de
+Lybra se generalizó a una `FindingsPrintingStrategy` compartida (Lybra queda con el mismo
+comportamiento exacto) de la que `NucleiPrintingStrategy` es una subclase fina — el "beneficio
+colateral" que este mismo apartado anticipaba. En el frontend, Nuclei es una cuarta pestaña del
+mundo de escáneres externos, registrada en `constants/scanTypes.js`.
+
+Lo que esta pasada **no** cierra, a propósito: **U2** (Nuclei como corroborador del análisis
+profundo — cerrada en una pasada posterior, ver más abajo), **U3** (el oráculo diferencial de
+`tests/oracle/`) y **U4** (ingesta de plantillas). Tampoco hay cron de
+sincronización del feed de plantillas: se hornean en la imagen y envejecen hasta el siguiente build;
+el patrón a seguir cuando se aborde es el de `KbSyncManager` + `ThemisScheduler._schedule_kb_sync`.
+
+#### U2 — Corroborador del análisis profundo
+
+Una vez existe U1, `LybraEngineManager._launch_deep_corroborators` gana a Nuclei con la misma
+condición que hoy dispara a Nikto (hay algún servicio HTTP). Es una línea.
+
+**Estado (2026-07-30): ✓ hecha.** Literalmente una línea más un `try/except` a juego con el resto de
+corroboradores (`_launch_deep_corroborators`, `managers/lybra_engine.py`): Nuclei se lanza dentro del
+mismo `if any(is_http_service(s) for s in services)` que ya gobierna a Nikto, con el mismo perfil de
+severidad acotado por defecto que U1 le dio (`severities=None` → `CR.get_nuclei_default_severities()`
+dentro de `NucleiScanTask`), y el mismo blindaje *best-effort*: un fallo al lanzarlo no hunde el
+escaneo Lybra ni a los demás corroboradores. La autorización del objetivo no se re-comprueba aquí
+porque `_launch_deep_corroborators` solo se invoca cuando `is_target_authorized` ya es verdad en la
+llamada — el mismo tratamiento que Nikto ya tenía, no una excepción nueva para Nuclei.
+
+Los tests de `test_lybra_deep_analysis.py` pasaron de fijar el conjunto de corroboradores a tres
+(`{nmap, nikto, openvas}`) a cuatro, y el escenario "sin servicio HTTP" ahora comprueba que Nikto
+**y** Nuclei se saltan igual, no solo Nikto.
+
+**Y aquí aparece una consecuencia de producto que conviene afrontar en vez de dejarla implícita: en
+cuanto Nuclei está en el pool, Nikto se queda sin trabajo.** Cubre menos superficie, con datos de peor
+calidad (OSVDB frente a CVE + CVSS), y deja de ser el corroborador web. El glosario decía que Nikto
+"se queda como corroborador hasta que la Fase R alcance su umbral de precisión"; esta fase adelanta
+esa fecha por una vía que no estaba prevista. **La retirada de Nikto no se ejecuta en esta fase** —no
+hay prisa y no cuesta nada mantenerlo mientras se compara—, pero sí se declara la intención: el pool
+objetivo de herramientas externas es **Nmap + Nuclei**, más limpio que los tres actuales. La decisión
+se toma con el número de U3, no con una fecha.
+
+#### U3 — El oráculo diferencial
+
+Es la segunda pata del §8, y con U1 hecha es casi gratis: el traductor ya existe, solo hay que
+ejecutarlo en un contenedor efímero del banco y comparar. Mide lo que la verdad por etiqueta conocida
+no puede medir: **falsos positivos** en objetivos sin etiqueta previa, y hallazgos que se nos escapan.
+Nunca corre en producción como oráculo; el binario que sí corre en producción es el de U1, que es otro
+uso y otro riesgo.
+
+**Estado (2026-07-30): ✓ hecha**, `tests/oracle/test_lybra_nuclei_differential_bench.py`. Requiere
+Docker y un binario `nuclei` real con plantillas ya descargadas (`nuclei -update-templates`, una vez);
+se salta entero si falta cualquiera de los dos, igual que el resto del paquete `oracle`. El método:
+lanzar un escaneo Lybra de autodescubrimiento y, por separado, el binario real de Nuclei —ambos contra
+el mismo contenedor, por la red real— y comparar el conjunto de CVE que cada uno reporta. El traductor
+es literalmente el mismo `nuclei_result_to_finding` de U1 (`lybra/adapters.py`), invocado directo sobre
+el JSONL sin pasar por `NucleiScanManager`/TaskQueue — el mismo criterio que el resto de tests evita
+Redis real (`conftest.py`, T5).
+
+**Los objetivos son los tres que `test_lybra_oracle_bench.py` ya levanta** (`httpd:2.4.49`, el nginx
+con `.git/config` expuesto, el nginx TLS autofirmado) — reimportados como fixtures tal cual, sin
+duplicar contenedores. "Sin etiqueta previa" (§8) describe el **método**, no una exigencia de
+contenedor nuevo: la comparación deriva su propia verdad de Nuclei en tiempo real, sin consultar la
+lista de CVEs que el otro módulo ya conoce de antemano.
+
+**El número, medido:** sobre los tres objetivos, **0 CVE corroborados, 0 hallazgos de Nuclei que se
+escapan, 1 posible falso positivo** (`CVE-2021-41773` en `httpd_2449_port`, solo del lado de Lybra).
+
+Ese resultado no es un fallo del banco ni del motor — es el hallazgo real que motivó reescribir la
+guarda de cordura del módulo. La aserción original esperaba que Nuclei corroborase `CVE-2021-41773`
+contra el mismo `httpd:2.4.49` que el banco de verdad-por-etiqueta usa, y falló. Investigado a mano
+(`nuclei -id CVE-2021-41773 -debug`): la plantilla de Nuclei para esa CVE es una **explotación activa**
+(RCE vía `mod_cgi`, un `POST /cgi-bin/../../../bin/sh`) que exige `ExecCGI` habilitado — algo que ni
+`httpd:2.4.49` vanilla ni siquiera `vulhub/httpd:2.4.49` traen listo con un `docker run` suelto (vulhub
+monta configuración extra vía `docker-compose`, que este banco no reproduce). La detección de Lybra,
+en cambio, es por versión/banner vía la KB — nunca intenta explotar nada. Son **señales distintas que
+no tienen por qué coincidir**: una CVE puede estar presente por versión sin que el contenedor concreto
+esté configurado de forma explotable. Descubrir esto es exactamente el trabajo que un oráculo
+diferencial promete, aunque el resultado no fuera el esperado de entrada.
+
+La guarda de cordura del módulo (que si fallara apuntaría a un banco roto, no a un motor que falla en
+silencio) se reescribió sobre una señal que sí es puramente pasiva en ambos lados: la exposición de
+`.git/config`. Nuclei tiene una plantilla (`git-config`) que solo hace un `GET` y compara contenido,
+igual que el check propio de Lybra — sin condición de explotación de por medio. Verificado por separado
+que dispara de forma fiable contra el fixture (`test_nuclei_translator_pipeline_corroborates_a_real_exposure`),
+confirmando que el subproceso, el parseo del JSONL y el traductor funcionan de punta a punta — el "1
+falso positivo" de arriba es limpio: no es un artefacto de la tubería de medición.
+
+**Consecuencia para U4 y para el pool objetivo declarado en U2.** El único CVE con explotación activa
+disponible en el banco actual no era genuinamente explotable, así que esta pasada no aporta evidencia
+sobre cuántas CVE activas Nuclei y Lybra coinciden de verdad — el banco necesita al menos un contenedor
+correctamente configurado como explotable (siguiendo el `docker-compose.yml` real de vulhub, no un
+`docker run` suelto) antes de que el número de falsos positivos sea representativo. Es deuda anotada,
+no bloqueante: la mecánica completa (banco, traductor, comparación, guarda de cordura) ya está
+verificada y funcionando; lo que falta es un catálogo de objetivos más rico, el mismo "hay que
+escalar" que el §8 ya señalaba para la primera pata.
+
+#### U4 — La ingesta de plantillas, medida antes de decidirse
+
+Éste es el papel que **no** entrega esta fase, y conviene ser explícito sobre por qué. El
+`CheckRuntime` actual (`lybra/checks.py`) entiende un subconjunto pequeño del lenguaje de Nuclei:
+
+| Nuclei | `CheckRuntime` hoy |
+|---|---|
+| Matchers `status`, `word`, `regex` | ✓ |
+| Matchers `binary`, `size`, `dsl`, `favicon` | ✗ — `dsl` es un lenguaje de expresiones entero |
+| `extractors` + interpolación `{{var}}` | ✗ |
+| `payloads` + `attack: batteringram/pitchfork/clusterbomb` | ✗ |
+| `condition: and` **dentro** de un matcher de words | ✗ — `Matcher._raw_match` fija `any()` |
+| `req-condition`, `stop-at-first-match` entre peticiones | ✗ — `_run_check` combina siempre con AND |
+| `interactsh` (out-of-band) | ✗, y debe seguir así |
+| `code:`, `flow:` (JavaScript) | ✗, y debe seguir así — ya descartado en la Fase R |
+| `network` con `inputs`/`type: hex` (payload binario) | ✗ — `Request.send` es `str` y se codifica en UTF-8 |
+
+Esa última fila tiene premio, y es la convergencia que justifica tratar U y R como piezas del mismo
+trabajo: la Fase N dejó registrado que los checks "SMB sin firma" y "SMBv1 habilitado" **no se pudieron
+construir** porque *"el runtime declarativo actual solo compara texto decodificado, y una respuesta
+SMB2 es binaria"*. **Adoptar el esquema `network` de Nuclei —`inputs` con `type: hex` más un matcher
+`binary`— desbloquea exactamente ese hueco ya documentado.** No es una coincidencia forzada: es la
+misma carencia vista desde dos sitios.
+
+Por tanto, "ingerir el feed de Nuclei" nunca va a significar ingerirlo entero, sino **la fracción que
+use solo el subconjunto que soportemos**, descartando el resto. Y esa fracción hoy no la sabemos. El
+entregable de U4 en esta fase no es código de producto: es **la medición**. Un script que lea el
+árbol de plantillas **ya instalado** —el mismo que el binario de U1 usa, ver la subsección de la
+copia única más abajo; no un clon aparte de `projectdiscovery/nuclei-templates`—, parsee las
+plantillas y las clasifique por las características que requieren, produciendo un histograma —cuántas se ingieren hoy tal cual, cuántas necesitan
+`extractors`, cuántas `dsl`, cuántas son `code`/`flow` y quedan descartadas por diseño—. Ese número
+decide la Fase R:
+
+- **Fracción alta** → la migración del feed a YAML y la ingesta selectiva valen la pena, y R las
+  acomete con el esquema de Nuclei como referencia.
+- **Fracción baja** → R renuncia a ingerir, se queda con `network` y `script`, y sigue siendo un buen
+  resultado. El feed propio puede migrar a YAML igualmente, por legibilidad, pero deja de ser una
+  promesa de compatibilidad.
+
+Dos cautelas que no se descuidan: **auditar la licencia** del repositorio de plantillas antes de
+redistribuir nada en un feed propio, y **ingerir en tiempo de sincronización, no vendorizar** — el
+repositorio cambia a diario y meterlo en el checkout es peso y superficie de suministro que no
+queremos; el patrón de `KbSyncManager` ya existe para esto.
+
+**Estado (2026-07-31): el instrumento está construido; falta pasarlo.**
+`tools/nuclei_template_census.py` clasifica el árbol y emite el histograma, apoyado en
+`lybra/ingest/classifier.py`. Tres decisiones de lo construido:
+
+1. **El censo no clona el repositorio upstream**, al contrario de lo que este mismo apartado daba
+   por hecho al escribirse. Lee el árbol que el binario usa en producción, vía el getter único de
+   la ruta — que es la consecuencia directa de la restricción de copia única. El número medido pasa
+   a corresponder a la versión que de verdad corre, no a `main` del día del clon.
+2. **El clasificador es la misma pieza que usará la ingesta** (`is_ingestible`). Si el censo y la
+   ingesta midieran con criterios distintos, el número no describiría lo que la ingesta acabaría
+   haciendo; compartiendo módulo no pueden discrepar.
+3. **El umbral se fijó por escrito antes de medir**, que era la cautela que este plan se había
+   impuesto: **≥ 25 % de las plantillas HTTP en el cubo `ingestible_now`**. Está en el docstring y
+   en una constante, y el script imprime el veredicto él solo — no hay margen para racionalizar el
+   resultado a posteriori.
+
+Los cubos son cinco, ordenados por esfuerzo, y una plantilla cae en el del *peor* obstáculo que
+presenta: `ingestible_now` · `needs_extractors` (extractors e interpolación real — `{{BaseURL}}` no
+cuenta, aparece en casi todas y el runtime ya la resuelve) · `needs_payloads_or_binary` (payloads,
+matchers `binary`/`size`/`dsl`, `inputs` con `type: hex`, `condition` dentro de un matcher,
+`req-condition`) · `rejected_by_design` (`code`, `flow`, `javascript`) · `out_of_scope` (`dns`,
+`headless`, `whois`...). El histograma cuenta además cada obstáculo por separado, así que dirá no
+solo cuántas plantillas fallan sino **por qué** — y en particular cuántas usan `input-hex`, que es
+la señal que decide si el camino binario de la Fase N merece la pena.
+
+**Estado (2026-07-31, tarde): el número está medido. El veredicto es NO ingerir.**
+Ejecutado en el equipo con el feed instalado (`~/nuclei-templates`, motor Nuclei v3.11.0, 13.206
+plantillas legibles de 13.391 ficheros):
+
+| Cubo | Plantillas | % |
+|---|---|---|
+| `ingestible_now` | 2.398 | 18,16 % |
+| `needs_extractors` | 1.839 | 13,93 % |
+| `needs_payloads_or_binary` | 6.178 | 46,78 % |
+| `rejected_by_design` | 2.232 | 16,90 % |
+| `out_of_scope` | 559 | 4,23 % |
+
+**El número que decide: 2.369 de 10.137 plantillas HTTP son ingeribles hoy tal cual — 23,37 %,
+por debajo del umbral de 25 % fijado por escrito de antemano.** El script emite el veredicto él
+solo: *la Fase R renuncia a ingerir*. `themis.lybra.ingest.enabled` **se queda en `false`**, y esa
+deja de ser una decisión pendiente para pasar a ser una decisión tomada con un dato.
+
+Queda a 1,63 puntos del umbral, así que conviene decir en voz alta lo que el histograma insinúa y
+por qué **no** se actúa sobre ello ahora: el obstáculo más frecuente de todo el árbol es
+`matcher-condition-interna` (4.711 plantillas), es decir el `condition: and` *dentro* de un matcher
+de words que `Matcher._raw_match` fija a `any()`. Es, con diferencia, la característica más barata
+de las que faltan. Pero cambiar el criterio del clasificador **después** de ver el número es
+exactamente la racionalización a posteriori contra la que este apartado se blindó, así que se
+registra como observación y nada más: si algún día se implementa esa condición por sus propios
+méritos, el censo se vuelve a pasar y el umbral vuelve a decidir sin haberse tocado. Otros datos
+del reparto que sí valen para futuras fases: `input-hex` aparece en 182 plantillas —poco, lo que
+rebaja el atractivo del camino binario que la Fase N dejó anotado para "SMBv1 habilitado"— y
+`matcher:binary` en solo 27.
+
+*(Nota menor observada al ejecutarlo: el almacén resuelve la versión del árbol como
+`nuclei-templates-unknown` cuando las plantillas se instalaron fuera de la imagen Docker. No afecta
+al censo, pero sí sellaría un `feed_version` inútil si la ingesta llegara a encenderse — que ahora
+mismo no va a pasar.)*
+
+#### Una sola copia de las plantillas, y qué no se puede verificar en este equipo
+
+Dos restricciones que gobiernan cómo se ejecutan U4 y el cierre de R, anotadas antes de escribir
+nada para que no se descubran a mitad.
+
+**La primera es de diseño: Themis tiene una única copia de las plantillas de Nuclei.** Con U1 ya
+entregada, el binario que el usuario lanza desde el panel y la ingesta que la Fase R contempla
+apuntan al *mismo* árbol de ficheros — no a dos, y desde luego no a uno copiado del otro. Hoy la
+ubicación ya tiene un único punto de verdad, `CR.get_nuclei_templates_dir()`, pero su valor por
+defecto es la cadena vacía, que significa "deja que el binario use su ubicación propia": un
+contrato que el binario entiende y que Python no puede resolver. En cuanto haya un segundo
+consumidor que necesite *leer* las plantillas en vez de solo pasárselas por `-templates`, ese
+vacío deja de valer.
+
+**Estado (2026-07-31): el almacén está construido.**
+`themis/services/nuclei_templates.py` (`NucleiTemplateStore` + `resolve_templates_dir`) es la
+autoridad única, y `NucleiScanTask` ya le pide la ruta en vez de leer la configuración por su
+cuenta. La resolución no obligó a tocar el `Dockerfile`: la tercera prioridad
+(`~/.local/nuclei-templates`) es exactamente donde su `nuclei -update-templates` deja las
+plantillas cuando corre como root, así que el árbol horneado se encuentra solo. Fijar
+`templatesDir` explícitamente sigue siendo endurecimiento recomendable, pero exige verificar el
+nombre del flag de descarga contra el binario fijado (convención `Q_NUCLEI` del propio Dockerfile),
+y por eso no se hizo a ciegas desde un equipo sin la imagen. `PyYAML` pasa a estar declarado en
+`requirements.txt`: estaba disponible de forma transitiva, y ahora hay código de primera parte que
+lo importa.
+
+De ahí sale una pieza pequeña y previa a todo lo demás: un **almacén de plantillas** con tres
+consumidores y ningún duplicado — `NucleiScanTask`, que le pide la ruta efectiva; la ingesta de
+Lybra, que itera y parsea esa misma ruta; y el censo de U4, que mide sobre esa misma ruta. Cuatro
+consecuencias, cada una decidida aquí y no más adelante:
+
+1. **El censo de U4 no clona el repositorio de plantillas**, al contrario de lo que la primera
+   redacción de U4 daba por hecho: lee el árbol ya instalado. El número medido pasa a
+   corresponder a la versión que corre de verdad en producción, no a `main` del día del clon.
+2. **`templatesDir` deja de poder estar vacío.** El almacén necesita resolución explícita, y lo
+   limpio es fijarla en el `Dockerfile`/`SecOpsConfig.json` para que el binario y el lector no
+   puedan discrepar nunca en silencio.
+3. **La ingesta traduce en memoria; no escribe plantillas traducidas.** `checks_feed.json` sigue
+   siendo *solo* el feed propio. Como mucho, una caché de índice invalidada por versión de
+   plantillas — nunca el cuerpo de una plantilla ajena copiado a nuestro lado.
+4. **La procedencia se separa, lo que resuelve de paso el `feed_version` global.** Los checks
+   propios siguen siendo `lybra:{id}@{v}` + `CHECKS_FEED_VERSION`; los ingeridos son
+   `nuclei:{template-id}@{templatesVersion}` + `get_nuclei_templates_version()`. Dos orígenes, dos
+   versiones, un solo árbol en disco.
+
+Y una decisión de producto que la copia única destapa y que **se toma con el número de U4, no
+antes**: si Lybra ingiere las mismas plantillas que el binario ejecuta como corroborador (U2), en
+un `deep=True` el mismo check toca el objetivo dos veces. `dedup_key` fundirá los hallazgos, pero
+el tráfico se duplica igual. Las dos salidas razonables son que el subconjunto ingerido sea el
+complementario de lo que el binario ya cubre, o que la ingesta sirva sobre todo a despliegues sin
+binario.
+
+*(Nota de infraestructura: hoy `api` y `ellysia-worker` construyen del mismo Dockerfile y hornean
+copias idénticas en build, así que son coherentes por construcción. Si el refresco de plantillas
+pasa algún día a tiempo de ejecución —la deuda del cron que el propio Dockerfile documenta—,
+`templatesDir` **tiene que** ser un volumen nombrado compartido entre ambos, o los dos contenedores
+divergen sin que nada avise.)*
+
+**La segunda restricción es de entorno.** El checkout de trabajo es Windows, sin binario `nuclei`,
+sin las plantillas horneadas y **sin la KB poblada**. Eso no impide avanzar, pero sí obliga a saber
+qué se está verificando de verdad en cada sitio:
+
+| Trabajo | Verificable en el equipo de desarrollo | ⚠ Requiere el equipo completo |
+|---|---|---|
+| **R — tipo de check `script`** | Runtime, registro y tests con socket falso (el patrón que `smb.py` ya usa) | Disparo real contra Samba/Windows — el dissector SMB **ya estaba sin verificar** contra un servidor real |
+| **U4 — el censo** | La lógica del clasificador, con plantillas de muestra escritas a mano (✓ hecho) | ✓ **resuelto (2026-07-31)**: ejecutado sobre el árbol real (13.206 plantillas, motor v3.11.0) — 23,37 %, por debajo del umbral |
+| **El almacén de plantillas** | Resolución de rutas y parseo contra un directorio de prueba | ✓ resuelto: resolvió `~/nuclei-templates`, el mismo árbol que el binario usa. Salvedad menor: la *versión* del árbol queda como `nuclei-templates-unknown` fuera de la imagen Docker |
+| **R — migración del feed a YAML** | Todo (parseo, equivalencia con el JSON actual) — ✓ hecho | — |
+| **R — ingesta de plantillas** | Traductor plantilla→`Check`, índice de selección (✓ hecho, apagado por defecto) | ✓ resuelto por la vía contraria: el censo dice que no se enciende, así que ejecutar checks ingeridos deja de ser trabajo pendiente |
+| **R — precisión ≥ 0,9 medida** | Nada | ✓ **medida (2026-07-31)**: 1,000 con `tests/oracle/test_lybra_precision_bench.py` sobre 9 objetivos Docker. No necesitó `nuclei` — las tres familias medidas no producen CVE |
+| **Cualquier CPE→CVE de extremo a extremo** | Nada | ✓ **desbloqueado (2026-07-31)** con `tests/oracle/_real_kb.py`: copia de solo lectura del backfill NVD real del Postgres de desarrollo al SQLite del banco, limitada a los productos del catálogo. Sin ese Postgres levantado, el módulo se salta en vez de medir el vacío |
+| **`nuclei_templates_version.txt`** | Nada | ⚠ El `Dockerfile` vuelca ahí la salida de `nuclei -version`, que es la versión **del motor**, no la de plantillas — mientras que el regex de `_check_output_line` sí captura la de plantillas. Probable etiqueta equivocada en el *fallback*; sin la imagen no se puede confirmar |
+
+La consecuencia práctica de la fila de la KB gobernaba a todas las demás: **un test que aquí dé
+"0 hallazgos" no es evidencia de nada.** Y no era hipotética: el número de U3 registrado más arriba
+(`0/0/0` en los tres objetivos) se midió exactamente así, con la KB vacía, y se leía como acuerdo
+perfecto. Resuelto el 2026-07-31 con el puente de solo lectura al backfill real; sobre `httpd:2.4.49`
+la misma comparación pasó de `0/0/0` a `0 corroborados / 70 solo-Lybra / 0 solo-Nuclei`. La regla que
+sobrevive, y que conviene no olvidar: **un banco que no declara de dónde salen sus datos de
+correlación no está midiendo la correlación.**
+
+#### Qué NO incluye esta fase
+
+Para que no se disperse: no incluye la ingesta real de plantillas (es U4→Fase R, condicionada a la
+medición), no incluye la migración del feed propio a YAML (Fase R), no incluye la retirada de Nikto
+(se declara la intención, se ejecuta con el número de U3), y no incluye ninguna tabla de resultados
+nativa para Nuclei — por decisión, no por omisión.
+
+#### Definición de hecho
+
+**Damos la Fase U por hecha cuando** (1) un usuario lanza un escaneo de Nuclei desde el panel, con
+perfil acotado y objetivo autorizado, y descarga su PDF — **✓**; (2) sus hallazgos llegan a `Finding`
+con `cve_ids`, `cvss_score`, `check_id` y `feed_version` poblados, y se deduplican con los de otras
+fuentes sobre el mismo activo — **✓**; (3) el análisis profundo de Lybra lo dispara como corroborador
+— **✓**; (4) el banco produce un número de falsos positivos frente a Nuclei sobre al menos tres
+objetivos sin etiqueta previa — **✓, medido: 0 corroborados / 0 se escapan / 1 posible falso positivo,
+con la salvedad anotada arriba de que el catálogo de objetivos explotables sigue siendo pobre**; y (5)
+existe el histograma de ingestibilidad del feed de plantillas, con una recomendación escrita de sí o no
+para U4 — **✓, medido el 2026-07-31: 23,37 % de las plantillas HTTP son ingeribles, por debajo del
+umbral de 25 %; la recomendación escrita es NO ingerir**.
+
+**La Fase U queda ✓ hecha.** Los cinco criterios están cerrados. U4 nunca prometió código de
+producto: prometía el número que decide, y el número dice que no. La ingesta construida en la Fase R
+se queda apagada, que es el resultado que el propio diseño contemplaba como perfectamente válido.
+
+**Y el criterio (4) mejora de paso, porque la KB dejó de estar vacía.** El número de U3 que este
+apartado registraba (`0 corroborados / 0 se escapan / 1 posible falso positivo`) se había medido
+sobre un SQLite de test con la KB **vacía** — la fila que la tabla de restricciones de más abajo ya
+señalaba como la que gobierna a todas las demás. Con la KB vacía la mitad Lybra de la comparación
+devuelve el conjunto vacío, y un empate a cero se lee como "acuerdo perfecto" cuando en realidad no
+se midió nada. Resuelto con `tests/oracle/_real_kb.py`: una copia **de solo lectura** del backfill
+NVD real (el Postgres de desarrollo, ~371k CVE / 2,5M reglas de aplicabilidad) hacia el SQLite del
+banco, limitada a los productos que los contenedores hablan de verdad — 370 CVE de
+`apache:http_server` y `*:nginx`. Si ese Postgres no está levantado el módulo se salta, porque medir
+contra una KB vacía es justo lo que hay que evitar.
+
+**El número de U3, ahora sí sobre datos reales (2026-07-31):**
+
+| Objetivo | Corroborados | Solo Lybra | Solo Nuclei |
+|---|---|---|---|
+| `httpd:2.4.49` | 0 | **70** | 0 |
+| nginx con `.git/config` | 0 | 0 | 0 |
+| nginx TLS autofirmado | 0 | 0 | 0 |
+
+Los 70 no son 70 falsos positivos, y confundirlos sería el error de lectura que este banco existe
+para prevenir: son las CVE que la KB conoce para Apache 2.4.49 por rango de versión afectada, y
+Nuclei no corrobora ninguna porque **casi ninguna tiene plantilla de explotación activa** — la misma
+asimetría de señal que la pasada anterior ya había diagnosticado con una sola CVE, ahora visible a
+escala. La lectura correcta es que **el oráculo diferencial no puede validar la detección por
+versión**: mide bien la superficie activa (donde ambos motores hacen lo mismo) y no dice nada sobre
+la correlación por CPE, donde solo uno de los dos juega. Consecuencia para la decisión de retirar
+Nikto (declarada en U2, pendiente "del número de U3"): el número no la respalda ni la contradice,
+porque los tres objetivos del banco no producen ni un hallazgo web del lado de Nuclei — sigue
+haciendo falta el catálogo de objetivos genuinamente explotables que esta misma sección ya anotaba
+como deuda.
+
+---
+
+### Fase R — El runtime de detección propio · pista de bajo nivel · ✓ implementada
 
 Ésta es la capa de identidad, la L2. Es lo que convierte a Lybra de un correlacionador en un motor
 con criterio propio de detección: un runtime único de comprobaciones —versionado, extensible y
@@ -390,12 +1490,13 @@ El runtime maneja cinco tipos de comprobación bajo el mismo motor:
 | `version` | Detección por CPE→CVE (Fase 1) | La KB local, sin tocar el objetivo | ✓ |
 | `http` | Petición más matchers (el 90 % de web/banner) | Cliente HTTP propio, declarativo | ✓ 10 checks |
 | `ssl` | Higiene de TLS | Python de primera parte (`ssl`/`cryptography`) | ✓ 3 checks |
-| `network` | **Sondas de protocolo crudas** | Socket propio, declarativo | ✗ **— vehículo de la Fase N** |
-| `script` | Lógica compleja, multipaso o binaria | Plugin en Python, de primera parte y revisado | ✗ |
+| `network` | **Sondas de protocolo crudas** | Socket propio, declarativo | ✓ 2 checks (lo aportó la Fase N) |
+| `script` | Lógica compleja, multipaso o binaria | Plugin en Python, de primera parte y revisado | ✓ 1 check (2026-07-31) |
 
 El grueso de las comprobaciones debe escribirse de forma **declarativa**, con un esquema
-razonablemente compatible con las plantillas de Nuclei. El feed actual es JSON; el diseño pide YAML.
-Así se lee un check típico:
+razonablemente compatible con las plantillas de Nuclei. El feed vive en YAML desde el 2026-07-31 (ver
+la nota de estado más abajo); admite comentarios, que era la razón de fondo de migrarlo. Así se lee un
+check típico:
 
 ```yaml
 id: apache-2449-path-traversal
@@ -450,17 +1551,151 @@ plugins de terceros, la vía es aislarlos en un subproceso con `rlimit`/seccomp 
 tres primeras familias, existen los tipos `network` y `script`, el feed vive en YAML, y el `qod` sube
 de 70 a 99 en lo confirmado.
 
-**Estado (2026-07-11, sigue vigente):** la mecánica está completa — 13 checks activos en 3 familias,
+**Estado (2026-07-31): el feed vive en YAML y la ingesta está construida (apagada).**
+
+*La migración a YAML* fue un cambio de formato y no de comportamiento, y eso se verificó en vez de
+suponerse: ambos deserializadores alimentan el mismo `_parse_check`, así que se comprobó que el JSON
+antiguo y el YAML nuevo producen objetos `Check` **idénticos campo a campo** antes de retirar el
+JSON. El cargador conserva las dos rutas (despacha por extensión) porque un feed externo puede venir
+en cualquiera de los dos formatos. La razón de fondo de la migración, más allá de la compatibilidad
+con Nuclei, es que **YAML admite comentarios** — en un feed de reglas de detección, eso es la
+diferencia entre poder explicar por qué existe un check y no poder.
+
+*La ingesta* son tres piezas en `lybra/ingest/`: el clasificador (compartido con el censo de U4), el
+traductor y el selector. Tres decisiones que conviene dejar escritas:
+
+1. **Traducir a medias no es una opción.** Una plantilla con extractors o payloads podría "casi"
+   traducirse ignorando esas partes, y el resultado sería un check que corre, no falla, y comprueba
+   algo distinto de lo que la plantilla dice — la peor clase de error en un motor de detección,
+   porque produce hallazgos con la confianza de un check confirmado. Ante la duda se descarta. El
+   mismo criterio retira las plantillas HTTP **multi-ruta**: Nuclei dispara si *alguna* ruta casa y
+   el runtime combina con AND, así que traducirla la volvería más estricta que el original.
+2. **Procedencia, no autoría.** `Check` gana `namespace` y `feed_version` (con defaults que no
+   cambian nada de lo existente). Un check traducido nace `nuclei:git-config@1`, no `lybra:...`, y
+   sella la versión del árbol de plantillas en vez del `CHECKS_FEED_VERSION` propio — que era el
+   problema real que se había identificado: un único global deja de ser verdad en cuanto hay dos
+   feeds con líneas de versión independientes. Y toda plantilla externa entra en `mode="safe"` sin
+   excepción, porque no las hemos revisado una a una.
+3. **El selector, que el diseño original no había estimado.** `CheckRuntime.run` es
+   O(servicios × checks) y el limitador impone 0,2 s por petición y host: 3.000 plantillas contra un
+   solo servicio son más de diez minutos de tráfico, y contra un host con cuatro puertos web, casi
+   una hora. Sin esta capa, activar la ingesta no sería una mejora sino un disparo en el pie. Filtra
+   por severidad mínima, por relevancia de etiqueta (un check de WordPress no se lanza contra un
+   nginx; uno *sin* etiquetas de producto sí, porque es genérico y son justo los más aplicables) y
+   por un tope duro, ordenando por severidad para que lo que el tope recorte sea lo menos grave. Se
+   aplica **antes** de construir el runtime, así que el feed propio no paga nada por que exista.
+
+**Está apagada por defecto (`themis.lybra.ingest.enabled = false`), y a conciencia:** el flag decide
+la *activación*, no la existencia del código. Quien la enciende es el número del censo de U4, que
+sigue pendiente del equipo con el feed instalado. ⚠ La ejecución real de checks ingeridos contra
+objetivos tampoco se ha probado aquí — los tests cubren traducción, procedencia y selección.
+
+**El prerrequisito de la Fase U, delimitado con precisión — y ya superado en la práctica.** De los
+cuatro entregables que le quedaban a esta fase, tres se han construido sin esperar al número de U4, y
+el único que de verdad lo necesitaba (activar la ingesta) quedó resuelto separando "el código existe"
+de "el código está encendido":
+
+| Lo que faltaba de R | ¿Dependía de U? | Estado |
+|---|---|---|
+| **Migración del feed a YAML** | En el diseño, sí — se migraba al esquema de Nuclei | **✓ hecho (2026-07-31), sin esperar al número.** El esquema no cambió, solo el formato; se verificó por equivalencia de objetos `Check` antes de retirar el JSON |
+| **Ingesta de plantillas externas** | Sí, para decidir si *merece la pena* | **✓ construida (2026-07-31), apagada — y ahora apagada *por decisión*.** El censo de U4 dio 23,37 % frente al umbral de 25 %: `themis.lybra.ingest.enabled` se queda en `false` sin fecha de revisión |
+| **Precisión ≥ 0,9 medida** | **Sí, de verdad** | **✓ medida (2026-07-31): 1,000 sobre 9 objetivos etiquetados.** Ver la nota de estado del banco de precisión más abajo |
+| **El tipo de check `script`** | No — plugin de primera parte, sin relación con Nuclei | **✓ hecho (2026-07-31)** |
+
+**Lo que esto cambia respecto al diseño original:** la premisa de que YAML e ingesta debían *esperar*
+al histograma resultó más conservadora de lo necesario. El clasificador que produce el histograma
+(`lybra/ingest/classifier.py`) es la misma pieza que decide, plantilla a plantilla, si el traductor la
+acepta — así que construir el traductor no exigía conocer el número agregado de antemano, solo que
+ambos compartieran criterio. Migrar a YAML tampoco exigía esperar: el feed propio no iba a dejar de
+usar el subconjunto que ya soporta, gane o pierda la ingesta. Lo único que de verdad necesita el
+número es la decisión binaria de **encender** la ingesta, y esa sigue bloqueada — correctamente — tras
+el flag.
+
+Y una delimitación en la otra dirección, para que el prerrequisito no estrangule al roadmap: **la Fase
+U no bloquea a la Fase N.** El tipo de check `network` que N necesitaba como vehículo declarativo **ya
+está construido** (lo aportó la propia Fase N, ver su nota de estado), así que N puede seguir avanzando
+—dissectors nuevos, checks de configuración de red— sin esperar a nada de esto. Lo único que la Fase U
+condiciona es el **cierre** de R, no su existencia ni la fase prioritaria que se apoya en ella.
+
+**Estado (2026-07-31): el tipo `script` existe.** `lybra/script_checks.py` aporta los plugins de
+primera parte y `CheckRuntime` los recibe **por inyección** (`script_plugins=`), no por importación:
+`checks.py` no puede importar `fingerprinting` sin cerrar un ciclo, porque los dissectors importan de
+él sus predicados de aplicabilidad. El reparto acabó siendo el mismo que ya existía para los
+dissectors — la clase base (`ScriptPlugin`) y su contexto restringido (`ScriptContext`) viven junto al
+runtime, igual que `Dissector` vive en `dispatch.py`; los plugins concretos viven aparte, igual que
+`SmbDissector` vive en `smb.py`.
+
+El primer plugin, `smb-signing-not-required` (feed subido a `lybra-checks-4`), cierra **la mitad** del
+hueco que la Fase N había dejado anotado: el dissector de SMB ya negociaba y ya leía el `SecurityMode`
+del servidor, así que el hecho estaba observado y solo faltaba un vehículo para convertirlo en
+hallazgo — sin necesitar el matcher `binary` ni el esquema `type: hex`, que dependen de la medición de
+U4. **La otra mitad, "SMBv1 habilitado", sigue sin construirse y no salía gratis aquí:** `SmbProbe`
+solo ofrece dialectos SMB2, y detectar SMBv1 exige un paquete `NEGOTIATE` de SMB1 que es trabajo nuevo
+en `smb.py`.
+
+Un plugin que lance una excepción se contiene en su propio check en vez de hundir el escaneo: son de
+primera parte, pero ejecutan lógica de protocolo multipaso, y que uno reviente ante la respuesta
+malformada de algún appliance debe costar ese check y nada más. Los tests cubren la mecánica con una
+sonda falsa (dispara sin firma obligatoria, calla con ella, calla sin negociación, calla ante un
+dialecto desconocido, y el feed y el registro concuerdan). ⚠ **El disparo contra un Samba/Windows real
+sigue pendiente del equipo completo** — la misma deuda que el dissector ya arrastraba.
+
+**Estado (2026-07-11, actualizado 2026-07-31):** la mecánica está completa — hoy son **16 checks
+en 5 familias** (`exposed_path` ×7, `security_header` ×3, `tls` ×3, `network` ×2, `script` ×1),
 todas bajo el mismo `CheckRuntime`, todas `confirmed=true`/`qod=99` cuando disparan, feed versionado
-(`lybra-checks-1`). La familia `tls` tiene banco automatizado: dos fixtures de contenedor local
-(nginx con certificado autofirmado generado en el arranque, sin bind-mount) cubren
-`tls-self-signed-cert` y `tls-expired-cert` con aserciones contra un handshake real — el segundo
-genera el certificado bajo `libfaketime` con el reloj adelantado a 2020 (sin necesitar
-`CAP_SYS_TIME`) para producirlo ya caducado. La fixture "sana" sirve de control negativo.
-`tls-deprecated-protocol` queda sin cubrir a propósito: el OpenSSL moderno de la imagen base rechaza
-negociar SSLv3/TLSv1.0/TLSv1.1 aunque se fuerce por configuración — hueco documentado, no descubierto
-por sorpresa. Lo que falta para cerrarla es la medición formal de precisión ≥0,9 a escala, más los
-dos tipos de check pendientes y la migración a YAML.
+(`lybra-checks-4`, en YAML desde el 2026-07-31 — ver la nota de estado más arriba). La familia `tls`
+tiene banco automatizado: dos fixtures de contenedor local (nginx con certificado autofirmado
+generado en el arranque, sin bind-mount) cubren `tls-self-signed-cert` y `tls-expired-cert` con
+aserciones contra un handshake real — el segundo genera el certificado bajo `libfaketime` con el
+reloj adelantado a 2020 (sin necesitar `CAP_SYS_TIME`) para producirlo ya caducado. La fixture "sana"
+sirve de control negativo. `tls-deprecated-protocol` queda sin cubrir a propósito: el OpenSSL moderno
+de la imagen base rechaza negociar SSLv3/TLSv1.0/TLSv1.1 aunque se fuerce por configuración — hueco
+documentado, no descubierto por sorpresa.
+
+**Estado (2026-07-31, tarde): la precisión está medida. La Fase R queda ✓ hecha.**
+
+El número que faltaba no dependía del catálogo de U3, como este documento suponía: el diferencial de
+Nuclei mide desacuerdo sobre CVE, y las tres familias de la Fase R (`tls`, `security_header`,
+`exposed_path`) no producen CVE ninguna. Lo que hacía falta era un banco de **verdad por etiqueta**
+con señuelos, y no existía: `test_lybra_oracle_bench.py` afirmaba objetivo-a-objetivo ("en este
+contenedor debe salir este check"), que es regresión y no medición — no agregaba nada y, sobre todo,
+**no tenía un solo objetivo capaz de generar un falso positivo**, así que el denominador de la
+precisión no podía significar nada.
+
+`tests/oracle/test_lybra_precision_bench.py` es ese banco. Nueve objetivos con el conjunto exacto de
+`check_id` declarado por adelantado, sin imágenes nuevas (`nginx:alpine` y `httpd:2.4.49`, las que el
+banco ya usaba — lo que crece es el número de *escenarios*, que es donde estaba la falta de escala).
+Cuatro de los nueve son señuelos o controles negativos, a propósito: `nginx-endurecido` manda las
+tres cabeceras y **no debe producir nada**, y `nginx-senuelos` sirve un 200 en las siete rutas que
+los checks de `exposed_path` piden pero con un cuerpo que no es lo que el check busca — un
+`.git/config` que no es un config de Git, un `backup.sql` que no es un volcado. Un check que mirase
+solo el código de estado sacaría ahí siete falsos positivos de golpe.
+
+**El resultado: TP=30, FP=0, FN=0 → precisión = 1,000 (umbral 0,9), recall = 1,000.** El desglose se
+imprime por objetivo y va en el mensaje del fallo, así que una regresión futura dice *cuál* objetivo
+la causó.
+
+Dos honestidades sobre ese 1,000, porque un número redondo invita a confiar más de lo que sostiene.
+La primera: 30 detecciones sobre un feed de 16 checks es una medición pequeña; prueba que las tres
+familias no disparan en falso contra los engaños que se les han puesto delante, no que no vayan a
+hacerlo nunca contra la variedad de una red real. La segunda es un hallazgo del propio banco: la
+primera pasada dio **0,833** con seis falsos positivos, y los seis eran artefacto de la medición, no
+del motor. Los nueve objetivos comparten IP (127.0.0.1) y por tanto el mismo `Host`, así que
+`apply_lifecycle` (Fase 5) arrastra a cada escaneo un hallazgo fantasma en estado `fixed` por cada
+uno del escaneo anterior que ya no está — que es exactamente lo que debe hacer, para dejar constancia
+de la remediación. Contarlos como detecciones convertía un mecanismo que funciona en seis falsos
+positivos inventados por el banco. El banco filtra `state == "fixed"` y lo explica en el sitio: un
+hallazgo `fixed` significa literalmente "no observado ahora".
+
+*(Cambio colateral en `test_lybra_oracle_bench.py`: `_run_self_discovery` hace idempotente el alta en
+el registro de objetivos autorizados. Un test que barre varios contenedores con la misma IP lo llama
+una vez por objetivo, y el registro rechaza duplicados; lo que el helper necesita es "que esté
+autorizado", no "que se acabe de añadir".)*
+
+⚠ Lo que sigue sin cubrir, sin cambios respecto a antes: `tls-deprecated-protocol` (el hueco de
+OpenSSL de arriba), el disparo del check `script` de SMB contra un Samba/Windows real, y la ejecución
+de checks ingeridos — esta última ya no es deuda pendiente sino trabajo archivado, porque U4 decidió
+que la ingesta no se enciende.
 
 ---
 
@@ -853,9 +2088,19 @@ positivos* y descubrir hallazgos que se nos escapan en objetivos sin etiqueta pr
 OpenVAS no encajaba, por la misma razón que gobierna todo este documento: **Nuclei es un binario de
 línea de comandos con un feed de datos**, no una plataforma con su propio protocolo, su ciclo de vida
 y su base de datos. Se ejecuta en un contenedor efímero del banco de pruebas, se compara su salida
-con la nuestra, y se descarta. Nunca corre en producción, nunca es una dependencia de tiempo de
-ejecución, y su feed es además el mismo que la Fase R quiere ingerir como plantillas — así que el
-trabajo se aprovecha dos veces.
+con la nuestra, y se descarta.
+
+**Esa segunda pata es ahora el papel U3 de la Fase U**, y conviene señalar el cambio de encuadre que
+esa fase introduce: cuando este apartado se escribió, "Nuclei nunca corre en producción" era una
+propiedad del diseño. Con la Fase U deja de serlo — Nuclei pasa a ser también una herramienta de
+primera clase que el usuario lanza (U1) y un corroborador del análisis profundo (U2). **La distinción
+que se mantiene no es "en producción sí o no", sino "dependencia de tiempo de ejecución del motor sí o
+no"**: Lybra sigue sin necesitar a Nuclei para funcionar, exactamente igual que no necesita a Nmap ni
+a Nikto. Lo que se gana a cambio es que el traductor de la salida de Nuclei a `Finding` se escribe una
+sola vez y sirve para los tres papeles, y que el número de falsos positivos deja de ser un ejercicio
+de laboratorio para medirse sobre los mismos objetivos que el usuario escanea de verdad. El feed de
+plantillas es además el mismo que la Fase R quiere ingerir (U4) — así que el trabajo se aprovecha
+cuatro veces, no dos.
 
 **Nmap sigue siendo el oráculo de descubrimiento y fingerprinting**, exactamente como hasta ahora, y
 sigue midiéndose con `test_lybra_concordance_bench.py`. Con la Fase N, el catálogo de ese banco tiene
@@ -927,14 +2172,18 @@ Los números que dan cada fase por hecha:
 |---|---|
 | **N** | Producto y versión extraídos en ≥ 4 protocolos no-HTTP con concordancia ≥ 0,90 frente a `nmap -sV`, en laboratorio **y** en objetivos reales; ≥ 3 checks de configuración de red disparando con `qod=99` |
 | **I** | Hallazgos de CVE producidos desde el inventario de un host con agente, fusionados por `dedup_key` con los del escaneo remoto del mismo activo |
-| **R** | Familias de TLS, cabeceras y paths con precisión ≥ 0,9 medida contra el catálogo de imágenes etiquetadas; tipos `network` y `script` existentes; feed en YAML |
+| **U** | Un escaneo de Nuclei lanzable solo, con PDF, cuyos `Finding` traen `cve_ids`/`cvss_score`/`feed_version` y deduplican con los de otras fuentes; falsos positivos medidos sobre ≥ 3 objetivos sin etiqueta; histograma de ingestibilidad del feed de plantillas con recomendación escrita |
+| **R** | Familias de TLS, cabeceras y paths con precisión ≥ 0,9 medida contra el catálogo de imágenes etiquetadas **y contra el oráculo diferencial de la Fase U**; tipos `network` y `script` existentes; feed en YAML |
 | **O** | Falsos positivos del banco −40 % en imágenes Debian/RHEL |
 | **D** | Detección en laboratorio con límite de intentos respetado y cero plaintext persistido |
 | **F** | Concordancia de fingerprint ≥ 0,90 con Nmap por familia, laboratorio **y** real |
 | **T** | Concordancia de puertos ≥ 0,95 con Nmap, laboratorio **y** real; degradación sin `CAP_NET_RAW` probada |
 
-Y las decisiones grandes se toman con un umbral, no con una fecha. ¿Retiramos Nikto? Solo cuando las
-tres primeras familias de la Fase R alcancen precisión 0,9. ¿Construimos el repositorio nativo? Solo
+Y las decisiones grandes se toman con un umbral, no con una fecha. ¿Retiramos Nikto? Cuando la Fase U
+demuestre con el número de U3 que Nuclei lo cubre —una vía más rápida que la prevista, que era esperar
+a la precisión 0,9 de las tres primeras familias de la Fase R. ¿Ingerimos plantillas de Nuclei
+(U4/Fase R)? Solo si el histograma de ingestibilidad de la Fase U da una fracción que lo justifique.
+¿Construimos el repositorio nativo? Solo
 cuando el laboratorio demuestre el techo de rendimiento en Python. ¿Abrimos el análisis web activo?
 Solo si el uso real es web y existe el registro de autorización.
 
@@ -942,10 +2191,21 @@ Solo si el uso real es web y existe el registro de autorización.
 —1.00 de concordancia en ambos, sobre 6 objetivos Docker variados— más el lado real anterior
 (`scanme.nmap.org` + 2 reales, también 1.00). Con N modesto, el número prueba sobre todo que el
 mecanismo de medición funciona, más que la confianza de fondo que pide un 0,90/0,95 robusto — pero ya
-no es una medición manual de una vez: es una suite repetible que puede crecer. R tiene las 3 familias
-con banco automatizado (incluida `tls`), pero sin precisión medida formalmente contra un catálogo. Lo
-que falta es escala, y —para F, T y N— el lado real de la paridad, que requiere que el usuario amplíe
-su registro de objetivos autorizados.
+no es una medición manual de una vez: es una suite repetible que puede crecer.
+
+**Actualización (2026-07-31).** R y U tienen ya su número medido, los dos en el equipo con Docker, el
+binario de Nuclei, el feed de plantillas y el backfill NVD real:
+
+| Fase | El número, medido |
+|---|---|
+| **R** | **Precisión 1,000** (TP=30, FP=0, FN=0) sobre 9 objetivos etiquetados —cuatro de ellos señuelos o controles negativos—, familias `tls`/`security_header`/`exposed_path`. Recall 1,000 |
+| **U** | Los cinco criterios cerrados; el histograma da **23,37 %** de plantillas HTTP ingeribles frente al **25 %** fijado de antemano ⇒ recomendación escrita: no ingerir |
+
+Lo que sigue faltando, sin cambios: para F, T y N el lado real de la paridad, que requiere que el
+usuario amplíe su registro de objetivos autorizados; y para el diferencial de U3, un catálogo con
+objetivos genuinamente explotables. Sobre R, el 1,000 es limpio pero pequeño (30 detecciones, feed de
+16 checks): dice que las familias no disparan en falso contra los engaños que se les han puesto
+delante, no que no vayan a hacerlo nunca.
 
 ---
 
@@ -956,7 +2216,10 @@ su registro de objetivos autorizados.
 | **Pérdida de cobertura al eliminar OpenVAS antes de cerrar G1** | Aceptada conscientemente: no hay usuarios apoyándose en ella (§7). La Fase N lidera el roadmap precisamente por esto |
 | Falsos positivos por versión (backports) | El par `qod`/`confirmed`; los confirmadores de la Fase R; las Fases O e I, que lo atacan por dos caminos independientes |
 | La Fase N se convierte en un pozo sin fondo de protocolos | Lista priorizada y cerrada (7 familias, 3 niveles); la cola larga de appliances es anti-meta declarada (G5) |
-| Coste de mantenimiento del diccionario de CPE y los checks | Los alias como "una línea nueva"; la ingesta de plantillas de Nuclei; el feed versionado con CI |
+| Coste de mantenimiento del diccionario de CPE y los checks | Los alias como "una línea nueva"; la ingesta de plantillas de Nuclei (U4); el feed versionado con CI |
+| **Que la Fase U reintroduzca por la puerta de atrás la dependencia que el §1 expulsa** | Nuclei pasa el examen de naturaleza del §1 (binario + feed, no plataforma) y no es dependencia de tiempo de ejecución del motor: Lybra funciona sin él igual que sin Nmap. La señal de alarma sería que Lybra dejase de detectar por su cuenta y se limitase a envolver la salida de Nuclei — el §4 ya lo nombra como anti-meta |
+| **Que Nuclei haga irrelevante al `CheckRuntime` propio (Fase R)** | Riesgo real y asumido: Nuclei es abrumadoramente HTTP, y lo que R aporta que él no tiene es el encadenamiento versión→confirmador contra la KB local, el tipo `network` sobre los dissectors de la Fase N y el tipo `script`. Si el histograma de U4 sale bajo, R se estrecha a eso y renuncia a competir en la familia `http` — un resultado más honesto que mantener 10 checks frente a un feed comunitario vivo |
+| **Escaneos de Nuclei que saturan al objetivo o tardan una eternidad** | Perfil acotado por defecto (`-severity`/`-tags`/subconjunto curado) más `-rate-limit`, decididos en la propia Fase U y no descubiertos en producción; el registro de objetivos autorizados como prerrequisito |
 | Riesgo legal: las Fases N, R, T y D tocan el objetivo | El registro de objetivos autorizados como prerrequisito; el modo `safe` por defecto; el presupuesto de intentos de la Fase D |
 | Deriva de alcance hacia "clonar OpenVAS" | Las anti-metas del §4; el beachhead estrecho; la disciplina del 80/20 |
 | Coste del repositorio nativo | Aparcado hasta tener evidencia de rendimiento; el fallback en Python siempre presente |
@@ -993,8 +2256,16 @@ El camino crítico, en orden, para el primer resultado tangible bajo esta premis
 5. Y solo entonces, **E1 y E2** del desmontaje, con la tranquilidad de que la primera pieza del
    sustituto ya está en pie.
 
-A partir de ahí, el orden del §6.2: el resto de dissectors de la Fase N, la Fase I, el cierre de la
-Fase R, la Fase O y la Fase D.
+A partir de ahí, el orden del §6.2: el resto de dissectors de la Fase N, la Fase I, **la Fase U**, el
+cierre de la Fase R, la Fase O y la Fase D.
+
+**Una nota sobre por dónde entrar en la Fase U**, porque tiene un orden interno que no es obvio. Lo
+tentador es empezar por el histograma de ingestibilidad (U4), que es lo intelectualmente interesante;
+lo correcto es empezar por **U1**, que es lo que entrega producto. El traductor de la salida de Nuclei
+a `Finding` es la pieza de la que cuelgan U2 y U3 casi gratis, y el histograma se puede hacer en
+cualquier momento porque no depende de nada del backend — es un script suelto sobre un clon del
+repositorio de plantillas. Orden: U1 (herramienta + PDF) → U2 (una línea en el corroborador) → U3 (el
+banco, reusando el traductor) → U4 (el histograma y su recomendación).
 
 ---
 
@@ -1005,13 +2276,15 @@ Fase R, la Fase O y la Fase D.
 | Fase | Pista | Capa | Qué entrega | Brecha / independencia |
 |---|---|---|---|---|
 | 0 | Correlación | — | CPE persistido, `ScanType.LYBRA`, modelo `Finding` | ✓ hecha |
+| **0.9** | Correlación | — | **Modo de entrada por payload en `run_scan`; `Service.origin`; qod/confirmed derivados** | **✓ implementada — desbloquea la Fase I** |
 | 1 | Correlación | L3 | El matcher de CPE a CVE (detección por versión) | ✓ hecha |
 | 2 | Correlación | L3 | La KB local (NVD, KEV, EPSS, CPE Dictionary) | ✓ hecha — CIRCL/NVD en tiempo de escaneo |
 | 5 | Correlación | L3 | Dedup multi-fuente, ciclo de vida, scoring, `HostService` | ✓ hecha |
 | 6 | — | L4 | El pipeline orquestado | ✓ hecha |
 | **N** | Bajo nivel | L1+L2 | **Dissectors y checks no-HTTP (SMB, FTP, SMTP, SNMP, BD, RDP…)** | **G1 — la brecha decisiva** |
 | **I** | Correlación | L3 | **Inventario de Hygeia → `Service` → motor** | **G2 — mejor que el escaneo autenticado** |
-| R | Bajo nivel | L2 | Runtime de checks; faltan `network`, `script` y el YAML | G1, G4 — **Nikto** |
+| **U** | Bajo nivel | L2 | **`ScanType.NUCLEI` de primera clase (sin tablas nativas), corroborador, oráculo diferencial y medición de ingestibilidad** | **La vara de medir de R; jubila a Nikto** |
+| R | Bajo nivel | L2 | Runtime de checks; faltan `script` y el YAML (`network` ya hecho) — **su cierre requiere U** | G1, G4 — **Nikto** |
 | O | Correlación | L3 | Backports por feeds OVAL/CSAF de distribución | **G3 — el Notus propio** |
 | D | Bajo nivel | L2 | Credenciales por defecto, lockout-safe, sin plaintext | **G4** |
 | F | Bajo nivel | L1 | Fingerprint propio; falta JARM | `nmap -sV`, que pasa a oráculo |
@@ -1055,7 +2328,10 @@ lógica de detección propia. Es lo que Themis era, y lo que este plan supera.
 identificar servicios y versiones. **Se queda** como corroborador y como oráculo del banco.
 
 **Nikto** — Escáner de vulnerabilidades web que comprueba rutas y configuraciones peligrosas
-conocidas. **Se queda** como corroborador hasta que la Fase R alcance su umbral de precisión.
+conocidas. **Se queda** como corroborador, pero con fecha de caducidad más cercana de lo previsto: la
+Fase U introduce a Nuclei, que cubre la misma superficie con datos mucho mejores (CVE y CVSS frente al
+OSVDB de Nikto, muerto desde 2016). El pool objetivo de herramientas externas es **Nmap + Nuclei**; la
+retirada se decide con el número del oráculo (U3), no con una fecha.
 
 **OpenVAS / Greenbone** — Suite completa de gestión de vulnerabilidades, con protocolo propio (GMP),
 ciclo de escaneo propio y feed de NVTs. **Se elimina** (§7): es una plataforma, no una herramienta.
@@ -1070,8 +2346,10 @@ las versiones reales de los paquetes. Lo sustituye la Fase I.
 cada distribución. Su equivalente propio es la Fase O.
 
 **Nuclei** — Motor que ejecuta plantillas de detección declarativas en YAML, con un gran feed
-comunitario. Es un binario CLI con un feed de datos, no una plataforma: por eso sí encaja, como
-oráculo diferencial del banco (§8) y como fuente de plantillas ingeribles (Fase R).
+comunitario. Es un binario CLI con un feed de datos, no una plataforma: por eso sí encaja, y la
+**Fase U** lo incorpora en sus cuatro papeles — herramienta de primera clase lanzable por el usuario
+(U1), corroborador del análisis profundo (U2), oráculo diferencial del banco (U3, el §8) y fuente de
+plantillas ingeribles (U4, que queda en la Fase R condicionado a una medición previa).
 
 **CVE** — El identificador estándar de una vulnerabilidad concreta, p. ej. CVE-2021-41773.
 
@@ -1097,6 +2375,11 @@ realmente corregido en cada release. La fuente de verdad de la Fase O.
 
 **Backport** — La práctica de las distribuciones de aplicar el parche de una vulnerabilidad sin subir
 el número de versión visible. Causa principal de los falsos positivos por versión.
+
+**`Service.origin`** — El campo que la Fase 0.9 añade a `Service` para distinguir un dato inferido de
+la red (`"network"`, el único valor que existía hasta ahora) de un dato verificado en el propio host
+(`"inventory"`, el caso de un inventario de paquetes). Es lo que permite que un hallazgo por inventario
+nazca `confirmed=true` en vez de compartir el `qod=70` genérico de una hipótesis por banner.
 
 **Finding** *(hallazgo)* — El modelo de datos normalizado que unifica los resultados de todas las
 fuentes en una sola tabla. La pieza central de la arquitectura, y lo que hace que eliminar OpenVAS no

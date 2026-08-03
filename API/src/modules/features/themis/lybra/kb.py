@@ -44,7 +44,8 @@ import urllib.parse
 import urllib.request
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Iterator, List, Optional, Tuple
+from pathlib import Path
+from typing import Dict, Iterator, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +131,22 @@ def version_in_range(version: str, match) -> bool:
     * A range built from up to four bounds (start including/excluding, end
       including/excluding) — the CVE affects everything inside that range.
 
-    A rule with neither an exact version nor any bound is taken to affect *every*
-    version of the product.
+    A rule carrying **neither** an exact version nor any bound does not match
+    anything. NVD reads such a rule as "every version of this product", but
+    that is a claim about the versions that existed when the CVE was analyzed,
+    and it is the only kind of rule that cannot be checked against a version at
+    all — which is precisely what an ``outdated_software`` finding asserts.
+    Honouring it turns "you have this product" into "you have this
+    vulnerability", forever, for every past CVE.
+
+    This is not a marginal case: 14.6% of a full NVD mirror (370k of 2.5M
+    applicability rows) is unbounded, and it is concentrated in exactly the
+    auto-updating desktop software a Hygeia inventory is full of. Measured on a
+    real Windows inventory, honouring these rules produced **695 CVEs for a
+    single up-to-date Microsoft Edge** and resurrected CVE-2009-1099 against a
+    2026 JDK, while contributing zero findings that a real version range did
+    not already justify. Dropping them cost 22→22 genuine detections and
+    removed 708 false ones.
 
     Args:
         version: The discovered version to test, e.g. "2.4.49".
@@ -139,7 +154,8 @@ def version_in_range(version: str, match) -> bool:
 
     Returns:
         ``True`` if ``version`` falls within the rule's applicability, ``False``
-        otherwise. An empty ``version`` never matches.
+        otherwise. An empty ``version``, or a rule with no version information
+        at all, never matches.
     """
     if not version:
         return False
@@ -154,7 +170,7 @@ def version_in_range(version: str, match) -> bool:
     vee = _bound(match, "version_end_excluding")
 
     if not any([vsi, vse, vei, vee]):
-        return True
+        return False
     if vsi and version_compare(version, vsi) < 0:
         return False
     if vse and version_compare(version, vse) <= 0:
@@ -164,6 +180,114 @@ def version_in_range(version: str, match) -> bool:
     if vee and version_compare(version, vee) >= 0:
         return False
     return True
+
+
+# =========================================================================
+# PRODUCT NAME NORMALIZATION (Fase I-b, paso 1)
+# =========================================================================
+
+# Content in brackets/parentheses is almost always packaging noise for a
+# desktop inventory entry ("7-Zip 25.01 (x64)", "[Optional] VLC media player"),
+# never part of a product's identity — stripped outright rather than parsed.
+_BRACKETED_RE = re.compile(r"[(\[][^)\]]*[)\]]")
+# Architecture/bitness markers only. Deliberately a short, conservative list:
+# generic English words like "server"/"client"/"edition"/"runtime" are NOT
+# included here, because they can be part of a product's real identity ("SQL
+# Server", "Java Runtime Environment") — one over-eager strip could turn a
+# resolvable name into an unresolvable one, or worse, collide two different
+# products onto the same normalized key.
+#
+# "setup"/"installer"/"msi" used to be in this list and were removed: NVD has
+# 116 distinct (vendor, product) pairs whose product name genuinely contains
+# one of them, including `adobe:photoshop_installer` and
+# `adobe:flash_player_installer` — separate products from `adobe:photoshop`
+# and `adobe:flash_player`. Stripping the word collapsed "Microsoft Visual
+# Studio Installer" (a small bootstrapper, version 4.x) onto
+# `microsoft:visual_studio` (version 17.x), which would then be version-matched
+# against a completely unrelated product's CVE ranges. "msi" was doubly wrong:
+# as a bare word it is far more often the hardware vendor (MSI) than a file
+# extension. An architecture token like "x64" is never a product's identity;
+# these words are, so they stay.
+_NOISE_WORD_RE = re.compile(
+    r"\b(x86_64|x64|x86|i386|i686|amd64|arm64|32-?bit|64-?bit)\b",
+    re.IGNORECASE,
+)
+_SEPARATOR_RE = re.compile(r"[_\-]+")
+_WHITESPACE_RE = re.compile(r"\s+")
+# A dotted version number trailing the name, e.g. "7-Zip 25.01" or the
+# doubled-up "GBT_Dynamic_Lighting_Lib_UC 25.07.21.01 25.07.21.01" some
+# Windows registry entries produce — the version already lives in its own
+# field; embedded here it only ever duplicates it, never adds identity.
+# Requires at least one dot so a meaningful trailing digit ("Python 3",
+# "Half-Life 2") is never mistaken for a version and stripped.
+_TRAILING_VERSION_RE = re.compile(r"(?:\s+\d+(?:\.\d+){1,3}[a-z0-9]*)+$")
+
+
+def normalize_product_name(name: str) -> str:
+    """Canonicalize a product name for CPE-alias matching (Fase I-b, paso 1).
+
+    Applied to *both* sides of a comparison — an inventory entry's ``name``
+    and an NVD ``CpeMatch.product`` — so the two vocabularies can be compared
+    at all: Hygeia reports ``"7-Zip 25.01 (x64)"``, NVD calls the same
+    software ``7-zip``. Lowercases, strips bracketed content, known
+    architecture/packaging noise and a trailing embedded version number,
+    collapses separators to single spaces.
+
+    Deliberately conservative (see the module-level regexes' comments): the
+    goal is closing an exact-match comparison, not fuzzy matching. A
+    normalization that is too aggressive risks *collision* — two different
+    products reducing to the same key — which is a worse failure than staying
+    unresolved, since :func:`~.repositories.KbRepository.rebuild_cpe_product_index`
+    already discards a colliding key rather than guessing (Fase I-b, paso 2).
+
+    Args:
+        name: A raw product name, from either side of the comparison.
+
+    Returns:
+        The normalized name, or ``""`` if ``name`` was empty/whitespace.
+    """
+    text = _BRACKETED_RE.sub(" ", (name or "").lower())
+    text = _NOISE_WORD_RE.sub(" ", text)
+    text = _SEPARATOR_RE.sub(" ", text)
+    text = _WHITESPACE_RE.sub(" ", text).strip()
+    return _TRAILING_VERSION_RE.sub("", text).strip()
+
+
+def extract_trailing_version(name: str) -> Optional[str]:
+    """Return the version number embedded at the end of a raw product name.
+
+    A companion to :func:`normalize_product_name`, which finds the very same
+    trailing token but only to discard it. This exists for a caller with a
+    version *source-quality* problem of its own: JetBrains installers, for
+    one confirmed real case, register their internal build number
+    (``"252.26199.169"``) as the Windows registry ``DisplayVersion``, while
+    the marketing version NVD's own CVE ranges are expressed against
+    (``"2025.2.2"``) only ever shows up embedded in ``DisplayName``
+    (``"IntelliJ IDEA 2025.2.2"``). Comparing the build number against those
+    ranges does not just miss real matches — it produces a flood of false
+    ones, because a build number happens to sort as "older than everything"
+    against a range like ``version_end_excluding="2022.1"``. A caller whose
+    inventory source has this quirk should prefer this over its own raw
+    version field; one that does not can simply ignore it.
+
+    Args:
+        name: A raw product name, e.g. ``"IntelliJ IDEA 2025.2.2"``.
+
+    Returns:
+        The trailing version token (the first one, if the name doubles it up
+        the way some Windows registry entries do), or ``None`` if the name
+        has no trailing version-shaped token at all.
+    """
+    # Strip bracketed content first ("7-Zip 25.01 (x64)") — otherwise the
+    # trailing-version pattern's end anchor never reaches the version at all,
+    # since "(x64)", not a digit, is what actually sits at the end.
+    text = _BRACKETED_RE.sub(" ", (name or "").strip())
+    text = _WHITESPACE_RE.sub(" ", text).strip()
+    match = _TRAILING_VERSION_RE.search(text)
+    if not match:
+        return None
+    tokens = match.group(0).split()
+    return tokens[0] if tokens else None
 
 
 # =========================================================================
@@ -211,6 +335,38 @@ def parse_cpe23(cpe: str) -> Optional[dict]:
     if len(parts) < 6 or parts[0] != "cpe" or parts[1] != "2.3":
         return None
     return {"part": parts[2], "vendor": parts[3], "product": parts[4], "version": parts[5]}
+
+
+# The curated product-name -> (vendor, product) alias feed (Fase I-b, paso 3),
+# alongside every other Lybra feed (checks_feed.json, tech_signatures.json).
+# Same "Lybra feed" philosophy: a new alias is one JSON entry, not a code
+# change, added whenever a real inventory turns up a frequent unresolved
+# product the automated index (paso 2) can't reach — a marketing name too far
+# from its CPE ("Microsoft Visual C++ 2022 X64 Additional Runtime" vs
+# ``visual_c++``) rather than a spelling/formatting difference.
+_BUNDLED_PRODUCT_ALIASES = Path(__file__).parent / "feeds" / "product_aliases.json"
+
+
+def load_product_aliases(path: Optional[str] = None) -> Dict[str, Tuple[str, str]]:
+    """Load the curated product-name alias feed.
+
+    Keys are matched against a *raw* product string lowercased and stripped
+    (the same shape ``engine.CPE_PRODUCT_OVERRIDES`` always used), not the
+    normalized form :func:`normalize_product_name` produces — this feed is for
+    names that don't survive normalization intact, so re-normalizing here
+    would defeat the point.
+
+    Args:
+        path: Path to a JSON feed file. Defaults to the feed bundled with this
+            module.
+
+    Returns:
+        A dict mapping a lowercased product name to its ``(vendor, product)``
+        CPE identity, in the same shape ``engine.CPE_PRODUCT_OVERRIDES`` uses.
+    """
+    feed_path = Path(path) if path else _BUNDLED_PRODUCT_ALIASES
+    data = json.loads(feed_path.read_text(encoding="utf-8"))
+    return {entry["match"]: (entry["vendor"], entry["product"]) for entry in data.get("aliases", [])}
 
 
 # =========================================================================

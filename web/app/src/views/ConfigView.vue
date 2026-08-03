@@ -44,9 +44,9 @@
             <div class="section-body">
               <p class="field-hint">Parámetros de coste de Argon2id. Subirlos endurece los hashes pero ralentiza el inicio de sesión. Solo afectan a contraseñas creadas o cambiadas tras guardar.</p>
               <div class="cfg-grid">
-                <div class="form-group"><label>Iteraciones (time cost)</label><input v-model.number="store.configFlat['security.argon2.time_cost']" type="number" min="1" max="20" class="inp" /></div>
-                <div class="form-group"><label>Memoria (KiB)</label><input v-model.number="store.configFlat['security.argon2.memory_cost']" type="number" min="8192" step="1024" class="inp" /><span class="field-hint">65536 KiB = 64 MiB por hash</span></div>
-                <div class="form-group"><label>Paralelismo (hilos)</label><input v-model.number="store.configFlat['security.argon2.parallelism']" type="number" min="1" max="16" class="inp" /></div>
+                <div class="form-group"><label>Iteraciones (time cost)</label><input v-model.number="store.configFlat['general.security.argon2.time_cost']" type="number" min="1" max="20" class="inp" /></div>
+                <div class="form-group"><label>Memoria (KiB)</label><input v-model.number="store.configFlat['general.security.argon2.memory_cost']" type="number" min="8192" step="1024" class="inp" /><span class="field-hint">65536 KiB = 64 MiB por hash</span></div>
+                <div class="form-group"><label>Paralelismo (hilos)</label><input v-model.number="store.configFlat['general.security.argon2.parallelism']" type="number" min="1" max="16" class="inp" /></div>
               </div>
             </div>
           </section>
@@ -57,13 +57,13 @@
               <p class="field-hint">Las credenciales viven en el archivo <code>.env</code>. Estos ajustes requieren reiniciar la API para aplicarse.</p>
               <div class="cfg-grid">
                 <div class="form-group"><label>Nivel de aislamiento</label>
-                  <select v-model="store.configFlat['database.isolation_level']" class="inp sel">
+                  <select v-model="store.configFlat['infrastructure.database.isolation_level']" class="inp sel">
                     <option v-for="lvl in isolationLevels" :key="lvl" :value="lvl">{{ lvl }}</option>
                   </select>
                 </div>
-                <div class="form-group"><label>Tamaño del pool</label><input v-model.number="store.configFlat['database.pool_size']" type="number" min="1" max="100" class="inp" /></div>
-                <div class="form-group"><label>Conexiones extra (overflow)</label><input v-model.number="store.configFlat['database.max_overflow']" type="number" min="0" max="100" class="inp" /></div>
-                <div class="form-group"><label>Timeout del pool (s)</label><input v-model.number="store.configFlat['database.pool_timeout']" type="number" min="1" max="300" class="inp" /></div>
+                <div class="form-group"><label>Tamaño del pool</label><input v-model.number="store.configFlat['infrastructure.database.pool_size']" type="number" min="1" max="100" class="inp" /></div>
+                <div class="form-group"><label>Conexiones extra (overflow)</label><input v-model.number="store.configFlat['infrastructure.database.max_overflow']" type="number" min="0" max="100" class="inp" /></div>
+                <div class="form-group"><label>Timeout del pool (s)</label><input v-model.number="store.configFlat['infrastructure.database.pool_timeout']" type="number" min="1" max="300" class="inp" /></div>
               </div>
             </div>
           </section>
@@ -73,10 +73,10 @@
             <div class="section-body">
               <p class="field-hint">La contraseña se toma de <code>REDIS_PASSWORD</code> en <code>.env</code>. En contenedores, las variables <code>REDIS_HOST</code> / <code>REDIS_PORT</code> / <code>REDIS_DB</code> tienen prioridad sobre estos valores.</p>
               <div class="cfg-grid">
-                <div class="form-group"><label>Host</label><input v-model="store.configFlat['redis.host']" type="text" class="inp mono" /></div>
-                <div class="form-group"><label>Puerto</label><input v-model.number="store.configFlat['redis.port']" type="number" min="1" max="65535" class="inp" /></div>
-                <div class="form-group"><label>Base de datos (db)</label><input v-model.number="store.configFlat['redis.db']" type="number" min="0" max="15" class="inp" /></div>
-                <div class="form-group"><label>Timeout de conexión (s)</label><input v-model.number="store.configFlat['redis.socket_connect_timeout']" type="number" min="1" max="60" class="inp" /></div>
+                <div class="form-group"><label>Host</label><input v-model="store.configFlat['infrastructure.redis.host']" type="text" class="inp mono" /></div>
+                <div class="form-group"><label>Puerto</label><input v-model.number="store.configFlat['infrastructure.redis.port']" type="number" min="1" max="65535" class="inp" /></div>
+                <div class="form-group"><label>Base de datos (db)</label><input v-model.number="store.configFlat['infrastructure.redis.db']" type="number" min="0" max="15" class="inp" /></div>
+                <div class="form-group"><label>Timeout de conexión (s)</label><input v-model.number="store.configFlat['infrastructure.redis.socket_connect_timeout']" type="number" min="1" max="60" class="inp" /></div>
               </div>
             </div>
           </section>
@@ -85,9 +85,9 @@
             <div class="section-head"><h2>TaskQueue</h2><p class="section-desc">Cola de tareas en segundo plano</p></div>
             <div class="section-body">
               <div class="cfg-grid">
-                <div class="form-group"><label>Max Workers</label><input v-model.number="store.configFlat['general.taskqueue.max_workers']" type="number" min="1" max="32" class="inp" /></div>
-                <div class="form-group"><label>Historial TTL (s)</label><input v-model.number="store.configFlat['general.taskqueue.history_ttl_seconds']" type="number" min="60" max="86400" class="inp" /></div>
-                <div class="form-group"><label>Max items en historial</label><input v-model.number="store.configFlat['general.taskqueue.history_max_items']" type="number" min="10" max="1000" class="inp" /></div>
+                <div class="form-group"><label>Max Workers</label><input v-model.number="store.configFlat['infrastructure.taskqueue.max_workers']" type="number" min="1" max="32" class="inp" /></div>
+                <div class="form-group"><label>Historial TTL (s)</label><input v-model.number="store.configFlat['infrastructure.taskqueue.history_ttl_seconds']" type="number" min="60" max="86400" class="inp" /></div>
+                <div class="form-group"><label>Max items en historial</label><input v-model.number="store.configFlat['infrastructure.taskqueue.history_max_items']" type="number" min="10" max="1000" class="inp" /></div>
               </div>
             </div>
           </section>
@@ -98,17 +98,17 @@
               <p class="field-hint">Elige qué proveedor genera el contenido de cada módulo. Las credenciales y los modelos se configuran en <code>.env</code> (<code>OLLAMA_*</code>, <code>OPENAI_*</code>).</p>
               <div class="cfg-grid">
                 <div class="form-group"><label>Estrategia por defecto</label>
-                  <select v-model="store.configFlat['ai.defaultStrategy']" class="inp sel">
+                  <select v-model="store.configFlat['tools.scribe.defaultStrategy']" class="inp sel">
                     <option v-for="s in aiStrategies" :key="s.value" :value="s.value">{{ s.label }}</option>
                   </select>
                 </div>
                 <div class="form-group"><label>Themis</label>
-                  <select v-model="store.configFlat['ai.modules.themis']" class="inp sel">
+                  <select v-model="store.configFlat['tools.scribe.modules.themis']" class="inp sel">
                     <option v-for="s in aiStrategies" :key="s.value" :value="s.value">{{ s.label }}</option>
                   </select>
                 </div>
                 <div class="form-group"><label>Aegis</label>
-                  <select v-model="store.configFlat['ai.modules.aegis']" class="inp sel">
+                  <select v-model="store.configFlat['tools.scribe.modules.aegis']" class="inp sel">
                     <option v-for="s in aiStrategies" :key="s.value" :value="s.value">{{ s.label }}</option>
                   </select>
                 </div>
@@ -121,9 +121,10 @@
             <div class="section-body">
               <p class="field-hint">Puntuación de autenticidad de un correo. Por encima del umbral legítimo se considera fiable; por debajo del sospechoso, una amenaza. El umbral sospechoso puede ser negativo.</p>
               <div class="cfg-grid">
-                <div class="form-group"><label>Umbral legítimo</label><input v-model.number="store.configFlat['iris.legitimate_threshold']" type="number" class="inp" /></div>
-                <div class="form-group"><label>Umbral sospechoso</label><input v-model.number="store.configFlat['iris.suspicious_threshold']" type="number" class="inp" /></div>
-                <div class="form-group"><label>Cabeceras mínimas</label><input v-model.number="store.configFlat['iris.min_headers']" type="number" min="0" max="50" class="inp" /></div>
+                <div class="form-group"><label>Umbral legítimo</label><input v-model.number="store.configFlat['features.iris.legitimateThreshold']" type="number" class="inp" /></div>
+                <div class="form-group"><label>Umbral sospechoso</label><input v-model.number="store.configFlat['features.iris.suspiciousThreshold']" type="number" class="inp" /></div>
+                <div class="form-group"><label>Cabeceras mínimas</label><input v-model.number="store.configFlat['features.iris.minHeaders']" type="number" min="0" max="50" class="inp" /></div>
+                <div class="form-group"><label>Tamaño máx. del mensaje (bytes)</label><input v-model.number="store.configFlat['features.iris.maxMessageBytes']" type="number" min="1024" step="1024" class="inp" /><span class="field-hint">10485760 = 10 MiB</span></div>
               </div>
             </div>
           </section>
@@ -131,64 +132,53 @@
           <section id="section-themis" class="section">
             <div class="section-head"><h2>Themis</h2><p class="section-desc">Escáner de red, análisis web y vulnerabilidades</p></div>
             <div class="section-body">
-              <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['themis.enabled']" type="checkbox" class="toggle" /><span>Habilitado</span></label></div>
+              <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.themis.enabled']" type="checkbox" class="toggle" /><span>Habilitado</span></label></div>
               <div class="cfg-grid">
-                <div class="form-group"><label>Directorio de salida (PDFs)</label><input v-model="store.configFlat['themis.directories.output']" type="text" class="inp" /></div>
-                <div class="form-group"><label>Directorio CSV</label><input v-model="store.configFlat['themis.directories.csv']" type="text" class="inp" /></div>
-                <div class="form-group"><label>Directorio de recursos</label><input v-model="store.configFlat['themis.directories.resources']" type="text" class="inp" /></div>
+                <div class="form-group"><label>Directorio de salida (PDFs)</label><input v-model="store.configFlat['features.themis.directories.output']" type="text" class="inp" /></div>
+                <div class="form-group"><label>Directorio CSV</label><input v-model="store.configFlat['features.themis.directories.csv']" type="text" class="inp" /></div>
+                <div class="form-group"><label>Directorio de recursos</label><input v-model="store.configFlat['features.themis.directories.resources']" type="text" class="inp" /></div>
               </div>
-              <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['themis.areLocalIpsAllowed']" type="checkbox" class="toggle" /><span>Permitir IPs locales</span></label></div>
+              <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.themis.areLocalIpsAllowed']" type="checkbox" class="toggle" /><span>Permitir IPs locales</span></label></div>
               <div class="cfg-grid">
-                <div class="form-group"><label>Carpeta por defecto</label><input v-model="store.configFlat['themis.folders.defaultFolderName']" type="text" class="inp" /><span class="field-hint">Nombre de la carpeta virtual para escaneos sin agrupar</span></div>
-                <div class="form-group"><label>Escaneos en estadísticas</label><input v-model.number="store.configFlat['themis.history.maxScans']" type="number" min="1" max="100" class="inp" /><span class="field-hint">Escaneos recientes que se promedian en el histórico</span></div>
+                <div class="form-group"><label>Carpeta por defecto</label><input v-model="store.configFlat['features.themis.folders.defaultFolderName']" type="text" class="inp" /><span class="field-hint">Nombre de la carpeta virtual para escaneos sin agrupar</span></div>
+                <div class="form-group"><label>Escaneos en estadísticas</label><input v-model.number="store.configFlat['features.themis.history.maxScans']" type="number" min="1" max="100" class="inp" /><span class="field-hint">Escaneos recientes que se promedian en el histórico</span></div>
               </div>
               <h3 class="subsection-title">Verificación de accesibilidad del host</h3>
               <div class="cfg-grid">
-                <div class="form-group"><label class="toggle-row"><input v-model="store.configFlat['themis.hostReachabilityCheck.enabled']" type="checkbox" class="toggle" /><span>Habilitado</span></label></div>
-                <div class="form-group"><label>Timeout (s)</label><input v-model.number="store.configFlat['themis.hostReachabilityCheck.timeout']" type="number" step="0.5" min="0.5" class="inp" /></div>
-                <div class="form-group"><label>Puerto</label><input v-model.number="store.configFlat['themis.hostReachabilityCheck.port']" type="number" min="1" max="65535" class="inp" /></div>
+                <div class="form-group"><label class="toggle-row"><input v-model="store.configFlat['features.themis.hostReachabilityCheck.enabled']" type="checkbox" class="toggle" /><span>Habilitado</span></label></div>
+                <div class="form-group"><label>Timeout (s)</label><input v-model.number="store.configFlat['features.themis.hostReachabilityCheck.timeout']" type="number" step="0.5" min="0.5" class="inp" /></div>
+                <div class="form-group"><label>Puerto</label><input v-model.number="store.configFlat['features.themis.hostReachabilityCheck.port']" type="number" min="1" max="65535" class="inp" /></div>
               </div>
               <h3 class="subsection-title">Traceroute</h3>
               <div class="cfg-grid">
-                <div class="form-group"><label>Validez de caché (h)</label><input v-model.number="store.configFlat['themis.traceroute.cacheHours']" type="number" min="1" max="720" class="inp" /></div>
-                <div class="form-group"><label>Saltos máximos</label><input v-model.number="store.configFlat['themis.traceroute.maxHops']" type="number" min="1" max="64" class="inp" /></div>
-                <div class="form-group"><label>Timeout (s)</label><input v-model.number="store.configFlat['themis.traceroute.timeout']" type="number" min="1" max="600" class="inp" /></div>
-                <div class="form-group"><label>Reintento si falla (min)</label><input v-model.number="store.configFlat['themis.traceroute.retryFailedMinutes']" type="number" min="1" max="1440" class="inp" /></div>
+                <div class="form-group"><label>Validez de caché (h)</label><input v-model.number="store.configFlat['features.themis.traceroute.cacheHours']" type="number" min="1" max="720" class="inp" /></div>
+                <div class="form-group"><label>Saltos máximos</label><input v-model.number="store.configFlat['features.themis.traceroute.maxHops']" type="number" min="1" max="64" class="inp" /></div>
+                <div class="form-group"><label>Timeout (s)</label><input v-model.number="store.configFlat['features.themis.traceroute.timeout']" type="number" min="1" max="600" class="inp" /></div>
+                <div class="form-group"><label>Reintento si falla (min)</label><input v-model.number="store.configFlat['features.themis.traceroute.retryFailedMinutes']" type="number" min="1" max="1440" class="inp" /></div>
               </div>
             </div>
             <div class="scanner-grid">
-              <ScannerCard name="Nmap" icon="scan" :flat="store.configFlat" prefix="themis.nmap" />
-              <ScannerCard name="Nikto" icon="web" :flat="store.configFlat" prefix="themis.nikto" />
-              <ScannerCard name="OpenVAS" icon="vuln" :flat="store.configFlat" prefix="themis.openvas" />
-            </div>
-            <div class="section-body openvas-tool-configs">
-              <h3 class="subsection-title">OpenVAS — Configuraciones de escaneo</h3>
-              <div class="cfg-grid">
-                <div class="form-group"><label>Full Deep</label><input v-model="store.configFlat['themis.openvas.toolConfigs.scanConfigs.full_deep']" type="text" class="inp mono" /></div>
-                <div class="form-group"><label>Full Fast</label><input v-model="store.configFlat['themis.openvas.toolConfigs.scanConfigs.full_fast']" type="text" class="inp mono" /></div>
-                <div class="form-group"><label>Full Ultimate</label><input v-model="store.configFlat['themis.openvas.toolConfigs.scanConfigs.full_ultimate']" type="text" class="inp mono" /></div>
-              </div>
-              <h3 class="subsection-title">OpenVAS — Listas de puertos</h3>
-              <div class="cfg-grid">
-                <div class="form-group"><label>TCP All</label><input v-model="store.configFlat['themis.openvas.toolConfigs.portList.tcp_all']" type="text" class="inp mono" /></div>
-                <div class="form-group"><label>TCP All + UDP Top 100</label><input v-model="store.configFlat['themis.openvas.toolConfigs.portList.tcp_all_udp_top100']" type="text" class="inp mono" /></div>
-                <div class="form-group"><label>TCP + UDP All</label><input v-model="store.configFlat['themis.openvas.toolConfigs.portList.tcp_udp_all']" type="text" class="inp mono" /></div>
-              </div>
+              <ScannerCard name="Nmap" icon="scan" :flat="store.configFlat" prefix="features.themis.scanners.nmap" />
+              <ScannerCard name="Nikto" icon="web" :flat="store.configFlat" prefix="features.themis.scanners.nikto" />
             </div>
           </section>
 
           <section id="section-aegis" class="section">
             <div class="section-head"><h2>Aegis</h2><p class="section-desc">Generación de píldoras de concienciación con IA</p></div>
             <div class="section-body">
-              <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['aegis.enabled']" type="checkbox" class="toggle" /><span>Habilitado</span></label></div>
+              <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.aegis.enabled']" type="checkbox" class="toggle" /><span>Habilitado</span></label></div>
               <div class="cfg-grid">
-                <div class="form-group"><label>Directorio de salida</label><input v-model="store.configFlat['aegis.directories.output']" type="text" class="inp" /></div>
-                <div class="form-group"><label>Stack de documentos</label><input v-model="store.configFlat['aegis.directories.stack']" type="text" class="inp" /></div>
+                <div class="form-group"><label>Consejos por píldora</label><input v-model.number="store.configFlat['features.aegis.tipsAmount']" type="number" min="1" max="20" class="inp" /></div>
+                <div class="form-group"><label>Antigüedad máx. de alertas (años)</label><input v-model.number="store.configFlat['features.aegis.vulnerabilitiesAntiquity']" type="number" min="1" max="30" class="inp" /></div>
+              </div>
+              <div class="grid">
+                <div class="form-group"><label>Directorio de salida</label><input v-model="store.configFlat['features.aegis.directories.output']" type="text" class="inp" /></div>
+                <div class="form-group"><label>Stack de documentos</label><input v-model="store.configFlat['features.aegis.directories.stack']" type="text" class="inp" /></div>
               </div>
               <h3 class="subsection-title">Prompt del sistema</h3>
-              <textarea v-model="store.configFlat['aegis.prompts.system']" rows="10" class="txta"></textarea>
+              <textarea v-model="store.configFlat['features.aegis.prompts.system']" rows="10" class="txta"></textarea>
               <h3 class="subsection-title">Plantilla de usuario</h3>
-              <textarea v-model="store.configFlat['aegis.prompts.userTemplate']" rows="8" class="txta"></textarea>
+              <textarea v-model="store.configFlat['features.aegis.prompts.userTemplate']" rows="8" class="txta"></textarea>
               <h3 class="subsection-title">Marcas monitoreadas</h3>
               <p class="field-hint">Array JSON. Cada entrada requiere <code>label</code>, <code>circl_vendor</code>, <code>circl_product</code> y <code>aliases</code>.</p>
               <textarea v-model="brandsText" rows="10" class="txta mono" @blur="syncBrands"></textarea>
@@ -261,8 +251,8 @@ onMounted(() => {
 onUnmounted(() => { if (observer) observer.disconnect() })
 
 const brandsText = ref('')
-watch(() => store.configFlat['aegis.brands'], (val) => { brandsText.value = JSON.stringify(val ?? [], null, 2) }, { immediate: true })
-function syncBrands() { try { const p = JSON.parse(brandsText.value); if (Array.isArray(p)) store.configFlat['aegis.brands'] = p } catch {} }
+watch(() => store.configFlat['features.aegis.brands'], (val) => { brandsText.value = JSON.stringify(val ?? [], null, 2) }, { immediate: true })
+function syncBrands() { try { const p = JSON.parse(brandsText.value); if (Array.isArray(p)) store.configFlat['features.aegis.brands'] = p } catch {} }
 function handleSave() { store.saveConfig() }
 </script>
 
@@ -306,7 +296,6 @@ function handleSave() { store.saveConfig() }
 .toggle { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 .field-hint { font-size: var(--fs-md); color: var(--text-muted); line-height: 1.5; }
 .field-hint code { font-family: var(--font-mono); font-size: var(--fs-md); background: var(--surface-2); padding: 1px 4px; border-radius: 3px; color: var(--text-dim); }
-.openvas-tool-configs { margin-top: 0.85rem; }
 .form-actions { display: flex; gap: 0.6rem; justify-content: flex-end; position: sticky; bottom: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem 1.1rem; z-index: 10; }
 .loading-block { padding: 5rem 0; display: flex; justify-content: center; width: 100%; }
 .skeleton { background: var(--surface); border-radius: 8px; animation: pulse 1.4s ease-in-out infinite; }

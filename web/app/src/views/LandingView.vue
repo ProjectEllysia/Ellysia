@@ -237,8 +237,8 @@ const tools = [
     blurb: 'Detección de vulnerabilidades',
     myth: 'La que sostiene la balanza y no dicta sentencia sin pesar antes cada indicio.',
     title: 'Pesa cada amenaza antes de que golpee',
-    desc: 'Motor de detección propio (Lybra) con Nmap, Nikto y OpenVAS como corroboradores opcionales, e informes redactados por IA listos para entregar.',
-    chips: ['Lybra', 'Nmap', 'Nikto', 'OpenVAS', 'Informes IA'],
+    desc: 'Motor de detección propio (Lybra) con Nmap, Nikto y Nuclei como corroboradores opcionales, e informes redactados por IA listos para entregar.',
+    chips: ['Lybra', 'Nmap', 'Nikto', 'Nuclei', 'Informes IA'],
   },
   {
     id: 'aegis',

@@ -30,7 +30,7 @@
           <th>ID</th><th>Target</th><th>Estado</th>
           <th v-if="type === 'nmap'">Puertos</th>
           <th v-if="type === 'nikto'">Incidencias</th>
-          <template v-if="type === 'openvas'"><th>Vulns</th><th>Críticas</th><th>Altas</th></template>
+          <template v-if="type === 'nuclei'"><th>Hallazgos</th><th>Críticos</th><th>Altos</th></template>
           <th>Fecha</th><th>Acciones</th>
         </tr></thead>
         <TransitionGroup name="row" tag="tbody">
@@ -41,22 +41,24 @@
             <td><StatusBadge :status="row.status" /></td>
             <td v-if="type === 'nmap'" class="mono">{{ row.totalOpenPorts ?? 0 }} <span class="muted">puertos</span></td>
             <td v-if="type === 'nikto'" class="mono">{{ row.totalIncidents ?? 0 }} <span class="muted">hallazgos</span></td>
-            <template v-if="type === 'openvas'">
-              <td class="mono">{{ row.totalVulnerabilities ?? 0 }}</td>
+            <template v-if="type === 'nuclei'">
+              <td class="mono">{{ row.totalFindings ?? 0 }}</td>
               <td class="sev-critical"><span v-if="row.criticalCount">{{ row.criticalCount }}</span><span v-else class="muted">0</span></td>
               <td class="sev-high"><span v-if="row.highCount">{{ row.highCount }}</span><span v-else class="muted">0</span></td>
             </template>
             <td class="date">{{ formatDate(row.startedAt) }}</td>
             <td class="actions">
-              <button class="act-btn" title="Vista previa" @click="$emit('preview', row.id, type)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-              </button>
-              <button v-if="isActive(row.status)" class="act-btn warn" title="Cancelar" @click="confirmCancel(row.id)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-              </button>
-              <button class="act-btn danger" title="Eliminar" @click="confirmDelete(row.id)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
-              </button>
+              <div class="actions-row">
+                <button class="act-btn" title="Vista previa" @click="$emit('preview', row.id, type)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+                <button v-if="isActive(row.status)" class="act-btn warn" title="Cancelar" @click="confirmCancel(row.id)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                </button>
+                <button class="act-btn danger" title="Eliminar" @click="confirmDelete(row.id)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+                </button>
+              </div>
             </td>
           </tr>
         </TransitionGroup>
@@ -148,7 +150,8 @@ tr.selected td { background: rgba(99,102,241,0.06); }
 .target { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sev-critical { color: var(--danger); font-weight: 600; }
 .sev-high { color: var(--warn); font-weight: 600; }
-.actions { display: flex; gap: 0.25rem; }
+.actions { vertical-align: middle; }
+.actions-row { display: flex; gap: 0.25rem; }
 .act-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); cursor: pointer; transition: all 0.15s; }
 .act-btn:hover { border-color: var(--accent); color: var(--accent); }
 .act-btn svg { width: 13px; height: 13px; }

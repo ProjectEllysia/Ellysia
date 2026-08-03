@@ -40,7 +40,7 @@ class AnalyzeRequestSchema(Schema):
         cambio vía PUT /system surta efecto sin reiniciar la API (mismo
         patrón que ``hygeia/schemas.py::validate_array_limits``).
         """
-        max_bytes = CR.get_iris_max_message_bytes()
+        max_bytes = CR.iris_config().max_message_bytes
         for field_name in ("headers", "message"):
             value = data.get(field_name)
             if value and len(value.encode("utf-8", errors="ignore")) > max_bytes:

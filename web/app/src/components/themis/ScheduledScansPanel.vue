@@ -152,8 +152,8 @@ function formatDate(iso) { if (!iso) return '—'; return new Date(iso).toLocale
 .type-badge { text-transform: uppercase; font-size: var(--fs-body); font-weight: 700; letter-spacing: 0.03em; padding: 0.1rem 0.4rem; border-radius: 5px; }
 .type-badge.nmap { color: var(--success); background: var(--success-dim); }
 .type-badge.nikto { color: var(--warn); background: var(--warn-dim); }
-.type-badge.openvas { color: var(--danger); background: var(--danger-dim); }
 .type-badge.lybra { color: var(--accent-bright); background: var(--accent-dim); }
+.type-badge.nuclei { color: var(--info); background: var(--info-dim); }
 .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 0.3rem; }
 .status-dot.active { background: var(--success); }
 .status-dot.revoked { background: var(--text-muted); }

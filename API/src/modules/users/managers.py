@@ -564,10 +564,12 @@ class OAuthTokenManager:
             Signed JWT string.
         """
         # N7: leer config OAuth en el punto de uso, no en import-time.
-        # CR.get_oauth_config() cachea con @_lazy_load → barato y permite
-        # que PUT /system recargue tuning JWT sin reiniciar la app.
-        expire_min, _, jwt_secret, jwt_algo = CR.get_oauth_config()
-        expires_at = utcnow_naive() + timedelta(minutes=expire_min)
+        # CR.jwt_config() cachea el bloque → barato, y permite que PUT /system
+        # recargue el tuning JWT sin reiniciar la app.
+        jwt_cfg = CR.jwt_config()
+        expires_at = utcnow_naive() + timedelta(
+            minutes=jwt_cfg.access_token_expiry_minutes
+        )
 
         payload = {
             "sub":      str(user_id),
@@ -580,7 +582,7 @@ class OAuthTokenManager:
             "pwd_at":   _to_utc_epoch(password_changed_at),
             "mfa_at":   _to_utc_epoch(mfa_at),
         }
-        token = jwt.encode(payload, jwt_secret, algorithm=jwt_algo)
+        token = jwt.encode(payload, jwt_cfg.secret, algorithm=jwt_cfg.algorithm)
 
         with UnitOfWork() as uow:
             TokenRepository(uow).save_access_token(
@@ -603,8 +605,9 @@ class OAuthTokenManager:
             Raw refresh token string (URL-safe base64, 64 bytes).
         """
         token      = secrets.token_urlsafe(64)
-        _, refresh_days, _, _ = CR.get_oauth_config()
-        expires_at = utcnow_naive() + timedelta(days=refresh_days)
+        expires_at = utcnow_naive() + timedelta(
+            days=CR.jwt_config().refresh_token_expiry_days
+        )
 
         with UnitOfWork() as uow:
             TokenRepository(uow).save_refresh_token(
@@ -632,8 +635,8 @@ class OAuthTokenManager:
         """
         try:
             # Step 1: validate JWT signature and expiry (no DB hit yet).
-            _, _, jwt_secret, jwt_algo = CR.get_oauth_config()
-            payload = jwt.decode(token, jwt_secret, algorithms=[jwt_algo])
+            jwt_cfg = CR.jwt_config()
+            payload = jwt.decode(token, jwt_cfg.secret, algorithms=[jwt_cfg.algorithm])
 
             if payload.get("type") != "access":
                 return None
@@ -686,9 +689,9 @@ class OAuthTokenManager:
         que se llama únicamente en el camino de error.
         """
         try:
-            _, _, jwt_secret, jwt_algo = CR.get_oauth_config()
+            jwt_cfg = CR.jwt_config()
             payload = jwt.decode(
-                token, jwt_secret, algorithms=[jwt_algo],
+                token, jwt_cfg.secret, algorithms=[jwt_cfg.algorithm],
                 options={"verify_exp": False},
             )
         except jwt.InvalidTokenError:
@@ -793,9 +796,10 @@ class OAuthTokenManager:
         Returns:
             Opaque challenge token string (not a JWT).
         """
-        cfg = CR.get_mfa_config()
         token = secrets.token_urlsafe(48)
-        expires_at = utcnow_naive() + timedelta(minutes=cfg["challenge_expiry_minutes"])
+        expires_at = utcnow_naive() + timedelta(
+            minutes=CR.mfa_config().challenge_expiry_minutes
+        )
 
         with UnitOfWork() as uow:
             MFARepository(uow).save_challenge(
@@ -819,9 +823,9 @@ class OAuthTokenManager:
         Returns:
             User primary key if valid, None otherwise.
         """
-        cfg = CR.get_mfa_config()
         challenge = build_repository(MFARepository).get_challenge(token)
-        if challenge is None or not challenge.is_valid(cfg["max_challenge_attempts"]):
+        max_attempts = CR.mfa_config().max_challenge_attempts
+        if challenge is None or not challenge.is_valid(max_attempts):
             return None
         return challenge.user_id
 
@@ -963,8 +967,9 @@ class MFAManager:
             cred.confirmed_at = utcnow_naive()
 
             repo.delete_recovery_codes(user_id)
-            cfg = CR.get_mfa_config()
-            plaintext_codes = generate_recovery_codes(cfg["recovery_codes_count"])
+            plaintext_codes = generate_recovery_codes(
+                CR.mfa_config().recovery_codes_count
+            )
             repo.save_recovery_codes([
                 MFARecoveryCode(user_id=user_id, code_hash=hash_password(plain))
                 for plain in plaintext_codes

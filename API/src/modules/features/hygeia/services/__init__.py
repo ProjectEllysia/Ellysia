@@ -17,8 +17,10 @@ from .ingest_guard import (
     enforce_body_size,
     enforce_ingest_limits,
 )
+from .inventory_adapter import services_from_inventory
 
 __all__ = [
+    "services_from_inventory",
     "agent_key_id_from_request",
     "generate_agent_key",
     "require_agent_key",

@@ -1,6 +1,6 @@
 """add Ellysia engine (Finding, EllysiaScan) + OpenPort.cpe
 
-Fase 0 of the Ellysia vulnerability engine (see knowledge/vulnengineroadmap.md):
+Fase 0 of the Ellysia vulnerability engine (see plans/feature/themis/lybra-engine-roadmap.md):
 
 - ``OpenPort.cpe``: stop dropping the CPE Nmap already emits with ``-sV`` so the
   engine can read it for version→CVE correlation in later phases.

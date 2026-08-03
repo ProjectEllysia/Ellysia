@@ -343,9 +343,9 @@ class AegisAlertFetcher:
     _lock       = threading.Lock()
 
     def __init__(self, fallback_brands: list[str] | None = None) -> None:
-        self._max_alert_age_years = CR.get_aegis_vulnerabilities_antiquity()
+        self._max_alert_age_years = CR.aegis_config().vulnerabilities_antiquity
 
-        brand_catalogue           = CR.get_aegis_brands()
+        brand_catalogue           = CR.aegis_config().brands
         self._brand_slugs: dict[str, tuple[str, str]] = {
             b["label"]: (b["circl_vendor"], b["circl_product"])
             for b in brand_catalogue
@@ -682,7 +682,7 @@ class AegisAIWriter:
     # ── Prompts ───────────────────────────────────────────────────────────────
 
     def _build_system_prompt(self) -> str:
-        prompts = CR.get_aegis_prompts()
+        prompts = CR.aegis_config().prompts
         return prompts.get("system", "")
 
     def _build_intro_context(self, tweaks: dict[str, Any]) -> str:
@@ -732,7 +732,7 @@ class AegisAIWriter:
         tweaks:             dict[str, Any],
         verified_resources: str,
     ) -> str:
-        prompts = CR.get_aegis_prompts()
+        prompts = CR.aegis_config().prompts
         user_template = prompts.get("userTemplate", "")
         
         company  = tweaks.get("company", "la empresa")
@@ -768,7 +768,7 @@ class AegisAIWriter:
             "topic_id": str(topic.id) if topic else str(topic_id),
             "focus": focus,
             "verified_resources": verified_resources[:2000],
-            "tips_amount": str(CR.get_aegis_tips_amount()),
+            "tips_amount": str(CR.aegis_config().tips_amount),
             "intro_context": intro_context,
         }
         
@@ -825,7 +825,7 @@ class AegisAIWriter:
         result = self._generator.digest(ai_input)
 
         data = result.parse_json()
-        tips_amount = CR.get_aegis_tips_amount()
+        tips_amount = CR.aegis_config().tips_amount
         raw_subtitle = str(data.get("subtitle", "")).strip()
         
         if not raw_subtitle or raw_subtitle.lower() == topic_title.lower():

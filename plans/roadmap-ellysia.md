@@ -1,6 +1,6 @@
 # Ellysia — Plan de producto y roadmap
 
-> Documento de gobierno del proyecto. Ordena al resto de planes (`vulnengineroadmap.md`,
+> Documento de gobierno del proyecto. Ordena al resto de planes (`lybra-engine-roadmap.md`,
 > `feature/hygeia/*`, `improvements/*`) y decide qué se construye, qué se congela y qué no se
 > construye. Sustituye por completo al antiguo plan de viabilidad SaaS, cuyas dos premisas
 > centrales dejaron de ser ciertas: decía que Themis era "un envoltorio de Nmap/Nikto/OpenVAS"
@@ -54,7 +54,7 @@ Verificado directamente contra el código, no contra planes anteriores.
 | SPA Vue | 77 vistas, ~21.000 líneas | Incluye hubs públicos y páginas legales |
 | Tests | 60 ficheros, 708 tests | Unit + integration, SQLite con externos mockeados |
 
-### 2.2 Lybra — el motor propio (`vulnengineroadmap.md`)
+### 2.2 Lybra — el motor propio (`lybra-engine-roadmap.md`)
 
 Es, objetivamente, la pieza más valiosa del repositorio y la que justifica que Ellysia exista
 como algo más que una integración de herramientas ajenas.
@@ -62,17 +62,23 @@ como algo más que una integración de herramientas ajenas.
 | Fase | Pista | Estado real |
 |---|---|---|
 | **0** — Cimientos (`Finding`, `ScanType.LYBRA`, CPE persistido) | Correlación | ✓ implementada |
+| **0.9** — Contrato de entrada externa de servicios (`Service.origin`, modo `services=`) | Correlación | ✓ implementada — desbloquea la Fase I |
 | **1** — Matcher CPE→CVE | Correlación | ✓ implementada |
 | **2** — KB local | Correlación | ✓ implementada — refleja NVD, CISA-KEV y FIRST-EPSS |
+| **N** — Dissectors y checks de red no-HTTP (SMB, FTP, SMTP/IMAP/POP3, MySQL, Redis, VNC…) | Bajo nivel | ◐ parcial — siete protocolos con dissector, cierra la brecha G1 que dejaba OpenVAS |
+| **I** — Inventario de Hygeia como escaneo autenticado | Correlación | ◐ parcial — la tubería funciona de extremo a extremo; falta que el motor sepa resolver software de escritorio a CPE (Fase I-b) |
 | **5** — Dedup multi-fuente, ciclo de vida, scoring | Correlación | ✓ implementada |
 | **6** — Pipeline orquestado | Convergencia | ✓ implementada |
-| **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — soporta `http` y `tls`; faltan `network` y `script`; el feed es JSON, no el YAML estilo Nuclei del diseño |
-| **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — hash de favicon, firmas de tecnología estilo Wappalyzer y HASSH de SSH; falta JARM |
+| **U** — Nuclei: herramienta de primera clase, corroborador y oráculo | Bajo nivel | ○ planificada — **prerrequisito del cierre de la Fase R** (ver §5.2) |
+| **R** — Runtime de checks propio | Bajo nivel | ◐ parcial — soporta `http`, `tls` y `network`; falta `script`; el feed es JSON, no el YAML estilo Nuclei del diseño; su cierre depende de la Fase U |
+| **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS y siete protocolos de la Fase N; falta JARM |
 | **T** — Transporte propio | Bajo nivel | ◐ parcial — connect scan sobre asyncio; faltan SYN sin estado, sondas UDP y control de tasa AIMD |
-| **4**, DAST, y toda la Etapa 2 (P, E, C, O, A, B, D, G, S, X) | Ambas | ○ planificadas |
+| **O**, **D**, **4**, DAST, y toda la Etapa 2 (P, E, C, A, B, G, S, X) | Ambas | ○ planificadas |
 
-La pista de correlación está **completa**. La pista de bajo nivel —la que da carácter propio al
-escáner— está a medias en sus tres fases. Ahí es donde queda el trabajo con más identidad.
+La pista de correlación está, en su núcleo, **completa** (0.9, 1, 2, 5, 6 hechas; solo I-b queda
+abierta). La pista de bajo nivel —la que da carácter propio al escáner— está a medias en sus fases,
+y es donde queda el trabajo con más identidad. El detalle completo de las quince fases vive en
+`lybra-engine-roadmap.md`; esta tabla es el resumen que gobierna las prioridades del §5.
 
 ### 2.3 Hygeia — el módulo de telemetría (`feature/hygeia/hygeia-backend.md`)
 
@@ -182,27 +188,53 @@ antemano el problema de los backports que la Fase 4 de Lybra pretendía atacar p
 
 **Alcance:** endpoint `POST /hygeia/inventory` con la misma auth de agente y las mismas guardas
 de payload que la ingesta · columna `MonitoredAsset.host_id` con resolución/creación del `Host`
-· adaptador inventario→servicios (simétrico a los de Nikto/OpenVAS que ya existen, pero con
+· adaptador inventario→servicios (simétrico al de Nikto que ya existe, pero con
 puerto opcional) · disparo de `LybraEngineManager` vía TaskQueue · envío diferencial por hash
 del listado. Requiere trabajo en el repo del agente además de en este.
 
 **Estimación:** 4–6 semanas.
 
-### 5.2 Prioridad 2 — Cerrar la Fase R de Lybra
+### 5.2 Prioridad 2 — Nuclei: herramienta, corroborador y oráculo (Fase U de Lybra)
 
-**Qué falta:** los tipos de check `network` (sondas de protocolo crudas sobre socket propio) y
-`script` (plugins Python para lógica multipaso), y la migración del feed de JSON al esquema
-declarativo YAML compatible con plantillas de Nuclei que describe el roadmap.
+**Qué es:** incorporar Nuclei a Ellysia en cuatro papeles que comparten la misma pieza de trabajo
+—el traductor de su salida a `Finding`—: (U1) un `ScanType.NUCLEI` de primera clase, lanzable solo
+desde el panel de Themis con su propio PDF, exactamente como hoy se lanzan Nmap o Nikto; (U2) un
+corroborador más del análisis profundo de Lybra; (U3) un oráculo diferencial para el banco de
+pruebas, que mide falsos positivos sobre objetivos sin etiqueta previa; y (U4) una medición —no
+todavía la implementación— de qué fracción del feed comunitario de plantillas es ingerible por el
+runtime de checks propio.
 
-**Por qué:** la Fase R es, según el propio roadmap del motor, "la capa de identidad, la más
-importante de todo el plan" — es lo que independiza a Lybra de Nikto. Está a medias, y una
-fase a medias es la peor posición posible: ya pagas su complejidad sin cobrar su beneficio.
-El paso a YAML tiene además un efecto multiplicador que ninguna otra tarea del roadmap tiene:
-convierte "escribir una detección nueva" en editar un fichero de datos en vez de tocar código.
+**Por qué antes que cerrar la Fase R:** Nuclei pasa el mismo examen de naturaleza que ya distingue
+a Nmap y Nikto de OpenVAS (§6) — es un binario con un feed de datos, no una plataforma ajena — así
+que encaja sin contradecir la premisa de Lybra. Y resulta que **es el prerrequisito real de la
+Prioridad 3**: la migración del feed propio al esquema YAML de Nuclei, la ingesta de sus
+plantillas y el umbral de precisión ≥0,9 que cierra la Fase R dependen de un dato que hoy no existe
+—qué fracción del lenguaje de Nuclei soporta el runtime propio— y de una vara de medir para el
+propio umbral. Hacerlo antes evita migrar el feed dos veces y evita declarar una precisión que
+nadie ha medido. Como beneficio de producto añadido, sustituye a Nikto como corroborador con datos
+mucho mejores (CVE + CVSS frente al OSVDB de Nikto, muerto desde 2016) y entrega, de paso, una
+herramienta más para el panel de Themis sin construir ningún módulo nuevo — sigue siendo Themis,
+no una sexta pieza, así que no choca con la regla del §9.
+
+**Estimación:** 2–3 semanas (U1–U3; U4 es un script de medición de horas, no semanas).
+
+### 5.3 Prioridad 3 — Cerrar la Fase R de Lybra
+
+**Qué falta:** el tipo de check `script` (plugins Python para lógica multipaso) y la migración del
+feed de JSON al esquema declarativo YAML compatible con plantillas de Nuclei — el tipo `network`
+ya está construido, aportado por la Fase N. Depende de la Prioridad 2: el esquema YAML al que se
+migra es el de Nuclei, la ingesta de plantillas es literalmente el resultado de U4, y el umbral de
+precisión ≥0,9 se mide contra el oráculo diferencial de U3.
+
+**Por qué:** la Fase R es, según el propio roadmap del motor, la capa de identidad — es lo que
+independiza a Lybra de Nikto. Está a medias, y una fase a medias es la peor posición posible: ya
+pagas su complejidad sin cobrar su beneficio. El paso a YAML tiene además un efecto multiplicador
+que ninguna otra tarea del roadmap tiene: convierte "escribir una detección nueva" en editar un
+fichero de datos en vez de tocar código.
 
 **Estimación:** 3–5 semanas.
 
-### 5.3 Prioridad 3 — Ampliar la KB con OSV/GHSA
+### 5.4 Prioridad 4 — Ampliar la KB con OSV/GHSA
 
 La KB refleja NVD, KEV y EPSS. Falta OSV/GHSA, que es donde vive la vulnerabilidad de
 dependencias de aplicación (npm, PyPI, Go…). Con la integración de inventario de §5.1 ya en
@@ -211,18 +243,18 @@ host incluye paquetes que NVD cubre mal y OSV cubre bien.
 
 **Estimación:** 2–3 semanas.
 
-### 5.4 Prioridad 4 — Fases F y T de Lybra
+### 5.5 Prioridad 5 — Fases F y T de Lybra
 
 Completar el fingerprinting (JARM) y el transporte (SYN sin estado, sondas UDP, control AIMD).
 Es el trabajo técnicamente más entretenido de todo el roadmap y el que más independiza de Nmap,
-pero entrega menos valor de producto por hora que las tres anteriores: hoy Nmap ya cubre esa
+pero entrega menos valor de producto por hora que las cuatro anteriores: hoy Nmap ya cubre esa
 función correctamente. **Es trabajo de identidad y de disfrute, no de necesidad** — lo cual,
 dada la premisa del §1, es un motivo legítimo para hacerlo, siempre que sea una decisión
-consciente y no un desvío de las prioridades 1–3.
+consciente y no un desvío de las prioridades 1–4.
 
 **Estimación:** 6–10 semanas para ambas.
 
-### 5.5 Oportunista — Fase G (hallazgo → píldora de Aegis)
+### 5.6 Oportunista — Fase G (hallazgo → píldora de Aegis)
 
 Generar automáticamente una píldora de concienciación y un plan de remediación con el comando
 exacto a partir de un `Finding`. Conecta Themis con Aegis usando `scribe`, que ya está
@@ -233,35 +265,59 @@ la plataforma. No es urgente, pero es la mejor relación valor/esfuerzo de la Et
 
 ---
 
-## 6. OpenVAS: congelado
+## 6. OpenVAS: eliminado
 
-**Decisión: se queda en el código, sale del producto.** No se elimina, no se promociona, no
-recibe más trabajo.
+**Estado (2026-07-31): eliminado.** Ejecutado el desmontaje completo descrito en
+`lybra-engine-roadmap.md` §7/§6.3 (Ronda 0 y Ronda 2): desconectado del análisis profundo (E0),
+retirado del producto y del código (E1+E2), y sus tres tablas nativas borradas por migración
+(E3) — la base de desarrollo no tenía ninguna fila que archivar, verificado antes de escribir la
+migración. `grep -ri openvas API/src` no devuelve código, solo comentarios que documentan por
+qué un `Finding.source="openvas"` histórico puede seguir apareciendo. El razonamiento de
+gobierno que motivó la decisión queda abajo, sin cambios.
 
-El razonamiento es el que ya se discutió y sigue siendo válido. OpenVAS/Greenbone es una
+El motivo de fondo no cambia respecto a la decisión anterior. OpenVAS/Greenbone es una
 plataforma completa con su propio protocolo de gestión, su propio ciclo de escaneo y su propia
 base de NVTs; integrarla es hacer de proxy autenticado hacia otra API, no añadir capacidad
 propia. Frente a Nmap y Nikto —binarios cuya salida Ellysia parsea para construir su propio
-modelo— OpenVAS no deja margen para aportar nada encima. Contradice la razón de ser de Lybra.
+modelo— OpenVAS no deja margen para aportar nada encima. Contradice la razón de ser de Lybra, y
+sigue siendo con diferencia el servicio más pesado del `docker-compose` (feed de NVTs con ~15
+minutos de arranque en frío, un solo host por escaneo, `NET_ADMIN` + `NET_RAW`, 1 GiB de
+memoria compartida).
 
-A eso se suma el coste operativo: el feed de NVTs tarda ~15 minutos en el primer arranque,
-acepta un solo host por escaneo (sin rangos), y es con diferencia el servicio más pesado del
-`docker-compose`. En una instancia compartida, cada usuario compitiendo por la misma instancia
-de Greenbone es el problema del vecino ruidoso en su forma más aguda.
+**Qué cambió respecto a "congelar":** dos hallazgos, al revisar el plan del motor con la
+pregunta "¿qué nos haría falta para prescindir de OpenVAS?", abarataron el borrado por debajo
+del umbral que justificaba dejarlo estático:
 
-**Por qué congelar y no borrar:** son ~200 referencias repartidas por 20 ficheros de Themis,
-con tests que pasan y una capacidad que funciona. Arrancarlo es varias sesiones de refactor
-cuyo único beneficio es estético mientras el proyecto no se despliegue para nadie. Si algún
-día se despliega, la decisión ya está tomada: OpenVAS no entra en ningún tier. Y si algún
-cliente lo pidiera expresamente, la única forma sensata sería una instancia dedicada suya,
-facturada aparte.
+1. El banco de pruebas de Lybra (`API/tests/oracle/`) nunca usó a OpenVAS como oráculo de
+   detección, pese a que un plan anterior lo daba por hecho — verificado contra el código, no
+   contra el plan. Borrarlo no deja a Lybra sin instrumento de medición; el sustituto (verdad
+   por etiqueta conocida en imágenes vulnerables + Nuclei como oráculo diferencial, el papel U3
+   de la Prioridad 2 del §5.2) no depende de OpenVAS en absoluto.
+2. La brecha de cobertura real que deja no son "cien mil NVTs", sino cinco cosas concretas y
+   acotadas (protocolos no-HTTP, escaneo autenticado, verdad del proveedor sobre backports,
+   credenciales por defecto, y una cola larga de appliances de nicho que se descarta a
+   propósito). Cuatro de las cinco ya eran fases de este roadmap; la Fase N
+   (`lybra-engine-roadmap.md`) pasa a liderar precisamente para cerrar la única que de verdad
+   importa antes de que el borrado duela.
+
+Como el proyecto no tiene usuarios ni contacto comercial (§1), nadie pierde cobertura real al
+borrarlo ya: el coste de mantenerlo conectado (arranque lento, un corroborador de hasta 4 h
+disparándose en cada análisis profundo del motor propio) es presente y cierto; la pérdida de
+cobertura es hipotética y, en la práctica, ya cubierta por las fases en marcha. Por eso el
+desmontaje empieza por desconectarlo de inmediato (paso E0 de `lybra-engine-roadmap.md`) en
+lugar de esperar a que las fases de sustitución terminen.
+
+**Qué no cambia respecto a la decisión anterior:** si algún día hay un cliente real que lo pida
+expresamente, la única forma sensata seguiría siendo una instancia dedicada suya, facturada
+aparte — eso ya no es una opción de este roadmap una vez borrado el código, sino una
+reintegración desde cero si llegara a hacer falta.
 
 ---
 
 ## 7. Los otros módulos
 
 La regla que gobierna esta sección: **ningún módulo satélite recibe trabajo nuevo hasta que
-las prioridades 1–3 del §5 estén cerradas.** Siguen todos visibles y funcionando en la
+las prioridades 1–4 del §5 estén cerradas.** Siguen todos visibles y funcionando en la
 plataforma; lo que se congela es la inversión de tiempo, no la funcionalidad.
 
 - **Aegis — add-on comercial separado.** Es el único módulo con un comprador potencialmente
@@ -337,15 +393,15 @@ alguien la pida.
 Infraestructura estimada si se desplegara: un VPS único (Hetzner, ~10–35 €/mes) con API,
 worker, Postgres y Redis; Caddy como proxy inverso con TLS automático; Brevo para SMTP con
 SPF/DKIM/DMARC configurados —sin esto las campañas de Aegis y las alertas de Hygeia van a
-spam—; Ollama es opcional porque `scribe` ya usa OpenAI por defecto; OpenVAS no se despliega
-(§6). Total por debajo de 50 €/mes.
+spam—; Ollama es opcional porque `scribe` ya usa OpenAI por defecto; OpenVAS ya no existe en el
+código (§6). Total por debajo de 50 €/mes.
 
 ---
 
 ## 9. Qué no construir
 
 - **Un sexto módulo.** Cualquier idea nueva se escribe como plan y se deja quieta hasta que
-  las prioridades 1–3 estén cerradas. Esta regla es la más importante del documento.
+  las prioridades 1–4 estén cerradas. Esta regla es la más importante del documento.
 - **Los nueve planes de diseño sin implementar** (webhooks salientes, WebAuthn, vault de claves
   de agente, botón de reinicio del servidor, migración a Tailwind, escalado de BD, factory de
   decoradores N12…). Todos están correctamente analizados y ninguno es urgente. Que un plan
@@ -365,7 +421,8 @@ spam—; Ollama es opcional porque `scribe` ya usa OpenAI por defecto; OpenVAS n
 | Riesgo | Probabilidad | Mitigación |
 |---|---|---|
 | **Dispersión en módulos nuevos** | Alta — es el patrón histórico del proyecto | La regla del §9; cerrar Fase R antes de abrir nada |
-| **Fases a medias acumulándose** | Alta — R, F y T llevan tiempo parciales | Prioridad 2 existe exactamente por esto |
+| **Fases a medias acumulándose** | Alta — R, F y T llevan tiempo parciales | Prioridades 2 y 3 existen exactamente por esto — U es lo que hace medible y cerrable a R |
+| **Que la Fase U (Nuclei) se lea como el sexto módulo prohibido por el §9** | Baja, pero conviene nombrarla | No lo es: vive dentro de Themis, sigue el mismo patrón de escáner que Nmap/Nikto, y no abre superficie de producto nueva — amplía una ya existente |
 | **El proyecto se queda sin usuarios nunca** | Alta, y **aceptada** por la premisa del §1 | Ninguna; no es un fallo si el objetivo es construir |
 | **Deuda que muerde si algún día se despliega** | Media | `areLocalIpsAllowed`, lockfile de dependencias y backups son las tres únicas que importan |
 | **Pérdida de datos del entorno propio** | Media | `CREATE_DATABASE=True` sigue siendo destructivo; los backups del §8.1 valen también para uso personal |
@@ -378,10 +435,10 @@ spam—; Ollama es opcional porque `scribe` ya usa OpenAI por defecto; OpenVAS n
 No hay fecha. Hay dos condiciones objetivas, y basta con revisar cuál se cumple cuando se
 cumpla:
 
-- **Si se cierran las prioridades 1–3 del §5** — inventario→Lybra, Fase R y OSV/GHSA — Ellysia
-  pasa a ser un producto técnicamente coherente y completo en su núcleo. Ese es el momento
-  natural para reevaluar si la vía comercial merece las 4–8 semanas aburridas del §8.1, porque
-  por primera vez habría algo redondo que enseñar.
+- **Si se cierran las prioridades 1–4 del §5** — inventario→Lybra, Nuclei (Fase U), Fase R y
+  OSV/GHSA — Ellysia pasa a ser un producto técnicamente coherente y completo en su núcleo. Ese
+  es el momento natural para reevaluar si la vía comercial merece las 4–8 semanas aburridas del
+  §8.1, porque por primera vez habría algo redondo que enseñar.
 - **Si aparece la señal externa del §8.2** antes que eso, §8.1 se activa y el roadmap técnico
   cede el paso.
 

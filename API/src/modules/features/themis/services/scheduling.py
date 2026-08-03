@@ -78,20 +78,24 @@ def _run_nikto_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None
     logger.info("Nikto scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
 
 
-def _run_openvas_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None:
-    _require_args(arguments, ["target"], "openvas")
+def _run_nuclei_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None:
+    _require_args(arguments, ["target"], "nuclei")
 
-    logger.info("Launching OpenVAS scheduled scan #%d: %s", ps_id, arguments["target"])
+    logger.info("Launching Nuclei scheduled scan #%d: %s", ps_id, arguments["target"])
 
-    from ..managers import OpenVASScanManager
+    from ..managers import NucleiScanManager
 
-    scan_id = OpenVASScanManager().run_scan(
+    scan_id = NucleiScanManager().run_scan(
         target=arguments["target"],
+        severities=arguments.get("severities"),
+        tags=arguments.get("tags"),
+        rate_limit=arguments.get("rate_limit"),
+        request_timeout=arguments.get("request_timeout"),
         user_id=user_id,
         programed_scan_id=ps_id,
     )
 
-    logger.info("OpenVAS scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
+    logger.info("Nuclei scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
 
 
 def _run_lybra_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None:
@@ -120,8 +124,8 @@ class ThemisScheduler:
     _TASK_MAPPING: dict[ScanType, Callable[[int, int, dict[str, Any]], None]] = {
         ScanType.NMAP:    _run_nmap_scan,
         ScanType.NIKTO:   _run_nikto_scan,
-        ScanType.OPENVAS: _run_openvas_scan,
         ScanType.LYBRA:   _run_lybra_scan,
+        ScanType.NUCLEI:  _run_nuclei_scan,
     }
 
     _scheduler: Optional[_BgScheduler] = None
@@ -230,18 +234,18 @@ class ThemisScheduler:
         the per-user ProgramedScan jobs.
         """
         import src.modules.system.config_reading as CR
-        if not CR.is_kb_sync_enabled():
+        if not CR.knowledge_base_config().enabled:
             return
         from ..managers import KbSyncManager
         cls._scheduler.add_job(  # type: ignore[union-attr]
             func=KbSyncManager.execute_kb_sync,
-            trigger=CronTrigger.from_crontab(CR.get_kb_sync_cron(), timezone=timezone.utc),
+            trigger=CronTrigger.from_crontab(CR.knowledge_base_config().sync_cron, timezone=timezone.utc),
             id="lybra_kb_sync",
             replace_existing=True,
             max_instances=1,
             name="Lybra KB sync",
         )
-        logger.info("Scheduled Lybra KB sync (%s)", CR.get_kb_sync_cron())
+        logger.info("Scheduled Lybra KB sync (%s)", CR.knowledge_base_config().sync_cron)
 
     @classmethod
     def _sync_from_db(cls) -> None:

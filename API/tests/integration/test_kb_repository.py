@@ -67,6 +67,124 @@ def test_upsert_cve_is_idempotent_and_replaces_matches(app):
     assert now[0].cvss_score == 9.8     # fields updated
 
 
+# ------------------------------------------------- Fase I-b, paso 2: índice CPE
+
+def _match(vendor, product):
+    return {"vendor": vendor, "product": product, "exact_version": "1.0",
+            "version_start_including": None, "version_start_excluding": None,
+            "version_end_including": None, "version_end_excluding": None}
+
+
+def test_rebuild_cpe_product_index_resolves_unambiguous_names(app):
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            # "7-zip" and "http_server" each have exactly one (vendor, product).
+            repo.upsert_cve(_cve_row("CVE-1111-1111"), [_match("7-zip", "7-zip")])
+            repo.upsert_cve(_cve_row("CVE-2222-2222"), [_match("apache", "http_server")])
+
+        with UnitOfWork() as uow:
+            count = KbRepository(uow).rebuild_cpe_product_index()
+
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            seven_zip = repo.resolve_product_alias("7 zip")
+            apache = repo.resolve_product_alias("http server")
+            missing = repo.resolve_product_alias("totally unknown app")
+
+    # Two pairs, each indexed twice: by product and by vendor+product.
+    assert count == 4
+    assert seven_zip == ("7-zip", "7-zip")
+    assert apache == ("apache", "http_server")
+    assert missing is None
+
+
+def test_rebuild_cpe_product_index_resolves_vendor_prefixed_names(app):
+    """A Windows inventory writes "Microsoft Edge"; NVD's product column says
+    only "edge". Without the vendor-qualified key the two could never meet."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).upsert_cve(_cve_row("CVE-7777-7777"),
+                                          [_match("microsoft", "edge")])
+        with UnitOfWork() as uow:
+            KbRepository(uow).rebuild_cpe_product_index()
+
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            assert repo.resolve_product_alias("microsoft edge") == ("microsoft", "edge")
+            # The bare product name still resolves too — this is additive.
+            assert repo.resolve_product_alias("edge") == ("microsoft", "edge")
+
+
+def test_product_key_wins_over_a_colliding_vendor_qualified_key(app):
+    """NVD names the same software both ways ("adobe:adobe_reader" and
+    "adobe:reader"), so "adobe reader" is reachable as a product name AND as a
+    vendor-qualified one. The direct reading must win rather than the pair
+    being discarded as ambiguous — otherwise adding the vendor keys would
+    silently *remove* names that resolved before."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            repo.upsert_cve(_cve_row("CVE-8888-8888"), [_match("adobe", "adobe_reader")])
+            repo.upsert_cve(_cve_row("CVE-9999-9999"), [_match("adobe", "reader")])
+        with UnitOfWork() as uow:
+            KbRepository(uow).rebuild_cpe_product_index()
+
+        with UnitOfWork() as uow:
+            resolved = KbRepository(uow).resolve_product_alias("adobe reader")
+
+    assert resolved == ("adobe", "adobe_reader")
+
+
+def test_rebuild_cpe_product_index_discards_ambiguous_names(app):
+    """The real case that motivated the rule: NVD tags "git" under several
+    unrelated vendors (a Jenkins plugin, firmware, the real Git SCM...). All
+    of them share the exact same product string, so they collide on the same
+    normalized key — and none should be guessed."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            repo.upsert_cve(_cve_row("CVE-3333-3333"), [_match("git-scm", "git")])
+            repo.upsert_cve(_cve_row("CVE-4444-4444"), [_match("jenkins", "git")])
+
+        with UnitOfWork() as uow:
+            count = KbRepository(uow).rebuild_cpe_product_index()
+
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            resolved = repo.resolve_product_alias("git")
+            qualified = repo.resolve_product_alias("jenkins git")
+
+    # The bare "git" stays ambiguous and unresolved, but each vendor-qualified
+    # variant ("git scm git", "jenkins git") names exactly one pair, so those
+    # two are indexed — the ambiguity is in the bare name, not in them.
+    assert count == 2
+    assert resolved is None    # never guesses between git-scm and jenkins
+    assert qualified == ("jenkins", "git")
+
+
+def test_rebuild_cpe_product_index_is_a_full_replace_not_incremental(app):
+    """A pair that stops being unique (a second vendor for the same product
+    shows up in a later sync) must fall back OUT of the index, not linger."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            repo.upsert_cve(_cve_row("CVE-5555-5555"), [_match("solo-vendor", "widget")])
+        with UnitOfWork() as uow:
+            KbRepository(uow).rebuild_cpe_product_index()
+        with UnitOfWork() as uow:
+            assert KbRepository(uow).resolve_product_alias("widget") == ("solo-vendor", "widget")
+
+        # A second, unrelated vendor for the exact same product name appears.
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            repo.upsert_cve(_cve_row("CVE-6666-6666"), [_match("other-vendor", "widget")])
+        with UnitOfWork() as uow:
+            KbRepository(uow).rebuild_cpe_product_index()
+        with UnitOfWork() as uow:
+            assert KbRepository(uow).resolve_product_alias("widget") is None
+
+
 def test_upsert_kev_and_epss_lookup(app):
     with app.app_context():
         with UnitOfWork() as uow:

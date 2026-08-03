@@ -11,6 +11,7 @@ from unittest import mock
 import pytest
 from itsdangerous import BadSignature
 
+import src.modules.system.config_reading as CR
 import src.modules.features.iris.mailbox_managers as mailbox_managers_mod
 from src.modules.features.iris.exceptions import (
     IrisMailboxConnectionNotFoundError,
@@ -181,7 +182,10 @@ def test_start_connect_rejects_unknown_provider(app, regular_user):
 
 
 def test_start_connect_enforces_quota(app, regular_user, monkeypatch):
-    monkeypatch.setattr(mailbox_managers_mod.CR, "get_iris_max_connections_per_user", lambda: 1)
+    monkeypatch.setattr(
+        mailbox_managers_mod.CR, "iris_config",
+        lambda: CR.IrisConfig(max_connections_per_user=1),
+    )
     with app.app_context():
         _save(app, _connection(regular_user.id, account_email="a@gmail.com"))
         with pytest.raises(IrisMailboxQuotaExceededError):
@@ -337,7 +341,10 @@ def test_sync_connection_ingests_new_messages_and_advances_cursor(app, regular_u
 
 
 def test_sync_connection_stops_at_daily_quota(app, regular_user, monkeypatch):
-    monkeypatch.setattr(mailbox_managers_mod.CR, "get_iris_max_ingested_per_day", lambda: 0)
+    monkeypatch.setattr(
+        mailbox_managers_mod.CR, "iris_config",
+        lambda: CR.IrisConfig(max_ingested_per_day=0),
+    )
     with app.app_context():
         connection_id = _save(app, _connection(regular_user.id, sync_cursor="cursor-0"))
 

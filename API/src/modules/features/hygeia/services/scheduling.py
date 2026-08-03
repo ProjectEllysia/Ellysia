@@ -50,7 +50,7 @@ class HygeiaScheduler:
         )
         cls._scheduler.add_job(
             func=cls._run_retention,
-            trigger=CronTrigger.from_crontab(CR.get_hygeia_retention_cron(), timezone=timezone.utc),
+            trigger=CronTrigger.from_crontab(CR.hygeia_config().retention_cron, timezone=timezone.utc),
             id="hygeia_retention",
             replace_existing=True,
             max_instances=1,

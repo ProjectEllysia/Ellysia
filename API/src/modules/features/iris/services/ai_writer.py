@@ -2,10 +2,10 @@
 IrisAIWriter — AI-generated executive narrative for a finished Iris analysis.
 
 Follows the same pattern as ``themis/services/analyzers.py``'s
-``NmapAIWriter``/``NiktoAIWriter``/``OpenVASAIWriter``: model calling is
+``NmapAIWriter``/``NiktoAIWriter``/``LybraAIWriter``: model calling is
 delegated to an injected scribe ``AIGenerator``, prompts live in
-SecOpsConfig.json (``iris.prompts.summary``), and the strategy (Ollama/
-OpenAI) is resolved per module via ``get_ai_strategy_for("iris")``.
+SecOpsConfig.json (``features.iris.prompts.summary``), and the strategy (Ollama/
+OpenAI) is resolved per module via ``CR.scribe_config().strategy_for("iris")``.
 
 Unlike Themis — where the AI narrative is generated inline while building
 the PDF and never persisted on its own — Iris's web report viewer is a live
@@ -57,7 +57,7 @@ class IrisAIWriter:
         self._generator = generator or build_generator("iris")
 
     def _build_prompts(self) -> dict:
-        return CR.get_iris_prompts().get("summary", {})
+        return CR.iris_config().prompts.get("summary", {})
 
     def _build_user_prompt(self, report: Dict[str, Any]) -> str:
         failed_rules = [
@@ -100,7 +100,7 @@ class IrisAIWriter:
         """
         prompts = self._build_prompts()
         if not prompts.get("system"):
-            raise AIResponseError("Prompt 'iris.prompts.summary.system' no configurado", attempt=0)
+            raise AIResponseError("Prompt 'features.iris.prompts.summary.system' no configurado", attempt=0)
 
         ai_input = AIInput(
             system_prompt=prompts["system"],

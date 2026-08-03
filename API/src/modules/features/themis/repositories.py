@@ -2,7 +2,7 @@
 Repositories for the Themis security scanning module.
 
 Provides typed data access for Scan, its polymorphic subtypes
-(NmapScan, NiktoScan, OpenVASScan), and ThemisDocument.
+(NmapScan, NiktoScan, LybraScan, NucleiScan), and ThemisDocument.
 
 Classes:
     ScanRepository:                Repository for Scan and its polymorphic subtypes.
@@ -24,8 +24,9 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session, joinedload
@@ -35,6 +36,7 @@ from src.modules.shared import utcnow_naive
 from .model import (
     AuthorizedTarget,
     CpeMatch,
+    CpeProductAlias,
     CveEntry,
     LybraScan,
     EpssScore,
@@ -45,10 +47,8 @@ from .model import (
     NiktoIncident,
     NiktoScan,
     NmapScan,
+    NucleiScan,
     OpenPort,
-    OpenVASVulnerability,
-    OpenVASScan,
-    OpenVASScanResult,
     Port,
     ProgramedScan,
     Scan,
@@ -59,6 +59,8 @@ from .model import (
     Traceroute,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class ScanRepository(BaseRepository[Scan]):
     """
@@ -68,8 +70,8 @@ class ScanRepository(BaseRepository[Scan]):
     and adds domain-specific query methods for the Themis module.
 
     Polymorphism is handled transparently by SQLAlchemy: querying Scan
-    returns instances of NmapScan, NiktoScan, or OpenVASScan depending
-    on the `scan_type` discriminator column.
+    returns instances of NmapScan, NiktoScan, LybraScan or NucleiScan
+    depending on the `scan_type` discriminator column.
 
     Attributes:
         _model:  Scan (inherited from BaseRepository).
@@ -91,9 +93,13 @@ class ScanRepository(BaseRepository[Scan]):
             NiktoScan,
             lambda: [joinedload(NiktoScan.incidents)],
         ),
-        ScanType.OPENVAS: (
-            OpenVASScan,
-            lambda: [joinedload(OpenVASScan.results).joinedload(OpenVASScanResult.vulnerability)],
+        ScanType.LYBRA: (
+            LybraScan,
+            lambda: [joinedload(LybraScan.findings)],
+        ),
+        ScanType.NUCLEI: (
+            NucleiScan,
+            lambda: [joinedload(NucleiScan.findings)],
         ),
     }
 
@@ -137,19 +143,6 @@ class ScanRepository(BaseRepository[Scan]):
             self._session.query(NiktoScan)
             .filter(NiktoScan.id == scan_id)
             .options(joinedload(NiktoScan.incidents), joinedload(NiktoScan.host))
-            .one_or_none()
-        )
-
-    def get_openvas_rich(self, scan_id: int) -> Optional[OpenVASScan]:
-        """[Background thread] Retrieve OpenVASScan with relationships eagerly loaded."""
-        return (
-            self._session.query(OpenVASScan)
-            .filter(OpenVASScan.id == scan_id)
-            .options(
-                joinedload(OpenVASScan.host),
-                joinedload(OpenVASScan.results).joinedload(OpenVASScanResult.vulnerability),
-                joinedload(OpenVASScan.results).joinedload(OpenVASScanResult.host),
-            )
             .one_or_none()
         )
 
@@ -202,12 +195,74 @@ class ScanRepository(BaseRepository[Scan]):
             order_by=Scan.started_at.desc(),
         )
 
+    # Sentinela de "solo los lanzados desde el panel de Themis" para
+    # ``get_lybra_scans_paginated``. Hace falta un valor propio porque ``None``
+    # ya significa otra cosa ahí ("no filtres, dame todos"), y lo que hay que
+    # expresar es un ``asset_id IS NULL`` — que ``paginate`` no sabe formular,
+    # ya que filtra por igualdad.
+    PANEL_SCANS = "panel"
+
+    def get_lybra_scans_paginated(
+        self,
+        user_id: int,
+        page: int = 1,
+        per_page: int = 10,
+        asset_id=PANEL_SCANS,
+    ):
+        """
+        Paginated Lybra scans for a user, filtered by where they came from.
+
+        Args:
+            user_id:  Owner user primary key.
+            page:     1-based page number.
+            per_page: Items per page.
+            asset_id: :data:`PANEL_SCANS` (the default) for the scans launched
+                from the Themis panel — those with no Hygeia asset behind them;
+                an ``int`` for one asset's inventory scans (Fase I); or ``None``
+                for every Lybra scan regardless of origin.
+
+        Returns:
+            Tuple of (items: List[LybraScan], total_count: int).
+        """
+        query = self._session.query(LybraScan).filter(LybraScan.user_id == user_id)
+        if asset_id is self.PANEL_SCANS:
+            query = query.filter(LybraScan.asset_id.is_(None))
+        elif asset_id is not None:
+            query = query.filter(LybraScan.asset_id == asset_id)
+
+        total_count = query.count()
+        items = (
+            query.order_by(LybraScan.started_at.desc())
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+            .all()
+        )
+        return items, total_count
+
+    def get_lybra_scan_ids_for_asset(self, asset_id: int) -> List[int]:
+        """Ids of every Lybra scan produced from one Hygeia asset's inventory.
+
+        The counterpart to ``LybraScan.asset_id`` being a soft reference with
+        no ``ForeignKey``: there is no database-level cascade to lean on, so
+        the asset's owner module has to clean up explicitly. Only the ids are
+        returned because the actual deletion goes through
+        ``LybraEngineManager.delete_scans_for_asset`` → ``delete_scan``, which
+        also removes each scan's generated PDFs from disk — a bulk row delete
+        here would leave those orphaned.
+        """
+        rows = (
+            self._session.query(LybraScan.id)
+            .filter(LybraScan.asset_id == asset_id)
+            .all()
+        )
+        return [row[0] for row in rows]
+
     def get_stats(self, user_id: int) -> dict:
         """
         Return scan counts grouped by type for a user.
 
         Returns:
-            Dict with keys ``total``, ``nmap``, ``nikto``, ``openvas``.
+            Dict with keys ``total``, ``nmap``, ``nikto``, ``lybra``, ``nuclei``.
         """
         from sqlalchemy import func
 
@@ -217,7 +272,7 @@ class ScanRepository(BaseRepository[Scan]):
             .group_by(Scan.scan_type)
             .all()
         )
-        counts = {"nmap": 0, "nikto": 0, "openvas": 0, "lybra": 0}
+        counts = {"nmap": 0, "nikto": 0, "lybra": 0, "nuclei": 0}
         for scan_type_val, count in results:
             key = scan_type_val.value if hasattr(scan_type_val, "value") else str(scan_type_val)
             if key in counts:
@@ -490,21 +545,6 @@ class ScanRepository(BaseRepository[Scan]):
         self._session.flush()
         return incident
 
-    def get_or_create_vulnerability(self, vuln_data: dict) -> OpenVASVulnerability:
-        """Get or create an OpenVASVulnerability row by NVT OID."""
-        nvt_oid = vuln_data["nvt_oid"]
-        vuln = self._session.query(OpenVASVulnerability).filter(
-            OpenVASVulnerability.nvt_oid == nvt_oid
-        ).one_or_none()
-
-        if vuln:
-            return vuln
-
-        vuln = OpenVASVulnerability(**vuln_data)
-        self._session.add(vuln)
-        self._session.flush()
-        return vuln
-
     def persist_nmap_results(self, scan, host, ports_data) -> None:
         """Persist Nmap host and port data into the database."""
         scan.host_id = host.id
@@ -533,21 +573,6 @@ class ScanRepository(BaseRepository[Scan]):
                 scan.incidents.append(incident)
 
         scan.host = host
-
-    def persist_openvas_results(self, scan, results_data, vulnerability_map) -> None:
-        """Persist OpenVAS scan results."""
-        for result_data in results_data:
-            host = self.get_or_create_host(
-                hostname   = result_data["host_ip"],
-                ip_address = result_data["host_ip"],
-            )
-
-            scan_result = OpenVASScanResult(
-                openvas_scan_id  = scan.id,
-                vulnerability_id = vulnerability_map[result_data["nvt_oid"]].id,
-                host_id          = host.id,
-            )
-            self._session.add(scan_result)
 
     # =========================================================================
     # LYBRA ENGINE
@@ -602,23 +627,54 @@ class ScanRepository(BaseRepository[Scan]):
         """Return a single finding by id (or None)."""
         return self._session.get(Finding, finding_id)
 
+    def get_previous_findings(
+        self, user_id: int, target: str, scan_type: str, exclude_scan_id: int
+    ) -> List[Finding]:
+        """Return the findings of the user's previous finished scan of a given
+        type against a target (for lifecycle comparison), or an empty list if
+        there is none. Generic over ``scan_type`` — the version any scanner's
+        manager (Lybra, Nuclei, ...) can share instead of each hand-rolling its
+        own "find the previous scan" query.
+        """
+        prev = (
+            self._session.query(Scan)
+            .filter(
+                Scan.user_id == user_id,
+                Scan.target == target,
+                Scan.scan_type == scan_type,
+                Scan.status == ScanStatus.FINISHED.value,
+                Scan.id != exclude_scan_id,
+            )
+            .order_by(Scan.started_at.desc())
+            .first()
+        )
+        return self.get_findings_by_scan(prev.id) if prev else []
+
     def get_previous_lybra_findings(
         self, user_id: int, target: str, exclude_scan_id: int
     ) -> List[Finding]:
         """Return the findings of the user's previous finished Lybra scan of a
-        target (for lifecycle comparison), or an empty list if there is none."""
-        prev = (
-            self._session.query(LybraScan)
-            .filter(
-                LybraScan.user_id == user_id,
-                LybraScan.target == target,
-                LybraScan.status == ScanStatus.FINISHED.value,
-                LybraScan.id != exclude_scan_id,
-            )
-            .order_by(LybraScan.started_at.desc())
-            .first()
+        target (for lifecycle comparison), or an empty list if there is none.
+
+        Thin wrapper kept for its existing call sites — the real query is now
+        the type-generic ``get_previous_findings``.
+        """
+        return self.get_previous_findings(user_id, target, ScanType.LYBRA.value, exclude_scan_id)
+
+    def set_feed_version_for_scan(self, scan_id: int, feed_version: str) -> None:
+        """Bulk-update every Finding's ``feed_version`` for a scan.
+
+        Used by ``NucleiScanManager`` to correct the reproducibility marker
+        after the fact: findings are persisted with a config-level fallback
+        during ``_persist_scan_results`` (before the live ``templates_version``
+        banner from the running binary is captured), then patched here once
+        the outer ``_execute_scan`` override has it — the same
+        persist-now/patch-post-hoc shape any scanner uses when a value is
+        only known after the subprocess has already produced its output.
+        """
+        self._session.query(Finding).filter(Finding.scan_id == scan_id).update(
+            {"feed_version": feed_version}
         )
-        return self.get_findings_by_scan(prev.id) if prev else []
 
     def get_host_services(self, host_id: int) -> List[HostService]:
         """Return a host's currently-tracked attack surface (Fase 5)."""
@@ -629,7 +685,7 @@ class ScanRepository(BaseRepository[Scan]):
         )
 
     def upsert_host_service(
-        self, host_id: int, port: int, protocol: str,
+        self, host_id: int, port: Optional[int], protocol: str,
         name: Optional[str], product: Optional[str], version: Optional[str], cpe: Optional[str],
     ) -> None:
         """Record a service as currently open, creating or refreshing its row.
@@ -638,14 +694,24 @@ class ScanRepository(BaseRepository[Scan]):
         scan actually resolved something — an unresolved rescan must not erase
         a product/version a previous scan already found) on every call, so a
         service's row always reflects its most recent observation.
+
+        ``port`` is ``None`` for a portless, ``origin="inventory"`` service
+        (Fase 0.9) — an installed package with nothing listening. A port
+        already uniquely identifies which row to touch; without a port, the
+        lookup keys on ``product`` too, otherwise two different packages on
+        the same host would collide on the same ``(host, NULL, protocol)``
+        row and silently overwrite each other.
         """
+        filters = [
+            HostService.host_id == host_id,
+            HostService.port == port,
+            HostService.protocol == protocol,
+        ]
+        if port is None:
+            filters.append(HostService.product == product)
         existing = (
             self._session.query(HostService)
-            .filter(
-                HostService.host_id == host_id,
-                HostService.port == port,
-                HostService.protocol == protocol,
-            )
+            .filter(*filters)
             .first()
         )
         now = utcnow_naive()
@@ -821,6 +887,91 @@ class KbRepository(BaseRepository[CveEntry]):
                 result.append(match.cve)
         return result
 
+    def resolve_product_alias(self, normalized_name: str) -> Optional[Tuple[str, str]]:
+        """Look up a normalized product name in the automated CPE index (Fase I-b, paso 2).
+
+        The third and last strategy ``LybraEngine._resolve_cpe`` tries, after
+        an embedded CPE and the curated alias feed both miss. See
+        :meth:`rebuild_cpe_product_index` for how the index is built and why a
+        name that used to be ambiguous is never in it.
+        """
+        row = (
+            self._session.query(CpeProductAlias)
+            .filter(CpeProductAlias.normalized_name == normalized_name)
+            .one_or_none()
+        )
+        return (row.vendor, row.product) if row else None
+
+    def rebuild_cpe_product_index(self) -> int:
+        """Rebuild ``CpeProductAlias`` from the current ``CpeMatch`` table (Fase I-b, paso 2).
+
+        Indexes every distinct ``(vendor, product)`` pair in ``CpeMatch`` under
+        **two** normalized keys (:func:`~.lybra.kb.normalize_product_name`),
+        because a desktop inventory and NVD name the same software differently:
+
+        1. The product alone — ``microsoft:edge`` → ``"edge"``. This is NVD's
+           own vocabulary, read literally.
+        2. Vendor and product together — ``microsoft:edge`` → ``"microsoft
+           edge"``. Windows inventories overwhelmingly prefix the vendor into
+           the display name ("Microsoft Edge", "Adobe Acrobat", "GitHub CLI",
+           "Oracle VirtualBox"), which key 1 alone can never match: NVD's
+           ``product`` column almost never repeats the vendor.
+
+        Key 1 **wins on collision**: it is the direct reading, while key 2 is a
+        derived convenience, so where both exist the direct one is kept and the
+        derived one only fills genuine gaps. This mirrors the precedence
+        ``LybraEngine._resolve_cpe`` already applies across its three
+        strategies (more-direct evidence first), and it is what makes adding
+        key 2 a pure addition — measured against a full NVD mirror it adds
+        ~118k resolvable names while removing exactly zero.
+
+        Ambiguity is discarded **within each key space independently**: a
+        normalized name that more than one distinct pair maps to is dropped
+        entirely rather than resolved to either candidate — e.g. the literal
+        NVD product ``"git"`` belongs to at least half a dozen unrelated
+        vendors (a Jenkins plugin, a firmware component, the real Git SCM...),
+        and picking one at random would risk matching CVEs against the wrong
+        software. That specific, verified case is exactly what
+        ``feeds/product_aliases.json`` (paso 3) exists to override by hand.
+
+        A full delete-and-reinsert rather than an incremental diff: this runs
+        once per KB sync (nightly, at most), so the cost is a non-issue, and it
+        is what lets a pair that stops being unique correctly fall back out of
+        the index instead of a stale row lingering.
+
+        Returns:
+            The number of alias rows written.
+        """
+        from .lybra import normalize_product_name
+
+        pairs = self._session.query(CpeMatch.vendor, CpeMatch.product).distinct().all()
+        by_product: dict[str, set] = {}
+        by_vendor_product: dict[str, set] = {}
+        for vendor, product in pairs:
+            key = normalize_product_name(product)
+            if key:
+                by_product.setdefault(key, set()).add((vendor, product))
+            vendor_key = normalize_product_name(f"{vendor} {product}")
+            if vendor_key:
+                by_vendor_product.setdefault(vendor_key, set()).add((vendor, product))
+
+        def unambiguous(grouped: dict) -> dict:
+            return {key: next(iter(c)) for key, c in grouped.items() if len(c) == 1}
+
+        resolved = unambiguous(by_product)
+        for key, pair in unambiguous(by_vendor_product).items():
+            resolved.setdefault(key, pair)   # key 1 wins; key 2 only fills gaps
+
+        self._session.query(CpeProductAlias).delete()
+        for key, (vendor, product) in resolved.items():
+            self._session.add(CpeProductAlias(normalized_name=key, vendor=vendor, product=product))
+        self._session.flush()
+        logger.info(
+            "KB: CPE product index rebuilt (%d aliases: %d product names, %d vendor-qualified)",
+            len(resolved), len(by_product), len(by_vendor_product),
+        )
+        return len(resolved)
+
     def get_kev(self, cve_id: str) -> Optional[KevEntry]:
         return self._session.query(KevEntry).filter(KevEntry.cve_id == cve_id).one_or_none()
 
@@ -985,7 +1136,7 @@ class ProgramedScanRepository(BaseRepository[ProgramedScan]):
 
         Args:
             user_id:    User primary key.
-            scan_type:  Scan type discriminator ("nmap", "nikto", "openvas").
+            scan_type:  Scan type discriminator ("nmap", "nikto", "lybra", "nuclei").
 
         Returns:
             List of matching ProgramedScan instances.
@@ -1060,7 +1211,7 @@ class ProgramedScanRepository(BaseRepository[ProgramedScan]):
 
         Args:
             user_id:         Owner user primary key.
-            scan_type:       Scan discriminator ("nmap", "nikto", "openvas").
+            scan_type:       Scan discriminator ("nmap", "nikto", "lybra", "nuclei").
             arguments:       Scan parameters (e.g. {"ports": "22,80"}).
             schedule_type:   "interval" or "cron".
             schedule_config: Schedule definition (e.g. {"every": 60, "unit": "minutes"}).

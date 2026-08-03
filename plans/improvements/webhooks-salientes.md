@@ -68,7 +68,7 @@ automáticamente) y **el propio backend del cliente**.
 | Módulo | Eventos candidatos | Valor | Comentario |
 |---|---|---|---|
 | **Hygeia** | `anomaly.opened`, `anomaly.closed`, `asset.offline` | **Muy alto** | Es monitorización: su valor *es* la inmediatez. Hoy el aviso solo sale por email (`hygeia.notify`), que es el canal más lento y menos automatizable. Caso de uso #1. |
-| **Themis** | `scan.completed`, `scan.failed`, `vulnerability.critical_found` | **Alto** | Escaneos largos (OpenVAS ~15 min) — el patrón "lanzo y me avisas" es el natural; hoy obliga a polling. |
+| **Themis** | `scan.completed`, `scan.failed`, `vulnerability.critical_found` | **Alto** | Escaneos largos (Nuclei con feed completo, análisis profundo de Lybra) — el patrón "lanzo y me avisas" es el natural; hoy obliga a polling. |
 | **Aegis** | `campaign.finished`, `recipient.clicked`, `quiz.failed` | **Medio** | Útil para reporting, pero contiene datos personales de empleados → cuidado legal (§6.4). |
 | **Iris** | `analysis.completed` | **Medio** | Mismo patrón que Themis pero análisis más cortos. |
 | **Acheron** | — | **Ninguno / contraindicado** | Es una bóveda de cifrado con conocimiento cero. Emitir eventos con contenido sería una fuga; emitirlos sin contenido no aporta. **Decisión explícita: Acheron no publica eventos.** |

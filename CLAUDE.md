@@ -8,7 +8,7 @@ A detailed agent guide already exists — **`AGENTS.md`** (architecture, TaskQue
 
 ## Platform note
 
-The API assumes **Linux** — scan tools (Nmap, Nikto, OpenVAS/Greenbone) are Linux-native with no Windows bridge in the code. On Windows, run the entrypoint inside **WSL** (`wsl` → `cd API && python run.py`) or use `docker compose`. The repo checkout itself is on Windows; tests and the web build run fine natively, but running the API server does not.
+The API assumes **Linux** — scan tools (Nmap, Nikto, Nuclei) are Linux-native with no Windows bridge in the code. On Windows, run the entrypoint inside **WSL** (`wsl` → `cd API && python run.py`) or use `docker compose`. The repo checkout itself is on Windows; tests and the web build run fine natively, but running the API server does not.
 
 ## Common commands
 
@@ -49,7 +49,7 @@ npm run test:acheron   # crypto interop + CRUD tests for the Acheron vault clien
 
 ### Docker (from repo root)
 ```bash
-docker compose --profile dev up -d        # infra only: postgres(15432), redis(6379), ollama, openvas
+docker compose --profile dev up -d        # infra only: postgres(15432), redis(6379), ollama
 docker compose --profile container up -d  # full stack incl. API, worker, web
 # GPU: add -f docker-compose.gpu-nvidia.yml (or .gpu-intel.yml / .gpu-amd.yml)
 ```
@@ -77,8 +77,8 @@ Blueprints are registered in `run.py` (`/system`, `/oauth`, `/users`, `/themis`,
 **Cross-cutting modules:**
 - `infrastructure/` — `UnitOfWork` (transaction boundary), `base_repository`, engine/session singletons. UnitOfWork does **not** own sessions: lifecycle lives at the two edges — `teardown_request` for HTTP, `job_context`/`Scheduler.execute` for background work. In a request `__exit__` is a no-op (teardown commits, one atomic transaction); in a background context it commits on clean exit / rolls back on error. Never manage sessions directly outside repositories.
 - `shared/` — base model, exceptions, `handle_exceptions`, rate limiter, `Document` base.
-- `tools/scribe/` — pluggable **AI generation** strategy layer (Ollama / OpenAI). Consumers hand it inputs; it knows nothing about them. Strategy chosen per-module in `SecOpsConfig.json` → `ai.modules`.
-- `tools/herald/` — pluggable **email sending** strategy layer (SMTP relay), same philosophy as `scribe`. Chosen per-module in `SecOpsConfig.json` → `email.modules`. Used by Aegis campaigns.
+- `tools/scribe/` — pluggable **AI generation** strategy layer (Ollama / OpenAI). Consumers hand it inputs; it knows nothing about them. Strategy chosen per-module in `SecOpsConfig.json` → `tools.scribe.modules`.
+- `tools/herald/` — pluggable **email sending** strategy layer (SMTP relay), same philosophy as `scribe`. Chosen per-module in `SecOpsConfig.json` → `tools.herald.modules`. Used by Aegis campaigns.
 
 ### TaskQueue (RQ + Redis) — `system/taskqueue/`
 Replaces the legacy in-process queue. Jobs persist in Redis (survive API restarts) and run in **isolated OS worker processes**, not threads.
@@ -96,11 +96,42 @@ OAuth 2.0 + JWT (PyJWT). `POST /oauth/token` with `{"grantType":"password", ...}
 ## Configuration
 
 Layered, read via `system/config_reading.py` (imported as `CR`, lazily cached with `@_lazy_load`):
-1. **`API/SecOpsConfig.json`** — base config: prompts, directories, taskqueue defaults, `ai`/`email` strategy selection, non-secret JWT tuning (`security.jwt`), `appVersion` (→ `CR.get_app_version()`).
-2. **`API/.env`** — env vars that **override** JSON. Required for secrets: `JWT_SECRET_KEY`, DB / Redis / SMTP / OpenAI / OpenVAS credentials, `PUBLIC_WEB_URL`.
-3. **Root `.env`** — docker-compose only (Postgres/Redis/OpenVAS creds), not read by the API.
+1. **`API/SecOpsConfig.json`** — base config: prompts, directories, taskqueue defaults, `tools.scribe`/`tools.herald` strategy selection, non-secret JWT tuning (`general.security.jwt`), `appVersion` (→ `CR.get_app_version()`).
+2. **`API/.env`** — env vars that **override** JSON. Required for secrets: `JWT_SECRET_KEY`, DB / Redis / SMTP / OpenAI credentials, `PUBLIC_WEB_URL`.
+3. **Root `.env`** — docker-compose only (Postgres/Redis creds), not read by the API.
 
 Changes to `SecOpsConfig.json` require an app restart (values are cached) unless applied via `PUT /system`.
+
+`SecOpsConfig.json` has exactly five root entries — put new keys under the right one rather than at the root:
+
+```
+appVersion                      # required at the root; read by create_app()
+general/       publicUrl, directories (tempdir/logdir), security (argon2/jwt/mfa)
+infrastructure/ database, redis, taskqueue
+tools/         scribe (AI), herald (email)   # names match src/modules/tools/
+features/      themis, aegis, iris, hygeia   # one per feature module
+```
+
+Themis' four scanners each get their own block under `features.themis.scanners.<tool>` (`nmap`, `nikto`, `lybra`, `nuclei`), all with `prompts` + `colorPalette`. The tuple `CR.THEMIS_SCANNERS` must stay in sync with them — `tests/unit/test_config_shape.py` enforces it.
+
+### Reading config: blocks, not getters
+
+Values are read through **frozen dataclasses bound to a branch of the tree** with `@config_block`, not one getter per value:
+
+```python
+CR.nuclei_config().rate_limit          # features.themis.scanners.nuclei.rateLimit
+CR.hygeia_limits().max_body_bytes      # features.hygeia.limits.maxBodyBytes
+```
+
+- Field names are `snake_case` and map to the JSON's `camelCase` automatically (`max_body_bytes` → `maxBodyBytes`). For keys that must keep another shape — the ones passed straight as kwargs to argon2/SQLAlchemy/redis-py — declare it: `field(default=10, metadata={"key": "pool_size"})`.
+- **Defaults live only in the field.** They used to be written twice (getter + JSON) and drifted.
+- Values with an env override or their own resolution are a `@property` over a `configured_*` field: `CR.general_config().public_url` prefers `PUBLIC_WEB_URL`, `CR.jwt_config().secret` raises if `JWT_SECRET_KEY` is missing (lazily — so a deploy without OpenAI credentials still boots).
+- Blocks are cached and rebuilt automatically when `_configs` changes (`reload()`, `PUT /system`, a monkeypatched config in tests) — nothing has to invalidate by hand.
+- Adding a block: define it, add an accessor, and register it in `CONFIG_BLOCKS` in `tests/unit/test_config_shape.py`.
+
+A few things stay plain functions on purpose: env-only credentials (`get_*_environment`), and lookups parameterized by key rather than by field (`get_iris_data`, `get_iris_scoring_weight`, `get_tool_prompts`) — declaring those as fields would mean editing `config_reading.py` every time a rule is added.
+
+**Beware the silent failure**: `_cfg()` returns the *default* when a path doesn't resolve, so a mistyped prefix disables a whole config block without raising. Any key you move must be updated in three places — the `@config_block` path (or `_cfg()` call) in `config_reading.py`, the literal path in `web/app/src/views/ConfigView.vue`, and `test_config_shape.py`.
 
 ## Naming conventions
 
@@ -111,9 +142,10 @@ Changes to `SecOpsConfig.json` require an app restart (values are cached) unless
 
 - `.env` files hold credentials — never commit. `API/.env`, `API/src/data/`, and `docs/` are gitignored.
 - **First deploy only**: `CREATE_DATABASE=True` runs the destructive `_init_db()` (drops + recreates DB, seeds root user + Topic rows). Set it back to `False` afterward or you lose data on next restart. Subsequent schema changes go through Alembic (auto-applied on startup, non-destructive).
+- **Do not run `CREATE_DATABASE=True` / reset the local dev DB.** As of 2026-07-29 it holds a real NVD/KEV/EPSS knowledge-base backfill (`CveEntry`/`CpeMatch`/`KevEntry`/`EpssScore`, ~350k CVEs — the full historical catalog, not just a window) that took over an hour to pull under NVD's unauthenticated rate limit (see `lybra-engine-roadmap.md`, Fase I-b). Re-running it is pure lost time, not a correctness issue — but there's no reason to pay that cost twice.
 - PostgreSQL is on port **15432** locally (container maps 5432→15432), not the standard 5432.
 - Async tasks silently never run if no RQ **worker** is up.
 - `themis/services/tasks.py` defines its **own** `TaskStatus` enum — distinct from `taskqueue.TaskStatus`. Don't conflate them.
-- OpenVAS accepts **one host per scan** (no CIDR ranges) and takes ~15 min on first start (NVT feed).
 - API version is config-driven: `create_app()` reads it via `CR.get_app_version()` from `appVersion` in `SecOpsConfig.json` (currently `4.2`) — it is not hardcoded.
-- `themis.areLocalIpsAllowed` is set to `true` in `SecOpsConfig.json` (intentional, for local dev against private IPs) — with it `true`, 4 SSRF tests don't trigger (`test_nikto_rejects_loopback_target`, `test_nikto_rejects_cloud_metadata_target`, `test_nmap_rejects_private_ip_target`, `test_openvas_scheduled_flow_rejects_private_ip`; not a regression). **Must be reverted to `false` before any real deployment**, or the anti-SSRF defense stays disabled in production.
+- `features.themis.areLocalIpsAllowed` is set to `true` in `SecOpsConfig.json` (intentional, for local dev against private IPs) — with it `true`, 3 SSRF tests don't trigger (`test_nikto_rejects_loopback_target`, `test_nikto_rejects_cloud_metadata_target`, `test_nmap_rejects_private_ip_target`; not a regression). **Must be reverted to `false` before any real deployment**, or the anti-SSRF defense stays disabled in production.
+- OpenVAS was removed from the product (roadmap `plans/feature/themis/lybra-engine-roadmap.md` §7/§6.3, Ronda 2): its scheduled-flow SSRF fix (`run_scan()` self-validating via `ScanManager.reject_private_ip`) no longer exists, and the surviving scanners (Nmap/Nikto/Nuclei/Lybra) don't have the same self-validation in their own `run_scan()` — they rely on the HTTP endpoint validating first. The scheduled flow (`scheduling.py`) calls `run_scan()` directly, bypassing that. Flagged for a separate audit; not yet fixed.

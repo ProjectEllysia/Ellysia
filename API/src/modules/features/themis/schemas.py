@@ -19,9 +19,21 @@ class NiktoScanRequestSchema(Schema):
     timeout = fields.Integer(load_default=900, validate=validate.Range(min=1))
 
 
-class OpenVASScanRequestSchema(Schema):
+class NucleiScanRequestSchema(Schema):
     target = fields.String(required=True)
-    scanConfig = fields.String(load_default="full_fast", validate=validate.OneOf(["full_fast", "full_deep", "full_ultimate"]))
+    # Perfil acotado por defecto (roadmap Fase U1, punto 1): sin esto, Nuclei
+    # con el feed completo contra un solo host son miles de peticiones. "info"
+    # queda fuera del default a propósito — son miles de plantillas de
+    # tech-detect y, al ser confirmed=True sin CVSS, el suelo de
+    # score_finding las subiría todas a MEDIUM.
+    severities = fields.List(
+        fields.String(validate=validate.OneOf(["info", "low", "medium", "high", "critical"])),
+        load_default=None,
+    )
+    tags = fields.List(fields.String(), load_default=None)
+    rateLimit = fields.Integer(load_default=None, validate=validate.Range(min=1, max=1000))
+    requestTimeout = fields.Integer(load_default=None, validate=validate.Range(min=1, max=120))
+    timeout = fields.Integer(load_default=None, validate=validate.Range(min=1))
 
 
 class LybraScanRequestSchema(Schema):
@@ -30,7 +42,7 @@ class LybraScanRequestSchema(Schema):
     sourceScanId = fields.Integer()
     target = fields.String()
     ports = fields.String()
-    # Fase 6 "análisis profundo": also launch Nmap/Nikto/OpenVAS as independent
+    # Fase 6 "análisis profundo": also launch Nmap/Nikto/Nuclei as independent
     # corroborator scans, fused with Lybra's own findings when read.
     deep = fields.Boolean(load_default=False)
     timeout = fields.Integer(load_default=120, validate=validate.Range(min=1))
@@ -78,9 +90,14 @@ class AuthorizedTargetActionResponseSchema(Schema):
 
 
 class ResultsQuerySchema(Schema):
-    type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "openvas", "lybra", "all"]))
+    type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "lybra", "nuclei", "all"]))
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))
     per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
+    # Fase I, solo con type=lybra: acota la lista a los escaneos originados por
+    # el inventario de un activo de Hygeia. Omitirlo devuelve los escaneos
+    # lanzados desde el panel de Themis (los de agente se ven por agente, no
+    # mezclados en la feed general).
+    assetId = fields.Integer(load_default=None, allow_none=True)
 
 
 class GeneratePdfRequestSchema(Schema):
@@ -319,7 +336,7 @@ class HistoryHostsResponseSchema(Schema):
 
 class HistoryStatsQuerySchema(Schema):
     target = fields.String(required=True)
-    type = fields.String(required=True, validate=validate.OneOf(["nmap", "nikto", "openvas"]))
+    type = fields.String(required=True, validate=validate.OneOf([t.value for t in ScanType]))
 
 
 class HistoryStatsResponseSchema(Schema):

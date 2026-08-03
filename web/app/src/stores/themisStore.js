@@ -10,7 +10,7 @@ import { useThemisHistoryStore } from '@/stores/themisHistoryStore'
  * Store de Themis — gestiona escaneos, estadísticas, modales y documentos.
  *
  * Sustituye al estado disperso en themis.js (1,198 líneas de manipulación DOM
- * directa). Centraliza las listas de resultados por tipo (nmap, nikto, openvas),
+ * directa). Centraliza las listas de resultados por tipo (nmap, nikto, nuclei),
  * la paginación, los modales de vista previa/detalle y los documentos asociados.
  */
 export const useThemisStore = defineStore('themis', () => {
@@ -21,18 +21,24 @@ export const useThemisStore = defineStore('themis', () => {
   const historyStore = useThemisHistoryStore()
 
   /* ════════════════════════════════ MUNDOS ═════════════════════════════ */
-  // Themis vive en dos mundos: el motor propio (Lybra) y los escáneres
-  // externos (Nmap/Nikto/OpenVAS). El toggle de ThemisView conmuta entre ellos.
-  // Lybra es el mundo por defecto (roadmap Fase 6: el motor propio es el
-  // protagonista, Nmap/Nikto/OpenVAS quedan como segunda opinión opcional).
-  const world = ref('lybra') // 'external' | 'lybra'
+  // Themis vive en tres mundos: el motor propio (Lybra), los escáneres
+  // externos (Nmap/Nikto/Nuclei) y los agentes de Hygeia (Fase I: escaneos
+  // Lybra nacidos del inventario de software de un activo, que se navegan por
+  // agente en vez de mezclarse en la feed del motor). El toggle de ThemisView
+  // conmuta entre ellos. Lybra es el mundo por defecto (roadmap Fase 6: el
+  // motor propio es el protagonista, los externos son segunda opinión).
+  const world = ref('lybra') // 'external' | 'lybra' | 'agents'
   function setWorld(w) { world.value = w }
+
+  // Activo de Hygeia seleccionado en el mundo de agentes. Null = ninguna
+  // tarjeta elegida todavía, así que no hay escaneos que pedir.
+  const selectedAssetId = ref(null)
 
   /* ════════════════════════════════ TABS ═══════════════════════════════ */
   const activeTab = ref('nmap')
 
   /* ════════════════════════════════ STATS ══════════════════════════════ */
-  const stats = reactive({ total: 0, nmap: 0, nikto: 0, openvas: 0, lybra: 0 })
+  const stats = reactive({ total: 0, nmap: 0, nikto: 0, lybra: 0, nuclei: 0 })
   const loadingStats = ref(false)
   const statsError = ref(null)
 
@@ -40,8 +46,13 @@ export const useThemisStore = defineStore('themis', () => {
   const scans = reactive({
     nmap:    { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
     nikto:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
-    openvas: { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
     lybra:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
+    nuclei:  { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
+    // Fase I: los escaneos del activo Hygeia seleccionado. Mismo tipo de
+    // escaneo que `lybra` y misma forma de estado —por eso `LybraResults` se
+    // reutiliza tal cual—, pero su propia lista: el backend los sirve por
+    // separado (`assetId`) y jamás los mezcla con los del panel.
+    agentLybra: { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
   })
 
   // Escaneos Nmap terminados, para el modo "analizar un Nmap existente" de Lybra.
@@ -64,7 +75,7 @@ export const useThemisStore = defineStore('themis', () => {
   const viewMode = ref('full') // 'full' | 'folders' | 'history'
 
   /* ── HELPERS ── */
-  /** @param {'nmap'|'nikto'|'openvas'} type */
+  /** @param {'nmap'|'nikto'|'nuclei'} type */
   function _scandata(type) { return scans[type] }
 
   /* ════════════════════════════════ STATS ══════════════════════════════ */
@@ -77,8 +88,8 @@ export const useThemisStore = defineStore('themis', () => {
       const data = await res.json()
       stats.nmap    = data.nmap    ?? 0
       stats.nikto   = data.nikto   ?? 0
-      stats.openvas = data.openvas ?? 0
       stats.lybra   = data.lybra   ?? 0
+      stats.nuclei  = data.nuclei  ?? 0
       stats.total   = data.total   ?? 0
       statsError.value = null
     } catch { statsError.value = 'Error de conexión al cargar las estadísticas.' }
@@ -96,7 +107,23 @@ export const useThemisStore = defineStore('themis', () => {
 
   function _isTypeVisible(type) {
     if (type === 'lybra') return world.value === 'lybra' && viewMode.value !== 'history'
+    if (type === 'agentLybra') return world.value === 'agents' && !!selectedAssetId.value
     return world.value === 'external' && activeTab.value === type && viewMode.value === 'full'
+  }
+
+  /**
+   * Parámetros de consulta de una lista de escaneos.
+   *
+   * `agentLybra` no es un tipo de escaneo propio sino la misma lista de Lybra
+   * acotada a un activo: el backend distingue ambas por `assetId` (omitirlo
+   * devuelve los del panel), así que la diferencia vive aquí y no en una
+   * segunda ruta.
+   */
+  function _scanQuery(type, page, perPage) {
+    if (type === 'agentLybra') {
+      return new URLSearchParams({ type: 'lybra', page, per_page: perPage, assetId: selectedAssetId.value })
+    }
+    return new URLSearchParams({ type, page, per_page: perPage })
   }
 
   function _scheduleScanPoll(type) {
@@ -116,9 +143,14 @@ export const useThemisStore = defineStore('themis', () => {
   /** Carga una pagina de resultados para un tipo de escaneo. */
   async function loadScans(type) {
     const d = _scandata(type)
+    // Sin activo seleccionado no hay nada que pedir en el mundo de agentes.
+    if (type === 'agentLybra' && !selectedAssetId.value) {
+      d.results = []; d.totalCount = 0; d.error = null
+      return
+    }
     d.loading = true
     try {
-      const params = new URLSearchParams({ type, page: d.page, per_page: d.perPage })
+      const params = _scanQuery(type, d.page, d.perPage)
       const res = await apiFetch(`/themis/results?${params}`)
       if (!res?.ok) {
         d.results = []
@@ -168,9 +200,9 @@ export const useThemisStore = defineStore('themis', () => {
   async function launchNikto(payload) {
     return _launch('/themis/nikto', payload, 'nikto')
   }
-  /** Lanza un escaneo OpenVAS. */
-  async function launchOpenvas(payload) {
-    return _launch('/themis/openvas', payload, 'openvas')
+  /** Lanza un escaneo Nuclei (roadmap Fase U1). */
+  async function launchNuclei(payload) {
+    return _launch('/themis/nuclei', payload, 'nuclei')
   }
 
   /* ── LYBRA (el motor propio) ── */
@@ -186,14 +218,13 @@ export const useThemisStore = defineStore('themis', () => {
    * listado de veredictos crece hacia abajo sin perder el scroll ni el
    * estado expandido de las tarjetas ya visibles.
    */
-  async function loadMoreLybraScans() {
-    const d = scans.lybra
+  async function loadMoreLybraScans(type = 'lybra') {
+    const d = _scandata(type)
     if (d.loading || d.results.length >= d.totalCount) return
     d.loading = true
     try {
       const nextPage = d.page + 1
-      const params = new URLSearchParams({ type: 'lybra', page: nextPage, per_page: d.perPage })
-      const res = await apiFetch(`/themis/results?${params}`)
+      const res = await apiFetch(`/themis/results?${_scanQuery(type, nextPage, d.perPage)}`)
       if (!res?.ok) return
       const data = await res.json()
       d.results = [...d.results, ...(data.results ?? [])]
@@ -202,6 +233,28 @@ export const useThemisStore = defineStore('themis', () => {
     } finally {
       d.loading = false
     }
+  }
+
+  /* ── AGENTES (Fase I: escaneos nacidos del inventario de Hygeia) ── */
+
+  /**
+   * Selecciona un activo de Hygeia y carga sus escaneos.
+   *
+   * @param {number|null} assetId - Id del activo, o null para deseleccionar.
+   */
+  function selectAgentAsset(assetId) {
+    selectedAssetId.value = assetId
+    const d = scans.agentLybra
+    d.page = 1
+    d.results = []
+    d.totalCount = 0
+    if (assetId) loadScans('agentLybra')
+  }
+
+  /** Recarga los escaneos del activo seleccionado desde la primera página. */
+  function loadAgentScans() {
+    scans.agentLybra.page = 1
+    return loadScans('agentLybra')
   }
 
   /**
@@ -649,10 +702,19 @@ export const useThemisStore = defineStore('themis', () => {
     finally { d.loading = false }
   }
 
-  /** Genera un PDF para un escaneo Lybra y refresca su lista de documentos. */
+  /**
+   * Genera un PDF para un escaneo Lybra y refresca su lista de documentos.
+   *
+   * Refresca dos veces a propósito: nada más lanzar la generación, para que
+   * el documento aparezca de inmediato con estado "pending"/"running" (antes
+   * la lista no se tocaba hasta que `waitForDocument` ya había terminado, así
+   * que el usuario nunca llegaba a ver el documento en curso); y otra vez al
+   * terminar el sondeo, para reflejar el estado final ("done"/"error").
+   */
   async function generateLybraPdf(scanId, useAi = false) {
     const ok = await generatePdf(scanId, useAi)
     if (ok) {
+      await loadLybraDocs(scanId)
       await waitForDocument(scanId)
       await loadLybraDocs(scanId)
     }
@@ -666,11 +728,16 @@ export const useThemisStore = defineStore('themis', () => {
     return ok
   }
 
-  /** Elimina un escaneo Lybra por ID y refresca la lista. */
-  async function deleteLybraScan(id) {
+  /**
+   * Elimina un escaneo Lybra por ID y refresca la lista.
+   *
+   * @param {number} id - Id del escaneo.
+   * @param {'lybra'|'agentLybra'} [type] - Lista de la que quitarlo.
+   */
+  async function deleteLybraScan(id, type = 'lybra') {
     const res = await apiFetch(`/themis/${id}`, { method: 'DELETE' })
     if (!res?.ok) { toast.show('No se pudo eliminar el escaneo.', 'error'); return false }
-    const d = scans.lybra
+    const d = _scandata(type)
     const idx = d.results.findIndex(s => s.id === id)
     if (idx !== -1) { d.results.splice(idx, 1); d.totalCount = Math.max(0, d.totalCount - 1) }
     await loadStats()
@@ -688,12 +755,13 @@ export const useThemisStore = defineStore('themis', () => {
     activeTab.value = 'nmap'
     viewMode.value = 'full'
     launching.value = false
+    selectedAssetId.value = null
 
-    Object.assign(stats, { total: 0, nmap: 0, nikto: 0, openvas: 0, lybra: 0 })
+    Object.assign(stats, { total: 0, nmap: 0, nikto: 0, lybra: 0, nuclei: 0 })
     loadingStats.value = false
     statsError.value = null
 
-    for (const type of ['nmap', 'nikto', 'openvas', 'lybra']) {
+    for (const type of ['nmap', 'nikto', 'lybra', 'nuclei', 'agentLybra']) {
       Object.assign(scans[type], { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null })
     }
 
@@ -713,8 +781,9 @@ export const useThemisStore = defineStore('themis', () => {
     preview, details,
     viewMode,
     loadStats, loadScans, switchTab, refreshCurrent, goToPage, stopScanPolling,
-    launchNmap, launchNikto, launchOpenvas,
+    launchNmap, launchNikto, launchNuclei,
     launchLybra, loadLybraScans, loadMoreLybraScans, loadSourceNmapScans, deleteLybraScan,
+    selectedAssetId, selectAgentAsset, loadAgentScans,
     lybraDocs, loadLybraDocs, generateLybraPdf, deleteLybraDoc,
     deleteScan, cancelScan,
     openPreview, closePreview, refreshPreviewDocs, loadPreviewTraceroute,

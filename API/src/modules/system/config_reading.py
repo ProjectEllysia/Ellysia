@@ -9,17 +9,15 @@ import json
 import logging
 import os
 
+from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
 from functools import wraps
 from pathlib import Path
-from dotenv import load_dotenv
-from dataclasses import dataclass
+from typing import Optional, TypeVar, get_origin
 
-from typing import Optional
+from dotenv import load_dotenv
 
 from src.modules.shared._exceptions import IllegalStateError
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -113,10 +111,10 @@ def _require_configs() -> dict:
 def _cfg(path: str, default=None, cast=None):
     """Lee un valor anidado de la config por ruta con puntos.
 
-    ``_cfg("themis.traceroute.cacheHours", 24, float)`` es el equivalente de
-    ``_require_configs().get("themis", {}).get("traceroute", {}).get("cacheHours", 24)``
-    convertido a ``float``. Requiere llamarse desde una función decorada con
-    ``@_lazy_load`` (o después de que la config ya esté cargada).
+    ``_cfg("features.themis.traceroute.cacheHours", 24, float)`` es el equivalente de
+    ``_require_configs().get("features", {}).get("themis", {}).get("traceroute", {})
+    .get("cacheHours", 24)`` convertido a ``float``. Requiere llamarse desde una
+    función decorada con ``@_lazy_load`` (o después de que la config ya esté cargada).
     """
     node = _require_configs()
     for key in path.split("."):
@@ -124,6 +122,90 @@ def _cfg(path: str, default=None, cast=None):
             return default
         node = node[key]
     return cast(node) if cast else node
+
+
+# =============================================================================
+# BLOQUES DE CONFIGURACIÓN
+# =============================================================================
+#
+# Un "bloque" es una dataclass ``frozen`` atada a una rama del JSON: declara sus
+# campos con el tipo y el valor por defecto, y ``config_block`` se encarga de
+# leerlos. Sustituye al patrón de un getter por valor, que tenía dos problemas
+# concretos:
+#
+#   - El default se escribía dos veces (en el getter y en SecOpsConfig.json) y
+#     acababa divergiendo sin que nadie lo notara, porque el del fichero gana.
+#     Aquí se declara una sola vez, en el campo.
+#   - Sin tipos, cada consumidor tenía que recordar qué devolvía cada getter.
+#
+# Los bloques son planos a propósito: no hay un ``ThemisConfig`` que contenga a
+# los demás. Ningún consumidor quiere "todo Themis" — quiere Nuclei, o quiere
+# traceroute — y un árbol obligaría a construir las ramas que nadie ha pedido.
+
+_ConfigBlock = TypeVar("_ConfigBlock")
+
+# El bloque construido, junto al dict del que salió. Se compara por identidad
+# (``is``) en vez de invalidar a mano: así reload(), save_full_config() y un
+# ``_configs`` monkeypatcheado en un test invalidan la caché solos, sin que
+# ninguno de los tres tenga que acordarse de avisar.
+_block_cache: dict[type, tuple[dict, object]] = {}
+
+
+def _to_camel_case(snake_case_name: str) -> str:
+    """``max_body_bytes`` → ``maxBodyBytes``, la convención de claves del JSON."""
+    head, *tail = snake_case_name.split("_")
+    return head + "".join(word.capitalize() for word in tail)
+
+
+def config_block(path: str):
+    """Ata una dataclass ``frozen`` a la rama ``path`` de SecOpsConfig.json.
+
+    Cada campo se lee de ``<path>.<campoEnCamelCase>``; si la clave no está, se
+    queda con el valor por defecto declarado en el campo. Para las claves que no
+    siguen la convención (las que se pasan tal cual como kwargs a una librería,
+    como ``isolation_level``) se indica el nombre explícito::
+
+        pool_size: int = field(default=10, metadata={"key": "pool_size"})
+    """
+    def decorator(block_type):
+        if not is_dataclass(block_type):
+            raise TypeError(f"{block_type.__name__} debe ser una dataclass")
+        block_type.__config_path__ = path
+        return block_type
+    return decorator
+
+
+def _coerce(field_type, raw_value):
+    """Convierte el valor del JSON al tipo declarado en el campo.
+
+    ``bool`` primero: en Python ``bool`` es subclase de ``int``, y sin este
+    orden un ``"true"`` acabaría en ``int("true")``.
+    """
+    origin_type = get_origin(field_type) or field_type
+    if origin_type is bool:
+        return _as_bool(raw_value)
+    if origin_type in (int, float, str):
+        return origin_type(raw_value)
+    return raw_value
+
+
+@_lazy_load
+def load_block(block_type: type[_ConfigBlock]) -> _ConfigBlock:
+    """Devuelve la instancia (cacheada) del bloque, leída de la config actual."""
+    source, cached = _block_cache.get(block_type, (None, None))
+    if source is _configs:
+        return cached  # type: ignore[return-value]
+
+    branch = _cfg(block_type.__config_path__, {})  # type: ignore[attr-defined]
+    values = {}
+    for field_info in fields(block_type):  # type: ignore[arg-type]
+        key = field_info.metadata.get("key") or _to_camel_case(field_info.name)
+        if isinstance(branch, dict) and key in branch:
+            values[field_info.name] = _coerce(field_info.type, branch[key])
+
+    built = block_type(**values)
+    _block_cache[block_type] = (_configs, built)
+    return built
 
 
 # =============================================================================
@@ -182,77 +264,6 @@ def get_google_environment() -> dict[str, str]:
     return {"api_key": api_key, "model": model}
 
 
-_ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
-
-
-@_lazy_load
-def get_oauth_config() -> tuple[float, float, Optional[str], Optional[str]]:
-    """Configuración OAuth/JWT.
-
-    El secreto (``JWT_SECRET_KEY``) vive exclusivamente en .env.
-    ``algorithm``, ``access_token_expiry_minutes`` y
-    ``refresh_token_expiry_days`` provienen de ``security.jwt`` en
-    SecOpsConfig.json; las env vars ``JWT_ALGORITHM``,
-    ``ACCESS_TOKEN_EXPIRY_MINUTES`` y ``REFRESH_TOKEN_EXPIRY_DAYS``
-    sobreescriben la config si están presentes (override útil para
-    contenedores / 12-factor).
-    """
-    secret = os.getenv("JWT_SECRET_KEY")
-    if not secret:
-        logger.error("Falta la variable de entorno JWT_SECRET_KEY")
-        raise ValueError(
-            "Falta la variable de entorno JWT_SECRET_KEY. "
-            "Defínela en el archivo .env (es un secreto, no va en "
-            "SecOpsConfig.json)."
-        )
-
-    jwt_cfg = _require_configs().get("security", {}).get("jwt", {})
-    algorithm = os.getenv("JWT_ALGORITHM") or str(jwt_cfg.get("algorithm", "HS256"))
-    # S8: JWT_ALGORITHM es override por entorno sin validar — un typo o un
-    # despliegue mal configurado con "none" (o un algoritmo asimétrico que
-    # necesita un par de claves, no un secreto simétrico) rompería la
-    # verificación de tokens en producción. Firmamos con un único secreto
-    # simétrico, así que solo la familia HS* tiene sentido aquí.
-    if algorithm not in _ALLOWED_JWT_ALGORITHMS:
-        raise ValueError(
-            f"JWT_ALGORITHM '{algorithm}' no permitido. "
-            f"Debe ser uno de: {', '.join(sorted(_ALLOWED_JWT_ALGORITHMS))}."
-        )
-    access    = os.getenv("ACCESS_TOKEN_EXPIRY_MINUTES") or jwt_cfg.get("access_token_expiry_minutes", 30)
-    refresh   = os.getenv("REFRESH_TOKEN_EXPIRY_DAYS") or jwt_cfg.get("refresh_token_expiry_days", 7)
-
-    return (float(access), float(refresh), secret, algorithm)
-
-
-@_lazy_load
-def get_mfa_config() -> dict:
-    """Configuración de MFA (TOTP + códigos de recuperación).
-
-    ``MFA_ENCRYPTION_KEY`` (clave Fernet para cifrar en reposo el secreto TOTP)
-    vive exclusivamente en .env, igual que ``JWT_SECRET_KEY`` — a diferencia del
-    resto de secretos de Acheron, el servidor SÍ necesita poder leer este valor
-    para poder calcular el código TOTP vigente y verificarlo. El resto de
-    parámetros provienen de ``security.mfa`` en SecOpsConfig.json.
-    """
-    encryption_key = os.getenv("MFA_ENCRYPTION_KEY")
-    if not encryption_key:
-        logger.error("Falta la variable de entorno MFA_ENCRYPTION_KEY")
-        raise ValueError(
-            "Falta la variable de entorno MFA_ENCRYPTION_KEY. "
-            "Defínela en el archivo .env (clave Fernet: "
-            "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\")."
-        )
-
-    mfa_cfg = _require_configs().get("security", {}).get("mfa", {})
-    return {
-        "encryption_key": encryption_key,
-        "issuer": str(mfa_cfg.get("issuer", "Ellysia")),
-        "challenge_expiry_minutes": int(mfa_cfg.get("challenge_expiry_minutes", 5)),
-        "max_challenge_attempts": int(mfa_cfg.get("max_challenge_attempts", 5)),
-        "recovery_codes_count": int(mfa_cfg.get("recovery_codes_count", 10)),
-    }
-
-
 def get_encryption_key(purpose: str) -> str:
     """Clave Fernet de cifrado en reposo para un ``purpose`` dado (``shared._crypto``).
 
@@ -276,26 +287,6 @@ def get_encryption_key(purpose: str) -> str:
             "python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\")."
         )
     return key
-
-
-def get_openvas_environment() -> dict[str, str]:
-    """Solo variables de entorno."""
-    hostname    = os.getenv("OPENVAS_HOST")
-    port        = os.getenv("OPENVAS_PORT")
-    user        = os.getenv("OPENVAS_USERNAME")
-    password    = os.getenv("OPENVAS_PASSWORD")
-
-    if all([hostname, port, user, password]):
-        return {
-            "hostname": hostname,
-            "port": port,
-            "username": user,
-            "password": password
-        } # type: ignore
-
-    raise ValueError("Faltan variables de entorno para OpenVAS. "
-                "Asegúrate de definir OPENVAS_HOST, OPENVAS_PORT, "
-                "OPENVAS_USERNAME y OPENVAS_PASSWORD.")
 
 
 def _as_bool(value: str | bool | None, default: bool = False) -> bool:
@@ -389,15 +380,22 @@ def _env_override_for(dir_key: str) -> Optional[str]:
 
 
 def _lookup_raw_path(cfg: dict, dir_key: str) -> str:
-    """Resuelve la ruta cruda en la config: rama anidada ``module.subkey`` o plana ``general``."""
+    """Resuelve la ruta cruda en la config.
+
+    Un ``dir_key`` con punto (``themis.csv``) es el directorio de un módulo y
+    vive en ``features.<módulo>.directories.<sub_key>``; uno plano
+    (``tempdir``) es transversal y vive en ``general.directories``. Ojo: el
+    ``dir_key`` **no** es una ruta del árbol de configuración, sino la clave
+    del enum ``DirectoryType`` — de ahí que se traduzca aquí y no en ``_cfg``.
+    """
     if "." in dir_key:
         module_key, sub_key = dir_key.split(".")
-        if module_key not in cfg:
+        module_config = cfg.get("features", {}).get(module_key)
+        if module_config is None:
             raise ValueError(f"Módulo '{module_key}' no encontrado en la configuración.")
-        module_config = cfg[module_key]
-        if "directories" not in module_config:
+        directories = module_config.get("directories")
+        if directories is None:
             raise ValueError(f"Directorio '{dir_key}' no encontrado en la configuración.")
-        directories = module_config["directories"]
         if sub_key not in directories:
             raise ValueError(f"Directorio '{sub_key}' no encontrado en la configuración.")
         return directories[sub_key]
@@ -432,87 +430,90 @@ def get_directory_of(directory_type) -> str:
 # CONFIGURACIÓN DE AEGIS
 # =============================================================================
 
-@_lazy_load
-def get_aegis_config() -> dict:
-    return _cfg("aegis", {})
+@config_block("features.aegis")
+@dataclass(frozen=True)
+class AegisConfig:
+    """Generación de píldoras de concienciación y campañas."""
 
-@_lazy_load
-def get_aegis_tips_amount() -> int:
-    return _cfg("aegis.tipsAmount", 7, int)
+    enabled: bool = True
 
-@_lazy_load
-def get_aegis_vulnerabilities_antiquity() -> int:
-    return _cfg("aegis.vulnerabilitiesAntiquity", 5, int)
+    tips_amount: int = 7
+    """Consejos que se le piden a la IA por píldora."""
 
-@_lazy_load
-def get_aegis_brands() -> list[dict]:
-    return _cfg("aegis.brands", [], list)
+    vulnerabilities_antiquity: int = 5
+    """Antigüedad máxima (años) de una alerta para seguir considerándola vigente."""
 
-@_lazy_load
-def get_aegis_prompts() -> dict:
-    return _cfg("aegis.prompts", {})
+    brands: list[dict] = field(default_factory=list)
+    """Catálogo de fabricantes vigilados, con su equivalencia en CIRCL.
 
-
-# =============================================================================
-# CONFIGURACIÓN DE IA (scribe)
-# =============================================================================
-
-@_lazy_load
-def get_ai_config() -> dict:
-    """Devuelve el bloque 'ai' de SecOpsConfig.json (puede estar vacío)."""
-    return _cfg("ai", {})
-
-
-@_lazy_load
-def get_ai_strategy_for(module: str | None = None) -> str:
-    """Resuelve la estrategia de IA para un módulo.
-
-    Busca primero un override por módulo en ``ai.modules.<module>`` y, si no
-    existe, devuelve ``ai.defaultStrategy`` (o 'ollama' como último recurso).
-
-    Args:
-        module: Nombre del módulo consumidor ('aegis', 'themis', …).
-
-    Returns:
-        Nombre de la estrategia ('ollama' | 'openai' | …).
+    Cada entrada lleva ``label``, ``circl_vendor``, ``circl_product`` y una lista
+    de ``aliases`` para resolver los nombres que la gente escribe de otra forma
+    ("hewlett packard enterprise" → HPE).
     """
-    ai_cfg = get_ai_config()
-    default = ai_cfg.get("defaultStrategy", "ollama")
-    if module:
-        return ai_cfg.get("modules", {}).get(module, default)
-    return default
+
+    prompts: dict = field(default_factory=dict)
+    """Par ``system`` / ``userTemplate`` que se le pasa a Scribe."""
+
+
+def aegis_config() -> AegisConfig:
+    return load_block(AegisConfig)
 
 
 # =============================================================================
-# CONFIGURACIÓN DE CORREO (herald)
+# CONFIGURACIÓN DE LAS HERRAMIENTAS (scribe / herald)
 # =============================================================================
+#
+# Scribe (generación con IA) y Herald (envío de correo) comparten la misma
+# forma: una estrategia por defecto, un override por módulo consumidor y unos
+# ajustes por estrategia. De ahí la clase base común — no es abstracción
+# preventiva, son dos bloques que ya existen y ya son idénticos.
 
-@_lazy_load
-def get_email_config() -> dict:
-    """Devuelve el bloque 'email' de SecOpsConfig.json (puede estar vacío)."""
-    return _cfg("email", {})
+@dataclass(frozen=True)
+class _StrategySelection:
+    """Selección de estrategia de una herramienta enchufable."""
+
+    default_strategy: str = ""
+    """Estrategia usada cuando el módulo no tiene override propio."""
+
+    modules: dict[str, str] = field(default_factory=dict)
+    """Override por módulo consumidor: ``{"aegis": "openai", …}``."""
+
+    strategies: dict[str, dict] = field(default_factory=dict)
+    """Ajustes propios de cada estrategia (modelo, host SMTP, remitente…)."""
+
+    def strategy_for(self, module: Optional[str] = None) -> str:
+        """Estrategia que le toca a ``module``, o la de por defecto."""
+        if module:
+            return self.modules.get(module, self.default_strategy)
+        return self.default_strategy
+
+    def options_for(self, strategy_name: str) -> dict:
+        """Ajustes declarados para ``strategy_name`` (vacío si no hay)."""
+        return self.strategies.get(strategy_name, {})
 
 
-@_lazy_load
-def get_email_strategy_for(module: str | None = None) -> str:
-    """Resuelve la estrategia de correo para un módulo.
+@config_block("tools.scribe")
+@dataclass(frozen=True)
+class ScribeConfig(_StrategySelection):
+    """Capa de generación con IA (Ollama / OpenAI / Google)."""
 
-    Busca primero un override por módulo en ``email.modules.<module>`` y, si
-    no existe, devuelve ``email.defaultStrategy`` (o 'smtp' como último
-    recurso). Espejo de ``get_ai_strategy_for``.
+    default_strategy: str = "ollama"
 
-    Args:
-        module: Nombre del módulo consumidor ('aegis', …).
 
-    Returns:
-        Nombre de la estrategia ('smtp' | …).
-    """
-    email_cfg = get_email_config()
-    default = email_cfg.get("defaultStrategy", "smtp")
-    if module:
-        return email_cfg.get("modules", {}).get(module, default)
-    return default
+@config_block("tools.herald")
+@dataclass(frozen=True)
+class HeraldConfig(_StrategySelection):
+    """Capa de envío de correo (relay SMTP)."""
 
+    default_strategy: str = "smtp"
+
+
+def scribe_config() -> ScribeConfig: # type: ignore
+    return load_block(ScribeConfig) # type: ignore
+
+
+def herald_config() -> HeraldConfig: # type: ignore
+    return load_block(HeraldConfig) # type: ignore
 
 def get_smtp_environment() -> dict[str, str]:
     """Credenciales SMTP desde variables de entorno.
@@ -526,10 +527,14 @@ def get_smtp_environment() -> dict[str, str]:
     username = os.getenv("SMTP_USERNAME")
     password = os.getenv("SMTP_PASSWORD")
 
-    if not username or not password:
+    if not username:
         raise ValueError(
-            "Faltan las variables de entorno SMTP_USERNAME / SMTP_PASSWORD. "
-            "Defínelas en el archivo .env junto a las demás credenciales."
+            "Falta la variable de entorno SMTP_USERNAME."
+        )
+
+    if not password:
+        raise ValueError(
+            "Falta la variable de entorno SMTP_PASSWORD."
         )
 
     return {"username": username, "password": password}
@@ -539,177 +544,333 @@ def get_smtp_environment() -> dict[str, str]:
 # CONFIGURACIÓN DE THEMIS
 # =============================================================================
 
-@_lazy_load
-def get_themis_config() -> dict:
-    return _cfg("themis", {})
+# Los cuatro escáneres de Themis, cada uno con su propio bloque bajo
+# ``features.themis.scanners``: mismos ``prompts`` y ``colorPalette``, más los
+# ajustes que cada herramienta necesite. OpenVAS salió de esta lista al
+# retirarse (roadmap §7/§6.3, Ronda 2 — E2).
+THEMIS_SCANNERS = ("nmap", "nikto", "lybra", "nuclei")
+
+
+@config_block("features.themis")
+@dataclass(frozen=True)
+class ThemisConfig:
+    """Ajustes generales del módulo de escaneo."""
+
+    enabled: bool = True
+
+    are_local_ips_allowed: bool = False
+    """Si se permite escanear IPs privadas/loopback.
+
+    Es la defensa anti-SSRF del módulo: con ``True`` un usuario puede apuntar un
+    escaneo a la red interna del servidor o al endpoint de metadatos del cloud.
+    Se pone a ``True`` solo para desarrollo local contra IPs privadas.
+    """
+
+
+@config_block("features.themis.folders")
+@dataclass(frozen=True)
+class ThemisFolders:
+    default_folder_name: str = "Sin carpeta"
+    """Nombre mostrado para la carpeta virtual de escaneos sin agrupar."""
+
+
+@config_block("features.themis.history")
+@dataclass(frozen=True)
+class ThemisHistory:
+    max_scans: int = 5
+    """Escaneos recientes que se promedian en las estadísticas históricas."""
+
+
+@config_block("features.themis.taskDefaults")
+@dataclass(frozen=True)
+class ThemisTaskDefaults:
+    timeout: float = 200000
+    """Timeout (s) de ``_Task`` cuando el caller no especifica uno explícito."""
+
+
+@config_block("features.themis.hostReachabilityCheck")
+@dataclass(frozen=True)
+class HostReachabilityCheck:
+    """Sondeo previo que evita lanzar un escaneo largo contra un host caído."""
+
+    enabled: bool = True
+    timeout: float = 3.0
+    port: int = 80
+
+
+@config_block("features.themis.traceroute")
+@dataclass(frozen=True)
+class TracerouteConfig:
+    cache_hours: float = 24
+    """Horas que una ruta cacheada se considera válida antes de recalcularse."""
+
+    max_hops: int = 30
+    """Número máximo de saltos a sondear (``-m`` en traceroute)."""
+
+    timeout: float = 60
+    """Tiempo máximo total (segundos) para el comando traceroute."""
+
+    retry_failed_minutes: float = 15
+    """Minutos que una ruta fallida (sin saltos) se cachea antes de reintentar.
+
+    Mucho más corto que ``cache_hours``: evita re-sondear un host inalcanzable
+    en cada apertura del detalle, pero permite reintentar pronto (o de inmediato
+    con el botón de refresco).
+    """
+
+
+@config_block("features.themis.kb")
+@dataclass(frozen=True)
+class KnowledgeBaseConfig:
+    """Espejo local de NVD/KEV/EPSS que alimenta a Lybra."""
+
+    enabled: bool = False
+    sources: dict = field(default_factory=dict)
+    sync_cron: str = "0 3 * * *"
+    nvd_window_days: int = 8
+
+    configured_nvd_api_key: str = field(
+        default="", metadata={"key": "nvdApiKey", "optional": True}
+    )
+    """Respaldo en fichero de la API key de NVD. Ver ``nvd_api_key``."""
+
+    @property
+    def nvd_api_key(self) -> Optional[str]:
+        """La API key efectiva, o ``None`` si no hay ninguna.
+
+        Es un secreto, así que ``NVD_API_KEY`` en el entorno manda; la clave del
+        fichero existe solo como respaldo y no está en SecOpsConfig.json a
+        propósito (los secretos no se versionan).
+        """
+        return os.environ.get("NVD_API_KEY") or (self.configured_nvd_api_key or None)
+
+
+@config_block("features.themis.scanners.lybra")
+@dataclass(frozen=True)
+class LybraConfig:
+    """Interruptores de operador del motor propio.
+
+    Ambos van a ``True`` por defecto: el registro de objetivos autorizados por
+    usuario (roadmap §6, ``AuthorizedTargetManager``) es la verdadera puerta —
+    Lybra solo toca un objetivo que el llamante haya autorizado explícitamente,
+    valga lo que valga este flag. Existen como interruptor de emergencia para
+    desactivar la funcionalidad en todo el despliegue.
+    """
+
+    active_checks: bool = True
+    fingerprinting_enabled: bool = True
+
+
+@config_block("features.themis.scanners.lybra.ingest")
+@dataclass(frozen=True)
+class LybraIngestConfig:
+    """Ingesta de plantillas de Nuclei al runtime propio de Lybra (Fase R)."""
+
+    enabled: bool = False
+    """**Por defecto desactivado, y a conciencia.** El código está construido y
+    probado, pero la decisión de si la ingesta merece la pena la toma el número
+    del censo de la Fase U4 (``tools/nuclei_template_census.py``), que solo puede
+    medirse en una máquina con el feed instalado. Hasta que ese número exista, el
+    interruptor existe pero no se activa: el flag decide la *activación*, no la
+    existencia del código."""
+
+    min_severity: str = "MEDIUM"
+    """Severidad mínima de una plantilla ingerida para llegar a ejecutarse."""
+
+    max_checks: int = 300
+    """Tope duro de checks ingeridos por escaneo (la red de seguridad final)."""
+
+
+def _nuclei_default_template_locations() -> tuple[Path, ...]:
+    """Ubicaciones por defecto de Nuclei, resueltas en el momento de llamar.
+
+    Se calculan aquí y no en una constante de módulo a propósito: ``Path.home()``
+    en una constante se congelaría al importar, y entonces ni un test podría
+    simular otro ``HOME`` ni un worker heredaría un entorno distinto al del
+    proceso que lo importó. En la imagen Docker esto resuelve a
+    ``/root/.local/nuclei-templates``, que es donde el ``nuclei -update-templates``
+    del Dockerfile las deja.
+    """
+    home = Path.home()
+    return (home / ".local" / "nuclei-templates", home / "nuclei-templates")
+
+
+@config_block("features.themis.scanners.nuclei")
+@dataclass(frozen=True)
+class NucleiConfig:
+    binary_path: str = "nuclei"
+    """Ruta o nombre del binario ``nuclei`` (resuelto vía PATH por defecto)."""
+
+    default_severities: list = field(
+        default_factory=lambda: ["critical", "high", "medium"]
+    )
+    """Perfil acotado por defecto cuando el caller no especifica severidades.
+
+    Excluye ``info`` a propósito (roadmap Fase U1, punto 1): son miles de
+    plantillas de tech-detect, y al ser ``confirmed=True`` sin CVSS el suelo de
+    ``score_finding`` las subiría todas a MEDIO. Activarlas es una elección
+    explícita del usuario en el formulario, no un default.
+    """
+
+    rate_limit: int = 150
+    """Peticiones/segundo máximas por defecto."""
+
+    request_timeout: int = 10
+    """Timeout por petición HTTP individual (segundos)."""
+
+    timeout: float = 1800
+    """Timeout (s) del escaneo completo cuando el caller no especifica uno —
+    también usado como timeout del job en ``NucleiScanManager.run_scan``."""
+
+    configured_templates_dir: str = field(default="", metadata={"key": "templatesDir"})
+    """Respaldo en fichero del árbol de plantillas. Ver ``templates_dir``."""
+
+    configured_templates_version: str = field(
+        default="", metadata={"key": "templatesVersion"}
+    )
+    """Respaldo en fichero de la versión del feed. Ver ``templates_version``."""
+
+    @property
+    def templates_dir(self) -> Optional[Path]:
+        """Directorio efectivo del **único** árbol de plantillas de Themis.
+
+        Themis tiene una sola copia de las plantillas, y esta propiedad es quien
+        dice dónde está. Tres consumidores dependen de esa respuesta y ninguno
+        debe resolverla por su cuenta: ``NucleiScanTask`` (que se la pasa al
+        binario por ``-templates``), la ingesta de plantillas al runtime propio y
+        el censo de ingestibilidad (roadmap Fases R y U4).
+
+        Prioridad, de más explícito a más implícito: 1) ``templatesDir`` en
+        SecOpsConfig.json, 2) ``NUCLEI_TEMPLATES_DIR`` en el entorno, 3) las
+        ubicaciones por defecto de Nuclei.
+
+        Returns:
+            La ruta al árbol, o ``None`` si ninguna candidata existe en disco.
+            Nunca una ruta inventada: quien pasa el flag al binario omite
+            ``-templates`` y deja que decida él, y quien necesita *leer* las
+            plantillas no puede hacer nada y debe poder saberlo.
+        """
+        configured = self.configured_templates_dir.strip()
+        if configured:
+            path = Path(configured)
+            if path.is_dir():
+                return path
+            # Una ruta configurada que no existe es un error de despliegue, no
+            # algo que deba degradarse en silencio a otra ubicación: se avisa y
+            # se sigue buscando, para no dejar un escaneo sin plantillas sin
+            # explicación.
+            logger.warning(
+                "features.themis.scanners.nuclei.templatesDir apunta a '%s', que "
+                "no existe; se buscarán las ubicaciones por defecto de Nuclei",
+                configured,
+            )
+
+        from_environment = (os.environ.get("NUCLEI_TEMPLATES_DIR") or "").strip()
+        if from_environment and Path(from_environment).is_dir():
+            return Path(from_environment)
+
+        return next((c for c in _nuclei_default_template_locations() if c.is_dir()), None)
+
+    @property
+    def templates_version(self) -> str:
+        """Versión del feed, usada como respaldo hasta que ``NucleiScanTask``
+        capture la real del banner de arranque del binario (ver
+        ``NucleiScanManager._execute_scan``, que corrige el ``feed_version`` de
+        cada ``Finding`` post-hoc con ese dato, más fiable).
+
+        Prioridad: 1) el fichero que el Dockerfile vuelca al hornear las
+        plantillas en build (``/app/resources/nuclei_templates_version.txt``, más
+        fiable que un valor estático porque refleja lo que de verdad se
+        sincronizó en esa imagen), 2) ``templatesVersion`` en SecOpsConfig.json,
+        3) un marcador explícito de "desconocido".
+        """
+        version_file = (
+            Path(get_directory_of(DirectoryType.RESOURCES_THEMIS)).parent
+            / "nuclei_templates_version.txt"
+        )
+        try:
+            from_file = version_file.read_text(encoding="utf-8").strip()
+            if from_file:
+                return f"nuclei-templates-{from_file}"
+        except (OSError, IOError):
+            pass
+        configured = self.configured_templates_version
+        return f"nuclei-templates-{configured}" if configured else "nuclei-templates-unknown"
+
+
+def themis_config() -> ThemisConfig:
+    return load_block(ThemisConfig)
+
+
+def themis_folders() -> ThemisFolders:
+    return load_block(ThemisFolders)
+
+
+def themis_history() -> ThemisHistory:
+    return load_block(ThemisHistory)
+
+
+def themis_task_defaults() -> ThemisTaskDefaults:
+    return load_block(ThemisTaskDefaults)
+
+
+def host_reachability_check() -> HostReachabilityCheck:
+    return load_block(HostReachabilityCheck)
+
+
+def traceroute_config() -> TracerouteConfig:
+    return load_block(TracerouteConfig)
+
+
+def knowledge_base_config() -> KnowledgeBaseConfig:
+    return load_block(KnowledgeBaseConfig)
+
+
+def lybra_config() -> LybraConfig:
+    return load_block(LybraConfig)
+
+
+def lybra_ingest_config() -> LybraIngestConfig:
+    return load_block(LybraIngestConfig)
+
+
+def nuclei_config() -> NucleiConfig:
+    return load_block(NucleiConfig)
+
+
+# --- Prompts y paletas: parametrizados por herramienta, no por bloque --------
+#
+# Los cinco escáneres comparten la misma forma (``prompts`` + ``colorPalette``)
+# y los consumidores los piden por herramienta, no por nombre fijo: una
+# dataclass por escáner solo para esto serían cinco clases idénticas.
 
 @_lazy_load
 def get_prompts_config() -> dict:
-    themis = _require_configs().get("themis", {})
-
     return {
-        "nmap": themis.get("nmap", {}).get("prompts", {}),
-        "nikto": themis.get("nikto", {}).get("prompts", {}),
-        "openvas": themis.get("openvas", {}).get("prompts", {}),
-        "lybra": themis.get("lybra", {}).get("prompts", {}),
+        scanner: _cfg(f"features.themis.scanners.{scanner}.prompts", {})
+        for scanner in THEMIS_SCANNERS
     }
+
 
 @_lazy_load
 def get_tool_prompts(tool: str) -> dict:
     prompts = get_prompts_config()
     return prompts.get(tool, {})
 
+
 @_lazy_load
 def get_tool_color_palette(tool) -> dict:
-    themis = _require_configs().get("themis", {})
-
     # Accepts a ThemisTool enum member or a plain string; without this, a
     # dict lookup with an Enum instance against string keys always misses
     # and silently returns {} (bug: every caller has been getting the
     # hardcoded per-strategy fallback colors instead of SecOpsConfig's).
     tool_key = tool.value if hasattr(tool, "value") else tool
-    if tool_key not in themis:
-        return {}
+    return _cfg(f"features.themis.scanners.{tool_key}.colorPalette", {})
 
-    tool_config = themis[tool_key]
-    return tool_config.get("colorPalette", {})
-
-@_lazy_load
-def are_local_ips_allowed() -> bool:
-    return _as_bool(_cfg("themis.areLocalIpsAllowed", False))
-
-@_lazy_load
-def get_openvas_scan_configs() -> dict[str, str]:
-    configs = get_themis_config()
-    return configs["openvas"]["toolConfigs"]["scanConfigs"]
-
-@_lazy_load
-def get_openvas_port_list() -> dict[str, str]:
-    configs = get_themis_config()
-    return configs["openvas"]["toolConfigs"]["portList"]
-
-@_lazy_load
-def is_host_reachability_check_enabled() -> bool:
-    return _as_bool(_cfg("themis.hostReachabilityCheck.enabled", True))
-
-@_lazy_load
-def get_host_reachability_check_timeout() -> float:
-    return _cfg("themis.hostReachabilityCheck.timeout", 3.0, float)
-
-@_lazy_load
-def get_host_reachability_check_port() -> int:
-    return _cfg("themis.hostReachabilityCheck.port", 80, int)
 
 @_lazy_load
 def get_themis_csv_dir() -> str:
     return get_directory_of(DirectoryType.CSV_THEMIS)
-
-
-# --- Task timeouts (Q2: números mágicos movidos desde themis/services/tasks.py) ---
-
-@_lazy_load
-def get_themis_task_default_timeout() -> float:
-    """Timeout (s) de ``_Task`` cuando el caller no especifica uno explícito."""
-    return _cfg("themis.taskDefaults.timeout", 200000, float)
-
-@_lazy_load
-def get_openvas_task_timeout() -> float:
-    """Timeout (s) por defecto de ``OpenVASTask`` — también usado como timeout
-    del job en ``OpenVASScanManager.run_scan`` (deben coincidir: si el job de
-    RQ expira antes que el escaneo interno, se mata a mitad de sondeo)."""
-    return _cfg("themis.openvas.timeout", 14400, float)
-
-@_lazy_load
-def get_openvas_max_wait_timeout() -> float:
-    """Techo aplicado en ``OpenVASTask.wait()`` al timeout recibido."""
-    return _cfg("themis.openvas.maxWaitTimeout", 28800, float)
-
-
-# --- Lybra knowledge base (local NVD/KEV/EPSS mirror) ---
-
-@_lazy_load
-def is_kb_sync_enabled() -> bool:
-    return _as_bool(_cfg("themis.kb.enabled", False))
-
-@_lazy_load
-def get_kb_sources() -> dict:
-    return _cfg("themis.kb.sources", {})
-
-@_lazy_load
-def get_kb_sync_cron() -> str:
-    return _cfg("themis.kb.syncCron", "0 3 * * *")
-
-@_lazy_load
-def get_kb_nvd_window_days() -> int:
-    return _cfg("themis.kb.nvdWindowDays", 8, int)
-
-@_lazy_load
-def get_kb_nvd_api_key():
-    # Secret → prefer the environment, per the config convention.
-    import os
-    return os.environ.get("NVD_API_KEY") or (_cfg("themis.kb.nvdApiKey", "") or None)
-
-
-# --- Lybra active detection checks (Fase R) ---
-
-@_lazy_load
-def is_lybra_active_checks_enabled() -> bool:
-    # Global switch, on by default: active checks touch the target, but the
-    # per-user authorized-targets register (roadmap §6, AuthorizedTargetManager)
-    # is the real gate — LybraEngineManager only runs these against a target the
-    # caller has explicitly authorized, regardless of this flag. This exists as
-    # an operator-level kill switch to disable the whole feature deployment-wide.
-    return _as_bool(_cfg("themis.lybra.activeChecks", True))
-
-
-# --- Lybra own fingerprinting (Fase F) ---
-
-@_lazy_load
-def is_lybra_fingerprinting_enabled() -> bool:
-    # Same story as active checks: on by default now that the authorized-targets
-    # register (roadmap §6) gates it per-target; this flag is just the
-    # operator-level kill switch.
-    return _as_bool(_cfg("themis.lybra.fingerprintingEnabled", True))
-
-
-@_lazy_load
-def get_themis_default_folder_name() -> str:
-    """Devuelve el nombre mostrado para la carpeta virtual de escaneos sueltos."""
-    return _cfg("themis.folders.defaultFolderName", "Sin carpeta")
-
-
-@_lazy_load
-def get_themis_history_size() -> int:
-    """Número de escaneos recientes a considerar en las estadísticas históricas."""
-    return _cfg("themis.history.maxScans", 5, int)
-
-
-@_lazy_load
-def get_themis_traceroute_cache_hours() -> float:
-    """Horas que una ruta cacheada se considera válida antes de recalcularse."""
-    return _cfg("themis.traceroute.cacheHours", 24, float)
-
-
-@_lazy_load
-def get_themis_traceroute_max_hops() -> int:
-    """Número máximo de saltos a sondear (``-m`` en traceroute)."""
-    return _cfg("themis.traceroute.maxHops", 30, int)
-
-
-@_lazy_load
-def get_themis_traceroute_timeout() -> float:
-    """Tiempo máximo total (segundos) para el comando traceroute."""
-    return _cfg("themis.traceroute.timeout", 60, float)
-
-
-@_lazy_load
-def get_themis_traceroute_retry_failed_minutes() -> float:
-    """Minutos que una ruta fallida (sin saltos) se cachea antes de reintentar.
-
-    Mucho más corto que ``cacheHours``: evita re-sondear un host inalcanzable en
-    cada apertura del detalle, pero permite reintentar pronto (o de inmediato con
-    el botón de refresco)."""
-    return _cfg("themis.traceroute.retryFailedMinutes", 15, float)
 
 
 # =============================================================================
@@ -770,231 +931,443 @@ def save_full_config(new_config: dict, expected_version: Optional[str] = None) -
 
 
 # =============================================================================
-# CONFIGURACIÓN DE TASKQUEUE
+# CONFIGURACIÓN GENERAL
 # =============================================================================
 
-@_lazy_load
-def get_redis_config() -> dict:
-    """Devuelve la configuración de conexión Redis.
+@config_block("general")
+@dataclass(frozen=True)
+class GeneralConfig:
+    configured_public_url: str = field(
+        default="http://localhost:5173", metadata={"key": "publicUrl"}
+    )
+    """Respaldo en fichero de la URL pública. Ver ``public_url``."""
 
-    Valores no secretos (host, port, db, socket_connect_timeout) provienen de
-    SecOpsConfig.json. El password (secreto) proviene de la variable de entorno
-    REDIS_PASSWORD. Las env vars REDIS_HOST/PORT/DB sobreescriben la config si
-    están presentes (útil en contenedores).
+    @property
+    def public_url(self) -> str:
+        """Base URL pública del SPA, usada para construir enlaces en los correos
+        salientes (p. ej. el del quiz de una campaña de Aegis).
+
+        ``PUBLIC_WEB_URL`` en .env manda sobre el fichero; sin ninguno de los
+        dos, cae al valor de desarrollo de Vite. Siempre sin barra final.
+        """
+        return (os.getenv("PUBLIC_WEB_URL") or self.configured_public_url).rstrip("/")
+
+
+def general_config() -> GeneralConfig:
+    return load_block(GeneralConfig)
+
+
+# =============================================================================
+# CONFIGURACIÓN DE SEGURIDAD
+# =============================================================================
+#
+# Las tres ramas de ``general.security`` usan snake_case en el JSON, no la
+# convención camelCase del resto: sus claves se pasan tal cual como kwargs a
+# argon2 y a PyJWT, y traducirlas solo añadiría una capa que se puede
+# desincronizar. De ahí el ``metadata={"key": ...}`` en cada campo.
+
+@config_block("general.security.argon2")
+@dataclass(frozen=True)
+class Argon2Config:
+    """Parámetros de Argon2id para el hash de contraseñas."""
+
+    time_cost: int = field(default=3, metadata={"key": "time_cost"})
+    memory_cost: int = field(default=65536, metadata={"key": "memory_cost"})
+    parallelism: int = field(default=4, metadata={"key": "parallelism"})
+
+    def as_kwargs(self) -> dict[str, int]:
+        """Los tres parámetros tal como los espera ``argon2.PasswordHasher``."""
+        return {
+            "time_cost": self.time_cost,
+            "memory_cost": self.memory_cost,
+            "parallelism": self.parallelism,
+        }
+
+# TODO: Sería interesante que este campo estuviera en la configuración
+_ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
+
+
+@config_block("general.security.jwt")
+@dataclass(frozen=True)
+class JwtConfig:
+    """Firma y caducidad de los tokens OAuth.
+
+    Los tres valores del fichero son pisables por entorno (útil en contenedores
+    / 12-factor); el secreto no está en el fichero en absoluto.
     """
-    cfg = _cfg("redis", {})
-    host    = os.getenv("REDIS_HOST", str(cfg.get("host", "localhost")))
-    port    = int(os.getenv("REDIS_PORT", str(cfg.get("port", 6379))))
-    db      = int(os.getenv("REDIS_DB",   str(cfg.get("db", 0))))
-    timeout = int(cfg.get("socket_connect_timeout", 2))
-    password = os.getenv("REDIS_PASSWORD", "")
 
-    return {
-        "host":                  host,
-        "port":                  port,
-        "db":                    db,
-        "socket_connect_timeout": timeout,
-        "password":              password or None,
-    }
+    configured_algorithm: str = field(default="HS256", metadata={"key": "algorithm"})
+    configured_access_token_expiry_minutes: float = field(
+        default=30, metadata={"key": "access_token_expiry_minutes"}
+    )
+    configured_refresh_token_expiry_days: float = field(
+        default=7, metadata={"key": "refresh_token_expiry_days"}
+    )
 
-@_lazy_load
-def get_taskqueue_config() -> dict:
-    cfg = _cfg("general.taskqueue", {})
-    max_workers_env = os.getenv("TASKQUEUE_MAX_WORKERS")
-    if max_workers_env is not None:
-        cfg["max_workers"] = int(max_workers_env)
+    @property
+    def secret(self) -> str:
+        """``JWT_SECRET_KEY``, que vive exclusivamente en .env.
 
-    return cfg
+        Raises:
+            ValueError: Si falta. Es una propiedad y no un campo justo por esto:
+                arrancar sin secreto debe fallar cuando alguien va a firmar un
+                token, no al construir el bloque.
+        """
+        secret = os.getenv("JWT_SECRET_KEY")
+        if not secret:
+            logger.error("Falta la variable de entorno JWT_SECRET_KEY")
+            raise ValueError(
+                "Falta la variable de entorno JWT_SECRET_KEY. "
+                "Defínela en el archivo .env (es un secreto, no va en "
+                "SecOpsConfig.json)."
+            )
+        return secret
+
+    @property
+    def algorithm(self) -> str:
+        """Algoritmo de firma, validado contra la familia HS*.
+
+        S8: ``JWT_ALGORITHM`` era un override de entorno sin validar — un typo, o
+        un despliegue mal configurado con "none" (o con un algoritmo asimétrico,
+        que necesita un par de claves y no un secreto simétrico), rompería la
+        verificación de tokens en producción. Firmamos con un único secreto
+        simétrico, así que solo HS* tiene sentido aquí.
+        """
+        algorithm = os.getenv("JWT_ALGORITHM") or self.configured_algorithm
+        if algorithm not in _ALLOWED_JWT_ALGORITHMS:
+            raise ValueError(
+                f"JWT_ALGORITHM '{algorithm}' no permitido. "
+                f"Debe ser uno de: {', '.join(sorted(_ALLOWED_JWT_ALGORITHMS))}."
+            )
+        return algorithm
+
+    @property
+    def access_token_expiry_minutes(self) -> float:
+        return float(
+            os.getenv("ACCESS_TOKEN_EXPIRY_MINUTES")
+            or self.configured_access_token_expiry_minutes
+        )
+
+    @property
+    def refresh_token_expiry_days(self) -> float:
+        return float(
+            os.getenv("REFRESH_TOKEN_EXPIRY_DAYS")
+            or self.configured_refresh_token_expiry_days
+        )
 
 
-@_lazy_load
-def get_public_web_url() -> str:
-    """Base URL pública del frontend (SPA), usada para construir enlaces
-    en emails salientes (p. ej. el enlace del quiz de una campaña Aegis).
+@config_block("general.security.mfa")
+@dataclass(frozen=True)
+class MfaConfig:
+    """Segundo factor: TOTP y códigos de recuperación."""
 
-    ``PUBLIC_WEB_URL`` en .env tiene prioridad sobre ``general.publicUrl``
-    en SecOpsConfig.json; sin ninguno de los dos, cae al valor de desarrollo
-    de Vite. Sin barra final.
-    """
-    env_override = os.getenv("PUBLIC_WEB_URL")
-    if env_override:
-        return env_override.rstrip("/")
+    issuer: str = "Ellysia"
+    """Nombre que muestra la app de autenticación."""
 
-    return _cfg("general.publicUrl", "http://localhost:5173", str).rstrip("/")
+    challenge_expiry_minutes: int = field(
+        default=5, metadata={"key": "challenge_expiry_minutes"}
+    )
+    max_challenge_attempts: int = field(
+        default=5, metadata={"key": "max_challenge_attempts"}
+    )
+    recovery_codes_count: int = field(
+        default=10, metadata={"key": "recovery_codes_count"}
+    )
+
+    @property
+    def encryption_key(self) -> str:
+        """Clave Fernet con la que se cifra en reposo el secreto TOTP.
+
+        Vive solo en .env, igual que ``JWT_SECRET_KEY``: a diferencia del resto
+        de secretos de Acheron, el servidor sí necesita poder leer este valor
+        para calcular el TOTP vigente y verificarlo.
+        """
+        return get_encryption_key("mfa")
+
+
+def argon2_config() -> Argon2Config:
+    return load_block(Argon2Config)
+
+
+def jwt_config() -> JwtConfig:
+    return load_block(JwtConfig)
+
+
+def mfa_config() -> MfaConfig:
+    return load_block(MfaConfig)
+
+
+# =============================================================================
+# CONFIGURACIÓN DE INFRAESTRUCTURA
+# =============================================================================
+#
+# Igual que en seguridad, estas claves son snake_case en el JSON porque se pasan
+# tal cual a SQLAlchemy y a redis-py.
+
+@config_block("infrastructure.database")
+@dataclass(frozen=True)
+class DatabaseConfig:
+    """Ajustes no secretos de SQLAlchemy. Las credenciales van en .env."""
+
+    isolation_level: str = field(
+        default="READ COMMITTED", metadata={"key": "isolation_level"}
+    )
+    pool_size: int = field(default=10, metadata={"key": "pool_size"})
+    max_overflow: int = field(default=20, metadata={"key": "max_overflow"})
+    pool_timeout: int = field(default=30, metadata={"key": "pool_timeout"})
+
+    def pool_kwargs(self) -> dict[str, int]:
+        """El pool tal como lo espera ``create_engine``."""
+        return {
+            "pool_size": self.pool_size,
+            "max_overflow": self.max_overflow,
+            "pool_timeout": self.pool_timeout,
+        }
+
+
+@config_block("infrastructure.redis")
+@dataclass(frozen=True)
+class RedisConfig:
+    """Conexión a Redis: lo no secreto del fichero, el resto del entorno."""
+
+    configured_host: str = field(default="localhost", metadata={"key": "host"})
+    configured_port: int = field(default=6379, metadata={"key": "port"})
+    configured_db: int = field(default=0, metadata={"key": "db"})
+
+    socket_connect_timeout: int = field(
+        default=2, metadata={"key": "socket_connect_timeout"}
+    )
+
+    @property
+    def host(self) -> str:
+        return os.getenv("REDIS_HOST", self.configured_host)
+
+    @property
+    def port(self) -> int:
+        return int(os.getenv("REDIS_PORT", str(self.configured_port)))
+
+    @property
+    def db(self) -> int:
+        return int(os.getenv("REDIS_DB", str(self.configured_db)))
+
+    @property
+    def password(self) -> Optional[str]:
+        """``REDIS_PASSWORD``, o ``None`` si la instancia no lleva contraseña."""
+        return os.getenv("REDIS_PASSWORD", "") or None
+
+    def connection_kwargs(self) -> dict:
+        """La conexión tal como la esperan ``redis.Redis`` y RQ."""
+        return {
+            "host": self.host,
+            "port": self.port,
+            "db": self.db,
+            "socket_connect_timeout": self.socket_connect_timeout,
+            "password": self.password,
+        }
+
+
+@config_block("infrastructure.taskqueue")
+@dataclass(frozen=True)
+class TaskQueueConfig:
+    """Cola de trabajos sobre RQ."""
+
+    configured_max_workers: int = field(default=4, metadata={"key": "max_workers"})
+
+    history_ttl_seconds: int = field(
+        default=3600, metadata={"key": "history_ttl_seconds"}
+    )
+    history_max_items: int = field(default=200, metadata={"key": "history_max_items"})
+
+    @property
+    def max_workers(self) -> int:
+        """Procesos worker a levantar.
+
+        ``TASKQUEUE_MAX_WORKERS`` manda sobre el fichero. Antes esto se resolvía
+        escribiendo el valor del entorno *dentro* del dict cacheado de la
+        configuración, con lo que se colaba en la respuesta de ``GET /system`` y
+        acababa persistido en el fichero al primer guardado desde el SPA.
+        """
+        return int(os.getenv("TASKQUEUE_MAX_WORKERS") or self.configured_max_workers)
+
+
+def database_config() -> DatabaseConfig:
+    return load_block(DatabaseConfig)
+
+
+def redis_config() -> RedisConfig:
+    return load_block(RedisConfig)
+
+
+def taskqueue_config() -> TaskQueueConfig:
+    return load_block(TaskQueueConfig)
+
 
 # =============================================================================
 # CONFIGURACIÓN DE HYGEIA
 # =============================================================================
 
-@_lazy_load
-def get_hygeia_config() -> dict:
-    return _cfg("hygeia", {})
+@config_block("features.hygeia.limits")
+@dataclass(frozen=True)
+class HygeiaLimits:  # pylint: disable=too-many-instance-attributes
+    """Topes defensivos sobre lo que un agente puede mandar en un heartbeat.
 
-@_lazy_load
-def get_hygeia_heartbeat_interval_sec() -> int:
-    """Intervalo de heartbeat esperado del agente, en segundos (por defecto, 15)."""
-    return _cfg("hygeia.heartbeatIntervalSec", 15, int)
+    No son ajustes de comodidad: cada uno acota un recurso que un agente
+    comprometido —o simplemente mal configurado— podría agotar (§16).
+    """
 
-@_lazy_load
-def get_hygeia_max_assets_per_user() -> int:
-    """Cuota de activos monitorizados que puede dar de alta un mismo usuario (§16.4)."""
-    return _cfg("hygeia.limits.maxAssetsPerUser", 500, int)
-
-@_lazy_load
-def get_hygeia_max_body_bytes() -> int:
+    max_body_bytes: int = 1048576
     """Tamaño máximo (comprimido) del cuerpo de un heartbeat, en bytes (§16.1)."""
-    return _cfg("hygeia.limits.maxBodyBytes", 262144, int)
 
-@_lazy_load
-def get_hygeia_max_decompressed_bytes() -> int:
-    """Tope de descompresión de un heartbeat gzip, en bytes (defensa anti gzip-bomb, §16.1)."""
-    return _cfg("hygeia.limits.maxDecompressedBytes", 1048576, int)
+    max_decompressed_bytes: int = 4194304
+    """Tope de descompresión de un heartbeat gzip (defensa anti gzip-bomb, §16.1)."""
 
-@_lazy_load
-def get_hygeia_max_processes() -> int:
+    max_processes: int = 20
     """Máximo de procesos en topCpu/topMem por heartbeat (§16.1)."""
-    return _cfg("hygeia.limits.maxProcesses", 20, int)
 
-@_lazy_load
-def get_hygeia_max_disk_mounts() -> int:
+    max_disk_mounts: int = 64
     """Máximo de puntos de montaje reportados por heartbeat (§16.1)."""
-    return _cfg("hygeia.limits.maxDiskMounts", 64, int)
 
-@_lazy_load
-def get_hygeia_max_net_interfaces() -> int:
+    max_net_interfaces: int = 64
     """Máximo de interfaces de red reportadas por heartbeat (§16.1)."""
-    return _cfg("hygeia.limits.maxNetInterfaces", 64, int)
 
-@_lazy_load
-def get_hygeia_max_inventory_items() -> int:
+    max_inventory_items: int = 2000
     """Máximo de aplicaciones en un escaneo de inventario de software (§16.1)."""
-    return _cfg("hygeia.limits.maxInventoryItems", 2000, int)
 
-@_lazy_load
-def get_hygeia_min_interval_sec() -> int:
-    """Suelo de cadencia entre heartbeats de una misma clave, en segundos (§16.2)."""
-    return _cfg("hygeia.limits.minIntervalSec", 5, int)
-
-@_lazy_load
-def get_hygeia_clock_skew_sec() -> int:
-    """Ventana de cordura (± segundos) para el ``collectedAt`` del agente (§16.3)."""
-    return _cfg("hygeia.limits.clockSkewSec", 300, int)
-
-@_lazy_load
-def get_hygeia_max_series_points() -> int:
+    max_series_points: int = 1000
     """Máximo de puntos devueltos por la serie temporal de un activo (§5)."""
-    return _cfg("hygeia.limits.maxSeriesPoints", 1000, int)
 
-@_lazy_load
-def get_hygeia_thresholds() -> dict[str, dict[str, int]]:
-    """Umbrales globales por defecto de Hygeia (``hygeia.thresholds``); override por activo en DB."""
-    return _cfg("hygeia.thresholds", {})
+    min_interval_sec: int = 5
+    """Suelo de cadencia entre heartbeats de una misma clave, en segundos (§16.2)."""
 
-@_lazy_load
-def get_hygeia_offline_after_missed() -> int:
+    clock_skew_sec: int = 300
+    """Ventana de cordura (± segundos) para el ``collectedAt`` del agente (§16.3)."""
+
+    max_assets_per_user: int = 500
+    """Cuota de activos monitorizados que puede dar de alta un usuario (§16.4)."""
+
+
+@config_block("features.hygeia")
+@dataclass(frozen=True)
+class HygeiaConfig:
+    """Cadencia y retención del monitor de activos."""
+
+    heartbeat_interval_sec: int = 15
+    """Intervalo de heartbeat esperado del agente, en segundos."""
+
+    offline_after_missed: int = 4
     """Heartbeats perdidos (sobre el intervalo efectivo) para pasar de stale a offline."""
-    return _cfg("hygeia.offlineAfterMissed", 4, int)
 
-@_lazy_load
-def get_hygeia_retention_days() -> int:
+    retention_days: int = 30
     """Antigüedad máxima de un AssetSnapshot antes de podarlo (§7.3)."""
-    return _cfg("hygeia.retentionDays", 30, int)
 
-@_lazy_load
-def get_hygeia_retention_cron() -> str:
+    retention_cron: str = "0 4 * * *"
     """Expresión cron del job diario de poda de snapshots."""
-    return _cfg("hygeia.retentionCron", "0 4 * * *", str)
+
+    thresholds: dict[str, dict[str, int]] = field(default_factory=dict)
+    """Umbrales globales por defecto; cada activo puede pisarlos desde la DB.
+
+    Mapa libre de métrica (``cpuPct``, ``memPct``…) a sus cortes, así que se
+    queda como dict: las claves las decide la configuración, no este módulo.
+    """
+
+
+def hygeia_config() -> HygeiaConfig:
+    return load_block(HygeiaConfig)
+
+
+def hygeia_limits() -> HygeiaLimits:
+    return load_block(HygeiaLimits)
 
 
 # =============================================================================
 # CONFIGURACIÓN DE IRIS
 # =============================================================================
 
-@_lazy_load
-def get_iris_config() -> dict:
-    return _cfg("iris", {})
+@config_block("features.iris")
+@dataclass(frozen=True)
+class IrisConfig:  # pylint: disable=too-many-instance-attributes
+    """Análisis anti-phishing de correo."""
 
-@_lazy_load
-def get_iris_legitimate_threshold() -> float:
-    # 0–100 subtractive scale: >= 80 is Legitimate (see IrisManager._aggregate_score).
-    return _cfg("iris.legitimate_threshold", 80, float)
+    legitimate_threshold: float = 80
+    """Escala sustractiva 0–100: a partir de aquí el veredicto es Legítimo
+    (ver ``IrisManager._aggregate_score``)."""
 
-@_lazy_load
-def get_iris_suspicious_threshold() -> float:
-    # 0–100 subtractive scale: >= 55 is Suspicious, below is Phishing.
-    return _cfg("iris.suspicious_threshold", 55, float)
+    suspicious_threshold: float = 55
+    """Por debajo de ``legitimate_threshold`` y a partir de aquí, Sospechoso;
+    por debajo de aquí, Phishing."""
 
-@_lazy_load
-def get_iris_min_headers() -> int:
-    return _cfg("iris.min_headers", 2, int)
+    min_headers: int = 2
+    """Cabeceras mínimas para considerar analizable un mensaje."""
 
-@_lazy_load
-def get_iris_max_message_bytes() -> int:
-    # C4: AnalyzeRequestSchema had no upper bound at all — a multi-MB .eml
-    # (attachments included) was accepted whole into a Text column and
-    # re-parsed, base64 decoding included, on every subsequent read
-    # (get_analysis_results/path/iocs). 10 MB comfortably covers a real
-    # email with attachments while capping the re-parse cost.
-    return _cfg("iris.maxMessageBytes", 10 * 1024 * 1024, int)
+    max_message_bytes: int = 10 * 1024 * 1024
+    """Tamaño máximo de un ``.eml`` aceptado (C4).
+
+    ``AnalyzeRequestSchema`` no tenía ningún tope: un correo de varios MB con
+    adjuntos entraba entero en una columna Text y se re-parseaba —decodificando
+    base64 incluido— en cada lectura posterior (``get_analysis_results``,
+    ``path``, ``iocs``). 10 MB cubre de sobra un correo real con adjuntos y a la
+    vez acota el coste de ese re-parseo.
+    """
+
+    max_connections_per_user: int = 5
+    """Máximo de cuentas de correo que un usuario puede conectar a la vez."""
+
+    poll_interval_minutes: int = 5
+    """Intervalo (minutos) del scheduler que sondea las conexiones activas."""
+
+    max_ingested_per_day: int = 200
+    """Tope diario de análisis auto-ingeridos, **por conexión** (no global).
+
+    Una conexión mal configurada (carpeta ruidosa, bucle de reenvíos) no debe
+    poder generar análisis sin límite — ver roadmap-ellysia.md §8.1.
+    """
+
+    prompts: dict = field(default_factory=dict)
+    """Prompts de ``IrisAIWriter`` (IA1): ``summary.{system,userTemplate}``."""
+
+
+def iris_config() -> IrisConfig:
+    return load_block(IrisConfig)
+
+
+# --- Datasets y pesos: buscados por clave, no por campo ---------------------
+#
+# Ninguno de los dos encaja en un bloque: los datasets son dos docenas de listas
+# que solo ``iris/services/shared.py`` consume, y los pesos de scoring son un
+# mapa abierto donde cada regla trae su propio default calibrado. En ambos casos
+# el consumidor sabe qué clave quiere, y declararlas como campos obligaría a
+# tocar este módulo cada vez que se añade una regla.
 
 @_lazy_load
 def get_iris_data(key: str):
-    """Dataset de detección de Iris desde ``iris.data.<key>`` (o None si falta).
+    """Dataset de detección desde ``features.iris.data.<key>`` (o None si falta).
 
     Los datasets (marcas, dominios, keywords, extensiones…) viven en el bloque
-    ``iris.data`` de SecOpsConfig.json; los defaults de respaldo están en
-    ``src/modules/features/iris/services/shared.py``, que es el único consumidor previsto.
+    ``features.iris.data``; los defaults de respaldo están en
+    ``src/modules/features/iris/services/shared.py``, que es el único consumidor
+    previsto.
     """
-    return _cfg(f"iris.data.{key}")
+    return _cfg(f"features.iris.data.{key}")
 
-@_lazy_load
-def get_iris_prompts() -> dict:
-    """Prompts de IrisAIWriter (IA1) desde ``iris.prompts.<key>``.
-
-    Espejo de ``get_prompts_config()`` (que solo mira el bloque ``themis``)
-    para el módulo Iris: ``iris.prompts.summary.{system,userTemplate}``.
-    """
-    return _cfg("iris.prompts", {})
 
 @_lazy_load
 def get_iris_scoring_weight(weight_key: str, default: float) -> float:
     """Peso de scoring configurable de una regla de Iris (recalibración §19/S6).
 
-    ``iris.scoring.<weight_key>`` en SecOpsConfig.json puede pisar la
-    magnitud de penalización que una regla define en código sin necesidad de
-    redeploy -- el propio ``default`` que cada llamada pasa (el valor
-    calibrado por el consejo, ver STUDY.md) es el que se usa si la clave no
-    está presente en la config, así que el comportamiento no cambia hasta
-    que alguien la añade explícitamente.
+    ``features.iris.scoring.<weight_key>`` puede pisar la magnitud de
+    penalización que una regla define en código sin necesidad de redeploy. El
+    propio ``default`` que cada llamada pasa (el valor calibrado por el consejo,
+    ver STUDY.md) es el que se usa si la clave no está en la config, así que el
+    comportamiento no cambia hasta que alguien la añade explícitamente.
     """
-    return _cfg(f"iris.scoring.{weight_key}", default, float)
+    return _cfg(f"features.iris.scoring.{weight_key}", default, float)
 
 
 # =============================================================================
 # CONECTOR DE BUZÓN DE IRIS (Fase 3-4 del plan mailbox-connector)
 # =============================================================================
-
-@_lazy_load
-def get_iris_max_connections_per_user() -> int:
-    """Máximo de cuentas de correo que un usuario puede conectar a la vez."""
-    return _cfg("iris.maxConnectionsPerUser", 5, int)
-
-
-@_lazy_load
-def get_iris_poll_interval_minutes() -> int:
-    """Intervalo (minutos) del scheduler que sondea las conexiones activas."""
-    return _cfg("iris.pollIntervalMinutes", 5, int)
-
-
-@_lazy_load
-def get_iris_max_ingested_per_day() -> int:
-    """Tope diario de análisis auto-ingeridos, por conexión (no global).
-
-    Una conexión mal configurada (carpeta ruidosa, bucle de reenvíos) no
-    debe poder generar analisis sin límite — ver roadmap-ellysia.md §8.1.
-    """
-    return _cfg("iris.maxIngestedPerDay", 200, int)
-
+# Los ajustes del conector (cuotas, cadencia de sondeo) viven en ``IrisConfig``;
+# aquí solo quedan las credenciales OAuth de las apps, que son secretos de .env.
 
 def get_gmail_environment() -> dict[str, str]:
     """Credenciales OAuth de la app de Gmail desde variables de entorno.
@@ -1046,41 +1419,6 @@ def get_graph_environment() -> dict[str, str]:
 def get_app_version() -> str:
     """Versión de la aplicación desde SecOpsConfig.json."""
     return _cfg("appVersion", "0.0.0", str)
-
-
-# =============================================================================
-# CONFIGURACIÓN DE BASE DE DATOS (no secretos)
-# =============================================================================
-
-@_lazy_load
-def get_db_isolation_level() -> str:
-    """Devuelve el isolation level de SQLAlchemy desde SecOpsConfig.json."""
-    return _cfg("database.isolation_level", "READ COMMITTED")
-
-
-@_lazy_load
-def get_db_pool_config() -> dict:
-    """Devuelve la configuración del pool de conexiones desde SecOpsConfig.json.
-
-    Claves: pool_size, max_overflow, pool_timeout. Aplica defaults sensatos si
-    faltan, de modo que el sistema arranca aunque el bloque no esté completo.
-    """
-    return {
-        "pool_size": _cfg("database.pool_size", 10, int),
-        "max_overflow": _cfg("database.max_overflow", 20, int),
-        "pool_timeout": _cfg("database.pool_timeout", 30, int),
-    }
-
-
-# =============================================================================
-# CONFIGURACIÓN DE SEGURIDAD
-# =============================================================================
-
-@_lazy_load
-def get_argon2_config() -> dict:
-    """Devuelve los parámetros de Argon2id para hashing de contraseñas."""
-    defaults = {"time_cost": 3, "memory_cost": 65536, "parallelism": 4}
-    return {**defaults, **_cfg("security.argon2", {})}
 
 
 # =============================================================================

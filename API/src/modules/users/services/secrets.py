@@ -24,12 +24,7 @@ from src.modules.shared._crypto import decrypt_at_rest, encrypt_at_rest
 
 
 def _get_hasher() -> PasswordHasher:
-    cfg = CR.get_argon2_config()
-    return PasswordHasher(
-        time_cost=cfg.get("time_cost", 3),
-        memory_cost=cfg.get("memory_cost", 65536),
-        parallelism=cfg.get("parallelism", 4),
-    )
+    return PasswordHasher(**CR.argon2_config().as_kwargs())
 
 
 def hash_password(password: str) -> str:

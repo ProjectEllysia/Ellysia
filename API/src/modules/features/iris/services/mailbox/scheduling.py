@@ -39,7 +39,7 @@ class IrisMailboxScheduler:
         if cls._scheduler is not None:
             return
 
-        interval = CR.get_iris_poll_interval_minutes()
+        interval = CR.iris_config().poll_interval_minutes
         cls._scheduler = make_background_scheduler()
         cls._scheduler.add_job(
             func=cls._poll_connections,
@@ -66,7 +66,7 @@ class IrisMailboxScheduler:
     @scheduler_job(logger, "Error sondeando conexiones de buzón de Iris")
     def _poll_connections() -> None:
         """Entry point del job (aislamiento de errores y cierre de sesión vía ``scheduler_job``)."""
-        interval = CR.get_iris_poll_interval_minutes()
+        interval = CR.iris_config().poll_interval_minutes
         due = build_repository(IrisMailboxConnectionRepository).get_due_for_sync(interval)
         manager = IrisMailboxManager()
         for connection in due:

@@ -4,7 +4,7 @@ import logging
 import os
 import ipaddress
 
-from flask import request, send_file
+from flask import send_file
 from flask_smorest import Blueprint as SmorestBlueprint
 
 from src.modules.users import require_oauth_token, require_attributes, AttributeType, get_current_user
@@ -28,7 +28,7 @@ from .managers import (
     ScanManager,
     NmapScanManager,
     NiktoScanManager,
-    OpenVASScanManager,
+    NucleiScanManager,
     LybraEngineManager,
     ProgramedScanManager,
     ThemisReportManager,
@@ -54,12 +54,13 @@ from .exceptions import (
     ScanAlreadyInFolderError,
     AuthorizedTargetNotFoundError,
     DuplicateAuthorizedTargetError,
+    TargetNotAuthorizedError,
 )
 from .schemas import (
     ScanIdQuerySchema,
     NmapScanRequestSchema,
     NiktoScanRequestSchema,
-    OpenVASScanRequestSchema,
+    NucleiScanRequestSchema,
     LybraScanRequestSchema,
     FindingStateRequestSchema,
     FindingStateResponseSchema,
@@ -103,7 +104,7 @@ from .schemas import (
 
 themis_blp = SmorestBlueprint(
     "themis", __name__,
-    description="Escaneos de seguridad (Nmap, Nikto, OpenVAS) y PDFs"
+    description="Escaneos de seguridad (Nmap, Nikto, Lybra, Nuclei) y PDFs"
 )
 logger = logging.getLogger(__name__)
 
@@ -141,28 +142,18 @@ def _serialize_document(doc) -> dict:
         "downloadUrl": _download_url_for(doc),
     }
 
-
-def validate_targets(raw: str, max_hosts: int = 10) -> list[str]:
+def validate_web_target(raw: str) -> str:
     """
-    Validate ``raw`` as a target spec via ``ScanManager.validate_ip``,
-    translating its domain exceptions into the HTTP-facing ones.
-    """
-    try:
-        return ScanManager.validate_ip(raw, max_hosts=max_hosts)
-    except IPValidationError as exc:
-        raise ValidationError(field="target", message=str(exc), value=raw) from exc
-    except MaxHostsExceededError as exc:
-        raise ValidationError(str(exc.user_message or exc))
-    except PrivateIPRequested as exc:
-        raise EllysiaException(str(exc.user_message or exc), status_code=403)
+    Nikto y Nuclei escanean por hostname/URL, no por un spec de CIDR/rango, así
+    que ninguno puede reusar ``validate_targets``. Resuelve el target a IP y
+    rechaza esa IP si es privada — cierra el hueco SSRF donde un hostname/DNS
+    resuelve a una dirección local o de metadata (127.0.0.1, 169.254.169.254,
+    ...).
 
-
-def validate_nikto_target(raw: str) -> None:
-    """
-    Nikto escanea por hostname/URL, no por un spec de CIDR/rango, así que no
-    puede reusar ``validate_targets``. Resuelve el target a IP y rechaza esa
-    IP si es privada — cierra el hueco SSRF donde un hostname/DNS resuelve a
-    una dirección local o de metadata (127.0.0.1, 169.254.169.254, ...).
+    Returns:
+        La IP resuelta — Nuclei la necesita además para el gate de objetivos
+        autorizados (``AuthorizedTargetManager.is_authorized`` solo entiende
+        IPs desnudas, no URLs).
     """
     try:
         ip, _ = normalize_target(raw)
@@ -172,6 +163,7 @@ def validate_nikto_target(raw: str) -> None:
         ScanManager.reject_private_ip(ip)
     except PrivateIPRequested as exc:
         raise EllysiaException(str(exc.user_message or exc), status_code=403)
+    return ip
 
 
 @themis_blp.get("/scan-status")
@@ -270,7 +262,7 @@ def start_nmap_scan(data: dict):
     user = get_current_user()
 
     nmap_manager = NmapScanManager()
-    hosts = validate_targets(host)
+    hosts = ScanManager.validate_targets(host)
 
     try:
         ScanManager.validate_port(ports)
@@ -313,7 +305,7 @@ def start_nikto_scan(data):
     timeout = data["timeout"]
     user = get_current_user()
 
-    validate_nikto_target(target)
+    validate_web_target(target)
 
     nikto_manager = NiktoScanManager()
     scan_id = nikto_manager.run_scan(target, user_id=user.id, timeout=timeout)
@@ -327,45 +319,46 @@ def start_nikto_scan(data):
     }
 
 
-@themis_blp.post("/openvas")
-@themis_blp.arguments(OpenVASScanRequestSchema)
-@themis_blp.response(201, ScanResponseSchema, description="OpenVAS scan started")
+@themis_blp.post("/nuclei")
+@themis_blp.arguments(NucleiScanRequestSchema)
+@themis_blp.response(201, ScanResponseSchema, description="Nuclei scan started")
 @themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
 @themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@limiter.limit("10 per hour; 50 per day")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions / target not authorized")
+@limiter.limit("20 per hour; 100 per day")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.THEMIS_CREATE])
 @handle_exceptions(default_exception=ScanExecutionError, logger=logger)
-def start_openvas_scan(data):
-    """Lanzar un escaneo OpenVAS para un unico host"""
+def start_nuclei_scan(data):
+    """Lanzar un escaneo Nuclei (roadmap Fase U1).
+
+    A diferencia de Nikto, Nuclei toca el objetivo bastante más — nace sujeto
+    al registro de objetivos autorizados desde el día uno, no se le añade
+    después (roadmap Fase U1, punto 3).
+    """
     target = data["target"]
-    scan_config = data["scanConfig"]
     user = get_current_user()
-    if user is None:
-        raise IllegalStateError("'user' detectado como None")
 
-    hosts = validate_targets(target, max_hosts=1)
+    ip = validate_web_target(target)
+    if not AuthorizedTargetManager.is_authorized(user.id, ip):
+        raise TargetNotAuthorizedError(target)
 
-    openvas_manager = OpenVASScanManager()
-    target_ip = hosts[0]
-    ipaddress.ip_address(target_ip)
-
-    scan_id = openvas_manager.run_scan(
-        target=target_ip,
-        scan_config=scan_config,
+    nuclei_manager = NucleiScanManager()
+    scan_id = nuclei_manager.run_scan(
+        target=target,
         user_id=user.id,
-        skip_normalize=True,
+        severities=data.get("severities"),
+        tags=data.get("tags"),
+        rate_limit=data.get("rateLimit"),
+        request_timeout=data.get("requestTimeout"),
+        timeout=data.get("timeout"),
     )
-    logger.info(f"OpenVAS lanzado: ID={scan_id} target={target_ip} config={scan_config} user={user.username}")
-
+    logger.info(f"Nuclei lanzado: ID={scan_id} target={target} user={user.username}")
     return {
-        "message": "Escaneo OpenVAS iniciado correctamente",
+        "message": "Escaneo Nuclei iniciado correctamente",
         "scanId": scan_id,
-        "target": target_ip,
-        "scanConfig": scan_config,
+        "scanType": "nuclei",
         "user": user.username,
-        "note": "Use /themis/scan-status para verificar el progreso.",
     }
 
 
@@ -402,15 +395,21 @@ def start_lybra_scan(data):
     else:
         # Autodescubrimiento: valida el objetivo (rechaza IPs privadas, etc.)
         # igual que un escaneo Nmap, ya que el transporte propio toca el objetivo.
-        target = validate_targets(data["target"], max_hosts=1)[0]
+        target = ScanManager.validate_targets(data["target"], max_hosts=1)[0]
         discover_ports = None
         if data.get("ports"):
             try:
                 discover_ports = ScanManager.validate_port(data["ports"])
             except PortValidationError as exc:
                 raise ValidationError(field="ports", message=str(exc), value=data["ports"]) from exc
-        scan_id = manager.run_scan(user_id=user.id, target=target, discover_ports=discover_ports,
-                                   deep=deep, timeout=timeout)
+            
+        scan_id = manager.run_scan(
+            user_id=user.id, 
+            target=target, 
+            discover_ports=discover_ports,
+            deep=deep, 
+            timeout=timeout
+        )
         logger.info(f"Lybra lanzado: ID={scan_id} autodescubrimiento target={target} deep={deep} user={user.username}")
 
     return {
@@ -533,7 +532,12 @@ def retrieve_all_scans(args):
 
     if scan_type != "all":
         mgr = ScanManager.get_manager_for_type(scan_type)
-        results, total_count = mgr.get_scans_paginated(uid, page, per_page)
+        # `assetId` solo lo entiende Lybra (Fase I): es el que separa los
+        # escaneos de un agente Hygeia de los lanzados desde el panel.
+        if scan_type == "lybra" and args.get("assetId") is not None:
+            results, total_count = mgr.get_scans_paginated(uid, page, per_page, asset_id=args["assetId"])
+        else:
+            results, total_count = mgr.get_scans_paginated(uid, page, per_page)
         total_pages = (total_count + per_page - 1) // per_page
 
         return {
@@ -726,8 +730,8 @@ def delete_scan(scan_id: int):
     if scan.status in CANCELLABLE_STATES:
         logger.info(f"Cancelando escaneo {scan_id} antes de eliminar")
         # La cancelación es cooperativa (solo señaliza al worker, no mata el
-        # proceso — ver TaskQueue.cancel): si falla, el subproceso (nmap/nikto/
-        # openvas) puede seguir vivo. Borrar la fila igualmente lo dejaría
+        # proceso — ver TaskQueue.cancel): si falla, el subproceso (nmap/nikto)
+        # puede seguir vivo. Borrar la fila igualmente lo dejaría
         # huérfano y para siempre invisible para la app, así que no se procede.
         if not manager.cancel_scan(scan_id, user.id): # type: ignore
             raise ScanExecutionError(
