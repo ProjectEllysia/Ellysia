@@ -120,6 +120,7 @@ def test_lybra_self_discovery_produces_open_port_findings(app, admin_user, monke
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [80, 22])
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
 
     with app.app_context():
         mgr = LybraEngineManager()
@@ -136,6 +137,35 @@ def test_lybra_self_discovery_produces_open_port_findings(app, admin_user, monke
     assert {f.port for f in open_ports} == {80, 22}
     # Self-discovery creates a Host for the target, so findings are anchored.
     assert all(f.host_id is not None for f in findings)
+
+
+def test_lybra_self_discovery_disambiguates_the_same_port_over_tcp_and_udp(app, admin_user, monkeypatch):
+    """Ronda 1 (roadmap §6.3): 161/tcp y 161/udp del mismo host son dos
+    servicios distintos y deben sobrevivir como dos hallazgos `open_port` con
+    `dedup_key` distintas — el riesgo real que motivó la columna
+    `Finding.protocol` y el arreglo de `compute_dedup_key`."""
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
+                        lambda self, target, ports: [161])
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports",
+                        lambda self, target: [161])
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="8.8.4.4", user_id=admin_user.id, source_scan_id=None)
+        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    open_ports = [f for f in findings if f.category == "open_port" and f.port == 161]
+    assert len(open_ports) == 2
+    assert {f.protocol for f in open_ports} == {"tcp", "udp"}
+    assert len({f.dedup_key for f in open_ports}) == 2
+    assert {f.title for f in open_ports} == {
+        "Puerto 161/tcp abierto — snmp",
+        "Puerto 161/udp abierto — snmp",
+    }
 
 
 def test_lybra_self_discovery_unreachable_host_fails_without_false_fixed(app, admin_user, monkeypatch):
@@ -181,6 +211,7 @@ def test_lybra_self_discovery_genuine_zero_ports_still_marks_fixed(app, admin_us
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [80])
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
 
     with app.app_context():
         mgr = LybraEngineManager()
@@ -752,6 +783,7 @@ def test_lybra_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, mon
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [80])
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
 
     def fake_fetch(self, host, port, method, path):
         return Response(200, "<html><title>It works</title></html>",
@@ -791,6 +823,7 @@ def test_lybra_ftp_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user,
     monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(fingerprinting_enabled=True))
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports", lambda self, target, ports: [21])
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
     monkeypatch.setattr(FtpProbe, "fetch", lambda self, host, port: "220 (vsFTPd 2.3.4)")
     _authorize_target(app, admin_user.id)
 
@@ -822,6 +855,7 @@ def test_lybra_mysql_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_use
     monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(fingerprinting_enabled=True))
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports", lambda self, target, ports: [3306])
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
     monkeypatch.setattr(
         MysqlProbe, "fetch",
         lambda self, host, port: bytes([0x0A]) + b"8.0.34\x00" + b"\x00" * 13,

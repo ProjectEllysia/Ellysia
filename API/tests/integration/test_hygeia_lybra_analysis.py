@@ -141,7 +141,8 @@ def test_analysis_never_touches_the_targets_network(app, admin_user):
 
     with mock.patch.object(LybraEngineManager, "_fingerprint_services", _boom), \
          mock.patch.object(LybraEngineManager, "_run_active_checks", _boom), \
-         mock.patch.object(LybraEngineManager, "_discover_ports", _boom):
+         mock.patch.object(LybraEngineManager, "_discover_ports", _boom), \
+         mock.patch.object(LybraEngineManager, "_discover_udp_ports", _boom):
         scan_id = _analyze(app, admin_user, asset_id)
 
     with app.app_context():

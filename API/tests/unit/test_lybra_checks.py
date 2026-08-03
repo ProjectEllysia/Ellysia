@@ -18,6 +18,7 @@ from src.modules.features.themis.lybra import (
     NetworkProbe,
     Response,
     SmbSigningNotRequiredPlugin,
+    SnmpDefaultCommunityPlugin,
     default_script_plugins,
     is_http_service,
     is_ftp_service,
@@ -387,6 +388,64 @@ def test_script_check_declares_its_plugin_in_the_bundled_feed():
     """The feed entry and the registry must agree, or the check silently never runs."""
     check = next(c for c in load_checks() if c.id == "smb-signing-not-required")
     assert check.type == "script"
+    assert check.script in default_script_plugins()
+
+
+# ------------------------------------------ snmp-default-community (Ronda 1)
+
+class _FakeSnmpProbe:
+    """Stands in for SnmpProbe: returns a canned sysDescr string, or ``None``
+    for "no reply" — the same no-evidence-no-finding contract as _FakeSmbProbe.
+    """
+
+    def __init__(self, result):
+        self._result = result
+        self.calls = []
+
+    def fetch(self, host, port=161, community="public"):
+        self.calls.append((host, port, community))
+        return self._result
+
+
+_SNMP = Service(161, "udp", "snmp", "", "", None)
+
+
+def _snmp_runtime(probe, mode="safe"):
+    plugins = {"snmp-default-community": SnmpDefaultCommunityPlugin(probe=probe)}
+    return CheckRuntime(load_checks(), _fetcher({}), mode=mode, script_plugins=plugins)
+
+
+def test_snmp_default_community_fires_when_public_answers():
+    probe = _FakeSnmpProbe("Linux router 5.4.0")
+    findings = _snmp_runtime(probe).run("10.0.0.5", [_SNMP])
+
+    snmp = [f for f in findings if f["check_id"] == "lybra:snmp-default-community@1"]
+    assert len(snmp) == 1
+    assert snmp[0]["confirmed"] is True
+    assert snmp[0]["qod"] == 99
+    assert snmp[0]["port"] == 161
+    assert probe.calls == [("10.0.0.5", 161, "public")]
+
+
+def test_snmp_default_community_silent_when_no_reply():
+    findings = _snmp_runtime(_FakeSnmpProbe(None)).run("10.0.0.5", [_SNMP])
+    assert findings == []
+
+
+def test_snmp_plugin_skips_tcp_161():
+    """El mismo puerto por TCP nunca debe recibir un datagrama SNMP."""
+    tcp_snmp = Service(161, "tcp", "snmp", "", "", None)
+    probe = _FakeSnmpProbe("Linux router 5.4.0")
+    findings = _snmp_runtime(probe).run("10.0.0.5", [tcp_snmp])
+
+    assert probe.calls == []
+    assert findings == []
+
+
+def test_snmp_check_in_bundled_feed():
+    check = next(c for c in load_checks() if c.id == "snmp-default-community")
+    assert check.type == "script"
+    assert check.service == "snmp"
     assert check.script in default_script_plugins()
 
 
