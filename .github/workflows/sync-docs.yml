@@ -41,10 +41,6 @@ jobs:
           POSTGRES_PASSWORD: dummy
           POSTGRES_DB: dummy
           OLLAMA_HOST: http://localhost:11434
-          OPENVAS_HOST: localhost
-          OPENVAS_PORT: 9390
-          OPENVAS_USER: admin
-          OPENVAS_PASSWORD: admin
 
       - name: Update docs README
         run: |

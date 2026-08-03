@@ -102,7 +102,7 @@ class ScanManager(TaskTrackingMixin, ABC):
             Scan instance (typed to ``self._MODEL``), or None if not found.
         """
         # Q3: _MODEL es Optional a nivel de la clase base porque solo las
-        # subclases concretas lo fijan (Nmap/Nikto/OpenVAS/Lybra) — nunca es
+        # subclases concretas lo fijan (Nmap/Nikto/Lybra/Nuclei) — nunca es
         # None en una instancia real. El assert lo deja explícito para el
         # checker de tipos y sirve de red si alguna subclase nueva lo olvidara.
         assert self._MODEL is not None, f"{type(self).__name__} no define _MODEL"
@@ -708,7 +708,7 @@ class ScanManager(TaskTrackingMixin, ABC):
             scan_id: Id del escaneo a revisar
 
         Returns:
-            Tipo del escaneo ("nmap", "nikto", "openvas")
+            Tipo del escaneo ("nmap", "nikto", "lybra", "nuclei")
         """
 
         with UnitOfWork() as uow:
@@ -770,7 +770,7 @@ class ScanManager(TaskTrackingMixin, ABC):
     def reject_private_ip(ip: str) -> None:
         """Lanza ``PrivateIPRequested`` si ``ip`` es privada y
         'areLocalIpsAllowed' está en falso. Para llamantes que resuelven un
-        hostname/URL ellos mismos (Nikto, OpenVAS) en vez de expandir un
+        hostname/URL ellos mismos (Nikto) en vez de expandir un
         rango vía ``validate_ip``.
         """
         parsing.reject_private_ip(ip)

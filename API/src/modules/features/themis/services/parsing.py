@@ -2,7 +2,7 @@
 themis.services.parsing
 ──────────────────────────
 Parsers y validadores de especificaciones de IP y puertos para escaneos
-Themis (Nmap/Nikto/OpenVAS). Aislado de managers.py: son funciones puras
+Themis (Nmap/Nikto/Lybra/Nuclei). Aislado de managers.py: son funciones puras
 sobre strings, sin sesión de BD ni TaskQueue de por medio.
 
 Formatos de IP soportados (``validate_ip``):
@@ -182,7 +182,7 @@ def _reject_private_ips(lista_ips: List[str]) -> None:
 
 def reject_private_ip(ip: str) -> None:
     """Single-IP entry point for callers that resolve a hostname/URL
-    themselves (Nikto, OpenVAS) instead of expanding a CIDR/range spec via
+    themselves (Nikto) instead of expanding a CIDR/range spec via
     ``validate_ip``."""
     _reject_private_ips([ip])
 

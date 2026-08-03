@@ -15,7 +15,6 @@ Classes:
     MetricExtractor:        Abstract per-tool finding extractor.
     NmapMetricExtractor:    Open ports as the metric.
     NiktoMetricExtractor:   Web incidents as the metric.
-    OpenVASMetricExtractor: Vulnerabilities as the metric.
     LybraMetricExtractor:   Findings as the metric.
     HistoryStatsService:    Builds the serializable chart payload from a scan list.
 """
@@ -26,7 +25,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Set, Type
 
-from ..model import LybraScan, NiktoScan, NmapScan, NucleiScan, OpenVASScan, Scan, ScanType
+from ..model import LybraScan, NiktoScan, NmapScan, NucleiScan, Scan, ScanType
 
 logger = logging.getLogger(__name__)
 
@@ -96,20 +95,6 @@ class NiktoMetricExtractor(MetricExtractor):
         return {
             f"{inc.method}|{inc.url}|{inc.description}"
             for inc in (scan.incidents or [])
-        }
-
-
-@MetricExtractor.register(ScanType.OPENVAS)
-class OpenVASMetricExtractor(MetricExtractor):
-    """Metric: vulnerabilities. Identity: the NVT OID."""
-
-    metric_label = "Vulnerabilidades"
-
-    def identities(self, scan: OpenVASScan) -> Set[str]:
-        return {
-            res.vulnerability.nvt_oid
-            for res in (scan.results or [])
-            if res.vulnerability is not None
         }
 
 

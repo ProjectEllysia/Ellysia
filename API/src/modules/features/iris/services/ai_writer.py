@@ -2,7 +2,7 @@
 IrisAIWriter — AI-generated executive narrative for a finished Iris analysis.
 
 Follows the same pattern as ``themis/services/analyzers.py``'s
-``NmapAIWriter``/``NiktoAIWriter``/``OpenVASAIWriter``: model calling is
+``NmapAIWriter``/``NiktoAIWriter``/``LybraAIWriter``: model calling is
 delegated to an injected scribe ``AIGenerator``, prompts live in
 SecOpsConfig.json (``features.iris.prompts.summary``), and the strategy (Ollama/
 OpenAI) is resolved per module via ``CR.scribe_config().strategy_for("iris")``.

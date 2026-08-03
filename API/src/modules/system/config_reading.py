@@ -19,8 +19,6 @@ from dotenv import load_dotenv
 
 from src.modules.shared._exceptions import IllegalStateError
 
-load_dotenv()
-
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -291,26 +289,6 @@ def get_encryption_key(purpose: str) -> str:
     return key
 
 
-def get_openvas_environment() -> dict[str, str]:
-    """Solo variables de entorno."""
-    hostname    = os.getenv("OPENVAS_HOST")
-    port        = os.getenv("OPENVAS_PORT")
-    user        = os.getenv("OPENVAS_USERNAME")
-    password    = os.getenv("OPENVAS_PASSWORD")
-
-    if all([hostname, port, user, password]):
-        return {
-            "hostname": hostname,
-            "port": port,
-            "username": user,
-            "password": password
-        } # type: ignore
-
-    raise ValueError("Faltan variables de entorno para OpenVAS. "
-                "Asegúrate de definir OPENVAS_HOST, OPENVAS_PORT, "
-                "OPENVAS_USERNAME y OPENVAS_PASSWORD.")
-
-
 def _as_bool(value: str | bool | None, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
@@ -530,13 +508,12 @@ class HeraldConfig(_StrategySelection):
     default_strategy: str = "smtp"
 
 
-def scribe_config() -> ScribeConfig:
-    return load_block(ScribeConfig)
+def scribe_config() -> ScribeConfig: # type: ignore
+    return load_block(ScribeConfig) # type: ignore
 
 
-def herald_config() -> HeraldConfig:
-    return load_block(HeraldConfig)
-
+def herald_config() -> HeraldConfig: # type: ignore
+    return load_block(HeraldConfig) # type: ignore
 
 def get_smtp_environment() -> dict[str, str]:
     """Credenciales SMTP desde variables de entorno.
@@ -550,10 +527,14 @@ def get_smtp_environment() -> dict[str, str]:
     username = os.getenv("SMTP_USERNAME")
     password = os.getenv("SMTP_PASSWORD")
 
-    if not username or not password:
+    if not username:
         raise ValueError(
-            "Faltan las variables de entorno SMTP_USERNAME / SMTP_PASSWORD. "
-            "Defínelas en el archivo .env junto a las demás credenciales."
+            "Falta la variable de entorno SMTP_USERNAME."
+        )
+
+    if not password:
+        raise ValueError(
+            "Falta la variable de entorno SMTP_PASSWORD."
         )
 
     return {"username": username, "password": password}
@@ -563,10 +544,11 @@ def get_smtp_environment() -> dict[str, str]:
 # CONFIGURACIÓN DE THEMIS
 # =============================================================================
 
-# Los cinco escáneres de Themis, cada uno con su propio bloque bajo
+# Los cuatro escáneres de Themis, cada uno con su propio bloque bajo
 # ``features.themis.scanners``: mismos ``prompts`` y ``colorPalette``, más los
-# ajustes que cada herramienta necesite.
-THEMIS_SCANNERS = ("nmap", "nikto", "openvas", "lybra", "nuclei")
+# ajustes que cada herramienta necesite. OpenVAS salió de esta lista al
+# retirarse (roadmap §7/§6.3, Ronda 2 — E2).
+THEMIS_SCANNERS = ("nmap", "nikto", "lybra", "nuclei")
 
 
 @config_block("features.themis")
@@ -661,27 +643,6 @@ class KnowledgeBaseConfig:
         propósito (los secretos no se versionan).
         """
         return os.environ.get("NVD_API_KEY") or (self.configured_nvd_api_key or None)
-
-
-@config_block("features.themis.scanners.openvas")
-@dataclass(frozen=True)
-class OpenVASConfig:
-    timeout: float = 14400
-    """Timeout (s) por defecto de ``OpenVASTask``, también usado como timeout del
-    job en ``OpenVASScanManager.run_scan``: deben coincidir, porque si el job de
-    RQ expira antes que el escaneo interno, se mata a mitad de sondeo."""
-
-    max_wait_timeout: float = 28800
-    """Techo aplicado en ``OpenVASTask.wait()`` al timeout recibido."""
-
-
-@config_block("features.themis.scanners.openvas.toolConfigs")
-@dataclass(frozen=True)
-class OpenVASToolConfigs:
-    """UUIDs de los objetos que OpenVAS trae creados de fábrica."""
-
-    scan_configs: dict[str, str] = field(default_factory=dict)
-    port_list: dict[str, str] = field(default_factory=dict)
 
 
 @config_block("features.themis.scanners.lybra")
@@ -865,14 +826,6 @@ def knowledge_base_config() -> KnowledgeBaseConfig:
     return load_block(KnowledgeBaseConfig)
 
 
-def openvas_config() -> OpenVASConfig:
-    return load_block(OpenVASConfig)
-
-
-def openvas_tool_configs() -> OpenVASToolConfigs:
-    return load_block(OpenVASToolConfigs)
-
-
 def lybra_config() -> LybraConfig:
     return load_block(LybraConfig)
 
@@ -977,7 +930,7 @@ def save_full_config(new_config: dict, expected_version: Optional[str] = None) -
     return new_config
 
 
-# ============================================================================= 
+# =============================================================================
 # CONFIGURACIÓN GENERAL
 # =============================================================================
 

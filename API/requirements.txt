@@ -51,7 +51,6 @@ flask_limiter
 PyJWT
 pyotp>=2.9.0
 dnspython
-python-gvm
 ollama
 openai>=1.0
 google-generativeai>=0.8.0

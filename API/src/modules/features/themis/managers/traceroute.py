@@ -39,8 +39,8 @@ class TracerouteManager(TaskTrackingMixin):
           enough to retry soon and overridable via refresh).
         - ``pending`` → a job is enqueued/running, or one was just submitted.
 
-    Results are cached per (user, target) and reused across all scan types
-    (Nmap, Nikto, OpenVAS). Every operation is scoped to the owning user via
+    Results are cached per (user, target) and reused across all scan types.
+    Every operation is scoped to the owning user via
     ``ScanManager.assert_scan_ownership`` so a user can only ever trace targets
     from their own scans.
     """

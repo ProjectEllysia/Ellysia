@@ -4,7 +4,7 @@ Database models for Themis security scanning module.
 This module contains SQLAlchemy models for vulnerability scanning including:
 - Network hosts and port management
 - Scan base class with polymorphic inheritance
-- Nmap, Nikto, and OpenVAS scan implementations
+- Nmap and Nikto scan implementations
 - Vulnerability and result tracking
 - Scan document generation
 
@@ -16,9 +16,6 @@ Classes:
     OpenPort: Open port discovered during Nmap scan.
     NiktoScan: Nikto web vulnerability scan results.
     NiktoIncident: Individual Nikto finding.
-    OpenVASScan: OpenVAS vulnerability scan results.
-    OpenVASVulnerability: Stored vulnerability definition.
-    OpenVASScanResult: Scan result linking scan to vulnerability.
     ThemisDocument: Generated PDF report from scan.
 
 Example:
@@ -99,13 +96,17 @@ class ScanType(str, Enum):
     Attributes:
         NMAP:    Nmap network and port scanner.
         NIKTO:   Nikto web server vulnerability scanner.
-        OPENVAS: OpenVAS comprehensive vulnerability manager.
         LYBRA: Lybra's own vulnerability engine (native detection).
         NUCLEI: Nuclei template-based vulnerability scanner (Fase U1).
+
+    OpenVAS was removed (roadmap §7/§6.3, Ronda 2 — E1): it was a whole
+    platform we could never add anything on top of, not a tool whose output
+    we parsed like the others (see the roadmap's §1). Historical ``Finding``
+    rows with ``source="openvas"`` are kept as provenance; nothing produces
+    new ones.
     """
     NMAP    = "nmap"
     NIKTO   = "nikto"
-    OPENVAS = "openvas"
     LYBRA = "lybra"
     NUCLEI = "nuclei"
 
@@ -203,9 +204,9 @@ class Traceroute(Base):
 
     The hops are a property of the *route to the destination*, not of any
     individual scan, and change slowly over time. We therefore cache one row
-    per (user, target) and reuse it across all scan types (Nmap, Nikto,
-    OpenVAS) instead of re-running the traceroute on every scan. ``created_at``
-    drives cache invalidation (see ``TracerouteManager``).
+    per (user, target) and reuse it across all scan types instead of
+    re-running the traceroute on every scan. ``created_at`` drives cache
+    invalidation (see ``TracerouteManager``).
 
     Attributes:
         id: Primary key, auto-incrementing integer.
@@ -287,7 +288,7 @@ class Scan(Base):
     Base class for all security scan types.
 
     Uses polymorphic inheritance to support different scan implementations
-    (Nmap, Nikto, OpenVAS) while maintaining a common interface.
+    (Nmap, Nikto, Lybra, Nuclei) while maintaining a common interface.
 
     Attributes:
         id: Primary key, auto-incrementing integer.
@@ -295,7 +296,9 @@ class Scan(Base):
         started_at: Scan start timestamp (automatic).
         status: Current scan status (pending/running/finished/failed/cancelled).
         user_id: Foreign key to User.id (scan owner).
-        scan_type: Polymorphic discriminator (nmap/nikto/openvas).
+        scan_type: Polymorphic discriminator (nmap/nikto/lybra/nuclei). May
+            still read "openvas" on a historical row — that scan type no
+            longer runs, but old rows are not rewritten.
         frequent: Whether this is a scheduled/repeated scan.
         host_id: Optional foreign key to Host.
         finished_at: Scan completion timestamp (nullable).
@@ -385,7 +388,7 @@ class ProgramedScan(Base):
 
     id              = Column(Integer, primary_key=True)
     user_id         = Column(Integer, ForeignKey("User.id"), nullable=False)
-    scan_type       = Column(String(20), nullable=False)  # "nmap" | "nikto" | "openvas"
+    scan_type       = Column(String(20), nullable=False)  # "nmap" | "nikto" | "lybra" | "nuclei" (or historical "openvas")
     arguments       = Column(JSONB, nullable=False)       # {"ports": "22,80", "timeout": 300}
 
     # Schedule
@@ -644,152 +647,13 @@ class NiktoIncident(Base):
         return f"<NiktoIncident(id={self.id}, osvdb='{self.osvdb_id}', severity='{self.severity}')>"
 
 
-# =========================================================================
-# OPENVAS MODELS
-# =========================================================================
-
-class OpenVASScan(Scan):
-    """
-    OpenVAS vulnerability scan results.
-
-    Inherits from Scan and stores OpenVAS-specific data including
-    task and report identifiers, and detected vulnerabilities.
-
-    Attributes:
-        id: Primary key (foreign key to Scan.id).
-        task_id: OpenVAS task identifier.
-        report_id: OpenVAS report identifier.
-        scan_config_name: OpenVAS scan configuration used.
-        scanner_name: OpenVAS scanner name.
-        results: List of OpenVASScanResult objects with findings.
-
-    Table Constraints:
-        Unique constraint on (task_id, report_id) to prevent duplicates.
-    """
-    __tablename__ = "OpenVASScan"
-
-    id               = Column(Integer,     ForeignKey("Scan.id"), primary_key=True)
-    task_id          = Column(String(255), nullable=False)
-    report_id        = Column(String(255), nullable=False)
-    scan_config_name = Column(String(255))
-    scanner_name     = Column(String(255))
-
-    results = relationship(
-        "OpenVASScanResult", back_populates="openvas_scan", cascade="all, delete-orphan"
-    )
-
-    __mapper_args__ = {"polymorphic_identity": ScanType.OPENVAS}
-
-    __table_args__ = (
-        UniqueConstraint("task_id", "report_id", name="unique_task_report"),
-    )
-
-
-class OpenVASVulnerability(Base):
-    """
-    Stored vulnerability definition from OpenVAS NVT feed.
-
-    Represents a unique vulnerability with CVSS scoring, CVE references,
-    and remediation information.
-
-    Attributes:
-        id: Primary key, auto-incrementing integer.
-        nvt_oid: OpenVAS NVT OID (unique, indexed).
-        name: Vulnerability name/title.
-        severity_score: Numeric severity score.
-        severity_class: Severity category (Critical/High/Medium/Low/Log).
-        cvss_base_score: CVSS v2 base score.
-        cvss_vector: CVSS vector string.
-        cve_ids: Comma-separated CVE identifiers.
-        cert_refs: CERT-Bund references.
-        bugtraq_ids: BugTraq IDs.
-        other_refs: Other reference identifiers.
-        summary: Brief summary.
-        description: Full description.
-        impact: Impact description.
-        insight: Insight into the vulnerability.
-        affected_software: Affected software list.
-        solution_type: Type of solution (VendorFix, Workaround, etc.).
-        solution: Solution description.
-        qod_value: Quality of Detection value.
-        qod_type: Quality of Detection type.
-        family: NVT family.
-        category: NVT category.
-        created_at: Creation timestamp (automatic).
-        updated_at: Last update timestamp (automatic).
-
-    Relationships:
-        scan_results: OpenVASScanResult objects linking to this vulnerability.
-    """
-    __tablename__ = "OpenVASVulnerability"
-
-    id                = Column(Integer,     primary_key=True, autoincrement=True)
-    nvt_oid           = Column(String(255), unique=True, nullable=False, index=True)
-    name              = Column(Text,        nullable=False)
-    severity_score    = Column(Float(3))
-    severity_class    = Column(String(20),  index=True)
-    cvss_base_score   = Column(Float(3))
-    cvss_vector       = Column(String(255))
-    cve_ids           = Column(Text)
-    cert_refs         = Column(Text)
-    bugtraq_ids       = Column(Text)
-    other_refs        = Column(Text)
-    summary           = Column(Text)
-    description       = Column(Text)
-    impact            = Column(Text)
-    insight           = Column(Text)
-    affected_software = Column(Text)
-    solution_type     = Column(String(50))
-    solution          = Column(Text)
-    qod_value         = Column(Integer)
-    qod_type          = Column(String(100))
-    family            = Column(String(255))
-    category          = Column(String(255))
-    created_at        = Column(DateTime, nullable=False, default=utcnow_naive)
-    updated_at        = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
-
-    scan_results = relationship("OpenVASScanResult", back_populates="vulnerability")
-
-    def __repr__(self):
-        """
-        Return a debug representation of the OpenVASVulnerability instance.
-
-        Returns:
-            String with NVT OID.
-        """
-        return f"<OpenVASVulnerability(nvt_oid='{self.nvt_oid}')>"
-
-
-class OpenVASScanResult(Base):
-    """
-    Result linking an OpenVAS scan to a detected vulnerability.
-
-    Represents a single vulnerability finding in a specific scan,
-    including host where it was detected.
-
-    Attributes:
-        id: Primary key, auto-incrementing integer.
-        openvas_scan_id: Foreign key to OpenVASScan.id (indexed, cascading delete).
-        vulnerability_id: Foreign key to OpenVASVulnerability.id (indexed).
-        host_id: Foreign key to Host.id where vulnerability was found.
-        detected_at: Detection timestamp (automatic).
-
-    Relationships:
-        openvas_scan: OpenVASScan containing this result.
-        vulnerability: OpenVASVulnerability detected.
-        host: Host where vulnerability was detected.
-    """
-    __tablename__ = "OpenVASScanResult"
-
-    id              = Column(Integer, primary_key=True, autoincrement=True)
-    openvas_scan_id = Column(Integer, ForeignKey("OpenVASScan.id", ondelete="CASCADE"), nullable=False, index=True)
-    vulnerability_id = Column(Integer, ForeignKey("OpenVASVulnerability.id"), nullable=False, index=True)
-    host_id         = Column(Integer, ForeignKey("Host.id"), nullable=False, index=True)
-    detected_at     = Column(DateTime, nullable=False, default=utcnow_naive)
-
-    openvas_scan  = relationship("OpenVASScan",          back_populates="results")
-    vulnerability = relationship("OpenVASVulnerability",  back_populates="scan_results")
-    host          = relationship("Host")
+# OpenVAS's three native tables (OpenVASScan, OpenVASVulnerability,
+# OpenVASScanResult) were removed here (roadmap §7/§6.3, Ronda 2 — E2+E3).
+# The development database had zero rows in any of the three (verified by
+# query before removing), so there was nothing to archive first — the
+# backfill-then-drop the roadmap originally described was unnecessary.
+# Finding rows with source="openvas" are unaffected: they live in the
+# source-agnostic Finding table, not in these.
 
 
 # =========================================================================
@@ -808,7 +672,7 @@ class LybraScan(Scan):
         id: Primary key (foreign key to Scan.id).
         source_scan_id: The Nmap Scan whose discovered services were analysed.
             Nullable so a future self-discovering scan can leave it empty.
-        deep_scan_ids: Fase 6 "análisis profundo" — ids of the Nmap/Nikto/OpenVAS
+        deep_scan_ids: Fase 6 "análisis profundo" — ids of the Nmap/Nikto/Nuclei
             corroborator scans launched alongside this one. Fire-and-forget:
             each is an ordinary, independently-tracked Scan; their Finding rows
             are merged in only at read time (see LybraEngineManager.format_scan),
@@ -843,10 +707,10 @@ class NucleiScan(Scan):
     """Scan launched via the Nuclei template-based scanner (roadmap Fase U1).
 
     Follows the same design ``LybraScan`` already established rather than the
-    Nmap/Nikto/OpenVAS one: no result table of its own. Nuclei's JSONL output
+    Nmap/Nikto one: no result table of its own. Nuclei's JSONL output
     maps almost 1:1 onto ``Finding`` (``cve_ids``, ``cvss_score``, ``check_id``
     all come straight from the tool), so building a parallel ``NucleiFinding``
-    table would only recreate the scaffolding the roadmap's §7 is dismantling
+    table would only recreate the scaffolding the roadmap's §7 dismantled
     for OpenVAS — not something to add fresh in a brand new scan type. Unlike
     ``LybraScan`` there is no second identifying column (no ``source_scan_id``
     equivalent), so no ``inherit_condition`` override is needed: SQLAlchemy
@@ -898,9 +762,10 @@ class AuthorizedTarget(Base):
 class Finding(Base):
     """Normalized security finding, independent of the scanner that produced it.
 
-    The unified finding model that lets Lybra, Nikto and OpenVAS results live
-    in one table and be correlated (dedup by ``dedup_key``). See the vuln-engine
-    roadmap (§3.3) for the full design. In Fase 0 only informational
+    The unified finding model that lets Lybra, Nikto, Nuclei and (historically)
+    OpenVAS results live in one table and be correlated (dedup by
+    ``dedup_key``). See the vuln-engine roadmap (§3.3) for the full design.
+    In Fase 0 only informational
     "open port" findings are written (``category="open_port"``, ``qod=30``); the
     detection columns (``cve_ids``, ``cvss_score``…) stay empty until later
     phases fill them.
@@ -912,9 +777,16 @@ class Finding(Base):
         title: Human-readable one-line description.
         category: Finding family ("open_port" | "outdated_software" | "tls" ...).
         port / service / cpe: The affected service.
+        protocol: Transport of the affected service ("tcp" | "udp"). Nullable —
+            every finding before Fase N's UDP probe (roadmap §6.3, Ronda 1) is
+            TCP and is never backfilled. Exists so ``compute_dedup_key`` can
+            tell a service open on 161/tcp apart from the same port on
+            161/udp; see its docstring for why the merge would otherwise
+            collide the two.
         cve_ids / cvss_score / cvss_vector / epss_score / in_kev /
             exploit_maturity: Vulnerability correlation (filled from Fase 1 on).
-        source: Which scanner produced it ("lybra" | "nikto" | "openvas" | "nmap").
+        source: Which scanner produced it ("lybra" | "nikto" | "nuclei" | "nmap",
+            or historically "openvas" — that scanner no longer runs).
         check_id: Which own check produced it ("lybra:git-config-exposure@3").
         feed_version: KB/checks version used (reproducibility).
         dedup_key: hash(host, port, cpe|check_id, cve) for multi-source merge.
@@ -940,6 +812,7 @@ class Finding(Base):
     port     = Column(Integer)
     service  = Column(String(128))
     cpe      = Column(String(255), index=True)
+    protocol = Column(String(8), nullable=True)
 
     # Vulnerability correlation (filled from Fase 1 onwards)
     cve_ids          = Column(JSONB)
@@ -969,9 +842,10 @@ class Finding(Base):
             "host_id": self.host_id, 
             "title": self.title, 
             "category": self.category,
-            "port": self.port, 
-            "service": self.service, 
-            "cpe": self.cpe, 
+            "port": self.port,
+            "service": self.service,
+            "cpe": self.cpe,
+            "protocol": self.protocol,
             "cve_ids": self.cve_ids,
             "cvss_score": self.cvss_score, 
             "cvss_vector": self.cvss_vector,
@@ -1134,7 +1008,7 @@ class ThemisDocument(Document):
     Attributes:
         id: Primary key (foreign key to Document.id).
         scan_id: Foreign key to Scan.id (cascade delete).
-        scan_type: Scan type ('nmap', 'nikto', 'openvas') for filtering without join.
+        scan_type: Scan type ('nmap', 'nikto', 'lybra', 'nuclei') for filtering without join.
         enrichment_json: Cached AI analysis result (JSONB, nullable).
         scan: Relationship to the source Scan.
 
@@ -1148,7 +1022,7 @@ class ThemisDocument(Document):
           "global_recommendations": ["...", "..."]
         }
 
-        nikto / openvas:
+        nikto:
         [
           {"item_id": <int>, "recommendation": "..."},
           ...

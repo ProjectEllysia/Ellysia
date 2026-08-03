@@ -28,7 +28,6 @@ from .managers import (
     ScanManager,
     NmapScanManager,
     NiktoScanManager,
-    OpenVASScanManager,
     NucleiScanManager,
     LybraEngineManager,
     ProgramedScanManager,
@@ -61,7 +60,6 @@ from .schemas import (
     ScanIdQuerySchema,
     NmapScanRequestSchema,
     NiktoScanRequestSchema,
-    OpenVASScanRequestSchema,
     NucleiScanRequestSchema,
     LybraScanRequestSchema,
     FindingStateRequestSchema,
@@ -106,7 +104,7 @@ from .schemas import (
 
 themis_blp = SmorestBlueprint(
     "themis", __name__,
-    description="Escaneos de seguridad (Nmap, Nikto, OpenVAS, Nuclei) y PDFs"
+    description="Escaneos de seguridad (Nmap, Nikto, Lybra, Nuclei) y PDFs"
 )
 logger = logging.getLogger(__name__)
 
@@ -318,48 +316,6 @@ def start_nikto_scan(data):
         "target": target,
         "timeout": timeout,
         "user": user.username,
-    }
-
-
-@themis_blp.post("/openvas")
-@themis_blp.arguments(OpenVASScanRequestSchema)
-@themis_blp.response(201, ScanResponseSchema, description="OpenVAS scan started")
-@themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
-@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@limiter.limit("10 per hour; 50 per day")
-@require_oauth_token
-@require_attributes(at_least_one=[AttributeType.THEMIS_CREATE])
-@handle_exceptions(default_exception=ScanExecutionError, logger=logger)
-def start_openvas_scan(data):
-    """Lanzar un escaneo OpenVAS para un unico host"""
-    target = data["target"]
-    scan_config = data["scanConfig"]
-    user = get_current_user()
-    if user is None:
-        raise IllegalStateError("'user' detectado como None")
-
-    hosts = ScanManager.validate_targets(target, max_hosts=1)
-
-    openvas_manager = OpenVASScanManager()
-    target_ip = hosts[0]
-    ipaddress.ip_address(target_ip)
-
-    scan_id = openvas_manager.run_scan(
-        target=target_ip,
-        scan_config=scan_config,
-        user_id=user.id,
-        skip_normalize=True,
-    )
-    logger.info(f"OpenVAS lanzado: ID={scan_id} target={target_ip} config={scan_config} user={user.username}")
-
-    return {
-        "message": "Escaneo OpenVAS iniciado correctamente",
-        "scanId": scan_id,
-        "target": target_ip,
-        "scanConfig": scan_config,
-        "user": user.username,
-        "note": "Use /themis/scan-status para verificar el progreso.",
     }
 
 
@@ -774,8 +730,8 @@ def delete_scan(scan_id: int):
     if scan.status in CANCELLABLE_STATES:
         logger.info(f"Cancelando escaneo {scan_id} antes de eliminar")
         # La cancelación es cooperativa (solo señaliza al worker, no mata el
-        # proceso — ver TaskQueue.cancel): si falla, el subproceso (nmap/nikto/
-        # openvas) puede seguir vivo. Borrar la fila igualmente lo dejaría
+        # proceso — ver TaskQueue.cancel): si falla, el subproceso (nmap/nikto)
+        # puede seguir vivo. Borrar la fila igualmente lo dejaría
         # huérfano y para siempre invisible para la app, así que no se procede.
         if not manager.cancel_scan(scan_id, user.id): # type: ignore
             raise ScanExecutionError(

@@ -2,8 +2,8 @@
 Report generation for security scans.
 
 This module provides classes for generating PDF security reports from scan results.
-It includes strategies for different scan types (Nmap, OpenVAS, Nikto) with support
-for AI-powered analysis using Ollama.
+It includes strategies for different scan types (Nmap, Nikto, Lybra, Nuclei) with
+support for AI-powered analysis using Ollama.
 
 Classes:
     ColorType: Enumeration of color palette types.
@@ -11,14 +11,12 @@ Classes:
     PrintingStrategy: Abstract base class for printing strategies.
     PDFCreator: Main class for PDF document generation.
     NmapPrintingStrategy: Strategy for Nmap scan reports.
-    OpenVASPrintingStrategy: Strategy for OpenVAS scan reports.
     NiktoPrintingStrategy: Strategy for Nikto scan reports.
     FindingsPrintingStrategy: Shared base for scan types living entirely in `Finding`.
     LybraPrintingStrategy: Strategy for Lybra engine scan reports.
     NucleiPrintingStrategy: Strategy for Nuclei scan reports (Fase U1).
     NmapAIWriter: AI writer for Nmap scan analysis.
     NiktoAIWriter: AI writer for Nikto scan analysis.
-    OpenVASAIWriter: AI writer for OpenVAS scan analysis.
 """
 
 import os
@@ -52,7 +50,7 @@ from src.modules.shared._exceptions import IllegalStateError, ValidationError
 logger = logging.getLogger(__name__)
 
 from ..model import NmapScan, NiktoScan, LybraScan, Scan, Host, ScanType
-from .analyzers import NmapAIWriter, NiktoAIWriter, OpenVASAIWriter, LybraAIWriter
+from .analyzers import NmapAIWriter, NiktoAIWriter, LybraAIWriter
 
 
 
@@ -60,7 +58,6 @@ class ThemisTool(Enum):
     """Enumeración de herramientas disponibles en Themis"""
     NMAP    = "nmap"
     NIKTO   = "nikto"
-    OPENVAS = "openvas"
     LYBRA   = "lybra"
     NUCLEI  = "nuclei"
 
@@ -392,7 +389,7 @@ class PrintingStrategy(ABC):
 
         prompts = CR.get_prompts_config()
         tool_key = {
-            'NmapScan': 'nmap', 'NiktoScan': 'nikto', 'OpenVASScan': 'openvas', 'LybraScan': 'lybra',
+            'NmapScan': 'nmap', 'NiktoScan': 'nikto', 'LybraScan': 'lybra',
             'NucleiScan': 'nuclei',
         }.get(scan_type, 'nmap')
         tool_prompts = prompts.get(tool_key, {})
@@ -552,7 +549,6 @@ class PrintingStrategy(ABC):
         tool_map = {
             "NmapScan": ScanType.NMAP,
             "NiktoScan": ScanType.NIKTO,
-            "OpenVASScan": ScanType.OPENVAS,
         }
         scan_type = tool_map.get(type(self.scan).__name__)
         if scan_type is None:
@@ -1261,393 +1257,6 @@ class NmapPrintingStrategy(PrintingStrategy):
         return "Análisis de Seguridad de Red"
 
 
-@PrintingStrategy.register(ScanType.OPENVAS)
-class OpenVASPrintingStrategy(PrintingStrategy):
-    """Printing strategy for OpenVAS vulnerability scan reports.
-
-    Generates PDF reports for OpenVAS scans including vulnerability summary,
-    detailed vulnerability cards with CVSS scores, and optional AI analysis.
-
-    Color palette: Green theme for vulnerability management reports.
-
-    Attributes:
-        color_palette: Green color palette for the report.
-    """
-
-    def __init__(self, scan) -> None:
-        """Initialize OpenVAS printing strategy.
-
-        Args:
-            scan: OpenVASScan instance to generate report from.
-        """
-        super().__init__(scan)
-        self.writer = OpenVASAIWriter()
-
-        palette_config = CR.get_tool_color_palette(ThemisTool.OPENVAS)
-
-        self.color_palette = {
-            ColorType.BLACK: palette_config.get("black", "#0D2818"),
-            ColorType.DARK: palette_config.get("dark", "#1B5E20"),
-            ColorType.MAIN: palette_config.get("main", "#2E7D32"),
-            ColorType.SECONDARY: palette_config.get("secondary", "#43A047"),
-            ColorType.LIGHT: palette_config.get("light", "#66BB6A"),
-            ColorType.WHITE: palette_config.get("white", "#E8F5E9"),
-        }
-
-    def append_body(self, theme: "ReportTheme", elements: list, ai_report: bool = False) -> None:
-        """Generate the report body for OpenVAS scans.
-
-        Args:
-            theme: Report theme for styling.
-            elements: List of flowable elements to append to.
-            ai_report: Whether to include AI-generated analysis.
-        """
-        results = getattr(self.scan, "results", []) or []
-
-        self._append_ov_header(theme, elements, results)
-
-        # Resumen de severidad
-        if results:
-            self._append_ov_severity_summary(theme, elements, results)
-
-            # Detalle de vulnerabilidades
-            elements.append(PageBreak())
-            elements.append(Paragraph("Vulnerabilidades detectadas", theme.subtitle))
-            elements.append(Spacer(1, 0.1 * inch))
-
-            if not results:
-                elements.append(Paragraph("No se detectaron vulnerabilidades.", theme.info))
-                return
-
-            severity_priority = {
-                "CRITICAL": 0,
-                "HIGH": 1,
-                "MEDIUM": 2,
-                "LOW": 3,
-                "LOG": 4,
-                "UNKNOWN": 5,
-            }
-
-        def sort_key(res):
-            vuln = res.vulnerability
-            sev_raw = getattr(vuln, "severity_class", None) or "UNKNOWN"
-            sev = str(sev_raw).upper()
-            score = getattr(vuln, "severity_score", None) or 0.0
-            return (severity_priority.get(sev, 5), -float(score))
-
-        sorted_results = sorted(results, key=sort_key)
-
-        # Colores de fondo por severidad
-        severity_bg = {
-            "CRITICAL": colors.HexColor("#ffcccc"),
-            "HIGH": colors.HexColor("#ffe6cc"),
-            "MEDIUM": colors.HexColor("#fff4cc"),
-            "LOW": colors.HexColor("#e6ffe6"),
-            "LOG": colors.HexColor("#e6f7ff"),
-            "UNKNOWN": colors.HexColor("#f0f0f0"),
-        }
-
-        description_style = ParagraphStyle(
-            "OVDescription",
-            parent=theme.body,
-            fontSize=9,
-            leading=12,
-        )
-
-        for idx, result in enumerate(sorted_results, start=1):
-            self._append_ov_vulnerability_card(theme, elements, result, idx, severity_bg, description_style)
-
-        if ai_report:
-            self._append_ai_analysis(elements, theme)
-
-        self._append_history_stats(elements, theme)
-
-    def _append_ov_header(self, theme: "ReportTheme", elements: list, results: list) -> None:
-        """Cabecera del informe: título, tabla de host y tabla de resumen del escaneo."""
-        scan = self.scan
-
-        elements.append(Paragraph("Informe de Escaneo OpenVAS", theme.title))
-        elements.append(Spacer(1, 0.1 * inch))
-
-        if getattr(scan, "host", None):
-            host = scan.host
-            host_info = [
-                ["Host analizado:", str(getattr(host, "ip_address", ""))],
-                ["Nombre de host:", str(getattr(host, "hostname", ""))],
-            ]
-            host_table = theme.kv_table(host_info, col_widths=[2 * inch, 4 * inch])
-            elements.append(host_table)
-            elements.append(Spacer(1, 0.1 * inch))
-
-        started = getattr(scan, "started_at", None)
-        started_str = started.strftime("%d/%m/%Y %H:%M:%S") if started else "N/A"
-
-        scan_info = [
-            ["ID del escaneo:", str(getattr(scan, "id", ""))],
-            ["Task ID:", str(getattr(scan, "task_id", ""))],
-            ["Report ID:", str(getattr(scan, "report_id", ""))],
-            ["Fecha de inicio:", started_str],
-            ["Total de vulnerabilidades:", str(len(results))],
-        ]
-        if getattr(scan, "scan_config_name", None):
-            scan_info.append(["Configuración:", str(scan.scan_config_name)])
-        if getattr(scan, "scanner_name", None):
-            scan_info.append(["Scanner:", str(scan.scanner_name)])
-
-        info_table = theme.kv_table(scan_info, col_widths=[2 * inch, 4 * inch])
-        elements.append(info_table)
-        elements.append(Spacer(1, 0.3 * inch))
-
-    def _append_ov_severity_summary(self, theme: "ReportTheme", elements: list, results: list) -> None:
-        """Tabla resumen: cantidad y score CVSS promedio por severidad."""
-        palette = self.color_palette
-        main = colors.HexColor(palette[ColorType.MAIN])
-        dark = colors.HexColor(palette[ColorType.DARK])
-        white = colors.HexColor(palette[ColorType.WHITE])
-
-        elements.append(Paragraph("Resumen de severidad", theme.subtitle))
-        elements.append(Spacer(1, 0.1 * inch))
-
-        severity_counts: Dict[str, int] = {}
-        scores_by_severity: Dict[str, list] = {}
-
-        for result in results:
-            vuln = result.vulnerability
-            sev_raw = getattr(vuln, "severity_class", None) or "UNKNOWN"
-            severity = str(sev_raw).upper()
-
-            severity_counts[severity] = severity_counts.get(severity, 0) + 1
-
-            score = getattr(vuln, "severity_score", None)
-            if score is not None:
-                scores_by_severity.setdefault(severity, []).append(float(score))
-
-        header = ["Severidad", "Cantidad", "Score promedio"]
-        data = [header]
-
-        severity_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "LOG", "UNKNOWN"]
-        for sev in severity_order:
-            if sev not in severity_counts:
-                continue
-            count = severity_counts[sev]
-            scores = scores_by_severity.get(sev, [])
-            avg = sum(scores) / len(scores) if scores else 0.0
-            data.append([sev, str(count), f"{avg:.1f}"])
-
-        table = Table(data, colWidths=[2.5 * inch, 1.3 * inch, 2.2 * inch], repeatRows=1)
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), main),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 10),
-            ("TOPPADDING", (0, 0), (-1, 0), 8),
-            ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-            ("BACKGROUND", (0, 1), (-1, -1), white),
-            ("TEXTCOLOR", (0, 1), (-1, -1), dark),
-            ("ALIGN", (0, 1), (0, -1), "CENTER"),
-            ("ALIGN", (1, 1), (-1, -1), "CENTER"),
-            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 1), (-1, -1), 9),
-            ("TOPPADDING", (0, 1), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
-            ("GRID", (0, 0), (-1, -1), 0.4, dark),
-        ]))
-        elements.append(table)
-        elements.append(Spacer(1, 0.3 * inch))
-
-    def _append_ov_vulnerability_card(
-        self,
-        theme: "ReportTheme",
-        elements: list,
-        result,
-        idx: int,
-        severity_bg: dict,
-        description_style: ParagraphStyle,
-    ) -> None:
-        """Tarjeta de una vulnerabilidad: cabecera, nombre, detalles técnicos,
-        resumen, impacto, solución y referencias (bloques opcionales según datos)."""
-        palette = self.color_palette
-        main = colors.HexColor(palette[ColorType.MAIN])
-        dark = colors.HexColor(palette[ColorType.DARK])
-        white = colors.HexColor(palette[ColorType.WHITE])
-
-        elements.append(CondPageBreak(3 * inch))
-
-        vuln = result.vulnerability
-        sev_raw = getattr(vuln, "severity_class", None) or "UNKNOWN"
-        severity = str(sev_raw).upper()
-
-        bgcolor = severity_bg.get(severity, severity_bg["UNKNOWN"])
-        cvss = getattr(vuln, "cvss_base_score", None)
-        score_text = f"CVSS: {cvss:.1f}" if cvss is not None else "CVSS: N/A"
-
-        # Cabecera
-        header_table = theme.severity_header_table(
-            left_text=f"Vulnerabilidad #{idx}",
-            right_text=f"Severidad: {severity} | {score_text}",
-            bg_color=bgcolor,
-        )
-        elements.append(header_table)
-
-        # Nombre de la vulnerabilidad en una banda de color principal
-        name_para = Paragraph(str(getattr(vuln, "name", "")), ParagraphStyle(
-            "OVName",
-            parent=theme.styles["Normal"],
-            fontName="Helvetica-Bold",
-            fontSize=10,
-            textColor=colors.whitesmoke,
-            alignment=TA_LEFT,
-        ))
-        name_table = Table([[name_para]], colWidths=[6 * inch])
-        name_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), main),
-            ("LEFTPADDING", (0, 0), (-1, -1), 10),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-            ("TOPPADDING", (0, 0), (-1, -1), 8),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-            ("BOX", (0, 0), (-1, -1), 0.6, dark),
-        ]))
-        elements.append(name_table)
-
-        # Detalles técnicos
-        details = [
-            ["NVT OID:", str(getattr(vuln, "nvt_oid", ""))],
-            ["Host:", str(getattr(result.host, "ip_address", ""))],
-        ]
-        detected = getattr(result, "detected_at", None)
-        if detected:
-            details.append(["Detectado:", detected.strftime("%d/%m/%Y %H:%M:%S")])
-        if getattr(vuln, "family", None):
-            details.append(["Familia:", str(vuln.family)])
-        if getattr(vuln, "cvss_vector", None):
-            details.append(["Vector CVSS:", str(vuln.cvss_vector)])
-        if getattr(vuln, "qod_value", None) is not None:
-            qod_type = getattr(vuln, "qod_type", None) or "N/A"
-            details.append(["QoD:", f"{vuln.qod_value}% ({qod_type})"])
-
-        details_table = Table(details, colWidths=[1.7 * inch, 4.3 * inch])
-        details_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f9f9f9")),
-            ("ALIGN", (0, 0), (0, -1), "LEFT"),
-            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-            ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-        ]))
-        elements.append(details_table)
-
-        # Resumen
-        summary = getattr(vuln, "summary", None)
-        if summary:
-            text = summary[:500] + ("..." if len(summary) > 500 else "")
-            para = Paragraph(f"Resumen: {text}", description_style)
-            table = Table([[para]], colWidths=[6 * inch])
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-            ]))
-            elements.append(table)
-
-        # Impacto
-        impact = getattr(vuln, "impact", None)
-        if impact:
-            text = impact[:400] + ("..." if len(impact) > 400 else "")
-            para = Paragraph(f"Impacto: {text}", description_style)
-            table = Table([[para]], colWidths=[6 * inch])
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fff0f0")),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-            ]))
-            elements.append(table)
-
-        # Solución
-        solution = getattr(vuln, "solution", None)
-        if solution:
-            text = solution[:400] + ("..." if len(solution) > 400 else "")
-            stype = getattr(vuln, "solution_type", None)
-            stype_txt = f" ({stype})" if stype else ""
-            para = Paragraph(f"Solución{stype_txt}: {text}", description_style)
-            table = Table([[para]], colWidths=[6 * inch])
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), white),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-            ]))
-            elements.append(table)
-
-        # Referencias
-        refs_parts = []
-        if getattr(vuln, "cve_ids", None):
-            refs_parts.append(f"CVE: {vuln.cve_ids}")
-        if getattr(vuln, "cert_refs", None):
-            refs_parts.append(f"CERT: {vuln.cert_refs}")
-        if getattr(vuln, "bugtraq_ids", None):
-            refs_parts.append(f"BugTraq: {vuln.bugtraq_ids}")
-        if getattr(vuln, "other_refs", None):
-            refs_parts.append(f"Otros: {vuln.other_refs}")
-
-        if refs_parts:
-            full = " | ".join(refs_parts)
-            text = full[:400] + ("..." if len(full) > 400 else "")
-            para = Paragraph(f"Referencias: {text}", description_style)
-            table = Table([[para]], colWidths=[6 * inch])
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f0f8ff")),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
-            ]))
-            elements.append(table)
-
-        elements.append(Spacer(1, 0.2 * inch))
-
-    def get_filename_suffix(self) -> str:
-        """Get the PDF filename suffix.
-
-        Returns:
-            Filename suffix: "_OpenVAS.pdf"
-        """
-        return "_OpenVAS.pdf"
-
-    def get_picture_name(self, dark: bool = False) -> str:
-        """Get the logo image name for OpenVAS reports.
-
-        Args:
-            dark: Whether to use dark variant.
-
-        Returns:
-            Logo filename.
-        """
-        picture_name = "Themis-Green-Bg"
-        return picture_name + "Dark.png" if dark else picture_name + "Light.png"
-
-    def get_report_title(self) -> str:
-        """Get the report title for the cover page.
-
-        Returns:
-            Report title: "Análisis de Vulnerabilidades OpenVAS"
-        """
-        return "Análisis de Vulnerabilidades OpenVAS"
-
-
 @PrintingStrategy.register(ScanType.NIKTO)
 class NiktoPrintingStrategy(PrintingStrategy):
     """Printing strategy for Nikto web vulnerability scan reports.
@@ -2074,7 +1683,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
             self._append_ai_analysis(elements, theme)
 
         # ponytail: no per-target history chart yet — _append_history_stats'
-        # tool_map only knows the Nmap/Nikto/OpenVAS scan classes, since it relies on
+        # tool_map only knows the Nmap/Nikto scan classes, since it relies on
         # a MetricExtractor for each; a Finding-based one is separate scope
         # from wiring the PDF itself. Add it when that's needed.
 
@@ -2236,7 +1845,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
 
     def _append_finding_card(self, theme: "ReportTheme", elements: list, finding: dict, idx: int) -> None:
         """Tarjeta de un hallazgo: cabecera de prioridad, nombre, detalles,
-        descripción y referencias (mismo lenguaje visual que Nmap/Nikto/OpenVAS:
+        descripción y referencias (mismo lenguaje visual que Nmap/Nikto:
         cada bloque lleva su propio borde, no solo la cabecera)."""
         severity_bg = {
             "CRITICAL": colors.HexColor("#ffcccc"),
@@ -2262,7 +1871,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
         )
         elements.append(header)
 
-        # Título en banda de color principal, igual que el nombre de vulnerabilidad de OpenVAS.
+        # Título en banda de color principal, mismo lenguaje visual que las demás tarjetas.
         title_para = Paragraph(finding["title"], ParagraphStyle(
             "LybraFindingTitle", parent=theme.styles["Normal"], fontName="Helvetica-Bold",
             fontSize=10, textColor=colors.whitesmoke, alignment=TA_LEFT,
@@ -2379,8 +1988,8 @@ class NucleiPrintingStrategy(FindingsPrintingStrategy):
     called out: the PDF is the hardest part of adding a scanner, and here it
     costs a dozen class attributes.
 
-    Color palette: Blue theme, distinct from Lybra's green and OpenVAS's
-    salmon so the two coexist without visual confusion in the tool picker.
+    Color palette: Blue theme, distinct from Lybra's green so the two
+    coexist without visual confusion in the tool picker.
     """
 
     _TOOL = ThemisTool.NUCLEI

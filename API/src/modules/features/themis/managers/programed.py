@@ -25,7 +25,6 @@ class ProgramedScanManager():
     _REQUIRED_ARGS: dict[ScanType, List[str]] = {
         ScanType.NMAP:      ["target_host", "target_ports"],
         ScanType.NIKTO:     ["target_domain"],
-        ScanType.OPENVAS:   ["target"],
         ScanType.LYBRA:     ["target"],
         ScanType.NUCLEI:    ["target"],
     }

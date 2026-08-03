@@ -2,7 +2,7 @@
 Repositories for the Themis security scanning module.
 
 Provides typed data access for Scan, its polymorphic subtypes
-(NmapScan, NiktoScan, OpenVASScan), and ThemisDocument.
+(NmapScan, NiktoScan, LybraScan, NucleiScan), and ThemisDocument.
 
 Classes:
     ScanRepository:                Repository for Scan and its polymorphic subtypes.
@@ -47,10 +47,8 @@ from .model import (
     NiktoIncident,
     NiktoScan,
     NmapScan,
+    NucleiScan,
     OpenPort,
-    OpenVASVulnerability,
-    OpenVASScan,
-    OpenVASScanResult,
     Port,
     ProgramedScan,
     Scan,
@@ -72,8 +70,8 @@ class ScanRepository(BaseRepository[Scan]):
     and adds domain-specific query methods for the Themis module.
 
     Polymorphism is handled transparently by SQLAlchemy: querying Scan
-    returns instances of NmapScan, NiktoScan, or OpenVASScan depending
-    on the `scan_type` discriminator column.
+    returns instances of NmapScan, NiktoScan, LybraScan or NucleiScan
+    depending on the `scan_type` discriminator column.
 
     Attributes:
         _model:  Scan (inherited from BaseRepository).
@@ -95,9 +93,13 @@ class ScanRepository(BaseRepository[Scan]):
             NiktoScan,
             lambda: [joinedload(NiktoScan.incidents)],
         ),
-        ScanType.OPENVAS: (
-            OpenVASScan,
-            lambda: [joinedload(OpenVASScan.results).joinedload(OpenVASScanResult.vulnerability)],
+        ScanType.LYBRA: (
+            LybraScan,
+            lambda: [joinedload(LybraScan.findings)],
+        ),
+        ScanType.NUCLEI: (
+            NucleiScan,
+            lambda: [joinedload(NucleiScan.findings)],
         ),
     }
 
@@ -141,19 +143,6 @@ class ScanRepository(BaseRepository[Scan]):
             self._session.query(NiktoScan)
             .filter(NiktoScan.id == scan_id)
             .options(joinedload(NiktoScan.incidents), joinedload(NiktoScan.host))
-            .one_or_none()
-        )
-
-    def get_openvas_rich(self, scan_id: int) -> Optional[OpenVASScan]:
-        """[Background thread] Retrieve OpenVASScan with relationships eagerly loaded."""
-        return (
-            self._session.query(OpenVASScan)
-            .filter(OpenVASScan.id == scan_id)
-            .options(
-                joinedload(OpenVASScan.host),
-                joinedload(OpenVASScan.results).joinedload(OpenVASScanResult.vulnerability),
-                joinedload(OpenVASScan.results).joinedload(OpenVASScanResult.host),
-            )
             .one_or_none()
         )
 
@@ -273,7 +262,7 @@ class ScanRepository(BaseRepository[Scan]):
         Return scan counts grouped by type for a user.
 
         Returns:
-            Dict with keys ``total``, ``nmap``, ``nikto``, ``openvas``, ``lybra``, ``nuclei``.
+            Dict with keys ``total``, ``nmap``, ``nikto``, ``lybra``, ``nuclei``.
         """
         from sqlalchemy import func
 
@@ -283,7 +272,7 @@ class ScanRepository(BaseRepository[Scan]):
             .group_by(Scan.scan_type)
             .all()
         )
-        counts = {"nmap": 0, "nikto": 0, "openvas": 0, "lybra": 0, "nuclei": 0}
+        counts = {"nmap": 0, "nikto": 0, "lybra": 0, "nuclei": 0}
         for scan_type_val, count in results:
             key = scan_type_val.value if hasattr(scan_type_val, "value") else str(scan_type_val)
             if key in counts:
@@ -556,21 +545,6 @@ class ScanRepository(BaseRepository[Scan]):
         self._session.flush()
         return incident
 
-    def get_or_create_vulnerability(self, vuln_data: dict) -> OpenVASVulnerability:
-        """Get or create an OpenVASVulnerability row by NVT OID."""
-        nvt_oid = vuln_data["nvt_oid"]
-        vuln = self._session.query(OpenVASVulnerability).filter(
-            OpenVASVulnerability.nvt_oid == nvt_oid
-        ).one_or_none()
-
-        if vuln:
-            return vuln
-
-        vuln = OpenVASVulnerability(**vuln_data)
-        self._session.add(vuln)
-        self._session.flush()
-        return vuln
-
     def persist_nmap_results(self, scan, host, ports_data) -> None:
         """Persist Nmap host and port data into the database."""
         scan.host_id = host.id
@@ -599,21 +573,6 @@ class ScanRepository(BaseRepository[Scan]):
                 scan.incidents.append(incident)
 
         scan.host = host
-
-    def persist_openvas_results(self, scan, results_data, vulnerability_map) -> None:
-        """Persist OpenVAS scan results."""
-        for result_data in results_data:
-            host = self.get_or_create_host(
-                hostname   = result_data["host_ip"],
-                ip_address = result_data["host_ip"],
-            )
-
-            scan_result = OpenVASScanResult(
-                openvas_scan_id  = scan.id,
-                vulnerability_id = vulnerability_map[result_data["nvt_oid"]].id,
-                host_id          = host.id,
-            )
-            self._session.add(scan_result)
 
     # =========================================================================
     # LYBRA ENGINE
@@ -709,9 +668,9 @@ class ScanRepository(BaseRepository[Scan]):
         after the fact: findings are persisted with a config-level fallback
         during ``_persist_scan_results`` (before the live ``templates_version``
         banner from the running binary is captured), then patched here once
-        the outer ``_execute_scan`` override has it. Mirrors how
-        ``OpenVASScanManager`` patches ``task_id``/``report_id`` onto the scan
-        row post-hoc, for the same structural reason.
+        the outer ``_execute_scan`` override has it — the same
+        persist-now/patch-post-hoc shape any scanner uses when a value is
+        only known after the subprocess has already produced its output.
         """
         self._session.query(Finding).filter(Finding.scan_id == scan_id).update(
             {"feed_version": feed_version}
@@ -1177,7 +1136,7 @@ class ProgramedScanRepository(BaseRepository[ProgramedScan]):
 
         Args:
             user_id:    User primary key.
-            scan_type:  Scan type discriminator ("nmap", "nikto", "openvas").
+            scan_type:  Scan type discriminator ("nmap", "nikto", "lybra", "nuclei").
 
         Returns:
             List of matching ProgramedScan instances.
@@ -1252,7 +1211,7 @@ class ProgramedScanRepository(BaseRepository[ProgramedScan]):
 
         Args:
             user_id:         Owner user primary key.
-            scan_type:       Scan discriminator ("nmap", "nikto", "openvas").
+            scan_type:       Scan discriminator ("nmap", "nikto", "lybra", "nuclei").
             arguments:       Scan parameters (e.g. {"ports": "22,80"}).
             schedule_type:   "interval" or "cron".
             schedule_config: Schedule definition (e.g. {"every": 60, "unit": "minutes"}).

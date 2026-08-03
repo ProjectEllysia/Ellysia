@@ -34,8 +34,8 @@ class ScanHistoryManager:
             user_id: Owner user primary key (scopes the counts to this user).
 
         Returns:
-            A dict with per-type counts (``nmap``/``nikto``/``openvas``/
-            ``lybra``) plus a ``total`` (see ``ScanRepository.get_stats``).
+            A dict with per-type counts (``nmap``/``nikto``/``lybra``/
+            ``nuclei``) plus a ``total`` (see ``ScanRepository.get_stats``).
         """
         with UnitOfWork() as uow:
             return ScanRepository(uow).get_stats(user_id)
@@ -46,7 +46,7 @@ class ScanHistoryManager:
         Args:
             user_id:   Owner user primary key (enforces the security scope).
             target:    The scanned host.
-            scan_type: The tool discriminator (nmap/nikto/openvas).
+            scan_type: The tool discriminator.
 
         Returns:
             JSON-serializable statistics payload (see HistoryStatsService.build).

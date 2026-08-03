@@ -1,7 +1,7 @@
 """
 Adaptador inventario de software → servicios de Lybra (Fase I).
 
-Simétrico a los adaptadores que Themis ya tiene para Nikto y OpenVAS
+Simétrico a los adaptadores que Themis ya tiene para Nikto
 (``themis/lybra/adapters.py``), pero vive de este lado porque es Hygeia
 quien conoce la forma de su propio inventario: el contrato de ingesta v1.0
 (``SoftwareSchema``), no Themis.

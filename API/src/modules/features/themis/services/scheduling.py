@@ -78,22 +78,6 @@ def _run_nikto_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None
     logger.info("Nikto scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
 
 
-def _run_openvas_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None:
-    _require_args(arguments, ["target"], "openvas")
-
-    logger.info("Launching OpenVAS scheduled scan #%d: %s", ps_id, arguments["target"])
-
-    from ..managers import OpenVASScanManager
-
-    scan_id = OpenVASScanManager().run_scan(
-        target=arguments["target"],
-        user_id=user_id,
-        programed_scan_id=ps_id,
-    )
-
-    logger.info("OpenVAS scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
-
-
 def _run_nuclei_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None:
     _require_args(arguments, ["target"], "nuclei")
 
@@ -140,7 +124,6 @@ class ThemisScheduler:
     _TASK_MAPPING: dict[ScanType, Callable[[int, int, dict[str, Any]], None]] = {
         ScanType.NMAP:    _run_nmap_scan,
         ScanType.NIKTO:   _run_nikto_scan,
-        ScanType.OPENVAS: _run_openvas_scan,
         ScanType.LYBRA:   _run_lybra_scan,
         ScanType.NUCLEI:  _run_nuclei_scan,
     }

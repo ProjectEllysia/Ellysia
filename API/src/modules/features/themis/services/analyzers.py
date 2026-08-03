@@ -4,11 +4,11 @@ AI Writers for security scan analysis.
 This module provides AI-powered analysis classes for different scan types:
 - NmapAIWriter: Analyzes Nmap network scans
 - NiktoAIWriter: Analyzes Nikto web vulnerability scans
-- OpenVASAIWriter: Analyzes OpenVAS vulnerability scans
 - LybraAIWriter: Analyzes Lybra engine findings (already structured by the
-  engine itself — cve_ids/cvss/epss/qod/confirmed — so unlike the other three
+  engine itself — cve_ids/cvss/epss/qod/confirmed — so unlike the other
   writers it does not need a text-heuristic "bucket into security controls"
-  preprocessing step)
+  preprocessing step; also used for Nuclei scans, whose findings share the
+  same shape)
 
 Each writer delegates model calling to a scribe ``AIGenerator`` (Ollama or
 OpenAI strategy, chosen per module in SecOpsConfig.json) to produce security
@@ -24,7 +24,7 @@ import src.modules.system.config_reading as CR
 from src.modules.tools.scribe import AIInput, AIGenerator, build_generator, WEB_SEARCH_TOOL
 from src.modules.tools.scribe.exceptions import AIResponseError
 
-from ..model import NmapScan, NiktoScan, OpenVASScan, LybraScan
+from ..model import NmapScan, NiktoScan, LybraScan
 
 
 def _extract_json_with_regex(raw: str) -> Optional[dict]:
@@ -525,204 +525,10 @@ class NiktoAIWriter:
             raise AIResponseError(f"Respuesta inválida: {raw[:200]}", attempt=attempt)
 
 
-class OpenVASAIWriter:
-    """AI writer for OpenVAS vulnerability scan analysis.
-
-    Generates security analysis for OpenVAS scans. Analyzes aggregated findings
-    grouped by security controls rather than individual vulnerabilities,
-    providing calibrated risk assessments. Model calling is delegated to an
-    injected ``AIGenerator`` (scribe).
-
-    The system prompt enforces:
-    - Controls over counts (one misconfigured control = one issue)
-    - Never escalate risk based on number of findings
-    - Distinguish between confirmed vs potential vulnerabilities
-
-    Attributes:
-        _generator: scribe AIGenerator used for model calling.
-    """
-
-    def __init__(self, generator: Optional[AIGenerator] = None) -> None:
-        """Initialize OpenVAS AI writer."""
-        self._generator = generator or build_generator("themis")
-
-    def _preprocess_vulnerabilities(self, vulnerabilities: list) -> dict:
-        """Preprocess vulnerabilities by grouping them into security controls."""
-        if not vulnerabilities:
-            return {"error": "No vulnerabilities"}
-
-        controls = {
-            "input_validation": [],
-            "authentication": [],
-            "session_management": [],
-            "data_protection": [],
-            "access_control": [],
-            "cryptography": [],
-            "information_disclosure": [],
-        }
-
-        for vuln in vulnerabilities:
-            name = str(vuln.get("name", "")).lower()
-            desc = str(vuln.get("description", "")).lower()
-            combined = name + " " + desc
-
-            if any(x in combined for x in ["sql injection", "command injection", "ldap injection", "xml injection", "xxe", "xpath injection"]):
-                controls["input_validation"].append(vuln)
-            elif any(x in combined for x in ["authentication", "credential", "default password", "brute force", "weak password"]):
-                controls["authentication"].append(vuln)
-            elif any(x in combined for x in ["session fixation", "session id", "weak session"]):
-                controls["session_management"].append(vuln)
-            elif any(x in combined for x in ["encryption", "ssl", "tls", "certificate", "unencrypted", "weak cryptographic"]):
-                controls["cryptography"].append(vuln)
-            elif any(x in combined for x in ["idor", "broken access control", "privilege", "authorization"]):
-                controls["access_control"].append(vuln)
-            elif any(x in combined for x in ["information disclosure", "debug", "verbose error", "version disclosure", "banner"]):
-                controls["information_disclosure"].append(vuln)
-            else:
-                controls["data_protection"].append(vuln)
-
-        return {
-            "controls": controls,
-            "metrics": {
-                "total_raw": len(vulnerabilities),
-                "by_severity": self._count_by_severity(vulnerabilities),
-                "controls_affected": sum(1 for v in controls.values() if len(v) > 0)
-            }
-        }
-
-    def _count_by_severity(self, vulnerabilities: list) -> dict:
-        """Count vulnerabilities by severity class."""
-        counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "LOG": 0}
-        for v in vulnerabilities:
-            sev = str(v.get("severity_class", "")).upper()
-            if sev in counts:
-                counts[sev] += 1
-        return counts
-
-    def _build_system_prompt(self) -> str:
-        prompts_config = CR.get_prompts_config()
-        return prompts_config.get("openvas", {}).get("system", "")
-
-    def _build_user_prompt(self, scan_data: dict, processed: dict) -> str:
-        target = scan_data.get("target", "desconocido")
-        started = scan_data.get("started_at", "N/A")
-        metrics = processed.get("metrics", {})
-        controls = processed.get("controls", {})
-
-        severity_counts = metrics.get("by_severity", {})
-        severity_str = f"CRITICAL: {severity_counts.get('CRITICAL', 0)}, HIGH: {severity_counts.get('HIGH', 0)}, MEDIUM: {severity_counts.get('MEDIUM', 0)}, LOW: {severity_counts.get('LOW', 0)}"
-
-        vulns_for_ai = []
-        for control_name, findings in controls.items():
-            if not findings:
-                continue
-            scored = [f for f in findings if float(f.get("severity_score", 0.0)) > 0.0]
-            sample = scored[:3] if scored else findings[:1]
-            for f in sample:
-                vulns_for_ai.append({
-                    "control": control_name,
-                    "name": f.get("name", "")[:120],
-                    "severity": f.get("severity_class", "LOG"),
-                    "cvss_score": f.get("severity_score", 0.0),
-                    "description": f.get("description", "")[:200]
-                })
-
-        prompts_config = CR.get_prompts_config()
-        template = prompts_config.get("openvas", {}).get("userTemplate", "")
-
-        return template.replace("{{target}}", str(target)) \
-                    .replace("{{started}}", str(started)) \
-                    .replace("{{total_vulns}}", str(metrics.get("total_raw", 0))) \
-                    .replace("{{severity_counts}}", severity_str) \
-                    .replace("{{vulns_json}}", json.dumps(vulns_for_ai, indent=2, ensure_ascii=False))
-
-    def _assess_control_severity(self, control_name: str, findings: list) -> str:
-        """Assess the base severity for a security control."""
-        severity_map = {
-            "input_validation": "CRÍTICO",
-            "authentication": "ALTO",
-            "access_control": "ALTO",
-            "data_protection": "MEDIO",
-            "cryptography": "MEDIO",
-            "session_management": "MEDIO",
-            "information_disclosure": "BAJO"
-        }
-        return severity_map.get(control_name, "MEDIO")
-
-    def generate(self, scan: OpenVASScan) -> dict:
-        """Generate AI security analysis for an OpenVAS scan."""
-        scan_data = {
-            "target": scan.target,
-            "started_at": scan.started_at.isoformat() if getattr(scan, 'started_at', None) else "N/A",
-        }
-
-        vulnerabilities = []
-        for result in (getattr(scan, 'results', None) or []):
-            vuln = result.vulnerability if hasattr(result, 'vulnerability') else result
-            vulnerabilities.append({
-                "name": getattr(vuln, "name", ""),
-                "description": getattr(vuln, "description", ""),
-                "severity_class": getattr(vuln, "severity_class", "LOG"),
-                "severity_score": getattr(vuln, "severity_score", 0.0),
-                "threat": getattr(vuln, "threat", ""),
-                "method": getattr(vuln, "method", ""),
-            })
-
-        processed = self._preprocess_vulnerabilities(vulnerabilities)
-
-        if processed.get("error"):
-            return {
-                "executive_summary": "Escaneo sin vulnerabilidades detectadas o datos insuficientes.",
-                "risk_level": "INFORMATIVO",
-                "technical_analysis": "No se detectaron vulnerabilidades en el escaneo.",
-                "recommendations": [],
-                "conclusions": "Continuar con monitoreo regular."
-            }
-
-        prompt = self._build_user_prompt(scan_data, processed)
-
-        ai_input = AIInput(
-            system_prompt = self._build_system_prompt(),
-            user_prompt   = prompt,
-            tools         = [WEB_SEARCH_TOOL],
-            num_predict   = 2048,
-            temperature   = 0.1,
-            top_p         = 0.75,
-            repeat_penalty = 1.3,
-        )
-
-        result = self._generator.digest(ai_input)
-        return self._parse_response(result.text)
-
-    def _parse_response(self, raw: str, attempt: int = 0) -> dict:
-        """Parse the AI response JSON with validation."""
-        if not raw:
-            raise AIResponseError("Respuesta vacía", attempt=attempt)
-
-        try:
-            result = json.loads(raw)
-            valid = ["CRÍTICO", "ALTO", "MEDIO", "BAJO", "INFORMATIVO"]
-            risk_level = result.get("risk_level")
-            if risk_level is None or not isinstance(risk_level, str) or risk_level.upper() not in valid:
-                result["risk_level"] = "BAJO"
-
-            result.setdefault("executive_summary", "Análisis completado.")
-            result.setdefault("technical_analysis", "Análisis de vulnerabilidades completado.")
-            result.setdefault("recommendations", [])
-            result.setdefault("conclusions", "Continuar con el plan de remediación.")
-
-            return result
-        except json.JSONDecodeError:
-            recovered = _extract_json_with_regex(raw)
-            if recovered is not None:
-                return recovered
-            raise AIResponseError(f"Respuesta inválida: {raw[:200]}", attempt=attempt)
-
-
 class LybraAIWriter:
     """AI writer for Lybra engine scan security analysis.
 
-    Unlike the other three writers, Lybra's own `Finding` rows already carry
+    Unlike the other writers, Lybra's own `Finding` rows already carry
     CVE ids, CVSS, EPSS, KEV membership, QoD and the confirmed/hypothesis
     distinction — the engine did that correlation, not free text needing a
     heuristic "bucket into security controls" pass. This writer's job is
