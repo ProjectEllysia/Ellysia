@@ -151,9 +151,13 @@ def test_worker_perform_job_removes_session_on_error(monkeypatch):
 
 def test_scheduler_execute_removes_session(monkeypatch):
     from src.modules.features.themis.services import scheduling
+    from src.modules.infrastructure import scheduling as infra_scheduling
 
     calls = {"n": 0}
-    monkeypatch.setattr(scheduling, "close_all", lambda: calls.__setitem__("n", calls["n"] + 1))
+    # B6: execute() ya no llama a close_all() a mano — lo hace el decorador
+    # @scheduler_job, que lo importa (y lo llama) desde infrastructure.scheduling,
+    # no desde themis.services.scheduling.
+    monkeypatch.setattr(infra_scheduling, "close_all", lambda: calls.__setitem__("n", calls["n"] + 1))
     # Skip the launch entirely: load phase returns None.
     monkeypatch.setattr(
         scheduling.ThemisScheduler, "_load_and_guard", classmethod(lambda cls, ps_id: None)
