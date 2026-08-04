@@ -22,7 +22,6 @@ import threading
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
@@ -58,18 +57,37 @@ class SeverityLevel(str, Enum):
 
 class AlertSource(str, Enum):
     INCIBE = "incibe"
-    CIRCL  = "circl"
+    KB     = "kb"
+    """Espejo local de NVD/KEV/EPSS (la base de conocimiento de Themis).
+
+    Sustituye a la antigua fuente ``circl``, que consultaba por HTTP otro
+    espejo de los mismos datos. Las filas ya persistidas con ``source='circl'``
+    se siguen leyendo sin problema: ``source_label`` se guarda junto a ellas y
+    es el que se muestra ("NVD/CVE" en ambos casos).
+    """
 
 
 MAX_BRANDS         = 5
+"""Tope de productos que se anotan en un aviso concreto (campo ``brands``)."""
+
 MAX_RETRIES        = 3
 RETRY_DELAY_BASE   = 1.5  # segundos, backoff exponencial
 
-FALLBACK_BRANDS: list[str] = [
-    "Microsoft", "Google", "Cisco", "Apple", "Adobe",
-    "Oracle", "SAP", "VMware", "Fortinet", "Palo Alto",
-    "Juniper", "IBM", "Linux", "Android", "Chrome",
-]
+#: Severidad de NVD → la escala en español de ``SeverityLevel``.
+_KB_SEVERITY: dict[str, str] = {
+    "CRITICAL": "crítica",
+    "HIGH":     "alta",
+    "MEDIUM":   "media",
+    "LOW":      "baja",
+}
+
+# Recortes de los bloques largos que se inyectan en el prompt. El stack de
+# referencias lo cargan 3 ficheros de hasta 50k caracteres cada uno
+# (AegisManager._load_reference_stack): entero no cabe en la ventana de
+# ningún modelo razonable, y hasta ahora simplemente se descartaba.
+MAX_PROMPT_REFERENCE_CHARS = 6000
+MAX_PROMPT_RESOURCES_CHARS = 2000
+MAX_PROMPT_ADVISORIES      = 10
 
 COMPANY_SIZE_LABELS: dict[str, str] = {
     "micro":    "microempresa (menos de 10 empleados)",
@@ -329,11 +347,17 @@ def validate_url(url: str) -> bool:
 
 class AegisAlertFetcher:
     """
-    Fetch concurrente de alertas de vulnerabilidad desde INCIBE y CIRCL.
+    Reúne los avisos de seguridad vigentes para los productos que vigila una
+    organización, desde dos fuentes que aportan cosas distintas:
 
-    Mantiene una caché en memoria por instancia de clase (compartida entre
-    instancias del mismo proceso) con TTL de 15 minutos. Las llamadas
-    externas se protegen con @retry_on_failure.
+    - **La KB local** (espejo de NVD/KEV/EPSS que mantiene Themis): los CVE
+      concretos de cada producto, con su severidad y la señal de explotación
+      real. Consulta a Postgres, sin red.
+    - **INCIBE-CERT**: avisos divulgativos en español, redactados para
+      personas. Es un feed RSS, y la única salida a internet que queda aquí.
+
+    Mantiene una caché en memoria a nivel de clase (compartida entre
+    instancias del mismo proceso) con TTL de 15 minutos.
     """
 
     INCIBE_FEED = "https://www.incibe.es/incibe-cert/alerta-temprana/avisos/feed"
@@ -342,21 +366,8 @@ class AegisAlertFetcher:
     _cache_ttl  = timedelta(minutes=15)
     _lock       = threading.Lock()
 
-    def __init__(self, fallback_brands: list[str] | None = None) -> None:
+    def __init__(self) -> None:
         self._max_alert_age_years = CR.aegis_config().vulnerabilities_antiquity
-
-        brand_catalogue           = CR.aegis_config().brands
-        self._brand_slugs: dict[str, tuple[str, str]] = {
-            b["label"]: (b["circl_vendor"], b["circl_product"])
-            for b in brand_catalogue
-        }
-        self._brand_aliases: dict[str, list[str]] = {
-            b["label"]: [a.lower() for a in b.get("aliases", [])]
-            for b in brand_catalogue
-            if b.get("aliases")
-        }
-        catalogue_labels          = [b["label"] for b in brand_catalogue]
-        self._fallback_brands     = fallback_brands or catalogue_labels or FALLBACK_BRANDS[:]
 
     # ── Caché ─────────────────────────────────────────────────────────────────
 
@@ -376,14 +387,12 @@ class AegisAlertFetcher:
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    def _resolve_brands(self, brands: list[str]) -> list[str]:
-        """Completa la lista de marcas hasta MAX_BRANDS con fallbacks."""
-        unique    = list(dict.fromkeys(b.strip() for b in brands if b.strip()))
-        if len(unique) >= MAX_BRANDS:
-            return unique[:MAX_BRANDS]
-        available = [b for b in self._fallback_brands if b not in unique]
-        padding   = random.sample(available, min(MAX_BRANDS - len(unique), len(available)))
-        return unique + padding
+    # ``_resolve_brands`` se retiró: rellenaba la lista hasta MAX_BRANDS con
+    # ``random.sample`` sobre un catálogo fijo, así que quien declaraba una
+    # sola marca recibía cuatro más elegidas al azar y sus píldoras hablaban
+    # de software que no tenía. Ahora la lista de productos es explícita (la
+    # elige el usuario o la deduce el inventario de sus agentes) y vacía
+    # significa vacía.
 
     def _is_recent(self, date_str: str) -> bool:
         if not date_str:
@@ -396,11 +405,16 @@ class AegisAlertFetcher:
             logger.warning(f"Fecha no parseable '{date_str}', asumiendo reciente")
             return True
 
-    # ── Fuentes externas ──────────────────────────────────────────────────────
+    # ── Fuentes ───────────────────────────────────────────────────────────────
 
     @retry_on_failure(max_retries=3)
     def _fetch_incibe(self, brands: list[str], max_per_brand: int) -> list[AegisAlert]:
-        """Fetch de alertas desde INCIBE."""
+        """Avisos divulgativos de INCIBE-CERT que mencionan alguno de ``brands``.
+
+        ``brands`` son términos de búsqueda en texto libre (el nombre de
+        vendor o de producto), no etiquetas de un catálogo: el feed es prosa
+        en español, así que aquí solo cabe casar por subcadena.
+        """
         from email.utils import parsedate_to_datetime
 
         cache_key = f"incibe_{','.join(sorted(brands))}"
@@ -460,8 +474,7 @@ class AegisAlertFetcher:
             for brand in brands:
                 if brand_counts[brand] >= max_per_brand:
                     continue
-                search_terms = [brand.lower()] + self._brand_aliases.get(brand, [])
-                if any(term in haystack for term in search_terms):
+                if brand.lower() in haystack:
                     matched.append(brand)
                     brand_counts[brand] += 1
 
@@ -482,177 +495,133 @@ class AegisAlertFetcher:
         self._set_cached(cache_key, alerts)
         return alerts
 
-    @retry_on_failure(max_retries=3)
-    def _fetch_circl(self, brands: list[str], max_per_brand: int) -> list[AegisAlert]:
-        """Fetch de alertas desde CIRCL/NVD."""
-        cache_key = f"circl_{','.join(sorted(brands))}"
+    def _fetch_kb_advisories(
+        self, products: list[dict], max_per_product: int,
+    ) -> list[AegisAlert]:
+        """Avisos de CVE desde el espejo local de NVD (la KB de Themis).
+
+        Antes esto era una petición HTTP por marca a ``cve.circl.lu`` (con un
+        ``sleep(0.2)`` entre marcas para no castigar el servicio ajeno). CIRCL
+        es a su vez un espejo de NVD, así que se estaba saliendo a la red a
+        buscar datos que ya están en Postgres: ~350k CVEs indexados por
+        ``(vendor, product)`` y refrescados cada noche por ``KbSyncManager``,
+        además de KEV y EPSS, que CIRCL ni siquiera devuelve.
+
+        La descripción en inglés de NVD **no** se propaga al AegisAlert: sirve
+        como contexto para el modelo (vía ``advisories`` del prompt) y aquí se
+        sustituye por un resumen estructurado en español, porque este texto sí
+        se persiste y se muestra al usuario final.
+        """
+        from src.modules.features.themis.managers import KbQueryManager
+
+        coordinates = [(p["vendor"], p["product"]) for p in products if p.get("vendor")]
+        if not coordinates:
+            return []
+
+        cache_key = "kb_" + ",".join(sorted(f"{v}:{p}" for v, p in coordinates))
         cached = self._get_cached(cache_key)
-        if cached:
+        if cached is not None:
             return cached
 
+        since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            days=365 * self._max_alert_age_years
+        )
+        advisories = KbQueryManager().advisories_for_products(
+            coordinates, since=since, limit_per_product=max_per_product,
+        )
+
         alerts = []
-        brand_counts = {b: 0 for b in brands}
-
-        for brand in brands:
-            if brand_counts[brand] >= max_per_brand:
-                continue
-
-            cve_list = self._circl_fetch_cve_list(brand)
-            if cve_list is None:
-                continue
-
-            sorted_entries = sorted(cve_list, key=self._circl_extract_date, reverse=True)
-
-            for entry in sorted_entries:
-                if brand_counts[brand] >= max_per_brand:
-                    break
-
-                alert = self._circl_parse_entry(entry, brand)
-                if alert is not None:
-                    alerts.append(alert)
-                    brand_counts[brand] += 1
-
-            time.sleep(0.2)
+        for advisory in advisories:
+            try:
+                alerts.append(AegisAlert(
+                    title       = f"{advisory.cve_id} — {advisory.vendor} {advisory.product}"[:200],
+                    description = self._describe_advisory(advisory),
+                    url         = advisory.url,
+                    source      = AlertSource.KB,
+                    published   = advisory.published.strftime("%Y-%m-%d") if advisory.published else "",
+                    severity    = _KB_SEVERITY.get((advisory.severity or "").upper(), ""),
+                    brands      = [advisory.product],
+                ))
+            except ValueError as exc:
+                logger.debug(f"Aviso de la KB descartado: {exc}")
 
         self._set_cached(cache_key, alerts)
         return alerts
 
-    def _circl_fetch_cve_list(self, brand: str) -> list | None:
-        """Consulta la API de CIRCL para ``brand``; devuelve la lista ``cvelistv5``
-        o None si la petición falla o la respuesta no tiene el formato esperado."""
-        vendor, product = self._brand_slugs.get(brand, (brand.lower().replace(" ", ""), ""))
-        url = (
-            f"https://cve.circl.lu/api/search/{vendor}/{product}"
-            if product else
-            f"https://cve.circl.lu/api/search/{vendor}"
-        )
-
-        try:
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "AegisAlertFetcher/2.0", "Accept": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read())
-        except Exception as e:
-            logger.warning(f"CIRCL error para '{brand}': {e}")
-            return None
-
-        results = data.get("results", {}) if isinstance(data, dict) else {}
-        cve_list = results.get("cvelistv5", []) if isinstance(results, dict) else []
-
-        if not isinstance(cve_list, list):
-            return None
-        return cve_list
-
     @staticmethod
-    def _circl_extract_date(entry) -> str:
-        """Fecha de publicación de una entrada cvelistv5, usada como clave de orden."""
-        try:
-            if isinstance(entry, (list, tuple)) and len(entry) > 1:
-                return entry[1].get("cveMetadata", {}).get("datePublished", "")
-            return ""
-        except Exception:
-            return ""
+    def _describe_advisory(advisory) -> str:
+        """Resumen del CVE en español, compuesto de campos estructurados.
 
-    def _circl_parse_entry(self, entry, brand: str) -> Optional[AegisAlert]:
-        """Convierte una entrada cvelistv5 de CIRCL en un AegisAlert.
-
-        Devuelve None si la entrada está malformada, no es reciente
-        (``_is_recent``), o cualquier otro filtro descarta el CVE.
+        NVD guarda la descripción en inglés (``lang='en'``, deliberado en
+        ``lybra.kb``), y esta cadena sí acaba delante del usuario final: en el
+        visor, en los exportadores y en el correo de campaña. En vez de
+        mostrar inglés o pagar una traducción, se compone con los datos que ya
+        son neutros al idioma — la severidad, la puntuación y las señales de
+        explotación real, que es además lo que de verdad ayuda a priorizar.
         """
-        try:
-            if not isinstance(entry, (list, tuple)) or len(entry) < 2:
-                return None
+        parts = []
+        if advisory.cvss_score is not None:
+            severity_label = _KB_SEVERITY.get((advisory.severity or "").upper(), "")
+            suffix = f" ({severity_label.upper()})" if severity_label else ""
+            parts.append(f"CVSS {advisory.cvss_score:.1f}{suffix}")
+        elif advisory.severity:
+            parts.append(_KB_SEVERITY.get(advisory.severity.upper(), advisory.severity).upper())
 
-            cve_id = entry[0].upper()
-            meta = entry[1]
+        if advisory.kev:
+            parts.append("Explotada activamente (CISA KEV)")
+        if advisory.epss is not None:
+            parts.append(f"Probabilidad de explotación {advisory.epss:.0%} (EPSS)")
 
-            if not isinstance(meta, dict):
-                return None
-
-            # Extraer metadata
-            cve_metadata = meta.get("cveMetadata", {})
-            pub_raw = cve_metadata.get("datePublished", "")[:10]
-
-            if not self._is_recent(pub_raw):
-                return None
-
-            containers = meta.get("containers", {})
-            cna = containers.get("cna", {})
-            descriptions = cna.get("descriptions", [])
-
-            desc = next(
-                (d["value"] for d in descriptions if d.get("lang", "").startswith("es")),
-                next((d["value"] for d in descriptions if d.get("lang", "").startswith("en")), "")
-            ) if descriptions else ""
-
-            severity = ""
-            metrics = cna.get("metrics", [])
-            for metric in metrics:
-                for key in ("cvssV3_1", "cvssV3_0", "cvssV3"):
-                    cvss = metric.get(key, {})
-                    if cvss:
-                        base = cvss.get("baseSeverity", "").upper()
-                        severity = {
-                            "CRITICAL": "crítica", "HIGH": "alta",
-                            "MEDIUM": "media", "LOW": "baja"
-                        }.get(base, "")
-                        break
-                if severity:
-                    break
-
-            affected = cna.get("affected", [])
-            product_name = affected[0].get("product", "") if affected else ""
-            title = f"{cve_id}" + (f" — {product_name}" if product_name else "")
-
-            return AegisAlert(
-                title=title[:200],
-                description=(desc[:400] + "…" if len(desc) > 400 else desc) if desc else f"Vulnerabilidad en {brand}",
-                url=f"https://cve.circl.lu/cve/{cve_id}",
-                source=AlertSource.CIRCL,
-                published=pub_raw,
-                severity=severity,
-                brands=[brand],
-            )
-        except Exception as e:
-            logger.debug(f"Entrada CIRCL malformada: {e}")
-            return None
+        return " · ".join(parts) or "Vulnerabilidad registrada en NVD."
 
     def fetch_alerts(
         self,
-        brands:          list[str],
-        max_per_brand:   int  = 3,
-        use_concurrency: bool = True,
+        products:        list[dict],
+        max_per_product: int = 3,
     ) -> list[AegisAlert]:
         """
-        Fetch paralelo de INCIBE y CIRCL con fallback y deduplicación.
-        Devuelve como máximo 20 alertas ordenadas por fecha descendente.
+        Avisos vigentes para ``products``, de la KB local y de INCIBE.
+
+        Secuencial a propósito. Antes las dos fuentes iban en un
+        ``ThreadPoolExecutor``, lo que tenía sentido cuando ambas eran
+        peticiones HTTP; ahora una es una consulta a Postgres, y sacarla a un
+        hilo suelto abriría ahí una sesión de SQLAlchemy que ningún borde
+        (``teardown_request`` / ``job_context``) cierra. El paralelismo
+        ahorraba el menor de dos tiempos y costaba una fuga de sesión por
+        generación.
+
+        Args:
+            products: coordenadas CPE ``[{"vendor": ..., "product": ...}]``,
+                tal como las guarda ``AegisOrgProfile.tracked_products`` o las
+                deduce el inventario de Hygeia. Vacío devuelve vacío: ya no se
+                rellena con marcas al azar.
+            max_per_product: tope de avisos por producto y fuente.
+
+        Returns:
+            Hasta 20 avisos deduplicados, del más reciente al más antiguo.
         """
-        if not brands and not self._fallback_brands:
+        if not products:
             return []
 
-        resolved = self._resolve_brands(brands)
-        results: list[AegisAlert] = []
+        # Para INCIBE, que casa contra texto libre, valen tanto el vendor como
+        # el producto: un aviso puede decir "Microsoft" o decir "Windows".
+        search_terms = list(dict.fromkeys(
+            term
+            for entry in products
+            for term in (entry.get("vendor", ""), entry.get("product", ""))
+            if term
+        ))
 
-        if use_concurrency:
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                futures = {
-                    executor.submit(self._fetch_incibe, resolved, max_per_brand): "INCIBE",
-                    executor.submit(self._fetch_circl,  resolved, max_per_brand): "CIRCL",
-                }
-                for future in as_completed(futures):
-                    source_name = futures[future]
-                    try:
-                        results.extend(future.result())
-                    except Exception as exc:
-                        logger.error(f"Error fetch {source_name}: {exc}")
-        else:
-            for fetch_fn, name in [(self._fetch_incibe, "INCIBE"), (self._fetch_circl, "CIRCL")]:
-                try:
-                    results.extend(fetch_fn(resolved, max_per_brand))
-                except Exception as exc:
-                    logger.error(f"Error fetch {name}: {exc}")
+        results: list[AegisAlert] = []
+        for fetch_fn, name in (
+            (lambda: self._fetch_kb_advisories(products, max_per_product), "KB"),
+            (lambda: self._fetch_incibe(search_terms, max_per_product), "INCIBE"),
+        ):
+            try:
+                results.extend(fetch_fn())
+            except Exception as exc:
+                # Una fuente caída no puede impedir generar la píldora.
+                logger.error(f"Error fetch {name}: {exc}")
 
         # Deduplicación por (título, fecha)
         seen:          set[str]         = set()
@@ -685,7 +654,8 @@ class AegisAIWriter:
         prompts = CR.aegis_config().prompts
         return prompts.get("system", "")
 
-    def _build_intro_context(self, tweaks: dict[str, Any]) -> str:
+    @staticmethod
+    def _build_intro_context(tweaks: dict[str, Any]) -> str:
         """
         Construye el bloque de contexto adicional a partir de los tweaks de
         empresa (tamaño, jurisdicción, modelo de trabajo, incidente reciente).
@@ -724,21 +694,52 @@ class AegisAIWriter:
 
         return context
 
-    def _build_user_prompt(
-        self,
+    @staticmethod
+    def _format_advisories(advisories: list["AegisAlert"] | None) -> str:
+        """Formatea los avisos como bloque compacto para el prompt.
+
+        Es la única vía por la que el texto de un CVE entra en el sistema: se
+        usa como contexto de generación y **no** se persiste ni se muestra
+        (las descripciones de la base de conocimiento están en inglés y las
+        píldoras son en español — el modelo redacta a partir de esto, no se
+        traduce a mano).
+        """
+        if not advisories:
+            return "No hay avisos recientes relevantes para los productos vigilados."
+
+        lines = []
+        for alert in advisories[:MAX_PROMPT_ADVISORIES]:
+            severity = getattr(alert.severity, "value", alert.severity) or "informativa"
+            published = f" ({alert.published})" if alert.published else ""
+            summary = " ".join((alert.description or "").split())[:400]
+            lines.append(f"- [{str(severity).upper()}] {alert.title}{published}\n  {summary}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _build_replacements(
+        *,
         topic:              Topic | None,
         topic_id:           int,
         reference:          str,
         tweaks:             dict[str, Any],
         verified_resources: str,
-    ) -> str:
-        prompts = CR.aegis_config().prompts
-        user_template = prompts.get("userTemplate", "")
-        
+        advisories:         list["AegisAlert"] | None = None,
+    ) -> dict[str, str]:
+        """Todas las sustituciones que se ofrecen a ``userTemplate``.
+
+        Separado de ``_build_user_prompt`` para que el test pueda comprobar
+        que la plantilla las consume todas sin construir un ``AIGenerator``
+        (ver ``tests/unit/test_aegis_prompt.py``). Añadir una clave aquí
+        obliga a añadir su placeholder en SecOpsConfig.json, o el test cae.
+        """
         company  = tweaks.get("company", "la empresa")
         sector   = tweaks.get("sector", "tecnología")
         audience = tweaks.get("audienceLevel", "mixed")
-        brands   = ", ".join(tweaks.get("associatedBrands", []))
+        brands   = ", ".join(
+            f"{entry.get('vendor', '')} {entry.get('product', '')}".strip()
+            for entry in (tweaks.get("trackedProducts") or [])
+            if entry.get("vendor")
+        )
         contact  = tweaks.get("mentionContact", "el equipo de seguridad")
         language = tweaks.get("language", "es")
         tone     = tweaks.get("tone", "profesional")
@@ -753,9 +754,9 @@ class AegisAIWriter:
         topic_title = topic.title if topic else "Ciberseguridad General"
         topic_description = getattr(topic, 'description', 'No disponible') if topic else f"Genérico para sector {sector}"
 
-        intro_context = self._build_intro_context(tweaks)
+        intro_context = AegisAIWriter._build_intro_context(tweaks)
 
-        replacements = {
+        return {
             "company": company,
             "sector": sector,
             "brands": brands or "No especificadas",
@@ -766,16 +767,49 @@ class AegisAIWriter:
             "topic_title": topic_title,
             "topic_description": topic_description,
             "topic_id": str(topic.id) if topic else str(topic_id),
-            "focus": focus,
-            "verified_resources": verified_resources[:2000],
+            "focus": focus or "sin foco específico",
+            "reference": (reference or "")[:MAX_PROMPT_REFERENCE_CHARS],
+            "verified_resources": verified_resources[:MAX_PROMPT_RESOURCES_CHARS],
+            "advisories": AegisAIWriter._format_advisories(advisories),
             "tips_amount": str(CR.aegis_config().tips_amount),
             "intro_context": intro_context,
         }
-        
+
+    def _build_user_prompt(
+        self,
+        topic:              Topic | None,
+        topic_id:           int,
+        reference:          str,
+        tweaks:             dict[str, Any],
+        verified_resources: str,
+        advisories:         list["AegisAlert"] | None = None,
+    ) -> str:
+        user_template = CR.aegis_config().prompts.get("userTemplate", "")
+        replacements = self._build_replacements(
+            topic              = topic,
+            topic_id           = topic_id,
+            reference          = reference,
+            tweaks             = tweaks,
+            verified_resources = verified_resources,
+            advisories         = advisories,
+        )
+
+        # Un .replace() sobre un placeholder que la plantilla no declara es un
+        # no-op silencioso: durante mucho tiempo userTemplate solo consumía 4
+        # de estas claves y el modelo nunca vio ni la empresa, ni el tono, ni
+        # las referencias cargadas de disco. El test lo impide en CI; esto lo
+        # deja visible también en producción si alguien edita la config viva.
+        unused = [key for key in replacements if "{{" + key + "}}" not in user_template]
+        if unused:
+            logger.warning(
+                "userTemplate no consume estas sustituciones (se pierden): %s",
+                ", ".join(sorted(unused)),
+            )
+
         result = user_template
         for key, value in replacements.items():
             result = result.replace("{{" + key + "}}", value)
-        
+
         return result
 
     # ── Generación ────────────────────────────────────────────────────────────
@@ -789,6 +823,7 @@ class AegisAIWriter:
         topic_note:        str,
         reference:         str,
         tweaks:            dict[str, Any],
+        advisories:        list[AegisAlert] | None = None,
     ) -> AegisContent:
         """
         Genera el contenido de la píldora delegando en el ``AIGenerator``.
@@ -796,12 +831,20 @@ class AegisAIWriter:
         El generador encapsula el tool calling, los reintentos y el circuit
         breaker; aquí solo construimos el ``AIInput`` y validamos la salida.
         Devuelve un AegisContent validado listo para persistir.
+
+        ``advisories`` son los avisos de seguridad vigentes para los productos
+        vigilados. Llegan **antes** de generar, a propósito: son el contexto
+        sobre el que se redacta la píldora, no un apéndice que se pega al
+        final del documento cuando el modelo ya ha escrito.
         """
-        # Enriquecimiento de contexto con búsqueda web
+        # Enriquecimiento de contexto con búsqueda web. Había una tercera
+        # consulta, "CVE recientes <marcas>", que se retiró: buscar CVEs a
+        # ciegas en la web es un sustituto pobre de lo que ahora llega en
+        # ``advisories`` desde el espejo local de NVD, con fecha, severidad y
+        # señal de explotación real. Una búsqueda menos por generación.
         search_queries = [
             f"{topic_title} ciberseguridad guía oficial {tweaks.get('language', 'es')}",
             f"{topic_title} mejores prácticas empresa {tweaks.get('sector', '')}",
-            f"CVE recientes {','.join(tweaks.get('associatedBrands', [])[:2])}",
         ]
         verified_resources = ""
         for query in search_queries:
@@ -811,7 +854,7 @@ class AegisAIWriter:
                 logger.warning(f"Búsqueda fallida '{query}': {exc}")
 
         prompt = self._build_user_prompt(
-            topic, resolved_topic_id, reference, tweaks, verified_resources
+            topic, resolved_topic_id, reference, tweaks, verified_resources, advisories
         )
 
         ai_input = AIInput(

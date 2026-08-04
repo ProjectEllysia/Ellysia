@@ -22,8 +22,6 @@ export const useAegisStore = defineStore('aegis', () => {
 
   /** Lista de temas disponibles */
   const topics = ref([])
-  /** Catálogo de marcas */
-  const brands = ref([])
   /** Documentos del historial del usuario */
   const documents = ref([])
   const listError = ref(null)
@@ -33,8 +31,16 @@ export const useAegisStore = defineStore('aegis', () => {
   const currentDocId = ref(null)
   /** Modo de ordenación del historial */
   const sortMode = ref('date-desc')
-  /** Marcas seleccionadas para la generación */
-  const selectedBrands = ref([])
+  /** Productos vigilados: pares { vendor, product } del índice CPE */
+  const trackedProducts = ref([])
+  /** Deducir los productos del inventario de los agentes de Hygeia */
+  const useHygeiaInventory = ref(true)
+  /** Si el usuario tiene algún agente con inventario (decide si se ofrece) */
+  const hygeiaInventoryAvailable = ref(false)
+  /** Resultados del buscador de productos */
+  const productResults = ref([])
+  /** Búsqueda de productos en curso */
+  const searchingProducts = ref(false)
   /** Generación en curso */
   const generating = ref(false)
   /** Carga de historial en curso */
@@ -89,6 +95,12 @@ export const useAegisStore = defineStore('aegis', () => {
   const creatingList = ref(false)
   /** Lanzamiento de campaña en curso */
   const launchingCampaign = ref(false)
+  /** Campaña desplegada en el modal, con sus destinatarios y notas */
+  const campaignDetail = ref(null)
+  /** Carga del detalle de campaña en curso */
+  const loadingCampaignDetail = ref(false)
+  /** Eliminación de campaña en curso */
+  const deletingCampaign = ref(false)
 
   /* ── CARGA INICIAL ── */
 
@@ -103,16 +115,41 @@ export const useAegisStore = defineStore('aegis', () => {
     } catch { /* noop */ }
   }
 
-  /** Carga el catálogo de marcas desde GET /aegis/brands. Normaliza a strings. */
-  async function loadBrands() {
+  /**
+   * Busca productos en el índice CPE del espejo local de NVD
+   * (GET /aegis/products). Sustituye al antiguo catálogo fijo de 19 marcas:
+   * la lista sale de la base de conocimiento y solo ofrece productos que de
+   * verdad tienen algún CVE registrado.
+   * @param {string} term
+   */
+  async function searchProducts(term) {
+    const query = (term || '').trim()
+    if (query.length < 2) { productResults.value = []; return }
+    searchingProducts.value = true
     try {
-      const res = await apiFetch('/aegis/brands')
-      if (res?.ok) {
-        const data = await res.json()
-        const raw = data.brands ?? data ?? []
-        brands.value = raw.map(b => (typeof b === 'string' ? b : (b.name || b.label || b.value || String(b))))
-      }
-    } catch { /* noop */ }
+      const res = await apiFetch(`/aegis/products?q=${encodeURIComponent(query)}`)
+      if (!res?.ok) { productResults.value = []; return }
+      const data = await res.json()
+      productResults.value = data.products ?? []
+    } catch { productResults.value = [] }
+    finally { searchingProducts.value = false }
+  }
+
+  /** Añade un producto a los vigilados, sin duplicar. */
+  function addTrackedProduct(entry) {
+    if (!entry?.vendor) return
+    const exists = trackedProducts.value.some(
+      p => p.vendor === entry.vendor && p.product === entry.product,
+    )
+    if (!exists) trackedProducts.value.push({ vendor: entry.vendor, product: entry.product })
+    productResults.value = []
+  }
+
+  /** Quita un producto de los vigilados. */
+  function removeTrackedProduct(entry) {
+    trackedProducts.value = trackedProducts.value.filter(
+      p => !(p.vendor === entry.vendor && p.product === entry.product),
+    )
   }
 
   /**
@@ -137,7 +174,9 @@ export const useAegisStore = defineStore('aegis', () => {
       tweaks.sector         = data.sector ?? ''
       tweaks.workModel      = data.workModel ?? ''
       tweaks.employeeCount  = data.employeeCount ?? null
-      selectedBrands.value  = [...(data.associatedBrands ?? [])]
+      trackedProducts.value = [...(data.trackedProducts ?? [])]
+      useHygeiaInventory.value = data.useHygeiaInventory ?? true
+      hygeiaInventoryAvailable.value = data.hygeiaInventoryAvailable ?? false
     } finally { loadingOrgProfile.value = false }
   }
 
@@ -159,7 +198,8 @@ export const useAegisStore = defineStore('aegis', () => {
         sector:           tweaks.sector,
         workModel:        tweaks.workModel,
         employeeCount:    tweaks.employeeCount || null,
-        associatedBrands: [...selectedBrands.value],
+        trackedProducts:  [...trackedProducts.value],
+        useHygeiaInventory: useHygeiaInventory.value,
       }
       const res = await apiFetch('/aegis/org-profile', { method: 'PUT', body: JSON.stringify(payload) })
       if (!res?.ok) {
@@ -220,7 +260,8 @@ export const useAegisStore = defineStore('aegis', () => {
         topicId: selectedTopicId.value,
         tweaks: {
           ...tweaks,
-          associatedBrands: [...selectedBrands.value],
+          trackedProducts: [...trackedProducts.value],
+          useHygeiaInventory: useHygeiaInventory.value,
           employeeCount: tweaks.employeeCount || null,
         },
       }
@@ -380,6 +421,7 @@ export const useAegisStore = defineStore('aegis', () => {
   /** Cierra el modal de campaña */
   function closeCampaignModal() {
     campaignModalOpen.value = false
+    campaignDetail.value = null
   }
 
   /** Carga las listas de distribución del usuario desde GET /aegis/lists */
@@ -405,6 +447,41 @@ export const useAegisStore = defineStore('aegis', () => {
       const data = await res.json()
       campaignsForDoc.value = (data.campaigns ?? []).filter(c => c.documentId === documentId)
     } catch { campaignsForDoc.value = [] }
+  }
+
+  /**
+   * Carga el detalle de una campaña (GET /aegis/campaigns/{id}), que incluye
+   * cada destinatario con su estado (sent/opened/completed) y su nota.
+   * Llamar con el mismo id que ya está abierto lo cierra.
+   * @param {number|string} campaignId
+   */
+  async function loadCampaignDetail(campaignId) {
+    if (campaignDetail.value?.id === campaignId) { campaignDetail.value = null; return }
+    loadingCampaignDetail.value = true
+    campaignDetail.value = null
+    try {
+      const res = await apiFetch(`/aegis/campaigns/${campaignId}`)
+      if (!res?.ok) { toast.show('No se pudo cargar el detalle de la campaña.', 'error'); return }
+      campaignDetail.value = await res.json()
+    } finally { loadingCampaignDetail.value = false }
+  }
+
+  /**
+   * Elimina una campaña (DELETE /aegis/campaigns/{id}) y su tracking —
+   * invalida cualquier enlace de quiz que ya se hubiera enviado. Devuelve
+   * true si se eliminó.
+   * @param {number|string} campaignId
+   */
+  async function deleteCampaign(campaignId) {
+    deletingCampaign.value = true
+    try {
+      const res = await apiFetch(`/aegis/campaigns/${campaignId}`, { method: 'DELETE' })
+      if (!res?.ok) { toast.show('No se pudo eliminar la campaña.', 'error'); return false }
+      if (campaignDetail.value?.id === campaignId) campaignDetail.value = null
+      campaignsForDoc.value = campaignsForDoc.value.filter(c => c.id !== campaignId)
+      toast.show('Campaña eliminada.', 'success')
+      return true
+    } finally { deletingCampaign.value = false }
   }
 
   /**
@@ -476,13 +553,16 @@ export const useAegisStore = defineStore('aegis', () => {
     docCache.clear()
 
     topics.value = []
-    brands.value = []
     documents.value = []
     listError.value = null
     selectedTopicId.value = null
     currentDocId.value = null
     sortMode.value = 'date-desc'
-    selectedBrands.value = []
+    trackedProducts.value = []
+    useHygeiaInventory.value = true
+    hygeiaInventoryAvailable.value = false
+    productResults.value = []
+    searchingProducts.value = false
     generating.value = false
     loading.value = false
     editing.value = false
@@ -503,19 +583,25 @@ export const useAegisStore = defineStore('aegis', () => {
     campaignsForDoc.value = []
     creatingList.value = false
     launchingCampaign.value = false
+    campaignDetail.value = null
+    loadingCampaignDetail.value = false
+    deletingCampaign.value = false
   }
 
   return {
-    topics, brands, documents, listError, selectedTopicId, currentDocId, sortMode, selectedBrands,
+    topics, documents, listError, selectedTopicId, currentDocId, sortMode,
+    trackedProducts, useHygeiaInventory, hygeiaInventoryAvailable,
+    productResults, searchingProducts,
     generating, loading, editing, saving, tweaks, viewerDoc,
     loadingOrgProfile, savingOrgProfile, orgProfileConfigured,
-    loadTopics, loadBrands, loadOrgProfile, saveOrgProfile, loadHistory, sortedDocuments, generate,
+    searchProducts, addTrackedProduct, removeTrackedProduct,
+    loadTopics, loadOrgProfile, saveOrgProfile, loadHistory, sortedDocuments, generate,
     loadDocument, closeViewer, deleteDocument, downloadExport, previewMarkdown,
     startEdit, cancelEdit, savePill,
     campaignModalOpen, distributionLists, loadingLists, campaignsForDoc,
-    creatingList, launchingCampaign,
+    creatingList, launchingCampaign, campaignDetail, loadingCampaignDetail, deletingCampaign,
     openCampaignModal, closeCampaignModal, loadDistributionLists,
-    createDistributionListWithRecipients, launchNewCampaign,
+    createDistributionListWithRecipients, launchNewCampaign, loadCampaignDetail, deleteCampaign,
     $reset,
   }
 })

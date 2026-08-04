@@ -43,7 +43,7 @@ from .schemas import (
     GenerateResponseSchema,
     DeleteDocumentResponseSchema,
     DocumentListResponseSchema,
-    BrandsCatalogResponseSchema,
+    ProductSearchQuerySchema,
     ExportFormatsResponseSchema,
     ExportResultResponseSchema,
     DistributionListCreateSchema,
@@ -321,16 +321,17 @@ def aegis_get_topics():
     return topics
 
 
-@aegis_blp.get("/brands")
-@aegis_blp.response(200, BrandsCatalogResponseSchema, description="Catalog of brands")
+@aegis_blp.get("/products")
+@aegis_blp.arguments(ProductSearchQuerySchema, location="query")
+@aegis_blp.response(200, description="Products matching the search term")
 @aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @limiter.limit("120 per hour; 600 per day")
 @require_oauth_token
 @handle_exceptions(default_exception=DocumentError, logger=logger)
-def aegis_get_brands():
-    """Catalogo de marcas disponibles para filtrado de alertas"""
-    brands = CR.aegis_config().brands
-    return {"count": len(brands), "brands": brands}
+def aegis_search_products(args):
+    """Buscar productos vigilables en el índice CPE del espejo local de NVD"""
+    products = AegisOrgProfileManager.search_products(args["q"], limit=args["limit"])
+    return {"count": len(products), "products": products}
 
 
 # ============================================================================

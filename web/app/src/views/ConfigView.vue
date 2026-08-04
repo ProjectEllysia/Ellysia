@@ -179,9 +179,6 @@
               <textarea v-model="store.configFlat['features.aegis.prompts.system']" rows="10" class="txta"></textarea>
               <h3 class="subsection-title">Plantilla de usuario</h3>
               <textarea v-model="store.configFlat['features.aegis.prompts.userTemplate']" rows="8" class="txta"></textarea>
-              <h3 class="subsection-title">Marcas monitoreadas</h3>
-              <p class="field-hint">Array JSON. Cada entrada requiere <code>label</code>, <code>circl_vendor</code>, <code>circl_product</code> y <code>aliases</code>.</p>
-              <textarea v-model="brandsText" rows="10" class="txta mono" @blur="syncBrands"></textarea>
             </div>
           </section>
 
@@ -196,7 +193,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
 import { useConfigStore } from '@/stores/configStore'
@@ -250,9 +247,9 @@ onMounted(() => {
 })
 onUnmounted(() => { if (observer) observer.disconnect() })
 
-const brandsText = ref('')
-watch(() => store.configFlat['features.aegis.brands'], (val) => { brandsText.value = JSON.stringify(val ?? [], null, 2) }, { immediate: true })
-function syncBrands() { try { const p = JSON.parse(brandsText.value); if (Array.isArray(p)) store.configFlat['features.aegis.brands'] = p } catch {} }
+// El catálogo fijo de marcas se retiró: los productos vigilados se eligen por
+// usuario contra el índice CPE del espejo local de NVD (GET /aegis/products),
+// no desde la configuración global.
 function handleSave() { store.saveConfig() }
 </script>
 

@@ -93,7 +93,17 @@ class AegisOrgProfile(Base):
         sector: Industry sector (free text).
         work_model: Work model ('' | 'remoto' | 'híbrido' | 'presencial').
         employee_count: Approximate headcount.
-        associated_brands: JSONB list of brand names the org tracks by default.
+        tracked_products: JSONB list of ``{"vendor": ..., "product": ...}`` CPE
+            coordinates whose advisories should feed this org's pills. Replaces
+            the old ``associated_brands`` list of free-text labels, which could
+            only be matched against a hardcoded 19-entry catalogue in
+            SecOpsConfig.json; these come from the local NVD mirror, so any
+            product NVD knows about can be tracked.
+        use_hygeia_inventory: Whether to derive the tracked products from the
+            software inventory the user's Hygeia agents report, instead of the
+            manual ``tracked_products`` list. Defaults to True so that
+            registering a first agent starts paying off without extra setup;
+            the UI only surfaces the control once such an agent exists.
         created_at: Creation timestamp.
     """
 
@@ -110,7 +120,8 @@ class AegisOrgProfile(Base):
     sector            = Column(String(128), nullable=True)
     work_model        = Column(String(16),  nullable=True)
     employee_count    = Column(Integer,     nullable=True)
-    associated_brands = Column(JSONB,       nullable=True)
+    tracked_products  = Column(JSONB,       nullable=True)
+    use_hygeia_inventory = Column(Boolean,  nullable=False, default=True, server_default="true")
     created_at        = Column(DateTime,    nullable=False, default=utcnow_naive)
 
     user = relationship("User")
@@ -134,7 +145,8 @@ class AegisOrgProfile(Base):
             "sector":           self.sector or "",
             "workModel":        self.work_model or "",
             "employeeCount":    self.employee_count,
-            "associatedBrands": self.associated_brands or [],
+            "trackedProducts":  self.tracked_products or [],
+            "useHygeiaInventory": bool(self.use_hygeia_inventory),
         }
 
     def __repr__(self) -> str:

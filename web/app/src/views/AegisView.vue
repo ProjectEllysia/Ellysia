@@ -96,7 +96,7 @@ const { collapsed: rightCollapsed, toggle: toggleRight } = usePanelCollapse('aeg
 const leftWidth = computed(() => (leftCollapsed.value ? '48px' : '400px'))
 const rightWidth = computed(() => (rightCollapsed.value ? '48px' : '320px'))
 
-onMounted(async () => { await Promise.all([store.loadTopics(), store.loadBrands()]); await store.loadHistory() })
+onMounted(async () => { await store.loadTopics(); await store.loadHistory() })
 </script>
 
 <style scoped>

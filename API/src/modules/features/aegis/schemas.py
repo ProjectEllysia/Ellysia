@@ -1,6 +1,17 @@
 from marshmallow import Schema, ValidationError, fields, validate, validates_schema
 
 
+class TrackedProductSchema(Schema):
+    """Coordenadas CPE de un producto vigilado.
+
+    Salen del espejo local de NVD (``GET /aegis/products``), no de una lista
+    fija: son el ``vendor``/``product`` de un CPE tal cual los indexa la base
+    de conocimiento de Themis.
+    """
+    vendor  = fields.String(required=True, validate=validate.Length(min=1, max=128))
+    product = fields.String(required=True, validate=validate.Length(min=1, max=128))
+
+
 class AegisTweaksSchema(Schema):
     """
     Parámetros opcionales que ajustan la generación de una píldora.
@@ -14,7 +25,10 @@ class AegisTweaksSchema(Schema):
         load_default="mixed",
         validate=validate.OneOf(["technical", "mixed", "non-technical"]),
     )
-    associatedBrands  = fields.List(fields.String(), load_default=list)
+    trackedProducts   = fields.List(fields.Nested(TrackedProductSchema), load_default=list)
+    # Si va a true (por defecto), los productos se deducen del inventario de
+    # los agentes de Hygeia y ``trackedProducts`` queda como alternativa.
+    useHygeiaInventory = fields.Boolean(load_default=True)
     mentionContact    = fields.String(load_default="", validate=validate.Length(max=128))
     language          = fields.String(load_default="es", validate=validate.Length(max=8))
     tone              = fields.String(load_default="profesional", validate=validate.Length(max=64))
@@ -54,7 +68,19 @@ class AegisOrgProfileSchema(Schema):
         load_default="", validate=validate.OneOf(["", "remoto", "híbrido", "presencial"]),
     )
     employeeCount     = fields.Integer(load_default=None, allow_none=True, validate=validate.Range(min=1))
-    associatedBrands  = fields.List(fields.String(), load_default=list)
+    trackedProducts   = fields.List(fields.Nested(TrackedProductSchema), load_default=list)
+    useHygeiaInventory = fields.Boolean(load_default=True)
+    # Solo de salida: no es un campo del perfil sino del entorno (si el usuario
+    # tiene algún agente de Hygeia que haya reportado inventario). El frontend
+    # lo usa para decidir si pinta el interruptor de arriba. Sin ``dump_only``
+    # el mismo esquema, que también valida el PUT, lo descartaría al serializar.
+    hygeiaInventoryAvailable = fields.Boolean(dump_only=True)
+
+
+class ProductSearchQuerySchema(Schema):
+    """Búsqueda en el índice CPE que alimenta el selector de productos."""
+    q     = fields.String(required=True, validate=validate.Length(min=2, max=64))
+    limit = fields.Integer(load_default=20, validate=validate.Range(min=1, max=50))
 
 
 class AegisGenerateRequestSchema(Schema):
@@ -137,21 +163,16 @@ class DocumentListResponseSchema(Schema):
     documents = fields.List(fields.Dict())
 
 
-class BrandsResponseSchema(Schema):
-    count = fields.Integer()
-    brands = fields.List(fields.Dict())
+class ProductItemSchema(Schema):
+    """Un producto del índice CPE, tal como lo devuelve GET /aegis/products."""
+    vendor      = fields.String()
+    product     = fields.String()
+    displayName = fields.String()
 
 
-class BrandItemSchema(Schema):
-    label = fields.String()
-    circl_vendor = fields.String()
-    circl_product = fields.String()
-    aliases = fields.List(fields.String())
-
-
-class BrandsCatalogResponseSchema(Schema):
-    count = fields.Integer()
-    brands = fields.List(fields.Nested(BrandItemSchema))
+class ProductSearchResponseSchema(Schema):
+    count    = fields.Integer()
+    products = fields.List(fields.Nested(ProductItemSchema))
 
 
 class FormatItemSchema(Schema):
