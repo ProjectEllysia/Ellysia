@@ -1042,10 +1042,10 @@ class CampaignManager(TaskTrackingMixin):
             ] if doc else []
 
             sent_count = 0
-            cancelled = False
+            was_cancelled = False
             for i, recipient in enumerate(recipients):
                 if job.cancelled():
-                    cancelled = True
+                    was_cancelled = True
                     break
 
                 # /quiz, no /aegis/quiz: la página del quiz vive en el SPA y
@@ -1085,7 +1085,7 @@ class CampaignManager(TaskTrackingMixin):
 
                 job.progress(int(100 * (i + 1) / total))
 
-            if not cancelled:
+            if not was_cancelled:
                 # No mentir sobre el resultado: si ningún envío tuvo éxito la
                 # campaña no se "envió". Solo se marca 'sent' cuando al menos un
                 # destinatario recibió el correo.
@@ -1095,7 +1095,7 @@ class CampaignManager(TaskTrackingMixin):
 
             logger.info(
                 f"Campaña {campaign_id} procesada: {sent_count}/{total} enviados"
-                f"{' (cancelada)' if cancelled else ''}"
+                f"{' (cancelada)' if was_cancelled else ''}"
             )
 
     # =========================================================================

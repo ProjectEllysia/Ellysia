@@ -384,8 +384,8 @@ class ScanManager(TaskTrackingMixin, ABC):
                 )
                 return False
 
-            cancelled = self._tq.cancel(sq_task.id)
-            if not cancelled:
+            was_cancelled = self._tq.cancel(sq_task.id)
+            if not was_cancelled:
                 logger.warning(f"No se pudo cancelar la tarea del escaneo {scan_id}")
                 return False
 
@@ -394,11 +394,11 @@ class ScanManager(TaskTrackingMixin, ABC):
                 # la ventana entre la señal cooperativa y esta escritura, no lo
                 # sobrescribimos a CANCELLED — evita mostrar resultados reales
                 # como si el escaneo se hubiera cancelado.
-                written = ScanRepository(uow).update_status_if(
+                was_written = ScanRepository(uow).update_status_if(
                     scan_id, {ScanStatus.PENDING, ScanStatus.RUNNING}, ScanStatus.CANCELLED
                 )
 
-            if not written:
+            if not was_written:
                 logger.warning(
                     f"Escaneo {scan_id} ya no estaba pending/running al cancelar "
                     "(probablemente terminó justo antes)"
@@ -493,13 +493,13 @@ class ScanManager(TaskTrackingMixin, ABC):
                     return
 
             task.scan()
-            success = task.wait(
+            did_succeed = task.wait(
                 timeout=task.timeout + self._scan_timeout_margin,
                 cancel_check=cancel_check,
             )
 
             no_results = task.results is None
-            if not success or no_results:
+            if not did_succeed or no_results:
                 if task.status == TaskStatus.CANCELLED:
                     logger.info(f"Escaneo {scan_id} cancelado por el usuario")
                     thread_manager.update_scan_status(scan_id, ScanStatus.CANCELLED)
@@ -521,11 +521,11 @@ class ScanManager(TaskTrackingMixin, ABC):
                 # que este worker terminó de escanear y esta transacción, no lo
                 # sobrescribimos a FINISHED — los resultados quedan igual
                 # persistidos, pero el estado respeta la cancelación pedida.
-                finished = scan_repo.update_status_if(
+                is_finished = scan_repo.update_status_if(
                     scan_id, {ScanStatus.PENDING, ScanStatus.RUNNING}, ScanStatus.FINISHED
                 )
 
-            if finished:
+            if is_finished:
                 logger.info(f"Escaneo {scan_id} completado exitosamente")
             else:
                 logger.info(

@@ -237,8 +237,8 @@ def taskqueue_task_detail(task_id):
 def taskqueue_cancel_task(task_id):
     """Cancela una tarea, estando en espera o en ejecucion."""
     tq = TaskQueue.get_instance()
-    cancelled = tq.cancel(task_id)
-    if not cancelled:
+    was_cancelled = tq.cancel(task_id)
+    if not was_cancelled:
         return {"error": "not_found", "error_description": "Task not found or already finished"}, 404
     task = tq.get_task(task_id)
     return (task or Task(id=task_id)).to_dict()

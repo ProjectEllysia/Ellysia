@@ -197,14 +197,14 @@ class HistoryStatsService:
     @staticmethod
     def _compute_diff(scans: List[Scan], extractor: MetricExtractor) -> dict:
         """Diff the most recent scan against the immediately previous one."""
-        empty = {
+        empty_payload = {
             "new": 0, "unchanged": 0, "disappeared": 0,
             "currentScanId": None, "previousScanId": None,
         }
         if len(scans) < 2:
             if scans:
-                empty["currentScanId"] = scans[-1].id
-            return empty
+                empty_payload["currentScanId"] = scans[-1].id
+            return empty_payload
 
         previous, current = scans[-2], scans[-1]
         prev_ids = extractor.identities(previous)

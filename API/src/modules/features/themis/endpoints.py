@@ -697,12 +697,12 @@ def is_scan_finished(args):
     scan_id = args["id"]
     manager, scan = ScanManager.resolve_owned_scan(scan_id, user.id)
 
-    finished = manager.is_scan_finished(scan.id)
+    is_finished = manager.is_scan_finished(scan.id)
 
     return {
-        "message": f"El escaneo {scan_id} {'esta' if finished else 'no esta'} terminado",
+        "message": f"El escaneo {scan_id} {'esta' if is_finished else 'no esta'} terminado",
         "scanId": scan_id,
-        "isFinished": finished,
+        "isFinished": is_finished,
         "scanType": scan.scan_type,
     }
 

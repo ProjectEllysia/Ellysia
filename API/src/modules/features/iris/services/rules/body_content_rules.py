@@ -194,10 +194,10 @@ def check_body_content(context) -> RuleResult:
     if not text_lower.strip():
         return RuleResult(score=0, verdict="neutral", details={"reason": "empty body"})
 
-    found = phrase_matches("credential_phrases", text_lower)
+    matched_phrases = phrase_matches("credential_phrases", text_lower)
     hidden = _has_evasive_hidden_text(_strip_style_blocks(body_html))
 
-    if not found and not hidden:
+    if not matched_phrases and not hidden:
         return RuleResult(score=0, verdict="pass", details={})
 
     # Recalibración de pesos: "verifique su cuenta" es lenguaje de banca
@@ -206,24 +206,24 @@ def check_body_content(context) -> RuleResult:
     # y se mantiene en -10; el gate body_content_fail también distingue los
     # dos casos (ver managers._extract_verdict_signals).
     score = 0
-    if found:
-        score += CR.get_iris_scoring_weight("body_content.phrase_match", -3) * min(len(found), 2)
+    if matched_phrases:
+        score += CR.get_iris_scoring_weight("body_content.phrase_match", -3) * min(len(matched_phrases), 2)
     if hidden:
         score += CR.get_iris_scoring_weight("body_content.hidden_text", -10)
 
     # El mensaje describe solo lo que de verdad disparó -- antes afirmaba
     # "frases típicas de phishing" incluso en la rama donde solo se detectó
-    # texto oculto (found == [], hidden == True), contradiciendo el propio
-    # `phrases_found` vacío que se muestra en el mismo resultado.
+    # texto oculto (matched_phrases == [], hidden == True), contradiciendo el
+    # propio `phrases_found` vacío que se muestra en el mismo resultado.
     clauses = []
-    if found:
+    if matched_phrases:
         clauses.append("frases típicas de phishing")
     if hidden:
         clauses.append("texto oculto")
 
     return RuleResult(
         score=score, verdict="fail",
-        details={"phrases_found": found, "hidden_text": hidden},
+        details={"phrases_found": matched_phrases, "hidden_text": hidden},
         recommendation=f"El cuerpo del correo contiene {' y '.join(clauses)}.",
     )
 

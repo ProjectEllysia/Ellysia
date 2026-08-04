@@ -479,11 +479,11 @@ class IrisManager(TaskTrackingMixin):
             logger.warning(f"No active task found for analysis {analysis_id}")
             return False
 
-        cancelled = self._tq.cancel(sq_task.id)
-        if cancelled:
+        was_cancelled = self._tq.cancel(sq_task.id)
+        if was_cancelled:
             self._update_analysis(analysis_id, status="cancelled", finished_at=utcnow_naive())
             logger.info(f"Analysis {analysis_id} cancelled by user {user_id}")
-        return cancelled
+        return was_cancelled
 
     def delete_analysis(self, analysis_id: int) -> bool:
         """Permanently delete an analysis and its rule results.

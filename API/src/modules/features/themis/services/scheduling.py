@@ -158,8 +158,8 @@ class ThemisScheduler:
             return
         with UnitOfWork() as uow:
             repo = ProgramedScanRepository(uow)
-            active = repo.get_all_active()
-            for ps in active:
+            active_scans = repo.get_all_active()
+            for ps in active_scans:
                 cls.schedule(
                     ps_id=ps.id,
                     scan_type=ps.scan_type,
@@ -176,7 +176,7 @@ class ThemisScheduler:
                 next_run = cls._job_next_run(ps.id)
                 if next_run is not None:
                     ps.next_run_at = next_run
-            logger.info("Synced %d active scans from database", len(active))
+            logger.info("Synced %d active scans from database", len(active_scans))
 
     # =========================================================================
     # EXECUTION

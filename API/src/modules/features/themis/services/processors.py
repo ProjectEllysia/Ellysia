@@ -155,11 +155,11 @@ class NmapResultProcessor(ScanResultProcessor):
         stats = {}
         runstats = root.find("runstats")
         if runstats is not None:
-            finished = runstats.find("finished")
+            finished_node = runstats.find("finished")
             hosts_el = runstats.find("hosts")
             stats = {
-                "timestr": finished.get("timestr", "") if finished is not None else "",
-                "elapsed": finished.get("elapsed", "") if finished is not None else "",
+                "timestr": finished_node.get("timestr", "") if finished_node is not None else "",
+                "elapsed": finished_node.get("elapsed", "") if finished_node is not None else "",
                 "uphosts": hosts_el.get("up", "0") if hosts_el is not None else "0",
                 "downhosts": hosts_el.get("down", "0") if hosts_el is not None else "0",
                 "totalhosts": hosts_el.get("total", "0") if hosts_el is not None else "0",

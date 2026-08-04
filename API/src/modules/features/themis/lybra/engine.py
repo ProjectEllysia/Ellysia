@@ -193,7 +193,7 @@ class LybraEngine:
         straight from the package manager.
         """
         cve_id = cve.cve_id
-        verified = service.origin == "inventory"
+        is_verified = service.origin == "inventory"
         return {
             "title":        f"{service.label} — {cve_id}",
             "category":     "outdated_software",
@@ -209,8 +209,8 @@ class LybraEngine:
             "source":       "lybra",
             "check_id":     "lybra:version-match@1",
             "feed_version": self.FEED_VERSION,
-            "qod":          QOD_INVENTORY_MATCH if verified else QOD_VERSION_MATCH,
-            "confirmed":    verified,   # a network-inferred match stays a hypothesis; Fase R confirms it actively
+            "qod":          QOD_INVENTORY_MATCH if is_verified else QOD_VERSION_MATCH,
+            "confirmed":    is_verified,   # a network-inferred match stays a hypothesis; Fase R confirms it actively
             "cpe_resolved": True,   # this finding only exists because resolution succeeded
             "state":        "open",
         }

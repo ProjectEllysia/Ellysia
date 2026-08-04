@@ -485,18 +485,18 @@ def check_misspelled_brands(headers: dict) -> RuleResult:
             recommendation=None,
         )
 
-    found = _find_typosquats(combined)
+    typosquat_matches = _find_typosquats(combined)
 
-    if not found:
+    if not typosquat_matches:
         return RuleResult(
             score=0, verdict="pass",
             details={"subject": subject, "display_name": display_name},
             recommendation=None,
         )
 
-    count = len(found)
-    types = set(f["type"] for f in found)
-    names = ", ".join(f["found"] for f in found)
+    count = len(typosquat_matches)
+    types = set(f["type"] for f in typosquat_matches)
+    names = ", ".join(f["found"] for f in typosquat_matches)
 
     return RuleResult(
         score=CR.get_iris_scoring_weight("misspelled_brands.per_match", -4) * min(count, 2),
@@ -504,7 +504,7 @@ def check_misspelled_brands(headers: dict) -> RuleResult:
         details={
             "subject": subject,
             "display_name": display_name,
-            "suspicious_words": found,
+            "suspicious_words": typosquat_matches,
             "count": count,
         },
         recommendation=(

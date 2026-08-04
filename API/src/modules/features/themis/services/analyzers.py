@@ -507,9 +507,9 @@ class NiktoAIWriter:
 
         try:
             result = json.loads(raw)
-            valid = ["CRÍTICO", "ALTO", "MEDIO", "BAJO", "INFORMATIVO"]
+            valid_severities = ["CRÍTICO", "ALTO", "MEDIO", "BAJO", "INFORMATIVO"]
             risk_level = result.get("risk_level")
-            if risk_level is None or not isinstance(risk_level, str) or risk_level.upper() not in valid:
+            if risk_level is None or not isinstance(risk_level, str) or risk_level.upper() not in valid_severities:
                 result["risk_level"] = "BAJO"
 
             result.setdefault("executive_summary", "Análisis completado.")
@@ -666,9 +666,9 @@ class LybraAIWriter:
 
         try:
             result = json.loads(raw)
-            valid = ["CRÍTICO", "ALTO", "MEDIO", "BAJO", "INFORMATIVO"]
+            valid_severities = ["CRÍTICO", "ALTO", "MEDIO", "BAJO", "INFORMATIVO"]
             risk_level = result.get("risk_level")
-            if risk_level is None or not isinstance(risk_level, str) or risk_level.upper() not in valid:
+            if risk_level is None or not isinstance(risk_level, str) or risk_level.upper() not in valid_severities:
                 result["risk_level"] = "BAJO"
 
             result.setdefault("executive_summary", "Análisis completado.")
