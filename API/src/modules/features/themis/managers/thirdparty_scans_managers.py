@@ -21,10 +21,10 @@ from ..lybra import (
     compute_dedup_key,
     nikto_incident_to_finding,
     nuclei_result_to_finding,
+    finding_to_json,
     merge_findings,
     apply_lifecycle,
     classify_exposure,
-    score_finding,
 )
 from ..services import (
     NmapResultProcessor,
@@ -123,14 +123,14 @@ class NmapScanManager(ScanManager):
             )
             NmapScanManager()._execute_scan(scan_id, task, cancel_check=job.cancelled)
 
-    def _create_scan_record(self, target: str, user_id: int, programed_scan_id: Optional[int] = None) -> NmapScan: # pylint: disable=arguments-differ
-        """Create and persist an NmapScan row."""
-        scan = NmapScan(target=target, user_id=user_id, started_at=utcnow_naive(), programed_scan_id=programed_scan_id)
-        with UnitOfWork() as uow:
-            ScanRepository(uow).save(scan)
-            # Durable antes de encolar: el worker corre en otro proceso.
-            uow.commit_for_handoff()
-        return scan
+    # _create_scan_record: NmapScan no necesita columnas extra — usa el
+    # default de ScanManager (A4).
+
+    def _process_results(self, processor, results, target: str):
+        """Nmap's processor also needs ``target`` to resolve the scanned host
+        (B2) — every other scan type's processor only needs ``results``,
+        which is what ``ScanManager._process_results`` gives it."""
+        return processor.process(results, target)
 
     def _persist_scan_results(self, uow, scan, domain_data) -> None:
         """Persist Nmap host and port data into the database."""
@@ -251,14 +251,8 @@ class NiktoScanManager(ScanManager):
             )
             NiktoScanManager()._execute_scan(scan_id, task, cancel_check=job.cancelled)
 
-    def _create_scan_record(self, target: str, user_id: int, programed_scan_id: Optional[int] = None) -> NiktoScan: # pylint: disable=arguments-differ
-        """Create and persist a NiktoScan row."""
-        scan = NiktoScan(target=target, user_id=user_id, started_at=utcnow_naive(), programed_scan_id=programed_scan_id)
-        with UnitOfWork() as uow:
-            ScanRepository(uow).save(scan)
-            # Durable antes de encolar: el worker corre en otro proceso.
-            uow.commit_for_handoff()
-        return scan
+    # _create_scan_record: NiktoScan no necesita columnas extra — usa el
+    # default de ScanManager (A4).
 
     def _persist_scan_results(self, uow, scan, domain_data) -> None:
         """Persist Nikto incidents and associate a host."""
@@ -436,14 +430,8 @@ class NucleiScanManager(ScanManager):
             )
             NucleiScanManager()._execute_scan(scan_id, task, cancel_check=job.cancelled)
 
-    def _create_scan_record(self, target: str, user_id: int, programed_scan_id: Optional[int] = None) -> NucleiScan:  # pylint: disable=arguments-differ
-        """Create and persist a NucleiScan row."""
-        scan = NucleiScan(target=target, user_id=user_id, started_at=utcnow_naive(), programed_scan_id=programed_scan_id)
-        with UnitOfWork() as uow:
-            ScanRepository(uow).save(scan)
-            # Durable antes de encolar: el worker corre en otro proceso.
-            uow.commit_for_handoff()
-        return scan
+    # _create_scan_record: NucleiScan no necesita columnas extra — usa el
+    # default de ScanManager (A4).
 
     def _execute_scan(
         self,
@@ -520,21 +508,7 @@ class NucleiScanManager(ScanManager):
 
         scan_repo.persist_findings(scan, findings)
 
-    @staticmethod
-    def _previous_findings_map(scan_repo: ScanRepository, user_id: int, target: str, exclude_scan_id: int) -> dict:
-        """Build ``dedup_key -> {state, snapshot}`` from the previous Nuclei
-        scan of this target, for lifecycle comparison. Mirrors
-        ``LybraEngineManager._previous_findings_map`` — same shape, own scan
-        type."""
-        if not user_id or not target:
-            return {}
-        result: dict = {}
-        for pf in scan_repo.get_previous_findings(user_id, target, ScanType.NUCLEI.value, exclude_scan_id):
-            snapshot = pf.snapshot
-            key = pf.dedup_key or compute_dedup_key(snapshot)
-            snapshot["dedup_key"] = key
-            result[key] = {"state": pf.state or "open", "snapshot": snapshot}
-        return result
+    # _previous_findings_map: usa el default de ScanManager (A6).
 
     def format_scan(self, scan_id: int, _scan=None) -> dict:
         scan = _scan or self.get_scan_by_id(scan_id)
@@ -544,20 +518,14 @@ class NucleiScanManager(ScanManager):
         repo = build_repository(ScanRepository)
         exposure = classify_exposure(scan.target)
 
-        def _priority(f: dict) -> str:
-            return score_finding(
-                {"cvss_score": f.get("cvss_score"), "in_kev": f.get("in_kev"),
-                 "epss_score": f.get("epss_score"), "confirmed": f.get("confirmed")},
-                exposure,
-            )
-
         findings = []
         for f in repo.get_findings_by_scan(scan_id):
             d = f.snapshot
             d["id"] = f.id
             d["state"] = f.state
-            d["priority"] = _priority(d)
             findings.append(d)
+
+        json_findings = [finding_to_json(f, exposure) for f in findings]
 
         result = {
             "id": scan.id,
@@ -567,31 +535,11 @@ class NucleiScanManager(ScanManager):
             "status": getattr(scan, "status", "unknown"),
             "startedAt": isoformat_utc(scan.started_at),
             "finishedAt": isoformat_utc(scan.finished_at),  # type: ignore
-            "findings": [
-                {
-                    "id": f.get("id"),
-                    "title": f.get("title"),
-                    "category": f.get("category"),
-                    "port": f.get("port"),
-                    "service": f.get("service"),
-                    "cpe": f.get("cpe"),
-                    "cveIds": f.get("cve_ids"),
-                    "cvssScore": f.get("cvss_score"),
-                    "epssScore": f.get("epss_score"),
-                    "inKev": f.get("in_kev"),
-                    "qod": f.get("qod"),
-                    "confirmed": f.get("confirmed"),
-                    "source": f.get("source"),
-                    "state": f.get("state"),
-                    "dedupKey": f.get("dedup_key"),
-                    "priority": f.get("priority"),
-                }
-                for f in findings
-            ],
-            "totalFindings": len(findings),
-            "criticalCount": sum(1 for f in findings if f.get("priority") == "CRITICAL"),
-            "highCount": sum(1 for f in findings if f.get("priority") == "HIGH"),
-            "confirmedFindings": sum(1 for f in findings if f.get("confirmed")),
+            "findings": json_findings,
+            "totalFindings": len(json_findings),
+            "criticalCount": sum(1 for f in json_findings if f.get("priority") == "CRITICAL"),
+            "highCount": sum(1 for f in json_findings if f.get("priority") == "HIGH"),
+            "confirmedFindings": sum(1 for f in json_findings if f.get("confirmed")),
         }
         self._append_document_info(scan, result)
         return result

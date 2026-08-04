@@ -13,9 +13,8 @@ from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import update
-from sqlalchemy.orm import Session
 
-from src.modules.infrastructure import BaseRepository, UnitOfWork
+from src.modules.infrastructure import BaseRepository
 
 from .model import Anomaly, AssetSnapshot, MonitoredAsset
 
@@ -23,8 +22,7 @@ from .model import Anomaly, AssetSnapshot, MonitoredAsset
 class MonitoredAssetRepository(BaseRepository[MonitoredAsset]):
     """Acceso a datos de MonitoredAsset."""
 
-    def __init__(self, uow: Optional[UnitOfWork] = None, session: Optional[Session] = None) -> None:
-        super().__init__(MonitoredAsset, uow=uow, session=session)
+    _MODEL = MonitoredAsset
 
     def get_by_user(self, user_id: int) -> List[MonitoredAsset]:
         """Devuelve todos los activos monitorizados de un usuario, más recientes primero."""
@@ -106,8 +104,7 @@ class MonitoredAssetRepository(BaseRepository[MonitoredAsset]):
 class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
     """Acceso a datos de AssetSnapshot (heartbeats)."""
 
-    def __init__(self, uow: Optional[UnitOfWork] = None, session: Optional[Session] = None) -> None:
-        super().__init__(AssetSnapshot, uow=uow, session=session)
+    _MODEL = AssetSnapshot
 
     def get_series(
         self, asset_id: int, since: Optional[datetime] = None,
@@ -179,8 +176,7 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
 class AnomalyRepository(BaseRepository[Anomaly]):
     """Acceso a datos de Anomaly."""
 
-    def __init__(self, uow: Optional[UnitOfWork] = None, session: Optional[Session] = None) -> None:
-        super().__init__(Anomaly, uow=uow, session=session)
+    _MODEL = Anomaly
 
     #: Estados que cuentan como "todavía activa" a efectos de detección:
     #: reconocer una anomalía (``acknowledged``) no la da por resuelta, así

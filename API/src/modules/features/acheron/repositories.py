@@ -22,10 +22,8 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from sqlalchemy.orm import Session
-
 from src.modules.features.acheron.model import Storable, Vault
-from src.modules.infrastructure import BaseRepository, UnitOfWork
+from src.modules.infrastructure import BaseRepository
 
 
 class VaultRepository(BaseRepository[Vault]):
@@ -42,8 +40,7 @@ class VaultRepository(BaseRepository[Vault]):
     ...     vault = repo.get_by_user(user_id=1)
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(Vault, uow=uow, session=session)
+    _MODEL = Vault
 
     # =========================================================================
     # DOMAIN QUERIES
@@ -108,8 +105,7 @@ class StorableRepository(BaseRepository[Storable]):
     ...     storables = repo.get_by_vault(vault_id=1)
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(Storable, uow=uow, session=session)
+    _MODEL = Storable
 
     # =========================================================================
     # DOMAIN QUERIES

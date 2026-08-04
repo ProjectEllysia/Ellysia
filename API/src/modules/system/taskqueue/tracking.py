@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .queue import ITaskQueue
+from .queue import ITaskQueue, TaskQueue
 from .task import Task
 
 
@@ -61,6 +61,17 @@ class TaskTrackingMixin:
     TASK_CATEGORY: Optional[str] = None
 
     _tq: ITaskQueue
+
+    def __init__(self, task_queue: Optional[ITaskQueue] = None, *args, **kwargs) -> None:
+        """Centraliza ``self._tq = task_queue or TaskQueue.get_instance()``,
+        repetido antes en cada manager que hereda de este mixin (A10).
+
+        ``*args``/``**kwargs`` se reenvían a ``super().__init__`` para no
+        romper cooperación con otras clases base en el MRO (p. ej.
+        ``ScanManager(TaskTrackingMixin, ABC)``).
+        """
+        self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
+        super().__init__(*args, **kwargs)
 
     def external_id_for(self, entity_id) -> str:
         """Construye el external_id canónico para una entidad.

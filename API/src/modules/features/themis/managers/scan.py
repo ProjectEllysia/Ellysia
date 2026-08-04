@@ -8,10 +8,10 @@ from urllib.parse import urlparse
 import src.modules.system.config_reading as CR
 
 from src.modules.shared._exceptions import EllysiaException, ValidationError
-from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin
+from src.modules.system.taskqueue import TaskQueue, TaskTrackingMixin
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
-from src.modules.shared import assert_owned
+from src.modules.shared import assert_owned, utcnow_naive
 from ..services.csv_logger import ScanLoggerFactory
 from ..repositories import (
     ScanRepository,
@@ -28,6 +28,7 @@ from ..services import (
 )
 from ..services import parsing, reachability
 from ..exceptions import IPValidationError, MaxHostsExceededError, PrivateIPRequested, ScanError, ScanNotFoundError
+from ..lybra import compute_dedup_key
 
 
 logger = logging.getLogger(__name__)
@@ -72,15 +73,7 @@ class ScanManager(TaskTrackingMixin, ABC):
     EXTERNAL_ID_PREFIX = "scan:"
     TASK_CATEGORY = "themis.scan"
 
-    def __init__(self, task_queue: ITaskQueue | None = None) -> None:
-        """
-        Initialize the scan manager.
-
-        Args:
-            task_queue: Cola de tareas a usar (inyectable para tests). Por
-                defecto, el singleton ``TaskQueue``.
-        """
-        self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
+    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin (A10).
 
 
     # =========================================================================
@@ -457,12 +450,11 @@ class ScanManager(TaskTrackingMixin, ABC):
                 if not scan:
                     logger.error(f"Escaneo {scan_id} no encontrado en el hilo")
                     return
-                # B7: leer estos atributos aquí, dentro de la sesión que los
+                # B7: leer este atributo aquí, dentro de la sesión que lo
                 # cargó, en vez de en instancia detached más abajo — antes
                 # solo funcionaba porque expire_on_commit=False lo permite
                 # implícitamente, no por contrato.
-                target    = scan.target
-                scan_type = scan.scan_type
+                target = scan.target
 
             thread_manager.update_scan_status(scan_id, ScanStatus.RUNNING)
             logger.info(f"Iniciando escaneo {scan_id}")
@@ -499,8 +491,8 @@ class ScanManager(TaskTrackingMixin, ABC):
 
             logger.info(f"Procesando resultados de escaneo {scan_id}")
 
-            processor  = thread_manager.result_processor # type: ignore
-            domain_data = processor.process(task.results, target) if scan_type == "nmap" else processor.process(task.results)
+            processor   = thread_manager.result_processor # type: ignore
+            domain_data = thread_manager._process_results(processor, task.results, target)
 
             with UnitOfWork() as uow:
                 scan_repo  = ScanRepository(uow)
@@ -531,6 +523,19 @@ class ScanManager(TaskTrackingMixin, ABC):
                 logger.error(f"Error en escaneo {scan_id}: {e}", exc_info=True)
                 thread_manager.update_scan_status(scan_id, ScanStatus.FAILED)
             thread_manager._log_to_csv(scan_id, fresh_scan, task)
+
+    def _process_results(self, processor, results, target: str):
+        """Hand raw task results to this scan type's result processor (B2).
+
+        Default: every processor except Nmap's only needs ``results``. Nmap
+        overrides this because its processor also needs ``target`` (to
+        resolve the scanned host) — see ``NmapScanManager._process_results``.
+        Keeping the dispatch here as an overridable method, rather than the
+        base class branching on ``scan_type == "nmap"``, means a future scan
+        type whose processor also needs ``target`` doesn't require editing
+        this base class again.
+        """
+        return processor.process(results)
 
     def update_scan_status(self, scan_id: int, status: ScanStatus) -> None:
         """
@@ -795,9 +800,49 @@ class ScanManager(TaskTrackingMixin, ABC):
     def run_scan(self, **kwargs) -> int:
         """Start a new scan. Returns the scan's primary key."""
 
-    @abstractmethod
-    def _create_scan_record(self, **kwargs) -> Scan:
-        """Create and persist the initial scan record."""
+    def _create_scan_record(
+        self, target: str, user_id: int, programed_scan_id: Optional[int] = None, **extra
+    ) -> Scan:
+        """Create and persist the initial scan record for ``self._MODEL`` (A4).
+
+        Default implementation shared by every scan type whose model needs
+        no columns beyond target/user_id/started_at/programed_scan_id.
+        Subclasses whose model has extra columns (e.g. ``LybraScan``'s
+        ``source_scan_id``/``asset_id``) pass them via ``**extra`` instead of
+        overriding this method wholesale — see
+        ``LybraEngineManager._create_scan_record``.
+        """
+        assert self._MODEL is not None, f"{type(self).__name__} no define _MODEL"
+        scan = self._MODEL(
+            target=target, user_id=user_id, started_at=utcnow_naive(),
+            programed_scan_id=programed_scan_id, **extra,
+        )
+        with UnitOfWork() as uow:
+            ScanRepository(uow).save(scan)
+            # Durable antes de encolar: el worker corre en otro proceso.
+            uow.commit_for_handoff()
+        return scan
+
+    def _previous_findings_map(
+        self, scan_repo: ScanRepository, user_id: int, target: str, exclude_scan_id: int
+    ) -> dict:
+        """Build ``dedup_key -> {state, snapshot}`` from the previous scan of
+        this type against ``target``, for lifecycle comparison (A6).
+
+        Shared by every manager that does lifecycle correlation over
+        ``Finding`` (Lybra, Nuclei) — uses ``self.SCAN_TYPE`` to pick the
+        right previous scan, so the two hand-rolled copies (identical save
+        for which scan type they filtered on) collapse into one.
+        """
+        if not user_id or not target:
+            return {}
+        result: dict = {}
+        for pf in scan_repo.get_previous_findings(user_id, target, self.SCAN_TYPE.value, exclude_scan_id):
+            snapshot = pf.snapshot
+            key = pf.dedup_key or compute_dedup_key(snapshot)
+            snapshot["dedup_key"] = key
+            result[key] = {"state": pf.state or "open", "snapshot": snapshot}
+        return result
 
     @abstractmethod
     def _persist_scan_results(self, uow, scan, domain_data) -> None:

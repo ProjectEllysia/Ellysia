@@ -9,17 +9,21 @@ Classes:
 
 Usage:
     class ScanRepository(BaseRepository[Scan]):
-        def __init__(self, uow: UnitOfWork) -> None:
-            super().__init__(Scan, uow)
+        _MODEL = Scan
 
         def get_by_target(self, target: str) -> list[Scan]:
             return self.get_all_by_field("target", target)
+
+A subclass needs its own ``__init__`` only if it does something beyond
+declaring ``_MODEL`` (A8) — the base's ``__init__`` reads it, so the
+``super().__init__(Model, uow, session)`` one-liner that used to be repeated
+in every repository is gone.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Generic, List, Optional, Type, TypeVar
+from typing import Any, ClassVar, Generic, List, Optional, Type, TypeVar
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -37,11 +41,17 @@ class BaseRepository(Generic[T]):
     Generic repository providing type-safe CRUD operations.
 
     Concrete repositories inherit from this class, specifying the model
-    type via the Generic parameter. All database access goes through the
-    UnitOfWork's session, keeping transaction control in the caller.
+    type via the Generic parameter *and* the ``_MODEL`` class attribute
+    (A8) — the former is for static type-checking, the latter is what
+    ``__init__`` actually reads at runtime.
+
+    Class Attributes:
+        _MODEL: SQLAlchemy model class this repository manages. Must be set
+            by every concrete subclass.
 
     Attributes:
-        _model:  The SQLAlchemy model class this repository manages.
+        _model:  The SQLAlchemy model class this repository manages (copied
+            from ``_MODEL`` in ``__init__``).
         _uow:    The Unit of Work providing the active session.
 
     Type Parameters:
@@ -49,15 +59,16 @@ class BaseRepository(Generic[T]):
 
     Example:
     >>> class UserRepository(BaseRepository[User]):
-    ...     def __init__(self, uow: UnitOfWork) -> None:
-    ...         super().__init__(User, uow)
+    ...     _MODEL = User
     ...
     >>> with UnitOfWork() as uow:
     ...     repo = UserRepository(uow)
     ...     user = repo.get_by_id(42)
     """
 
-    def __init__(self, model: Type[T], uow: Optional[UnitOfWork] = None, session: Optional[Session] = None) -> None:
+    _MODEL: ClassVar[Optional[Type]] = None
+
+    def __init__(self, uow: Optional[UnitOfWork] = None, session: Optional[Session] = None) -> None:
         """
         Initialize the repository.
 
@@ -66,11 +77,11 @@ class BaseRepository(Generic[T]):
         by Flask middleware).
 
         Args:
-            model:    SQLAlchemy model class to manage.
             uow:      Active Unit of Work providing the session (write path).
             session:  Direct SQLAlchemy Session (read path, request-scoped).
         """
-        self._model = model
+        assert self._MODEL is not None, f"{type(self).__name__} no define _MODEL"
+        self._model = self._MODEL
         if session is not None:
             self.__session = session
             self._uow = None

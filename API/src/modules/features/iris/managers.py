@@ -93,8 +93,7 @@ class IrisManager(TaskTrackingMixin):
     TASK_CATEGORY = "iris.analyze"
     _TOP_SIGNALS_LIMIT = 5
 
-    def __init__(self, task_queue: ITaskQueue | None = None) -> None:
-        self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
+    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin (A10).
 
     # =========================================================================
     # PUBLIC API
@@ -1203,8 +1202,7 @@ class IrisReportManager(TaskTrackingMixin):
     EXTERNAL_ID_PREFIX = "iris-doc:"
     TASK_CATEGORY = "iris.report"
 
-    def __init__(self, task_queue: ITaskQueue | None = None) -> None:
-        self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
+    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin (A10).
 
     @staticmethod
     def _create_document(analysis: IrisAnalysis) -> int:

@@ -7,7 +7,7 @@ import src.modules.system.config_reading as CR
 from src.modules.system.taskqueue import ITaskQueue, job_context
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
-from src.modules.shared import utcnow_naive, isoformat_utc
+from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc
 from ..repositories import (
     ScanRepository,
     KbRepository,
@@ -26,7 +26,7 @@ from ..lybra import (
     merge_findings,
     apply_lifecycle,
     classify_exposure,
-    score_finding,
+    finding_to_json,
     QOD_OPEN_PORT,
     QOD_FINGERPRINT,
     default_dissectors,
@@ -630,18 +630,7 @@ class LybraEngineManager(ScanManager):
             logger.info("Análisis profundo: lanzados %d escaneos corroboradores para %s", len(ids), target)
         return ids
 
-    def _previous_findings_map(self, scan_repo: ScanRepository, user_id: int, target: str, exclude_scan_id: int) -> dict:
-        """Build ``dedup_key -> {state, snapshot}`` from the previous Lybra scan
-        of this target, for lifecycle comparison."""
-        if not user_id or not target:
-            return {}
-        result: dict = {}
-        for pf in scan_repo.get_previous_lybra_findings(user_id, target, exclude_scan_id):
-            snapshot = pf.snapshot
-            key = pf.dedup_key or compute_dedup_key(snapshot)
-            snapshot["dedup_key"] = key
-            result[key] = {"state": pf.state or "open", "snapshot": snapshot}
-        return result
+    # _previous_findings_map: usa el default de ScanManager (A6).
 
     @classmethod
     def _finding_view_dict(cls, f: Finding) -> dict:
@@ -661,9 +650,11 @@ class LybraEngineManager(ScanManager):
             finding = repo.get_finding(finding_id)
             if finding is None:
                 raise FindingNotFoundError(finding_id)
-            scan = repo.get_by_id(finding.scan_id)
-            if scan is None or scan.user_id != user_id:
-                raise FindingNotFoundError(finding_id)
+            # El finding se busca por su propio id, pero la propiedad se
+            # verifica sobre el scan al que pertenece (E5): FindingNotFoundError
+            # se lanza con finding_id para no revelar el scan_id ajeno.
+            assert_owned(ScanRepository, finding.scan_id, user_id,
+                         lambda _scan_id: FindingNotFoundError(finding_id), uow=uow)
             finding.state = state  # type: ignore
             repo.update(finding)
             return finding
@@ -672,18 +663,19 @@ class LybraEngineManager(ScanManager):
         self, target: str, user_id: int, source_scan_id: Optional[int] = None,
         programed_scan_id: Optional[int] = None, asset_id: Optional[int] = None,
     ) -> LybraScan:  # pylint: disable=arguments-differ
-        """Create and persist an LybraScan row linked to its source Nmap scan."""
-        scan = LybraScan(
-            target=target,
-            user_id=user_id,
-            started_at=utcnow_naive(),
-            source_scan_id=source_scan_id,
-            programed_scan_id=programed_scan_id,
-            asset_id=asset_id,
+        """Create and persist an LybraScan row linked to its source Nmap scan.
+
+        Delegates to ``ScanManager._create_scan_record`` (A4), passing
+        LybraScan's extra columns via ``**extra``. Antes esta clase no
+        llamaba ``uow.commit_for_handoff()`` como las demás — inconsistencia
+        real, no deliberada: ``run_scan()`` encola en TaskQueue justo después
+        (mismo patrón que Nmap/Nikto/Nuclei), así que el worker en otro
+        proceso también necesita ver esta fila ya confirmada.
+        """
+        return super()._create_scan_record(
+            target=target, user_id=user_id, programed_scan_id=programed_scan_id,
+            source_scan_id=source_scan_id, asset_id=asset_id,
         )
-        with UnitOfWork() as uow:
-            ScanRepository(uow).save(scan)
-        return scan
 
     def _persist_scan_results(self, uow, scan, domain_data) -> None:
         """Persist the engine's findings (``domain_data`` is a list of dicts)."""
@@ -775,12 +767,7 @@ class LybraEngineManager(ScanManager):
             scan.target and AuthorizedTargetManager.is_authorized(scan.user_id, scan.target)
         )
 
-        def _priority(f: dict) -> str:
-            return score_finding(
-                {"cvss_score": f.get("cvss_score"), "in_kev": f.get("in_kev"),
-                 "epss_score": f.get("epss_score"), "confirmed": f.get("confirmed")},
-                exposure,
-            )
+        json_findings = [finding_to_json(f, exposure) for f in display_findings]
 
         result = {
             "id": scan.id,
@@ -795,29 +782,8 @@ class LybraEngineManager(ScanManager):
             "status": getattr(scan, "status", "unknown"),
             "startedAt": isoformat_utc(scan.started_at),
             "finishedAt": isoformat_utc(scan.finished_at),  # type: ignore
-            "findings": [
-                {
-                    "id": f.get("id"),
-                    "title": f.get("title"),
-                    "category": f.get("category"),
-                    "port": f.get("port"),
-                    "service": f.get("service"),
-                    "cpe": f.get("cpe"),
-                    "cveIds": f.get("cve_ids"),
-                    "cvssScore": f.get("cvss_score"),
-                    "epssScore": f.get("epss_score"),
-                    "inKev": f.get("in_kev"),
-                    "qod": f.get("qod"),
-                    "confirmed": f.get("confirmed"),
-                    "cpeResolved": f.get("cpe_resolved"),
-                    "source": f.get("source"),
-                    "state": f.get("state"),
-                    "dedupKey": f.get("dedup_key"),
-                    "priority": _priority(f),
-                }
-                for f in display_findings
-            ],
-            "totalFindings": len(display_findings),
+            "findings": json_findings,
+            "totalFindings": len(json_findings),
             "vulnerableFindings": sum(1 for f in display_findings if f.get("category") == "outdated_software"),
             "openFindings": sum(1 for f in display_findings if f.get("state") == "open"),
             "fixedFindings": sum(1 for f in display_findings if f.get("state") == "fixed"),

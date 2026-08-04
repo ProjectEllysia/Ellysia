@@ -4,7 +4,7 @@ import logging
 import hashlib
 from datetime import timedelta
 import src.modules.system.config_reading as CR
-from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
+from src.modules.system.taskqueue import TaskTrackingMixin, job_context
 from src.modules.infrastructure import UnitOfWork
 from src.modules.shared import utcnow_naive, isoformat_utc
 from ..repositories import TracerouteRepository
@@ -48,14 +48,7 @@ class TracerouteManager(TaskTrackingMixin):
     EXTERNAL_ID_PREFIX = "themis-traceroute:"
     TASK_CATEGORY = "themis.traceroute"
 
-    def __init__(self, task_queue: ITaskQueue | None = None) -> None:
-        """Initialize the manager.
-
-        Args:
-            task_queue: Task queue to use (injectable for tests). Defaults to
-                the singleton ``TaskQueue``.
-        """
-        self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
+    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin (A10).
 
     # =========================================================================
     # REQUEST-SIDE (non-blocking)

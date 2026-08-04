@@ -27,7 +27,7 @@ import src.modules.system.config_reading as CR
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, decrypt_at_rest, encrypt_at_rest, utcnow_naive
-from src.modules.system.taskqueue import ITaskQueue, TaskQueue, job_context
+from src.modules.system.taskqueue import TaskTrackingMixin, job_context
 from src.modules.system.taskqueue.connection import RedisConnectionFactory
 
 from .exceptions import (
@@ -58,7 +58,7 @@ class _ReauthRequiredError(Exception):
     """
 
 
-class IrisMailboxManager:
+class IrisMailboxManager(TaskTrackingMixin):
     """Orquesta el ciclo de vida de una conexión de buzón externo.
 
     Typical usage::
@@ -80,8 +80,9 @@ class IrisMailboxManager:
     #: no esté aquí se añade al final, alfabéticamente.
     _PROVIDER_DISPLAY_ORDER = ("microsoft", "gmail")
 
-    def __init__(self, task_queue: ITaskQueue | None = None) -> None:
-        self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
+    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin (A10). Ya
+    # declaraba TASK_CATEGORY/EXTERNAL_ID_PREFIX sin heredar del mixin —
+    # ahora hereda también external_id_for/find_task/task_status_of.
 
     # =========================================================================
     # OAuth: connect / callback
@@ -293,7 +294,7 @@ class IrisMailboxManager:
             args=(connection_id,),
             name=f"IrisMailboxSync-{connection_id}",
             category=self.TASK_CATEGORY,
-            external_id=f"{self.EXTERNAL_ID_PREFIX}{connection_id}",
+            external_id=self.external_id_for(connection_id),
         )
 
     @staticmethod

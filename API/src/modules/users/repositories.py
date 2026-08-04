@@ -27,7 +27,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import joinedload, selectinload
 
 from .model import (
     AccessToken,
@@ -39,7 +39,7 @@ from .model import (
     MFAChallenge,
 )
 
-from src.modules.infrastructure.base_repository import BaseRepository, UnitOfWork
+from src.modules.infrastructure.base_repository import BaseRepository
 from src.modules.shared import utcnow_naive
 
 
@@ -58,8 +58,7 @@ class UserRepository(BaseRepository[User]):
     ...     user = repo.get_by_username("johnd")
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(User, uow=uow, session=session)
+    _MODEL = User
 
     # =========================================================================
     # LOOKUPS
@@ -171,9 +170,8 @@ class TokenRepository(BaseRepository[AccessToken]):
         ...         ...
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        # Primary model is AccessToken; RefreshToken queries use _session directly.
-        super().__init__(AccessToken, uow=uow, session=session)
+    # Primary model is AccessToken; RefreshToken queries use _session directly.
+    _MODEL = AccessToken
 
     # =========================================================================
     # INTERNAL HELPERS (shared by AccessToken / RefreshToken)
@@ -361,8 +359,7 @@ class AttributeRepository(BaseRepository[UserAttribute]):
         ...     attrs = repo.get_by_user(5)
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(UserAttribute, uow=uow, session=session)
+    _MODEL = UserAttribute
 
     def get_by_user(self, user_id: int) -> List[UserAttribute]:
         """
@@ -515,8 +512,7 @@ class MFARepository(BaseRepository[MFATotpCredential]):
         ...     cred = repo.get_totp_credential(user_id=1)
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(MFATotpCredential, uow=uow, session=session)
+    _MODEL = MFATotpCredential
 
     # =========================================================================
     # TOTP CREDENTIAL

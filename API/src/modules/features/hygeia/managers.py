@@ -18,7 +18,7 @@ from typing import Optional
 import src.modules.system.config_reading as CR
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
-from src.modules.shared import utcnow_naive
+from src.modules.shared import assert_owned, utcnow_naive
 from src.modules.system.taskqueue import TaskQueue, job_context
 from src.modules.tools.herald import EmailMessage, build_mailer, render_email
 from src.modules.users.model import User
@@ -174,8 +174,7 @@ class HygeiaAssetManager:
         Raises:
             AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
         """
-        asset_repo = build_repository(MonitoredAssetRepository)
-        self._get_owned_asset(asset_repo, asset_id, self.user.id)
+        assert_owned(MonitoredAssetRepository, asset_id, self.user.id, AssetNotFoundError)
 
         limit = CR.hygeia_limits().max_series_points
         snapshot_repo = build_repository(AssetSnapshotRepository)
@@ -208,8 +207,7 @@ class HygeiaAssetManager:
         Raises:
             AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
         """
-        asset_repo = build_repository(MonitoredAssetRepository)
-        self._get_owned_asset(asset_repo, asset_id, self.user.id)
+        assert_owned(MonitoredAssetRepository, asset_id, self.user.id, AssetNotFoundError)
 
         snapshot_repo = build_repository(AssetSnapshotRepository)
         snapshot = snapshot_repo.get_latest(asset_id)
@@ -238,8 +236,7 @@ class HygeiaAssetManager:
         Raises:
             AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
         """
-        repo = build_repository(MonitoredAssetRepository)
-        asset = self._get_owned_asset(repo, asset_id, self.user.id)
+        asset = assert_owned(MonitoredAssetRepository, asset_id, self.user.id, AssetNotFoundError)
         return {
             "collectedAt": asset.inventory_collected_at,
             "software": asset.inventory or [],
@@ -258,8 +255,7 @@ class HygeiaAssetManager:
                 usuario (misma excepción en ambos casos, para no permitir
                 enumerar activos ajenos por diferencia de respuesta).
         """
-        repo = build_repository(MonitoredAssetRepository)
-        asset = self._get_owned_asset(repo, asset_id, self.user.id)
+        asset = assert_owned(MonitoredAssetRepository, asset_id, self.user.id, AssetNotFoundError)
         return asset.to_dict()
 
     def analyze_inventory(self, asset_id: int) -> dict:
@@ -288,8 +284,7 @@ class HygeiaAssetManager:
                 versión no hay CPE que resolver, así que el análisis no
                 produciría ni una sola detección).
         """
-        repo = build_repository(MonitoredAssetRepository)
-        asset = self._get_owned_asset(repo, asset_id, self.user.id)
+        asset = assert_owned(MonitoredAssetRepository, asset_id, self.user.id, AssetNotFoundError)
 
         services = services_from_inventory(asset.inventory or [])
         if not services:
@@ -323,8 +318,7 @@ class HygeiaAssetManager:
         Raises:
             AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
         """
-        repo = build_repository(MonitoredAssetRepository)
-        self._get_owned_asset(repo, asset_id, self.user.id)
+        assert_owned(MonitoredAssetRepository, asset_id, self.user.id, AssetNotFoundError)
 
         manager = LybraEngineManager()
         scans, _total = manager.get_scans_paginated(
@@ -385,15 +379,16 @@ class HygeiaAssetManager:
         Raises:
             AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
         """
-        repo = build_repository(MonitoredAssetRepository)
-        self._get_owned_asset(repo, asset_id, self.user.id)
+        assert_owned(MonitoredAssetRepository, asset_id, self.user.id, AssetNotFoundError)
 
         LybraEngineManager().delete_scans_for_asset(asset_id)
 
         with UnitOfWork() as uow:
-            write_repo = MonitoredAssetRepository(uow)
-            asset = self._get_owned_asset(write_repo, asset_id, self.user.id)
-            write_repo.delete(asset)
+            asset = assert_owned(
+                MonitoredAssetRepository, asset_id, self.user.id,
+                AssetNotFoundError, uow=uow,
+            )
+            MonitoredAssetRepository(uow).delete(asset)
 
     def rotate_key(self, asset_id: int) -> dict:
         """
@@ -410,35 +405,17 @@ class HygeiaAssetManager:
             AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
         """
         with UnitOfWork() as uow:
-            repo = MonitoredAssetRepository(uow)
-            asset = self._get_owned_asset(repo, asset_id, self.user.id)
+            asset = assert_owned(
+                MonitoredAssetRepository, asset_id, self.user.id,
+                AssetNotFoundError, uow=uow,
+            )
 
             key_id, secret_hash, full_key = generate_agent_key()
             asset.agent_key_id = key_id
             asset.agent_key_hash = secret_hash
-            repo.update(asset)
+            MonitoredAssetRepository(uow).update(asset)
 
         return {"agentKey": full_key}
-
-    @staticmethod
-    def _get_owned_asset(
-        repo: MonitoredAssetRepository, asset_id: int, user_id: int,
-    ) -> MonitoredAsset:
-        """Obtiene un activo por id y verifica que pertenece a ``user_id``.
-
-        Ayudante interno de la clase: a diferencia de ``assert_owned`` de
-        ``shared``, aquí se necesita reutilizar el mismo ``repo`` (y por
-        tanto la misma sesión) que el llamador, para poder mutar y guardar
-        la entidad devuelta dentro del mismo ``UnitOfWork``.
-
-        Lanza la misma excepción tanto si el activo no existe como si
-        pertenece a otro usuario, para no permitir enumerar activos ajenos
-        por diferencia de respuesta.
-        """
-        asset = repo.get_by_id(asset_id)
-        if asset is None or asset.user_id != user_id:
-            raise AssetNotFoundError(asset_id)
-        return asset
 
 
 class HygeiaIngestManager:

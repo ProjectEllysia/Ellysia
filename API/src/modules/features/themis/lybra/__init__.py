@@ -170,6 +170,7 @@ from .fingerprinting import (
 from .adapters import (
     nikto_incident_to_finding,
     nuclei_result_to_finding,
+    finding_to_json,
     QOD_NUCLEI_MATCH,
 )
 from .transport import (
@@ -296,6 +297,7 @@ __all__ = [
     "QOD_FINGERPRINT",
     "nikto_incident_to_finding",
     "nuclei_result_to_finding",
+    "finding_to_json",
     "QOD_NUCLEI_MATCH",
     "AsyncConnectScanner",
     "scan_ports_sync",

@@ -24,8 +24,6 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from sqlalchemy.orm import Session
-
 from src.modules.shared import utcnow_naive
 from src.modules.features.aegis.model import (
     AegisDocument,
@@ -40,7 +38,7 @@ from src.modules.features.aegis.model import (
     Recipient,
     Topic,
 )
-from src.modules.infrastructure import BaseRepository, UnitOfWork
+from src.modules.infrastructure import BaseRepository
 
 
 class AegisDocumentRepository(BaseRepository[AegisDocument]):
@@ -62,8 +60,7 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
     ...     repo.delete(doc)
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(AegisDocument, uow=uow, session=session)
+    _MODEL = AegisDocument
 
     # =========================================================================
     # DOMAIN QUERIES
@@ -370,8 +367,7 @@ class AegisOrgProfileRepository(BaseRepository[AegisOrgProfile]):
     One row per user; inherits generic CRUD from BaseRepository.
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(AegisOrgProfile, uow=uow, session=session)
+    _MODEL = AegisOrgProfile
 
     def get_by_user_id(self, user_id: int) -> Optional[AegisOrgProfile]:
         """Retrieve the org profile for a user, or None if not set up yet."""
@@ -381,8 +377,7 @@ class AegisOrgProfileRepository(BaseRepository[AegisOrgProfile]):
 class DistributionListRepository(BaseRepository[DistributionList]):
     """Repository for DistributionList and its Recipient rows."""
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(DistributionList, uow=uow, session=session)
+    _MODEL = DistributionList
 
     def get_lists_by_user(self, user_id: int) -> List[DistributionList]:
         """Retrieve all distribution lists owned by a user, newest first."""
@@ -458,8 +453,7 @@ class DistributionListRepository(BaseRepository[DistributionList]):
 class CampaignRepository(BaseRepository[Campaign]):
     """Repository for Campaign, CampaignRecipient, and CampaignAnswer."""
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(Campaign, uow=uow, session=session)
+    _MODEL = Campaign
 
     # =========================================================================
     # CAMPAIGN

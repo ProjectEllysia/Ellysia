@@ -29,6 +29,8 @@ import hashlib
 from typing import Optional
 from urllib.parse import urlparse
 
+from .correlation import score_finding
+
 
 # Nikto's severity classification (its ``_classify_threat_level``) is a pattern
 # match against the response text, not a structured assertion — so its findings
@@ -205,3 +207,40 @@ def _nuclei_port(result: dict) -> Optional[int]:
 def _stable_hash(*parts: str) -> str:
     """Return a short, stable hex digest of the given strings joined together."""
     return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+
+def finding_to_json(f: dict, exposure: str) -> dict:
+    """Serialize one ``Finding`` snapshot dict to the API JSON shape (A5).
+
+    Shared by ``LybraEngineManager.format_scan`` and
+    ``NucleiScanManager.format_scan`` — both hand-wrote the same fifteen-key
+    dict (plus their own ``priority`` computation via ``score_finding``),
+    which had already drifted: Lybra's included ``cpeResolved``, Nuclei's
+    didn't. A Nuclei finding simply has no ``cpe_resolved`` key, so it now
+    serializes as ``cpeResolved: null`` there too — harmless, and the two
+    scan types stop being able to silently diverge on this shape again.
+    """
+    priority = score_finding(
+        {"cvss_score": f.get("cvss_score"), "in_kev": f.get("in_kev"),
+         "epss_score": f.get("epss_score"), "confirmed": f.get("confirmed")},
+        exposure,
+    )
+    return {
+        "id":          f.get("id"),
+        "title":       f.get("title"),
+        "category":    f.get("category"),
+        "port":        f.get("port"),
+        "service":     f.get("service"),
+        "cpe":         f.get("cpe"),
+        "cveIds":      f.get("cve_ids"),
+        "cvssScore":   f.get("cvss_score"),
+        "epssScore":   f.get("epss_score"),
+        "inKev":       f.get("in_kev"),
+        "qod":         f.get("qod"),
+        "confirmed":   f.get("confirmed"),
+        "cpeResolved": f.get("cpe_resolved"),
+        "source":      f.get("source"),
+        "state":       f.get("state"),
+        "dedupKey":    f.get("dedup_key"),
+        "priority":    priority,
+    }

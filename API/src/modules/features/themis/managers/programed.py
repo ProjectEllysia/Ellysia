@@ -138,24 +138,14 @@ class ProgramedScanManager():
     def revoke(cls, ps_id: int, user_id: int) -> None:
         ThemisScheduler.unschedule(ps_id)
         with UnitOfWork() as uow:
-            repo = ProgramedScanRepository(uow)
-            ps = repo.get_by_id(ps_id)
-            if ps is None:
-                raise ProgramedScanNotFoundError(ps_id)
-            if ps.user_id != user_id: # type: ignore
-                raise ProgramedScanNotFoundError(ps_id)
+            ps = assert_owned(ProgramedScanRepository, ps_id, user_id, ProgramedScanNotFoundError, uow=uow)
             ps.is_active = False # type: ignore
-            repo.update(ps)
+            ProgramedScanRepository(uow).update(ps)
 
     @classmethod
     def delete(cls, ps_id: int, user_id: int) -> None:
         ThemisScheduler.unschedule(ps_id)
         with UnitOfWork() as uow:
-            repo = ProgramedScanRepository(uow)
-            ps = repo.get_by_id(ps_id)
-            if ps is None:
-                raise ProgramedScanNotFoundError(ps_id)
-            if ps.user_id != user_id: # type: ignore
-                raise ProgramedScanNotFoundError(ps_id)
-            repo.delete(ps)
+            ps = assert_owned(ProgramedScanRepository, ps_id, user_id, ProgramedScanNotFoundError, uow=uow)
+            ProgramedScanRepository(uow).delete(ps)
 

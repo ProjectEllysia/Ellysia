@@ -30,8 +30,8 @@ from typing import List, Optional, Tuple
 
 from sqlalchemy import or_
 from sqlalchemy import update as sa_update
-from sqlalchemy.orm import Session, joinedload
-from src.modules.infrastructure import BaseRepository, UnitOfWork
+from sqlalchemy.orm import joinedload
+from src.modules.infrastructure import BaseRepository
 from src.modules.shared import utcnow_naive
 
 from .model import (
@@ -105,8 +105,7 @@ class ScanRepository(BaseRepository[Scan]):
     }
 
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(Scan, uow=uow, session=session)
+    _MODEL = Scan
 
     # =========================================================================
     # TYPED GETTERS BY SUBTYPE
@@ -651,17 +650,6 @@ class ScanRepository(BaseRepository[Scan]):
         )
         return self.get_findings_by_scan(prev.id) if prev else []
 
-    def get_previous_lybra_findings(
-        self, user_id: int, target: str, exclude_scan_id: int
-    ) -> List[Finding]:
-        """Return the findings of the user's previous finished Lybra scan of a
-        target (for lifecycle comparison), or an empty list if there is none.
-
-        Thin wrapper kept for its existing call sites — the real query is now
-        the type-generic ``get_previous_findings``.
-        """
-        return self.get_previous_findings(user_id, target, ScanType.LYBRA.value, exclude_scan_id)
-
     def set_feed_version_for_scan(self, scan_id: int, feed_version: str) -> None:
         """Bulk-update every Finding's ``feed_version`` for a scan.
 
@@ -745,8 +733,7 @@ class ThemisReportRepository(BaseRepository[ThemisDocument]):
     ...     repo.delete(doc)
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(ThemisDocument, uow=uow, session=session)
+    _MODEL = ThemisDocument
 
     def get_document(self, scan_id: int) -> Optional[ThemisDocument]:
         return (
@@ -792,8 +779,7 @@ class ScanFolderRepository(BaseRepository[ScanFolder]):
         _uow:    Active Unit of Work (inherited from BaseRepository).
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(ScanFolder, uow=uow, session=session)
+    _MODEL = ScanFolder
 
     def get_by_user(self, user_id: int) -> List[ScanFolder]:
         """Return all folders for a user, newest first."""
@@ -821,8 +807,7 @@ class TracerouteRepository(BaseRepository[Traceroute]):
     place so the cache never grows unbounded for a repeatedly-scanned host.
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(Traceroute, uow=uow, session=session)
+    _MODEL = Traceroute
 
     def get_by_user_and_target(self, user_id: int, target: str) -> Optional[Traceroute]:
         """Return the cached traceroute for a user + target, or None."""
@@ -858,8 +843,7 @@ class KbRepository(BaseRepository[CveEntry]):
     re-sync updates in place instead of duplicating.
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(CveEntry, uow=uow, session=session)
+    _MODEL = CveEntry
 
     # =========================================================================
     # MATCHER QUERY
@@ -1209,8 +1193,7 @@ class ProgramedScanRepository(BaseRepository[ProgramedScan]):
     ...     repo.update_run_timestamps(ps, last_run=now, next_run=next_run)
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(ProgramedScan, uow=uow, session=session)
+    _MODEL = ProgramedScan
 
     # =========================================================================
     # QUERY METHODS
@@ -1358,8 +1341,7 @@ class ProgramedScanRepository(BaseRepository[ProgramedScan]):
 class AuthorizedTargetRepository(BaseRepository[AuthorizedTarget]):
     """Repository for the AuthorizedTarget entity (roadmap §6 register)."""
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(AuthorizedTarget, uow=uow, session=session)
+    _MODEL = AuthorizedTarget
 
     def get_by_user(self, user_id: int) -> List[AuthorizedTarget]:
         """Return all authorized-target entries for a user, newest first."""

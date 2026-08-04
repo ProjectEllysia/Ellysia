@@ -72,7 +72,7 @@ import src.modules.system.config_reading as CR
 # ---------------------------------------------------------------------------
 from src.modules.tools.herald import EmailMessage, Mailer, build_mailer, render_email
 from src.modules.users import User
-from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
+from src.modules.system.taskqueue import ITaskQueue, TaskTrackingMixin, job_context
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc
@@ -120,7 +120,7 @@ class AegisManager(TaskTrackingMixin):
         self.user = user
         self.alert_fetcher = alert_fetcher or AegisAlertFetcher()
         self.ai_writer = ai_writer
-        self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
+        super().__init__(task_queue)
 
     # =========================================================================
     # API PÚBLICA
@@ -840,7 +840,7 @@ class CampaignManager(TaskTrackingMixin):
         # guarda tal cual (puede ser None) y el default se construye de
         # forma perezosa en _run_campaign_send, no aquí.
         self.user = user
-        self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
+        super().__init__(task_queue)
         self.mailer = mailer
 
     # =========================================================================
@@ -863,11 +863,11 @@ class CampaignManager(TaskTrackingMixin):
 
     def delete_list(self, list_id: int) -> None:
         with UnitOfWork() as uow:
-            repo = DistributionListRepository(uow)
-            dist_list = repo.get_by_id(list_id)
-            if dist_list is None or dist_list.user_id != self.user.id:
-                raise DistributionListNotFoundError(list_id)
-            repo.delete(dist_list)
+            dist_list = assert_owned(
+                DistributionListRepository, list_id, self.user.id,
+                DistributionListNotFoundError, uow=uow,
+            )
+            DistributionListRepository(uow).delete(dist_list)
 
     def add_recipients(self, list_id: int, recipients: list[dict]) -> list[dict]:
         self._assert_list_ownership(list_id)
@@ -895,10 +895,7 @@ class CampaignManager(TaskTrackingMixin):
     # =========================================================================
 
     def create_campaign(self, document_id: int, list_id: int, name: str) -> dict:
-        doc_repo = build_repository(AegisDocumentRepository)
-        doc = doc_repo.get_by_id(document_id)
-        if doc is None or doc.user_id != self.user.id:
-            raise DocumentNotFoundError(document_id)
+        doc = assert_owned(AegisDocumentRepository, document_id, self.user.id, DocumentNotFoundError)
         if doc.status != "done":
             raise DocumentNotReadyError(document_id, doc.status)
 

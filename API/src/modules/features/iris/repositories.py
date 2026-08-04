@@ -13,7 +13,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import asc, desc, nullslast
 from sqlalchemy.orm import joinedload
 
-from src.modules.infrastructure import BaseRepository, UnitOfWork
+from src.modules.infrastructure import BaseRepository
 from src.modules.shared import utcnow_naive
 
 from .model import IrisAnalysis, IrisMailboxConnection, IrisRuleResult, IrisDocument
@@ -26,8 +26,7 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
     and adds analysis-specific query methods.
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session=None) -> None:
-        super().__init__(IrisAnalysis, uow=uow, session=session)
+    _MODEL = IrisAnalysis
 
     def get_by_user(self, user_id: int) -> List[IrisAnalysis]:
         """Return all analyses belonging to a user, newest first."""
@@ -117,8 +116,7 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
 class IrisMailboxConnectionRepository(BaseRepository[IrisMailboxConnection]):
     """Data-access layer for IrisMailboxConnection records."""
 
-    def __init__(self, uow: UnitOfWork | None = None, session=None) -> None:
-        super().__init__(IrisMailboxConnection, uow=uow, session=session)
+    _MODEL = IrisMailboxConnection
 
     def get_by_user(self, user_id: int) -> List[IrisMailboxConnection]:
         """Return all connections belonging to a user, newest first."""
@@ -173,8 +171,7 @@ class IrisMailboxConnectionRepository(BaseRepository[IrisMailboxConnection]):
 class IrisRuleResultRepository(BaseRepository[IrisRuleResult]):
     """Data-access layer for IrisRuleResult records."""
 
-    def __init__(self, uow: UnitOfWork | None = None, session=None) -> None:
-        super().__init__(IrisRuleResult, uow=uow, session=session)
+    _MODEL = IrisRuleResult
 
     def get_by_analysis(self, analysis_id: int) -> List[IrisRuleResult]:
         """Return all rule results for an analysis, ordered by position."""
@@ -195,8 +192,7 @@ class IrisRuleResultRepository(BaseRepository[IrisRuleResult]):
 class IrisReportRepository(BaseRepository[IrisDocument]):
     """Data-access layer for IrisDocument records (generated PDF reports)."""
 
-    def __init__(self, uow: UnitOfWork | None = None, session=None) -> None:
-        super().__init__(IrisDocument, uow=uow, session=session)
+    _MODEL = IrisDocument
 
     def get_latest_document(self, analysis_id: int) -> IrisDocument | None:
         """Return the most recently created document for an analysis."""
