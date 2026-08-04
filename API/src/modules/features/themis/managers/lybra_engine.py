@@ -134,7 +134,9 @@ class LybraEngineManager(ScanManager):
         Returns:
             Primary key of the created LybraScan record.
         """
-        source = ServiceSource.for_args(source_scan_id, services, discover_ports)
+        from .lybra_sources import ServiceSource  # ciclo de imports: lybra_sources importa este módulo
+
+        source = ServiceSource.build_for_args(source_scan_id, services, discover_ports)
         scan_target = source.scan_target(user_id, target)
 
         scan = self._create_scan_record(

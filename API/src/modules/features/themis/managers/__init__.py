@@ -39,7 +39,7 @@ from .traceroute import TracerouteManager
 from .thirdparty_scans_managers import NmapScanManager, NiktoScanManager, NucleiScanManager
 from .authorized_target import AuthorizedTargetManager
 from .lybra_engine import LybraEngineManager
-from .kb import KbSyncManager
+from .kb import CveAdvisory, KbProduct, KbQueryManager, KbSyncManager
 from .reports import ThemisReportManager
 
 __all__ = [
@@ -54,6 +54,10 @@ __all__ = [
     "NucleiScanManager",
     "LybraEngineManager",
     "KbSyncManager",
+    # Lectura de la KB local: contrato público para otros módulos (Aegis).
+    "KbQueryManager",
+    "CveAdvisory",
+    "KbProduct",
     "AuthorizedTargetManager",
     "ThemisReportManager",
 ]

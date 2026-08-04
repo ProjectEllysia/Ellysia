@@ -474,6 +474,19 @@ class CampaignRepository(BaseRepository[Campaign]):
             .all()
         )
 
+    def get_campaigns_by_document(self, document_id: int) -> List[Campaign]:
+        """All campaigns built on a given document, regardless of owner.
+
+        Used to cascade-delete a document's campaigns before the document
+        itself: 'document_id' on Campaign has no ON DELETE CASCADE at the DB
+        level, so deleting the document first would fail the FK constraint.
+        """
+        return (
+            self._session.query(Campaign)
+            .filter(Campaign.document_id == document_id)
+            .all()
+        )
+
     def create_campaign(
         self, user_id: int, document_id: int, list_id: int, name: str,
     ) -> Campaign:

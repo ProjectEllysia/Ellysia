@@ -51,7 +51,26 @@ from src.modules.features.aegis.exceptions import (
     QuizTokenInvalidError,
 )
 import src.modules.system.config_reading as CR
-from src.modules.tools.herald import EmailMessage, Mailer, build_mailer
+# ---------------------------------------------------------------------------
+# Dependencia de Aegis sobre Themis (KbQueryManager).
+#
+# Segundo import entre módulos de ``features/``, tras el de Hygeia → Themis,
+# y por la misma clase de razón: la base de conocimiento (espejo local de
+# NVD/KEV/EPSS, ~350k CVEs refrescados cada noche) ya existe en Themis, y
+# Aegis la necesita para saber qué ha sido notable en los productos de una
+# organización. Antes se lo preguntaba por HTTP a cve.circl.lu — que es otro
+# espejo de NVD, más lento, sin KEV ni EPSS y con la red de por medio. Esto
+# no añade una dependencia: retira una.
+#
+# Va en la MISMA dirección que la de Hygeia (``features/* → themis``), así
+# que no abre un sentido nuevo, y entra por ``KbQueryManager``, que devuelve
+# dataclasses planas: ninguna entidad del ORM de Themis cruza la frontera.
+# Los imports son locales, dentro de los métodos que los usan, para no crear
+# un ciclo en tiempo de carga entre los paquetes de features.
+#
+# Themis sigue sin saber que Aegis existe, y así debe seguir.
+# ---------------------------------------------------------------------------
+from src.modules.tools.herald import EmailMessage, Mailer, build_mailer, render_email
 from src.modules.users import User
 from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
 from src.modules.infrastructure import UnitOfWork
@@ -320,6 +339,14 @@ class AegisManager(TaskTrackingMixin):
                         except OSError:
                             logger.warning("No se pudo eliminar el archivo %s", file_path, exc_info=True)
 
+                # Campaign.document_id no tiene ON DELETE CASCADE en BD: borrar
+                # el documento con campañas colgando de él violaría la FK. Se
+                # borran primero (arrastrando destinatarios y respuestas por
+                # cascade="all, delete-orphan" en Campaign.recipients).
+                campaign_repo = CampaignRepository(uow)
+                for campaign in campaign_repo.get_campaigns_by_document(document_id):
+                    campaign_repo.delete(campaign)
+
                 repo.delete(doc)
         except Exception as exc:
             raise RuntimeError(f"Error eliminando documento: {exc}")
@@ -435,7 +462,20 @@ class AegisManager(TaskTrackingMixin):
                 # 2. Carga de referencias de disco
                 reference = self._load_reference_stack(cfg["stack_dir"])
 
-                # 3. Generación de contenido con el modelo
+                # 3. Avisos vigentes — ANTES de generar, no después.
+                #
+                # Es el orden el que hace que los avisos importen: son el
+                # contexto sobre el que el modelo redacta. Traerlos después,
+                # como se hacía, los dejaba en un apéndice decorativo pegado
+                # al final del documento que no había influido en una sola
+                # frase del contenido.
+                products = self._resolve_tracked_products(tweaks)
+                alerts = self.alert_fetcher.fetch_alerts(
+                    products        = products,
+                    max_per_product = 2,
+                )
+
+                # 4. Generación de contenido con el modelo
                 writer = self.ai_writer or AegisAIWriter()
                 content: AegisContent = writer.generate(
                     topic             = topic,
@@ -444,12 +484,7 @@ class AegisManager(TaskTrackingMixin):
                     topic_note        = topic_note,
                     reference         = reference,
                     tweaks            = tweaks,
-                )
-
-                # 4. Fetch de alertas
-                alerts = self.alert_fetcher.fetch_alerts(
-                    brands        = tweaks.get("associatedBrands", []),
-                    max_per_brand = 2,
+                    advisories        = alerts,
                 )
 
                 # 5. Persistencia
@@ -589,6 +624,50 @@ class AegisManager(TaskTrackingMixin):
 
         return random.choice(all_topics), True
 
+    def _resolve_tracked_products(self, tweaks: dict[str, Any]) -> list[dict]:
+        """Los productos cuyos avisos alimentan esta píldora.
+
+        Dos orígenes, y se elige uno, no se mezclan:
+
+        1. **El inventario de los agentes de Hygeia**, si el usuario no lo ha
+           desactivado y algún activo suyo ha reportado software. Es el mejor
+           dato posible: los productos que la organización ejecuta de verdad,
+           sin que nadie los teclee ni los mantenga.
+        2. **La lista manual** del perfil (``trackedProducts``), que es a lo
+           que se cae siempre que lo anterior no dé nada: sin agentes, con el
+           interruptor apagado, o cuando ningún nombre del inventario resuelve
+           a un CPE conocido (un parque entero de software que NVD no indexa).
+
+        Devuelve pares ``{"vendor", "product"}``.
+        """
+        manual = [
+            entry for entry in (tweaks.get("trackedProducts") or [])
+            if entry.get("vendor")
+        ]
+        if not tweaks.get("useHygeiaInventory", True):
+            return manual
+
+        try:
+            from src.modules.features.hygeia.managers import HygeiaAssetManager
+            from src.modules.features.themis.managers import KbQueryManager
+
+            names = HygeiaAssetManager.inventory_products(self.user.id)
+            resolved = KbQueryManager().resolve_products(names)
+        except Exception as exc:
+            # El inventario es una mejora, no un requisito: si falla, la
+            # píldora se genera igual con la lista que el usuario eligió.
+            logger.warning(f"No se pudo resolver el inventario de Hygeia: {exc}", exc_info=True)
+            return manual
+
+        if not resolved:
+            return manual
+
+        logger.info(
+            f"Aegis: {len(resolved)} productos deducidos del inventario de "
+            f"{len(names)} paquetes del usuario {self.user.id}"
+        )
+        return [{"vendor": vendor, "product": product} for vendor, product in resolved]
+
     def _load_reference_stack(self, stack_dir: Path) -> str:
         """Carga los 3 archivos .md más recientes del directorio de referencias."""
         if not stack_dir.exists():
@@ -657,28 +736,61 @@ _ORG_PROFILE_DEFAULTS: dict[str, Any] = {
     "sector": "",
     "workModel": "",
     "employeeCount": None,
-    "associatedBrands": [],
+    "trackedProducts": [],
+    "useHygeiaInventory": True,
 }
 
 
 class AegisOrgProfileManager:
     """
     Gestiona el perfil de organización de Aegis: los valores estables de
-    generación (empresa, contacto, tono, tamaño, jurisdicción, marcas
-    habituales) que se guardan una vez y se precargan en cada generación,
+    generación (empresa, contacto, tono, tamaño, jurisdicción, productos
+    vigilados) que se guardan una vez y se precargan en cada generación,
     en vez de reintroducirse cada vez.
     """
 
     def __init__(self, user: User) -> None:
         self.user = user
 
+    @staticmethod
+    def search_products(term: str, limit: int = 20) -> list[dict]:
+        """Busca productos vigilables en el índice CPE del espejo local de NVD.
+
+        Sustituye al catálogo fijo de 19 marcas que vivía en
+        ``SecOpsConfig.json``: la lista sale de la base de conocimiento, se
+        refresca sola con el sync nocturno y solo ofrece productos que de
+        verdad tienen algún CVE registrado.
+        """
+        from src.modules.features.themis.managers import KbQueryManager
+
+        return [
+            {"vendor": p.vendor, "product": p.product, "displayName": p.display_name}
+            for p in KbQueryManager().search_products(term, limit=limit)
+        ]
+
     def get_or_default(self) -> dict:
-        """Devuelve el perfil guardado, o los defaults si aún no existe."""
+        """Devuelve el perfil guardado, o los defaults si aún no existe.
+
+        Añade ``hygeiaInventoryAvailable``, que no es un campo del perfil sino
+        del entorno: le dice al frontend si tiene sentido pintar el
+        interruptor de "deducir los productos de mis agentes". Sin agentes que
+        hayan reportado inventario, el control no se muestra y la preferencia
+        guardada (activada por defecto) queda latente hasta que haya alguno.
+        """
         repo = build_repository(AegisOrgProfileRepository)
         profile = repo.get_by_user_id(self.user.id)
-        if profile is None:
-            return dict(_ORG_PROFILE_DEFAULTS)
-        return profile.to_dict()
+        result = dict(_ORG_PROFILE_DEFAULTS) if profile is None else profile.to_dict()
+        result["hygeiaInventoryAvailable"] = self._hygeia_inventory_available()
+        return result
+
+    def _hygeia_inventory_available(self) -> bool:
+        try:
+            from src.modules.features.hygeia.managers import HygeiaAssetManager
+
+            return HygeiaAssetManager.has_inventory(self.user.id)
+        except Exception as exc:
+            logger.warning(f"No se pudo comprobar el inventario de Hygeia: {exc}")
+            return False
 
     def upsert(self, data: dict) -> dict:
         """Crea o actualiza el perfil de organización del usuario actual."""
@@ -697,7 +809,8 @@ class AegisOrgProfileManager:
             profile.sector = data["sector"]
             profile.work_model = data["workModel"]
             profile.employee_count = data["employeeCount"]
-            profile.associated_brands = data["associatedBrands"]
+            profile.tracked_products = data["trackedProducts"]
+            profile.use_hygeia_inventory = data["useHygeiaInventory"]
 
             saved = repo.save(profile)
             return saved.to_dict()
@@ -859,6 +972,20 @@ class CampaignManager(TaskTrackingMixin):
     def _assert_campaign_ownership(self, campaign_id: int) -> Campaign:
         return assert_owned(CampaignRepository, campaign_id, self.user.id, CampaignNotFoundError)
 
+    def delete_campaign(self, campaign_id: int) -> None:
+        """
+        Elimina una campaña y todo su tracking (destinatarios, respuestas).
+
+        Borra las filas CampaignRecipient en cascada (cascade="all,
+        delete-orphan" en Campaign.recipients), lo que se lleva por delante
+        sus tokens: cualquier enlace de correo ya enviado para esta campaña
+        pasa a devolver QuizTokenInvalidError (404) — es la forma en que se
+        "invalida" la URL, no hay una lista de revocación aparte.
+        """
+        campaign = self._assert_campaign_ownership(campaign_id)
+        with UnitOfWork() as uow:
+            CampaignRepository(uow).delete(campaign)
+
     # =========================================================================
     # WORKFLOW DE ENVÍO (privado, ejecutado en el worker RQ)
     # =========================================================================
@@ -894,6 +1021,29 @@ class CampaignManager(TaskTrackingMixin):
             mailer = self.mailer or build_mailer("aegis")
             pill_title = doc.subtitle or doc.title if doc else "Formación de concienciación"
 
+            # La píldora se entrega dentro del propio correo (no solo el
+            # enlace al test): el destinatario nunca la recibía por ningún
+            # otro canal, así que el test evaluaba un contenido que no se le
+            # había hecho llegar. Mismos campos que consume HTMLExporter,
+            # pero renderizados aquí con la plantilla de correo (tablas +
+            # estilos inline) en vez del HTML de exportación — ese usa
+            # <style> en <head> y no es válido embebido dentro de un correo.
+            pill_intro = doc.intro if doc else ""
+            pill_closing = doc.closing if doc else ""
+            pill_company = doc.company if doc else ""
+            pill_contact_email = doc.contact_email if doc else ""
+            # Mismo tratamiento que los exportadores (services/exporters.py):
+            # "seguridad@empresa.com" es el placeholder por defecto de la IA
+            # cuando no se indicó un contacto real — no se envía como si fuera
+            # un correo válido, se sustituye por una frase.
+            pill_contact_is_placeholder = pill_contact_email == "seguridad@empresa.com"
+            pill_tips = [tip.to_dict() for tip in (doc.tips if doc else [])]
+            # Los avisos cuelgan del documento ya cargado: ninguna consulta extra.
+            pill_alerts = [
+                alert.to_dict()
+                for alert in sorted(doc.alerts, key=lambda a: a.position)
+            ] if doc else []
+
             sent_count = 0
             cancelled = False
             for i, recipient in enumerate(recipients):
@@ -901,14 +1051,29 @@ class CampaignManager(TaskTrackingMixin):
                     cancelled = True
                     break
 
-                link = f"{base_url}/aegis/quiz?t={recipient.token}"
+                # /quiz, no /aegis/quiz: la página del quiz vive en el SPA y
+                # todo lo que cuelga de /aegis/ lo captura el proxy hacia Flask
+                # (nginx.conf, vite.config.js) — el destinatario vería el JSON.
+                link = f"{base_url}/quiz?t={recipient.token}"
+                html_body, text_body = render_email(
+                    "campaign",
+                    pill_title=pill_title,
+                    link=link,
+                    recipient_name=recipient.recipient_name,
+                    company=pill_company,
+                    intro=pill_intro,
+                    tips=pill_tips,
+                    closing=pill_closing,
+                    contact_email=pill_contact_email,
+                    contact_is_placeholder=pill_contact_is_placeholder,
+                    alerts=pill_alerts,
+                )
                 message = EmailMessage(
                     to=recipient.recipient_email,
                     to_name=recipient.recipient_name,
                     subject=f"Formación de concienciación: {pill_title}",
-                    html_body=self._render_campaign_email_html(
-                        pill_title, link, recipient.recipient_name
-                    ),
+                    html_body=html_body,
+                    text_body=text_body,
                 )
                 try:
                     mailer.send(message)
@@ -1022,15 +1187,3 @@ class CampaignManager(TaskTrackingMixin):
             raise QuizAlreadyCompletedError()
 
         return {"status": "completed", "score": score, "total": len(snapshot)}
-
-    @staticmethod
-    def _render_campaign_email_html(pill_title: str, link: str, recipient_name: str | None) -> str:
-        """HTML mínimo del correo de campaña: saludo + CTA al quiz público."""
-        greeting = f"Hola {recipient_name}," if recipient_name else "Hola,"
-        return (
-            f"<p>{greeting}</p>"
-            f"<p>Te han asignado la formación de concienciación "
-            f"<strong>{pill_title}</strong>.</p>"
-            f'<p><a href="{link}">Accede a la formación y completa el test</a></p>'
-            f"<p>El enlace es personal y solo puede usarse una vez.</p>"
-        )

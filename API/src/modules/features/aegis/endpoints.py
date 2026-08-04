@@ -43,7 +43,7 @@ from .schemas import (
     GenerateResponseSchema,
     DeleteDocumentResponseSchema,
     DocumentListResponseSchema,
-    BrandsCatalogResponseSchema,
+    ProductSearchQuerySchema,
     ExportFormatsResponseSchema,
     ExportResultResponseSchema,
     DistributionListCreateSchema,
@@ -321,16 +321,17 @@ def aegis_get_topics():
     return topics
 
 
-@aegis_blp.get("/brands")
-@aegis_blp.response(200, BrandsCatalogResponseSchema, description="Catalog of brands")
+@aegis_blp.get("/products")
+@aegis_blp.arguments(ProductSearchQuerySchema, location="query")
+@aegis_blp.response(200, description="Products matching the search term")
 @aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @limiter.limit("120 per hour; 600 per day")
 @require_oauth_token
 @handle_exceptions(default_exception=DocumentError, logger=logger)
-def aegis_get_brands():
-    """Catalogo de marcas disponibles para filtrado de alertas"""
-    brands = CR.aegis_config().brands
-    return {"count": len(brands), "brands": brands}
+def aegis_search_products(args):
+    """Buscar productos vigilables en el índice CPE del espejo local de NVD"""
+    products = AegisOrgProfileManager.search_products(args["q"], limit=args["limit"])
+    return {"count": len(products), "products": products}
 
 
 # ============================================================================
@@ -725,6 +726,24 @@ def get_campaign(campaign_id):
     user = get_current_user()
     mgr = CampaignManager(user)
     return mgr.get_campaign(campaign_id)
+
+
+@aegis_blp.delete("/campaigns/<int:campaign_id>")
+@aegis_blp.response(200, description="Campaign deleted")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@aegis_blp.alt_response(404, schema=ErrorSchema, description="Campaign not found")
+@limiter.limit("30 per hour; 100 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_DELETE])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def delete_campaign(campaign_id):
+    """Eliminar una campaña y su tracking — invalida los enlaces de quiz ya enviados"""
+    user = get_current_user()
+    mgr = CampaignManager(user)
+    mgr.delete_campaign(campaign_id)
+    logger.info(f"Campaña {campaign_id} eliminada | user={current_actor()}")
+    return {"message": "Campaña eliminada correctamente", "campaignId": campaign_id}
 
 
 @aegis_blp.post("/campaigns/<int:campaign_id>/launch")

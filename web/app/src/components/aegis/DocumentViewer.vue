@@ -36,6 +36,8 @@
             v-if="viewerDoc.data.status === 'done'"
             type="button"
             class="toolbar-btn toolbar-btn--campaign"
+            :disabled="!hasQuestions"
+            :title="hasQuestions ? 'Lanzar una campaña con esta píldora' : 'Añade preguntas al test desde el editor para poder lanzar una campaña'"
             @click="emit('campaign')"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -92,11 +94,15 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useUtils } from '@/composables/useUtils'
 
 const { formatDate } = useUtils()
-defineProps({ viewerDoc: { type: Object, default: () => ({ loading: false, data: null }) } })
+const props = defineProps({ viewerDoc: { type: Object, default: () => ({ loading: false, data: null }) } })
+
+// Sin preguntas el backend rechaza el lanzamiento (CampaignNoQuestionsError);
+// mejor decirlo aquí que dejar al usuario rellenar el modal para nada.
+const hasQuestions = computed(() => (props.viewerDoc?.data?.pill?.questions?.length || 0) > 0)
 const emit = defineEmits(['close', 'export', 'preview', 'edit', 'campaign'])
 const exportOpen = ref(false)
 
@@ -117,17 +123,18 @@ function emitExport(fmt) { exportOpen.value = false; emit('export', fmt) }
 .doc-id, .doc-topic { font-weight: 600; color: var(--text-dim); font-family: var(--font-mono); font-size: var(--fs-md); }
 .toolbar-spacer { flex: 1; }
 .toolbar-btn { padding: 0.25rem 0.6rem; font-size: var(--fs-md); font-weight: 600; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer; transition: all 0.2s; }
-.toolbar-btn:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.toolbar-btn:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .toolbar-btn--campaign { display: inline-flex; align-items: center; gap: 0.3rem; background: var(--accent-dim); border-color: var(--accent); color: var(--accent-bright); }
-.toolbar-btn--campaign:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); box-shadow: 0 0 14px var(--accent-dim); }
+.toolbar-btn--campaign:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); border-color: var(--accent); box-shadow: 0 0 14px var(--accent-dim); }
+.toolbar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .toolbar-close { border: none; background: none; font-size: var(--fs-lg); padding: 0 0.25rem; line-height: 1; }
 .toolbar-close:hover { background: none; color: var(--danger); }
 .export-dropdown { position: relative; }
 .export-menu { position: absolute; right: 0; top: 100%; margin-top: 3px; z-index: 20; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; overflow: hidden; min-width: 100px; }
 .export-menu button { display: block; width: 100%; text-align: left; padding: 0.35rem 0.6rem; font-size: var(--fs-md); background: none; border: none; color: var(--text-dim); cursor: pointer; transition: background 0.15s; }
 .export-menu button:hover { background: var(--accent); color: var(--on-accent); }
-.pill-body { padding: 1.25rem; overflow-y: auto; flex: 1; }
-.pill-title { font-size: var(--fs-xl); font-weight: 800; color: var(--text); margin: 0 0 0.2rem; font-family: var(--font-display); }
+.pill-body { padding: 1.25rem 4rem; overflow-y: auto; flex: 1; }
+.pill-title { font-size: var(--fs-3xl); font-weight: 800; color: var(--text); margin: 0 0 0.8rem; font-family: var(--font-epic); text-align: center; }
 .pill-subtitle { font-size: var(--fs-lg); color: var(--text-dim); margin: 0 0 1.25rem; }
 .pill-section { margin-bottom: 1.25rem; }
 .pill-section h3 { font-size: var(--fs-xl); font-weight: 700; color: var(--accent); margin: 0 0 0.65rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--border); font-family: var(--font-display); }

@@ -29,7 +29,12 @@ def _build_strategy(name: str) -> EmailStrategy:
     overrides = CR.herald_config().options_for(name)
 
     if name == "smtp":
-        creds = CR.get_smtp_environment()
+        try:
+            creds = CR.get_smtp_environment()
+        except ValueError as exc:
+            # get_smtp_environment lanza ValueError pelado; aquí dentro es un
+            # fallo de configuración y debe salir como tal.
+            raise EmailConfigurationError(str(exc)) from exc
         return SmtpStrategy(
             host=overrides.get("host", "localhost"),
             port=int(overrides.get("port", 587)),

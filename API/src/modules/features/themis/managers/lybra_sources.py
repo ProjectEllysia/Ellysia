@@ -9,7 +9,7 @@ a fresh Nmap corroborator would be redundant. Each :class:`ServiceSource`
 implementation answers all of that for its mode in one place instead of a
 condition re-checked at each of those call sites.
 
-``run_scan`` builds a :class:`ServiceSource` (via :meth:`ServiceSource.for_args`)
+``run_scan`` builds a :class:`ServiceSource` (via :meth:`ServiceSource.build_for_args`)
 purely to resolve and validate the scan's target before the scan record exists;
 the TaskQueue itself keeps serializing the same primitive arguments it always did
 (``source_scan_id`` / ``services`` / ``discover_ports``), and the worker rebuilds

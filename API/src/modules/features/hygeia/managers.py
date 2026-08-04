@@ -20,7 +20,7 @@ from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import utcnow_naive
 from src.modules.system.taskqueue import TaskQueue, job_context
-from src.modules.tools.herald import EmailMessage, build_mailer
+from src.modules.tools.herald import EmailMessage, build_mailer, render_email
 from src.modules.users.model import User
 
 from .exceptions import (
@@ -62,6 +62,42 @@ class HygeiaAssetManager:
 
     def __init__(self, user: User) -> None:
         self.user = user
+
+    @staticmethod
+    def inventory_products(user_id: int) -> list[str]:
+        """Nombres distintos del software instalado en los activos del usuario.
+
+        Lectura pura, pensada para que Aegis sepa de qué productos habla la
+        organización sin que nadie los teclee. Devuelve nombres tal como los
+        reporta el agente ("Microsoft Edge", "IntelliJ IDEA 2025.2.2"); quien
+        los consuma decide cómo resolverlos a coordenadas CPE.
+
+        No exige que el agente esté vivo ahora mismo: ``inventory`` guarda el
+        último escaneo completo y no caduca, así que un portátil apagado sigue
+        contando. Lo contrario haría que una píldora generada de noche hablara
+        de cosas distintas que la misma de día.
+        """
+        repo = build_repository(MonitoredAssetRepository)
+        names: list[str] = []
+        seen: set[str] = set()
+        for asset in repo.get_by_user(user_id):
+            for entry in (asset.inventory or []):
+                name = (entry.get("name") or "").strip()
+                key = name.lower()
+                if name and key not in seen:
+                    seen.add(key)
+                    names.append(name)
+        return names
+
+    @staticmethod
+    def has_inventory(user_id: int) -> bool:
+        """Si el usuario tiene algún activo que haya reportado inventario.
+
+        Es lo que decide si la UI de Aegis ofrece siquiera la opción de
+        deducir los productos de los agentes.
+        """
+        repo = build_repository(MonitoredAssetRepository)
+        return any(asset.inventory for asset in repo.get_by_user(user_id))
 
     def create_asset(self, hostname: str, os_name: Optional[str], labels: dict) -> dict:
         """
@@ -848,11 +884,21 @@ class HygeiaNotifyManager:
             logger.error(f"Usuario {asset.user_id} no encontrado para notificar anomalía {anomaly_id}")
             return
 
+        html_body, text_body = render_email(
+            "anomaly",
+            hostname=asset.hostname,
+            kind=anomaly.kind,
+            metric=anomaly.metric,
+            value=anomaly.value,
+            threshold=anomaly.threshold,
+            recipient_name=user.first_name,
+        )
         message = EmailMessage(
             to=user.email,
             to_name=user.first_name,
             subject=f"[Hygeia] Anomalía crítica en {asset.hostname}",
-            html_body=HygeiaNotifyManager._render_notify_email_html(asset, anomaly),
+            html_body=html_body,
+            text_body=text_body,
         )
         try:
             build_mailer("hygeia").send(message)
@@ -860,19 +906,3 @@ class HygeiaNotifyManager:
         except Exception as exc:
             logger.error(f"Fallo enviando notificación de anomalía {anomaly_id}: {exc}")
 
-    @staticmethod
-    def _render_notify_email_html(asset: MonitoredAsset, anomaly: Anomaly) -> str:
-        """HTML mínimo del correo de aviso: qué activo, qué anomalía, qué valor la disparó."""
-        metric_line = (
-            f"<p>Métrica: <strong>{anomaly.metric}</strong> — "
-            f"valor {anomaly.value} (umbral {anomaly.threshold})</p>"
-            if anomaly.metric else ""
-        )
-        return (
-            f"<p>Hola,</p>"
-            f"<p>Se ha detectado una anomalía <strong>crítica</strong> en el activo "
-            f"<strong>{asset.hostname}</strong>.</p>"
-            f"<p>Tipo: <strong>{anomaly.kind}</strong></p>"
-            f"{metric_line}"
-            f"<p>Puedes revisar el detalle desde tu panel de Hygeia.</p>"
-        )

@@ -12,8 +12,9 @@
 
     <p v-if="!expanded" class="op-summary">
       {{ store.tweaks.company || "Sin configurar todavía" }}
-      <span v-if="store.selectedBrands.length">
-        · {{ store.selectedBrands.length }} marca(s)</span
+      <span v-if="usingInventory"> · productos de mis agentes</span>
+      <span v-else-if="store.trackedProducts.length">
+        · {{ store.trackedProducts.length }} producto(s)</span
       >
     </p>
 
@@ -139,37 +140,71 @@
             </div>
           </div>
 
-          <div class="form-group">
-            <label>Marcas habituales</label>
-            <div class="selected-brands" v-if="store.selectedBrands.length">
+          <!-- Solo se ofrece si hay algún agente que haya reportado
+               inventario; si no, la preferencia queda latente. -->
+          <div class="form-group" v-if="store.hygeiaInventoryAvailable">
+            <label class="switch-row">
+              <input type="checkbox" v-model="store.useHygeiaInventory" />
+              <span>
+                Deducir los productos de mis agentes
+                <small
+                  >Usa el software que Hygeia inventaría en tus activos en
+                  lugar de la lista de abajo.</small
+                >
+              </span>
+            </label>
+          </div>
+
+          <div class="form-group" :class="{ 'form-group--muted': usingInventory }">
+            <label for="op-products">Productos vigilados</label>
+            <p class="field-hint" v-if="usingInventory">
+              Ahora mismo se usan los de tus agentes. Esta lista queda como
+              alternativa si desactivas la opción de arriba.
+            </p>
+
+            <div class="selected-brands" v-if="store.trackedProducts.length">
               <span
-                v-for="b in store.selectedBrands"
-                :key="b"
+                v-for="p in store.trackedProducts"
+                :key="`${p.vendor}:${p.product}`"
                 class="brand-tag"
               >
-                {{ b }}
+                {{ p.vendor }}<template v-if="p.product"> · {{ p.product }}</template>
                 <button
                   type="button"
                   class="brand-remove"
-                  @click="removeBrand(b)"
+                  :aria-label="`Quitar ${p.vendor} ${p.product}`"
+                  @click="store.removeTrackedProduct(p)"
                 >
                   &times;
                 </button>
               </span>
             </div>
-            <select
-              class="input select"
-              :value="''"
-              @change="
-                addBrand($event.target.value);
-                $event.target.value = '';
-              "
+
+            <input
+              id="op-products"
+              v-model="productQuery"
+              type="search"
+              class="input"
+              placeholder="Busca un producto: windows, firefox, apache…"
+              autocomplete="off"
+              @input="onProductQuery"
+            />
+            <p class="field-hint" v-if="store.searchingProducts">Buscando…</p>
+            <p
+              class="field-hint"
+              v-else-if="productQuery.trim().length >= 2 && !store.productResults.length"
             >
-              <option value="">+ Añadir marca</option>
-              <option v-for="b in availableBrands" :key="b" :value="b">
-                {{ b }}
-              </option>
-            </select>
+              Sin coincidencias en el catálogo de vulnerabilidades.
+            </p>
+
+            <ul class="product-results" v-if="store.productResults.length">
+              <li v-for="p in store.productResults" :key="`${p.vendor}:${p.product}`">
+                <button type="button" @click="pickProduct(p)">
+                  <span class="product-name">{{ p.displayName }}</span>
+                  <span class="product-cpe">{{ p.vendor }}:{{ p.product }}</span>
+                </button>
+              </li>
+            </ul>
           </div>
 
           <button
@@ -194,7 +229,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useAegisStore } from "@/stores/aegisStore";
 
 const store = useAegisStore();
@@ -203,15 +238,28 @@ const store = useAegisStore();
 // mes); expandido si es la primera vez. Se ajusta tras cargar el perfil.
 const expanded = ref(true);
 
-const availableBrands = computed(() =>
-  (store.brands || []).filter((b) => !store.selectedBrands.includes(b)),
+const productQuery = ref("");
+
+/** Origen efectivo de los productos: los agentes mandan cuando están activos. */
+const usingInventory = computed(
+  () => store.hygeiaInventoryAvailable && store.useHygeiaInventory,
 );
-function addBrand(brand) {
-  if (brand) store.selectedBrands.push(brand);
+
+// Debounce: cada pulsación consultaría el índice CPE, y el endpoint está
+// limitado a 120 peticiones/hora.
+let queryTimer = null;
+function onProductQuery() {
+  clearTimeout(queryTimer);
+  const term = productQuery.value;
+  queryTimer = setTimeout(() => store.searchProducts(term), 250);
 }
-function removeBrand(brand) {
-  store.selectedBrands = store.selectedBrands.filter((b) => b !== brand);
+
+function pickProduct(product) {
+  store.addTrackedProduct(product);
+  productQuery.value = "";
 }
+
+onUnmounted(() => clearTimeout(queryTimer));
 
 async function handleSave() {
   const ok = await store.saveOrgProfile();
@@ -358,6 +406,74 @@ onMounted(async () => {
 }
 .brand-remove:hover {
   opacity: 1;
+}
+
+/* ── Buscador de productos (índice CPE) ── */
+.field-hint {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  margin: 0.2rem 0;
+}
+.form-group--muted .selected-brands,
+.form-group--muted .input {
+  opacity: 0.6;
+}
+.switch-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+.switch-row input {
+  margin-top: 0.25rem;
+  accent-color: var(--accent);
+  flex: 0 0 auto;
+}
+.switch-row small {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.product-results {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  max-height: 11rem;
+  overflow-y: auto;
+  border: 1px solid var(--border-med);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.product-results button {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text);
+}
+.product-results button:hover {
+  background: var(--accent-dim);
+}
+.product-results button:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: -2px;
+}
+.product-name {
+  font-size: var(--fs-md);
+}
+.product-cpe {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 .btn-save-profile {
   margin-top: 0.2rem;

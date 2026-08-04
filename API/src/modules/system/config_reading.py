@@ -443,13 +443,10 @@ class AegisConfig:
     vulnerabilities_antiquity: int = 5
     """Antigüedad máxima (años) de una alerta para seguir considerándola vigente."""
 
-    brands: list[dict] = field(default_factory=list)
-    """Catálogo de fabricantes vigilados, con su equivalencia en CIRCL.
-
-    Cada entrada lleva ``label``, ``circl_vendor``, ``circl_product`` y una lista
-    de ``aliases`` para resolver los nombres que la gente escribe de otra forma
-    ("hewlett packard enterprise" → HPE).
-    """
+    # ``brands`` (catálogo fijo de 19 fabricantes con su equivalencia en CIRCL)
+    # se retiró: los productos vigilados son ahora de cada usuario y salen del
+    # índice CPE del espejo local de NVD (``AegisOrgProfile.tracked_products``,
+    # poblado vía ``GET /aegis/products``), no de la configuración global.
 
     prompts: dict = field(default_factory=dict)
     """Par ``system`` / ``userTemplate`` que se le pasa a Scribe."""
@@ -506,6 +503,15 @@ class HeraldConfig(_StrategySelection):
     """Capa de envío de correo (relay SMTP)."""
 
     default_strategy: str = "smtp"
+
+    branding: dict = field(default_factory=dict)
+    """Marca que pintan las plantillas: ``productName``, ``accentColor``,
+    ``logoUrl``, ``supportEmail``, ``footerNote``. Lo que no se declare aquí
+    lo rellena ``herald.rendering._DEFAULT_BRAND``."""
+
+    templates_dir: str = ""
+    """Directorio externo con plantillas que pisan a las del paquete. Vacío
+    (lo normal) = solo se usan las de ``herald/templates/``."""
 
 
 def scribe_config() -> ScribeConfig: # type: ignore

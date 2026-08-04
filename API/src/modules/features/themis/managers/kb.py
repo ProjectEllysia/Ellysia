@@ -1,7 +1,13 @@
-"""KbSyncManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
+"""KbSyncManager y KbQueryManager — escritura y lectura de la KB local.
+
+``KbSyncManager`` se extrajo de themis/managers.py (Fase 3 del refactor de
+estructura). ``KbQueryManager`` es posterior y es el contrato de lectura que
+consumen otros módulos.
+"""
 
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Optional
 import src.modules.system.config_reading as CR
@@ -169,4 +175,148 @@ class KbSyncManager:
             logger.exception("KB sync failed")
         finally:
             close_all()
+
+
+# =============================================================================
+# CONSULTA DE LA BASE DE CONOCIMIENTO (contrato público entre módulos)
+# =============================================================================
+#
+# La KB es un espejo local de NVD/KEV/EPSS que ya se refresca cada noche, y
+# tiene más consumidores potenciales que el escáner: Aegis necesita saber qué
+# ha sido notable en los productos de una organización para redactar sus
+# píldoras, y hasta ahora se lo preguntaba por HTTP a cve.circl.lu — que es
+# otro espejo de NVD, más lento, sin KEV ni EPSS y con la red de por medio.
+#
+# Este manager es la puerta por la que entran esos consumidores. Devuelve
+# dataclasses planas, nunca entidades del ORM: una CveEntry viva fuera de la
+# sesión que la cargó es una fuente de DetachedInstanceError, y además ata al
+# consumidor al esquema de Themis. El acoplamiento se queda en la forma de
+# estos DTOs.
+
+
+@dataclass(frozen=True)
+class CveAdvisory:
+    """Un CVE de la KB local, listo para consumir fuera de Themis."""
+
+    cve_id:      str
+    vendor:      str
+    product:     str
+    published:   Optional[datetime] = None
+    severity:    str = ""
+    cvss_score:  Optional[float] = None
+    description: str = ""
+    """Texto de NVD. **En inglés** — la KB guarda deliberadamente ``lang='en'``.
+    Sirve como contexto para un modelo que redacte en otro idioma; mostrarlo
+    tal cual a un usuario final sería una regresión."""
+    kev:         bool = False
+    """Aparece en el catálogo de CISA de vulnerabilidades explotadas."""
+    epss:        Optional[float] = None
+    """Probabilidad estimada de explotación en 30 días (0-1)."""
+
+    @property
+    def url(self) -> str:
+        return f"https://nvd.nist.gov/vuln/detail/{self.cve_id}"
+
+
+@dataclass(frozen=True)
+class KbProduct:
+    """Un producto del índice CPE, para poblar un selector."""
+
+    vendor:       str
+    product:      str
+    display_name: str
+
+
+class KbQueryManager:
+    """Lectura de la KB local para otros módulos.
+
+    Solo lee: la escritura es de :class:`KbSyncManager`. Usa
+    ``build_repository`` en vez de ``UnitOfWork`` justamente por eso — no
+    demarca transacción porque no hay nada que confirmar.
+    """
+
+    def advisories_for_products(
+        self,
+        products: List[tuple],
+        since: datetime,
+        min_cvss: Optional[float] = None,
+        limit_per_product: int = 5,
+        limit_total: int = 20,
+    ) -> List[CveAdvisory]:
+        """Avisos recientes para unas coordenadas CPE, enriquecidos con KEV/EPSS.
+
+        Args:
+            products: pares ``(vendor, product)``.
+            since: fecha de publicación mínima.
+            min_cvss: suelo de CVSS opcional.
+            limit_per_product: tope por producto, para que uno ruidoso no
+                desplace a los demás.
+            limit_total: tope global tras ordenar por fecha.
+
+        Returns:
+            Los avisos, del más reciente al más antiguo.
+        """
+        from src.modules.infrastructure.session import build_repository
+
+        repo = build_repository(KbRepository)
+        rows = repo.recent_cves_for_products(
+            products, since, min_cvss=min_cvss, limit_per_product=limit_per_product,
+        )
+        if not rows:
+            return []
+
+        # Dos consultas en lote para todo el conjunto, no dos por CVE.
+        cve_ids = [cve.cve_id for _, _, cve in rows]
+        kev_ids = repo.kev_ids_in(cve_ids)
+        epss_by_id = repo.epss_scores_for(cve_ids)
+
+        advisories = [
+            CveAdvisory(
+                cve_id      = cve.cve_id,
+                vendor      = vendor,
+                product     = product,
+                published   = cve.published,
+                severity    = cve.severity or "",
+                cvss_score  = cve.cvss_score,
+                description = cve.description or "",
+                kev         = cve.cve_id in kev_ids,
+                epss        = epss_by_id.get(cve.cve_id),
+            )
+            for vendor, product, cve in rows
+        ]
+        advisories.sort(key=lambda a: a.published or datetime.min, reverse=True)
+        return advisories[:limit_total]
+
+    def search_products(self, term: str, limit: int = 20) -> List[KbProduct]:
+        """Productos del índice CPE que empiezan por ``term``."""
+        from src.modules.infrastructure.session import build_repository
+
+        rows = build_repository(KbRepository).search_products(term, limit=limit)
+        return [
+            KbProduct(vendor=vendor, product=product, display_name=display_name)
+            for vendor, product, display_name in rows
+        ]
+
+    def resolve_products(self, names: List[str]) -> List[tuple]:
+        """Traduce nombres de producto a coordenadas CPE ``(vendor, product)``.
+
+        Para resolución automática (el inventario de un agente), donde sí
+        importa que el índice descarte los nombres ambiguos: elegir un vendor
+        al azar para "git" casaría CVEs contra software que no es. Los nombres
+        que no resuelven se descartan en silencio, que es lo correcto para un
+        inventario lleno de software sin presencia en NVD.
+        """
+        from src.modules.infrastructure.session import build_repository
+        from ..lybra import normalize_product_name
+
+        repo = build_repository(KbRepository)
+        resolved: list[tuple] = []
+        for name in names:
+            key = normalize_product_name(name or "")
+            if not key:
+                continue
+            pair = repo.resolve_product_alias(key)
+            if pair and pair not in resolved:
+                resolved.append(pair)
+        return resolved
 
