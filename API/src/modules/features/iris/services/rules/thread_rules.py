@@ -20,7 +20,8 @@ import re
 
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
-from ..shared import esp_msgid_domains, extract_domain, registrable_domain
+from ..wordlists import esp_msgid_domains
+from ..text import extract_domain, registrable_domain
 from ..parsers import parse_received_line
 
 REPLY_PREFIXES = [

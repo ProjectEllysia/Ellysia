@@ -27,7 +27,7 @@ from typing import List
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
 from ..parsers import _hop_timestamp, _is_private_ip, build_path, parse_received_line
-from ..shared import extract_domain, registrable_domain
+from ..text import extract_domain, registrable_domain
 
 MAX_FUTURE_DAYS = 1
 MAX_PAST_DAYS = 365

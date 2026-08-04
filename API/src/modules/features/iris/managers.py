@@ -35,7 +35,7 @@ from .exceptions import (
 from .model import IrisAnalysis, IrisDocument, IrisRuleResult
 from .repositories import IrisAnalysisRepository, IrisReportRepository, IrisRuleResultRepository
 from .services.rules import iris_rules, RuleResult
-from .services.shared import extract_domain, is_free_provider, url_host
+from .services.text import extract_domain, is_free_provider, url_host
 from .services import parse_raw_message
 from .services.parsers import build_path, parse_received_line
 from .services.reports import IrisPDFCreator

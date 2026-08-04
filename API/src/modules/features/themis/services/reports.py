@@ -1626,7 +1626,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
         from ..lybra import score_finding
         # Diferido como el resto de imports de esta función: `managers` importa
         # `services`, así que a nivel de módulo sería un ciclo.
-        from ..managers.lybra_engine import LybraEngineManager
+        from ..managers.lybra import LybraEngineManager
 
         rows = build_repository(ScanRepository).get_findings_by_scan(self.scan.id)
         exposure = LybraEngineManager.exposure_for(self.scan)

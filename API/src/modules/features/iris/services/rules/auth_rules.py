@@ -36,7 +36,7 @@ import re
 
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
-from ..shared import extract_domain, registrable_domain
+from ..text import extract_domain, registrable_domain
 from ..parsers import parse_received_line
 
 

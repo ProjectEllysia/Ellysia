@@ -26,10 +26,8 @@ import re
 
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
-from ..shared import (
-    esp_msgid_domains, esp_tracker_domains, extract_domain,
-    is_free_provider, registrable_domain,
-)
+from ..wordlists import esp_msgid_domains, esp_tracker_domains
+from ..text import extract_domain, is_free_provider, registrable_domain
 
 
 def _is_esp_domain(domain: str | None) -> bool:

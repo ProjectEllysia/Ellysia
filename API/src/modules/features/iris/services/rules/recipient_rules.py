@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
-from ..shared import undisclosed_patterns
+from ..wordlists import undisclosed_patterns
 
 
 @iris_rules.register(

@@ -1,6 +1,6 @@
 """Where a Lybra scan gets its services from — the three modes of roadmap §0.9.
 
-Extracted out of ``lybra_engine.py`` because the manager kept re-asking the same
+Extracted out of ``lybra/engine.py`` because the manager kept re-asking the same
 question — "are we over a prior Nmap scan, an external payload, or doing our own
 discovery?" — at every step of the pipeline: resolving the target, resolving the
 services, deciding whether fingerprinting/active checks may touch the network,
@@ -20,18 +20,35 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Callable, List, Optional
 
-from src.modules.features.themis.managers.lybra_engine import LybraEngineManager
 import src.modules.system.config_reading as CR
 from src.modules.infrastructure import UnitOfWork
-from ..repositories import ScanRepository
-from ..exceptions import ScanNotFoundError, TargetNotAuthorizedError
-from ..lybra import Service, services_from_open_ports, services_from_discovered_ports
-from .authorized_target import AuthorizedTargetManager
-from .scan import ScanManager
+from ...repositories import ScanRepository
+from ...exceptions import ScanNotFoundError, TargetNotAuthorizedError
+from ...lybra import Service, services_from_open_ports, services_from_discovered_ports
+from ..authorized_target import AuthorizedTargetManager
+from ..scan import ScanManager
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DiscoveryProbes:
+    """The three network-probing capabilities ``SelfDiscovery`` needs from
+    the calling manager, passed as plain callables instead of the whole
+    manager object (E1).
+
+    Before, ``resolve_services`` took the full ``LybraEngineManager`` just to
+    reach three of its methods — which forced this module to import that
+    manager's *class* purely for the type hint, creating a real import cycle
+    with ``lybra/engine.py`` (worked around before with two deferred imports
+    there). Handing over three bound methods instead removes the need for
+    this module to know the manager's type at all.
+    """
+    is_host_reachable: Callable[..., bool]
+    discover_ports: Callable[[str, Optional[list]], Optional[list]]
+    discover_udp_ports: Callable[[str], list]
 
 
 @dataclass(frozen=True)
@@ -101,15 +118,13 @@ class ServiceSource:
     def resolve_services(
         self,
         scan_repo: ScanRepository,
-        manager: LybraEngineManager,
+        probes: DiscoveryProbes,
         target: Optional[str]
     ) -> Optional[ResolvedServices]:
         """Obtain this mode's services inside the caller's transaction.
 
-        ``manager`` is the calling ``LybraEngineManager``— only the
-        self-discovery mode uses it, to reach ``is_host_reachable`` and
-        ``_discover_ports``, which stay manager methods since they own the
-        network/DB access that already lives there.
+        ``probes`` bundles the network-probing capabilities only the
+        self-discovery mode uses (E1) — the other two modes ignore it.
 
         Returns ``None`` for an unrecoverable failure (host unreachable, probe
         blew up) — the caller marks the scan FAILED and stops. This is
@@ -156,7 +171,7 @@ class NmapSourceScan(ServiceSource):
     def resolve_services(
         self,
         scan_repo: ScanRepository,
-        manager: LybraEngineManager,
+        probes: DiscoveryProbes,
         target: Optional[str]
     ) -> ResolvedServices:
         open_ports = scan_repo.get_open_ports_for_scan(self.source_scan_id)
@@ -191,7 +206,7 @@ class ExternalPayload(ServiceSource):
     def resolve_services(
         self,
         scan_repo: ScanRepository,
-        manager: LybraEngineManager,
+        probes: DiscoveryProbes,
         target: Optional[str]
     ) -> ResolvedServices:
         return ResolvedServices(
@@ -230,13 +245,13 @@ class SelfDiscovery(ServiceSource):
     def resolve_services(
             self,
             scan_repo: ScanRepository,
-            manager: LybraEngineManager,
+            probes: DiscoveryProbes,
             target: Optional[str]
     ) -> Optional[ResolvedServices]:
         discovered_ports: list = []
         udp_ports: list = []
         if target:
-            if CR.host_reachability_check().enabled and not manager.is_host_reachable(
+            if CR.host_reachability_check().enabled and not probes.is_host_reachable(
                 target,
                 port=CR.host_reachability_check().port,
                 timeout=CR.host_reachability_check().timeout,
@@ -244,7 +259,7 @@ class SelfDiscovery(ServiceSource):
                 logger.warning(f"Host '{target}' inalcanzable.")
                 return None
 
-            discovered = manager._discover_ports(target, self.discover_ports)  # pylint: disable=protected-access
+            discovered = probes.discover_ports(target, self.discover_ports)
             if discovered is None:
                 logger.error("Descubrimiento de puertos fallido para %s", target)
                 return None
@@ -253,7 +268,7 @@ class SelfDiscovery(ServiceSource):
             # partir de la lista TCP del usuario — self.discover_ports es una
             # lista de puertos TCP. Best-effort por diseño de
             # _discover_udp_ports: nunca aborta el descubrimiento TCP.
-            udp_ports = manager._discover_udp_ports(target)  # pylint: disable=protected-access
+            udp_ports = probes.discover_udp_ports(target)
 
         services = services_from_discovered_ports(discovered_ports)
         services += services_from_discovered_ports(udp_ports, protocol="udp")

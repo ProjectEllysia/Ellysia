@@ -27,10 +27,10 @@ import re
 
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
-from ..shared import (
-    alarming_emojis, exotic_charsets, extract_display_name, extract_domain,
-    is_free_provider, phrase_matches, registrable_domain, strip_html,
-    suspicious_tlds,
+from ..wordlists import alarming_emojis, exotic_charsets, phrase_matches, suspicious_tlds
+from ..text import (
+    extract_display_name, extract_domain, is_free_provider,
+    registrable_domain, strip_html,
 )
 from ..parsers import decode_mime_words
 

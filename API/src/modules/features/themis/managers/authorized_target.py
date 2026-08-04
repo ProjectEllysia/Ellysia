@@ -1,6 +1,6 @@
 """AuthorizedTargetManager — el registro de objetivos autorizados (roadmap §6).
 
-Extraído de ``lybra_engine.py``: no comparte modelo, repositorio ni lógica con
+Extraído de ``lybra/engine.py``: no comparte modelo, repositorio ni lógica con
 ``LybraEngineManager`` — es un gate legal transversal, consultado también por
 ``format_scan`` y, en el futuro, por cualquier operación que toque la red del
 objetivo. Vivía junto al motor solo porque Lybra fue su primer consumidor.

@@ -36,9 +36,11 @@ from .programed import ProgramedScanManager
 from .scan_folder import ScanFolderManager
 from .scan_history import ScanHistoryManager
 from .traceroute import TracerouteManager
-from .thirdparty_scans_managers import NmapScanManager, NiktoScanManager, NucleiScanManager
+from .nmap import NmapScanManager
+from .nikto import NiktoScanManager
+from .nuclei import NucleiScanManager
 from .authorized_target import AuthorizedTargetManager
-from .lybra_engine import LybraEngineManager
+from .lybra import LybraEngineManager
 from .kb_sync import CveAdvisory, KbProduct, KbQueryManager, KbSyncManager
 from .reports import ThemisReportManager
 

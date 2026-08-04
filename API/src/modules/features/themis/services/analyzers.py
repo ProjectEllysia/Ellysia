@@ -620,7 +620,7 @@ class LybraAIWriter:
         from ..repositories import ScanRepository
         # Diferido como el resto de imports de esta función: `managers` importa
         # `services`, así que a nivel de módulo sería un ciclo.
-        from ..managers.lybra_engine import LybraEngineManager
+        from ..managers.lybra import LybraEngineManager
 
         scan_data = {
             "target": scan.target,

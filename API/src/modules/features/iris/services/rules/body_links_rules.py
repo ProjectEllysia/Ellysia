@@ -31,10 +31,8 @@ import numpy as np
 
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
-from ..shared import (
-    analyze_url, esp_tracker_domains, extract_domain, redirect_params,
-    registrable_domain, url_host,
-)
+from ..wordlists import esp_tracker_domains, redirect_params
+from ..text import analyze_url, extract_domain, registrable_domain, url_host
 
 
 def _max_score_floor() -> float:

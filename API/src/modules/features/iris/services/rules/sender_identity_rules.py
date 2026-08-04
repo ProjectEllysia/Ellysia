@@ -30,11 +30,14 @@ import re
 
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
-from ..shared import (
-    brand_trusted_domains, canonical_brands, extract_display_name,
-    extract_domain, is_free_provider, is_plausible_typo, levenshtein,
-    multi_level_tlds, normalize_homoglyphs, registrable_domain,
-    registrable_label, subdomain_action_words, suspicious_tlds,
+from ..wordlists import (
+    brand_trusted_domains, canonical_brands, multi_level_tlds,
+    subdomain_action_words, suspicious_tlds,
+)
+from ..text import (
+    extract_display_name, extract_domain, is_free_provider,
+    is_plausible_typo, levenshtein, normalize_homoglyphs,
+    registrable_domain, registrable_label,
 )
 from ..parsers import decode_mime_words
 

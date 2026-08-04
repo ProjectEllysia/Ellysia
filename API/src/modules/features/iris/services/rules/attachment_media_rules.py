@@ -25,11 +25,11 @@ import zipfile
 
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
-from ..shared import (
-    dangerous_extensions, esp_tracker_domains, extract_domain,
-    macro_extensions, registrable_domain, strip_html,
-    suspicious_mime_types, url_host,
+from ..wordlists import (
+    dangerous_extensions, esp_tracker_domains,
+    macro_extensions, suspicious_mime_types,
 )
+from ..text import extract_domain, registrable_domain, strip_html, url_host
 
 _IMG_SRC_RE = re.compile(r'<img\b[^>]*src\s*=\s*["\']([^"\']+)["\']',
                           re.IGNORECASE)

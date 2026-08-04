@@ -8,18 +8,18 @@ from src.modules.system.taskqueue import ITaskQueue, job_context
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc
-from ..repositories import (
+from ...repositories import (
     ScanRepository,
     KbRepository,
 )
-from ..model import (
+from ...model import (
     Finding,
     LybraScan,
     Scan,
     ScanStatus,
     ScanType,
 )
-from ..lybra import (
+from ...lybra import (
     LybraEngine,
     Service,
     compute_dedup_key,
@@ -43,17 +43,20 @@ from ..lybra import (
     scan_ports_sync,
     scan_udp_ports_sync,
 )
-from ..lybra.ingest import select_for_services, translate_all
-from ..services import _Task
-from ..services.nuclei_templates import NucleiTemplateStore
-from ..exceptions import (
+from ...lybra.ingest import select_for_services, translate_all
+from ...services import _Task
+from ...services.nuclei_templates import NucleiTemplateStore
+from ...exceptions import (
     ScanNotFoundError,
     FindingNotFoundError,
 )
 
-from .scan import ScanManager
-from .thirdparty_scans_managers import NmapScanManager, NiktoScanManager, NucleiScanManager
-from .authorized_target import AuthorizedTargetManager
+from ..scan import ScanManager
+from ..nmap import NmapScanManager
+from ..nikto import NiktoScanManager
+from ..nuclei import NucleiScanManager
+from ..authorized_target import AuthorizedTargetManager
+from .sources import ServiceSource, DiscoveryProbes
 
 
 logger = logging.getLogger(__name__)
@@ -144,8 +147,6 @@ class LybraEngineManager(ScanManager):
         Returns:
             Primary key of the created LybraScan record.
         """
-        from .lybra_sources import ServiceSource  # ciclo de imports: lybra_sources importa este módulo
-
         source = ServiceSource.build_for_args(source_scan_id, services, discover_ports)
         scan_target = source.scan_target(user_id, target)
 
@@ -204,9 +205,12 @@ class LybraEngineManager(ScanManager):
         pattern). Runs synchronously; safe to call directly in tests without a
         worker.
         """
-        from .lybra_sources import ServiceSource
-
         source = ServiceSource.build_for_args(source_scan_id, services_payload, discover_ports)
+        probes = DiscoveryProbes(
+            is_host_reachable=self.is_host_reachable,
+            discover_ports=self._discover_ports,
+            discover_udp_ports=self._discover_udp_ports,
+        )
         try:
             self.update_scan_status(scan_id, ScanStatus.RUNNING)
 
@@ -223,7 +227,7 @@ class LybraEngineManager(ScanManager):
                     and AuthorizedTargetManager.is_authorized(user_id, source_target)
                 )
 
-                resolved = source.resolve_services(scan_repo, self, source_target)
+                resolved = source.resolve_services(scan_repo, probes, source_target)
                 if resolved is None:
                     self.update_scan_status(scan_id, ScanStatus.FAILED)
                     return

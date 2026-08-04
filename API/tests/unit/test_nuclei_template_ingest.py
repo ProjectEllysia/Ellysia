@@ -238,30 +238,30 @@ def test_ingest_is_disabled_by_default():
 
 def test_manager_skips_ingestion_entirely_when_disabled(monkeypatch):
     """Con el flag apagado no se toca ni el almacén de plantillas."""
-    from src.modules.features.themis.managers.lybra_engine import LybraEngineManager
+    from src.modules.features.themis.managers.lybra.engine import LybraEngineManager
 
     def _explode():
         raise AssertionError("no debería construirse el almacén con la ingesta apagada")
 
     monkeypatch.setattr(
-        "src.modules.features.themis.managers.lybra_engine.NucleiTemplateStore", _explode
+        "src.modules.features.themis.managers.lybra.engine.NucleiTemplateStore", _explode
     )
     assert LybraEngineManager._ingested_checks(object(), [_NGINX]) == []
 
 
 def test_manager_falls_back_to_the_own_feed_when_the_tree_is_missing(monkeypatch):
     """Activar la ingesta sin plantillas instaladas avisa, no revienta el escaneo."""
-    from src.modules.features.themis.managers.lybra_engine import LybraEngineManager
+    from src.modules.features.themis.managers.lybra.engine import LybraEngineManager
 
     class _EmptyStore:
         is_available = False
 
     monkeypatch.setattr(
-        "src.modules.features.themis.managers.lybra_engine.CR.lybra_ingest_config",
+        "src.modules.features.themis.managers.lybra.engine.CR.lybra_ingest_config",
         lambda: CR.LybraIngestConfig(enabled=True),
     )
     monkeypatch.setattr(
-        "src.modules.features.themis.managers.lybra_engine.NucleiTemplateStore",
+        "src.modules.features.themis.managers.lybra.engine.NucleiTemplateStore",
         lambda: _EmptyStore(),
     )
     assert LybraEngineManager._ingested_checks(object(), [_NGINX]) == []
