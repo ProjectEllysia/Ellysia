@@ -84,7 +84,7 @@ function doDelete() { emit('delete', deleteTarget.value); deleteTarget.value = n
 <style scoped>
 .history-panel { display: flex; flex-direction: column; height: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .history-header { display: flex; align-items: baseline; justify-content: space-between; padding: 0.85rem 1.1rem 0.4rem; }
-.history-header h2 { font-size: var(--fs-md); font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); }
+.history-header h2 { font-size: var(--fs-xl); font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); }
 .history-count { font-size: var(--fs-md); color: var(--text-muted); font-family: var(--font-mono); }
 .history-controls { display: flex; align-items: center; gap: 0.4rem; padding: 0 1.1rem 0.65rem; border-bottom: 1px solid var(--border); }
 .sort { flex: 1; padding: 0.3rem 0.45rem; font-size: var(--fs-md); }
