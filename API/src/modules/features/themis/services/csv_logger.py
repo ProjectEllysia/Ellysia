@@ -133,6 +133,34 @@ class BaseScanLogger(ABC):
         return total
 
 
+class ScanLoggerFactory:
+    """
+    Factory central para loggers CSV de escaneos.
+
+    ``register`` es un decorador de clase (B3): el alta vive junto a la
+    clase que se da de alta, en vez de una lista aparte al final del
+    fichero que hay que recordar tocar cuando se añade un logger nuevo.
+    Lybra no tiene logger (no pasa por ``_log_to_csv`` — ``append_csv_data``
+    es un no-op en ``LybraEngineManager``, ver su docstring).
+    """
+
+    _loggers: dict[str, BaseScanLogger] = {}
+
+    @classmethod
+    def register(cls, scan_type: str):
+        def decorator(logger_cls: type[BaseScanLogger]) -> type[BaseScanLogger]:
+            cls._loggers[scan_type] = logger_cls()
+            return logger_cls
+        return decorator
+
+    @classmethod
+    def get(cls, scan_type: str) -> BaseScanLogger:
+        if scan_type not in cls._loggers:
+            raise ValueError(f"Logger no registrado para tipo: {scan_type}")
+        return cls._loggers[scan_type]
+
+
+@ScanLoggerFactory.register("nmap")
 class NmapScanLogger(BaseScanLogger):
     _csv_name = "nmap"
 
@@ -167,6 +195,7 @@ class NmapScanLogger(BaseScanLogger):
         super().log(log_data)
 
 
+@ScanLoggerFactory.register("nikto")
 class NiktoScanLogger(BaseScanLogger):
     _csv_name = "nikto"
 
@@ -204,6 +233,7 @@ class NiktoScanLogger(BaseScanLogger):
         super().log(log_data)
 
 
+@ScanLoggerFactory.register("nuclei")
 class NucleiScanLogger(BaseScanLogger):
     _csv_name = "nuclei"
 
@@ -238,34 +268,6 @@ class NucleiScanLogger(BaseScanLogger):
             "status": data.get("status", ""),
         }
         super().log(log_data)
-
-
-class ScanLoggerFactory:
-    """
-    Factory central para loggers CSV de escaneos.
-    Permite registro dinámico de nuevos tipos de escaneo.
-    """
-
-    _loggers: dict[str, BaseScanLogger] = {}
-
-    @classmethod
-    def register(cls, scan_type: str, logger: BaseScanLogger) -> None:
-        cls._loggers[scan_type] = logger
-
-    @classmethod
-    def get(cls, scan_type: str) -> BaseScanLogger:
-        if scan_type not in cls._loggers:
-            raise ValueError(f"Logger no registrado para tipo: {scan_type}")
-        return cls._loggers[scan_type]
-
-    @classmethod
-    def register_defaults(cls) -> None:
-        cls.register("nmap", NmapScanLogger())
-        cls.register("nikto", NiktoScanLogger())
-        cls.register("nuclei", NucleiScanLogger())
-
-
-ScanLoggerFactory.register_defaults()
 
 
 __all__ = [

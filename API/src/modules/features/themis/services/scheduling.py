@@ -2,7 +2,7 @@
 import logging
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler as _BgScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -10,9 +10,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 from croniter import croniter
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.unit_of_work import close_all
 from src.modules.infrastructure.retry import retry_on_transient
-from src.modules.infrastructure.scheduling import make_background_scheduler
+from src.modules.infrastructure.scheduling import make_background_scheduler, scheduler_job
 from src.modules.shared import utcnow_naive
 
 from ..exceptions import InvalidProgramedTaskArgumentError
@@ -24,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def _require_args(
     arguments: dict[str, Any],
-    required: list[str],
+    required: "tuple[str, ...] | list[str]",
     scan_type: str,
 ) -> None:
     for field in required:
@@ -32,101 +31,7 @@ def _require_args(
             raise InvalidProgramedTaskArgumentError(scan_type, field)
 
 
-# =============================================================================
-# SCAN RUNNERS
-# -----------------------------------------------------------------------------
-# Each runner only depends on plain data (ids + arguments), never on an
-# ORM-attached ProgramedScan. This matters because the scan managers open their
-# own UnitOfWork, which in a scheduler thread shares — and then closes — the
-# thread-scoped SQLAlchemy session. Passing primitives keeps these functions
-# free of detached-instance hazards.
-# =============================================================================
-
-def _run_nmap_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None:
-    _require_args(arguments, ["target_host", "target_ports"], "nmap")
-
-    logger.info(
-        "Launching Nmap scheduled scan #%d: %s ports %s",
-        ps_id, arguments["target_host"], arguments["target_ports"],
-    )
-
-    from ..managers import NmapScanManager
-
-    scan_id = NmapScanManager().run_scan(
-        target_host=arguments["target_host"],
-        target_ports=arguments["target_ports"],
-        user_id=user_id,
-        programed_scan_id=ps_id,
-    )
-
-    logger.info("Nmap scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
-
-
-def _run_nikto_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None:
-    _require_args(arguments, ["target_domain"], "nikto")
-
-    logger.info("Launching Nikto scheduled scan #%d: %s", ps_id, arguments["target_domain"])
-
-    from ..managers import NiktoScanManager
-
-    scan_id = NiktoScanManager().run_scan(
-        target_domain=arguments["target_domain"],
-        user_id=user_id,
-        programed_scan_id=ps_id,
-    )
-
-    logger.info("Nikto scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
-
-
-def _run_nuclei_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None:
-    _require_args(arguments, ["target"], "nuclei")
-
-    logger.info("Launching Nuclei scheduled scan #%d: %s", ps_id, arguments["target"])
-
-    from ..managers import NucleiScanManager
-
-    scan_id = NucleiScanManager().run_scan(
-        target=arguments["target"],
-        severities=arguments.get("severities"),
-        tags=arguments.get("tags"),
-        rate_limit=arguments.get("rate_limit"),
-        request_timeout=arguments.get("request_timeout"),
-        user_id=user_id,
-        programed_scan_id=ps_id,
-    )
-
-    logger.info("Nuclei scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
-
-
-def _run_lybra_scan(ps_id: int, user_id: int, arguments: dict[str, Any]) -> None:
-    _require_args(arguments, ["target"], "lybra")
-
-    logger.info("Launching Lybra scheduled scan #%d: %s", ps_id, arguments["target"])
-
-    from ..managers import LybraEngineManager
-
-    # Self-discovery mode (Fase T): a scheduled scan has no prior Nmap scan to
-    # analyse, so it always discovers its own ports. discover_ports/deep are
-    # optional, same knobs the manual launch panel exposes.
-    scan_id = LybraEngineManager().run_scan(
-        target=arguments["target"],
-        discover_ports=arguments.get("discover_ports"),
-        deep=bool(arguments.get("deep", False)),
-        user_id=user_id,
-        programed_scan_id=ps_id,
-    )
-
-    logger.info("Lybra scheduled scan #%d launched (scan_id=%d)", ps_id, scan_id)
-
-
 class ThemisScheduler:
-
-    _TASK_MAPPING: dict[ScanType, Callable[[int, int, dict[str, Any]], None]] = {
-        ScanType.NMAP:    _run_nmap_scan,
-        ScanType.NIKTO:   _run_nikto_scan,
-        ScanType.LYBRA:   _run_lybra_scan,
-        ScanType.NUCLEI:  _run_nuclei_scan,
-    }
 
     _scheduler: Optional[_BgScheduler] = None
 
@@ -295,7 +200,11 @@ class ThemisScheduler:
                 logger.info("Programed scan %d is inactive, skipping", ps_id)
                 return None
 
-            if ScanType(ps.scan_type) not in cls._TASK_MAPPING:
+            # Import perezoso: managers/__init__.py importa programed.py, que
+            # importa services/__init__.py, que importa este módulo — un
+            # import a nivel de módulo de ScanManager aquí cerraría el ciclo.
+            from ..managers import ScanManager
+            if ScanType(ps.scan_type) not in ScanManager._registry:  # pylint: disable=protected-access
                 raise ValueError(f"Unknown scan type: {ps.scan_type}")
 
             if ScanRepository(uow).has_active_run_for_programed(ps.id):
@@ -326,7 +235,36 @@ class ThemisScheduler:
                 repo.update_run_timestamps(ps, last_run=now, next_run=next_run)
 
     @classmethod
-    def execute(cls, ps_id: int) -> None:
+    def _run_scheduled_scan(cls, ps_id: int, user_id: int, arguments: dict[str, Any], scan_type: ScanType) -> int:
+        """Launch a scheduled scan of ``scan_type`` (B1).
+
+        Despacha por el mismo ``ScanManager._registry`` que ``resolve_manager``
+        usa — añadir un tipo de escaneo nuevo (y darlo de alta con
+        ``@ScanManager.register``) es lo único que hace falta para que
+        también sea programable, sin volver a tocar este scheduler.
+        Solo depende de datos planos (ids + arguments), nunca de un
+        ``ProgramedScan`` atado al ORM: los managers de escaneo abren su
+        propio ``UnitOfWork``, que en un hilo del scheduler comparte — y
+        luego cierra — la sesión del hilo.
+        """
+        from ..managers import ScanManager
+
+        manager_class = ScanManager._registry[scan_type]  # pylint: disable=protected-access
+        _require_args(arguments, manager_class.SCHEDULED_REQUIRED_ARGS, scan_type.value)
+
+        logger.info("Launching %s scheduled scan #%d", scan_type.value, ps_id)
+
+        scan_id = manager_class().run_scan(
+            user_id=user_id, programed_scan_id=ps_id,
+            **manager_class.scheduled_run_kwargs(arguments),
+        )
+
+        logger.info("%s scheduled scan #%d launched (scan_id=%d)", scan_type.value, ps_id, scan_id)
+        return scan_id
+
+    @staticmethod
+    @scheduler_job(logger, "Scheduled scan %d failed")
+    def execute(ps_id: int) -> None:
         """Fire a programed scan: launch it and advance its run timestamps.
 
         Split into three phases on purpose. The scan managers open their own
@@ -336,38 +274,36 @@ class ThemisScheduler:
         fresh session *after* the launch; otherwise the flush would target a
         detached ProgramedScan and the update would silently never persist
         (the cause of the stale "next run" shown in the UI).
+
+        Aislamiento de errores y cierre de sesión vía ``@scheduler_job`` (B6)
+        — antes reimplementaba ese try/except/finally a mano pese a ser el
+        mismo helper que ya usan Hygeia e Iris. ``@staticmethod`` en vez de
+        ``@classmethod`` porque ``scheduler_job`` reenvía sus ``*args`` al
+        formateo ``%d`` del mensaje de error; con ``@classmethod`` el primer
+        arg sería ``cls``, no ``ps_id``.
         """
         logger.info("Triggered programed scan %d", ps_id)
-        try:
-            # Phase 1 — load, validate and guard against overlapping runs.
-            params = cls._load_and_guard(ps_id)
-            if params is None:
-                return
+        # Phase 1 — load, validate and guard against overlapping runs.
+        params = ThemisScheduler._load_and_guard(ps_id)
+        if params is None:
+            return
 
-            runner = cls._TASK_MAPPING[ScanType(params["scan_type"])]
+        # Phase 2 — launch the scan (manager owns its own session).
+        ThemisScheduler._run_scheduled_scan(
+            ps_id, params["user_id"], params["arguments"], ScanType(params["scan_type"]),
+        )
 
-            # Phase 2 — launch the scan (manager owns its own session).
-            runner(ps_id, params["user_id"], params["arguments"])
+        # Phase 3 — record the execution in a *fresh* session.
+        now = utcnow_naive()
+        next_run = ThemisScheduler.calculate_next_run(
+            params["schedule_type"], params["schedule_config"], last_run=now
+        )
+        ThemisScheduler._record_run(ps_id, now, next_run)
 
-            # Phase 3 — record the execution in a *fresh* session.
-            now = utcnow_naive()
-            next_run = cls.calculate_next_run(
-                params["schedule_type"], params["schedule_config"], last_run=now
-            )
-            cls._record_run(ps_id, now, next_run)
-
-            logger.info(
-                "Programed scan %d executed; next run at %s",
-                ps_id, next_run.isoformat() if next_run else "N/A",
-            )
-
-        except Exception:
-            logger.exception("Scheduled scan %d failed", ps_id)
-        finally:
-            # APScheduler corre en un hilo de vida larga y scoped_session está
-            # keyed por hilo: sin esto, la sesión usada en este disparo quedaría
-            # pegada al hilo y un estado abortado envenenaría el siguiente.
-            close_all()
+        logger.info(
+            "Programed scan %d executed; next run at %s",
+            ps_id, next_run.isoformat() if next_run else "N/A",
+        )
 
     @classmethod
     def calculate_next_run(

@@ -22,7 +22,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Optional
 
-from .exceptions import AIConnectionError
+from .exceptions import AIConnectionError, AIStrategyConfigurationError
 from .inputs import AIInput
 
 logger = logging.getLogger(__name__)
@@ -32,10 +32,45 @@ ToolExecutor = Callable[[str, dict], str]
 
 
 class ModelStrategy(ABC):
-    """Contrato de una estrategia de llamada al modelo."""
+    """Contrato de una estrategia de llamada al modelo.
+
+    ``register``/``resolve`` (B4) centralizan lo que ``scribe.factory``
+    hacía con una cadena ``if/elif`` por nombre: cada estrategia se da de
+    alta junto a su propia clase, así que añadir un proveedor nuevo (una
+    API transaccional, etc.) no exige volver a editar la factory.
+    """
 
     #: Nombre legible de la estrategia (para logs y circuit breaker).
     name: str = "model"
+
+    _registry: dict[str, type["ModelStrategy"]] = {}
+
+    @classmethod
+    def register(cls, name: str):
+        def decorator(subclass: type["ModelStrategy"]) -> type["ModelStrategy"]:
+            cls._registry[name] = subclass
+            return subclass
+        return decorator
+
+    @classmethod
+    def resolve(cls, name: str, overrides: dict) -> "ModelStrategy":
+        """Instancia la estrategia ``name`` con credenciales de entorno/config."""
+        strategy_cls = cls._registry.get(name)
+        if strategy_cls is None:
+            raise AIStrategyConfigurationError(f"estrategia desconocida: '{name}'")
+        return strategy_cls.from_config(overrides)
+
+    @classmethod
+    def from_config(cls, overrides: dict) -> "ModelStrategy":
+        """Construye esta estrategia a partir de las credenciales de entorno
+        (``.env``) y las ``overrides`` de ``SecOpsConfig.json``
+        (``tools.scribe.modules.<módulo>``, p.ej. un ``model`` distinto).
+
+        No es ``@abstractmethod``: un doble de test que construye la
+        estrategia directamente (sin pasar por ``resolve``/config real) no
+        tiene por qué implementarlo — solo lo necesitan las estrategias
+        registradas de verdad."""
+        raise NotImplementedError
 
     @abstractmethod
     def complete(self, ai_input: AIInput, tool_executor: Optional[ToolExecutor] = None) -> str:
@@ -50,10 +85,17 @@ class ModelStrategy(ABC):
         """
 
 
+@ModelStrategy.register("ollama")
 class OllamaStrategy(ModelStrategy):
     """Estrategia que llama a un modelo local servido por Ollama."""
 
     name = "ollama"
+
+    @classmethod
+    def from_config(cls, overrides: dict) -> "OllamaStrategy":
+        import src.modules.system.config_reading as CR
+        host, model = CR.get_ollama_environment()
+        return cls(host=host, model=overrides.get("model") or model)
 
     def __init__(self, host: str, model: str, timeout: int = 300) -> None:
         import ollama
@@ -112,10 +154,21 @@ class OllamaStrategy(ModelStrategy):
             raise AIConnectionError(str(exc), model=self.model) from exc
 
 
+@ModelStrategy.register("openai")
 class OpenAIStrategy(ModelStrategy):
     """Estrategia que llama a la API de OpenAI (p.ej. gpt-4o-mini)."""
 
     name = "openai"
+
+    @classmethod
+    def from_config(cls, overrides: dict) -> "OpenAIStrategy":
+        import src.modules.system.config_reading as CR
+        env = CR.get_openai_environment()
+        return cls(
+            api_key=env["api_key"],
+            model=overrides.get("model") or env["model"],
+            base_url=env.get("base_url"),
+        )
 
     def __init__(
         self,
@@ -191,10 +244,20 @@ class OpenAIStrategy(ModelStrategy):
             raise AIConnectionError(str(exc), model=self.model) from exc
 
 
+@ModelStrategy.register("google")
 class GoogleStrategy(ModelStrategy):
     """Estrategia que llama a la API de Google Gemini."""
 
     name = "google"
+
+    @classmethod
+    def from_config(cls, overrides: dict) -> "GoogleStrategy":
+        import src.modules.system.config_reading as CR
+        env = CR.get_google_environment()
+        return cls(
+            api_key=env["api_key"],
+            model=overrides.get("model") or env["model"],
+        )
 
     def __init__(self, api_key: str, model: str, timeout: int = 120) -> None:
         import google.generativeai as genai

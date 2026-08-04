@@ -554,7 +554,19 @@ def get_smtp_environment() -> dict[str, str]:
 # ``features.themis.scanners``: mismos ``prompts`` y ``colorPalette``, más los
 # ajustes que cada herramienta necesite. OpenVAS salió de esta lista al
 # retirarse (roadmap §7/§6.3, Ronda 2 — E2).
-THEMIS_SCANNERS = ("nmap", "nikto", "lybra", "nuclei")
+#
+# Derivado de ScanType (A1) en vez de repetido a mano: un escáner nuevo que
+# se registre en el enum aparece aquí solo, en vez de quedarse fuera hasta
+# que alguien se acuerde de tocar esta tupla también. Import perezoso
+# (dentro de la función, no a nivel de módulo): config_reading.py lo importa
+# casi todo el proyecto muy pronto, y no debe depender en su superficie
+# global de un modelo de un módulo de features concreto.
+def _themis_scanner_values() -> tuple:
+    from src.modules.features.themis.model import ScanType
+    return tuple(t.value for t in ScanType)
+
+
+THEMIS_SCANNERS = _themis_scanner_values()
 
 
 @config_block("features.themis")

@@ -272,7 +272,7 @@ class ScanRepository(BaseRepository[Scan]):
             .group_by(Scan.scan_type)
             .all()
         )
-        counts = {"nmap": 0, "nikto": 0, "lybra": 0, "nuclei": 0}
+        counts = {t.value: 0 for t in ScanType}
         for scan_type_val, count in results:
             key = scan_type_val.value if hasattr(scan_type_val, "value") else str(scan_type_val)
             if key in counts:

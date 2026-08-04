@@ -79,6 +79,7 @@ class LybraEngineManager(ScanManager):
 
     SCAN_TYPE = ScanType.LYBRA
     _MODEL = LybraScan
+    SCHEDULED_REQUIRED_ARGS = ("target",)
 
     # Categories that are point-in-time events, not persistent vulnerability
     # state - excluded from lifecycle tracking (see Phase 2.5 in _run_lybra).
@@ -86,6 +87,16 @@ class LybraEngineManager(ScanManager):
 
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
         super().__init__(task_queue)
+
+    @classmethod
+    def scheduled_run_kwargs(cls, arguments: dict) -> dict:
+        """target obligatorio + discover_ports/deep opcionales (B1). Un
+        escaneo programado siempre es autodescubrimiento (Fase T) — nunca
+        tiene un source_scan_id ni un payload de services que programar."""
+        kwargs = super().scheduled_run_kwargs(arguments)
+        kwargs["discover_ports"] = arguments.get("discover_ports")
+        kwargs["deep"] = bool(arguments.get("deep", False))
+        return kwargs
 
     def run_scan(self,
         user_id: int,

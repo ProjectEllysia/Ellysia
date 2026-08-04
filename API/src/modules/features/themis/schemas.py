@@ -90,7 +90,7 @@ class AuthorizedTargetActionResponseSchema(Schema):
 
 
 class ResultsQuerySchema(Schema):
-    type = fields.String(load_default="all", validate=validate.OneOf(["nmap", "nikto", "lybra", "nuclei", "all"]))
+    type = fields.String(load_default="all", validate=validate.OneOf([t.value for t in ScanType] + ["all"]))
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))
     per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
     # Fase I, solo con type=lybra: acota la lista a los escaneos originados por

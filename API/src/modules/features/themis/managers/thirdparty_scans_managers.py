@@ -45,6 +45,7 @@ class NmapScanManager(ScanManager):
     SCAN_TYPE = ScanType.NMAP
     _MODEL = NmapScan
     _RICH_LOADER = "get_nmap_rich"
+    SCHEDULED_REQUIRED_ARGS = ("target_host", "target_ports")
 
     """
     Manager for Nmap network security scans.
@@ -181,6 +182,7 @@ class NiktoScanManager(ScanManager):
     SCAN_TYPE = ScanType.NIKTO
     _MODEL = NiktoScan
     _RICH_LOADER = "get_nikto_rich"
+    SCHEDULED_REQUIRED_ARGS = ("target_domain",)
 
     """
     Manager for Nikto web vulnerability scans.
@@ -333,10 +335,22 @@ class NucleiScanManager(ScanManager):
     _MODEL = NucleiScan
     # _RICH_LOADER no se define: sin relaciones ORM propias que precargar,
     # igual que LybraScan (ver ScanManager._RICH_LOADER).
+    SCHEDULED_REQUIRED_ARGS = ("target",)
 
     def __init__(self) -> None:
         super().__init__()
         self.result_processor = NucleiResultProcessor()
+
+    @classmethod
+    def scheduled_run_kwargs(cls, arguments: dict) -> dict:
+        """target obligatorio + severities/tags/rate_limit/request_timeout
+        opcionales, pasados solo si están presentes (B1) — run_scan() ya
+        tiene default None para todos ellos."""
+        kwargs = super().scheduled_run_kwargs(arguments)
+        for name in ("severities", "tags", "rate_limit", "request_timeout"):
+            if arguments.get(name) is not None:
+                kwargs[name] = arguments[name]
+        return kwargs
 
     def run_scan(  # pylint: disable=arguments-differ
         self,

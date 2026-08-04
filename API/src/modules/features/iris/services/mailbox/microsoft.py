@@ -27,6 +27,7 @@ import requests
 import src.modules.system.config_reading as CR
 
 from .base import MailboxConnector, MessageRef, TokenSet
+from .registry import register_connector
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ _SELECT_FIELDS = "internetMessageHeaders"
 _TIMEOUT_SECONDS = 20
 
 
+@register_connector("microsoft")
 class GraphConnector(MailboxConnector):
     provider = "microsoft"
 

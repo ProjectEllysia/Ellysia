@@ -16,36 +16,21 @@ from typing import Optional
 
 import src.modules.system.config_reading as CR
 
-from .exceptions import EmailConfigurationError
 from .mailer import Mailer
-from .strategies import EmailStrategy, SmtpStrategy
+from .strategies import EmailStrategy
 
 logger = logging.getLogger(__name__)
 
 
 def _build_strategy(name: str) -> EmailStrategy:
-    """Instancia la estrategia ``name`` con credenciales de entorno/config."""
+    """Instancia la estrategia ``name`` con credenciales de entorno/config.
+
+    Despacha por ``EmailStrategy._registry`` (B4) en vez de una cadena
+    ``if/elif`` por nombre — mismo mecanismo que ``scribe.factory``.
+    """
     name = (name or "smtp").lower()
     overrides = CR.herald_config().options_for(name)
-
-    if name == "smtp":
-        try:
-            creds = CR.get_smtp_environment()
-        except ValueError as exc:
-            # get_smtp_environment lanza ValueError pelado; aquí dentro es un
-            # fallo de configuración y debe salir como tal.
-            raise EmailConfigurationError(str(exc)) from exc
-        return SmtpStrategy(
-            host=overrides.get("host", "localhost"),
-            port=int(overrides.get("port", 587)),
-            from_address=overrides.get("fromAddress") or creds.get("username", ""),
-            from_name=overrides.get("fromName"),
-            use_tls=bool(overrides.get("useTls", True)),
-            username=creds.get("username"),
-            password=creds.get("password"),
-        )
-
-    raise EmailConfigurationError(f"estrategia desconocida: '{name}'")
+    return EmailStrategy.resolve(name, overrides)
 
 
 def build_mailer(module: Optional[str] = None) -> Mailer:

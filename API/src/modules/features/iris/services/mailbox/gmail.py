@@ -26,6 +26,7 @@ import requests
 import src.modules.system.config_reading as CR
 
 from .base import MailboxConnector, MessageRef, TokenSet
+from .registry import register_connector
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ _METADATA_HEADERS = [
 _TIMEOUT_SECONDS = 20
 
 
+@register_connector("gmail")
 class GmailConnector(MailboxConnector):
     provider = "gmail"
 

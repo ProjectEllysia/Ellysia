@@ -82,6 +82,38 @@ def test_every_scanner_has_its_own_block(raw_config):
         assert "colorPalette" in block, f"al escáner '{name}' le falta 'colorPalette'"
 
 
+def test_every_scan_type_is_fully_registered(raw_config):
+    """Cada ``ScanType`` debe estar dado de alta en los cuatro registros que
+    lo hacen "funcionar de verdad" (A1): manager, estrategia de impresión,
+    argumentos programables, y bloque de config. El logger CSV es la única
+    excepción deliberada (Lybra no pasa por ``_log_to_csv``, ver B3).
+
+    Sin este test, un escáner nuevo que se registre en el enum pero se
+    olvide de uno de estos sitios falla en silencio: en tiempo de ejecución,
+    no al arrancar ni en CI.
+    """
+    from src.modules.features.themis.model import ScanType
+    from src.modules.features.themis.managers import ScanManager
+    from src.modules.features.themis.services.csv_logger import ScanLoggerFactory
+    from src.modules.features.themis.services.reports import PrintingStrategy
+
+    scanners = _value_at(raw_config, "features.themis.scanners")
+
+    for scan_type in ScanType:
+        manager_class = ScanManager._registry.get(scan_type)  # pylint: disable=protected-access
+        assert manager_class is not None, f"{scan_type} no tiene manager registrado"
+        assert manager_class.SCHEDULED_REQUIRED_ARGS, (
+            f"{scan_type} no declara SCHEDULED_REQUIRED_ARGS"
+        )
+        assert scan_type in PrintingStrategy._registry, (  # pylint: disable=protected-access
+            f"{scan_type} no tiene PrintingStrategy registrada"
+        )
+        assert scan_type.value in scanners, f"{scan_type} no tiene bloque en SecOpsConfig.json"
+
+        if scan_type is not ScanType.LYBRA:
+            assert ScanLoggerFactory.get(scan_type.value) is not None
+
+
 # =============================================================================
 # GETTERS ↔ RUTAS
 # =============================================================================

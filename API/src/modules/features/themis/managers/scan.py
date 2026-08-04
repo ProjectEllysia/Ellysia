@@ -75,6 +75,25 @@ class ScanManager(TaskTrackingMixin, ABC):
 
     # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin (A10).
 
+    # Contrato para el lanzamiento programado (B1): qué claves de
+    # ProgramedScan.arguments son obligatorias para este tipo, y cómo
+    # traducirlas a los kwargs de run_scan(). Con esto ThemisScheduler
+    # despacha por el mismo _registry que resolve_manager en vez de llevar
+    # su propio mapeo scan_type -> función de lanzamiento en paralelo.
+    SCHEDULED_REQUIRED_ARGS: tuple = ()
+
+    @classmethod
+    def scheduled_run_kwargs(cls, arguments: dict) -> dict:
+        """Map a ``ProgramedScan.arguments`` dict to this scan type's
+        ``run_scan()`` kwargs (B1).
+
+        Default: every required arg passed through unchanged (arg name ==
+        ``run_scan`` parameter name). Override when a kwarg needs
+        translation — an optional arg, a different name, a type coercion —
+        see ``LybraEngineManager.scheduled_run_kwargs`` for an example.
+        """
+        return {name: arguments[name] for name in cls.SCHEDULED_REQUIRED_ARGS}
+
 
     # =========================================================================
     # SCAN QUERIES
