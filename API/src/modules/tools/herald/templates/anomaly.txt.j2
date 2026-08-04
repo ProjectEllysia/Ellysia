@@ -1,0 +1,17 @@
+{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}
+
+
+Se ha detectado una anomalía CRÍTICA en uno de tus activos monitorizados.
+
+Activo:  {{ hostname }}
+Tipo:    {{ kind }}
+{% if metric %}
+Métrica: {{ metric }}
+Valor:   {{ value }}
+Umbral:  {{ threshold }}
+{% endif %}
+
+{% if panel_url %}Ver en el panel: {{ panel_url }}{% else %}Puedes revisar el detalle desde tu panel de Hygeia.{% endif %}
+
+--
+Este mensaje se ha enviado automáticamente desde {{ brand.productName }}. No respondas a esta dirección.

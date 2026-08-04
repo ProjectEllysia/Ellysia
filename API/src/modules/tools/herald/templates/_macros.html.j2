@@ -1,0 +1,25 @@
+{# Piezas reutilizables de los correos. Importar con:
+   {% from "_macros.html.j2" import button, data_row %} #}
+
+{#
+  Botón "a prueba de balas": una tabla con el color de fondo y un <a> con
+  padding dentro. Un <a> estilado a secas pierde el fondo en Outlook.
+#}
+{% macro button(href, label, color) -%}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;">
+  <tr>
+    <td align="center" bgcolor="{{ color }}" style="border-radius:6px;">
+      <a href="{{ href }}"
+         style="display:inline-block; padding:14px 32px; font-family:Helvetica,Arial,sans-serif; font-size:16px; font-weight:bold; color:#16151a; text-decoration:none; border-radius:6px;">{{ label }}</a>
+    </td>
+  </tr>
+</table>
+{%- endmacro %}
+
+{# Fila etiqueta/valor para los correos que reportan datos (Hygeia). #}
+{% macro data_row(label, value) -%}
+<tr>
+  <td style="padding:6px 12px 6px 0; font-family:Helvetica,Arial,sans-serif; font-size:14px; color:#8a857c; white-space:nowrap; vertical-align:top;">{{ label }}</td>
+  <td style="padding:6px 0; font-family:Helvetica,Arial,sans-serif; font-size:14px; color:#2c2a26; font-weight:bold;">{{ value }}</td>
+</tr>
+{%- endmacro %}

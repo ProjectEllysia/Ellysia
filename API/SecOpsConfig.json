@@ -59,6 +59,14 @@
     },
     "herald": {
       "defaultStrategy": "smtp",
+      "branding": {
+        "productName": "Ellysia",
+        "accentColor": "#d4a04a",
+        "logoUrl": "",
+        "supportEmail": "",
+        "footerNote": "Recibes este correo porque tu organización te ha incluido en su plan de concienciación en seguridad."
+      },
+      "templatesDir": "",
       "modules": {
         "aegis": "smtp",
         "hygeia": "smtp"

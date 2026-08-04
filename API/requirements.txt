@@ -27,6 +27,11 @@ xmltodict==0.13.0
 # de primera parte que lo importa.
 PyYAML>=6.0
 
+# Jinja2: plantillas de correo de herald (tools/herald/templates/). Ya venía
+# de forma transitiva con Flask; se declara explícito ahora que hay código de
+# primera parte que la importa.
+Jinja2>=3.1
+
 # Logging & Utilities
 python-dateutil==2.8.2
 
