@@ -28,6 +28,7 @@ import logging
 from datetime import datetime
 from typing import List, Optional, Tuple
 
+from sqlalchemy import or_
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session, joinedload
 from src.modules.infrastructure import BaseRepository, UnitOfWork
@@ -977,6 +978,128 @@ class KbRepository(BaseRepository[CveEntry]):
 
     def get_epss(self, cve_id: str) -> Optional[EpssScore]:
         return self._session.query(EpssScore).filter(EpssScore.cve_id == cve_id).one_or_none()
+
+    def kev_ids_in(self, cve_ids: List[str]) -> set:
+        """Which of ``cve_ids`` are in CISA's Known Exploited Vulnerabilities.
+
+        Batch counterpart to :meth:`get_kev`, which costs one query per CVE —
+        fine for the matcher (a handful of findings per host), wasteful for a
+        discovery query that starts from dozens of CVEs at once.
+        """
+        if not cve_ids:
+            return set()
+        rows = (
+            self._session.query(KevEntry.cve_id)
+            .filter(KevEntry.cve_id.in_(cve_ids))
+            .all()
+        )
+        return {row[0] for row in rows}
+
+    def epss_scores_for(self, cve_ids: List[str]) -> dict:
+        """EPSS exploitation-probability scores for ``cve_ids``, keyed by id.
+
+        Batch counterpart to :meth:`get_epss` — see :meth:`kev_ids_in`.
+        """
+        if not cve_ids:
+            return {}
+        rows = (
+            self._session.query(EpssScore.cve_id, EpssScore.score)
+            .filter(EpssScore.cve_id.in_(cve_ids))
+            .all()
+        )
+        return {cve_id: score for cve_id, score in rows}
+
+    # =========================================================================
+    # DISCOVERY QUERIES
+    # =========================================================================
+    #
+    # Distintas de ``cves_for_cpe`` a propósito, y no una generalización suya.
+    #
+    # El matcher responde "¿ESTE host, con ESTA versión, es vulnerable?", y por
+    # eso exige versión y descarta las reglas de aplicabilidad sin límites (ver
+    # ``lybra.kb.version_in_range``: honrarlas producía 695 CVEs para un Edge al
+    # día). Las consultas de aquí abajo responden otra pregunta —"¿qué ha sido
+    # notable en este producto últimamente?"— para alimentar contenido de
+    # concienciación, no un hallazgo contra un activo concreto. Ahí no hay
+    # versión que comprobar y una regla sin límites es información válida, así
+    # que mezclar ambos caminos rompería uno de los dos.
+
+    def recent_cves_for_products(
+        self,
+        products: List[Tuple[str, str]],
+        since: datetime,
+        min_cvss: Optional[float] = None,
+        limit_per_product: int = 5,
+    ) -> List[Tuple[str, str, CveEntry]]:
+        """Recent CVEs published against any of ``products``.
+
+        Args:
+            products: ``(vendor, product)`` CPE coordinates to look up.
+            since: Only CVEs published at or after this instant.
+            min_cvss: Optional CVSS floor; rows with no score are kept, since
+                a missing score means "not yet analysed", not "harmless".
+            limit_per_product: Newest N per product, so one noisy product
+                cannot crowd out the rest.
+
+        Returns:
+            ``(vendor, product, cve)`` triples, newest first per product.
+        """
+        if not products:
+            return []
+
+        results: List[Tuple[str, str, CveEntry]] = []
+        for vendor, product in products:
+            query = (
+                self._session.query(CveEntry)
+                .join(CpeMatch, CpeMatch.cve_id == CveEntry.id)
+                .filter(CpeMatch.vendor == vendor, CpeMatch.product == product)
+                .filter(CveEntry.published.isnot(None), CveEntry.published >= since)
+            )
+            if min_cvss is not None:
+                query = query.filter(
+                    or_(CveEntry.cvss_score.is_(None), CveEntry.cvss_score >= min_cvss)
+                )
+            rows = (
+                query.order_by(CveEntry.published.desc())
+                .distinct()
+                .limit(limit_per_product)
+                .all()
+            )
+            results.extend((vendor, product, cve) for cve in rows)
+        return results
+
+    def search_products(self, term: str, limit: int = 20) -> List[Tuple[str, str, str]]:
+        """Search the CPE product index for a human-facing picker.
+
+        Runs over ``CpeProductAlias`` rather than ``CpeMatch``: it is already
+        the small, indexed, nightly-rebuilt set of products that have at least
+        one CVE, which is exactly what deserves to be offered. Prefix match so
+        the unique index on ``normalized_name`` can serve it.
+
+        Note this index drops names that map to more than one ``(vendor,
+        product)`` pair — necessary when the machine resolves a name on its
+        own (see :meth:`rebuild_cpe_product_index`), and harmless here because
+        the vendor-qualified key ("microsoft edge") survives even when the bare
+        one ("edge") does not.
+
+        Returns:
+            ``(vendor, product, display_name)`` triples, alphabetically.
+        """
+        term = (term or "").strip().lower()
+        if not term:
+            return []
+        rows = (
+            self._session.query(
+                CpeProductAlias.vendor,
+                CpeProductAlias.product,
+                CpeProductAlias.normalized_name,
+            )
+            .filter(CpeProductAlias.normalized_name.like(f"{term}%"))
+            .order_by(CpeProductAlias.normalized_name)
+            .limit(limit)
+            .all()
+        )
+        return [(vendor, product, name) for vendor, product, name in rows]
 
     def get_cves_with_matches(self, cve_ids: List[str]) -> List[CveEntry]:
         """Bulk-fetch CveEntry rows (with their CpeMatch rows eager-loaded) for a
