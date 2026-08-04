@@ -51,6 +51,16 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    // Quiz público de una campaña de Aegis: el destino del enlace del correo.
+    // PÚBLICA a propósito — el destinatario no tiene cuenta y el token de la
+    // query es su única identidad. Cuelga de /quiz y no de /aegis/quiz porque
+    // todo lo que empieza por /aegis/ lo captura el proxy hacia Flask
+    // (nginx.conf, vite.config.js) y se serviría el JSON de la API.
+    path: '/quiz',
+    name: 'Quiz',
+    component: () => import('@/views/QuizView.vue'),
+  },
+  {
     path: '/iris',
     name: 'IrisHub',
     component: () => import('@/views/IrisHubView.vue'),
