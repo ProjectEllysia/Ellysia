@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import ipaddress
 
 from flask import send_file
 from flask_smorest import Blueprint as SmorestBlueprint
@@ -43,15 +42,12 @@ from .exceptions import (
     ScanExecutionError,
     ScanNotFoundError,
     FindingNotFoundError,
-    IPValidationError,
-    MaxHostsExceededError,
     PortValidationError,
     PrivateIPRequested,
     ProgramedScanError,
     ProgramedScanNotFoundError,
     FolderNotFoundError,
     FolderNameInvalidError,
-    ScanAlreadyInFolderError,
     AuthorizedTargetNotFoundError,
     DuplicateAuthorizedTargetError,
     TargetNotAuthorizedError,
@@ -842,17 +838,12 @@ def get_document_status(args):
 
     doc_mgr = ThemisReportManager()
 
-    doc = doc_mgr.get_document_by_id(document_id) if document_id else (
-        doc_mgr.get_latest_document_by_scan_id(scan_id) if scan_id else None
-    )
-
-    if not doc:
-        raise ScanNotFoundError(document_id or scan_id)
-
-    # N1: verificar ownership en ambas ramas (antes solo se comprobaba
-    # cuando se consultaba por document_id). Mismo patrón que Iris.
-    if doc.user_id != user.id:
-        raise ScanNotFoundError(document_id or scan_id)
+    # N1/E4: lookup dual (por document_id o, si no, el último documento del
+    # scan) + verificación de ownership viven en el manager, no aquí.
+    # not_found_error=ScanNotFoundError preserva el 404 propio de este
+    # endpoint (assert_document_ownership usa el DocumentError genérico de
+    # 500, con otro propósito — ver el docstring de get_document_status).
+    doc = doc_mgr.get_document_status(document_id, scan_id, user.id, not_found_error=ScanNotFoundError)
 
     return {
         "documentId": doc.id,
@@ -913,7 +904,7 @@ def get_documents_by_scan(scan_id: int):
     ScanManager.resolve_owned_scan(scan_id, user.id) # type: ignore
 
     doc_mgr = ThemisReportManager()
-    documents = doc_mgr.get_documents_by_scan_id(scan_id)
+    documents = doc_mgr.get_documents_by_parent(scan_id)
 
     docs_list = [_serialize_document(doc) for doc in documents]
 

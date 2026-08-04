@@ -26,7 +26,7 @@ from src.modules.users import (
 )
 from src.modules.shared import handle_exceptions, limiter
 from src.modules.shared.schemas import ErrorSchema
-from src.modules.shared._exceptions import DocumentError, DocumentNotFoundError, DocumentNotReadyError
+from src.modules.shared._exceptions import DocumentError, DocumentNotReadyError
 
 import src.modules.system.config_reading as CR
 
@@ -387,15 +387,9 @@ def get_document_status(args):
     analysis_id = args.get("analysisId")
 
     doc_mgr = IrisReportManager()
-    doc = doc_mgr.get_document_by_id(document_id) if document_id else (
-        doc_mgr.get_latest_document_by_analysis_id(analysis_id) if analysis_id else None
-    )
-
-    if not doc:
-        raise DocumentNotFoundError(document_id or analysis_id)
-
-    if doc.user_id != user.id:
-        raise DocumentNotFoundError(document_id or analysis_id)
+    # E4: lookup dual (por documentId o, si no, el último documento del
+    # análisis) + verificación de ownership viven en el manager, no aquí.
+    doc = doc_mgr.get_document_status(document_id, analysis_id, user.id)
 
     return {
         "documentId": doc.id,
@@ -451,7 +445,7 @@ def get_documents_by_analysis(analysis_id: int):
     IrisManager.assert_analysis_ownership(analysis_id, user.id)
 
     doc_mgr = IrisReportManager()
-    documents = doc_mgr.get_documents_by_analysis_id(analysis_id)
+    documents = doc_mgr.get_documents_by_parent(analysis_id)
 
     docs_list = [{
         "documentId": doc.id,

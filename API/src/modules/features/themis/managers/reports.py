@@ -1,11 +1,10 @@
 """ThemisReportManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
-from typing import List, Optional
-from src.modules.system.taskqueue import ITaskQueue, TaskQueue, job_context
-from src.modules.shared import Document, assert_owned
+from typing import List
+from src.modules.system.taskqueue import job_context
 from src.modules.shared._exceptions import DocumentError
-from src.modules.shared._documents import run_report_generation, delete_document_with_file
+from src.modules.shared._documents import run_report_generation, DocumentManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from ..repositories import ThemisReportRepository
@@ -18,19 +17,21 @@ from .scan import ScanManager
 logger = logging.getLogger(__name__)
 
 
-class ThemisReportManager:
+class ThemisReportManager(DocumentManager):
     """
     Manager for Themis document lifecycle and PDF report generation.
 
     Handles document CRUD operations, ownership verification, and async
-    PDF generation for security scan reports.
-
-    Attributes:
-        user: User performing the operations.
+    PDF generation for security scan reports. CRUD/ownership are shared with
+    Iris via ``DocumentManager`` (A3); this class keeps only what is really
+    Themis-specific: creating a ``ThemisDocument`` and rendering its PDF.
     """
 
-    def __init__(self, task_queue: ITaskQueue | None = None) -> None:
-        self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
+    EXTERNAL_ID_PREFIX = "themis-doc:"
+    TASK_CATEGORY = "themis.report"
+
+    _REPOSITORY = ThemisReportRepository
+    _NOT_FOUND_ERROR = staticmethod(lambda eid: DocumentError(f"Documento {eid} no encontrado"))
 
     @staticmethod
     def _create_document(scan, ai_report: bool) -> int:
@@ -52,69 +53,12 @@ class ThemisReportManager:
 
         return document.id  # type: ignore
 
-    def get_document_by_id(self, document_id: int) -> Optional[ThemisDocument]:
-        """Retrieve a ThemisDocument by its primary key."""
-        doc = build_repository(ThemisReportRepository).get_by_id(document_id)
-
-        if not doc:
-            logger.warning(f"Documento {document_id} no encontrado")
-
-        return doc
-
-    def get_latest_document_by_scan_id(self, scan_id: int) -> Optional[ThemisDocument]:
-        """Retrieve the most recently created document for a scan."""
-        doc = build_repository(ThemisReportRepository).get_latest_document(scan_id)
-
-        return doc
-
-    def get_documents_for_user(self, user_id: int) -> List[ThemisDocument]:
-        """Retrieve all documents belonging to the active user."""
-        docs = build_repository(ThemisReportRepository).get_documents_by_user(user_id)  # type: ignore
-
-        logger.info(f"Se obtuvieron {len(docs)} documentos")
-        return docs
-
-    def get_documents_by_scan_id(self, scan_id: int) -> List[ThemisDocument]:
+    def get_documents_by_parent(self, scan_id: int) -> List[ThemisDocument]:
         """Retrieve all documents associated with a specific scan."""
         docs = build_repository(ThemisReportRepository).get_documents_by_scan(scan_id)
 
         logger.info(f"Se obtuvieron {len(docs)} documentos para scan {scan_id}")
         return docs
-
-    def delete_document(self, document_id: int) -> bool:
-        """
-        Delete a document and its associated file on disk.
-
-        Returns:
-            True if deleted successfully.
-
-        Raises:
-            DocumentError: If the document was not found.
-        """
-        delete_document_with_file(
-            document_id,
-            ThemisReportRepository,
-            lambda eid: DocumentError(f"Documento {eid} no encontrado"),
-        )
-        return True
-
-    def assert_document_ownership(self, document_id: int, user_id: int) -> Document:
-        """
-        Verify document ownership and return the document.
-
-        Args:
-            document_id: ID of the document.
-
-        Returns:
-            Document instance.
-
-        Raises:
-            DocumentError: If document not found or not owned by user.
-        """
-        return assert_owned(
-            ThemisReportRepository, document_id, user_id,
-            lambda eid: DocumentError(f"Documento {eid} no encontrado"),
-        )
 
     def generate_report(self, scan_id: int, ai_report: bool = False) -> int:
         """
@@ -138,8 +82,8 @@ class ThemisReportManager:
             func=ThemisReportManager.execute_report_generation,
             args=(doc_id, scan.id, ai_report),
             name=f"PDFGeneration-Scan-{scan.id}",
-            category="themis.report",
-            external_id=f"themis-doc:{doc_id}",
+            category=self.TASK_CATEGORY,
+            external_id=self.external_id_for(doc_id),
         )
         return doc_id  # type: ignore
 

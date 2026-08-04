@@ -733,7 +733,7 @@ class ScanManager(TaskTrackingMixin, ABC):
         """Append the latest document ID and status to a scan result dict."""
         from .reports import ThemisReportManager
         inst = ThemisReportManager()
-        doc = inst.get_latest_document_by_scan_id(scan.id)
+        doc = inst.get_latest_document_by_parent(scan.id)
         if doc:
             result["documentId"] = doc.id
             result["documentStatus"] = doc.status

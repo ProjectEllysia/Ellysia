@@ -22,8 +22,8 @@ from src.modules.shared._exceptions import DocumentNotFoundError
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc, CANCELLABLE_STATES as _CANCELLABLE_STATES
-from src.modules.shared._documents import run_report_generation, delete_document_with_file
-from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
+from src.modules.shared._documents import run_report_generation, DocumentManager
+from src.modules.system.taskqueue import TaskQueue, TaskTrackingMixin, job_context
 
 from .exceptions import (
     IrisAnalysisNotFoundError,
@@ -1190,19 +1190,19 @@ class IrisManager(TaskTrackingMixin):
             logger.error(f"Failed to mark analysis {analysis_id} as failed: {e}", exc_info=True)
 
 
-class IrisReportManager(TaskTrackingMixin):
+class IrisReportManager(DocumentManager):
     """Manager for IrisDocument lifecycle and async PDF report generation.
 
-    Mirrors ``ThemisReportManager``: creates an ``IrisDocument`` row in
-    ``running`` state, submits a TaskQueue job (category ``"iris.report"``)
-    that renders the PDF via :class:`IrisPDFCreator`, and exposes the
-    CRUD/ownership operations the endpoints need.
+    CRUD/ownership are shared with Themis via ``DocumentManager`` (A3); this
+    class keeps only what is really Iris-specific: creating an
+    ``IrisDocument`` and rendering its PDF via :class:`IrisPDFCreator`.
     """
 
     EXTERNAL_ID_PREFIX = "iris-doc:"
     TASK_CATEGORY = "iris.report"
 
-    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin (A10).
+    _REPOSITORY = IrisReportRepository
+    _NOT_FOUND_ERROR = DocumentNotFoundError
 
     @staticmethod
     def _create_document(analysis: IrisAnalysis) -> int:
@@ -1223,43 +1223,9 @@ class IrisReportManager(TaskTrackingMixin):
             uow.commit_for_handoff()
         return document.id  # type: ignore
 
-    def get_document_by_id(self, document_id: int) -> Optional[IrisDocument]:
-        """Retrieve an IrisDocument by its primary key."""
-        return build_repository(IrisReportRepository).get_by_id(document_id)
-
-    def get_latest_document_by_analysis_id(self, analysis_id: int) -> Optional[IrisDocument]:
-        """Retrieve the most recently created document for an analysis."""
-        return build_repository(IrisReportRepository).get_latest_document(analysis_id)
-
-    def get_documents_for_user(self, user_id: int) -> List[IrisDocument]:
-        """Retrieve all documents belonging to a user."""
-        return build_repository(IrisReportRepository).get_documents_by_user(user_id)
-
-    def get_documents_by_analysis_id(self, analysis_id: int) -> List[IrisDocument]:
+    def get_documents_by_parent(self, analysis_id: int) -> List[IrisDocument]:
         """Retrieve all documents generated for a specific analysis."""
         return build_repository(IrisReportRepository).get_documents_by_analysis(analysis_id)
-
-    def delete_document(self, document_id: int) -> bool:
-        """Delete a document and its associated file on disk.
-
-        Raises:
-            DocumentNotFoundError: If the document was not found.
-        """
-        delete_document_with_file(
-            document_id,
-            IrisReportRepository,
-            DocumentNotFoundError,
-        )
-        return True
-
-    def assert_document_ownership(self, document_id: int, user_id: int) -> IrisDocument:
-        """Verify document ownership and return the document.
-
-        Raises:
-            DocumentNotFoundError: If document not found or not owned by
-                user (same error for both cases to prevent ID enumeration).
-        """
-        return assert_owned(IrisReportRepository, document_id, user_id, DocumentNotFoundError)
 
     def generate_report(self, analysis_id: int, user_id: int) -> int:
         """Create an IrisDocument and start async PDF generation.
