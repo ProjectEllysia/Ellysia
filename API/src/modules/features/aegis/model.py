@@ -609,6 +609,10 @@ class Campaign(Base):
             "status":      self.status,
             "createdAt":   isoformat_utc(self.created_at),
             "launchedAt":  isoformat_utc(self.launched_at),
+            # Sobre cuántas preguntas puntúa esta campaña. Sale del snapshot
+            # congelado al lanzarla, no del documento: la píldora puede haberse
+            # editado después y el "x/total" de los resultados mentiría.
+            "questionCount": len(self.questions_snapshot or []),
         }
 
     def __repr__(self) -> str:

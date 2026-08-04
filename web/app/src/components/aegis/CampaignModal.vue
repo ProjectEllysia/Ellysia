@@ -72,11 +72,68 @@ bob@empresa.com"
 
             <div v-if="store.campaignsForDoc.length" class="past-campaigns">
               <span class="past-campaigns-label">Campañas anteriores de esta píldora</span>
-              <div v-for="c in store.campaignsForDoc" :key="c.id" class="past-campaign-row">
-                <span class="badge" :class="statusBadgeClass(c.status)">{{ statusLabel(c.status) }}</span>
-                <span class="past-campaign-name">{{ c.name }}</span>
-                <span class="past-campaign-date">{{ formatDate(c.createdAt) }}</span>
-              </div>
+              <template v-for="c in store.campaignsForDoc" :key="c.id">
+                <div class="past-campaign-row" :class="{ 'past-campaign-row--open': store.campaignDetail?.id === c.id }">
+                  <button
+                    type="button"
+                    class="past-campaign-row-main"
+                    :aria-expanded="store.campaignDetail?.id === c.id"
+                    @click="store.loadCampaignDetail(c.id)"
+                  >
+                    <span class="badge" :class="statusBadgeClass(c.status)">{{ statusLabel(c.status) }}</span>
+                    <span class="past-campaign-name">{{ c.name }}</span>
+                    <span class="past-campaign-date">{{ formatDate(c.createdAt) }}</span>
+                    <span class="past-campaign-chevron" aria-hidden="true">›</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="past-campaign-delete"
+                    title="Eliminar campaña"
+                    aria-label="Eliminar campaña"
+                    @click="deleteTarget = c"
+                  >✕</button>
+                </div>
+
+                <!-- Resultados: solo la campaña desplegada -->
+                <div v-if="store.campaignDetail?.id === c.id" class="results">
+                  <p v-if="store.loadingCampaignDetail" class="hint">Cargando resultados…</p>
+                  <template v-else>
+                    <div class="results-stats">
+                      <div class="stat">
+                        <span class="stat-value">{{ stats.sent }}</span>
+                        <span class="stat-label">Enviados</span>
+                      </div>
+                      <div class="stat">
+                        <span class="stat-value">{{ stats.opened }}</span>
+                        <span class="stat-label">Abiertos</span>
+                      </div>
+                      <div class="stat">
+                        <span class="stat-value">{{ stats.completed }}</span>
+                        <span class="stat-label">Completados</span>
+                      </div>
+                      <div class="stat">
+                        <span class="stat-value">{{ stats.averageScore ?? '—' }}</span>
+                        <span class="stat-label">Nota media</span>
+                      </div>
+                    </div>
+
+                    <div class="progress" role="img" :aria-label="`${stats.completionRate}% completado`">
+                      <div class="progress-fill" :style="{ width: `${stats.completionRate}%` }"></div>
+                    </div>
+                    <p class="hint">{{ stats.completionRate }}% ha completado el test.</p>
+
+                    <div class="recipient-rows">
+                      <div v-for="r in store.campaignDetail.recipients" :key="r.id" class="recipient-row">
+                        <span class="dot" :class="`dot--${r.status}`" :title="recipientLabel(r.status)"></span>
+                        <span class="recipient-email">{{ r.email }}</span>
+                        <span class="recipient-state">
+                          {{ r.status === 'completed' ? `${r.score}/${store.campaignDetail.questionCount}` : recipientLabel(r.status) }}
+                        </span>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
             </div>
           </div>
         </Transition>
@@ -90,6 +147,16 @@ bob@empresa.com"
         </footer>
       </div>
     </div>
+
+    <ConfirmModal
+      :show="!!deleteTarget"
+      title="Eliminar campaña"
+      :message="`¿Eliminar «${deleteTarget?.name}»? Los enlaces de quiz ya enviados a sus destinatarios dejarán de funcionar.`"
+      confirm-label="Eliminar"
+      danger
+      @confirm="confirmDelete"
+      @cancel="deleteTarget = null"
+    />
   </Teleport>
 </template>
 
@@ -97,6 +164,7 @@ bob@empresa.com"
 import { computed, ref } from 'vue'
 import { useAegisStore } from '@/stores/aegisStore'
 import { useUtils } from '@/composables/useUtils'
+import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 
 const props = defineProps({ doc: { type: Object, required: true } })
 const emit = defineEmits(['close'])
@@ -169,10 +237,42 @@ async function handleLaunch() {
 
 function close() { emit('close') }
 
-const statusLabels = { draft: 'Borrador', sending: 'Enviando', sent: 'Enviada', closed: 'Cerrada' }
-const statusBadges = { draft: 'badge--pending', sending: 'badge--running', sent: 'badge--done', closed: 'badge--cancelled' }
+const deleteTarget = ref(null)
+async function confirmDelete() {
+  const campaign = deleteTarget.value
+  deleteTarget.value = null
+  if (campaign) await store.deleteCampaign(campaign.id)
+}
+
+const statusLabels = { draft: 'Borrador', sending: 'Enviando', sent: 'Enviada', failed: 'Fallida', closed: 'Cerrada' }
+const statusBadges = { draft: 'badge--pending', sending: 'badge--running', sent: 'badge--done', failed: 'badge--error', closed: 'badge--cancelled' }
 function statusLabel(status) { return statusLabels[status] || status }
 function statusBadgeClass(status) { return statusBadges[status] || 'badge--pending' }
+
+const recipientLabels = { sent: 'Enviado', opened: 'Abierto', completed: 'Completado' }
+function recipientLabel(status) { return recipientLabels[status] || status }
+
+/**
+ * Resumen de la campaña desplegada. 'opened' y 'completed' son acumulativos:
+ * quien completó también abrió, y quien abrió también recibió el correo — el
+ * estado solo guarda el punto más avanzado al que llegó cada destinatario.
+ */
+const stats = computed(() => {
+  const recipients = store.campaignDetail?.recipients ?? []
+  const completed = recipients.filter(r => r.status === 'completed')
+  const opened = recipients.filter(r => r.status === 'opened').length + completed.length
+  const scored = completed.filter(r => typeof r.score === 'number')
+
+  return {
+    sent: recipients.length,
+    opened,
+    completed: completed.length,
+    completionRate: recipients.length ? Math.round((completed.length / recipients.length) * 100) : 0,
+    averageScore: scored.length
+      ? (scored.reduce((total, r) => total + r.score, 0) / scored.length).toFixed(1)
+      : null,
+  }
+})
 </script>
 
 <style scoped>
@@ -210,9 +310,39 @@ function statusBadgeClass(status) { return statusBadges[status] || 'badge--pendi
 
 .past-campaigns { margin-top: 0.2rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
 .past-campaigns-label { display: block; font-size: var(--fs-md); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 0.5rem; }
-.past-campaign-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0; font-size: var(--fs-lg); }
-.past-campaign-name { flex: 1; min-width: 0; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.past-campaign-date { color: var(--text-muted); font-size: var(--fs-md); font-family: var(--font-mono); flex-shrink: 0; }
+.past-campaign-row { display: flex; align-items: stretch; gap: 0.25rem; border-radius: 6px; transition: background var(--transition); }
+.past-campaign-row:hover, .past-campaign-row--open { background: var(--bg); }
+.past-campaign-row-main { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.4rem; font-size: var(--fs-lg); flex: 1; min-width: 0; background: none; border: none; font-family: inherit; text-align: left; cursor: pointer; }
+.past-campaign-row-main:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 1px; }
+.past-campaign-name { flex: 1; min-width: 0; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-md);}
+.past-campaign-date { color: var(--text-muted); font-size: var(--fs-sm); font-family: var(--font-mono); flex-shrink: 0; }
+.past-campaign-chevron { color: var(--text-muted); flex-shrink: 0; transition: transform var(--transition); }
+.past-campaign-row--open .past-campaign-chevron { transform: rotate(90deg); color: var(--accent); }
+.past-campaign-delete { flex-shrink: 0; width: 24px; margin: 0.25rem 0.3rem 0.25rem 0; border: none; border-radius: 5px; background: none; color: var(--text-muted); font-size: var(--fs-md); cursor: pointer; transition: all 0.15s; }
+.past-campaign-delete:hover { background: var(--danger-dim); color: var(--danger); }
+
+/* ── Resultados de una campaña ── */
+.results { padding: 0.6rem 0.4rem 0.9rem; display: flex; flex-direction: column; gap: 0.6rem; border-bottom: 1px solid var(--border); }
+.results-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; }
+.stat { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; padding: 0.5rem 0.25rem; background: var(--bg); border-radius: 7px; }
+.stat-value { font-size: var(--fs-xl); font-weight: 700; color: var(--accent-bright); font-family: var(--font-display); line-height: 1.1; }
+.stat-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); text-align: center; }
+
+.progress { height: 6px; border-radius: 3px; background: var(--bg); overflow: hidden; }
+.progress-fill { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.35s ease; }
+
+.recipient-rows { display: flex; flex-direction: column; max-height: 11rem; overflow-y: auto; }
+.recipient-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; font-size: var(--fs-md); }
+.recipient-email { flex: 1; min-width: 0; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recipient-state { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--fs-sm); flex-shrink: 0; }
+.dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text-muted); }
+.dot--sent { background: var(--text-muted); }
+.dot--opened { background: var(--warn); }
+.dot--completed { background: var(--success); }
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-fill, .past-campaign-chevron { transition: none !important; }
+}
 
 .campaign-footer { display: flex; justify-content: flex-end; gap: 0.5rem; padding: 0.9rem 1.25rem; border-top: 1px solid var(--border); flex-shrink: 0; }
 .btn-spin-inline { width: 12px; height: 12px; border: 2px solid rgba(0,0,0,0.2); border-top-color: currentColor; border-radius: 50%; animation: seq-spin 0.6s linear infinite; }

@@ -320,6 +320,14 @@ class AegisManager(TaskTrackingMixin):
                         except OSError:
                             logger.warning("No se pudo eliminar el archivo %s", file_path, exc_info=True)
 
+                # Campaign.document_id no tiene ON DELETE CASCADE en BD: borrar
+                # el documento con campañas colgando de él violaría la FK. Se
+                # borran primero (arrastrando destinatarios y respuestas por
+                # cascade="all, delete-orphan" en Campaign.recipients).
+                campaign_repo = CampaignRepository(uow)
+                for campaign in campaign_repo.get_campaigns_by_document(document_id):
+                    campaign_repo.delete(campaign)
+
                 repo.delete(doc)
         except Exception as exc:
             raise RuntimeError(f"Error eliminando documento: {exc}")
@@ -858,6 +866,20 @@ class CampaignManager(TaskTrackingMixin):
 
     def _assert_campaign_ownership(self, campaign_id: int) -> Campaign:
         return assert_owned(CampaignRepository, campaign_id, self.user.id, CampaignNotFoundError)
+
+    def delete_campaign(self, campaign_id: int) -> None:
+        """
+        Elimina una campaña y todo su tracking (destinatarios, respuestas).
+
+        Borra las filas CampaignRecipient en cascada (cascade="all,
+        delete-orphan" en Campaign.recipients), lo que se lleva por delante
+        sus tokens: cualquier enlace de correo ya enviado para esta campaña
+        pasa a devolver QuizTokenInvalidError (404) — es la forma en que se
+        "invalida" la URL, no hay una lista de revocación aparte.
+        """
+        campaign = self._assert_campaign_ownership(campaign_id)
+        with UnitOfWork() as uow:
+            CampaignRepository(uow).delete(campaign)
 
     # =========================================================================
     # WORKFLOW DE ENVÍO (privado, ejecutado en el worker RQ)

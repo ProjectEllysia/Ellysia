@@ -727,6 +727,24 @@ def get_campaign(campaign_id):
     return mgr.get_campaign(campaign_id)
 
 
+@aegis_blp.delete("/campaigns/<int:campaign_id>")
+@aegis_blp.response(200, description="Campaign deleted")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@aegis_blp.alt_response(404, schema=ErrorSchema, description="Campaign not found")
+@limiter.limit("30 per hour; 100 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_DELETE])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def delete_campaign(campaign_id):
+    """Eliminar una campaña y su tracking — invalida los enlaces de quiz ya enviados"""
+    user = get_current_user()
+    mgr = CampaignManager(user)
+    mgr.delete_campaign(campaign_id)
+    logger.info(f"Campaña {campaign_id} eliminada | user={current_actor()}")
+    return {"message": "Campaña eliminada correctamente", "campaignId": campaign_id}
+
+
 @aegis_blp.post("/campaigns/<int:campaign_id>/launch")
 @aegis_blp.response(200, description="Campaign launched — sending in background")
 @aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
