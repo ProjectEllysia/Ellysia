@@ -10,17 +10,14 @@ alembic>=1.13
 
 # PDF Generation
 reportlab>=4.0.7
+# Pillow: no se importa directamente, pero reportlab la requiere en tiempo de
+# ejecución para insertar imágenes en los PDFs (Image de platypus) — se
+# declara explícito para fijar versión mínima en vez de depender de la
+# transitiva de reportlab.
 Pillow>=11.0.0
 
 # QR code decoding (Iris quishing detection, D1)
 opencv-python-headless>=4.10.0
-
-# Python-Nmap: Interfaz Python para Nmap
-python-nmap==0.7.1
-
-# XML Processing (for Nmap and Nikto output parsing)
-lxml>=4.9.3
-xmltodict==0.13.0
 
 # YAML: plantillas de Nuclei (almacén/ingesta, roadmap Fases U4 y R). Estaba
 # disponible de forma transitiva; se declara explícito ahora que hay código
@@ -32,19 +29,6 @@ PyYAML>=6.0
 # primera parte que la importa.
 Jinja2>=3.1
 
-# Logging & Utilities
-python-dateutil==2.8.2
-
-# Testing (optional but recommended)
-pytest>=7.4.3
-pytest-cov>=4.1.0
-pytest-mock>=3.12.0
-
-# Type Hints & Code Quality (development)
-mypy>=1.7.1
-black>=23.11.0
-flake8>=6.1.0
-
 # API Documentation & Validation
 flask-smorest>=0.45.0,<0.47
 marshmallow>=3.21.0,<4.0
@@ -55,7 +39,6 @@ cryptography>=41.0.4
 flask_limiter
 PyJWT
 pyotp>=2.9.0
-dnspython
 ollama
 openai>=1.0
 google-generativeai>=0.8.0

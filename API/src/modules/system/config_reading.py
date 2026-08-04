@@ -866,7 +866,7 @@ def get_tool_prompts(tool: str) -> dict:
 
 @_lazy_load
 def get_tool_color_palette(tool) -> dict:
-    # Accepts a ThemisTool enum member or a plain string; without this, a
+    # Accepts a ScanType enum member or a plain string; without this, a
     # dict lookup with an Enum instance against string keys always misses
     # and silently returns {} (bug: every caller has been getting the
     # hardcoded per-strategy fallback colors instead of SecOpsConfig's).

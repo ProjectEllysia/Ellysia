@@ -23,10 +23,9 @@ import time
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from functools import wraps
-from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
 
@@ -34,11 +33,7 @@ import src.modules.system.config_reading as CR
 from src.modules.tools.scribe import AIInput, AIGenerator, build_generator, web_search, WEB_SEARCH_TOOL
 
 logger = logging.getLogger(__name__)
-from src.modules.features.aegis.exceptions import (
-    AegisValidationError,
-    AegisInsufficientContentError,
-    AegisFetchError,
-)
+from src.modules.features.aegis.exceptions import AegisValidationError
 
 from ..model import Topic
 

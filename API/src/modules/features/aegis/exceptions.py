@@ -3,8 +3,6 @@ from src.modules.shared._exceptions import (
     ErrorCode,
     ErrorSeverity,
     ValidationError,
-    DatabaseError,
-    EntityAlreadyExistsError,
     DocumentError,
     DocumentNotFoundError,
     DocumentNotReadyError,

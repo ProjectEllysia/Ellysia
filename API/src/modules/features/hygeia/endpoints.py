@@ -25,7 +25,6 @@ from src.modules.users import (
 
 from .exceptions import (
     AnomalyNotFoundError,
-    AnomalyStillOpenError,
     AssetNotFoundError,
     HygeiaError,
 )

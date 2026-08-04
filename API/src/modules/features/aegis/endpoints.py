@@ -1,6 +1,6 @@
 import logging
 
-from flask import request, send_file, Response
+from flask import send_file, Response
 from flask_smorest import Blueprint as SmorestBlueprint
 
 import src.modules.system.config_reading as CR
@@ -14,14 +14,7 @@ from .exceptions import (
     DocumentError,
     DocumentNotFoundError,
     DocumentNotReadyError,
-    CampaignAlreadyLaunchedError,
-    CampaignEmptyListError,
     CampaignError,
-    CampaignNoQuestionsError,
-    CampaignNotFoundError,
-    DistributionListNotFoundError,
-    QuizAlreadyCompletedError,
-    QuizTokenInvalidError,
     EllysiaException,
 )
 from .services import (

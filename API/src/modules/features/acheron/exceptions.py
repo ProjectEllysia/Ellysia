@@ -21,7 +21,6 @@ Ejemplo de uso:
 from typing import Optional
 
 from src.modules.shared._exceptions import (
-    EllysiaException,
     ErrorCode,
     ErrorSeverity,
     DatabaseError,

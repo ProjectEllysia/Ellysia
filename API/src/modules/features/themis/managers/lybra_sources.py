@@ -98,8 +98,6 @@ class ServiceSource:
         """Resolve and validate this mode's target, before the scan record exists."""
         raise NotImplementedError
 
-    # TODO: Cambiar nombre de la función a algo más descriptivo,
-    # como `resolve_services` o `get_resolved_services`.
     def resolve_services(
         self,
         scan_repo: ScanRepository,

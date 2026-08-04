@@ -44,7 +44,7 @@ from ..lybra import (
     scan_udp_ports_sync,
 )
 from ..lybra.ingest import select_for_services, translate_all
-from ..services import _Task, LybraPrintingStrategy
+from ..services import _Task
 from ..services.nuclei_templates import NucleiTemplateStore
 from ..exceptions import (
     ScanNotFoundError,
@@ -79,7 +79,6 @@ class LybraEngineManager(ScanManager):
 
     SCAN_TYPE = ScanType.LYBRA
     _MODEL = LybraScan
-    _strategy_class = LybraPrintingStrategy
 
     # Categories that are point-in-time events, not persistent vulnerability
     # state - excluded from lifecycle tracking (see Phase 2.5 in _run_lybra).

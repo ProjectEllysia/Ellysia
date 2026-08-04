@@ -54,14 +54,6 @@ from .analyzers import NmapAIWriter, NiktoAIWriter, LybraAIWriter
 
 
 
-class ThemisTool(Enum):
-    """Enumeración de herramientas disponibles en Themis"""
-    NMAP    = "nmap"
-    NIKTO   = "nikto"
-    LYBRA   = "lybra"
-    NUCLEI  = "nuclei"
-
-
 class ColorType(Enum):
     """Color palette type identifiers for report theming."""
     BLACK       = "black"
@@ -384,14 +376,10 @@ class PrintingStrategy(ABC):
 
     def _append_ai_analysis(self, elements: list, theme: ReportTheme) -> None:
         """Append AI-generated security analysis to the report."""
-        scan_type = type(self.scan).__name__
-        logger.info(f"[IA] Iniciando para scan {self.scan.id} ({scan_type})")
+        tool_key = self.scan.scan_type
+        logger.info(f"[IA] Iniciando para scan {self.scan.id} ({tool_key})")
 
         prompts = CR.get_prompts_config()
-        tool_key = {
-            'NmapScan': 'nmap', 'NiktoScan': 'nikto', 'LybraScan': 'lybra',
-            'NucleiScan': 'nuclei',
-        }.get(scan_type, 'nmap')
         tool_prompts = prompts.get(tool_key, {})
 
         if not tool_prompts.get('system'):
@@ -1116,7 +1104,7 @@ class NmapPrintingStrategy(PrintingStrategy):
         super().__init__(scan)
         self.writer = NmapAIWriter()
 
-        palette_config = CR.get_tool_color_palette(ThemisTool.NMAP)
+        palette_config = CR.get_tool_color_palette(ScanType.NMAP)
 
         self.color_palette = {
             ColorType.BLACK: palette_config.get("black", "#121212"),
@@ -1280,7 +1268,7 @@ class NiktoPrintingStrategy(PrintingStrategy):
         super().__init__(scan)
         self.writer = NiktoAIWriter()
 
-        palette_config = CR.get_tool_color_palette(ThemisTool.NIKTO)
+        palette_config = CR.get_tool_color_palette(ScanType.NIKTO)
 
         self.color_palette = {
             ColorType.BLACK: palette_config.get("black", "#4B2500"),
@@ -1569,7 +1557,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
 
     Subclass contract (all required, no defaults — each identity must be a
     deliberate choice, not an inherited accident):
-        _TOOL:              ``ThemisTool`` member, for ``CR.get_tool_color_palette``.
+        _TOOL:              ``ScanType`` member, for ``CR.get_tool_color_palette``.
         _WRITER_CLASS:       AI writer class to instantiate (both tools reuse
                              ``LybraAIWriter`` today — its logic only reads
                              already-structured findings, nothing Lybra-specific).
@@ -1601,7 +1589,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
     # concrete subclass fills in. Declaring them here (rather than leaving
     # them only in prose) is what lets static analysis resolve `self._TOOL`
     # etc. inside this class's own methods.
-    _TOOL: "ThemisTool"
+    _TOOL: "ScanType"
     _WRITER_CLASS: type
     _WRITER_PROMPT_KEY: str
     _OWN_SOURCE: str
@@ -1963,7 +1951,7 @@ class LybraPrintingStrategy(FindingsPrintingStrategy):
     Lybra's identity — behaviour is unchanged from before the Fase U1 extract.
     """
 
-    _TOOL = ThemisTool.LYBRA
+    _TOOL = ScanType.LYBRA
     _WRITER_CLASS = LybraAIWriter
     _WRITER_PROMPT_KEY = "lybra"
     _OWN_SOURCE = "lybra"
@@ -1992,7 +1980,7 @@ class NucleiPrintingStrategy(FindingsPrintingStrategy):
     coexist without visual confusion in the tool picker.
     """
 
-    _TOOL = ThemisTool.NUCLEI
+    _TOOL = ScanType.NUCLEI
     _WRITER_CLASS = LybraAIWriter
     _WRITER_PROMPT_KEY = "nuclei"
     _OWN_SOURCE = "nuclei"

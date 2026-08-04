@@ -28,11 +28,8 @@ from ..lybra import (
 )
 from ..services import (
     NmapResultProcessor,
-    NmapPrintingStrategy,
     NiktoResultProcessor,
-    NiktoPrintingStrategy,
     NucleiResultProcessor,
-    NucleiPrintingStrategy,
     _Task,
 )
 from ..exceptions import ScanNotFoundError, TargetNotAuthorizedError
@@ -47,7 +44,6 @@ logger = logging.getLogger(__name__)
 class NmapScanManager(ScanManager):
     SCAN_TYPE = ScanType.NMAP
     _MODEL = NmapScan
-    _strategy_class = NmapPrintingStrategy
     _RICH_LOADER = "get_nmap_rich"
 
     """
@@ -184,7 +180,6 @@ class NmapScanManager(ScanManager):
 class NiktoScanManager(ScanManager):
     SCAN_TYPE = ScanType.NIKTO
     _MODEL = NiktoScan
-    _strategy_class = NiktoPrintingStrategy
     _RICH_LOADER = "get_nikto_rich"
 
     """
@@ -342,7 +337,6 @@ class NucleiScanManager(ScanManager):
     """
     SCAN_TYPE = ScanType.NUCLEI
     _MODEL = NucleiScan
-    _strategy_class = NucleiPrintingStrategy
     # _RICH_LOADER no se define: sin relaciones ORM propias que precargar,
     # igual que LybraScan (ver ScanManager._RICH_LOADER).
 

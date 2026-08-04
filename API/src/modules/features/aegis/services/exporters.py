@@ -29,7 +29,6 @@ from urllib.parse import urlparse
 
 from src.modules.shared import utcnow_naive, isoformat_utc
 from src.modules.features.aegis.exceptions import (
-    ExporterError,
     ExporterFormatError,
     ExporterConfigurationError,
 )

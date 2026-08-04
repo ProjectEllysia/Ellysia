@@ -1,13 +1,10 @@
 """
 Shared utilities for all API endpoints.
 
-This module provides common functionality used across all blueprints:
-- OAuth authentication decorator (require_oauth_token)
-- Current user access helpers
-- Manager factory (DRY principle)
-- Scan lookup helper by ID
-- Centralized validation constants
-- PDFCreator builder helper
+This module provides:
+- limiter: global rate limiter instance (lazy initialization).
+- current_actor(): readable user identity for endpoint context logs.
+- normalize_target(): normalize a user-supplied target to (ip, hostname).
 
 Module Variables:
     limiter: Global rate limiter instance (lazy initialization).
