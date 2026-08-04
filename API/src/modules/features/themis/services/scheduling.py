@@ -1,13 +1,12 @@
 
 import logging
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler as _BgScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from croniter import croniter
 
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.retry import retry_on_transient
@@ -47,9 +46,10 @@ class ThemisScheduler:
     def _build_trigger(cls, schedule_type: str, schedule_config: dict):
         # timezone=UTC explícito: los triggers de APScheduler, por defecto, fijan
         # la zona LOCAL del servidor al construirse. Sin esto, un cron "0 2 * * *"
-        # dispararía a las 02:00 locales mientras que calculate_next_run/croniter y
-        # las columnas DateTime trabajan en UTC naive → la UI mostraría una hora
-        # distinta a la real. Forzando UTC todo queda coherente.
+        # dispararía a las 02:00 locales mientras que calculate_next_run (A12:
+        # delega en este mismo trigger) y las columnas DateTime trabajan en UTC
+        # naive → la UI mostraría una hora distinta a la real. Forzando UTC todo
+        # queda coherente.
         if schedule_type == "interval":
             every = int(schedule_config["every"])
             unit = schedule_config["unit"]
@@ -316,18 +316,28 @@ class ThemisScheduler:
 
         Naive UTC keeps it consistent with ``utcnow_naive()`` used across the
         codebase and with the timezone-naive ``DateTime`` columns.
+
+        A12: delega en ``_build_trigger`` (el mismo trigger de APScheduler que
+        de verdad dispara el job) en vez de mantener una segunda
+        interpretación de la config vía ``croniter``/``timedelta``. Antes las
+        dos podían divergir en silencio para un cron con día de la semana
+        numérico: crontab estándar (y ``croniter``) usa 0=domingo, pero
+        ``CronTrigger`` de APScheduler usa 0=lunes (``datetime.weekday()``) —
+        confirmado con un caso real (test_scheduling_semantics.py): "30 23 *
+        * 0" calculaba el próximo domingo (croniter) mientras el trigger
+        disparaba el lunes siguiente. Con una sola fuente, esa clase entera
+        de bug deja de ser posible.
         """
         reference = last_run if last_run is not None else utcnow_naive()
+        reference_aware = reference.replace(tzinfo=timezone.utc)
 
-        if schedule_type == "interval":
-            every = int(schedule_config["every"])
-            unit = schedule_config["unit"]
-            try:
-                return reference + timedelta(**{unit: every})
-            except TypeError as exc:
-                raise ValueError(f"Unknown interval unit: {unit}") from exc
+        try:
+            trigger = cls._build_trigger(schedule_type, schedule_config)
+        except TypeError as exc:
+            unit = schedule_config.get("unit")
+            raise ValueError(f"Unknown interval unit: {unit}") from exc
 
-        if schedule_type == "cron":
-            return croniter(schedule_config["cron"], reference).get_next(datetime)
-
-        raise ValueError(f"Unknown schedule_type: {schedule_type}")
+        next_fire = trigger.get_next_fire_time(reference_aware, reference_aware)
+        if next_fire is None:
+            raise ValueError(f"No next fire time for {schedule_type}: {schedule_config}")
+        return next_fire.astimezone(timezone.utc).replace(tzinfo=None)

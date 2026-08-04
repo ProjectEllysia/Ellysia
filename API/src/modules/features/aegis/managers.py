@@ -31,7 +31,6 @@ import json
 import logging
 import random
 import secrets
-import threading
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
@@ -102,8 +101,6 @@ class AegisManager(TaskTrackingMixin):
     EXTERNAL_ID_PREFIX = "aegis-doc:"
     TASK_CATEGORY = "aegis.generate"
 
-    _lock = threading.Lock()
-
     def __init__(
         self,
         user: User,
@@ -129,19 +126,27 @@ class AegisManager(TaskTrackingMixin):
     def generate(self, topic_id: int, tweaks: dict | None = None) -> int:
         """
         Lanza la generacion asincrona de una pildora y devuelve el documentId
-        inmediatamente. Thread-safe.
-        """
-        with self._lock:
-            tweaks      = tweaks or {}
-            document_id = self._create_pending_document(topic_id)
+        inmediatamente.
 
-            self._tq.submit(
-                func=AegisManager.execute_aegis_generation,
-                args=(document_id, topic_id, tweaks, self.user.id),
-                name=f"AegisGen-{document_id}",
-                category=self.TASK_CATEGORY,
-                external_id=self.external_id_for(document_id),
-            )
+        E6: no necesita lock. ``_create_pending_document`` siempre inserta
+        una fila nueva (PK autoincremental) — no hay estado mutuo
+        compartido que proteger entre dos llamadas concurrentes, cada una
+        obtiene su propio documento. Un ``threading.Lock`` de atributo de
+        clase tampoco serviría aunque lo hubiera: bajo gunicorn con varios
+        workers (el despliegue real de este proyecto) cada proceso tiene su
+        propio lock, así que no coordina nada entre procesos — solo
+        serializaba llamadas dentro de un mismo proceso sin necesidad.
+        """
+        tweaks      = tweaks or {}
+        document_id = self._create_pending_document(topic_id)
+
+        self._tq.submit(
+            func=AegisManager.execute_aegis_generation,
+            args=(document_id, topic_id, tweaks, self.user.id),
+            name=f"AegisGen-{document_id}",
+            category=self.TASK_CATEGORY,
+            external_id=self.external_id_for(document_id),
+        )
 
         return document_id
 
