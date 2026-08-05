@@ -16,7 +16,7 @@ import pytest
 from src.modules.infrastructure import UnitOfWork
 from src.modules.system.taskqueue import Task, TaskStatus
 
-import src.modules.features.iris.managers as managers_mod
+import src.modules.features.iris.managers.analysis as managers_mod
 from src.modules.features.iris.model import IrisAnalysis
 from src.modules.features.iris.repositories import IrisAnalysisRepository
 

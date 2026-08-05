@@ -7,6 +7,9 @@ Coordinates the analysis lifecycle:
 3. The background task runs all registered rules, aggregates scores,
    determines a verdict, and persists results.
 4. Provides status queries and cancellation support.
+
+D4 en ``plans/deuda-tecnica-y-calidad.md``: extraído del ``managers.py``
+de 64 KB que reunía este manager y el de informes.
 """
 
 from __future__ import annotations
@@ -18,31 +21,29 @@ from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
 import src.modules.system.config_reading as CR
-from src.modules.shared._exceptions import DocumentNotFoundError
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc, CANCELLABLE_STATES as _CANCELLABLE_STATES
-from src.modules.shared._documents import run_report_generation, DocumentManager
 from src.modules.system.taskqueue import TaskQueue, TaskTrackingMixin, job_context
 
-from .exceptions import (
+from ..exceptions import (
     IrisAnalysisNotFoundError,
     IrisAnalysisNotReadyError,
     IrisExecutionError,
     IrisInvalidInputError,
     IrisInvalidStateError,
 )
-from .model import IrisAnalysis, IrisDocument, IrisRuleResult
-from .repositories import IrisAnalysisRepository, IrisReportRepository, IrisRuleResultRepository
-from .services.rules import iris_rules, RuleResult
-from .services.text import extract_domain, is_free_provider, url_host
-from .services import parse_raw_message
-from .services.parsers import build_path, parse_received_line
-from .services.reports import IrisPDFCreator
-from .services.ai_writer import IrisAIWriter
+from ..model import IrisAnalysis, IrisRuleResult
+from ..repositories import IrisAnalysisRepository, IrisRuleResultRepository
+from ..services.rules import iris_rules, RuleResult
+from ..services.text import extract_domain, is_free_provider, url_host
+from ..services import parse_raw_message
+from ..services.parsers import build_path, parse_received_line
+from ..services.ai_writer import IrisAIWriter
 
 
 logger = logging.getLogger(__name__)
+
 
 # Verdict severity ordering, worst last. Gating can only push a verdict
 # toward a *worse* category, never improve it.
@@ -1188,97 +1189,3 @@ class IrisManager(TaskTrackingMixin):
             self._update_analysis(analysis_id, status="failed", finished_at=utcnow_naive())
         except Exception as e:
             logger.error(f"Failed to mark analysis {analysis_id} as failed: {e}", exc_info=True)
-
-
-class IrisReportManager(DocumentManager):
-    """Manager for IrisDocument lifecycle and async PDF report generation.
-
-    CRUD/ownership are shared with Themis via ``DocumentManager`` (A3); this
-    class keeps only what is really Iris-specific: creating an
-    ``IrisDocument`` and rendering its PDF via :class:`IrisPDFCreator`.
-    """
-
-    EXTERNAL_ID_PREFIX = "iris-doc:"
-    TASK_CATEGORY = "iris.report"
-
-    _REPOSITORY = IrisReportRepository
-    _NOT_FOUND_ERROR = DocumentNotFoundError
-
-    @staticmethod
-    def _create_document(analysis: IrisAnalysis) -> int:
-        """Create an IrisDocument for a finished analysis and return its ID."""
-        with UnitOfWork() as uow:
-            document = IrisDocument(
-                analysis_id=analysis.id,
-                document_type="iris",
-                filename="",
-                format="pdf",
-                status="running",
-                user_id=analysis.user_id,
-                verdict=analysis.verdict,
-                is_ai_generated=0,
-            )
-            IrisReportRepository(uow).save(document)
-            # Durable antes de encolar: el worker corre en otro proceso.
-            uow.commit_for_handoff()
-        return document.id  # type: ignore
-
-    # get_documents_by_parent: usa el default de DocumentManager (A9).
-
-    def generate_report(self, analysis_id: int, user_id: int) -> int:
-        """Create an IrisDocument and start async PDF generation.
-
-        Args:
-            analysis_id: Primary key of the finished analysis.
-            user_id:     Owner of the analysis (ownership is verified here).
-
-        Returns:
-            Primary key of the created IrisDocument.
-
-        Raises:
-            IrisAnalysisNotFoundError: If the analysis does not exist or
-                is not owned by ``user_id``.
-            IrisAnalysisNotReadyError: If the analysis is not ``finished``.
-        """
-        analysis = IrisManager.assert_analysis_ownership(analysis_id, user_id)
-        if analysis.status != "finished":
-            raise IrisAnalysisNotReadyError(analysis_id, analysis.status)
-
-        doc_id = self._create_document(analysis)
-
-        self._tq.submit(
-            func=IrisReportManager.execute_report_generation,
-            args=(doc_id, analysis_id),
-            name=f"PDFGeneration-Analysis-{analysis_id}",
-            category=self.TASK_CATEGORY,
-            external_id=self.external_id_for(doc_id),
-        )
-        return doc_id  # type: ignore
-
-    @staticmethod
-    def execute_report_generation(doc_id: int, analysis_id: int) -> None:
-        """Entry point submitted to the TaskQueue for background PDF generation."""
-        with job_context():
-            IrisReportManager()._generate_pdf_async(doc_id, analysis_id)
-
-    def _generate_pdf_async(self, document_id: int, analysis_id: int) -> None:
-        """Genera el PDF del informe en el worker y sincroniza el estado del documento.
-
-        Delega en ``run_report_generation`` (helper compartido con Themis) que
-        gestiona el marcado ``done``/``error`` y el re-lanzamiento de la
-        excepción para que el job de RQ termine como FAILED si algo falla.
-        """
-        def _render() -> str:
-            report = IrisManager().get_analysis_results(analysis_id)
-            analysis = build_repository(IrisAnalysisRepository).get_by_id(analysis_id)
-            path = None
-            if analysis is not None:
-                context = parse_raw_message(analysis.raw_headers or "")
-                path = {"analysisId": analysis_id, **build_path(context.received_headers)}
-            return IrisPDFCreator(report=report, path=path).print_pdf()
-
-        run_report_generation(
-            document_id=document_id,
-            repo_cls=IrisReportRepository,
-            render=_render,
-        )

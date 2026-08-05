@@ -16,7 +16,7 @@ import pytest
 
 from src.modules.system.taskqueue import Task, TaskStatus
 
-import src.modules.features.iris.managers as managers_mod
+import src.modules.features.iris.managers.analysis as managers_mod
 import src.modules.features.iris.services.reports as reports_mod
 
 pytestmark = pytest.mark.integration

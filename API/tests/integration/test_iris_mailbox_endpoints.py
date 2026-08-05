@@ -13,7 +13,7 @@ from unittest import mock
 
 import pytest
 
-from src.modules.features.iris.mailbox_managers import IrisMailboxManager
+from src.modules.features.iris.managers.mailbox import IrisMailboxManager
 from src.modules.features.iris.model import IrisMailboxConnection
 from src.modules.features.iris.repositories import IrisMailboxConnectionRepository
 from src.modules.infrastructure import UnitOfWork

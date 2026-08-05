@@ -12,14 +12,14 @@ import pytest
 from itsdangerous import BadSignature
 
 import src.modules.system.config_reading as CR
-import src.modules.features.iris.mailbox_managers as mailbox_managers_mod
+import src.modules.features.iris.managers.mailbox as mailbox_managers_mod
 from src.modules.features.iris.exceptions import (
     IrisMailboxConnectionNotFoundError,
     IrisMailboxInvalidProviderError,
     IrisMailboxOAuthStateError,
     IrisMailboxQuotaExceededError,
 )
-from src.modules.features.iris.mailbox_managers import IrisMailboxManager
+from src.modules.features.iris.managers.mailbox import IrisMailboxManager
 from src.modules.features.iris.model import IrisAnalysis, IrisMailboxConnection
 from src.modules.features.iris.repositories import IrisAnalysisRepository, IrisMailboxConnectionRepository
 from src.modules.features.iris.services.mailbox.base import MessageRef, TokenSet

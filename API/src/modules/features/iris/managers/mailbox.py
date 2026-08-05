@@ -30,16 +30,16 @@ from src.modules.shared import assert_owned, decrypt_at_rest, encrypt_at_rest, u
 from src.modules.system.taskqueue import TaskTrackingMixin, job_context
 from src.modules.system.taskqueue.connection import RedisConnectionFactory
 
-from .exceptions import (
+from ..exceptions import (
     IrisMailboxConnectionNotFoundError,
     IrisMailboxInvalidProviderError,
     IrisMailboxOAuthStateError,
     IrisMailboxQuotaExceededError,
 )
-from .managers import IrisManager
-from .model import IrisMailboxConnection
-from .repositories import IrisMailboxConnectionRepository
-from .services.mailbox import MAILBOX_CONNECTORS, MailboxConnector, get_connector
+from .analysis import IrisManager
+from ..model import IrisMailboxConnection
+from ..repositories import IrisMailboxConnectionRepository
+from ..services.mailbox import MAILBOX_CONNECTORS, MailboxConnector, get_connector
 
 logger = logging.getLogger(__name__)
 

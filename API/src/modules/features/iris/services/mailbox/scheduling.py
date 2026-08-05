@@ -22,7 +22,7 @@ import src.modules.system.config_reading as CR
 from src.modules.infrastructure.session import build_repository
 from src.modules.infrastructure.scheduling import make_background_scheduler, scheduler_job
 
-from ...mailbox_managers import IrisMailboxManager
+from ...managers.mailbox import IrisMailboxManager
 from ...repositories import IrisMailboxConnectionRepository
 
 logger = logging.getLogger(__name__)

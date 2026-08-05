@@ -30,8 +30,7 @@ from src.modules.shared._exceptions import DocumentError, DocumentNotReadyError
 
 import src.modules.system.config_reading as CR
 
-from .managers import IrisManager, IrisReportManager
-from .mailbox_managers import IrisMailboxManager
+from .managers import IrisManager, IrisReportManager, IrisMailboxManager
 from .exceptions import (
     IrisAnalysisNotFoundError,
     IrisExecutionError,

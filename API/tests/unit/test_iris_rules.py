@@ -766,7 +766,7 @@ def test_execute_ai_summary_generation_degrades_cleanly_on_ai_failure(monkeypatc
         def generate(self, report):
             raise RuntimeError("AI backend unavailable")
 
-    monkeypatch.setattr("src.modules.features.iris.managers.IrisAIWriter", _BrokenWriter)
+    monkeypatch.setattr("src.modules.features.iris.managers.analysis.IrisAIWriter", _BrokenWriter)
 
     # Should not raise.
     IrisManager.execute_ai_summary_generation(analysis_id=11)
