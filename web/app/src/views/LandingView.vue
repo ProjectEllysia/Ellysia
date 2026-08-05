@@ -94,7 +94,7 @@
         <span class="eyebrow">Security Operations Suite</span>
         <h1 class="hero-title">Ellysia</h1>
         <p class="verse">Vigila. Conciencia. Verifica. Guarda.</p>
-        <p class="lede">Cuatro herramientas de operaciones de seguridad bajo un mismo cielo.</p>
+        <p class="lede">Herramientas de seguridad bajo un mismo cielo.</p>
         <div class="hero-actions">
           <router-link v-if="!auth.isAuthenticated" to="/login" class="cta cta--solid">Entrar</router-link>
           <button class="cta cta--line" @click="scrollToSection('tools')">Conocer las herramientas</button>
@@ -115,6 +115,39 @@
       </div>
       <div class="banner-rule"></div>
     </div>
+
+    <!-- ═══════════ FILOSOFÍA — la inscripción ═══════════ -->
+    <section id="filosofia" class="philosophy">
+      <div class="philosophy-inner">
+        <img class="philo-figure" :src="socratesIcon" alt="" aria-hidden="true" />
+
+        <div class="philosophy-copy">
+          <span class="philo-eyebrow">Razón de ser</span>
+          <h2 class="philo-title">La filosofía detrás de Ellysia</h2>
+
+          <!-- Pauta vertical: el margen de una inscripción, no un adorno -->
+          <div class="philo-text" ref="philosophyTextRef">
+            <p class="philo-para">
+              La seguridad en la red dejó de ser asunto de unos pocos. Hoy basta con
+              abrir un correo, guardar una contraseña o encender un servidor para
+              quedar expuesto. Lo que cambió no fue la amenaza: fue quién la recibe.
+            </p>
+            <p class="philo-para">
+              Defenderse, en cambio, sigue siendo caro. Media docena de productos,
+              cada uno con su licencia y su consola, al alcance de quien puede pagar
+              un equipo que los maneje. Ellysia reúne esas piezas
+              <em class="philo-gold">bajo un mismo cielo</em> — detectar, formar,
+              verificar, guardar, vigilar — para quien no tiene un departamento de
+              seguridad detrás.
+            </p>
+            <p class="philo-para philo-para--close">
+              No prometemos invulnerabilidad; nadie honesto lo hace. Prometemos que
+              <em class="philo-gold">defenderse deje de ser un privilegio</em>.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- ═══════════ HERRAMIENTAS — estelas ═══════════ -->
     <section id="tools" class="stelae">
@@ -162,6 +195,22 @@
       </template>
     </section>
 
+    <!-- ═══════════ TECNOLOGÍAS — cinta en marcha ═══════════ -->
+    <section class="forge" aria-label="Tecnologías con las que está construida Ellysia">
+      <span class="forge-eyebrow">Construida con</span>
+      <div class="forge-viewport">
+        <!-- Dos copias de la lista: cuando la primera termina de entrar, la
+             segunda ocupa su sitio exacto y el bucle no tiene costura. -->
+        <div class="forge-track" aria-hidden="true">
+          <span v-for="(tech, index) in techMarquee" :key="index" class="forge-item">{{ tech }}</span>
+        </div>
+      </div>
+      <!-- Lista real para lectores de pantalla (la cinta visual está oculta) -->
+      <ul class="sr-only">
+        <li v-for="tech in technologies" :key="tech">{{ tech }}</li>
+      </ul>
+    </section>
+
     <!-- ═══════════ PLACA ═══════════ -->
     <section class="plaque">
       <span class="plaque-item"><i class="plaque-dot"></i>Operativo — 5/5 herramientas</span>
@@ -192,6 +241,7 @@ import aegisIcon from '@/assets/images/aegis/Ellysia-Aegis-Blue-BgN.png'
 import irisIcon from '@/assets/images/iris/Iris-Red-BgN.png'
 import acheronIcon from '@/assets/images/acheron/Acheron-Purple-BgN.png'
 import hygeiaIcon from '@/assets/images/hygeia/Hygeia-DarkGreen-BgN.png'
+import socratesIcon from '@/assets/images/socrastes/Socrates-BgN.png'
 
 const auth = useAuthStore()
 const profileStore = useProfileStore()
@@ -202,7 +252,19 @@ const toolsOpen = ref(false)
 const docsOpen = ref(false)
 const dropRef = ref(null)
 const steleRefs = ref([])
+const philosophyTextRef = ref(null)
 const appVersion = ref('—')
+
+/** Tecnologías con las que está construida la plataforma, en la cinta del pie. */
+const technologies = [
+  'Python', 'Flask', 'Flask-Smorest', 'SQLAlchemy', 'Alembic', 'PostgreSQL',
+  'Redis', 'RQ', 'Marshmallow', 'Argon2id', 'PyJWT', 'Pytest',
+  'Vue 3', 'Vite', 'Pinia', 'Vue Router', 'Docker', 'Ollama', 'OpenAI',
+  'Nmap', 'Nikto', 'Nuclei', 'Kotlin', 'Android',
+]
+/* La cinta lleva la lista dos veces: cuando la primera copia termina de
+   entrar, la segunda ocupa su sitio exacto y el bucle no tiene costura. */
+const techMarquee = [...technologies, ...technologies]
 
 /** Enlaces del desplegable "Documentación" — de momento apuntan a páginas placeholder. */
 const docsLinks = [
@@ -352,6 +414,8 @@ onMounted(() => {
     { threshold: 0.2 }
   )
   for (const el of steleRefs.value) observer.observe(el)
+  // Los párrafos de la filosofía se revelan uno a uno, con el mismo observador.
+  for (const el of Array.from(philosophyTextRef.value?.children ?? [])) observer.observe(el)
 
   clickOutside = (e) => {
     const d = dropRef.value
@@ -676,6 +740,104 @@ onUnmounted(() => {
   border-style: dashed;
 }
 
+/* ═══════════ Filosofía — la inscripción ═══════════ */
+/* Sala propia entre el hero y las estelas: fondo distinto (--surface, no
+   --bg) y un aliento del ocaso del héroe en degradado, para que se lea como
+   un espacio con carácter propio y no como una continuación de las estelas. */
+.philosophy {
+  position: relative;
+  padding: 6rem 3rem;
+  background:
+    radial-gradient(ellipse 900px 500px at 15% 0%, var(--sun-glow) 0%, transparent 60%),
+    var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.philosophy-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 4rem;
+  align-items: center;
+}
+
+/* Sócrates, a la izquierda — testigo silencioso de la sección, del mismo
+   trazo dorado que los medallones de las herramientas, pero sin marco: una
+   presencia junto al texto, no un icono más. */
+.philo-figure {
+  width: 100%;
+  max-width: 220px;
+  height: auto;
+  margin: 0 auto;
+  opacity: 0.8;
+  filter: drop-shadow(0 0 18px var(--sun-glow));
+}
+
+.philosophy-copy { max-width: 62ch; }
+
+.philo-eyebrow {
+  display: block;
+  font-family: var(--font-epic);
+  font-size: var(--fs-md); font-weight: 500;
+  letter-spacing: 0.42em; text-transform: uppercase;
+  color: var(--accent);
+}
+.philo-title {
+  font-family: var(--font-epic);
+  font-size: clamp(1.8rem, 4vw, 2.7rem);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  line-height: 1.25;
+  color: var(--text);
+  margin-top: 1.1rem;
+}
+
+/* La pauta dorada a la izquierda: el margen de una inscripción. Se dibuja
+   creciendo de arriba abajo a la vez que se revelan los párrafos. */
+.philo-text {
+  position: relative;
+  margin-top: 2.8rem;
+  padding-left: 2.4rem;
+  display: flex; flex-direction: column; gap: 1.9rem;
+}
+.philo-text::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0.5rem; bottom: 0.5rem;
+  width: 1px;
+  background: linear-gradient(to bottom, var(--accent), transparent);
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform 1.6s ease-out;
+}
+.philo-text:has(.revealed)::before { transform: scaleY(1); }
+
+.philo-para {
+  font-family: var(--font-display);
+  font-size: clamp(1.3rem, 2.1vw, 1.7rem);
+  line-height: 1.6;
+  color: var(--text-dim);
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.9s ease, transform 0.9s ease;
+}
+.philo-para.revealed { opacity: 1; transform: translateY(0); }
+
+/* Cierre: la frase que sostiene el resto sube de peso y de tinta. */
+.philo-para--close {
+  font-size: clamp(1.45rem, 2.4vw, 1.95rem);
+  color: var(--text);
+  margin-top: 0.6rem;
+}
+
+/* Las dos frases que cargan el argumento — oro, cinceladas, sin cursiva. */
+.philo-gold {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.01em;
+}
+
 /* ═══════════ Estelas ═══════════ */
 .stelae {
   max-width: 1320px;
@@ -873,10 +1035,68 @@ onUnmounted(() => {
   opacity: 0.4;
 }
 
+/* ═══════════ Cinta de tecnologías ═══════════ */
+.forge {
+  margin-top: 5rem;
+  padding: 2.4rem 0 0.4rem;
+  text-align: center;
+}
+.forge-eyebrow {
+  display: block;
+  font-family: var(--font-epic);
+  font-size: var(--fs-sm); font-weight: 500;
+  letter-spacing: 0.4em; text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+}
+.forge-viewport {
+  overflow: hidden;
+  /* Los nombres aparecen y desaparecen por desvanecimiento en los bordes,
+     en vez de cortarse contra el borde de la ventana. */
+  mask-image: linear-gradient(to right, transparent, #000 14%, #000 86%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 14%, #000 86%, transparent);
+}
+.forge-track {
+  display: flex;
+  width: max-content;
+  /* De izquierda a derecha: parte de la segunda copia y avanza hasta la
+     primera; al llegar a 0 el fotograma es idéntico y el bucle no salta. */
+  animation: forge-drift 90s linear infinite;
+}
+.forge-item {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  padding: 0 1.6rem;
+}
+.forge-item::after {
+  content: '◆';
+  color: var(--accent);
+  opacity: 0.45;
+  font-size: 0.5em;
+  vertical-align: middle;
+  margin-left: 1.6rem;
+}
+@keyframes forge-drift {
+  from { transform: translateX(-50%); }
+  to   { transform: translateX(0); }
+}
+
+/* Lista equivalente para lectores de pantalla — la cinta va aria-hidden. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* ═══════════ Placa ═══════════ */
 .plaque {
   max-width: 1080px;
-  margin: 4rem auto 0;
+  margin: 2.6rem auto 0;
   padding: 1.4rem 2rem;
   display: flex; align-items: center; justify-content: center; gap: 1.2rem;
   flex-wrap: wrap;
@@ -926,6 +1146,12 @@ onUnmounted(() => {
   .stele-divider { max-width: 320px; }
   .stelae { padding: 3rem 1.2rem 2.5rem; }
   .greek-banner { height: 28px; }
+  .philosophy { padding: 4rem 1.4rem; }
+  .philosophy-inner { grid-template-columns: 1fr; gap: 1.6rem; justify-items: center; text-align: center; }
+  .philo-figure { max-width: 130px; }
+  .philo-text { padding-left: 1.3rem; gap: 1.5rem; text-align: left; }
+  .forge-item { padding: 0 1rem; font-size: var(--fs-body); }
+  .forge-item::after { margin-left: 1rem; }
 }
 
 /* ═══════════ Movimiento reducido ═══════════ */
@@ -934,5 +1160,8 @@ onUnmounted(() => {
   .stele { opacity: 1; transform: none; transition: none; }
   .stele.revealed:hover { transform: none !important; }
   .stele-medallion, .medallion-ring { animation: none !important; }
+  .philo-para { opacity: 1; transform: none; transition: none; }
+  .philo-text::before { transform: scaleY(1); transition: none; }
+  .forge-track { animation: none; }
 }
 </style>
