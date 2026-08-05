@@ -21,6 +21,7 @@ Ejemplo de uso:
 from typing import Optional
 
 from src.modules.shared._exceptions import (
+    EntityNotFoundError,
     ErrorCode,
     ErrorSeverity,
     DatabaseError,
@@ -39,39 +40,28 @@ class VaultError(DatabaseError):
     default_severity = ErrorSeverity.HIGH
 
 
-class VaultNotFoundError(VaultError):
+class VaultNotFoundError(EntityNotFoundError, VaultError):
     """
     Cuando un vault no existe en la base de datos.
+
+    Se construye siempre sin id (``VaultNotFoundError()``): el vault se
+    resuelve por el usuario de la sesión, no por un id de la petición. De
+    ahí que ``EntityNotFoundError`` admita un ``entity_id`` opcional.
     """
-    default_code = ErrorCode.ENTITY_NOT_FOUND
-    default_status_code = 404
-    default_severity = ErrorSeverity.LOW
-
-    def __init__(self, vault_id: int = None, **kwargs):
-        msg = f"Vault con ID {vault_id} no encontrado" if vault_id is not None else "Vault no encontrado"
-        super().__init__(
-            message=kwargs.pop("message", msg),
-            details={"vault_id": vault_id},
-            user_message="Vault no encontrado.",
-            **kwargs,
-        )
+    entity_label = "Vault"
+    id_field = "vault_id"
 
 
-class StorableNotFoundError(VaultError):
+class StorableNotFoundError(EntityNotFoundError, VaultError):
     """
     Cuando un storable no existe en el vault.
-    """
-    default_code = ErrorCode.ENTITY_NOT_FOUND
-    default_status_code = 404
-    default_severity = ErrorSeverity.LOW
 
-    def __init__(self, internal_id: str = None, storable_id: int = None):
-        identifier = internal_id or str(storable_id)
-        super().__init__(
-            message=f"Storable '{identifier}' no encontrado",
-            details={"internal_id": internal_id, "storable_id": storable_id},
-            user_message="Storable no encontrado."
-        )
+    El identificador es el ``internal_id`` (una cadena que acuña el
+    cliente), no una PK numérica — de ahí que ``entity_id`` no esté tipado
+    como ``int`` en la base.
+    """
+    entity_label = "Storable"
+    id_field = "internal_id"
 
 
 class VaultRevisionMismatchError(VaultError):

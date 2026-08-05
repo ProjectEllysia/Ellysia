@@ -15,7 +15,7 @@ Hierarchy:
 
 from __future__ import annotations
 
-from src.modules.shared._exceptions import EllysiaException, ErrorCode
+from src.modules.shared._exceptions import EllysiaException, EntityNotFoundError, ErrorCode
 
 
 class HygeiaError(EllysiaException):
@@ -24,22 +24,15 @@ class HygeiaError(EllysiaException):
     default_status_code = 500
 
 
-class AssetNotFoundError(HygeiaError):
+class AssetNotFoundError(EntityNotFoundError, HygeiaError):
     """Se lanza cuando un activo no existe o no pertenece al usuario.
 
     Sirve también como capa de privacidad: la misma excepción se devuelve
     tanto si el activo no existe como si pertenece a otro usuario, para no
     permitir enumerar IDs ajenos por diferencia de respuesta.
     """
-    default_code = ErrorCode.ENTITY_NOT_FOUND
-    default_status_code = 404
-
-    def __init__(self, asset_id: int) -> None:
-        super().__init__(
-            message=f"Activo {asset_id} no encontrado",
-            details={"asset_id": asset_id},
-            user_message="Activo no encontrado.",
-        )
+    entity_label = "Activo"
+    id_field = "asset_id"
 
 
 class AssetQuotaExceededError(HygeiaError):
@@ -98,17 +91,11 @@ class IngestTooFrequentError(HygeiaError):
         )
 
 
-class AnomalyNotFoundError(HygeiaError):
+class AnomalyNotFoundError(EntityNotFoundError, HygeiaError):
     """Se lanza cuando una anomalía no existe o no pertenece al usuario."""
-    default_code = ErrorCode.ENTITY_NOT_FOUND
-    default_status_code = 404
-
-    def __init__(self, anomaly_id: int) -> None:
-        super().__init__(
-            message=f"Anomalía {anomaly_id} no encontrada",
-            details={"anomaly_id": anomaly_id},
-            user_message="Anomalía no encontrada.",
-        )
+    entity_label = "Anomalía"
+    entity_is_feminine = True
+    id_field = "anomaly_id"
 
 
 class AnomalyStillOpenError(HygeiaError):

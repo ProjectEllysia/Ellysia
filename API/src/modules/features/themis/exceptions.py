@@ -10,6 +10,7 @@ Grupos: Escaneo, Reportes, Escaneo Programado, Validación, Carpetas.
 
 from src.modules.shared._exceptions import (
     EllysiaException,
+    EntityNotFoundError,
     ErrorCode,
     ErrorSeverity,
     ValidationError,
@@ -24,34 +25,20 @@ class ScanError(EllysiaException):
     default_severity = ErrorSeverity.MEDIUM
 
 
-class ScanNotFoundError(ScanError):
+class ScanNotFoundError(EntityNotFoundError, ScanError):
     """Escaneo no encontrado en la base de datos."""
 
     default_code = ErrorCode.SCAN_NOT_FOUND
-    default_status_code = 404
-    default_severity = ErrorSeverity.LOW
-
-    def __init__(self, scan_id: int):
-        super().__init__(
-            message=f"Escaneo con ID {scan_id} no encontrado",
-            details={"scan_id": scan_id},
-            user_message=f"El escaneo #{scan_id} no existe."
-        )
+    entity_label = "Escaneo"
+    id_field = "scan_id"
 
 
-class FindingNotFoundError(ScanError):
+class FindingNotFoundError(EntityNotFoundError, ScanError):
     """Hallazgo (Finding) no encontrado o no perteneciente al usuario."""
 
     default_code = ErrorCode.SCAN_NOT_FOUND
-    default_status_code = 404
-    default_severity = ErrorSeverity.LOW
-
-    def __init__(self, finding_id: int):
-        super().__init__(
-            message=f"Hallazgo con ID {finding_id} no encontrado",
-            details={"finding_id": finding_id},
-            user_message=f"El hallazgo #{finding_id} no existe."
-        )
+    entity_label = "Hallazgo"
+    id_field = "finding_id"
 
 
 class ScanAlreadyRunningError(ScanError):
@@ -151,19 +138,12 @@ class TargetNotAuthorizedError(ScanError):
         )
 
 
-class AuthorizedTargetNotFoundError(ScanError):
+class AuthorizedTargetNotFoundError(EntityNotFoundError, ScanError):
     """La entrada del registro de objetivos autorizados no existe o no es del usuario."""
 
     default_code = ErrorCode.AUTHORIZED_TARGET_NOT_FOUND
-    default_status_code = 404
-    default_severity = ErrorSeverity.LOW
-
-    def __init__(self, target_id: int):
-        super().__init__(
-            message=f"Objetivo autorizado con ID {target_id} no encontrado",
-            details={"target_id": target_id},
-            user_message=f"El objetivo autorizado #{target_id} no existe."
-        )
+    entity_label = "Objetivo autorizado"
+    id_field = "target_id"
 
 
 class DuplicateAuthorizedTargetError(ScanError):
@@ -202,19 +182,12 @@ class ReportGenerationError(ReportError):
         )
 
 
-class ReportNotFoundError(ReportError):
+class ReportNotFoundError(EntityNotFoundError, ReportError):
     """Reporte o documento no encontrado."""
 
     default_code = ErrorCode.REPORT_NOT_FOUND
-    default_status_code = 404
-    default_severity = ErrorSeverity.LOW
-
-    def __init__(self, report_id: str):
-        super().__init__(
-            message=f"Reporte '{report_id}' no encontrado",
-            details={"report_id": report_id},
-            user_message="El reporte solicitado no existe."
-        )
+    entity_label = "Reporte"
+    id_field = "report_id"
 
 
 class PortValidationError(ValidationError):
@@ -317,19 +290,12 @@ class ProgramedScanError(ScanError):
     """Excepción base para errores de escaneos programados (recurrentes o cron)."""
 
 
-class ProgramedScanNotFoundError(ProgramedScanError):
+class ProgramedScanNotFoundError(EntityNotFoundError, ProgramedScanError):
     """Escaneo programado no encontrado."""
 
     default_code = ErrorCode.PROGRAMED_SCAN_NOT_FOUND
-    default_status_code = 404
-    default_severity = ErrorSeverity.LOW
-
-    def __init__(self, ps_id: int):
-        super().__init__(
-            message=f"Escaneo programado con ID {ps_id} no encontrado",
-            details={"programed_scan_id": ps_id},
-            user_message=f"El escaneo programado #{ps_id} no existe."
-        )
+    entity_label = "Escaneo programado"
+    id_field = "programed_scan_id"
 
 
 class ProgramedScanAlreadyActiveError(ProgramedScanError):
@@ -373,20 +339,18 @@ class FolderError(ScanError):
     """Excepción base para errores relacionados con carpetas de escaneos."""
 
 
-class FolderNotFoundError(FolderError):
-    """La carpeta no existe o no pertenece al usuario."""
+class FolderNotFoundError(EntityNotFoundError, FolderError):
+    """La carpeta no existe o no pertenece al usuario.
+
+    Tenía una firma permisiva (``message``/``details``/``**kwargs``
+    sobreescribibles) que ningún llamante usaba: el único punto de
+    construcción pasa un id posicional (``scan_folder.py``).
+    """
 
     default_code = ErrorCode.SCAN_NOT_FOUND
-    default_status_code = 404
-    default_severity = ErrorSeverity.LOW
-
-    def __init__(self, folder_id: int = None, message: str = None, details: dict = None, **kwargs):
-        if message is None:
-            message = f"Carpeta con ID {folder_id} no encontrada"
-        if details is None:
-            details = {"folder_id": folder_id}
-        kwargs.setdefault("user_message", f"La carpeta #{folder_id} no existe." if folder_id else "Carpeta no encontrada.")
-        super().__init__(message=message, details=details, **kwargs)
+    entity_label = "Carpeta"
+    entity_is_feminine = True
+    id_field = "folder_id"
 
 
 class FolderNameInvalidError(FolderError):

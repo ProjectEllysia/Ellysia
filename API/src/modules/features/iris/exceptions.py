@@ -11,7 +11,7 @@ Hierarchy:
 
 from __future__ import annotations
 
-from src.modules.shared._exceptions import EllysiaException, ErrorCode
+from src.modules.shared._exceptions import EllysiaException, EntityNotFoundError, ErrorCode
 
 
 class IrisError(EllysiaException):
@@ -20,17 +20,14 @@ class IrisError(EllysiaException):
     default_status_code = 500
 
 
-class IrisAnalysisNotFoundError(IrisError):
+class IrisAnalysisNotFoundError(EntityNotFoundError, IrisError):
     """Raised when an analysis ID does not exist or is not owned by the user.
 
     This also serves as a privacy layer — the same error is returned
     whether the analysis does not exist or belongs to another user.
     """
-    default_code = ErrorCode.ENTITY_NOT_FOUND
-    default_status_code = 404
-
-    def __init__(self, analysis_id: int) -> None:
-        super().__init__(f"Analysis {analysis_id} not found")
+    entity_label = "Análisis"
+    id_field = "analysis_id"
 
 
 class IrisAnalysisNotReadyError(IrisError):
@@ -64,14 +61,12 @@ class IrisInvalidInputError(IrisError):
     default_status_code = 400
 
 
-class IrisMailboxConnectionNotFoundError(IrisError):
+class IrisMailboxConnectionNotFoundError(EntityNotFoundError, IrisError):
     """Raised when a mailbox connection id does not exist or is not owned
     by the user (same error for both, prevents ID enumeration)."""
-    default_code = ErrorCode.ENTITY_NOT_FOUND
-    default_status_code = 404
-
-    def __init__(self, connection_id: int) -> None:
-        super().__init__(f"Mailbox connection {connection_id} not found")
+    entity_label = "Conexión de buzón"
+    entity_is_feminine = True
+    id_field = "connection_id"
 
 
 class IrisMailboxInvalidProviderError(IrisError):

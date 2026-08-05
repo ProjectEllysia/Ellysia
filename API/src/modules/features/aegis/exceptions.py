@@ -1,5 +1,6 @@
 from src.modules.shared._exceptions import (
     EllysiaException,
+    EntityNotFoundError,
     ErrorCode,
     ErrorSeverity,
     ValidationError,
@@ -104,30 +105,16 @@ class CampaignError(EllysiaException):
     default_severity = ErrorSeverity.MEDIUM
 
 
-class DistributionListNotFoundError(CampaignError):
-    default_code = ErrorCode.ENTITY_NOT_FOUND
-    default_status_code = 404
-    default_severity = ErrorSeverity.LOW
-
-    def __init__(self, list_id: int):
-        super().__init__(
-            message=f"Lista de distribución {list_id} no encontrada",
-            details={"list_id": list_id},
-            user_message="Lista de distribución no encontrada."
-        )
+class DistributionListNotFoundError(EntityNotFoundError, CampaignError):
+    entity_label = "Lista de distribución"
+    entity_is_feminine = True
+    id_field = "list_id"
 
 
-class CampaignNotFoundError(CampaignError):
-    default_code = ErrorCode.ENTITY_NOT_FOUND
-    default_status_code = 404
-    default_severity = ErrorSeverity.LOW
-
-    def __init__(self, campaign_id: int):
-        super().__init__(
-            message=f"Campaña {campaign_id} no encontrada",
-            details={"campaign_id": campaign_id},
-            user_message="Campaña no encontrada."
-        )
+class CampaignNotFoundError(EntityNotFoundError, CampaignError):
+    entity_label = "Campaña"
+    entity_is_feminine = True
+    id_field = "campaign_id"
 
 
 class CampaignAlreadyLaunchedError(CampaignError):

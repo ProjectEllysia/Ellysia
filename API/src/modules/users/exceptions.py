@@ -1,8 +1,9 @@
 from src.modules.shared._exceptions import (
     EllysiaException,
+    EntityNotFoundError,
     ErrorCode,
     ErrorSeverity,
-    DatabaseError,
+    DatabaseError,  # noqa: F401  — re-exportada: users/managers.py la importa desde aquí
 )
 
 
@@ -63,15 +64,16 @@ class PasswordChangedError(AuthenticationError):
         )
 
 
-class UserNotFoundError(AuthenticationError):
+class UserNotFoundError(EntityNotFoundError, AuthenticationError):
     default_code = ErrorCode.USER_NOT_FOUND
+    # 401, no el 404 de EntityNotFoundError: se hereda de AuthenticationError
+    # y se re-declara para que la mezcla no lo cambie. "Usuario no
+    # encontrado" aquí es un fallo de autenticación, no un recurso ausente.
+    default_status_code = 401
+    default_severity = ErrorSeverity.MEDIUM
 
-    def __init__(self, user_id: int):
-        super().__init__(
-            message=f"Usuario '{user_id}' no encontrado",
-            details={"id_usuario": user_id},
-            user_message="Usuario no encontrado."
-        )
+    entity_label = "Usuario"
+    id_field = "id_usuario"
 
 
 class UserBindingError(AuthenticationError):

@@ -262,16 +262,60 @@ class DatabaseError(EllysiaException):
     default_severity = ErrorSeverity.HIGH
 
 
-class EntityNotFoundError(DatabaseError):
+class EntityNotFoundError(EllysiaException):
+    """Base de las excepciones "no encontrado" de todo el proyecto (A7).
+
+    Quince clases repetían el mismo cuerpo (``message`` + ``details`` +
+    ``user_message``, todas 404/LOW) cambiando solo la etiqueta y el nombre
+    de la clave del id — y por eso habían derivado: unas decían "no
+    encontrado" y otras "no encontrada", unas metían el id en el mensaje de
+    usuario y otras no. La API respondía con dos estilos distintos al mismo
+    tipo de error según el módulo.
+
+    **Se mezcla, no sustituye.** Cada excepción concreta sigue heredando
+    además de la base de su módulo, para que los ``except ScanError`` /
+    ``except IrisError`` que ya existen la sigan capturando::
+
+        class ScanNotFoundError(EntityNotFoundError, ScanError):
+            default_code = ErrorCode.SCAN_NOT_FOUND   # el suyo, no el genérico
+            entity_label = "Escaneo"
+            id_field = "scan_id"
+
+    Deriva de ``EllysiaException`` y no de ``DatabaseError`` a propósito: un
+    recurso que no existe no es un fallo de base de datos, y mezclarlo haría
+    que un ``except DatabaseError`` capturase todos los 404 del proyecto.
+
+    Atributos de clase que definen la subclase:
+        entity_label:       Nombre legible ("Escaneo", "Campaña"...).
+        entity_is_feminine: Concordancia de género en español — "no
+            encontrada" en vez de "no encontrado". No es cosmético: es la
+            razón por la que los mensajes habían divergido a mano.
+        id_field:           Clave bajo la que el id viaja en ``details``.
+    """
+
     default_code = ErrorCode.ENTITY_NOT_FOUND
     default_status_code = 404
     default_severity = ErrorSeverity.LOW
 
-    def __init__(self, entity_type: str, identifier: Any):
+    entity_label: str = "Entidad"
+    entity_is_feminine: bool = False
+    id_field: str = "entity_id"
+
+    def __init__(self, entity_id: Any = None):
+        not_found = "encontrada" if self.entity_is_feminine else "encontrado"
+        # ``entity_id`` opcional: hay recursos que se resuelven por el token
+        # o la sesión y cuyo id nunca llega al punto donde se lanza el error
+        # (p. ej. el vault del usuario actual en Acheron).
+        if entity_id is None:
+            message = f"{self.entity_label} no {not_found}"
+            details = {}
+        else:
+            message = f"{self.entity_label} {entity_id} no {not_found}"
+            details = {self.id_field: entity_id}
         super().__init__(
-            message=f"{entity_type} con identificador {identifier} no encontrado",
-            details={"entity_type": entity_type, "identifier": str(identifier)},
-            user_message=f"{entity_type} no encontrado."
+            message=message,
+            details=details,
+            user_message=f"{self.entity_label} no {not_found}.",
         )
 
 
@@ -320,17 +364,10 @@ class DocumentError(EllysiaException):
     default_severity = ErrorSeverity.MEDIUM
 
 
-class DocumentNotFoundError(DocumentError):
+class DocumentNotFoundError(EntityNotFoundError, DocumentError):
     default_code = ErrorCode.DOCUMENT_NOT_FOUND
-    default_status_code = 404
-    default_severity = ErrorSeverity.LOW
-
-    def __init__(self, doc_id: int):
-        super().__init__(
-            message=f"Documento {doc_id} no encontrado",
-            details={"document_id": doc_id},
-            user_message=f"Documento {doc_id} no encontrado."
-        )
+    entity_label = "Documento"
+    id_field = "document_id"
 
 
 class DocumentNotReadyError(DocumentError):
