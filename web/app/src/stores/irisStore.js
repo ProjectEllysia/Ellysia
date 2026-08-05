@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, reactive, computed } from 'vue'
 import { useApi } from '@/composables/useApi'
+import { usePolling } from '@/composables/usePolling'
 import { useUtils } from '@/composables/useUtils'
 import { useToastStore } from '@/stores/toastStore'
 
@@ -37,9 +38,11 @@ export const useIrisStore = defineStore('iris', () => {
 
   const documents = ref([])
   const documentsLoading = ref(false)
-  const documentPollTimers = reactive(new Map())
+  // Map de documentId -> poller de usePolling (E8). No reactive: nadie
+  // renderiza a partir de él, solo se arranca y se para.
+  const documentPollers = new Map()
 
-  let pollTimer = null
+  let statusPoller = null
 
   // Fase 2: si hay un mensaje completo (.eml arrastrado) se envía en
   // "message" para que el backend analice cuerpo, enlaces y adjuntos
@@ -291,23 +294,16 @@ export const useIrisStore = defineStore('iris', () => {
     currentStatus.polling = true
     currentStatus.status = 'pending'
     currentStatus.progress = 0
-    _pollStatus(id)
+    statusPoller = usePolling(() => _pollStatus(id), { intervalMs: 2000 })
+    statusPoller.start()
   }
 
-  // B10: setInterval con callback async no esperaba a que la petición anterior
-  // terminara — si getStatus/getReport tardaban más de 2s, podían dispararse
-  // varias peticiones solapadas. setTimeout re-encadenado (mismo idioma que
-  // traceroute/Themis) garantiza que el siguiente sondeo no arranca hasta que
-  // el actual termina. El chequeo de `currentStatus.polling` evita que un
-  // ciclo en vuelo se reprograme después de que stopPolling() ya corrió.
+  // B10/E8: el re-encadenado y la invalidación de ciclos en vuelo los aporta
+  // ahora `usePolling`; aquí solo queda qué pedir y cuándo parar. Devolver
+  // `false` es la condición terminal.
   async function _pollStatus(id) {
     const st = await getStatus(id)
-    if (!currentStatus.polling) return
-
-    if (!st) {
-      pollTimer = setTimeout(() => _pollStatus(id), 2000)
-      return
-    }
+    if (!st) return true
 
     currentStatus.status = st.status
     currentStatus.progress = st.progress ?? null
@@ -315,22 +311,22 @@ export const useIrisStore = defineStore('iris', () => {
     if (st.status === 'finished') {
       await getReport(id)
       await fetchResults()
-      stopPolling()
-    } else if (st.status === 'failed' || st.status === 'cancelled') {
+      currentStatus.polling = false
+      return false
+    }
+    if (st.status === 'failed' || st.status === 'cancelled') {
       currentReport.data = { status: st.status }
       currentReport.loading = false
       await fetchResults()
-      stopPolling()
-    } else {
-      pollTimer = setTimeout(() => _pollStatus(id), 2000)
+      currentStatus.polling = false
+      return false
     }
+    return true
   }
 
   function stopPolling() {
-    if (pollTimer) {
-      clearTimeout(pollTimer)
-      pollTimer = null
-    }
+    statusPoller?.stop()
+    statusPoller = null
     currentStatus.polling = false
   }
 
@@ -475,26 +471,32 @@ export const useIrisStore = defineStore('iris', () => {
     return await res.json()
   }
 
-  /** Sondea el estado de un documento en generación hasta que termine. */
+  /** Sondea el estado de un documento en generación hasta que termine.
+   *
+   * E8: usaba `setInterval`, el idioma que este mismo fichero documenta como
+   * incorrecto unas líneas más arriba (B10) — con la petición tardando más
+   * de 2 s se solapaban varias. `usePolling` re-encadena. */
   function pollDocumentStatus(documentId, analysisId) {
-    if (documentPollTimers.has(documentId)) return
-    const timer = setInterval(async () => {
+    if (documentPollers.has(documentId)) return
+    const poller = usePolling(async () => {
       const st = await getDocumentStatus(documentId)
-      if (!st) return
+      if (!st) return true
       if (st.status === 'done' || st.status === 'error') {
-        clearInterval(documentPollTimers.get(documentId))
-        documentPollTimers.delete(documentId)
+        documentPollers.delete(documentId)
         await fetchDocuments(analysisId)
+        return false            // condición terminal: deja de sondear
       }
-    }, 2000)
-    documentPollTimers.set(documentId, timer)
+      return true
+    }, { intervalMs: 2000, immediate: false })
+    documentPollers.set(documentId, poller)
+    poller.start()
   }
 
   /** Detiene todos los pollings de documentos activos (documento colgado,
    * análisis borrado, o navegación fuera de la vista). */
   function stopDocumentPolling() {
-    for (const timer of documentPollTimers.values()) clearInterval(timer)
-    documentPollTimers.clear()
+    for (const poller of documentPollers.values()) poller.stop()
+    documentPollers.clear()
   }
 
   /** Descarga un documento PDF por ID. */

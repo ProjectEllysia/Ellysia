@@ -111,7 +111,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
@@ -121,6 +121,7 @@ import AssetDetail from '@/components/hygeia/AssetDetail.vue'
 import CreateAssetModal from '@/components/hygeia/CreateAssetModal.vue'
 import AgentKeyModal from '@/components/hygeia/AgentKeyModal.vue'
 import InventoryAnalysisModal from '@/components/hygeia/InventoryAnalysisModal.vue'
+import { usePolling } from '@/composables/usePolling'
 import { useHygeiaStore } from '@/stores/hygeiaStore'
 import { useHygeiaAlertsStore } from '@/stores/hygeiaAlertsStore'
 import { useToastStore } from '@/stores/toastStore'
@@ -245,7 +246,6 @@ function goToThemis() {
  * un panel congelado es indistinguible de un host caído.
  */
 const POLL_MS = 15000
-let pollId = null
 
 /** Refresco manual (botón de recargar): sí muestra el estado de carga. */
 async function refreshNow() {
@@ -260,9 +260,12 @@ async function refreshNow() {
   ])
 }
 
-/** Refresco periódico: silencioso, para no parpadear cada 15 s. */
+/** Refresco periódico: silencioso, para no parpadear cada 15 s.
+ *
+ * E8: el `if (document.hidden) return` que había aquí lo aporta ahora
+ * `usePolling` con `pauseWhenHidden` — y además reanuda de inmediato al
+ * volver a primer plano, en vez de esperar los 15 s completos. */
 async function poll() {
-  if (document.hidden) return
   await store.fetchAssets({ silent: true })
   const id = store.state.selectedId
   if (!id) return
@@ -280,15 +283,17 @@ async function poll() {
   await Promise.all(tasks)
 }
 
+// usePolling se llama en el setup, no dentro de onMounted: así puede
+// engancharse a onUnmounted él solo y no hace falta parar nada a mano.
+const poller = usePolling(poll, { intervalMs: POLL_MS, immediate: false })
+
 onMounted(async () => {
   await store.fetchAssets()
   if (store.state.assets.length) {
     await handleSelect(store.state.assets[0].id)
   }
-  pollId = setInterval(poll, POLL_MS)
+  poller.start()
 })
-
-onUnmounted(() => { if (pollId) clearInterval(pollId) })
 </script>
 
 <style scoped>

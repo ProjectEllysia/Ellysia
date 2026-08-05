@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, reactive } from 'vue'
 import { useApi } from '@/composables/useApi'
+import { usePolling } from '@/composables/usePolling'
 import { useUtils } from '@/composables/useUtils'
 import { useToastStore } from '@/stores/toastStore'
 import { useThemisFoldersStore } from '@/stores/themisFoldersStore'
@@ -126,6 +127,13 @@ export const useThemisStore = defineStore('themis', () => {
     return new URLSearchParams({ type, page, per_page: perPage })
   }
 
+  // E8: este NO usa `usePolling` a propósito. No es un poller que posea una
+  // tarea, sino un cargador que se reprograma a sí mismo: `loadScans` lo
+  // llama en su `finally`, y a `loadScans` se entra también desde switchTab,
+  // goToPage y refreshCurrent. Meterlo en el composable obligaría a arrancar
+  // el poller desde esos cuatro sitios, o a que el poller se detuviera a sí
+  // mismo a mitad de ciclo. Ya usa el idioma correcto (setTimeout
+  // re-encadenado, sin solape), así que se queda.
   function _scheduleScanPoll(type) {
     clearTimeout(_scanPollTimers[type])
     delete _scanPollTimers[type]
@@ -418,15 +426,15 @@ export const useThemisStore = defineStore('themis', () => {
 
   // El traceroute se calcula en segundo plano (worker): el endpoint responde
   // "pending" al instante y aquí se hace polling hasta que esté "done"/"failed".
-  // El token de generación invalida polls en curso al cerrar o cambiar de modal.
+  // Cerrar o cambiar de modal invalida los ciclos en vuelo (E8: lo hace el
+  // stop() de usePolling, antes era un token de generación a mano).
   const TRACE_POLL_INTERVAL_MS = 2000
   const TRACE_POLL_MAX_ATTEMPTS = 30
-  let tracePollGen = 0
-  let tracePollTimer = null
+  let tracePoller = null
 
   function stopTracePoll() {
-    tracePollGen += 1
-    if (tracePollTimer) { clearTimeout(tracePollTimer); tracePollTimer = null }
+    tracePoller?.stop()
+    tracePoller = null
   }
 
   /** Abre el modal de vista previa y carga scan + documentos. */
@@ -474,7 +482,6 @@ export const useThemisStore = defineStore('themis', () => {
     if (!scanId) return
 
     stopTracePoll()
-    const gen = tracePollGen
     if (!force) preview.traceroute = null
     preview.tracerouteLoading = true
 
@@ -486,34 +493,29 @@ export const useThemisStore = defineStore('themis', () => {
         toast.show('Error al recalcular el traceroute.', 'error')
       }
     }
-    pollPreviewTraceroute(scanId, gen, 0)
-  }
 
-  /** Sondea el estado del traceroute hasta que esté listo o se agoten los intentos. */
-  async function pollPreviewTraceroute(scanId, gen, attempt) {
-    if (gen !== tracePollGen || preview.scanId !== scanId) return
-    try {
+    // E8: el token de generación que llevaba a mano lo aporta ahora
+    // `usePolling` (stop() invalida los ciclos en vuelo); aquí solo queda el
+    // guard propio de esta vista — que el modal siga abierto sobre el MISMO
+    // escaneo, que es una condición distinta de "se canceló el sondeo".
+    tracePoller = usePolling(async (attempt) => {
+      if (preview.scanId !== scanId) return false
       const res = await apiFetch(`/themis/scan/${scanId}/traceroute`)
-      if (gen !== tracePollGen || preview.scanId !== scanId) return
+      if (preview.scanId !== scanId) return false
 
-      if (res?.ok) {
-        const data = await res.json()
-        if (data.status === 'pending' && attempt < TRACE_POLL_MAX_ATTEMPTS) {
-          tracePollTimer = setTimeout(
-            () => pollPreviewTraceroute(scanId, gen, attempt + 1),
-            TRACE_POLL_INTERVAL_MS,
-          )
-          return
-        }
-        // "done"/"failed" (o se agotaron los intentos): resultado final.
-        preview.traceroute = data
-        preview.tracerouteLoading = false
-      } else {
-        preview.tracerouteLoading = false
-      }
-    } catch {
+      if (!res?.ok) { preview.tracerouteLoading = false; return false }
+
+      const data = await res.json()
+      // `attempt` es 0-based, así que el último ciclo permitido es
+      // TRACE_POLL_MAX_ATTEMPTS - 1: ahí se acepta lo que haya como final.
+      if (data.status === 'pending' && attempt < TRACE_POLL_MAX_ATTEMPTS - 1) return true
+
+      // "done"/"failed" (o se agotaron los intentos): resultado final.
+      preview.traceroute = data
       preview.tracerouteLoading = false
-    }
+      return false
+    }, { intervalMs: TRACE_POLL_INTERVAL_MS, maxAttempts: TRACE_POLL_MAX_ATTEMPTS })
+    tracePoller.start()
   }
 
   /** Cierra el modal de vista previa. */
@@ -608,6 +610,10 @@ export const useThemisStore = defineStore('themis', () => {
    * `setTimeout` fijo de 600ms, que asumía que la generación —encolada,
    * asíncrona— siempre terminaba antes de ese plazo).
    */
+  // E8: tampoco usa `usePolling`. Esto no es un sondeo en segundo plano sino
+  // una espera bloqueante — el llamante hace `await` hasta que el documento
+  // esté listo. El bucle secuencial ya es correcto (nunca solapa) y no hay
+  // nada que cancelar desde fuera.
   async function waitForDocument(scanId, { intervalMs = 1500, maxAttempts = 20 } = {}) {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const res = await apiFetch(`/themis/document-status?scan_id=${scanId}`)
