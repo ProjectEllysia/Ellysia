@@ -452,10 +452,10 @@ def ingest_nvd_cve(item: dict) -> Optional[Tuple[dict, List[dict]]]:
     )
     score, vector, severity = _pick_cvss(cve.get("metrics", {}))
     cwe_ids = sorted({
-        d.get("value")
+        description.get("value")
         for weakness in cve.get("weaknesses", [])
-        for d in weakness.get("description", [])
-        if d.get("value", "").startswith("CWE-")
+        for description in weakness.get("description", [])
+        if description.get("value", "").startswith("CWE-")
     })
 
     cve_row = {

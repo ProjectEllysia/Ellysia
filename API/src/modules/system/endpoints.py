@@ -180,28 +180,28 @@ def taskqueue_status():
 @require_role(minimum_role=Role.ADMIN)
 def taskqueue_tasks(query_args):
     """Lista las tareas de la cola con paginacion y filtros opcionales."""
-    tq = TaskQueue.get_instance()
+    task_queue = TaskQueue.get_instance()
     category = query_args.get("category")
     status = query_args.get("status")
     page = query_args.get("page", 1)
     per_page = query_args.get("per_page", 20)
 
     if status == "pending":
-        tasks = tq.get_pending(category=category)
+        tasks = task_queue.get_pending(category=category)
     elif status == "running":
-        tasks = tq.get_running(category=category)
+        tasks = task_queue.get_running(category=category)
     elif status == "history":
         # "history" no es un estado de tarea sino el conjunto de tareas
         # terminadas (completed/failed/cancelled). Devolver el historial entero.
-        tasks = tq.get_history(category=category)
+        tasks = task_queue.get_history(category=category)
     elif status is not None:
         # Filtro fino por un estado concreto dentro del historial.
-        history = tq.get_history(category=category)
-        tasks = [t for t in history if t.get("status") == status]
+        history = task_queue.get_history(category=category)
+        tasks = [history_entry for history_entry in history if history_entry.get("status") == status]
     else:
-        pending = tq.get_pending(category=category)
-        running = tq.get_running(category=category)
-        history = tq.get_history(category=category)
+        pending = task_queue.get_pending(category=category)
+        running = task_queue.get_running(category=category)
+        history = task_queue.get_history(category=category)
         tasks = pending + running + history
 
     total_count = len(tasks)
@@ -236,11 +236,11 @@ def taskqueue_task_detail(task_id):
 @require_role(minimum_role=Role.ADMIN)
 def taskqueue_cancel_task(task_id):
     """Cancela una tarea, estando en espera o en ejecucion."""
-    tq = TaskQueue.get_instance()
-    was_cancelled = tq.cancel(task_id)
+    task_queue = TaskQueue.get_instance()
+    was_cancelled = task_queue.cancel(task_id)
     if not was_cancelled:
         return {"error": "not_found", "error_description": "Task not found or already finished"}, 404
-    task = tq.get_task(task_id)
+    task = task_queue.get_task(task_id)
     return (task or Task(id=task_id)).to_dict()
 
 

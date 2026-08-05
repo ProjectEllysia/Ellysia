@@ -139,12 +139,12 @@ class NmapScanManager(ScanManager):
             "finishedAt": isoformat_utc(scan.finished_at), # type: ignore
             "openPorts": [
                 {
-                    "port": f"{p.port_id}/{p.port.protocol}",
-                    "reason": p.reason,
-                    "product": p.product,
-                    "version": p.version,
+                    "port": f"{open_port.port_id}/{open_port.port.protocol}",
+                    "reason": open_port.reason,
+                    "product": open_port.product,
+                    "version": open_port.version,
                 }
-                for p in scan.open_ports_relation
+                for open_port in scan.open_ports_relation
             ],
             "totalOpenPorts": len(scan.open_ports_relation),
         }

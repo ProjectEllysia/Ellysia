@@ -88,7 +88,7 @@ class CampaignManager(TaskTrackingMixin):
 
     def list_lists(self) -> list[dict]:
         repo = build_repository(DistributionListRepository)
-        return [d.to_dict() for d in repo.get_lists_by_user(self.user.id)]
+        return [distribution_list.to_dict() for distribution_list in repo.get_lists_by_user(self.user.id)]
 
     def get_list(self, list_id: int) -> dict:
         distribution_list = self._assert_list_ownership(list_id)
@@ -107,12 +107,12 @@ class CampaignManager(TaskTrackingMixin):
         with UnitOfWork() as uow:
             repo = DistributionListRepository(uow)
             created = repo.add_recipients(list_id, recipients)
-            return [r.to_dict() for r in created]
+            return [recipient.to_dict() for recipient in created]
 
     def get_recipients(self, list_id: int) -> list[dict]:
         self._assert_list_ownership(list_id)
         repo = build_repository(DistributionListRepository)
-        return [r.to_dict() for r in repo.get_recipients(list_id)]
+        return [recipient.to_dict() for recipient in repo.get_recipients(list_id)]
 
     def remove_recipient(self, list_id: int, recipient_id: int) -> None:
         self._assert_list_ownership(list_id)
@@ -141,7 +141,7 @@ class CampaignManager(TaskTrackingMixin):
 
     def list_campaigns(self) -> list[dict]:
         repo = build_repository(CampaignRepository)
-        return [c.to_dict() for c in repo.get_campaigns_by_user(self.user.id)]
+        return [campaign.to_dict() for campaign in repo.get_campaigns_by_user(self.user.id)]
 
     def get_campaign(self, campaign_id: int) -> dict:
         campaign = self._assert_campaign_ownership(campaign_id)
@@ -241,7 +241,7 @@ class CampaignManager(TaskTrackingMixin):
                 return
 
             document = campaign.document
-            recipients = [r for r in campaign_repository.get_recipients(campaign_id) if r.sent_at is None]
+            recipients = [recipient for recipient in campaign_repository.get_recipients(campaign_id) if recipient.sent_at is None]
             total = len(recipients)
             if total == 0:
                 logger.info(f"Campaña {campaign_id}: no hay destinatarios pendientes de envío")
@@ -368,8 +368,8 @@ class CampaignManager(TaskTrackingMixin):
             "status": "opened",
             "pillTitle": (document.subtitle or document.title) if document else "",
             "questions": [
-                {"position": q["position"], "prompt": q["prompt"], "options": q["options"]}
-                for q in snapshot
+                {"position": question["position"], "prompt": question["prompt"], "options": question["options"]}
+                for question in snapshot
             ],
         }
 
@@ -393,7 +393,7 @@ class CampaignManager(TaskTrackingMixin):
         if recipient.status == "completed":
             raise QuizAlreadyCompletedError()
 
-        snapshot = {q["position"]: q for q in (recipient.campaign.questions_snapshot or [])}
+        snapshot = {question["position"]: question for question in (recipient.campaign.questions_snapshot or [])}
 
         answers_data = []
         for answer in answers:
@@ -408,7 +408,7 @@ class CampaignManager(TaskTrackingMixin):
                 "is_correct": selected_index == question.get("correctIndex"),
             })
 
-        score = sum(1 for a in answers_data if a["is_correct"])
+        score = sum(1 for answer in answers_data if answer["is_correct"])
 
         try:
             with UnitOfWork() as uow:

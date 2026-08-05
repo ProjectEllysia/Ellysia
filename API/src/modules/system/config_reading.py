@@ -563,7 +563,7 @@ def get_smtp_environment() -> dict[str, str]:
 # global de un modelo de un módulo de features concreto.
 def _themis_scanner_values() -> tuple:
     from src.modules.features.themis.model import ScanType
-    return tuple(t.value for t in ScanType)
+    return tuple(scan_type.value for scan_type in ScanType)
 
 
 THEMIS_SCANNERS = _themis_scanner_values()
@@ -787,7 +787,7 @@ class NucleiConfig:
         if from_environment and Path(from_environment).is_dir():
             return Path(from_environment)
 
-        return next((c for c in _nuclei_default_template_locations() if c.is_dir()), None)
+        return next((template_location for template_location in _nuclei_default_template_locations() if template_location.is_dir()), None)
 
     @property
     def templates_version(self) -> str:

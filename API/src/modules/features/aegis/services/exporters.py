@@ -160,7 +160,7 @@ class AegisExporter(ABC):
 
     def _validate_configuration(self) -> None:
         required = ["format", "extension", "mimetype"]
-        missing = [a for a in required if not getattr(self, a, None)]
+        missing = [required_field for required_field in required if not getattr(self, required_field, None)]
         if missing:
             raise ExporterConfigurationError(missing)
 
@@ -170,7 +170,7 @@ class AegisExporter(ABC):
 
     def generate_filename(self, data: ExportData, suffix: str = "") -> str:
         timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name   = "".join(c for c in data.company if c.isalnum() or c in "-_").lower()[:20]
+        safe_name   = "".join(character for character in data.company if character.isalnum() or character in "-_").lower()[:20]
         base        = f"aegis_{safe_name}_{data.topic_id}_{timestamp}"
         if suffix:
             base += f"_{suffix}"
@@ -271,7 +271,7 @@ class MarkdownExporter(AegisExporter):
         ]
 
     def _intro(self, data: ExportData) -> list[str]:
-        paragraphs = [p.strip() for p in self._sanitize(data.intro).split("\n\n") if p.strip()]
+        paragraphs = [paragraph.strip() for paragraph in self._sanitize(data.intro).split("\n\n") if paragraph.strip()]
         lines: list[str] = []
         for paragraph in paragraphs:
             lines.append(paragraph)

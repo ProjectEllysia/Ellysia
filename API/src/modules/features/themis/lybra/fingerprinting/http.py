@@ -98,8 +98,8 @@ def load_tech_signatures(path: Optional[str] = None) -> List[TechSignature]:
         TechSignature(
             name=signature["name"],
             matchers=tuple(
-                TechMatcher(part=m["part"], words=tuple(m["words"]))
-                for m in signature["matchers"]
+                TechMatcher(part=matcher["part"], words=tuple(matcher["words"]))
+                for matcher in signature["matchers"]
             ),
         )
         for signature in data.get("signatures", [])

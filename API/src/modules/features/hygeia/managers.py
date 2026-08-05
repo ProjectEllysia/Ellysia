@@ -579,7 +579,7 @@ class HygeiaIngestManager:
 
         anomaly_repo = AnomalyRepository(uow)
         active_anomalies = {
-            (a.kind, a.metric): a for a in anomaly_repo.get_all_active(asset.id)
+            (anomaly.kind, anomaly.metric): anomaly for anomaly in anomaly_repo.get_all_active(asset.id)
         }
         outcome = evaluate(
             metrics=metrics,
@@ -816,9 +816,9 @@ class HygeiaNotifyManager:
             anomaly_ids: IDs de anomalías con severidad ``critical`` recién
                 abiertas. Una lista vacía es un no-op.
         """
-        tq = TaskQueue.get_instance()
+        task_queue = TaskQueue.get_instance()
         for anomaly_id in anomaly_ids:
-            tq.submit(
+            task_queue.submit(
                 func=HygeiaNotifyManager.execute_notify_critical_anomaly,
                 args=(anomaly_id,),
                 name=f"HygeiaNotify-{anomaly_id}",

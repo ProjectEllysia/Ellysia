@@ -234,7 +234,7 @@ def _extract_links(html: str) -> List[Link]:
 
 
 def _extract_bare_urls(text: str) -> List[Link]:
-    return [Link(href=u, text=u) for u in _BARE_URL_RE.findall(text)]
+    return [Link(href=url, text=url) for url in _BARE_URL_RE.findall(text)]
 
 
 def _find_nested_forward(msg: Message) -> Optional[Message]:

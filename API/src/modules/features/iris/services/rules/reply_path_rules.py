@@ -257,7 +257,7 @@ def _triangulation_would_fire(headers: dict) -> bool:
     return_dom = _email_domain(
         headers.get("return-path", "") or headers.get("envelope-from", "") or headers.get("sender", "")
     )
-    distinct = {d for d in (from_dom, reply_dom, return_dom) if d}
+    distinct = {domain for domain in (from_dom, reply_dom, return_dom) if domain}
     esp_involved = _is_esp_domain(reply_dom) or _is_esp_domain(return_dom)
     return len(distinct) >= 3 and not esp_involved
 
@@ -283,7 +283,7 @@ def check_triangulation(headers: dict) -> RuleResult:
     if not from_dom:
         return RuleResult(score=0, verdict="neutral", details={}, recommendation=None)
 
-    present = [d for d in (from_dom, reply_dom, return_dom) if d]
+    present = [domain for domain in (from_dom, reply_dom, return_dom) if domain]
     distinct = set(present)
 
     # B3: a Reply-To/Return-Path on a known ESP domain is exactly what

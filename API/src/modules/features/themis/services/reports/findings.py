@@ -174,7 +174,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
         if not cve_ids:
             return
 
-        entries = {e.cve_id: e for e in build_repository(KbRepository).get_cves_with_matches(cve_ids)}
+        entries = {cve_entry.cve_id: cve_entry for cve_entry in build_repository(KbRepository).get_cves_with_matches(cve_ids)}
 
         for f in findings:
             ids = f.get("cve_ids") or []

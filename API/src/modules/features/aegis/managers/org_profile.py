@@ -64,8 +64,8 @@ class AegisOrgProfileManager:
         from src.modules.features.themis.managers import KbQueryManager
 
         return [
-            {"vendor": p.vendor, "product": p.product, "displayName": p.display_name}
-            for p in KbQueryManager().search_products(term, limit=limit)
+            {"vendor": product.vendor, "product": product.product, "displayName": product.display_name}
+            for product in KbQueryManager().search_products(term, limit=limit)
         ]
 
     def get_or_default(self) -> dict:

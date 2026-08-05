@@ -155,13 +155,13 @@ class Matcher:
     def _raw_match(self, response: Response) -> bool:
         """Run the matcher's test, before any ``negative`` inversion."""
         if self.type == "status":
-            return response.status in {int(v) for v in self.values}
+            return response.status in {int(expected_status) for expected_status in self.values}
         text = self._part_text(response)
         if self.type == "word":
             low = text.lower()
-            return any(str(w).lower() in low for w in self.values)
+            return any(str(word).lower() in low for word in self.values)
         if self.type == "regex":
-            return any(re.search(str(p), text) for p in self.values)
+            return any(re.search(str(pattern), text) for pattern in self.values)
         return False
 
     def _part_text(self, response: Response) -> str:

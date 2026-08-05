@@ -90,7 +90,7 @@ class IrisMailboxManager(TaskTrackingMixin):
 
     @staticmethod
     def list_providers() -> list[str]:
-        ordered = [p for p in IrisMailboxManager._PROVIDER_DISPLAY_ORDER if p in MAILBOX_CONNECTORS]
+        ordered = [provider for provider in IrisMailboxManager._PROVIDER_DISPLAY_ORDER if provider in MAILBOX_CONNECTORS]
         remaining = sorted(MAILBOX_CONNECTORS.keys() - set(ordered))
         return ordered + remaining
 

@@ -272,7 +272,7 @@ class ScanRepository(BaseRepository[Scan]):
             .group_by(Scan.scan_type)
             .all()
         )
-        counts = {t.value: 0 for t in ScanType}
+        counts = {scan_type.value: 0 for scan_type in ScanType}
         for scan_type_val, count in results:
             key = scan_type_val.value if hasattr(scan_type_val, "value") else str(scan_type_val)
             if key in counts:
@@ -464,7 +464,7 @@ class ScanRepository(BaseRepository[Scan]):
 
         result = self._session.execute(
             sa_update(Scan)
-            .where(Scan.id == scan_id, Scan.status.in_([s.value for s in expected]))
+            .where(Scan.id == scan_id, Scan.status.in_([expected_status.value for expected_status in expected]))
             .values(**values)
         )
         return result.rowcount > 0

@@ -139,7 +139,10 @@ def is_free_provider(domain: Optional[str]) -> bool:
     if not domain:
         return False
     domain = domain.lower()
-    return any(domain == d or domain.endswith("." + d) for d in free_provider_domains())
+    return any(
+        domain == provider or domain.endswith("." + provider)
+        for provider in free_provider_domains()
+    )
 
 
 def levenshtein(a: str, b: str) -> int:
@@ -214,7 +217,7 @@ def find_brand_in_subdomain(domain: str) -> Optional[dict]:
     """
     if not domain or "xn--" in domain:
         return None
-    labels = [l for l in domain.lower().strip(".").split(".") if l]
+    labels = [label for label in domain.lower().strip(".").split(".") if label]
     if len(labels) < 3:
         return None
     brands = canonical_brands()
@@ -411,7 +414,8 @@ def analyze_url(href: str, sender_domain: Optional[str] = None,
     # legitimate form) and tagged distinctly so the report doesn't read
     # as "the sender's own site is malicious".
     is_multitenant_host = any(
-        host == d or host.endswith("." + d) for d in multitenant_hosting_domains()
+        host == hosting_domain or host.endswith("." + hosting_domain)
+        for hosting_domain in multitenant_hosting_domains()
     )
     if is_multitenant_host or (host_reg != sender_domain and registrable_label(host) not in brands):
         path_and_query = f"{parsed.path} {parsed.query}".lower()

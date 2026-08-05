@@ -90,7 +90,7 @@ class NmapAIWriter:
             is_private = addr.is_private or addr.is_loopback or addr.is_link_local
         except ValueError:
             lower = target.lower()
-            is_private = any(lower.endswith(s) for s in (
+            is_private = any(lower.endswith(suffix) for suffix in (
                 ".local", ".lan", ".internal", ".intranet", ".corp", ".home"
             )) or lower in ("localhost",)
 
@@ -578,20 +578,20 @@ class LybraAIWriter:
         # everything: confirmed + KEV first (never dropped), then a sample of
         # the rest, so a host with hundreds of open-port entries doesn't drown
         # the handful of real vulnerabilities in the prompt.
-        priority_ids = {id(f) for f in confirmed} | {id(f) for f in kev}
+        priority_ids = {id(finding) for finding in confirmed} | {id(finding) for finding in kev}
         sample = confirmed + kev + [finding for finding in findings if id(finding) not in priority_ids][:15]
 
         findings_for_ai = [{
-            "titulo": f.get("title", "")[:160],
-            "categoria": f.get("category", ""),
-            "cve_ids": f.get("cve_ids") or [],
-            "cvss": f.get("cvss_score"),
-            "epss": f.get("epss_score"),
-            "en_kev": bool(f.get("in_kev")),
-            "confirmado": bool(f.get("confirmed")),
-            "qod": f.get("qod"),
-            "estado": f.get("state", "open"),
-        } for f in sample]
+            "titulo": finding.get("title", "")[:160],
+            "categoria": finding.get("category", ""),
+            "cve_ids": finding.get("cve_ids") or [],
+            "cvss": finding.get("cvss_score"),
+            "epss": finding.get("epss_score"),
+            "en_kev": bool(finding.get("in_kev")),
+            "confirmado": bool(finding.get("confirmed")),
+            "qod": finding.get("qod"),
+            "estado": finding.get("state", "open"),
+        } for finding in sample]
 
         prompts_config = CR.get_prompts_config()
         template = prompts_config.get(self._prompt_key, {}).get("userTemplate", "")

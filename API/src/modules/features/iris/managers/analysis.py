@@ -245,8 +245,8 @@ class IrisManager(TaskTrackingMixin):
         ]
 
         recommendations = [
-            r["recommendation"] for r in rules_data
-            if r["recommendation"] is not None
+            rule["recommendation"] for rule in rules_data
+            if rule["recommendation"] is not None
         ]
 
         from src.modules.users import UserManager
@@ -549,18 +549,18 @@ class IrisManager(TaskTrackingMixin):
         }
         results = [
             {
-                "analysisId": a.id,
-                "title": a.title,
-                "status": a.status,
-                "totalScore": a.total_score,
-                "verdict": a.verdict,
-                "startedAt": isoformat_utc(a.started_at), # type: ignore
-                "finishedAt": isoformat_utc(a.finished_at), # type: ignore
-                "connectionId": a.connection_id,
-                "provider": a.connection.provider if a.connection else None,
-                "accountEmail": a.connection.account_email if a.connection else None,
+                "analysisId": analysis_record.id,
+                "title": analysis_record.title,
+                "status": analysis_record.status,
+                "totalScore": analysis_record.total_score,
+                "verdict": analysis_record.verdict,
+                "startedAt": isoformat_utc(analysis_record.started_at), # type: ignore
+                "finishedAt": isoformat_utc(analysis_record.finished_at), # type: ignore
+                "connectionId": analysis_record.connection_id,
+                "provider": analysis_record.connection.provider if analysis_record.connection else None,
+                "accountEmail": analysis_record.connection.account_email if analysis_record.connection else None,
             }
-            for a in items
+            for analysis_record in items
         ]
         return results, total, thresholds
 
@@ -1168,13 +1168,13 @@ class IrisManager(TaskTrackingMixin):
         Returns:
             Número de análisis marcados como failed.
         """
-        tq = TaskQueue.get_instance()
+        task_queue = TaskQueue.get_instance()
         fixed = 0
         with UnitOfWork() as uow:
             repo = IrisAnalysisRepository(uow)
             for analysis in repo.get_active_analyses():
                 external_id = f"{cls.EXTERNAL_ID_PREFIX}{analysis.id}"
-                task = tq.get_task_by_external_id(external_id, cls.TASK_CATEGORY)
+                task = task_queue.get_task_by_external_id(external_id, cls.TASK_CATEGORY)
                 if task is not None and str(task.status) == "pending":
                     continue
                 analysis.status = "failed"

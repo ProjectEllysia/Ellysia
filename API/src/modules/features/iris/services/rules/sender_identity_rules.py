@@ -184,12 +184,12 @@ def _is_random_local(local: str) -> bool:
         return False
     if len(local) < 8:
         return False
-    has_digit = any(c.isdigit() for c in local)
-    has_letter = any(c.isalpha() for c in local)
+    has_digit = any(character.isdigit() for character in local)
+    has_letter = any(character.isalpha() for character in local)
     has_dot_or_plus = "." in local or "+" in local
     if not (has_digit and has_letter):
         return False
-    digit_ratio = sum(c.isdigit() for c in local) / len(local)
+    digit_ratio = sum(character.isdigit() for character in local) / len(local)
     if digit_ratio > 0.35 and has_dot_or_plus:
         return True
     if len(local) >= 12 and has_digit and has_letter and has_dot_or_plus:
@@ -286,7 +286,7 @@ def check_lookalike_domain(headers: dict) -> RuleResult:
     if label in brands:
         return RuleResult(score=1, verdict="pass", details={"domain": domain}, recommendation=None)
 
-    tokens = [t for t in re.split(r"[^a-z0-9]+", label) if len(t) >= 4]
+    tokens = [token for token in re.split(r"[^a-z0-9]+", label) if len(token) >= 4]
     findings: list[dict] = []
 
     for token in tokens:

@@ -79,9 +79,9 @@ class NmapMetricExtractor(MetricExtractor):
 
     def identities(self, scan: NmapScan) -> Set[str]:
         return {
-            op.port.protocol
-            for op in (scan.open_ports_relation or [])
-            if op.port is not None
+            open_port.port.protocol
+            for open_port in (scan.open_ports_relation or [])
+            if open_port.port is not None
         }
 
 

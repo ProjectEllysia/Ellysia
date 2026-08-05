@@ -426,13 +426,13 @@ class ScanManager(TaskTrackingMixin, ABC):
         Returns:
             Número de escaneos marcados como FAILED.
         """
-        tq = TaskQueue.get_instance()
+        task_queue = TaskQueue.get_instance()
         fixed = 0
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
             for scan in repo.get_active_scans():
                 external_id = f"{cls.EXTERNAL_ID_PREFIX}{scan.id}"
-                task = tq.get_task_by_external_id(external_id, cls.TASK_CATEGORY)
+                task = task_queue.get_task_by_external_id(external_id, cls.TASK_CATEGORY)
 
                 if task is not None and task.status == TaskStatus.PENDING:
                     continue
@@ -664,7 +664,7 @@ class ScanManager(TaskTrackingMixin, ABC):
     @classmethod
     def all_managers(cls) -> List["ScanManager"]:
         """Una instancia por cada tipo de escaneo registrado."""
-        return [m() for m in cls._registry.values()]
+        return [scan_manager() for scan_manager in cls._registry.values()]
 
     # Name of the ScanRepository method that eager-loads this manager's scan
     # type for background-thread use (e.g. "get_nmap_rich"). None means the

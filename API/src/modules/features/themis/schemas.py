@@ -90,7 +90,7 @@ class AuthorizedTargetActionResponseSchema(Schema):
 
 
 class ResultsQuerySchema(Schema):
-    type = fields.String(load_default="all", validate=validate.OneOf([t.value for t in ScanType] + ["all"]))
+    type = fields.String(load_default="all", validate=validate.OneOf([scan_type.value for scan_type in ScanType] + ["all"]))
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))
     per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
     # Fase I, solo con type=lybra: acota la lista a los escaneos originados por
@@ -118,7 +118,7 @@ class DocumentStatusQuerySchema(Schema):
 class DocumentsQuerySchema(Schema):
     # Derived from ScanType, not hand-listed: a new scan type is filterable
     # here automatically, no schema edit needed.
-    scan_type = fields.String(load_default="all", validate=validate.OneOf([t.value for t in ScanType] + ["all"]))
+    scan_type = fields.String(load_default="all", validate=validate.OneOf([scan_type.value for scan_type in ScanType] + ["all"]))
 
 
 class ScheduledScanRequestSchema(Schema):
@@ -336,7 +336,7 @@ class HistoryHostsResponseSchema(Schema):
 
 class HistoryStatsQuerySchema(Schema):
     target = fields.String(required=True)
-    type = fields.String(required=True, validate=validate.OneOf([t.value for t in ScanType]))
+    type = fields.String(required=True, validate=validate.OneOf([scan_type.value for scan_type in ScanType]))
 
 
 class HistoryStatsResponseSchema(Schema):

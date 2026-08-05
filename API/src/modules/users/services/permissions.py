@@ -376,7 +376,7 @@ def require_attributes(
                     role_enum = Role(user_role_str)
                 except ValueError:
                     role_enum = Role.USER
-                baseline = {p.db_name for p in ROLE_PERMISSIONS.get(role_enum, set())}
+                baseline = {permission.db_name for permission in ROLE_PERMISSIONS.get(role_enum, set())}
 
                 with UnitOfWork() as uow:
                     repo = AttributeRepository(uow)
@@ -385,11 +385,11 @@ def require_attributes(
 
                 missing_at_least_one: List[AttributeType] = []
                 if at_least_one:
-                    missing_at_least_one = [p for p in at_least_one if p.db_name not in effective]
+                    missing_at_least_one = [permission for permission in at_least_one if permission.db_name not in effective]
 
                 missing_all_required: List[AttributeType] = []
                 if all_required:
-                    missing_all_required = [p for p in all_required if p.db_name not in effective]
+                    missing_all_required = [permission for permission in all_required if permission.db_name not in effective]
 
                 has_at_least_one = not at_least_one or len(missing_at_least_one) < len(at_least_one)
                 has_all_required = not all_required or len(missing_all_required) == 0
@@ -397,15 +397,15 @@ def require_attributes(
                 if not has_at_least_one or not has_all_required:
                     logger.warning(
                         f"Usuario {user_id} (rol={user_role_str}) denegado en {f.__name__}. "
-                        f"at_least_one_missing={[p.db_name for p in missing_at_least_one]}, "
-                        f"all_required_missing={[p.db_name for p in missing_all_required]}"
+                        f"at_least_one_missing={[permission.db_name for permission in missing_at_least_one]}, "
+                        f"all_required_missing={[permission.db_name for permission in missing_all_required]}"
                     )
                     return jsonify({
                         "error": "forbidden",
                         "error_description": "Insufficient permissions",
                         "missing_permissions": {
-                            "at_least_one": [p.db_name for p in missing_at_least_one],
-                            "all_required":  [p.db_name for p in missing_all_required],
+                            "at_least_one": [permission.db_name for permission in missing_at_least_one],
+                            "all_required":  [permission.db_name for permission in missing_all_required],
                         },
                     }), 403
 

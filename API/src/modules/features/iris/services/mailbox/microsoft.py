@@ -150,7 +150,7 @@ class GraphConnector(MailboxConnector):
             )
             response.raise_for_status()
             cached = response.json().get("internetMessageHeaders", [])
-        return "".join(f"{h['name']}: {h['value']}\r\n" for h in cached)
+        return "".join(f"{header['name']}: {header['value']}\r\n" for header in cached)
 
     def fetch_raw(self, access_token: str, message_ref: MessageRef) -> str:
         response = requests.get(

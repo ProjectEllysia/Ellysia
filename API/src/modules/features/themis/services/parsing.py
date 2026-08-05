@@ -207,7 +207,7 @@ def validate_ip(ips_str: str, max_hosts: int = 10) -> List[str]:
     """
     ips_str = _require_non_empty(ips_str, IPValidationError)
 
-    segmentos = [s.strip() for s in ips_str.split(",")]
+    segmentos = [ip_string.strip() for ip_string in ips_str.split(",")]
     lista_ips = []
     for segmento in segmentos:
         if not segmento:

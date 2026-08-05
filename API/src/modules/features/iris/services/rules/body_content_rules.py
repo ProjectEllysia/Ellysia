@@ -73,7 +73,7 @@ def check_alarming_keywords(headers: dict) -> RuleResult:
 
     high_found = phrase_matches("high_signal_keywords", combined)
     low_found = phrase_matches("low_signal_keywords", combined)
-    emoji_found = [repr(e) for e in alarming_emojis() if e in combined]
+    emoji_found = [repr(emoji) for emoji in alarming_emojis() if emoji in combined]
 
     weight = 2 * len(high_found) + len(low_found) + len(emoji_found)
     score, severity, recommendation = _score_by_weight(weight)
@@ -366,7 +366,7 @@ def _contains_url(text: str) -> list[str]:
     # canonical TLD list used everywhere else (found duplicated verbatim
     # during this refactor -- Suspicious TLD's own list had since grown to
     # 37 entries while this one was stuck at 24).
-    tld_alternation = "|".join(re.escape(t.lstrip(".")) for t in suspicious_tlds())
+    tld_alternation = "|".join(re.escape(tld.lstrip(".")) for tld in suspicious_tlds())
     patterns = [
         r"https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+(?::\d+)?(?:/[\w\-./?%&+=~#!@]*)?",
         r"(?:www\.)[\w\-]+(?:\.[\w\-]+)+(?::\d+)?(?:/[\w\-./?%&+=~#!@]*)?",
@@ -439,7 +439,7 @@ _BIDI_CONTROLS = {
 
 
 def _find_bidi_controls(text: str) -> list[str]:
-    return sorted({_BIDI_CONTROLS[ch] for ch in text if ch in _BIDI_CONTROLS})
+    return sorted({_BIDI_CONTROLS[character] for character in text if character in _BIDI_CONTROLS})
 
 
 # Script ranges used to detect mixed-script (homograph) text. Only the
@@ -664,7 +664,7 @@ def check_toad_callback_pattern(context) -> RuleResult:
     if has_thread:
         return RuleResult(score=0, verdict="neutral", details={"reason": "has prior thread"})
 
-    phones = [p for p in _PHONE_RE.findall(text) if sum(c.isdigit() for c in p) >= 9]
+    phones = [phone for phone in _PHONE_RE.findall(text) if sum(character.isdigit() for character in phone) >= 9]
     if not phones:
         return RuleResult(score=0, verdict="pass", details={"phones_found": 0})
 

@@ -192,7 +192,7 @@ class AegisDocumentRepository(DocumentRepository[AegisDocument]):
         for i, tip_data in enumerate(tips_data, 1):
             links_value = tip_data.get("links")
             if links_value:
-                links_value = [{"text": lk["text"], "url": lk["url"]} for lk in links_value]
+                links_value = [{"text": link["text"], "url": link["url"]} for link in links_value]
 
             self._session.add(AegisTip(
                 document_id=doc_id,

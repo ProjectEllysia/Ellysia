@@ -26,7 +26,7 @@ def check_undisclosed_recipients(headers: dict) -> RuleResult:
     cc_stripped = cc_addr.strip()
 
     is_to_empty = not to_stripped
-    is_undisclosed = any(p in to_stripped.lower() for p in undisclosed_patterns())
+    is_undisclosed = any(pattern in to_stripped.lower() for pattern in undisclosed_patterns())
 
     if is_to_empty and not cc_stripped:
         return RuleResult(

@@ -555,5 +555,5 @@ def phrase_matches(key: str, text: str) -> list[str]:
     """
     if not text:
         return []
-    hits = {m.lower() for m in _phrase_pattern(key).findall(text)}
-    return [p for p in _data(key) if p.lower() in hits]
+    hits = {match.lower() for match in _phrase_pattern(key).findall(text)}
+    return [phrase for phrase in _data(key) if phrase.lower() in hits]

@@ -455,8 +455,8 @@ def list_authorized_targets():
     return {
         "message": "Objetivos autorizados obtenidos correctamente",
         "targets": [
-            {"id": e.id, "target": e.target, "label": e.label, "createdAt": e.created_at}
-            for e in entries
+            {"id": entry.id, "target": entry.target, "label": entry.label, "createdAt": entry.created_at}
+            for entry in entries
         ],
         "user": user.username,
     }
@@ -985,7 +985,7 @@ def delete_document(document_id: int):
 def schedule_scan(data):
     """Crear un escaneo programado"""
     scan_type_str = data["scan_type"].lower()
-    valid_types = {t.value for t in ScanType}
+    valid_types = {scan_type.value for scan_type in ScanType}
     if scan_type_str not in valid_types:
         raise ValidationError(
             field="scan_type",

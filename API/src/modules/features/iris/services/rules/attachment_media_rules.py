@@ -52,7 +52,7 @@ def check_external_image_tracking(context) -> RuleResult:
 
     from_domain = registrable_domain(extract_domain(context.headers.get("from", "")))
 
-    sources = [m.group(1) for m in _IMG_SRC_RE.finditer(body_html)]
+    sources = [match.group(1) for match in _IMG_SRC_RE.finditer(body_html)]
 
     esp_domains = esp_tracker_domains()
 

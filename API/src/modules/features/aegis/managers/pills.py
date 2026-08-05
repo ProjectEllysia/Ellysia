@@ -122,7 +122,10 @@ class AegisManager(TaskTrackingMixin):
 
         if document.status == "done": # type: ignore
             result["pill"] = document.pill_to_dict()
-            result["alerts"] = [a.to_dict() for a in sorted(document.alerts, key=lambda a: a.position)]
+            result["alerts"] = [
+                alert.to_dict()
+                for alert in sorted(document.alerts, key=lambda alert: alert.position)
+            ]
 
         return result
 

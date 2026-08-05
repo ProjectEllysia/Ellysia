@@ -127,7 +127,7 @@ class IrisAIWriter:
 
         if not isinstance(result.get("recommendations"), list):
             result["recommendations"] = []
-        result["recommendations"] = [str(r) for r in result["recommendations"] if r]
+        result["recommendations"] = [str(recommendation) for recommendation in result["recommendations"] if recommendation]
 
         confidence = str(result.get("confidence") or "").upper()
         result["confidence"] = confidence if confidence in _VALID_CONFIDENCE else "BAJA"

@@ -119,9 +119,9 @@ def _has_interpolation(value) -> bool:
         stripped = value.replace("{{BaseURL}}", "").replace("{{Hostname}}", "")
         return "{{" in stripped
     if isinstance(value, dict):
-        return any(_has_interpolation(v) for v in value.values())
+        return any(_has_interpolation(nested_value) for nested_value in value.values())
     if isinstance(value, list):
-        return any(_has_interpolation(v) for v in value)
+        return any(_has_interpolation(nested_value) for nested_value in value)
     return False
 
 

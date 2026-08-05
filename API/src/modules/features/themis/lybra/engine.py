@@ -101,7 +101,7 @@ class Service:
         Prefers "product version" (e.g. "Apache httpd 2.4.49"), falls back to the
         service name, and finally to a generic placeholder.
         """
-        product_version = " ".join(p for p in (self.product, self.version) if p)
+        product_version = " ".join(part for part in (self.product, self.version) if part)
         return product_version or self.name or "servicio desconocido"
 
 

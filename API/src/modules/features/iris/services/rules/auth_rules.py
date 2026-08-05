@@ -502,8 +502,8 @@ def check_auth_results_provenance(context) -> RuleResult:
     if not _AUTHSERV_ID_RE.match(authserv_id):
         return RuleResult(score=0, verdict="neutral", details={"reason": "authserv-id ausente o no es un hostname"})
 
-    statuses = {m.group(1).lower(): m.group(2).lower() for m in _AUTHSERV_STATUS_RE.finditer(auth_results)}
-    if not any(v == "pass" for v in statuses.values()):
+    statuses = {match.group(1).lower(): match.group(2).lower() for match in _AUTHSERV_STATUS_RE.finditer(auth_results)}
+    if not any(status == "pass" for status in statuses.values()):
         # Sin ningún "pass" reclamado no hay incentivo para forjar la
         # cabecera -- fallar la autenticación no le compra nada al atacante.
         return RuleResult(score=0, verdict="neutral", details={"authserv_id": authserv_id, "statuses": statuses})

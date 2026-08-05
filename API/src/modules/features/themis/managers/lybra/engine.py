@@ -285,8 +285,8 @@ class LybraEngineManager(ScanManager):
                 finding["dedup_key"] = compute_dedup_key(finding)
             findings_data = merge_findings(findings_data)
 
-            trackable = [f for f in findings_data if f.get("category") not in self._EVENT_CATEGORIES]
-            events = [f for f in findings_data if f.get("category") in self._EVENT_CATEGORIES]
+            trackable = [finding for finding in findings_data if finding.get("category") not in self._EVENT_CATEGORIES]
+            events = [finding for finding in findings_data if finding.get("category") in self._EVENT_CATEGORIES]
             for event in events:
                 event["state"] = "open"
             trackable_previous = {
@@ -501,7 +501,7 @@ class LybraEngineManager(ScanManager):
         anything changed.
         """
         existing = {
-            self._surface_key(s): s for s in scan_repo.get_host_services(host_id)
+            self._surface_key(service): service for service in scan_repo.get_host_services(host_id)
         }
         # A host's very first Lybra scan establishes the baseline surface, not
         # a change to it — every port would otherwise be "new" by definition,
@@ -623,7 +623,7 @@ class LybraEngineManager(ScanManager):
 
         if source.launches_nmap_corroborator:
             try:
-                ports_str = ",".join(str(p) for p in sorted(set(DEFAULT_PORTS)))
+                ports_str = ",".join(str(port) for port in sorted(set(DEFAULT_PORTS)))
                 ids.append(NmapScanManager().run_scan(
                     target_host=target, target_ports=ports_str, user_id=user_id,
                 ))
@@ -764,14 +764,14 @@ class LybraEngineManager(ScanManager):
             raise ScanNotFoundError(scan_id)
 
         repo = build_repository(ScanRepository)
-        own_findings = [self._finding_view_dict(f) for f in repo.get_findings_by_scan(scan_id)]
+        own_findings = [self._finding_view_dict(finding) for finding in repo.get_findings_by_scan(scan_id)]
 
         deep_scan_ids = scan.deep_scan_ids or []
         if deep_scan_ids:
             corroborator_findings = [
-                self._finding_view_dict(f)
+                self._finding_view_dict(finding)
                 for corroborator_id in deep_scan_ids
-                for f in repo.get_findings_by_scan(corroborator_id)
+                for finding in repo.get_findings_by_scan(corroborator_id)
             ]
             display_findings = merge_findings(own_findings + corroborator_findings)
         else:

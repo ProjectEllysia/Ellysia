@@ -218,7 +218,7 @@ def _relevance_tags(info: dict) -> tuple:
             if value:
                 values.append(str(value).strip())
 
-    return tuple(sorted({v.lower() for v in values if v}))
+    return tuple(sorted({raw_value.lower() for raw_value in values if raw_value}))
 
 
 def _cve_ids(info: dict) -> Optional[List[str]]:
@@ -236,7 +236,7 @@ def _cve_ids(info: dict) -> Optional[List[str]]:
     if not raw:
         return None
     values = [raw] if isinstance(raw, str) else list(raw)
-    normalized = [str(v).strip().upper() for v in values if str(v).strip()]
+    normalized = [str(raw_value).strip().upper() for raw_value in values if str(raw_value).strip()]
     return normalized or None
 
 

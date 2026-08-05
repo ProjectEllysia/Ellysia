@@ -318,7 +318,7 @@ class VaultManager:
         for field, value in filters.items():
             if not hasattr(Storable, field):
                 raise ValueError(f"Campo inválido para Storable: {field}")
-            result = [s for s in result if getattr(s, field, None) == value]
+            result = [storable for storable in result if getattr(storable, field, None) == value]
 
         return result
 

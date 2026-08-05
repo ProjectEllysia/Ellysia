@@ -54,7 +54,7 @@ def _sum_or_none(values: Iterable[Optional[float]]) -> Optional[float]:
     en el segundo caso pintaría una línea plana en el fondo del gráfico,
     afirmando un dato que nadie ha medido.
     """
-    present = [v for v in values if v is not None]
+    present = [measurement for measurement in values if measurement is not None]
     return sum(present) if present else None
 
 

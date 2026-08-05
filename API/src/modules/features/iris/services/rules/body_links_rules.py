@@ -171,7 +171,7 @@ def _looks_opaque_path(path: str) -> bool:
         return False
     if "." in cleaned:
         return False
-    alnum_ratio = sum(c.isalnum() for c in cleaned) / len(cleaned)
+    alnum_ratio = sum(character.isalnum() for character in cleaned) / len(cleaned)
     return alnum_ratio >= 0.95
 
 

@@ -469,7 +469,7 @@ Raises:
             created = AttributeRepository(uow).add_attributes(
                 user_id, attribute_names
             )
-            return [c.attribute_name for c in created]
+            return [created_user.attribute_name for created_user in created]
 
     def remove_user_attributes(
         self,

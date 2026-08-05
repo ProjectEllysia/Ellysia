@@ -441,7 +441,7 @@ def check_origin_helo_coherence(context) -> RuleResult:
             if dom:
                 chain_domains.add(dom)
 
-    known_domains = {d for d in (from_domain, msgid_domain) if d} | chain_domains
+    known_domains = {domain for domain in (from_domain, msgid_domain) if domain} | chain_domains
     if not known_domains or helo_domain in known_domains:
         return RuleResult(score=0, verdict="pass", details={"helo_domain": helo_domain})
 

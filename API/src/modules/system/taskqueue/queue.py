@@ -155,15 +155,15 @@ class QueueRegistry:
 
 def _record_terminal(job: "Job", status: "TaskStatus", error: str | None = None) -> None:
     try:
-        tq = TaskQueue.get_instance()
+        task_queue = TaskQueue.get_instance()
         data = Task.from_rq_job(job).to_dict()
         data["status"] = str(status)
         if error and not data.get("error"):
             data["error"] = error
         if not data.get("finishedAt"):
             data["finishedAt"] = datetime.now(timezone.utc).isoformat()
-        tq._history.record(data)
-        tq._external.remove_by_job_id(job.id)
+        task_queue._history.record(data)
+        task_queue._external.remove_by_job_id(job.id)
     except Exception:  # noqa: BLE001 - un fallo de historial no debe tumbar el job
         logger.warning(
             "No se pudo registrar el historial del job %s",
