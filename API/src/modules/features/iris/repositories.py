@@ -13,7 +13,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import asc, desc, nullslast
 from sqlalchemy.orm import joinedload
 
-from src.modules.infrastructure import BaseRepository
+from src.modules.infrastructure import BaseRepository, DocumentRepository
 from src.modules.shared import utcnow_naive
 
 from .model import IrisAnalysis, IrisMailboxConnection, IrisRuleResult, IrisDocument
@@ -189,34 +189,11 @@ class IrisRuleResultRepository(BaseRepository[IrisRuleResult]):
         ).delete()
 
 
-class IrisReportRepository(BaseRepository[IrisDocument]):
-    """Data-access layer for IrisDocument records (generated PDF reports)."""
+class IrisReportRepository(DocumentRepository[IrisDocument]):
+    """Data-access layer for IrisDocument records (generated PDF reports).
+
+    Las tres consultas de documentos las aporta ``DocumentRepository`` (A9).
+    """
 
     _MODEL = IrisDocument
-
-    def get_latest_document(self, analysis_id: int) -> IrisDocument | None:
-        """Return the most recently created document for an analysis."""
-        return (
-            self._session.query(IrisDocument)
-            .filter(IrisDocument.analysis_id == analysis_id)
-            .order_by(IrisDocument.created_at.desc())
-            .first()
-        )
-
-    def get_documents_by_user(self, user_id: int) -> List[IrisDocument]:
-        """Return all documents belonging to a user, newest first."""
-        return (
-            self._session.query(IrisDocument)
-            .filter(IrisDocument.user_id == user_id)
-            .order_by(IrisDocument.created_at.desc())
-            .all()
-        )
-
-    def get_documents_by_analysis(self, analysis_id: int) -> List[IrisDocument]:
-        """Return all documents generated for a specific analysis, newest first."""
-        return (
-            self._session.query(IrisDocument)
-            .filter(IrisDocument.analysis_id == analysis_id)
-            .order_by(IrisDocument.created_at.desc())
-            .all()
-        )
+    _PARENT_FK = "analysis_id"

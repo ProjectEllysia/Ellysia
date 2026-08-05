@@ -31,7 +31,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import or_
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import joinedload
-from src.modules.infrastructure import BaseRepository
+from src.modules.infrastructure import BaseRepository, DocumentRepository
 from src.modules.shared import utcnow_naive
 
 from .model import (
@@ -718,13 +718,13 @@ class ScanRepository(BaseRepository[Scan]):
         existing.cpe = cpe or existing.cpe
 
 
-class ThemisReportRepository(BaseRepository[ThemisDocument]):
+class ThemisReportRepository(DocumentRepository[ThemisDocument]):
     """
     Repository for the ThemisDocument entity (PDF reports).
 
-    Attributes:
-        _model:  ThemisDocument (inherited from BaseRepository).
-        _uow:    Active Unit of Work (inherited from BaseRepository).
+    Las tres consultas de documentos (``get_latest_document``,
+    ``get_documents_by_user``, ``get_documents_by_parent``) las aporta
+    ``DocumentRepository`` (A9).
 
     Example:
     >>> with UnitOfWork() as uow:
@@ -734,37 +734,7 @@ class ThemisReportRepository(BaseRepository[ThemisDocument]):
     """
 
     _MODEL = ThemisDocument
-
-    def get_document(self, scan_id: int) -> Optional[ThemisDocument]:
-        return (
-            self._session.query(ThemisDocument)
-            .filter(ThemisDocument.scan_id == scan_id)
-            .one_or_none()
-        )
-
-    def get_latest_document(self, scan_id: int) -> Optional[ThemisDocument]:
-        return (
-            self._session.query(ThemisDocument)
-            .filter(ThemisDocument.scan_id == scan_id)
-            .order_by(ThemisDocument.created_at.desc())
-            .first()
-        )
-
-    def get_documents_by_user(self, user_id: int) -> List[ThemisDocument]:
-        return (
-            self._session.query(ThemisDocument)
-            .filter(ThemisDocument.user_id == user_id)
-            .order_by(ThemisDocument.created_at.desc())
-            .all()
-        )
-
-    def get_documents_by_scan(self, scan_id: int) -> List[ThemisDocument]:
-        return (
-            self._session.query(ThemisDocument)
-            .filter(ThemisDocument.scan_id == scan_id)
-            .order_by(ThemisDocument.created_at.desc())
-            .all()
-        )
+    _PARENT_FK = "scan_id"
 
 
 class ScanFolderRepository(BaseRepository[ScanFolder]):

@@ -124,17 +124,17 @@ class DocumentManager(TaskTrackingMixin):
     indirección.
 
     Subclases deben declarar:
-        _REPOSITORY:      Clase de repositorio del documento.
+        _REPOSITORY:      Clase de repositorio del documento, que debe
+            extender ``infrastructure.DocumentRepository`` (A9) — de ahí
+            salen las tres consultas que estos métodos delegan.
         _NOT_FOUND_ERROR: Callable(document_id) -> Exception, lanzada tanto
             si el documento no existe como si pertenece a otro usuario.
         EXTERNAL_ID_PREFIX / TASK_CATEGORY: contrato de ``TaskTrackingMixin``.
 
-    Y sobreescribir:
-        get_documents_by_parent: el repositorio de cada módulo nombra su
-            consulta "por padre" de forma distinta (``get_documents_by_scan``
-            vs. ``get_documents_by_analysis``) — ``get_latest_document`` y
-            ``get_documents_by_user`` sí comparten nombre en ambos
-            repositorios y por eso sí viven aquí sin indirección.
+    Ya no hace falta sobreescribir ``get_documents_by_parent``: hasta A9 cada
+    repositorio nombraba esa consulta a su manera (``get_documents_by_scan``
+    vs. ``get_documents_by_analysis``), así que la base no podía tener un
+    default; ahora los tres la exponen con el mismo nombre.
     """
 
     _REPOSITORY: Type
@@ -159,13 +159,10 @@ class DocumentManager(TaskTrackingMixin):
         return docs
 
     def get_documents_by_parent(self, parent_id: int) -> List:
-        """Retrieve all documents generated for a specific parent entity.
-
-        Must be overridden — the underlying repository query is named
-        differently per module (``get_documents_by_scan`` vs.
-        ``get_documents_by_analysis``), so there is no default here.
-        """
-        raise NotImplementedError
+        """Retrieve all documents generated for a specific parent entity."""
+        docs = build_repository(self._REPOSITORY).get_documents_by_parent(parent_id)
+        logger.info(f"Se obtuvieron {len(docs)} documentos para el padre {parent_id}")
+        return docs
 
     def delete_document(self, document_id: int) -> bool:
         """Delete a document and its associated file on disk.

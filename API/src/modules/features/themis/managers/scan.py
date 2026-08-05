@@ -238,7 +238,7 @@ class ScanManager(TaskTrackingMixin, ABC):
             if not scan:
                 return False
 
-            docs = build_repository(ThemisReportRepository).get_documents_by_scan(scan_id)
+            docs = build_repository(ThemisReportRepository).get_documents_by_parent(scan_id)
             for doc in docs:
                 delete_document_with_file(
                     doc.id, ThemisReportRepository,

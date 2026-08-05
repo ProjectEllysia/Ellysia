@@ -1223,9 +1223,7 @@ class IrisReportManager(DocumentManager):
             uow.commit_for_handoff()
         return document.id  # type: ignore
 
-    def get_documents_by_parent(self, analysis_id: int) -> List[IrisDocument]:
-        """Retrieve all documents generated for a specific analysis."""
-        return build_repository(IrisReportRepository).get_documents_by_analysis(analysis_id)
+    # get_documents_by_parent: usa el default de DocumentManager (A9).
 
     def generate_report(self, analysis_id: int, user_id: int) -> int:
         """Create an IrisDocument and start async PDF generation.

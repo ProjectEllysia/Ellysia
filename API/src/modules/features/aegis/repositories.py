@@ -38,19 +38,17 @@ from src.modules.features.aegis.model import (
     Recipient,
     Topic,
 )
-from src.modules.infrastructure import BaseRepository
+from src.modules.infrastructure import BaseRepository, DocumentRepository
 
 
-class AegisDocumentRepository(BaseRepository[AegisDocument]):
+class AegisDocumentRepository(DocumentRepository[AegisDocument]):
     """
     Repository for the AegisDocument entity (security awareness pills).
 
-    Inherits all generic CRUD and query operations from BaseRepository[AegisDocument]
-    and adds domain-specific query methods.
-
-    Attributes:
-        _model:  AegisDocument (inherited from BaseRepository).
-        _uow:    Active Unit of Work (inherited from BaseRepository).
+    Las tres consultas de documentos las aporta ``DocumentRepository`` (A9).
+    A diferencia de Themis e Iris, Aegis ordena por ``generated_at`` y no por
+    ``created_at``: es la fecha que su listado muestra, y se mantiene tal
+    cual para no cambiar el orden que el usuario ya ve.
 
     Example:
     >>> with UnitOfWork() as uow:
@@ -61,70 +59,13 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
     """
 
     _MODEL = AegisDocument
-
-    # =========================================================================
-    # DOMAIN QUERIES
-    # =========================================================================
+    _PARENT_FK = "topic_id"
+    _ORDER_COLUMN = "generated_at"
 
     def get_documents_by_user(self, user_id: int, limit: int = 100) -> List[AegisDocument]:
-        """
-        Retrieve all documents for a user, ordered by generation date (desc).
-
-        Args:
-            user_id: Primary key of the user.
-            limit: Maximum number of documents to return (default: 100).
-
-        Returns:
-            List of AegisDocument instances.
-        """
-        return (
-            self._session.query(AegisDocument)
-            .filter(AegisDocument.user_id == user_id)
-            .order_by(AegisDocument.generated_at.desc())
-            .limit(limit)
-            .all()
-        )
-
-    def get_documents_by_topic(self, topic_id: int, limit: int = 50) -> List[AegisDocument]:
-        """
-        Retrieve all documents for a topic.
-
-        Args:
-            topic_id: Primary key of the topic.
-            limit: Maximum number of documents to return (default: 50).
-
-        Returns:
-            List of AegisDocument instances.
-        """
-        return (
-            self._session.query(AegisDocument)
-            .filter(AegisDocument.topic_id == topic_id)
-            .order_by(AegisDocument.generated_at.desc())
-            .limit(limit)
-            .all()
-        )
-
-    def get_documents_by_status(
-        self, user_id: int, status: str, limit: int = 50
-    ) -> List[AegisDocument]:
-        """
-        Retrieve documents by status for a specific user.
-
-        Args:
-            user_id: Primary key of the user.
-            status: Document status ('pending', 'running', 'done', 'error').
-            limit: Maximum number of documents to return (default: 50).
-
-        Returns:
-            List of AegisDocument instances.
-        """
-        return (
-            self._session.query(AegisDocument)
-            .filter(AegisDocument.user_id == user_id, AegisDocument.status == status)
-            .order_by(AegisDocument.created_at.desc())
-            .limit(limit)
-            .all()
-        )
+        """Documentos de un usuario. Solo fija el ``limit`` por defecto (100)
+        que este módulo venía usando; la consulta es la de la base."""
+        return super().get_documents_by_user(user_id, limit=limit)
 
     # =========================================================================
     # TOPIC QUERIES

@@ -1,12 +1,10 @@
 """ThemisReportManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
-from typing import List
 from src.modules.system.taskqueue import job_context
 from src.modules.shared._exceptions import DocumentError
 from src.modules.shared._documents import run_report_generation, DocumentManager
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.session import build_repository
 from ..repositories import ThemisReportRepository
 from ..model import ThemisDocument
 from ..services import PDFCreator
@@ -53,12 +51,7 @@ class ThemisReportManager(DocumentManager):
 
         return document.id  # type: ignore
 
-    def get_documents_by_parent(self, scan_id: int) -> List[ThemisDocument]:
-        """Retrieve all documents associated with a specific scan."""
-        docs = build_repository(ThemisReportRepository).get_documents_by_scan(scan_id)
-
-        logger.info(f"Se obtuvieron {len(docs)} documentos para scan {scan_id}")
-        return docs
+    # get_documents_by_parent: usa el default de DocumentManager (A9).
 
     def generate_report(self, scan_id: int, ai_report: bool = False) -> int:
         """
