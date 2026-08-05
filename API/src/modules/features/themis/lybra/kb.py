@@ -39,13 +39,13 @@ import logging
 import re
 import socket
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -585,7 +585,7 @@ def _epss_scored_at(csv_text: str) -> Optional[datetime]:
 
 
 # =========================================================================
-# FETCH (the thin network edge: urllib + backoff)
+# FETCH (the thin network edge: requests + backoff)
 # =========================================================================
 
 @contextmanager
@@ -641,18 +641,28 @@ def _http_get(url: str, timeout: int = 30, api_key: Optional[str] = None) -> byt
     last_error: Optional[Exception] = None
     for attempt in range(_RETRIES):
         try:
-            req = urllib.request.Request(url, headers=headers)
-            # ``urlopen(timeout=...)`` bounds the socket read/connect, but not
-            # always the DNS resolution (``getaddrinfo``) ahead of it; a stalled
-            # resolver has been observed to hang well past that timeout. The
-            # global default socket timeout covers that phase too.
-            with socket_timeout(timeout), urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read()
+            # ``socket_timeout`` sigue haciendo falta con ``requests`` (E7): ni
+            # el timeout de urllib ni el de requests acotan la resolución DNS
+            # (``getaddrinfo`` corre dentro de ``socket.create_connection``
+            # *antes* de que el timeout se aplique al socket), y un resolver
+            # colgado se ha observado pasándose de largo del timeout. El
+            # default global de socket sí cubre esa fase.
+            with socket_timeout(timeout):
+                response = requests.get(url, headers=headers, timeout=timeout)
+            # requests no lanza en 4xx/5xx por sí solo, urlopen sí: se fuerza
+            # aquí para conservar exactamente el mismo camino de reintento.
+            response.raise_for_status()
+            return response.content
         except Exception as exc:  # noqa: BLE001 - retried, then re-raised
             last_error = exc
             if attempt < _RETRIES - 1:
-                if isinstance(exc, urllib.error.HTTPError) and exc.code == 429:
-                    retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                rate_limited = (
+                    isinstance(exc, requests.HTTPError)
+                    and exc.response is not None
+                    and exc.response.status_code == 429
+                )
+                if rate_limited:
+                    retry_after = exc.response.headers.get("Retry-After")
                     wait = max(_RATE_LIMIT_WAIT, float(retry_after)) if retry_after else _RATE_LIMIT_WAIT
                     time.sleep(wait)
                 else:

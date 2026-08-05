@@ -837,6 +837,15 @@ class HttpProbe:
     def __init__(self, timeout: int = 8, max_bytes: int = 131072) -> None:
         self._timeout = timeout
         self._max_bytes = max_bytes
+        # E7: este probe se queda deliberadamente en ``urllib`` mientras el
+        # resto del tráfico HTTP ordinario del proyecto (aegis/pills.py,
+        # lybra/kb.py) usa ``requests``. Una sonda de seguridad necesita
+        # control fino sobre el contexto TLS de *cada* salto, y ``requests``
+        # esconde justo eso: su ``verify=False`` sí cubre las redirecciones,
+        # pero no deja sustituir el ``SSLContext`` por handler, que es lo que
+        # el caso de abajo necesita. No es inconsistencia, es un requisito
+        # distinto — y por eso vive aquí y no en el camino común.
+        #
         # We are scanning arbitrary hosts whose certificates we do not control,
         # so every HTTPS leg — including one reached via a same-host redirect,
         # e.g. a plain "http://" request answered with "Location: https://..." —

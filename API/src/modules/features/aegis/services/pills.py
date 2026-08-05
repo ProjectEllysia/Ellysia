@@ -20,8 +20,9 @@ import random
 import re
 import threading
 import time
-import urllib.request
 import xml.etree.ElementTree as ET
+
+import requests
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -417,15 +418,14 @@ class AegisAlertFetcher:
         if cached:
             return cached
 
-        req = urllib.request.Request(
+        response = requests.get(
             self.INCIBE_FEED,
             headers={"User-Agent": "AegisAlertFetcher/2.0", "Accept": "application/rss+xml"},
+            timeout=15,
         )
-        
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            raw = resp.read()
+        response.raise_for_status()
 
-        root = ET.fromstring(raw)
+        root = ET.fromstring(response.content)
         channel = root.find("channel")
         if channel is None:
             return []
