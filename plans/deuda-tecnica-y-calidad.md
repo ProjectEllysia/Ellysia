@@ -793,6 +793,32 @@ mantienen (ya autorizadas por el `CLAUDE.md`): `repo`, `config`, `uow`, `pk`, `C
 D1, D3, D4), no antes — cada renombrado sobre código que va a moverse es trabajo tirado y conflictos
 de merge gratis.
 
+> **Hecho, y en último lugar por esa misma razón.** ~940 renombrados en total. El recuento de la
+> tabla de arriba se quedó corto: era anterior a las mudanzas de las fases 5, 11, 12 y 14.
+>
+> No se hizo con `sed`. Un `\bdoc\b` habría tocado también `x.doc`, `f(doc=…)` y las cadenas
+> `"doc"`. Se usó un renombrador de AST + `symtable` que solo altera nodos `Name`/`arg` cuyo
+> binding es **local a un scope de función**, lo que deja fuera atributos, kwargs, globales,
+> anotaciones y literales por construcción. Con dos redes:
+>
+> - **Detección de colisión.** Si el nombre destino ya existe en ese scope, no se toca y se
+>   reporta. Fusionar dos variables distintas es el fallo silencioso que este tipo de refactor
+>   produce, y es de los que no da error hasta producción. Saltó una vez, correctamente
+>   (`iris/services/text.py`, donde `domain` ya era el parámetro).
+> - **`col_offset` es un offset en bytes UTF-8**, no en caracteres. Con los comentarios en
+>   castellano de este repo, editar sobre la cadena descuadra las columnas; se edita sobre bytes,
+>   y una aserción por edición comprueba que lo que hay en esa posición es de verdad el nombre
+>   viejo.
+>
+> Las variables de comprensión se derivan del iterable (`for f in findings` → `for finding in
+> findings`); 321 salieron así. Las 89 que la derivación no resolvía con confianza se listaron y
+> se nombraron leyendo cada sitio, porque la misma letra significaba cosas distintas según el
+> fichero. **No se aplicaron derivaciones vagas** (`value`, `item`): el `CLAUDE.md` pide que el
+> nombre aclare el tipo, y llamar `value` a cuatro cosas distintas no mejora nada.
+>
+> Se mantienen las convenciones legítimas: `repo`, `config`, `uow`, `pk`, `CR`, `e` en `except`,
+> y `_`, `i`, `j`, `n`, `x`, `y`, `ip` como índices y descartes.
+
 ---
 
 ### E7 · Dos idiomas HTTP conviviendo
