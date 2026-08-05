@@ -142,5 +142,5 @@ class RedisDissector(Dissector):
         reply = self._probe.fetch(target, service.port or 6379)
         if reply is None:
             return None
-        fp = fingerprint_redis(reply)
-        return DissectorResult(fp.product, fp.version, self.label)
+        fingerprint = fingerprint_redis(reply)
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)

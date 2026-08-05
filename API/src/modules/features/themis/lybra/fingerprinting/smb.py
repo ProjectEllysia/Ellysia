@@ -120,7 +120,7 @@ def build_negotiate_request() -> bytes:
         struct.pack("<I", 0),                 # Capabilities
         b"\x00" * 16,                          # ClientGuid
         struct.pack("<Q", 0),                  # ClientStartTime (reserved pre-3.1.1)
-    ]) + b"".join(struct.pack("<H", d) for d in _DIALECTS)
+    ]) + b"".join(struct.pack("<H", dialect) for dialect in _DIALECTS)
 
     message = _smb2_header(command=0x0000) + body
     length = len(message)
@@ -237,5 +237,5 @@ class SmbDissector(Dissector):
         if result is None:
             return None
         dialect_revision, security_mode = result
-        fp = fingerprint_smb(dialect_revision, security_mode)
-        return DissectorResult(fp.product, fp.version, self.label)
+        fingerprint = fingerprint_smb(dialect_revision, security_mode)
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)

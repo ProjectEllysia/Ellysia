@@ -93,8 +93,8 @@ class NiktoMetricExtractor(MetricExtractor):
 
     def identities(self, scan: NiktoScan) -> Set[str]:
         return {
-            f"{inc.method}|{inc.url}|{inc.description}"
-            for inc in (scan.incidents or [])
+            f"{incident.method}|{incident.url}|{incident.description}"
+            for incident in (scan.incidents or [])
         }
 
 
@@ -106,8 +106,8 @@ class LybraMetricExtractor(MetricExtractor):
 
     def identities(self, scan: LybraScan) -> Set[str]:
         return {
-            f.dedup_key or f"finding:{f.id}"
-            for f in (scan.findings or [])
+            finding.dedup_key or f"finding:{finding.id}"
+            for finding in (scan.findings or [])
         }
 
 
@@ -124,8 +124,8 @@ class NucleiMetricExtractor(MetricExtractor):
 
     def identities(self, scan: NucleiScan) -> Set[str]:
         return {
-            f.dedup_key or f"finding:{f.id}"
-            for f in (scan.findings or [])
+            finding.dedup_key or f"finding:{finding.id}"
+            for finding in (scan.findings or [])
         }
 
 
@@ -173,7 +173,7 @@ class HistoryStatsService:
                 "scanId": scan.id,
             })
 
-        max_value = max((p["y"] for p in points), default=0)
+        max_value = max((point["y"] for point in points), default=0)
         diff = self._compute_diff(scans, extractor)
 
         return {

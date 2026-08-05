@@ -140,7 +140,7 @@ class Matcher:
     values: tuple = ()
     negative: bool = False
 
-    def matches(self, resp: Response) -> bool:
+    def matches(self, response: Response) -> bool:
         """Return whether this matcher is satisfied by a response.
 
         Args:
@@ -149,14 +149,14 @@ class Matcher:
         Returns:
             The test result, inverted if ``negative`` is set.
         """
-        result = self._raw_match(resp)
+        result = self._raw_match(response)
         return (not result) if self.negative else result
 
-    def _raw_match(self, resp: Response) -> bool:
+    def _raw_match(self, response: Response) -> bool:
         """Run the matcher's test, before any ``negative`` inversion."""
         if self.type == "status":
-            return resp.status in {int(v) for v in self.values}
-        text = self._part_text(resp)
+            return response.status in {int(v) for v in self.values}
+        text = self._part_text(response)
         if self.type == "word":
             low = text.lower()
             return any(str(w).lower() in low for w in self.values)
@@ -164,13 +164,13 @@ class Matcher:
             return any(re.search(str(p), text) for p in self.values)
         return False
 
-    def _part_text(self, resp: Response) -> str:
+    def _part_text(self, response: Response) -> str:
         """Return the response text this matcher's ``part`` refers to."""
         if self.part == "header":
-            return "\n".join(f"{k}: {v}" for k, v in resp.headers.items())
+            return "\n".join(f"{k}: {v}" for k, v in response.headers.items())
         if self.part == "status":
-            return str(resp.status)
-        return resp.body
+            return str(response.status)
+        return response.body
 
 
 @dataclass(frozen=True)
@@ -200,7 +200,7 @@ class Request:
     condition: str = "and"
     send: Optional[str] = None
 
-    def evaluate(self, resp: Response) -> bool:
+    def evaluate(self, response: Response) -> bool:
         """Return whether this request's matchers are satisfied by a response.
 
         Args:
@@ -212,7 +212,7 @@ class Request:
         """
         if not self.matchers:
             return False
-        results = [m.matches(resp) for m in self.matchers]
+        results = [matcher.matches(response) for matcher in self.matchers]
         return all(results) if self.condition == "and" else any(results)
 
 
@@ -311,7 +311,7 @@ def load_checks(path: Optional[str] = None) -> List[Check]:
     """
     feed_path = Path(path) if path else _BUNDLED_FEED
     data = load_feed_document(feed_path)
-    return [_parse_check(c) for c in data.get("checks", [])]
+    return [_parse_check(check) for check in data.get("checks", [])]
 
 
 def _parse_check(c: dict) -> Check:
@@ -322,21 +322,21 @@ def _parse_check(c: dict) -> Check:
     """
     requests = tuple(
         Request(
-            method=r.get("method", "GET"),
-            path=r.get("path", "/"),
-            condition=r.get("matchers-condition", "and"),
-            send=r.get("send"),
+            method=request.get("method", "GET"),
+            path=request.get("path", "/"),
+            condition=request.get("matchers-condition", "and"),
+            send=request.get("send"),
             matchers=tuple(
                 Matcher(
-                    type=m["type"],
-                    part=m.get("part", "body"),
-                    values=tuple(m.get("words") or m.get("regex") or m.get("value") or []),
-                    negative=m.get("negative", False),
+                    type=matcher["type"],
+                    part=matcher.get("part", "body"),
+                    values=tuple(matcher.get("words") or matcher.get("regex") or matcher.get("value") or []),
+                    negative=matcher.get("negative", False),
                 )
-                for m in r.get("matchers", [])
+                for matcher in request.get("matchers", [])
             ),
         )
-        for r in c.get("requests", [])
+        for request in c.get("requests", [])
     )
     return Check(
         id=c["id"],
@@ -702,8 +702,8 @@ class CheckRuntime:
         for request in check.requests:
             if self._rl is not None:
                 self._rl.acquire(host)
-            resp = self._fetch(host, service.port, request.method, request.path)
-            if resp is None or not request.evaluate(resp):
+            response = self._fetch(host, service.port, request.method, request.path)
+            if response is None or not request.evaluate(response):
                 return None
         return self._finding(check, service)
 
@@ -735,8 +735,8 @@ class CheckRuntime:
             return None
         try:
             for request in check.requests:
-                resp = session.exchange(request.send)
-                if resp is None or not request.evaluate(resp):
+                response = session.exchange(request.send)
+                if response is None or not request.evaluate(response):
                     return None
             return self._finding(check, service)
         finally:
@@ -908,9 +908,9 @@ class HttpProbe:
         netloc = f"{host}:{port}" if port else host
         url = f"{scheme}://{netloc}{path}"
         try:
-            req = urllib.request.Request(url, method=method, headers={"User-Agent": "Lybra/1.0"})
-            with self._opener.open(req, timeout=self._timeout) as resp:
-                return resp.status, resp.read(self._max_bytes), dict(resp.headers)
+            request = urllib.request.Request(url, method=method, headers={"User-Agent": "Lybra/1.0"})
+            with self._opener.open(request, timeout=self._timeout) as response:
+                return response.status, response.read(self._max_bytes), dict(response.headers)
         except urllib.error.HTTPError as err:
             body = err.read(self._max_bytes) if hasattr(err, "read") else b""
             return err.code, body, dict(err.headers or {})

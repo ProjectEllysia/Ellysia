@@ -336,9 +336,9 @@ def delete_analysis(analysis_id: int):
     }
 
 
-def _download_url_for(doc) -> str | None:
-    if doc.status == "done" and doc.filename:
-        return f"/iris/document/{doc.id}/download"
+def _download_url_for(document) -> str | None:
+    if document.status == "done" and document.filename:
+        return f"/iris/document/{document.id}/download"
     return None
 
 
@@ -388,16 +388,16 @@ def get_document_status(args):
     doc_mgr = IrisReportManager()
     # E4: lookup dual (por documentId o, si no, el último documento del
     # análisis) + verificación de ownership viven en el manager, no aquí.
-    doc = doc_mgr.get_document_status(document_id, analysis_id, user.id)
+    document = doc_mgr.get_document_status(document_id, analysis_id, user.id)
 
     return {
-        "documentId": doc.id,
-        "analysisId": doc.analysis_id,
-        "status": doc.status,
-        "verdict": doc.verdict,
-        "createdAt": doc.created_at,
-        "generatedAt": doc.generated_at,
-        "downloadUrl": _download_url_for(doc),
+        "documentId": document.id,
+        "analysisId": document.analysis_id,
+        "status": document.status,
+        "verdict": document.verdict,
+        "createdAt": document.created_at,
+        "generatedAt": document.generated_at,
+        "downloadUrl": _download_url_for(document),
     }
 
 
@@ -417,14 +417,14 @@ def get_all_documents():
     documents = doc_mgr.get_documents_for_user(user.id)
 
     docs_list = [{
-        "documentId": doc.id,
-        "analysisId": doc.analysis_id,
-        "status": doc.status,
-        "verdict": doc.verdict,
-        "createdAt": doc.created_at,
-        "generatedAt": doc.generated_at,
-        "downloadUrl": _download_url_for(doc),
-    } for doc in documents]
+        "documentId": document.id,
+        "analysisId": document.analysis_id,
+        "status": document.status,
+        "verdict": document.verdict,
+        "createdAt": document.created_at,
+        "generatedAt": document.generated_at,
+        "downloadUrl": _download_url_for(document),
+    } for document in documents]
 
     return {"documents": docs_list, "total": len(docs_list)}
 
@@ -447,14 +447,14 @@ def get_documents_by_analysis(analysis_id: int):
     documents = doc_mgr.get_documents_by_parent(analysis_id)
 
     docs_list = [{
-        "documentId": doc.id,
-        "analysisId": doc.analysis_id,
-        "status": doc.status,
-        "verdict": doc.verdict,
-        "createdAt": doc.created_at,
-        "generatedAt": doc.generated_at,
-        "downloadUrl": _download_url_for(doc),
-    } for doc in documents]
+        "documentId": document.id,
+        "analysisId": document.analysis_id,
+        "status": document.status,
+        "verdict": document.verdict,
+        "createdAt": document.created_at,
+        "generatedAt": document.generated_at,
+        "downloadUrl": _download_url_for(document),
+    } for document in documents]
 
     return {"analysisId": analysis_id, "documents": docs_list, "total": len(docs_list)}
 
@@ -473,17 +473,17 @@ def download_document(document_id: int):
     user = get_current_user()
 
     doc_mgr = IrisReportManager()
-    doc = doc_mgr.assert_document_ownership(document_id, user.id)
+    document = doc_mgr.assert_document_ownership(document_id, user.id)
 
-    if doc.status != "done" or not doc.filename or not os.path.exists(doc.filename):
-        raise DocumentNotReadyError(document_id, doc.status)
+    if document.status != "done" or not document.filename or not os.path.exists(document.filename):
+        raise DocumentNotReadyError(document_id, document.status)
 
-    logger.info(f"Serving Iris document {document_id}: {doc.filename}")
+    logger.info(f"Serving Iris document {document_id}: {document.filename}")
     return send_file(
-        doc.filename,
+        document.filename,
         mimetype="application/pdf",
         as_attachment=True,
-        download_name=f"iris_analysis_{doc.analysis_id}.pdf",
+        download_name=f"iris_analysis_{document.analysis_id}.pdf",
     )
 
 
@@ -609,7 +609,7 @@ def list_mailbox_connections():
     """Listar las conexiones de buzón del usuario actual (nunca expone tokens)"""
     user = get_current_user()
     connections = IrisMailboxManager.list_connections(user.id)
-    items = [_serialize_connection(c) for c in connections]
+    items = [_serialize_connection(connection) for connection in connections]
     return {"connections": items, "total": len(items)}
 
 

@@ -523,23 +523,23 @@ class ScanRepository(BaseRepository[Scan]):
         self._session.flush()
         return new_port
 
-    def get_or_create_nikto_incident(self, inc_data: dict) -> NiktoIncident:
+    def get_or_create_nikto_incident(self, incident_data: dict) -> NiktoIncident:
         """Get or create a NiktoIncident row by its unique fields."""
         existing = self._session.query(NiktoIncident).filter(
-            NiktoIncident.description == inc_data["description"],
-            NiktoIncident.url         == inc_data["url"],
-            NiktoIncident.method      == inc_data["method"],
+            NiktoIncident.description == incident_data["description"],
+            NiktoIncident.url         == incident_data["url"],
+            NiktoIncident.method      == incident_data["method"],
         ).first()
 
         if existing:
             return existing
 
         incident = NiktoIncident(
-            description = inc_data["description"],
-            osvdb_id    = inc_data["osvdb_id"],
-            method      = inc_data["method"],
-            url         = inc_data["url"],
-            severity    = inc_data["severity"],
+            description = incident_data["description"],
+            osvdb_id    = incident_data["osvdb_id"],
+            method      = incident_data["method"],
+            url         = incident_data["url"],
+            severity    = incident_data["severity"],
         )
         self._session.add(incident)
         self._session.flush()
@@ -567,8 +567,8 @@ class ScanRepository(BaseRepository[Scan]):
 
     def persist_nikto_results(self, scan, host, incidents_data) -> None:
         """Persist Nikto incidents and associate a host."""
-        for inc_data in incidents_data:
-            incident = self.get_or_create_nikto_incident(inc_data)
+        for incident_data in incidents_data:
+            incident = self.get_or_create_nikto_incident(incident_data)
             if incident not in scan.incidents:
                 scan.incidents.append(incident)
 
@@ -1250,7 +1250,7 @@ class ProgramedScanRepository(BaseRepository[ProgramedScan]):
 
     def update_run_timestamps(
         self,
-        ps: ProgramedScan,
+        programed_scan: ProgramedScan,
         last_run: datetime,
         next_run: Optional[datetime],
     ) -> ProgramedScan:
@@ -1269,9 +1269,9 @@ class ProgramedScanRepository(BaseRepository[ProgramedScan]):
         Returns:
             The same ProgramedScan instance after flush.
         """
-        ps.last_run_at = last_run  # type: ignore
-        ps.next_run_at = next_run  # type: ignore
-        return self.update(ps)
+        programed_scan.last_run_at = last_run  # type: ignore
+        programed_scan.next_run_at = next_run  # type: ignore
+        return self.update(programed_scan)
 
     def create(
         self,
@@ -1297,7 +1297,7 @@ class ProgramedScanRepository(BaseRepository[ProgramedScan]):
         Returns:
             The newly persisted ProgramedScan instance.
         """
-        ps = ProgramedScan(
+        programed_scan = ProgramedScan(
             user_id=user_id,
             scan_type=scan_type,
             arguments=arguments,
@@ -1305,7 +1305,7 @@ class ProgramedScanRepository(BaseRepository[ProgramedScan]):
             schedule_config=schedule_config,
             next_run_at=next_run_at,
         )
-        return self.save(ps)
+        return self.save(programed_scan)
 
 
 class AuthorizedTargetRepository(BaseRepository[AuthorizedTarget]):

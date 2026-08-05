@@ -185,7 +185,7 @@ class SnmpDissector(Dissector):
         sysdescr = self._probe.fetch(target, service.port or 161)
         if sysdescr is None:
             return None
-        fp = fingerprint_snmp(sysdescr)
-        if fp.product is None:
+        fingerprint = fingerprint_snmp(sysdescr)
+        if fingerprint.product is None:
             return None
-        return DissectorResult(fp.product, fp.version, self.label)
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)

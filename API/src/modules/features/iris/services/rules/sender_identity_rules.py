@@ -309,7 +309,7 @@ def check_lookalike_domain(headers: dict) -> RuleResult:
     if not findings:
         return RuleResult(score=1, verdict="pass", details={"domain": domain}, recommendation=None)
 
-    matched_brand_names = ", ".join(sorted({f["brand"] for f in findings}))
+    matched_brand_names = ", ".join(sorted({finding["brand"] for finding in findings}))
     return RuleResult(
         score=CR.get_iris_scoring_weight("lookalike_domain.typosquat", -15), verdict="fail",
         details={"domain": domain, "registrable_label": label, "findings": findings},
@@ -364,8 +364,8 @@ def check_subdomain_impersonation(headers: dict) -> RuleResult:
     if reg_label in brands:
         return RuleResult(score=0, verdict="neutral", details={"domain": domain}, recommendation=None)
 
-    pre_labels = [l for l in labels[:-2] if l] if ".".join(labels[-2:]) in multi_level_tlds() \
-        else [l for l in labels[:-1] if l]
+    pre_labels = [label for label in labels[:-2] if label] if ".".join(labels[-2:]) in multi_level_tlds() \
+        else [label for label in labels[:-1] if label]
 
     findings: list[dict] = []
 
@@ -385,10 +385,10 @@ def check_subdomain_impersonation(headers: dict) -> RuleResult:
         if lbl in brands:
             continue
         tokens = re.split(r"-+", lbl)
-        brand_hits = [t for t in tokens if t in brands]
-        action_hits = [t for t in tokens if t in action_words]
+        brand_hits = [token for token in tokens if token in brands]
+        action_hits = [token for token in tokens if token in action_words]
         if brand_hits and action_hits:
-            if not any(f.get("label") == lbl and f.get("type") == "brand_action_combo" for f in findings):
+            if not any(finding.get("label") == lbl and finding.get("type") == "brand_action_combo" for finding in findings):
                 findings.append({
                     "label": lbl, "brand": brand_hits[0], "action": action_hits[0],
                     "type": "brand_action_combo",
@@ -397,10 +397,10 @@ def check_subdomain_impersonation(headers: dict) -> RuleResult:
     if not findings:
         return RuleResult(score=0, verdict="neutral", details={"domain": domain}, recommendation=None)
 
-    types = sorted({f["type"] for f in findings})
+    types = sorted({finding["type"] for finding in findings})
     score = (
         CR.get_iris_scoring_weight("subdomain_impersonation.brand_in_subdomain", -10)
-        if any(f["type"] == "brand_in_subdomain" for f in findings)
+        if any(finding["type"] == "brand_in_subdomain" for finding in findings)
         else CR.get_iris_scoring_weight("subdomain_impersonation.brand_action_combo", -8)
     )
 
@@ -495,8 +495,8 @@ def check_misspelled_brands(headers: dict) -> RuleResult:
         )
 
     count = len(typosquat_matches)
-    types = set(f["type"] for f in typosquat_matches)
-    names = ", ".join(f["found"] for f in typosquat_matches)
+    types = set(typosquat_match["type"] for typosquat_match in typosquat_matches)
+    names = ", ".join(typosquat_match["found"] for typosquat_match in typosquat_matches)
 
     return RuleResult(
         score=CR.get_iris_scoring_weight("misspelled_brands.per_match", -4) * min(count, 2),
@@ -557,11 +557,11 @@ def check_suspicious_tld(headers: dict) -> RuleResult:
     # Reply-To *and* Return-Path is one suspicious fact, not three — the
     # loop above appends one entry per header it appears in, so a single
     # domain could otherwise cost -15 instead of -5.
-    unique_domains = {d["domain"]: d for d in found_tlds}
+    unique_domains = {found_tld["domain"]: found_tld for found_tld in found_tlds}
     found_tlds = list(unique_domains.values())
     count = len(found_tlds)
-    domains_str = ", ".join(d["domain"] for d in found_tlds)
-    tlds_str = ", ".join(d["tld"] for d in found_tlds)
+    domains_str = ", ".join(found_tld["domain"] for found_tld in found_tlds)
+    tlds_str = ", ".join(found_tld["tld"] for found_tld in found_tlds)
 
     # Recalibración de pesos: techo máx -10 -- corroboración honesta, no
     # debe poder salirse del techo de familia identidad por acumular TLDs.

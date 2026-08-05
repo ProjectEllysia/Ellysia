@@ -289,7 +289,7 @@ class IrisMailboxManager(TaskTrackingMixin):
         """Encola un job de sync para ``connection_id`` sin comprobar ownership
         (uso interno: llamado también por ``IrisMailboxScheduler``, que no
         actúa en nombre de un usuario concreto)."""
-        self._tq.submit(
+        self._task_queue.submit(
             func=IrisMailboxManager.execute_sync_connection,
             args=(connection_id,),
             name=f"IrisMailboxSync-{connection_id}",

@@ -172,10 +172,10 @@ class NmapAIWriter:
             if isinstance(p, int):
                 ports.append(p)
 
-        priviliged = sum(1 for p in ports if p < 1024)
-        userland = sum(1 for p in ports if p >= 1024)
-        web_like = any(p in [80, 443, 8080, 8443] for p in ports)
-        admin_like = any(p in [22, 23, 3389, 5900] for p in ports)
+        priviliged = sum(1 for port in ports if port < 1024)
+        userland = sum(1 for port in ports if port >= 1024)
+        web_like = any(port in [80, 443, 8080, 8443] for port in ports)
+        admin_like = any(port in [22, 23, 3389, 5900] for port in ports)
 
         if priviliged >= 3 and userland <= 2:
             profile = "Servidor de infraestructura (mix privilegiado estándar)"
@@ -334,30 +334,30 @@ class NiktoAIWriter:
             "noise": []
         }
 
-        for inc in incidents:
-            desc = str(inc.get("description", "")).lower()
-            url = str(inc.get("url", ""))
-            method = str(inc.get("method", "GET"))
-            severity = str(inc.get("severity", "INFO")).upper()
+        for incident in incidents:
+            desc = str(incident.get("description", "")).lower()
+            url = str(incident.get("url", ""))
+            method = str(incident.get("method", "GET"))
+            severity = str(incident.get("severity", "INFO")).upper()
 
             if "hash(" in url or "0x" in url or len(url) > 200:
-                controls["noise"].append(inc)
+                controls["noise"].append(incident)
                 continue
 
             if any(x in desc for x in ["cookie", "session", "httponly", "secure flag"]):
-                controls["session_management"].append(inc)
+                controls["session_management"].append(incident)
             elif any(x in desc for x in ["certificate", "ssl", "tls", "https", "cn=", "hostname"]):
-                controls["transport_security"].append(inc)
+                controls["transport_security"].append(incident)
             elif any(x in desc for x in ["x-frame-options", "csp", "content-security", "clickjacking", "xss"]):
-                controls["client_protection"].append(inc)
+                controls["client_protection"].append(incident)
             elif any(x in desc for x in ["method", "put", "delete", "trace", "debug", "options"]):
-                controls["access_control"].append(inc)
+                controls["access_control"].append(incident)
             elif any(x in desc for x in ["banner", "version", "x-powered-by", "server:", "etag", "inode"]):
-                controls["information_disclosure"].append(inc)
+                controls["information_disclosure"].append(incident)
             elif any(x in desc for x in ["robots.txt", "directory", "index of", "accessible"]):
-                controls["configuration"].append(inc)
+                controls["configuration"].append(incident)
             else:
-                controls["information_disclosure"].append(inc)
+                controls["information_disclosure"].append(incident)
 
         total_valid = sum(len(v) for k, v in controls.items() if k != "noise")
 
@@ -405,7 +405,7 @@ class NiktoAIWriter:
             controls_summary[control_name] = {
                 "instancias_detectadas": len(findings),
                 "severidad_original_nikto": sorted(
-                    {str(f.get("severity", "INFO")).upper() for f in findings},
+                    {str(finding.get("severity", "INFO")).upper() for finding in findings},
                     key=self._severity_rank, reverse=True
                 ),
                 "ejemplos_representativos": unique_issues,
@@ -571,15 +571,15 @@ class LybraAIWriter:
         started = scan_data.get("started_at", "N/A")
         exposure = scan_data.get("exposure", "unknown")
 
-        confirmed = [f for f in findings if f.get("confirmed")]
-        kev = [f for f in findings if f.get("in_kev")]
+        confirmed = [finding for finding in findings if finding.get("confirmed")]
+        kev = [finding for finding in findings if finding.get("in_kev")]
 
         # Cap the payload to the highest-signal findings rather than dumping
         # everything: confirmed + KEV first (never dropped), then a sample of
         # the rest, so a host with hundreds of open-port entries doesn't drown
         # the handful of real vulnerabilities in the prompt.
         priority_ids = {id(f) for f in confirmed} | {id(f) for f in kev}
-        sample = confirmed + kev + [f for f in findings if id(f) not in priority_ids][:15]
+        sample = confirmed + kev + [finding for finding in findings if id(finding) not in priority_ids][:15]
 
         findings_for_ai = [{
             "titulo": f.get("title", "")[:160],
@@ -630,10 +630,10 @@ class LybraAIWriter:
 
         rows = build_repository(ScanRepository).get_findings_by_scan(scan.id)
         findings = [{
-            "title": f.title, "category": f.category, "cve_ids": f.cve_ids,
-            "cvss_score": f.cvss_score, "epss_score": f.epss_score, "in_kev": f.in_kev,
-            "confirmed": f.confirmed, "qod": f.qod, "state": f.state,
-        } for f in rows]
+            "title": row.title, "category": row.category, "cve_ids": row.cve_ids,
+            "cvss_score": row.cvss_score, "epss_score": row.epss_score, "in_kev": row.in_kev,
+            "confirmed": row.confirmed, "qod": row.qod, "state": row.state,
+        } for row in rows]
 
         if not findings:
             return {

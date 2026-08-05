@@ -229,14 +229,14 @@ class IrisPDFCreator:
         self.path = path or {}
         self.directory = CR.get_directory_of(CR.DirectoryType.OUTPUT_IRIS)
 
-    def _set_pdf_metadata(self, doc) -> None:
+    def _set_pdf_metadata(self, document) -> None:
         analysis_id = self.report.get("analysisId")
-        doc.title = f"Informe de Análisis Iris - {analysis_id}"
-        doc.author = "Ellysia Security Team"
-        doc.subject = "Análisis de cabeceras de correo (anti-phishing)"
-        doc.creator = "Ellysia PDF Generator v2.0"
+        document.title = f"Informe de Análisis Iris - {analysis_id}"
+        document.author = "Ellysia Security Team"
+        document.subject = "Análisis de cabeceras de correo (anti-phishing)"
+        document.creator = "Ellysia PDF Generator v2.0"
 
-    def _on_page(self, canv, doc):
+    def _on_page(self, canv, document):
         canv.saveState()
         width, height = A4
 
@@ -539,7 +539,7 @@ class IrisPDFCreator:
         elements.append(Spacer(1, 0.2 * inch))
 
         # Recommendations attached to failing rules.
-        flagged = [r for r in rules if r.get("recommendation")]
+        flagged = [rule for rule in rules if rule.get("recommendation")]
         if flagged:
             elements.append(Paragraph("Detalle de hallazgos", theme.subtitle))
             elements.append(Spacer(1, 0.08 * inch))
@@ -606,7 +606,7 @@ class IrisPDFCreator:
         elements.append(hop_table)
 
         transitions = self.path.get("transitions") or []
-        suspicious = [t for t in transitions if t.get("suspicious")]
+        suspicious = [transition for transition in transitions if transition.get("suspicious")]
         if suspicious:
             elements.append(Spacer(1, 0.15 * inch))
             elements.append(Paragraph("Transiciones sospechosas detectadas", theme.subtitle))
@@ -685,7 +685,7 @@ class IrisPDFCreator:
         analysis_id = self.report.get("analysisId")
         filename = os.path.join(self.directory, f"{analysis_id}_Iris.pdf")
 
-        doc = SimpleDocTemplate(
+        document = SimpleDocTemplate(
             filename, pagesize=A4,
             rightMargin=36, leftMargin=36, topMargin=60, bottomMargin=40,
         )
@@ -705,7 +705,7 @@ class IrisPDFCreator:
         self.append_consent(elements, theme)
         self.append_footer(elements, theme)
 
-        self._set_pdf_metadata(doc)
-        doc.build(elements, onFirstPage=self._on_page, onLaterPages=self._on_page)
+        self._set_pdf_metadata(document)
+        document.build(elements, onFirstPage=self._on_page, onLaterPages=self._on_page)
 
         return filename

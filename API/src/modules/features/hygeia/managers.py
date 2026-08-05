@@ -340,10 +340,10 @@ class HygeiaAssetManager:
         # que no se pudieron identificar — antes era una advertencia genérica
         # cuando `vulnerableCount` daba cero; ahora el frontend puede decir
         # cuántos, en vez de "puede que alguno".
-        package_count = sum(1 for f in findings if f.get("category") == "installed_package")
+        package_count = sum(1 for finding in findings if finding.get("category") == "installed_package")
         unresolved_count = sum(
-            1 for f in findings
-            if f.get("category") == "installed_package" and f.get("cpeResolved") is False
+            1 for finding in findings
+            if finding.get("category") == "installed_package" and finding.get("cpeResolved") is False
         )
 
         return {
@@ -353,8 +353,8 @@ class HygeiaAssetManager:
             "finishedAt":      scan.get("finishedAt"),
             "totalFindings":   len(findings),
             "byPriority":      by_priority,
-            "confirmedCount":  sum(1 for f in findings if f.get("confirmed")),
-            "vulnerableCount": sum(1 for f in findings if f.get("category") == "outdated_software"),
+            "confirmedCount":  sum(1 for finding in findings if finding.get("confirmed")),
+            "vulnerableCount": sum(1 for finding in findings if finding.get("category") == "outdated_software"),
             "packageCount":    package_count,
             "unresolvedCount": unresolved_count,
         }

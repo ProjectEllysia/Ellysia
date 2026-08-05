@@ -544,7 +544,7 @@ def brand_trusted_domains() -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ..
 @lru_cache(maxsize=None)
 def _phrase_pattern(key: str) -> re.Pattern:
     phrases = sorted(_data(key), key=len, reverse=True)
-    alternation = "|".join(re.escape(p) for p in phrases)
+    alternation = "|".join(re.escape(phras) for phras in phrases)
     return re.compile(rf"\b(?:{alternation})\b", re.IGNORECASE)
 
 

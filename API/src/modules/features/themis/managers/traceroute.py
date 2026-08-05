@@ -95,7 +95,7 @@ class TracerouteManager(TaskTrackingMixin):
         """
         key = self._trace_key(user_id, target)
         timeout = int(CR.traceroute_config().timeout) + 30
-        self._tq.submit(
+        self._task_queue.submit(
             func=TracerouteManager.execute_traceroute,
             args=(user_id, target),
             name=f"traceroute_{key}",  # RQ-safe job name

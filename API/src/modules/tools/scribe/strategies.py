@@ -119,7 +119,7 @@ class OllamaStrategy(ModelStrategy):
         fmt = "json" if ai_input.json_mode else None
 
         try:
-            resp = self._client.chat(
+            response = self._client.chat(
                 model=self.model,
                 messages=messages,
                 tools=ai_input.tools,
@@ -127,12 +127,12 @@ class OllamaStrategy(ModelStrategy):
                 options=options,
             )
 
-            tool_calls = getattr(resp.message, "tool_calls", None)
+            tool_calls = getattr(response.message, "tool_calls", None)
             if tool_calls and tool_executor:
                 logger.info("[scribe/ollama] tool_calls: %d", len(tool_calls))
                 messages.append({
                     "role": "assistant",
-                    "content": resp.message.content or "",
+                    "content": response.message.content or "",
                     "tool_calls": tool_calls,
                 })
                 for tc in tool_calls:
@@ -140,14 +140,14 @@ class OllamaStrategy(ModelStrategy):
                     result = tool_executor(tc.function.name, dict(args))
                     messages.append({"role": "tool", "content": result})
 
-                resp = self._client.chat(
+                response = self._client.chat(
                     model=self.model,
                     messages=messages,
                     format=fmt,
                     options=options,
                 )
 
-            return (resp.message.content or "").strip()
+            return (response.message.content or "").strip()
 
         except Exception as exc:
             logger.error("[scribe/ollama] error en %s: %s", self.host, exc, exc_info=True)
@@ -201,8 +201,8 @@ class OpenAIStrategy(ModelStrategy):
         messages = ai_input.to_messages()
 
         try:
-            resp = self._create(messages, ai_input, with_tools=True)
-            message = resp.choices[0].message
+            response = self._create(messages, ai_input, with_tools=True)
+            message = response.choices[0].message
 
             tool_calls = getattr(message, "tool_calls", None)
             if tool_calls and tool_executor:
@@ -212,14 +212,14 @@ class OpenAIStrategy(ModelStrategy):
                     "content": message.content or "",
                     "tool_calls": [
                         {
-                            "id": tc.id,
+                            "id": tool_call.id,
                             "type": "function",
                             "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
+                                "name": tool_call.function.name,
+                                "arguments": tool_call.function.arguments,
                             },
                         }
-                        for tc in tool_calls
+                        for tool_call in tool_calls
                     ],
                 })
                 for tc in tool_calls:
@@ -234,8 +234,8 @@ class OpenAIStrategy(ModelStrategy):
                         "content": result,
                     })
 
-                resp = self._create(messages, ai_input, with_tools=False)
-                message = resp.choices[0].message
+                response = self._create(messages, ai_input, with_tools=False)
+                message = response.choices[0].message
 
             return (message.content or "").strip()
 

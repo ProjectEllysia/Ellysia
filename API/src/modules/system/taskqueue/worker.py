@@ -274,7 +274,7 @@ def start_worker() -> None:
         logging.info("Worker %d started", i + 1)
 
     try:
-        while any(t.is_alive() for t in threads):
+        while any(thread.is_alive() for thread in threads):
             for t in threads:
                 t.join(timeout=0.5)
     except KeyboardInterrupt:

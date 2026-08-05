@@ -242,15 +242,15 @@ class AegisContent:
             },
             "alerts": [
                 {
-                    "title":       a.title,
-                    "description": a.description,
-                    "url":         a.url,
-                    "source":      a.source.value,
-                    "published":   a.published,
-                    "severity":    a.severity.value if isinstance(a.severity, Enum) else a.severity,
-                    "brands":      a.brands,
+                    "title":       alert.title,
+                    "description": alert.description,
+                    "url":         alert.url,
+                    "source":      alert.source.value,
+                    "published":   alert.published,
+                    "severity":    alert.severity.value if isinstance(alert.severity, Enum) else alert.severity,
+                    "brands":      alert.brands,
                 }
-                for a in alerts
+                for alert in alerts
             ],
         }
 
@@ -321,7 +321,7 @@ def validate_url(url: str) -> bool:
         "localhost", "herramienta-ejemplo", "recurso-ejemplo",
         "clickhere.com", "test.com", "sample.org",
     ]
-    if any(p in url.lower() for p in invalid_patterns):
+    if any(invalid_pattern in url.lower() for invalid_pattern in invalid_patterns):
         return False
 
     try:
@@ -431,7 +431,7 @@ class AegisAlertFetcher:
             return []
 
         alerts = []
-        brand_counts = {b: 0 for b in brands}
+        brand_counts = {brand: 0 for brand in brands}
 
         for item in channel.findall("item"):
             title = (item.findtext("title") or "").strip()
@@ -509,7 +509,7 @@ class AegisAlertFetcher:
         """
         from src.modules.features.themis.managers import KbQueryManager
 
-        coordinates = [(p["vendor"], p["product"]) for p in products if p.get("vendor")]
+        coordinates = [(product["vendor"], product["product"]) for product in products if product.get("vendor")]
         if not coordinates:
             return []
 
@@ -892,9 +892,9 @@ class AegisAIWriter:
             if not isinstance(tip_data, dict):
                 continue
             valid_links = [
-                {"text": str(lk["text"])[:50], "url": str(lk["url"])[:512]}
-                for lk in (tip_data.get("links") or [])
-                if isinstance(lk, dict) and validate_url(lk.get("url")) and lk.get("text")
+                {"text": str(link["text"])[:50], "url": str(link["url"])[:512]}
+                for link in (tip_data.get("links") or [])
+                if isinstance(link, dict) and validate_url(link.get("url")) and link.get("text")
             ]
             try:
                 tips.append(AegisTipData(

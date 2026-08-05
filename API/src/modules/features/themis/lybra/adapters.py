@@ -75,7 +75,7 @@ _NUCLEI_TYPE_CATEGORY = {
 }
 
 
-def nikto_incident_to_finding(inc: dict) -> dict:
+def nikto_incident_to_finding(incident: dict) -> dict:
     """Adapt one Nikto incident into a Finding dict.
 
     Args:
@@ -86,11 +86,11 @@ def nikto_incident_to_finding(inc: dict) -> dict:
         A dict of ``Finding`` column values. The caller still attaches
         ``host_id`` and ``dedup_key`` before persisting.
     """
-    method = (inc.get("method") or "").strip()
-    url = (inc.get("url") or "").strip()
-    description = (inc.get("description") or "").strip()
-    severity = (inc.get("severity") or "LOW").upper()
-    osvdb_id = inc.get("osvdb_id") or ""
+    method = (incident.get("method") or "").strip()
+    url = (incident.get("url") or "").strip()
+    description = (incident.get("description") or "").strip()
+    severity = (incident.get("severity") or "LOW").upper()
+    osvdb_id = incident.get("osvdb_id") or ""
 
     title = f"{method} {url}: {description}".strip() if (method or url) else description
     # Prefer the OSVDB id as a stable check id; when Nikto did not provide one,
@@ -138,7 +138,7 @@ def nuclei_result_to_finding(result: dict, feed_version: str = "nuclei-templates
     # hash to two different keys and never merge, which is the entire point of
     # giving Nuclei this adapter in the first place.
     raw_cve_ids = classification.get("cve-id") or []
-    cve_ids = sorted({c.upper() for c in raw_cve_ids if c}) or None
+    cve_ids = sorted({raw_cve_id.upper() for raw_cve_id in raw_cve_ids if raw_cve_id}) or None
 
     cvss_score = classification.get("cvss-score")
     if cvss_score is None:
@@ -152,7 +152,7 @@ def nuclei_result_to_finding(result: dict, feed_version: str = "nuclei-templates
     category = "outdated_software" if cve_ids else _NUCLEI_TYPE_CATEGORY.get(template_type, "vulnerability")
 
     tags = info.get("tags") or []
-    in_kev = "kev" in [str(t).strip().lower() for t in tags]
+    in_kev = "kev" in [str(tag).strip().lower() for tag in tags]
 
     return {
         "title":        title,

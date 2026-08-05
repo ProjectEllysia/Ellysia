@@ -511,7 +511,7 @@ def check_unicode_evasion(context) -> RuleResult:
     if not findings:
         return RuleResult(score=1, verdict="pass", details={})
 
-    types = sorted({f["type"] for f in findings})
+    types = sorted({finding["type"] for finding in findings})
     return RuleResult(
         score=max(score, _unicode_evasion_score_floor()), verdict="fail",
         details={"findings": findings, "types": types},
@@ -550,7 +550,7 @@ def _encoded_word_matches(header_value: str) -> list[re.Match]:
 def _is_suspiciously_chained(matches: list[re.Match]) -> bool:
     if len(matches) < _MIN_BLOCKS_FOR_CHAINING:
         return False
-    avg_len = sum(len(m.group(3)) for m in matches) / len(matches)
+    avg_len = sum(len(match.group(3)) for match in matches) / len(matches)
     return avg_len < _CHAIN_AVG_LEN_THRESHOLD
 
 
@@ -567,7 +567,7 @@ def _inspect_encoded_header(field_name: str, raw_value: str) -> list[dict]:
             "block_count": len(matches),
         })
 
-    charsets_used = {m.group(1).lower() for m in matches}
+    charsets_used = {match.group(1).lower() for match in matches}
     exotic = charsets_used & set(exotic_charsets())
     if exotic:
         findings.append({
@@ -617,8 +617,8 @@ def check_encoded_word_abuse(headers: dict) -> RuleResult:
         return RuleResult(score=1, verdict="pass", details={})
 
     finding_scores = _encoded_word_finding_scores()
-    score = sum(finding_scores[f["type"]] for f in findings)
-    types = sorted({f["type"] for f in findings})
+    score = sum(finding_scores[finding["type"]] for finding in findings)
+    types = sorted({finding["type"] for finding in findings})
 
     return RuleResult(
         score=max(score, _encoded_word_score_floor()), verdict="fail",

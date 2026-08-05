@@ -204,7 +204,7 @@ def check_received_chain_temporal_inconsistency(context) -> RuleResult:
         )
 
     timestamps = [_hop_timestamp(line) for line in received]
-    parsed_count = sum(1 for t in timestamps if t is not None)
+    parsed_count = sum(1 for timestamp in timestamps if timestamp is not None)
     if parsed_count < 2:
         return RuleResult(
             score=0, verdict="neutral",
@@ -309,14 +309,14 @@ def check_received_path_anomaly(context) -> RuleResult:
     # missing_timestamps signal below, which is unrelated) when every hop
     # that *does* expose an IP is private; an unparseable/absent IP on
     # some hops shouldn't itself defeat the exemption.
-    hop_ips = [h.get("fromIp") for h in hops if h.get("fromIp")]
+    hop_ips = [hop.get("fromIp") for hop in hops if hop.get("fromIp")]
     all_internal = bool(hop_ips) and all(_is_private_ip(ip) for ip in hop_ips)
 
     # --- TLS downgrade between consecutive hops ---
     tls_downgrade_pairs: List[dict] = [
-        {"from": t["from"], "to": t["to"]}
-        for t in transitions
-        if "tls_downgrade" in t.get("reasons", [])
+        {"from": transition["from"], "to": transition["to"]}
+        for transition in transitions
+        if "tls_downgrade" in transition.get("reasons", [])
     ] if not all_internal else []
     if tls_downgrade_pairs:
         unique_signals.append("tls_downgrade")
@@ -324,14 +324,14 @@ def check_received_path_anomaly(context) -> RuleResult:
     # --- Long chain (>= 5 hops with mostly unique IPs) ---
     long_chain = False
     if not all_internal and len(hops) >= LONG_CHAIN_THRESHOLD:
-        ips = [h.get("fromIp") for h in hops if h.get("fromIp")]
+        ips = [hop.get("fromIp") for hop in hops if hop.get("fromIp")]
         if len(set(ips)) >= max(3, int(0.6 * len(hops))):
             long_chain = True
             unique_signals.append("long_chain")
 
     # --- Missing timestamps ---
     missing_timestamps: List[int] = [
-        h["hop"] for h in hops if not h.get("timestamp")
+        hop["hop"] for hop in hops if not hop.get("timestamp")
     ]
     if (
         len(hops) >= MISSING_TS_MIN_HOPS
@@ -367,7 +367,7 @@ def check_received_path_anomaly(context) -> RuleResult:
             "long_chain": "cadena Received inusualmente larga",
             "missing_timestamps": "algunos hops no exponen timestamp parseable",
         }
-        msg = "; ".join(reasons[s] for s in unique_signals)
+        msg = "; ".join(reasons[unique_signal] for unique_signal in unique_signals)
         recommendation = (
             "El recorrido Received presenta anomalías: " + msg + "."
         )

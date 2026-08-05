@@ -153,5 +153,5 @@ class MysqlDissector(Dissector):
         payload = self._probe.fetch(target, service.port or 3306)
         if payload is None:
             return None
-        fp = fingerprint_mysql(payload)
-        return DissectorResult(fp.product, fp.version, self.label)
+        fingerprint = fingerprint_mysql(payload)
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)

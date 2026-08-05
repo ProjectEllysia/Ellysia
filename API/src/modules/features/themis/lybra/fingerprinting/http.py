@@ -96,27 +96,27 @@ def load_tech_signatures(path: Optional[str] = None) -> List[TechSignature]:
     data = json.loads(feed_path.read_text(encoding="utf-8"))
     return [
         TechSignature(
-            name=s["name"],
+            name=signature["name"],
             matchers=tuple(
                 TechMatcher(part=m["part"], words=tuple(m["words"]))
-                for m in s["matchers"]
+                for m in signature["matchers"]
             ),
         )
-        for s in data.get("signatures", [])
+        for signature in data.get("signatures", [])
     ]
 
 
 _TECH_SIGNATURES: List[TechSignature] = load_tech_signatures()
 
 
-def _tech_evidence(resp: Response, title: Optional[str], error_resp: Optional[Response]) -> Dict[str, str]:
+def _tech_evidence(response: Response, title: Optional[str], error_resp: Optional[Response]) -> Dict[str, str]:
     """Assemble the named evidence parts a :class:`TechMatcher` can target."""
     evidence = {
-        "body": resp.body,
+        "body": response.body,
         "title": title or "",
         "error_body": error_resp.body if error_resp else "",
     }
-    for name, value in resp.headers.items():
+    for name, value in response.headers.items():
         evidence[f"header:{name}"] = value
     return evidence
 
@@ -175,7 +175,7 @@ def _parse_server_header(server: str) -> Tuple[Optional[str], Optional[str]]:
 
 
 def fingerprint_http(
-    resp: Response,
+    response: Response,
     favicon: Optional[bytes] = None,
     error_resp: Optional[Response] = None,
 ) -> HttpFingerprint:
@@ -197,10 +197,10 @@ def fingerprint_http(
     Returns:
         An :class:`HttpFingerprint`.
     """
-    server = resp.headers.get("server", "")
+    server = response.headers.get("server", "")
     product, version = _parse_server_header(server)
-    title = _extract_title(resp.body)
-    evidence = _tech_evidence(resp, title, error_resp)
+    title = _extract_title(response.body)
+    evidence = _tech_evidence(response, title, error_resp)
     technologies = tuple(sig.name for sig in _TECH_SIGNATURES if _signature_matches(sig, evidence))
     favicon_hash = hashlib.sha256(favicon).hexdigest() if favicon else None
 
@@ -235,8 +235,8 @@ class HttpDissector(Dissector):
 
     def probe(self, target, service, rate_limiter):
         rate_limiter.acquire(target)
-        resp = self._probe.fetch(target, service.port, "GET", "/")
-        if resp is None:
+        response = self._probe.fetch(target, service.port, "GET", "/")
+        if response is None:
             return None
         rate_limiter.acquire(target)
         favicon = self._probe.fetch_bytes(target, service.port, "/favicon.ico")
@@ -244,5 +244,5 @@ class HttpDissector(Dissector):
         # Some vendors brand their error page more than their homepage (a
         # SonicWall's 404 body says so, its "/" doesn't) — see fingerprint_http.
         error_resp = self._probe.fetch(target, service.port, "GET", "/lybra-nonexistent-check")
-        fp = fingerprint_http(resp, favicon, error_resp)
-        return DissectorResult(fp.product, fp.version, self.label)
+        fingerprint = fingerprint_http(response, favicon, error_resp)
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)

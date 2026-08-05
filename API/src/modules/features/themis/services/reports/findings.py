@@ -114,11 +114,11 @@ class FindingsPrintingStrategy(PrintingStrategy):
         exposure = LybraEngineManager.exposure_for(self.scan)
 
         findings = [{
-            "title": f.title, "category": f.category, "port": f.port, "service": f.service,
-            "cpe": f.cpe, "cve_ids": f.cve_ids or [], "cvss_score": f.cvss_score,
-            "epss_score": f.epss_score, "in_kev": f.in_kev, "qod": f.qod, "confirmed": f.confirmed,
-            "source": f.source, "state": f.state, "cpe_resolved": f.cpe_resolved,
-        } for f in rows]
+            "title": row.title, "category": row.category, "port": row.port, "service": row.service,
+            "cpe": row.cpe, "cve_ids": row.cve_ids or [], "cvss_score": row.cvss_score,
+            "epss_score": row.epss_score, "in_kev": row.in_kev, "qod": row.qod, "confirmed": row.confirmed,
+            "source": row.source, "state": row.state, "cpe_resolved": row.cpe_resolved,
+        } for row in rows]
         for f in findings:
             f["priority"] = score_finding(f, exposure)
         self._enrich_with_cve_context(findings)
@@ -170,7 +170,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
         from ..repositories import KbRepository
         from ..lybra import parse_cpe23
 
-        cve_ids = sorted({cve for f in findings for cve in (f.get("cve_ids") or [])})
+        cve_ids = sorted({cve for finding in findings for cve in (finding.get("cve_ids") or [])})
         if not cve_ids:
             return
 
@@ -225,7 +225,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
 
         started = getattr(scan, "started_at", None)
         started_str = started.strftime("%d/%m/%Y %H:%M:%S") if started else "N/A"
-        confirmed_count = sum(1 for f in findings if f["confirmed"])
+        confirmed_count = sum(1 for finding in findings if finding["confirmed"])
 
         scan_info = [
             ["ID del escaneo:", str(getattr(scan, "id", ""))],
@@ -291,10 +291,10 @@ class FindingsPrintingStrategy(PrintingStrategy):
         los que sí se resolvieron, pero eso ya no es ambiguo, es "comprobado y
         sin hallazgos".
         """
-        packages = sum(1 for f in findings if f["category"] == "installed_package")
+        packages = sum(1 for finding in findings if finding["category"] == "installed_package")
         unresolved = sum(
-            1 for f in findings
-            if f["category"] == "installed_package" and f.get("cpe_resolved") is False
+            1 for finding in findings
+            if finding["category"] == "installed_package" and finding.get("cpe_resolved") is False
         )
         if not packages or not unresolved:
             return

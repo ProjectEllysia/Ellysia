@@ -4,7 +4,7 @@ taskqueue/queue.py
 Cola de tareas asincrónica respaldada por RQ + Redis.
 
 **Flujo completo (cómo funciona)**:
-    1. Manager: self._tq.submit(func=MyManager.execute_task, category="mi.tarea", ...)
+    1. Manager: self._task_queue.submit(func=MyManager.execute_task, category="mi.tarea", ...)
     2. TaskQueue.submit() → enqueue en RQ (Redis) → retorna Task (PENDING)
     3. Worker (proceso separado): escucha colas vía QueueRegistry.names()
     4. Cuando ve un job → Job.fetch() → ejecuta func(args)
@@ -390,7 +390,7 @@ class TaskQueue:
         que registran snapshots en el historial (últimas N tareas por TTL).
 
         **Ejemplo (manager)**:
-            self._tq.submit(
+            self._task_queue.submit(
                 func=NmapScanManager.execute_nmap_scan,
                 name=f"scan-{scan_id}",
                 category="themis.scan",

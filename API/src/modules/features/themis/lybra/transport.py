@@ -120,7 +120,7 @@ class AsyncConnectScanner:
                 if await self._is_open(host, port):
                     open_ports.append(port)
 
-        await asyncio.gather(*(probe(p) for p in ports))
+        await asyncio.gather(*(probe(port) for port in ports))
         return sorted(open_ports)
 
     async def _is_open(self, host: str, port: int) -> bool:

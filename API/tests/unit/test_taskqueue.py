@@ -84,7 +84,7 @@ class _DummyManager(TaskTrackingMixin):
     TASK_CATEGORY = "demo.category"
 
     def __init__(self, task_queue: ITaskQueue) -> None:
-        self._tq = task_queue
+        self._task_queue = task_queue
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +162,7 @@ def test_manager_uses_injected_queue_on_submit():
     fake = FakeTaskQueue()
     mgr = _DummyManager(fake)
     # Simula lo que hacen los managers: enviar usando la cola inyectada.
-    mgr._tq.submit(func=lambda: None, name="Demo-1",
+    mgr._task_queue.submit(func=lambda: None, name="Demo-1",
                    category=mgr.TASK_CATEGORY,
                    external_id=mgr.external_id_for(1))
     assert len(fake.submitted) == 1

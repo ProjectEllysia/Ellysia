@@ -161,8 +161,8 @@ class SmtpDissector(Dissector):
         banner = self._probe.fetch(target, service.port or 25)
         if banner is None:
             return None
-        fp = fingerprint_smtp(banner)
-        return DissectorResult(fp.product, fp.version, self.label)
+        fingerprint = fingerprint_smtp(banner)
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)
 
 
 @register_dissector
@@ -180,8 +180,8 @@ class ImapDissector(Dissector):
         banner = self._probe.fetch(target, service.port or 143)
         if banner is None:
             return None
-        fp = fingerprint_imap(banner)
-        return DissectorResult(fp.product, fp.version, self.label)
+        fingerprint = fingerprint_imap(banner)
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)
 
 
 @register_dissector
@@ -199,5 +199,5 @@ class Pop3Dissector(Dissector):
         banner = self._probe.fetch(target, service.port or 110)
         if banner is None:
             return None
-        fp = fingerprint_pop3(banner)
-        return DissectorResult(fp.product, fp.version, self.label)
+        fingerprint = fingerprint_pop3(banner)
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)

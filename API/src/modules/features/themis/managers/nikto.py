@@ -65,7 +65,7 @@ class NiktoScanManager(ScanManager):
             )
             scan_id = scan.id
 
-            self._tq.submit(
+            self._task_queue.submit(
                 func=NiktoScanManager.execute_nikto_scan,
                 args=(scan_id, target_domain, timeout),
                 name=f"NiktoScan-{scan_id}",
@@ -117,8 +117,8 @@ class NiktoScanManager(ScanManager):
         # the NiktoIncident write above — the PDF report and history charts
         # still read that (see lybra/adapters.py for why).
         findings = []
-        for inc_data in incidents_data:
-            finding = nikto_incident_to_finding(inc_data)
+        for incident_data in incidents_data:
+            finding = nikto_incident_to_finding(incident_data)
             finding["host_id"] = host.id
             finding["dedup_key"] = compute_dedup_key(finding)
             findings.append(finding)

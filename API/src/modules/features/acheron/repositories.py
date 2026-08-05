@@ -85,8 +85,8 @@ class VaultRepository(BaseRepository[Vault]):
         Args:
             vault: Vault instance to delete.
         """
-        for st in list(vault.storables):
-            self._session.delete(st)
+        for storable in list(vault.storables):
+            self._session.delete(storable)
         self._session.flush()
         self._session.delete(vault)
 

@@ -314,7 +314,7 @@ def normalize_cpe_to_23(cpe: str) -> str:
         return cpe
     if cpe.startswith("cpe:/"):
         fields = (cpe[len("cpe:/"):].split(":") + ["*"] * 7)[:7]
-        part, vendor, product, version, update, edition, lang = [f or "*" for f in fields]
+        part, vendor, product, version, update, edition, lang = [field or "*" for field in fields]
         return f"cpe:2.3:{part}:{vendor}:{product}:{version}:{update}:{edition}:{lang}:*:*:*:*"
     return cpe
 
@@ -447,14 +447,14 @@ def ingest_nvd_cve(item: dict) -> Optional[Tuple[dict, List[dict]]]:
 
     descriptions = cve.get("descriptions", [])
     description = next(
-        (d.get("value") for d in descriptions if d.get("lang") == "en"),
+        (description.get("value") for description in descriptions if description.get("lang") == "en"),
         descriptions[0].get("value") if descriptions else None,
     )
     score, vector, severity = _pick_cvss(cve.get("metrics", {}))
     cwe_ids = sorted({
         d.get("value")
-        for w in cve.get("weaknesses", [])
-        for d in w.get("description", [])
+        for weakness in cve.get("weaknesses", [])
+        for d in weakness.get("description", [])
         if d.get("value", "").startswith("CWE-")
     })
 

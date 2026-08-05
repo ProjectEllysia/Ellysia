@@ -63,8 +63,8 @@ def current_actor() -> str:
     username = getattr(request, "current_username", None)
     if not username:
         return "anonymous"
-    uid = getattr(request, "current_user_id", None)
-    return f"{username}(id={uid})"
+    user_id = getattr(request, "current_user_id", None)
+    return f"{username}(id={user_id})"
 
 
 def normalize_target(

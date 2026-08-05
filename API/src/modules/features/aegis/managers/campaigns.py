@@ -83,24 +83,24 @@ class CampaignManager(TaskTrackingMixin):
     def create_list(self, name: str) -> dict:
         with UnitOfWork() as uow:
             repo = DistributionListRepository(uow)
-            dist_list = repo.create_list(self.user.id, name)
-            return dist_list.to_dict()
+            distribution_list = repo.create_list(self.user.id, name)
+            return distribution_list.to_dict()
 
     def list_lists(self) -> list[dict]:
         repo = build_repository(DistributionListRepository)
         return [d.to_dict() for d in repo.get_lists_by_user(self.user.id)]
 
     def get_list(self, list_id: int) -> dict:
-        dist_list = self._assert_list_ownership(list_id)
-        return dist_list.to_dict()
+        distribution_list = self._assert_list_ownership(list_id)
+        return distribution_list.to_dict()
 
     def delete_list(self, list_id: int) -> None:
         with UnitOfWork() as uow:
-            dist_list = assert_owned(
+            distribution_list = assert_owned(
                 DistributionListRepository, list_id, self.user.id,
                 DistributionListNotFoundError, uow=uow,
             )
-            DistributionListRepository(uow).delete(dist_list)
+            DistributionListRepository(uow).delete(distribution_list)
 
     def add_recipients(self, list_id: int, recipients: list[dict]) -> list[dict]:
         self._assert_list_ownership(list_id)
@@ -128,9 +128,9 @@ class CampaignManager(TaskTrackingMixin):
     # =========================================================================
 
     def create_campaign(self, document_id: int, list_id: int, name: str) -> dict:
-        doc = assert_owned(AegisDocumentRepository, document_id, self.user.id, DocumentNotFoundError)
-        if doc.status != "done":
-            raise DocumentNotReadyError(document_id, doc.status)
+        document = assert_owned(AegisDocumentRepository, document_id, self.user.id, DocumentNotFoundError)
+        if document.status != "done":
+            raise DocumentNotReadyError(document_id, document.status)
 
         self._assert_list_ownership(list_id)
 
@@ -148,7 +148,7 @@ class CampaignManager(TaskTrackingMixin):
         repo = build_repository(CampaignRepository)
         recipients = repo.get_recipients(campaign_id)
         result = campaign.to_dict()
-        result["recipients"] = [r.to_dict() for r in recipients]
+        result["recipients"] = [recipient.to_dict() for recipient in recipients]
         return result
 
     def launch_campaign(self, campaign_id: int) -> dict:
@@ -162,8 +162,8 @@ class CampaignManager(TaskTrackingMixin):
             raise CampaignAlreadyLaunchedError(campaign_id, campaign.status)
 
         doc_repo = build_repository(AegisDocumentRepository)
-        doc = doc_repo.get_by_id(campaign.document_id)
-        questions_snapshot = [q.to_dict() for q in doc.questions] if doc else []
+        document = doc_repo.get_by_id(campaign.document_id)
+        questions_snapshot = [question.to_dict() for question in document.questions] if document else []
         if not questions_snapshot:
             raise CampaignNoQuestionsError(campaign.document_id)
 
@@ -174,11 +174,11 @@ class CampaignManager(TaskTrackingMixin):
 
         campaign_recipients = [
             CampaignRecipient(
-                recipient_email=r.email,
-                recipient_name=r.name,
+                recipient_email=recipient.email,
+                recipient_name=recipient.name,
                 token=secrets.token_urlsafe(32),
             )
-            for r in recipients
+            for recipient in recipients
         ]
 
         with UnitOfWork() as uow:
@@ -188,7 +188,7 @@ class CampaignManager(TaskTrackingMixin):
             # ver el snapshot + los tokens ya persistidos.
             uow.commit_for_handoff()
 
-        self._tq.submit(
+        self._task_queue.submit(
             func=CampaignManager.execute_campaign_send,
             args=(campaign_id, self.user.id),
             name=f"CampaignSend-{campaign_id}",
@@ -234,14 +234,14 @@ class CampaignManager(TaskTrackingMixin):
     def _run_campaign_send(self, campaign_id: int) -> None:
         """Envía el email de la campaña a cada destinatario pendiente."""
         with job_context() as job:
-            camp_repo = build_repository(CampaignRepository)
-            campaign = camp_repo.get_by_id(campaign_id)
+            campaign_repository = build_repository(CampaignRepository)
+            campaign = campaign_repository.get_by_id(campaign_id)
             if campaign is None:
                 logger.error(f"Campaña {campaign_id} no encontrada para envío")
                 return
 
-            doc = campaign.document
-            recipients = [r for r in camp_repo.get_recipients(campaign_id) if r.sent_at is None]
+            document = campaign.document
+            recipients = [r for r in campaign_repository.get_recipients(campaign_id) if r.sent_at is None]
             total = len(recipients)
             if total == 0:
                 logger.info(f"Campaña {campaign_id}: no hay destinatarios pendientes de envío")
@@ -249,7 +249,7 @@ class CampaignManager(TaskTrackingMixin):
 
             base_url = CR.general_config().public_url
             mailer = self.mailer or build_mailer("aegis")
-            pill_title = doc.subtitle or doc.title if doc else "Formación de concienciación"
+            pill_title = document.subtitle or document.title if document else "Formación de concienciación"
 
             # La píldora se entrega dentro del propio correo (no solo el
             # enlace al test): el destinatario nunca la recibía por ningún
@@ -258,21 +258,21 @@ class CampaignManager(TaskTrackingMixin):
             # pero renderizados aquí con la plantilla de correo (tablas +
             # estilos inline) en vez del HTML de exportación — ese usa
             # <style> en <head> y no es válido embebido dentro de un correo.
-            pill_intro = doc.intro if doc else ""
-            pill_closing = doc.closing if doc else ""
-            pill_company = doc.company if doc else ""
-            pill_contact_email = doc.contact_email if doc else ""
+            pill_intro = document.intro if document else ""
+            pill_closing = document.closing if document else ""
+            pill_company = document.company if document else ""
+            pill_contact_email = document.contact_email if document else ""
             # Mismo tratamiento que los exportadores (services/exporters.py):
             # "seguridad@empresa.com" es el placeholder por defecto de la IA
             # cuando no se indicó un contacto real — no se envía como si fuera
             # un correo válido, se sustituye por una frase.
             pill_contact_is_placeholder = pill_contact_email == "seguridad@empresa.com"
-            pill_tips = [tip.to_dict() for tip in (doc.tips if doc else [])]
+            pill_tips = [tip.to_dict() for tip in (document.tips if document else [])]
             # Los avisos cuelgan del documento ya cargado: ninguna consulta extra.
             pill_alerts = [
                 alert.to_dict()
-                for alert in sorted(doc.alerts, key=lambda a: a.position)
-            ] if doc else []
+                for alert in sorted(document.alerts, key=lambda a: a.position)
+            ] if document else []
 
             sent_count = 0
             was_cancelled = False
@@ -363,10 +363,10 @@ class CampaignManager(TaskTrackingMixin):
             with UnitOfWork() as uow:
                 CampaignRepository(uow).mark_opened(recipient.id)
 
-        doc = campaign.document
+        document = campaign.document
         return {
             "status": "opened",
-            "pillTitle": (doc.subtitle or doc.title) if doc else "",
+            "pillTitle": (document.subtitle or document.title) if document else "",
             "questions": [
                 {"position": q["position"], "prompt": q["prompt"], "options": q["options"]}
                 for q in snapshot

@@ -72,8 +72,8 @@ logger = logging.getLogger(__name__)
 def create_asset(data):
     """Dar de alta un activo a monitorizar y emitir su clave de agente"""
     user = get_current_user()
-    mgr = HygeiaAssetManager(user)
-    result = mgr.create_asset(
+    manager = HygeiaAssetManager(user)
+    result = manager.create_asset(
         hostname=data["hostname"],
         os_name=data["os"],
         labels=data["labels"],
@@ -93,8 +93,8 @@ def create_asset(data):
 def list_assets():
     """Listar los activos monitorizados del usuario con su estado de presencia"""
     user = get_current_user()
-    mgr = HygeiaAssetManager(user)
-    return {"assets": mgr.list_assets()}
+    manager = HygeiaAssetManager(user)
+    return {"assets": manager.list_assets()}
 
 
 @hygeia_blp.get("/assets/<int:asset_id>")
@@ -109,8 +109,8 @@ def list_assets():
 def get_asset(asset_id):
     """Obtener el detalle de un activo monitorizado"""
     user = get_current_user()
-    mgr = HygeiaAssetManager(user)
-    return mgr.get_asset(asset_id)
+    manager = HygeiaAssetManager(user)
+    return manager.get_asset(asset_id)
 
 
 @hygeia_blp.get("/assets/<int:asset_id>/metrics")
@@ -126,8 +126,8 @@ def get_asset(asset_id):
 def get_asset_metrics(args, asset_id):
     """Obtener la serie temporal de métricas escalares de un activo, para el gráfico de la SPA"""
     user = get_current_user()
-    mgr = HygeiaAssetManager(user)
-    return mgr.get_metrics(asset_id, since=args["since"], until=args["until"])
+    manager = HygeiaAssetManager(user)
+    return manager.get_metrics(asset_id, since=args["since"], until=args["until"])
 
 
 @hygeia_blp.get("/assets/<int:asset_id>/metrics/latest")
@@ -142,8 +142,8 @@ def get_asset_metrics(args, asset_id):
 def get_asset_latest_metrics(asset_id):
     """Obtener el último heartbeat completo de un activo (disco, red, procesos y núcleos)"""
     user = get_current_user()
-    mgr = HygeiaAssetManager(user)
-    return mgr.get_latest_metrics(asset_id)
+    manager = HygeiaAssetManager(user)
+    return manager.get_latest_metrics(asset_id)
 
 
 @hygeia_blp.get("/assets/<int:asset_id>/inventory")
@@ -158,8 +158,8 @@ def get_asset_latest_metrics(asset_id):
 def get_asset_inventory(asset_id):
     """Obtener el último inventario de software conocido de un activo"""
     user = get_current_user()
-    mgr = HygeiaAssetManager(user)
-    return mgr.get_inventory(asset_id)
+    manager = HygeiaAssetManager(user)
+    return manager.get_inventory(asset_id)
 
 
 @hygeia_blp.post("/assets/<int:asset_id>/analyze")
@@ -178,8 +178,8 @@ def get_asset_inventory(asset_id):
 def analyze_asset_inventory(asset_id):
     """Analizar el inventario de software de un activo con el motor Lybra"""
     user = get_current_user()
-    mgr = HygeiaAssetManager(user)
-    result = mgr.analyze_inventory(asset_id)
+    manager = HygeiaAssetManager(user)
+    result = manager.analyze_inventory(asset_id)
     logger.info(f"Análisis de inventario del activo {asset_id} lanzado por {user.username}")
     return result
 
@@ -196,8 +196,8 @@ def analyze_asset_inventory(asset_id):
 def get_asset_analysis(asset_id):
     """Obtener el resumen del último análisis de inventario de un activo"""
     user = get_current_user()
-    mgr = HygeiaAssetManager(user)
-    return mgr.get_analysis_summary(asset_id)
+    manager = HygeiaAssetManager(user)
+    return manager.get_analysis_summary(asset_id)
 
 
 @hygeia_blp.delete("/assets/<int:asset_id>")
@@ -212,8 +212,8 @@ def get_asset_analysis(asset_id):
 def delete_asset(asset_id):
     """Dar de baja un activo monitorizado, revocando su clave de agente"""
     user = get_current_user()
-    mgr = HygeiaAssetManager(user)
-    mgr.delete_asset(asset_id)
+    manager = HygeiaAssetManager(user)
+    manager.delete_asset(asset_id)
     logger.info(f"Activo Hygeia {asset_id} eliminado | user={current_actor()}")
     return {"message": "Asset eliminado correctamente"}
 
@@ -230,8 +230,8 @@ def delete_asset(asset_id):
 def rotate_key(asset_id):
     """Regenerar la clave de agente de un activo, invalidando la anterior"""
     user = get_current_user()
-    mgr = HygeiaAssetManager(user)
-    result = mgr.rotate_key(asset_id)
+    manager = HygeiaAssetManager(user)
+    result = manager.rotate_key(asset_id)
     logger.info(f"Clave de agente rotada para activo {asset_id} | user={current_actor()}")
     return result
 
@@ -248,8 +248,8 @@ def rotate_key(asset_id):
 def list_alerts(args):
     """Listar las anomalías de los activos del usuario, con filtros opcionales"""
     user = get_current_user()
-    mgr = HygeiaAlertManager(user)
-    anomalies = mgr.list_alerts(
+    manager = HygeiaAlertManager(user)
+    anomalies = manager.list_alerts(
         state=args["state"], severity=args["severity"], asset_id=args["assetId"],
     )
     return {"anomalies": anomalies}
@@ -267,8 +267,8 @@ def list_alerts(args):
 def ack_alert(anomaly_id):
     """Reconocer una anomalía, sin darla por resuelta"""
     user = get_current_user()
-    mgr = HygeiaAlertManager(user)
-    result = mgr.ack_alert(anomaly_id)
+    manager = HygeiaAlertManager(user)
+    result = manager.ack_alert(anomaly_id)
     logger.info(f"Anomalía {anomaly_id} reconocida | user={current_actor()}")
     return result
 
@@ -285,8 +285,8 @@ def ack_alert(anomaly_id):
 def resolve_alert(anomaly_id):
     """Resolver manualmente una anomalía"""
     user = get_current_user()
-    mgr = HygeiaAlertManager(user)
-    result = mgr.resolve_alert(anomaly_id)
+    manager = HygeiaAlertManager(user)
+    result = manager.resolve_alert(anomaly_id)
     logger.info(f"Anomalía {anomaly_id} resuelta manualmente | user={current_actor()}")
     return result
 
@@ -304,8 +304,8 @@ def resolve_alert(anomaly_id):
 def delete_alert(anomaly_id):
     """Borrar una anomalía ya reconocida o resuelta"""
     user = get_current_user()
-    mgr = HygeiaAlertManager(user)
-    mgr.delete_alert(anomaly_id)
+    manager = HygeiaAlertManager(user)
+    manager.delete_alert(anomaly_id)
     logger.info(f"Anomalía {anomaly_id} eliminada | user={current_actor()}")
     return {"message": "Anomalía eliminada correctamente"}
 
@@ -330,5 +330,5 @@ def ingest(data):
     # Esta superficie se autentica por clave de agente (@require_agent_key
     # inyecta request.current_asset_id), no por OAuth de usuario — no hay
     # request.current_user_id aquí, así que get_current_user() no aplica.
-    mgr = HygeiaIngestManager(request.current_asset_id)
-    return mgr.ingest_heartbeat(data)
+    manager = HygeiaIngestManager(request.current_asset_id)
+    return manager.ingest_heartbeat(data)

@@ -121,21 +121,21 @@ class AegisDocumentRepository(DocumentRepository[AegisDocument]):
         Returns:
             Updated AegisDocument instance, or None if not found.
         """
-        doc = self._session.get(AegisDocument, doc_id)
-        if doc is None:
+        document = self._session.get(AegisDocument, doc_id)
+        if document is None:
             return None
 
-        doc.status = status
+        document.status = status
         if title:
-            doc.title = title[:64]
+            document.title = title[:64]
         if filename:
-            doc.filename = filename[:128]
+            document.filename = filename[:128]
         if status == "done":
-            doc.generated_at = utcnow_naive()
+            document.generated_at = utcnow_naive()
         if error and status == "error":
-            doc.title = f"[ERR{doc_id}] {error[:50]}"[:64]
+            document.title = f"[ERR{doc_id}] {error[:50]}"[:64]
 
-        return doc
+        return document
 
     # =========================================================================
     # CONTENT PERSISTENCE
@@ -164,17 +164,17 @@ class AegisDocumentRepository(DocumentRepository[AegisDocument]):
         Returns:
             Updated AegisDocument instance, or None if not found.
         """
-        doc = self._session.get(AegisDocument, doc_id)
-        if doc is None:
+        document = self._session.get(AegisDocument, doc_id)
+        if document is None:
             return None
 
-        doc.subtitle = subtitle
-        doc.intro = intro
-        doc.closing = closing
-        doc.contact_email = contact_email
-        doc.company = company
+        document.subtitle = subtitle
+        document.intro = intro
+        document.closing = closing
+        document.contact_email = contact_email
+        document.company = company
 
-        return doc
+        return document
 
     def save_tips(self, doc_id: int, tips_data: list[dict]) -> None:
         """
@@ -285,7 +285,7 @@ class AegisDocumentRepository(DocumentRepository[AegisDocument]):
         ts = utcnow_naive().strftime("%Y%m%d_%H%M%S")
         placeholder = f"pending_{ts}_{user_id}_{topic_id}"
 
-        doc = AegisDocument(
+        document = AegisDocument(
             title=placeholder[:64],
             filename=f"{placeholder}.json"[:128],
             status="pending",
@@ -295,10 +295,10 @@ class AegisDocumentRepository(DocumentRepository[AegisDocument]):
             is_ai_generated=1,
         )
 
-        self._session.add(doc)
+        self._session.add(document)
         self._session.flush()
-        self._session.refresh(doc)
-        return doc
+        self._session.refresh(document)
+        return document
 
 
 class AegisOrgProfileRepository(BaseRepository[AegisOrgProfile]):
@@ -331,11 +331,11 @@ class DistributionListRepository(BaseRepository[DistributionList]):
 
     def create_list(self, user_id: int, name: str) -> DistributionList:
         """Create a new, empty distribution list."""
-        dist_list = DistributionList(user_id=user_id, name=name)
-        self._session.add(dist_list)
+        distribution_list = DistributionList(user_id=user_id, name=name)
+        self._session.add(distribution_list)
         self._session.flush()
-        self._session.refresh(dist_list)
-        return dist_list
+        self._session.refresh(distribution_list)
+        return distribution_list
 
     def add_recipients(self, list_id: int, recipients_data: list[dict]) -> List[Recipient]:
         """

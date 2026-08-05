@@ -135,5 +135,5 @@ class VncDissector(Dissector):
         banner = self._probe.fetch(target, service.port or 5900)
         if banner is None:
             return None
-        fp = fingerprint_vnc(banner)
-        return DissectorResult(fp.product, fp.version, self.label)
+        fingerprint = fingerprint_vnc(banner)
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)

@@ -62,7 +62,7 @@ def classify_exposure(target: str) -> str:
         private = addr.is_private or addr.is_loopback or addr.is_link_local
     except ValueError:
         low = target.strip().lower()
-        private = low == "localhost" or any(low.endswith(s) for s in _PRIVATE_SUFFIXES)
+        private = low == "localhost" or any(low.endswith(private_suffix) for private_suffix in _PRIVATE_SUFFIXES)
     return "private" if private else "public"
 
 

@@ -71,7 +71,7 @@ class ThemisReportManager(DocumentManager):
 
         doc_id = self._create_document(scan, ai_report)
 
-        self._tq.submit(
+        self._task_queue.submit(
             func=ThemisReportManager.execute_report_generation,
             args=(doc_id, scan.id, ai_report),
             name=f"PDFGeneration-Scan-{scan.id}",

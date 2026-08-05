@@ -165,8 +165,8 @@ class VaultManager:
                     existing_vault.kdf_parallelism = int(algorithm.get("kdfParallelism", 1))
                     existing_vault.salt = algorithm.get("salt", "")
 
-                    for st in list(existing_vault.storables):
-                        uow.session.delete(st)
+                    for storable in list(existing_vault.storables):
+                        uow.session.delete(storable)
                     uow.session.flush()
 
                     vault_id = existing_vault.id
@@ -275,17 +275,17 @@ class VaultManager:
             spec.json_list_key: [] for spec in STORABLE_SPECS.values()
         }
 
-        for st in vault.storables:
-            spec = SPEC_BY_MODEL.get(type(st))
+        for storable in vault.storables:
+            spec = SPEC_BY_MODEL.get(type(storable))
             if spec is None:
                 continue
             by_list_key[spec.json_list_key].append({
-                "id": st.internal_id,
-                "title": st.title,
-                "createdAt": st.created_at.strftime('%Y-%m-%dT%H:%M:%S.%fZ') if st.created_at else None,
-                "updatedAt": st.updated_at.strftime('%Y-%m-%dT%H:%M:%S.%fZ') if st.updated_at else None,
+                "id": storable.internal_id,
+                "title": storable.title,
+                "createdAt": storable.created_at.strftime('%Y-%m-%dT%H:%M:%S.%fZ') if storable.created_at else None,
+                "updatedAt": storable.updated_at.strftime('%Y-%m-%dT%H:%M:%S.%fZ') if storable.updated_at else None,
                 "allowedUsers": [],
-                **{json_key: getattr(st, attr) for attr, json_key in spec.fields},
+                **{json_key: getattr(storable, attr) for attr, json_key in spec.fields},
             })
 
         return {
@@ -369,7 +369,7 @@ class VaultManager:
         created_at = created_at or utcnow_naive()
         updated_at = updated_at or created_at
 
-        st = spec.model(
+        storable = spec.model(
             vault=vault,
             internal_id=internal_id,
             title=title,
@@ -381,10 +381,10 @@ class VaultManager:
         try:
             with UnitOfWork() as uow:
                 repo = StorableRepository(uow)
-                repo.save(st)
+                repo.save(storable)
                 self._bump_revision(vault)
-            logger.info(f"Storable {st.id} creado en vault {vault_id}")
-            return st
+            logger.info(f"Storable {storable.id} creado en vault {vault_id}")
+            return storable
         except IntegrityError as ie:
             logger.error(f"Error de integridad añadiendo storable: {ie}", exc_info=True)
             raise
@@ -409,36 +409,36 @@ class VaultManager:
         """
         with UnitOfWork() as uow:
             repo = StorableRepository(uow)
-            st = repo.get_by_id(storable_id)
-            if st is None:
+            storable = repo.get_by_id(storable_id)
+            if storable is None:
                 raise ValueError(f"Storable {storable_id} no encontrado")
 
             try:
                 changed = False
                 if title is not None:
-                    st.title = title
+                    storable.title = title
                     changed = True
                 if internal_id is not None:
-                    st.internal_id = internal_id
+                    storable.internal_id = internal_id
                     changed = True
 
-                spec = SPEC_BY_MODEL.get(type(st))
+                spec = SPEC_BY_MODEL.get(type(storable))
                 if spec is not None:
                     for attr, _ in spec.fields:
                         value = fields.get(attr)
                         if value is not None:
-                            setattr(st, attr, value)
+                            setattr(storable, attr, value)
                             changed = True
 
                 if changed:
-                    st.updated_at = utcnow_naive()
-                    self._bump_revision(st.vault)
-                    repo.update(st)
-                    logger.info(f"Storable {st.id} actualizado correctamente")
+                    storable.updated_at = utcnow_naive()
+                    self._bump_revision(storable.vault)
+                    repo.update(storable)
+                    logger.info(f"Storable {storable.id} actualizado correctamente")
                 else:
-                    logger.info(f"Storable {st.id}: sin cambios")
+                    logger.info(f"Storable {storable.id}: sin cambios")
 
-                return st
+                return storable
 
             except IntegrityError as ie:
                 logger.error(f"Error de integridad actualizando storable {storable_id}: {ie}", exc_info=True)
@@ -504,11 +504,11 @@ class VaultManager:
                     })
                     continue
 
-                st = self.get_storable_by(
+                storable = self.get_storable_by(
                     vault_id=vault.id,
                     internal_id=internal_id,
                 )
-                if not st:
+                if not storable:
                     results.append({
                         "internalId": internal_id,
                         "isRecovery": is_recovery,
@@ -531,7 +531,7 @@ class VaultManager:
                     })
                     continue
 
-                self.update_storable(st.id, **update_kwargs)
+                self.update_storable(storable.id, **update_kwargs)
                 results.append({
                     "internalId": internal_id,
                     "isRecovery": is_recovery,
@@ -558,17 +558,17 @@ class VaultManager:
         storable_id: int,
         expected_revision: Optional[int] = None,
     ) -> bool:
-        st = self.get_storable(storable_id)
-        if st is None:
+        storable = self.get_storable(storable_id)
+        if storable is None:
             return False
 
-        vault = st.vault
+        vault = storable.vault
         self._require_revision(vault, expected_revision)
 
         try:
             with UnitOfWork() as uow:
                 repo = StorableRepository(uow)
-                repo.delete(st)
+                repo.delete(storable)
                 self._bump_revision(vault)
             logger.info(f"Storable {storable_id} eliminado")
             return True

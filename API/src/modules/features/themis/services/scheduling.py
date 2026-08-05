@@ -39,8 +39,8 @@ class ThemisScheduler:
     # =========================================================================
 
     @classmethod
-    def _build_job_id(cls, ps_id: int) -> str:
-        return f"programed_scan_{ps_id}"
+    def _build_job_id(cls, programed_scan_id: int) -> str:
+        return f"programed_scan_{programed_scan_id}"
 
     @classmethod
     def _build_trigger(cls, schedule_type: str, schedule_config: dict):
@@ -86,34 +86,34 @@ class ThemisScheduler:
     # =========================================================================
 
     @classmethod
-    def schedule(cls, ps_id: int, scan_type: str, user_id: int,
+    def schedule(cls, programed_scan_id: int, scan_type: str, user_id: int,
                  schedule_type: str, schedule_config: dict) -> None:
         if cls._scheduler is None:
-            logger.warning("Scheduler not started, skipping schedule of %d", ps_id)
+            logger.warning("Scheduler not started, skipping schedule of %d", programed_scan_id)
             return
 
         cls._scheduler.add_job(
             func=cls.execute,
             trigger=cls._build_trigger(schedule_type, schedule_config),
-            args=[ps_id],
-            id=cls._build_job_id(ps_id),
+            args=[programed_scan_id],
+            id=cls._build_job_id(programed_scan_id),
             replace_existing=True,
             max_instances=1,
             name=f"{scan_type} scan (user {user_id})",
         )
-        logger.info("Scheduled scan %d: %s (%s)", ps_id, scan_type, schedule_type)
+        logger.info("Scheduled scan %d: %s (%s)", programed_scan_id, scan_type, schedule_type)
 
     @classmethod
-    def unschedule(cls, ps_id: int) -> None:
+    def unschedule(cls, programed_scan_id: int) -> None:
         if cls._scheduler is None:
             return
-        job = cls._scheduler.get_job(cls._build_job_id(ps_id))
+        job = cls._scheduler.get_job(cls._build_job_id(programed_scan_id))
         if job is not None:
             job.remove()
-            logger.info("Unscheduled scan %d", ps_id)
+            logger.info("Unscheduled scan %d", programed_scan_id)
 
     @classmethod
-    def _job_next_run(cls, ps_id: int) -> Optional[datetime]:
+    def _job_next_run(cls, programed_scan_id: int) -> Optional[datetime]:
         """APScheduler's authoritative next fire time for a job, as naive UTC.
 
         Returned right after ``add_job`` (no race), unlike reading it from inside
@@ -121,7 +121,7 @@ class ThemisScheduler:
         """
         if cls._scheduler is None:
             return None
-        job = cls._scheduler.get_job(cls._build_job_id(ps_id))
+        job = cls._scheduler.get_job(cls._build_job_id(programed_scan_id))
         if job is None or job.next_run_time is None:
             return None
         return job.next_run_time.astimezone(timezone.utc).replace(tzinfo=None)
@@ -159,13 +159,13 @@ class ThemisScheduler:
         with UnitOfWork() as uow:
             repo = ProgramedScanRepository(uow)
             active_scans = repo.get_all_active()
-            for ps in active_scans:
+            for programed_scan in active_scans:
                 cls.schedule(
-                    ps_id=ps.id,
-                    scan_type=ps.scan_type,
-                    user_id=ps.user_id,
-                    schedule_type=ps.schedule_type,
-                    schedule_config=ps.schedule_config,
+                    programed_scan_id=programed_scan.id,
+                    scan_type=programed_scan.scan_type,
+                    user_id=programed_scan.user_id,
+                    schedule_type=programed_scan.schedule_type,
+                    schedule_config=programed_scan.schedule_config,
                 )
                 # Tras (re)programar, APScheduler ya conoce el próximo disparo real.
                 # Persistirlo deja la UI coherente tras un reinicio en lugar de
@@ -173,9 +173,9 @@ class ThemisScheduler:
                 # durante la caída NO se recuperan: el horario se reanuda desde
                 # ahora (decisión de diseño, sin catch-up). El commit del UoW al
                 # salir persiste el cambio.
-                next_run = cls._job_next_run(ps.id)
+                next_run = cls._job_next_run(programed_scan.id)
                 if next_run is not None:
-                    ps.next_run_at = next_run
+                    programed_scan.next_run_at = next_run
             logger.info("Synced %d active scans from database", len(active_scans))
 
     # =========================================================================
@@ -184,7 +184,7 @@ class ThemisScheduler:
 
     @classmethod
     @retry_on_transient()
-    def _load_and_guard(cls, ps_id: int) -> Optional[dict[str, Any]]:
+    def _load_and_guard(cls, programed_scan_id: int) -> Optional[dict[str, Any]]:
         """Phase 1 — load, validate and guard against overlapping runs.
 
         Returns the launch parameters, or ``None`` when the scan should be
@@ -192,50 +192,50 @@ class ThemisScheduler:
         transient DB errors since a pure read is idempotent.
         """
         with UnitOfWork() as uow:
-            ps = ProgramedScanRepository(uow).get_by_id(ps_id)
-            if ps is None:
-                logger.warning("Programed scan %d no longer exists, skipping", ps_id)
+            programed_scan = ProgramedScanRepository(uow).get_by_id(programed_scan_id)
+            if programed_scan is None:
+                logger.warning("Programed scan %d no longer exists, skipping", programed_scan_id)
                 return None
-            if not ps.is_active:
-                logger.info("Programed scan %d is inactive, skipping", ps_id)
+            if not programed_scan.is_active:
+                logger.info("Programed scan %d is inactive, skipping", programed_scan_id)
                 return None
 
             # Import perezoso: managers/__init__.py importa programed.py, que
             # importa services/__init__.py, que importa este módulo — un
             # import a nivel de módulo de ScanManager aquí cerraría el ciclo.
             from ..managers import ScanManager
-            if ScanType(ps.scan_type) not in ScanManager._registry:  # pylint: disable=protected-access
-                raise ValueError(f"Unknown scan type: {ps.scan_type}")
+            if ScanType(programed_scan.scan_type) not in ScanManager._registry:  # pylint: disable=protected-access
+                raise ValueError(f"Unknown scan type: {programed_scan.scan_type}")
 
-            if ScanRepository(uow).has_active_run_for_programed(ps.id):
+            if ScanRepository(uow).has_active_run_for_programed(programed_scan.id):
                 logger.info(
                     "Programed scan %d already has a pending/running scan, skipping",
-                    ps.id,
+                    programed_scan.id,
                 )
                 return None
 
             return {
-                "scan_type": ps.scan_type,
-                "user_id": ps.user_id,
-                "arguments": dict(ps.arguments or {}),
-                "schedule_type": ps.schedule_type,
-                "schedule_config": dict(ps.schedule_config or {}),
+                "scan_type": programed_scan.scan_type,
+                "user_id": programed_scan.user_id,
+                "arguments": dict(programed_scan.arguments or {}),
+                "schedule_type": programed_scan.schedule_type,
+                "schedule_config": dict(programed_scan.schedule_config or {}),
             }
 
     @classmethod
     @retry_on_transient()
-    def _record_run(cls, ps_id: int, now: datetime, next_run: datetime) -> None:
+    def _record_run(cls, programed_scan_id: int, now: datetime, next_run: datetime) -> None:
         """Phase 3 — record the execution in a *fresh* session so the new
         next_run_at actually reaches the database (and thus the UI). Idempotent
         write (last value wins), so safe to retry on transient errors."""
         with UnitOfWork() as uow:
             repo = ProgramedScanRepository(uow)
-            ps = repo.get_by_id(ps_id)
-            if ps is not None:
-                repo.update_run_timestamps(ps, last_run=now, next_run=next_run)
+            programed_scan = repo.get_by_id(programed_scan_id)
+            if programed_scan is not None:
+                repo.update_run_timestamps(programed_scan, last_run=now, next_run=next_run)
 
     @classmethod
-    def _run_scheduled_scan(cls, ps_id: int, user_id: int, arguments: dict[str, Any], scan_type: ScanType) -> int:
+    def _run_scheduled_scan(cls, programed_scan_id: int, user_id: int, arguments: dict[str, Any], scan_type: ScanType) -> int:
         """Launch a scheduled scan of ``scan_type`` (B1).
 
         Despacha por el mismo ``ScanManager._registry`` que ``resolve_manager``
@@ -252,19 +252,19 @@ class ThemisScheduler:
         manager_class = ScanManager._registry[scan_type]  # pylint: disable=protected-access
         _require_args(arguments, manager_class.SCHEDULED_REQUIRED_ARGS, scan_type.value)
 
-        logger.info("Launching %s scheduled scan #%d", scan_type.value, ps_id)
+        logger.info("Launching %s scheduled scan #%d", scan_type.value, programed_scan_id)
 
         scan_id = manager_class().run_scan(
-            user_id=user_id, programed_scan_id=ps_id,
+            user_id=user_id, programed_scan_id=programed_scan_id,
             **manager_class.scheduled_run_kwargs(arguments),
         )
 
-        logger.info("%s scheduled scan #%d launched (scan_id=%d)", scan_type.value, ps_id, scan_id)
+        logger.info("%s scheduled scan #%d launched (scan_id=%d)", scan_type.value, programed_scan_id, scan_id)
         return scan_id
 
     @staticmethod
     @scheduler_job(logger, "Scheduled scan %d failed")
-    def execute(ps_id: int) -> None:
+    def execute(programed_scan_id: int) -> None:
         """Fire a programed scan: launch it and advance its run timestamps.
 
         Split into three phases on purpose. The scan managers open their own
@@ -282,15 +282,15 @@ class ThemisScheduler:
         formateo ``%d`` del mensaje de error; con ``@classmethod`` el primer
         arg sería ``cls``, no ``ps_id``.
         """
-        logger.info("Triggered programed scan %d", ps_id)
+        logger.info("Triggered programed scan %d", programed_scan_id)
         # Phase 1 — load, validate and guard against overlapping runs.
-        params = ThemisScheduler._load_and_guard(ps_id)
+        params = ThemisScheduler._load_and_guard(programed_scan_id)
         if params is None:
             return
 
         # Phase 2 — launch the scan (manager owns its own session).
         ThemisScheduler._run_scheduled_scan(
-            ps_id, params["user_id"], params["arguments"], ScanType(params["scan_type"]),
+            programed_scan_id, params["user_id"], params["arguments"], ScanType(params["scan_type"]),
         )
 
         # Phase 3 — record the execution in a *fresh* session.
@@ -298,11 +298,11 @@ class ThemisScheduler:
         next_run = ThemisScheduler.calculate_next_run(
             params["schedule_type"], params["schedule_config"], last_run=now
         )
-        ThemisScheduler._record_run(ps_id, now, next_run)
+        ThemisScheduler._record_run(programed_scan_id, now, next_run)
 
         logger.info(
             "Programed scan %d executed; next run at %s",
-            ps_id, next_run.isoformat() if next_run else "N/A",
+            programed_scan_id, next_run.isoformat() if next_run else "N/A",
         )
 
     @classmethod

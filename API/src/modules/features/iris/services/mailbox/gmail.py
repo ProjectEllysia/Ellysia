@@ -160,7 +160,7 @@ class GmailConnector(MailboxConnector):
         )
         response.raise_for_status()
         payload_headers = response.json().get("payload", {}).get("headers", [])
-        return "".join(f"{h['name']}: {h['value']}\r\n" for h in payload_headers)
+        return "".join(f"{payload_header['name']}: {payload_header['value']}\r\n" for payload_header in payload_headers)
 
     def fetch_raw(self, access_token: str, message_ref: MessageRef) -> str:
         headers = {"Authorization": f"Bearer {access_token}"}

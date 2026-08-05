@@ -161,7 +161,7 @@ class IrisManager(TaskTrackingMixin):
         if self.TASK_CATEGORY is None:
             raise IrisExecutionError("Task category is not defined for IrisManager.")
 
-        self._tq.submit(
+        self._task_queue.submit(
             func=IrisManager.execute_iris_analysis,
             args=(analysis_id, raw_input),
             name=f"IrisAnalysis-{analysis_id}",
@@ -234,14 +234,14 @@ class IrisManager(TaskTrackingMixin):
 
         rules_data = [
             {
-                "ruleName": r.rule_name,
-                "category": r.category,
-                "score": r.score,
-                "verdict": r.verdict,
-                "details": r.details,
-                "recommendation": r.recommendation,
+                "ruleName": rule.rule_name,
+                "category": rule.category,
+                "score": rule.score,
+                "verdict": rule.verdict,
+                "details": rule.details,
+                "recommendation": rule.recommendation,
             }
-            for r in rules
+            for rule in rules
         ]
 
         recommendations = [
@@ -421,7 +421,7 @@ class IrisManager(TaskTrackingMixin):
         if analysis.status != "finished":
             raise IrisAnalysisNotReadyError(analysis_id, analysis.status)
 
-        self._tq.submit(
+        self._task_queue.submit(
             func=IrisManager.execute_ai_summary_generation,
             args=(analysis_id,),
             name=f"AISummary-Analysis-{analysis_id}",
@@ -475,12 +475,12 @@ class IrisManager(TaskTrackingMixin):
                 f"Analysis {analysis_id} cannot be cancelled in state: {analysis.status}"
             )
 
-        sq_task = self.find_task(analysis_id)
-        if not sq_task:
+        queued_task = self.find_task(analysis_id)
+        if not queued_task:
             logger.warning(f"No active task found for analysis {analysis_id}")
             return False
 
-        was_cancelled = self._tq.cancel(sq_task.id)
+        was_cancelled = self._task_queue.cancel(queued_task.id)
         if was_cancelled:
             self._update_analysis(analysis_id, status="cancelled", finished_at=utcnow_naive())
             logger.info(f"Analysis {analysis_id} cancelled by user {user_id}")
@@ -505,9 +505,9 @@ class IrisManager(TaskTrackingMixin):
             raise IrisAnalysisNotFoundError(analysis_id)
 
         if analysis.status in _CANCELLABLE_STATES:
-            sq_task = self.find_task(analysis_id)
-            if sq_task:
-                self._tq.cancel(sq_task.id)
+            queued_task = self.find_task(analysis_id)
+            if queued_task:
+                self._task_queue.cancel(queued_task.id)
 
         with UnitOfWork() as uow:
             repo = IrisAnalysisRepository(uow)
@@ -930,7 +930,7 @@ class IrisManager(TaskTrackingMixin):
         subdomain = res("Subdomain Impersonation")
         subdomain_brand_in_subdomain = (
             subdomain is not None and subdomain.verdict == "fail"
-            and any(f.get("type") == "brand_in_subdomain" for f in (subdomain.details.get("findings") or []))
+            and any(finding.get("type") == "brand_in_subdomain" for finding in (subdomain.details.get("findings") or []))
         )
 
         # G-B (red team, máxima prioridad): lookalike del dominio del

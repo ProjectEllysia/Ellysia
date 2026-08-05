@@ -57,7 +57,7 @@ def _environment() -> Environment:
         search_paths.insert(0, Path(override_dir))
 
     env = Environment(
-        loader=ChoiceLoader([FileSystemLoader(str(p)) for p in search_paths]),
+        loader=ChoiceLoader([FileSystemLoader(str(search_path)) for search_path in search_paths]),
         autoescape=_autoescape,
         trim_blocks=True,
         lstrip_blocks=True,

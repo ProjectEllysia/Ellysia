@@ -74,8 +74,8 @@ class NiktoPrintingStrategy(PrintingStrategy):
             "UNKNOWN": 5,
         }
 
-        def sort_key(inc):
-            sev_raw = getattr(inc, "severity", None) or "UNKNOWN"
+        def sort_key(incident):
+            sev_raw = getattr(incident, "severity", None) or "UNKNOWN"
             sev = str(sev_raw).upper()
             return severity_priority.get(sev, 5)
 
@@ -155,8 +155,8 @@ class NiktoPrintingStrategy(PrintingStrategy):
         elements.append(Spacer(1, 0.1 * inch))
 
         severity_counts: Dict[str, int] = {}
-        for inc in incidents:
-            sev_raw = getattr(inc, "severity", None) or "UNKNOWN"
+        for incident in incidents:
+            sev_raw = getattr(incident, "severity", None) or "UNKNOWN"
             severity = str(sev_raw).upper()
             severity_counts[severity] = severity_counts.get(severity, 0) + 1
 

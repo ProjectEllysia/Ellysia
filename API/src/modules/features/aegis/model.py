@@ -245,11 +245,11 @@ class AegisDocument(Document):
         return {
             "subtitle":     self.subtitle or "",
             "intro":        self.intro or "",
-            "tips":         [t.to_dict() for t in self.tips],
+            "tips":         [tip.to_dict() for tip in self.tips],
             "closing":      self.closing or "",
             "contactEmail": self.contact_email or "",
             "company":      self.company or "",
-            "questions":    [q.to_dict() for q in self.questions],
+            "questions":    [question.to_dict() for question in self.questions],
         }
 
     def __repr__(self) -> str:

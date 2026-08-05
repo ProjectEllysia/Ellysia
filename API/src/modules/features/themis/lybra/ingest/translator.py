@@ -95,7 +95,7 @@ def _translate_request(request: dict, is_http: bool) -> List[Request]:
     (:func:`translate_template`) la descarta en caso contrario en vez de
     producir un check más estricto que el original y que casi nunca dispararía.
     """
-    matchers = tuple(_translate_matcher(m) for m in request.get("matchers") or [])
+    matchers = tuple(_translate_matcher(matcher) for matcher in request.get("matchers") or [])
     condition = str(request.get("matchers-condition") or "and").lower()
 
     if not is_http:
@@ -170,7 +170,7 @@ def translate_template(document: dict, feed_version: str) -> Optional[Check]:
             return None
         requests.extend(translated)
 
-    if not requests or any(not r.matchers for r in requests):
+    if not requests or any(not request.matchers for request in requests):
         return None
 
     return Check(

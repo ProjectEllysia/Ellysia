@@ -321,5 +321,5 @@ class SshDissector(Dissector):
         if probed is None:
             return None
         banner, kexinit_payload = probed
-        fp = fingerprint_ssh(banner, kexinit_payload)
-        return DissectorResult(fp.product, fp.version, self.label)
+        fingerprint = fingerprint_ssh(banner, kexinit_payload)
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)

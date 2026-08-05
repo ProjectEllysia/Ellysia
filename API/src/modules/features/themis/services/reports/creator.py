@@ -53,7 +53,7 @@ class PDFCreator:
         self.scan = self.printing_strategy.scan
         self.document_id = document_id
 
-    def _set_pdf_metadata(self, doc) -> None:
+    def _set_pdf_metadata(self, document) -> None:
         """Set PDF document metadata.
 
         Args:
@@ -62,12 +62,12 @@ class PDFCreator:
         scan = self.scan
         started = getattr(scan, "started_at", None)
         date_str = started.strftime("%d/%m/%Y") if started else datetime.now().strftime("%d/%m/%Y")
-        doc.title = f"Informe de Seguridad - {scan.id}"
-        doc.author = "Ellysia Security Team"
-        doc.subject = f"Análisis de seguridad realizado el {date_str}"
-        doc.creator = "Ellysia PDF Generator v2.0"
+        document.title = f"Informe de Seguridad - {scan.id}"
+        document.author = "Ellysia Security Team"
+        document.subject = f"Análisis de seguridad realizado el {date_str}"
+        document.creator = "Ellysia PDF Generator v2.0"
 
-    def _on_page(self, canv, doc):
+    def _on_page(self, canv, document):
         """Callback for rendering page elements (header, footer, sidebar, small logo).
 
         Args:
@@ -371,7 +371,7 @@ class PDFCreator:
             f"{stem}{self.printing_strategy.get_filename_suffix()}",
         )
 
-        doc = SimpleDocTemplate(
+        document = SimpleDocTemplate(
             filename,
             pagesize=A4,
             rightMargin=36,
@@ -396,8 +396,8 @@ class PDFCreator:
         self.append_consent(elements, theme)
         self.append_footer(elements, theme)
 
-        self._set_pdf_metadata(doc)
-        doc.build(elements, onFirstPage=self._on_page, onLaterPages=self._on_page)
+        self._set_pdf_metadata(document)
+        document.build(elements, onFirstPage=self._on_page, onLaterPages=self._on_page)
 
         return filename
 

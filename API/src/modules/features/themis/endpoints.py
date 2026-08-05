@@ -114,28 +114,28 @@ logger = logging.getLogger(__name__)
 # con un ignore — ver `cancel_scan` y `ScanManager.get_manager_for_type`.
 
 
-def _download_url_for(doc) -> str | None:
+def _download_url_for(document) -> str | None:
     """URL de descarga del documento, o None si no está listo."""
-    if doc.status == "done" and doc.filename:
-        return f"/themis/document/{doc.id}/download"
+    if document.status == "done" and document.filename:
+        return f"/themis/document/{document.id}/download"
     return None
 
 
-def _serialize_document(doc) -> dict:
+def _serialize_document(document) -> dict:
     """Serializa un ThemisDocument al formato de los endpoints de listado.
 
     Unifica la lógica de downloadUrl y los campos comunes que antes estaban
     duplicados en get_all_documents y get_documents_by_scan.
     """
     return {
-        "documentId": doc.id,
-        "scanId": doc.scan_id,
-        "scanType": doc.scan_type,
-        "status": doc.status,
-        "isAiGenerated": doc.is_ai_generated == 1 if doc.is_ai_generated is not None else False,
-        "createdAt": doc.created_at if doc.created_at else None,
-        "generatedAt": doc.generated_at if doc.generated_at else None,
-        "downloadUrl": _download_url_for(doc),
+        "documentId": document.id,
+        "scanId": document.scan_id,
+        "scanType": document.scan_type,
+        "status": document.status,
+        "isAiGenerated": document.is_ai_generated == 1 if document.is_ai_generated is not None else False,
+        "createdAt": document.created_at if document.created_at else None,
+        "generatedAt": document.generated_at if document.generated_at else None,
+        "downloadUrl": _download_url_for(document),
     }
 
 def validate_web_target(raw: str) -> str:
@@ -524,16 +524,16 @@ def retrieve_all_scans(args):
     per_page = args["per_page"]
 
     user = get_current_user()
-    uid = user.id
+    user_id = user.id
 
     if scan_type != "all":
-        mgr = ScanManager.get_manager_for_type(scan_type)
+        manager = ScanManager.get_manager_for_type(scan_type)
         # `assetId` solo lo entiende Lybra (Fase I): es el que separa los
         # escaneos de un agente Hygeia de los lanzados desde el panel.
         if scan_type == "lybra" and args.get("assetId") is not None:
-            results, total_count = mgr.get_scans_paginated(uid, page, per_page, asset_id=args["assetId"])
+            results, total_count = manager.get_scans_paginated(user_id, page, per_page, asset_id=args["assetId"])
         else:
-            results, total_count = mgr.get_scans_paginated(uid, page, per_page)
+            results, total_count = manager.get_scans_paginated(user_id, page, per_page)
         total_pages = (total_count + per_page - 1) // per_page
 
         return {
@@ -549,10 +549,10 @@ def retrieve_all_scans(args):
         }
 
     all_results = []
-    for mgr in ScanManager.all_managers():
+    for manager in ScanManager.all_managers():
         try:
-            for scan in mgr.get_scans_for_user(uid):
-                all_results.append(mgr.format_scan(scan.id, _scan=scan))
+            for scan in manager.get_scans_for_user(user_id):
+                all_results.append(manager.format_scan(scan.id, _scan=scan))
         except (OSError, RuntimeError) as exc:
             logger.error(f"Error obteniendo scans: {exc}", exc_info=True)
 
@@ -792,9 +792,9 @@ def generate_pdf(args):
     ai_report = args["aiReport"]
 
     user = get_current_user()
-    uid = user.id
+    user_id = user.id
 
-    manager, _scan = ScanManager.resolve_owned_scan(scan_id, uid)
+    manager, _scan = ScanManager.resolve_owned_scan(scan_id, user_id)
 
     if not manager.is_scan_finished(scan_id):
         raise ValidationError(
@@ -843,16 +843,16 @@ def get_document_status(args):
     # not_found_error=ScanNotFoundError preserva el 404 propio de este
     # endpoint (assert_document_ownership usa el DocumentError genérico de
     # 500, con otro propósito — ver el docstring de get_document_status).
-    doc = doc_mgr.get_document_status(document_id, scan_id, user.id, not_found_error=ScanNotFoundError)
+    document = doc_mgr.get_document_status(document_id, scan_id, user.id, not_found_error=ScanNotFoundError)
 
     return {
-        "documentId": doc.id,
-        "scanId": doc.scan_id,
-        "status": doc.status,
-        "aiReport": doc.enrichment_json is not None,
-        "createdAt": doc.created_at if doc.created_at else None,
-        "generatedAt": doc.generated_at if doc.generated_at else None,
-        "downloadUrl": _download_url_for(doc),
+        "documentId": document.id,
+        "scanId": document.scan_id,
+        "status": document.status,
+        "aiReport": document.enrichment_json is not None,
+        "createdAt": document.created_at if document.created_at else None,
+        "generatedAt": document.generated_at if document.generated_at else None,
+        "downloadUrl": _download_url_for(document),
     }
 
 
@@ -874,9 +874,9 @@ def get_all_documents(args):
     documents = doc_mgr.get_documents_for_user(user.id)
 
     if scan_type_filter != "all":
-        documents = [d for d in documents if d.scan_type == scan_type_filter]
+        documents = [document for document in documents if document.scan_type == scan_type_filter]
 
-    docs_list = [_serialize_document(doc) for doc in documents]
+    docs_list = [_serialize_document(document) for document in documents]
 
     return {
         "documents": docs_list,
@@ -906,7 +906,7 @@ def get_documents_by_scan(scan_id: int):
     doc_mgr = ThemisReportManager()
     documents = doc_mgr.get_documents_by_parent(scan_id)
 
-    docs_list = [_serialize_document(doc) for doc in documents]
+    docs_list = [_serialize_document(document) for document in documents]
 
     return {
         "scanId": scan_id,
@@ -927,27 +927,27 @@ def get_documents_by_scan(scan_id: int):
 def download_document(document_id: int):
     """Descargar un documento PDF generado"""
     user = get_current_user()
-    uid = user.id
-    logger.info(f"Download request for document {document_id} by user {uid}")
+    user_id = user.id
+    logger.info(f"Download request for document {document_id} by user {user_id}")
 
     doc_mgr = ThemisReportManager()
-    doc_mgr.assert_document_ownership(document_id, uid) # type: ignore
+    doc_mgr.assert_document_ownership(document_id, user_id) # type: ignore
 
-    doc = doc_mgr.get_document_by_id(document_id)
-    if not doc:
-        logger.warning(f"Document {document_id} not found or access denied for user {uid}")
+    document = doc_mgr.get_document_by_id(document_id)
+    if not document:
+        logger.warning(f"Document {document_id} not found or access denied for user {user_id}")
         raise DocumentNotFoundError(document_id)
 
-    if doc.status != "done" or not doc.filename or not os.path.exists(doc.filename):
-        logger.warning(f"Document {document_id} not ready: status={doc.status}, filename={doc.filename}")
-        raise DocumentNotReadyError(document_id, doc.status)
+    if document.status != "done" or not document.filename or not os.path.exists(document.filename):
+        logger.warning(f"Document {document_id} not ready: status={document.status}, filename={document.filename}")
+        raise DocumentNotReadyError(document_id, document.status)
 
-    logger.info(f"Serving document {document_id}: {doc.filename}")
+    logger.info(f"Serving document {document_id}: {document.filename}")
     return send_file(
-        doc.filename,
+        document.filename,
         mimetype="application/pdf",
         as_attachment=True,
-        download_name=f"{doc.scan_type}_scan_{doc.scan_id}.pdf",
+        download_name=f"{document.scan_type}_scan_{document.scan_id}.pdf",
     )
 
 
@@ -963,12 +963,12 @@ def download_document(document_id: int):
 def delete_document(document_id: int):
     """Eliminar un documento"""
     user = get_current_user()
-    uid = user.id
+    user_id = user.id
 
     doc_mgr = ThemisReportManager()
-    doc_mgr.assert_document_ownership(document_id, uid) # type: ignore
+    doc_mgr.assert_document_ownership(document_id, user_id) # type: ignore
     doc_mgr.delete_document(document_id)
-    logger.info(f"Documento {document_id} eliminado por usuario {uid}")
+    logger.info(f"Documento {document_id} eliminado por usuario {user_id}")
     return {"message": "Documento eliminado correctamente", "documentId": document_id}
 
 
@@ -994,7 +994,7 @@ def schedule_scan(data):
             expected=", ".join(sorted(valid_types)),
         )
     user = get_current_user()
-    ps = ProgramedScanManager.register(
+    programed_scan = ProgramedScanManager.register(
         user_id=user.id,
         scan_type=ScanType(scan_type_str),
         arguments=data["arguments"],
@@ -1002,16 +1002,16 @@ def schedule_scan(data):
         schedule_config=data["schedule_config"],
     )
     logger.info(
-        f"Escaneo programado {ps.id} creado: tipo={scan_type_str} "
+        f"Escaneo programado {programed_scan.id} creado: tipo={scan_type_str} "
         f"programacion={data['schedule_type']} usuario={user.username}"
     )
     return {
         "message": "Escaneo programado creado correctamente",
-        "programedScanId": ps.id,
+        "programedScanId": programed_scan.id,
         "scanType": scan_type_str,
         "scheduleType": data["schedule_type"],
         "scheduleConfig": data["schedule_config"],
-        "nextRunAt": ps.next_run_at if ps.next_run_at else None,
+        "nextRunAt": programed_scan.next_run_at if programed_scan.next_run_at else None,
         "user": user.username,
     }
 
@@ -1025,16 +1025,16 @@ def schedule_scan(data):
 @require_attributes(at_least_one=[AttributeType.THEMIS_SCHEDULE_DELETE])
 @limiter.limit("60 per hour; 200 per day")
 @handle_exceptions(default_exception=ProgramedScanNotFoundError, logger=logger)
-def revoke_scheduled_scan(ps_id: int):
+def revoke_scheduled_scan(programed_scan_id: int):
     """Revocar un escaneo programado (desactivar)"""
     user = get_current_user()
-    ps = ProgramedScanManager.assert_ownership(ps_id, user.id) # type: ignore
-    ProgramedScanManager.revoke(ps_id, user.id) # type: ignore
-    logger.info(f"Escaneo programado {ps_id} revocado por {user.username}")
+    programed_scan = ProgramedScanManager.assert_ownership(programed_scan_id, user.id) # type: ignore
+    ProgramedScanManager.revoke(programed_scan_id, user.id) # type: ignore
+    logger.info(f"Escaneo programado {programed_scan_id} revocado por {user.username}")
     return {
         "message": "Escaneo programado revocado correctamente",
-        "programedScanId": ps_id,
-        "scanType": ps.scan_type,
+        "programedScanId": programed_scan_id,
+        "scanType": programed_scan.scan_type,
         "user": user.username,
     }
 
@@ -1048,16 +1048,16 @@ def revoke_scheduled_scan(ps_id: int):
 @require_attributes(at_least_one=[AttributeType.THEMIS_SCHEDULE_DELETE])
 @limiter.limit("30 per hour; 100 per day")
 @handle_exceptions(default_exception=ProgramedScanNotFoundError, logger=logger)
-def delete_scheduled_scan(ps_id: int):
+def delete_scheduled_scan(programed_scan_id: int):
     """Eliminar permanentemente un escaneo programado de la BD"""
     user = get_current_user()
-    ps = ProgramedScanManager.assert_ownership(ps_id, user.id) # type: ignore
-    ProgramedScanManager.delete(ps_id, user.id) # type: ignore
-    logger.info(f"Escaneo programado {ps_id} eliminado permanentemente por {user.username}")
+    programed_scan = ProgramedScanManager.assert_ownership(programed_scan_id, user.id) # type: ignore
+    ProgramedScanManager.delete(programed_scan_id, user.id) # type: ignore
+    logger.info(f"Escaneo programado {programed_scan_id} eliminado permanentemente por {user.username}")
     return {
         "message": "Escaneo programado eliminado permanentemente",
-        "programedScanId": ps_id,
-        "scanType": ps.scan_type,
+        "programedScanId": programed_scan_id,
+        "scanType": programed_scan.scan_type,
         "user": user.username,
     }
 
@@ -1076,17 +1076,17 @@ def list_scheduled_scans():
     scans = ProgramedScanManager.get_scans_for_user(user.id)
     results = [
         {
-            "id": ps.id,
-            "scanType": ps.scan_type,
-            "arguments": ps.arguments,
-            "scheduleType": ps.schedule_type,
-            "scheduleConfig": ps.schedule_config,
-            "isActive": ps.is_active,
-            "lastRunAt": ps.last_run_at if ps.last_run_at else None,
-            "nextRunAt": ps.next_run_at if ps.next_run_at else None,
-            "createdAt": ps.created_at if ps.created_at else None,
+            "id": programed_scan.id,
+            "scanType": programed_scan.scan_type,
+            "arguments": programed_scan.arguments,
+            "scheduleType": programed_scan.schedule_type,
+            "scheduleConfig": programed_scan.schedule_config,
+            "isActive": programed_scan.is_active,
+            "lastRunAt": programed_scan.last_run_at if programed_scan.last_run_at else None,
+            "nextRunAt": programed_scan.next_run_at if programed_scan.next_run_at else None,
+            "createdAt": programed_scan.created_at if programed_scan.created_at else None,
         }
-        for ps in scans
+        for programed_scan in scans
     ]
     return {
         "message": "Escaneos programados obtenidos correctamente",

@@ -77,7 +77,7 @@ def _lazy_load(func):
                     for parent in reversed(this_file.parents[:4])
                     for name in ("SecOpsConfig.json", "SecConfig.json")
                 )
-                _configs_path = next((c for c in candidates if c.exists()), None)
+                _configs_path = next((candidate for candidate in candidates if candidate.exists()), None)
                 if _configs_path is None:
                     raise FileNotFoundError("No se encontró ningún archivo de configuración.")
             with open(_configs_path, "r", encoding="utf-8") as f:

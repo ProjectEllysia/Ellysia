@@ -159,7 +159,7 @@ class LybraEngineManager(ScanManager):
         )
         scan_id = scan.id
 
-        self._tq.submit(
+        self._task_queue.submit(
             func=LybraEngineManager.execute_lybra_scan, # type: ignore
             args=(scan_id, source_scan_id, discover_ports, deep, services),
             name=f"LybraScan-{scan_id}",
@@ -438,7 +438,7 @@ class LybraEngineManager(ScanManager):
         updated: list = []
 
         for service in services:
-            dissector = next((d for d in dissectors if d.applies(service)), None)
+            dissector = next((dissector for dissector in dissectors if dissector.applies(service)), None)
             result = None
             if dissector is not None:
                 try:
@@ -630,7 +630,7 @@ class LybraEngineManager(ScanManager):
             except Exception:
                 logger.exception("Análisis profundo: fallo al lanzar Nmap corroborador para %s", target)
 
-        if any(is_http_service(s) for s in services):
+        if any(is_http_service(service) for service in services):
             try:
                 ids.append(NiktoScanManager().run_scan(target_domain=target, user_id=user_id))
             except Exception:
@@ -782,7 +782,7 @@ class LybraEngineManager(ScanManager):
             scan.target and AuthorizedTargetManager.is_authorized(scan.user_id, scan.target)
         )
 
-        json_findings = [finding_to_json(f, exposure) for f in display_findings]
+        json_findings = [finding_to_json(display_finding, exposure) for display_finding in display_findings]
 
         result = {
             "id": scan.id,
@@ -799,9 +799,9 @@ class LybraEngineManager(ScanManager):
             "finishedAt": isoformat_utc(scan.finished_at),  # type: ignore
             "findings": json_findings,
             "totalFindings": len(json_findings),
-            "vulnerableFindings": sum(1 for f in display_findings if f.get("category") == "outdated_software"),
-            "openFindings": sum(1 for f in display_findings if f.get("state") == "open"),
-            "fixedFindings": sum(1 for f in display_findings if f.get("state") == "fixed"),
+            "vulnerableFindings": sum(1 for display_finding in display_findings if display_finding.get("category") == "outdated_software"),
+            "openFindings": sum(1 for display_finding in display_findings if display_finding.get("state") == "open"),
+            "fixedFindings": sum(1 for display_finding in display_findings if display_finding.get("state") == "fixed"),
         }
         self._append_document_info(scan, result)
         return result

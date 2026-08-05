@@ -85,7 +85,7 @@ def check_external_image_tracking(context) -> RuleResult:
     # hallazgo se sigue reportando (útil como recomendación de "bloquea la
     # carga de imágenes"), pero deja de empujar el score. Varios hosts
     # externos distintos sí siguen siendo el patrón de tracking/payload.
-    unique_hosts = {f["registrable"] for f in findings if f["registrable"]}
+    unique_hosts = {finding["registrable"] for finding in findings if finding["registrable"]}
     score = (
         CR.get_iris_scoring_weight("external_image_tracking.single_host", 0)
         if len(unique_hosts) == 1
@@ -361,7 +361,7 @@ def check_suspicious_attachments(context) -> RuleResult:
         return RuleResult(score=0, verdict="pass", details={"attachment_count": len(attachments)})
 
     reason_scores = _reason_scores()
-    score = sum(reason_scores[f["reason"]] for f in findings)
+    score = sum(reason_scores[finding["reason"]] for finding in findings)
     score = max(score, _attachment_score_floor())
 
     return RuleResult(
@@ -369,7 +369,7 @@ def check_suspicious_attachments(context) -> RuleResult:
         details={"attachment_count": len(attachments), "findings": findings},
         recommendation=(
             "El correo incluye adjuntos potencialmente peligrosos: "
-            + ", ".join(f.get("filename") or f["reason"] for f in findings) + ". "
+            + ", ".join(finding.get("filename") or finding["reason"] for finding in findings) + ". "
             "No los abras a menos que confíes plenamente en el remitente."
         ),
     )

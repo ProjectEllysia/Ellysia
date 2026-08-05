@@ -52,19 +52,19 @@ def run_report_generation(
     try:
         pdf_path = render()
         with UnitOfWork() as uow:
-            doc = repo_cls(uow).get_by_id(document_id)
-            if doc:
-                doc.filename = pdf_path
-                doc.status = "done"
-                doc.generated_at = utcnow_naive()
+            document = repo_cls(uow).get_by_id(document_id)
+            if document:
+                document.filename = pdf_path
+                document.status = "done"
+                document.generated_at = utcnow_naive()
         logger.info("PDF generado exitosamente para documento %s", document_id)
     except Exception:
         logger.error("Error generando PDF para documento %s", document_id, exc_info=True)
         try:
             with UnitOfWork() as uow:
-                doc = repo_cls(uow).get_by_id(document_id)
-                if doc:
-                    doc.status = "error"
+                document = repo_cls(uow).get_by_id(document_id)
+                if document:
+                    document.status = "error"
         except Exception:
             logger.exception("Error updating document status for document %s", document_id)
         raise
@@ -94,17 +94,17 @@ def delete_document_with_file(
     
     with UnitOfWork() as uow:
         doc_repo = repo_cls(uow)
-        doc = doc_repo.get_by_id(document_id)
-        if not doc:
+        document = doc_repo.get_by_id(document_id)
+        if not document:
             raise not_found_exc(document_id)
 
-        if doc.filename and os.path.exists(doc.filename):
+        if document.filename and os.path.exists(document.filename):
             try:
-                os.remove(doc.filename)
+                os.remove(document.filename)
             except Exception as exc:
-                logger.warning(f"No se pudo eliminar el archivo {doc.filename}: {exc}", exc_info=True)
+                logger.warning(f"No se pudo eliminar el archivo {document.filename}: {exc}", exc_info=True)
 
-        doc_repo.delete(doc)
+        doc_repo.delete(document)
 
 
 # =========================================================================
@@ -142,10 +142,10 @@ class DocumentManager(TaskTrackingMixin):
 
     def get_document_by_id(self, document_id: int):
         """Retrieve a document by its primary key."""
-        doc = build_repository(self._REPOSITORY).get_by_id(document_id)
-        if not doc:
+        document = build_repository(self._REPOSITORY).get_by_id(document_id)
+        if not document:
             logger.warning(f"Documento {document_id} no encontrado")
-        return doc
+        return document
 
     def get_latest_document_by_parent(self, parent_id: int):
         """Retrieve the most recently created document for a parent entity
@@ -209,10 +209,10 @@ class DocumentManager(TaskTrackingMixin):
             ``user_id``.
         """
         not_found_error = not_found_error or self._NOT_FOUND_ERROR
-        doc = self.get_document_by_id(document_id) if document_id else (
+        document = self.get_document_by_id(document_id) if document_id else (
             self.get_latest_document_by_parent(parent_id) if parent_id else None
         )
-        if not doc or doc.user_id != user_id:
+        if not document or document.user_id != user_id:
             raise not_found_error(document_id or parent_id)
-        return doc
+        return document
 

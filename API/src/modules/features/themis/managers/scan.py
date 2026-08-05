@@ -239,9 +239,9 @@ class ScanManager(TaskTrackingMixin, ABC):
                 return False
 
             docs = build_repository(ThemisReportRepository).get_documents_by_parent(scan_id)
-            for doc in docs:
+            for document in docs:
                 delete_document_with_file(
-                    doc.id, ThemisReportRepository,
+                    document.id, ThemisReportRepository,
                     lambda eid: ValueError(f"Documento {eid} no existe"),
                 )
 
@@ -276,9 +276,9 @@ class ScanManager(TaskTrackingMixin, ABC):
         results = []
         for scan_id in scan_ids:
             try:
-                mgr = cls.resolve_manager(scan_id)
+                manager = cls.resolve_manager(scan_id)
                 cls.assert_scan_ownership(scan_id, user_id)
-                scan = mgr.get_scan_by_id(scan_id)
+                scan = manager.get_scan_by_id(scan_id)
                 if not scan:
                     results.append({"scanId": scan_id, "status": "error", "error": "not_found"})
                     continue
@@ -289,19 +289,19 @@ class ScanManager(TaskTrackingMixin, ABC):
                     # (ver el mismo guard en endpoints.delete_scan), así que este
                     # escaneo se salta y se reporta como fallido en vez de forzar
                     # la eliminación.
-                    if not mgr.cancel_scan(scan_id, user_id):
+                    if not manager.cancel_scan(scan_id, user_id):
                         results.append({
                             "scanId": scan_id, "status": "error",
                             "error": "no_se_pudo_cancelar",
                         })
                         continue
 
-                mgr.delete_scan(scan_id)
+                manager.delete_scan(scan_id)
                 results.append({"scanId": scan_id, "status": "ok", "error": None})
             except Exception as e:
                 results.append({"scanId": scan_id, "status": "error", "error": str(e)})
 
-        deleted = sum(1 for r in results if r["status"] == "ok")
+        deleted = sum(1 for result in results if result["status"] == "ok")
         failed = len(results) - deleted
         return {
             "deletedCount": deleted,
@@ -376,15 +376,15 @@ class ScanManager(TaskTrackingMixin, ABC):
                 )
                 return False
 
-            sq_task = self.find_task(scan_id)
+            queued_task = self.find_task(scan_id)
 
-            if sq_task is None:
+            if queued_task is None:
                 logger.warning(
                     f"No se encontro tarea activa para el escaneo {scan_id}"
                 )
                 return False
 
-            was_cancelled = self._tq.cancel(sq_task.id)
+            was_cancelled = self._task_queue.cancel(queued_task.id)
             if not was_cancelled:
                 logger.warning(f"No se pudo cancelar la tarea del escaneo {scan_id}")
                 return False
@@ -602,10 +602,10 @@ class ScanManager(TaskTrackingMixin, ABC):
                     "duration_sec": round(duration, 2),
                     "status": status,
                     # Q3: get_status() es admin/monitoring, fuera a propósito
-                    # del contrato ITaskQueue (per-tarea) — self._tq aquí es
+                    # del contrato ITaskQueue (per-tarea) — self._task_queue aquí es
                     # siempre el TaskQueue real (nunca un doble de test, que
                     # no llega a este código de logging en segundo plano).
-                    "concurrent_tasks": self._tq.get_status()["runningCount"],  # type: ignore[attr-defined]
+                    "concurrent_tasks": self._task_queue.get_status()["runningCount"],  # type: ignore[attr-defined]
                 }
 
                 self.append_csv_data(data, fresh_scan, task)
@@ -752,10 +752,10 @@ class ScanManager(TaskTrackingMixin, ABC):
         """Append the latest document ID and status to a scan result dict."""
         from .reports import ThemisReportManager
         inst = ThemisReportManager()
-        doc = inst.get_latest_document_by_parent(scan.id)
-        if doc:
-            result["documentId"] = doc.id
-            result["documentStatus"] = doc.status
+        document = inst.get_latest_document_by_parent(scan.id)
+        if document:
+            result["documentId"] = document.id
+            result["documentStatus"] = document.status
     
     @classmethod
     def validate_targets(cls, raw: str, max_hosts: int = 10) -> list[str]:

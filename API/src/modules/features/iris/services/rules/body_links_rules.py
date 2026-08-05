@@ -64,7 +64,7 @@ def check_body_links(context) -> RuleResult:
         link_findings, link_score = analyze_url(link.href or "", sender_domain, link.text or "")
         findings.extend(link_findings)
         score += link_score
-        seen_types.update(f["type"] for f in link_findings)
+        seen_types.update(link_finding["type"] for link_finding in link_findings)
 
     if not findings:
         return RuleResult(score=1, verdict="pass", details={"link_count": len(links)})
@@ -135,7 +135,7 @@ def check_qr_code_links(context) -> RuleResult:
             for f in url_findings:
                 findings.append({**f, "source": "qr_code", "filename": image.filename})
             score += url_score
-            seen_types.update(f["type"] for f in url_findings)
+            seen_types.update(url_finding["type"] for url_finding in url_findings)
 
     if not qr_urls:
         return RuleResult(score=0, verdict="pass", details={"image_count": len(images), "qr_count": 0})

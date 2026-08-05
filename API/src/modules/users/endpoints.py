@@ -87,7 +87,7 @@ def _serialize_user_profile(user: "User", *, include_attributes: bool = False) -
         "password_changed_at": user.password_changed_at,
     }
     if include_attributes:
-        profile["attributes"] = [a.attribute_name for a in user.attributes]
+        profile["attributes"] = [attribute.attribute_name for attribute in user.attributes]
     return profile
 
 
@@ -110,18 +110,18 @@ def oauth_token(data: dict[str, Any]):
         username = data["username"]
         password = data["password"]
 
-        is_valid, uid = UserManager().verify_credentials(username, password)
-        if not is_valid or uid is None:
+        is_valid, user_id = UserManager().verify_credentials(username, password)
+        if not is_valid or user_id is None:
             logger.warning(f"Login fallido para: {username}")
             raise InvalidCredentialsError()
 
-        user = USER_MANAGER.get_user_by_id(uid)
+        user = USER_MANAGER.get_user_by_id(user_id)
 
         # MFA activado: en vez de tokens reales, se emite un challenge de corta
         # duración que el cliente debe canjear en POST /oauth/mfa/verify tras
         # aportar el segundo factor. Cuentas sin MFA no ven ningún cambio.
-        if MFA_MANAGER.is_enabled(uid):
-            challenge_token = OAUTH_MANAGER.create_mfa_challenge(uid)
+        if MFA_MANAGER.is_enabled(user_id):
+            challenge_token = OAUTH_MANAGER.create_mfa_challenge(user_id)
             logger.info(f"MFA requerido para: {username}")
             return {
                 "mfaRequired": True,
@@ -130,12 +130,12 @@ def oauth_token(data: dict[str, Any]):
             }
 
         access_token = OAUTH_MANAGER.create_access_token(
-            user_id=uid, username=username,
+            user_id=user_id, username=username,
             role=user.role if user else "role_user",
             password_changed_at=user.password_changed_at if user else None,
         )
-        refresh_token = OAUTH_MANAGER.create_refresh_token(uid)
-        user_attrs = USER_MANAGER.get_user_attributes(uid)
+        refresh_token = OAUTH_MANAGER.create_refresh_token(user_id)
+        user_attrs = USER_MANAGER.get_user_attributes(user_id)
 
         logger.info(f"Tokens emitidos para: {username}")
         return {
@@ -149,25 +149,25 @@ def oauth_token(data: dict[str, Any]):
 
     if grant_type == "refresh_token":
         refresh_token_str = data["refresh_token"]
-        uid = OAUTH_MANAGER.verify_refresh_token(refresh_token_str)
-        if not uid:
+        user_id = OAUTH_MANAGER.verify_refresh_token(refresh_token_str)
+        if not user_id:
             # Si el refresh falló porque la contraseña cambió, devolver un motivo
             # específico para que el cliente muestre la pantalla dedicada.
             if OAUTH_MANAGER.is_refresh_stale_by_password(refresh_token_str):
                 raise PasswordChangedError()
             raise InvalidCredentialsError()
 
-        user = USER_MANAGER.get_user_by_id(uid)
+        user = USER_MANAGER.get_user_by_id(user_id)
         if not user:
             raise InvalidCredentialsError()
 
         access_token = OAUTH_MANAGER.create_access_token(
-            uid, user.username, user.role,  # type: ignore
+            user_id, user.username, user.role,  # type: ignore
             password_changed_at=user.password_changed_at,
         )
-        user_attrs = USER_MANAGER.get_user_attributes(uid)
+        user_attrs = USER_MANAGER.get_user_attributes(user_id)
 
-        logger.info(f"Access token renovado para usuario ID: {uid}")
+        logger.info(f"Access token renovado para usuario ID: {user_id}")
         return {
             "access_token": access_token,
             "token_type": "Bearer",
@@ -212,16 +212,16 @@ def oauth_mfa_verify(data: dict[str, Any]):
     """Verificar el segundo factor (TOTP o codigo de recuperacion) y emitir tokens"""
     challenge_token = data["challengeToken"]
 
-    uid = OAUTH_MANAGER.verify_mfa_challenge(challenge_token)
-    if uid is None:
+    user_id = OAUTH_MANAGER.verify_mfa_challenge(challenge_token)
+    if user_id is None:
         raise MfaChallengeInvalidError()
 
-    user = USER_MANAGER.get_user_by_id(uid)
+    user = USER_MANAGER.get_user_by_id(user_id)
     if user is None:
         raise MfaChallengeInvalidError()
 
     verified = MFA_MANAGER.verify_totp_or_recovery(
-        uid, code=data.get("code"), recovery_code=data.get("recoveryCode"),
+        user_id, code=data.get("code"), recovery_code=data.get("recoveryCode"),
     )
     if not verified:
         OAUTH_MANAGER.register_mfa_challenge_failure(challenge_token)
@@ -231,12 +231,12 @@ def oauth_mfa_verify(data: dict[str, Any]):
     OAUTH_MANAGER.consume_mfa_challenge(challenge_token)
 
     access_token = OAUTH_MANAGER.create_access_token(
-        user_id=uid, username=user.username, role=user.role,
+        user_id=user_id, username=user.username, role=user.role,
         password_changed_at=user.password_changed_at,
         mfa_at=utcnow_naive(),
     )
-    refresh_token = OAUTH_MANAGER.create_refresh_token(uid)
-    user_attrs = USER_MANAGER.get_user_attributes(uid)
+    refresh_token = OAUTH_MANAGER.create_refresh_token(user_id)
+    user_attrs = USER_MANAGER.get_user_attributes(user_id)
 
     logger.info(f"MFA verificado, tokens emitidos para: {user.username}")
     return {
@@ -399,10 +399,10 @@ def list_all_users():
 def list_user_attributes(target_user_id: int):
     """Listar los atributos de un usuario especifico"""
     current_user = get_current_user()
-    uid = current_user.id
+    user_id = current_user.id
 
-    if not USER_MANAGER.can_manage_user(uid, target_user_id):
-        logger.warning(f"Usuario {uid} intento ver atributos de {target_user_id} sin permiso")
+    if not USER_MANAGER.can_manage_user(user_id, target_user_id):
+        logger.warning(f"Usuario {user_id} intento ver atributos de {target_user_id} sin permiso")
         raise EllysiaException(
             "No tienes permiso para ver atributos de este usuario",
             status_code=403,
@@ -411,7 +411,7 @@ def list_user_attributes(target_user_id: int):
     target_user = USER_MANAGER.get_user_by_id(target_user_id)
     return {
         "user_id": target_user_id,
-        "attributes": [a.attribute_name for a in target_user.attributes],
+        "attributes": [attribute.attribute_name for attribute in target_user.attributes],
         "role": target_user.role if target_user else "role_user",
     }
 

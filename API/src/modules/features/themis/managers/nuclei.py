@@ -118,7 +118,7 @@ class NucleiScanManager(ScanManager):
             )
             scan_id = scan.id
 
-            self._tq.submit(
+            self._task_queue.submit(
                 func=NucleiScanManager.execute_nuclei_scan,
                 args=(scan_id, target, severities, tags, rate_limit, request_timeout, resolved_timeout),
                 name=f"NucleiScan-{scan_id}",
@@ -251,7 +251,7 @@ class NucleiScanManager(ScanManager):
             d["state"] = f.state
             findings.append(d)
 
-        json_findings = [finding_to_json(f, exposure) for f in findings]
+        json_findings = [finding_to_json(finding, exposure) for finding in findings]
 
         result = {
             "id": scan.id,
@@ -263,9 +263,9 @@ class NucleiScanManager(ScanManager):
             "finishedAt": isoformat_utc(scan.finished_at),  # type: ignore
             "findings": json_findings,
             "totalFindings": len(json_findings),
-            "criticalCount": sum(1 for f in json_findings if f.get("priority") == "CRITICAL"),
-            "highCount": sum(1 for f in json_findings if f.get("priority") == "HIGH"),
-            "confirmedFindings": sum(1 for f in json_findings if f.get("confirmed")),
+            "criticalCount": sum(1 for json_finding in json_findings if json_finding.get("priority") == "CRITICAL"),
+            "highCount": sum(1 for json_finding in json_findings if json_finding.get("priority") == "HIGH"),
+            "confirmedFindings": sum(1 for json_finding in json_findings if json_finding.get("confirmed")),
         }
         self._append_document_info(scan, result)
         return result

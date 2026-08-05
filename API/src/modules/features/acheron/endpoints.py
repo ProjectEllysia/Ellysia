@@ -110,13 +110,13 @@ def handle_vault_revision_mismatch(error: VaultRevisionMismatchError):
 @handle_exceptions(default_exception=VaultNotFoundError, logger=logger)
 def get_vault():
     """Obtener el vault del usuario en formato JSON"""
-    with get_vault_manager() as mgr:
-        vault = mgr.get_vault_for_user()
+    with get_vault_manager() as manager:
+        vault = manager.get_vault_for_user()
 
         if not vault:
             raise VaultNotFoundError()
 
-        payload = mgr.export_vault_to_json(vault.id)
+        payload = manager.export_vault_to_json(vault.id)
     logger.info("Vault %s devuelto | user=%s", vault.id, current_actor())
     return payload, 200, _etag(payload["revision"])
 
@@ -137,8 +137,8 @@ def get_vault_revision():
     descifrar el vault entero, de ahi que tenga su propio limite de peticiones,
     mas generoso que el del GET completo.
     """
-    with get_vault_manager() as mgr:
-        vault = mgr.get_vault_for_user()
+    with get_vault_manager() as manager:
+        vault = manager.get_vault_for_user()
 
         if not vault:
             raise VaultNotFoundError()
@@ -175,8 +175,8 @@ def upsert_vault():
 
     expected_revision = _client_revision()
 
-    with get_vault_manager() as mgr:
-        existing = mgr.get_vault_for_user()
+    with get_vault_manager() as manager:
+        existing = manager.get_vault_for_user()
         if existing is not None:
             if request.args.get("mode") != "replace":
                 raise ValidationError(
@@ -187,7 +187,7 @@ def upsert_vault():
             if expected_revision is None:
                 raise VaultRevisionMismatchError(current=existing.revision or 1)
 
-        vault, created = mgr.upsert_vault_from_json(
+        vault, created = manager.upsert_vault_from_json(
             data, expected_revision=expected_revision
         )
         logger.info("Vault %s (ID=%s) | user=%s", "creado" if created else "actualizado", vault.id, current_actor())
@@ -217,8 +217,8 @@ def change_vault_metadata(data):
     Actualiza unicamente checker, vaultKey y algorithm; los storables (cifrados con
     la misma vaultKey) permanecen intactos.
     """
-    with get_vault_manager() as mgr:
-        vault = mgr.update_vault_metadata(data, expected_revision=_client_revision())
+    with get_vault_manager() as manager:
+        vault = manager.update_vault_metadata(data, expected_revision=_client_revision())
         if not vault:
             raise VaultNotFoundError()
         logger.info("Metadatos del vault %s refrescados | user=%s", vault.id, current_actor())
@@ -265,12 +265,12 @@ def generate_password(query):
 @handle_exceptions(default_exception=VaultError, logger=logger)
 def patch_vault_storables(data):
     """Actualizar en bulk uno o varios Storables del usuario (array de operaciones)"""
-    with get_vault_manager() as mgr:
-        results = mgr.bulk_update_storables(
+    with get_vault_manager() as manager:
+        results = manager.bulk_update_storables(
             operations=data, expected_revision=_client_revision()
         )
         logger.info("Bulk update: %s operaciones | user=%s", len(data), current_actor())
-        vault = mgr.get_vault_for_user()
+        vault = manager.get_vault_for_user()
         revision = (vault.revision or 1) if vault else 1
     return (
         {"message": "Bulk storable update completed", "results": results, "revision": revision},
@@ -303,26 +303,26 @@ def add_vault_storable(data):
     spec = STORABLE_SPECS.get(kind)
     payload = {attr: data.get(json_key, "") for attr, json_key in spec.fields} if spec else {}
 
-    with get_vault_manager() as mgr:
-        vault = mgr.get_vault_for_user()
+    with get_vault_manager() as manager:
+        vault = manager.get_vault_for_user()
         if not vault:
             raise VaultNotFoundError()
 
-        if internal_id and mgr.get_storable_by(vault_id=vault.id, internal_id=internal_id):
+        if internal_id and manager.get_storable_by(vault_id=vault.id, internal_id=internal_id):
             raise StorableConflictError(internal_id)
 
-        st = mgr.add_storable_to_vault(
+        storable = manager.add_storable_to_vault(
             vault_id=vault.id, kind=kind, internal_id=internal_id,
             title=title, created_at=created_at, updated_at=updated_at,
             expected_revision=_client_revision(),
             **payload,
         )
-    logger.info("Storable %s anadido al vault %s | user=%s", st.id, vault.id, current_actor())
+    logger.info("Storable %s anadido al vault %s | user=%s", storable.id, vault.id, current_actor())
     return {
         "message": "Storable created",
-        "storableId": st.id,
-        "internalId": st.internal_id,
-        "vaultId": st.vault_id,
+        "storableId": storable.id,
+        "internalId": storable.internal_id,
+        "vaultId": storable.vault_id,
         "kind": kind,
         "revision": vault.revision or 1,
     }, 201, _etag(vault.revision or 1)
@@ -344,18 +344,18 @@ def delete_vault_storable(data):
     """Eliminar un Storable del vault por su internalId"""
     internal_id = data["internalId"]
 
-    with get_vault_manager() as mgr:
-        vault = mgr.get_vault_for_user()
+    with get_vault_manager() as manager:
+        vault = manager.get_vault_for_user()
 
         if not vault:
             raise VaultNotFoundError()
 
-        st = mgr.get_storable_by(vault_id=vault.id, internal_id=internal_id)
-        if not st:
+        storable = manager.get_storable_by(vault_id=vault.id, internal_id=internal_id)
+        if not storable:
             raise StorableNotFoundError(internal_id)
 
-        storable_id = st.id
-        if not mgr.delete_storable(storable_id, expected_revision=_client_revision()):
+        storable_id = storable.id
+        if not manager.delete_storable(storable_id, expected_revision=_client_revision()):
             raise VaultError("Could not delete storable")
 
         logger.info("Storable %s (internalId=%s) eliminado | user=%s", storable_id, internal_id, current_actor())

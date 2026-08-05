@@ -179,5 +179,5 @@ class FtpDissector(Dissector):
         banner = self._probe.fetch(target, service.port or 21)
         if banner is None:
             return None
-        fp = fingerprint_ftp(banner)
-        return DissectorResult(fp.product, fp.version, self.label)
+        fingerprint = fingerprint_ftp(banner)
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)

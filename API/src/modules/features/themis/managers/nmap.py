@@ -74,7 +74,7 @@ class NmapScanManager(ScanManager):
             )
             scan_id = scan.id
 
-            self._tq.submit(
+            self._task_queue.submit(
                 func=NmapScanManager.execute_nmap_scan,
                 args=(scan_id, target_host, target_ports, timeout),
                 name=f"NmapScan-{scan_id}",

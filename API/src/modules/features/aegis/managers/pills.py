@@ -84,7 +84,7 @@ class AegisManager(TaskTrackingMixin):
         tweaks      = tweaks or {}
         document_id = self._create_pending_document(topic_id)
 
-        self._tq.submit(
+        self._task_queue.submit(
             func=AegisManager.execute_aegis_generation,
             args=(document_id, topic_id, tweaks, self.user.id),
             name=f"AegisGen-{document_id}",
@@ -96,33 +96,33 @@ class AegisManager(TaskTrackingMixin):
 
     def get_document(self, doc_id: int) -> dict:
         repo = build_repository(AegisDocumentRepository)
-        doc = repo.get_by_id(doc_id)
-        if not doc:
+        document = repo.get_by_id(doc_id)
+        if not document:
             raise DocumentNotFoundError(doc_id)
 
         result = {
-            "id": doc.id,
-            "internalName": doc.title,
-            "title": doc.subtitle or "Sin título",
-            "userId": doc.user.id,
-            "topicId": doc.topic_id,
-            "topicTitle": doc.topic.title if doc.topic else "Tema desconocido",
-            "status": doc.status,
+            "id": document.id,
+            "internalName": document.title,
+            "title": document.subtitle or "Sin título",
+            "userId": document.user.id,
+            "topicId": document.topic_id,
+            "topicTitle": document.topic.title if document.topic else "Tema desconocido",
+            "status": document.status,
             "pill": {
-                "subtitle": doc.subtitle,
-                "intro": doc.intro,
-                "closing": doc.closing,
-                "company": doc.company,
-                "contactEmail": doc.contact_email,
-                "tips": [t.to_dict() for t in doc.tips],
+                "subtitle": document.subtitle,
+                "intro": document.intro,
+                "closing": document.closing,
+                "company": document.company,
+                "contactEmail": document.contact_email,
+                "tips": [tip.to_dict() for tip in document.tips],
             },
-            "alerts": [a.to_dict() for a in doc.alerts],
-            "generatedAt": isoformat_utc(doc.generated_at), # type: ignore
+            "alerts": [alert.to_dict() for alert in document.alerts],
+            "generatedAt": isoformat_utc(document.generated_at), # type: ignore
         }
 
-        if doc.status == "done": # type: ignore
-            result["pill"] = doc.pill_to_dict()
-            result["alerts"] = [a.to_dict() for a in sorted(doc.alerts, key=lambda a: a.position)]
+        if document.status == "done": # type: ignore
+            result["pill"] = document.pill_to_dict()
+            result["alerts"] = [a.to_dict() for a in sorted(document.alerts, key=lambda a: a.position)]
 
         return result
 
@@ -159,7 +159,7 @@ class AegisManager(TaskTrackingMixin):
                 "headline": tip["headline"],
                 "body": tip["body"],
                 "links": (
-                    [{"text": lk["text"], "url": lk["url"]} for lk in tip.get("links") or []]
+                    [{"text": link["text"], "url": link["url"]} for link in tip.get("links") or []]
                     or None
                 ),
             }
@@ -168,16 +168,16 @@ class AegisManager(TaskTrackingMixin):
 
         questions_data = [
             {
-                "prompt": q["prompt"],
-                "options": q["options"],
-                "correct_index": q["correctIndex"],
+                "prompt": question["prompt"],
+                "options": question["options"],
+                "correct_index": question["correctIndex"],
             }
-            for q in pill.get("questions", [])
+            for question in pill.get("questions", [])
         ]
 
         with UnitOfWork() as uow:
             repo = AegisDocumentRepository(uow)
-            doc = repo.update_content_fields(
+            document = repo.update_content_fields(
                 doc_id=doc_id,
                 subtitle=subtitle,
                 intro=intro,
@@ -185,9 +185,9 @@ class AegisManager(TaskTrackingMixin):
                 contact_email=contact_email,
                 company=company,
             )
-            if doc is not None:
+            if document is not None:
                 # Mantener sincronizada la etiqueta del historial (title interno).
-                doc.title = subtitle[:64]
+                document.title = subtitle[:64]
             repo.save_tips(doc_id, tips_data)
             repo.save_questions(doc_id, questions_data)
             logger.info(
@@ -254,17 +254,17 @@ class AegisManager(TaskTrackingMixin):
 
     def get_document_path(self, document_id: int) -> Path:
         """Devuelve la ruta al archivo generado, validando propiedad y existencia."""
-        doc = self.assert_document_ownership(document_id)
-        if not doc:
+        document = self.assert_document_ownership(document_id)
+        if not document:
             raise ValueError(f"Documento {document_id} no existe")
 
-        if not doc.filename:
+        if not document.filename:
             raise ValueError(f"Documento {document_id} no tiene filename")
 
         cfg = self._read_cfg()
-        path = cfg["output_dir"] / doc.filename
+        path = cfg["output_dir"] / document.filename
         if not path.exists():
-            raise FileNotFoundError(f"Archivo no encontrado: {doc.filename}")
+            raise FileNotFoundError(f"Archivo no encontrado: {document.filename}")
 
         return path
 
@@ -275,12 +275,12 @@ class AegisManager(TaskTrackingMixin):
         try:
             with UnitOfWork() as uow:
                 repo = AegisDocumentRepository(uow)
-                doc = repo.get_by_id(document_id)
-                if not doc:
+                document = repo.get_by_id(document_id)
+                if not document:
                     raise ValueError(f"Documento {document_id} no existe")
 
-                if doc.filename:
-                    file_path = cfg["output_dir"] / doc.filename
+                if document.filename:
+                    file_path = cfg["output_dir"] / document.filename
                     if file_path.exists():
                         import os
                         try:
@@ -296,7 +296,7 @@ class AegisManager(TaskTrackingMixin):
                 for campaign in campaign_repo.get_campaigns_by_document(document_id):
                     campaign_repo.delete(campaign)
 
-                repo.delete(doc)
+                repo.delete(document)
         except Exception as exc:
             raise RuntimeError(f"Error eliminando documento: {exc}")
 
@@ -319,10 +319,10 @@ class AegisManager(TaskTrackingMixin):
             "topic_id":    "topicId",
         }
         result = []
-        for doc in docs:
+        for document in docs:
             item = {}
             for model_field, output_name in fields_map.items():
-                value = getattr(doc, model_field, None)
+                value = getattr(document, model_field, None)
                 if value is None:
                     item[output_name] = None
                 elif isinstance(value, datetime):
@@ -337,7 +337,7 @@ class AegisManager(TaskTrackingMixin):
         repo = build_repository(AegisDocumentRepository)
 
         topics = repo.get_topics()
-        return [{"id": t.id, "title": t.title} for t in topics]
+        return [{"id": topic.id, "title": topic.title} for topic in topics]
 
     def assert_document_ownership(self, document_id: int) -> AegisDocument:
         """
@@ -481,7 +481,7 @@ class AegisManager(TaskTrackingMixin):
                 "headline": tip.headline,
                 "body": tip.body,
                 "links": (
-                    [{"text": lk["text"], "url": lk["url"]} for lk in tip.links]
+                    [{"text": link["text"], "url": link["url"]} for link in tip.links]
                     if tip.links else None
                 ),
             }
@@ -490,11 +490,11 @@ class AegisManager(TaskTrackingMixin):
 
         questions_data = [
             {
-                "prompt": q.prompt,
-                "options": q.options,
-                "correct_index": q.correct_index,
+                "prompt": question.prompt,
+                "options": question.options,
+                "correct_index": question.correct_index,
             }
-            for q in content.questions
+            for question in content.questions
         ]
 
         with UnitOfWork() as uow:
@@ -640,7 +640,7 @@ class AegisManager(TaskTrackingMixin):
         ts = utcnow_naive().strftime("%Y%m%d_%H%M%S")
         placeholder = f"pending_{ts}_{self.user.id}_{topic_id}"
 
-        doc = AegisDocument(
+        document = AegisDocument(
             title=placeholder[:64],
             filename=f"{placeholder}.json"[:128],
             status="pending",
@@ -652,7 +652,7 @@ class AegisManager(TaskTrackingMixin):
 
         with UnitOfWork() as uow:
             repo = AegisDocumentRepository(uow)
-            saved_doc = repo.save(doc)
+            saved_doc = repo.save(document)
             # Durable antes de encolar: el worker corre en otro proceso.
             uow.commit_for_handoff()
 

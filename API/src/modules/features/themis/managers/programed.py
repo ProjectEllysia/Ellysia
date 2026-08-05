@@ -52,7 +52,7 @@ class ProgramedScanManager():
         )
         with UnitOfWork() as uow:
             repo = ProgramedScanRepository(uow)
-            ps = repo.create(
+            programed_scan = repo.create(
                 user_id=user_id,
                 scan_type=scan_type,
                 arguments=arguments,
@@ -62,13 +62,13 @@ class ProgramedScanManager():
             )
 
         ThemisScheduler.schedule(
-            ps_id=ps.id,
-            scan_type=ps.scan_type,
-            user_id=ps.user_id,
+            programed_scan_id=programed_scan.id,
+            scan_type=programed_scan.scan_type,
+            user_id=programed_scan.user_id,
             schedule_type=schedule_type,
             schedule_config=schedule_config,
         )
-        return ps
+        return programed_scan
 
     @classmethod
     def _assert_valid_arguments(cls, scan_type: ScanType, arguments: dict[str, str]):
@@ -123,8 +123,8 @@ class ProgramedScanManager():
             )
 
     @classmethod
-    def assert_ownership(cls, ps_id: int, user_id: int) -> ProgramedScan:
-        return assert_owned(ProgramedScanRepository, ps_id, user_id, ProgramedScanNotFoundError)
+    def assert_ownership(cls, programed_scan_id: int, user_id: int) -> ProgramedScan:
+        return assert_owned(ProgramedScanRepository, programed_scan_id, user_id, ProgramedScanNotFoundError)
 
     @classmethod
     def get_scans_for_user(cls, user_id: int) -> List[ProgramedScan]:
@@ -135,17 +135,17 @@ class ProgramedScanManager():
         return programed_scans
 
     @classmethod
-    def revoke(cls, ps_id: int, user_id: int) -> None:
-        ThemisScheduler.unschedule(ps_id)
+    def revoke(cls, programed_scan_id: int, user_id: int) -> None:
+        ThemisScheduler.unschedule(programed_scan_id)
         with UnitOfWork() as uow:
-            ps = assert_owned(ProgramedScanRepository, ps_id, user_id, ProgramedScanNotFoundError, uow=uow)
-            ps.is_active = False # type: ignore
-            ProgramedScanRepository(uow).update(ps)
+            programed_scan = assert_owned(ProgramedScanRepository, programed_scan_id, user_id, ProgramedScanNotFoundError, uow=uow)
+            programed_scan.is_active = False # type: ignore
+            ProgramedScanRepository(uow).update(programed_scan)
 
     @classmethod
-    def delete(cls, ps_id: int, user_id: int) -> None:
-        ThemisScheduler.unschedule(ps_id)
+    def delete(cls, programed_scan_id: int, user_id: int) -> None:
+        ThemisScheduler.unschedule(programed_scan_id)
         with UnitOfWork() as uow:
-            ps = assert_owned(ProgramedScanRepository, ps_id, user_id, ProgramedScanNotFoundError, uow=uow)
-            ProgramedScanRepository(uow).delete(ps)
+            programed_scan = assert_owned(ProgramedScanRepository, programed_scan_id, user_id, ProgramedScanNotFoundError, uow=uow)
+            ProgramedScanRepository(uow).delete(programed_scan)
 

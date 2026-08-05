@@ -62,13 +62,13 @@ class IrisAIWriter:
     def _build_user_prompt(self, report: Dict[str, Any]) -> str:
         failed_rules = [
             {
-                "name": r.get("ruleName"),
-                "category": r.get("category"),
-                "score": r.get("score"),
-                "recommendation": r.get("recommendation"),
+                "name": rule.get("ruleName"),
+                "category": rule.get("category"),
+                "score": rule.get("score"),
+                "recommendation": rule.get("recommendation"),
             }
-            for r in (report.get("rules") or [])
-            if (r.get("score") or 0) < 0
+            for rule in (report.get("rules") or [])
+            if (rule.get("score") or 0) < 0
         ]
 
         template = self._build_prompts().get("userTemplate", "")

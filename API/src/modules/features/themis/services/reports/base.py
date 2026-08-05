@@ -326,8 +326,8 @@ class PrintingStrategy(ABC):
         bc.y = 45
         bc.height = 135
         bc.width = 390
-        bc.data = [[p["y"] for p in points]]
-        bc.categoryAxis.categoryNames = [p["x"] for p in points]
+        bc.data = [[point["y"] for point in points]]
+        bc.categoryAxis.categoryNames = [point["x"] for point in points]
         bc.categoryAxis.labels.boxAnchor = "ne"
         bc.categoryAxis.labels.angle = 30
         bc.categoryAxis.labels.fontName = "Helvetica"

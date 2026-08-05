@@ -275,8 +275,8 @@ def summarize(profiles: List[TemplateProfile]) -> Dict[str, object]:
         for blocker in profile.blockers:
             blocker_counts[blocker] = blocker_counts.get(blocker, 0) + 1
 
-    http_profiles = [p for p in profiles if p.protocol == "http"]
-    http_ingestible = sum(1 for p in http_profiles if p.bucket is Bucket.INGESTIBLE_NOW)
+    http_profiles = [profile for profile in profiles if profile.protocol == "http"]
+    http_ingestible = sum(1 for http_profile in http_profiles if http_profile.bucket is Bucket.INGESTIBLE_NOW)
 
     return {
         "total": total,

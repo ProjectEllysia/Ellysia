@@ -86,7 +86,7 @@ class IrisReportManager(DocumentManager):
 
         doc_id = self._create_document(analysis)
 
-        self._tq.submit(
+        self._task_queue.submit(
             func=IrisReportManager.execute_report_generation,
             args=(doc_id, analysis_id),
             name=f"PDFGeneration-Analysis-{analysis_id}",

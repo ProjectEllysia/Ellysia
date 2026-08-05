@@ -92,5 +92,5 @@ def concordance_rate(pairs: Iterable[Tuple[Optional[str], Optional[str], Optiona
     pairs = list(pairs)
     if not pairs:
         return 0.0
-    hits = sum(1 for p in pairs if agrees_with_nmap(*p))
+    hits = sum(1 for pair in pairs if agrees_with_nmap(*pair))
     return hits / len(pairs)

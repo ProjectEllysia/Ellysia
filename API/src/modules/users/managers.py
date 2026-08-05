@@ -448,7 +448,7 @@ Raises:
             List of attribute name strings.
         """
         attrs = build_repository(AttributeRepository).get_by_user(user_id)
-        return [a.attribute_name for a in attrs]
+        return [attr.attribute_name for attr in attrs]
 
     def add_user_attributes(
         self,
