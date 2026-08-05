@@ -633,6 +633,21 @@ extraiga con regex todas las cadenas `configFlat['...']` y afirme que cada una r
 `SecOpsConfig.json`. No unifica las fuentes, pero convierte la divergencia silenciosa en un fallo
 de CI. **Recomendado hacer esto ya, y el endpoint cuando toque.**
 
+> **Hecho: la alternativa ⚡** — `API/tests/unit/test_config_view_paths.py`, 45 rutas verificadas.
+> Comprueba dos cosas, no una: que la ruta **existe** y que apunta a una **hoja**. Lo segundo hace
+> falta porque `flatten()` (`useUtils.js`) solo emite claves para hojas, así que una ruta que
+> apunte a una rama del JSON existe pero no aparece en `configFlat` — el control queda igual de
+> desconectado que con un typo, y el primer chequeo no lo vería. Incluye además una aserción de
+> que se extrajeron >30 rutas, para que el test no pase en verde si el regex deja de casar.
+>
+> **El endpoint queda pendiente a propósito.** Servir el esquema desde la API obliga a mover al
+> backend todo lo que hoy es presentación pura y está escrito a mano en el `.vue`: etiquetas en
+> castellano, ayudas contextuales (*«65536 KiB = 64 MiB por hash»*), tipo de control, mínimos y
+> máximos, agrupación y orden de los campos. Eso es peor acoplamiento que el que arregla —
+> `config_reading.py` pasaría a saber de widgets — y arriesga degradar una pantalla cuidada a
+> cambio de un daño (la divergencia silenciosa) que el test ya convierte en fallo de CI. Rehacerlo
+> tiene sentido el día que la pantalla se genere de verdad, no antes.
+
 ---
 
 ### D5 · `themis/services/reports.py`: 85 KB en un fichero
