@@ -378,3 +378,104 @@ def admin_headers(admin_user, auth_headers):
 @pytest.fixture()
 def user_headers(regular_user, auth_headers):
     return auth_headers(regular_user)
+
+
+# ---------------------------------------------------------------------------
+# 7. Catálogo de planes (módulo accounts)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def seeded_plans(app):
+    """Siembra un catálogo mínimo de planes y devuelve {code: plan_id}.
+
+    **Function-scoped a propósito**: ``_clean_db`` vacía todas las tablas al
+    terminar cada test, así que un fixture de sesión dejaría el catálogo
+    sembrado solo para el primero que lo pidiera.
+
+    No replica el catálogo comercial real (4 planes × 15 claves × 2 ámbitos):
+    duplicarlo aquí obligaría a editar los números en dos sitios y un cambio de
+    precio rompería tests. Lo que estos necesitan ejercitar son las formas —
+    un límite mensual, uno de existencias, un cero, un ilimitado, un plan
+    oculto y el plan por defecto. La fidelidad del catálogo real la vigila
+    ``tests/unit/test_accounts_seed.py``, sobre el literal de la migración.
+    """
+    from src.modules.accounts.model import Plan, PlanLimit
+
+    # (code, name, rank, price, is_public, is_default)
+    plans = [
+        ("freemium", "Freemium", 0,     0, True,  True),
+        ("bronze",   "Bronze",   1,  2900, True,  False),
+        ("gold",     "Gold",     2, 19900, True,  False),
+        ("custom",   "A medida", 9, 50000, False, False),
+    ]
+    # code -> [(limit_key, scope, value, period)]
+    limits = {
+        "freemium": [
+            ("iris.analyses",           "holder",   10, "month"),
+            ("acheron.vaults",          "holder",    1, "stock"),
+            ("themis.thirdparty.scans", "holder",    0, "month"),
+        ],
+        "bronze": [
+            ("iris.analyses",           "holder",  100, "month"),
+            ("acheron.vaults",          "holder",    3, "stock"),
+            ("themis.thirdparty.scans", "holder",   10, "month"),
+            ("acheron.vaults",          "member",    3, "stock"),
+        ],
+        "gold": [
+            ("iris.analyses",           "holder", None, "month"),
+            ("acheron.vaults",          "holder", None, "stock"),
+            ("themis.thirdparty.scans", "holder",  200, "month"),
+            ("acheron.vaults",          "member", None, "stock"),
+        ],
+        "custom": [
+            ("iris.analyses",           "holder", None, "month"),
+        ],
+    }
+
+    ids = {}
+    with app.app_context():
+        with unit_of_work.UnitOfWork() as uow:
+            for code, name, rank, price, is_public, is_default in plans:
+                plan = Plan(
+                    code=code, name=name, tagline=f"Plan {name}", rank=rank,
+                    monthly_price_cents=price, org_addon_price_cents=0,
+                    currency="EUR", is_public=is_public, is_default=is_default,
+                )
+                uow.session.add(plan)
+                uow.session.flush()
+                ids[code] = plan.id
+                for limit_key, scope, value, period in limits[code]:
+                    uow.session.add(PlanLimit(
+                        plan_id=plan.id, limit_key=limit_key,
+                        scope=scope, value=value, period=period,
+                    ))
+            uow.session.flush()
+    return ids
+
+
+@pytest.fixture()
+def make_subscription(app, seeded_plans):
+    """Factory que da de alta una suscripción para un usuario.
+
+    Sin llamar a ningún manager: en esta fase no existe todavía quien mueva
+    suscripciones (eso es el ciclo de vida de la fase 6), así que los tests
+    escriben la fila directamente.
+    """
+    from src.modules.accounts.model import Subscription
+
+    def _make(user, plan_code="gold", status="active", **overrides):
+        with app.app_context():
+            with unit_of_work.UnitOfWork() as uow:
+                subscription = Subscription(
+                    user_id=user.id,
+                    plan_id=seeded_plans[plan_code],
+                    status=status,
+                    organization_enabled=overrides.pop("organization_enabled", False),
+                    cancel_at_period_end=overrides.pop("cancel_at_period_end", False),
+                    **overrides,
+                )
+                uow.session.add(subscription)
+                uow.session.flush()
+                return subscription.id
+
+    return _make

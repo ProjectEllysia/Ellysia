@@ -343,13 +343,22 @@ de poder restringir nada — matando justo lo que el dueño de una organización
 
 **El arreglo, pequeño y en fase 1:**
 
-- Vaciar (o dejar casi vacío) `ROLE_PERMISSIONS[Role.USER]`.
-- Definir un **conjunto de atributos por defecto** — las herramientas de autoservicio:
-  `acheron_*`, `iris_*`, `hygeia_*`, `themis_read`, `themis_folder_*`, `aegis_read` — y
-  escribirlo como **filas explícitas de `UserAttribute`** en el momento del alta, sea el
-  alta pública, la de un admin o la de una invitación.
-- Una migración escribe esas filas a los usuarios existentes con lo que hoy tienen
-  implícito, para que nadie note el cambio.
+- Vaciar `ROLE_PERMISSIONS[Role.USER]`.
+- Definir un **conjunto de atributos por defecto** y escribirlo como **filas explícitas
+  de `UserAttribute`** en el momento del alta, sea el alta pública, la de un admin o la
+  de una invitación.
+- Una migración escribe esas filas a los usuarios existentes.
+
+> **Implementado así** (fase 0, commit `refactor(users): los atributos ABAC pasan a ser
+> filas explícitas`): el conjunto por defecto es
+> `DEFAULT_USER_ATTRIBUTES = frozenset(AttributeType)` — **todos**, no un subconjunto de
+> autoservicio como se escribió arriba. La razón la impone §11: Freemium incluye 3
+> escaneos de Lybra y 2 píldoras de Aegis, así que una cuenta nueva necesita
+> `themis_create` y `aegis_create` desde el primer minuto; y §5.1 ya decía que Freemium y
+> Gold tienen el mismo llavero. Es seguro por construcción — cada endpoint filtra por
+> `user_id` y lo peligroso lo guarda `require_role`. La migración concede ese mismo
+> conjunto completo a los `role_user` existentes, para no dejar dos clases de cuenta
+> conviviendo para siempre.
 
 A partir de ahí el administrador puede **añadir y quitar de verdad**, y `ROLE_PERMISSIONS`
 se queda solo con lo que de verdad es estructural (`Role.ADMIN`).
@@ -777,8 +786,14 @@ precios, no una decisión comercial.
 corre con `CREATE_DATABASE=True` (destructivo, primer despliegue); un entorno ya
 desplegado se quedaría sin planes y todo el mundo sin suscripción.
 
-La misma migración crea una `Subscription` al plan por defecto para **todos los usuarios
-existentes**, o el día del despliegue nadie puede hacer nada.
+> **Corregido en la fase 1.** Aquí decía que la migración debía crear una `Subscription`
+> al plan por defecto para todos los usuarios existentes. No hace falta, y meterla era
+> peor: **la ausencia de fila significa "plan por defecto"**, exactamente igual que una
+> suscripción caducada. El camino de respaldo tiene que existir de todos modos (§12.3),
+> así que el backfill sería un segundo mecanismo para el mismo resultado — y obligaría a
+> acordarse de crear la fila en los tres caminos de alta (admin, público, invitación),
+> con un cuarto esperando a que alguien lo añada. `Subscription` solo tiene fila cuando
+> alguien ha comprado o se le ha asignado algo.
 
 ---
 
@@ -1047,8 +1062,10 @@ cobrado por transferencia.
   desincroniza en el primer borrado.
 - **Un usuario ≠ una organización.** El `unique` de `OrganizationMember.user_id` lo
   impone Postgres, no un `if` en Python.
-- **La migración tiene que dar suscripción a los usuarios existentes**, o el despliegue
-  deja a todo el mundo a cero.
+- **Sin fila en `Subscription` = plan por defecto.** No hay backfill ni hook en el alta, a
+  propósito (§11). Quien escriba un `JOIN` contra `Subscription` dando por hecho que todo
+  usuario tiene fila contará de menos; el `activate()` de la fase 6 hace *upsert* por
+  `user_id`, que es lo que ya tenía que hacer para ser idempotente.
 - **`CREATE_DATABASE=True` sigue siendo destructivo.** La semilla va en Alembic.
 - **Periodos en UTC naive**, primer día del mes, con `utcnow_naive()` como el resto del
   proyecto. Nada de zonas horarias por usuario en la v1.
