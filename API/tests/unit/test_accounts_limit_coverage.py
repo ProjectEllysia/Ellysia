@@ -25,17 +25,20 @@ from src.modules.accounts.services.limits import (
 pytestmark = pytest.mark.unit
 
 
-#: Claves que todavía no se exigen, y por qué. Vaciar esta lista es el objetivo.
-DEFERRED: dict[LimitKey, str] = {
-    LimitKey.ORGANIZATION_MEMBERS:
-        "Las organizaciones llegan en la fase 5; hoy nadie escribe la tabla.",
-}
+#: Claves que todavía no se exigen, y por qué. Vaciar esta lista es el objetivo,
+#: y desde la fase 5 está vacía: las quince pasan por caja.
+DEFERRED: dict[LimitKey, str] = {}
 
-FEATURES_DIR = Path(__file__).resolve().parents[2] / "src" / "modules" / "features"
+SRC_DIR = Path(__file__).resolve().parents[2] / "src" / "modules"
+
+#: Dónde puede vivir un ``consume()``. Las herramientas, y el propio módulo
+#: comercial — ``organization.members`` la cobra el alta de una organización,
+#: que no es una feature.
+CONSUMER_DIRS = (SRC_DIR / "features", SRC_DIR / "accounts" / "managers")
 
 
-def _keys_used_in_feature_managers() -> set[str]:
-    """Nombres de LimitKey que aparecen en el código de los módulos de features.
+def _keys_used_in_managers() -> set[str]:
+    """Nombres de LimitKey que aparecen en el código de los consumidores.
 
     Se lee el texto en vez de importar y reflexionar sobre los managers porque
     lo que se quiere comprobar es justo que *existe una línea* que la consume,
@@ -43,13 +46,14 @@ def _keys_used_in_feature_managers() -> set[str]:
     """
     pattern = re.compile(r"LimitKey\.([A-Z_]+)")
     found: set[str] = set()
-    for path in FEATURES_DIR.rglob("*.py"):
-        found.update(pattern.findall(path.read_text(encoding="utf-8")))
+    for directory in CONSUMER_DIRS:
+        for path in directory.rglob("*.py"):
+            found.update(pattern.findall(path.read_text(encoding="utf-8")))
     return found
 
 
 def test_every_limit_key_is_enforced_somewhere():
-    used = _keys_used_in_feature_managers()
+    used = _keys_used_in_managers()
     missing = {
         key for key in LimitKey
         if key.name not in used and key not in DEFERRED

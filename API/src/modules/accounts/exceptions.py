@@ -90,6 +90,128 @@ class QuotaExceededError(PlanLimitError):
         )
 
 
+class OrganizationNotFoundError(EntityNotFoundError, AccountsError):
+    """No existe la organización, o no es tuya.
+
+    El mismo error en los dos casos, con el criterio de ``assert_owned``: si
+    "no existe" y "no es tuya" dieran respuestas distintas, se podrían enumerar
+    organizaciones ajenas probando ids.
+    """
+
+    entity_label = "Organizacion"
+    id_field = "organization_id"
+    entity_is_feminine = True
+
+
+class OrganizationNotAllowedError(AccountsError):
+    """El plan del usuario no incluye el toggle de organización.
+
+    402 y no 403: esto se arregla pagando, que es justo la diferencia que el
+    cliente necesita para saber qué ofrecer.
+    """
+
+    default_code = ErrorCode.PLAN_FEATURE_NOT_INCLUDED
+    default_status_code = 402
+    expose_details = True
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="La suscripcion no tiene habilitada la gestion de organizaciones",
+            details={"limitKey": "organization.members", "requiresOrganizationAddon": True},
+            user_message=(
+                "Tu plan no incluye la gestion de una organizacion. "
+                "Puedes anyadirla desde la pagina de planes."
+            ),
+        )
+
+
+class OrganizationAlreadyExistsError(AccountsError):
+    """Un usuario es dueño de una organización como mucho."""
+
+    default_code = ErrorCode.ENTITY_ALREADY_EXISTS
+    default_status_code = 409
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="El usuario ya es duenyo de una organizacion",
+            user_message="Ya tienes una organizacion. Solo se puede tener una.",
+        )
+
+
+class AlreadyInOrganizationError(AccountsError):
+    """El usuario ya pertenece a una organización.
+
+    Un usuario pertenece a lo sumo a una, y lo impone un ``UNIQUE`` de la base
+    de datos; esto es solo el mensaje legible.
+    """
+
+    default_code = ErrorCode.CONSTRAINT_VIOLATION
+    default_status_code = 409
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="El usuario ya pertenece a una organizacion",
+            user_message=(
+                "Esta cuenta ya forma parte de una organizacion. "
+                "Tiene que salirse de ella antes de unirse a otra."
+            ),
+        )
+
+
+class NotInOrganizationError(AccountsError):
+    """La acción exige pertenecer a una organización y el usuario no está en ninguna."""
+
+    default_code = ErrorCode.ENTITY_NOT_FOUND
+    default_status_code = 404
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="El usuario no pertenece a ninguna organizacion",
+            user_message="No formas parte de ninguna organizacion.",
+        )
+
+
+class InvitationInvalidError(AccountsError):
+    """Invitación inexistente, ya respondida, revocada o caducada.
+
+    Los cuatro casos dan el mismo error a propósito, con el mismo criterio que
+    la verificación de correo: distinguirlos permitiría averiguar qué
+    invitaciones existieron y a qué organizaciones.
+    """
+
+    default_code = ErrorCode.ENTITY_NOT_FOUND
+    default_status_code = 400
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="Invitacion invalida, ya respondida o caducada",
+            user_message=(
+                "Esta invitacion no es valida o ha caducado. "
+                "Pide a quien te invito que te mande otra."
+            ),
+        )
+
+
+class CannotRemoveOwnerError(AccountsError):
+    """No se puede expulsar al dueño de su propia organización.
+
+    Ni él mismo puede salirse: la organización quedaría sin titular y sin nadie
+    que pague. Primero se disuelve o se traspasa.
+    """
+
+    default_code = ErrorCode.CONSTRAINT_VIOLATION
+    default_status_code = 409
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="El duenyo no puede salir de su propia organizacion",
+            user_message=(
+                "Eres el duenyo de esta organizacion. Para dejarla, "
+                "tendrias que disolverla o traspasarla antes."
+            ),
+        )
+
+
 class EmailNotVerifiedError(AccountsError):
     """La cuenta no ha confirmado su correo y la acción cuesta dinero.
 

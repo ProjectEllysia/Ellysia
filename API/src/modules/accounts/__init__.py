@@ -16,10 +16,10 @@ from .model import (
     Subscription,
     UsageCounter,
 )
-from .managers import PlanManager
+from .managers import OrganizationManager, PlanManager
 from .services import LimitKey, LimitPeriod, QuotaManager
 from .exceptions import PlanFeatureDisabledError, QuotaExceededError
-from .endpoints import plans_blp
+from .endpoints import organizations_blp, plans_blp
 
 __all__ = [
     "Plan",
@@ -30,6 +30,7 @@ __all__ = [
     "OrganizationInvitation",
     "UsageCounter",
     "PlanManager",
+    "OrganizationManager",
     "QuotaManager",
     "LimitKey",
     "LimitPeriod",

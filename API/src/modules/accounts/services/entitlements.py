@@ -24,8 +24,14 @@ from src.modules.shared import utcnow_naive
 
 from ..exceptions import DefaultPlanMissingError
 from ..model import Plan, Subscription
-from ..repositories import PlanLimitRepository, PlanRepository, SubscriptionRepository
-from .limits import PERIODS, SCOPE_HOLDER, LimitKey, LimitPeriod
+from ..repositories import (
+    OrganizationMemberRepository,
+    OrganizationRepository,
+    PlanLimitRepository,
+    PlanRepository,
+    SubscriptionRepository,
+)
+from .limits import PERIODS, SCOPE_HOLDER, SCOPE_MEMBER, LimitKey, LimitPeriod
 
 
 #: Estados que conceden derechos mientras el periodo siga abierto.
@@ -151,6 +157,57 @@ class Entitlement:
         return self.limit == 0
 
 
+def _limit_of(plan_id: int, key: LimitKey, scope: str) -> Optional[int]:
+    """Tope declarado por un plan para una clave y un ámbito.
+
+    Una fila que no existe se lee como ``0``: fallo cerrado, de modo que una
+    clave nueva que nadie se acordó de rellenar queda desactivada en vez de
+    regalada.
+    """
+    row = build_repository(PlanLimitRepository).get_one(plan_id, key.db_name, scope)
+    return row.value if row is not None else 0
+
+
+def _is_at_least(candidate: Optional[int], reference: Optional[int]) -> bool:
+    """``candidate >= reference`` con ``None`` valiendo "ilimitado"."""
+    if candidate is None:
+        return True
+    if reference is None:
+        return False
+    return candidate >= reference
+
+
+def resolve_organization_grant(
+    user_id: int,
+    key: LimitKey,
+    now: datetime,
+) -> Tuple[Optional[int], Optional[int]]:
+    """Derechos que le llegan a ``user_id`` por pertenecer a una organización.
+
+    Returns:
+        ``(tope, organization_id)``. ``(0, None)`` si no pertenece a ninguna, o
+        si la suscripción del dueño no está vigente o perdió el toggle — que es
+        justo lo que pasa cuando el dueño deja de pagar (§12.8): los miembros
+        conservan cuenta, datos y plan personal, y solo dejan de recibir lo
+        heredado.
+    """
+    membership = build_repository(OrganizationMemberRepository).get_by_user(user_id)
+    if membership is None:
+        return 0, None
+
+    organization = build_repository(OrganizationRepository).get_by_id(membership.organization_id)
+    if organization is None:
+        return 0, None
+
+    owner_subscription = build_repository(SubscriptionRepository).get_by_user(
+        organization.owner_user_id
+    )
+    if not is_effective(owner_subscription, now) or not owner_subscription.organization_enabled:
+        return 0, None
+
+    return _limit_of(owner_subscription.plan_id, key, SCOPE_MEMBER), organization.id
+
+
 def resolve_entitlement(
     user_id: int,
     key: LimitKey,
@@ -158,27 +215,45 @@ def resolve_entitlement(
 ) -> Entitlement:
     """Resuelve el tope de ``key`` para ``user_id`` y quién paga su consumo.
 
-    Una fila de ``PlanLimit`` que no existe se lee como ``0``: fallo cerrado, de
-    modo que una clave nueva que nadie se acordó de rellenar queda desactivada
-    en vez de regalada.
+    Dos fuentes que **nunca se anulan entre sí**: el plan personal y lo que le
+    llega por pertenecer a una organización. Gana el mayor de los dos, con
+    ``None`` (ilimitado) por encima de cualquier número.
 
-    En esta fase la única fuente es el plan personal, así que el titular del
-    contador es siempre el propio usuario. La fase 5 añade aquí el ``max()``
-    con los derechos derivados de la organización y, con ellos, la posibilidad
-    de que el titular sea la organización.
+    Entrar en una organización no cancela ni sustituye el plan personal: un
+    empleado sigue siendo Freemium *y además* tiene bóveda de verdad porque su
+    empresa paga Gold. Si se compra un Bronze, sube donde Bronze le dé más, y
+    al salir de la empresa se lo lleva intacto.
+
+    **Quién paga.** Paga quien concede el tope que gana. Si empatan paga la
+    organización, para no gastarle al empleado su cupo personal en algo que su
+    empresa ya cubre. Cuando paga la organización, el contador es el suyo — la
+    bolsa común que comparten todos sus miembros.
     """
     now = now or utcnow_naive()
-    plan, subscription = resolve_effective_plan(user_id, now)
-    effective = is_effective(subscription, now)
 
-    row = build_repository(PlanLimitRepository).get_one(plan.id, key.db_name, SCOPE_HOLDER)
+    plan, subscription = resolve_effective_plan(user_id, now)
+    personal_limit = _limit_of(plan.id, key, SCOPE_HOLDER)
+    personal_source = "personal" if is_effective(subscription, now) else "default"
+
+    organization_limit, organization_id = resolve_organization_grant(user_id, key, now)
+
+    if organization_id is not None and _is_at_least(organization_limit, personal_limit):
+        return Entitlement(
+            key=key,
+            limit=organization_limit,
+            period=PERIODS[key],
+            holder_kind="org",
+            holder_id=organization_id,
+            source="organization",
+            plan_code=plan.code,
+        )
 
     return Entitlement(
         key=key,
-        limit=row.value if row is not None else 0,
+        limit=personal_limit,
         period=PERIODS[key],
         holder_kind="user",
         holder_id=user_id,
-        source="personal" if effective else "default",
+        source=personal_source,
         plan_code=plan.code,
     )

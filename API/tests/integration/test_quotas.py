@@ -128,18 +128,24 @@ def test_stock_counts_the_real_table_so_deleting_frees_room(
     assert again.status_code == 201
 
 
-def test_stock_key_without_counter_is_a_programming_error(app, regular_user, set_plan_limits):
+def test_stock_key_without_counter_is_a_programming_error(
+    app, regular_user, set_plan_limits, monkeypatch
+):
     """Exigir una clave de existencias sin contador registrado no es culpa del
     usuario, y no debe salir como un 402 que le invite a pagar.
 
-    ``organization.members`` es la única que queda así: la tabla existe pero
-    nadie la escribe hasta la fase 5.
+    Hoy todas las claves tienen contador, así que se le quita uno a propósito:
+    lo que se prueba es la red de seguridad para quien añada una clave nueva y
+    se olvide del recuento.
     """
-    set_plan_limits({LimitKey.ORGANIZATION_MEMBERS: 1})
+    from src.modules.accounts.services import limits
+
+    monkeypatch.delitem(limits.STOCK_COUNTERS, LimitKey.HYGEIA_ASSETS)
+    set_plan_limits({LimitKey.HYGEIA_ASSETS: 1})
 
     with app.app_context():
         with pytest.raises(NotImplementedError):
-            QuotaManager().consume(regular_user.id, LimitKey.ORGANIZATION_MEMBERS)
+            QuotaManager().consume(regular_user.id, LimitKey.HYGEIA_ASSETS)
 
 
 # --------------------------------------------- las claves de la fase 3, por HTTP
@@ -360,16 +366,25 @@ def test_usage_reports_what_has_been_spent(
     assert entry["resetsAt"] is not None
 
 
-def test_usage_survives_keys_without_a_counter(
-    client, regular_user, auth_headers
-):
-    """Las claves de existencias que todavía no saben contarse llegan con
-    ``used: null``, que no es lo mismo que cero — y sobre todo, no tumban la
-    vista entera."""
+def test_usage_reports_every_stock_key(client, regular_user, auth_headers):
     body = client.get("/plans/me/usage", headers=auth_headers(regular_user)).get_json()
 
-    assert body["usage"]["organization.members"]["used"] is None
-    assert body["usage"]["hygeia.assets"]["used"] == 0
+    for key in ("hygeia.assets", "acheron.vaults", "acheron.items",
+                "organization.members", "themis.scheduled"):
+        assert body["usage"][key]["used"] == 0, key
+
+
+def test_usage_survives_a_key_it_cannot_count(
+    client, regular_user, auth_headers, monkeypatch
+):
+    """Una clave que no sabe contarse llega con ``used: null`` —que no es lo
+    mismo que cero— y, sobre todo, no tumba la vista entera."""
+    from src.modules.accounts.services import limits
+
+    monkeypatch.delitem(limits.STOCK_COUNTERS, LimitKey.HYGEIA_ASSETS)
+    body = client.get("/plans/me/usage", headers=auth_headers(regular_user)).get_json()
+
+    assert body["usage"]["hygeia.assets"]["used"] is None
     assert body["usage"]["acheron.vaults"]["used"] == 0
 
 

@@ -523,7 +523,55 @@ Raises:
         if is_actor_admin:
             return not is_target_root and not is_target_admin
 
+        # El dueño de una organización gestiona a los suyos. No es un rol —
+        # es tener una fila en Organization — y su alcance es exactamente esa
+        # organización: nunca alguien de fuera, nunca un admin que resulte ser
+        # miembro suyo.
+        if self._owns_the_organization_of(actor_id, target_id):
+            return not is_target_root and not is_target_admin
+
         return False
+
+    def can_administer_user(self, actor_id: int, target_id: int) -> bool:
+        """Como ``can_manage_user``, pero para **escrituras**.
+
+        La diferencia es una y es la que importa: aquí nadie se gestiona a sí
+        mismo. ``can_manage_user`` empieza con ``actor_id == target_id → True``,
+        que está bien para leer tus propios atributos y sería una escalada de
+        privilegios para escribirlos — cualquiera podría concederse
+        ``themis_create``. Mientras los endpoints llevaban
+        ``require_role(Role.ADMIN)`` el caso no se alcanzaba; al abrirlos al
+        dueño de una organización, esta función es la única barrera.
+
+        Root sí puede sobre sí mismo: ya bypasea todas las comprobaciones ABAC,
+        así que negárselo no protegería de nada y solo confundiría.
+        """
+        if actor_id == target_id:
+            actor = self.get_user_by_id(actor_id)
+            return actor is not None and actor.role == "role_root"
+        return self.can_manage_user(actor_id, target_id)
+
+    @staticmethod
+    def _owns_the_organization_of(actor_id: int, target_id: int) -> bool:
+        """¿Es ``actor_id`` el dueño de la organización a la que pertenece
+        ``target_id``?
+
+        Import diferido: ``accounts`` importa ``users``, así que al nivel de
+        módulo esto cerraría el ciclo.
+        """
+        from src.modules.accounts.repositories import (
+            OrganizationMemberRepository,
+            OrganizationRepository,
+        )
+
+        membership = build_repository(OrganizationMemberRepository).get_by_user(target_id)
+        if membership is None:
+            return False
+
+        organization = build_repository(OrganizationRepository).get_by_id(
+            membership.organization_id
+        )
+        return organization is not None and organization.owner_user_id == actor_id
 
     def can_create_admin(self, actor_id: int) -> bool:
         """

@@ -16,7 +16,7 @@ Example:
 'User(id=None, username='admin', role='role_user')'
 """
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from src.modules.shared import Base, utcnow_naive
@@ -182,6 +182,12 @@ class User(Base):
     email_verified_at             = Column(DateTime,     nullable=True)
     email_verification_hash       = Column(String(128),  nullable=True)
     email_verification_expires_at = Column(DateTime,     nullable=True)
+
+    # La cuenta nació con una contraseña que el usuario no eligió (alta por
+    # invitación a una organización) y tiene que cambiarla. Va aparte de
+    # password_changed_at porque ese NULL ya significa otra cosa: "nunca se
+    # cambió", que también es cierto de las cuentas antiguas.
+    must_change_password = Column(Boolean, nullable=False, default=False)
 
     scans          = relationship("Scan",         back_populates="user", cascade="all, delete-orphan")
     tokens         = relationship("AccessToken",  back_populates="user", cascade="all, delete-orphan")

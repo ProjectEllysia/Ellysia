@@ -5,7 +5,7 @@ Los nombres llevan prefijo ``Account``/``Plan`` para no chocar en el
 ``components/schemas`` del OpenAPI con los de otros módulos.
 """
 
-from marshmallow import Schema, fields
+from marshmallow import Schema, fields, validate
 
 from src.modules.shared.schemas import UTCDateTime
 
@@ -67,6 +67,40 @@ class PlanSummarySchema(Schema):
     isDefault = fields.Boolean()
 
 
+class OrganizationCreateRequestSchema(Schema):
+    name = fields.String(required=True, validate=validate.Length(min=2, max=128))
+
+
+class OrganizationSchema(Schema):
+    id = fields.Integer()
+    name = fields.String()
+    slug = fields.String()
+    ownerUserId = fields.Integer()
+    memberCount = fields.Integer()
+    createdAt = UTCDateTime()
+    myRole = fields.String()
+    isOwner = fields.Boolean()
+
+
+class OrganizationMemberSchema(Schema):
+    """Identidad y nada más.
+
+    Ni escaneos, ni análisis, ni bóvedas: el dueño de una organización no ve
+    los datos de su gente, y eso se vende como garantía.
+    """
+
+    userId = fields.Integer()
+    username = fields.String()
+    email = fields.String()
+    fullName = fields.String()
+    role = fields.String()
+    joinedAt = UTCDateTime()
+
+
+class OrganizationMemberListSchema(Schema):
+    members = fields.List(fields.Nested(OrganizationMemberSchema))
+
+
 class UsageEntrySchema(Schema):
     """Consumo de una clave.
 
@@ -104,3 +138,30 @@ class EffectivePlanResponseSchema(Schema):
     graceUntil = UTCDateTime(allow_none=True)
     organizationEnabled = fields.Boolean()
     limits = fields.Dict(keys=fields.String(), values=fields.Nested(PlanLimitValueSchema))
+
+
+class InvitationCreateRequestSchema(Schema):
+    email = fields.Email(required=True, validate=validate.Length(max=128))
+
+
+class InvitationSchema(Schema):
+    id = fields.Integer()
+    email = fields.String()
+    status = fields.String()
+    createdAt = UTCDateTime()
+    expiresAt = UTCDateTime()
+    acceptedAt = UTCDateTime(allow_none=True)
+    createdUserId = fields.Integer(allow_none=True)
+
+
+class InvitationListSchema(Schema):
+    invitations = fields.List(fields.Nested(InvitationSchema))
+
+
+class InvitationAcceptRequestSchema(Schema):
+    token = fields.String(required=True)
+
+
+class InvitationAcceptResponseSchema(Schema):
+    message = fields.String()
+    organizationId = fields.Integer()

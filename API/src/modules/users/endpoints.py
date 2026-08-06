@@ -473,7 +473,6 @@ def list_all_users():
 @users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @users_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
 @require_oauth_token
-@require_role(Role.ADMIN)
 @handle_exceptions(default_exception=DatabaseError, logger=logger)
 def list_user_attributes(target_user_id: int):
     """Listar los atributos de un usuario especifico"""
@@ -502,13 +501,12 @@ def list_user_attributes(target_user_id: int):
 @users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @users_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
 @require_oauth_token
-@require_role(Role.ADMIN)
 @handle_exceptions(default_exception=DatabaseError, logger=logger)
 def add_user_attribute(data: dict[str, Any], target_user_id: int):
     """Anadir atributos a un usuario"""
     current_user_id = get_current_user().id
 
-    if not USER_MANAGER.can_manage_user(current_user_id, target_user_id):
+    if not USER_MANAGER.can_administer_user(current_user_id, target_user_id):
         logger.warning(f"Usuario {current_user_id} intento anadir atributos a {target_user_id} sin permiso")
         raise EllysiaException(
             "No tienes permiso para gestionar atributos de este usuario",
@@ -531,13 +529,12 @@ def add_user_attribute(data: dict[str, Any], target_user_id: int):
 @users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @users_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
 @require_oauth_token
-@require_role(Role.ADMIN)
 @handle_exceptions(default_exception=DatabaseError, logger=logger)
 def remove_user_attribute(data: dict[str, Any], target_user_id: int):
     """Eliminar atributos de un usuario"""
     current_user_id = get_current_user().id
 
-    if not USER_MANAGER.can_manage_user(current_user_id, target_user_id):
+    if not USER_MANAGER.can_administer_user(current_user_id, target_user_id):
         logger.warning(
             f"Usuario {current_user_id} intento eliminar atributos de {target_user_id} sin permiso"
         )

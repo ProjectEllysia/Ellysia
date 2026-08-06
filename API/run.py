@@ -47,7 +47,7 @@ from src.modules.users      import (
     oauth_blp,
     users_blp
 )
-from src.modules.accounts   import plans_blp
+from src.modules.accounts   import organizations_blp, plans_blp
 from src.modules.users.services.secrets import hash_password as _hash_password
 from src.modules.features.themis   import themis_blp
 from src.modules.features.acheron    import acheron_blp
@@ -211,6 +211,7 @@ def _register_blueprints(app: Flask) -> None:
     flask_smorest_api.register_blueprint(oauth_blp,     url_prefix="/oauth")
     flask_smorest_api.register_blueprint(users_blp,     url_prefix="/users")
     flask_smorest_api.register_blueprint(plans_blp,     url_prefix="/plans")
+    flask_smorest_api.register_blueprint(organizations_blp, url_prefix="/organizations")
     flask_smorest_api.register_blueprint(themis_blp,    url_prefix="/themis")
     flask_smorest_api.register_blueprint(acheron_blp,   url_prefix="/acheron")
     flask_smorest_api.register_blueprint(aegis_blp,     url_prefix="/aegis")

@@ -26,7 +26,8 @@
     },
     "registration": {
       "enabled": true,
-      "verificationTtlHours": 48
+      "verificationTtlHours": 48,
+      "invitationTtlHours": 168
     }
   },
   "infrastructure": {

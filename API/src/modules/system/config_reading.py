@@ -993,6 +993,9 @@ class RegistrationConfig:
     verification_ttl_hours: int = 48
     """Vigencia del enlace de verificación de correo."""
 
+    invitation_ttl_hours: int = 168
+    """Vigencia del enlace de invitación a una organización (una semana)."""
+
 
 def registration_config() -> RegistrationConfig:
     return load_block(RegistrationConfig)

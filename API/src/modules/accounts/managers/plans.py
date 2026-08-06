@@ -13,11 +13,11 @@ from typing import Optional
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import utcnow_naive
 
-from .model import Plan
-from .repositories import PlanLimitRepository, PlanRepository
-from .services.entitlements import is_effective, resolve_effective_plan
-from .services.limits import SCOPE_HOLDER, SCOPE_MEMBER, LimitKey
-from .services.quotas import QuotaManager
+from ..model import Plan
+from ..repositories import PlanLimitRepository, PlanRepository
+from ..services.entitlements import is_effective, resolve_effective_plan
+from ..services.limits import SCOPE_HOLDER, SCOPE_MEMBER, LimitKey
+from ..services.quotas import QuotaManager
 
 logger = logging.getLogger(__name__)
 

@@ -464,13 +464,17 @@ def seeded_plans(app, _unlimited_default_plan):
             ("iris.analyses",           "holder",  100, "month"),
             ("acheron.vaults",          "holder",    3, "stock"),
             ("themis.thirdparty.scans", "holder",   10, "month"),
+            ("organization.members",    "holder",    2, "stock"),
             ("acheron.vaults",          "member",    3, "stock"),
+            ("iris.analyses",           "member",   50, "month"),
         ],
         "gold": [
             ("iris.analyses",           "holder", None, "month"),
             ("acheron.vaults",          "holder", None, "stock"),
             ("themis.thirdparty.scans", "holder",  200, "month"),
+            ("organization.members",    "holder",    5, "stock"),
             ("acheron.vaults",          "member", None, "stock"),
+            ("iris.analyses",           "member",  200, "month"),
         ],
         "custom": [
             ("iris.analyses",           "holder", None, "month"),

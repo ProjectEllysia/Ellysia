@@ -32,7 +32,7 @@ from sqlalchemy import and_, insert, update
 from sqlalchemy.exc import IntegrityError
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.infrastructure.session import get_db_session
+from src.modules.infrastructure.session import build_repository, get_db_session
 
 from ..exceptions import EmailNotVerifiedError, PlanFeatureDisabledError, QuotaExceededError
 from ..model import UsageCounter
@@ -280,6 +280,18 @@ class QuotaManager:
                 f"registrado en STOCK_COUNTERS. Anyadelo antes de exigirla."
             )
 
-        # La lista tendrá más de un elemento cuando la bolsa sea de una
-        # organización (fase 5).
-        return counter(get_db_session(), [entitlement.holder_id])
+        return counter(get_db_session(), QuotaManager._holder_user_ids(entitlement))
+
+    @staticmethod
+    def _holder_user_ids(entitlement: Entitlement) -> list[int]:
+        """Usuarios cuyas existencias suman para este titular.
+
+        Cuando paga la organización, la bolsa es común: cuenta lo que tienen
+        entre todos sus miembros. Cuando paga el usuario, es solo él.
+        """
+        if entitlement.holder_kind != "org":
+            return [entitlement.holder_id]
+
+        from ..repositories import OrganizationMemberRepository
+
+        return build_repository(OrganizationMemberRepository).user_ids_of(entitlement.holder_id)

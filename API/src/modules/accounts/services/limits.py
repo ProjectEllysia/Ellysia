@@ -178,6 +178,42 @@ def _count_acheron_items(session, user_ids: list[int]) -> int:
     )
 
 
+def _count_organization_members(session, user_ids: list[int]) -> int:
+    """Miembros de la organización más sus invitaciones sin responder.
+
+    Las pendientes cuentan a propósito: si no, se invitaría a 300 personas con
+    un plan de 20 y el tope no serviría de nada — bastaría con que fueran
+    aceptando.
+
+    ``user_ids`` llega con el dueño, que es de quien se resuelve el tope; la
+    organización se busca por él.
+    """
+    from ..model import Organization, OrganizationInvitation, OrganizationMember
+
+    organization = (
+        session.query(Organization)
+        .filter(Organization.owner_user_id.in_(user_ids))
+        .one_or_none()
+    )
+    if organization is None:
+        return 0
+
+    members = (
+        session.query(OrganizationMember)
+        .filter(OrganizationMember.organization_id == organization.id)
+        .count()
+    )
+    pending = (
+        session.query(OrganizationInvitation)
+        .filter(
+            OrganizationInvitation.organization_id == organization.id,
+            OrganizationInvitation.status == "pending",
+        )
+        .count()
+    )
+    return members + pending
+
+
 #: Cómo se cuenta lo ya existente para cada clave de tipo ``stock``.
 #:
 #: Las claves de existencias NO llevan contador propio: se cuenta la tabla real.
@@ -188,8 +224,6 @@ def _count_acheron_items(session, user_ids: list[int]) -> int:
 #: organización suma la de todos sus miembros (fase 5). Hoy la lista siempre
 #: tiene un elemento.
 #:
-#: Falta ``ORGANIZATION_MEMBERS`` a propósito: la tabla existe pero nadie la
-#: escribe hasta la fase 5, y un contador sin nada que contar es código muerto.
 #: Pedir una clave que no esté aquí es un error de programación, no del usuario,
 #: y ``QuotaManager`` lo dice como tal en vez de responder un 402.
 STOCK_COUNTERS: dict[LimitKey, Callable[..., int]] = {
@@ -199,6 +233,7 @@ STOCK_COUNTERS: dict[LimitKey, Callable[..., int]] = {
     LimitKey.IRIS_MAILBOX_CONNECTIONS: _count_iris_mailbox_connections,
     LimitKey.ACHERON_VAULTS:           _count_acheron_vaults,
     LimitKey.ACHERON_ITEMS:            _count_acheron_items,
+    LimitKey.ORGANIZATION_MEMBERS:     _count_organization_members,
 }
 
 
