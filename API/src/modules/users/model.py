@@ -172,6 +172,17 @@ class User(Base):
     # cambio de contraseña (ver require_oauth_token y el grant refresh_token).
     password_changed_at = Column(DateTime,  nullable=True)
 
+    # Verificación del correo (alta pública). Tres columnas y no una tabla
+    # aparte porque solo hay un token vivo por usuario y no interesa el
+    # histórico. NULL en email_verified_at = sin verificar: la cuenta entra y
+    # navega, pero QuotaManager no le deja consumir nada que cueste dinero.
+    # Del hash se guarda un SHA-256 y no un Argon2 como en los códigos de
+    # recuperación: el token son 32 bytes aleatorios, así que no hay nada que
+    # adivinar a fuerza bruta y un KDF lento solo añadiría latencia.
+    email_verified_at             = Column(DateTime,     nullable=True)
+    email_verification_hash       = Column(String(128),  nullable=True)
+    email_verification_expires_at = Column(DateTime,     nullable=True)
+
     scans          = relationship("Scan",         back_populates="user", cascade="all, delete-orphan")
     tokens         = relationship("AccessToken",  back_populates="user", cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")

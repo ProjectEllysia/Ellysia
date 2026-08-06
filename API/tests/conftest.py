@@ -102,6 +102,7 @@ from src.modules.users.repositories import (  # noqa: E402
 from src.modules.users.managers import OAuthTokenManager  # noqa: E402
 from src.modules.users.services import generate_salt, hash_password, hash_password_with_salt  # noqa: E402
 from src.modules.users.services.permissions import DEFAULT_USER_ATTRIBUTES  # noqa: E402
+from src.modules.shared import utcnow_naive  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +286,8 @@ def make_user(app):
     """
     counter = {"n": 0}
 
-    def _make(role: str = "role_user", attributes=None, password: str = "Secret123!", legacy_hash: bool = False):
+    def _make(role: str = "role_user", attributes=None, password: str = "Secret123!",
+              legacy_hash: bool = False, unverified: bool = False):
         counter["n"] += 1
         suffix = counter["n"]
         username = f"user{suffix}"
@@ -307,6 +309,10 @@ def make_user(app):
                 password_hash=password_hash,
                 password_salt=salt,
                 role=role,
+                # Verificado salvo que el test pida lo contrario, igual que un
+                # alta hecha por un administrador: sin esto, el motor de cuotas
+                # cortaría a todos los usuarios de la suite.
+                email_verified_at=None if unverified else utcnow_naive(),
             )
             granted = (
                 [attribute.db_name for attribute in DEFAULT_USER_ATTRIBUTES]

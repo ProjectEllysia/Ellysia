@@ -34,7 +34,7 @@ from sqlalchemy.exc import IntegrityError
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import get_db_session
 
-from ..exceptions import PlanFeatureDisabledError, QuotaExceededError
+from ..exceptions import EmailNotVerifiedError, PlanFeatureDisabledError, QuotaExceededError
 from ..model import UsageCounter
 from .entitlements import Entitlement, resolve_entitlement
 from .limits import (
@@ -104,9 +104,12 @@ class QuotaManager:
         """Apunta ``amount`` usos de ``key``, o corta.
 
         Raises:
+            EmailNotVerifiedError: la cuenta no ha confirmado su correo (403).
             PlanFeatureDisabledError: el plan no incluye la característica (402).
             QuotaExceededError: incluida, pero sin cupo (402).
         """
+        self._assert_email_verified(user_id)
+
         entitlement = resolve_entitlement(user_id, key)
 
         if entitlement.is_disabled:
@@ -122,6 +125,30 @@ class QuotaManager:
             self._consume_counter(entitlement, amount)
 
     # ------------------------------------------------------------- internos
+
+    @staticmethod
+    def _assert_email_verified(user_id: int) -> None:
+        """Sin correo confirmado no se consume nada que cueste dinero.
+
+        Una comprobación, en el único sitio por el que pasan todas las acciones
+        medidas — el mismo motivo por el que ``consume()`` vive en la costura
+        del manager. Poner el guard en cada endpoint sería recordarlo catorce
+        veces y olvidarlo en la quince.
+
+        La cuenta sin verificar **entra y navega**: puede mirar sus datos, su
+        plan y la documentación. Lo que no puede es gastar dinero nuestro, que
+        es lo que evita que el plan gratuito sea un grifo abierto a cuentas
+        desechables.
+
+        Import diferido: ``users`` acaba importando ``features``, y ``features``
+        importa este módulo. Al nivel de módulo sería un ciclo.
+        """
+        from src.modules.users.model import User
+
+        user = get_db_session().get(User, user_id)
+        if user is not None and user.email_verified_at is None:
+            logger.info(f"Corte por correo sin verificar | user={user_id}")
+            raise EmailNotVerifiedError()
 
     def _consume_stock(self, entitlement: Entitlement, amount: int) -> None:
         """Existencias: cuenta la tabla real y compara.

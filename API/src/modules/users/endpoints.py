@@ -11,7 +11,7 @@ from src.modules.shared._exceptions import (
     IllegalStateError,
     EllysiaException,
 )
-from src.modules.shared.schemas import ErrorSchema
+from src.modules.shared.schemas import ErrorSchema, SuccessMessageSchema
 from src.modules.shared import utcnow_naive
 
 from .services import Role, require_oauth_token, require_role
@@ -22,6 +22,7 @@ from .exceptions import (
     PasswordChangedError,
     MfaChallengeInvalidError,
     InvalidMfaCodeError,
+    RegistrationClosedError,
 )
 from .model import User
 from .schemas import (
@@ -46,6 +47,9 @@ from .schemas import (
     MfaTotpConfirmResponseSchema,
     MfaDisableRequestSchema,
     MfaStatusResponseSchema,
+    RegisterRequestSchema,
+    RegisterResponseSchema,
+    VerifyEmailRequestSchema,
 )
 
 
@@ -374,6 +378,81 @@ def sign_up_user(data: dict[str, Any]):
         "email": email,
         "role": requested_role,
     }
+
+
+# =========================================================================
+# ALTA PUBLICA Y VERIFICACION DE CORREO
+# =========================================================================
+
+
+@users_blp.post("/register")
+@users_blp.arguments(RegisterRequestSchema)
+@users_blp.response(201, RegisterResponseSchema, description="Account created, verification email sent")
+@users_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@users_blp.alt_response(403, schema=ErrorSchema, description="Public registration disabled")
+@users_blp.alt_response(409, schema=ErrorSchema, description="Username or email already taken")
+@limiter.limit("5 per hour; 20 per day")
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def register_user(data: dict[str, Any]):
+    """Crear una cuenta desde la web, sin intervencion de un administrador"""
+    if not CR.registration_config().enabled:
+        raise RegistrationClosedError()
+
+    # Rol forzado a role_user y correo sin verificar: son las dos diferencias
+    # con el alta de un administrador, y las dos son deliberadas. Los atributos
+    # ABAC por defecto los pone sign_in_user, iguales para todo el mundo.
+    user = USER_MANAGER.sign_in_user(
+        username=data["username"],
+        email=data["email"],
+        first_name=data["first_name"],
+        last_name=data["last_name"],
+        password=data["password"],
+        email_verified=False,
+    )
+
+    # No se crea fila en Subscription: su ausencia ya significa "plan por
+    # defecto" (ver accounts/services/entitlements.py).
+    USER_MANAGER.issue_email_verification(user.id)
+
+    logger.info(f"Alta publica: {user.username} (ID: {user.id})")
+    return {
+        "message": "Cuenta creada. Te hemos enviado un correo para confirmarla.",
+        "userId": user.id,
+        "username": user.username,
+        "email": user.email,
+        "emailVerified": False,
+    }
+
+
+@users_blp.post("/verify-email")
+@users_blp.arguments(VerifyEmailRequestSchema)
+@users_blp.response(200, SuccessMessageSchema, description="Email verified")
+@users_blp.alt_response(400, schema=ErrorSchema, description="Invalid or expired token")
+@limiter.limit("20 per hour")
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def verify_email(data: dict[str, Any]):
+    """Confirmar una direccion de correo con el token del enlace
+
+    Publico a proposito: el token es la unica identidad, igual que en el quiz
+    de Aegis. Quien pulsa el enlace no tiene por que tener la sesion abierta,
+    ni siquiera en el mismo dispositivo.
+    """
+    user = USER_MANAGER.verify_email(data["token"])
+    return {"message": f"Correo confirmado. Ya puedes usar Ellysia, {user.first_name}."}
+
+
+@users_blp.post("/verify-email/resend")
+@users_blp.response(200, SuccessMessageSchema, description="Verification email sent again")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@users_blp.alt_response(409, schema=ErrorSchema, description="Email already verified")
+@limiter.limit("3 per hour")
+@require_oauth_token
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def resend_email_verification():
+    """Pedir un nuevo enlace de confirmacion. Invalida el anterior."""
+    user = get_current_user()
+    USER_MANAGER.issue_email_verification(user.id)
+    return {"message": "Te hemos enviado un correo de confirmacion."}
 
 
 @users_blp.get("")

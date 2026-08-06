@@ -90,6 +90,28 @@ class QuotaExceededError(PlanLimitError):
         )
 
 
+class EmailNotVerifiedError(AccountsError):
+    """La cuenta no ha confirmado su correo y la acción cuesta dinero.
+
+    Es un **403**, no un 402: no se arregla pagando, se arregla pulsando el
+    enlace del correo. Vive aquí y no en ``users`` porque quien la lanza es el
+    motor de cuotas — importar ``users.exceptions`` desde aquí cerraría un
+    ciclo de imports.
+    """
+
+    default_code = ErrorCode.EMAIL_NOT_VERIFIED
+    default_status_code = 403
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="La cuenta no ha verificado su correo",
+            user_message=(
+                "Confirma tu correo electronico para poder usar esta funcion. "
+                "Puedes pedir un enlace nuevo desde tu perfil."
+            ),
+        )
+
+
 class DefaultPlanMissingError(AccountsError):
     """No hay ningún plan marcado como ``is_default``.
 

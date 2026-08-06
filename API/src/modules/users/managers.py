@@ -29,10 +29,13 @@ import jwt
 import src.modules.system.config_reading as CR
 from src.modules.users.exceptions import (
     DatabaseError,
+    EmailAlreadyVerifiedError,
     ExistingUserError,
+    InvalidVerificationTokenError,
     PermissionsError,
     ProfileUpdateError,
     UserBindingError,
+    UserNotFoundError,
     MfaAlreadyEnabledError,
     MfaNotEnabledError,
     InvalidMfaCodeError,
@@ -40,6 +43,7 @@ from src.modules.users.exceptions import (
 from src.modules.infrastructure import UnitOfWork
 from src.modules.shared import utcnow_naive
 from src.modules.infrastructure.session import build_repository
+from src.modules.tools.herald import EmailMessage, build_mailer, render_email
 
 from .model import (
     AccessToken,
@@ -62,6 +66,8 @@ from .services import (
     totp_provisioning_uri,
     verify_totp_code,
     generate_recovery_codes,
+    generate_opaque_token,
+    hash_opaque_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -163,6 +169,7 @@ class UserManager:
         password:   str,
         role:        Optional[str] = None,
         actor_id:   Optional[int] = None,
+        email_verified: bool = True,
     ) -> User:
         """
         Register a new user.
@@ -179,6 +186,10 @@ class UserManager:
             role:       Optional role to assign: "role_user" (default), "role_admin".
                         Requires actor_id with appropriate permissions.
             actor_id:   ID of user creating this account. Required if role is specified.
+            email_verified: Si la dirección se da por buena sin confirmarla. True
+                        por defecto porque de un alta hecha por un administrador
+                        responde quien la hace. El alta pública pasa False: ahí
+                        nadie ha comprobado que el correo exista.
 
         Returns:
             The newly created User instance (credential fields excluded
@@ -232,6 +243,7 @@ Raises:
                     password_hash = hash_password(password),
                     password_salt = "",
                     role          = assigned_role,
+                    email_verified_at = utcnow_naive() if email_verified else None,
                 )
                 repo.save(new_user)
 
@@ -254,6 +266,91 @@ Raises:
         except Exception as e:
             logger.error(f"Error registrando usuario '{username}': {e}")
             raise DatabaseError("Error con credenciales. Revísalas e inténtalo de nuevo.")
+
+    # =========================================================================
+    # VERIFICACIÓN DE CORREO
+    # =========================================================================
+
+    def issue_email_verification(self, user_id: int) -> str:
+        """Emite un token de verificación y lo manda por correo.
+
+        Del token se guarda solo el hash; el que viaja en el enlace no vuelve a
+        estar disponible. Emitir uno nuevo invalida el anterior — el usuario
+        que pide un reenvío porque "no le llegó" no debe quedarse con dos
+        enlaces vivos.
+
+        El envío no es crítico: si el relé de correo falla, el alta sigue en
+        pie y el usuario puede pedir otro. Tumbar el registro porque el SMTP
+        está caído sería peor que dejar una cuenta pendiente de confirmar.
+
+        Returns:
+            El token en claro, para poder construir el enlace.
+        """
+        token = generate_opaque_token()
+        ttl_hours = CR.registration_config().verification_ttl_hours
+
+        with UnitOfWork() as uow:
+            repo = UserRepository(uow)
+            user = repo.get_by_id(user_id)
+            if user is None:
+                raise UserNotFoundError(user_id)
+            if user.email_verified_at is not None:
+                raise EmailAlreadyVerifiedError()
+
+            user.email_verification_hash = hash_opaque_token(token)
+            user.email_verification_expires_at = utcnow_naive() + timedelta(hours=ttl_hours)
+            repo.update(user)
+            recipient, name = user.email, user.first_name
+
+        self._send_verification_email(recipient, name, token, ttl_hours)
+        return token
+
+    def verify_email(self, token: str) -> User:
+        """Consume un token de verificación y marca el correo como confirmado.
+
+        Un token solo vale una vez: al consumirlo se borran hash y caducidad.
+
+        Raises:
+            InvalidVerificationTokenError: si no existe, ya se usó o caducó.
+                Los tres casos comparten error para no revelar cuáles
+                existieron.
+        """
+        with UnitOfWork() as uow:
+            repo = UserRepository(uow)
+            user = repo.get_by_verification_hash(hash_opaque_token(token))
+
+            if user is None or user.email_verification_expires_at is None:
+                raise InvalidVerificationTokenError()
+            if utcnow_naive() >= user.email_verification_expires_at:
+                raise InvalidVerificationTokenError()
+
+            user.email_verified_at = utcnow_naive()
+            user.email_verification_hash = None
+            user.email_verification_expires_at = None
+            repo.update(user)
+            logger.info(f"Correo verificado para el usuario {user.id}")
+            return user
+
+    @staticmethod
+    def _send_verification_email(recipient: str, name: str, token: str, ttl_hours: int) -> None:
+        """Manda el correo de confirmación. Los fallos se registran, no se propagan."""
+        verify_url = f"{CR.general_config().public_url}/verificar?token={token}"
+        try:
+            html, text = render_email(
+                "email_verification",
+                recipient_name=name,
+                verify_url=verify_url,
+                ttl_hours=ttl_hours,
+            )
+            build_mailer("accounts").send(EmailMessage(
+                to=recipient,
+                to_name=name,
+                subject="Confirma tu correo en Ellysia",
+                html_body=html,
+                text_body=text,
+            ))
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error(f"No se pudo enviar el correo de verificacion a {recipient}: {exc}")
 
     # =========================================================================
     # QUERIES

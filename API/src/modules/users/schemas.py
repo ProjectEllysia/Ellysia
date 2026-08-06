@@ -52,6 +52,29 @@ class SignUpResponseSchema(Schema):
     role = fields.String()
 
 
+class RegisterRequestSchema(Schema):
+    """Alta pública. Sin ``role``: siempre role_user, y no es negociable —
+    aceptarlo del cliente sería regalar el panel de administración."""
+
+    username = fields.String(required=True, validate=validate.Length(min=3, max=64))
+    email = fields.Email(required=True, validate=validate.Length(max=128))
+    first_name = fields.String(required=True, validate=validate.Length(min=1, max=64))
+    last_name = fields.String(required=True, validate=validate.Length(min=1, max=64))
+    password = fields.String(required=True, validate=validate.Length(min=8, max=256))
+
+
+class RegisterResponseSchema(Schema):
+    message = fields.String()
+    userId = fields.Integer()
+    username = fields.String()
+    email = fields.String()
+    emailVerified = fields.Boolean()
+
+
+class VerifyEmailRequestSchema(Schema):
+    token = fields.String(required=True)
+
+
 class CheckCredentialsRequestSchema(Schema):
     username = fields.String(required=True)
     password = fields.String(required=True)

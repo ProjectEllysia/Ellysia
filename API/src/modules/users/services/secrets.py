@@ -101,3 +101,36 @@ def encrypt_totp_secret(secret: str) -> str:
 def decrypt_totp_secret(token: str) -> str:
     """Decrypt a TOTP secret previously produced by encrypt_totp_secret()."""
     return decrypt_at_rest(token, purpose="mfa")
+
+
+# =========================================================================
+# TOKENS OPACOS DE UN SOLO USO (verificación de correo, invitaciones)
+# =========================================================================
+
+def generate_opaque_token() -> str:
+    """Token aleatorio para enlaces de un solo uso.
+
+    32 bytes de ``secrets.token_urlsafe`` — el mismo criterio que la clave de
+    agente de Hygeia o el token del quiz de Aegis: entropía suficiente para que
+    el token sea, por sí solo, la identidad de quien pulsa el enlace.
+    """
+    import secrets as _secrets
+
+    return _secrets.token_urlsafe(32)
+
+
+def hash_opaque_token(token: str) -> str:
+    """SHA-256 del token, que es lo único que se guarda.
+
+    A diferencia de las contraseñas y de los códigos de recuperación de MFA,
+    aquí NO se usa Argon2: un KDF lento existe para encarecer la fuerza bruta
+    sobre secretos que un humano podría adivinar, y esto son 256 bits
+    aleatorios. Lo que sí importa es no guardar el token en claro, para que una
+    lectura de la base de datos no permita verificar cuentas ajenas.
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def verify_opaque_token(token: str, stored_hash: str) -> bool:
+    """Comparación en tiempo constante del token contra su hash guardado."""
+    return hmac.compare_digest(hash_opaque_token(token), stored_hash or "")
