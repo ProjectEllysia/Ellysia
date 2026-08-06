@@ -4,6 +4,7 @@ import logging
 from dataclasses import replace
 from typing import List, Optional
 import src.modules.system.config_reading as CR
+from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.system.taskqueue import ITaskQueue, job_context
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
@@ -147,6 +148,13 @@ class LybraEngineManager(ScanManager):
         Returns:
             Primary key of the created LybraScan record.
         """
+        # La cuota se consume aquí y no en el endpoint: por este método pasan
+        # también el flujo programado (scheduling.py llama a run_scan
+        # directamente) y la puerta de Hygeia. Es la misma lección que dejó el
+        # arreglo SSRF de los escáneres — lo que vive solo en el endpoint HTTP
+        # se lo saltan los otros caminos.
+        QuotaManager().consume(user_id, LimitKey.THEMIS_LYBRA_SCANS)
+
         source = ServiceSource.build_for_args(source_scan_id, services, discover_ports)
         scan_target = source.scan_target(user_id, target)
 

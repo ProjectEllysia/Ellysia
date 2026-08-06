@@ -67,6 +67,25 @@ class PlanSummarySchema(Schema):
     isDefault = fields.Boolean()
 
 
+class UsageEntrySchema(Schema):
+    """Consumo de una clave.
+
+    ``used`` puede ser ``null``: significa "todavía no sabemos medir esto", que
+    no es lo mismo que cero.
+    """
+
+    value = fields.Integer(allow_none=True)
+    period = fields.String()
+    used = fields.Integer(allow_none=True)
+    resetsAt = fields.Date(allow_none=True)
+    exceeded = fields.Boolean()
+
+
+class UsageResponseSchema(Schema):
+    planCode = fields.String()
+    usage = fields.Dict(keys=fields.String(), values=fields.Nested(UsageEntrySchema))
+
+
 class EffectivePlanResponseSchema(Schema):
     """Plan efectivo de quien pregunta, más el estado de su suscripción.
 

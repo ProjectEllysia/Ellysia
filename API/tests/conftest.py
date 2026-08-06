@@ -384,9 +384,48 @@ def user_headers(regular_user, auth_headers):
 # 7. Catálogo de planes (módulo accounts)
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _unlimited_default_plan(app):
+    """Siembra un plan por defecto sin topes, para toda la suite.
+
+    Desde que el motor de cuotas corta de verdad, una base de datos sin
+    catálogo no es un estado realista: en producción siempre hay planes, los
+    siembra la migración. Sin esto, cualquier test que lance un escaneo o dé de
+    alta un activo recibiría un 500 por ``DefaultPlanMissingError``.
+
+    Todos los topes van a ``NULL`` (ilimitado) por el mismo motivo que
+    ``limiter.enabled = False``: el resto de la suite no está probando cuotas y
+    no debe pelearse con ellas. El motor sigue ejecutándose en cada llamada —
+    así que una excepción dentro de él sale a la luz igual—, simplemente nunca
+    corta. Los tests que sí prueban el corte se traen su propio catálogo.
+    """
+    from src.modules.accounts.model import Plan, PlanLimit
+    from src.modules.accounts.services.limits import PERIODS, LimitKey
+
+    with app.app_context():
+        with unit_of_work.UnitOfWork() as uow:
+            plan = Plan(
+                code="test-unlimited", name="Test", rank=0,
+                monthly_price_cents=0, org_addon_price_cents=0, currency="EUR",
+                is_public=False, is_default=True,
+            )
+            uow.session.add(plan)
+            uow.session.flush()
+            for key in LimitKey:
+                uow.session.add(PlanLimit(
+                    plan_id=plan.id, limit_key=key.value, scope="holder",
+                    value=None, period=PERIODS[key].value,
+                ))
+            uow.session.flush()
+    yield
+
+
 @pytest.fixture()
-def seeded_plans(app):
+def seeded_plans(app, _unlimited_default_plan):
     """Siembra un catálogo mínimo de planes y devuelve {code: plan_id}.
+
+    Retira antes el plan sin topes de ``_unlimited_default_plan``: solo puede
+    haber un ``is_default``, y lo impone un índice único de la base de datos.
 
     **Function-scoped a propósito**: ``_clean_db`` vacía todas las tablas al
     terminar cada test, así que un fixture de sesión dejaría el catálogo
@@ -435,6 +474,13 @@ def seeded_plans(app):
     ids = {}
     with app.app_context():
         with unit_of_work.UnitOfWork() as uow:
+            placeholder = uow.session.query(Plan).filter(
+                Plan.code == "test-unlimited"
+            ).one_or_none()
+            if placeholder is not None:
+                uow.session.delete(placeholder)
+                uow.session.flush()
+
             for code, name, rank, price, is_public, is_default in plans:
                 plan = Plan(
                     code=code, name=name, tagline=f"Plan {name}", rank=rank,
@@ -451,6 +497,34 @@ def seeded_plans(app):
                     ))
             uow.session.flush()
     return ids
+
+
+@pytest.fixture()
+def set_plan_limits(app, _unlimited_default_plan):
+    """Aprieta los topes del plan por defecto de la suite.
+
+    Es la forma más corta de poner a un usuario contra el límite: no hace falta
+    crear un plan nuevo ni darle una suscripción, porque quien no tiene
+    suscripción ya recibe el plan por defecto.
+
+    Uso: ``set_plan_limits({LimitKey.HYGEIA_ASSETS: 1})``.
+    """
+    from src.modules.accounts.model import Plan, PlanLimit
+
+    def _set(limits: dict) -> None:
+        with app.app_context():
+            with unit_of_work.UnitOfWork() as uow:
+                plan = uow.session.query(Plan).filter(Plan.is_default.is_(True)).one()
+                for key, value in limits.items():
+                    row = uow.session.query(PlanLimit).filter(
+                        PlanLimit.plan_id == plan.id,
+                        PlanLimit.limit_key == key.value,
+                        PlanLimit.scope == "holder",
+                    ).one()
+                    row.value = value
+                uow.session.flush()
+
+    return _set
 
 
 @pytest.fixture()

@@ -16,7 +16,8 @@ from src.modules.shared import utcnow_naive
 from .model import Plan
 from .repositories import PlanLimitRepository, PlanRepository
 from .services.entitlements import is_effective, resolve_effective_plan
-from .services.limits import SCOPE_HOLDER, SCOPE_MEMBER
+from .services.limits import SCOPE_HOLDER, SCOPE_MEMBER, LimitKey
+from .services.quotas import QuotaManager
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,47 @@ class PlanManager:
                 limit_repository.get_by_plan_and_scope(plan.id, SCOPE_HOLDER)
             ),
         }
+
+    def get_usage(self, user_id: int) -> dict:
+        """Consumo actual de ``user_id``, clave a clave.
+
+        Solo se informa de las claves que el motor de cuotas sabe medir hoy: el
+        resto llega con ``used: null``, que el cliente pinta como "sin datos" en
+        vez de como un cero que sería mentira.
+
+        ``exceeded`` marca las claves por encima del tope. Pasa sin que nadie
+        haya hecho nada malo — al bajar de plan o al caducar una suscripción,
+        unas existencias que eran legales dejan de serlo. Nunca se borra nada:
+        la clave entra en solo lectura hasta volver por debajo.
+        """
+        plan, _ = resolve_effective_plan(user_id)
+        quota_manager = QuotaManager()
+        usage = {}
+
+        for limit in build_repository(PlanLimitRepository).get_by_plan_and_scope(
+            plan.id, SCOPE_HOLDER
+        ):
+            entry = {"value": limit.value, "period": limit.period,
+                     "used": None, "resetsAt": None, "exceeded": False}
+            try:
+                key = LimitKey(limit.limit_key)
+                state = quota_manager.state(user_id, key)
+            except (ValueError, NotImplementedError):
+                # ValueError: la fila referencia una clave que ya no existe en
+                # el enum. NotImplementedError: es de existencias y todavía no
+                # tiene contador (llegan en la fase 3). Ninguna de las dos es
+                # motivo para tumbar la vista entera.
+                usage[limit.limit_key] = entry
+                continue
+
+            entry.update({
+                "used":     state.used,
+                "resetsAt": state.resets_at,
+                "exceeded": state.exceeded,
+            })
+            usage[limit.limit_key] = entry
+
+        return {"planCode": plan.code, "usage": usage}
 
     def get_plan_by_code(self, code: str) -> Optional[Plan]:
         """Búsqueda por código, para quien asigne planes en fases posteriores."""

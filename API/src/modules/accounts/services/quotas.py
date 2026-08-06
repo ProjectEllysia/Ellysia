@@ -1,0 +1,258 @@
+"""
+Motor de cuotas: cuenta lo consumido y corta cuando el plan se acaba.
+
+Dos naturalezas, dos formas de contar (§6.2 del diseño):
+
+- **Consumo** (``month`` / ``day``): hay contador en ``UsageCounter``. Sube y no
+  baja, y se reinicia solo al cambiar de periodo — no hay ningún proceso que
+  ponga contadores a cero.
+- **Existencias** (``stock``): no hay contador. Se cuenta la tabla real. Un
+  contador de existencias se desincroniza en el primer borrado, y la base de
+  datos ya sabe la respuesta.
+
+**Dónde se llama.** ``consume()`` va en la costura del *manager*, nunca solo en
+el endpoint HTTP. Es la lección que dejó el arreglo SSRF de los escáneres: el
+flujo programado (``scheduling.py`` llamando a ``run_scan()`` directamente) y
+las reejecuciones del worker RQ no pasan por el endpoint, y se saltarían
+cualquier comprobación que viva solo allí.
+
+**Sin devolución.** Si la tarea falla después de consumir, la cuota se gastó.
+Es fallo cerrado y es lo aburrido. El gancho para un ``release()`` simétrico es
+obvio, pero no se escribe hasta que duela de verdad.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from datetime import date
+from typing import Optional
+
+from sqlalchemy import and_, insert, update
+from sqlalchemy.exc import IntegrityError
+
+from src.modules.infrastructure import UnitOfWork
+from src.modules.infrastructure.session import get_db_session
+
+from ..exceptions import PlanFeatureDisabledError, QuotaExceededError
+from ..model import UsageCounter
+from .entitlements import Entitlement, resolve_entitlement
+from .limits import (
+    STOCK_COUNTERS,
+    LimitKey,
+    LimitPeriod,
+    next_period_start,
+    period_start_for,
+)
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class QuotaState:
+    """Foto del consumo de una clave, para enseñarla sin modificar nada."""
+
+    key: LimitKey
+    limit: Optional[int]
+    used: int
+    period: LimitPeriod
+    source: str
+    plan_code: str
+    resets_at: Optional[date]
+
+    @property
+    def is_unlimited(self) -> bool:
+        return self.limit is None
+
+    @property
+    def exceeded(self) -> bool:
+        """Por encima del tope.
+
+        Pasa sin haber hecho nada malo: al bajar de plan, al caducar una
+        suscripción o al salir de una organización, unas existencias que eran
+        legales dejan de serlo. Nunca se borra nada — la clave entra en modo
+        solo lectura hasta volver por debajo.
+        """
+        return self.limit is not None and self.used > self.limit
+
+    @property
+    def remaining(self) -> Optional[int]:
+        return None if self.limit is None else max(self.limit - self.used, 0)
+
+
+class QuotaManager:
+    """Comprueba y consume cuota. La única puerta a ``UsageCounter``."""
+
+    # -------------------------------------------------------------- lectura
+
+    def state(self, user_id: int, key: LimitKey) -> QuotaState:
+        """Consumo actual sin tocar nada. Es lo que alimenta la vista "Mi plan"."""
+        entitlement = resolve_entitlement(user_id, key)
+        return QuotaState(
+            key=key,
+            limit=entitlement.limit,
+            used=self._current_usage(entitlement),
+            period=entitlement.period,
+            source=entitlement.source,
+            plan_code=entitlement.plan_code,
+            resets_at=next_period_start(entitlement.period),
+        )
+
+    # -------------------------------------------------------------- escritura
+
+    def consume(self, user_id: int, key: LimitKey, amount: int = 1) -> None:
+        """Apunta ``amount`` usos de ``key``, o corta.
+
+        Raises:
+            PlanFeatureDisabledError: el plan no incluye la característica (402).
+            QuotaExceededError: incluida, pero sin cupo (402).
+        """
+        entitlement = resolve_entitlement(user_id, key)
+
+        if entitlement.is_disabled:
+            logger.info(
+                f"Corte por plan | user={user_id} key={key.db_name} "
+                f"plan={entitlement.plan_code} motivo=no_incluido"
+            )
+            raise PlanFeatureDisabledError(key.db_name, entitlement.plan_code)
+
+        if entitlement.period is LimitPeriod.STOCK:
+            self._consume_stock(entitlement, amount)
+        else:
+            self._consume_counter(entitlement, amount)
+
+    # ------------------------------------------------------------- internos
+
+    def _consume_stock(self, entitlement: Entitlement, amount: int) -> None:
+        """Existencias: cuenta la tabla real y compara.
+
+        No hay nada que escribir — la fila que se está a punto de crear es el
+        contador. Por eso la comprobación es ``actual + amount > limite`` y no
+        ``>=``.
+        """
+        if entitlement.is_unlimited:
+            return
+
+        used = self._count_stock(entitlement)
+        if used + amount > entitlement.limit:
+            logger.info(
+                f"Corte por plan | user={entitlement.holder_id} key={entitlement.key.db_name} "
+                f"plan={entitlement.plan_code} usado={used}/{entitlement.limit} tipo=stock"
+            )
+            raise QuotaExceededError(
+                limit_key=entitlement.key.db_name,
+                value=entitlement.limit,
+                used=used,
+                period=entitlement.period.value,
+                plan_code=entitlement.plan_code,
+            )
+
+    def _consume_counter(self, entitlement: Entitlement, amount: int) -> None:
+        """Consumo: incremento condicional, con la condición dentro del UPDATE.
+
+        La atomicidad vive entera en ese ``WHERE``: si dos peticiones simultáneas
+        intentan gastar el último hueco, la base de datos serializa los dos
+        UPDATE y el segundo no afecta a ninguna fila. Nada de leer, decidir en
+        Python y escribir — ese patrón regala cuota bajo concurrencia.
+        """
+        period_start = period_start_for(entitlement.period)
+
+        with UnitOfWork() as uow:
+            session = uow.session
+            self._ensure_counter_row(session, entitlement, period_start)
+
+            conditions = [
+                UsageCounter.holder_kind == entitlement.holder_kind,
+                UsageCounter.holder_id == entitlement.holder_id,
+                UsageCounter.limit_key == entitlement.key.db_name,
+                UsageCounter.period_start == period_start,
+            ]
+            if not entitlement.is_unlimited:
+                conditions.append(UsageCounter.used + amount <= entitlement.limit)
+
+            result = session.execute(
+                update(UsageCounter)
+                .where(and_(*conditions))
+                .values(used=UsageCounter.used + amount)
+            )
+
+            if result.rowcount:
+                return
+
+            # Ninguna fila afectada: o se agotó el cupo, o se perdió la carrera
+            # contra otra petición que gastó el hueco. Las dos cosas significan
+            # lo mismo de cara al usuario.
+            used = self._read_counter(session, entitlement, period_start)
+
+        logger.info(
+            f"Corte por plan | user={entitlement.holder_id} key={entitlement.key.db_name} "
+            f"plan={entitlement.plan_code} usado={used}/{entitlement.limit} "
+            f"periodo={entitlement.period.value}"
+        )
+        raise QuotaExceededError(
+            limit_key=entitlement.key.db_name,
+            value=entitlement.limit,
+            used=used,
+            period=entitlement.period.value,
+            plan_code=entitlement.plan_code,
+            resets_at=next_period_start(entitlement.period),
+        )
+
+    @staticmethod
+    def _ensure_counter_row(session, entitlement: Entitlement, period_start: date) -> None:
+        """Crea la fila del periodo con ``used = 0`` si no existía.
+
+        El INSERT va dentro de un SAVEPOINT (``begin_nested``): si otra petición
+        crea la misma fila entre el comprobar y el insertar, el conflicto de
+        clave primaria se queda dentro del punto de guardado y no aborta la
+        transacción de fuera — que es lo que pasaría en Postgres con un
+        ``IntegrityError`` suelto. Después manda el UPDATE condicional, que es
+        la única autoridad sobre si cabe o no.
+        """
+        try:
+            with session.begin_nested():
+                session.execute(
+                    insert(UsageCounter).values(
+                        holder_kind=entitlement.holder_kind,
+                        holder_id=entitlement.holder_id,
+                        limit_key=entitlement.key.db_name,
+                        period_start=period_start,
+                        used=0,
+                    )
+                )
+        except IntegrityError:
+            pass  # ya existía: seguimos al UPDATE.
+
+    def _current_usage(self, entitlement: Entitlement) -> int:
+        if entitlement.period is LimitPeriod.STOCK:
+            return self._count_stock(entitlement)
+
+        return self._read_counter(
+            get_db_session(), entitlement, period_start_for(entitlement.period)
+        )
+
+    @staticmethod
+    def _read_counter(session, entitlement: Entitlement, period_start: date) -> int:
+        row = session.get(
+            UsageCounter,
+            (
+                entitlement.holder_kind,
+                entitlement.holder_id,
+                entitlement.key.db_name,
+                period_start,
+            ),
+        )
+        return row.used if row is not None else 0
+
+    @staticmethod
+    def _count_stock(entitlement: Entitlement) -> int:
+        counter = STOCK_COUNTERS.get(entitlement.key)
+        if counter is None:
+            raise NotImplementedError(
+                f"La clave de existencias '{entitlement.key.db_name}' no tiene contador "
+                f"registrado en STOCK_COUNTERS. Anyadelo antes de exigirla."
+            )
+
+        # La lista tendrá más de un elemento cuando la bolsa sea de una
+        # organización (fase 5).
+        return counter(get_db_session(), [entitlement.holder_id])

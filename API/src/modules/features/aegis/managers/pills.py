@@ -19,6 +19,7 @@ from typing import Any
 
 from src.modules.features.aegis.exceptions import DocumentNotFoundError
 import src.modules.system.config_reading as CR
+from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.users import User
 from src.modules.system.taskqueue import ITaskQueue, TaskTrackingMixin, job_context
 from src.modules.infrastructure import UnitOfWork
@@ -81,6 +82,10 @@ class AegisManager(TaskTrackingMixin):
         propio lock, así que no coordina nada entre procesos — solo
         serializaba llamadas dentro de un mismo proceso sin necesidad.
         """
+        # Una píldora es siempre una llamada a la IA, y de las caras. Se cobra
+        # al encolarla, no al terminarla: entre lo uno y lo otro cabe pedir mil.
+        QuotaManager().consume(self.user.id, LimitKey.AI_REQUESTS)
+
         tweaks      = tweaks or {}
         document_id = self._create_pending_document(topic_id)
 

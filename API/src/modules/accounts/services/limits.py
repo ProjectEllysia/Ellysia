@@ -14,7 +14,11 @@ guarda en base de datos, así que renombrar un miembro no basta — habría que
 migrar las filas de ``PlanLimit`` y ``UsageCounter`` que lo referencian.
 """
 
+from datetime import date, datetime
 from enum import Enum
+from typing import Callable, Optional
+
+from src.modules.shared import utcnow_naive
 
 
 class LimitPeriod(str, Enum):
@@ -91,6 +95,71 @@ PERIODS: dict[LimitKey, LimitPeriod] = {
 
     LimitKey.ORGANIZATION_MEMBERS: LimitPeriod.STOCK,
 }
+
+
+# =========================================================================
+# CONTADORES DE EXISTENCIAS
+# =========================================================================
+
+def _count_hygeia_assets(session, user_ids: list[int]) -> int:
+    """Activos monitorizados vivos de un conjunto de usuarios.
+
+    Import diferido a propósito: ``accounts`` no puede importar ``features`` en
+    tiempo de módulo — los módulos de features importan el motor de cuotas y se
+    formaría un ciclo.
+    """
+    from src.modules.features.hygeia.model import MonitoredAsset
+
+    return (
+        session.query(MonitoredAsset)
+        .filter(MonitoredAsset.user_id.in_(user_ids))
+        .count()
+    )
+
+
+#: Cómo se cuenta lo ya existente para cada clave de tipo ``stock``.
+#:
+#: Las claves de existencias NO llevan contador propio: se cuenta la tabla real.
+#: Un contador de existencias se desincroniza en el primer borrado, y la base de
+#: datos ya sabe la respuesta.
+#:
+#: Recibe una lista de ``user_ids`` y no uno solo porque la bolsa de una
+#: organización suma la de todos sus miembros (fase 5). Hoy la lista siempre
+#: tiene un elemento.
+#:
+#: Solo están las claves que la fase 2 hace cumplir. Pedir una que no esté es un
+#: error de programación, no del usuario, y ``QuotaManager`` lo dice como tal.
+STOCK_COUNTERS: dict[LimitKey, Callable[..., int]] = {
+    LimitKey.HYGEIA_ASSETS: _count_hygeia_assets,
+}
+
+
+def period_start_for(period: LimitPeriod, moment: Optional[datetime] = None) -> Optional[date]:
+    """Primer día del periodo en curso, en UTC.
+
+    Es la cuarta parte de la clave primaria de ``UsageCounter``: al cambiar de
+    periodo cambia este valor y nace una fila nueva con ``used = 0``. Por eso no
+    hace falta ningún proceso que reinicie contadores.
+
+    Devuelve ``None`` para las existencias, que no tienen periodo.
+    """
+    moment = moment or utcnow_naive()
+    if period is LimitPeriod.MONTH:
+        return date(moment.year, moment.month, 1)
+    if period is LimitPeriod.DAY:
+        return moment.date()
+    return None
+
+
+def next_period_start(period: LimitPeriod, moment: Optional[datetime] = None) -> Optional[date]:
+    """Cuándo se reinicia el contador. Es el ``resetsAt`` que ve el cliente."""
+    current = period_start_for(period, moment)
+    if current is None:
+        return None
+    if period is LimitPeriod.DAY:
+        return date.fromordinal(current.toordinal() + 1)
+    # Mensual: el día 1 del mes siguiente.
+    return date(current.year + 1, 1, 1) if current.month == 12 else date(current.year, current.month + 1, 1)
 
 
 #: Ámbitos posibles de una fila de ``PlanLimit``.

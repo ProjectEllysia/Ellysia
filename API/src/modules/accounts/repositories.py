@@ -59,6 +59,22 @@ class PlanLimitRepository(BaseRepository[PlanLimit]):
             .all()
         )
 
+    def get_one(self, plan_id: int, limit_key: str, scope: str) -> Optional[PlanLimit]:
+        """Un tope concreto, o ``None`` si el plan no lo declara.
+
+        ``None`` no significa "ilimitado": quien llama lo lee como 0 (no
+        incluido). Es el fallo cerrado del catálogo.
+        """
+        return (
+            self._session.query(PlanLimit)
+            .filter(
+                PlanLimit.plan_id == plan_id,
+                PlanLimit.limit_key == limit_key,
+                PlanLimit.scope == scope,
+            )
+            .one_or_none()
+        )
+
 
 class SubscriptionRepository(BaseRepository[Subscription]):
     """Acceso a datos de las suscripciones."""

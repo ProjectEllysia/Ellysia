@@ -15,6 +15,7 @@ con la fase 5, cuando ``OrganizationMember`` tenga filas.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Tuple
 
@@ -23,7 +24,8 @@ from src.modules.shared import utcnow_naive
 
 from ..exceptions import DefaultPlanMissingError
 from ..model import Plan, Subscription
-from ..repositories import PlanRepository, SubscriptionRepository
+from ..repositories import PlanLimitRepository, PlanRepository, SubscriptionRepository
+from .limits import PERIODS, SCOPE_HOLDER, LimitKey, LimitPeriod
 
 
 #: Estados que conceden derechos mientras el periodo siga abierto.
@@ -113,3 +115,70 @@ def resolve_effective_plan(
         raise DefaultPlanMissingError()
 
     return default_plan, subscription
+
+
+@dataclass(frozen=True)
+class Entitlement:
+    """Lo que un usuario tiene derecho a hacer para **una** clave concreta.
+
+    Attributes:
+        limit: Tope. ``None`` es ilimitado; ``0``, no incluido en el plan.
+        holder_kind / holder_id: a quién se le carga el consumo. Hoy siempre el
+            propio usuario; en la fase 5, la organización cuando sea ella quien
+            conceda el derecho (bolsa común).
+        source: de dónde viene el derecho — ``"personal"`` (su suscripción
+            vigente), ``"default"`` (el plan gratuito) o, desde la fase 5,
+            ``"organization"``. No es adorno: la vista "Mi plan" tiene que poder
+            decir "ilimitado, cortesía de tu organización", porque de eso
+            depende que el usuario entienda qué pierde si se va.
+    """
+
+    key: LimitKey
+    limit: Optional[int]
+    period: LimitPeriod
+    holder_kind: str
+    holder_id: int
+    source: str
+    plan_code: str
+
+    @property
+    def is_unlimited(self) -> bool:
+        return self.limit is None
+
+    @property
+    def is_disabled(self) -> bool:
+        """El plan no incluye la característica en absoluto."""
+        return self.limit == 0
+
+
+def resolve_entitlement(
+    user_id: int,
+    key: LimitKey,
+    now: Optional[datetime] = None,
+) -> Entitlement:
+    """Resuelve el tope de ``key`` para ``user_id`` y quién paga su consumo.
+
+    Una fila de ``PlanLimit`` que no existe se lee como ``0``: fallo cerrado, de
+    modo que una clave nueva que nadie se acordó de rellenar queda desactivada
+    en vez de regalada.
+
+    En esta fase la única fuente es el plan personal, así que el titular del
+    contador es siempre el propio usuario. La fase 5 añade aquí el ``max()``
+    con los derechos derivados de la organización y, con ellos, la posibilidad
+    de que el titular sea la organización.
+    """
+    now = now or utcnow_naive()
+    plan, subscription = resolve_effective_plan(user_id, now)
+    effective = is_effective(subscription, now)
+
+    row = build_repository(PlanLimitRepository).get_one(plan.id, key.db_name, SCOPE_HOLDER)
+
+    return Entitlement(
+        key=key,
+        limit=row.value if row is not None else 0,
+        period=PERIODS[key],
+        holder_kind="user",
+        holder_id=user_id,
+        source="personal" if effective else "default",
+        plan_code=plan.code,
+    )

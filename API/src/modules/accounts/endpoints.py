@@ -22,7 +22,11 @@ from src.modules.users import require_oauth_token, get_current_user
 
 from .exceptions import AccountsError
 from .managers import PlanManager
-from .schemas import EffectivePlanResponseSchema, PlanCatalogResponseSchema
+from .schemas import (
+    EffectivePlanResponseSchema,
+    PlanCatalogResponseSchema,
+    UsageResponseSchema,
+)
 
 
 plans_blp = SmorestBlueprint(
@@ -50,3 +54,14 @@ def list_plans():
 def get_my_plan():
     """Consultar el plan efectivo del usuario autenticado y su vigencia"""
     return PlanManager().get_effective_plan(get_current_user().id)
+
+
+@plans_blp.get("/me/usage")
+@plans_blp.response(200, UsageResponseSchema, description="Current usage per limit key")
+@plans_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@limiter.limit("300 per hour")
+@require_oauth_token
+@handle_exceptions(default_exception=AccountsError, logger=logger)
+def get_my_usage():
+    """Consultar el consumo actual del usuario autenticado, clave a clave"""
+    return PlanManager().get_usage(get_current_user().id)
