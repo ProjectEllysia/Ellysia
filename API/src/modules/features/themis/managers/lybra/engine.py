@@ -148,15 +148,18 @@ class LybraEngineManager(ScanManager):
         Returns:
             Primary key of the created LybraScan record.
         """
+        source = ServiceSource.build_for_args(source_scan_id, services, discover_ports)
+        scan_target = source.scan_target(user_id, target)
+
         # La cuota se consume aquí y no en el endpoint: por este método pasan
         # también el flujo programado (scheduling.py llama a run_scan
         # directamente) y la puerta de Hygeia. Es la misma lección que dejó el
         # arreglo SSRF de los escáneres — lo que vive solo en el endpoint HTTP
         # se lo saltan los otros caminos.
+        #
+        # Y va después de resolver el objetivo, no antes: un objetivo inválido
+        # no debe gastar cuota. Se cobra justo antes de crear el registro.
         QuotaManager().consume(user_id, LimitKey.THEMIS_LYBRA_SCANS)
-
-        source = ServiceSource.build_for_args(source_scan_id, services, discover_ports)
-        scan_target = source.scan_target(user_id, target)
 
         scan = self._create_scan_record(
             target=scan_target,

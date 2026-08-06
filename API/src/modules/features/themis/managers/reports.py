@@ -73,8 +73,16 @@ class ThemisReportManager(DocumentManager):
         # Solo el informe con IA cuesta dinero; el PDF a secas no consume nada.
         # Se cobra al pedirlo y no al terminarlo: el trabajo se encola aquí, y
         # esperar al worker dejaría un hueco para pedir mil informes a la vez.
+        #
+        # Dos claves por la misma acción, y es intencionado: la concreta es la
+        # que el usuario ve en su plan, y ai.requests es el techo agregado que
+        # protege el coste de la IA aunque cada módulo por separado sea
+        # generoso. Primero la concreta, para que el 402 nombre lo que el
+        # usuario estaba intentando hacer.
         if ai_report:
-            QuotaManager().consume(scan.user_id, LimitKey.AI_REQUESTS)
+            quota_manager = QuotaManager()
+            quota_manager.consume(scan.user_id, LimitKey.THEMIS_REPORTS_AI)
+            quota_manager.consume(scan.user_id, LimitKey.AI_REQUESTS)
 
         doc_id = self._create_document(scan, ai_report)
 

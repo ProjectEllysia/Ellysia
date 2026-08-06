@@ -84,7 +84,14 @@ class AegisManager(TaskTrackingMixin):
         """
         # Una píldora es siempre una llamada a la IA, y de las caras. Se cobra
         # al encolarla, no al terminarla: entre lo uno y lo otro cabe pedir mil.
-        QuotaManager().consume(self.user.id, LimitKey.AI_REQUESTS)
+        #
+        # Dos claves: la concreta, que es la que el usuario ve en su plan, y
+        # ai.requests, el techo agregado que protege el coste de la IA aunque
+        # cada módulo por separado sea generoso. La concreta primero, para que
+        # el 402 nombre lo que se estaba intentando hacer.
+        quota_manager = QuotaManager()
+        quota_manager.consume(self.user.id, LimitKey.AEGIS_PILLS)
+        quota_manager.consume(self.user.id, LimitKey.AI_REQUESTS)
 
         tweaks      = tweaks or {}
         document_id = self._create_pending_document(topic_id)

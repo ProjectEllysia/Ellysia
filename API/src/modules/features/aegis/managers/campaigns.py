@@ -31,6 +31,7 @@ from src.modules.features.aegis.exceptions import (
     QuizTokenInvalidError,
 )
 import src.modules.system.config_reading as CR
+from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.tools.herald import EmailMessage, Mailer, build_mailer, render_email
 from src.modules.users import User
 from src.modules.system.taskqueue import ITaskQueue, TaskTrackingMixin, job_context
@@ -104,6 +105,12 @@ class CampaignManager(TaskTrackingMixin):
 
     def add_recipients(self, list_id: int, recipients: list[dict]) -> list[dict]:
         self._assert_list_ownership(list_id)
+
+        # El tope es de destinatarios totales, no por lista: se cobran todos los
+        # del lote de golpe para que no se pueda rebasar metiéndolos de uno en
+        # uno. Son existencias, así que borrar destinatarios devuelve el hueco.
+        QuotaManager().consume(self.user.id, LimitKey.AEGIS_RECIPIENTS, amount=len(recipients))
+
         with UnitOfWork() as uow:
             repo = DistributionListRepository(uow)
             created = repo.add_recipients(list_id, recipients)
@@ -171,6 +178,12 @@ class CampaignManager(TaskTrackingMixin):
         recipients = list_repo.get_recipients(campaign.list_id)
         if not recipients:
             raise CampaignEmptyListError(campaign.list_id)
+
+        # Se cobra al lanzar, no al crear el borrador: un borrador no manda
+        # correos ni cuesta nada. Y después de las validaciones — una campaña
+        # sin preguntas o sin destinatarios no llega a lanzarse, así que
+        # tampoco debe gastar.
+        QuotaManager().consume(self.user.id, LimitKey.AEGIS_CAMPAIGNS)
 
         campaign_recipients = [
             CampaignRecipient(

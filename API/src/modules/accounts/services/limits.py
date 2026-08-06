@@ -117,6 +117,67 @@ def _count_hygeia_assets(session, user_ids: list[int]) -> int:
     )
 
 
+def _count_themis_scheduled(session, user_ids: list[int]) -> int:
+    """Escaneos programados **activos**.
+
+    Los revocados siguen en la tabla como histórico y no ocupan hueco: lo que
+    consume recursos es lo que va a volver a dispararse.
+    """
+    from src.modules.features.themis.model import ProgramedScan
+
+    return (
+        session.query(ProgramedScan)
+        .filter(
+            ProgramedScan.user_id.in_(user_ids),
+            ProgramedScan.is_active.is_(True),
+        )
+        .count()
+    )
+
+
+def _count_aegis_recipients(session, user_ids: list[int]) -> int:
+    """Destinatarios en todas las listas de distribución del usuario."""
+    from src.modules.features.aegis.model import DistributionList, Recipient
+
+    return (
+        session.query(Recipient)
+        .join(DistributionList, Recipient.list_id == DistributionList.id)
+        .filter(DistributionList.user_id.in_(user_ids))
+        .count()
+    )
+
+
+def _count_iris_mailbox_connections(session, user_ids: list[int]) -> int:
+    from src.modules.features.iris.model import IrisMailboxConnection
+
+    return (
+        session.query(IrisMailboxConnection)
+        .filter(IrisMailboxConnection.user_id.in_(user_ids))
+        .count()
+    )
+
+
+def _count_acheron_vaults(session, user_ids: list[int]) -> int:
+    from src.modules.features.acheron.model import Vault
+
+    return session.query(Vault).filter(Vault.user_id.in_(user_ids)).count()
+
+
+def _count_acheron_items(session, user_ids: list[int]) -> int:
+    """Secretos guardados, contados a través de la bóveda que los contiene.
+
+    ``Storable`` no tiene ``user_id``: el dueño lo pone la bóveda.
+    """
+    from src.modules.features.acheron.model import Storable, Vault
+
+    return (
+        session.query(Storable)
+        .join(Vault, Storable.vault_id == Vault.id)
+        .filter(Vault.user_id.in_(user_ids))
+        .count()
+    )
+
+
 #: Cómo se cuenta lo ya existente para cada clave de tipo ``stock``.
 #:
 #: Las claves de existencias NO llevan contador propio: se cuenta la tabla real.
@@ -127,10 +188,17 @@ def _count_hygeia_assets(session, user_ids: list[int]) -> int:
 #: organización suma la de todos sus miembros (fase 5). Hoy la lista siempre
 #: tiene un elemento.
 #:
-#: Solo están las claves que la fase 2 hace cumplir. Pedir una que no esté es un
-#: error de programación, no del usuario, y ``QuotaManager`` lo dice como tal.
+#: Falta ``ORGANIZATION_MEMBERS`` a propósito: la tabla existe pero nadie la
+#: escribe hasta la fase 5, y un contador sin nada que contar es código muerto.
+#: Pedir una clave que no esté aquí es un error de programación, no del usuario,
+#: y ``QuotaManager`` lo dice como tal en vez de responder un 402.
 STOCK_COUNTERS: dict[LimitKey, Callable[..., int]] = {
-    LimitKey.HYGEIA_ASSETS: _count_hygeia_assets,
+    LimitKey.HYGEIA_ASSETS:            _count_hygeia_assets,
+    LimitKey.THEMIS_SCHEDULED:         _count_themis_scheduled,
+    LimitKey.AEGIS_RECIPIENTS:         _count_aegis_recipients,
+    LimitKey.IRIS_MAILBOX_CONNECTIONS: _count_iris_mailbox_connections,
+    LimitKey.ACHERON_VAULTS:           _count_acheron_vaults,
+    LimitKey.ACHERON_ITEMS:            _count_acheron_items,
 }
 
 

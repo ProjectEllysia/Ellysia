@@ -5,6 +5,7 @@ import logging
 from typing import Callable, Optional
 
 import src.modules.system.config_reading as CR
+from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.system.taskqueue import job_context
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
@@ -111,6 +112,12 @@ class NucleiScanManager(ScanManager):
                 raise TargetNotAuthorizedError(target)
 
             resolved_timeout = int(timeout) if timeout is not None else int(CR.nuclei_config().timeout)
+
+            # Después de validar y justo antes de crear el registro: un objetivo
+            # rechazado o no autorizado no gasta cuota. Aquí y no en el endpoint,
+            # porque el flujo programado entra por este mismo método.
+            QuotaManager().consume(user_id, LimitKey.THEMIS_THIRDPARTY_SCANS)
+
             scan = self._create_scan_record(
                 target=target,
                 user_id=user_id,

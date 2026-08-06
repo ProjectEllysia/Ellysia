@@ -1101,6 +1101,13 @@ cobrado por transferencia.
 
 - **Los números de §11.** Están puestos para que haya algo enseñable; hay que revisarlos
   con el coste real de OpenAI y de los escaneos delante.
+- **`acheron.vaults` promete algo que el esquema no permite.** La tabla de precios vende
+  3 bóvedas en Bronze, 10 en Silver e ilimitadas en Gold, pero `Vault.user_id` es
+  `UNIQUE`: hoy nadie puede tener más de una. Al cablear la clave (fase 3) el tope quedó
+  funcionando como una **puerta** — `0` es "tu plan no incluye Acheron" y cualquier valor
+  ≥ 1 es "sí" — que es coherente pero no es lo que dice la tabla. Hay que elegir: o
+  Acheron pasa a admitir varias bóvedas por usuario (cambio de modelo y de cliente, que
+  es quien cifra), o §11 deja de venderlas y la clave se documenta como puerta.
 - **¿El dueño puede lanzar acciones "en nombre de" un miembro?** (p. ej. un escaneo que
   aparece en el histórico del empleado). Recomendación: **no** en la v1 — abre la puerta
   a que el dueño toque datos ajenos, que es justo lo que §8.4 promete que no pasa.

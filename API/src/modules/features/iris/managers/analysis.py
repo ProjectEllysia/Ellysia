@@ -21,6 +21,7 @@ from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
 import src.modules.system.config_reading as CR
+from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc, CANCELLABLE_STATES as _CANCELLABLE_STATES
@@ -152,6 +153,12 @@ class IrisManager(TaskTrackingMixin):
             )
 
         self._validate_headers_pre(raw_input)
+
+        # Después de validar la entrada: un correo mal pegado no gasta cuota.
+        # Aquí y no en el endpoint, porque por este método entra también la
+        # ingesta desde un buzón conectado (mailbox sync), que no pasa por HTTP.
+        QuotaManager().consume(user_id, LimitKey.IRIS_ANALYSES)
+
         analysis_id = self._create_analysis_record(
             raw_input, user_id, title=title,
             connection_id=connection_id, source_message_uid=source_message_uid,
@@ -420,6 +427,12 @@ class IrisManager(TaskTrackingMixin):
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
         if analysis.status != "finished":
             raise IrisAnalysisNotReadyError(analysis_id, analysis.status)
+
+        # La concreta y el techo agregado de IA, en ese orden, para que el 402
+        # nombre lo que el usuario estaba pidiendo.
+        quota_manager = QuotaManager()
+        quota_manager.consume(user_id, LimitKey.IRIS_AI_SUMMARIES)
+        quota_manager.consume(user_id, LimitKey.AI_REQUESTS)
 
         self._task_queue.submit(
             func=IrisManager.execute_ai_summary_generation,
