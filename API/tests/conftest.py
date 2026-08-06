@@ -101,6 +101,7 @@ from src.modules.users.repositories import (  # noqa: E402
 )
 from src.modules.users.managers import OAuthTokenManager  # noqa: E402
 from src.modules.users.services import generate_salt, hash_password, hash_password_with_salt  # noqa: E402
+from src.modules.users.services.permissions import DEFAULT_USER_ATTRIBUTES  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +275,13 @@ def make_user(app):
     ejercitaba de verdad la rama Argon2 de ``verify_password`` (la que usa el
     100% de los usuarios reales). ``legacy_hash=True`` sigue disponible para
     los tests que verifican explícitamente la migración SHA-256→Argon2.
+
+    Semántica de ``attributes``, que cambió al vaciarse el baseline de
+    ``Role.USER``: omitirlo concede ``DEFAULT_USER_ATTRIBUTES``, que es lo que
+    ``sign_in_user`` escribe en el alta real; pasarlo concede **exactamente**
+    esos, ni uno más — es la forma de construir el caso "el administrador le ha
+    retirado este permiso". ``attributes=[]`` deja al usuario sin ninguno (ver
+    el atajo ``stripped_user``).
     """
     counter = {"n": 0}
 
@@ -300,10 +308,15 @@ def make_user(app):
                 password_salt=salt,
                 role=role,
             )
+            granted = (
+                [attribute.db_name for attribute in DEFAULT_USER_ATTRIBUTES]
+                if attributes is None
+                else attributes
+            )
             with unit_of_work.UnitOfWork() as uow:
                 UserRepository(uow).save(user)
                 user_id = user.id
-                for attr in attributes or []:
+                for attr in granted:
                     AttributeRepository(uow).add_attribute(user_id, attr)
 
         return UserHandle(user_id, username, password, role)
@@ -338,6 +351,18 @@ def admin_user(make_user):
 @pytest.fixture()
 def regular_user(make_user):
     return make_user(role="role_user")
+
+
+@pytest.fixture()
+def stripped_user(make_user):
+    """Usuario al que un administrador le ha retirado todos los atributos.
+
+    Es el caso que prueban los tests ``*_requires_*_attribute``: desde que el
+    baseline de ``Role.USER`` está vacío, un usuario normal tiene todos los
+    atributos por defecto, así que el 403 solo puede venir de una retirada
+    explícita. Antes ese 403 lo daba la ausencia de baseline.
+    """
+    return make_user(role="role_user", attributes=[])
 
 
 @pytest.fixture()

@@ -235,6 +235,17 @@ Raises:
                 )
                 repo.save(new_user)
 
+                # Los atributos ABAC se escriben como filas explícitas, no se
+                # heredan del rol: solo así puede un administrador retirarlos
+                # después (ver DEFAULT_USER_ATTRIBUTES). Import diferido por el
+                # ciclo managers <-> services.permissions, igual que en
+                # get_all_available_attributes.
+                from .services.permissions import DEFAULT_USER_ATTRIBUTES
+                AttributeRepository(uow).add_attributes(
+                    new_user.id,
+                    [attribute.db_name for attribute in DEFAULT_USER_ATTRIBUTES],
+                )
+
             logger.info(f"Usuario '{username}' registrado con rol '{assigned_role}' (ID: {new_user.id})")
             return new_user
 

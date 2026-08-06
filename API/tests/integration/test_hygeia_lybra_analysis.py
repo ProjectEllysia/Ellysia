@@ -272,12 +272,12 @@ def test_analyze_another_users_asset_is_404(client, app, make_user, auth_headers
     assert resp.status_code == 404
 
 
-def test_analyze_requires_themis_create(client, app, regular_user, auth_headers):
-    """La acción crea un escaneo de Themis: quien no puede lanzarlos allí
-    tampoco debe poder hacerlo por la puerta de Hygeia."""
-    asset_id = _create_asset(app, regular_user, inventory=[_software("Apache httpd", "2.4.49")])
+def test_analyze_requires_themis_create(client, app, stripped_user, auth_headers):
+    """La acción crea un escaneo de Themis: a quien le han retirado el permiso
+    de lanzarlos allí tampoco debe dejarle entrar por la puerta de Hygeia."""
+    asset_id = _create_asset(app, stripped_user, inventory=[_software("Apache httpd", "2.4.49")])
 
-    resp = client.post(f"/hygeia/assets/{asset_id}/analyze", headers=auth_headers(regular_user))
+    resp = client.post(f"/hygeia/assets/{asset_id}/analyze", headers=auth_headers(stripped_user))
     assert resp.status_code == 403
 
 

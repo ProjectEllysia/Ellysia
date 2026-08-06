@@ -26,9 +26,9 @@ def test_start_nmap_requires_authentication(client):
     assert client.post("/themis/nmap", json=_VALID_NMAP_BODY).status_code == 401
 
 
-def test_start_nmap_requires_create_attribute(client, regular_user, auth_headers):
-    # role_user no incluye themis_create en su baseline.
-    resp = client.post("/themis/nmap", headers=auth_headers(regular_user),
+def test_start_nmap_requires_create_attribute(client, stripped_user, auth_headers):
+    # Usuario al que le han retirado themis_create.
+    resp = client.post("/themis/nmap", headers=auth_headers(stripped_user),
                        json=_VALID_NMAP_BODY)
     assert resp.status_code == 403
 

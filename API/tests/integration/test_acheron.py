@@ -9,9 +9,9 @@ def test_get_vault_requires_authentication(client):
     assert client.get("/acheron/vault").status_code == 401
 
 
-def test_create_vault_requires_create_attribute(client, regular_user, auth_headers):
-    # role_user tiene acheron_read pero no acheron_create.
-    resp = client.post("/acheron/vault", headers=auth_headers(regular_user),
+def test_create_vault_requires_create_attribute(client, stripped_user, auth_headers):
+    # Usuario al que le han retirado acheron_create.
+    resp = client.post("/acheron/vault", headers=auth_headers(stripped_user),
                        json={"storables": []})
     assert resp.status_code == 403
 
@@ -22,8 +22,8 @@ def test_get_vault_empty_returns_404(client, regular_user, auth_headers):
     assert resp.status_code == 404
 
 
-def test_add_storable_requires_create_attribute(client, regular_user, auth_headers):
-    resp = client.post("/acheron/storables", headers=auth_headers(regular_user), json={
+def test_add_storable_requires_create_attribute(client, stripped_user, auth_headers):
+    resp = client.post("/acheron/storables", headers=auth_headers(stripped_user), json={
         "kind": "account",
         "username": "u",
         "domain": "d",
@@ -61,9 +61,9 @@ def _vault_payload(checker="checker-old", vault_key="vaultkey-old", salt="salt-o
     }
 
 
-def test_change_vault_password_requires_update_attribute(client, regular_user, auth_headers):
-    # role_user tiene acheron_read pero no acheron_update.
-    resp = client.patch("/acheron/vault", headers=auth_headers(regular_user), json={
+def test_change_vault_password_requires_update_attribute(client, stripped_user, auth_headers):
+    # Usuario al que le han retirado acheron_update.
+    resp = client.patch("/acheron/vault", headers=auth_headers(stripped_user), json={
         "checker": "c", "vaultKey": "k", "algorithm": {"salt": "s"},
     })
     assert resp.status_code == 403
@@ -78,14 +78,14 @@ def test_change_vault_password_without_vault_returns_404(client, make_user, auth
 
 
 def test_change_vault_password_invalid_body_is_rejected(client, make_user, auth_headers):
-    user = make_user(role="role_user", attributes=["acheron_create", "acheron_update"])
+    user = make_user(role="role_user", attributes=["acheron_read", "acheron_create", "acheron_update"])
     # Falta vaultKey/algorithm -> error de validación del schema.
     resp = client.patch("/acheron/vault", headers=auth_headers(user), json={"checker": "c"})
     assert resp.status_code in (400, 422)
 
 
 def test_change_vault_password_updates_metadata_and_keeps_storables(client, make_user, auth_headers):
-    user = make_user(role="role_user", attributes=["acheron_create", "acheron_update"])
+    user = make_user(role="role_user", attributes=["acheron_read", "acheron_create", "acheron_update"])
     headers = auth_headers(user)
 
     # 1. Crear el vault con un storable.
@@ -124,7 +124,7 @@ def test_change_vault_password_updates_metadata_and_keeps_storables(client, make
 
 
 def test_metadata_version_starts_at_one_and_bumps_on_password_change(client, make_user, auth_headers):
-    user = make_user(role="role_user", attributes=["acheron_create", "acheron_update"])
+    user = make_user(role="role_user", attributes=["acheron_read", "acheron_create", "acheron_update"])
     headers = auth_headers(user)
 
     client.post("/acheron/vault", headers=headers, json=_vault_payload())
@@ -158,7 +158,7 @@ def test_all_storable_kinds_add_update_and_export_roundtrip(client, make_user, a
     export_vault_to_json: guarda contra typos en el registro storable_specs
     (un solo test de account no detectaría un mapeo mal escrito en, p. ej.,
     bankaccount o identity)."""
-    user = make_user(role="role_user", attributes=["acheron_create", "acheron_update"])
+    user = make_user(role="role_user", attributes=["acheron_read", "acheron_create", "acheron_update"])
     headers = auth_headers(user)
 
     created = client.post("/acheron/vault", headers=headers, json=_vault_payload())

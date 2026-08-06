@@ -142,31 +142,51 @@ class AttributeType(Enum):
 
 
 # =========================================================================
+# DEFAULT ATTRIBUTE SET — lo que recibe toda cuenta nueva
+# =========================================================================
+
+DEFAULT_USER_ATTRIBUTES: frozenset[AttributeType] = frozenset(AttributeType)
+"""Atributos que se conceden como filas explícitas al dar de alta un usuario.
+
+Son **todos**, y eso es deliberado. Con la llegada de los planes, el llavero
+deja de depender de lo que se haya pagado: un Freemium y un Gold tienen los
+mismos atributos y lo que los distingue son los topes del plan (un límite a 0
+corta con 402, no con 403). El plan Freemium incluye escaneos de Lybra y
+píldoras de Aegis, así que una cuenta nueva necesita ``themis_create`` y
+``aegis_create`` desde el primer minuto.
+
+Es seguro por construcción: todos los endpoints de módulo filtran por
+``user_id`` y siguen pasando por ``assert_owned``, así que un atributo solo
+autoriza a operar sobre los datos propios. Lo que de verdad es peligroso
+(``/system``, ``/users``, ``/queue``) lo guarda ``require_role``, no los
+atributos.
+
+A partir de aquí el ABAC tiene un único trabajo: **restar**. El administrador
+—y el dueño de una organización— quita lo que no quiere que alguien haga.
+"""
+
+
+# =========================================================================
 # ROLE → AttributeType MATRIX
 # =========================================================================
 
-# Defines the baseline permissions each role grants implicitly.
-# When checking permissions, a user's effective set is:
-#     ROLE_PERMISSIONS[user.role]  ∪  {explicit UserAttribute rows}
+# Permisos que cada rol concede de forma implícita. Al comprobar permisos, el
+# conjunto efectivo de un usuario es:
+#     ROLE_PERMISSIONS[user.role]  ∪  {filas explícitas de UserAttribute}
 #
-# Root is intentionally absent — it short-circuits all checks.
+# Root está ausente a propósito — cortocircuita todas las comprobaciones.
+#
+# Role.USER va VACÍO y no puede dejar de estarlo: lo que concede el baseline es
+# irrevocable, porque `require_attributes` calcula la unión y
+# `remove_user_attributes` solo borra filas — no existe una tabla de
+# denegación. Mientras el baseline fue tacaño no se notaba; en cuanto un
+# usuario normal necesita permisos de creación (ver DEFAULT_USER_ATTRIBUTES),
+# concederlos por rol dejaría al administrador sin poder retirarle nada a
+# nadie. Van como filas explícitas en el alta, y así se pueden quitar.
+# Role.ADMIN sí conserva su baseline: es un rol estructural que gestiona root.
 
 ROLE_PERMISSIONS: dict[Role, Set[AttributeType]] = {
-    Role.USER: {
-        AttributeType.AEGIS_READ,
-        AttributeType.THEMIS_READ,
-        AttributeType.ACHERON_READ,
-        AttributeType.IRIS_READ,
-        AttributeType.THEMIS_SCHEDULE_READ,
-        AttributeType.THEMIS_FOLDER_CREATE,
-        AttributeType.THEMIS_FOLDER_READ,
-        AttributeType.THEMIS_FOLDER_UPDATE,
-        AttributeType.THEMIS_FOLDER_DELETE,
-        AttributeType.HYGEIA_CREATE,
-        AttributeType.HYGEIA_READ,
-        AttributeType.HYGEIA_UPDATE,
-        AttributeType.HYGEIA_DELETE,
-    },
+    Role.USER: set(),
     Role.ADMIN: {
         AttributeType.AEGIS_CREATE,
         AttributeType.AEGIS_READ,
