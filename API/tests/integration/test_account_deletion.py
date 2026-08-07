@@ -248,7 +248,8 @@ def test_the_members_survive_the_dissolution(
     client.delete("/users/me", headers=auth_headers(owner), json={"password": PASSWORD})
 
     assert client.get("/users/me", headers=auth_headers(member)).status_code == 200
-    assert client.get("/organizations/mine", headers=auth_headers(member)).status_code == 404
+    mia = client.get("/organizations/mine", headers=auth_headers(member))
+    assert mia.get_json()["organization"] is None
 
     with app.app_context():
         state = QuotaManager().state(member.id, LimitKey.IRIS_ANALYSES)

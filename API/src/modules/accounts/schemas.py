@@ -101,6 +101,19 @@ class OrganizationMemberListSchema(Schema):
     members = fields.List(fields.Nested(OrganizationMemberSchema))
 
 
+class MyOrganizationResponseSchema(Schema):
+    """Estado de pertenencia del usuario. ``null`` = no está en ninguna.
+
+    Va envuelto y con 200 en vez de responder 404 cuando no hay ninguna: "no
+    perteneces a ninguna organización" es un **estado normal**, no un recurso
+    que falte. Con el 404, la mayoría de las cuentas veían un error rojo en la
+    consola del navegador en cada carga — y una consola llena de rojos de
+    mentira es una consola en la que ya no se ve el rojo de verdad.
+    """
+
+    organization = fields.Nested(OrganizationSchema, allow_none=True)
+
+
 class UsageEntrySchema(Schema):
     """Consumo de una clave.
 
@@ -178,6 +191,13 @@ class SubscriptionSchema(Schema):
     currentPeriodEnd = UTCDateTime(allow_none=True)
     cancelAtPeriodEnd = fields.Boolean()
     graceUntil = UTCDateTime(allow_none=True)
+
+
+class SubscriptionStateSchema(Schema):
+    """Suscripción de una cuenta. ``null`` = no tiene, luego está en el plan
+    por defecto — mismo criterio que ``MyOrganizationResponseSchema``."""
+
+    subscription = fields.Nested(SubscriptionSchema, allow_none=True)
 
 
 class SubscriptionOperationSchema(Schema):

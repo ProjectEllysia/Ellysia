@@ -24,7 +24,7 @@ from src.modules.users import require_oauth_token, require_role, get_current_use
 # durante su propia inicialización rompe el ciclo. El submódulo sí está cargado.
 from src.modules.users.services.permissions import Role
 
-from .exceptions import AccountsError, NotInOrganizationError, SubscriptionNotFoundError
+from .exceptions import AccountsError
 from .managers import (
     InvitationManager,
     OrganizationManager,
@@ -42,9 +42,11 @@ from .schemas import (
     PlanUpdateSchema,
     PlanWriteSchema,
     SubscriptionOperationSchema,
+    SubscriptionStateSchema,
     SubscriptionSchema,
     EffectivePlanResponseSchema,
     OrganizationCreateRequestSchema,
+    MyOrganizationResponseSchema,
     OrganizationMemberListSchema,
     InvitationAcceptRequestSchema,
     InvitationAcceptResponseSchema,
@@ -122,18 +124,19 @@ def create_organization(data):
 
 
 @organizations_blp.get("/mine")
-@organizations_blp.response(200, OrganizationSchema, description="The user's organization")
+@organizations_blp.response(200, MyOrganizationResponseSchema, description="Membership state")
 @organizations_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@organizations_blp.alt_response(404, schema=ErrorSchema, description="Not in any organization")
 @limiter.limit("120 per hour")
 @require_oauth_token
 @handle_exceptions(default_exception=AccountsError, logger=logger)
 def get_my_organization():
-    """La organizacion del usuario, sea duenyo o miembro"""
-    organization = OrganizationManager().get_mine(get_current_user().id)
-    if organization is None:
-        raise NotInOrganizationError()
-    return organization
+    """La organizacion del usuario, sea duenyo o miembro. null si no tiene.
+
+    200 y no 404: no pertenecer a ninguna es un estado normal, no un recurso
+    que falte. Ademas lo pregunta cada carga de sesion, y un 404 llenaba de
+    rojo la consola del navegador a la mayoria de las cuentas.
+    """
+    return {"organization": OrganizationManager().get_mine(get_current_user().id)}
 
 
 @organizations_blp.put("/<int:organization_id>")
@@ -267,20 +270,21 @@ def accept_organization_invitation(data):
 
 
 @plans_blp.get("/subscriptions/<int:user_id>")
-@plans_blp.response(200, SubscriptionSchema, description="Subscription")
+@plans_blp.response(200, SubscriptionStateSchema, description="Subscription state")
 @plans_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @plans_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
-@plans_blp.alt_response(404, schema=ErrorSchema, description="No subscription")
 @limiter.limit("120 per hour")
 @require_oauth_token
 @require_role(Role.ROOT)
 @handle_exceptions(default_exception=AccountsError, logger=logger)
 def get_user_subscription(user_id: int):
-    """Consultar la suscripcion de un usuario"""
+    """Consultar la suscripcion de un usuario. null si no tiene ninguna.
+
+    El gestor pregunta esto nada mas elegir una cuenta, y no tener suscripcion
+    es lo normal — significa que esta en el plan por defecto.
+    """
     subscription = build_repository(SubscriptionRepository).get_by_user(user_id)
-    if subscription is None:
-        raise SubscriptionNotFoundError(user_id)
-    return subscription.to_dict()
+    return {"subscription": subscription.to_dict() if subscription else None}
 
 
 @plans_blp.put("/subscriptions/<int:user_id>")

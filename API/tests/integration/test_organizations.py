@@ -278,9 +278,11 @@ def test_inviting_an_existing_user_changes_nothing_until_they_accept(
     assert resp.status_code == 201
     assert resp.get_json()["status"] == "pending"
 
-    # Sigue sin organización y con su plan de siempre.
-    assert client.get("/organizations/mine",
-                      headers=auth_headers(regular_user)).status_code == 404
+    # Sigue sin organización y con su plan de siempre. El endpoint responde
+    # 200 con null: no estar en ninguna es un estado, no un recurso que falte.
+    mia = client.get("/organizations/mine", headers=auth_headers(regular_user))
+    assert mia.status_code == 200
+    assert mia.get_json()["organization"] is None
     with app.app_context():
         assert QuotaManager().state(regular_user.id, LimitKey.ACHERON_VAULTS).source == "default"
 

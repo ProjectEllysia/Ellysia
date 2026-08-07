@@ -282,13 +282,13 @@ async function loadUsers() {
   if (res?.ok) users.value = await res.json()
 }
 
-/** Sin suscripción es 404, y es un estado normal: la cuenta está en el plan
- *  por defecto. No se pinta como error. */
+/** Sin suscripción llega `null`, y es un estado normal: la cuenta está en el
+ *  plan por defecto. */
 async function loadSubscription() {
   subscription.value = null
   if (!subUserId.value) return
   const res = await apiFetch(`/plans/subscriptions/${subUserId.value}`)
-  if (res?.ok) subscription.value = await res.json()
+  if (res?.ok) subscription.value = (await res.json()).subscription ?? null
 }
 
 async function applyOperation() {

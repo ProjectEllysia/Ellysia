@@ -91,16 +91,16 @@ export const useAccountStore = defineStore('account', () => {
   }
 
   /**
-   * Organización propia. Un 404 es normal —no pertenece a ninguna—, no un error.
+   * Organización propia, o null si no pertenece a ninguna.
+   *
+   * El endpoint responde 200 con `organization: null` en vez de 404: no estar
+   * en ninguna es un estado normal, y con el 404 la mayoría de las cuentas veía
+   * un error rojo en la consola en cada carga.
    */
   async function loadOrganization() {
     const res = await apiFetch('/organizations/mine')
-    if (res?.status === 404) {
-      organization.value = null
-      return
-    }
     if (!res?.ok) return
-    organization.value = await res.json()
+    organization.value = (await res.json()).organization ?? null
   }
 
   /** Todo lo de la cuenta de una vez, para el arranque de la sesión. */

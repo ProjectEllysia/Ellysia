@@ -131,8 +131,12 @@ def test_a_bad_registration_says_which_field_is_wrong(client, seeded_plans):
 def test_root_can_read_a_subscription_that_does_not_exist_yet(
     client, seeded_plans, root_user, regular_user, auth_headers
 ):
-    """El gestor pregunta por la suscripción nada más elegir una cuenta. Sin
-    fila es un 404, y es un estado normal — la cuenta está en el plan por
-    defecto — no un error que deba romper la pantalla."""
+    """El gestor pregunta por la suscripción nada más elegir una cuenta.
+
+    Sin fila responde 200 con `null`, no 404: la cuenta está en el plan por
+    defecto, que es un estado normal. Con el 404, seleccionar una cuenta sin
+    plan dejaba un error rojo en la consola cada vez."""
     resp = client.get(f"/plans/subscriptions/{regular_user.id}", headers=auth_headers(root_user))
-    assert resp.status_code == 404
+
+    assert resp.status_code == 200
+    assert resp.get_json()["subscription"] is None
