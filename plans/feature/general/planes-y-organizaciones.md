@@ -754,7 +754,7 @@ para tener algo enseñable el primer día. `∞` = `NULL`, `—` = `0` (no inclu
 | `iris.analyses` /mes | 10 | 100 | 500 | ∞ |
 | `iris.ai_summaries` /mes | 2 | 25 | 100 | 400 |
 | `iris.mailbox.connections` | — | 1 | 3 | 10 |
-| `acheron.vaults` | 1 | 3 | 10 | ∞ |
+| `acheron.vaults` | 1 | 1 | 1 | 1 |
 | `acheron.items` | 25 | 250 | 1000 | ∞ |
 | `hygeia.assets` | 1 | 10 | 40 | 150 |
 | `ai.requests` /mes | 5 | 60 | 250 | 900 |
@@ -767,7 +767,7 @@ de Iris y bóveda de verdad porque su empresa paga.
 
 | Clave | Bronze | Silver | Gold |
 |---|---:|---:|---:|
-| `acheron.vaults` | 3 | 5 | ∞ |
+| `acheron.vaults` | ∞ | ∞ | ∞ |
 | `acheron.items` | 250 | 1000 | ∞ |
 | `iris.analyses` /mes | 50 | 200 | ∞ |
 | `iris.mailbox.connections` | 1 | 2 | 3 |
@@ -1138,13 +1138,15 @@ cobrado por transferencia.
 
 - **Los números de §11.** Están puestos para que haya algo enseñable; hay que revisarlos
   con el coste real de OpenAI y de los escaneos delante.
-- **`acheron.vaults` promete algo que el esquema no permite.** La tabla de precios vende
-  3 bóvedas en Bronze, 10 en Silver e ilimitadas en Gold, pero `Vault.user_id` es
-  `UNIQUE`: hoy nadie puede tener más de una. Al cablear la clave (fase 3) el tope quedó
-  funcionando como una **puerta** — `0` es "tu plan no incluye Acheron" y cualquier valor
-  ≥ 1 es "sí" — que es coherente pero no es lo que dice la tabla. Hay que elegir: o
-  Acheron pasa a admitir varias bóvedas por usuario (cambio de modelo y de cliente, que
-  es quien cifra), o §11 deja de venderlas y la clave se documenta como puerta.
+- **`acheron.vaults` era una lectura equivocada, ya corregida** (migración
+  `f5e6f7a8b9c0`). `Vault.user_id` es `UNIQUE` y así debe seguir: **cada persona tiene
+  una bóveda como máximo**. Lo que el plan del dueño limita no es cuántas tiene alguien
+  sino *a cuánta de su gente le toca una* — el contador del ámbito `member` suma las
+  bóvedas de todos los miembros, como cualquier bolsa común. En el ámbito `holder` la
+  clave solo puede valer `0` ("tu plan no incluye Acheron") o `1` ("sí"), y en el ámbito
+  `member` va **ilimitada**: servir una bóveda no cuesta nada —el servidor solo guarda
+  cifrado, sin IA ni escaneos detrás— así que racionarla era un incordio, no un
+  argumento comercial.
 - **¿El dueño puede lanzar acciones "en nombre de" un miembro?** (p. ej. un escaneo que
   aparece en el histórico del empleado). Recomendación: **no** en la v1 — abre la puerta
   a que el dueño toque datos ajenos, que es justo lo que §8.4 promete que no pasa.

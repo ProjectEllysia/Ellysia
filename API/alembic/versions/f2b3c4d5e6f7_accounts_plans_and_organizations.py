@@ -39,7 +39,7 @@ depends_on: Union[str, Sequence[str], None] = None
 _PLANS: tuple[tuple, ...] = (
     ("freemium", "Freemium", "Prueba Ellysia sin coste ni tarjeta",            0,     0,      0, True, True),
     ("bronze",   "Bronze",   "Para quien se defiende solo",                    1,  2900,   2000, True, False),
-    ("silver",   "Silver",   "Para un equipo pequenyo con activos que cuidar", 2,  7900,   5000, True, False),
+    ("silver",   "Silver",   "Para un equipo pequeño con activos que cuidar",  2,  7900,   5000, True, False),
     ("gold",     "Gold",     "Para un responsable de seguridad y su gente",    3, 19900,  12000, True, False),
 )
 
@@ -71,7 +71,7 @@ _HOLDER_LIMITS: dict[str, tuple[str, dict[str, int | None]]] = {
 #: max(), nunca se sustituyen).
 #:
 #: Aqui solo van las claves con valor: lo que no aparece vale 0. Un empleado no
-#: lanza pentestings ni campanyas de concienciacion por su cuenta — eso es del
+#: lanza pentestings ni campañas de concienciacion por su cuenta — eso es del
 #: responsable de seguridad. Freemium no aparece porque no admite organizacion.
 _MEMBER_LIMITS: dict[str, tuple[str, dict[str, int | None]]] = {
     "acheron.vaults":           ("stock", {"bronze":   3, "silver":    5, "gold": None}),

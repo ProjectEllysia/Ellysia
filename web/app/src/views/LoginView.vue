@@ -632,7 +632,7 @@ onBeforeUnmount(() => {})
 .submit:hover:not(:disabled) .submit-arrow { transform: translateX(4px); }
 .submit:active:not(:disabled) { transform: translateY(0); }
 .submit:disabled { opacity: 0.6; cursor: not-allowed; }
-.submit-label, .submit-arrow { position: relative; z-index: 1; }
+.submit-label, .submit-arrow { position: relative; z-index: 1; font-size: var(--fs-md); }
 .submit-arrow { transition: transform 0.25s ease; }
 .submit.loading .submit-label, .submit.loading .submit-arrow { opacity: 0; }
 .submit-spin {
@@ -670,6 +670,8 @@ onBeforeUnmount(() => {})
 }
 @keyframes live-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.7); } }
 .foot-ver { opacity: 0.8; letter-spacing: 0.04em; }
+.signup-hint { padding: 0.5rem 0 }
+
 
 /* ═══════════ Umbral cruzado ═══════════ */
 .grant-screen {

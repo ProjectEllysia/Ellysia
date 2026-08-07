@@ -106,10 +106,10 @@ async function handleCancel(id) { await store.cancelTask(id) }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.85rem; }
 .page-header h1 { font-size: var(--fs-3xl); font-weight: 800; color: var(--text); margin: 0; font-family: var(--font-display); }
 .subtitle { font-size: var(--fs-lg); color: var(--text-dim); margin: 0.2rem 0 0; }
-.status-bar { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; padding: 0.85rem 1.1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 1.25rem; }
+.status-bar { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; padding: 0.85rem 1.1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 1.25rem; justify-content: space-between }
 .stat-item { display: flex; flex-direction: column; gap: 0.1rem; min-width: 90px; }
-.stat-label { font-size: var(--fs-md); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.02em; font-weight: 600; }
-.stat-value { font-size: var(--fs-2xl); font-weight: 700; color: var(--text); font-family: var(--font-mono); }
+.stat-label { font-size: var(--fs-lg); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.02em; font-weight: 600; }
+.stat-value { font-size: var(--fs-lg); font-weight: 700; color: var(--text); font-family: var(--font-mono); text-align: center }
 .stat-item--running .stat-value { color: var(--info); }
 .stat-item--pending .stat-value { color: var(--warn); }
 .stat-item--history .stat-value { color: var(--text-dim); }
