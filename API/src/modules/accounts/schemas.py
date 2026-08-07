@@ -199,3 +199,71 @@ class SubscriptionOperationSchema(Schema):
     periodEnd = fields.DateTime(load_default=None)
     graceUntil = fields.DateTime(load_default=None)
     immediate = fields.Boolean(load_default=False)
+
+
+# =========================================================================
+# GESTOR DEL CATÁLOGO (root)
+# =========================================================================
+
+
+class PlanWriteSchema(Schema):
+    """Alta de un plan."""
+
+    code = fields.String(required=True, validate=validate.Length(min=2, max=32))
+    name = fields.String(required=True, validate=validate.Length(min=2, max=64))
+    tagline = fields.String(load_default=None, allow_none=True,
+                            validate=validate.Length(max=160))
+    rank = fields.Integer(load_default=0)
+    monthly_price_cents = fields.Integer(data_key="monthlyPriceCents", load_default=0,
+                                         validate=validate.Range(min=0))
+    org_addon_price_cents = fields.Integer(data_key="orgAddonPriceCents", load_default=0,
+                                           validate=validate.Range(min=0))
+    currency = fields.String(load_default="EUR", validate=validate.Length(equal=3))
+    is_public = fields.Boolean(data_key="isPublic", load_default=True)
+
+
+class PlanUpdateSchema(Schema):
+    """Edición de un plan. **Sin `code`**: cambiarlo rompería las asignaciones
+    que lo nombran y, el día de la pasarela, su correspondencia con ella. Si
+    hace falta otro código, es otro plan."""
+
+    name = fields.String(validate=validate.Length(min=2, max=64))
+    tagline = fields.String(allow_none=True, validate=validate.Length(max=160))
+    rank = fields.Integer()
+    monthly_price_cents = fields.Integer(data_key="monthlyPriceCents",
+                                         validate=validate.Range(min=0))
+    org_addon_price_cents = fields.Integer(data_key="orgAddonPriceCents",
+                                           validate=validate.Range(min=0))
+    currency = fields.String(validate=validate.Length(equal=3))
+    is_public = fields.Boolean(data_key="isPublic")
+
+
+class PlanLimitWriteSchema(Schema):
+    """Un tope. ``period`` no se acepta: lo dicta el catálogo de claves, no el
+    formulario — si lo eligiera quien rellena, un contador mensual podría
+    acabar declarado como existencias."""
+
+    limitKey = fields.String(required=True)
+    scope = fields.String(load_default="holder", validate=validate.OneOf(["holder", "member"]))
+    value = fields.Integer(allow_none=True, load_default=None, validate=validate.Range(min=0))
+
+
+class PlanLimitsWriteSchema(Schema):
+    limits = fields.List(fields.Nested(PlanLimitWriteSchema), required=True)
+
+
+class PlanLimitsResponseSchema(Schema):
+    planCode = fields.String()
+    limits = fields.Nested(PlanScopedLimitsSchema)
+
+
+class LimitCatalogEntrySchema(Schema):
+    key = fields.String()
+    period = fields.String()
+
+
+class LimitCatalogResponseSchema(Schema):
+    """Las claves que existen, para que el panel las ofrezca en un desplegable
+    en vez de dejar escribirlas a mano."""
+
+    keys = fields.List(fields.Nested(LimitCatalogEntrySchema))

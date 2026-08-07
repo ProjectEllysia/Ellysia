@@ -25,17 +25,15 @@
       </button>
 
       <router-link v-if="!auth.isAuthenticated" to="/login" class="enter-btn">Entrar</router-link>
-      <router-link v-else to="/profile" class="avatar-btn" :aria-label="`Perfil de ${auth.username()}`">
-        {{ initial }}
-      </router-link>
+      <AccountMenu v-else />
     </div>
   </header>
 </template>
 
 <script setup>
-import { computed } from 'vue'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
+import AccountMenu from '@/components/shared/AccountMenu.vue'
 
 const auth = useAuthStore()
 const theme = useThemeStore()
@@ -48,7 +46,6 @@ const modules = [
   { id: 'hygeia', name: 'Hygeia', route: '/hygeia' },
 ]
 
-const initial = computed(() => (auth.username()?.[0] || 'U').toUpperCase())
 </script>
 
 <style scoped>
@@ -116,19 +113,9 @@ const initial = computed(() => (auth.username()?.[0] || 'U').toUpperCase())
   transition: all var(--transition);
 }
 .enter-btn:hover { background: var(--accent); color: var(--on-accent); }
-.avatar-btn {
-  width: 40px; height: 40px; border-radius: 50%;
-  display: grid; place-items: center;
-  background: var(--accent-dim);
-  border: 1.5px solid var(--border-med);
-  color: var(--accent-bright);
-  font-size: var(--fs-md); font-weight: 700;
-  transition: all var(--transition);
-}
-.avatar-btn:hover { border-color: var(--accent); box-shadow: 0 0 12px var(--accent-dim); }
 
 .icon-btn:focus-visible, .enter-btn:focus-visible,
-.avatar-btn:focus-visible, .nav-link:focus-visible, .brand:focus-visible {
+.nav-link:focus-visible, .brand:focus-visible {
   outline: 2px solid var(--accent-bright);
   outline-offset: 3px;
 }

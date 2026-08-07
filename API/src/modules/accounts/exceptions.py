@@ -234,6 +234,56 @@ class EmailNotVerifiedError(AccountsError):
         )
 
 
+class PlanCodeTakenError(AccountsError):
+    """Ya hay un plan con ese código."""
+
+    default_code = ErrorCode.ENTITY_ALREADY_EXISTS
+    default_status_code = 409
+
+    def __init__(self, code: str) -> None:
+        super().__init__(
+            message=f"Ya existe un plan con el codigo '{code}'",
+            details={"code": code},
+            user_message=f"Ya hay un plan con el codigo '{code}'.",
+        )
+
+
+class PlanInUseError(AccountsError):
+    """No se puede borrar: alguien lo tiene, o es el de por defecto.
+
+    Dejar cuentas apuntando a un plan inexistente convertiría cada lectura de
+    sus derechos en un error.
+    """
+
+    default_code = ErrorCode.CONSTRAINT_VIOLATION
+    default_status_code = 409
+
+    def __init__(self, code: str, reason: str) -> None:
+        super().__init__(
+            message=f"El plan '{code}' no se puede borrar: {reason}",
+            details={"code": code, "reason": reason},
+            user_message=f"No se puede borrar el plan '{code}' porque {reason}.",
+        )
+
+
+class UnknownLimitKeyError(AccountsError):
+    """Clave o ámbito que no está en el catálogo.
+
+    Se rechaza en vez de guardarse: una errata crearía una fila que nadie
+    consulta nunca y dejaría la característica desactivada en silencio.
+    """
+
+    default_code = ErrorCode.VALIDATION_ERROR
+    default_status_code = 400
+
+    def __init__(self, value: str) -> None:
+        super().__init__(
+            message=f"Clave o ambito de limite desconocido: '{value}'",
+            details={"value": value},
+            user_message=f"'{value}' no es una clave de limite valida.",
+        )
+
+
 class SubscriptionNotFoundError(EntityNotFoundError, AccountsError):
     """El usuario no tiene fila en ``Subscription``.
 

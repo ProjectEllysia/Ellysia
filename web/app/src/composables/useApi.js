@@ -104,7 +104,42 @@ export function useApi() {
       return null
     }
 
+    // ── 402: corte por plan ───────────────────────────────────────────
+    // Un solo punto para los catorce sitios que pueden cortar. El cuerpo del
+    // 402 es contrato (tope, consumo y cuándo se renueva), así que se puede
+    // decir algo útil en vez de "error 402". Se devuelve la respuesta igual:
+    // quien llama puede querer reaccionar además del aviso.
+    if (res.status === 402) {
+      const body = await res.clone().json().catch(() => null)
+      const { useToastStore } = await import('@/stores/toastStore')
+      useToastStore().show(planLimitMessage(body), 'warn', 6000)
+    }
+
     return res
+  }
+
+  /**
+   * Traduce el cuerpo de un 402 a algo que un humano entienda.
+   *
+   * Distingue "tu plan no lo incluye" (se arregla mejorando de plan) de "te
+   * has quedado sin cupo" (se arregla esperando al mes que viene), que es la
+   * razón de que sean dos códigos distintos y no uno.
+   */
+  function planLimitMessage(body) {
+    const detail = body?.details ?? {}
+    if (body?.code === 1902) {
+      return 'Tu plan no incluye esta funcionalidad. Puedes verlo en Planes.'
+    }
+    if (detail.resetsAt) {
+      const when = new Date(detail.resetsAt).toLocaleDateString('es-ES', {
+        day: 'numeric', month: 'long',
+      })
+      return `Has alcanzado el límite de tu plan (${detail.used}/${detail.value}). Se renueva el ${when}.`
+    }
+    if (detail.value != null) {
+      return `Has alcanzado el límite de tu plan (${detail.used}/${detail.value}).`
+    }
+    return body?.error_description || 'Has alcanzado un límite de tu plan.'
   }
 
   return { apiFetch, apiError }

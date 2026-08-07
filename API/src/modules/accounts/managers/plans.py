@@ -10,13 +10,20 @@ seis operaciones del ciclo de vida) y quien cuenta el consumo
 import logging
 from typing import Optional
 
+from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import utcnow_naive
 
-from ..model import Plan
+from ..exceptions import (
+    PlanCodeTakenError,
+    PlanInUseError,
+    PlanNotFoundError,
+    UnknownLimitKeyError,
+)
+from ..model import Plan, PlanLimit, Subscription
 from ..repositories import PlanLimitRepository, PlanRepository
 from ..services.entitlements import is_effective, resolve_effective_plan
-from ..services.limits import SCOPE_HOLDER, SCOPE_MEMBER, LimitKey
+from ..services.limits import PERIODS, SCOPE_HOLDER, SCOPE_MEMBER, SCOPES, LimitKey
 from ..services.quotas import QuotaManager
 
 logger = logging.getLogger(__name__)
@@ -117,6 +124,146 @@ class PlanManager:
             usage[limit.limit_key] = entry
 
         return {"planCode": plan.code, "usage": usage}
+
+    # ------------------------------------------------------- gestor (root)
+
+    def create_plan(self, data: dict) -> dict:
+        """Alta de un plan en el catálogo.
+
+        Nace **sin topes**: todas sus claves se leen como 0 hasta que alguien
+        las rellene. Es el fallo cerrado de siempre — un plan a medio configurar
+        no regala nada.
+        """
+        with UnitOfWork() as uow:
+            repo = PlanRepository(uow)
+            if repo.get_by_code(data["code"]) is not None:
+                raise PlanCodeTakenError(data["code"])
+
+            plan = Plan(**data)
+            uow.session.add(plan)
+            uow.session.flush()
+            payload = plan.to_dict()
+
+        logger.info(f"Plan '{payload['code']}' creado")
+        return payload
+
+    def update_plan(self, plan_id: int, data: dict) -> dict:
+        """Edita los metadatos de un plan. El ``code`` no se toca.
+
+        Cambiarlo rompería las asignaciones que lo nombran (y, el día de la
+        pasarela, la correspondencia con lo que ella tenga guardado). Si hace
+        falta otro código, es otro plan.
+        """
+        with UnitOfWork() as uow:
+            repo = PlanRepository(uow)
+            plan = repo.get_by_id(plan_id)
+            if plan is None:
+                raise PlanNotFoundError(plan_id)
+
+            for field, value in data.items():
+                setattr(plan, field, value)
+            plan.updated_at = utcnow_naive()
+            repo.update(plan)
+            return plan.to_dict()
+
+    def set_default_plan(self, plan_id: int) -> dict:
+        """Marca un plan como el de por defecto, quitándoselo al anterior.
+
+        Los dos cambios van en la misma transacción porque un índice único
+        parcial impide que haya dos: quitar primero y poner después no es una
+        cortesía, es la única forma de que no falle.
+        """
+        with UnitOfWork() as uow:
+            repo = PlanRepository(uow)
+            plan = repo.get_by_id(plan_id)
+            if plan is None:
+                raise PlanNotFoundError(plan_id)
+
+            current = repo.get_default()
+            if current is not None and current.id != plan_id:
+                current.is_default = False
+                uow.session.flush()
+
+            plan.is_default = True
+            plan.updated_at = utcnow_naive()
+            repo.update(plan)
+            logger.info(f"Plan por defecto: '{plan.code}'")
+            return plan.to_dict()
+
+    def replace_limits(self, plan_id: int, limits: list[dict]) -> dict:
+        """Reemplaza **todos** los topes de un plan.
+
+        Reemplazar y no parchear: así lo que se ve en el panel es exactamente lo
+        que queda guardado, y una clave que se borra de la lista desaparece de
+        verdad en vez de quedarse con su valor viejo.
+
+        Cada clave se valida contra ``LimitKey``: una errata crearía una fila
+        que nadie consulta y dejaría la característica desactivada en silencio.
+        """
+        with UnitOfWork() as uow:
+            plan = PlanRepository(uow).get_by_id(plan_id)
+            if plan is None:
+                raise PlanNotFoundError(plan_id)
+
+            rows = [self._validated_limit(plan_id, limit) for limit in limits]
+
+            uow.session.query(PlanLimit).filter(
+                PlanLimit.plan_id == plan_id
+            ).delete(synchronize_session=False)
+            uow.session.add_all(rows)
+            uow.session.flush()
+
+            logger.info(f"Topes del plan '{plan.code}' reemplazados ({len(rows)} claves)")
+            return {
+                "planCode": plan.code,
+                "limits": self._group_limits_by_scope(rows),
+            }
+
+    def delete_plan(self, plan_id: int) -> None:
+        """Borra un plan del catálogo.
+
+        Se niega si alguien lo tiene contratado o si es el de por defecto:
+        dejar cuentas apuntando a un plan inexistente convertiría cada lectura
+        de sus derechos en un error.
+        """
+        with UnitOfWork() as uow:
+            repo = PlanRepository(uow)
+            plan = repo.get_by_id(plan_id)
+            if plan is None:
+                raise PlanNotFoundError(plan_id)
+            if plan.is_default:
+                raise PlanInUseError(plan.code, reason="es el plan por defecto")
+
+            live = uow.session.query(Subscription).filter(
+                Subscription.plan_id == plan_id
+            ).count()
+            if live:
+                raise PlanInUseError(plan.code, reason=f"lo tienen {live} cuenta(s)")
+
+            repo.delete(plan)
+            logger.info(f"Plan '{plan.code}' eliminado")
+
+    @staticmethod
+    def _validated_limit(plan_id: int, limit: dict) -> PlanLimit:
+        try:
+            key = LimitKey(limit["limitKey"])
+        except ValueError as exc:
+            raise UnknownLimitKeyError(limit["limitKey"]) from exc
+
+        scope = limit.get("scope", SCOPE_HOLDER)
+        if scope not in SCOPES:
+            raise UnknownLimitKeyError(scope)
+
+        return PlanLimit(
+            plan_id=plan_id,
+            limit_key=key.db_name,
+            scope=scope,
+            value=limit.get("value"),
+            # El periodo lo manda el catálogo de claves, no el formulario: si lo
+            # eligiera quien rellena, un contador mensual podría acabar
+            # declarado como existencias.
+            period=PERIODS[key].value,
+        )
 
     def get_plan_by_code(self, code: str) -> Optional[Plan]:
         """Búsqueda por código, para quien asigne planes en fases posteriores."""

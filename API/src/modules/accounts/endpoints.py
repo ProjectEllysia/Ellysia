@@ -32,8 +32,15 @@ from .managers import (
     SubscriptionManager,
 )
 from .repositories import SubscriptionRepository
+from .services.limits import PERIODS, LimitKey
 from .services.ownership import require_organization_owner
 from .schemas import (
+    LimitCatalogResponseSchema,
+    PlanLimitsResponseSchema,
+    PlanLimitsWriteSchema,
+    PlanSummarySchema,
+    PlanUpdateSchema,
+    PlanWriteSchema,
     SubscriptionOperationSchema,
     SubscriptionSchema,
     EffectivePlanResponseSchema,
@@ -305,3 +312,106 @@ def move_user_subscription(data, user_id: int):
     )
     logger.info(f"Operacion '{data['operation']}' aplicada sobre la suscripcion de {user_id}")
     return result
+
+
+# =========================================================================
+# GESTOR DEL CATALOGO (root)
+# =========================================================================
+
+
+@plans_blp.get("/limit-keys")
+@plans_blp.response(200, LimitCatalogResponseSchema, description="Available limit keys")
+@plans_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@plans_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@limiter.limit("120 per hour")
+@require_oauth_token
+@require_role(Role.ROOT)
+@handle_exceptions(default_exception=AccountsError, logger=logger)
+def list_limit_keys():
+    """Claves medibles que existen, con su periodicidad
+
+    El panel las ofrece en un desplegable en vez de dejar escribirlas: una
+    errata crearia una fila que nadie consulta y dejaria la caracteristica
+    desactivada en silencio.
+    """
+    return {"keys": [{"key": key.value, "period": PERIODS[key].value} for key in LimitKey]}
+
+
+@plans_blp.post("")
+@plans_blp.arguments(PlanWriteSchema)
+@plans_blp.response(201, PlanSummarySchema, description="Plan created")
+@plans_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@plans_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@plans_blp.alt_response(409, schema=ErrorSchema, description="Code already taken")
+@limiter.limit("30 per hour")
+@require_oauth_token
+@require_role(Role.ROOT)
+@handle_exceptions(default_exception=AccountsError, logger=logger)
+def create_plan(data):
+    """Crear un plan. Nace sin topes: sus claves valen 0 hasta rellenarlas."""
+    return PlanManager().create_plan(data), 201
+
+
+@plans_blp.put("/<int:plan_id>")
+@plans_blp.arguments(PlanUpdateSchema)
+@plans_blp.response(200, PlanSummarySchema, description="Plan updated")
+@plans_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@plans_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@plans_blp.alt_response(404, schema=ErrorSchema, description="Unknown plan")
+@limiter.limit("60 per hour")
+@require_oauth_token
+@require_role(Role.ROOT)
+@handle_exceptions(default_exception=AccountsError, logger=logger)
+def update_plan(data, plan_id: int):
+    """Editar los metadatos de un plan"""
+    return PlanManager().update_plan(plan_id, data)
+
+
+@plans_blp.put("/<int:plan_id>/default")
+@plans_blp.response(200, PlanSummarySchema, description="Default plan set")
+@plans_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@plans_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@plans_blp.alt_response(404, schema=ErrorSchema, description="Unknown plan")
+@limiter.limit("20 per hour")
+@require_oauth_token
+@require_role(Role.ROOT)
+@handle_exceptions(default_exception=AccountsError, logger=logger)
+def set_default_plan(plan_id: int):
+    """Marcar el plan que reciben las cuentas sin suscripcion vigente"""
+    return PlanManager().set_default_plan(plan_id)
+
+
+@plans_blp.put("/<int:plan_id>/limits")
+@plans_blp.arguments(PlanLimitsWriteSchema)
+@plans_blp.response(200, PlanLimitsResponseSchema, description="Limits replaced")
+@plans_blp.alt_response(400, schema=ErrorSchema, description="Unknown limit key")
+@plans_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@plans_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@plans_blp.alt_response(404, schema=ErrorSchema, description="Unknown plan")
+@limiter.limit("60 per hour")
+@require_oauth_token
+@require_role(Role.ROOT)
+@handle_exceptions(default_exception=AccountsError, logger=logger)
+def replace_plan_limits(data, plan_id: int):
+    """Reemplazar TODOS los topes de un plan
+
+    Reemplazar y no parchear: lo que se ve en el panel es exactamente lo que
+    queda guardado, y una clave que se quita desaparece de verdad.
+    """
+    return PlanManager().replace_limits(plan_id, data["limits"])
+
+
+@plans_blp.delete("/<int:plan_id>")
+@plans_blp.response(200, SuccessMessageSchema, description="Plan deleted")
+@plans_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@plans_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@plans_blp.alt_response(404, schema=ErrorSchema, description="Unknown plan")
+@plans_blp.alt_response(409, schema=ErrorSchema, description="Plan in use or default")
+@limiter.limit("20 per hour")
+@require_oauth_token
+@require_role(Role.ROOT)
+@handle_exceptions(default_exception=AccountsError, logger=logger)
+def delete_plan(plan_id: int):
+    """Borrar un plan. Se niega si alguien lo tiene o si es el de por defecto."""
+    PlanManager().delete_plan(plan_id)
+    return {"message": "Plan eliminado"}

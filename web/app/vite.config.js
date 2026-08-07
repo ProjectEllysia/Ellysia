@@ -37,6 +37,13 @@ export default defineConfig({
       '/acheron':   { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
       '/iris':      { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
       '/hygeia':    { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
+      // Capa comercial. Van con bypass porque comparten prefijo con rutas del
+      // SPA: /plans es la API pero /planes es la tabla de precios, y
+      // /organizations es la API mientras que /organizacion es la vista. El
+      // castellano de las rutas del front evita casi toda colisión, pero el
+      // bypass la cierra del todo.
+      '/plans':         { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
+      '/organizations': { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
     },
     allowedHosts: ['dev.local.ellysia.es'],
   }
