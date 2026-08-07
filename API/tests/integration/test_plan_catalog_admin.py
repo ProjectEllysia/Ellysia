@@ -243,6 +243,36 @@ def test_the_default_plan_cannot_be_deleted(client, seeded_plans, root_user, aut
     assert resp.status_code == 409
 
 
+# --------------------------------------------------- el catálogo del gestor
+
+def test_the_manager_sees_the_hidden_plans(client, seeded_plans, root_user, auth_headers):
+    """`GET /plans` filtra por isPublic, que es lo que debe ver la tabla de
+    precios. Un gestor que no enseña los ocultos no deja gestionarlos — y son
+    justo los que nadie más puede tocar."""
+    publicos = [p["code"] for p in client.get("/plans").get_json()["plans"]]
+    todos = [
+        p["code"] for p in
+        client.get("/plans/all", headers=auth_headers(root_user)).get_json()["plans"]
+    ]
+
+    assert "custom" not in publicos
+    assert "custom" in todos
+
+
+def test_the_full_catalog_is_root_only(client, seeded_plans, admin_user, auth_headers):
+    assert client.get("/plans/all", headers=auth_headers(admin_user)).status_code == 403
+
+
+def test_the_full_catalog_carries_the_limits(client, seeded_plans, root_user, auth_headers):
+    """El gestor edita los topes sobre lo que le llega: si no vinieran, la
+    tabla de topes arrancaría vacía y guardar borraría la configuración."""
+    plans = client.get("/plans/all", headers=auth_headers(root_user)).get_json()["plans"]
+    bronze = next(plan for plan in plans if plan["code"] == "bronze")
+
+    assert bronze["limits"]["holder"]["iris.analyses"]["value"] == 100
+    assert bronze["limits"]["member"]["acheron.vaults"]["value"] == 3
+
+
 # ------------------------------------------------------- catálogo de claves
 
 def test_the_limit_key_catalog_is_offered_to_the_panel(

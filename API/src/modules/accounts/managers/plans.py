@@ -51,6 +51,23 @@ class PlanManager:
             plans.append(payload)
         return plans
 
+    def list_all_plans(self) -> list[dict]:
+        """Catálogo **completo**, incluidos los ocultos. Para el gestor.
+
+        ``list_public_plans`` filtra por ``is_public``, que es lo que debe ver
+        la tabla de precios — pero un gestor que no enseña los planes ocultos no
+        deja gestionarlos, y son justo los que nadie más puede tocar.
+        """
+        limit_repository = build_repository(PlanLimitRepository)
+        plans = []
+        for plan in build_repository(PlanRepository).get_all_ordered():
+            payload = plan.to_dict()
+            payload["limits"] = self._group_limits_by_scope(
+                limit_repository.get_by_plan(plan.id)
+            )
+            plans.append(payload)
+        return plans
+
     def get_effective_plan(self, user_id: int) -> dict:
         """Plan que rige ahora mismo para ``user_id``, con su estado de vigencia.
 

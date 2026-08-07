@@ -15,7 +15,18 @@
           <button class="btn btn--primary" @click="startCreate">Nuevo plan</button>
         </div>
 
-        <table class="table">
+        <!-- Sin esto la tabla se quedaba vacía y en silencio, que es la peor
+             respuesta posible: no distinguía "no hay planes" de "falló". -->
+        <p v-if="loadError" class="state state--error">
+          {{ loadError }}
+        </p>
+        <p v-else-if="loaded && !plans.length" class="state">
+          No hay ningún plan en la base de datos. Si acabas de desplegar, aplica
+          las migraciones — la semilla del catálogo va en una de ellas:
+          <code>cd API &amp;&amp; alembic upgrade head</code>
+        </p>
+
+        <table v-else-if="plans.length" class="table">
           <thead>
             <tr><th>Código</th><th>Nombre</th><th>Precio</th><th>Orden</th><th>Estado</th><th></th></tr>
           </thead>
@@ -62,6 +73,99 @@
             <button type="submit" class="btn btn--primary">Crear</button>
           </div>
         </form>
+      </section>
+
+      <!-- Asignar un plan a una cuenta -->
+      <section class="section">
+        <h2>Suscripciones</h2>
+        <p class="section-desc">
+          Las seis operaciones del ciclo de vida, a mano. Es el mismo camino que
+          usará la pasarela el día que se enchufe: aquí las mueve root, mañana un
+          adaptador de webhooks.
+        </p>
+
+        <div class="sub-picker">
+          <div class="form-group">
+            <label for="sub-user">Cuenta</label>
+            <select id="sub-user" v-model.number="subUserId" class="inp" @change="loadSubscription">
+              <option :value="null">Elige una cuenta…</option>
+              <option v-for="user in users" :key="user.id" :value="user.id">
+                {{ user.username }} — {{ user.email }}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <template v-if="subUserId">
+          <p class="sub-current">
+            <template v-if="subscription">
+              Ahora: <strong>{{ planName(subscription.planId) }}</strong> ·
+              {{ STATUS[subscription.status] ?? subscription.status }}
+              <span v-if="subscription.organizationEnabled"> · con organización</span>
+              <span v-if="subscription.currentPeriodEnd">
+                · hasta {{ shortDate(subscription.currentPeriodEnd) }}
+              </span>
+            </template>
+            <template v-else>
+              Sin suscripción — esta cuenta está en el plan por defecto.
+            </template>
+          </p>
+
+          <div class="sub-form">
+            <div class="form-group">
+              <label for="sub-op">Operación</label>
+              <select id="sub-op" v-model="operation" class="inp">
+                <option value="activate">Activar o cambiar de plan</option>
+                <option value="start_trial">Empezar prueba</option>
+                <option value="mark_past_due">Marcar impago</option>
+                <option value="resume">Reanudar</option>
+                <option value="cancel">Cancelar</option>
+                <option value="expire">Caducar ahora</option>
+              </select>
+            </div>
+
+            <div v-if="needsPlan" class="form-group">
+              <label for="sub-plan">Plan</label>
+              <select id="sub-plan" v-model="opPlanCode" class="inp">
+                <option v-for="plan in plans" :key="plan.code" :value="plan.code">
+                  {{ plan.name }}
+                </option>
+              </select>
+            </div>
+
+            <div v-if="needsPeriodEnd" class="form-group">
+              <label for="sub-end">{{ operation === 'start_trial' ? 'La prueba acaba el' : 'Vigente hasta' }}</label>
+              <input id="sub-end" v-model="opPeriodEnd" type="date" class="inp" />
+            </div>
+
+            <div v-if="operation === 'mark_past_due'" class="form-group">
+              <label for="sub-grace">Cortesía hasta</label>
+              <input id="sub-grace" v-model="opGraceUntil" type="date" class="inp" />
+            </div>
+
+            <div v-if="operation === 'activate'" class="form-group">
+              <label for="sub-org">Organización</label>
+              <select id="sub-org" v-model="opOrgEnabled" class="inp">
+                <option :value="false">Sin organización</option>
+                <option :value="true">Puede gestionar una organización</option>
+              </select>
+            </div>
+
+            <div v-if="operation === 'cancel'" class="form-group">
+              <label for="sub-immediate">Cuándo</label>
+              <select id="sub-immediate" v-model="opImmediate" class="inp">
+                <option :value="false">Al terminar el periodo pagado</option>
+                <option :value="true">Ahora mismo (devolución)</option>
+              </select>
+            </div>
+
+            <div class="form-actions">
+              <button class="btn btn--primary" :disabled="applying" @click="applyOperation">
+                {{ applying ? 'Aplicando…' : 'Aplicar' }}
+              </button>
+            </div>
+          </div>
+        </template>
       </section>
 
       <!-- Topes del plan seleccionado -->
@@ -119,7 +223,7 @@
  * quien rellena, un contador mensual podría acabar declarado como existencias y
  * no reiniciarse nunca.
  */
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
@@ -133,6 +237,8 @@ const PERIODS = { month: 'mensual', day: 'diario', stock: 'existencias' }
 
 const plans = ref([])
 const limitKeys = ref([])
+const loadError = ref('')
+const loaded = ref(false)
 const selected = ref(null)
 const selectedId = ref(null)
 const holder = ref({})
@@ -142,6 +248,77 @@ const saving = ref(false)
 const draft = ref(emptyDraft())
 const confirm = ref({ open: false, title: '', message: '', action: () => {} })
 
+/* ── Suscripciones ── */
+const STATUS = {
+  active: 'activa',
+  trialing: 'en prueba',
+  past_due: 'impago',
+  canceled: 'cancelada',
+}
+const users = ref([])
+const subUserId = ref(null)
+const subscription = ref(null)
+const operation = ref('activate')
+const opPlanCode = ref('')
+const opPeriodEnd = ref('')
+const opGraceUntil = ref('')
+const opOrgEnabled = ref(false)
+const opImmediate = ref(false)
+const applying = ref(false)
+
+const needsPlan = computed(() => ['activate', 'start_trial'].includes(operation.value))
+const needsPeriodEnd = computed(() => ['activate', 'start_trial'].includes(operation.value))
+
+function planName(planId) {
+  return plans.value.find((plan) => plan.id === planId)?.name ?? `#${planId}`
+}
+
+function shortDate(iso) {
+  return new Date(iso).toLocaleDateString('es-ES')
+}
+
+async function loadUsers() {
+  const res = await apiFetch('/users')
+  if (res?.ok) users.value = await res.json()
+}
+
+/** Sin suscripción es 404, y es un estado normal: la cuenta está en el plan
+ *  por defecto. No se pinta como error. */
+async function loadSubscription() {
+  subscription.value = null
+  if (!subUserId.value) return
+  const res = await apiFetch(`/plans/subscriptions/${subUserId.value}`)
+  if (res?.ok) subscription.value = await res.json()
+}
+
+async function applyOperation() {
+  applying.value = true
+  try {
+    const body = { operation: operation.value }
+    if (needsPlan.value) body.planCode = opPlanCode.value || plans.value[0]?.code
+    // El backend espera ISO-8601; <input type="date"> da 'YYYY-MM-DD'.
+    if (needsPeriodEnd.value && opPeriodEnd.value) body.periodEnd = `${opPeriodEnd.value}T00:00:00`
+    if (operation.value === 'mark_past_due' && opGraceUntil.value) {
+      body.graceUntil = `${opGraceUntil.value}T00:00:00`
+    }
+    if (operation.value === 'activate') body.organizationEnabled = opOrgEnabled.value
+    if (operation.value === 'cancel') body.immediate = opImmediate.value
+
+    const res = await apiFetch(`/plans/subscriptions/${subUserId.value}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo aplicar la operación.'), 'error')
+      return
+    }
+    subscription.value = await res.json()
+    toast.show('Suscripción actualizada.', 'success')
+  } finally {
+    applying.value = false
+  }
+}
+
 function emptyDraft() {
   return { code: '', name: '', tagline: '', monthlyPriceCents: 0, orgAddonPriceCents: 0, rank: 0 }
 }
@@ -150,11 +327,17 @@ function euros(cents) {
   return `${(cents / 100).toFixed(2)} €`
 }
 
+/**
+ * El catálogo COMPLETO, no el público: /plans filtra por isPublic y un gestor
+ * que no enseña los planes ocultos no deja gestionarlos.
+ */
 async function loadPlans() {
-  // El catálogo público oculta los planes con isPublic=false, así que para
-  // gestionarlos hace falta verlos todos: se piden con sesión de root.
-  const res = await fetch('/plans')
-  if (!res.ok) return
+  loadError.value = ''
+  const res = await apiFetch('/plans/all')
+  if (!res?.ok) {
+    loadError.value = await apiError(res, 'No se ha podido cargar el catálogo.')
+    return
+  }
   plans.value = (await res.json()).plans ?? []
 }
 
@@ -271,7 +454,8 @@ function remove(plan) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadPlans(), loadKeys()])
+  await Promise.all([loadPlans(), loadKeys(), loadUsers()])
+  loaded.value = true
 })
 </script>
 
@@ -307,6 +491,19 @@ onMounted(async () => {
   border: 1px solid var(--border-med); margin-right: 0.3rem;
 }
 .tag--default { color: var(--accent-bright); border-color: var(--accent); }
+
+.state {
+  margin-top: 1.2rem; padding: 1rem 1.1rem; border-radius: 8px;
+  background: var(--bg); border: 1px solid var(--border-med);
+  color: var(--text-muted); font-size: var(--fs-md); line-height: 1.6;
+}
+.state--error { border-color: var(--danger); color: var(--text); }
+.state code {
+  display: inline-block; margin-top: 0.4rem;
+  font-family: var(--font-mono); font-size: var(--fs-body);
+  color: var(--accent-bright); background: var(--accent-dim);
+  padding: 0.15rem 0.45rem; border-radius: 4px;
+}
 
 .grid-form {
   margin-top: 1.2rem; display: grid; gap: 0.9rem;

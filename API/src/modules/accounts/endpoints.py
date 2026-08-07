@@ -319,6 +319,23 @@ def move_user_subscription(data, user_id: int):
 # =========================================================================
 
 
+@plans_blp.get("/all")
+@plans_blp.response(200, PlanCatalogResponseSchema, description="Every plan, hidden ones included")
+@plans_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@plans_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@limiter.limit("120 per hour")
+@require_oauth_token
+@require_role(Role.ROOT)
+@handle_exceptions(default_exception=AccountsError, logger=logger)
+def list_all_plans():
+    """Catalogo completo para el gestor, con los planes ocultos incluidos
+
+    GET /plans filtra por isPublic, que es lo que debe ver la tabla de precios;
+    un gestor que no los enseña no deja gestionarlos.
+    """
+    return {"plans": PlanManager().list_all_plans()}
+
+
 @plans_blp.get("/limit-keys")
 @plans_blp.response(200, LimitCatalogResponseSchema, description="Available limit keys")
 @plans_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")

@@ -265,6 +265,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
+import { validationMessage } from '@/composables/useApi'
 import ElysianScene from '@/components/shared/ElysianScene.vue'
 import ellysiaIcon from '@/assets/images/ellysia/Ellysia-BgN.png'
 
@@ -313,7 +314,12 @@ async function handleRegister() {
     const body = await res.json().catch(() => ({}))
 
     if (!res.ok) {
-      showAlert(body.error_description || 'No se pudo crear la cuenta.', 'error')
+      // Un 422 dice qué campo falla y por qué; sin traducirlo, el usuario solo
+      // veía "no se pudo crear la cuenta" y no tenía forma de arreglarlo.
+      showAlert(
+        validationMessage(body) || body.error_description || 'No se pudo crear la cuenta.',
+        'error',
+      )
       return
     }
 

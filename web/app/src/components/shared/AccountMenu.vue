@@ -16,6 +16,20 @@
           </div>
         </div>
 
+        <!-- Sin correo confirmado no se puede lanzar nada, y hasta ahora la
+             interfaz no lo decía en ninguna parte: el usuario se comía un 403
+             sin saber por qué ni cómo salir. -->
+        <div v-if="needsVerification" class="drop-verify">
+          <span class="drop-verify-title">Confirma tu correo</span>
+          <span class="drop-verify-text">
+            Puedes mirar, pero no lanzar escaneos ni pedirle nada a la IA hasta
+            que pulses el enlace que te enviamos.
+          </span>
+          <button class="drop-verify-btn" :disabled="resending" @click="resend">
+            {{ resending ? 'Enviando…' : 'Enviar otro enlace' }}
+          </button>
+        </div>
+
         <router-link v-if="account.plan" to="/mi-plan" class="drop-plan" @click="open = false">
           <span class="drop-plan-name">{{ account.plan.plan.name }}</span>
           <span v-if="notice" class="drop-plan-notice">{{ notice.text }}</span>
@@ -64,6 +78,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '@/stores/authStore'
 import { useProfileStore } from '@/stores/profileStore'
 import { useAccountStore } from '@/stores/accountStore'
+import { useApi } from '@/composables/useApi'
 
 const auth = useAuthStore()
 const profileStore = useProfileStore()
@@ -94,7 +109,34 @@ const roleLabel = computed(() => {
 })
 
 const notice = computed(() => account.notice)
-const hasNotice = computed(() => notice.value !== null || account.exceededKeys.length > 0)
+
+/** El perfil solo trae `emailVerified` una vez cargado; mientras tanto no se
+ *  avisa de nada, para no acusar a nadie por un dato que aún no ha llegado. */
+const needsVerification = computed(() => profileStore.profile.emailVerified === false)
+
+const hasNotice = computed(
+  () => notice.value !== null || account.exceededKeys.length > 0 || needsVerification.value,
+)
+
+const resending = ref(false)
+
+async function resend() {
+  resending.value = true
+  try {
+    const { apiFetch, apiError } = useApi()
+    const res = await apiFetch('/users/verify-email/resend', { method: 'POST' })
+    const { useToastStore } = await import('@/stores/toastStore')
+    const toast = useToastStore()
+    toast.show(
+      res?.ok
+        ? 'Te hemos enviado otro enlace. Revisa tu correo.'
+        : await apiError(res, 'No se pudo enviar el enlace.'),
+      res?.ok ? 'success' : 'error',
+    )
+  } finally {
+    resending.value = false
+  }
+}
 
 /** El toggle de organización es lo único que el plan sí "concede" (§5.1). */
 const canCreateOrganization = computed(() => account.plan?.organizationEnabled === true)
@@ -177,6 +219,23 @@ onUnmounted(() => {
   font-family: var(--font-mono); font-size: var(--fs-body); color: var(--accent);
   letter-spacing: 0.06em; text-transform: uppercase;
 }
+
+.drop-verify {
+  display: flex; flex-direction: column; gap: 0.35rem;
+  padding: 0.7rem; margin-bottom: 0.45rem; border-radius: 7px;
+  background: var(--danger-dim); border: 1px solid var(--danger);
+}
+.drop-verify-title {
+  font-family: var(--font-epic); font-size: var(--fs-md); font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--danger);
+}
+.drop-verify-text { font-size: var(--fs-body); color: var(--text-dim); line-height: 1.45; }
+.drop-verify-btn {
+  align-self: flex-start; margin-top: 0.25rem;
+  font-size: var(--fs-body); font-weight: 600;
+  color: var(--accent-bright); text-decoration: underline;
+}
+.drop-verify-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .drop-plan {
   display: block;

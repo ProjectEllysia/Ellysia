@@ -91,6 +91,11 @@ def _serialize_user_profile(user: "User", *, include_attributes: bool = False) -
         "role": user.role,
         "created_at": user.created_at,
         "password_changed_at": user.password_changed_at,
+        # Sin esto el cliente no puede saber que la cuenta está pendiente de
+        # confirmar, y el usuario se come un 403 al primer intento de hacer
+        # cualquier cosa sin entender por qué ni cómo salir de ahí.
+        "emailVerified": user.email_verified_at is not None,
+        "mustChangePassword": bool(user.must_change_password),
     }
     if include_attributes:
         profile["attributes"] = [attribute.attribute_name for attribute in user.attributes]

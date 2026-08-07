@@ -12,8 +12,8 @@
         </p>
       </header>
 
-      <p v-if="!account.catalog.length" class="empty">
-        No se ha podido cargar el catálogo de planes.
+      <p v-if="loaded && !account.catalog.length" class="empty">
+        Todavía no hay planes publicados.
       </p>
 
       <section v-else class="grid">
@@ -66,7 +66,7 @@
  * plan no la lee nadie. El detalle completo está en "Mi plan", ya con el
  * consumo al lado, que es donde de verdad importa.
  */
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import SiteHeader from '@/components/shared/SiteHeader.vue'
 import SiteFooter from '@/components/shared/SiteFooter.vue'
 import { useAccountStore } from '@/stores/accountStore'
@@ -114,7 +114,12 @@ function describe(plan, key) {
   return limit.period === 'month' ? `${limit.value} al mes` : `${limit.value}`
 }
 
-onMounted(() => account.loadCatalog())
+const loaded = ref(false)
+
+onMounted(async () => {
+  await account.loadCatalog()
+  loaded.value = true
+})
 </script>
 
 <style scoped>

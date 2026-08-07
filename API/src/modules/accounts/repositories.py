@@ -41,6 +41,10 @@ class PlanRepository(BaseRepository[Plan]):
             .one_or_none()
         )
 
+    def get_all_ordered(self) -> List[Plan]:
+        """Todos los planes, ocultos incluidos, del más barato al más caro."""
+        return self._session.query(Plan).order_by(Plan.rank.asc()).all()
+
     def get_public(self) -> List[Plan]:
         """Catálogo visible en la web, del más barato al más caro."""
         return (

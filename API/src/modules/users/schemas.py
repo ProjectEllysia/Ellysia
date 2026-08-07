@@ -112,6 +112,8 @@ class UserProfileSchema(Schema):
     role = fields.String()
     created_at = UTCDateTime(allow_none=True)
     password_changed_at = UTCDateTime(allow_none=True)
+    emailVerified = fields.Boolean()
+    mustChangePassword = fields.Boolean()
 
 
 class UserListItemSchema(Schema):
