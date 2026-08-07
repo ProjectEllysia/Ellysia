@@ -144,6 +144,13 @@ def _run_shutdown_cleanup() -> None:
     except Exception as e:
         _logger.error(f"Error deteniendo scheduler de Hygeia: {e}")
 
+    _logger.info("[Shutdown] Deteniendo scheduler de accounts...")
+    try:
+        from src.modules.accounts.services.scheduling import AccountsScheduler
+        AccountsScheduler.stop()
+    except Exception as e:
+        _logger.error(f"Error deteniendo scheduler de accounts: {e}")
+
     _logger.info("[Shutdown] Deteniendo scheduler de buzones de Iris...")
     try:
         from src.modules.features.iris.services.mailbox.scheduling import IrisMailboxScheduler
@@ -359,6 +366,7 @@ def _configure_scheduling() -> None:
     from src.modules.features.themis.services.scheduling import ThemisScheduler
     from src.modules.features.hygeia.services.scheduling import HygeiaScheduler
     from src.modules.features.iris.services.mailbox.scheduling import IrisMailboxScheduler
+    from src.modules.accounts.services.scheduling import AccountsScheduler
 
     _logger.info("Reconciliando escaneos huérfanos...")
     try:
@@ -386,6 +394,9 @@ def _configure_scheduling() -> None:
 
     _logger.info("Arrancando scheduler de buzones de Iris...")
     IrisMailboxScheduler.start()
+
+    _logger.info("Arrancando scheduler de avisos de suscripcion...")
+    AccountsScheduler.start()
 
 
 def _run_migrations() -> None:

@@ -165,3 +165,37 @@ class InvitationAcceptRequestSchema(Schema):
 class InvitationAcceptResponseSchema(Schema):
     message = fields.String()
     organizationId = fields.Integer()
+
+
+class SubscriptionSchema(Schema):
+    id = fields.Integer()
+    userId = fields.Integer()
+    planId = fields.Integer()
+    status = fields.String()
+    organizationEnabled = fields.Boolean()
+    startedAt = UTCDateTime()
+    currentPeriodStart = UTCDateTime(allow_none=True)
+    currentPeriodEnd = UTCDateTime(allow_none=True)
+    cancelAtPeriodEnd = fields.Boolean()
+    graceUntil = UTCDateTime(allow_none=True)
+
+
+class SubscriptionOperationSchema(Schema):
+    """Una de las seis operaciones del ciclo de vida, y sus argumentos.
+
+    El cuerpo nombra la INTENCIÓN, no el estado final. Aceptar un ``status``
+    a pelo dejaría escribir combinaciones imposibles (``canceled`` con
+    ``graceUntil``) y perdería el sentido de lo que se hizo.
+    """
+
+    operation = fields.String(
+        required=True,
+        validate=validate.OneOf(
+            ["activate", "start_trial", "mark_past_due", "cancel", "resume", "expire"]
+        ),
+    )
+    planCode = fields.String(load_default=None)
+    organizationEnabled = fields.Boolean(load_default=False)
+    periodEnd = fields.DateTime(load_default=None)
+    graceUntil = fields.DateTime(load_default=None)
+    immediate = fields.Boolean(load_default=False)

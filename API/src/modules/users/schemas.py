@@ -187,3 +187,26 @@ class MfaDisableRequestSchema(Schema):
 class MfaStatusResponseSchema(Schema):
     enabled = fields.Boolean()
     confirmedAt = UTCDateTime(allow_none=True)
+
+
+class OwnedOrganizationPreviewSchema(Schema):
+    id = fields.Integer()
+    name = fields.String()
+    membersLosingAccess = fields.Integer()
+
+
+class DeletionPreviewSchema(Schema):
+    """Lo que se destruye al borrar la cuenta.
+
+    ``ownedOrganization`` no es ``null`` cuando el usuario es dueño de una: al
+    borrarse, la organización desaparece con él y sus miembros se quedan sin
+    ella. Es la consecuencia sobre terceros y la que hay que enseñar antes de
+    confirmar.
+    """
+
+    ownedOrganization = fields.Nested(OwnedOrganizationPreviewSchema, allow_none=True)
+    leavesOrganizationId = fields.Integer(allow_none=True)
+
+
+class DeleteAccountRequestSchema(Schema):
+    password = fields.String(required=True)

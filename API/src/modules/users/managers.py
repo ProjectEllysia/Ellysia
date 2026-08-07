@@ -31,6 +31,7 @@ from src.modules.users.exceptions import (
     DatabaseError,
     EmailAlreadyVerifiedError,
     ExistingUserError,
+    InvalidCredentialsError,
     InvalidVerificationTokenError,
     PermissionsError,
     ProfileUpdateError,
@@ -458,6 +459,77 @@ Raises:
             logger.error(f"Error actualizando perfil para usuario {user_id}: {e}")
             raise ProfileUpdateError(f"Error al actualizar el perfil: {e}")
 
+    def preview_deletion(self, user_id: int) -> dict:
+        """Qué se destruye si esta cuenta se borra. **No borra nada.**
+
+        Existe para que el aviso de la interfaz diga algo concreto en vez de
+        "esta acción es irreversible". Lo que de verdad importa avisar es la
+        consecuencia sobre terceros: si eres dueño de una organización,
+        **desaparece con la cuenta** y toda tu gente se queda sin ella. Nadie
+        pierde su cuenta ni sus datos, pero sí lo que su plan les daba por
+        pertenecer, y eso conviene decirlo antes y no después.
+        """
+        from src.modules.accounts.repositories import (
+            OrganizationMemberRepository,
+            OrganizationRepository,
+        )
+
+        organization = build_repository(OrganizationRepository).get_by_owner(user_id)
+        owned = None
+        if organization is not None:
+            members = build_repository(OrganizationMemberRepository).count_members(organization.id)
+            owned = {
+                "id": organization.id,
+                "name": organization.name,
+                # Sin contar al propio dueño: son los que se quedan sin nada.
+                "membersLosingAccess": max(members - 1, 0),
+            }
+
+        membership = build_repository(OrganizationMemberRepository).get_by_user(user_id)
+        belongs_to = (
+            membership.organization_id
+            if membership is not None and organization is None
+            else None
+        )
+
+        return {
+            "ownedOrganization": owned,
+            "leavesOrganizationId": belongs_to,
+        }
+
+    def delete_own_account(self, user_id: int, password: str) -> dict:
+        """Borra la cuenta y todo lo que cuelga de ella.
+
+        Se re-verifica la contraseña aunque haya sesión: es la operación más
+        destructiva del producto y un token robado no debería bastar. Mismo
+        criterio que el cambio de contraseña.
+
+        El barrido por módulo va en ``services/account_deletion.py``, y con él
+        se disuelve la organización de la que el usuario sea dueño. Todo ocurre
+        en **una transacción**: o se va entero o no se va nada.
+
+        Raises:
+            InvalidCredentialsError: si la contraseña no es la suya.
+        """
+        from .services.account_deletion import purge_user_data
+
+        user = self.get_user_by_id(user_id)
+        if user is None:
+            raise UserBindingError(username=str(user_id))
+
+        is_valid, _ = self.verify_credentials(user.username, password)
+        if not is_valid:
+            raise InvalidCredentialsError()
+
+        username = user.username
+        with UnitOfWork() as uow:
+            purged = purge_user_data(uow, user_id)
+            repo = UserRepository(uow)
+            repo.delete(repo.get_by_id(user_id))
+
+        logger.info(f"Cuenta '{username}' (ID: {user_id}) eliminada | purgado={purged}")
+        return purged
+
     def delete_user(self, user_id: int) -> None:
         """
         Delete a user by primary key.
@@ -468,11 +540,17 @@ Raises:
         Raises:
             UserBindingError: If the user is not found.
         """
+        from .services.account_deletion import purge_user_data
+
         with UnitOfWork() as uow:
             repo = UserRepository(uow)
             user = repo.get_by_id(user_id)
             if user is None:
                 raise UserBindingError(username=str(user_id))
+            # El mismo barrido que la baja voluntaria: sin él, la mitad de las
+            # tablas quedarían con claves ajenas colgando y Postgres rechazaría
+            # el DELETE. SQLite (la suite) no lo detectaría.
+            purge_user_data(uow, user_id)
             repo.delete(user)
 
         logger.info(f"Usuario {user_id} eliminado")

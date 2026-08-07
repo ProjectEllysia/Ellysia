@@ -981,7 +981,44 @@ Gold con 40 miembros, la suscripción caduca. Qué pasa exactamente:
   no ha pagado; verán en la UI que ciertas funciones ya no están disponibles. No es
   nuestro mensaje que dar.
 
-### 12.9 Lo que la UI necesita saber
+### 12.9 Cuando el dueño borra su cuenta: la organización desaparece
+
+Es el otro final posible, y no se parece al impago. Un impago es reversible y no
+destruye nada; una baja voluntaria es una decisión explícita de quien manda.
+
+> **Al borrar la cuenta de un dueño, su organización se disuelve.** Sus miembros
+> **conservan cuenta, datos y plan personal** — pierden solo lo que heredaban.
+
+Por eso el botón no puede limitarse a decir "esta acción es irreversible". Antes
+de confirmar hay que enseñar la consecuencia **sobre terceros**, que es la que
+quien pulsa no tiene presente:
+
+```
+GET /users/me/deletion-preview
+→ { "ownedOrganization": { "name": "Acme", "membersLosingAccess": 12 } }
+```
+
+`membersLosingAccess` no cuenta al dueño: son las personas ajenas afectadas por
+su decisión, que es exactamente el número que tiene que leer.
+
+**El barrido.** Veintiséis claves ajenas apuntan a `User` y solo dos tienen
+`ON DELETE CASCADE`; unas cuantas más cuelgan de una `relationship` con cascada
+del ORM. El resto —activos de Hygeia, listas y campañas de Aegis, buzones de
+Iris, escaneos programados, carpetas y objetivos autorizados de Themis,
+invitaciones— hay que borrarlas a mano, o Postgres rechaza el `DELETE`.
+
+> ⚠️ **Y no se notaría.** La suite corre sobre SQLite, que **no** aplica claves
+> ajenas salvo un PRAGMA que el proyecto no activa. Un barrido incompleto pasa
+> verde en los tests y da un 500 en producción. La defensa es un test que
+> recorre `Base.metadata` buscando toda columna con una FK hacia `User` y exige
+> que no quede ninguna fila apuntando al borrado — así una tabla nueva entra
+> sola en la comprobación.
+
+El barrido vive en `users/services/account_deletion.py` como una **lista
+explícita**, no como un registro donde cada módulo se apunta solo: se lee de
+arriba abajo y responde en diez segundos a "¿qué destruye este botón?".
+
+### 12.10 Lo que la UI necesita saber
 
 `GET /plans/me` devuelve, además de los límites y el uso:
 
@@ -1013,9 +1050,9 @@ el límite de tu plan"*. Los tres salen de datos, no de adivinar.
 | 3 | **Resto del cableado** | Las 12 claves restantes en sus managers | Cobertura completa |
 | 4 | **Alta pública** | `/users/register`, verificación por correo, plantilla Herald, guard en `consume()` | Un desconocido se registra solo |
 | 5 | **Organizaciones** | Tablas ya creadas en la 1; managers, invitaciones, correos, aceptación, expulsión, solo-lectura al degradar | La venta a PYME es contable |
-| 6 | **Ciclo de vida** | Las seis operaciones de §12.1, `is_effective()`, modo excedido, `external_event_at`, avisos por correo. **Sin pasarela**: el driver es el panel | La máquina de estados de cobro, entera y probada, movida a mano |
+| 6 | **Ciclo de vida y baja** | Las seis operaciones de §12.1, `is_effective()`, modo excedido, `external_event_at`, avisos por correo, y la **baja de cuenta** con su barrido por módulo y la disolución de la organización (§12.9). **Sin pasarela**: el driver es `PUT /plans/subscriptions/<id>` | La máquina de estados de cobro, entera y probada, movida a mano; y un botón de borrar cuenta que borra de verdad |
 | 7 | **Gestor de planes** | `PUT /plans/<id>/limits`, `PUT /users/<id>/subscription`, vista `/admin/planes` con las seis operaciones como botones | El equipo rellena los números y mueve suscripciones sin tocar código |
-| 8 | **Frontend transversal** | `AccountMenu` compartido, `/planes`, `/mi-plan`, `/organizacion`, registro en el login, 402 y los tres avisos de §12.9 en `useApi` | Presentable |
+| 8 | **Frontend transversal** | `AccountMenu` compartido, `/planes`, `/mi-plan`, `/organizacion`, registro en el login, 402 y los tres avisos de §12.10 en `useApi`, y el aviso de baja de §12.9 | Presentable |
 | — | *(futuro)* | Checkout + portal de cliente + **adaptador** de webhooks a las seis operaciones | Cobro real |
 
 Las fases 1-2 son la mitad del valor: en cuanto el plan se ve y el corte funciona en la

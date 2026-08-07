@@ -234,6 +234,19 @@ class EmailNotVerifiedError(AccountsError):
         )
 
 
+class SubscriptionNotFoundError(EntityNotFoundError, AccountsError):
+    """El usuario no tiene fila en ``Subscription``.
+
+    No es lo mismo que "no tiene plan": quien no tiene fila está en el plan por
+    defecto. Este error solo aparece al intentar **mover** una suscripción que
+    no existe — cancelar lo que nadie contrató.
+    """
+
+    entity_label = "Suscripcion"
+    id_field = "user_id"
+    entity_is_feminine = True
+
+
 class DefaultPlanMissingError(AccountsError):
     """No hay ningún plan marcado como ``is_default``.
 

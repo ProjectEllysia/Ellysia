@@ -50,6 +50,8 @@ from .schemas import (
     RegisterRequestSchema,
     RegisterResponseSchema,
     VerifyEmailRequestSchema,
+    DeletionPreviewSchema,
+    DeleteAccountRequestSchema,
 )
 
 
@@ -378,6 +380,49 @@ def sign_up_user(data: dict[str, Any]):
         "email": email,
         "role": requested_role,
     }
+
+
+# =========================================================================
+# BAJA DE LA CUENTA
+# =========================================================================
+
+
+@users_blp.get("/me/deletion-preview")
+@users_blp.response(200, DeletionPreviewSchema, description="What deleting the account destroys")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@limiter.limit("30 per hour")
+@require_oauth_token
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def preview_account_deletion():
+    """Que se destruye si esta cuenta se borra. No borra nada.
+
+    Alimenta el aviso de confirmacion. Lo importante que devuelve es la
+    consecuencia sobre terceros: si el usuario es duenyo de una organizacion,
+    esta DESAPARECE con su cuenta y sus miembros se quedan sin ella.
+    """
+    return USER_MANAGER.preview_deletion(get_current_user().id)
+
+
+@users_blp.delete("/me")
+@users_blp.arguments(DeleteAccountRequestSchema)
+@users_blp.response(200, SuccessMessageSchema, description="Account deleted")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Wrong password or not authenticated")
+@limiter.limit("5 per hour")
+@require_oauth_token
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def delete_own_account(data: dict[str, Any]):
+    """Borrar la cuenta y todo lo que cuelga de ella.
+
+    Si el usuario es duenyo de una organizacion, esta se disuelve: sus miembros
+    conservan cuenta, datos y plan personal, pero pierden lo que heredaban.
+    Se re-verifica la contrasenya porque un token robado no debe bastar para la
+    operacion mas destructiva del producto.
+    """
+    user = get_current_user()
+    username = user.username
+    USER_MANAGER.delete_own_account(user.id, data["password"])
+    logger.info(f"Cuenta eliminada a peticion del propio usuario: {username}")
+    return {"message": "Tu cuenta y todos tus datos se han eliminado."}
 
 
 # =========================================================================

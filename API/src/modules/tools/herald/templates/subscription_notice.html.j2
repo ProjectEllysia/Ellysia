@@ -1,0 +1,41 @@
+{# Aviso sobre una suscripción: caducidad próxima o impago en cortesía.
+   Contexto: recipient_name (opcional), kind ('expiring'|'past_due'),
+   plan_name, deadline, plans_url. #}
+{% extends "base.html.j2" %}
+{% from "_macros.html.j2" import button %}
+
+{% block title %}{% if kind == 'past_due' %}Hay un problema con tu pago{% else %}Tu plan {{ plan_name }} termina pronto{% endif %}{% endblock %}
+
+{% block preheader %}{% if kind == 'past_due' %}No hemos podido cobrar tu suscripción.{% else %}Tu plan {{ plan_name }} termina el {{ deadline }}.{% endif %}{% endblock %}
+
+{% block header_tagline %}
+<div style="margin-top:8px; font-family:Helvetica,Arial,sans-serif; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#8a857c;">
+  Tu suscripción
+</div>
+{% endblock %}
+
+{% block content %}
+<p style="margin:0 0 16px;">{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}</p>
+
+{% if kind == 'past_due' %}
+<p style="margin:0 0 20px;">
+  No hemos podido cobrar tu suscripción <strong>{{ plan_name }}</strong>. Casi
+  siempre es una tarjeta caducada y se arregla en un minuto.
+</p>
+<p style="margin:0 0 20px;">
+  <strong>Tu plan sigue funcionando hasta el {{ deadline }}</strong>. No hemos
+  cortado nada ni vamos a borrar nada tuyo.
+</p>
+{% else %}
+<p style="margin:0 0 20px;">
+  Tu plan <strong>{{ plan_name }}</strong> termina el <strong>{{ deadline }}</strong>.
+</p>
+<p style="margin:0 0 20px;">
+  A partir de ese día pasarás al plan gratuito. Nada de lo que tengas se borra:
+  lo que quede por encima de los nuevos topes se queda en solo lectura hasta que
+  bajes de ellos o vuelvas a un plan mayor.
+</p>
+{% endif %}
+
+{{ button(plans_url, "Ver mi plan", brand.accentColor) }}
+{% endblock %}

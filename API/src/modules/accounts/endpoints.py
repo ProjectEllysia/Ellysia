@@ -16,14 +16,26 @@ import logging
 
 from flask_smorest import Blueprint as SmorestBlueprint
 
+from src.modules.infrastructure.session import build_repository
 from src.modules.shared import handle_exceptions, limiter
 from src.modules.shared.schemas import ErrorSchema, SuccessMessageSchema
-from src.modules.users import require_oauth_token, get_current_user
+from src.modules.users import require_oauth_token, require_role, get_current_user
+# Role no está entre lo que re-exporta el paquete users, y pedírselo al paquete
+# durante su propia inicialización rompe el ciclo. El submódulo sí está cargado.
+from src.modules.users.services.permissions import Role
 
-from .exceptions import AccountsError, NotInOrganizationError
-from .managers import InvitationManager, OrganizationManager, PlanManager
+from .exceptions import AccountsError, NotInOrganizationError, SubscriptionNotFoundError
+from .managers import (
+    InvitationManager,
+    OrganizationManager,
+    PlanManager,
+    SubscriptionManager,
+)
+from .repositories import SubscriptionRepository
 from .services.ownership import require_organization_owner
 from .schemas import (
+    SubscriptionOperationSchema,
+    SubscriptionSchema,
     EffectivePlanResponseSchema,
     OrganizationCreateRequestSchema,
     OrganizationMemberListSchema,
@@ -240,3 +252,56 @@ def accept_organization_invitation(data):
         "message": "Te has unido a la organizacion. Tu plan personal no cambia.",
         "organizationId": result["organizationId"],
     }
+
+
+# =========================================================================
+# CICLO DE VIDA (root) — el mismo puerto que usara la pasarela
+# =========================================================================
+
+
+@plans_blp.get("/subscriptions/<int:user_id>")
+@plans_blp.response(200, SubscriptionSchema, description="Subscription")
+@plans_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@plans_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@plans_blp.alt_response(404, schema=ErrorSchema, description="No subscription")
+@limiter.limit("120 per hour")
+@require_oauth_token
+@require_role(Role.ROOT)
+@handle_exceptions(default_exception=AccountsError, logger=logger)
+def get_user_subscription(user_id: int):
+    """Consultar la suscripcion de un usuario"""
+    subscription = build_repository(SubscriptionRepository).get_by_user(user_id)
+    if subscription is None:
+        raise SubscriptionNotFoundError(user_id)
+    return subscription.to_dict()
+
+
+@plans_blp.put("/subscriptions/<int:user_id>")
+@plans_blp.arguments(SubscriptionOperationSchema)
+@plans_blp.response(200, SubscriptionSchema, description="Operation applied")
+@plans_blp.alt_response(400, schema=ErrorSchema, description="Missing argument for the operation")
+@plans_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@plans_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@plans_blp.alt_response(404, schema=ErrorSchema, description="Unknown plan or subscription")
+@limiter.limit("60 per hour")
+@require_oauth_token
+@require_role(Role.ROOT)
+@handle_exceptions(default_exception=AccountsError, logger=logger)
+def move_user_subscription(data, user_id: int):
+    """Mover la suscripcion de un usuario por una de las seis operaciones
+
+    Es el driver manual del mismo puerto que usara la pasarela: lo que aqui
+    hace root, manyana lo hara un adaptador de webhooks traduciendo eventos.
+    """
+    result = SubscriptionManager().apply(
+        operation=data["operation"],
+        user_id=user_id,
+        actor_id=get_current_user().id,
+        plan_code=data.get("planCode"),
+        organization_enabled=data.get("organizationEnabled", False),
+        period_end=data.get("periodEnd"),
+        grace_until=data.get("graceUntil"),
+        immediate=data.get("immediate", False),
+    )
+    logger.info(f"Operacion '{data['operation']}' aplicada sobre la suscripcion de {user_id}")
+    return result
