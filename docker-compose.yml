@@ -88,6 +88,9 @@ services:
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    enviroment:
+        REDIS_PASSWORD: ${REDIS_PASSWORD}
+
     healthcheck:
       # E4: redis-cli sale con exit 0 incluso ante NOAUTH/WRONGPASS (no
       # propaga el error de protocolo al exit code) — el "|| redis-cli ping"
