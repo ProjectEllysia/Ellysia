@@ -88,9 +88,14 @@ services:
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
-    enviroment:
-        REDIS_PASSWORD: ${REDIS_PASSWORD}
-
+    # El healthcheck de abajo usa $$REDIS_PASSWORD, que se resuelve DENTRO del
+    # contenedor. Sin esta variable de entorno estaba vacía, el ping salía
+    # NOAUTH y el chequeo no podía pasar nunca: redis se quedaba "unhealthy"
+    # para siempre y api/worker, que dependen de él con service_healthy, no
+    # llegaban a arrancar. La interpolación de `command` la hace compose en el
+    # host, así que aquella no delataba el problema.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     healthcheck:
       # E4: redis-cli sale con exit 0 incluso ante NOAUTH/WRONGPASS (no
       # propaga el error de protocolo al exit code) — el "|| redis-cli ping"

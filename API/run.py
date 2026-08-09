@@ -272,10 +272,28 @@ def _register_error_handlers(app: Flask) -> None:
         # real en producción habría lanzado TypeError en vez de la respuesta
         # JSON esperada.
         _logger.warning("Rate limit superado: %s", request.remote_addr)
-        return jsonify({
+
+        # Cuánto falta para que se renueve la ventana. Sin este dato el cliente
+        # solo puede adivinar: reintentaba a ciegas y volvía a chocarse, o se
+        # rendía y enseñaba un error genérico. `Retry-After` en segundos es lo
+        # que espera cualquier cliente HTTP (RFC 9110 §10.2.3).
+        retry_after = None
+        current = getattr(limiter, "current_limit", None)
+        if current is not None and getattr(current, "reset_at", None):
+            retry_after = max(1, int(current.reset_at - time.time()))
+
+        payload = {
             "error": "too_many_requests",
             "error_description": "Has superado el límite de peticiones. Espera un momento e inténtalo de nuevo.",
-        }), 429
+        }
+        if retry_after is not None:
+            payload["retryAfter"] = retry_after
+
+        response = jsonify(payload)
+        response.status_code = 429
+        if retry_after is not None:
+            response.headers["Retry-After"] = str(retry_after)
+        return response
 
     @app.errorhandler(EllysiaException)
     def handle_secops_exception(error):
@@ -313,6 +331,47 @@ def _register_error_handlers(app: Flask) -> None:
             "error": "internal_server_error",
             "error_description": "Ha ocurrido un error inesperado en el servidor.",
         }), 500
+
+
+def _register_conditional_get(app: Flask) -> None:
+    """
+    Añade ETag a las lecturas y responde 304 cuando el cliente ya tiene el dato.
+
+    Las vistas más sondeadas devuelven casi siempre lo mismo: la lista de
+    escaneos cambia cuando uno termina (minutos), los activos de Hygeia cuando
+    alguien da uno de alta (días). Aun así se reenviaba el JSON entero en cada
+    vuelta. Con un ETag, si nada ha cambiado el cliente recibe un 304 vacío.
+
+    Va en un solo ``after_request`` en vez de endpoint por endpoint porque corre
+    DESPUÉS de que flask-smorest serialice: los endpoints devuelven diccionarios
+    que el decorador ``@blp.response`` convierte en respuesta, así que desde
+    dentro de la vista no hay todavía un cuerpo al que calcularle el hash.
+
+    Lo que esto NO hace: ahorrar cupo del rate limiter. El límite cuenta
+    peticiones, no bytes, y un 304 es una petición. El cupo se ahorra sondeando
+    menos (backoff en el cliente); esto ahorra ancho de banda y re-pintado.
+
+    Args:
+        app: Instancia de la aplicación Flask.
+    """
+    _logger.info("Registrando GET condicional (ETag/304)...")
+
+    @app.after_request
+    def _add_etag(response):
+        if request.method not in ("GET", "HEAD") or response.status_code != 200:
+            return response
+        # Acheron y /system ya usan ETag como testigo de concurrencia optimista
+        # (el cliente lo reenvía en If-Match para detectar escrituras pisadas).
+        # Recalcularlo aquí lo sustituiría por un hash del cuerpo y rompería esa
+        # comprobación, así que si ya hay uno se respeta.
+        if response.headers.get("ETag"):
+            return response
+        # direct_passthrough = ficheros y streams: acceder a .data los consumiría.
+        if response.direct_passthrough or not response.is_json:
+            return response
+
+        response.add_etag()
+        return response.make_conditional(request)
 
 
 def _register_request_audit(app: Flask) -> None:
@@ -565,6 +624,11 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
         redis_auth = f":{quote_plus(redis_cfg.password)}@" if redis_cfg.password else ""
         storage_uri = f"redis://{redis_auth}{redis_cfg.host}:{redis_cfg.port}/{redis_cfg.db}"
     app.config["RATELIMIT_STORAGE_URI"] = storage_uri
+    # Sin esto, flask-limiter no manda NADA: ni cuánto queda del cupo ni cuándo
+    # se renueva. El cliente no tenía forma de saber que se estaba acercando al
+    # límite y descubría el 429 chocándose con él, sin saber cuánto esperar. Con
+    # las cabeceras activas el front puede frenar antes de agotar el cupo.
+    app.config["RATELIMIT_HEADERS_ENABLED"] = True
     limiter.init_app(app)
 
     _logger.info("Inicializando documentación OpenAPI...")
@@ -577,6 +641,7 @@ def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_mi
 
     _register_blueprints(app)
     _register_error_handlers(app)
+    _register_conditional_get(app)
     _register_request_audit(app)
 
     if fresh_db_init:
