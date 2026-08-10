@@ -48,8 +48,17 @@
          role="tabpanel" id="panel-graficas" aria-labelledby="tab-graficas" tabindex="0">
       <section class="section">
         <h4 class="section-title">Constantes</h4>
-        <p v-if="metricsLoading" class="state-msg">Cargando métricas…</p>
-        <p v-else-if="metricsError" class="state-msg state-msg--error">{{ metricsError }}</p>
+        <!-- Una silueta por constante, con el alto real de sus tarjetas: con
+             el "Cargando métricas…" de una línea, la ficha entera daba un salto
+             de varios cientos de píxeles al llegar los datos.
+
+             Solo cuando no hay nada que enseñar todavía: al refrescar a mano,
+             las métricas anteriores siguen en la store, y taparlas con un
+             esqueleto sería un parpadeo gratuito y un salto de más. -->
+        <div v-if="metricsLoading && !metrics.length" class="vitals-ghost" aria-busy="true" aria-label="Cargando métricas">
+          <span v-for="n in VITAL_SKELETONS" :key="n" class="skeleton vital-ghost" aria-hidden="true"></span>
+        </div>
+        <p v-else-if="metricsError && !metrics.length" class="state-msg state-msg--error">{{ metricsError }}</p>
         <MetricsChart v-else :snapshots="metrics" :truncated="metricsTruncated" />
       </section>
     </div>
@@ -168,7 +177,11 @@
         </h4>
 
         <p v-if="inventoryError" class="state-msg state-msg--error">{{ inventoryError }}</p>
-        <p v-else-if="inventoryLoading" class="state-msg">Cargando inventario…</p>
+        <div v-else-if="inventoryLoading" class="inventory-ghost" aria-busy="true"
+             aria-label="Cargando inventario">
+          <span v-for="n in SKELETON_ROWS" :key="n"
+                class="skeleton skeleton--line" aria-hidden="true"></span>
+        </div>
 
         <template v-else>
           <p v-if="inventoryCollectedAt" class="inventory-scanned">
@@ -318,6 +331,17 @@ const { formatDate } = useUtils()
 
 const TAB_IDS = ['graficas', 'estadisticas', 'inventario', 'anomalias']
 const TAB_STORAGE_PREFIX = 'ellysia:hygeia:lastTab:'
+
+/* Siluetas mientras carga.
+   Cuántas constantes llegarán no se sabe de antemano: MetricsChart dibuja una
+   por serie con datos, de hasta seis posibles (CPU, memoria, swap, disco y red
+   en los dos sentidos), y un agente reporta las que reporta. Cinco es lo
+   medido en un host Linux sin swap (CPU, memoria, disco y red en ambos
+   sentidos), que es el caso corriente. Si acierta poco, el esqueleto sigue
+   reservando mucho más hueco del que reservaba el texto de una línea que había
+   antes, así que el salto baja igual aunque no llegue a cero. */
+const VITAL_SKELETONS = 5
+const SKELETON_ROWS = 6
 
 const activeTab = ref('graficas')
 /** Al cambiar de activo se recupera la última pestaña que se miró en ESE
@@ -477,6 +501,13 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
   border: 1px solid currentColor;
 }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* 134px es el alto medido de una .vital real de MetricsChart (cabecera,
+   lectura actual, gráfica de 48px, pie de máximos y media). Si esa tarjeta
+   cambia de alto, este número deja de cuadrar y vuelve el salto. */
+.vitals-ghost { display: flex; flex-direction: column; gap: 0.85rem; }
+.vital-ghost { height: 134px; border-radius: 8px; }
+.inventory-ghost { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.6rem; }
 .status--pending { color: var(--text-muted); }
 .status--online  { color: var(--success); }
 .status--stale   { color: var(--warn); }

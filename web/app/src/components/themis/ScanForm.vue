@@ -1,5 +1,5 @@
 <template>
-  <div class="launch-card">
+  <div class="card launch-card">
     <div class="launch-header">
       <span class="launch-title">Nuevo escaneo {{ type.toUpperCase() }}</span>
       <Transition name="pop"><span v-if="launched" class="launch-success">Escaneo iniciado</span></Transition>
@@ -136,7 +136,7 @@ function handleLaunch() {
 </script>
 
 <style scoped>
-.launch-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.1rem 1.25rem; margin-bottom: 1.1rem; }
+.launch-card { padding: 1.1rem 1.25rem; margin-bottom: 1.1rem; }
 .launch-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.85rem; }
 .launch-title { font-weight: 600; color: var(--text); font-size: var(--fs-xl); font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .launch-success { font-size: var(--fs-md); color: var(--success); background: var(--success-dim); padding: 0.15rem 0.5rem; border-radius: 6px; }

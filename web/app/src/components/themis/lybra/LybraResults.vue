@@ -9,9 +9,12 @@
     </div>
 
     <Transition name="fade-swap" mode="out-in">
-      <div v-if="loading && !scans.length" key="loading" class="empty-state">
-        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="spin"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-        <span>Cargando…</span>
+      <div v-if="loading && !scans.length" key="loading" class="scan-list"
+           aria-busy="true" aria-label="Cargando veredictos">
+        <div v-for="n in SKELETON_ROWS" :key="n" class="scan-ghost" aria-hidden="true">
+          <span class="skeleton skeleton--circle ghost-dot"></span>
+          <span class="skeleton skeleton--line skeleton--w60"></span>
+        </div>
       </div>
       <div v-else-if="!scans.length" key="empty" class="empty-state">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M12 3v18M7 21h10M5 7h14M5 7l-2.5 5a3 3 0 0 0 5 0L5 7zM19 7l-2.5 5a3 3 0 0 0 5 0L19 7z"/></svg>
@@ -194,6 +197,9 @@ const props = defineProps({
 })
 const emit = defineEmits(['refresh', 'delete', 'load-docs', 'generate-pdf', 'download-doc', 'delete-doc', 'load-more'])
 
+/** Veredictos fantasma mientras carga: los que caben sin alargar la caja. */
+const SKELETON_ROWS = 4
+
 const LADDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 const PRIO_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 }
 const PRIO_LABEL = { CRITICAL: 'Crítica', HIGH: 'Alta', MEDIUM: 'Media', LOW: 'Baja', INFO: 'Info' }
@@ -303,6 +309,15 @@ function fmtDate(iso) {
 
 /* ── Tarjeta de escaneo ── */
 .scan-list { display: flex; flex-direction: column; }
+/* Mismo alto y mismo padding que .scan-head, para que al llegar los
+   veredictos la lista no cambie de tamaño. */
+.scan-ghost {
+  display: flex; align-items: center; gap: 0.65rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.ghost-dot { width: 15px; flex-shrink: 0; }
+
 .scan-card { border-bottom: 1px solid var(--border); }
 .scan-card:last-child { border-bottom: none; }
 .scan-card.open { background: var(--surface-2); }

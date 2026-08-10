@@ -1,5 +1,5 @@
 <template>
-  <div class="scheduled-card">
+  <div class="card scheduled-card">
     <div class="scheduled-header" @click="expanded = !expanded">
       <div class="scheduled-header-left">
         <span class="scheduled-title">Escaneos Programados</span>
@@ -106,7 +106,7 @@ function formatDate(iso) { if (!iso) return '—'; return new Date(iso).toLocale
 </script>
 
 <style scoped>
-.scheduled-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 1.1rem; overflow: hidden; }
+.scheduled-card { margin-bottom: 1.1rem; overflow: hidden; }
 .scheduled-header { display: flex; align-items: center; justify-content: space-between; padding: 0.85rem 1.25rem; cursor: pointer; user-select: none; transition: background 0.2s; }
 .scheduled-header:hover { background: var(--surface-2); }
 .scheduled-header-left { display: flex; align-items: center; gap: 0.4rem; }

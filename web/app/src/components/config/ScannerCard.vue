@@ -1,5 +1,5 @@
 <template>
-  <div class="scanner-card">
+  <div class="card scanner-card">
     <div class="scanner-header">
       <span class="scanner-icon" v-html="iconSvg"></span>
       <h3>{{ name }}</h3>
@@ -37,7 +37,7 @@ const iconSvg = computed(() => icons[props.icon] || icons.scan)
 </script>
 
 <style scoped>
-.scanner-card { background: var(--surface); border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.scanner-card { overflow: hidden; }
 .scanner-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 0.85rem; border-bottom: 1px solid var(--border); background: var(--bg); }
 .scanner-icon { width: 20px; height: 20px; color: var(--accent); flex-shrink: 0; display: flex; }
 .scanner-header h3 { font-size: var(--fs-xl); font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }

@@ -454,6 +454,67 @@ select option { background: var(--surface); color: var(--text); }
 }
 .empty-state svg { opacity: 0.25; }
 
+/* ── Superficie de tarjeta ──────────────────────────────────────────────
+   Solo la superficie: fondo, borde y radio. El interior (padding, rejilla,
+   tipografía) lo pone cada componente, porque ahí es donde de verdad
+   difieren — una tarjeta de estadística y una de escaneo programado no se
+   parecen por dentro, pero sí por fuera.
+
+   Nace de una deriva medida: el mismo recuadro estaba escrito a mano en más
+   de veinte componentes con seis radios distintos (5, 6, 7, 8, 9 y 10px)
+   según quién lo escribiera. Aquí el radio es uno.
+
+   No la usan las tarjetas que hacen algo más que ser una superficie
+   (`.modal-card` es un diálogo con tope de alto, `.engine-card` lleva
+   degradado, `.pantheon-card` es la pieza del hub): forzarlas aquí las
+   dejaría peor, no mejor. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+/* Elevación al pasar por encima, para las tarjetas que son accionables. */
+.card--interactive { transition: border-color var(--transition), transform var(--transition); }
+.card--interactive:hover { border-color: var(--accent); transform: translateY(-2px); }
+
+/* ── Esqueletos de carga ────────────────────────────────────────────────
+   `seq-shimmer` llevaba definido desde siempre sin un solo consumidor: la
+   aplicación entera anunciaba la espera con texto ("Cargando…") o con un
+   spinner, y al llegar el contenido la página daba un salto porque el hueco
+   reservado no medía lo mismo que lo que acababa de entrar.
+
+   Un esqueleto ocupa el sitio del contenido real, así que no hay salto y
+   además se lee de un vistazo QUÉ está llegando (una tabla, una ficha, un
+   párrafo), no solo que algo tarda.
+
+   Va marcado como decorativo: quien usa lector de pantalla no gana nada con
+   siete cajas vacías. El estado de carga se anuncia con aria-busy en el
+   contenedor, no repitiendo la silueta. */
+.skeleton {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-3) 50%,
+    var(--surface-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: seq-shimmer 1.4s linear infinite;
+}
+/* Una línea de texto. `em` y no `rem`: así hereda el tamaño de donde se
+   ponga y una línea de titular sale más gruesa que una de cuerpo, sin
+   tener que declararlo. */
+.skeleton--line   { height: 0.75em; border-radius: 4px; }
+.skeleton--title  { height: 1.1em;  border-radius: 4px; width: 60%; }
+.skeleton--block  { height: 4.5rem; }
+.skeleton--circle { border-radius: 50%; aspect-ratio: 1; }
+/* Anchos para que las líneas no queden todas iguales, que es lo que delata
+   un esqueleto como adorno en vez de como silueta. */
+.skeleton--w80 { width: 80%; }
+.skeleton--w60 { width: 60%; }
+.skeleton--w40 { width: 40%; }
+
 .alert {
   border-radius: var(--radius-sm);
   padding: 0.7rem 1rem;
@@ -496,6 +557,11 @@ select option { background: var(--surface); color: var(--text); }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
+  /* El esqueleto se queda: sigue reservando el hueco y evitando el salto,
+     que es su trabajo principal. Lo que se va es el brillo en movimiento. */
+  .skeleton { animation: none; }
+  .card--interactive { transition: none; }
+  .card--interactive:hover { transform: none; }
 }
 
 .modal {

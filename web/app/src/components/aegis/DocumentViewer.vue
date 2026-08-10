@@ -11,13 +11,13 @@
       <p class="gen-title">Redactando la píldora…</p>
       <p class="gen-elapsed">{{ elapsedLabel }}</p>
       <div class="gen-skeleton" aria-hidden="true">
-        <span class="sk sk--title"></span>
-        <span class="sk sk--line"></span>
-        <span class="sk sk--line"></span>
-        <span class="sk sk--line sk--short"></span>
-        <span class="sk sk--block"></span>
-        <span class="sk sk--line"></span>
-        <span class="sk sk--line sk--short"></span>
+        <span class="skeleton skeleton--title"></span>
+        <span class="skeleton skeleton--line"></span>
+        <span class="skeleton skeleton--line"></span>
+        <span class="skeleton skeleton--line skeleton--w60"></span>
+        <span class="skeleton skeleton--block"></span>
+        <span class="skeleton skeleton--line"></span>
+        <span class="skeleton skeleton--line skeleton--w60"></span>
       </div>
       <p class="gen-note">Puedes seguir usando el resto de Aegis mientras tanto.</p>
     </div>
@@ -204,23 +204,11 @@ const elapsedLabel = computed(() => {
 .gen-note { margin: 1.4rem 0 0; font-size: var(--fs-sm); color: var(--text-muted); }
 
 /* La silueta de la píldora que va a llegar: cuando aparece de verdad, ocupa
-   el mismo sitio y no hay salto. `seq-shimmer` ya estaba definido en
-   shared.css desde siempre y no lo usaba nadie. */
+   el mismo sitio y no hay salto. La forma la pone `.skeleton` de shared.css;
+   aquí solo el ritmo vertical propio de un documento. */
 .gen-skeleton { display: flex; flex-direction: column; gap: 0.7rem; }
-.sk {
-  display: block; border-radius: 5px;
-  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
-  background-size: 200% 100%;
-  animation: seq-shimmer 1.4s linear infinite;
-}
-.sk--title { height: 1.6rem; width: 62%; margin-bottom: 0.5rem; }
-.sk--line  { height: 0.75rem; width: 100%; }
-.sk--short { width: 72%; }
-.sk--block { height: 4.5rem; width: 100%; margin: 0.5rem 0; }
-
-@media (prefers-reduced-motion: reduce) {
-  .sk { animation: none; }
-}
+.gen-skeleton .skeleton--title { margin-bottom: 0.5rem; }
+.gen-skeleton .skeleton--block { margin: 0.5rem 0; }
 .pill-body { padding: 1.25rem 4rem; overflow-y: auto; flex: 1; }
 .pill-title { font-size: var(--fs-3xl); font-weight: 800; color: var(--text); margin: 0 0 0.8rem; font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); text-align: center; }
 .pill-subtitle { font-size: var(--fs-lg); color: var(--text-dim); margin: 0 0 1.25rem; }

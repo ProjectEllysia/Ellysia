@@ -14,9 +14,9 @@
       </div>
     </div>
 
-    <div v-if="loading && !folders.length" class="empty-state">
-      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="spin"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-      <span>Cargando carpetas…</span>
+    <div v-if="loading && !folders.length" class="folder-list"
+         aria-busy="true" aria-label="Cargando carpetas">
+      <span v-for="n in SKELETON_ROWS" :key="n" class="skeleton folder-ghost" aria-hidden="true"></span>
     </div>
     <div v-else-if="!folders.length" class="empty-state">
       <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
@@ -41,6 +41,9 @@
 <script setup>
 import FolderAccordion from './FolderAccordion.vue'
 
+/** Carpetas fantasma mientras carga. */
+const SKELETON_ROWS = 3
+
 defineProps({
   folders: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
@@ -61,6 +64,9 @@ defineEmits(['refresh', 'create-folder', 'preview', 'cancel', 'delete', 'rename-
 .btn-refresh:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-new svg, .btn-refresh svg { width: 12px; height: 12px; }
 .folder-list { display: flex; flex-direction: column; }
+/* Mismo alto que .accordion-header de FolderAccordion, para que la lista no
+   cambie de tamaño al llegar las carpetas. */
+.folder-ghost { height: 3rem; border-radius: 0; border-bottom: 1px solid var(--border); }
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; padding: 2.5rem 1rem; color: var(--text-muted); font-size: var(--fs-lg); text-align: center; }
 .empty-state svg { opacity: 0.2; }
 .spin { animation: seq-spin 0.8s linear infinite; }
