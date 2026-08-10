@@ -101,6 +101,8 @@ from src.modules.users.repositories import (  # noqa: E402
 )
 from src.modules.users.managers import OAuthTokenManager  # noqa: E402
 from src.modules.users.services import generate_salt, hash_password, hash_password_with_salt  # noqa: E402
+from src.modules.users.services.permissions import DEFAULT_USER_ATTRIBUTES  # noqa: E402
+from src.modules.shared import utcnow_naive  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -274,10 +276,18 @@ def make_user(app):
     ejercitaba de verdad la rama Argon2 de ``verify_password`` (la que usa el
     100% de los usuarios reales). ``legacy_hash=True`` sigue disponible para
     los tests que verifican explícitamente la migración SHA-256→Argon2.
+
+    Semántica de ``attributes``, que cambió al vaciarse el baseline de
+    ``Role.USER``: omitirlo concede ``DEFAULT_USER_ATTRIBUTES``, que es lo que
+    ``sign_in_user`` escribe en el alta real; pasarlo concede **exactamente**
+    esos, ni uno más — es la forma de construir el caso "el administrador le ha
+    retirado este permiso". ``attributes=[]`` deja al usuario sin ninguno (ver
+    el atajo ``stripped_user``).
     """
     counter = {"n": 0}
 
-    def _make(role: str = "role_user", attributes=None, password: str = "Secret123!", legacy_hash: bool = False):
+    def _make(role: str = "role_user", attributes=None, password: str = "Secret123!",
+              legacy_hash: bool = False, unverified: bool = False):
         counter["n"] += 1
         suffix = counter["n"]
         username = f"user{suffix}"
@@ -299,11 +309,20 @@ def make_user(app):
                 password_hash=password_hash,
                 password_salt=salt,
                 role=role,
+                # Verificado salvo que el test pida lo contrario, igual que un
+                # alta hecha por un administrador: sin esto, el motor de cuotas
+                # cortaría a todos los usuarios de la suite.
+                email_verified_at=None if unverified else utcnow_naive(),
+            )
+            granted = (
+                [attribute.db_name for attribute in DEFAULT_USER_ATTRIBUTES]
+                if attributes is None
+                else attributes
             )
             with unit_of_work.UnitOfWork() as uow:
                 UserRepository(uow).save(user)
                 user_id = user.id
-                for attr in attributes or []:
+                for attr in granted:
                     AttributeRepository(uow).add_attribute(user_id, attr)
 
         return UserHandle(user_id, username, password, role)
@@ -341,6 +360,18 @@ def regular_user(make_user):
 
 
 @pytest.fixture()
+def stripped_user(make_user):
+    """Usuario al que un administrador le ha retirado todos los atributos.
+
+    Es el caso que prueban los tests ``*_requires_*_attribute``: desde que el
+    baseline de ``Role.USER`` está vacío, un usuario normal tiene todos los
+    atributos por defecto, así que el 403 solo puede venir de una retirada
+    explícita. Antes ese 403 lo daba la ausencia de baseline.
+    """
+    return make_user(role="role_user", attributes=[])
+
+
+@pytest.fixture()
 def root_headers(root_user, auth_headers):
     return auth_headers(root_user)
 
@@ -353,3 +384,182 @@ def admin_headers(admin_user, auth_headers):
 @pytest.fixture()
 def user_headers(regular_user, auth_headers):
     return auth_headers(regular_user)
+
+
+# ---------------------------------------------------------------------------
+# 7. Catálogo de planes (módulo accounts)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _unlimited_default_plan(app):
+    """Siembra un plan por defecto sin topes, para toda la suite.
+
+    Desde que el motor de cuotas corta de verdad, una base de datos sin
+    catálogo no es un estado realista: en producción siempre hay planes, los
+    siembra la migración. Sin esto, cualquier test que lance un escaneo o dé de
+    alta un activo recibiría un 500 por ``DefaultPlanMissingError``.
+
+    Todos los topes van a ``NULL`` (ilimitado) por el mismo motivo que
+    ``limiter.enabled = False``: el resto de la suite no está probando cuotas y
+    no debe pelearse con ellas. El motor sigue ejecutándose en cada llamada —
+    así que una excepción dentro de él sale a la luz igual—, simplemente nunca
+    corta. Los tests que sí prueban el corte se traen su propio catálogo.
+    """
+    from src.modules.accounts.model import Plan, PlanLimit
+    from src.modules.accounts.services.limits import PERIODS, LimitKey
+
+    with app.app_context():
+        with unit_of_work.UnitOfWork() as uow:
+            plan = Plan(
+                code="test-unlimited", name="Test", rank=0,
+                monthly_price_cents=0, org_addon_price_cents=0, currency="EUR",
+                is_public=False, is_default=True,
+            )
+            uow.session.add(plan)
+            uow.session.flush()
+            for key in LimitKey:
+                uow.session.add(PlanLimit(
+                    plan_id=plan.id, limit_key=key.value, scope="holder",
+                    value=None, period=PERIODS[key].value,
+                ))
+            uow.session.flush()
+    yield
+
+
+@pytest.fixture()
+def seeded_plans(app, _unlimited_default_plan):
+    """Siembra un catálogo mínimo de planes y devuelve {code: plan_id}.
+
+    Retira antes el plan sin topes de ``_unlimited_default_plan``: solo puede
+    haber un ``is_default``, y lo impone un índice único de la base de datos.
+
+    **Function-scoped a propósito**: ``_clean_db`` vacía todas las tablas al
+    terminar cada test, así que un fixture de sesión dejaría el catálogo
+    sembrado solo para el primero que lo pidiera.
+
+    No replica el catálogo comercial real (4 planes × 15 claves × 2 ámbitos):
+    duplicarlo aquí obligaría a editar los números en dos sitios y un cambio de
+    precio rompería tests. Lo que estos necesitan ejercitar son las formas —
+    un límite mensual, uno de existencias, un cero, un ilimitado, un plan
+    oculto y el plan por defecto. La fidelidad del catálogo real la vigila
+    ``tests/unit/test_accounts_seed.py``, sobre el literal de la migración.
+    """
+    from src.modules.accounts.model import Plan, PlanLimit
+
+    # (code, name, rank, price, is_public, is_default)
+    plans = [
+        ("freemium", "Freemium", 0,     0, True,  True),
+        ("bronze",   "Bronze",   1,  2900, True,  False),
+        ("gold",     "Gold",     2, 19900, True,  False),
+        ("custom",   "A medida", 9, 50000, False, False),
+    ]
+    # code -> [(limit_key, scope, value, period)]
+    limits = {
+        "freemium": [
+            ("iris.analyses",           "holder",   10, "month"),
+            ("acheron.vaults",          "holder",    1, "stock"),
+            ("themis.thirdparty.scans", "holder",    0, "month"),
+        ],
+        "bronze": [
+            ("iris.analyses",           "holder",  100, "month"),
+            ("acheron.vaults",          "holder",    3, "stock"),
+            ("themis.thirdparty.scans", "holder",   10, "month"),
+            ("organization.members",    "holder",    2, "stock"),
+            ("acheron.vaults",          "member",    3, "stock"),
+            ("iris.analyses",           "member",   50, "month"),
+        ],
+        "gold": [
+            ("iris.analyses",           "holder", None, "month"),
+            ("acheron.vaults",          "holder", None, "stock"),
+            ("themis.thirdparty.scans", "holder",  200, "month"),
+            ("organization.members",    "holder",    5, "stock"),
+            ("acheron.vaults",          "member", None, "stock"),
+            ("iris.analyses",           "member",  200, "month"),
+        ],
+        "custom": [
+            ("iris.analyses",           "holder", None, "month"),
+        ],
+    }
+
+    ids = {}
+    with app.app_context():
+        with unit_of_work.UnitOfWork() as uow:
+            placeholder = uow.session.query(Plan).filter(
+                Plan.code == "test-unlimited"
+            ).one_or_none()
+            if placeholder is not None:
+                uow.session.delete(placeholder)
+                uow.session.flush()
+
+            for code, name, rank, price, is_public, is_default in plans:
+                plan = Plan(
+                    code=code, name=name, tagline=f"Plan {name}", rank=rank,
+                    monthly_price_cents=price, org_addon_price_cents=0,
+                    currency="EUR", is_public=is_public, is_default=is_default,
+                )
+                uow.session.add(plan)
+                uow.session.flush()
+                ids[code] = plan.id
+                for limit_key, scope, value, period in limits[code]:
+                    uow.session.add(PlanLimit(
+                        plan_id=plan.id, limit_key=limit_key,
+                        scope=scope, value=value, period=period,
+                    ))
+            uow.session.flush()
+    return ids
+
+
+@pytest.fixture()
+def set_plan_limits(app, _unlimited_default_plan):
+    """Aprieta los topes del plan por defecto de la suite.
+
+    Es la forma más corta de poner a un usuario contra el límite: no hace falta
+    crear un plan nuevo ni darle una suscripción, porque quien no tiene
+    suscripción ya recibe el plan por defecto.
+
+    Uso: ``set_plan_limits({LimitKey.HYGEIA_ASSETS: 1})``.
+    """
+    from src.modules.accounts.model import Plan, PlanLimit
+
+    def _set(limits: dict) -> None:
+        with app.app_context():
+            with unit_of_work.UnitOfWork() as uow:
+                plan = uow.session.query(Plan).filter(Plan.is_default.is_(True)).one()
+                for key, value in limits.items():
+                    row = uow.session.query(PlanLimit).filter(
+                        PlanLimit.plan_id == plan.id,
+                        PlanLimit.limit_key == key.value,
+                        PlanLimit.scope == "holder",
+                    ).one()
+                    row.value = value
+                uow.session.flush()
+
+    return _set
+
+
+@pytest.fixture()
+def make_subscription(app, seeded_plans):
+    """Factory que da de alta una suscripción para un usuario.
+
+    Sin llamar a ningún manager: en esta fase no existe todavía quien mueva
+    suscripciones (eso es el ciclo de vida de la fase 6), así que los tests
+    escriben la fila directamente.
+    """
+    from src.modules.accounts.model import Subscription
+
+    def _make(user, plan_code="gold", status="active", **overrides):
+        with app.app_context():
+            with unit_of_work.UnitOfWork() as uow:
+                subscription = Subscription(
+                    user_id=user.id,
+                    plan_id=seeded_plans[plan_code],
+                    status=status,
+                    organization_enabled=overrides.pop("organization_enabled", False),
+                    cancel_at_period_end=overrides.pop("cancel_at_period_end", False),
+                    **overrides,
+                )
+                uow.session.add(subscription)
+                uow.session.flush()
+                return subscription.id
+
+    return _make

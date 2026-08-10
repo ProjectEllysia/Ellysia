@@ -15,6 +15,9 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # imagen sin ese volumen falla al arrancar (certs ausentes) en vez de
 # arrancar con la clave anterior horneada.
 COPY proxy-common.conf /etc/nginx/conf.d/proxy-common.conf
+# A15: fuera de conf.d/ a propósito — la imagen base incluye conf.d/*.conf
+# dentro de http{}, y un `location` en ese contexto impide arrancar.
+COPY api-locations.conf /etc/nginx/api-locations.conf
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80 443
 CMD ["nginx", "-g", "daemon off;"]

@@ -7,6 +7,7 @@ apenas cuerpo, así que la unificación dejó de pagarse sola)."""
 import logging
 from typing import Optional
 
+from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.system.taskqueue import job_context
 from src.modules.shared import isoformat_utc
 from ..repositories import ScanRepository
@@ -66,6 +67,11 @@ class NmapScanManager(ScanManager):
             # directo, sin pasar por validate_targets() — mismo hueco que C3
             # (OpenVAS), mismo patrón de cierre.
             ScanManager.reject_private_ip(target_host)
+
+            # Después de validar y justo antes de crear el registro: un objetivo
+            # rechazado no gasta cuota. Aquí y no en el endpoint, porque el flujo
+            # programado entra por este mismo método.
+            QuotaManager().consume(user_id, LimitKey.THEMIS_THIRDPARTY_SCANS)
 
             scan    = self._create_scan_record(
                 target=target_host,

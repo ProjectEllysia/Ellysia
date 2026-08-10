@@ -99,6 +99,46 @@ const routes = [
     component: () => import('@/views/HygeiaView.vue'),
     meta: { requiresAuth: true },
   },
+  // Capa comercial: planes, plan propio y organización.
+  {
+    // Pública: es la tabla de precios, la ve quien todavía no tiene cuenta.
+    path: '/planes',
+    name: 'Plans',
+    component: () => import('@/views/PlansView.vue'),
+  },
+  {
+    path: '/mi-plan',
+    name: 'MyPlan',
+    component: () => import('@/views/MyPlanView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/organizacion',
+    name: 'Organization',
+    component: () => import('@/views/OrganizationView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/admin/planes',
+    name: 'AdminPlans',
+    component: () => import('@/views/AdminPlansView.vue'),
+    meta: { requiresAuth: true, requiresRoot: true },
+  },
+  // Aterrizajes de los enlaces de correo. PÚBLICOS a propósito: el token es la
+  // única identidad, así que el enlace tiene que funcionar en el móvil donde se
+  // abrió el correo, sin sesión abierta.
+  {
+    path: '/verificar',
+    name: 'VerifyEmail',
+    component: () => import('@/views/InvitationLandingView.vue'),
+    props: { kind: 'verify' },
+  },
+  {
+    path: '/invitacion',
+    name: 'AcceptInvitation',
+    component: () => import('@/views/InvitationLandingView.vue'),
+    props: { kind: 'invitation' },
+  },
   // Páginas informativas públicas (enlazadas desde el pie).
   {
     path: '/sobre',

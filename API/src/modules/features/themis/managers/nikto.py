@@ -4,6 +4,7 @@ plans/deuda-tecnica-y-calidad.md: ver el docstring de nmap.py para el porqué)."
 import logging
 from typing import Optional
 
+from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.system.taskqueue import job_context
 from src.modules.shared import isoformat_utc
 from ..repositories import ScanRepository
@@ -57,6 +58,11 @@ class NiktoScanManager(ScanManager):
             from src.modules.shared import normalize_target
             resolved_ip, _ = normalize_target(target_domain)
             ScanManager.reject_private_ip(resolved_ip)
+
+            # Después de validar y justo antes de crear el registro: un objetivo
+            # rechazado no gasta cuota. Aquí y no en el endpoint, porque el flujo
+            # programado entra por este mismo método.
+            QuotaManager().consume(user_id, LimitKey.THEMIS_THIRDPARTY_SCANS)
 
             scan = self._create_scan_record(
                 target=target_domain,

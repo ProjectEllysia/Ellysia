@@ -1,0 +1,38 @@
+{# Invitación a formar parte de una organización, para alguien que YA tiene
+   cuenta en Ellysia.
+   Contexto: recipient_name (opcional), organization_name, accept_url, ttl_hours. #}
+{% extends "base.html.j2" %}
+{% from "_macros.html.j2" import button %}
+
+{% block title %}Te han invitado a {{ organization_name }}{% endblock %}
+
+{% block preheader %}{{ organization_name }} te ha invitado a su organización en {{ brand.productName }}.{% endblock %}
+
+{% block header_tagline %}
+<div style="margin-top:8px; font-family:Helvetica,Arial,sans-serif; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#8a857c;">
+  Invitación a una organización
+</div>
+{% endblock %}
+
+{% block content %}
+<p style="margin:0 0 16px;">{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}</p>
+
+<p style="margin:0 0 20px;">
+  <strong>{{ organization_name }}</strong> te ha invitado a formar parte de su
+  organización en {{ brand.productName }}.
+</p>
+
+<p style="margin:0 0 20px;">
+  Aceptar no cambia tu plan: el tuyo sigue siendo tuyo, y lo que la organización
+  incluya se suma a lo que ya tienes. Tus datos siguen siendo privados — quien
+  gestiona la organización no ve tus bóvedas, ni tus correos analizados, ni tus
+  escaneos.
+</p>
+
+{{ button(accept_url, "Aceptar la invitación", brand.accentColor) }}
+
+<p style="margin:20px 0 0; font-size:14px; color:#6b665e;">
+  El enlace caduca en {{ ttl_hours }} horas. Si no reconoces esta organización,
+  ignora este mensaje: sin aceptar, no pasa nada.
+</p>
+{% endblock %}

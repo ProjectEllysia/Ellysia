@@ -29,10 +29,14 @@ import jwt
 import src.modules.system.config_reading as CR
 from src.modules.users.exceptions import (
     DatabaseError,
+    EmailAlreadyVerifiedError,
     ExistingUserError,
+    InvalidCredentialsError,
+    InvalidVerificationTokenError,
     PermissionsError,
     ProfileUpdateError,
     UserBindingError,
+    UserNotFoundError,
     MfaAlreadyEnabledError,
     MfaNotEnabledError,
     InvalidMfaCodeError,
@@ -40,6 +44,7 @@ from src.modules.users.exceptions import (
 from src.modules.infrastructure import UnitOfWork
 from src.modules.shared import utcnow_naive
 from src.modules.infrastructure.session import build_repository
+from src.modules.tools.herald import EmailMessage, build_mailer, render_email
 
 from .model import (
     AccessToken,
@@ -62,6 +67,8 @@ from .services import (
     totp_provisioning_uri,
     verify_totp_code,
     generate_recovery_codes,
+    generate_opaque_token,
+    hash_opaque_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -163,6 +170,7 @@ class UserManager:
         password:   str,
         role:        Optional[str] = None,
         actor_id:   Optional[int] = None,
+        email_verified: bool = True,
     ) -> User:
         """
         Register a new user.
@@ -179,6 +187,10 @@ class UserManager:
             role:       Optional role to assign: "role_user" (default), "role_admin".
                         Requires actor_id with appropriate permissions.
             actor_id:   ID of user creating this account. Required if role is specified.
+            email_verified: Si la dirección se da por buena sin confirmarla. True
+                        por defecto porque de un alta hecha por un administrador
+                        responde quien la hace. El alta pública pasa False: ahí
+                        nadie ha comprobado que el correo exista.
 
         Returns:
             The newly created User instance (credential fields excluded
@@ -232,8 +244,20 @@ Raises:
                     password_hash = hash_password(password),
                     password_salt = "",
                     role          = assigned_role,
+                    email_verified_at = utcnow_naive() if email_verified else None,
                 )
                 repo.save(new_user)
+
+                # Los atributos ABAC se escriben como filas explícitas, no se
+                # heredan del rol: solo así puede un administrador retirarlos
+                # después (ver DEFAULT_USER_ATTRIBUTES). Import diferido por el
+                # ciclo managers <-> services.permissions, igual que en
+                # get_all_available_attributes.
+                from .services.permissions import DEFAULT_USER_ATTRIBUTES
+                AttributeRepository(uow).add_attributes(
+                    new_user.id,
+                    [attribute.db_name for attribute in DEFAULT_USER_ATTRIBUTES],
+                )
 
             logger.info(f"Usuario '{username}' registrado con rol '{assigned_role}' (ID: {new_user.id})")
             return new_user
@@ -243,6 +267,91 @@ Raises:
         except Exception as e:
             logger.error(f"Error registrando usuario '{username}': {e}")
             raise DatabaseError("Error con credenciales. Revísalas e inténtalo de nuevo.")
+
+    # =========================================================================
+    # VERIFICACIÓN DE CORREO
+    # =========================================================================
+
+    def issue_email_verification(self, user_id: int) -> str:
+        """Emite un token de verificación y lo manda por correo.
+
+        Del token se guarda solo el hash; el que viaja en el enlace no vuelve a
+        estar disponible. Emitir uno nuevo invalida el anterior — el usuario
+        que pide un reenvío porque "no le llegó" no debe quedarse con dos
+        enlaces vivos.
+
+        El envío no es crítico: si el relé de correo falla, el alta sigue en
+        pie y el usuario puede pedir otro. Tumbar el registro porque el SMTP
+        está caído sería peor que dejar una cuenta pendiente de confirmar.
+
+        Returns:
+            El token en claro, para poder construir el enlace.
+        """
+        token = generate_opaque_token()
+        ttl_hours = CR.registration_config().verification_ttl_hours
+
+        with UnitOfWork() as uow:
+            repo = UserRepository(uow)
+            user = repo.get_by_id(user_id)
+            if user is None:
+                raise UserNotFoundError(user_id)
+            if user.email_verified_at is not None:
+                raise EmailAlreadyVerifiedError()
+
+            user.email_verification_hash = hash_opaque_token(token)
+            user.email_verification_expires_at = utcnow_naive() + timedelta(hours=ttl_hours)
+            repo.update(user)
+            recipient, name = user.email, user.first_name
+
+        self._send_verification_email(recipient, name, token, ttl_hours)
+        return token
+
+    def verify_email(self, token: str) -> User:
+        """Consume un token de verificación y marca el correo como confirmado.
+
+        Un token solo vale una vez: al consumirlo se borran hash y caducidad.
+
+        Raises:
+            InvalidVerificationTokenError: si no existe, ya se usó o caducó.
+                Los tres casos comparten error para no revelar cuáles
+                existieron.
+        """
+        with UnitOfWork() as uow:
+            repo = UserRepository(uow)
+            user = repo.get_by_verification_hash(hash_opaque_token(token))
+
+            if user is None or user.email_verification_expires_at is None:
+                raise InvalidVerificationTokenError()
+            if utcnow_naive() >= user.email_verification_expires_at:
+                raise InvalidVerificationTokenError()
+
+            user.email_verified_at = utcnow_naive()
+            user.email_verification_hash = None
+            user.email_verification_expires_at = None
+            repo.update(user)
+            logger.info(f"Correo verificado para el usuario {user.id}")
+            return user
+
+    @staticmethod
+    def _send_verification_email(recipient: str, name: str, token: str, ttl_hours: int) -> None:
+        """Manda el correo de confirmación. Los fallos se registran, no se propagan."""
+        verify_url = f"{CR.general_config().public_url}/verificar?token={token}"
+        try:
+            html, text = render_email(
+                "email_verification",
+                recipient_name=name,
+                verify_url=verify_url,
+                ttl_hours=ttl_hours,
+            )
+            build_mailer("accounts").send(EmailMessage(
+                to=recipient,
+                to_name=name,
+                subject="Confirma tu correo en Ellysia",
+                html_body=html,
+                text_body=text,
+            ))
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error(f"No se pudo enviar el correo de verificacion a {recipient}: {exc}")
 
     # =========================================================================
     # QUERIES
@@ -350,6 +459,77 @@ Raises:
             logger.error(f"Error actualizando perfil para usuario {user_id}: {e}")
             raise ProfileUpdateError(f"Error al actualizar el perfil: {e}")
 
+    def preview_deletion(self, user_id: int) -> dict:
+        """Qué se destruye si esta cuenta se borra. **No borra nada.**
+
+        Existe para que el aviso de la interfaz diga algo concreto en vez de
+        "esta acción es irreversible". Lo que de verdad importa avisar es la
+        consecuencia sobre terceros: si eres dueño de una organización,
+        **desaparece con la cuenta** y toda tu gente se queda sin ella. Nadie
+        pierde su cuenta ni sus datos, pero sí lo que su plan les daba por
+        pertenecer, y eso conviene decirlo antes y no después.
+        """
+        from src.modules.accounts.repositories import (
+            OrganizationMemberRepository,
+            OrganizationRepository,
+        )
+
+        organization = build_repository(OrganizationRepository).get_by_owner(user_id)
+        owned = None
+        if organization is not None:
+            members = build_repository(OrganizationMemberRepository).count_members(organization.id)
+            owned = {
+                "id": organization.id,
+                "name": organization.name,
+                # Sin contar al propio dueño: son los que se quedan sin nada.
+                "membersLosingAccess": max(members - 1, 0),
+            }
+
+        membership = build_repository(OrganizationMemberRepository).get_by_user(user_id)
+        belongs_to = (
+            membership.organization_id
+            if membership is not None and organization is None
+            else None
+        )
+
+        return {
+            "ownedOrganization": owned,
+            "leavesOrganizationId": belongs_to,
+        }
+
+    def delete_own_account(self, user_id: int, password: str) -> dict:
+        """Borra la cuenta y todo lo que cuelga de ella.
+
+        Se re-verifica la contraseña aunque haya sesión: es la operación más
+        destructiva del producto y un token robado no debería bastar. Mismo
+        criterio que el cambio de contraseña.
+
+        El barrido por módulo va en ``services/account_deletion.py``, y con él
+        se disuelve la organización de la que el usuario sea dueño. Todo ocurre
+        en **una transacción**: o se va entero o no se va nada.
+
+        Raises:
+            InvalidCredentialsError: si la contraseña no es la suya.
+        """
+        from .services.account_deletion import purge_user_data
+
+        user = self.get_user_by_id(user_id)
+        if user is None:
+            raise UserBindingError(username=str(user_id))
+
+        is_valid, _ = self.verify_credentials(user.username, password)
+        if not is_valid:
+            raise InvalidCredentialsError()
+
+        username = user.username
+        with UnitOfWork() as uow:
+            purged = purge_user_data(uow, user_id)
+            repo = UserRepository(uow)
+            repo.delete(repo.get_by_id(user_id))
+
+        logger.info(f"Cuenta '{username}' (ID: {user_id}) eliminada | purgado={purged}")
+        return purged
+
     def delete_user(self, user_id: int) -> None:
         """
         Delete a user by primary key.
@@ -360,11 +540,17 @@ Raises:
         Raises:
             UserBindingError: If the user is not found.
         """
+        from .services.account_deletion import purge_user_data
+
         with UnitOfWork() as uow:
             repo = UserRepository(uow)
             user = repo.get_by_id(user_id)
             if user is None:
                 raise UserBindingError(username=str(user_id))
+            # El mismo barrido que la baja voluntaria: sin él, la mitad de las
+            # tablas quedarían con claves ajenas colgando y Postgres rechazaría
+            # el DELETE. SQLite (la suite) no lo detectaría.
+            purge_user_data(uow, user_id)
             repo.delete(user)
 
         logger.info(f"Usuario {user_id} eliminado")
@@ -415,7 +601,55 @@ Raises:
         if is_actor_admin:
             return not is_target_root and not is_target_admin
 
+        # El dueño de una organización gestiona a los suyos. No es un rol —
+        # es tener una fila en Organization — y su alcance es exactamente esa
+        # organización: nunca alguien de fuera, nunca un admin que resulte ser
+        # miembro suyo.
+        if self._owns_the_organization_of(actor_id, target_id):
+            return not is_target_root and not is_target_admin
+
         return False
+
+    def can_administer_user(self, actor_id: int, target_id: int) -> bool:
+        """Como ``can_manage_user``, pero para **escrituras**.
+
+        La diferencia es una y es la que importa: aquí nadie se gestiona a sí
+        mismo. ``can_manage_user`` empieza con ``actor_id == target_id → True``,
+        que está bien para leer tus propios atributos y sería una escalada de
+        privilegios para escribirlos — cualquiera podría concederse
+        ``themis_create``. Mientras los endpoints llevaban
+        ``require_role(Role.ADMIN)`` el caso no se alcanzaba; al abrirlos al
+        dueño de una organización, esta función es la única barrera.
+
+        Root sí puede sobre sí mismo: ya bypasea todas las comprobaciones ABAC,
+        así que negárselo no protegería de nada y solo confundiría.
+        """
+        if actor_id == target_id:
+            actor = self.get_user_by_id(actor_id)
+            return actor is not None and actor.role == "role_root"
+        return self.can_manage_user(actor_id, target_id)
+
+    @staticmethod
+    def _owns_the_organization_of(actor_id: int, target_id: int) -> bool:
+        """¿Es ``actor_id`` el dueño de la organización a la que pertenece
+        ``target_id``?
+
+        Import diferido: ``accounts`` importa ``users``, así que al nivel de
+        módulo esto cerraría el ciclo.
+        """
+        from src.modules.accounts.repositories import (
+            OrganizationMemberRepository,
+            OrganizationRepository,
+        )
+
+        membership = build_repository(OrganizationMemberRepository).get_by_user(target_id)
+        if membership is None:
+            return False
+
+        organization = build_repository(OrganizationRepository).get_by_id(
+            membership.organization_id
+        )
+        return organization is not None and organization.owner_user_id == actor_id
 
     def can_create_admin(self, actor_id: int) -> bool:
         """

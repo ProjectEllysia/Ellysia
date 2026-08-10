@@ -127,6 +127,14 @@ class UserRepository(BaseRepository[User]):
         """
         return self.exists("username", username)
 
+    def get_by_verification_hash(self, token_hash: str) -> Optional[User]:
+        """Usuario con ese hash de token de verificación de correo pendiente.
+
+        La búsqueda es por el hash y nunca por el token en claro: es lo único
+        que la base de datos conoce.
+        """
+        return self.get_by_field("email_verification_hash", token_hash)
+
     def email_exists(self, email: str) -> bool:
         """
         Check whether an email address is already registered.

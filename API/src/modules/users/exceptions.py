@@ -99,6 +99,13 @@ class DuplicatedUserCredentials(AuthenticationError):
 
 class ExistingUserError(AuthenticationError):
     default_code = ErrorCode.USER_ALREADY_EXISTS
+    # 409, no el 401 que hereda de AuthenticationError: que un nombre de usuario
+    # esté cogido no es un fallo de autenticación. Los dos endpoints que la
+    # lanzan (sign-up de admin y alta pública) ya documentaban 409 en su
+    # alt_response, así que hasta ahora contradecían su propio contrato — y un
+    # cliente que trate el 401 como "sesión caducada" echaría al administrador
+    # al intentar crear un usuario repetido.
+    default_status_code = 409
 
     def __init__(self, username: str, email: str):
         super().__init__(
@@ -163,4 +170,60 @@ class MfaChallengeInvalidError(AuthenticationError):
         super().__init__(
             message="El challenge de MFA es inválido, expiró o agotó sus intentos",
             user_message="La verificación ha expirado. Inicia sesión de nuevo.",
+        )
+
+# =========================================================================
+# ALTA PÚBLICA Y VERIFICACIÓN DE CORREO
+# =========================================================================
+
+class RegistrationClosedError(AuthorizationError):
+    """Esta instalación no acepta altas públicas.
+
+    Es una decisión del despliegue (``general.registration.enabled``), no del
+    usuario: un Ellysia interno de una empresa quiere el grifo cerrado y da de
+    alta a su gente desde el panel.
+    """
+
+    default_code = ErrorCode.REGISTRATION_CLOSED
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="El registro publico esta deshabilitado en esta instalacion",
+            user_message=(
+                "Esta instalacion de Ellysia no acepta registros. "
+                "Pide a un administrador que te cree la cuenta."
+            ),
+        )
+
+
+class InvalidVerificationTokenError(AuthenticationError):
+    """Enlace de verificación inexistente, ya usado o caducado.
+
+    Los tres casos dan el mismo error a propósito: distinguirlos permitiría
+    averiguar qué tokens existieron.
+    """
+
+    default_code = ErrorCode.INVALID_VERIFICATION_TOKEN
+    default_status_code = 400
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="Token de verificacion invalido o caducado",
+            user_message=(
+                "Este enlace de confirmacion no es valido o ha caducado. "
+                "Puedes pedir uno nuevo desde tu perfil."
+            ),
+        )
+
+
+class EmailAlreadyVerifiedError(EllysiaException):
+    """Se pidió reenviar la confirmación de un correo ya confirmado."""
+
+    default_code = ErrorCode.VALIDATION_ERROR
+    default_status_code = 409
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="El correo ya esta verificado",
+            user_message="Tu correo ya esta confirmado.",
         )

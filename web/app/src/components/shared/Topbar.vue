@@ -16,20 +16,22 @@
         <div class="session-dot"></div>
         <span>{{ auth.username() }}</span>
       </div>
-      <button class="btn-logout" @click="auth.logout">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-          <polyline points="16 17 21 12 16 7"/>
-          <line x1="21" y1="12" x2="9" y2="12"/>
-        </svg>
-        <span>Salir</span>
-      </button>
+      <AccountMenu />
     </div>
   </nav>
 </template>
 
 <script setup>
+/**
+ * Barra de las vistas de herramienta.
+ *
+ * Antes solo llevaba la píldora de sesión y un botón de salir: desde dentro de
+ * Themis o Acheron no había forma de llegar al perfil, a la configuración ni,
+ * ahora, al plan o a la organización. El `AccountMenu` compartido resuelve eso
+ * sin duplicar nada — es el mismo componente que monta la portada.
+ */
 import { useAuthStore } from '@/stores/authStore'
+import AccountMenu from '@/components/shared/AccountMenu.vue'
 
 defineProps({
   title: { type: String, required: true },

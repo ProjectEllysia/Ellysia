@@ -72,5 +72,10 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
 # el scheduler (APScheduler) y la reconciliación de huérfanos en create_app()
 # son en memoria por proceso; con >1 worker se duplicarían. Escalar a más
 # procesos exige antes un lock distribuido (Redis) para ambos.
-CMD ["gunicorn", "--factory", "run:app_factory", "--bind", "0.0.0.0:5000", \
+# La fábrica se declara con la sintaxis de llamada `módulo:invocable()`, no con
+# el flag --factory: requirements.txt pide `gunicorn>=21.2.0` y a partir de la
+# 26 ese flag ya no existe, así que cualquier build reciente moría al arrancar
+# con "unrecognized arguments: --factory". La sintaxis de llamada la entienden
+# todas las versiones desde la 20.1.
+CMD ["gunicorn", "run:create_app()", "--bind", "0.0.0.0:5000", \
      "--workers", "1", "--threads", "8", "--timeout", "60"]

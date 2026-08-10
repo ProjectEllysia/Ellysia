@@ -1,6 +1,7 @@
 """ThemisReportManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
+from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.system.taskqueue import job_context
 from src.modules.shared._exceptions import DocumentError
 from src.modules.shared._documents import run_report_generation, DocumentManager
@@ -68,6 +69,20 @@ class ThemisReportManager(DocumentManager):
         scan = scan_manager.get_scan_by_id(scan_id)
         if not scan:
             raise ValueError(f"Escaneo {scan_id} no encontrado")
+
+        # Solo el informe con IA cuesta dinero; el PDF a secas no consume nada.
+        # Se cobra al pedirlo y no al terminarlo: el trabajo se encola aquí, y
+        # esperar al worker dejaría un hueco para pedir mil informes a la vez.
+        #
+        # Dos claves por la misma acción, y es intencionado: la concreta es la
+        # que el usuario ve en su plan, y ai.requests es el techo agregado que
+        # protege el coste de la IA aunque cada módulo por separado sea
+        # generoso. Primero la concreta, para que el 402 nombre lo que el
+        # usuario estaba intentando hacer.
+        if ai_report:
+            quota_manager = QuotaManager()
+            quota_manager.consume(scan.user_id, LimitKey.THEMIS_REPORTS_AI)
+            quota_manager.consume(scan.user_id, LimitKey.AI_REQUESTS)
 
         doc_id = self._create_document(scan, ai_report)
 

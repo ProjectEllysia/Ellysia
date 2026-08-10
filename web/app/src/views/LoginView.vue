@@ -48,7 +48,7 @@
           </div>
         </transition>
 
-        <form v-if="!mfaStep" novalidate @submit.prevent="handleSubmit">
+        <form v-if="!mfaStep && mode === 'login'" novalidate @submit.prevent="handleSubmit">
           <!-- Identificador -->
           <div class="field" :class="{ focused: focus === 'user' }">
             <label for="username">Identificador</label>
@@ -124,6 +124,74 @@
             <span class="submit-arrow" aria-hidden="true">→</span>
             <span class="submit-spin" aria-hidden="true"></span>
           </button>
+
+          <p class="signup-hint">
+            ¿No tienes cuenta?
+            <button type="button" class="link-btn" @click="mode = 'register'">
+              Regístrate gratis y prueba Ellysia
+            </button>
+          </p>
+        </form>
+
+        <!-- ───────── Alta pública ───────── -->
+        <form v-else-if="!mfaStep && mode === 'register'" novalidate @submit.prevent="handleRegister">
+          <div class="field" :class="{ focused: focus === 'reg-user' }">
+            <label for="reg-username">Identificador</label>
+            <div class="field-box">
+              <input id="reg-username" v-model="reg.username" type="text" required
+                     minlength="3" maxlength="64" autocomplete="username"
+                     @focus="focus = 'reg-user'" @blur="focus = ''" />
+            </div>
+          </div>
+
+          <div class="field" :class="{ focused: focus === 'reg-mail' }">
+            <label for="reg-email">Correo</label>
+            <div class="field-box">
+              <input id="reg-email" v-model="reg.email" type="email" required
+                     autocomplete="email" @focus="focus = 'reg-mail'" @blur="focus = ''" />
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field" :class="{ focused: focus === 'reg-first' }">
+              <label for="reg-first">Nombre</label>
+              <div class="field-box">
+                <input id="reg-first" v-model="reg.first_name" type="text" required
+                       maxlength="64" @focus="focus = 'reg-first'" @blur="focus = ''" />
+              </div>
+            </div>
+            <div class="field" :class="{ focused: focus === 'reg-last' }">
+              <label for="reg-last">Apellidos</label>
+              <div class="field-box">
+                <input id="reg-last" v-model="reg.last_name" type="text" required
+                       maxlength="64" @focus="focus = 'reg-last'" @blur="focus = ''" />
+              </div>
+            </div>
+          </div>
+
+          <div class="field" :class="{ focused: focus === 'reg-pass' }">
+            <label for="reg-password">Clave de acceso</label>
+            <div class="field-box">
+              <input id="reg-password" v-model="reg.password" type="password" required
+                     minlength="8" autocomplete="new-password"
+                     @focus="focus = 'reg-pass'" @blur="focus = ''" />
+            </div>
+            <span class="field-hint">Mínimo 8 caracteres.</span>
+          </div>
+
+          <button type="submit" class="submit" :class="{ loading }" :disabled="loading">
+            <span class="submit-label">{{ loading ? 'Creando…' : 'Crear mi cuenta' }}</span>
+            <span class="submit-arrow" aria-hidden="true">→</span>
+            <span class="submit-spin" aria-hidden="true"></span>
+          </button>
+
+          <p class="signup-hint">
+            Empezarás en el plan gratuito. Te mandaremos un correo para
+            confirmarlo.
+            <button type="button" class="link-btn" @click="mode = 'login'">
+              Ya tengo cuenta
+            </button>
+          </p>
         </form>
 
         <!-- ───────── Segundo factor (MFA) ───────── -->
@@ -166,6 +234,10 @@
           </div>
         </form>
 
+        <p v-if="mode === 'login'" class="plans-hint">
+          <router-link to="/planes" class="link-btn">Ver los planes</router-link>
+        </p>
+
         <footer class="portal-foot">
           <span class="foot-pulse"><i></i>Enlace cifrado activo</span>
           <span class="foot-ver">Ellysia © 2026</span>
@@ -193,6 +265,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
+import { validationMessage } from '@/composables/useApi'
 import ElysianScene from '@/components/shared/ElysianScene.vue'
 import ellysiaIcon from '@/assets/images/ellysia/Ellysia-BgN.png'
 
@@ -216,6 +289,53 @@ const granted = ref(false)
 
 /* ── segundo factor (MFA) ── */
 const mfaStep = ref(false)
+
+/**
+ * 'login' o 'register'. Un paso más del mismo formulario, como el de MFA, y no
+ * una vista aparte: el alta pública es la puerta de entrada al plan gratuito, y
+ * mandar a otra pantalla para volver aquí sobra.
+ */
+const mode = ref('login')
+const reg = ref({ username: '', email: '', first_name: '', last_name: '', password: '' })
+
+/**
+ * Alta pública. Al terminar NO se inicia sesión sola: la cuenta nace sin el
+ * correo verificado y se le dice, para que sepa por qué ciertas cosas no le
+ * dejarán hasta que pulse el enlace.
+ */
+async function handleRegister() {
+  loading.value = true
+  try {
+    const res = await fetch('/users/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reg.value),
+    })
+    const body = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      // Un 422 dice qué campo falla y por qué; sin traducirlo, el usuario solo
+      // veía "no se pudo crear la cuenta" y no tenía forma de arreglarlo.
+      showAlert(
+        validationMessage(body) || body.error_description || 'No se pudo crear la cuenta.',
+        'error',
+      )
+      return
+    }
+
+    showAlert(
+      'Cuenta creada. Revisa tu correo para confirmarla y ya puedes entrar.',
+      'success',
+    )
+    username.value = reg.value.username
+    reg.value = { username: '', email: '', first_name: '', last_name: '', password: '' }
+    mode.value = 'login'
+  } catch {
+    showAlert('No se pudo conectar con el servidor.', 'error')
+  } finally {
+    loading.value = false
+  }
+}
 const mfaChallengeToken = ref('')
 const mfaCode = ref('')
 const useRecovery = ref(false)
@@ -518,7 +638,7 @@ onBeforeUnmount(() => {})
 .submit:hover:not(:disabled) .submit-arrow { transform: translateX(4px); }
 .submit:active:not(:disabled) { transform: translateY(0); }
 .submit:disabled { opacity: 0.6; cursor: not-allowed; }
-.submit-label, .submit-arrow { position: relative; z-index: 1; }
+.submit-label, .submit-arrow { position: relative; z-index: 1; font-size: var(--fs-md); }
 .submit-arrow { transition: transform 0.25s ease; }
 .submit.loading .submit-label, .submit.loading .submit-arrow { opacity: 0; }
 .submit-spin {
@@ -556,6 +676,8 @@ onBeforeUnmount(() => {})
 }
 @keyframes live-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.7); } }
 .foot-ver { opacity: 0.8; letter-spacing: 0.04em; }
+.signup-hint { padding: 0.5rem 0 }
+
 
 /* ═══════════ Umbral cruzado ═══════════ */
 .grant-screen {

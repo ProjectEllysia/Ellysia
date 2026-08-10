@@ -104,11 +104,11 @@ class FindingsPrintingStrategy(PrintingStrategy):
 
     def append_body(self, theme: "ReportTheme", elements: list, ai_report: bool = False) -> None:
         from src.modules.infrastructure.session import build_repository
-        from ..repositories import ScanRepository
-        from ..lybra import score_finding
+        from src.modules.features.themis import ScanRepository
+        from src.modules.features.themis.lybra import score_finding
         # Diferido como el resto de imports de esta función: `managers` importa
         # `services`, así que a nivel de módulo sería un ciclo.
-        from ..managers.lybra import LybraEngineManager
+        from src.modules.features.themis.managers import LybraEngineManager
 
         rows = build_repository(ScanRepository).get_findings_by_scan(self.scan.id)
         exposure = LybraEngineManager.exposure_for(self.scan)
@@ -167,8 +167,8 @@ class FindingsPrintingStrategy(PrintingStrategy):
         finding's product) actually states an upper bound.
         """
         from src.modules.infrastructure.session import build_repository
-        from ..repositories import KbRepository
-        from ..lybra import parse_cpe23
+        from src.modules.features.themis.repositories import KbRepository
+        from src.modules.features.themis.lybra import parse_cpe23
 
         cve_ids = sorted({cve for finding in findings for cve in (finding.get("cve_ids") or [])})
         if not cve_ids:

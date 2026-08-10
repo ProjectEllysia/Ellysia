@@ -1,0 +1,35 @@
+{# Verificación del correo tras un alta pública.
+   Contexto: recipient_name (opcional), verify_url, ttl_hours. #}
+{% extends "base.html.j2" %}
+{% from "_macros.html.j2" import button %}
+
+{% block title %}Confirma tu correo{% endblock %}
+
+{% block preheader %}Confirma tu correo para empezar a usar {{ brand.productName }}.{% endblock %}
+
+{% block header_tagline %}
+<div style="margin-top:8px; font-family:Helvetica,Arial,sans-serif; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#8a857c;">
+  Confirmación de cuenta
+</div>
+{% endblock %}
+
+{% block content %}
+<p style="margin:0 0 16px;">{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}</p>
+
+<p style="margin:0 0 20px;">
+  Tu cuenta de {{ brand.productName }} ya está creada. Solo falta confirmar que esta
+  dirección es tuya: hasta entonces podrás entrar y mirar, pero no lanzar escaneos
+  ni pedirle nada a la IA.
+</p>
+
+{{ button(verify_url, "Confirmar mi correo", brand.accentColor) }}
+
+<p style="margin:20px 0 0; font-size:14px; color:#6b665e;">
+  El enlace caduca en {{ ttl_hours }} horas. Si caduca, puedes pedir uno nuevo desde tu perfil.
+</p>
+
+<p style="margin:16px 0 0; font-size:14px; color:#6b665e;">
+  Si no has sido tú quien ha creado esta cuenta, ignora este mensaje: sin confirmar,
+  no llegará a usarse.
+</p>
+{% endblock %}

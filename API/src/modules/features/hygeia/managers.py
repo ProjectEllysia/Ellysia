@@ -16,6 +16,7 @@ from datetime import timedelta
 from typing import Optional
 
 import src.modules.system.config_reading as CR
+from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive
@@ -117,9 +118,17 @@ class HygeiaAssetManager:
             ``agentKey`` (la clave completa en claro, una única vez).
 
         Raises:
-            AssetQuotaExceededError: Si el usuario ya alcanzó el máximo de
-                activos permitido (``features.hygeia.limits.maxAssetsPerUser``).
+            QuotaExceededError: Si el plan del usuario no da para más activos
+                (402). Es el tope comercial y es el que se agota en la práctica.
+            AssetQuotaExceededError: Si se alcanza el techo absoluto de la
+                instancia (``features.hygeia.limits.maxAssetsPerUser``, 409).
         """
+        # Dos topes que parecen lo mismo y no lo son: el del plan es comercial y
+        # lo edita el equipo sin desplegar; el de configuración es una defensa
+        # del servidor, muy por encima de cualquier plan, y protege a un
+        # despliegue on-premise de que alguien se dedique a dar de alta activos.
+        QuotaManager().consume(self.user.id, LimitKey.HYGEIA_ASSETS)
+
         with UnitOfWork() as uow:
             repo = MonitoredAssetRepository(uow)
 

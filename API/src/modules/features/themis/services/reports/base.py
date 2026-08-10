@@ -71,7 +71,7 @@ class PrintingStrategy(ABC):
             ValidationError: If scan type is not registered.
         """
 
-        from ..managers import ScanManager
+        from src.modules.features.themis import ScanManager
         raw_type = ScanManager.get_scan_type(scan_id)
         try:
             scan_type = ScanType(raw_type)

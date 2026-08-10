@@ -11,7 +11,7 @@ from src.modules.shared._exceptions import (
     IllegalStateError,
     EllysiaException,
 )
-from src.modules.shared.schemas import ErrorSchema
+from src.modules.shared.schemas import ErrorSchema, SuccessMessageSchema
 from src.modules.shared import utcnow_naive
 
 from .services import Role, require_oauth_token, require_role
@@ -22,6 +22,7 @@ from .exceptions import (
     PasswordChangedError,
     MfaChallengeInvalidError,
     InvalidMfaCodeError,
+    RegistrationClosedError,
 )
 from .model import User
 from .schemas import (
@@ -46,6 +47,11 @@ from .schemas import (
     MfaTotpConfirmResponseSchema,
     MfaDisableRequestSchema,
     MfaStatusResponseSchema,
+    RegisterRequestSchema,
+    RegisterResponseSchema,
+    VerifyEmailRequestSchema,
+    DeletionPreviewSchema,
+    DeleteAccountRequestSchema,
 )
 
 
@@ -85,6 +91,11 @@ def _serialize_user_profile(user: "User", *, include_attributes: bool = False) -
         "role": user.role,
         "created_at": user.created_at,
         "password_changed_at": user.password_changed_at,
+        # Sin esto el cliente no puede saber que la cuenta está pendiente de
+        # confirmar, y el usuario se come un 403 al primer intento de hacer
+        # cualquier cosa sin entender por qué ni cómo salir de ahí.
+        "emailVerified": user.email_verified_at is not None,
+        "mustChangePassword": bool(user.must_change_password),
     }
     if include_attributes:
         profile["attributes"] = [attribute.attribute_name for attribute in user.attributes]
@@ -376,6 +387,124 @@ def sign_up_user(data: dict[str, Any]):
     }
 
 
+# =========================================================================
+# BAJA DE LA CUENTA
+# =========================================================================
+
+
+@users_blp.get("/me/deletion-preview")
+@users_blp.response(200, DeletionPreviewSchema, description="What deleting the account destroys")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@limiter.limit("30 per hour")
+@require_oauth_token
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def preview_account_deletion():
+    """Que se destruye si esta cuenta se borra. No borra nada.
+
+    Alimenta el aviso de confirmacion. Lo importante que devuelve es la
+    consecuencia sobre terceros: si el usuario es duenyo de una organizacion,
+    esta DESAPARECE con su cuenta y sus miembros se quedan sin ella.
+    """
+    return USER_MANAGER.preview_deletion(get_current_user().id)
+
+
+@users_blp.delete("/me")
+@users_blp.arguments(DeleteAccountRequestSchema)
+@users_blp.response(200, SuccessMessageSchema, description="Account deleted")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Wrong password or not authenticated")
+@limiter.limit("5 per hour")
+@require_oauth_token
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def delete_own_account(data: dict[str, Any]):
+    """Borrar la cuenta y todo lo que cuelga de ella.
+
+    Si el usuario es duenyo de una organizacion, esta se disuelve: sus miembros
+    conservan cuenta, datos y plan personal, pero pierden lo que heredaban.
+    Se re-verifica la contrasenya porque un token robado no debe bastar para la
+    operacion mas destructiva del producto.
+    """
+    user = get_current_user()
+    username = user.username
+    USER_MANAGER.delete_own_account(user.id, data["password"])
+    logger.info(f"Cuenta eliminada a peticion del propio usuario: {username}")
+    return {"message": "Tu cuenta y todos tus datos se han eliminado."}
+
+
+# =========================================================================
+# ALTA PUBLICA Y VERIFICACION DE CORREO
+# =========================================================================
+
+
+@users_blp.post("/register")
+@users_blp.arguments(RegisterRequestSchema)
+@users_blp.response(201, RegisterResponseSchema, description="Account created, verification email sent")
+@users_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@users_blp.alt_response(403, schema=ErrorSchema, description="Public registration disabled")
+@users_blp.alt_response(409, schema=ErrorSchema, description="Username or email already taken")
+@limiter.limit("5 per hour; 20 per day")
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def register_user(data: dict[str, Any]):
+    """Crear una cuenta desde la web, sin intervencion de un administrador"""
+    if not CR.registration_config().enabled:
+        raise RegistrationClosedError()
+
+    # Rol forzado a role_user y correo sin verificar: son las dos diferencias
+    # con el alta de un administrador, y las dos son deliberadas. Los atributos
+    # ABAC por defecto los pone sign_in_user, iguales para todo el mundo.
+    user = USER_MANAGER.sign_in_user(
+        username=data["username"],
+        email=data["email"],
+        first_name=data["first_name"],
+        last_name=data["last_name"],
+        password=data["password"],
+        email_verified=False,
+    )
+
+    # No se crea fila en Subscription: su ausencia ya significa "plan por
+    # defecto" (ver accounts/services/entitlements.py).
+    USER_MANAGER.issue_email_verification(user.id)
+
+    logger.info(f"Alta publica: {user.username} (ID: {user.id})")
+    return {
+        "message": "Cuenta creada. Te hemos enviado un correo para confirmarla.",
+        "userId": user.id,
+        "username": user.username,
+        "email": user.email,
+        "emailVerified": False,
+    }
+
+
+@users_blp.post("/verify-email")
+@users_blp.arguments(VerifyEmailRequestSchema)
+@users_blp.response(200, SuccessMessageSchema, description="Email verified")
+@users_blp.alt_response(400, schema=ErrorSchema, description="Invalid or expired token")
+@limiter.limit("20 per hour")
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def verify_email(data: dict[str, Any]):
+    """Confirmar una direccion de correo con el token del enlace
+
+    Publico a proposito: el token es la unica identidad, igual que en el quiz
+    de Aegis. Quien pulsa el enlace no tiene por que tener la sesion abierta,
+    ni siquiera en el mismo dispositivo.
+    """
+    user = USER_MANAGER.verify_email(data["token"])
+    return {"message": f"Correo confirmado. Ya puedes usar Ellysia, {user.first_name}."}
+
+
+@users_blp.post("/verify-email/resend")
+@users_blp.response(200, SuccessMessageSchema, description="Verification email sent again")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@users_blp.alt_response(409, schema=ErrorSchema, description="Email already verified")
+@limiter.limit("3 per hour")
+@require_oauth_token
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def resend_email_verification():
+    """Pedir un nuevo enlace de confirmacion. Invalida el anterior."""
+    user = get_current_user()
+    USER_MANAGER.issue_email_verification(user.id)
+    return {"message": "Te hemos enviado un correo de confirmacion."}
+
+
 @users_blp.get("")
 @users_blp.response(200, UserListItemSchema(many=True), description="List of all users")
 @users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
@@ -394,7 +523,6 @@ def list_all_users():
 @users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @users_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
 @require_oauth_token
-@require_role(Role.ADMIN)
 @handle_exceptions(default_exception=DatabaseError, logger=logger)
 def list_user_attributes(target_user_id: int):
     """Listar los atributos de un usuario especifico"""
@@ -423,13 +551,12 @@ def list_user_attributes(target_user_id: int):
 @users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @users_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
 @require_oauth_token
-@require_role(Role.ADMIN)
 @handle_exceptions(default_exception=DatabaseError, logger=logger)
 def add_user_attribute(data: dict[str, Any], target_user_id: int):
     """Anadir atributos a un usuario"""
     current_user_id = get_current_user().id
 
-    if not USER_MANAGER.can_manage_user(current_user_id, target_user_id):
+    if not USER_MANAGER.can_administer_user(current_user_id, target_user_id):
         logger.warning(f"Usuario {current_user_id} intento anadir atributos a {target_user_id} sin permiso")
         raise EllysiaException(
             "No tienes permiso para gestionar atributos de este usuario",
@@ -452,13 +579,12 @@ def add_user_attribute(data: dict[str, Any], target_user_id: int):
 @users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @users_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
 @require_oauth_token
-@require_role(Role.ADMIN)
 @handle_exceptions(default_exception=DatabaseError, logger=logger)
 def remove_user_attribute(data: dict[str, Any], target_user_id: int):
     """Eliminar atributos de un usuario"""
     current_user_id = get_current_user().id
 
-    if not USER_MANAGER.can_manage_user(current_user_id, target_user_id):
+    if not USER_MANAGER.can_administer_user(current_user_id, target_user_id):
         logger.warning(
             f"Usuario {current_user_id} intento eliminar atributos de {target_user_id} sin permiso"
         )

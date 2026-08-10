@@ -68,9 +68,9 @@ def test_lybra_requires_authentication(client):
     assert client.post("/themis/lybra", json={"sourceScanId": 1}).status_code == 401
 
 
-def test_lybra_requires_create_attribute(client, regular_user, auth_headers):
-    # role_user lacks themis_create (same baseline as the Nmap start endpoint).
-    resp = client.post("/themis/lybra", headers=auth_headers(regular_user),
+def test_lybra_requires_create_attribute(client, stripped_user, auth_headers):
+    # Usuario al que le han retirado themis_create.
+    resp = client.post("/themis/lybra", headers=auth_headers(stripped_user),
                        json={"sourceScanId": 1})
     assert resp.status_code == 403
 
@@ -691,9 +691,9 @@ def test_accept_finding_via_endpoint(client, app, admin_user, auth_headers):
     assert resp.get_json()["state"] == "accepted"
 
 
-def test_accept_finding_requires_update_attribute(client, app, regular_user, auth_headers):
-    # role_user lacks themis_update.
-    resp = client.patch("/themis/findings/1", headers=auth_headers(regular_user),
+def test_accept_finding_requires_update_attribute(client, app, stripped_user, auth_headers):
+    # Usuario al que le han retirado themis_update.
+    resp = client.patch("/themis/findings/1", headers=auth_headers(stripped_user),
                        json={"state": "accepted"})
     assert resp.status_code == 403
 

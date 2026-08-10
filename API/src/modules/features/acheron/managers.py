@@ -9,6 +9,7 @@ from typing import Literal
 from .exceptions import VaultRevisionMismatchError
 from .model import Storable, Vault
 
+from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.users import User
 from src.modules.infrastructure.unit_of_work import UnitOfWork
 from src.modules.infrastructure.session import build_repository
@@ -134,6 +135,18 @@ class VaultManager:
 
                 existing_vault = vault_repo.get_by_user(self.active_user.id)
                 created = existing_vault is None
+
+                if created:
+                    # Solo al crearla: reemplazar una bóveda existente no es
+                    # una bóveda nueva.
+                    #
+                    # OJO: Vault.user_id es UNIQUE, así que hoy nadie puede
+                    # tener más de una y este tope funciona en la práctica como
+                    # una puerta — 0 es "tu plan no incluye Acheron" y
+                    # cualquier valor >= 1 es "sí". Los 3/10/ilimitado que
+                    # promete la tabla de precios necesitan que la bóveda deje
+                    # de ser única por usuario.
+                    QuotaManager().consume(self.active_user.id, LimitKey.ACHERON_VAULTS)
 
                 if existing_vault is None:
                     vault = Vault(
@@ -356,6 +369,11 @@ class VaultManager:
         vault = self.get_vault_by_id(vault_id)
         if vault is None:
             raise ValueError(f"Vault {vault_id} no encontrado")
+
+        # Son existencias, contadas sobre la tabla real a través de la bóveda:
+        # borrar un secreto devuelve el hueco. Va antes de tocar la sesión, por
+        # el mismo motivo que la comprobación de revisión de abajo.
+        QuotaManager().consume(self.active_user.id, LimitKey.ACHERON_ITEMS)
 
         # Antes de construir el storable: instanciarlo con vault=... ya lo mete
         # en la sesión por cascada, y el teardown de la petición lo commitearía

@@ -1,0 +1,20 @@
+{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}
+
+{% if kind == 'past_due' %}
+No hemos podido cobrar tu suscripción {{ plan_name }}. Casi siempre es una
+tarjeta caducada y se arregla en un minuto.
+
+TU PLAN SIGUE FUNCIONANDO HASTA EL {{ deadline }}. No hemos cortado nada ni
+vamos a borrar nada tuyo.
+{% else %}
+Tu plan {{ plan_name }} termina el {{ deadline }}.
+
+A partir de ese día pasarás al plan gratuito. Nada de lo que tengas se borra:
+lo que quede por encima de los nuevos topes se queda en solo lectura hasta que
+bajes de ellos o vuelvas a un plan mayor.
+{% endif %}
+
+Ver mi plan: {{ plans_url }}
+
+--
+Este mensaje se ha enviado automáticamente desde {{ brand.productName }}. No respondas a esta dirección.

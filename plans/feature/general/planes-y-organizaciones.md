@@ -343,13 +343,22 @@ de poder restringir nada — matando justo lo que el dueño de una organización
 
 **El arreglo, pequeño y en fase 1:**
 
-- Vaciar (o dejar casi vacío) `ROLE_PERMISSIONS[Role.USER]`.
-- Definir un **conjunto de atributos por defecto** — las herramientas de autoservicio:
-  `acheron_*`, `iris_*`, `hygeia_*`, `themis_read`, `themis_folder_*`, `aegis_read` — y
-  escribirlo como **filas explícitas de `UserAttribute`** en el momento del alta, sea el
-  alta pública, la de un admin o la de una invitación.
-- Una migración escribe esas filas a los usuarios existentes con lo que hoy tienen
-  implícito, para que nadie note el cambio.
+- Vaciar `ROLE_PERMISSIONS[Role.USER]`.
+- Definir un **conjunto de atributos por defecto** y escribirlo como **filas explícitas
+  de `UserAttribute`** en el momento del alta, sea el alta pública, la de un admin o la
+  de una invitación.
+- Una migración escribe esas filas a los usuarios existentes.
+
+> **Implementado así** (fase 0, commit `refactor(users): los atributos ABAC pasan a ser
+> filas explícitas`): el conjunto por defecto es
+> `DEFAULT_USER_ATTRIBUTES = frozenset(AttributeType)` — **todos**, no un subconjunto de
+> autoservicio como se escribió arriba. La razón la impone §11: Freemium incluye 3
+> escaneos de Lybra y 2 píldoras de Aegis, así que una cuenta nueva necesita
+> `themis_create` y `aegis_create` desde el primer minuto; y §5.1 ya decía que Freemium y
+> Gold tienen el mismo llavero. Es seguro por construcción — cada endpoint filtra por
+> `user_id` y lo peligroso lo guarda `require_role`. La migración concede ese mismo
+> conjunto completo a los `role_user` existentes, para no dejar dos clases de cuenta
+> conviviendo para siempre.
 
 A partir de ahí el administrador puede **añadir y quitar de verdad**, y `ROLE_PERMISSIONS`
 se queda solo con lo que de verdad es estructural (`Role.ADMIN`).
@@ -745,7 +754,7 @@ para tener algo enseñable el primer día. `∞` = `NULL`, `—` = `0` (no inclu
 | `iris.analyses` /mes | 10 | 100 | 500 | ∞ |
 | `iris.ai_summaries` /mes | 2 | 25 | 100 | 400 |
 | `iris.mailbox.connections` | — | 1 | 3 | 10 |
-| `acheron.vaults` | 1 | 3 | 10 | ∞ |
+| `acheron.vaults` | 1 | 1 | 1 | 1 |
 | `acheron.items` | 25 | 250 | 1000 | ∞ |
 | `hygeia.assets` | 1 | 10 | 40 | 150 |
 | `ai.requests` /mes | 5 | 60 | 250 | 900 |
@@ -758,7 +767,7 @@ de Iris y bóveda de verdad porque su empresa paga.
 
 | Clave | Bronze | Silver | Gold |
 |---|---:|---:|---:|
-| `acheron.vaults` | 3 | 5 | ∞ |
+| `acheron.vaults` | ∞ | ∞ | ∞ |
 | `acheron.items` | 250 | 1000 | ∞ |
 | `iris.analyses` /mes | 50 | 200 | ∞ |
 | `iris.mailbox.connections` | 1 | 2 | 3 |
@@ -777,8 +786,14 @@ precios, no una decisión comercial.
 corre con `CREATE_DATABASE=True` (destructivo, primer despliegue); un entorno ya
 desplegado se quedaría sin planes y todo el mundo sin suscripción.
 
-La misma migración crea una `Subscription` al plan por defecto para **todos los usuarios
-existentes**, o el día del despliegue nadie puede hacer nada.
+> **Corregido en la fase 1.** Aquí decía que la migración debía crear una `Subscription`
+> al plan por defecto para todos los usuarios existentes. No hace falta, y meterla era
+> peor: **la ausencia de fila significa "plan por defecto"**, exactamente igual que una
+> suscripción caducada. El camino de respaldo tiene que existir de todos modos (§12.3),
+> así que el backfill sería un segundo mecanismo para el mismo resultado — y obligaría a
+> acordarse de crear la fila en los tres caminos de alta (admin, público, invitación),
+> con un cuarto esperando a que alguien lo añada. `Subscription` solo tiene fila cuando
+> alguien ha comprado o se le ha asignado algo.
 
 ---
 
@@ -966,7 +981,44 @@ Gold con 40 miembros, la suscripción caduca. Qué pasa exactamente:
   no ha pagado; verán en la UI que ciertas funciones ya no están disponibles. No es
   nuestro mensaje que dar.
 
-### 12.9 Lo que la UI necesita saber
+### 12.9 Cuando el dueño borra su cuenta: la organización desaparece
+
+Es el otro final posible, y no se parece al impago. Un impago es reversible y no
+destruye nada; una baja voluntaria es una decisión explícita de quien manda.
+
+> **Al borrar la cuenta de un dueño, su organización se disuelve.** Sus miembros
+> **conservan cuenta, datos y plan personal** — pierden solo lo que heredaban.
+
+Por eso el botón no puede limitarse a decir "esta acción es irreversible". Antes
+de confirmar hay que enseñar la consecuencia **sobre terceros**, que es la que
+quien pulsa no tiene presente:
+
+```
+GET /users/me/deletion-preview
+→ { "ownedOrganization": { "name": "Acme", "membersLosingAccess": 12 } }
+```
+
+`membersLosingAccess` no cuenta al dueño: son las personas ajenas afectadas por
+su decisión, que es exactamente el número que tiene que leer.
+
+**El barrido.** Veintiséis claves ajenas apuntan a `User` y solo dos tienen
+`ON DELETE CASCADE`; unas cuantas más cuelgan de una `relationship` con cascada
+del ORM. El resto —activos de Hygeia, listas y campañas de Aegis, buzones de
+Iris, escaneos programados, carpetas y objetivos autorizados de Themis,
+invitaciones— hay que borrarlas a mano, o Postgres rechaza el `DELETE`.
+
+> ⚠️ **Y no se notaría.** La suite corre sobre SQLite, que **no** aplica claves
+> ajenas salvo un PRAGMA que el proyecto no activa. Un barrido incompleto pasa
+> verde en los tests y da un 500 en producción. La defensa es un test que
+> recorre `Base.metadata` buscando toda columna con una FK hacia `User` y exige
+> que no quede ninguna fila apuntando al borrado — así una tabla nueva entra
+> sola en la comprobación.
+
+El barrido vive en `users/services/account_deletion.py` como una **lista
+explícita**, no como un registro donde cada módulo se apunta solo: se lee de
+arriba abajo y responde en diez segundos a "¿qué destruye este botón?".
+
+### 12.10 Lo que la UI necesita saber
 
 `GET /plans/me` devuelve, además de los límites y el uso:
 
@@ -998,9 +1050,9 @@ el límite de tu plan"*. Los tres salen de datos, no de adivinar.
 | 3 | **Resto del cableado** | Las 12 claves restantes en sus managers | Cobertura completa |
 | 4 | **Alta pública** | `/users/register`, verificación por correo, plantilla Herald, guard en `consume()` | Un desconocido se registra solo |
 | 5 | **Organizaciones** | Tablas ya creadas en la 1; managers, invitaciones, correos, aceptación, expulsión, solo-lectura al degradar | La venta a PYME es contable |
-| 6 | **Ciclo de vida** | Las seis operaciones de §12.1, `is_effective()`, modo excedido, `external_event_at`, avisos por correo. **Sin pasarela**: el driver es el panel | La máquina de estados de cobro, entera y probada, movida a mano |
+| 6 | **Ciclo de vida y baja** | Las seis operaciones de §12.1, `is_effective()`, modo excedido, `external_event_at`, avisos por correo, y la **baja de cuenta** con su barrido por módulo y la disolución de la organización (§12.9). **Sin pasarela**: el driver es `PUT /plans/subscriptions/<id>` | La máquina de estados de cobro, entera y probada, movida a mano; y un botón de borrar cuenta que borra de verdad |
 | 7 | **Gestor de planes** | `PUT /plans/<id>/limits`, `PUT /users/<id>/subscription`, vista `/admin/planes` con las seis operaciones como botones | El equipo rellena los números y mueve suscripciones sin tocar código |
-| 8 | **Frontend transversal** | `AccountMenu` compartido, `/planes`, `/mi-plan`, `/organizacion`, registro en el login, 402 y los tres avisos de §12.9 en `useApi` | Presentable |
+| 8 | **Frontend transversal** | `AccountMenu` compartido, `/planes`, `/mi-plan`, `/organizacion`, registro en el login, 402 y los tres avisos de §12.10 en `useApi`, y el aviso de baja de §12.9 | Presentable |
 | — | *(futuro)* | Checkout + portal de cliente + **adaptador** de webhooks a las seis operaciones | Cobro real |
 
 Las fases 1-2 son la mitad del valor: en cuanto el plan se ve y el corte funciona en la
@@ -1047,8 +1099,10 @@ cobrado por transferencia.
   desincroniza en el primer borrado.
 - **Un usuario ≠ una organización.** El `unique` de `OrganizationMember.user_id` lo
   impone Postgres, no un `if` en Python.
-- **La migración tiene que dar suscripción a los usuarios existentes**, o el despliegue
-  deja a todo el mundo a cero.
+- **Sin fila en `Subscription` = plan por defecto.** No hay backfill ni hook en el alta, a
+  propósito (§11). Quien escriba un `JOIN` contra `Subscription` dando por hecho que todo
+  usuario tiene fila contará de menos; el `activate()` de la fase 6 hace *upsert* por
+  `user_id`, que es lo que ya tenía que hacer para ser idempotente.
 - **`CREATE_DATABASE=True` sigue siendo destructivo.** La semilla va en Alembic.
 - **Periodos en UTC naive**, primer día del mes, con `utcnow_naive()` como el resto del
   proyecto. Nada de zonas horarias por usuario en la v1.
@@ -1084,6 +1138,15 @@ cobrado por transferencia.
 
 - **Los números de §11.** Están puestos para que haya algo enseñable; hay que revisarlos
   con el coste real de OpenAI y de los escaneos delante.
+- **`acheron.vaults` era una lectura equivocada, ya corregida** (migración
+  `f5e6f7a8b9c0`). `Vault.user_id` es `UNIQUE` y así debe seguir: **cada persona tiene
+  una bóveda como máximo**. Lo que el plan del dueño limita no es cuántas tiene alguien
+  sino *a cuánta de su gente le toca una* — el contador del ámbito `member` suma las
+  bóvedas de todos los miembros, como cualquier bolsa común. En el ámbito `holder` la
+  clave solo puede valer `0` ("tu plan no incluye Acheron") o `1` ("sí"), y en el ámbito
+  `member` va **ilimitada**: servir una bóveda no cuesta nada —el servidor solo guarda
+  cifrado, sin IA ni escaneos detrás— así que racionarla era un incordio, no un
+  argumento comercial.
 - **¿El dueño puede lanzar acciones "en nombre de" un miembro?** (p. ej. un escaneo que
   aparece en el histórico del empleado). Recomendación: **no** en la v1 — abre la puerta
   a que el dueño toque datos ajenos, que es justo lo que §8.4 promete que no pasa.

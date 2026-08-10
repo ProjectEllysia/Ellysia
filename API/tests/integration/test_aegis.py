@@ -9,9 +9,9 @@ def test_generate_requires_authentication(client):
     assert client.post("/aegis/generate", json={"topicId": 1}).status_code == 401
 
 
-def test_generate_requires_create_attribute(client, regular_user, auth_headers):
-    # role_user tiene aegis_read pero no aegis_create.
-    resp = client.post("/aegis/generate", headers=auth_headers(regular_user),
+def test_generate_requires_create_attribute(client, stripped_user, auth_headers):
+    # Usuario al que le han retirado aegis_create.
+    resp = client.post("/aegis/generate", headers=auth_headers(stripped_user),
                        json={"topicId": 1})
     assert resp.status_code == 403
 
@@ -177,12 +177,12 @@ def test_update_requires_authentication(client, make_aegis_doc, admin_user):
     assert resp.status_code == 401
 
 
-def test_update_requires_update_attribute(client, regular_user, auth_headers, make_aegis_doc):
-    # role_user tiene aegis_read pero no aegis_update.
-    doc_id = make_aegis_doc(regular_user.id)
+def test_update_requires_update_attribute(client, stripped_user, auth_headers, make_aegis_doc):
+    # Usuario al que le han retirado aegis_update, sobre una píldora suya.
+    doc_id = make_aegis_doc(stripped_user.id)
     resp = client.put(
         f"/aegis/document?id={doc_id}",
-        headers=auth_headers(regular_user),
+        headers=auth_headers(stripped_user),
         json=_valid_pill_payload(),
     )
     assert resp.status_code == 403

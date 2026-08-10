@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime
 from typing import List
+from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.shared import assert_owned
 from ..repositories import ProgramedScanRepository
@@ -50,6 +51,12 @@ class ProgramedScanManager():
             schedule_type=schedule_type,
             schedule_config=schedule_config,
         )
+
+        # Después de validar argumentos y horario: una programación mal formada
+        # no gasta cuota. Cuenta las activas — las revocadas quedan como
+        # histórico y no ocupan hueco.
+        QuotaManager().consume(user_id, LimitKey.THEMIS_SCHEDULED)
+
         with UnitOfWork() as uow:
             repo = ProgramedScanRepository(uow)
             programed_scan = repo.create(

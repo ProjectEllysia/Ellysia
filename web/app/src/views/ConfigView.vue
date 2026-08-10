@@ -28,13 +28,31 @@
         <form class="config-form" @submit.prevent="handleSave">
           <section id="section-general" class="section">
             <div class="section-head section-head--row">
-              <div><h2>General</h2><p class="section-desc">Directorios del sistema</p></div>
+              <div><h2>General</h2><p class="section-desc">Directorios del sistema y alta de cuentas</p></div>
               <span class="version-chip" title="Versión de la aplicación">v{{ store.configFlat['appVersion'] }}</span>
             </div>
             <div class="section-body">
               <div class="cfg-grid">
                 <div class="form-group"><label>Temp</label><input v-model="store.configFlat['general.directories.tempdir']" type="text" class="inp" /></div>
                 <div class="form-group"><label>Logs</label><input v-model="store.configFlat['general.directories.logdir']" type="text" class="inp" /></div>
+              </div>
+              <p class="field-hint">Con el registro abierto, cualquiera puede crearse una cuenta desde la pantalla de acceso y estrenará el plan gratuito. En un despliegue interno lo normal es cerrarlo y dar de alta a la gente desde Usuarios.</p>
+              <div class="cfg-grid">
+                <div class="form-group">
+                  <label>Registro público</label>
+                  <select v-model="store.configFlat['general.registration.enabled']" class="inp">
+                    <option :value="true">Abierto</option>
+                    <option :value="false">Cerrado</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Vigencia del enlace de verificación (horas)</label>
+                  <input v-model.number="store.configFlat['general.registration.verificationTtlHours']" type="number" min="1" max="720" class="inp" />
+                </div>
+                <div class="form-group">
+                  <label>Vigencia de la invitación a una organización (horas)</label>
+                  <input v-model.number="store.configFlat['general.registration.invitationTtlHours']" type="number" min="1" max="2160" class="inp" />
+                </div>
               </div>
             </div>
           </section>

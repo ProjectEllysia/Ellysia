@@ -23,6 +23,11 @@
         "max_challenge_attempts": 5,
         "recovery_codes_count": 10
       }
+    },
+    "registration": {
+      "enabled": true,
+      "verificationTtlHours": 48,
+      "invitationTtlHours": 168
     }
   },
   "infrastructure": {
@@ -69,7 +74,8 @@
       "templatesDir": "",
       "modules": {
         "aegis": "smtp",
-        "hygeia": "smtp"
+        "hygeia": "smtp",
+        "accounts": "smtp"
       },
       "strategies": {
         "smtp": {

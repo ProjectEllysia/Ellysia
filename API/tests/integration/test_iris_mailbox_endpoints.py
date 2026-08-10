@@ -43,8 +43,8 @@ def test_providers_requires_authentication(client):
     assert client.get("/iris/mailbox/providers").status_code == 401
 
 
-def test_connect_requires_create_attribute(client, regular_user, auth_headers):
-    resp = client.post("/iris/mailbox/connect", headers=auth_headers(regular_user),
+def test_connect_requires_create_attribute(client, stripped_user, auth_headers):
+    resp = client.post("/iris/mailbox/connect", headers=auth_headers(stripped_user),
                        json={"provider": "gmail"})
     assert resp.status_code == 403
 
@@ -53,8 +53,8 @@ def test_list_connections_requires_authentication(client):
     assert client.get("/iris/mailbox/connections").status_code == 401
 
 
-def test_delete_connection_requires_delete_attribute(client, regular_user, auth_headers):
-    resp = client.delete("/iris/mailbox/connections/1", headers=auth_headers(regular_user))
+def test_delete_connection_requires_delete_attribute(client, stripped_user, auth_headers):
+    resp = client.delete("/iris/mailbox/connections/1", headers=auth_headers(stripped_user))
     assert resp.status_code == 403
 
 

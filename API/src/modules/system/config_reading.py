@@ -975,6 +975,32 @@ def general_config() -> GeneralConfig:
     return load_block(GeneralConfig)
 
 
+@config_block("general.registration")
+@dataclass(frozen=True)
+class RegistrationConfig:
+    """Alta pública de cuentas (§7 de planes-y-organizaciones.md).
+
+    Es de las pocas cosas de la capa comercial que sí son configuración de
+    instancia y no de negocio: los planes y sus topes viven en base de datos
+    porque los edita el equipo sin desplegar, pero *si esta instalación acepta
+    registros de desconocidos* es una decisión del despliegue — un Ellysia
+    on-premise dentro de una empresa quiere el grifo cerrado.
+    """
+
+    enabled: bool = True
+    """Si ``POST /users/register`` acepta altas. Con False responde 403."""
+
+    verification_ttl_hours: int = 48
+    """Vigencia del enlace de verificación de correo."""
+
+    invitation_ttl_hours: int = 168
+    """Vigencia del enlace de invitación a una organización (una semana)."""
+
+
+def registration_config() -> RegistrationConfig:
+    return load_block(RegistrationConfig)
+
+
 # =============================================================================
 # CONFIGURACIÓN DE SEGURIDAD
 # =============================================================================

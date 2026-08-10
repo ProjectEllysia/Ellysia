@@ -5,6 +5,9 @@ from .secrets import (
     verify_password,
     encrypt_totp_secret,
     decrypt_totp_secret,
+    generate_opaque_token,
+    hash_opaque_token,
+    verify_opaque_token,
 )
 
 from .mfa import (

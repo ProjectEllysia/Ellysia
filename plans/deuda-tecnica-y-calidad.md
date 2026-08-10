@@ -100,10 +100,55 @@ todo el `Medio+⚡` porque quince arreglos rápidos entregados valen más que un
 | 39 | **D2** — `thirdparty_scans_managers.py` debería ser tres ficheros | Ubicación | Bajo | ⚡ |
 | 40 | **D6** — `iris/services/shared.py`: 43 KB de dos cosas distintas | Ubicación | Bajo | ⚡ |
 | 41 | **E6** — `AegisManager._lock` promete una garantía que no da | Diseño | Bajo | ⚡ |
+| ~~42~~ | ~~**A15** — La lista de prefijos de API vive en 3 sitios y ya diverge (`/hygeia` no se proxya)~~ | Verdad | Alto | ✅ resuelto |
 
 ---
 
 ## Bloque A — Fuentes de verdad duplicadas
+
+### A15 · La lista de prefijos de API vive en 3 sitios, y ya ha divergido — ✅ RESUELTO
+
+> **Resuelto** en la rama `feature/plans-and-orgs`. Las dos copias de `nginx.conf` se
+> sustituyeron por un único `web/api-locations.conf` incluido por los dos bloques `server`
+> (copiado a `/etc/nginx/` y **no** a `conf.d/`, porque la imagen base incluye
+> `conf.d/*.conf` dentro de `http{}` y un `location` en ese contexto impide arrancar). Se
+> añadieron los tres prefijos que faltaban: `/hygeia`, `/plans` y `/organizations`.
+> `API/tests/unit/test_nginx_api_prefixes.py` ata esa lista a los `url_prefix` de `run.py`
+> en ambas direcciones y comprueba que nadie vuelva a pegar las `location` a mano.
+>
+> Queda vivo un punto menor del diagnóstico original: `vite.config.js` sigue manteniendo su
+> propia lista para el servidor de desarrollo. No es urgente —una divergencia ahí se nota al
+> instante, porque rompe el día a día en vez de solo el despliegue— pero el test podría
+> extenderse a ese fichero cuando moleste.
+
+**Qué pasaba.** Cada vez que un módulo estrenaba su blueprint había que apuntar su prefijo en
+tres ficheros que no se conocen entre sí:
+
+1. `API/run.py:214-226` — `register_blueprint(..., url_prefix=...)`, la verdad real.
+2. `web/app/vite.config.js:31-47` — el proxy del servidor de desarrollo.
+3. `web/nginx.conf:24-33` **y** `web/nginx.conf:79-88` — el proxy del contenedor, escrito **dos
+   veces** (bloque `server` de `localhost` y bloque de los dominios reales).
+
+Son cuatro copias contando la de nginx duplicada. Nadie las valida, así que la divergencia no da
+error: da un `index.html` donde se esperaba JSON, y el cliente revienta con
+`Unexpected token '<'` — el síntoma más caro de diagnosticar que produce este repositorio.
+
+**Ya ha divergido.** `nginx.conf` no proxya `/hygeia`, que existe en `run.py` desde
+`hygeia-backend` y sí está en `vite.config.js`. Es decir: **Hygeia funciona en desarrollo y está
+roto en el despliegue con contenedores**, y nadie lo ha notado porque el trabajo diario pasa por
+Vite. Lo mismo acaba de ocurrir con `/plans` y `/organizations`, que se añadieron a
+`vite.config.js` y no a `nginx.conf`.
+
+**La salida.** No hace falta generar nada: basta con que haya **una** lista. La más barata es una
+directiva `map` de nginx alimentada por un único fichero `api-prefixes.conf` incluido por los dos
+bloques `server`, y un test que compare esa lista con los `url_prefix` de `run.py` — el mismo
+patrón que ya usa `tests/unit/test_config_view_paths.py` para las rutas de configuración, que
+existe exactamente por este motivo.
+
+**Coste.** Un `include` compartido y un test de una pantalla. Elimina de golpe la duplicación
+interna de `nginx.conf` y convierte "se me olvidó un fichero" en un fallo de CI.
+
+---
 
 ### A14 · `CLAUDE.md` afirma una vulnerabilidad SSRF que ya no existe
 **Impacto: Alto · Velocidad: ⚡**

@@ -65,6 +65,9 @@ class ErrorCode(Enum):
     MFA_NOT_ENABLED = 1611
     INVALID_MFA_CODE = 1612
     MFA_CHALLENGE_INVALID = 1613
+    EMAIL_NOT_VERIFIED = 1614
+    INVALID_VERIFICATION_TOKEN = 1615
+    REGISTRATION_CLOSED = 1616
     PARSING_ERROR = 1700
     XML_PARSING_ERROR = 1701
     JSON_PARSING_ERROR = 1702
@@ -72,6 +75,13 @@ class ErrorCode(Enum):
     VAULT_REVISION_MISMATCH = 1704
 
     DOCUMENT_NOT_FOUND = 1801
+
+    # Capa comercial (modulo accounts). Se responden con 402 Payment Required
+    # para que el cliente pueda ofrecer "mejorar plan" en vez de "pide permiso
+    # a tu administrador", que es lo que significa un 403 del ABAC.
+    PLAN_ERROR = 1900
+    PLAN_LIMIT_REACHED = 1901
+    PLAN_FEATURE_NOT_INCLUDED = 1902
 
 
 class ErrorSeverity(Enum):
@@ -85,6 +95,16 @@ class EllysiaException(Exception):
     default_code = ErrorCode.UNKNOWN_ERROR
     default_status_code = 500
     default_severity = ErrorSeverity.MEDIUM
+
+    expose_details = False
+    """Si ``details`` viaja al cliente aunque no estemos en modo depuración.
+
+    Por defecto no: ``details`` suele llevar contexto interno que no le importa
+    a nadie de fuera. Lo activan las excepciones cuyo cuerpo es **parte del
+    contrato**, no diagnóstico — el corte por plan es el caso: el cliente
+    necesita el tope, el consumo y cuándo se reinicia para poder decir algo
+    útil en vez de "error 402".
+    """
 
     def __init__(
         self,
@@ -543,6 +563,11 @@ def create_error_response(
         "error_description": exception.user_message,
         "code": exception.code.value,
     }
+
+    # Las excepciones que declaran expose_details llevan un cuerpo que es parte
+    # del contrato con el cliente, no diagnóstico: viaja siempre.
+    if exception.expose_details and exception.details:
+        response["details"] = exception.details
 
     if include_debug_info:
         response["technical_message"] = exception.message

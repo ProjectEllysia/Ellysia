@@ -61,33 +61,9 @@
           </button>
 
           <router-link v-if="!auth.isAuthenticated" to="/login" class="enter-btn">Entrar</router-link>
-
-          <button v-else class="avatar-btn" @click="profileOpen = !profileOpen" aria-label="Perfil">
-            {{ profileInitials }}
-          </button>
+          <AccountMenu v-else />
         </div>
       </header>
-
-      <!-- Desplegable de perfil (sesión iniciada) -->
-      <Transition name="drop">
-        <div v-if="profileOpen" class="profile-drop" ref="dropRef">
-          <div class="drop-header">
-            <div class="drop-avatar">{{ profileInitials }}</div>
-            <div class="drop-name-wrap">
-              <h3 class="drop-name">{{ profileName }}</h3>
-              <span class="drop-role">{{ roleLabel }}</span>
-            </div>
-          </div>
-          <nav class="drop-menu">
-            <router-link to="/profile" class="drop-item" @click="profileOpen = false">Perfil</router-link>
-            <router-link v-if="auth.isAdmin" to="/users" class="drop-item" @click="profileOpen = false">Usuarios</router-link>
-            <router-link v-if="auth.isAdmin" to="/config" class="drop-item" @click="profileOpen = false">Configuración</router-link>
-            <router-link v-if="auth.isAdmin" to="/queue" class="drop-item" @click="profileOpen = false">Cola de Tareas</router-link>
-            <div class="drop-divider"></div>
-            <button class="drop-item drop-item--danger" @click="logout">Cerrar sesión</button>
-          </nav>
-        </div>
-      </Transition>
 
       <!-- Contenido del héroe -->
       <div class="hero-copy">
@@ -234,6 +210,7 @@ import { useProfileStore } from '@/stores/profileStore'
 import { useThemeStore } from '@/stores/themeStore'
 import ElysianScene from '@/components/shared/ElysianScene.vue'
 import SiteFooter from '@/components/shared/SiteFooter.vue'
+import AccountMenu from '@/components/shared/AccountMenu.vue'
 
 import ellysiaIcon from '@/assets/images/ellysia/Ellysia-BgN.png'
 import themisIcon from '@/assets/images/themis/Themis-Turqoise-BgN.png'
@@ -247,10 +224,8 @@ const auth = useAuthStore()
 const profileStore = useProfileStore()
 const themeStore = useThemeStore()
 
-const profileOpen = ref(false)
 const toolsOpen = ref(false)
 const docsOpen = ref(false)
-const dropRef = ref(null)
 const steleRefs = ref([])
 const philosophyTextRef = ref(null)
 const appVersion = ref('—')
@@ -356,38 +331,12 @@ const tools = [
   },
 ]
 
-const profileName = computed(() => {
-  const fn = profileStore.profile.first_name
-  const ln = profileStore.profile.last_name
-  if (fn || ln) return `${fn} ${ln}`.trim()
-  return auth.username() || 'Usuario'
-})
-
-const roleLabel = computed(() => {
-  const r = profileStore.profile.role || auth.role
-  if (r === 'role_root') return 'Root'
-  if (r === 'role_admin') return 'Admin'
-  return 'Usuario'
-})
-
-const profileInitials = computed(() => {
-  const parts = profileName.value.split(' ')
-  return parts.length >= 2
-    ? (parts[0][0] + parts[1][0]).toUpperCase()
-    : (parts[0]?.[0] || 'U').toUpperCase()
-})
-
 function scrollTop() {
   window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' })
 }
 
 function scrollToSection(id) {
   document.getElementById(id)?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' })
-}
-
-function logout() {
-  profileOpen.value = false
-  auth.logout()
 }
 
 /* ── Revelado de estelas al hacer scroll ── */
@@ -417,12 +366,9 @@ onMounted(() => {
   // Los párrafos de la filosofía se revelan uno a uno, con el mismo observador.
   for (const el of Array.from(philosophyTextRef.value?.children ?? [])) observer.observe(el)
 
+  // El menú de cuenta cierra el suyo por su cuenta (AccountMenu.vue); aquí
+  // solo quedan los desplegables del nav.
   clickOutside = (e) => {
-    const d = dropRef.value
-    const t = document.querySelector('.avatar-btn')
-    if (d && !d.contains(e.target) && t && !t.contains(e.target)) {
-      profileOpen.value = false
-    }
     if (!e.target.closest('.nav-dd')) {
       toolsOpen.value = false
       docsOpen.value = false

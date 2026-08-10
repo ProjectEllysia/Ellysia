@@ -24,6 +24,7 @@ import requests
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 import src.modules.system.config_reading as CR
+from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, decrypt_at_rest, encrypt_at_rest, utcnow_naive
@@ -160,6 +161,17 @@ class IrisMailboxManager(TaskTrackingMixin):
         """
         if provider not in MAILBOX_CONNECTORS:
             raise IrisMailboxInvalidProviderError(provider)
+
+        # Se comprueba aquí y no en handle_callback, donde nace la fila: es
+        # mejor decir que no antes de mandar al usuario a Google que después de
+        # que haya dado su consentimiento, y el callback responde con una
+        # redirección al frontend, donde un 402 no se vería.
+        #
+        # Al ser existencias no se apunta nada: se cuenta la tabla real, así que
+        # reintentar el flujo no cobra dos veces. Dos conexiones iniciadas a la
+        # vez podrían colarse por encima del tope; se vería como "excedido" en
+        # el uso, que es la misma situación que deja una bajada de plan.
+        QuotaManager().consume(user_id, LimitKey.IRIS_MAILBOX_CONNECTIONS)
 
         existing = build_repository(IrisMailboxConnectionRepository).count_for_user(user_id)
         max_connections = CR.iris_config().max_connections_per_user

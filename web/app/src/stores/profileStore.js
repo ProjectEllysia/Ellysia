@@ -20,7 +20,10 @@ export const useProfileStore = defineStore('profile', () => {
   const profileCache = useCache({ storage: 'session', keyPrefix: 'profile:', ttl: PROFILE_TTL, maxSize: 20 })
 
   /** Datos del perfil del usuario autenticado */
-  const profile = reactive({ first_name: '', last_name: '', email: '', username: '', role: '', created_at: '' })
+  // emailVerified arranca en null y no en false: hasta que el perfil llega
+  // no se sabe, y pintar el aviso de "confirma tu correo" a quien ya lo
+  // confirmo seria acusarle por un dato que aun no habia cargado.
+  const profile = reactive({ first_name: '', last_name: '', email: '', username: '', role: '', created_at: '', emailVerified: null, mustChangePassword: false })
   /** Indicador de carga en curso */
   const loading = ref(false)
 
@@ -32,6 +35,8 @@ export const useProfileStore = defineStore('profile', () => {
       username: data.username || '',
       role: data.role || '',
       created_at: data.created_at || '',
+      emailVerified: data.emailVerified ?? null,
+      mustChangePassword: data.mustChangePassword ?? false,
     })
   }
 
@@ -43,6 +48,8 @@ export const useProfileStore = defineStore('profile', () => {
       username: profile.username,
       role: profile.role,
       created_at: profile.created_at,
+      emailVerified: profile.emailVerified,
+      mustChangePassword: profile.mustChangePassword,
     }
   }
 
@@ -114,7 +121,7 @@ export const useProfileStore = defineStore('profile', () => {
    * nuevo en la misma pestaña vería el nombre/email del anterior hasta que
    * expirase por su cuenta. */
   function $reset() {
-    Object.assign(profile, { first_name: '', last_name: '', email: '', username: '', role: '', created_at: '' })
+    Object.assign(profile, { first_name: '', last_name: '', email: '', username: '', role: '', created_at: '', emailVerified: null, mustChangePassword: false })
     loading.value = false
     profileCache.clear()
   }

@@ -1,0 +1,16 @@
+{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}
+
+
+Tu cuenta de {{ brand.productName }} ya está creada. Solo falta confirmar que esta
+dirección es tuya: hasta entonces podrás entrar y mirar, pero no lanzar escaneos
+ni pedirle nada a la IA.
+
+Confirmar mi correo: {{ verify_url }}
+
+El enlace caduca en {{ ttl_hours }} horas. Si caduca, puedes pedir uno nuevo desde tu perfil.
+
+Si no has sido tú quien ha creado esta cuenta, ignora este mensaje: sin confirmar,
+no llegará a usarse.
+
+--
+Este mensaje se ha enviado automáticamente desde {{ brand.productName }}. No respondas a esta dirección.
