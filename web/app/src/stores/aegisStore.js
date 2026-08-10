@@ -43,6 +43,9 @@ export const useAegisStore = defineStore('aegis', () => {
   const searchingProducts = ref(false)
   /** Generación en curso */
   const generating = ref(false)
+  /** Último fallo de generación, para pintarlo donde ocurrió y no solo en un
+      toast que se desvanece. `null` cuando no hay ninguno. */
+  const generateError = ref(null)
   /** Carga de historial en curso */
   const loading = ref(false)
   /** Modo edición del documento en el visor */
@@ -263,6 +266,7 @@ export const useAegisStore = defineStore('aegis', () => {
       return false
     }
     generating.value = true
+    generateError.value = null
     try {
       const payload = {
         topicId: selectedTopicId.value,
@@ -275,7 +279,12 @@ export const useAegisStore = defineStore('aegis', () => {
       }
       const res = await apiFetch('/aegis/generate', { method: 'POST', body: JSON.stringify(payload) })
       if (!res?.ok) {
-        toast.show(await apiError(res, 'Error al generar la píldora.'), 'error')
+        // El toast se va solo a los pocos segundos. Si te has girado, la
+        // generación falló y no queda rastro en ninguna parte: la vista sigue
+        // igual que antes de pulsar. El error se guarda además en la store
+        // para poder pintarlo donde ocurrió.
+        generateError.value = await apiError(res, 'Error al generar la píldora.')
+        toast.show(generateError.value, 'error')
         return false
       }
       const data = await res.json()
@@ -600,7 +609,7 @@ export const useAegisStore = defineStore('aegis', () => {
     topics, documents, listError, selectedTopicId, currentDocId, sortMode,
     trackedProducts, useHygeiaInventory, hygeiaInventoryAvailable,
     productResults, searchingProducts,
-    generating, loading, editing, saving, tweaks, viewerDoc,
+    generating, generateError, loading, editing, saving, tweaks, viewerDoc,
     loadingOrgProfile, savingOrgProfile, orgProfileConfigured,
     searchProducts, addTrackedProduct, removeTrackedProduct,
     loadTopics, loadOrgProfile, saveOrgProfile, loadHistory, sortedDocuments, generate,

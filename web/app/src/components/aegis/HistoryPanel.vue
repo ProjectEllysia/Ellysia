@@ -18,7 +18,12 @@
     </div>
 
     <div class="history-list">
-      <div v-if="error" class="history-empty history-error">{{ error }}</div>
+      <!-- Antes el error se enseñaba sin salida: había que recargar la página
+           entera. Su hermano (ScanTable) ya ofrece reintentar; se iguala. -->
+      <div v-if="error" class="history-empty history-error">
+        <p class="history-error-text">{{ error }}</p>
+        <button type="button" class="retry" @click="handleRefresh">Reintentar</button>
+      </div>
       <div v-else-if="documents.length === 0" class="history-empty">Sin documentos aún</div>
 
       <div v-for="doc in documents" :key="doc.id"
@@ -32,15 +37,22 @@
           </div>
         </div>
         <div class="item-actions">
-          <button type="button" class="action-btn" title="Exportar" @click="exportOpen = exportOpen === doc.id ? null : doc.id">
+          <button type="button" class="action-btn"
+            :aria-label="`Exportar «${doc.title || `Documento #${doc.id}`}»`"
+            :aria-expanded="exportOpen === doc.id"
+            aria-haspopup="menu"
+            title="Exportar"
+            @click="exportOpen = exportOpen === doc.id ? null : doc.id">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           </button>
-          <div v-if="exportOpen === doc.id" class="export-mini-menu">
-            <button @click="emitExport(doc.id, 'md')">MD</button>
-            <button @click="emitExport(doc.id, 'html')">HTML</button>
-            <button @click="emitExport(doc.id, 'json')">JSON</button>
+          <div v-if="exportOpen === doc.id" class="export-mini-menu" role="menu">
+            <button role="menuitem" @click="emitExport(doc.id, 'md')">MD</button>
+            <button role="menuitem" @click="emitExport(doc.id, 'html')">HTML</button>
+            <button role="menuitem" @click="emitExport(doc.id, 'json')">JSON</button>
           </div>
-          <button type="button" class="action-btn action-btn--danger" title="Eliminar" @click="confirmDelete(doc.id)">
+          <button type="button" class="action-btn action-btn--danger"
+            :aria-label="`Eliminar «${doc.title || `Documento #${doc.id}`}»`"
+            title="Eliminar" @click="confirmDelete(doc.id)">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
           </button>
         </div>
@@ -48,22 +60,25 @@
     </div>
   </div>
 
-  <Teleport to="body">
-    <div v-if="deleteTarget" class="modal-overlay" @click.self="deleteTarget = null">
-      <div class="modal--confirm">
-        <p>¿Eliminar el documento <strong>#{{ deleteTarget }}</strong>?</p>
-        <div class="modal-actions">
-          <button type="button" class="btn btn--secondary" @click="deleteTarget = null">Cancelar</button>
-          <button type="button" class="btn btn--danger" @click="doDelete">Eliminar</button>
-        </div>
-      </div>
-    </div>
-  </Teleport>
+  <!-- El modal a mano que había aquí traía un <style> SIN scoped que
+       redefinía .btn, .btn--secondary y .btn--danger: al no estar acotado,
+       pisaba las primitivas de shared.css en TODA la aplicación, no solo en
+       este panel. ConfirmModal ya hace lo mismo, acotado y con transición. -->
+  <ConfirmModal
+    :show="deleteTarget !== null"
+    title="Eliminar documento"
+    :message="`¿Eliminar «${deleteTargetTitle}»? Esta acción no se puede deshacer.`"
+    confirm-label="Eliminar"
+    danger
+    @confirm="doDelete"
+    @cancel="deleteTarget = null" />
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useUtils } from '@/composables/useUtils'
+import { useDismissable } from '@/composables/useDismissable'
+import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 
 const { formatDate } = useUtils()
 const props = defineProps({ documents: { type: Array, default: () => [] }, error: { type: String, default: null }, currentDocId: { type: [Number, null], default: null }, sortMode: { type: String, default: 'date-desc' } })
@@ -79,13 +94,23 @@ function emitExport(docId, fmt) { exportOpen.value = null; emit('export', docId,
 async function handleRefresh() { spinning.value = true; emit('refresh'); setTimeout(() => { spinning.value = false }, 800) }
 function confirmDelete(id) { deleteTarget.value = id }
 function doDelete() { emit('delete', deleteTarget.value); deleteTarget.value = null }
+
+// El menú de exportar se cerraba solo volviendo a pulsar su botón: sin clic
+// fuera y sin Escape, quien lo abría sin querer se quedaba con él abierto.
+useDismissable('.item-actions', () => { exportOpen.value = null })
+
+/** El título del documento a borrar: "#12" no dice qué se está borrando. */
+const deleteTargetTitle = computed(() => {
+  const doc = props.documents.find(d => d.id === deleteTarget.value)
+  return doc?.title || `Documento #${deleteTarget.value}`
+})
 </script>
 
 <style scoped>
 .history-panel { display: flex; flex-direction: column; height: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .history-header { display: flex; align-items: baseline; justify-content: space-between; padding: 0.85rem 1.1rem 0.4rem; }
-.history-header h2 { font-size: var(--fs-xl); font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); }
-.history-count { font-size: var(--fs-md); color: var(--text-muted); font-family: var(--font-mono); }
+.history-header h2 { font-size: var(--fs-xl); font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
+.history-count { font-size: var(--fs-md); color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .history-controls { display: flex; align-items: center; gap: 0.4rem; padding: 0 1.1rem 0.65rem; border-bottom: 1px solid var(--border); }
 .sort { flex: 1; padding: 0.3rem 0.45rem; font-size: var(--fs-md); }
 .input { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 5px; color: var(--text); outline: none; }
@@ -114,16 +139,21 @@ function doDelete() { emit('delete', deleteTarget.value); deleteTarget.value = n
 .export-mini-menu { position: absolute; right: 2.2rem; z-index: 25; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; overflow: hidden; display: flex; }
 .export-mini-menu button { padding: 0.2rem 0.4rem; font-size: var(--fs-body); font-weight: 600; background: none; border: none; color: var(--text-dim); cursor: pointer; }
 .export-mini-menu button:hover { background: var(--accent); color: var(--on-accent); }
-</style>
 
-<style>
-.modal-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 1.5rem; backdrop-filter: blur(4px); }
-.modal--confirm { background: var(--surface); border: 1px solid var(--border-solid); border-radius: 10px; padding: 1.25rem; max-width: 340px; width: 100%; }
-.modal--confirm p { font-size: var(--fs-lg); color: var(--text); margin: 0 0 0.85rem; }
-.modal-actions { display: flex; gap: 0.45rem; justify-content: flex-end; }
-.btn { padding: 0.45rem 1.1rem; border-radius: 6px; font-size: var(--fs-lg); font-weight: 600; border: 1px solid transparent; cursor: pointer; transition: background 0.2s; }
-.btn--secondary { background: transparent; color: var(--text-dim); border-color: var(--border); }
-.btn--secondary:hover { background: var(--surface-2); color: var(--text); }
-.btn--danger { background: var(--danger); color: #fff; }
-.btn--danger:hover { filter: brightness(1.1); }
+.history-error-text { margin: 0 0 0.6rem; }
+.retry {
+  padding: 0.25rem 0.7rem;
+  background: transparent; border: 1px solid var(--danger); border-radius: 6px;
+  color: var(--danger); font-size: var(--fs-sm); cursor: pointer;
+  transition: background var(--transition);
+}
+.retry:hover { background: var(--danger-dim); }
+
+.action-btn:focus-visible,
+.btn-icon:focus-visible,
+.retry:focus-visible,
+.export-mini-menu button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 </style>

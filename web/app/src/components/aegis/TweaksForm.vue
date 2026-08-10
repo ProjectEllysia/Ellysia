@@ -54,6 +54,14 @@
       <span v-if="store.generating" class="spinner"></span>
       {{ store.generating ? "Generando…" : "Generar Píldora" }}
     </button>
+
+    <!-- El fallo se anunciaba solo con un toast, que desaparece a los pocos
+         segundos: si no estabas mirando, la generación había fallado y la vista
+         quedaba idéntica a antes de pulsar. Aquí se queda hasta el siguiente
+         intento, junto al botón que lo provocó. -->
+    <p v-if="store.generateError && !store.generating" class="generate-error" role="alert">
+      {{ store.generateError }}
+    </p>
   </div>
 </template>
 
@@ -77,7 +85,7 @@ const store = useAegisStore();
   color: var(--text);
   margin: 0 0 0.2rem;
   flex-shrink: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
 }
 .form-group {
   display: flex;
@@ -144,5 +152,15 @@ const store = useAegisStore();
   border-top-color: var(--on-accent);
   border-radius: 50%;
   animation: seq-spin 0.6s linear infinite;
+}
+
+.generate-error {
+  margin: 0.6rem 0 0;
+  padding: 0.55rem 0.7rem;
+  background: var(--danger-dim);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  font-size: var(--fs-sm);
 }
 </style>

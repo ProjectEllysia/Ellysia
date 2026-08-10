@@ -3,7 +3,7 @@
     <StarBackground />
     <Topbar title="Hygeia" badge="Monitorización de Activos" back-to="/hygeia" back-label="Volver" />
 
-    <main class="hygeia-layout">
+    <main class="hygeia-layout" :data-pane="mobilePane">
       <section class="panel panel--list">
         <AssetList
           :assets="store.state.assets"
@@ -19,6 +19,10 @@
       </section>
 
       <section class="panel panel--detail">
+        <button class="back-to-list" @click="mobilePane = 'list'">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+          Todos los activos
+        </button>
         <AssetDetail
           :asset="selectedAsset"
           :metrics="store.state.metrics"
@@ -147,8 +151,18 @@ const assetAnomalies = computed(() =>
   alerts.state.anomalies.filter((a) => a.assetId === store.state.selectedId)
 )
 
+/**
+ * En pantalla estrecha las dos columnas se apilan, y el panel de detalle es
+ * largo: al elegir un activo, la lista quedaba arriba del todo y no había
+ * forma de volver a ella salvo desplazarse a ciegas. En estrecho se enseña una
+ * cosa u otra, con un paso atrás explícito. En ancho no cambia nada: `panel`
+ * solo se oculta dentro de la media query.
+ */
+const mobilePane = ref('list')
+
 async function handleSelect(id) {
   store.selectAsset(id)
+  mobilePane.value = 'detail'
   await alerts.fetchAlerts({ assetId: id })
 }
 
@@ -236,7 +250,11 @@ async function handleReanalyzeConfirm() {
 function goToThemis() {
   const id = store.state.selectedId
   showAnalysisModal.value = false
-  router.push({ path: '/themis', query: { world: 'agents', asset: id } })
+  // /themis es el hub, que ignora estos parámetros: quien los lee es
+  // ThemisView, en /themis/escaneos (ver su onMounted). Apuntando al hub, el
+  // enlace aterrizaba en la portada del módulo y perdía activo y mundo, justo
+  // el contexto que este botón existe para llevar.
+  router.push({ path: '/themis/escaneos', query: { world: 'agents', asset: id } })
 }
 
 /**
@@ -348,7 +366,25 @@ onMounted(async () => {
   padding: 1.1rem 1.2rem;
 }
 
-@media (max-width: 900px) {
+/* En ancho no existe: las dos columnas se ven a la vez y no hay a dónde volver. */
+.back-to-list { display: none; }
+
+@media (max-width: 960px) {
   .hygeia-layout { grid-template-columns: 1fr; }
+
+  /* Maestro-detalle: una cosa cada vez, con paso atrás explícito. */
+  .hygeia-layout[data-pane="detail"] .panel--list { display: none; }
+  .hygeia-layout[data-pane="list"]   .panel--detail { display: none; }
+
+  .back-to-list {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    margin-bottom: 0.9rem; padding: 0.35rem 0.6rem 0.35rem 0.4rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    color: var(--text-dim); font-size: var(--fs-md); font-weight: 500;
+    transition: color var(--transition), border-color var(--transition);
+  }
+  .back-to-list:hover { color: var(--text); border-color: var(--accent); }
+  .back-to-list svg { width: 15px; height: 15px; }
 }
 </style>

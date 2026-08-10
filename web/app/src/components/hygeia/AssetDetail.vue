@@ -44,7 +44,8 @@
       @switch="activeTab = $event"
     />
 
-    <div v-show="activeTab === 'graficas'" class="tab-panel">
+    <div v-if="activeTab === 'graficas'" class="tab-panel"
+         role="tabpanel" id="panel-graficas" aria-labelledby="tab-graficas" tabindex="0">
       <section class="section">
         <h4 class="section-title">Constantes</h4>
         <p v-if="metricsLoading" class="state-msg">Cargando métricas…</p>
@@ -56,7 +57,8 @@
     <!-- Todo lo que sigue es el último heartbeat: tiene cardinalidad por
          entidad (montaje, interfaz, proceso, núcleo) y solo tiene sentido
          "ahora", así que no viaja en la serie temporal. -->
-    <div v-show="activeTab === 'estadisticas'" class="tab-panel">
+    <div v-if="activeTab === 'estadisticas'" class="tab-panel"
+         role="tabpanel" id="panel-estadisticas" aria-labelledby="tab-estadisticas" tabindex="0">
       <p v-if="latestError" class="state-msg state-msg--error">{{ latestError }}</p>
 
       <template v-if="m">
@@ -157,7 +159,8 @@
       </template>
     </div>
 
-    <div v-show="activeTab === 'inventario'" class="tab-panel">
+    <div v-if="activeTab === 'inventario'" class="tab-panel"
+         role="tabpanel" id="panel-inventario" aria-labelledby="tab-inventario" tabindex="0">
       <section class="section">
         <h4 class="section-title">
           Inventario de software
@@ -243,7 +246,8 @@
       </section>
     </div>
 
-    <div v-show="activeTab === 'anomalias'" class="tab-panel">
+    <div v-if="activeTab === 'anomalias'" class="tab-panel"
+         role="tabpanel" id="panel-anomalias" aria-labelledby="tab-anomalias" tabindex="0">
       <section class="section">
         <h4 class="section-title">
           Anomalías
@@ -461,7 +465,7 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 .head-id { min-width: 0; }
 .detail-host {
   margin: 0;
-  font-family: var(--font-mono); font-size: 1.5rem; font-weight: 600;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: 1.5rem; font-weight: 600;
   color: var(--text); word-break: break-all; line-height: 1.2;
 }
 .detail-seen { margin: 0.25rem 0 0; font-size: var(--fs-body); color: var(--text-muted); }
@@ -477,6 +481,24 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 .status--online  { color: var(--success); }
 .status--stale   { color: var(--warn); }
 .status--offline { color: var(--danger); }
+
+/* Hygeia vela por las constantes vitales: el ritmo del propio distintivo dice
+   cómo está el activo antes de leer la palabra. Sano late tranquilo; con el
+   latido atrasado, deprisa e inquieto; caído no late — el silencio es el dato.
+   Es el mismo gesto que ya usa la lista de activos (AssetList, .pulse--online),
+   traído a la cabecera del detalle para que las dos vistas hablen igual. */
+.status--online .status-dot  { animation: pulse-vital 2.4s ease-out infinite; }
+.status--stale  .status-dot  { animation: pulse-vital 0.9s ease-out infinite; }
+
+@keyframes pulse-vital {
+  0%        { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); }
+  70%, 100% { box-shadow: 0 0 0 6px transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status--online .status-dot,
+  .status--stale .status-dot { animation: none; }
+}
 
 /* ── Metadatos ── */
 .meta {
@@ -521,7 +543,7 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 }
 .readout dd {
   margin: 0;
-  font-family: var(--font-mono); font-size: var(--fs-lg); font-weight: 500;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-lg); font-weight: 500;
   color: var(--text); font-variant-numeric: tabular-nums;
 }
 .readout dd small { margin-left: 0.15em; font-size: 0.7em; color: var(--text-muted); }
@@ -539,14 +561,14 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 .row-name {
   flex: 1 1 0; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--font-mono); color: var(--text-dim);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); color: var(--text-dim);
 }
 .row-value {
   flex-shrink: 0;
-  font-family: var(--font-mono); color: var(--text); font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); color: var(--text); font-variant-numeric: tabular-nums;
 }
 .row-value small { color: var(--text-muted); }
-.row-pid { flex-shrink: 0; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); }
+.row-pid { flex-shrink: 0; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-xs); color: var(--text-muted); }
 .row-note { flex-shrink: 0; font-size: var(--fs-xs); color: var(--text-muted); }
 .row-note--bad { color: var(--danger); }
 
@@ -719,7 +741,7 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 
 .anomaly-reading { display: flex; flex-direction: column; margin: 0.4rem 0 0; }
 .reading-value {
-  font-family: var(--font-mono); font-size: var(--fs-xl); font-weight: 600;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-xl); font-weight: 600;
   color: var(--text); font-variant-numeric: tabular-nums;
   margin: -0rem 0 -0.7rem 0;
 }
