@@ -14,11 +14,13 @@
             <li><router-link to="/aegis">Aegis</router-link></li>
             <li><router-link to="/iris">Iris</router-link></li>
             <li><router-link to="/acheron">Acheron</router-link></li>
+            <li><router-link to="/hygeia">Hygeia</router-link></li>
           </ul>
         </div>
         <div class="footer-col">
           <h3 class="footer-heading">Ellysia</h3>
           <ul>
+            <li><router-link to="/planes">Planes</router-link></li>
             <li><router-link to="/sobre">Sobre nosotros</router-link></li>
             <li>
               <a href="https://github.com/ProjectEllysia/Ellysia" target="_blank" rel="noopener noreferrer">Código ↗</a>
@@ -50,19 +52,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
 import ellysiaIcon from '@/assets/images/ellysia/Ellysia-BgN.png'
+import { useAppVersion } from '@/composables/useAppVersion'
 
 const year = new Date().getFullYear()
-const appVersion = ref('—')
-
-onMounted(() => {
-  // Endpoint público (no requiere sesión); silencioso si falla.
-  fetch('/system/say-hello')
-    .then((r) => r.json())
-    .then((d) => { if (d.version) appVersion.value = d.version })
-    .catch(() => {})
-})
+// Compartida con la portada: antes cada uno pedía la suya y la misma página
+// gastaba dos peticiones para pintar el mismo número.
+const { version: appVersion } = useAppVersion()
 </script>
 
 <style scoped>

@@ -203,6 +203,20 @@ const routes = [
     component: () => import('@/views/QueueView.vue'),
     meta: { requiresAuth: true },
   },
+
+  /**
+   * Comodín, SIEMPRE el último: vue-router resuelve por orden y una ruta
+   * comodín colocada antes se tragaría todo lo que venga detrás.
+   *
+   * Sin esto, una dirección desconocida no encajaba con ninguna ruta y la SPA
+   * renderizaba un `<router-view>` vacío: pantalla en blanco, sin cabecera ni
+   * pie, indistinguible de un fallo de carga.
+   */
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'NotFound',
+    component: () => import('@/views/NotFoundView.vue'),
+  },
 ]
 
 /**

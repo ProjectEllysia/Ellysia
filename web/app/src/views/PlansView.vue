@@ -78,32 +78,11 @@ import { onMounted, ref } from 'vue'
 import SiteHeader from '@/components/shared/SiteHeader.vue'
 import SiteFooter from '@/components/shared/SiteFooter.vue'
 import { useAccountStore } from '@/stores/accountStore'
+import { FEATURED, LABELS, euros, limitOf, isZero, describe } from '@/constants/planFormat'
 import { useAuthStore } from '@/stores/authStore'
 
 const account = useAccountStore()
 const auth = useAuthStore()
-
-const FEATURED = [
-  'themis.lybra.scans',
-  'iris.analyses',
-  'acheron.items',
-  'hygeia.assets',
-  'ai.requests',
-  'organization.members',
-]
-
-const LABELS = {
-  'themis.lybra.scans': 'Escaneos de vulnerabilidades',
-  'iris.analyses': 'Análisis de correo',
-  'acheron.items': 'Secretos en la bóveda',
-  'hygeia.assets': 'Activos monitorizados',
-  'ai.requests': 'Peticiones a la IA',
-  'organization.members': 'Miembros de la organización',
-}
-
-function euros(cents) {
-  return `${(cents / 100).toLocaleString('es-ES', { maximumFractionDigits: 0 })} €`
-}
 
 /**
  * ¿Es el plan que tiene contratado ahora mismo?
@@ -115,23 +94,6 @@ function euros(cents) {
  */
 function isCurrent(plan) {
   return auth.isAuthenticated && account.plan?.plan?.code === plan.code
-}
-
-function limitOf(plan, key) {
-  return plan.limits?.holder?.[key]
-}
-
-function isZero(plan, key) {
-  const limit = limitOf(plan, key)
-  return !limit || limit.value === 0
-}
-
-/** `null` es ilimitado y `0` es "no incluido": no son lo mismo. */
-function describe(plan, key) {
-  const limit = limitOf(plan, key)
-  if (!limit || limit.value === 0) return 'No incluido'
-  if (limit.value === null) return 'Ilimitado'
-  return limit.period === 'month' ? `${limit.value} al mes` : `${limit.value}`
 }
 
 const loaded = ref(false)

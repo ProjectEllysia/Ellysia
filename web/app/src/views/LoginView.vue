@@ -294,8 +294,14 @@ const mfaStep = ref(false)
  * 'login' o 'register'. Un paso más del mismo formulario, como el de MFA, y no
  * una vista aparte: el alta pública es la puerta de entrada al plan gratuito, y
  * mandar a otra pantalla para volver aquí sobra.
+ *
+ * `/login?registro` arranca directamente en el alta. Sin esto, los CTA de la
+ * portada que dicen "Crear cuenta" aterrizaban en el formulario de entrar y
+ * había que encontrar el enlace pequeño de abajo: el embudo se rompía justo en
+ * el paso que más importa. Se comprueba con `!== undefined` para que valga
+ * tanto `?registro` como `?registro=1`.
  */
-const mode = ref('login')
+const mode = ref(route.query.registro !== undefined ? 'register' : 'login')
 const reg = ref({ username: '', email: '', first_name: '', last_name: '', password: '' })
 
 /**
@@ -456,7 +462,12 @@ onMounted(() => {
       'warning',
     )
   }
-  if (!reduceMotion) document.getElementById('username')?.focus()
+  // En modo registro el campo `username` no existe (los del alta van con
+  // prefijo `reg-`), así que el foco caía en la nada al entrar por /login?registro.
+  if (!reduceMotion) {
+    const primerCampo = mode.value === 'register' ? 'reg-username' : 'username'
+    document.getElementById(primerCampo)?.focus()
+  }
 })
 
 onBeforeUnmount(() => {})
