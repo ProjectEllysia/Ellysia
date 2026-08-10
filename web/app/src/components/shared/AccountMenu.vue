@@ -150,6 +150,13 @@ function logout() {
 let clickOutside = null
 
 onMounted(() => {
+  // El plan y la organización se piden aquí y no en el arranque de la sesión:
+  // este menú es el único que los necesita para decidir qué entradas enseña, y
+  // lo monta toda la aplicación. Cargarlos solo en MyPlanView dejaba el menú
+  // sin la tarjeta del plan ni las entradas de organización en cualquier otra
+  // vista — que es justo lo que el §10.2 del diseño quería resolver.
+  if (auth.isAuthenticated && !account.plan) account.loadAll()
+
   clickOutside = (event) => {
     if (rootRef.value && !rootRef.value.contains(event.target)) open.value = false
   }
@@ -216,7 +223,7 @@ onUnmounted(() => {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .drop-role {
-  font-family: var(--font-mono); font-size: var(--fs-body); color: var(--accent);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-body); color: var(--accent);
   letter-spacing: 0.06em; text-transform: uppercase;
 }
 
@@ -226,7 +233,7 @@ onUnmounted(() => {
   background: var(--danger-dim); border: 1px solid var(--danger);
 }
 .drop-verify-title {
-  font-family: var(--font-epic); font-size: var(--fs-md); font-weight: 600;
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.1em; text-transform: uppercase; color: var(--danger);
 }
 .drop-verify-text { font-size: var(--fs-body); color: var(--text-dim); line-height: 1.45; }
@@ -248,7 +255,7 @@ onUnmounted(() => {
 .drop-plan:hover { border-color: var(--accent); }
 .drop-plan-name {
   display: block;
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.12em; text-transform: uppercase;
   color: var(--accent-bright);

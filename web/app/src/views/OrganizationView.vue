@@ -276,16 +276,17 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.org-page { min-height: 100vh; background: var(--bg); }
-.main { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem 4rem; display: flex; flex-direction: column; gap: 1.5rem; }
+/* Ver la nota de MyPlanView: Topbar fija + StarBackground opaco en z-index 0. */
+.org-page { min-height: 100vh; background: var(--bg); padding-top: var(--topbar-h); position: relative; }
+.main { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem 4rem; display: flex; flex-direction: column; gap: 1.5rem; position: relative; z-index: 1; }
 
 .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap; }
 .head-eyebrow {
-  font-family: var(--font-epic); font-size: var(--fs-body); font-weight: 500;
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-size: var(--fs-body); font-weight: 500;
   letter-spacing: 0.3em; text-transform: uppercase; color: var(--accent);
 }
 .head-name {
-  font-family: var(--font-display); font-size: clamp(1.8rem, 4vw, 2.4rem);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-size: clamp(1.8rem, 4vw, 2.4rem);
   font-weight: 600; color: var(--text); margin-top: 0.3rem;
 }
 .head-meta { color: var(--text-muted); margin-top: 0.2rem; }
@@ -321,11 +322,11 @@ onMounted(async () => {
   border-bottom: 1px solid var(--border);
 }
 .table td { padding: 0.65rem 0.6rem; border-bottom: 1px solid var(--border); color: var(--text-dim); }
-.mono { font-family: var(--font-mono); font-size: var(--fs-body); }
+.mono { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-body); }
 .td-actions { text-align: right; }
 
 .btn {
-  font-family: var(--font-epic); font-size: var(--fs-body); font-weight: 600;
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-size: var(--fs-body); font-weight: 600;
   letter-spacing: 0.14em; text-transform: uppercase;
   padding: 0.6rem 1.2rem; border-radius: 3px;
   border: 1px solid var(--border-med); color: var(--text-dim);

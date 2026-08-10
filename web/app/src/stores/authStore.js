@@ -44,6 +44,10 @@ export const useAuthStore = defineStore('auth', () => {
    */
   const sessionEndReason = ref(null)
 
+  /** Promesa del refresco en curso, o null. No es estado reactivo: nadie lo
+   *  pinta, solo sirve para que los refrescos concurrentes se fusionen. */
+  let _refreshInFlight = null
+
   /** @type {import('vue').ComputedRef<boolean>} True si hay un access token vigente */
   const isAuthenticated = computed(() => !!accessToken.value)
   /** @type {import('vue').ComputedRef<boolean>} True si es admin o root */
@@ -200,6 +204,19 @@ export const useAuthStore = defineStore('auth', () => {
    * @returns {Promise<boolean>} True si el refresco fue exitoso
    */
   async function refreshAccessToken() {
+    // Un solo refresco en vuelo, compartido por todos los que lo pidan a la vez.
+    // Sin esto, cada 401 simultáneo lanzaba el suyo: una vista que carga tres
+    // cosas en paralelo gastaba tres de los veinte refrescos por hora que
+    // permite /oauth/token, y a la media docena el siguiente recibía un 429.
+    // Como un refresco fallido termina en logout(), el limitador de tasa
+    // acababa cerrando la sesión y devolviendo al login.
+    if (!_refreshInFlight) {
+      _refreshInFlight = _doRefresh().finally(() => { _refreshInFlight = null })
+    }
+    return _refreshInFlight
+  }
+
+  async function _doRefresh() {
     if (!refreshToken.value) return false
     try {
       const res = await fetch('/oauth/token', {

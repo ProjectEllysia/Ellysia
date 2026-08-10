@@ -18,9 +18,12 @@
 
       <section v-else class="grid">
         <article v-for="plan in account.catalog" :key="plan.code" class="card"
-                 :class="{ 'card--default': plan.isDefault }">
+                 :class="{ 'card--default': plan.isDefault, 'card--current': isCurrent(plan) }">
           <header class="card-head">
-            <h2 class="card-name">{{ plan.name }}</h2>
+            <h2 class="card-name">
+              {{ plan.name }}
+              <span v-if="isCurrent(plan)" class="card-current-tag">Tu plan</span>
+            </h2>
             <p v-if="plan.tagline" class="card-tagline">{{ plan.tagline }}</p>
             <p class="card-price">
               <span class="card-amount">{{ euros(plan.monthlyPriceCents) }}</span>
@@ -43,7 +46,12 @@
           <router-link v-if="!auth.isAuthenticated" to="/login" class="card-cta">
             {{ plan.isDefault ? 'Empezar gratis' : 'Entrar' }}
           </router-link>
-          <router-link v-else to="/mi-plan" class="card-cta">Ver mi plan</router-link>
+          <router-link v-else-if="isCurrent(plan)" to="/mi-plan" class="card-cta card-cta--current">
+            Ver consumo
+          </router-link>
+          <p v-else class="card-cta card-cta--muted">
+            Pídeselo a quien administre tu cuenta
+          </p>
         </article>
       </section>
 
@@ -97,6 +105,18 @@ function euros(cents) {
   return `${(cents / 100).toLocaleString('es-ES', { maximumFractionDigits: 0 })} €`
 }
 
+/**
+ * ¿Es el plan que tiene contratado ahora mismo?
+ *
+ * Sin pasarela no hay autoservicio de verdad — el §1 del diseño dice que el
+ * plan lo asigna root a mano — así que el resto de tarjetas no llevan a
+ * ningún sitio que haga algo: mostrar cuál es la propia es lo único honesto
+ * que esta pantalla puede ofrecer sin fingir una acción que no existe.
+ */
+function isCurrent(plan) {
+  return auth.isAuthenticated && account.plan?.plan?.code === plan.code
+}
+
 function limitOf(plan, key) {
   return plan.limits?.holder?.[key]
 }
@@ -117,7 +137,12 @@ function describe(plan, key) {
 const loaded = ref(false)
 
 onMounted(async () => {
-  await account.loadCatalog()
+  const calls = [account.loadCatalog()]
+  // Sin esto, `isCurrent` solo acertaba si algo más ya había cargado
+  // `account.plan` antes (AccountMenu lo hace, pero esta vista no debe
+  // depender de qué otro componente montó primero).
+  if (auth.isAuthenticated && !account.plan) calls.push(account.loadPlan())
+  await Promise.all(calls)
   loaded.value = true
 })
 </script>
@@ -128,11 +153,11 @@ onMounted(async () => {
 
 .intro { text-align: center; margin-bottom: 3rem; }
 .eyebrow {
-  font-family: var(--font-epic); font-size: var(--fs-md); font-weight: 500;
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-size: var(--fs-md); font-weight: 500;
   letter-spacing: 0.42em; text-transform: uppercase; color: var(--accent);
 }
 .title {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-size: clamp(1.9rem, 4vw, 2.8rem); font-weight: 600;
   color: var(--text); margin-top: 0.9rem; line-height: 1.2;
 }
@@ -152,10 +177,18 @@ onMounted(async () => {
   padding: 1.6rem 1.4rem;
 }
 .card--default { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-dim); }
+.card--current { border-color: var(--accent-bright); box-shadow: 0 0 0 1px var(--accent); }
 
 .card-name {
-  font-family: var(--font-epic); font-size: var(--fs-xl); font-weight: 600;
+  display: flex; align-items: center; gap: 0.5rem;
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.16em; text-transform: uppercase; color: var(--text);
+}
+.card-current-tag {
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-size: var(--fs-body); font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 0.15rem 0.5rem; border-radius: 3px;
+  color: var(--on-accent); background: var(--accent-bright);
 }
 .card-tagline { font-size: var(--fs-body); color: var(--text-muted); margin-top: 0.3rem; min-height: 2.4em; }
 .card-price { margin-top: 1rem; }
@@ -175,7 +208,7 @@ onMounted(async () => {
 
 .card-cta {
   display: block; text-align: center;
-  font-family: var(--font-epic); font-size: var(--fs-md); font-weight: 600;
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.16em; text-transform: uppercase;
   padding: 0.7rem 1rem; border-radius: 3px;
   color: var(--accent-bright); background: var(--accent-dim);
@@ -183,6 +216,16 @@ onMounted(async () => {
   transition: all var(--transition);
 }
 .card-cta:hover { background: var(--accent); color: var(--on-accent); }
+.card-cta--current { background: transparent; }
+
+/* No es un botón: no hay ninguna acción que hacer desde aquí. Sin pasarela,
+   el cambio de plan lo mueve root a mano (§1 del diseño) — decir "Entrar" o
+   "Ver mi plan" en una tarjeta que no es la propia prometía una acción que
+   la pantalla nunca cumplía. */
+.card-cta--muted {
+  background: transparent; border-color: var(--border-med);
+  color: var(--text-muted); font-weight: 500; cursor: default;
+}
 
 .footnote {
   margin-top: 2.5rem; text-align: center;

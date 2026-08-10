@@ -20,10 +20,18 @@
               {{ account.plan.plan.tagline }}
             </p>
           </div>
-          <router-link to="/planes" class="btn btn--secondary">Ver todos los planes</router-link>
+          <router-link to="/planes" class="btn btn--secondary">Comparar planes</router-link>
         </section>
 
         <section v-if="source" class="source">{{ source }}</section>
+
+        <!-- Sin pasarela de pago no hay autoservicio real (§1 del diseño): el
+             plan lo asigna root a mano. Decirlo aquí es más honesto que un
+             botón "Cambiar de plan" que no haría nada al pulsarlo. -->
+        <p class="upgrade-hint">
+          ¿Quieres subir de plan? Escribe a quien administre tu cuenta —
+          todavía no hay cambio de plan en autoservicio.
+        </p>
 
         <section class="section">
           <h2>Consumo</h2>
@@ -127,8 +135,13 @@ onMounted(() => account.loadAll())
 </script>
 
 <style scoped>
-.plan-page { min-height: 100vh; background: var(--bg); }
-.main { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+/* `padding-top` porque la Topbar es `position: fixed`, y `z-index` en .main
+   porque StarBackground es `position: fixed; inset: 0; z-index: 0` y OPACO:
+   sin contexto de apilamiento propio, el contenido de bloque se pinta por
+   debajo de él y la pantalla sale en blanco. Mismo patrón que el resto de
+   vistas con Topbar + StarBackground. */
+.plan-page { min-height: 100vh; background: var(--bg); padding-top: var(--topbar-h); position: relative; }
+.main { max-width: 900px; margin: 0 auto; padding: 2rem 1.5rem 4rem; position: relative; z-index: 1; }
 .empty { color: var(--text-muted); text-align: center; padding: 3rem 0; }
 
 .notice {
@@ -145,16 +158,17 @@ onMounted(() => account.loadAll())
   gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem;
 }
 .head-eyebrow {
-  font-family: var(--font-epic); font-size: var(--fs-body); font-weight: 500;
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-size: var(--fs-body); font-weight: 500;
   letter-spacing: 0.3em; text-transform: uppercase; color: var(--accent);
 }
 .head-name {
-  font-family: var(--font-display); font-size: clamp(1.8rem, 4vw, 2.4rem);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-size: clamp(1.8rem, 4vw, 2.4rem);
   font-weight: 600; color: var(--text); margin-top: 0.3rem;
 }
 .head-tagline { color: var(--text-muted); margin-top: 0.2rem; }
 
 .source { color: var(--text-muted); font-size: var(--fs-md); margin-bottom: 1.5rem; }
+.upgrade-hint { color: var(--text-muted); font-size: var(--fs-body); margin: -0.8rem 0 1.5rem; }
 
 .section {
   background: var(--surface); border: 1px solid var(--border-solid);
@@ -166,7 +180,7 @@ onMounted(() => account.loadAll())
 .limits { list-style: none; margin-top: 1.4rem; display: flex; flex-direction: column; gap: 1.2rem; }
 .row-head { display: flex; justify-content: space-between; gap: 1rem; margin-bottom: 0.4rem; }
 .row-label { color: var(--text-dim); font-size: var(--fs-md); }
-.row-value { color: var(--text); font-weight: 600; font-family: var(--font-mono); font-size: var(--fs-body); }
+.row-value { color: var(--text); font-weight: 600; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-body); }
 
 .bar { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .bar-fill { height: 100%; background: var(--accent); transition: width 0.4s ease; }
@@ -176,7 +190,7 @@ onMounted(() => account.loadAll())
 .row-note--muted { color: var(--text-muted); }
 
 .btn {
-  font-family: var(--font-epic); font-size: var(--fs-body); font-weight: 600;
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-size: var(--fs-body); font-weight: 600;
   letter-spacing: 0.14em; text-transform: uppercase;
   padding: 0.6rem 1.2rem; border-radius: 3px;
   border: 1px solid var(--border-med); color: var(--text-dim);

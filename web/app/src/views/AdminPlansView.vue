@@ -41,6 +41,7 @@
                 <span v-if="!plan.isPublic" class="tag">Oculto</span>
               </td>
               <td class="td-actions">
+                <button class="btn-link" @click="startEdit(plan)">Editar</button>
                 <button class="btn-link" @click="select(plan)">Topes</button>
                 <button v-if="!plan.isDefault" class="btn-link" @click="makeDefault(plan)">
                   Hacer por defecto
@@ -54,23 +55,40 @@
         </table>
       </section>
 
-      <!-- Alta de un plan -->
-      <section v-if="creating" class="section">
-        <h2>Nuevo plan</h2>
-        <p class="section-desc">
+      <!-- Alta y edición de un plan: el mismo formulario -->
+      <section v-if="editing" class="section">
+        <h2>{{ editingId ? `Editar ${draft.name}` : 'Nuevo plan' }}</h2>
+        <p v-if="editingId" class="section-desc">
+          El código no se edita: lo nombran las asignaciones ya hechas y, el día
+          de la pasarela, su correspondencia con ella. Si hace falta otro código,
+          es otro plan. Los topes se editan abajo, en su propia tabla.
+        </p>
+        <p v-else class="section-desc">
           Nace sin topes: todas sus claves valen 0 hasta que se rellenen. Un plan
           a medio configurar no regala nada.
         </p>
-        <form class="grid-form" @submit.prevent="create">
-          <div class="form-group"><label>Código</label><input v-model="draft.code" class="inp" required minlength="2" /></div>
+        <form class="grid-form" @submit.prevent="save">
+          <div class="form-group">
+            <label>Código</label>
+            <input v-model="draft.code" class="inp" required minlength="2" :disabled="!!editingId" />
+          </div>
           <div class="form-group"><label>Nombre</label><input v-model="draft.name" class="inp" required minlength="2" /></div>
           <div class="form-group form-group--wide"><label>Lema</label><input v-model="draft.tagline" class="inp" /></div>
           <div class="form-group"><label>Precio (céntimos)</label><input v-model.number="draft.monthlyPriceCents" type="number" min="0" class="inp" /></div>
           <div class="form-group"><label>Añadido de organización</label><input v-model.number="draft.orgAddonPriceCents" type="number" min="0" class="inp" /></div>
           <div class="form-group"><label>Orden</label><input v-model.number="draft.rank" type="number" class="inp" /></div>
+          <div class="form-group">
+            <label for="plan-public">Visibilidad</label>
+            <select id="plan-public" v-model="draft.isPublic" class="inp">
+              <option :value="true">Se enseña en la tabla de precios</option>
+              <option :value="false">Oculto (plan a medida)</option>
+            </select>
+          </div>
           <div class="form-actions">
-            <button type="button" class="btn" @click="creating = false">Cancelar</button>
-            <button type="submit" class="btn btn--primary">Crear</button>
+            <button type="button" class="btn" @click="editing = false">Cancelar</button>
+            <button type="submit" class="btn btn--primary" :disabled="savingPlan">
+              {{ savingPlan ? 'Guardando…' : (editingId ? 'Guardar cambios' : 'Crear') }}
+            </button>
           </div>
         </form>
       </section>
@@ -178,9 +196,9 @@
         </div>
         <p class="section-desc">
           Se guarda la tabla entera: lo que se ve aquí es exactamente lo que
-          queda. Dejar una casilla vacía significa <strong>ilimitado</strong>;
-          poner 0 significa <strong>no incluido</strong>. Una clave que se quite
-          de la lista desaparece.
+          queda. Casilla vacía = <strong>ilimitado</strong> (∞) ·
+          <strong>0</strong> = no incluido · un número = tope. Aparecen siempre
+          todas las claves, así que ninguna se queda sin decidir.
         </p>
 
         <table class="table">
@@ -243,7 +261,10 @@ const selected = ref(null)
 const selectedId = ref(null)
 const holder = ref({})
 const member = ref({})
-const creating = ref(false)
+const editing = ref(false)
+/** `null` = alta; un id = edición. Distingue POST /plans de PUT /plans/<id>. */
+const editingId = ref(null)
+const savingPlan = ref(false)
 const saving = ref(false)
 const draft = ref(emptyDraft())
 const confirm = ref({ open: false, title: '', message: '', action: () => {} })
@@ -320,7 +341,10 @@ async function applyOperation() {
 }
 
 function emptyDraft() {
-  return { code: '', name: '', tagline: '', monthlyPriceCents: 0, orgAddonPriceCents: 0, rank: 0 }
+  return {
+    code: '', name: '', tagline: '',
+    monthlyPriceCents: 0, orgAddonPriceCents: 0, rank: 0, isPublic: true,
+  }
 }
 
 function euros(cents) {
@@ -343,7 +367,11 @@ async function loadPlans() {
 
 async function loadKeys() {
   const res = await apiFetch('/plans/limit-keys')
-  if (!res?.ok) return
+  if (!res?.ok) {
+    limitKeys.value = []
+    toast.show(await apiError(res, 'No se pudo cargar el catálogo de claves.'), 'error')
+    return
+  }
   limitKeys.value = (await res.json()).keys ?? []
 }
 
@@ -354,32 +382,88 @@ function select(plan) {
   member.value = toForm(plan.limits?.member)
 }
 
-/** `null` (ilimitado) se representa con la casilla vacía. */
+/**
+ * Los topes de un ámbito, como formulario. Se rellenan **todas** las claves
+ * del catálogo, no solo las que el plan declara.
+ *
+ * Una clave que el plan no declara vale `0` (no incluido), y antes se pintaba
+ * como casilla vacía — que en esta tabla significa lo contrario, ilimitado. En
+ * una pantalla que fija lo que cobra cada plan, esa casilla decía justo lo
+ * opuesto de lo que el servidor iba a aplicar.
+ */
 function toForm(limits) {
   const form = {}
-  for (const [key, entry] of Object.entries(limits ?? {})) {
-    form[key] = entry.value === null ? '' : entry.value
+  for (const { key } of limitKeys.value) {
+    const entry = limits?.[key]
+    if (!entry) form[key] = 0                        // no declarada = no incluida
+    else form[key] = entry.value === null ? '' : entry.value
   }
   return form
 }
 
 function startCreate() {
   draft.value = emptyDraft()
-  creating.value = true
+  editingId.value = null
+  editing.value = true
 }
 
-async function create() {
-  const res = await apiFetch('/plans', { method: 'POST', body: JSON.stringify(draft.value) })
-  if (!res?.ok) {
-    toast.show(await apiError(res, 'No se pudo crear el plan.'), 'error')
-    return
+function startEdit(plan) {
+  draft.value = {
+    code: plan.code,
+    name: plan.name,
+    tagline: plan.tagline ?? '',
+    monthlyPriceCents: plan.monthlyPriceCents,
+    orgAddonPriceCents: plan.orgAddonPriceCents,
+    rank: plan.rank,
+    isPublic: plan.isPublic,
   }
-  toast.show('Plan creado.', 'success')
-  creating.value = false
-  await loadPlans()
+  editingId.value = plan.id
+  editing.value = true
+}
+
+/**
+ * Alta y edición por la misma puerta.
+ *
+ * En la edición no viaja `code`: el servidor lo rechaza a propósito
+ * (`PlanUpdateSchema` no lo declara) porque cambiarlo rompería las
+ * asignaciones que lo nombran.
+ */
+async function save() {
+  savingPlan.value = true
+  try {
+    const { code, ...withoutCode } = draft.value
+    const [path, method, body] = editingId.value
+      ? [`/plans/${editingId.value}`, 'PUT', withoutCode]
+      : ['/plans', 'POST', draft.value]
+
+    const res = await apiFetch(path, { method, body: JSON.stringify(body) })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo guardar el plan.'), 'error')
+      return
+    }
+    toast.show(editingId.value ? 'Plan actualizado.' : 'Plan creado.', 'success')
+    editing.value = false
+    await loadPlans()
+    // El panel de topes puede estar enseñando el plan que se acaba de editar:
+    // sin esto seguiría con el nombre y el precio viejos hasta recargar.
+    if (selectedId.value) {
+      const fresh = plans.value.find((plan) => plan.id === selectedId.value)
+      if (fresh) select(fresh)
+    }
+  } finally {
+    savingPlan.value = false
+  }
 }
 
 async function saveLimits() {
+  // Sin el catálogo de claves el formulario está vacío, y como el servidor
+  // REEMPLAZA el conjunto entero, guardar aquí borraría todos los topes del
+  // plan. Es el único sitio de esta pantalla que puede destruir datos.
+  if (!limitKeys.value.length) {
+    toast.show('No se han cargado las claves de límite: recarga antes de guardar.', 'error')
+    return
+  }
+
   saving.value = true
   try {
     const limits = [
@@ -403,18 +487,17 @@ async function saveLimits() {
 }
 
 /**
- * Solo se mandan las claves que alguien tocó. Una casilla que nunca se rellenó
- * no es "ilimitado": es una clave que este plan no declara, y que por tanto
- * vale 0 (fallo cerrado).
+ * Se mandan **todas** las claves, porque `PUT /plans/<id>/limits` reemplaza el
+ * conjunto entero: lo que no viaje deja de existir. Como el formulario ya trae
+ * las quince con su valor real (0 incluido), lo que se ve es exactamente lo
+ * que queda guardado.
  */
 function toPayload(form, scope) {
-  return Object.entries(form)
-    .filter(([, value]) => value !== undefined && value !== null)
-    .map(([limitKey, value]) => ({
-      limitKey,
-      scope,
-      value: value === '' ? null : Number(value),
-    }))
+  return Object.entries(form).map(([limitKey, value]) => ({
+    limitKey,
+    scope,
+    value: value === '' ? null : Number(value),
+  }))
 }
 
 function makeDefault(plan) {
@@ -460,8 +543,9 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.admin-page { min-height: 100vh; background: var(--bg); }
-.main { max-width: 1080px; margin: 0 auto; padding: 2rem 1.5rem 4rem; display: flex; flex-direction: column; gap: 1.5rem; }
+/* Ver la nota de MyPlanView: Topbar fija + StarBackground opaco en z-index 0. */
+.admin-page { min-height: 100vh; background: var(--bg); padding-top: var(--topbar-h); position: relative; }
+.main { max-width: 1080px; margin: 0 auto; padding: 2rem 1.5rem 4rem; display: flex; flex-direction: column; gap: 1.5rem; position: relative; z-index: 1; }
 .intro { color: var(--text-muted); font-size: var(--fs-md); max-width: 62ch; }
 
 .section {
@@ -481,9 +565,9 @@ onMounted(async () => {
 }
 .table td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--border); color: var(--text-dim); }
 .row--active { background: var(--accent-dim); }
-.mono { font-family: var(--font-mono); font-size: var(--fs-body); }
+.mono { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-body); }
 .muted { color: var(--text-muted); }
-.td-actions { text-align: right; display: flex; gap: 0.8rem; justify-content: flex-end; }
+.td-actions { font-size: var(--fs-body); text-align: right; display: flex; gap: 0.8rem; justify-content: flex-end; height: 48.78px; }
 
 .tag {
   display: inline-block; padding: 0.1rem 0.5rem; border-radius: 3px;
@@ -500,7 +584,7 @@ onMounted(async () => {
 .state--error { border-color: var(--danger); color: var(--text); }
 .state code {
   display: inline-block; margin-top: 0.4rem;
-  font-family: var(--font-mono); font-size: var(--fs-body);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-body);
   color: var(--accent-bright); background: var(--accent-dim);
   padding: 0.15rem 0.45rem; border-radius: 4px;
 }
@@ -521,10 +605,10 @@ onMounted(async () => {
   width: 100%;
 }
 .inp:focus { outline: none; border-color: var(--accent); }
-.inp--num { max-width: 110px; font-family: var(--font-mono); }
+.inp--num { max-width: 110px; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 
 .btn {
-  font-family: var(--font-epic); font-size: var(--fs-body); font-weight: 600;
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-size: var(--fs-body); font-weight: 600;
   letter-spacing: 0.14em; text-transform: uppercase;
   padding: 0.55rem 1.1rem; border-radius: 3px;
   border: 1px solid var(--border-med); color: var(--text-dim);
