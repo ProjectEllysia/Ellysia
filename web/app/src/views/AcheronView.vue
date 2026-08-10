@@ -754,13 +754,13 @@ onBeforeUnmount(() => {
   color: #c4a0e0;
 }
 .unlock-icon svg { width: 26px; height: 26px; }
-.unlock-title { font-family: var(--font-display); font-size: var(--fs-xl); color: var(--text); margin-bottom: 0.5rem; }
+.unlock-title { font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-size: var(--fs-xl); color: var(--text); margin-bottom: 0.5rem; }
 .unlock-sub { font-size: var(--fs-md); color: var(--text-dim); line-height: 1.5; margin-bottom: 1.5rem; }
 .unlock-sub strong { color: #c4a0e0; font-weight: 600; }
 
 .field { display: block; text-align: left; margin-bottom: 1rem; }
 .field-label {
-  display: block; font-family: var(--font-mono); font-size: var(--fs-body);
+  display: block; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-body);
   text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted);
   margin-bottom: 0.4rem;
 }
@@ -769,7 +769,7 @@ onBeforeUnmount(() => {
   width: 100%; padding: 0.7rem 2.6rem 0.7rem 0.85rem;
   background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-med);
   border-radius: 9px; color: var(--text); font-size: var(--fs-lg);
-  font-family: var(--font-mono); transition: border-color 0.2s ease;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); transition: border-color 0.2s ease;
 }
 .field-input input:focus { outline: none; border-color: rgba(160, 122, 192, 0.55); }
 .field-input--with-generate input { padding-right: 4.6rem; }
@@ -871,9 +871,9 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 1.75rem; gap: 1rem; flex-wrap: wrap;
 }
-.vault-title { font-family: var(--font-display); font-size: var(--fs-xl); color: var(--text); }
+.vault-title { font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-size: var(--fs-xl); color: var(--text); }
 .vault-count {
-  font-family: var(--font-mono); font-size: var(--fs-body); color: var(--text-muted);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-body); color: var(--text-muted);
   letter-spacing: 0.04em;
 }
 .vault-head-actions { display: flex; gap: 0.6rem; }
@@ -898,7 +898,7 @@ onBeforeUnmount(() => {
 .vault-section { margin-bottom: 2rem; }
 .section-title {
   display: flex; align-items: center; gap: 0.55rem;
-  font-family: var(--font-mono); font-size: var(--fs-md); text-transform: uppercase;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-md); text-transform: uppercase;
   letter-spacing: 0.1em; color: #c4a0e0; margin-bottom: 0.9rem;
   padding-bottom: 0.5rem; border-bottom: 1px solid rgba(160, 122, 192, 0.15);
 }
@@ -927,13 +927,13 @@ onBeforeUnmount(() => {
 .entry-fields { display: flex; flex-direction: column; gap: 0.55rem; }
 .entry-field { display: flex; flex-direction: column; gap: 0.15rem; }
 .entry-field dt {
-  font-family: var(--font-mono); font-size: var(--fs-sm); text-transform: uppercase;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-sm); text-transform: uppercase;
   letter-spacing: 0.06em; color: var(--text-muted);
 }
 .entry-field dd { display: flex; align-items: center; gap: 0.4rem; }
 .field-value {
   font-size: var(--fs-md); color: var(--text); word-break: break-all;
-  font-family: var(--font-mono); flex: 1;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); flex: 1;
 }
 .icon-btn {
   background: none; border: none; color: var(--text-muted); cursor: pointer;

@@ -74,7 +74,7 @@ async function copyKey() {
   padding: 0.6rem 0.7rem; margin-bottom: 0.9rem;
 }
 .key-box code {
-  flex: 1; font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text);
+  flex: 1; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-sm); color: var(--text);
   word-break: break-all;
 }
 .copy-btn {
@@ -85,7 +85,7 @@ async function copyKey() {
 
 .snippet-label { font-size: var(--fs-sm); color: var(--text-muted); margin: 0 0 0.3rem; }
 .snippet {
-  font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-dim);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-sm); color: var(--text-dim);
   background: var(--bg); border: 1px solid var(--border-med); border-radius: 6px;
   padding: 0.6rem 0.7rem; margin: 0; white-space: pre-wrap; word-break: break-all;
 }

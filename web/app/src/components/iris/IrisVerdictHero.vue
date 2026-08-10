@@ -76,7 +76,7 @@ const statusLabel = computed(() => {
 .score-num {
   font-size: var(--fs-stat-hero);
   font-weight: 800;
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   letter-spacing: -0.02em;
 }
 
@@ -87,7 +87,7 @@ const statusLabel = computed(() => {
 .score-unit {
   font-size: var(--fs-lg);
   color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
 }
 
 .rv-hero-verdict {
@@ -99,7 +99,7 @@ const statusLabel = computed(() => {
 .verdict-badge {
   font-size: var(--fs-xl);
   font-weight: 700;
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
 }
 
 .verdict--legit { color: var(--success); }

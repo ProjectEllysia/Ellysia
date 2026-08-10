@@ -530,7 +530,7 @@ function verdictClass(v) {
 
 .strip-origin {
   flex-shrink: 0;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -550,12 +550,12 @@ function verdictClass(v) {
 }
 
 .strip-id {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-lg);
 }
 
 .strip-title {
-  font-family: var(--font-body);
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body);
   font-size: var(--fs-lg);
   font-weight: 500;
   max-width: 160px;
@@ -565,7 +565,7 @@ function verdictClass(v) {
 }
 
 .strip-verdict {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-lg);
   font-weight: 700;
   margin-left: 0.15rem;
@@ -605,7 +605,7 @@ function verdictClass(v) {
   border: 1px solid var(--border-med);
   background: transparent;
   color: var(--text-dim);
-  font-family: var(--font-body);
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body);
   font-size: var(--fs-md);
   font-weight: 600;
   cursor: pointer;
@@ -625,7 +625,7 @@ function verdictClass(v) {
 }
 
 .archive-btn-count {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--fs-sm);
   font-weight: 700;

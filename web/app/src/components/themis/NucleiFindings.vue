@@ -85,7 +85,7 @@ const visible = computed(() => sorted.value.slice(0, page.value * PAGE_SIZE))
 .nf-conf.hypothesis { color: var(--text-muted); background: var(--surface); border: 1px dashed var(--border-solid); }
 .nf-title { font-size: var(--fs-lg); color: var(--text); }
 .nf-meta { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
-.nf-tag { font-size: var(--fs-md); font-family: var(--font-mono); padding: 0.1rem 0.4rem; border-radius: 4px; background: var(--surface); color: var(--text-dim); }
+.nf-tag { font-size: var(--fs-md); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); padding: 0.1rem 0.4rem; border-radius: 4px; background: var(--surface); color: var(--text-dim); }
 .nf-tag.cve { color: var(--accent-bright); background: var(--accent-dim); }
 .nf-tag.kev { color: var(--danger); background: var(--danger-dim); font-weight: 700; }
 .nf-tag.epss { color: var(--warn); background: var(--warn-dim); }

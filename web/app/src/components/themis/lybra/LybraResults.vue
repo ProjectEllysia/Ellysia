@@ -289,7 +289,7 @@ function fmtDate(iso) {
 <style scoped>
 .results-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .results-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 0.7rem 1rem; border-bottom: 1px solid var(--border); }
-.toolbar-title { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-xl); color: var(--text); }
+.toolbar-title { font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-weight: 600; font-size: var(--fs-xl); color: var(--text); }
 .btn-refresh { display: flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.7rem; background: var(--surface-2); border: 1px solid var(--border-solid); border-radius: 6px; color: var(--text-dim); font-size: var(--fs-md); cursor: pointer; transition: all 0.2s; }
 .btn-refresh:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
 .btn-refresh svg { width: 12px; height: 12px; }
@@ -324,9 +324,9 @@ function fmtDate(iso) {
 .deep-badge { font-size: var(--fs-md); padding: 0.12rem 0.45rem; border-radius: 5px; color: var(--accent-bright); background: var(--accent-dim); flex-shrink: 0; }
 
 .prio-summary { display: flex; align-items: center; gap: 0.25rem; margin-left: auto; flex-shrink: 0; }
-.prio-pill { min-width: 20px; text-align: center; font-size: var(--fs-md); font-weight: 700; padding: 0.1rem 0.35rem; border-radius: 5px; font-family: var(--font-mono); }
+.prio-pill { min-width: 20px; text-align: center; font-size: var(--fs-md); font-weight: 700; padding: 0.1rem 0.35rem; border-radius: 5px; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .prio-clean { font-size: var(--fs-md); color: var(--success); }
-.scan-date { font-size: var(--fs-md); color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; white-space: nowrap; }
+.scan-date { font-size: var(--fs-md); color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); flex-shrink: 0; white-space: nowrap; }
 
 /* Escala de severidad (compartida por pills de resumen y chips de finding) */
 .critical { color: var(--danger); background: var(--danger-dim); }
@@ -370,7 +370,7 @@ function fmtDate(iso) {
 .findings-chevron { display: grid; place-items: center; color: var(--text-muted); transition: transform 0.2s; }
 .findings-chevron svg { width: 12px; height: 12px; }
 .findings-chevron.rot { transform: rotate(90deg); }
-.findings-count { font-size: var(--fs-body); font-weight: 700; color: var(--text-muted); background: var(--surface-2); padding: 0.05rem 0.45rem; border-radius: 8px; font-family: var(--font-mono); }
+.findings-count { font-size: var(--fs-body); font-weight: 700; color: var(--text-muted); background: var(--surface-2); padding: 0.05rem 0.45rem; border-radius: 8px; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .load-more-findings {
   display: block; width: 100%; margin-top: 0.4rem; padding: 0.45rem;
   background: none; border: 1px dashed var(--border-solid); border-radius: 7px;
@@ -393,7 +393,7 @@ function fmtDate(iso) {
 .f-conf.hypothesis { color: var(--text-muted); background: var(--surface-2); border: 1px dashed var(--border-solid); }
 .f-title { font-size: var(--fs-lg); color: var(--text); }
 .f-meta { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
-.f-tag { font-size: var(--fs-md); font-family: var(--font-mono); padding: 0.1rem 0.4rem; border-radius: 4px; background: var(--surface-2); color: var(--text-dim); }
+.f-tag { font-size: var(--fs-md); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); padding: 0.1rem 0.4rem; border-radius: 4px; background: var(--surface-2); color: var(--text-dim); }
 .f-tag.cve { color: var(--accent-bright); background: var(--accent-dim); }
 .f-tag.kev { color: var(--danger); background: var(--danger-dim); font-weight: 700; }
 .f-tag.epss { color: var(--warn); background: var(--warn-dim); }

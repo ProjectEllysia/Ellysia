@@ -281,7 +281,7 @@ const stats = computed(() => {
 .campaign-header { display: flex; align-items: flex-start; gap: 0.75rem; padding: 1.1rem 1.25rem 0.9rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .campaign-header-icon { width: 34px; height: 34px; border-radius: 9px; background: var(--accent-dim); color: var(--accent-bright); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .campaign-header-text { flex: 1; min-width: 0; }
-.campaign-header-text h2 { font-size: var(--fs-lg); font-weight: 800; color: var(--text); margin: 0 0 0.15rem; font-family: var(--font-display); }
+.campaign-header-text h2 { font-size: var(--fs-lg); font-weight: 800; color: var(--text); margin: 0 0 0.15rem; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .campaign-header-text p { font-size: var(--fs-lg); color: var(--text-dim); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .modal-close { background: none; border: none; color: var(--text-muted); font-size: var(--fs-xl); line-height: 1; cursor: pointer; padding: 0.1rem 0.3rem; flex-shrink: 0; border-radius: 5px; transition: all 0.15s; }
 .modal-close:hover { color: var(--text); background: var(--bg); }
@@ -297,7 +297,7 @@ const stats = computed(() => {
 .input { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 6px; padding: 0.45rem 0.6rem; color: var(--text); font-size: var(--fs-input); outline: none; width: 100%; box-sizing: border-box; transition: border-color 0.2s; font-family: inherit; }
 .input:focus { border-color: var(--accent); }
 .select { cursor: pointer; }
-.textarea { resize: vertical; min-height: 3.6rem; line-height: 1.5; font-family: var(--font-mono); font-size: var(--fs-input); }
+.textarea { resize: vertical; min-height: 3.6rem; line-height: 1.5; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-input); }
 
 .hint { font-size: var(--fs-lg); color: var(--text-muted); margin: 0; }
 
@@ -315,7 +315,7 @@ const stats = computed(() => {
 .past-campaign-row-main { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.4rem; font-size: var(--fs-lg); flex: 1; min-width: 0; background: none; border: none; font-family: inherit; text-align: left; cursor: pointer; }
 .past-campaign-row-main:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 1px; }
 .past-campaign-name { flex: 1; min-width: 0; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-md);}
-.past-campaign-date { color: var(--text-muted); font-size: var(--fs-sm); font-family: var(--font-mono); flex-shrink: 0; }
+.past-campaign-date { color: var(--text-muted); font-size: var(--fs-sm); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); flex-shrink: 0; }
 .past-campaign-chevron { color: var(--text-muted); flex-shrink: 0; transition: transform var(--transition); }
 .past-campaign-row--open .past-campaign-chevron { transform: rotate(90deg); color: var(--accent); }
 .past-campaign-delete { flex-shrink: 0; width: 24px; margin: 0.25rem 0.3rem 0.25rem 0; border: none; border-radius: 5px; background: none; color: var(--text-muted); font-size: var(--fs-md); cursor: pointer; transition: all 0.15s; }
@@ -325,7 +325,7 @@ const stats = computed(() => {
 .results { padding: 0.6rem 0.4rem 0.9rem; display: flex; flex-direction: column; gap: 0.6rem; border-bottom: 1px solid var(--border); }
 .results-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; }
 .stat { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; padding: 0.5rem 0.25rem; background: var(--bg); border-radius: 7px; }
-.stat-value { font-size: var(--fs-xl); font-weight: 700; color: var(--accent-bright); font-family: var(--font-display); line-height: 1.1; }
+.stat-value { font-size: var(--fs-xl); font-weight: 700; color: var(--accent-bright); font-family: var(--font-display); font-size-adjust: var(--fsa-display); line-height: 1.1; }
 .stat-label { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); text-align: center; }
 
 .progress { height: 6px; border-radius: 3px; background: var(--bg); overflow: hidden; }
@@ -334,7 +334,7 @@ const stats = computed(() => {
 .recipient-rows { display: flex; flex-direction: column; max-height: 11rem; overflow-y: auto; }
 .recipient-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; font-size: var(--fs-md); }
 .recipient-email { flex: 1; min-width: 0; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.recipient-state { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--fs-sm); flex-shrink: 0; }
+.recipient-state { color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-sm); flex-shrink: 0; }
 .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text-muted); }
 .dot--sent { background: var(--text-muted); }
 .dot--opened { background: var(--warn); }
@@ -348,7 +348,7 @@ const stats = computed(() => {
 .btn-spin-inline { width: 12px; height: 12px; border: 2px solid rgba(0,0,0,0.2); border-top-color: currentColor; border-radius: 50%; animation: seq-spin 0.6s linear infinite; }
 
 .campaign-success { padding: 2.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.5rem; color: var(--success); }
-.campaign-success h3 { font-size: var(--fs-md); font-weight: 700; color: var(--text); margin: 0.4rem 0 0; font-family: var(--font-display); }
+.campaign-success h3 { font-size: var(--fs-md); font-weight: 700; color: var(--text); margin: 0.4rem 0 0; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .campaign-success p { font-size: var(--fs-lg); color: var(--text-dim); margin: 0; max-width: 300px; line-height: 1.5; }
 
 .campaign-fade-enter-active, .campaign-fade-leave-active { transition: opacity 0.2s ease; }

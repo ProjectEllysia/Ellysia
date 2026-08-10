@@ -335,7 +335,7 @@ function save() {
 <style scoped>
 .editor { height: 100%; display: flex; flex-direction: column; }
 .editor-toolbar { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.85rem; background: var(--surface); border-bottom: 1px solid var(--border); font-size: var(--fs-md); color: var(--text-muted); }
-.doc-id { font-weight: 600; color: var(--text-dim); font-family: var(--font-mono); font-size: var(--fs-md); }
+.doc-id { font-weight: 600; color: var(--text-dim); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-md); }
 .toolbar-spacer { flex: 1; }
 .toolbar-btn { padding: 0.25rem 0.7rem; font-size: var(--fs-md); font-weight: 600; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer; transition: all 0.2s; }
 .toolbar-btn:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
@@ -346,11 +346,11 @@ function save() {
 .editor-section { margin-bottom: 1.5rem; }
 .section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
 
-.field-label { display: block; font-size: var(--fs-lg); font-weight: 700; color: var(--accent); margin-bottom: 0.4rem; font-family: var(--font-display); text-transform: uppercase; letter-spacing: 0.04em; }
+.field-label { display: block; font-size: var(--fs-lg); font-weight: 700; color: var(--accent); margin-bottom: 0.4rem; font-family: var(--font-display); font-size-adjust: var(--fsa-display); text-transform: uppercase; letter-spacing: 0.04em; }
 .field-sublabel { display: block; font-size: var(--fs-md); font-weight: 600; color: var(--text-muted); margin: 0.5rem 0 0.25rem; }
 .field-input { width: 100%; box-sizing: border-box; padding: 0.5rem 0.65rem; font-size: var(--fs-input); font-family: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; transition: border-color 0.15s; }
 .field-input:focus { outline: none; border-color: var(--accent); }
-.field-title { font-size: var(--fs-lg); font-weight: 700; font-family: var(--font-display); }
+.field-title { font-size: var(--fs-lg); font-weight: 700; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .field-area { resize: vertical; line-height: 1.5; min-height: 3rem; }
 .field-error { color: var(--danger); font-size: var(--fs-md); margin: 0.25rem 0 0; }
 

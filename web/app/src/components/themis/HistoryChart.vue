@@ -118,16 +118,16 @@ function legendClass(label) {
 
 .gridline { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
 .axis { stroke: var(--border-med); stroke-width: 1.5; }
-.axis-label { fill: var(--text-muted); font-size: var(--fs-xs); font-family: var(--font-mono); }
+.axis-label { fill: var(--text-muted); font-size: var(--fs-xs); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .axis-title { fill: var(--text-dim); font-size: var(--fs-md); font-weight: 600; padding-right: 2rem;}
 .bar { transition: opacity 0.2s; }
 .bar:hover { opacity: 0.82; }
-.bar-value { fill: var(--text); font-size: var(--fs-sm); font-weight: 700; font-family: var(--font-mono); }
+.bar-value { fill: var(--text); font-size: var(--fs-sm); font-weight: 700; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .x-label { fill: var(--text-muted); font-size: var(--fs-sm); }
 
 .legend { display: flex; gap: 0.75rem; justify-content: center; margin-top: 1.1rem; flex-wrap: wrap; }
 .legend-item { display: flex; flex-direction: column; align-items: center; min-width: 92px; padding: 0.6rem 0.9rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
-.legend-value { font-size: var(--fs-2xl); font-weight: 800; font-family: var(--font-mono); line-height: 1.1; }
+.legend-value { font-size: var(--fs-2xl); font-weight: 800; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); line-height: 1.1; }
 .legend-label { font-size: var(--fs-md); color: var(--text-dim); margin-top: 0.15rem; }
 .legend-item.new .legend-value { color: var(--success); }
 .legend-item.same .legend-value { color: var(--info); }

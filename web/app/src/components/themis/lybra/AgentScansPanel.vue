@@ -125,7 +125,7 @@ function countFor(assetId) {
 .agents-wrap { display: flex; flex-direction: column; gap: 1rem; }
 
 .agents-head { display: flex; align-items: center; justify-content: space-between; }
-.agents-title { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-xl); color: var(--text); }
+.agents-title { font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-weight: 600; font-size: var(--fs-xl); color: var(--text); }
 .btn-refresh { display: flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.7rem; background: var(--surface-2); border: 1px solid var(--border-solid); border-radius: 6px; color: var(--text-dim); font-size: var(--fs-md); cursor: pointer; transition: all 0.2s; }
 .btn-refresh:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
 .btn-refresh:disabled { opacity: 0.5; cursor: not-allowed; }

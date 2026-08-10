@@ -381,7 +381,7 @@ function trapFocus(e) {
 
 .archive-eyebrow {
   margin: 0 0 0.25rem;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-xs);
   letter-spacing: 0.28em;
   text-transform: uppercase;
@@ -390,7 +390,7 @@ function trapFocus(e) {
 
 .archive-title {
   margin: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-size: var(--fs-2xl);
   font-weight: 700;
   color: var(--text);
@@ -518,7 +518,7 @@ td {
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
-.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-variant-numeric: tabular-nums; }
 .col-date { color: var(--text-dim); white-space: nowrap; }
 .col-title { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -527,7 +527,7 @@ td {
 .archive-row.focused { outline: 1px solid var(--accent); outline-offset: -1px; }
 
 .origin-chip {
-  font-family: var(--font-mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.06em;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.06em;
   padding: 0.1rem 0.32rem; border-radius: 4px;
 }
 .origin-chip--auto { color: var(--accent-bright); background: var(--accent-dim); }
@@ -579,7 +579,7 @@ td {
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;
   padding: 0.75rem 1.4rem; border-top: 1px solid var(--border); flex-shrink: 0;
 }
-.archive-summary { font-size: var(--fs-sm); color: var(--text-muted); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.archive-summary { font-size: var(--fs-sm); color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-variant-numeric: tabular-nums; }
 .archive-footer :deep(.pagination) { margin-top: 0; }
 
 /* ── Transiciones ─────────────────────────────────────────────────────── */

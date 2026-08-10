@@ -140,18 +140,18 @@ function fmtDate(iso) { if (!iso) return ''; return new Date(iso).toLocaleDateSt
 .pv-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem; margin-bottom: 0.65rem; }
 .pv-info-card { border-left: 3px solid var(--accent); }
 .pv-card-top { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.5rem; }
-.pv-badge { font-family: var(--font-mono); font-size: var(--fs-lg); font-weight: 800; color: var(--accent); background: var(--accent-dim); padding: 2px 9px; border-radius: 5px; }
+.pv-badge { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-lg); font-weight: 800; color: var(--accent); background: var(--accent-dim); padding: 2px 9px; border-radius: 5px; }
 .pv-type-tag { font-size: var(--fs-body); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); background: var(--surface-3); padding: 2px 7px; border-radius: 4px; }
 .pv-target-row { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.45rem; }
 .pv-icon { width: 14px; height: 14px; color: var(--accent); flex-shrink: 0; }
-.pv-target { font-size: var(--fs-lg); color: var(--text); font-family: var(--font-mono); word-break: break-all; }
+.pv-target { font-size: var(--fs-lg); color: var(--text); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); word-break: break-all; }
 .pv-meta { display: flex; align-items: center; gap: 0.3rem; font-size: var(--fs-md); color: var(--text-muted); flex-wrap: wrap; }
 .pv-sep { color: var(--border-med); }
 .pv-stats-row { display: flex; gap: 0.4rem; }
 .pv-stat { flex: 1; text-align: center; padding: 0.55rem 0.3rem; background: var(--surface); border-radius: 6px; }
 .pv-stat.crit { background: rgba(217,108,108,0.08); border: 1px solid rgba(217,108,108,0.15); }
 .pv-stat.high { background: rgba(212,160,74,0.08); border: 1px solid rgba(212,160,74,0.15); }
-.pv-stat-val { display: block; font-family: var(--font-mono); font-size: var(--fs-xl); font-weight: 800; color: var(--text); line-height: 1.2; }
+.pv-stat-val { display: block; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-xl); font-weight: 800; color: var(--text); line-height: 1.2; }
 .pv-stat.crit .pv-stat-val { color: var(--danger); }
 .pv-stat.high .pv-stat-val { color: var(--warn); }
 .pv-stat-lbl { font-size: var(--fs-body); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; display: block; }

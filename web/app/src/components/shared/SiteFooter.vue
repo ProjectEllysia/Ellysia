@@ -90,7 +90,7 @@ onMounted(() => {
   transform: translateY(-2px);
 }
 .footer-wordmark {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.3em; text-transform: uppercase;
   color: var(--text);
@@ -101,7 +101,7 @@ onMounted(() => {
    restante, sin dejar hueco muerto a la derecha (antes iban agrupadas). */
 .footer-cols { flex: 1; display: flex; justify-content: space-between; gap: 2.5rem; flex-wrap: wrap; }
 .footer-heading {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--accent);
@@ -127,7 +127,7 @@ onMounted(() => {
   border-top: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 0.5rem;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   color: var(--text-muted);
   letter-spacing: 0.04em;

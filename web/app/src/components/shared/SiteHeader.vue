@@ -70,7 +70,7 @@ const modules = [
   box-shadow: 0 0 0 3px var(--accent-dim), 0 0 10px var(--accent-dim);
 }
 .brand-text {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.32em; text-transform: uppercase;
   color: var(--text);
@@ -79,7 +79,7 @@ const modules = [
 /* ── Navegación de módulos ── */
 .site-nav { display: flex; gap: 1.5rem; margin-left: auto; }
 .nav-link {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-md); font-weight: 500;
   letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--text-dim);
@@ -102,7 +102,7 @@ const modules = [
 .icon-btn:hover { border-color: var(--accent); box-shadow: 0 0 12px var(--accent-dim); }
 .icon-btn svg { width: 18px; height: 18px; }
 .enter-btn {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--accent-bright);

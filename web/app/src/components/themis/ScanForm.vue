@@ -138,7 +138,7 @@ function handleLaunch() {
 <style scoped>
 .launch-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.1rem 1.25rem; margin-bottom: 1.1rem; }
 .launch-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.85rem; }
-.launch-title { font-weight: 600; color: var(--text); font-size: var(--fs-xl); font-family: var(--font-display); }
+.launch-title { font-weight: 600; color: var(--text); font-size: var(--fs-xl); font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .launch-success { font-size: var(--fs-md); color: var(--success); background: var(--success-dim); padding: 0.15rem 0.5rem; border-radius: 6px; }
 .pop-enter-active { transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .pop-enter-from { opacity: 0; transform: scale(0.8); }

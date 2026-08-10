@@ -256,10 +256,10 @@ const windowLabel = computed(() => {
 }
 .vital-now { margin: 0; line-height: 1; }
 .now-value {
-  font-family: var(--font-mono); font-size: 1.6rem; font-weight: 500;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: 1.6rem; font-weight: 500;
   color: var(--text); font-variant-numeric: tabular-nums;
 }
-.now-unit { margin-left: 0.1em; font-family: var(--font-mono); font-size: 0.95rem; color: var(--text-muted); }
+.now-unit { margin-left: 0.1em; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: 0.95rem; color: var(--text-muted); }
 /* El margen justo funciona para "%", pero pega el número a unidades de varias
    letras: "758KB/s" en lugar de "758 KB/s". */
 .now-unit--wide { margin-left: 0.3em; }
@@ -281,7 +281,7 @@ const windowLabel = computed(() => {
 .axis-mark {
   position: absolute; right: 0;
   padding: 0 0.25rem;
-  font-family: var(--font-mono); font-size: var(--fs-xs);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-xs);
   color: var(--text-muted);
   background: color-mix(in srgb, var(--surface-2) 88%, transparent);
   pointer-events: none;
@@ -291,7 +291,7 @@ const windowLabel = computed(() => {
 
 .vital-foot { display: flex; gap: 1.1rem; margin: 0; font-size: var(--fs-xs); color: var(--text-muted); }
 .stat b {
-  font-family: var(--font-mono); font-weight: 600;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-weight: 600;
   color: var(--text-dim); font-variant-numeric: tabular-nums;
 }
 /* Cada traza cubre sus propios puntos: una serie recién instrumentada tiene

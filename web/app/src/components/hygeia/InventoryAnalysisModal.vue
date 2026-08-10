@@ -131,17 +131,17 @@ function fmtDate(iso) {
 .state-msg--clean { color: var(--success); }
 
 .summary-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.9rem; }
-.mono { font-family: var(--font-mono); }
+.mono { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .scan-id { font-size: var(--fs-md); color: var(--text-muted); }
 .scan-status { font-size: var(--fs-md); font-weight: 600; padding: 0.12rem 0.45rem; border-radius: 5px; }
 .scan-status.finished { color: var(--success); background: var(--success-dim); }
 .scan-status.running, .scan-status.pending { color: var(--info); background: var(--info-dim); }
 .scan-status.failed { color: var(--danger); background: var(--danger-dim); }
-.scan-date { margin-left: auto; font-size: var(--fs-md); color: var(--text-muted); font-family: var(--font-mono); }
+.scan-date { margin-left: auto; font-size: var(--fs-md); color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 
 .totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-bottom: 0.9rem; }
 .total { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; padding: 0.6rem 0.4rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; }
-.total-value { font-size: var(--fs-2xl, 1.4rem); font-weight: 700; color: var(--text); font-family: var(--font-mono); }
+.total-value { font-size: var(--fs-2xl, 1.4rem); font-weight: 700; color: var(--text); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .total-label { font-size: var(--fs-sm); color: var(--text-muted); text-align: center; }
 
 .prio-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }

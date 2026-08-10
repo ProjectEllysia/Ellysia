@@ -150,7 +150,7 @@ function formatTime(iso) {
   gap: 0.4rem 0.7rem;
   font-size: var(--fs-md);
   color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -190,7 +190,7 @@ function formatTime(iso) {
   font-size: var(--fs-xl);
   border: 1px dashed var(--border);
   border-radius: 8px;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
 }
 
 .iep-scroll {
@@ -247,7 +247,7 @@ function formatTime(iso) {
 }
 
 .iep-node-num {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   color: var(--text-muted);
   letter-spacing: 0.06em;
@@ -256,7 +256,7 @@ function formatTime(iso) {
 .iep-node-by {
   font-size: var(--fs-lg);
   font-weight: 700;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   color: var(--text);
   max-width: 200px;
   overflow: hidden;
@@ -265,7 +265,7 @@ function formatTime(iso) {
 }
 
 .iep-node-ip {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   color: var(--text-dim);
 }
@@ -277,7 +277,7 @@ function formatTime(iso) {
 .iep-node-tls.off { opacity: 0.55; }
 
 .iep-node-time {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   color: var(--text-muted);
 }
@@ -288,7 +288,7 @@ function formatTime(iso) {
   gap: 0.3rem;
   padding: 0 0.35rem;
   color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   min-width: 64px;
   justify-content: center;
@@ -317,7 +317,7 @@ function formatTime(iso) {
 }
 
 .iep-detail-title {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-weight: 700;
   font-size: var(--fs-xl);
   color: var(--text);
@@ -344,7 +344,7 @@ function formatTime(iso) {
 
 .iep-detail-grid dt {
   color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-lg);
 }
 
@@ -352,7 +352,7 @@ function formatTime(iso) {
   color: var(--text);
   margin: 0;
   word-break: break-word;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-lg);
 }
 
@@ -361,7 +361,7 @@ function formatTime(iso) {
   margin-right: 0.3rem;
   padding: 1px 6px;
   border-radius: 4px;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   background: color-mix(in srgb, var(--danger) 18%, transparent);
   color: var(--danger);
@@ -381,7 +381,7 @@ function formatTime(iso) {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-lg);
   line-height: 1.5;
   white-space: pre-wrap;

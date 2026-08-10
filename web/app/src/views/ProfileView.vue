@@ -308,11 +308,11 @@ function downloadRecoveryCodes() {
 .profile-page { min-height: 100vh; background: var(--bg); padding-top: var(--topbar-h); position: relative; }
 .main { max-width: 1020px; margin: 0 auto; padding: 1.75rem 1.1rem; position: relative; z-index: 1; }
 .profile-header { text-align: center; margin-bottom: 2rem; }
-.profile-avatar { width: 72px; height: 72px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: var(--fs-3xl); font-weight: 700; font-family: var(--font-display); display: flex; align-items: center; justify-content: center; margin: 0 auto 0.75rem; }
-.profile-display-name { font-size: var(--fs-2xl); font-weight: 700; color: var(--text); margin: 0 0 0.2rem; font-family: var(--font-display); }
+.profile-avatar { width: 72px; height: 72px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: var(--fs-3xl); font-weight: 700; font-family: var(--font-display); font-size-adjust: var(--fsa-display); display: flex; align-items: center; justify-content: center; margin: 0 auto 0.75rem; }
+.profile-display-name { font-size: var(--fs-2xl); font-weight: 700; color: var(--text); margin: 0 0 0.2rem; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .profile-username { font-size: var(--fs-lg); color: var(--text-muted); margin: 0; }
 .profile-section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.1rem; }
-.profile-section h2 { font-size: var(--fs-xl); font-weight: 600; margin: 0 0 0.85rem; color: var(--text); font-family: var(--font-display); }
+.profile-section h2 { font-size: var(--fs-xl); font-weight: 600; margin: 0 0 0.85rem; color: var(--text); font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .profile-form { display: flex; flex-direction: column; gap: 0.85rem; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; }
 .form-row--single { grid-template-columns: 1fr; }
@@ -334,7 +334,7 @@ function downloadRecoveryCodes() {
   list-style: none; margin: 0 0 1rem; padding: 0.75rem; background: var(--bg);
   border: 1px solid var(--border-solid); border-radius: 6px;
 }
-.mfa-recovery-list code { font-family: monospace; font-size: var(--fs-lg); color: var(--text); }
+.mfa-recovery-list code { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-lg); color: var(--text); }
 .loading-block { padding: 3.5rem 0; display: flex; justify-content: center; }
 .skeleton { background: var(--surface); border-radius: 8px; animation: pulse 1.4s ease-in-out infinite; }
 .skeleton--lg { width: 100%; height: 240px; }

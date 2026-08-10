@@ -383,7 +383,7 @@ async function handleDelete(id) {
 
 .intake-eyebrow {
   margin: 0;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   letter-spacing: 0.28em;
   text-transform: uppercase;
@@ -393,7 +393,7 @@ async function handleDelete(id) {
 
 .intake-title {
   margin: 0.1rem 0 0.6rem;
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-size: var(--fs-xl);
   font-weight: 700;
   line-height: 1.25;
@@ -403,7 +403,7 @@ async function handleDelete(id) {
 }
 
 .intake-chip {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-lg);
   font-weight: 600;
   letter-spacing: 0.06em;

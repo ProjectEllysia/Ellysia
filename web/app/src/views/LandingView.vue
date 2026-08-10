@@ -435,14 +435,14 @@ onUnmounted(() => {
 }
 .wordmark:hover .wordmark-mark { filter: drop-shadow(0 0 14px var(--sun-glow)); transform: translateY(-3px); }
 .wordmark-text {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.38em; text-transform: uppercase;
   color: var(--text);
 }
 .ely-nav { display: flex; gap: 2.2rem; justify-self: center; }
 .nav-link {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-md); font-weight: 500;
   letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--text-dim);
@@ -503,7 +503,7 @@ onUnmounted(() => {
 .theme-toggle:hover { border-color: var(--accent); box-shadow: 0 0 14px var(--accent-dim); }
 .theme-toggle svg { width: 17px; height: 17px; }
 .enter-btn {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--accent-bright);
@@ -521,7 +521,7 @@ onUnmounted(() => {
   border: 1.5px solid var(--border-med);
   color: var(--accent-bright);
   font-size: var(--fs-md); font-weight: 700;
-  font-family: var(--font-body);
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body);
   transition: all var(--transition);
 }
 .avatar-btn:hover { border-color: var(--accent); box-shadow: 0 0 14px var(--accent-dim); }
@@ -551,7 +551,7 @@ onUnmounted(() => {
 }
 .drop-name { font-size: var(--fs-xl); font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .drop-role {
-  font-family: var(--font-mono); font-size: var(--fs-body); color: var(--accent);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-body); color: var(--accent);
   letter-spacing: 0.06em; text-transform: uppercase;
 }
 .drop-menu { display: flex; flex-direction: column; gap: 0.15rem; }
@@ -580,14 +580,14 @@ onUnmounted(() => {
 }
 .eyebrow {
   display: inline-block;
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-lg); font-weight: 500;
   letter-spacing: 0.42em; text-transform: uppercase;
   color: var(--accent);
   margin-top: 2.5rem;
 }
 .hero-title {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: clamp(6rem, 6vw, 7.5rem);
   font-weight: 600;
   letter-spacing: 0.14em;
@@ -596,7 +596,7 @@ onUnmounted(() => {
   text-shadow: 0 0 60px var(--sun-glow);
 }
 .verse {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-style: italic;
   font-size: clamp(1.5rem, 2.6vw, 1.75rem);
   color: var(--text-dim);
@@ -612,7 +612,7 @@ onUnmounted(() => {
   margin-top: 2.4rem; flex-wrap: wrap;
 }
 .cta {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-body); font-weight: 600;
   letter-spacing: 0.2em; text-transform: uppercase;
   padding: 0.95rem 2.3rem;
@@ -723,13 +723,13 @@ onUnmounted(() => {
 
 .philo-eyebrow {
   display: block;
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-md); font-weight: 500;
   letter-spacing: 0.42em; text-transform: uppercase;
   color: var(--accent);
 }
 .philo-title {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: clamp(1.8rem, 4vw, 2.7rem);
   font-weight: 600;
   letter-spacing: 0.14em;
@@ -759,7 +759,7 @@ onUnmounted(() => {
 .philo-text:has(.revealed)::before { transform: scaleY(1); }
 
 .philo-para {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-size: clamp(1.3rem, 2.1vw, 1.7rem);
   line-height: 1.6;
   color: var(--text-dim);
@@ -798,7 +798,7 @@ onUnmounted(() => {
   margin-bottom: 2rem;
 }
 .stelae-title {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: clamp(1.9rem, 4.2vw, 2.8rem);
   font-weight: 600;
   letter-spacing: 0.16em;
@@ -806,7 +806,7 @@ onUnmounted(() => {
   color: var(--text);
 }
 .stelae-bajada {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-style: italic;
   font-size: var(--fs-xl);
   color: var(--text-muted);
@@ -838,7 +838,7 @@ onUnmounted(() => {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: clamp(8rem, 22vw, 16rem);
   font-weight: 700;
   color: var(--text);
@@ -887,13 +887,13 @@ onUnmounted(() => {
 /* ── Cuerpo ── */
 .stele-body { position: relative; z-index: 1; }
 .stele-kicker {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.34em; text-transform: uppercase;
   color: var(--accent);
 }
 .stele-myth {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-style: italic;
   font-size: var(--fs-xl);
   color: var(--text-muted);
@@ -904,7 +904,7 @@ onUnmounted(() => {
 /* Epígrafe latino — inscripción cincelada */
 .stele-epigraph {
   display: block;
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.4em; text-transform: uppercase;
   color: var(--accent);
@@ -913,7 +913,7 @@ onUnmounted(() => {
 }
 
 .stele-title {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-size: clamp(2rem, 4vw, 2.9rem);
   font-weight: 600;
   line-height: 1.2;
@@ -933,7 +933,7 @@ onUnmounted(() => {
   margin-top: 1.1rem;
 }
 .stele-chips li {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-body);
   color: var(--accent);
   padding: 0.32rem 0.85rem;
@@ -945,7 +945,7 @@ onUnmounted(() => {
 .stele-cta {
   display: inline-flex; align-items: center; gap: 0.5rem;
   margin-top: 1.5rem;
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--accent);
@@ -989,7 +989,7 @@ onUnmounted(() => {
 }
 .forge-eyebrow {
   display: block;
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-sm); font-weight: 500;
   letter-spacing: 0.4em; text-transform: uppercase;
   color: var(--text-muted);
@@ -1011,7 +1011,7 @@ onUnmounted(() => {
 }
 .forge-item {
   flex-shrink: 0;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   color: var(--text-dim);
   letter-spacing: 0.08em;
@@ -1048,7 +1048,7 @@ onUnmounted(() => {
   flex-wrap: wrap;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   color: var(--text-dim);
   letter-spacing: 0.05em;
