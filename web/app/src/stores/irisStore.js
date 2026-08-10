@@ -294,7 +294,14 @@ export const useIrisStore = defineStore('iris', () => {
     currentStatus.polling = true
     currentStatus.status = 'pending'
     currentStatus.progress = 0
-    statusPoller = usePolling(() => _pollStatus(id), { intervalMs: 2000 })
+    // A 2s fijos son 1800 peticiones/hora contra un límite de 300: diez minutos
+    // de análisis agotaban el cupo del usuario. Con backoff, un análisis rápido
+    // se sigue notando a los 2s y uno lento se va espaciando hasta 20s.
+    statusPoller = usePolling(() => _pollStatus(id), {
+      intervalMs: 2000,
+      backoffFactor: 1.5,
+      maxIntervalMs: 20000,
+    })
     statusPoller.start()
   }
 
@@ -303,7 +310,14 @@ export const useIrisStore = defineStore('iris', () => {
   // `false` es la condición terminal.
   async function _pollStatus(id) {
     const st = await getStatus(id)
-    if (!st) return true
+    // Sin respuesta no hay novedad: devolver algo que no sea `true` deja que el
+    // backoff espacie los reintentos en vez de martillear una API caída.
+    if (!st) return undefined
+
+    // `true` solo cuando algo se ha movido de verdad; así el backoff se
+    // reinicia al primer avance y se estira mientras el análisis está parado.
+    const changed = currentStatus.status !== st.status
+      || currentStatus.progress !== (st.progress ?? null)
 
     currentStatus.status = st.status
     currentStatus.progress = st.progress ?? null
@@ -321,7 +335,7 @@ export const useIrisStore = defineStore('iris', () => {
       currentStatus.polling = false
       return false
     }
-    return true
+    return changed || undefined
   }
 
   function stopPolling() {

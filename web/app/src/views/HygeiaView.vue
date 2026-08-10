@@ -265,21 +265,46 @@ async function refreshNow() {
  * E8: el `if (document.hidden) return` que había aquí lo aporta ahora
  * `usePolling` con `pauseWhenHidden` — y además reanuda de inmediato al
  * volver a primer plano, en vez de esperar los 15 s completos. */
+/**
+ * Cada cosa se re-pide al ritmo al que de verdad cambia.
+ *
+ * Antes las cuatro lecturas iban en cada vuelta: 4 × 240 vueltas/hora = 960
+ * peticiones/hora contra un límite de 600, así que la propia vista se dejaba
+ * sin cupo en menos de 40 minutos. Bajar la cadencia no valía —el agente late
+ * cada 15 s y un panel congelado no se distingue de un host caído—, así que lo
+ * que se escalona es cada lectura por separado:
+ *
+ *   latest   cada vuelta (15 s) — es el pulso: los números en vivo
+ *   metrics  cada 2 vueltas (30 s) — la serie del gráfico, que dibuja una
+ *            tendencia; un punto de más o de menos no se aprecia
+ *   alerts   cada 4 vueltas (60 s) — lo crítico ya avisa por correo aparte
+ *   assets   cada 4 vueltas (60 s) — la lista cambia al dar de alta o de baja
+ *
+ * Total: 480 peticiones/hora en vez de 960, con el pulso igual de vivo.
+ */
+const METRICS_EVERY = 2
+const SLOW_EVERY = 4
+let pollTick = 0
+
 async function poll() {
-  await store.fetchAssets({ silent: true })
+  const tick = pollTick++
+  const tasks = []
+
+  if (tick % SLOW_EVERY === 0) tasks.push(store.fetchAssets({ silent: true }))
+
   const id = store.state.selectedId
-  if (!id) return
-  const tasks = [
-    store.fetchMetrics(id, { silent: true }),
-    store.fetchLatest(id),
-    alerts.fetchAlerts({ assetId: id }),
-  ]
-  // El análisis solo se re-pide mientras hay uno corriendo: es un escaneo
-  // puntual lanzado a mano, no un dato vivo como las métricas, así que
-  // sondearlo siempre sería una petición de más cada 15 s por nada.
-  if (['pending', 'running'].includes(store.state.analysis?.status)) {
-    tasks.push(store.fetchAnalysis(id, { silent: true }))
+  if (id) {
+    tasks.push(store.fetchLatest(id))
+    if (tick % METRICS_EVERY === 0) tasks.push(store.fetchMetrics(id, { silent: true }))
+    if (tick % SLOW_EVERY === 0) tasks.push(alerts.fetchAlerts({ assetId: id }))
+    // El análisis solo se re-pide mientras hay uno corriendo: es un escaneo
+    // puntual lanzado a mano, no un dato vivo como las métricas, así que
+    // sondearlo siempre sería una petición de más cada 15 s por nada.
+    if (['pending', 'running'].includes(store.state.analysis?.status)) {
+      tasks.push(store.fetchAnalysis(id, { silent: true }))
+    }
   }
+
   await Promise.all(tasks)
 }
 

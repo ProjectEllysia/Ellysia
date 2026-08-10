@@ -104,8 +104,16 @@ export const useAegisStore = defineStore('aegis', () => {
 
   /* ── CARGA INICIAL ── */
 
-  /** Carga los temas desde GET /aegis/topics */
+  /**
+   * Carga los temas desde GET /aegis/topics.
+   *
+   * Los temas son filas sembradas en la base de datos: no cambian durante una
+   * sesión. AegisView llamaba a esto en cada montaje, así que ir y volver del
+   * generador tres veces costaba tres peticiones para pintar la misma rejilla.
+   * `reset()` vacía `topics`, de modo que cerrar sesión vuelve a pedirlos.
+   */
   async function loadTopics() {
+    if (topics.value.length) return
     try {
       const res = await apiFetch('/aegis/topics')
       if (res?.ok) {

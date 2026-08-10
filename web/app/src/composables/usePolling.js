@@ -1,4 +1,7 @@
 import { getCurrentInstance, onUnmounted } from 'vue'
+// Relativo y sin dependencias a propósito: los tests de este archivo son Node
+// puro, sin Vite, así que no pueden resolver el alias `@` ni cargar Pinia.
+import { rateLimitWaitMs } from './rateLimitState.js'
 
 /**
  * Sondeo periódico correcto, en un solo sitio (E8).
@@ -34,6 +37,10 @@ import { getCurrentInstance, onUnmounted } from 'vue'
  *   `document.hidden`.
  * @param {boolean} [options.immediate=true] - Ejecutar el primer ciclo al
  *   llamar a `start()` en vez de esperar un intervalo.
+ * @param {number} [options.backoffFactor=1] - Cuánto se estira el intervalo
+ *   cada ciclo que no trae novedad. `1` lo desactiva (ritmo constante).
+ * @param {number} [options.maxIntervalMs=intervalMs] - Techo del intervalo
+ *   estirado. Sin techo, un sondeo largo acabaría comprobando una vez al día.
  * @returns {{start: Function, stop: Function, isRunning: Function}}
  */
 export function usePolling(task, {
@@ -41,11 +48,34 @@ export function usePolling(task, {
   maxAttempts = null,
   pauseWhenHidden = true,
   immediate = true,
+  backoffFactor = 1,
+  maxIntervalMs = null,
 } = {}) {
   let timer = null
   let generation = 0
   let attempts = 0
   let running = false
+
+  // ── Backoff ────────────────────────────────────────────────────────────
+  // Un sondeo a ritmo fijo gasta cupo proporcional al tiempo, no al trabajo:
+  // /themis/results cada 4s son 900 peticiones/hora contra un límite de 300,
+  // así que un escaneo de más de 20 minutos dejaba al usuario sin poder ver su
+  // propio escaneo. Lo que importa es enterarse pronto de un cambio, y los
+  // cambios se agrupan: conviene mirar mucho justo después de uno y cada vez
+  // menos según pasa el tiempo sin novedad.
+  //
+  // `task` señala novedad devolviendo `true`; cualquier otro valor que no sea
+  // `false` (incluido `undefined`) cuenta como "sin cambios" y estira la
+  // espera. Devolver `false` sigue deteniendo el sondeo, como antes.
+  const ceiling = maxIntervalMs ?? intervalMs
+  let currentInterval = intervalMs
+
+  function resetInterval() { currentInterval = intervalMs }
+
+  function stretchInterval() {
+    if (backoffFactor <= 1) return
+    currentInterval = Math.min(ceiling, Math.round(currentInterval * backoffFactor))
+  }
 
   const isHidden = () =>
     pauseWhenHidden && typeof document !== 'undefined' && document.hidden
@@ -56,7 +86,10 @@ export function usePolling(task, {
 
   function schedule(gen) {
     clearTimer()
-    timer = setTimeout(() => { void tick(gen) }, intervalMs)
+    // Si el servidor ya dijo que no insistamos, se respeta su plazo por encima
+    // del intervalo propio: seguir empujando contra un 429 solo alarga el corte.
+    const wait = Math.max(currentInterval, rateLimitWaitMs())
+    timer = setTimeout(() => { void tick(gen) }, wait)
   }
 
   async function tick(gen) {
@@ -78,6 +111,9 @@ export function usePolling(task, {
     }
     if (!running || gen !== generation) return
 
+    if (keepGoing === true) resetInterval()
+    else stretchInterval()
+
     attempts += 1
     if (keepGoing === false || (maxAttempts !== null && attempts >= maxAttempts)) {
       stop()
@@ -98,6 +134,7 @@ export function usePolling(task, {
     if (running) return
     running = true
     attempts = 0
+    resetInterval()
     generation += 1
     const gen = generation
     if (typeof document !== 'undefined') {

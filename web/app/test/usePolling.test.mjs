@@ -121,5 +121,61 @@ await test('start() dos veces no duplica el sondeo', async () => {
   assert.ok(calls <= 7, `doble start() duplico el ritmo (${calls} ciclos)`)
 })
 
+/* ── Backoff ──────────────────────────────────────────────────────────────
+   Un sondeo a ritmo fijo gasta cupo proporcional al tiempo, no al trabajo:
+   /themis/results cada 4 s son 900 peticiones/hora contra un limite de 300.
+   Lo que se comprueba aqui es que el intervalo crece sin novedad, se reinicia
+   en cuanto la hay, y que sin backoff nada de esto cambia el ritmo. */
+
+/** Mide los huecos entre ciclos consecutivos. */
+function medirHuecos(opciones, ciclos = 5) {
+  return new Promise(resolve => {
+    const huecos = []
+    let anterior = Date.now()
+    const poller = usePolling(async (intento) => {
+      const ahora = Date.now()
+      if (intento > 0) huecos.push(ahora - anterior)
+      anterior = ahora
+      if (intento >= ciclos) { poller.stop(); resolve(huecos); return false }
+      return opciones.novedadEn === intento ? true : undefined
+    }, { pauseWhenHidden: false, ...opciones })
+    poller.start()
+  })
+}
+
+await test('backoffFactor por defecto (1) mantiene el ritmo constante', async () => {
+  const huecos = await medirHuecos({ intervalMs: 20 })
+  for (const hueco of huecos) {
+    assert.ok(hueco < 45, `el intervalo crecio sin pedirlo: ${huecos.join(', ')}`)
+  }
+})
+
+await test('sin novedad, el intervalo crece con el factor indicado', async () => {
+  const huecos = await medirHuecos({ intervalMs: 20, backoffFactor: 2, maxIntervalMs: 2000 })
+  assert.ok(
+    huecos[huecos.length - 1] > huecos[0] * 2,
+    `el intervalo no crecio: ${huecos.join(', ')}`,
+  )
+})
+
+await test('maxIntervalMs pone techo al crecimiento', async () => {
+  const huecos = await medirHuecos({ intervalMs: 20, backoffFactor: 3, maxIntervalMs: 60 }, 6)
+  for (const hueco of huecos) {
+    assert.ok(hueco < 110, `se paso del techo de 60ms: ${huecos.join(', ')}`)
+  }
+})
+
+await test('devolver true (hubo novedad) reinicia el intervalo', async () => {
+  // Sin novedad hasta el ciclo 3; ahi se reinicia, asi que el hueco siguiente
+  // tiene que ser mucho menor que el que venia acumulandose.
+  const huecos = await medirHuecos({ intervalMs: 20, backoffFactor: 2, maxIntervalMs: 2000, novedadEn: 3 })
+  const antesDelReinicio = huecos[2]
+  const despuesDelReinicio = huecos[3]
+  assert.ok(
+    despuesDelReinicio < antesDelReinicio,
+    `no reinicio tras la novedad: ${huecos.join(', ')}`,
+  )
+})
+
 console.log(failures ? `\n${failures} test(s) fallaron` : '\nTodos los tests de usePolling pasaron')
 process.exit(failures ? 1 : 0)

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, reactive } from 'vue'
 import { useApi } from '@/composables/useApi'
+import { rateLimitWaitMs } from '@/composables/rateLimitState'
 import { usePolling } from '@/composables/usePolling'
 import { useUtils } from '@/composables/useUtils'
 import { useToastStore } from '@/stores/toastStore'
@@ -104,7 +105,24 @@ export const useThemisStore = defineStore('themis', () => {
   // setInterval): cada carga se reprograma a sí misma mientras la pestaña
   // siga visible y queden escaneos pending/running.
   const SCAN_POLL_INTERVAL_MS = 4000
+  // A ritmo fijo, 4s son 900 peticiones/hora contra un límite de 300: un
+  // escaneo de más de 20 minutos dejaba al usuario sin poder ver su propia
+  // lista de escaneos. La espera se estira un 50% por cada vuelta que no trae
+  // novedad y se reinicia en cuanto algo cambia, así que un escaneo que acaba
+  // rápido se sigue notando a los 4s y uno largo deja de malgastar cupo.
+  const SCAN_POLL_MAX_INTERVAL_MS = 30000
+  const SCAN_POLL_BACKOFF = 1.5
   const _scanPollTimers = {}
+  const _scanPollIntervals = {}
+  const _scanPollFingerprints = {}
+
+  /**
+   * Resumen de lo único que hace útil una vuelta de sondeo: qué escaneos hay y
+   * en qué estado están. Si no cambia, la vuelta no ha traído novedad.
+   */
+  function _scanFingerprint(type) {
+    return _scandata(type).results.map(s => `${s.id}:${s.status}`).join(',')
+  }
 
   function _isTypeVisible(type) {
     if (type === 'lybra') return world.value === 'lybra' && viewMode.value !== 'history'
@@ -139,13 +157,32 @@ export const useThemisStore = defineStore('themis', () => {
     delete _scanPollTimers[type]
     const hasActive = _scandata(type).results.some(s => s.status === 'pending' || s.status === 'running')
     if (!hasActive || !_isTypeVisible(type)) return
-    _scanPollTimers[type] = setTimeout(() => loadScans(type), SCAN_POLL_INTERVAL_MS)
+
+    const fingerprint = _scanFingerprint(type)
+    if (fingerprint === _scanPollFingerprints[type]) {
+      _scanPollIntervals[type] = Math.min(
+        SCAN_POLL_MAX_INTERVAL_MS,
+        Math.round((_scanPollIntervals[type] ?? SCAN_POLL_INTERVAL_MS) * SCAN_POLL_BACKOFF),
+      )
+    } else {
+      _scanPollIntervals[type] = SCAN_POLL_INTERVAL_MS
+    }
+    _scanPollFingerprints[type] = fingerprint
+
+    // Si el servidor ya pidió tregua, se respeta su plazo antes que el propio.
+    const wait = Math.max(_scanPollIntervals[type], rateLimitWaitMs())
+    _scanPollTimers[type] = setTimeout(() => loadScans(type), wait)
   }
 
   /** Detiene el polling de escaneos activos: de un tipo concreto, o de todos. */
   function stopScanPolling(type) {
     const types = type ? [type] : Object.keys(_scanPollTimers)
-    for (const t of types) { clearTimeout(_scanPollTimers[t]); delete _scanPollTimers[t] }
+    for (const t of types) {
+      clearTimeout(_scanPollTimers[t])
+      delete _scanPollTimers[t]
+      delete _scanPollIntervals[t]
+      delete _scanPollFingerprints[t]
+    }
   }
 
   /** Carga una pagina de resultados para un tipo de escaneo. */
