@@ -187,6 +187,8 @@
               <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.aegis.enabled']" type="checkbox" class="toggle" /><span>Habilitado</span></label></div>
               <div class="cfg-grid">
                 <div class="form-group"><label>Consejos por píldora</label><input v-model.number="store.configFlat['features.aegis.tipsAmount']" type="number" min="1" max="20" class="inp" /></div>
+                <div class="form-group"><label>Preguntas del test</label><input v-model.number="store.configFlat['features.aegis.questionsAmount']" type="number" min="1" max="20" class="inp" /></div>
+                <div class="form-group"><label>Opciones por pregunta</label><input v-model.number="store.configFlat['features.aegis.optionsAmount']" type="number" min="2" max="8" class="inp" /></div>
                 <div class="form-group"><label>Antigüedad máx. de alertas (años)</label><input v-model.number="store.configFlat['features.aegis.vulnerabilitiesAntiquity']" type="number" min="1" max="30" class="inp" /></div>
               </div>
               <div class="grid">

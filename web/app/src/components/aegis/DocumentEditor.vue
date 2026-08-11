@@ -95,13 +95,14 @@
           <button
             type="button"
             class="add-btn add-btn--primary"
-            :disabled="form.questions.length >= 20"
+            :disabled="form.questions.length >= maxQuestions"
             @click="addQuestion"
           >+ Añadir pregunta</button>
         </div>
 
         <p class="section-hint">
           Sin preguntas no se puede lanzar una campaña. Marca la opción correcta de cada una.
+          Máximo {{ maxQuestions }} preguntas de {{ maxOptions }} opciones.
         </p>
 
         <div v-if="!form.questions.length" class="empty-hint">Sin preguntas. Añade la primera.</div>
@@ -132,7 +133,7 @@
               <button
                 type="button"
                 class="add-btn add-btn--sm"
-                :disabled="question.options.length >= 4"
+                :disabled="question.options.length >= maxOptions"
                 @click="addOption(question)"
               >+ Opción</button>
             </div>
@@ -158,7 +159,7 @@
                 type="button"
                 class="icon-btn icon-danger"
                 title="Quitar opción"
-                :disabled="question.options.length <= 2"
+                :disabled="question.options.length <= MIN_OPTIONS"
                 @click="removeOption(question, j)"
               >✕</button>
             </div>
@@ -203,6 +204,16 @@ const props = defineProps({
   saving: { type: Boolean, default: false },
 })
 const emit = defineEmits(['save', 'cancel'])
+
+// Topes del test: los manda el backend en el documento (features.aegis.
+// questionsAmount / optionsAmount) porque son los mismos que aplica
+// AegisPillUpdateSchema — si se escribieran aquí a mano, subirlos en la
+// configuración no serviría de nada y bajarlos daría un 400 al guardar.
+// El mínimo de 2 opciones sí es fijo: una pregunta de una sola opción no es
+// una pregunta.
+const MIN_OPTIONS = 2
+const maxQuestions = props.doc.quizLimits?.maxQuestions ?? 5
+const maxOptions = props.doc.quizLimits?.maxOptions ?? 4
 
 /** Copia profunda de la píldora para que "Cancelar" descarte los cambios. */
 const pill = props.doc.pill ?? {}
@@ -261,11 +272,11 @@ function moveQuestion(i, dir) {
   form.questions.splice(j, 0, q)
 }
 function addOption(question) {
-  if (question.options.length >= 4) return
+  if (question.options.length >= maxOptions) return
   question.options.push('')
 }
 function removeOption(question, j) {
-  if (question.options.length <= 2) return
+  if (question.options.length <= MIN_OPTIONS) return
   question.options.splice(j, 1)
   // La correcta se desplaza con las opciones; si era la borrada, vuelve a la 0.
   if (question.correctIndex === j) question.correctIndex = 0
@@ -296,8 +307,8 @@ function validate() {
     if (filled.length !== question.options.length) {
       errors.questions[i].options = 'No dejes ninguna opción vacía.'
       ok = false
-    } else if (filled.length < 2 || filled.length > 4) {
-      errors.questions[i].options = 'Cada pregunta necesita entre 2 y 4 opciones.'
+    } else if (filled.length < MIN_OPTIONS || filled.length > maxOptions) {
+      errors.questions[i].options = `Cada pregunta necesita entre ${MIN_OPTIONS} y ${maxOptions} opciones.`
       ok = false
     } else if (question.correctIndex < 0 || question.correctIndex >= question.options.length) {
       errors.questions[i].options = 'Marca cuál es la opción correcta.'
