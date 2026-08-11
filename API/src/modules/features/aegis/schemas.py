@@ -1,5 +1,7 @@
 from marshmallow import Schema, ValidationError, fields, validate, validates_schema
 
+import src.modules.system.config_reading as CR
+
 
 class TrackedProductSchema(Schema):
     """Coordenadas CPE de un producto vigilado.
@@ -105,16 +107,25 @@ class AegisTipUpdateSchema(Schema):
 
 class AegisQuizQuestionUpdateSchema(Schema):
     prompt = fields.String(required=True, validate=validate.Length(min=1, max=300))
+    # El tope de opciones sale de features.aegis.optionsAmount, no de un
+    # validate.Length: ese se evalúa al importar el módulo y congelaría el
+    # valor hasta el siguiente reinicio, que es justo lo que se quiere evitar.
     options = fields.List(
         fields.String(validate=validate.Length(min=1, max=200)),
         required=True,
-        validate=validate.Length(min=2, max=4),
+        validate=validate.Length(min=2),
     )
     correctIndex = fields.Integer(required=True, validate=validate.Range(min=0))
 
     @validates_schema
-    def validate_correct_index_in_range(self, data, **kwargs):
+    def validate_options_and_correct_index(self, data, **kwargs):
         options = data.get("options") or []
+        max_options = CR.aegis_config().options_amount
+        if len(options) > max_options:
+            raise ValidationError(
+                f"una pregunta admite como mucho {max_options} opciones", field_name="options"
+            )
+
         correct_index = data.get("correctIndex")
         if correct_index is not None and correct_index >= len(options):
             raise ValidationError(
@@ -130,6 +141,16 @@ class AegisPillUpdateSchema(Schema):
     company = fields.String(load_default="", validate=validate.Length(max=128))
     tips = fields.List(fields.Nested(AegisTipUpdateSchema), load_default=[])
     questions = fields.List(fields.Nested(AegisQuizQuestionUpdateSchema), load_default=[])
+
+    @validates_schema
+    def validate_question_count(self, data, **kwargs):
+        """Mismo motivo que en las opciones: el tope se lee en tiempo de validación."""
+        max_questions = CR.aegis_config().questions_amount
+        if len(data.get("questions") or []) > max_questions:
+            raise ValidationError(
+                f"una píldora admite como mucho {max_questions} preguntas",
+                field_name="questions",
+            )
 
 
 class ExportRequestBodySchema(Schema):

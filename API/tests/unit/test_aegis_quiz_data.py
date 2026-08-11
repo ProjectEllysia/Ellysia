@@ -2,10 +2,19 @@
 
 import pytest
 
+import src.modules.system.config_reading as CR
 from src.modules.features.aegis.exceptions import AegisValidationError
 from src.modules.features.aegis.services.pills import AegisQuizData
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture
+def options_amount(monkeypatch):
+    """Fija ``features.aegis.optionsAmount``, el tope de opciones por pregunta."""
+    def _set(amount: int):
+        monkeypatch.setattr(CR, "aegis_config", lambda: CR.AegisConfig(options_amount=amount))
+    return _set
 
 
 def _valid_kwargs(**overrides):
@@ -39,9 +48,18 @@ def test_rejects_fewer_than_two_options():
         AegisQuizData(**_valid_kwargs(options=["Única opción"], correct_index=0))
 
 
-def test_rejects_more_than_four_options():
+def test_rejects_more_options_than_the_configured_amount(options_amount):
+    options_amount(4)
     with pytest.raises(AegisValidationError):
         AegisQuizData(**_valid_kwargs(options=["A", "B", "C", "D", "E"], correct_index=0))
+
+
+def test_accepts_more_options_when_the_config_allows_them(options_amount):
+    """El tope es ``features.aegis.optionsAmount``, no un 4 escrito a mano: subirlo
+    en la configuración tiene que bastar para que quepan más respuestas."""
+    options_amount(6)
+    question = AegisQuizData(**_valid_kwargs(options=["A", "B", "C", "D", "E", "F"], correct_index=5))
+    assert len(question.options) == 6
 
 
 def test_rejects_empty_option_string():

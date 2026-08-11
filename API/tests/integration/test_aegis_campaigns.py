@@ -121,9 +121,14 @@ def local_email_config(monkeypatch, smtp_catcher):
 
 @pytest.fixture()
 def make_aegis_doc_with_quiz(app):
-    """Factory: píldora 'done' con 2 preguntas de quiz. Devuelve el doc_id."""
+    """Factory: píldora 'done' con un test de ``questions`` × ``options``.
 
-    def _make(user_id):
+    La correcta es siempre la última opción de cada pregunta. Los tamaños son
+    parámetros porque el test ya no es de 2×3 fijo: sale de
+    ``features.aegis.questionsAmount`` / ``optionsAmount``. Devuelve el doc_id.
+    """
+
+    def _make(user_id, questions=2, options=2):
         from src.modules.infrastructure.unit_of_work import UnitOfWork
         from src.modules.features.aegis.model import AegisDocument, AegisQuizQuestion, Topic
         from src.modules.features.aegis.repositories import AegisDocumentRepository
@@ -151,18 +156,13 @@ def make_aegis_doc_with_quiz(app):
                 saved = AegisDocumentRepository(uow).save(doc)
                 doc_id = saved.id
 
-                uow.session.add(AegisQuizQuestion(
-                    document_id=doc_id, position=1,
-                    prompt="¿Qué haces ante un enlace sospechoso?",
-                    options=["Hacer clic", "Verificar el remitente"],
-                    correct_index=1,
-                ))
-                uow.session.add(AegisQuizQuestion(
-                    document_id=doc_id, position=2,
-                    prompt="¿Reportas un correo de phishing?",
-                    options=["No", "Sí, al equipo de seguridad"],
-                    correct_index=1,
-                ))
+                for position in range(1, questions + 1):
+                    uow.session.add(AegisQuizQuestion(
+                        document_id=doc_id, position=position,
+                        prompt=f"¿Qué haces ante la situación de phishing nº {position}?",
+                        options=[f"Opción {i + 1}" for i in range(options)],
+                        correct_index=options - 1,
+                    ))
         return doc_id
 
     return _make
@@ -345,6 +345,52 @@ def test_full_campaign_flow_send_and_quiz_no_repeat(
     assert after_data["status"] == "completed"
     assert after_data["score"] == 1
     assert "questions" not in after_data
+
+
+def test_quiz_serves_and_grades_more_than_two_questions(
+    app, client, admin_user, admin_headers, make_aegis_doc_with_quiz,
+):
+    """Un test de 5 preguntas de 4 opciones llega entero al destinatario.
+
+    El 2×3 de siempre lo imponía el prompt, no el modelo de datos: esto
+    comprueba que el snapshot de campaña, la página pública y la corrección
+    no traen ningún 2 ni ningún 4 escrito a mano por el camino.
+    """
+    doc_id = make_aegis_doc_with_quiz(admin_user.id, questions=5, options=4)
+
+    list_id = client.post(
+        "/aegis/lists", headers=admin_headers, json={"name": "Plantilla"}
+    ).get_json()["id"]
+    client.post(
+        f"/aegis/lists/{list_id}/recipients", headers=admin_headers,
+        json={"recipients": [{"email": "empleado@empresa.test", "name": "Empleado"}]},
+    )
+    campaign_id = client.post(
+        "/aegis/campaigns", headers=admin_headers,
+        json={"documentId": doc_id, "listId": list_id, "name": "Campaña larga"},
+    ).get_json()["id"]
+
+    with mock.patch.object(TaskQueue, "get_instance", return_value=_FakeTaskQueue()):
+        assert client.post(
+            f"/aegis/campaigns/{campaign_id}/launch", headers=admin_headers
+        ).status_code == 200
+
+    token = _fetch_token_for_email(app, campaign_id, "empleado@empresa.test")
+
+    quiz_data = client.get(f"/aegis/quiz?t={token}").get_json()
+    assert len(quiz_data["questions"]) == 5
+    assert all(len(question["options"]) == 4 for question in quiz_data["questions"])
+
+    # La correcta es la última opción (índice 3): se acierta en 3 de 5.
+    result = client.post(f"/aegis/quiz?t={token}", json={"answers": [
+        {"questionPosition": 1, "selectedIndex": 3},
+        {"questionPosition": 2, "selectedIndex": 3},
+        {"questionPosition": 3, "selectedIndex": 0},
+        {"questionPosition": 4, "selectedIndex": 2},
+        {"questionPosition": 5, "selectedIndex": 3},
+    ]}).get_json()
+    assert result["score"] == 3
+    assert result["total"] == 5
 
 
 # ─────────────────────────────────────────────────────────────────────────
