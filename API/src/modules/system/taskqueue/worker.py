@@ -79,7 +79,7 @@ class _ThreadSafeWorker(SimpleWorker):
         pass
 
     def perform_job(self, job, queue):
-        """Ejecuta el job y limpia la sesión scoped del hilo al terminar.
+        """Ejecuta el job, con la config al día, y limpia la sesión al terminar.
 
         Los hilos de worker viven indefinidamente y ``scoped_session`` está
         keyed por hilo, así que la misma ``Session`` se reutilizaría entre
@@ -88,7 +88,15 @@ class _ThreadSafeWorker(SimpleWorker):
         identity-map envenenaría el siguiente job del mismo hilo. Este es el
         único choke-point por el que pasan todos los tipos de job, por lo que
         ``close_all()`` aquí cubre nmap/nikto/lybra/nuclei/aegis/iris.
+
+        Por el mismo motivo es el sitio donde se refresca la configuración: un
+        ``PUT /system`` solo actualiza el ``_configs`` en memoria del proceso
+        API, y este proceso es otro. Sin esto, editar los prompts o los límites
+        desde la UI no afectaba a ninguna generación hasta reiniciar el worker.
+        ``reload_if_changed`` compara el mtime, así que el caso normal (config
+        sin tocar) es un ``stat()`` por job.
         """
+        CR.reload_if_changed()
         try:
             return super().perform_job(job, queue)
         finally:
