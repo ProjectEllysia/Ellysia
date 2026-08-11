@@ -55,6 +55,23 @@ from src.modules.features.themis.managers import LybraEngineManager
 logger = logging.getLogger(__name__)
 
 
+def _resolve_host_down_if_open(uow: UnitOfWork, asset_id: int) -> None:
+    """Cierra una anomalía ``host_down`` abierta de este activo, si la había.
+
+    Dos caminos la resuelven, y por eso vive aquí y no dentro de un manager:
+    recibir un heartbeat **es** la condición de resolución para este tipo
+    concreto de anomalía (§7.2, no hace falta mirar las métricas del
+    payload), y marcar el activo como no persistente también — silenciar un
+    host mientras su aviso sigue sonando no silenciaría nada.
+    """
+    anomaly_repo = AnomalyRepository(uow)
+    open_host_down = anomaly_repo.get_active(asset_id, "host_down")
+    if open_host_down is not None:
+        open_host_down.state = "resolved"
+        open_host_down.resolved_at = utcnow_naive()
+        anomaly_repo.update(open_host_down)
+
+
 class HygeiaAssetManager:
     """
     Gestiona el alta, consulta, baja y credenciales de los activos
@@ -100,7 +117,9 @@ class HygeiaAssetManager:
         repo = build_repository(MonitoredAssetRepository)
         return any(asset.inventory for asset in repo.get_by_user(user_id))
 
-    def create_asset(self, hostname: str, os_name: Optional[str], labels: dict) -> dict:
+    def create_asset(
+        self, hostname: str, os_name: Optional[str], labels: dict, is_persistent: bool = True,
+    ) -> dict:
         """
         Da de alta un nuevo activo y emite su clave de agente.
 
@@ -112,6 +131,9 @@ class HygeiaAssetManager:
             hostname: Nombre del host que reportará el agente.
             os_name: Sistema operativo del host, si se conoce de antemano.
             labels: Etiquetas libres del activo (entorno, rol, ubicación...).
+            is_persistent: Si se espera que el host esté siempre encendido.
+                ``False`` para un host que se apaga a propósito: su caída no
+                abrirá anomalía ni disparará correo.
 
         Returns:
             Diccionario con ``asset`` (vista serializada del activo) y
@@ -144,6 +166,7 @@ class HygeiaAssetManager:
                 agent_key_id=key_id,
                 agent_key_hash=secret_hash,
                 heartbeat_interval_sec=CR.hygeia_config().heartbeat_interval_sec,
+                is_persistent=is_persistent,
                 user_id=self.user.id,
             )
             saved = repo.save(asset)
@@ -399,6 +422,39 @@ class HygeiaAssetManager:
             )
             MonitoredAssetRepository(uow).delete(asset)
 
+    def set_persistence(self, asset_id: int, is_persistent: bool) -> dict:
+        """
+        Cambia la expectativa de encendido de un activo.
+
+        Al marcarlo como no persistente se resuelve además su ``host_down``
+        abierto, si lo hay: quien silencia un host caído está silenciando ese
+        aviso concreto, no solo los futuros.
+
+        Args:
+            asset_id: Activo a modificar.
+            is_persistent: ``True`` si el host debería estar siempre
+                encendido; ``False`` si se apaga a propósito.
+
+        Returns:
+            La vista serializada del activo ya actualizado.
+
+        Raises:
+            AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
+        """
+        with UnitOfWork() as uow:
+            asset = assert_owned(
+                MonitoredAssetRepository, asset_id, self.user.id,
+                AssetNotFoundError, uow=uow,
+            )
+
+            asset.is_persistent = is_persistent
+            if not is_persistent:
+                _resolve_host_down_if_open(uow, asset.id)
+            MonitoredAssetRepository(uow).update(asset)
+
+            # Serializado dentro del bloque: fuera, la instancia queda detached.
+            return asset.to_dict()
+
     def rotate_key(self, asset_id: int) -> dict:
         """
         Regenera la clave de agente de un activo, invalidando la anterior.
@@ -499,7 +555,7 @@ class HygeiaIngestManager:
                 asset.inventory_collected_at = now
             asset_repo.update(asset)
 
-            self._resolve_host_down_if_open(uow, asset.id)
+            _resolve_host_down_if_open(uow, asset.id)
 
             metrics = payload["metrics"]
             # La forma del payload la conocen el schema de ingesta y
@@ -549,21 +605,6 @@ class HygeiaIngestManager:
         elapsed = (now - asset.last_seen_at).total_seconds()
         if elapsed < min_interval:
             raise IngestTooFrequentError(min_interval)
-
-    @staticmethod
-    def _resolve_host_down_if_open(uow: UnitOfWork, asset_id: int) -> None:
-        """Cierra una anomalía ``host_down`` abierta de este activo, si la había.
-
-        Recibir el heartbeat **es** la condición de resolución para este
-        tipo concreto de anomalía (§7.2) — no hace falta ninguna otra
-        comprobación sobre las métricas del payload.
-        """
-        anomaly_repo = AnomalyRepository(uow)
-        open_host_down = anomaly_repo.get_active(asset_id, "host_down")
-        if open_host_down is not None:
-            open_host_down.state = "resolved"
-            open_host_down.resolved_at = utcnow_naive()
-            anomaly_repo.update(open_host_down)
 
     @staticmethod
     def _evaluate_thresholds(uow: UnitOfWork, asset: MonitoredAsset, metrics: dict) -> list[int]:
@@ -733,8 +774,13 @@ class HygeiaMaintenanceManager:
            señal visual en el listado de activos, no abre ninguna incidencia.
         2. ``stale`` → ``offline`` en un segundo corte más permisivo
            (``offlineAfterMissed`` heartbeats perdidos): solo esta segunda
-           transición abre ``Anomaly(kind="host_down")``, y solo si no había
-           ya una abierta (apertura idempotente).
+           transición abre ``Anomaly(kind="host_down")``, y solo si el activo
+           es persistente y no había ya una abierta (apertura idempotente).
+
+        Un activo no persistente (``is_persistent=False``: un host que se
+        apaga a propósito) transiciona igual — su estado es un hecho
+        observado y la lista debe mostrarlo — pero no abre anomalía, y al no
+        haber anomalía tampoco hay correo.
 
         Cada activo se compara contra su propio ``heartbeat_interval_sec``
         (el que tiene configurado, tras un posible auto-ajuste), no contra
@@ -774,7 +820,11 @@ class HygeiaMaintenanceManager:
                     transitioned = asset_repo.transition_status_if_still_silent(
                         asset.id, offline_cutoff, "stale", "offline",
                     )
-                    if transitioned and anomaly_repo.get_active(asset.id, "host_down") is None:
+                    if (
+                        transitioned
+                        and asset.is_persistent
+                        and anomaly_repo.get_active(asset.id, "host_down") is None
+                    ):
                         saved = anomaly_repo.save(Anomaly(
                             asset_id=asset.id, kind="host_down", severity="critical",
                         ))

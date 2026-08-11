@@ -22,6 +22,14 @@
               </select>
             </label>
 
+            <label class="check">
+              <input v-model="powersOff" type="checkbox" />
+              <span class="check-text">
+                Este host se apaga a propósito
+                <small>Un portátil o un equipo que se suspende. No se avisará cuando esté caído.</small>
+              </span>
+            </label>
+
             <p v-if="localError" class="error">{{ localError }}</p>
 
             <div class="modal-footer">
@@ -49,16 +57,19 @@ const emit = defineEmits(['submit', 'close'])
 
 const hostname = ref('')
 const os = ref(null)
+// Se pregunta en positivo ("se apaga") porque es la excepción; la API lo
+// recibe en negativo (`isPersistent`), que es lo que el detector consulta.
+const powersOff = ref(false)
 const localError = ref('')
 
 watch(() => props.show, (v) => {
-  if (v) { hostname.value = ''; os.value = null; localError.value = '' }
+  if (v) { hostname.value = ''; os.value = null; powersOff.value = false; localError.value = '' }
 })
 
 function submit() {
   if (!hostname.value) { localError.value = 'El hostname es obligatorio.'; return }
   localError.value = ''
-  emit('submit', { hostname: hostname.value, os: os.value })
+  emit('submit', { hostname: hostname.value, os: os.value, isPersistent: !powersOff.value })
 }
 </script>
 
@@ -77,6 +88,11 @@ function submit() {
   background: var(--bg); color: var(--text); font-size: var(--fs-md);
 }
 .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
+
+.check { display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.85rem; cursor: pointer; }
+.check input { margin-top: 0.15rem; accent-color: var(--accent); }
+.check-text { display: flex; flex-direction: column; gap: 0.15rem; font-size: var(--fs-md); color: var(--text); }
+.check-text small { font-size: var(--fs-sm); color: var(--text-muted); }
 
 .error { color: var(--danger); font-size: var(--fs-sm); margin: 0 0 0.6rem; }
 

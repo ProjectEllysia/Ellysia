@@ -42,6 +42,7 @@ from .schemas import (
     AssetMetricsQuerySchema,
     AssetMetricsResponseSchema,
     AssetSchema,
+    AssetUpdateRequestSchema,
     IngestRequestSchema,
     IngestResponseSchema,
     InventoryAnalysisSummarySchema,
@@ -77,6 +78,7 @@ def create_asset(data):
         hostname=data["hostname"],
         os_name=data["os"],
         labels=data["labels"],
+        is_persistent=data["isPersistent"],
     )
     logger.info(f"Activo Hygeia creado | user={current_actor()} hostname={data['hostname']}")
     return result
@@ -198,6 +200,27 @@ def get_asset_analysis(asset_id):
     user = get_current_user()
     manager = HygeiaAssetManager(user)
     return manager.get_analysis_summary(asset_id)
+
+
+@hygeia_blp.patch("/assets/<int:asset_id>")
+@hygeia_blp.arguments(AssetUpdateRequestSchema)
+@hygeia_blp.response(200, AssetSchema, description="Activo actualizado")
+@hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@hygeia_blp.alt_response(404, schema=ErrorSchema, description="Asset not found")
+@limiter.limit("30 per hour")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.HYGEIA_UPDATE])
+@handle_exceptions(default_exception=AssetNotFoundError, logger=logger)
+def update_asset(data, asset_id):
+    """Marcar si un activo debería estar siempre encendido o se apaga a propósito"""
+    user = get_current_user()
+    manager = HygeiaAssetManager(user)
+    result = manager.set_persistence(asset_id, data["isPersistent"])
+    logger.info(
+        f"Persistencia del activo {asset_id} = {data['isPersistent']} | user={current_actor()}"
+    )
+    return result
 
 
 @hygeia_blp.delete("/assets/<int:asset_id>")

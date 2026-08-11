@@ -47,11 +47,11 @@ export const useHygeiaStore = defineStore('hygeia', () => {
   }
 
   /** Da de alta un activo. La clave de agente queda en `state.lastAgentKey`, una única vez. */
-  async function createAsset({ hostname, os = null, labels = {} }) {
+  async function createAsset({ hostname, os = null, labels = {}, isPersistent = true }) {
     try {
       const res = await apiFetch('/hygeia/assets', {
         method: 'POST',
-        body: JSON.stringify({ hostname, os, labels }),
+        body: JSON.stringify({ hostname, os, labels, isPersistent }),
       })
       if (!res?.ok) { state.error = await apiError(res, 'No se pudo dar de alta el activo.'); return null }
       const data = await res.json()
@@ -81,6 +81,27 @@ export const useHygeiaStore = defineStore('hygeia', () => {
       state.lastAgentKey = data.agentKey
       return data.agentKey
     } catch { state.error = 'No se pudo conectar con la API.'; return null }
+  }
+
+  /**
+   * Marca si un activo debería estar siempre encendido o se apaga a propósito.
+   *
+   * La fila se reemplaza con la que devuelve la API en vez de esperar al
+   * siguiente sondeo de `fetchAssets` (uno de cada cuatro ticks): el estado del
+   * interruptor tiene que verse en el momento en que se pulsa.
+   */
+  async function setPersistence(id, isPersistent) {
+    try {
+      const res = await apiFetch(`/hygeia/assets/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ isPersistent }),
+      })
+      if (!res?.ok) { state.error = await apiError(res, 'No se pudo actualizar el activo.'); return false }
+      const asset = await res.json()
+      const index = state.assets.findIndex((a) => a.id === id)
+      if (index !== -1) state.assets[index] = asset
+      return true
+    } catch { state.error = 'No se pudo conectar con la API.'; return false }
   }
 
   /** Selecciona un activo para ver su detalle y carga sus métricas. */
@@ -229,7 +250,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
 
   return {
     state,
-    fetchAssets, createAsset, deleteAsset, rotateKey,
+    fetchAssets, createAsset, deleteAsset, rotateKey, setPersistence,
     selectAsset, fetchMetrics, fetchLatest, fetchInventory, clearAgentKey,
     fetchAnalysis, analyzeInventory,
     $reset,

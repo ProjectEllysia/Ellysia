@@ -45,14 +45,24 @@
     <ul v-else class="rows">
       <li v-for="asset in assets" :key="asset.id" class="row" :class="{ 'row--selected': asset.id === selectedId }">
         <button class="row-select" :aria-pressed="asset.id === selectedId" @click="$emit('select', asset.id)">
-          <span class="pulse" :class="`pulse--${asset.status}`" aria-hidden="true"></span>
+          <span class="pulse" :class="pulseClass(asset)" aria-hidden="true"></span>
           <span class="row-text">
             <span class="row-host">{{ asset.hostname }}</span>
-            <span class="row-meta">{{ statusLabel(asset.status) }} · {{ timeAgo(asset.lastSeenAt) }}</span>
+            <span class="row-meta">{{ statusLabel(asset) }} · {{ timeAgo(asset.lastSeenAt) }}</span>
           </span>
         </button>
 
         <span class="row-actions">
+          <button class="btn-icon" :class="{ 'btn-icon--muted': !asset.isPersistent }"
+            :title="asset.isPersistent ? 'Marcar como host que se apaga a propósito' : 'Marcar como host siempre encendido'"
+            :aria-pressed="!asset.isPersistent"
+            :aria-label="`${asset.hostname}: ${asset.isPersistent ? 'dejar de avisar cuando esté caído' : 'volver a avisar cuando esté caído'}`"
+            @click="$emit('toggle-persistent', asset.id)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M12 3v9" />
+              <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+            </svg>
+          </button>
           <button class="btn-icon" title="Rotar clave" :aria-label="`Rotar la clave de ${asset.hostname}`"
             @click="$emit('rotate', asset.id)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -81,13 +91,27 @@ defineProps({
   loading: { type: Boolean, default: false },
   error: { type: String, default: null },
 })
-defineEmits(['select', 'create', 'delete', 'rotate', 'refresh'])
+defineEmits(['select', 'create', 'delete', 'rotate', 'refresh', 'toggle-persistent'])
 
 /** Filas fantasma mientras carga: las que caben sin alargar el panel. */
 const SKELETON_ROWS = 4
 
 const STATUS_LABELS = { pending: 'Pendiente', online: 'En línea', stale: 'Inestable', offline: 'Caído' }
-function statusLabel(status) { return STATUS_LABELS[status] || status }
+
+/**
+ * Un activo que se apaga a propósito no está "caído": pintarlo en rojo sería
+ * exactamente el ruido que su marca elimina. El estado es el mismo (`offline`),
+ * solo cambia cómo se lee.
+ */
+function statusLabel(asset) {
+  if (asset.status === 'offline' && asset.isPersistent === false) return 'Apagado'
+  return STATUS_LABELS[asset.status] || asset.status
+}
+
+function pulseClass(asset) {
+  if (asset.status === 'offline' && asset.isPersistent === false) return 'pulse--dormant'
+  return `pulse--${asset.status}`
+}
 </script>
 
 <style scoped>
@@ -120,6 +144,8 @@ function statusLabel(status) { return STATUS_LABELS[status] || status }
 .btn-icon svg { width: 14px; height: 14px; }
 .btn-icon:hover { border-color: var(--accent); color: var(--accent-bright); }
 .btn-icon--danger:hover { border-color: var(--danger); color: var(--danger); }
+/* Interruptor pulsado: el activo está marcado como "se apaga a propósito". */
+.btn-icon--muted { border-style: dashed; opacity: 0.65; }
 
 /* ── Filas ── */
 .rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
@@ -159,6 +185,8 @@ function statusLabel(status) { return STATUS_LABELS[status] || status }
 .pulse--stale { background: var(--warn); }
 .pulse--offline { background: var(--danger); }
 .pulse--pending { background: var(--text-muted); box-shadow: inset 0 0 0 1px var(--border-med); }
+/* Caído a propósito: apagado, no en alarma. */
+.pulse--dormant { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-muted); }
 /* La fila fantasma repite el padding y el gap de .row-select. El min-height
    es el alto medido de una fila real (55px): las dos líneas del fantasma son
    algo más bajas que el hostname y su metadato, y sin esto la lista crecía

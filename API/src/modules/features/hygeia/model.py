@@ -21,6 +21,7 @@ Example:
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -28,6 +29,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    true,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -75,6 +77,14 @@ class MonitoredAsset(Base):
             tras el último heartbeat evaluado. Es la memoria que necesita
             la histéresis de ``services/detection.py`` para decidir cuándo
             abrir una anomalía sin tener que releer snapshots históricos.
+        is_persistent: Si el host debería estar encendido siempre. ``True``
+            (por defecto) es el comportamiento de un servidor 24/7: quedarse
+            callado es una incidencia y el detector de presencia abre
+            ``host_down``. ``False`` marca un host que se apaga a propósito
+            (un portátil, un sobremesa que se suspende de noche): sigue
+            transicionando a ``offline`` porque el estado es un hecho, pero
+            no abre anomalía ni dispara correo — una caída esperada avisando
+            cada noche solo entrena al dueño a ignorar los avisos de verdad.
         thresholds: Umbrales específicos de este activo, en el mismo formato
             que el bloque ``features.hygeia.thresholds`` de la configuración global.
             Si una métrica no aparece aquí, se usa el umbral global.
@@ -115,6 +125,7 @@ class MonitoredAsset(Base):
     heartbeat_interval_sec = Column(Integer, nullable=True)
     breach_counters        = Column(JSONB, nullable=True)
     thresholds             = Column(JSONB, nullable=True)
+    is_persistent          = Column(Boolean, nullable=False, default=True, server_default=true())
 
     inventory               = Column(JSONB, nullable=True)
     inventory_collected_at  = Column(DateTime, nullable=True)
@@ -143,7 +154,7 @@ class MonitoredAsset(Base):
 
         Returns:
             Diccionario con id, hostname, os, kernel, labels, status,
-            lastSeenAt, uptimeSec, agentVersion y createdAt.
+            isPersistent, lastSeenAt, uptimeSec, agentVersion y createdAt.
         """
         return {
             "id":           self.id,
@@ -152,6 +163,7 @@ class MonitoredAsset(Base):
             "kernel":       self.kernel,
             "labels":       self.labels or {},
             "status":       self.status,
+            "isPersistent": self.is_persistent,
             "lastSeenAt":   self.last_seen_at,
             "uptimeSec":    self.uptime_sec,
             "agentVersion": self.agent_version,
