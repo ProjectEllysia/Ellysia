@@ -138,7 +138,12 @@
 
                 <div v-if="docsLoading(scan.id) && !docsFor(scan.id).length" class="doc-empty">Cargando documentos…</div>
                 <div v-else-if="!docsFor(scan.id).length" class="doc-empty">Sin documentos generados</div>
-                <div v-else class="doc-list">
+                <!-- TransitionGroup: la tarjeta de un documento nuevo (recién generado) entra
+                     con una animación en vez de aparecer de golpe, y el resto se desliza para
+                     hacerle sitio. El estado (pendiente → generando → listo) es un cambio en el
+                     mismo doc, no una entrada/salida de la lista, así que ese swap lo anima el
+                     <Transition> interno de .doc-right, con key por estado. -->
+                <TransitionGroup v-else tag="div" name="doc-item" class="doc-list">
                   <div v-for="doc in docsFor(scan.id)" :key="doc.documentId" class="doc-item">
                     <div class="doc-left">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="doc-icon"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -146,20 +151,22 @@
                       <span v-if="doc.createdAt" class="doc-date">{{ fmtDate(doc.createdAt) }}</span>
                     </div>
                     <div class="doc-right">
-                      <template v-if="doc.status === 'done'">
-                        <button class="doc-icon-btn" @click="$emit('download-doc', doc.documentId)" title="Descargar">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                        </button>
-                        <button class="doc-icon-btn danger" @click="$emit('delete-doc', scan.id, doc.documentId)" title="Eliminar">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-                        </button>
-                      </template>
-                      <span v-else-if="doc.status === 'running'" class="doc-status running">Generando…</span>
-                      <span v-else-if="doc.status === 'pending'" class="doc-status pending">Pendiente</span>
-                      <span v-else-if="doc.status === 'error'" class="doc-status error">Error</span>
+                      <Transition name="fade-swap" mode="out-in">
+                        <span v-if="doc.status === 'done'" key="done" class="doc-actions">
+                          <button class="doc-icon-btn" @click="$emit('download-doc', doc.documentId)" title="Descargar">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                          </button>
+                          <button class="doc-icon-btn danger" @click="$emit('delete-doc', scan.id, doc.documentId)" title="Eliminar">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                          </button>
+                        </span>
+                        <span v-else-if="doc.status === 'running'" key="running" class="doc-status running">Generando…</span>
+                        <span v-else-if="doc.status === 'pending'" key="pending" class="doc-status pending">Pendiente</span>
+                        <span v-else-if="doc.status === 'error'" key="error" class="doc-status error">Error</span>
+                      </Transition>
                     </div>
                   </div>
-                </div>
+                </TransitionGroup>
 
                 <div class="doc-gen-bar">
                   <label class="doc-checkbox"><input type="checkbox" v-model="aiFlags[scan.id]" /><span>Análisis IA</span></label>
@@ -430,9 +437,18 @@ function fmtDate(iso) {
 .doc-refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .doc-refresh-btn svg { width: 12px; height: 12px; }
 .doc-empty { font-size: var(--fs-md); color: var(--text-muted); padding: 0.5rem 0; }
-.doc-list { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.6rem; }
+.doc-list { position: relative; display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.6rem; }
 .doc-item { display: flex; align-items: center; justify-content: space-between; padding: 0.4rem 0.55rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
 .doc-item:hover { border-color: var(--accent); }
+/* Mismo patrón que .finding-item: la tarjeta entra deslizándose, el resto de
+   la lista se mueve para hacerle sitio, y una salida (eliminar documento) no
+   deja un hueco brusco. */
+.doc-item-enter-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.doc-item-enter-from { opacity: 0; transform: translateY(-8px); }
+.doc-item-leave-active { transition: opacity 0.15s ease; position: absolute; width: 100%; }
+.doc-item-leave-to { opacity: 0; }
+.doc-item-move { transition: transform 0.25s ease; }
+.doc-actions { display: flex; gap: 0.2rem; align-items: center; }
 .doc-left { display: flex; align-items: center; gap: 0.4rem; min-width: 0; flex: 1; }
 .doc-icon { width: 13px; height: 13px; color: var(--text-muted); flex-shrink: 0; }
 .doc-name { font-size: var(--fs-md); color: var(--text); font-weight: 500; white-space: nowrap; }
@@ -449,9 +465,24 @@ function fmtDate(iso) {
 .doc-status.error   { background: var(--danger-dim); color: var(--danger); }
 .doc-gen-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
 .doc-checkbox { display: flex; align-items: center; gap: 0.35rem; font-size: var(--fs-md); color: var(--text-dim); cursor: pointer; user-select: none; }
-.doc-checkbox input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; padding: 0; border: 1.5px solid var(--text-muted); border-radius: 3px; background: transparent; cursor: pointer; margin: 0; flex-shrink: 0; position: relative; }
+/* align-items:center alinea la CAJA de la casilla con la caja de línea del
+   texto, no con su tinta: Alegreya Sans reserva descendente aunque "Análisis
+   IA" no tenga ninguna letra que baje de la línea base, así que esa caja
+   queda descentrada respecto al texto visible. translateY corrige ese
+   desfase óptico (medido con canvas measureText: ~1.5px a este tamaño). */
+.doc-checkbox input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; padding: 0; border: 1.5px solid var(--text-muted); border-radius: 3px; background: transparent; cursor: pointer; margin: 0; flex-shrink: 0; position: relative; transform: translateY(-1.5px); transition: background 0.15s ease, border-color 0.15s ease; }
 .doc-checkbox input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
-.doc-checkbox input[type="checkbox"]:checked::after { content: ''; position: absolute; top: 1px; left: 2px; width: 3px; height: 6px; border: solid var(--on-accent); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+/* Centrado por porcentaje + translate(-50%,-50%) en vez de top/left fijos en
+   píxeles: esos quedaban descuadrados según el redondeo del borde y se veían
+   corridos a la izquierda. El ::after existe siempre (no solo en :checked)
+   para poder animar entre opacity/scale 0 y 1 en vez de aparecer de golpe. */
+.doc-checkbox input[type="checkbox"]::after {
+  content: ''; position: absolute; left: 50%; top: 45%; width: 28%; height: 55%;
+  border: solid var(--on-accent); border-width: 0 1.5px 1.5px 0;
+  transform: translate(-50%, -50%) rotate(45deg) scale(0); opacity: 0;
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.12s ease;
+}
+.doc-checkbox input[type="checkbox"]:checked::after { transform: translate(-50%, -50%) rotate(45deg) scale(1); opacity: 1; }
 .doc-gen-btn { display: flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.7rem; font-size: var(--fs-md); font-weight: 600; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 6px; color: var(--accent-bright); cursor: pointer; transition: all 0.2s; }
 .doc-gen-btn:hover { background: var(--accent); color: var(--on-accent); }
 .doc-gen-btn svg { width: 12px; height: 12px; }
@@ -478,6 +509,8 @@ function fmtDate(iso) {
   .spin { animation: none !important; }
   .chevron, .expand-enter-active, .expand-leave-active, .fade-swap-enter-active, .fade-swap-leave-active,
   .findings-panel-enter-active, .findings-panel-leave-active,
-  .finding-item-enter-active, .finding-item-leave-active, .finding-item-move { transition: none !important; }
+  .finding-item-enter-active, .finding-item-leave-active, .finding-item-move,
+  .doc-checkbox input[type="checkbox"], .doc-checkbox input[type="checkbox"]::after,
+  .doc-item-enter-active, .doc-item-leave-active, .doc-item-move { transition: none !important; }
 }
 </style>

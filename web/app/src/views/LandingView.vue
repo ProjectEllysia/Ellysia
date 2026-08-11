@@ -302,13 +302,33 @@
       </div>
 
       <div class="faq-list">
-        <details v-for="item in faqs" :key="item.q" class="faq-item">
+        <details v-for="item in faqs" :key="item.q" class="faq-item" v-animate-details>
           <summary class="faq-q">
             {{ item.q }}
             <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
           </summary>
           <p class="faq-a">{{ item.a }}</p>
         </details>
+      </div>
+    </section>
+
+    <!-- ═══════════ CIERRE ═══════════ -->
+    <!-- La página terminaba en la placa de versión y un enlace a GitHub: un
+         final de proyecto, no de producto. Aquí se pide algo, por fin.
+         La pauta dorada hace de costura con la cinta de tecnologías, en vez
+         de un borde recto — es el mismo recurso que ya separa las estelas. -->
+    <div class="horizon-divider closing-seam" aria-hidden="true"></div>
+    <section class="closing">
+      <h2 class="closing-title">Defenderse no debería ser un privilegio</h2>
+      <p class="closing-lede">
+        Crea tu cuenta y lanza tu primer análisis hoy. Gratis, sin tarjeta.
+      </p>
+      <div class="closing-actions">
+        <router-link v-if="!auth.isAuthenticated" to="/login?registro" class="cta cta--solid">
+          Crear cuenta gratis
+        </router-link>
+        <router-link v-else to="/themis" class="cta cta--solid">Ir a mis herramientas</router-link>
+        <router-link to="/planes" class="cta cta--line">Ver los planes</router-link>
       </div>
     </section>
 
@@ -326,23 +346,6 @@
       <ul class="sr-only">
         <li v-for="tech in technologies" :key="tech">{{ tech }}</li>
       </ul>
-    </section>
-
-    <!-- ═══════════ CIERRE ═══════════ -->
-    <!-- La página terminaba en la placa de versión y un enlace a GitHub: un
-         final de proyecto, no de producto. Aquí se pide algo, por fin. -->
-    <section class="closing">
-      <h2 class="closing-title">Defenderse no debería ser un privilegio</h2>
-      <p class="closing-lede">
-        Crea tu cuenta y lanza tu primer análisis hoy. Gratis, sin tarjeta.
-      </p>
-      <div class="closing-actions">
-        <router-link v-if="!auth.isAuthenticated" to="/login?registro" class="cta cta--solid">
-          Crear cuenta gratis
-        </router-link>
-        <router-link v-else to="/themis" class="cta cta--solid">Ir a mis herramientas</router-link>
-        <router-link to="/planes" class="cta cta--line">Ver los planes</router-link>
-      </div>
     </section>
 
     <!-- ═══════════ PLACA ═══════════ -->
@@ -369,6 +372,7 @@ import { useThemeStore } from '@/stores/themeStore'
 import { useAccountStore } from '@/stores/accountStore'
 import { useDismissable } from '@/composables/useDismissable'
 import { useAppVersion } from '@/composables/useAppVersion'
+import { vAnimateDetails } from '@/composables/useAnimatedDetails'
 import { HEADLINE, SHORT_LABELS, euros, describe } from '@/constants/planFormat'
 import ElysianScene from '@/components/shared/ElysianScene.vue'
 import SiteFooter from '@/components/shared/SiteFooter.vue'
@@ -668,10 +672,10 @@ onUnmounted(() => {
   letter-spacing: 0.38em; text-transform: uppercase;
   color: var(--text);
 }
-.ely-nav { display: flex; gap: 2.2rem; justify-self: center; }
+.ely-nav { display: flex; align-items: center; gap: 2.2rem; justify-self: center; }
 .nav-link {
   font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
-  font-size: var(--fs-md); font-weight: 500;
+  font-size: var(--fs-lg); font-weight: 900;
   letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--text-dim);
   padding: 0.3rem 0.1rem;
@@ -1173,16 +1177,22 @@ onUnmounted(() => {
 }
 
 /* ═══════════ La senda — cómo se empieza ═══════════ */
+/* Pasos, planes y preguntas forman una sola sala, con --surface en vez de
+   --bg: antes las tres seguían el fondo de las estelas de arriba, así que la
+   página entera desde "Las cinco herramientas" hasta la cinta de tecnologías
+   se leía como un único bloque sin costuras. Mismo recurso que ya usa
+   .philosophy para separarse de las estelas. */
 .path-section {
-  max-width: 1080px;
   margin: 0 auto;
-  padding: 4rem 3rem 1rem;
+  padding: 4.5rem 3rem 1rem;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
 }
 .path-intro { text-align: center; margin-bottom: 3.5rem; }
 .path-eyebrow {
   display: block;
   font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
-  font-size: var(--fs-md); font-weight: 500;
+  font-size: var(--fs-xl); font-weight: 500;
   letter-spacing: 0.42em; text-transform: uppercase;
   color: var(--accent);
 }
@@ -1198,9 +1208,10 @@ onUnmounted(() => {
    lo dice mejor que un número. Es la misma pauta dorada de la filosofía
    (.philo-text::before), puesta en horizontal. */
 .path {
+  max-width: 1080px;
   position: relative;
   list-style: none;
-  margin: 0; padding: 0;
+  margin: 0 auto; padding: 0;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 2.5rem;
@@ -1248,9 +1259,9 @@ onUnmounted(() => {
 
 /* ═══════════ Planes ═══════════ */
 .plans-section {
-  max-width: 1180px;
   margin: 0 auto;
-  padding: 4.5rem 3rem 1rem;
+  padding: 5rem 5rem 1rem;
+  background: var(--surface);
 }
 .plans-intro { text-align: center; margin-bottom: 3rem; }
 .plans-bajada {
@@ -1262,6 +1273,8 @@ onUnmounted(() => {
   padding-bottom: 2rem;
 }
 .plans-grid {
+  margin: 0 auto;
+  max-width: 1200px;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 1.1rem;
@@ -1270,7 +1283,7 @@ onUnmounted(() => {
   position: relative;
   display: flex; flex-direction: column;
   padding: 1.5rem 1.3rem 1.3rem;
-  background: var(--surface);
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   transition: border-color var(--transition), transform var(--transition);
@@ -1290,12 +1303,12 @@ onUnmounted(() => {
 }
 .plan-name {
   font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
-  font-size: var(--fs-lg); font-weight: 600;
+  font-size: var(--fs-2xl); font-weight: 600;
   letter-spacing: 0.16em; text-transform: uppercase;
   color: var(--text);
 }
 .plan-tagline {
-  font-size: var(--fs-sm); color: var(--text-muted);
+  font-size: var(--fs-md); color: var(--text-muted);
   margin-top: 0.35rem; min-height: 2.6em;
 }
 .plan-price { margin-top: 0.9rem; display: flex; align-items: baseline; gap: 0.25rem; }
@@ -1303,14 +1316,14 @@ onUnmounted(() => {
   font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-2xl); font-weight: 700; color: var(--text);
 }
-.plan-period { font-size: var(--fs-sm); color: var(--text-muted); }
+.plan-period { font-size: var(--fs-md); color: var(--text-muted); }
 .plan-limits {
   list-style: none; margin: 1.1rem 0 0; padding: 1.1rem 0 0;
   border-top: 1px solid var(--border);
   display: flex; flex-direction: column; gap: 0.5rem;
   flex: 1;
 }
-.plan-limits li { display: flex; justify-content: space-between; gap: 0.6rem; font-size: var(--fs-sm); }
+.plan-limits li { display: flex; justify-content: space-between; gap: 0.6rem; font-size: var(--fs-md); }
 .plan-limit-label { color: var(--text-muted); }
 .plan-limit-value { color: var(--text-dim); font-weight: 600; text-align: right; }
 .plan-cta {
@@ -1318,7 +1331,7 @@ onUnmounted(() => {
   margin-top: 1.2rem; padding: 0.55rem 1rem;
   border: 1px solid var(--border-med); border-radius: var(--radius-sm);
   font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
-  font-size: var(--fs-sm); font-weight: 600;
+  font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--text-dim);
   transition: all var(--transition);
@@ -1337,13 +1350,14 @@ onUnmounted(() => {
 
 /* ═══════════ Preguntas ═══════════ */
 .faq-section {
-  max-width: 780px;
   margin: 0 auto;
-  padding: 4.5rem 3rem 1rem;
-}
-.faq-list { display: flex; flex-direction: column; gap: 0.6rem; }
-.faq-item {
+  padding: 3rem 3rem 4.5rem;
   background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.faq-list { display: flex; flex-direction: column; gap: 0.6rem; margin: 0 auto; max-width: 720px; }
+.faq-item {
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
@@ -1361,7 +1375,7 @@ onUnmounted(() => {
 /* El triángulo por defecto de <summary> no encaja con el resto; se sustituye
    por el mismo chevron del nav. */
 .faq-q::-webkit-details-marker { display: none; }
-.faq-q:hover { color: var(--accent); }
+.faq-q:hover { color: var(--accent); transition: 0.2s; }
 .faq-q:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .faq-chevron {
   width: 15px; height: 15px; flex-shrink: 0;
@@ -1377,14 +1391,22 @@ onUnmounted(() => {
 }
 
 /* ═══════════ Cierre ═══════════ */
+/* La pauta que hace de costura con la cinta de tecnologías (ver el div antes
+   de esta sección en el template). */
+.closing-seam { max-width: 420px; }
+
 .closing {
-  max-width: 780px;
-  margin: 5rem auto 0;
-  padding: 3.5rem 3rem;
+  margin: 0 auto;
+  padding: 4rem 3rem 4.5rem;
   text-align: center;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  background: radial-gradient(ellipse 700px 320px at 50% 100%, var(--sun-glow) 0%, transparent 70%);
+  /* Antes el resplandor nacía en el borde inferior (at 50% 100%): su punto
+     más brillante coincidía exactamente con el border-bottom, así que la
+     línea cortaba el brillo por la mitad y la sección entera parecía recortada
+     con tijera. Ahora nace arriba, junto al título — como el resplandor de
+     .philosophy — y se apaga mucho antes de llegar a ningún borde. Sin bordes
+     propios, además: la pauta dorada de arriba y el hueco antes de la placa ya
+     separan la sección sin necesidad de una línea recta. */
+  background: radial-gradient(ellipse 620px 300px at 50% 0%, var(--sun-glow) 0%, transparent 65%);
 }
 .closing-title {
   font-family: var(--font-display); font-size-adjust: var(--fsa-display);
@@ -1404,14 +1426,14 @@ onUnmounted(() => {
 
 /* ═══════════ Cinta de tecnologías ═══════════ */
 .forge {
-  margin-top: 5rem;
+  margin-top: 0rem;
   padding: 2.4rem 0 0.4rem;
   text-align: center;
 }
 .forge-eyebrow {
   display: block;
   font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
-  font-size: var(--fs-sm); font-weight: 500;
+  font-size: var(--fs-md); font-weight: 500;
   letter-spacing: 0.4em; text-transform: uppercase;
   color: var(--text-muted);
   margin-bottom: 1.5rem;
@@ -1488,7 +1510,7 @@ onUnmounted(() => {
 /* ═══════════ Menú móvil ═══════════ */
 /* En escritorio no existe: la navegación de arriba ya está a la vista. */
 .menu-toggle { display: none; }
-.nav-link--plain { background: none; border: none; cursor: pointer; }
+.nav-link--plain { display: inline-flex; align-items: center; background: none; border: none; cursor: pointer; }
 
 .mobile-menu {
   position: absolute;
@@ -1571,7 +1593,7 @@ onUnmounted(() => {
      sentido horizontal, así que se apaga. */
   .path { grid-template-columns: 1fr; gap: 2.2rem; }
   .path::before { display: none; }
-  .path-section, .plans-section, .faq-section { padding-inline: 1.5rem; }
+  .path-section, .plans-section, .faq-section { width: 100% }
   .closing { padding: 2.8rem 1.5rem; }
 }
 @media (max-width: 860px) {
