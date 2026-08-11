@@ -468,6 +468,36 @@ def test_deleting_document_deletes_its_campaigns(
     assert client.get(f"/aegis/quiz?t={token}").status_code == 404
 
 
+def test_deleting_list_deletes_its_campaigns(
+    app, client, admin_user, admin_headers, make_aegis_doc_with_quiz,
+):
+    """Campaign.list_id tampoco tiene ON DELETE CASCADE: sin borrar antes las
+    campañas, el DELETE de la lista reventaba con un IntegrityError de FK en el
+    commit de teardown — un 500 sin traza en el log."""
+    doc_id = make_aegis_doc_with_quiz(admin_user.id)
+    list_id = client.post(
+        "/aegis/lists", headers=admin_headers, json={"name": "L"}
+    ).get_json()["id"]
+    client.post(
+        f"/aegis/lists/{list_id}/recipients", headers=admin_headers,
+        json={"recipients": [{"email": "empleado@empresa.test"}]},
+    )
+    campaign_id = client.post(
+        "/aegis/campaigns", headers=admin_headers,
+        json={"documentId": doc_id, "listId": list_id, "name": "C"},
+    ).get_json()["id"]
+    with mock.patch.object(TaskQueue, "get_instance", return_value=_FakeTaskQueue()):
+        client.post(f"/aegis/campaigns/{campaign_id}/launch", headers=admin_headers)
+    token = _fetch_token_for_email(app, campaign_id, "empleado@empresa.test")
+
+    resp = client.delete(f"/aegis/lists/{list_id}", headers=admin_headers)
+    assert resp.status_code == 200
+
+    assert client.get(f"/aegis/lists/{list_id}", headers=admin_headers).status_code == 404
+    assert client.get(f"/aegis/campaigns/{campaign_id}", headers=admin_headers).status_code == 404
+    assert client.get(f"/aegis/quiz?t={token}").status_code == 404
+
+
 def test_public_quiz_unknown_token_returns_404(client):
     resp = client.get("/aegis/quiz?t=this-token-does-not-exist")
     assert resp.status_code == 404
