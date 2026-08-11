@@ -61,7 +61,7 @@ def test_root_layout(raw_config):
 
 
 @pytest.mark.parametrize("branch, expected_children", [
-    ("general",        {"publicUrl", "directories", "security", "registration"}),
+    ("general",        {"directories", "security", "registration"}),
     ("general.security", {"argon2", "jwt", "mfa"}),
     ("infrastructure", {"database", "redis", "taskqueue"}),
     ("tools",          {"scribe", "herald"}),
@@ -254,8 +254,6 @@ def test_block_covers_its_branch_exactly(raw_config, block_type, _accessor):
 # recorrido de campos no puede ver: los campos guardan el valor crudo, así que
 # comparar bloques nunca ejercita la resolución.
 ENV_BACKED_PROPERTIES = [
-    ("PUBLIC_WEB_URL", "https://ellysia.example", "public_url",
-     lambda: CR.GeneralConfig(configured_public_url="http://del-fichero"), "https://ellysia.example"),
     ("REDIS_HOST", "redis.interno", "host",
      lambda: CR.RedisConfig(configured_host="del-fichero"), "redis.interno"),
     ("REDIS_PORT", "6380", "port",
@@ -285,19 +283,17 @@ def test_environment_wins_over_the_configured_value(
 
 
 @pytest.mark.parametrize("env_var, property_name, build_block, expected", [
-    ("PUBLIC_WEB_URL", "public_url",
-     lambda: CR.GeneralConfig(configured_public_url="http://del-fichero/"), "http://del-fichero"),
     ("REDIS_HOST", "host",
      lambda: CR.RedisConfig(configured_host="del-fichero"), "del-fichero"),
     ("TASKQUEUE_MAX_WORKERS", "max_workers",
      lambda: CR.TaskQueueConfig(configured_max_workers=4), 4),
     ("NVD_API_KEY", "nvd_api_key",
      lambda: CR.KnowledgeBaseConfig(configured_nvd_api_key=""), None),
-], ids=["public_url", "redis_host", "max_workers", "nvd_api_key"])
+], ids=["redis_host", "max_workers", "nvd_api_key"])
 def test_falls_back_to_the_configured_value_without_the_environment(
     env_var, property_name, build_block, expected, monkeypatch
 ):
-    """Sin la env var manda el fichero (y ``public_url`` pierde la barra final)."""
+    """Sin la env var manda el fichero."""
     monkeypatch.delenv(env_var, raising=False)
 
     assert getattr(build_block(), property_name) == expected

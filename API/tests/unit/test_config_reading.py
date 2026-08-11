@@ -47,6 +47,18 @@ def test_jwt_algorithm_accepts_allowed_hs_algorithm(monkeypatch):
     assert CR.jwt_config().algorithm == "HS512"
 
 
+def test_general_config_public_url_from_env(monkeypatch):
+    monkeypatch.setenv("PUBLIC_WEB_URL", "https://ellysia.example/")
+    assert CR.general_config().public_url == "https://ellysia.example"
+
+
+def test_general_config_public_url_falls_back_without_env(monkeypatch):
+    """Sin PUBLIC_WEB_URL cae al valor de desarrollo de Vite: no hay respaldo
+    en SecOpsConfig.json, publicUrl solo se configura por .env."""
+    monkeypatch.delenv("PUBLIC_WEB_URL", raising=False)
+    assert CR.general_config().public_url == "http://localhost:5173"
+
+
 def test_taskqueue_max_workers_does_not_leak_into_the_cached_config(monkeypatch):
     """El override de entorno no debe escribirse dentro de la config cargada.
 

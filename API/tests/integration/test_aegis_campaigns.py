@@ -111,10 +111,7 @@ def local_email_config(monkeypatch, smtp_catcher):
     )
     monkeypatch.setattr(CR, "herald_config", lambda: fake_herald_config)
     monkeypatch.setattr(CR, "get_smtp_environment", lambda: {"username": "", "password": ""})
-    monkeypatch.setattr(
-        CR, "general_config",
-        lambda: CR.GeneralConfig(configured_public_url="http://localhost:5173"),
-    )
+    monkeypatch.setenv("PUBLIC_WEB_URL", "http://localhost:5173")
     return handler
 
 
