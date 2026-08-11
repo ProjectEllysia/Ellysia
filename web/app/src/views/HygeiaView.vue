@@ -14,6 +14,7 @@
           @create="showCreateModal = true"
           @delete="handleDeleteRequest"
           @rotate="handleRotate"
+          @toggle-persistent="handleTogglePersistent"
           @refresh="refreshNow"
         />
       </section>
@@ -166,10 +167,10 @@ async function handleSelect(id) {
   await alerts.fetchAlerts({ assetId: id })
 }
 
-async function handleCreate({ hostname, os }) {
+async function handleCreate({ hostname, os, isPersistent }) {
   creating.value = true
   try {
-    const asset = await store.createAsset({ hostname, os })
+    const asset = await store.createAsset({ hostname, os, isPersistent })
     if (asset) {
       showCreateModal.value = false
       toast.show(`Activo «${asset.hostname}» dado de alta.`, 'success')
@@ -179,6 +180,27 @@ async function handleCreate({ hostname, os }) {
   } finally {
     creating.value = false
   }
+}
+
+/**
+ * Alterna si un activo debería estar siempre encendido. Sin confirmación: es
+ * reversible con el mismo botón y no destruye nada.
+ */
+async function handleTogglePersistent(id) {
+  const asset = store.state.assets.find((a) => a.id === id)
+  if (!asset) return
+  const next = !asset.isPersistent
+  const ok = await store.setPersistence(id, next)
+  if (!ok) {
+    toast.show(store.state.error || 'No se pudo actualizar el activo.', 'error')
+    return
+  }
+  toast.show(
+    next
+      ? `Se volverá a avisar cuando «${asset.hostname}» esté caído.`
+      : `«${asset.hostname}» se marca como host que se apaga a propósito: no se avisará de sus caídas.`,
+    'success',
+  )
 }
 
 function handleDeleteRequest(id) {

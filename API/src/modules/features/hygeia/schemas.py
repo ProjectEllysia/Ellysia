@@ -16,6 +16,14 @@ class AssetCreateRequestSchema(Schema):
     hostname = fields.String(required=True, validate=validate.Length(min=1, max=255))
     os = fields.String(load_default=None, validate=validate.Length(max=64))
     labels = fields.Dict(load_default=dict)
+    # Por defecto se espera un host siempre encendido: es el comportamiento
+    # que tenía todo activo antes de que existiera esta propiedad.
+    isPersistent = fields.Boolean(load_default=True)
+
+
+class AssetUpdateRequestSchema(Schema):
+    """Modificación de un activo. Solo la expectativa de encendido es editable."""
+    isPersistent = fields.Boolean(required=True)
 
 
 class AssetSchema(Schema):
@@ -26,6 +34,7 @@ class AssetSchema(Schema):
     kernel = fields.String(allow_none=True)
     labels = fields.Dict()
     status = fields.String()
+    isPersistent = fields.Boolean()
     lastSeenAt = UTCDateTime(allow_none=True)
     uptimeSec = fields.Integer(allow_none=True)
     agentVersion = fields.String(allow_none=True)

@@ -296,6 +296,7 @@ Aegis combines AI-generated awareness content with current CVE alerts from INCIB
 | `GET` | `/hygeia/assets/<id>/metrics?from=&to=` | `HYGEIA_READ` | CPU/memory time series for the asset's chart |
 | `GET` | `/hygeia/assets/<id>/inventory` | `HYGEIA_READ` | Last known installed-software inventory |
 | `POST/GET` | `/hygeia/assets/<id>/analyze` / `/analysis` | `HYGEIA_UPDATE` + `THEMIS_CREATE` | Run/read a Lybra-powered analysis of the asset's software inventory |
+| `PATCH` | `/hygeia/assets/<id>` | `HYGEIA_UPDATE` | Set `isPersistent` — `false` marks a host that powers off on purpose, so its downtime opens no anomaly and sends no email |
 | `DELETE` | `/hygeia/assets/<id>` | `HYGEIA_DELETE` | Deregister an asset, revoking its agent key |
 | `POST` | `/hygeia/assets/<id>/rotate-key` | `HYGEIA_UPDATE` | Rotate the agent key, invalidating the previous one |
 | `GET` | `/hygeia/alerts?state=&severity=&assetId=` | `HYGEIA_READ` | List anomalies for the user's assets |
