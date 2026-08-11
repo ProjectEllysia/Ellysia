@@ -58,18 +58,19 @@ jobs:
             git checkout -
           fi
 
+          # git checkout removes landing/ (it's tracked on main but absent on
+          # gh-pages), so stash its contents outside the tree before switching.
+          STAGING=$(mktemp -d)
+          cp -a landing/. "$STAGING"/
+
           # Build a throwaway branch off origin/gh-pages, replace its content.
           git checkout --force -B gh-pages-work origin/gh-pages
           git rm -rf . -q
           # Drop any untracked leftovers from the parent checkout
-          find . -mindepth 1 -maxdepth 1 \
-            ! -name '.git' \
-            ! -name 'landing' \
-            ! -name '.github' \
-            -exec rm -rf {} +
-          # Copy landing/* to root; remove landing/ and .github/ from the tree
-          cp -a landing/. .
-          rm -rf landing .github
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+          # Copy landing/* to root
+          cp -a "$STAGING"/. .
+          rm -rf "$STAGING"
 
           git add -A
           SHA=$(git rev-parse --short "$GITHUB_SHA")
