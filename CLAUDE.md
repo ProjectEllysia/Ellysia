@@ -100,7 +100,7 @@ Layered, read via `system/config_reading.py` (imported as `CR`, lazily cached wi
 2. **`API/.env`** — env vars that **override** JSON. Required for secrets: `JWT_SECRET_KEY`, DB / Redis / SMTP / OpenAI credentials, `PUBLIC_WEB_URL`.
 3. **Root `.env`** — docker-compose only (Postgres/Redis creds), not read by the API.
 
-Changes to `SecOpsConfig.json` require an app restart (values are cached) unless applied via `PUT /system`.
+Changes to `SecOpsConfig.json` require an app restart (values are cached) unless applied via `PUT /system`, which refreshes the API process in place. The **worker** process is separate and would keep its boot-time config, so it re-reads the file before each job when the mtime changed (`CR.reload_if_changed()` in `_ThreadSafeWorker.perform_job`) — an edit saved from ConfigView reaches the next background job without restarting anything. `max_workers` is the exception: it is only read at worker startup.
 
 `SecOpsConfig.json` has exactly five root entries — put new keys under the right one rather than at the root:
 

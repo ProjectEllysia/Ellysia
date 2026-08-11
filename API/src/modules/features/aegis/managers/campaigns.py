@@ -101,6 +101,18 @@ class CampaignManager(TaskTrackingMixin):
                 DistributionListRepository, list_id, self.user.id,
                 DistributionListNotFoundError, uow=uow,
             )
+
+            # Campaign.list_id no tiene ON DELETE CASCADE en BD: borrar la
+            # lista con campañas colgando de ella violaba la FK, y el fallo
+            # saltaba en el commit de teardown_request — fuera ya de
+            # handle_exceptions, así que llegaba al cliente como un 500 mudo.
+            # Mismo tratamiento que al borrar una píldora (AegisManager):
+            # se borran antes las campañas, arrastrando sus destinatarios y
+            # respuestas por cascade="all, delete-orphan".
+            campaign_repo = CampaignRepository(uow)
+            for campaign in campaign_repo.get_campaigns_by_list(list_id):
+                campaign_repo.delete(campaign)
+
             DistributionListRepository(uow).delete(distribution_list)
 
     def add_recipients(self, list_id: int, recipients: list[dict]) -> list[dict]:

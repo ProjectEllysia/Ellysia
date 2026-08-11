@@ -127,7 +127,7 @@ GPU: `-f docker-compose.gpu-nvidia.yml / .gpu-intel.yml / .gpu-amd.yml`
 - `.env` files contain credentials — never commit. `API/.env` is gitignored.
 - `API/src/data/` and `docs/` are gitignored.
 - `_init_db()` is destructive — drops and recreates everything.
-- `SecOpsConfig.json` values are lazily cached — changes require app restart unless written via `PUT /system` endpoint.
+- `SecOpsConfig.json` values are lazily cached — changes require app restart unless written via `PUT /system` endpoint. The worker process is separate and re-reads the file per job when its mtime changed (`CR.reload_if_changed()` in `_ThreadSafeWorker.perform_job`), so config edits reach background jobs too; `max_workers` still only applies at worker startup.
 - `themis/services/tasks.py` has its own `TaskStatus` enum separate from `taskqueue.TaskStatus`.
 - RQ workers must be running for background tasks to execute. Launch with `python -m src.modules.system.taskqueue.worker`.
 - API version is read from config (`appVersion` in `SecOpsConfig.json`, currently `4.2`) via `CR.get_app_version()` in `create_app()` — not hardcoded.

@@ -130,6 +130,14 @@ class AegisManager(TaskTrackingMixin):
             },
             "alerts": [alert.to_dict() for alert in document.alerts],
             "generatedAt": isoformat_utc(document.generated_at), # type: ignore
+            # El editor necesita los mismos topes que aplica AegisPillUpdateSchema
+            # para no dejar añadir algo que el PUT va a rechazar con un 400. Viajan
+            # aquí porque GET /system es solo para root y quien edita una píldora
+            # normalmente no lo es.
+            "quizLimits": {
+                "maxQuestions": CR.aegis_config().questions_amount,
+                "maxOptions": CR.aegis_config().options_amount,
+            },
         }
 
         if document.status == "done": # type: ignore
