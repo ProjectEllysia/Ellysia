@@ -15,6 +15,10 @@ __pycache__/
 # Entornos y credenciales
 # ============================================
 .env
+# El patrón `.env` de arriba NO cubre los sufijos de Vite (.env.local,
+# .env.development.local...), que son locales de cada máquina por definición.
+.env.*.local
+.env.local
 .agents
 skills-lock.json
 

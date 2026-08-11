@@ -1,21 +1,21 @@
 <template>
   <div class="stats-row">
-    <div class="stat-card green">
+    <div class="card stat-card green">
       <div class="stat-value"><Transition name="num-flip" mode="out-in"><span :key="total">{{ total }}</span></Transition></div>
       <div class="stat-label">Escaneos totales</div>
       <div class="stat-sub">todos los tipos</div>
     </div>
-    <div class="stat-card blue">
+    <div class="card stat-card blue">
       <div class="stat-value"><Transition name="num-flip" mode="out-in"><span :key="nmap">{{ nmap }}</span></Transition></div>
       <div class="stat-label">Nmap</div>
       <div class="stat-sub">escaneos de red</div>
     </div>
-    <div class="stat-card amber">
+    <div class="card stat-card amber">
       <div class="stat-value"><Transition name="num-flip" mode="out-in"><span :key="nikto">{{ nikto }}</span></Transition></div>
       <div class="stat-label">Nikto</div>
       <div class="stat-sub">escaneos web</div>
     </div>
-    <div class="stat-card blue">
+    <div class="card stat-card blue">
       <div class="stat-value"><Transition name="num-flip" mode="out-in"><span :key="nuclei">{{ nuclei }}</span></Transition></div>
       <div class="stat-label">Nuclei</div>
       <div class="stat-sub">plantillas</div>
@@ -34,9 +34,9 @@ defineProps({
 
 <style scoped>
 .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.85rem; margin-bottom: 1.25rem; }
-.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.1rem 1.25rem; transition: border-color 0.2s, transform 0.2s; }
+.stat-card { padding: 1.1rem 1.25rem; transition: border-color 0.2s, transform 0.2s; }
 .stat-card:hover { border-color: var(--border-med); }
-.stat-value { display: block; overflow: hidden; font-size: var(--fs-2xl); font-weight: 800; font-family: var(--font-mono); line-height: 1.2; }
+.stat-value { display: block; overflow: hidden; font-size: var(--fs-2xl); font-weight: 800; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); line-height: 1.2; }
 .stat-value span { display: inline-block; }
 .stat-label { font-size: var(--fs-lg); font-weight: 600; color: var(--text-dim); margin-top: 0.2rem; }
 .stat-sub { font-size: var(--fs-md); color: var(--text-muted); margin-top: 0.1rem; }

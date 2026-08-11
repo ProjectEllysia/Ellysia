@@ -18,7 +18,18 @@
          pestañas de fondo — justo donde vive un panel de monitorización. Al
          volver a la pestaña, la vista se quedaba congelada a medio cambio de
          estado. Un fundido no vale ese riesgo. -->
-    <p v-if="loading" class="state-msg">Cargando activos…</p>
+    <!-- Filas fantasma con la misma silueta que las reales (punto de pulso +
+         dos líneas de texto): al llegar los activos ocupan el mismo alto y la
+         lista no se estira de golpe. -->
+    <ul v-if="loading" class="rows" aria-busy="true" aria-label="Cargando activos">
+      <li v-for="n in SKELETON_ROWS" :key="n" class="row row--ghost" aria-hidden="true">
+        <span class="skeleton skeleton--circle ghost-pulse"></span>
+        <span class="ghost-text">
+          <span class="skeleton skeleton--line skeleton--w60"></span>
+          <span class="skeleton skeleton--line skeleton--w40"></span>
+        </span>
+      </li>
+    </ul>
 
     <p v-else-if="error" class="state-msg state-msg--error">
       {{ error }}
@@ -71,6 +82,9 @@ defineProps({
   error: { type: String, default: null },
 })
 defineEmits(['select', 'create', 'delete', 'rotate', 'refresh'])
+
+/** Filas fantasma mientras carga: las que caben sin alargar el panel. */
+const SKELETON_ROWS = 4
 
 const STATUS_LABELS = { pending: 'Pendiente', online: 'En línea', stale: 'Inestable', offline: 'Caído' }
 function statusLabel(status) { return STATUS_LABELS[status] || status }
@@ -140,10 +154,18 @@ function statusLabel(status) { return STATUS_LABELS[status] || status }
 /* El punto de estado late solo cuando el host está vivo: es el único
    elemento animado de la vista, y dice de un vistazo quién sigue reportando. */
 .pulse { width: 9px; height: 9px; flex-shrink: 0; border-radius: 50%; background: var(--text-muted); }
+
 .pulse--online { background: var(--success); animation: pulse-ring 2.4s ease-out infinite; }
 .pulse--stale { background: var(--warn); }
 .pulse--offline { background: var(--danger); }
 .pulse--pending { background: var(--text-muted); box-shadow: inset 0 0 0 1px var(--border-med); }
+/* La fila fantasma repite el padding y el gap de .row-select. El min-height
+   es el alto medido de una fila real (55px): las dos líneas del fantasma son
+   algo más bajas que el hostname y su metadato, y sin esto la lista crecía
+   6px por fila al llegar los activos. */
+.row--ghost { align-items: center; gap: 0.6rem; padding: 0.55rem 0.6rem; min-height: 55px; }
+.ghost-pulse { width: 9px; flex-shrink: 0; }
+.ghost-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.35rem; }
 
 @keyframes pulse-ring {
   0%        { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 55%, transparent); }

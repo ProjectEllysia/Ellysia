@@ -1,5 +1,5 @@
 <template>
-  <div class="scheduled-card">
+  <div class="card scheduled-card">
     <div class="scheduled-header" @click="expanded = !expanded">
       <div class="scheduled-header-left">
         <span class="scheduled-title">Escaneos Programados</span>
@@ -106,12 +106,12 @@ function formatDate(iso) { if (!iso) return '—'; return new Date(iso).toLocale
 </script>
 
 <style scoped>
-.scheduled-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 1.1rem; overflow: hidden; }
+.scheduled-card { margin-bottom: 1.1rem; overflow: hidden; }
 .scheduled-header { display: flex; align-items: center; justify-content: space-between; padding: 0.85rem 1.25rem; cursor: pointer; user-select: none; transition: background 0.2s; }
 .scheduled-header:hover { background: var(--surface-2); }
 .scheduled-header-left { display: flex; align-items: center; gap: 0.4rem; }
-.scheduled-title { font-weight: 600; color: var(--text); font-size: var(--fs-xl); font-family: var(--font-display); }
-.scheduled-badge { font-size: var(--fs-md); color: var(--accent); background: var(--accent-dim); padding: 0.1rem 0.45rem; border-radius: 8px; font-family: var(--font-mono); }
+.scheduled-title { font-weight: 600; color: var(--text); font-size: var(--fs-xl); font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
+.scheduled-badge { font-size: var(--fs-md); color: var(--accent); background: var(--accent-dim); padding: 0.1rem 0.45rem; border-radius: 8px; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .btn-toggle { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0.2rem; transition: transform 0.25s; }
 .btn-toggle.open { transform: rotate(180deg); }
 .scheduled-body { padding: 0 1.25rem 1.1rem; }
@@ -146,7 +146,7 @@ function formatDate(iso) { if (!iso) return '—'; return new Date(iso).toLocale
 .scheduled-table td { padding: 0.5rem 0.55rem; font-size: var(--fs-lg); color: var(--text); border-top: 1px solid var(--border); }
 .scheduled-table tr:hover td { background: var(--surface-2); }
 .scheduled-table tr.inactive td { opacity: 0.5; }
-.mono { font-family: var(--font-mono); font-size: var(--fs-md); }
+.mono { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-md); }
 .text-muted { color: var(--text-muted); }
 .args-cell { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .type-badge { text-transform: uppercase; font-size: var(--fs-body); font-weight: 700; letter-spacing: 0.03em; padding: 0.1rem 0.4rem; border-radius: 5px; }

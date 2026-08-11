@@ -3,7 +3,7 @@
     <StarBackground />
     <Topbar title="Hygeia" badge="Monitorización de Activos" back-to="/hygeia" back-label="Volver" />
 
-    <main class="hygeia-layout">
+    <main class="hygeia-layout" :data-pane="mobilePane">
       <section class="panel panel--list">
         <AssetList
           :assets="store.state.assets"
@@ -19,6 +19,10 @@
       </section>
 
       <section class="panel panel--detail">
+        <button class="back-to-list" @click="mobilePane = 'list'">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+          Todos los activos
+        </button>
         <AssetDetail
           :asset="selectedAsset"
           :metrics="store.state.metrics"
@@ -147,8 +151,18 @@ const assetAnomalies = computed(() =>
   alerts.state.anomalies.filter((a) => a.assetId === store.state.selectedId)
 )
 
+/**
+ * En pantalla estrecha las dos columnas se apilan, y el panel de detalle es
+ * largo: al elegir un activo, la lista quedaba arriba del todo y no había
+ * forma de volver a ella salvo desplazarse a ciegas. En estrecho se enseña una
+ * cosa u otra, con un paso atrás explícito. En ancho no cambia nada: `panel`
+ * solo se oculta dentro de la media query.
+ */
+const mobilePane = ref('list')
+
 async function handleSelect(id) {
   store.selectAsset(id)
+  mobilePane.value = 'detail'
   await alerts.fetchAlerts({ assetId: id })
 }
 
@@ -236,7 +250,11 @@ async function handleReanalyzeConfirm() {
 function goToThemis() {
   const id = store.state.selectedId
   showAnalysisModal.value = false
-  router.push({ path: '/themis', query: { world: 'agents', asset: id } })
+  // /themis es el hub, que ignora estos parámetros: quien los lee es
+  // ThemisView, en /themis/escaneos (ver su onMounted). Apuntando al hub, el
+  // enlace aterrizaba en la portada del módulo y perdía activo y mundo, justo
+  // el contexto que este botón existe para llevar.
+  router.push({ path: '/themis/escaneos', query: { world: 'agents', asset: id } })
 }
 
 /**
@@ -265,21 +283,46 @@ async function refreshNow() {
  * E8: el `if (document.hidden) return` que había aquí lo aporta ahora
  * `usePolling` con `pauseWhenHidden` — y además reanuda de inmediato al
  * volver a primer plano, en vez de esperar los 15 s completos. */
+/**
+ * Cada cosa se re-pide al ritmo al que de verdad cambia.
+ *
+ * Antes las cuatro lecturas iban en cada vuelta: 4 × 240 vueltas/hora = 960
+ * peticiones/hora contra un límite de 600, así que la propia vista se dejaba
+ * sin cupo en menos de 40 minutos. Bajar la cadencia no valía —el agente late
+ * cada 15 s y un panel congelado no se distingue de un host caído—, así que lo
+ * que se escalona es cada lectura por separado:
+ *
+ *   latest   cada vuelta (15 s) — es el pulso: los números en vivo
+ *   metrics  cada 2 vueltas (30 s) — la serie del gráfico, que dibuja una
+ *            tendencia; un punto de más o de menos no se aprecia
+ *   alerts   cada 4 vueltas (60 s) — lo crítico ya avisa por correo aparte
+ *   assets   cada 4 vueltas (60 s) — la lista cambia al dar de alta o de baja
+ *
+ * Total: 480 peticiones/hora en vez de 960, con el pulso igual de vivo.
+ */
+const METRICS_EVERY = 2
+const SLOW_EVERY = 4
+let pollTick = 0
+
 async function poll() {
-  await store.fetchAssets({ silent: true })
+  const tick = pollTick++
+  const tasks = []
+
+  if (tick % SLOW_EVERY === 0) tasks.push(store.fetchAssets({ silent: true }))
+
   const id = store.state.selectedId
-  if (!id) return
-  const tasks = [
-    store.fetchMetrics(id, { silent: true }),
-    store.fetchLatest(id),
-    alerts.fetchAlerts({ assetId: id }),
-  ]
-  // El análisis solo se re-pide mientras hay uno corriendo: es un escaneo
-  // puntual lanzado a mano, no un dato vivo como las métricas, así que
-  // sondearlo siempre sería una petición de más cada 15 s por nada.
-  if (['pending', 'running'].includes(store.state.analysis?.status)) {
-    tasks.push(store.fetchAnalysis(id, { silent: true }))
+  if (id) {
+    tasks.push(store.fetchLatest(id))
+    if (tick % METRICS_EVERY === 0) tasks.push(store.fetchMetrics(id, { silent: true }))
+    if (tick % SLOW_EVERY === 0) tasks.push(alerts.fetchAlerts({ assetId: id }))
+    // El análisis solo se re-pide mientras hay uno corriendo: es un escaneo
+    // puntual lanzado a mano, no un dato vivo como las métricas, así que
+    // sondearlo siempre sería una petición de más cada 15 s por nada.
+    if (['pending', 'running'].includes(store.state.analysis?.status)) {
+      tasks.push(store.fetchAnalysis(id, { silent: true }))
+    }
   }
+
   await Promise.all(tasks)
 }
 
@@ -323,7 +366,25 @@ onMounted(async () => {
   padding: 1.1rem 1.2rem;
 }
 
-@media (max-width: 900px) {
+/* En ancho no existe: las dos columnas se ven a la vez y no hay a dónde volver. */
+.back-to-list { display: none; }
+
+@media (max-width: 960px) {
   .hygeia-layout { grid-template-columns: 1fr; }
+
+  /* Maestro-detalle: una cosa cada vez, con paso atrás explícito. */
+  .hygeia-layout[data-pane="detail"] .panel--list { display: none; }
+  .hygeia-layout[data-pane="list"]   .panel--detail { display: none; }
+
+  .back-to-list {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    margin-bottom: 0.9rem; padding: 0.35rem 0.6rem 0.35rem 0.4rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    color: var(--text-dim); font-size: var(--fs-md); font-weight: 500;
+    transition: color var(--transition), border-color var(--transition);
+  }
+  .back-to-list:hover { color: var(--text); border-color: var(--accent); }
+  .back-to-list svg { width: 15px; height: 15px; }
 }
 </style>

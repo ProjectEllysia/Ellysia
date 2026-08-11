@@ -138,14 +138,14 @@ onMounted(async () => {
 @media (prefers-reduced-motion: reduce) { .state--loading { animation: none; } }
 
 .title {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 600; color: var(--text);
 }
 .text { color: var(--text-muted); margin-top: 0.8rem; line-height: 1.6; }
 
 .cta {
   display: inline-block; margin-top: 1.8rem;
-  font-family: var(--font-epic); font-size: var(--fs-md); font-weight: 600;
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.18em; text-transform: uppercase;
   padding: 0.7rem 1.6rem; border-radius: 3px;
   color: var(--accent-bright); background: var(--accent-dim);

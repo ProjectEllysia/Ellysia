@@ -244,7 +244,7 @@ onMounted(load)
 /* ── Cabecera de marca (sin Topbar: el destinatario no tiene sesión) ── */
 .quiz-brand { text-align: center; margin-bottom: 1.25rem; }
 .brand-mark {
-  display: block; font-family: var(--font-epic); font-size: var(--fs-2xl);
+  display: block; font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-size: var(--fs-2xl);
   letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent);
 }
 .brand-sub {
@@ -258,11 +258,11 @@ onMounted(load)
   animation: seq-fade-up 0.4s ease-out backwards;
 }
 .card--center { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 3rem 1.5rem; }
-.card-title { font-family: var(--font-display); font-size: var(--fs-xl); color: var(--text); font-weight: 600; }
+.card-title { font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-size: var(--fs-xl); color: var(--text); font-weight: 600; }
 
 .intro-card { border-left: 3px solid var(--accent); }
 .eyebrow { font-size: var(--fs-xs); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.4rem; }
-.pill-title { font-family: var(--font-display); font-size: var(--fs-2xl); line-height: 1.25; color: var(--text); margin-bottom: 0.6rem; font-weight: 600; }
+.pill-title { font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-size: var(--fs-2xl); line-height: 1.25; color: var(--text); margin-bottom: 0.6rem; font-weight: 600; }
 .muted { color: var(--text-dim); font-size: var(--fs-body); line-height: 1.55; }
 .fine { font-size: var(--fs-sm); color: var(--text-muted); }
 
@@ -312,7 +312,7 @@ onMounted(load)
 .glyph--success { background: var(--success-dim); color: var(--success); }
 .glyph--warn    { background: var(--warn-dim);    color: var(--warn); }
 .glyph--danger  { background: var(--danger-dim);  color: var(--danger); }
-.score { font-family: var(--font-display); font-size: var(--fs-3xl); color: var(--text); }
+.score { font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-size: var(--fs-3xl); color: var(--text); }
 .score strong { color: var(--accent); }
 .score-sep { color: var(--text-muted); margin: 0 0.1em; }
 

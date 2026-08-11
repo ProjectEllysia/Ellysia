@@ -236,7 +236,7 @@ function timeAgo(iso) {
 .meta-chip svg { width: 12px; height: 12px; flex-shrink: 0; }
 .meta-chip--full { background: var(--accent-dim); color: var(--accent-bright); }
 
-.card-sync { margin: 0; font-size: var(--fs-sm); color: var(--text-muted); font-family: var(--font-mono); }
+.card-sync { margin: 0; font-size: var(--fs-sm); color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 
 .card-actions { display: flex; align-items: center; gap: 0.35rem; margin-top: 0.1rem; }
 

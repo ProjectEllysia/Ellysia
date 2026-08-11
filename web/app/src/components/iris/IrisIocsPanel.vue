@@ -100,7 +100,7 @@ function exportCsv() {
   background: var(--surface);
   border: 1px solid var(--border-solid);
   border-radius: 6px;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-lg);
   color: var(--text-dim);
   word-break: break-all;

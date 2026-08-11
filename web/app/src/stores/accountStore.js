@@ -103,11 +103,36 @@ export const useAccountStore = defineStore('account', () => {
     organization.value = (await res.json()).organization ?? null
   }
 
-  /** Todo lo de la cuenta de una vez, para el arranque de la sesión. */
-  async function loadAll() {
+  /**
+   * Cuánto se considera fresco lo de la cuenta.
+   *
+   * El plan y la organización cambian cuando alguien contrata, cancela o se
+   * une: sucesos de la vida real, no de cada navegación. `loadAll()` son tres
+   * peticiones y lo llaman tanto el menú de cuenta como /mi-plan, así que sin
+   * este margen abrir el menú tres veces seguidas cuesta nueve peticiones para
+   * pintar exactamente lo mismo.
+   *
+   * No hace falta `useCache` aquí: la store es un singleton y su estado ya
+   * sobrevive a la navegación. Lo único que faltaba era saber si estaba fresco.
+   */
+  const FRESH_MS = 60_000
+  let loadedAt = 0
+
+  /** Fuerza que la próxima llamada a `loadAll()` vaya al servidor. */
+  function invalidate() { loadedAt = 0 }
+
+  /**
+   * Todo lo de la cuenta de una vez, para el arranque de la sesión.
+   *
+   * @param {object} [options]
+   * @param {boolean} [options.force=false] - Ignorar el margen de frescura.
+   */
+  async function loadAll({ force = false } = {}) {
+    if (!force && plan.value && Date.now() - loadedAt < FRESH_MS) return
     loading.value = true
     try {
       await Promise.all([loadPlan(), loadUsage(), loadOrganization()])
+      loadedAt = Date.now()
     } finally {
       loading.value = false
     }
@@ -123,6 +148,8 @@ export const useAccountStore = defineStore('account', () => {
       return false
     }
     organization.value = await res.json()
+    // Acaba de cambiar la organización: lo que hubiera cacheado ya no vale.
+    invalidate()
     toast.show('Organización creada.', 'success')
     return true
   }
@@ -131,12 +158,13 @@ export const useAccountStore = defineStore('account', () => {
     plan.value = null
     usage.value = {}
     organization.value = null
+    invalidate()
   }
 
   return {
     plan, usage, organization, catalog, loading,
     notice, exceededKeys, isOwner,
     loadCatalog, loadPlan, loadUsage, loadOrganization, loadAll,
-    createOrganization, reset, formatDate,
+    createOrganization, reset, invalidate, formatDate,
   }
 })

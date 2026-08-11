@@ -37,8 +37,60 @@ from ._exceptions import MissingParameterError, MissingJsonBodyError
 # este módulo crea un import circular (shared -> system -> users -> shared).
 # in_memory_fallback_enabled evita que un Redis caído tumbe el rate limiting.
 
+def rate_limit_key() -> str:
+    """
+    Clave de cubo del rate limiter: la identidad de quien llama, no su IP.
+
+    Con ``get_remote_address`` a secas, una oficina entera detrás de un NAT
+    comparte un solo cubo: todos los empleados suman al mismo contador y el
+    primero que trabaja deja sin cupo a los demás. Con ``/oauth/token`` a
+    20/hora eso significa que el vigesimoprimer inicio de sesión —o refresco de
+    token— de esa oficina en una hora falla, y en el front un refresco fallido
+    cierra la sesión directamente.
+
+    Se usa el ``sub`` del JWT cuando la petición trae uno con **firma válida**.
+    Se verifica la firma a propósito: sin verificar, cualquiera se fabricaría un
+    ``sub`` distinto por petición y el límite dejaría de existir. No se
+    comprueba la caducidad ni la revocación en base de datos:
+
+    - La caducidad haría que el cubo saltara de identidad a IP justo mientras el
+      cliente refresca, que es cuando menos falta hace.
+    - La revocación exige una consulta a base de datos en CADA petición, incluidas
+      las que el limitador va a rechazar — justo lo que se intenta evitar. Un
+      token revocado sigue identificando a su dueño, que es lo único que se
+      necesita para contar.
+
+    Las peticiones anónimas (``/oauth/token``, el quiz público) caen a la IP, que
+    es lo correcto: ahí la identidad todavía no existe y lo que se protege es
+    precisamente el intento de adivinarla.
+    """
+    header = request.headers.get("Authorization", "")
+    if header.startswith("Bearer "):
+        try:
+            # Import diferido: hacerlo arriba crea el ciclo
+            # shared -> system -> users -> shared que documenta el bloque de abajo.
+            import jwt
+            from src.modules.system import config_reading as CR
+
+            jwt_cfg = CR.jwt_config()
+            payload = jwt.decode(
+                header[7:],
+                jwt_cfg.secret,
+                algorithms=[jwt_cfg.algorithm],
+                options={"verify_exp": False},
+            )
+            subject = payload.get("sub")
+            if subject:
+                return f"user:{subject}"
+        except Exception:
+            # Token ilegible, mal firmado o configuración incompleta: se cuenta
+            # por IP. Nunca se deja pasar sin contar.
+            pass
+    return get_remote_address()
+
+
 limiter = Limiter(
-    get_remote_address,
+    rate_limit_key,
     default_limits=[],
     storage_uri="memory://",
     in_memory_fallback_enabled=True,

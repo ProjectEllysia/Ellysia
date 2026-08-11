@@ -32,13 +32,13 @@ defineProps({
   padding: 4rem 2rem 5rem;
 }
 .info-eyebrow {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.32em; text-transform: uppercase;
   color: var(--accent);
 }
 .info-title {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-size: clamp(2.2rem, 5vw, 3.2rem);
   font-weight: 600;
   color: var(--text);
@@ -53,7 +53,7 @@ defineProps({
 }
 /* El contenido llega vía slot; estos estilos globales lo maquetan. */
 .info-body :deep(h2) {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.16em; text-transform: uppercase;
   color: var(--accent);

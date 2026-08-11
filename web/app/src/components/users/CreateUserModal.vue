@@ -80,7 +80,7 @@ defineExpose({ reset })
 .modal-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 1.5rem; backdrop-filter: blur(4px); }
 .modal-box { background: var(--surface); border: 1px solid var(--border-solid); border-radius: 12px; width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; padding: 1.5rem; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.1rem; }
-.modal-header h3 { font-size: var(--fs-xl); font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); }
+.modal-header h3 { font-size: var(--fs-xl); font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .modal-close { background: none; border: none; font-size: var(--fs-lg); color: var(--text-muted); cursor: pointer; padding: 0 0.2rem; line-height: 1; }
 .modal-close:hover { color: var(--text); }
 .modal-section { margin-bottom: 0.85rem; }

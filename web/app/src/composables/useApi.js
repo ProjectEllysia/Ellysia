@@ -1,4 +1,5 @@
 import { useAuthStore } from '@/stores/authStore'
+import { setRateLimited } from '@/composables/rateLimitState'
 
 /**
  * Extrae un mensaje de error legible de una respuesta fallida (D3/B11).
@@ -103,6 +104,27 @@ export function validationMessage(data) {
 }
 
 /**
+ * Peticiones GET idénticas que están ahora mismo en vuelo.
+ *
+ * Vive fuera de `useApi()` a propósito: cada componente que llama al
+ * composable crea su propia instancia, así que un Map por instancia no
+ * colapsaría nada. El de aquí lo comparte toda la aplicación.
+ *
+ * Es el mismo patrón que `authStore` ya usa para el refresco de token
+ * (`_refreshInFlight`), y por el mismo motivo que documenta allí: sin esto,
+ * una vista que carga tres cosas a la vez gasta tres veces el cupo. ThemisView
+ * lanza cuatro peticiones al montar y HygeiaView cinco.
+ */
+const _inFlight = new Map()
+
+/**
+ * Tope para el reintento automático de un 429. Por encima de esta espera no se
+ * reintenta solo: se avisa y se devuelve el error, porque bloquear la vista un
+ * minuto largo es peor que decir lo que pasa.
+ */
+const MAX_AUTO_RETRY_SECONDS = 5
+
+/**
  * Composable para llamadas autenticadas a la API REST.
  *
  * Inyecta automáticamente el header Authorization con el JWT vigente
@@ -130,6 +152,30 @@ export function useApi() {
    * @returns {Promise<Response|null>} Response, o null sin sesión / error de red
    */
   async function apiFetch(path, options = {}, _isRetry = false) {
+    // Solo se colapsan los GET: repetir una lectura da el mismo resultado,
+    // repetir un POST no. La clave incluye la ruta completa con su query.
+    const method = (options.method ?? 'GET').toUpperCase()
+    if (method === 'GET' && !_isRetry) {
+      const pending = _inFlight.get(path)
+      if (pending) {
+        // Cada quien necesita poder leer el cuerpo por su cuenta: un Response
+        // solo se consume una vez, así que se reparten clones.
+        return pending.then(res => (res ? res.clone() : res))
+      }
+      const promise = _doFetch(path, options, false)
+      _inFlight.set(path, promise)
+      try {
+        const res = await promise
+        return res ? res.clone() : res
+      } finally {
+        _inFlight.delete(path)
+      }
+    }
+    return _doFetch(path, options, _isRetry)
+  }
+
+  /** El fetch de verdad, sin la capa de deduplicación. */
+  async function _doFetch(path, options = {}, _isRetry = false) {
     const token = await auth.getToken()
     if (!token) {
       auth.logout()
@@ -193,7 +239,58 @@ export function useApi() {
       useToastStore().show(planLimitMessage(body), 'warn', 6000)
     }
 
+    // ── 429: cupo de peticiones agotado ───────────────────────────────
+    // Antes caía en el `return res` de abajo y cada store lo mostraba como su
+    // error genérico ("No se pudieron cargar los escaneos"), que es mentira:
+    // los escaneos están, lo que falta es cupo. El servidor manda `Retry-After`
+    // con los segundos exactos, así que se puede decir la verdad y esperar lo
+    // justo en vez de reintentar a ciegas.
+    if (res.status === 429) {
+      const waitSeconds = retryAfterSeconds(res)
+      setRateLimited(waitSeconds)
+
+      // Un solo reintento, y solo si la espera es corta: por encima de eso
+      // dejar la pestaña bloqueada esperando es peor que devolver el error.
+      if (!_isRetry && waitSeconds > 0 && waitSeconds <= MAX_AUTO_RETRY_SECONDS) {
+        await new Promise(r => setTimeout(r, waitSeconds * 1000 + 250))
+        return _doFetch(path, options, true)
+      }
+
+      const { useToastStore } = await import('@/stores/toastStore')
+      useToastStore().show(rateLimitMessage(waitSeconds), 'warn', 6000)
+    }
+
     return res
+  }
+
+  /**
+   * Segundos que el servidor pide esperar, leídos del `Retry-After`.
+   *
+   * La cabecera admite dos formatos (RFC 9110 §10.2.3): segundos, o una fecha
+   * HTTP. Se aceptan los dos; si no viene ninguna, se asume un minuto, que es
+   * la ventana más corta que usa la API.
+   */
+  function retryAfterSeconds(res) {
+    const raw = res.headers.get('Retry-After')
+    if (!raw) return 60
+    const seconds = Number(raw)
+    if (Number.isFinite(seconds)) return Math.max(0, Math.ceil(seconds))
+    const date = Date.parse(raw)
+    if (Number.isNaN(date)) return 60
+    return Math.max(0, Math.ceil((date - Date.now()) / 1000))
+  }
+
+  /** El aviso de cupo agotado, con la espera en unidades que se leen bien. */
+  function rateLimitMessage(seconds) {
+    if (seconds >= 3600) {
+      const hours = Math.ceil(seconds / 3600)
+      return `Has hecho demasiadas peticiones. Vuelve a intentarlo en ${hours} ${hours === 1 ? 'hora' : 'horas'}.`
+    }
+    if (seconds >= 60) {
+      const minutes = Math.ceil(seconds / 60)
+      return `Has hecho demasiadas peticiones. Vuelve a intentarlo en ${minutes} ${minutes === 1 ? 'minuto' : 'minutos'}.`
+    }
+    return `Has hecho demasiadas peticiones. Vuelve a intentarlo en ${seconds} segundos.`
   }
 
   /**

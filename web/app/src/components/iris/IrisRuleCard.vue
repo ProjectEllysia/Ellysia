@@ -139,7 +139,7 @@ function formatDetailValue(v) {
 .rule-score {
   font-size: var(--fs-lg);
   font-weight: 700;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   min-width: 3rem;
   text-align: right;
 }
@@ -234,7 +234,7 @@ function formatDetailValue(v) {
 
 .detail-key {
   color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   line-height: 1.6;
 }

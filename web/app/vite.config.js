@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 
@@ -12,40 +12,51 @@ import { fileURLToPath, URL } from 'node:url'
  * - Alias `@` → directorio `src/` para imports limpios.
  *
  * Server (solo desarrollo):
- * - Puerto 5173.
+ * - Puerto 80.
  * - Proxy inverso: cualquier ruta que empiece por /oauth, /themis, etc.
- *   se redirige a Flask en :5000. Esto evita CORS en desarrollo y permite
- *   que el frontend de Vue (Vite) y el backend (Flask) convivan en puertos
- *   distintos.
+ *   se redirige a la API. Esto evita CORS en desarrollo y permite que el
+ *   frontend de Vue (Vite) y el backend (Flask) convivan en puertos distintos.
+ *
+ * Destino del proxy: por defecto Flask en local (`python run.py` → :5000).
+ * Con la API en Docker el puerto publicado es el 15000, y además en Windows el
+ * 5000 está en el rango reservado por el sistema y no se puede publicar. Para
+ * ese caso, en `web/app/.env.local`:
+ *
+ *     VITE_API_TARGET=http://localhost:15000
  */
-export default defineConfig({
-  appType: 'spa',
-  plugins: [vue()],
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
-    }
-  },
-  server: {
-    port: 80,
-    proxy: {
-      '/oauth':     { target: 'http://localhost:5000', changeOrigin: true },
-      '/themis':    { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
-      '/aegis':     { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
-      '/users':     { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
-      '/system':    { target: 'http://localhost:5000', changeOrigin: true },
-      '/acheron':   { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
-      '/iris':      { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
-      '/hygeia':    { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
-      // Capa comercial. Van con bypass porque comparten prefijo con rutas del
-      // SPA: /plans es la API pero /planes es la tabla de precios, y
-      // /organizations es la API mientras que /organizacion es la vista. El
-      // castellano de las rutas del front evita casi toda colisión, pero el
-      // bypass la cierra del todo.
-      '/plans':         { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
-      '/organizations': { target: 'http://localhost:5000', changeOrigin: true, bypass: proxyBypass },
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), '')
+  const API_TARGET = env.VITE_API_TARGET || 'http://localhost:5000'
+
+  return {
+    appType: 'spa',
+    plugins: [vue()],
+    resolve: {
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url))
+      }
     },
-    allowedHosts: ['dev.local.ellysia.es'],
+    server: {
+      port: 80,
+      proxy: {
+        '/oauth':     { target: API_TARGET, changeOrigin: true },
+        '/themis':    { target: API_TARGET, changeOrigin: true, bypass: proxyBypass },
+        '/aegis':     { target: API_TARGET, changeOrigin: true, bypass: proxyBypass },
+        '/users':     { target: API_TARGET, changeOrigin: true, bypass: proxyBypass },
+        '/system':    { target: API_TARGET, changeOrigin: true },
+        '/acheron':   { target: API_TARGET, changeOrigin: true, bypass: proxyBypass },
+        '/iris':      { target: API_TARGET, changeOrigin: true, bypass: proxyBypass },
+        '/hygeia':    { target: API_TARGET, changeOrigin: true, bypass: proxyBypass },
+        // Capa comercial. Van con bypass porque comparten prefijo con rutas del
+        // SPA: /plans es la API pero /planes es la tabla de precios, y
+        // /organizations es la API mientras que /organizacion es la vista. El
+        // castellano de las rutas del front evita casi toda colisión, pero el
+        // bypass la cierra del todo.
+        '/plans':         { target: API_TARGET, changeOrigin: true, bypass: proxyBypass },
+        '/organizations': { target: API_TARGET, changeOrigin: true, bypass: proxyBypass },
+      },
+      allowedHosts: ['dev.local.ellysia.es'],
+    }
   }
 })
 

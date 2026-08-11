@@ -1,7 +1,6 @@
 {
-  "appVersion": "4.2",
+  "appVersion": "5.0.0",
   "general": {
-    "publicUrl": "http://dev.local.ellysia.es:5173",
     "directories": {
       "logdir": "..",
       "tempdir": "./tmp/secapp"

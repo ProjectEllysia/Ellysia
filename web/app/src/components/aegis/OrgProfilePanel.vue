@@ -296,7 +296,7 @@ onMounted(async () => {
   font-weight: 700;
   color: var(--text);
   margin: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
 }
 .op-chevron {
   color: var(--text-muted);
@@ -470,7 +470,7 @@ onMounted(async () => {
   font-size: var(--fs-md);
 }
 .product-cpe {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-xs);
   color: var(--text-muted);
   flex-shrink: 0;

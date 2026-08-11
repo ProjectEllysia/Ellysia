@@ -101,7 +101,7 @@ function handleSubmit() {
   font-size: var(--fs-2xl);
   font-weight: 700;
   color: var(--text);
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   margin: 0 0 0.35rem;
 }
 
@@ -122,7 +122,7 @@ function handleSubmit() {
 .form-title {
   width: 100%;
   padding: 0.7rem 0.85rem;
-  font-family: var(--font-body);
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body);
   font-size: var(--fs-lg);
   background: var(--surface);
   border: 1px solid var(--border-solid);
@@ -146,7 +146,7 @@ function handleSubmit() {
   width: 100%;
   min-height: 320px;
   resize: vertical;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   line-height: 1.7;
   padding: 1.1rem;
@@ -167,7 +167,7 @@ function handleSubmit() {
   color: var(--text-muted);
   font-size: var(--fs-md);
   opacity: 0.35;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
 }
 
 .form-footer {
@@ -180,7 +180,7 @@ function handleSubmit() {
 .char-count {
   font-size: var(--fs-md);
   color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
 }
 
 .btn-analyze {
@@ -196,7 +196,7 @@ function handleSubmit() {
   background: var(--accent);
   color: var(--on-accent);
   transition: opacity 0.2s, transform 0.15s;
-  font-family: var(--font-body);
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body);
 }
 
 .btn-analyze:hover:not(:disabled) {

@@ -289,7 +289,7 @@ function verdictClass(v) {
 }
 
 .doc-id {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   color: var(--text-dim);
 }

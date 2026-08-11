@@ -1,13 +1,29 @@
 <template>
-  <div class="tabs" role="tablist">
-    <button v-for="tab in tabs" :key="tab.id"
+  <!-- Teclado: las flechas mueven entre pestañas e Inicio/Fin saltan a los
+       extremos, que es lo que un lector de pantalla anuncia y lo que espera
+       quien navega sin ratón. Solo la pestaña activa entra en el orden de
+       tabulación (tabindex -1 en las demás), como manda el patrón de tablist. -->
+  <div class="tabs" role="tablist" aria-label="Vistas del activo" @keydown="onKeydown">
+    <button v-for="(tab, index) in tabs" :key="tab.id"
+      ref="tabButtons"
       class="tab" :class="{ active: active === tab.id }"
-      role="tab" :title="tab.hint" @click="$emit('switch', tab.id)">
+      role="tab"
+      :id="`tab-${tab.id}`"
+      :aria-selected="active === tab.id"
+      :aria-controls="`panel-${tab.id}`"
+      :tabindex="active === tab.id ? 0 : -1"
+      :title="tab.hint"
+      @click="$emit('switch', tab.id)">
       {{ tab.label }}
-      <span v-if="tab.id === 'anomalias' && anomalyCount" class="tab-badge">{{ anomalyCount }}</span>
+      <span v-if="tab.id === 'anomalias' && anomalyCount" class="tab-badge">
+        {{ anomalyCount }}
+        <span class="sr-only">anomalías abiertas</span>
+      </span>
       <span
         v-else-if="tab.id === 'estadisticas' && statsWarning"
         class="tab-dot"
+        role="img"
+        aria-label="Hay lecturas de disco o CPU por encima del umbral"
         title="Hay lecturas (disco o CPU) por encima del umbral"
       ></span>
     </button>
@@ -15,12 +31,14 @@
 </template>
 
 <script setup>
-defineProps({
+import { ref, nextTick } from 'vue'
+
+const props = defineProps({
   active: { type: String, required: true },
   anomalyCount: { type: Number, default: 0 },
   statsWarning: { type: Boolean, default: false },
 })
-defineEmits(['switch'])
+const emit = defineEmits(['switch'])
 
 const tabs = [
   { id: 'graficas', label: 'Gráficas', hint: 'Atajo: 1' },
@@ -28,6 +46,30 @@ const tabs = [
   { id: 'inventario', label: 'Inventario', hint: 'Atajo: 3' },
   { id: 'anomalias', label: 'Anomalías', hint: 'Atajo: 4' },
 ]
+
+const tabButtons = ref([])
+
+/** Mueve el foco y la selección a la pestaña de la posición dada. */
+async function focusTab(index) {
+  const destino = (index + tabs.length) % tabs.length
+  emit('switch', tabs[destino].id)
+  await nextTick()
+  tabButtons.value[destino]?.focus()
+}
+
+function onKeydown(event) {
+  const actual = tabs.findIndex(t => t.id === props.active)
+  const teclas = {
+    ArrowRight: () => focusTab(actual + 1),
+    ArrowLeft:  () => focusTab(actual - 1),
+    Home:       () => focusTab(0),
+    End:        () => focusTab(tabs.length - 1),
+  }
+  const accion = teclas[event.key]
+  if (!accion) return
+  event.preventDefault()
+  accion()
+}
 </script>
 
 <style scoped>
@@ -45,6 +87,7 @@ const tabs = [
 }
 .tab:hover { color: var(--text-dim); }
 .tab.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .tab-badge {
   padding: 0.05rem 0.45rem; border-radius: 999px;
@@ -55,4 +98,10 @@ const tabs = [
 /* Aviso discreto (no es una anomalía registrada, solo una lectura puntual
    por encima del umbral) — por eso un punto en vez de una insignia roja. */
 .tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); flex-shrink: 0; }
+
+/* El número solo no dice de qué: para quien escucha, "3" no es "3 anomalías". */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
 </style>

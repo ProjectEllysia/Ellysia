@@ -21,6 +21,8 @@ from src.modules.shared._exceptions import IllegalStateError
 
 logger = logging.getLogger(__name__)
 
+load_dotenv()
+
 # =============================================================================
 # ESTADO DEL MÓDULO
 # =============================================================================

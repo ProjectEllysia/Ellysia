@@ -217,8 +217,8 @@ function handleLaunch() {
 }
 .engine-mark svg { width: 21px; height: 21px; }
 .engine-title-wrap { display: flex; flex-direction: column; gap: 0.05rem; margin-right: auto; }
-.engine-title { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-lg); color: var(--text); }
-.engine-sub { font-family: var(--font-display); font-style: italic; font-size: var(--fs-lg); color: var(--text-muted); }
+.engine-title { font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-weight: 600; font-size: var(--fs-lg); color: var(--text); }
+.engine-sub { font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-style: italic; font-size: var(--fs-lg); color: var(--text-muted); }
 .engine-launched { font-size: var(--fs-md); color: var(--success); background: var(--success-dim); padding: 0.2rem 0.55rem; border-radius: 6px; }
 .pop-enter-active { transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.34,1.56,0.64,1); }
 .pop-enter-from { opacity: 0; transform: scale(0.8); }

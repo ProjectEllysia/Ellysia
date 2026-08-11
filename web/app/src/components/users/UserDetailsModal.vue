@@ -97,12 +97,12 @@ async function handleAddAttributes() { if (selectedAttrs.value.length === 0) ret
 .modal-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 1.5rem; backdrop-filter: blur(4px); }
 .modal-box { background: var(--surface); border: 1px solid var(--border-solid); border-radius: 12px; width: 100%; max-width: 540px; max-height: 90vh; overflow-y: auto; padding: 1.5rem; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.1rem; }
-.modal-header h3 { font-size: var(--fs-xl); font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); }
+.modal-header h3 { font-size: var(--fs-xl); font-weight: 700; color: var(--text); margin: 0; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .modal-close { background: none; border: none; font-size: var(--fs-lg); color: var(--text-muted); cursor: pointer; padding: 0 0.2rem; line-height: 1; }
 .modal-close:hover { color: var(--text); }
 .modal-loading { text-align: center; padding: 2.5rem 0; color: var(--text-muted); font-size: var(--fs-lg); }
 .detail-header { display: flex; align-items: center; gap: 0.85rem; margin-bottom: 1.1rem; }
-.detail-avatar { width: 48px; height: 48px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: var(--fs-2xl); font-weight: 700; background: var(--accent-dim); color: var(--accent-bright); font-family: var(--font-mono); }
+.detail-avatar { width: 48px; height: 48px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: var(--fs-2xl); font-weight: 700; background: var(--accent-dim); color: var(--accent-bright); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .role-avatar--root  { background: rgba(217,108,108,0.15); color: var(--danger); }
 .role-avatar--admin { background: rgba(212,160,74,0.15); color: var(--warn); }
 .role-avatar--user  { background: rgba(96,128,224,0.15); color: var(--info); }
@@ -120,7 +120,7 @@ async function handleAddAttributes() { if (selectedAttrs.value.length === 0) ret
 .detail-section { margin-top: 1.25rem; }
 .detail-section h4 { font-size: var(--fs-lg); font-weight: 600; color: var(--text); margin: 0 0 0.65rem; }
 .attr-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.65rem; }
-.attr-tag { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.45rem; font-size: var(--fs-md); font-weight: 500; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-family: var(--font-mono); }
+.attr-tag { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.45rem; font-size: var(--fs-md); font-weight: 500; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .attr-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: var(--fs-sm); line-height: 1; padding: 0; display: flex; }
 .attr-remove:hover { color: var(--danger); }
 .attr-empty { font-size: var(--fs-lg); color: var(--text-muted); }
