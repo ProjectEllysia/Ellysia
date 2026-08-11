@@ -957,20 +957,17 @@ def save_full_config(new_config: dict, expected_version: Optional[str] = None) -
 @config_block("general")
 @dataclass(frozen=True)
 class GeneralConfig:
-    configured_public_url: str = field(
-        default="http://localhost:5173", metadata={"key": "publicUrl"}
-    )
-    """Respaldo en fichero de la URL pública. Ver ``public_url``."""
-
     @property
     def public_url(self) -> str:
         """Base URL pública del SPA, usada para construir enlaces en los correos
         salientes (p. ej. el del quiz de una campaña de Aegis).
 
-        ``PUBLIC_WEB_URL`` en .env manda sobre el fichero; sin ninguno de los
-        dos, cae al valor de desarrollo de Vite. Siempre sin barra final.
+        Vive exclusivamente en ``PUBLIC_WEB_URL`` (.env) — a propósito no tiene
+        respaldo en SecOpsConfig.json, para que la URL pública de un despliegue
+        no se pueda fijar editando el fichero versionado. Sin la env var, cae
+        al valor de desarrollo de Vite. Siempre sin barra final.
         """
-        return (os.getenv("PUBLIC_WEB_URL") or self.configured_public_url).rstrip("/")
+        return os.getenv("PUBLIC_WEB_URL", "http://localhost:5173").rstrip("/")
 
 
 def general_config() -> GeneralConfig:
