@@ -5,6 +5,7 @@
       <h3>{{ name }}</h3>
     </div>
     <div class="scanner-body">
+      <slot />
       <h4>Paleta de colores</h4>
       <div class="color-grid">
         <div v-for="c in colors" :key="prefix + c.key" class="color-pick">
@@ -13,16 +14,15 @@
           <span class="color-hex">{{ flat[prefix + '.colorPalette.' + c.key] }}</span>
         </div>
       </div>
-      <h4>Prompt del sistema</h4>
-      <textarea v-model="flat[prefix + '.prompts.system']" rows="6" class="textarea"></textarea>
-      <h4>Plantilla de usuario</h4>
-      <textarea v-model="flat[prefix + '.prompts.userTemplate']" rows="6" class="textarea"></textarea>
+      <PromptField v-model="flat[prefix + '.prompts.system']" label="Prompt del sistema" :title="name + ' — prompt del sistema'" />
+      <PromptField v-model="flat[prefix + '.prompts.userTemplate']" label="Plantilla de usuario" :title="name + ' — plantilla de usuario'" />
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
+import PromptField from '@/components/shared/PromptField.vue'
 const props = defineProps({ name: { type: String, required: true }, icon: { type: String, default: 'scan' }, prefix: { type: String, required: true }, flat: { type: Object, required: true } })
 const colors = [
   { key: 'black', label: 'Negro' }, { key: 'dark', label: 'Oscuro' }, { key: 'main', label: 'Principal' },
@@ -48,6 +48,4 @@ const iconSvg = computed(() => icons[props.icon] || icons.scan)
 .color-input { width: 30px; height: 22px; border: none; border-radius: 3px; cursor: pointer; background: transparent; padding: 0; }
 .color-label { font-size: var(--fs-body); font-weight: 600; color: var(--text-dim); }
 .color-hex { font-size: var(--fs-body); color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
-.textarea { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 5px; padding: 0.45rem 0.55rem; color: var(--text); font-size: var(--fs-input); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); outline: none; resize: vertical; width: 100%; box-sizing: border-box; transition: border-color 0.2s; }
-.textarea:focus { border-color: var(--accent); }
 </style>
