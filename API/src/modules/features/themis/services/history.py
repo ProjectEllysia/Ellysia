@@ -15,7 +15,6 @@ Classes:
     MetricExtractor:        Abstract per-tool finding extractor.
     NmapMetricExtractor:    Open ports as the metric.
     NiktoMetricExtractor:   Web incidents as the metric.
-    OpenVASMetricExtractor: Vulnerabilities as the metric.
     LybraMetricExtractor:   Findings as the metric.
     HistoryStatsService:    Builds the serializable chart payload from a scan list.
 """
@@ -26,7 +25,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Set, Type
 
-from ..model import LybraScan, NiktoScan, NmapScan, OpenVASScan, Scan, ScanType
+from ..model import LybraScan, NiktoScan, NmapScan, NucleiScan, Scan, ScanType
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +79,9 @@ class NmapMetricExtractor(MetricExtractor):
 
     def identities(self, scan: NmapScan) -> Set[str]:
         return {
-            op.port.protocol
-            for op in (scan.open_ports_relation or [])
-            if op.port is not None
+            open_port.port.protocol
+            for open_port in (scan.open_ports_relation or [])
+            if open_port.port is not None
         }
 
 
@@ -94,22 +93,8 @@ class NiktoMetricExtractor(MetricExtractor):
 
     def identities(self, scan: NiktoScan) -> Set[str]:
         return {
-            f"{inc.method}|{inc.url}|{inc.description}"
-            for inc in (scan.incidents or [])
-        }
-
-
-@MetricExtractor.register(ScanType.OPENVAS)
-class OpenVASMetricExtractor(MetricExtractor):
-    """Metric: vulnerabilities. Identity: the NVT OID."""
-
-    metric_label = "Vulnerabilidades"
-
-    def identities(self, scan: OpenVASScan) -> Set[str]:
-        return {
-            res.vulnerability.nvt_oid
-            for res in (scan.results or [])
-            if res.vulnerability is not None
+            f"{incident.method}|{incident.url}|{incident.description}"
+            for incident in (scan.incidents or [])
         }
 
 
@@ -121,8 +106,26 @@ class LybraMetricExtractor(MetricExtractor):
 
     def identities(self, scan: LybraScan) -> Set[str]:
         return {
-            f.dedup_key or f"finding:{f.id}"
-            for f in (scan.findings or [])
+            finding.dedup_key or f"finding:{finding.id}"
+            for finding in (scan.findings or [])
+        }
+
+
+@MetricExtractor.register(ScanType.NUCLEI)
+class NucleiMetricExtractor(MetricExtractor):
+    """Metric: findings. Identity: dedup_key, or the row id for one without.
+
+    Identical shape to ``LybraMetricExtractor`` — both scan types live
+    entirely in ``Finding`` (roadmap Fase U1), so there is nothing
+    Nuclei-specific to add here beyond the label.
+    """
+
+    metric_label = "Hallazgos"
+
+    def identities(self, scan: NucleiScan) -> Set[str]:
+        return {
+            finding.dedup_key or f"finding:{finding.id}"
+            for finding in (scan.findings or [])
         }
 
 
@@ -170,7 +173,7 @@ class HistoryStatsService:
                 "scanId": scan.id,
             })
 
-        max_value = max((p["y"] for p in points), default=0)
+        max_value = max((point["y"] for point in points), default=0)
         diff = self._compute_diff(scans, extractor)
 
         return {
@@ -194,14 +197,14 @@ class HistoryStatsService:
     @staticmethod
     def _compute_diff(scans: List[Scan], extractor: MetricExtractor) -> dict:
         """Diff the most recent scan against the immediately previous one."""
-        empty = {
+        empty_payload = {
             "new": 0, "unchanged": 0, "disappeared": 0,
             "currentScanId": None, "previousScanId": None,
         }
         if len(scans) < 2:
             if scans:
-                empty["currentScanId"] = scans[-1].id
-            return empty
+                empty_payload["currentScanId"] = scans[-1].id
+            return empty_payload
 
         previous, current = scans[-2], scans[-1]
         prev_ids = extractor.identities(previous)

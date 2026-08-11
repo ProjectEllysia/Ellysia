@@ -459,14 +459,14 @@ watch(
 }
 
 .progress-label {
-  font-size: var(--fs-xl);
+  font-size: var(--fs-lg);
   color: var(--text-dim);
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
 }
 
 .btn-cancel {
   padding: 0.6rem 1.3rem;
-  font-size: var(--fs-xl);
+  font-size: var(--fs-lg);
   font-weight: 600;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -499,7 +499,7 @@ watch(
   font-size: var(--fs-xl);
   font-weight: 700;
   color: var(--text);
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   margin: 0;
 }
 
@@ -543,8 +543,8 @@ watch(
 }
 
 .analysis-id {
-  font-family: var(--font-mono);
-  font-size: var(--fs-xl);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--text-dim);
   background: var(--surface-2);
@@ -553,7 +553,7 @@ watch(
 }
 
 .report-title {
-  font-family: var(--font-body);
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body);
   font-size: var(--fs-lg);
   font-weight: 700;
   color: var(--text);
@@ -615,9 +615,9 @@ watch(
   border-radius: 999px;
   background: var(--accent);
   color: var(--bg);
-  font-size: var(--fs-body);
+  font-size: var(--fs-sm);
   font-weight: 700;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   line-height: 1;
 }
 
@@ -626,7 +626,7 @@ watch(
   font-size: var(--fs-xl);
   font-weight: 700;
   color: var(--text);
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   margin: 0 0 0.85rem;
   padding-bottom: 0.4rem;
   border-bottom: 1px solid var(--border);
@@ -727,10 +727,10 @@ watch(
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text);
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   cursor: pointer;
   transition: border-color 0.2s, transform 0.15s;
-  font-family: var(--font-body);
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body);
 }
 
 .signal-chip:hover {
@@ -743,7 +743,7 @@ watch(
 }
 
 .signal-score {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-weight: 700;
   color: var(--danger);
 }
@@ -811,7 +811,7 @@ watch(
   border-radius: 10px;
   background: color-mix(in srgb, var(--danger) 6%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border));
-  font-size: var(--fs-xl);
+  font-size: var(--fs-md);
   line-height: 1.6;
   color: var(--text);
 }
@@ -847,7 +847,7 @@ watch(
   border-radius: 10px;
   background: var(--surface);
   border: 1px solid var(--border);
-  font-size: var(--fs-xl);
+  font-size: var(--fs-lg);
   line-height: 1.6;
   color: var(--text-dim);
 }
@@ -899,7 +899,7 @@ watch(
   background: var(--surface);
   border: 1px solid var(--border-solid);
   border-radius: 8px;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-lg);
   line-height: 1.6;
   color: var(--text-dim);
@@ -953,7 +953,7 @@ watch(
   background: var(--surface);
   color: var(--text-muted);
   font-size: var(--fs-lg);
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   text-align: center;
 }
 

@@ -28,11 +28,11 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
 > The Android companion app lives in a separate repository: [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) (Kotlin/Jetpack Compose, with the AcheronCore Java crypto engine). It consumes the `/acheron` endpoints documented below.
 
 > [!IMPORTANT]
-> The API assumes a **Linux** environment. Scan tools (Nmap, Nikto, OpenVAS/Greenbone) are Linux-native. On Windows, use WSL (`wsl` → `cd API && python run.py`) or `docker compose`.
+> The API assumes a **Linux** environment. Scan tools (Nmap, Nikto, Nuclei) are Linux-native. On Windows, use WSL (`wsl` → `cd API && python run.py`) or `docker compose`.
 
 ## Features
 
-- **Vulnerability scanning** — Nmap (port/OS detection), Nikto (web vulns), and OpenVAS/GVM (full NVT scans), with scheduled execution via APScheduler.
+- **Vulnerability scanning** — Nmap (port/OS detection), Nikto (web vulns), Nuclei (template-based), and Lybra, a self-built detection engine (own CPE→CVE matcher, active checks, dedup and lifecycle tracking), with scheduled execution via APScheduler. OpenVAS/GVM was removed (see `plans/feature/themis/lybra-engine-roadmap.md` §7).
 - **AI-powered PDF reports** — Scan results enriched by local LLM (Ollama) with "Controls, Not Counts" risk assessment.
 - **Anti-phishing analysis** — 37 atomic rules evaluate email headers (SPF, DKIM, DMARC, content heuristics, domain impersonation) and produce a calibrated verdict.
 - **Encrypted credential vault** — AES-256-GCM client-side encryption (AcheronCore), with a sync API consumed by the web client and the [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) Android app.
@@ -52,7 +52,7 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
                 │  ┌──────────────────────────────────────────────────┐   │
                 │  │  APScheduler ──► TaskQueue (RQ + Redis)          │   │
    Web SPA ────►│  │               ┌────────────────────────────┤     │   │
-  (Vue 3)       │  │               │ RQ Workers (isolated procs)│     │──►  Nmap / Nikto / OpenVAS
+  (Vue 3)       │  │               │ RQ Workers (isolated procs)│     │──►  Nmap / Nikto / Nuclei / Lybra
                 │  │               │   themis.scan/report/...  │     │──►  Ollama / OpenAI
   Android  ────►│  │               │   aegis.generate/campaign │     │──►  INCIBE-CERT · CIRCL · NVD
   (Kotlin)      │  │               │   iris.analyze/report      │     │──►  SMTP relay (herald)
@@ -71,7 +71,7 @@ Ellysia/
 │   │   ├── system/              # Config, logging, task queue admin
 │   │   ├── users/               # OAuth 2.0 + JWT, user CRUD, ABAC
 │   │   ├── features/            # Feature modules (themis, iris, aegis, acheron, hygeia)
-│   │   │   ├── themis/          # Scan orchestration (Nmap/Nikto/OpenVAS)
+│   │   │   ├── themis/          # Scan orchestration (Nmap/Nikto/Nuclei/Lybra)
 │   │   │   ├── iris/            # Email header analysis (37 rules)
 │   │   │   ├── aegis/           # Awareness pills + CVE alerts
 │   │   │   ├── acheron/         # Encrypted credential vault
@@ -96,7 +96,7 @@ Ellysia/
 
 | Module | Description | Status |
 |---|---|---|
-| **Themis** | Nmap, Nikto, and OpenVAS scans with PDF reports, scheduled execution, AI enrichment, and traceroute tracing. | Operational |
+| **Themis** | Nmap, Nikto, Nuclei and Lybra (self-built engine) scans with PDF reports, scheduled execution, AI enrichment, and traceroute tracing. | Operational |
 | **Iris** | Phishing detection via 37 atomic email header analysis rules with subtractive risk scoring. | Operational |
 | **Acheron** | Client-encrypted credential vault with granular sync and export/import, consumed by the web client and [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile). | Operational |
 | **Aegis** | AI-generated security awareness pills across 73 topics with real-time CVE alerts from 19 tracked brands. | Operational |
@@ -109,14 +109,14 @@ Ellysia/
 ## Quick start
 
 > [!NOTE]
-> Requires: Python 3.10+, Docker, PostgreSQL, Redis, Ollama (for AI features), and scan tools (Nmap, Nikto, OpenVAS).
+> Requires: Python 3.10+, Docker, PostgreSQL, Redis, Ollama (for AI features), and scan tools (Nmap, Nikto, Nuclei).
 
 ```bash
 # 1. Clone
 git clone https://github.com/ProjectEllysia/Ellysia.git
 cd Ellysia
 
-# 2. Start infrastructure (PostgreSQL 15432, Redis, Ollama, OpenVAS)
+# 2. Start infrastructure (PostgreSQL 15432, Redis, Ollama)
 docker compose --profile dev up -d
 
 # 3. Configure the API
@@ -169,7 +169,8 @@ Content-Type: application/json
 |---|---|---|
 | `POST` | `/themis/nmap` | Port scan (supports CIDR ranges) |
 | `POST` | `/themis/nikto` | Web configuration / vulnerability scan |
-| `POST` | `/themis/openvas` | Full NVT scan (single host per scan) |
+| `POST` | `/themis/nuclei` | Template-based scan (single host per scan) |
+| `POST` | `/themis/lybra` | Self-built engine scan (self-discovery or from a prior Nmap scan) |
 | `GET` | `/themis/results` | List scans (filterable, paginated) |
 | `GET` | `/themis/results/<id>` | Scan detail |
 | `GET` | `/themis/scan-status?id=` | Status: pending / running / done / cancelled |
@@ -235,14 +236,18 @@ Aegis combines AI-generated awareness content with current CVE alerts from INCIB
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/acheron/vault` | Retrieve vault (encrypted blob) |
-| `POST` | `/acheron/vault` | Create or replace entire vault |
+| `GET` | `/acheron/vault` | Retrieve vault (encrypted blob); returns `revision` and an `ETag` |
+| `GET` | `/acheron/vault/revision` | Cheap probe: current `revision` only, no ciphertext |
+| `POST` | `/acheron/vault` | Create the vault; on an existing one it is a **full replace** and requires `?mode=replace` + `If-Match` |
 | `POST` | `/acheron/storables` | Add an `Account` or `CreditCard` |
 | `PATCH` | `/acheron/storables` | Bulk update only modified fields |
 | `DELETE` | `/acheron/storables` | Delete a Storable by `internalId` |
 
 > [!NOTE]
 > Encryption happens **client-side** (AcheronCore — see [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) for the Android implementation). The server stores only ciphertext. Internal IDs are deterministic SHA-256 hex hashes of encrypted content — collision-free across offline devices.
+
+> [!IMPORTANT]
+> **Optimistic concurrency.** `Vault.revision` is bumped on every content mutation and exposed as `ETag` / `revision`. Send it back as `If-Match: "N"` on writes: if it no longer matches, the write is rejected with `409 vault_revision_mismatch` (body carries `currentRevision`) and **nothing is mutated** — a client holding a stale snapshot can no longer wipe another device's edits. `If-Match` is mandatory on the destructive `POST /acheron/vault` replace; on the granular endpoints it is optional for now (transition window for already-deployed apps). Distinct from `metadataVersion`, which only tracks master-password rotation.
 
 ### Hygeia — infrastructure monitoring
 
@@ -286,7 +291,7 @@ Each entry point is a `@staticmethod` on the owning module's manager class — p
 
 | Category | Module | Entry function |
 |---|---|---|
-| `themis.scan` | Themis | `managers.NmapScanManager.execute_nmap_scan` (also `NiktoScanManager`, `OpenVASScanManager`) |
+| `themis.scan` | Themis | `managers.NmapScanManager.execute_nmap_scan` (also `NiktoScanManager`, `NucleiScanManager`, `LybraEngineManager`) |
 | `themis.report` | Themis | `managers.ThemisReportManager.execute_report_generation` |
 | `themis.traceroute` | Themis | `managers.TracerouteManager.execute_traceroute` |
 | `aegis.generate` | Aegis | `managers.AegisManager.execute_aegis_generation` |
@@ -342,7 +347,7 @@ alembic downgrade -1
 
 | Profile | Services | Use case |
 |---|---|---|
-| `dev` | PostgreSQL (15432), Redis, Ollama, OpenVAS | Local development with API on bare metal |
+| `dev` | PostgreSQL (15432), Redis, Ollama | Local development with API on bare metal |
 | `container` | Infrastructure + API, worker, web | Full deployment |
 
 ```bash
@@ -401,7 +406,6 @@ Encrypt, etc.) and update `nginx.conf` paths accordingly.
 | API | 5000 | `0.0.0.0:5000` (HTTP internally) |
 | PostgreSQL | 15432 | Container maps 5432 → 15432 |
 | Redis | 6379 | Required for TaskQueue |
-| OpenVAS | 9390 / 9392 | ~15 min first start (NVT feed initialization) |
 | Ollama | 11434 | Local LLM |
 
 ### AI configuration (scribe module)
@@ -478,7 +482,7 @@ SMTP_PASSWORD=your-smtp-key
 | Task queue | RQ + Redis 7 |
 | Authentication | OAuth 2.0 + JWT (PyJWT, claim `jti`) |
 | Password hashing | Argon2id (argon2-cffi) |
-| Scanning | Nmap + python-nmap, Nikto, OpenVAS/GVM (python-gvm) |
+| Scanning | Nmap + python-nmap, Nikto, Nuclei, Lybra (self-built engine) |
 | PDF reports | ReportLab + Pillow |
 | AI / LLM | Ollama (local) / OpenAI (swappable via `scribe`) |
 | Vulnerability feeds | INCIBE-CERT, CIRCL / NVD |
@@ -496,7 +500,7 @@ Ellysia uses a layered configuration system (`API/src/modules/system/config_read
 
 1. **`API/SecOpsConfig.json`** — base configuration (prompts, directories, task queue defaults)
 2. **`API/.env`** — environment variables that **override** JSON values (required for JWT secret, DB credentials, API keys)
-3. **Root `.env`** — docker-compose only (Postgres, Redis, OpenVAS credentials — not for the API)
+3. **Root `.env`** — docker-compose only (Postgres, Redis credentials — not for the API)
 
 All values are lazily loaded via `@_lazy_load`. Changes to `SecOpsConfig.json` require an app restart unless applied via `PUT /system`.
 
@@ -507,7 +511,6 @@ All values are lazily loaded via `@_lazy_load`. Changes to `SecOpsConfig.json` r
 
 - `.env` files contain credentials — **never commit them**. `API/.env` is in `.gitignore`.
 - `API/src/data/` and `docs/` are gitignored (scan outputs, generated PDFs).
-- OpenVAS accepts **one host per scan** (no CIDR ranges) and takes ~15 min for initial NVT feed setup.
 - PostgreSQL uses port **15432** locally (not standard 5432).
 - `themis/services/tasks.py` defines its own `TaskStatus` enum — distinct from `taskqueue.TaskStatus`.
 - API version is declared as `appVersion` in `SecOpsConfig.json` (read by `CR.get_app_version()`).

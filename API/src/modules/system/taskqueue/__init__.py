@@ -8,6 +8,7 @@ from .job_context import JobHandle, job_context
 from .queue import DEFAULT_QUEUE, ITaskQueue, QueueRegistry, TaskQueue
 from .task import Task, TaskStatus
 from .tracking import TaskTrackingMixin
+from .connection import ping_redis
 
 __all__ = [
     "ITaskQueue",
@@ -17,6 +18,7 @@ __all__ = [
     "TaskQueue",
     "TaskStatus",
     "TaskTrackingMixin",
+    "ping_redis",
     "QueueRegistry",
     "DEFAULT_QUEUE",
 ]

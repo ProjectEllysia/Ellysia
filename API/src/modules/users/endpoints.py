@@ -11,7 +11,7 @@ from src.modules.shared._exceptions import (
     IllegalStateError,
     EllysiaException,
 )
-from src.modules.shared.schemas import ErrorSchema
+from src.modules.shared.schemas import ErrorSchema, SuccessMessageSchema
 from src.modules.shared import utcnow_naive
 
 from .services import Role, require_oauth_token, require_role
@@ -22,6 +22,7 @@ from .exceptions import (
     PasswordChangedError,
     MfaChallengeInvalidError,
     InvalidMfaCodeError,
+    RegistrationClosedError,
 )
 from .model import User
 from .schemas import (
@@ -46,6 +47,11 @@ from .schemas import (
     MfaTotpConfirmResponseSchema,
     MfaDisableRequestSchema,
     MfaStatusResponseSchema,
+    RegisterRequestSchema,
+    RegisterResponseSchema,
+    VerifyEmailRequestSchema,
+    DeletionPreviewSchema,
+    DeleteAccountRequestSchema,
 )
 
 
@@ -85,9 +91,14 @@ def _serialize_user_profile(user: "User", *, include_attributes: bool = False) -
         "role": user.role,
         "created_at": user.created_at,
         "password_changed_at": user.password_changed_at,
+        # Sin esto el cliente no puede saber que la cuenta está pendiente de
+        # confirmar, y el usuario se come un 403 al primer intento de hacer
+        # cualquier cosa sin entender por qué ni cómo salir de ahí.
+        "emailVerified": user.email_verified_at is not None,
+        "mustChangePassword": bool(user.must_change_password),
     }
     if include_attributes:
-        profile["attributes"] = [a.attribute_name for a in user.attributes]
+        profile["attributes"] = [attribute.attribute_name for attribute in user.attributes]
     return profile
 
 
@@ -110,18 +121,18 @@ def oauth_token(data: dict[str, Any]):
         username = data["username"]
         password = data["password"]
 
-        is_valid, uid = UserManager().verify_credentials(username, password)
-        if not is_valid or uid is None:
+        is_valid, user_id = UserManager().verify_credentials(username, password)
+        if not is_valid or user_id is None:
             logger.warning(f"Login fallido para: {username}")
             raise InvalidCredentialsError()
 
-        user = USER_MANAGER.get_user_by_id(uid)
+        user = USER_MANAGER.get_user_by_id(user_id)
 
         # MFA activado: en vez de tokens reales, se emite un challenge de corta
         # duración que el cliente debe canjear en POST /oauth/mfa/verify tras
         # aportar el segundo factor. Cuentas sin MFA no ven ningún cambio.
-        if MFA_MANAGER.is_enabled(uid):
-            challenge_token = OAUTH_MANAGER.create_mfa_challenge(uid)
+        if MFA_MANAGER.is_enabled(user_id):
+            challenge_token = OAUTH_MANAGER.create_mfa_challenge(user_id)
             logger.info(f"MFA requerido para: {username}")
             return {
                 "mfaRequired": True,
@@ -130,18 +141,18 @@ def oauth_token(data: dict[str, Any]):
             }
 
         access_token = OAUTH_MANAGER.create_access_token(
-            user_id=uid, username=username,
+            user_id=user_id, username=username,
             role=user.role if user else "role_user",
             password_changed_at=user.password_changed_at if user else None,
         )
-        refresh_token = OAUTH_MANAGER.create_refresh_token(uid)
-        user_attrs = USER_MANAGER.get_user_attributes(uid)
+        refresh_token = OAUTH_MANAGER.create_refresh_token(user_id)
+        user_attrs = USER_MANAGER.get_user_attributes(user_id)
 
         logger.info(f"Tokens emitidos para: {username}")
         return {
             "access_token": access_token,
             "token_type": "Bearer",
-            "expires_in": CR.get_oauth_config()[0] * 60,
+            "expires_in": CR.jwt_config().access_token_expiry_minutes * 60,
             "refresh_token": refresh_token,
             "role": user.role if user else "role_user",
             "attributes": user_attrs,
@@ -149,29 +160,29 @@ def oauth_token(data: dict[str, Any]):
 
     if grant_type == "refresh_token":
         refresh_token_str = data["refresh_token"]
-        uid = OAUTH_MANAGER.verify_refresh_token(refresh_token_str)
-        if not uid:
+        user_id = OAUTH_MANAGER.verify_refresh_token(refresh_token_str)
+        if not user_id:
             # Si el refresh falló porque la contraseña cambió, devolver un motivo
             # específico para que el cliente muestre la pantalla dedicada.
             if OAUTH_MANAGER.is_refresh_stale_by_password(refresh_token_str):
                 raise PasswordChangedError()
             raise InvalidCredentialsError()
 
-        user = USER_MANAGER.get_user_by_id(uid)
+        user = USER_MANAGER.get_user_by_id(user_id)
         if not user:
             raise InvalidCredentialsError()
 
         access_token = OAUTH_MANAGER.create_access_token(
-            uid, user.username, user.role,  # type: ignore
+            user_id, user.username, user.role,  # type: ignore
             password_changed_at=user.password_changed_at,
         )
-        user_attrs = USER_MANAGER.get_user_attributes(uid)
+        user_attrs = USER_MANAGER.get_user_attributes(user_id)
 
-        logger.info(f"Access token renovado para usuario ID: {uid}")
+        logger.info(f"Access token renovado para usuario ID: {user_id}")
         return {
             "access_token": access_token,
             "token_type": "Bearer",
-            "expires_in": CR.get_oauth_config()[0] * 60,
+            "expires_in": CR.jwt_config().access_token_expiry_minutes * 60,
             "role": user.role,
             "attributes": user_attrs,
         }
@@ -212,16 +223,16 @@ def oauth_mfa_verify(data: dict[str, Any]):
     """Verificar el segundo factor (TOTP o codigo de recuperacion) y emitir tokens"""
     challenge_token = data["challengeToken"]
 
-    uid = OAUTH_MANAGER.verify_mfa_challenge(challenge_token)
-    if uid is None:
+    user_id = OAUTH_MANAGER.verify_mfa_challenge(challenge_token)
+    if user_id is None:
         raise MfaChallengeInvalidError()
 
-    user = USER_MANAGER.get_user_by_id(uid)
+    user = USER_MANAGER.get_user_by_id(user_id)
     if user is None:
         raise MfaChallengeInvalidError()
 
     verified = MFA_MANAGER.verify_totp_or_recovery(
-        uid, code=data.get("code"), recovery_code=data.get("recoveryCode"),
+        user_id, code=data.get("code"), recovery_code=data.get("recoveryCode"),
     )
     if not verified:
         OAUTH_MANAGER.register_mfa_challenge_failure(challenge_token)
@@ -231,18 +242,18 @@ def oauth_mfa_verify(data: dict[str, Any]):
     OAUTH_MANAGER.consume_mfa_challenge(challenge_token)
 
     access_token = OAUTH_MANAGER.create_access_token(
-        user_id=uid, username=user.username, role=user.role,
+        user_id=user_id, username=user.username, role=user.role,
         password_changed_at=user.password_changed_at,
         mfa_at=utcnow_naive(),
     )
-    refresh_token = OAUTH_MANAGER.create_refresh_token(uid)
-    user_attrs = USER_MANAGER.get_user_attributes(uid)
+    refresh_token = OAUTH_MANAGER.create_refresh_token(user_id)
+    user_attrs = USER_MANAGER.get_user_attributes(user_id)
 
     logger.info(f"MFA verificado, tokens emitidos para: {user.username}")
     return {
         "access_token": access_token,
         "token_type": "Bearer",
-        "expires_in": CR.get_oauth_config()[0] * 60,
+        "expires_in": CR.jwt_config().access_token_expiry_minutes * 60,
         "refresh_token": refresh_token,
         "role": user.role,
         "attributes": user_attrs,
@@ -376,6 +387,124 @@ def sign_up_user(data: dict[str, Any]):
     }
 
 
+# =========================================================================
+# BAJA DE LA CUENTA
+# =========================================================================
+
+
+@users_blp.get("/me/deletion-preview")
+@users_blp.response(200, DeletionPreviewSchema, description="What deleting the account destroys")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@limiter.limit("30 per hour")
+@require_oauth_token
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def preview_account_deletion():
+    """Que se destruye si esta cuenta se borra. No borra nada.
+
+    Alimenta el aviso de confirmacion. Lo importante que devuelve es la
+    consecuencia sobre terceros: si el usuario es duenyo de una organizacion,
+    esta DESAPARECE con su cuenta y sus miembros se quedan sin ella.
+    """
+    return USER_MANAGER.preview_deletion(get_current_user().id)
+
+
+@users_blp.delete("/me")
+@users_blp.arguments(DeleteAccountRequestSchema)
+@users_blp.response(200, SuccessMessageSchema, description="Account deleted")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Wrong password or not authenticated")
+@limiter.limit("5 per hour")
+@require_oauth_token
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def delete_own_account(data: dict[str, Any]):
+    """Borrar la cuenta y todo lo que cuelga de ella.
+
+    Si el usuario es duenyo de una organizacion, esta se disuelve: sus miembros
+    conservan cuenta, datos y plan personal, pero pierden lo que heredaban.
+    Se re-verifica la contrasenya porque un token robado no debe bastar para la
+    operacion mas destructiva del producto.
+    """
+    user = get_current_user()
+    username = user.username
+    USER_MANAGER.delete_own_account(user.id, data["password"])
+    logger.info(f"Cuenta eliminada a peticion del propio usuario: {username}")
+    return {"message": "Tu cuenta y todos tus datos se han eliminado."}
+
+
+# =========================================================================
+# ALTA PUBLICA Y VERIFICACION DE CORREO
+# =========================================================================
+
+
+@users_blp.post("/register")
+@users_blp.arguments(RegisterRequestSchema)
+@users_blp.response(201, RegisterResponseSchema, description="Account created, verification email sent")
+@users_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
+@users_blp.alt_response(403, schema=ErrorSchema, description="Public registration disabled")
+@users_blp.alt_response(409, schema=ErrorSchema, description="Username or email already taken")
+@limiter.limit("5 per hour; 20 per day")
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def register_user(data: dict[str, Any]):
+    """Crear una cuenta desde la web, sin intervencion de un administrador"""
+    if not CR.registration_config().enabled:
+        raise RegistrationClosedError()
+
+    # Rol forzado a role_user y correo sin verificar: son las dos diferencias
+    # con el alta de un administrador, y las dos son deliberadas. Los atributos
+    # ABAC por defecto los pone sign_in_user, iguales para todo el mundo.
+    user = USER_MANAGER.sign_in_user(
+        username=data["username"],
+        email=data["email"],
+        first_name=data["first_name"],
+        last_name=data["last_name"],
+        password=data["password"],
+        email_verified=False,
+    )
+
+    # No se crea fila en Subscription: su ausencia ya significa "plan por
+    # defecto" (ver accounts/services/entitlements.py).
+    USER_MANAGER.issue_email_verification(user.id)
+
+    logger.info(f"Alta publica: {user.username} (ID: {user.id})")
+    return {
+        "message": "Cuenta creada. Te hemos enviado un correo para confirmarla.",
+        "userId": user.id,
+        "username": user.username,
+        "email": user.email,
+        "emailVerified": False,
+    }
+
+
+@users_blp.post("/verify-email")
+@users_blp.arguments(VerifyEmailRequestSchema)
+@users_blp.response(200, SuccessMessageSchema, description="Email verified")
+@users_blp.alt_response(400, schema=ErrorSchema, description="Invalid or expired token")
+@limiter.limit("20 per hour")
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def verify_email(data: dict[str, Any]):
+    """Confirmar una direccion de correo con el token del enlace
+
+    Publico a proposito: el token es la unica identidad, igual que en el quiz
+    de Aegis. Quien pulsa el enlace no tiene por que tener la sesion abierta,
+    ni siquiera en el mismo dispositivo.
+    """
+    user = USER_MANAGER.verify_email(data["token"])
+    return {"message": f"Correo confirmado. Ya puedes usar Ellysia, {user.first_name}."}
+
+
+@users_blp.post("/verify-email/resend")
+@users_blp.response(200, SuccessMessageSchema, description="Verification email sent again")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@users_blp.alt_response(409, schema=ErrorSchema, description="Email already verified")
+@limiter.limit("3 per hour")
+@require_oauth_token
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def resend_email_verification():
+    """Pedir un nuevo enlace de confirmacion. Invalida el anterior."""
+    user = get_current_user()
+    USER_MANAGER.issue_email_verification(user.id)
+    return {"message": "Te hemos enviado un correo de confirmacion."}
+
+
 @users_blp.get("")
 @users_blp.response(200, UserListItemSchema(many=True), description="List of all users")
 @users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
@@ -394,15 +523,14 @@ def list_all_users():
 @users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @users_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
 @require_oauth_token
-@require_role(Role.ADMIN)
 @handle_exceptions(default_exception=DatabaseError, logger=logger)
 def list_user_attributes(target_user_id: int):
     """Listar los atributos de un usuario especifico"""
     current_user = get_current_user()
-    uid = current_user.id
+    user_id = current_user.id
 
-    if not USER_MANAGER.can_manage_user(uid, target_user_id):
-        logger.warning(f"Usuario {uid} intento ver atributos de {target_user_id} sin permiso")
+    if not USER_MANAGER.can_manage_user(user_id, target_user_id):
+        logger.warning(f"Usuario {user_id} intento ver atributos de {target_user_id} sin permiso")
         raise EllysiaException(
             "No tienes permiso para ver atributos de este usuario",
             status_code=403,
@@ -411,7 +539,7 @@ def list_user_attributes(target_user_id: int):
     target_user = USER_MANAGER.get_user_by_id(target_user_id)
     return {
         "user_id": target_user_id,
-        "attributes": [a.attribute_name for a in target_user.attributes],
+        "attributes": [attribute.attribute_name for attribute in target_user.attributes],
         "role": target_user.role if target_user else "role_user",
     }
 
@@ -423,13 +551,12 @@ def list_user_attributes(target_user_id: int):
 @users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @users_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
 @require_oauth_token
-@require_role(Role.ADMIN)
 @handle_exceptions(default_exception=DatabaseError, logger=logger)
 def add_user_attribute(data: dict[str, Any], target_user_id: int):
     """Anadir atributos a un usuario"""
     current_user_id = get_current_user().id
 
-    if not USER_MANAGER.can_manage_user(current_user_id, target_user_id):
+    if not USER_MANAGER.can_administer_user(current_user_id, target_user_id):
         logger.warning(f"Usuario {current_user_id} intento anadir atributos a {target_user_id} sin permiso")
         raise EllysiaException(
             "No tienes permiso para gestionar atributos de este usuario",
@@ -452,13 +579,12 @@ def add_user_attribute(data: dict[str, Any], target_user_id: int):
 @users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @users_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
 @require_oauth_token
-@require_role(Role.ADMIN)
 @handle_exceptions(default_exception=DatabaseError, logger=logger)
 def remove_user_attribute(data: dict[str, Any], target_user_id: int):
     """Eliminar atributos de un usuario"""
     current_user_id = get_current_user().id
 
-    if not USER_MANAGER.can_manage_user(current_user_id, target_user_id):
+    if not USER_MANAGER.can_administer_user(current_user_id, target_user_id):
         logger.warning(
             f"Usuario {current_user_id} intento eliminar atributos de {target_user_id} sin permiso"
         )

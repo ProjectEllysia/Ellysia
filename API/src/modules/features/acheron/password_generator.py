@@ -31,7 +31,7 @@ def generate_password(
         pools.append(_SYMBOLS)
 
     if exclude_ambiguous:
-        pools = ["".join(c for c in pool if c not in _AMBIGUOUS) for pool in pools]
+        pools = ["".join(character for character in pool if character not in _AMBIGUOUS) for pool in pools]
 
     alphabet = "".join(pools)
     chars = [secrets.choice(pool) for pool in pools]

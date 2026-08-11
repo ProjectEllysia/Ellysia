@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
-import ipaddress
 
-from flask import request, send_file
+from flask import send_file
 from flask_smorest import Blueprint as SmorestBlueprint
 
 from src.modules.users import require_oauth_token, require_attributes, AttributeType, get_current_user
@@ -28,7 +27,7 @@ from .managers import (
     ScanManager,
     NmapScanManager,
     NiktoScanManager,
-    OpenVASScanManager,
+    NucleiScanManager,
     LybraEngineManager,
     ProgramedScanManager,
     ThemisReportManager,
@@ -43,23 +42,21 @@ from .exceptions import (
     ScanExecutionError,
     ScanNotFoundError,
     FindingNotFoundError,
-    IPValidationError,
-    MaxHostsExceededError,
     PortValidationError,
     PrivateIPRequested,
     ProgramedScanError,
     ProgramedScanNotFoundError,
     FolderNotFoundError,
     FolderNameInvalidError,
-    ScanAlreadyInFolderError,
     AuthorizedTargetNotFoundError,
     DuplicateAuthorizedTargetError,
+    TargetNotAuthorizedError,
 )
 from .schemas import (
     ScanIdQuerySchema,
     NmapScanRequestSchema,
     NiktoScanRequestSchema,
-    OpenVASScanRequestSchema,
+    NucleiScanRequestSchema,
     LybraScanRequestSchema,
     FindingStateRequestSchema,
     FindingStateResponseSchema,
@@ -103,7 +100,7 @@ from .schemas import (
 
 themis_blp = SmorestBlueprint(
     "themis", __name__,
-    description="Escaneos de seguridad (Nmap, Nikto, OpenVAS) y PDFs"
+    description="Escaneos de seguridad (Nmap, Nikto, Lybra, Nuclei) y PDFs"
 )
 logger = logging.getLogger(__name__)
 
@@ -117,52 +114,42 @@ logger = logging.getLogger(__name__)
 # con un ignore — ver `cancel_scan` y `ScanManager.get_manager_for_type`.
 
 
-def _download_url_for(doc) -> str | None:
+def _download_url_for(document) -> str | None:
     """URL de descarga del documento, o None si no está listo."""
-    if doc.status == "done" and doc.filename:
-        return f"/themis/document/{doc.id}/download"
+    if document.status == "done" and document.filename:
+        return f"/themis/document/{document.id}/download"
     return None
 
 
-def _serialize_document(doc) -> dict:
+def _serialize_document(document) -> dict:
     """Serializa un ThemisDocument al formato de los endpoints de listado.
 
     Unifica la lógica de downloadUrl y los campos comunes que antes estaban
     duplicados en get_all_documents y get_documents_by_scan.
     """
     return {
-        "documentId": doc.id,
-        "scanId": doc.scan_id,
-        "scanType": doc.scan_type,
-        "status": doc.status,
-        "isAiGenerated": doc.is_ai_generated == 1 if doc.is_ai_generated is not None else False,
-        "createdAt": doc.created_at if doc.created_at else None,
-        "generatedAt": doc.generated_at if doc.generated_at else None,
-        "downloadUrl": _download_url_for(doc),
+        "documentId": document.id,
+        "scanId": document.scan_id,
+        "scanType": document.scan_type,
+        "status": document.status,
+        "isAiGenerated": document.is_ai_generated == 1 if document.is_ai_generated is not None else False,
+        "createdAt": document.created_at if document.created_at else None,
+        "generatedAt": document.generated_at if document.generated_at else None,
+        "downloadUrl": _download_url_for(document),
     }
 
-
-def validate_targets(raw: str, max_hosts: int = 10) -> list[str]:
+def validate_web_target(raw: str) -> str:
     """
-    Validate ``raw`` as a target spec via ``ScanManager.validate_ip``,
-    translating its domain exceptions into the HTTP-facing ones.
-    """
-    try:
-        return ScanManager.validate_ip(raw, max_hosts=max_hosts)
-    except IPValidationError as exc:
-        raise ValidationError(field="target", message=str(exc), value=raw) from exc
-    except MaxHostsExceededError as exc:
-        raise ValidationError(str(exc.user_message or exc))
-    except PrivateIPRequested as exc:
-        raise EllysiaException(str(exc.user_message or exc), status_code=403)
+    Nikto y Nuclei escanean por hostname/URL, no por un spec de CIDR/rango, así
+    que ninguno puede reusar ``validate_targets``. Resuelve el target a IP y
+    rechaza esa IP si es privada — cierra el hueco SSRF donde un hostname/DNS
+    resuelve a una dirección local o de metadata (127.0.0.1, 169.254.169.254,
+    ...).
 
-
-def validate_nikto_target(raw: str) -> None:
-    """
-    Nikto escanea por hostname/URL, no por un spec de CIDR/rango, así que no
-    puede reusar ``validate_targets``. Resuelve el target a IP y rechaza esa
-    IP si es privada — cierra el hueco SSRF donde un hostname/DNS resuelve a
-    una dirección local o de metadata (127.0.0.1, 169.254.169.254, ...).
+    Returns:
+        La IP resuelta — Nuclei la necesita además para el gate de objetivos
+        autorizados (``AuthorizedTargetManager.is_authorized`` solo entiende
+        IPs desnudas, no URLs).
     """
     try:
         ip, _ = normalize_target(raw)
@@ -172,6 +159,7 @@ def validate_nikto_target(raw: str) -> None:
         ScanManager.reject_private_ip(ip)
     except PrivateIPRequested as exc:
         raise EllysiaException(str(exc.user_message or exc), status_code=403)
+    return ip
 
 
 @themis_blp.get("/scan-status")
@@ -270,7 +258,7 @@ def start_nmap_scan(data: dict):
     user = get_current_user()
 
     nmap_manager = NmapScanManager()
-    hosts = validate_targets(host)
+    hosts = ScanManager.validate_targets(host)
 
     try:
         ScanManager.validate_port(ports)
@@ -313,7 +301,7 @@ def start_nikto_scan(data):
     timeout = data["timeout"]
     user = get_current_user()
 
-    validate_nikto_target(target)
+    validate_web_target(target)
 
     nikto_manager = NiktoScanManager()
     scan_id = nikto_manager.run_scan(target, user_id=user.id, timeout=timeout)
@@ -327,45 +315,46 @@ def start_nikto_scan(data):
     }
 
 
-@themis_blp.post("/openvas")
-@themis_blp.arguments(OpenVASScanRequestSchema)
-@themis_blp.response(201, ScanResponseSchema, description="OpenVAS scan started")
+@themis_blp.post("/nuclei")
+@themis_blp.arguments(NucleiScanRequestSchema)
+@themis_blp.response(201, ScanResponseSchema, description="Nuclei scan started")
 @themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
 @themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
-@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@limiter.limit("10 per hour; 50 per day")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions / target not authorized")
+@limiter.limit("20 per hour; 100 per day")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.THEMIS_CREATE])
 @handle_exceptions(default_exception=ScanExecutionError, logger=logger)
-def start_openvas_scan(data):
-    """Lanzar un escaneo OpenVAS para un unico host"""
+def start_nuclei_scan(data):
+    """Lanzar un escaneo Nuclei (roadmap Fase U1).
+
+    A diferencia de Nikto, Nuclei toca el objetivo bastante más — nace sujeto
+    al registro de objetivos autorizados desde el día uno, no se le añade
+    después (roadmap Fase U1, punto 3).
+    """
     target = data["target"]
-    scan_config = data["scanConfig"]
     user = get_current_user()
-    if user is None:
-        raise IllegalStateError("'user' detectado como None")
 
-    hosts = validate_targets(target, max_hosts=1)
+    ip = validate_web_target(target)
+    if not AuthorizedTargetManager.is_authorized(user.id, ip):
+        raise TargetNotAuthorizedError(target)
 
-    openvas_manager = OpenVASScanManager()
-    target_ip = hosts[0]
-    ipaddress.ip_address(target_ip)
-
-    scan_id = openvas_manager.run_scan(
-        target=target_ip,
-        scan_config=scan_config,
+    nuclei_manager = NucleiScanManager()
+    scan_id = nuclei_manager.run_scan(
+        target=target,
         user_id=user.id,
-        skip_normalize=True,
+        severities=data.get("severities"),
+        tags=data.get("tags"),
+        rate_limit=data.get("rateLimit"),
+        request_timeout=data.get("requestTimeout"),
+        timeout=data.get("timeout"),
     )
-    logger.info(f"OpenVAS lanzado: ID={scan_id} target={target_ip} config={scan_config} user={user.username}")
-
+    logger.info(f"Nuclei lanzado: ID={scan_id} target={target} user={user.username}")
     return {
-        "message": "Escaneo OpenVAS iniciado correctamente",
+        "message": "Escaneo Nuclei iniciado correctamente",
         "scanId": scan_id,
-        "target": target_ip,
-        "scanConfig": scan_config,
+        "scanType": "nuclei",
         "user": user.username,
-        "note": "Use /themis/scan-status para verificar el progreso.",
     }
 
 
@@ -402,15 +391,21 @@ def start_lybra_scan(data):
     else:
         # Autodescubrimiento: valida el objetivo (rechaza IPs privadas, etc.)
         # igual que un escaneo Nmap, ya que el transporte propio toca el objetivo.
-        target = validate_targets(data["target"], max_hosts=1)[0]
+        target = ScanManager.validate_targets(data["target"], max_hosts=1)[0]
         discover_ports = None
         if data.get("ports"):
             try:
                 discover_ports = ScanManager.validate_port(data["ports"])
             except PortValidationError as exc:
                 raise ValidationError(field="ports", message=str(exc), value=data["ports"]) from exc
-        scan_id = manager.run_scan(user_id=user.id, target=target, discover_ports=discover_ports,
-                                   deep=deep, timeout=timeout)
+            
+        scan_id = manager.run_scan(
+            user_id=user.id, 
+            target=target, 
+            discover_ports=discover_ports,
+            deep=deep, 
+            timeout=timeout
+        )
         logger.info(f"Lybra lanzado: ID={scan_id} autodescubrimiento target={target} deep={deep} user={user.username}")
 
     return {
@@ -460,8 +455,8 @@ def list_authorized_targets():
     return {
         "message": "Objetivos autorizados obtenidos correctamente",
         "targets": [
-            {"id": e.id, "target": e.target, "label": e.label, "createdAt": e.created_at}
-            for e in entries
+            {"id": entry.id, "target": entry.target, "label": entry.label, "createdAt": entry.created_at}
+            for entry in entries
         ],
         "user": user.username,
     }
@@ -529,11 +524,16 @@ def retrieve_all_scans(args):
     per_page = args["per_page"]
 
     user = get_current_user()
-    uid = user.id
+    user_id = user.id
 
     if scan_type != "all":
-        mgr = ScanManager.get_manager_for_type(scan_type)
-        results, total_count = mgr.get_scans_paginated(uid, page, per_page)
+        manager = ScanManager.get_manager_for_type(scan_type)
+        # `assetId` solo lo entiende Lybra (Fase I): es el que separa los
+        # escaneos de un agente Hygeia de los lanzados desde el panel.
+        if scan_type == "lybra" and args.get("assetId") is not None:
+            results, total_count = manager.get_scans_paginated(user_id, page, per_page, asset_id=args["assetId"])
+        else:
+            results, total_count = manager.get_scans_paginated(user_id, page, per_page)
         total_pages = (total_count + per_page - 1) // per_page
 
         return {
@@ -549,10 +549,10 @@ def retrieve_all_scans(args):
         }
 
     all_results = []
-    for mgr in ScanManager.all_managers():
+    for manager in ScanManager.all_managers():
         try:
-            for scan in mgr.get_scans_for_user(uid):
-                all_results.append(mgr.format_scan(scan.id, _scan=scan))
+            for scan in manager.get_scans_for_user(user_id):
+                all_results.append(manager.format_scan(scan.id, _scan=scan))
         except (OSError, RuntimeError) as exc:
             logger.error(f"Error obteniendo scans: {exc}", exc_info=True)
 
@@ -697,12 +697,12 @@ def is_scan_finished(args):
     scan_id = args["id"]
     manager, scan = ScanManager.resolve_owned_scan(scan_id, user.id)
 
-    finished = manager.is_scan_finished(scan.id)
+    is_finished = manager.is_scan_finished(scan.id)
 
     return {
-        "message": f"El escaneo {scan_id} {'esta' if finished else 'no esta'} terminado",
+        "message": f"El escaneo {scan_id} {'esta' if is_finished else 'no esta'} terminado",
         "scanId": scan_id,
-        "isFinished": finished,
+        "isFinished": is_finished,
         "scanType": scan.scan_type,
     }
 
@@ -726,8 +726,8 @@ def delete_scan(scan_id: int):
     if scan.status in CANCELLABLE_STATES:
         logger.info(f"Cancelando escaneo {scan_id} antes de eliminar")
         # La cancelación es cooperativa (solo señaliza al worker, no mata el
-        # proceso — ver TaskQueue.cancel): si falla, el subproceso (nmap/nikto/
-        # openvas) puede seguir vivo. Borrar la fila igualmente lo dejaría
+        # proceso — ver TaskQueue.cancel): si falla, el subproceso (nmap/nikto)
+        # puede seguir vivo. Borrar la fila igualmente lo dejaría
         # huérfano y para siempre invisible para la app, así que no se procede.
         if not manager.cancel_scan(scan_id, user.id): # type: ignore
             raise ScanExecutionError(
@@ -792,9 +792,9 @@ def generate_pdf(args):
     ai_report = args["aiReport"]
 
     user = get_current_user()
-    uid = user.id
+    user_id = user.id
 
-    manager, _scan = ScanManager.resolve_owned_scan(scan_id, uid)
+    manager, _scan = ScanManager.resolve_owned_scan(scan_id, user_id)
 
     if not manager.is_scan_finished(scan_id):
         raise ValidationError(
@@ -838,26 +838,21 @@ def get_document_status(args):
 
     doc_mgr = ThemisReportManager()
 
-    doc = doc_mgr.get_document_by_id(document_id) if document_id else (
-        doc_mgr.get_latest_document_by_scan_id(scan_id) if scan_id else None
-    )
-
-    if not doc:
-        raise ScanNotFoundError(document_id or scan_id)
-
-    # N1: verificar ownership en ambas ramas (antes solo se comprobaba
-    # cuando se consultaba por document_id). Mismo patrón que Iris.
-    if doc.user_id != user.id:
-        raise ScanNotFoundError(document_id or scan_id)
+    # N1/E4: lookup dual (por document_id o, si no, el último documento del
+    # scan) + verificación de ownership viven en el manager, no aquí.
+    # not_found_error=ScanNotFoundError preserva el 404 propio de este
+    # endpoint (assert_document_ownership usa el DocumentError genérico de
+    # 500, con otro propósito — ver el docstring de get_document_status).
+    document = doc_mgr.get_document_status(document_id, scan_id, user.id, not_found_error=ScanNotFoundError)
 
     return {
-        "documentId": doc.id,
-        "scanId": doc.scan_id,
-        "status": doc.status,
-        "aiReport": doc.enrichment_json is not None,
-        "createdAt": doc.created_at if doc.created_at else None,
-        "generatedAt": doc.generated_at if doc.generated_at else None,
-        "downloadUrl": _download_url_for(doc),
+        "documentId": document.id,
+        "scanId": document.scan_id,
+        "status": document.status,
+        "aiReport": document.enrichment_json is not None,
+        "createdAt": document.created_at if document.created_at else None,
+        "generatedAt": document.generated_at if document.generated_at else None,
+        "downloadUrl": _download_url_for(document),
     }
 
 
@@ -879,9 +874,9 @@ def get_all_documents(args):
     documents = doc_mgr.get_documents_for_user(user.id)
 
     if scan_type_filter != "all":
-        documents = [d for d in documents if d.scan_type == scan_type_filter]
+        documents = [document for document in documents if document.scan_type == scan_type_filter]
 
-    docs_list = [_serialize_document(doc) for doc in documents]
+    docs_list = [_serialize_document(document) for document in documents]
 
     return {
         "documents": docs_list,
@@ -909,9 +904,9 @@ def get_documents_by_scan(scan_id: int):
     ScanManager.resolve_owned_scan(scan_id, user.id) # type: ignore
 
     doc_mgr = ThemisReportManager()
-    documents = doc_mgr.get_documents_by_scan_id(scan_id)
+    documents = doc_mgr.get_documents_by_parent(scan_id)
 
-    docs_list = [_serialize_document(doc) for doc in documents]
+    docs_list = [_serialize_document(document) for document in documents]
 
     return {
         "scanId": scan_id,
@@ -932,27 +927,27 @@ def get_documents_by_scan(scan_id: int):
 def download_document(document_id: int):
     """Descargar un documento PDF generado"""
     user = get_current_user()
-    uid = user.id
-    logger.info(f"Download request for document {document_id} by user {uid}")
+    user_id = user.id
+    logger.info(f"Download request for document {document_id} by user {user_id}")
 
     doc_mgr = ThemisReportManager()
-    doc_mgr.assert_document_ownership(document_id, uid) # type: ignore
+    doc_mgr.assert_document_ownership(document_id, user_id) # type: ignore
 
-    doc = doc_mgr.get_document_by_id(document_id)
-    if not doc:
-        logger.warning(f"Document {document_id} not found or access denied for user {uid}")
+    document = doc_mgr.get_document_by_id(document_id)
+    if not document:
+        logger.warning(f"Document {document_id} not found or access denied for user {user_id}")
         raise DocumentNotFoundError(document_id)
 
-    if doc.status != "done" or not doc.filename or not os.path.exists(doc.filename):
-        logger.warning(f"Document {document_id} not ready: status={doc.status}, filename={doc.filename}")
-        raise DocumentNotReadyError(document_id, doc.status)
+    if document.status != "done" or not document.filename or not os.path.exists(document.filename):
+        logger.warning(f"Document {document_id} not ready: status={document.status}, filename={document.filename}")
+        raise DocumentNotReadyError(document_id, document.status)
 
-    logger.info(f"Serving document {document_id}: {doc.filename}")
+    logger.info(f"Serving document {document_id}: {document.filename}")
     return send_file(
-        doc.filename,
+        document.filename,
         mimetype="application/pdf",
         as_attachment=True,
-        download_name=f"{doc.scan_type}_scan_{doc.scan_id}.pdf",
+        download_name=f"{document.scan_type}_scan_{document.scan_id}.pdf",
     )
 
 
@@ -968,12 +963,12 @@ def download_document(document_id: int):
 def delete_document(document_id: int):
     """Eliminar un documento"""
     user = get_current_user()
-    uid = user.id
+    user_id = user.id
 
     doc_mgr = ThemisReportManager()
-    doc_mgr.assert_document_ownership(document_id, uid) # type: ignore
+    doc_mgr.assert_document_ownership(document_id, user_id) # type: ignore
     doc_mgr.delete_document(document_id)
-    logger.info(f"Documento {document_id} eliminado por usuario {uid}")
+    logger.info(f"Documento {document_id} eliminado por usuario {user_id}")
     return {"message": "Documento eliminado correctamente", "documentId": document_id}
 
 
@@ -990,7 +985,7 @@ def delete_document(document_id: int):
 def schedule_scan(data):
     """Crear un escaneo programado"""
     scan_type_str = data["scan_type"].lower()
-    valid_types = {t.value for t in ScanType}
+    valid_types = {scan_type.value for scan_type in ScanType}
     if scan_type_str not in valid_types:
         raise ValidationError(
             field="scan_type",
@@ -999,7 +994,7 @@ def schedule_scan(data):
             expected=", ".join(sorted(valid_types)),
         )
     user = get_current_user()
-    ps = ProgramedScanManager.register(
+    programed_scan = ProgramedScanManager.register(
         user_id=user.id,
         scan_type=ScanType(scan_type_str),
         arguments=data["arguments"],
@@ -1007,16 +1002,16 @@ def schedule_scan(data):
         schedule_config=data["schedule_config"],
     )
     logger.info(
-        f"Escaneo programado {ps.id} creado: tipo={scan_type_str} "
+        f"Escaneo programado {programed_scan.id} creado: tipo={scan_type_str} "
         f"programacion={data['schedule_type']} usuario={user.username}"
     )
     return {
         "message": "Escaneo programado creado correctamente",
-        "programedScanId": ps.id,
+        "programedScanId": programed_scan.id,
         "scanType": scan_type_str,
         "scheduleType": data["schedule_type"],
         "scheduleConfig": data["schedule_config"],
-        "nextRunAt": ps.next_run_at if ps.next_run_at else None,
+        "nextRunAt": programed_scan.next_run_at if programed_scan.next_run_at else None,
         "user": user.username,
     }
 
@@ -1030,16 +1025,16 @@ def schedule_scan(data):
 @require_attributes(at_least_one=[AttributeType.THEMIS_SCHEDULE_DELETE])
 @limiter.limit("60 per hour; 200 per day")
 @handle_exceptions(default_exception=ProgramedScanNotFoundError, logger=logger)
-def revoke_scheduled_scan(ps_id: int):
+def revoke_scheduled_scan(programed_scan_id: int):
     """Revocar un escaneo programado (desactivar)"""
     user = get_current_user()
-    ps = ProgramedScanManager.assert_ownership(ps_id, user.id) # type: ignore
-    ProgramedScanManager.revoke(ps_id, user.id) # type: ignore
-    logger.info(f"Escaneo programado {ps_id} revocado por {user.username}")
+    programed_scan = ProgramedScanManager.assert_ownership(programed_scan_id, user.id) # type: ignore
+    ProgramedScanManager.revoke(programed_scan_id, user.id) # type: ignore
+    logger.info(f"Escaneo programado {programed_scan_id} revocado por {user.username}")
     return {
         "message": "Escaneo programado revocado correctamente",
-        "programedScanId": ps_id,
-        "scanType": ps.scan_type,
+        "programedScanId": programed_scan_id,
+        "scanType": programed_scan.scan_type,
         "user": user.username,
     }
 
@@ -1053,16 +1048,16 @@ def revoke_scheduled_scan(ps_id: int):
 @require_attributes(at_least_one=[AttributeType.THEMIS_SCHEDULE_DELETE])
 @limiter.limit("30 per hour; 100 per day")
 @handle_exceptions(default_exception=ProgramedScanNotFoundError, logger=logger)
-def delete_scheduled_scan(ps_id: int):
+def delete_scheduled_scan(programed_scan_id: int):
     """Eliminar permanentemente un escaneo programado de la BD"""
     user = get_current_user()
-    ps = ProgramedScanManager.assert_ownership(ps_id, user.id) # type: ignore
-    ProgramedScanManager.delete(ps_id, user.id) # type: ignore
-    logger.info(f"Escaneo programado {ps_id} eliminado permanentemente por {user.username}")
+    programed_scan = ProgramedScanManager.assert_ownership(programed_scan_id, user.id) # type: ignore
+    ProgramedScanManager.delete(programed_scan_id, user.id) # type: ignore
+    logger.info(f"Escaneo programado {programed_scan_id} eliminado permanentemente por {user.username}")
     return {
         "message": "Escaneo programado eliminado permanentemente",
-        "programedScanId": ps_id,
-        "scanType": ps.scan_type,
+        "programedScanId": programed_scan_id,
+        "scanType": programed_scan.scan_type,
         "user": user.username,
     }
 
@@ -1081,17 +1076,17 @@ def list_scheduled_scans():
     scans = ProgramedScanManager.get_scans_for_user(user.id)
     results = [
         {
-            "id": ps.id,
-            "scanType": ps.scan_type,
-            "arguments": ps.arguments,
-            "scheduleType": ps.schedule_type,
-            "scheduleConfig": ps.schedule_config,
-            "isActive": ps.is_active,
-            "lastRunAt": ps.last_run_at if ps.last_run_at else None,
-            "nextRunAt": ps.next_run_at if ps.next_run_at else None,
-            "createdAt": ps.created_at if ps.created_at else None,
+            "id": programed_scan.id,
+            "scanType": programed_scan.scan_type,
+            "arguments": programed_scan.arguments,
+            "scheduleType": programed_scan.schedule_type,
+            "scheduleConfig": programed_scan.schedule_config,
+            "isActive": programed_scan.is_active,
+            "lastRunAt": programed_scan.last_run_at if programed_scan.last_run_at else None,
+            "nextRunAt": programed_scan.next_run_at if programed_scan.next_run_at else None,
+            "createdAt": programed_scan.created_at if programed_scan.created_at else None,
         }
-        for ps in scans
+        for programed_scan in scans
     ]
     return {
         "message": "Escaneos programados obtenidos correctamente",

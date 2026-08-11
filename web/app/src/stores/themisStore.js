@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, reactive } from 'vue'
 import { useApi } from '@/composables/useApi'
+import { rateLimitWaitMs } from '@/composables/rateLimitState'
+import { usePolling } from '@/composables/usePolling'
 import { useUtils } from '@/composables/useUtils'
 import { useToastStore } from '@/stores/toastStore'
 import { useThemisFoldersStore } from '@/stores/themisFoldersStore'
@@ -10,7 +12,7 @@ import { useThemisHistoryStore } from '@/stores/themisHistoryStore'
  * Store de Themis — gestiona escaneos, estadísticas, modales y documentos.
  *
  * Sustituye al estado disperso en themis.js (1,198 líneas de manipulación DOM
- * directa). Centraliza las listas de resultados por tipo (nmap, nikto, openvas),
+ * directa). Centraliza las listas de resultados por tipo (nmap, nikto, nuclei),
  * la paginación, los modales de vista previa/detalle y los documentos asociados.
  */
 export const useThemisStore = defineStore('themis', () => {
@@ -21,18 +23,24 @@ export const useThemisStore = defineStore('themis', () => {
   const historyStore = useThemisHistoryStore()
 
   /* ════════════════════════════════ MUNDOS ═════════════════════════════ */
-  // Themis vive en dos mundos: el motor propio (Lybra) y los escáneres
-  // externos (Nmap/Nikto/OpenVAS). El toggle de ThemisView conmuta entre ellos.
-  // Lybra es el mundo por defecto (roadmap Fase 6: el motor propio es el
-  // protagonista, Nmap/Nikto/OpenVAS quedan como segunda opinión opcional).
-  const world = ref('lybra') // 'external' | 'lybra'
+  // Themis vive en tres mundos: el motor propio (Lybra), los escáneres
+  // externos (Nmap/Nikto/Nuclei) y los agentes de Hygeia (Fase I: escaneos
+  // Lybra nacidos del inventario de software de un activo, que se navegan por
+  // agente en vez de mezclarse en la feed del motor). El toggle de ThemisView
+  // conmuta entre ellos. Lybra es el mundo por defecto (roadmap Fase 6: el
+  // motor propio es el protagonista, los externos son segunda opinión).
+  const world = ref('lybra') // 'external' | 'lybra' | 'agents'
   function setWorld(w) { world.value = w }
+
+  // Activo de Hygeia seleccionado en el mundo de agentes. Null = ninguna
+  // tarjeta elegida todavía, así que no hay escaneos que pedir.
+  const selectedAssetId = ref(null)
 
   /* ════════════════════════════════ TABS ═══════════════════════════════ */
   const activeTab = ref('nmap')
 
   /* ════════════════════════════════ STATS ══════════════════════════════ */
-  const stats = reactive({ total: 0, nmap: 0, nikto: 0, openvas: 0, lybra: 0 })
+  const stats = reactive({ total: 0, nmap: 0, nikto: 0, lybra: 0, nuclei: 0 })
   const loadingStats = ref(false)
   const statsError = ref(null)
 
@@ -40,8 +48,13 @@ export const useThemisStore = defineStore('themis', () => {
   const scans = reactive({
     nmap:    { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
     nikto:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
-    openvas: { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
     lybra:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
+    nuclei:  { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
+    // Fase I: los escaneos del activo Hygeia seleccionado. Mismo tipo de
+    // escaneo que `lybra` y misma forma de estado —por eso `LybraResults` se
+    // reutiliza tal cual—, pero su propia lista: el backend los sirve por
+    // separado (`assetId`) y jamás los mezcla con los del panel.
+    agentLybra: { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
   })
 
   // Escaneos Nmap terminados, para el modo "analizar un Nmap existente" de Lybra.
@@ -64,7 +77,7 @@ export const useThemisStore = defineStore('themis', () => {
   const viewMode = ref('full') // 'full' | 'folders' | 'history'
 
   /* ── HELPERS ── */
-  /** @param {'nmap'|'nikto'|'openvas'} type */
+  /** @param {'nmap'|'nikto'|'nuclei'} type */
   function _scandata(type) { return scans[type] }
 
   /* ════════════════════════════════ STATS ══════════════════════════════ */
@@ -77,8 +90,8 @@ export const useThemisStore = defineStore('themis', () => {
       const data = await res.json()
       stats.nmap    = data.nmap    ?? 0
       stats.nikto   = data.nikto   ?? 0
-      stats.openvas = data.openvas ?? 0
       stats.lybra   = data.lybra   ?? 0
+      stats.nuclei  = data.nuclei  ?? 0
       stats.total   = data.total   ?? 0
       statsError.value = null
     } catch { statsError.value = 'Error de conexión al cargar las estadísticas.' }
@@ -92,33 +105,97 @@ export const useThemisStore = defineStore('themis', () => {
   // setInterval): cada carga se reprograma a sí misma mientras la pestaña
   // siga visible y queden escaneos pending/running.
   const SCAN_POLL_INTERVAL_MS = 4000
+  // A ritmo fijo, 4s son 900 peticiones/hora contra un límite de 300: un
+  // escaneo de más de 20 minutos dejaba al usuario sin poder ver su propia
+  // lista de escaneos. La espera se estira un 50% por cada vuelta que no trae
+  // novedad y se reinicia en cuanto algo cambia, así que un escaneo que acaba
+  // rápido se sigue notando a los 4s y uno largo deja de malgastar cupo.
+  const SCAN_POLL_MAX_INTERVAL_MS = 30000
+  const SCAN_POLL_BACKOFF = 1.5
   const _scanPollTimers = {}
+  const _scanPollIntervals = {}
+  const _scanPollFingerprints = {}
+
+  /**
+   * Resumen de lo único que hace útil una vuelta de sondeo: qué escaneos hay y
+   * en qué estado están. Si no cambia, la vuelta no ha traído novedad.
+   */
+  function _scanFingerprint(type) {
+    return _scandata(type).results.map(s => `${s.id}:${s.status}`).join(',')
+  }
 
   function _isTypeVisible(type) {
     if (type === 'lybra') return world.value === 'lybra' && viewMode.value !== 'history'
+    if (type === 'agentLybra') return world.value === 'agents' && !!selectedAssetId.value
     return world.value === 'external' && activeTab.value === type && viewMode.value === 'full'
   }
 
+  /**
+   * Parámetros de consulta de una lista de escaneos.
+   *
+   * `agentLybra` no es un tipo de escaneo propio sino la misma lista de Lybra
+   * acotada a un activo: el backend distingue ambas por `assetId` (omitirlo
+   * devuelve los del panel), así que la diferencia vive aquí y no en una
+   * segunda ruta.
+   */
+  function _scanQuery(type, page, perPage) {
+    if (type === 'agentLybra') {
+      return new URLSearchParams({ type: 'lybra', page, per_page: perPage, assetId: selectedAssetId.value })
+    }
+    return new URLSearchParams({ type, page, per_page: perPage })
+  }
+
+  // E8: este NO usa `usePolling` a propósito. No es un poller que posea una
+  // tarea, sino un cargador que se reprograma a sí mismo: `loadScans` lo
+  // llama en su `finally`, y a `loadScans` se entra también desde switchTab,
+  // goToPage y refreshCurrent. Meterlo en el composable obligaría a arrancar
+  // el poller desde esos cuatro sitios, o a que el poller se detuviera a sí
+  // mismo a mitad de ciclo. Ya usa el idioma correcto (setTimeout
+  // re-encadenado, sin solape), así que se queda.
   function _scheduleScanPoll(type) {
     clearTimeout(_scanPollTimers[type])
     delete _scanPollTimers[type]
     const hasActive = _scandata(type).results.some(s => s.status === 'pending' || s.status === 'running')
     if (!hasActive || !_isTypeVisible(type)) return
-    _scanPollTimers[type] = setTimeout(() => loadScans(type), SCAN_POLL_INTERVAL_MS)
+
+    const fingerprint = _scanFingerprint(type)
+    if (fingerprint === _scanPollFingerprints[type]) {
+      _scanPollIntervals[type] = Math.min(
+        SCAN_POLL_MAX_INTERVAL_MS,
+        Math.round((_scanPollIntervals[type] ?? SCAN_POLL_INTERVAL_MS) * SCAN_POLL_BACKOFF),
+      )
+    } else {
+      _scanPollIntervals[type] = SCAN_POLL_INTERVAL_MS
+    }
+    _scanPollFingerprints[type] = fingerprint
+
+    // Si el servidor ya pidió tregua, se respeta su plazo antes que el propio.
+    const wait = Math.max(_scanPollIntervals[type], rateLimitWaitMs())
+    _scanPollTimers[type] = setTimeout(() => loadScans(type), wait)
   }
 
   /** Detiene el polling de escaneos activos: de un tipo concreto, o de todos. */
   function stopScanPolling(type) {
     const types = type ? [type] : Object.keys(_scanPollTimers)
-    for (const t of types) { clearTimeout(_scanPollTimers[t]); delete _scanPollTimers[t] }
+    for (const t of types) {
+      clearTimeout(_scanPollTimers[t])
+      delete _scanPollTimers[t]
+      delete _scanPollIntervals[t]
+      delete _scanPollFingerprints[t]
+    }
   }
 
   /** Carga una pagina de resultados para un tipo de escaneo. */
   async function loadScans(type) {
     const d = _scandata(type)
+    // Sin activo seleccionado no hay nada que pedir en el mundo de agentes.
+    if (type === 'agentLybra' && !selectedAssetId.value) {
+      d.results = []; d.totalCount = 0; d.error = null
+      return
+    }
     d.loading = true
     try {
-      const params = new URLSearchParams({ type, page: d.page, per_page: d.perPage })
+      const params = _scanQuery(type, d.page, d.perPage)
       const res = await apiFetch(`/themis/results?${params}`)
       if (!res?.ok) {
         d.results = []
@@ -168,9 +245,9 @@ export const useThemisStore = defineStore('themis', () => {
   async function launchNikto(payload) {
     return _launch('/themis/nikto', payload, 'nikto')
   }
-  /** Lanza un escaneo OpenVAS. */
-  async function launchOpenvas(payload) {
-    return _launch('/themis/openvas', payload, 'openvas')
+  /** Lanza un escaneo Nuclei (roadmap Fase U1). */
+  async function launchNuclei(payload) {
+    return _launch('/themis/nuclei', payload, 'nuclei')
   }
 
   /* ── LYBRA (el motor propio) ── */
@@ -186,14 +263,13 @@ export const useThemisStore = defineStore('themis', () => {
    * listado de veredictos crece hacia abajo sin perder el scroll ni el
    * estado expandido de las tarjetas ya visibles.
    */
-  async function loadMoreLybraScans() {
-    const d = scans.lybra
+  async function loadMoreLybraScans(type = 'lybra') {
+    const d = _scandata(type)
     if (d.loading || d.results.length >= d.totalCount) return
     d.loading = true
     try {
       const nextPage = d.page + 1
-      const params = new URLSearchParams({ type: 'lybra', page: nextPage, per_page: d.perPage })
-      const res = await apiFetch(`/themis/results?${params}`)
+      const res = await apiFetch(`/themis/results?${_scanQuery(type, nextPage, d.perPage)}`)
       if (!res?.ok) return
       const data = await res.json()
       d.results = [...d.results, ...(data.results ?? [])]
@@ -202,6 +278,28 @@ export const useThemisStore = defineStore('themis', () => {
     } finally {
       d.loading = false
     }
+  }
+
+  /* ── AGENTES (Fase I: escaneos nacidos del inventario de Hygeia) ── */
+
+  /**
+   * Selecciona un activo de Hygeia y carga sus escaneos.
+   *
+   * @param {number|null} assetId - Id del activo, o null para deseleccionar.
+   */
+  function selectAgentAsset(assetId) {
+    selectedAssetId.value = assetId
+    const d = scans.agentLybra
+    d.page = 1
+    d.results = []
+    d.totalCount = 0
+    if (assetId) loadScans('agentLybra')
+  }
+
+  /** Recarga los escaneos del activo seleccionado desde la primera página. */
+  function loadAgentScans() {
+    scans.agentLybra.page = 1
+    return loadScans('agentLybra')
   }
 
   /**
@@ -365,15 +463,15 @@ export const useThemisStore = defineStore('themis', () => {
 
   // El traceroute se calcula en segundo plano (worker): el endpoint responde
   // "pending" al instante y aquí se hace polling hasta que esté "done"/"failed".
-  // El token de generación invalida polls en curso al cerrar o cambiar de modal.
+  // Cerrar o cambiar de modal invalida los ciclos en vuelo (E8: lo hace el
+  // stop() de usePolling, antes era un token de generación a mano).
   const TRACE_POLL_INTERVAL_MS = 2000
   const TRACE_POLL_MAX_ATTEMPTS = 30
-  let tracePollGen = 0
-  let tracePollTimer = null
+  let tracePoller = null
 
   function stopTracePoll() {
-    tracePollGen += 1
-    if (tracePollTimer) { clearTimeout(tracePollTimer); tracePollTimer = null }
+    tracePoller?.stop()
+    tracePoller = null
   }
 
   /** Abre el modal de vista previa y carga scan + documentos. */
@@ -421,7 +519,6 @@ export const useThemisStore = defineStore('themis', () => {
     if (!scanId) return
 
     stopTracePoll()
-    const gen = tracePollGen
     if (!force) preview.traceroute = null
     preview.tracerouteLoading = true
 
@@ -433,34 +530,29 @@ export const useThemisStore = defineStore('themis', () => {
         toast.show('Error al recalcular el traceroute.', 'error')
       }
     }
-    pollPreviewTraceroute(scanId, gen, 0)
-  }
 
-  /** Sondea el estado del traceroute hasta que esté listo o se agoten los intentos. */
-  async function pollPreviewTraceroute(scanId, gen, attempt) {
-    if (gen !== tracePollGen || preview.scanId !== scanId) return
-    try {
+    // E8: el token de generación que llevaba a mano lo aporta ahora
+    // `usePolling` (stop() invalida los ciclos en vuelo); aquí solo queda el
+    // guard propio de esta vista — que el modal siga abierto sobre el MISMO
+    // escaneo, que es una condición distinta de "se canceló el sondeo".
+    tracePoller = usePolling(async (attempt) => {
+      if (preview.scanId !== scanId) return false
       const res = await apiFetch(`/themis/scan/${scanId}/traceroute`)
-      if (gen !== tracePollGen || preview.scanId !== scanId) return
+      if (preview.scanId !== scanId) return false
 
-      if (res?.ok) {
-        const data = await res.json()
-        if (data.status === 'pending' && attempt < TRACE_POLL_MAX_ATTEMPTS) {
-          tracePollTimer = setTimeout(
-            () => pollPreviewTraceroute(scanId, gen, attempt + 1),
-            TRACE_POLL_INTERVAL_MS,
-          )
-          return
-        }
-        // "done"/"failed" (o se agotaron los intentos): resultado final.
-        preview.traceroute = data
-        preview.tracerouteLoading = false
-      } else {
-        preview.tracerouteLoading = false
-      }
-    } catch {
+      if (!res?.ok) { preview.tracerouteLoading = false; return false }
+
+      const data = await res.json()
+      // `attempt` es 0-based, así que el último ciclo permitido es
+      // TRACE_POLL_MAX_ATTEMPTS - 1: ahí se acepta lo que haya como final.
+      if (data.status === 'pending' && attempt < TRACE_POLL_MAX_ATTEMPTS - 1) return true
+
+      // "done"/"failed" (o se agotaron los intentos): resultado final.
+      preview.traceroute = data
       preview.tracerouteLoading = false
-    }
+      return false
+    }, { intervalMs: TRACE_POLL_INTERVAL_MS, maxAttempts: TRACE_POLL_MAX_ATTEMPTS })
+    tracePoller.start()
   }
 
   /** Cierra el modal de vista previa. */
@@ -555,6 +647,10 @@ export const useThemisStore = defineStore('themis', () => {
    * `setTimeout` fijo de 600ms, que asumía que la generación —encolada,
    * asíncrona— siempre terminaba antes de ese plazo).
    */
+  // E8: tampoco usa `usePolling`. Esto no es un sondeo en segundo plano sino
+  // una espera bloqueante — el llamante hace `await` hasta que el documento
+  // esté listo. El bucle secuencial ya es correcto (nunca solapa) y no hay
+  // nada que cancelar desde fuera.
   async function waitForDocument(scanId, { intervalMs = 1500, maxAttempts = 20 } = {}) {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const res = await apiFetch(`/themis/document-status?scan_id=${scanId}`)
@@ -649,10 +745,19 @@ export const useThemisStore = defineStore('themis', () => {
     finally { d.loading = false }
   }
 
-  /** Genera un PDF para un escaneo Lybra y refresca su lista de documentos. */
+  /**
+   * Genera un PDF para un escaneo Lybra y refresca su lista de documentos.
+   *
+   * Refresca dos veces a propósito: nada más lanzar la generación, para que
+   * el documento aparezca de inmediato con estado "pending"/"running" (antes
+   * la lista no se tocaba hasta que `waitForDocument` ya había terminado, así
+   * que el usuario nunca llegaba a ver el documento en curso); y otra vez al
+   * terminar el sondeo, para reflejar el estado final ("done"/"error").
+   */
   async function generateLybraPdf(scanId, useAi = false) {
     const ok = await generatePdf(scanId, useAi)
     if (ok) {
+      await loadLybraDocs(scanId)
       await waitForDocument(scanId)
       await loadLybraDocs(scanId)
     }
@@ -666,11 +771,16 @@ export const useThemisStore = defineStore('themis', () => {
     return ok
   }
 
-  /** Elimina un escaneo Lybra por ID y refresca la lista. */
-  async function deleteLybraScan(id) {
+  /**
+   * Elimina un escaneo Lybra por ID y refresca la lista.
+   *
+   * @param {number} id - Id del escaneo.
+   * @param {'lybra'|'agentLybra'} [type] - Lista de la que quitarlo.
+   */
+  async function deleteLybraScan(id, type = 'lybra') {
     const res = await apiFetch(`/themis/${id}`, { method: 'DELETE' })
     if (!res?.ok) { toast.show('No se pudo eliminar el escaneo.', 'error'); return false }
-    const d = scans.lybra
+    const d = _scandata(type)
     const idx = d.results.findIndex(s => s.id === id)
     if (idx !== -1) { d.results.splice(idx, 1); d.totalCount = Math.max(0, d.totalCount - 1) }
     await loadStats()
@@ -688,12 +798,13 @@ export const useThemisStore = defineStore('themis', () => {
     activeTab.value = 'nmap'
     viewMode.value = 'full'
     launching.value = false
+    selectedAssetId.value = null
 
-    Object.assign(stats, { total: 0, nmap: 0, nikto: 0, openvas: 0, lybra: 0 })
+    Object.assign(stats, { total: 0, nmap: 0, nikto: 0, lybra: 0, nuclei: 0 })
     loadingStats.value = false
     statsError.value = null
 
-    for (const type of ['nmap', 'nikto', 'openvas', 'lybra']) {
+    for (const type of ['nmap', 'nikto', 'lybra', 'nuclei', 'agentLybra']) {
       Object.assign(scans[type], { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null })
     }
 
@@ -713,8 +824,9 @@ export const useThemisStore = defineStore('themis', () => {
     preview, details,
     viewMode,
     loadStats, loadScans, switchTab, refreshCurrent, goToPage, stopScanPolling,
-    launchNmap, launchNikto, launchOpenvas,
+    launchNmap, launchNikto, launchNuclei,
     launchLybra, loadLybraScans, loadMoreLybraScans, loadSourceNmapScans, deleteLybraScan,
+    selectedAssetId, selectAgentAsset, loadAgentScans,
     lybraDocs, loadLybraDocs, generateLybraPdf, deleteLybraDoc,
     deleteScan, cancelScan,
     openPreview, closePreview, refreshPreviewDocs, loadPreviewTraceroute,

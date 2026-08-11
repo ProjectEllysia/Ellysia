@@ -1,0 +1,44 @@
+{# Aviso de anomalía crítica de Hygeia.
+   Contexto: hostname, kind, metric/value/threshold (opcionales),
+   recipient_name (opcional), panel_url (opcional). #}
+{% extends "base.html.j2" %}
+{% from "_macros.html.j2" import button, data_row %}
+
+{% block title %}Anomalía crítica en {{ hostname }}{% endblock %}
+
+{% block preheader %}Se ha detectado una anomalía crítica en {{ hostname }}.{% endblock %}
+
+{% block header_tagline %}
+<div style="margin-top:8px; font-family:Helvetica,Arial,sans-serif; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#8a857c;">
+  Hygeia — Vigilancia de activos
+</div>
+{% endblock %}
+
+{% block content %}
+<p style="margin:0 0 16px;">{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}</p>
+
+<p style="margin:0 0 20px;">Se ha detectado una anomalía <strong>crítica</strong> en uno de tus activos monitorizados.</p>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="margin:0 0 20px; background-color:#faf8f5; border-left:3px solid #c0392b; border-radius:0 6px 6px 0;">
+  <tr>
+    <td style="padding:16px 20px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+        {{ data_row("Activo", hostname) }}
+        {{ data_row("Tipo", kind) }}
+        {% if metric %}
+        {{ data_row("Métrica", metric) }}
+        {{ data_row("Valor", value) }}
+        {{ data_row("Umbral", threshold) }}
+        {% endif %}
+      </table>
+    </td>
+  </tr>
+</table>
+
+{% if panel_url %}
+{{ button(panel_url, "Ver en el panel", brand.accentColor) }}
+{% else %}
+<p style="margin:0; font-size:14px; color:#6b665e;">Puedes revisar el detalle desde tu panel de Hygeia.</p>
+{% endif %}
+{% endblock %}

@@ -3,22 +3,22 @@ from __future__ import annotations
 from .reports import (
     NmapPrintingStrategy,
     NiktoPrintingStrategy,
-    OpenVASPrintingStrategy,
     LybraPrintingStrategy,
+    NucleiPrintingStrategy,
     PDFCreator,
 )
 
 from .processors import (
     NiktoResultProcessor,
     NmapResultProcessor,
-    OpenVASResultProcessor,
+    NucleiResultProcessor,
     ScanResultProcessor,
 )
 
 from .tasks import (
     NiktoScanTask,
     NmapScanTask,
-    OpenVASTask,
+    NucleiScanTask,
     TaskStatus,
     _Task
 )
@@ -29,10 +29,10 @@ from .csv_logger import (
     ScanLogger,
     NmapScanLogger,
     NiktoScanLogger,
-    OpenVASScanLogger,
+    NucleiScanLogger,
 )
 
-from .scheduling import Scheduler
+from .scheduling import ThemisScheduler
 
 from .parsing import validate_ip, validate_port, reject_private_ip
 
@@ -43,17 +43,17 @@ from .traceroute import TracerouteService
 __all__ = [
     NmapPrintingStrategy,
     NiktoPrintingStrategy,
-    OpenVASPrintingStrategy,
     LybraPrintingStrategy,
+    NucleiPrintingStrategy,
     PDFCreator,
     HistoryStatsService,
     NiktoResultProcessor,
     NmapResultProcessor,
-    OpenVASResultProcessor,
+    NucleiResultProcessor,
     ScanResultProcessor,
     NiktoScanTask,
     NmapScanTask,
-    OpenVASTask,
+    NucleiScanTask,
     TaskStatus,
     _Task,
     ScanLoggerFactory,
@@ -61,8 +61,8 @@ __all__ = [
     ScanLogger,
     NmapScanLogger,
     NiktoScanLogger,
-    OpenVASScanLogger,
-    Scheduler,
+    NucleiScanLogger,
+    ThemisScheduler,
     validate_ip,
     validate_port,
     reject_private_ip,

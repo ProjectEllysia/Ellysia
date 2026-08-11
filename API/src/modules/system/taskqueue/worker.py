@@ -11,8 +11,8 @@ so that database sessions, config, and all Flask extensions are available
 to every executed job. It then listens on the configured Redis queues.
 
 Modelo de ejecución: **hilos + RQ SimpleWorker** (sin ``fork``). Los jobs son
-I/O-bound (orquestan subprocesos nmap/nikto o llamadas GMP/HTTP a OpenVAS), por
-lo que el aislamiento por-proceso de ``fork`` no aporta frente al aislamiento
+I/O-bound (orquestan subprocesos nmap/nikto o peticiones de red del motor
+propio), por lo que el aislamiento por-proceso de ``fork`` no aporta frente al aislamiento
 de OS que ya dan esos subprocesos. Cada hilo crea su propia app Flask y empuja
 un contexto de aplicación, evitando los problemas de fork-safety del ``Worker``
 clásico de RQ (el ``engine`` de SQLAlchemy y las conexiones a Redis se crean
@@ -87,7 +87,7 @@ class _ThreadSafeWorker(SimpleWorker):
         abortado (``PendingRollbackError``) u objetos colgando en la
         identity-map envenenaría el siguiente job del mismo hilo. Este es el
         único choke-point por el que pasan todos los tipos de job, por lo que
-        ``close_all()`` aquí cubre nmap/nikto/openvas/aegis/iris.
+        ``close_all()`` aquí cubre nmap/nikto/lybra/nuclei/aegis/iris.
         """
         try:
             return super().perform_job(job, queue)
@@ -119,7 +119,7 @@ def _worker_thread(worker_num: int):
 
     **Proceso vs Thread**: RQ clásico usa fork() (procesos) por job. Aquí
     usamos threads porque los jobs son I/O-bound (subprocesos nmap/nikto,
-    llamadas GMP/HTTP a OpenVAS) y el aislamiento de ``fork`` no aporta frente
+    peticiones de red del motor propio) y el aislamiento de ``fork`` no aporta frente
     al que ya dan esos subprocesos. Cada thread tiene su propia app Flask, por
     lo que DB sessions no se interfieren, sin los problemas de fork-safety que
     tendría reutilizar conexiones de BD/Redis creadas antes de un fork.
@@ -248,8 +248,7 @@ def start_worker() -> None:
     # se desregistraron (p. ej. tras un kill -9) antes de crear los nuevos.
     _purge_dead_workers()
 
-    taskqueue_cfg = CR.get_taskqueue_config()
-    max_workers = int(taskqueue_cfg.get("max_workers", 4))
+    max_workers = CR.taskqueue_config().max_workers
     # Nota: max_workers se lee solo aquí, al arrancar el proceso worker. Si se
     # cambia vía PUT /system/tasks/config, el cambio entra en vigor solo cuando
     # se reinicia este proceso (contenedor docker-compose up, o Ctrl+C + python -m).
@@ -275,7 +274,7 @@ def start_worker() -> None:
         logging.info("Worker %d started", i + 1)
 
     try:
-        while any(t.is_alive() for t in threads):
+        while any(thread.is_alive() for thread in threads):
             for t in threads:
                 t.join(timeout=0.5)
     except KeyboardInterrupt:

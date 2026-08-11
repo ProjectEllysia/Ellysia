@@ -36,8 +36,6 @@
 
     <CreateUserModal :show="showCreateModal" @close="showCreateModal = false" @created="handleCreateUser" ref="createModal" />
     <UserDetailsModal :show="showDetailsModal" :user-id="selectedUserId" @close="showDetailsModal = false" @refresh="store.loadUsers()" />
-
-    <AppToast />
   </div>
 </template>
 
@@ -45,7 +43,6 @@
 import { ref, onMounted } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
-import AppToast from '@/components/shared/AppToast.vue'
 import { useUsersStore } from '@/stores/usersStore'
 import UserCard from '@/components/users/UserCard.vue'
 import CreateUserModal from '@/components/users/CreateUserModal.vue'
@@ -67,12 +64,12 @@ async function handleCreateUser(userData) { const ok = await store.createUser(us
 .users-page { min-height: 100vh; background: var(--bg); padding-top: var(--topbar-h); position: relative; }
 .main { max-width: 920px; margin: 0 auto; padding: 1.75rem 1.1rem 4rem; position: relative; z-index: 1; }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 1.75rem; flex-wrap: wrap; gap: 0.85rem; }
-.page-header h1 { font-size: var(--fs-3xl); font-weight: 800; color: var(--text); margin: 0; font-family: var(--font-display); }
+.page-header h1 { font-size: var(--fs-3xl); font-weight: 800; color: var(--text); margin: 0; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .subtitle { font-size: var(--fs-lg); color: var(--text-dim); margin: 0.2rem 0 0; }
 .header-right { display: flex; align-items: center; gap: 0.85rem; }
-.user-count { font-size: var(--fs-lg); color: var(--text-muted); font-family: var(--font-mono); }
+.user-count { font-size: var(--fs-lg); color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .role-section { margin-bottom: 1.75rem; }
-.role-heading { font-size: var(--fs-lg); font-weight: 700; margin: 0 0 0.65rem; text-transform: uppercase; letter-spacing: 0.03em; font-family: var(--font-display); }
+.role-heading { font-size: var(--fs-lg); font-weight: 700; margin: 0 0 0.65rem; text-transform: uppercase; letter-spacing: 0.03em; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .role-heading--root  { color: var(--danger); }
 .role-heading--admin { color: var(--warn); }
 .role-heading--user  { color: var(--info); }

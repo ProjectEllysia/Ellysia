@@ -8,6 +8,7 @@ necesitan tocar ``flask.request`` — mismo precedente que
 ``users/services/permissions.py`` con ``require_oauth_token``.
 """
 
+from .aggregation import denormalize
 from .detection import AnomalyChange, DetectionOutcome, evaluate
 from .enrollment import agent_key_id_from_request, generate_agent_key, require_agent_key
 from .ingest_guard import (
@@ -16,8 +17,10 @@ from .ingest_guard import (
     enforce_body_size,
     enforce_ingest_limits,
 )
+from .inventory_adapter import services_from_inventory
 
 __all__ = [
+    "services_from_inventory",
     "agent_key_id_from_request",
     "generate_agent_key",
     "require_agent_key",
@@ -28,4 +31,5 @@ __all__ = [
     "evaluate",
     "AnomalyChange",
     "DetectionOutcome",
+    "denormalize",
 ]

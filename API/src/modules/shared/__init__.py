@@ -22,6 +22,7 @@ from ._endpoints    import (
 from ._ownership import assert_owned
 from ._time import utcnow_naive, isoformat_utc
 from ._task_states import CANCELLABLE_STATES
+from ._crypto import encrypt_at_rest, decrypt_at_rest
 from .schemas import ErrorSchema, SuccessMessageSchema, PaginationQuerySchema, UTCDateTime
 
 __all__ = [
@@ -36,6 +37,8 @@ __all__ = [
     "utcnow_naive",
     "isoformat_utc",
     "CANCELLABLE_STATES",
+    "encrypt_at_rest",
+    "decrypt_at_rest",
     "ErrorSchema",
     "SuccessMessageSchema",
     "PaginationQuerySchema",

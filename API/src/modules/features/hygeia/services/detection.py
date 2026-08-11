@@ -71,7 +71,7 @@ def evaluate(
             este activo — evita reabrir o duplicar lo que ya está en curso.
         thresholds: Umbrales efectivos (global + override por activo, ya
             combinados por el llamador), con la forma del bloque
-            ``hygeia.thresholds`` de la config: ``cpuPct``, ``memPct``,
+            ``features.hygeia.thresholds`` de la config: ``cpuPct``, ``memPct``,
             ``diskPct``, ``swapPct``, cada uno con ``warning``/``critical``
             y, opcionalmente, ``sustainedHeartbeats``.
 

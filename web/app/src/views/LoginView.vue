@@ -48,7 +48,7 @@
           </div>
         </transition>
 
-        <form v-if="!mfaStep" novalidate @submit.prevent="handleSubmit">
+        <form v-if="!mfaStep && mode === 'login'" novalidate @submit.prevent="handleSubmit">
           <!-- Identificador -->
           <div class="field" :class="{ focused: focus === 'user' }">
             <label for="username">Identificador</label>
@@ -124,6 +124,74 @@
             <span class="submit-arrow" aria-hidden="true">→</span>
             <span class="submit-spin" aria-hidden="true"></span>
           </button>
+
+          <p class="signup-hint">
+            ¿No tienes cuenta?
+            <button type="button" class="link-btn" @click="mode = 'register'">
+              Regístrate gratis y prueba Ellysia
+            </button>
+          </p>
+        </form>
+
+        <!-- ───────── Alta pública ───────── -->
+        <form v-else-if="!mfaStep && mode === 'register'" novalidate @submit.prevent="handleRegister">
+          <div class="field" :class="{ focused: focus === 'reg-user' }">
+            <label for="reg-username">Identificador</label>
+            <div class="field-box">
+              <input id="reg-username" v-model="reg.username" type="text" required
+                     minlength="3" maxlength="64" autocomplete="username"
+                     @focus="focus = 'reg-user'" @blur="focus = ''" />
+            </div>
+          </div>
+
+          <div class="field" :class="{ focused: focus === 'reg-mail' }">
+            <label for="reg-email">Correo</label>
+            <div class="field-box">
+              <input id="reg-email" v-model="reg.email" type="email" required
+                     autocomplete="email" @focus="focus = 'reg-mail'" @blur="focus = ''" />
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field" :class="{ focused: focus === 'reg-first' }">
+              <label for="reg-first">Nombre</label>
+              <div class="field-box">
+                <input id="reg-first" v-model="reg.first_name" type="text" required
+                       maxlength="64" @focus="focus = 'reg-first'" @blur="focus = ''" />
+              </div>
+            </div>
+            <div class="field" :class="{ focused: focus === 'reg-last' }">
+              <label for="reg-last">Apellidos</label>
+              <div class="field-box">
+                <input id="reg-last" v-model="reg.last_name" type="text" required
+                       maxlength="64" @focus="focus = 'reg-last'" @blur="focus = ''" />
+              </div>
+            </div>
+          </div>
+
+          <div class="field" :class="{ focused: focus === 'reg-pass' }">
+            <label for="reg-password">Clave de acceso</label>
+            <div class="field-box">
+              <input id="reg-password" v-model="reg.password" type="password" required
+                     minlength="8" autocomplete="new-password"
+                     @focus="focus = 'reg-pass'" @blur="focus = ''" />
+            </div>
+            <span class="field-hint">Mínimo 8 caracteres.</span>
+          </div>
+
+          <button type="submit" class="submit" :class="{ loading }" :disabled="loading">
+            <span class="submit-label">{{ loading ? 'Creando…' : 'Crear mi cuenta' }}</span>
+            <span class="submit-arrow" aria-hidden="true">→</span>
+            <span class="submit-spin" aria-hidden="true"></span>
+          </button>
+
+          <p class="signup-hint">
+            Empezarás en el plan gratuito. Te mandaremos un correo para
+            confirmarlo.
+            <button type="button" class="link-btn" @click="mode = 'login'">
+              Ya tengo cuenta
+            </button>
+          </p>
         </form>
 
         <!-- ───────── Segundo factor (MFA) ───────── -->
@@ -166,6 +234,10 @@
           </div>
         </form>
 
+        <p v-if="mode === 'login'" class="plans-hint">
+          <router-link to="/planes" class="link-btn">Ver los planes</router-link>
+        </p>
+
         <footer class="portal-foot">
           <span class="foot-pulse"><i></i>Enlace cifrado activo</span>
           <span class="foot-ver">Ellysia © 2026</span>
@@ -193,6 +265,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
+import { validationMessage } from '@/composables/useApi'
 import ElysianScene from '@/components/shared/ElysianScene.vue'
 import ellysiaIcon from '@/assets/images/ellysia/Ellysia-BgN.png'
 
@@ -216,6 +289,59 @@ const granted = ref(false)
 
 /* ── segundo factor (MFA) ── */
 const mfaStep = ref(false)
+
+/**
+ * 'login' o 'register'. Un paso más del mismo formulario, como el de MFA, y no
+ * una vista aparte: el alta pública es la puerta de entrada al plan gratuito, y
+ * mandar a otra pantalla para volver aquí sobra.
+ *
+ * `/login?registro` arranca directamente en el alta. Sin esto, los CTA de la
+ * portada que dicen "Crear cuenta" aterrizaban en el formulario de entrar y
+ * había que encontrar el enlace pequeño de abajo: el embudo se rompía justo en
+ * el paso que más importa. Se comprueba con `!== undefined` para que valga
+ * tanto `?registro` como `?registro=1`.
+ */
+const mode = ref(route.query.registro !== undefined ? 'register' : 'login')
+const reg = ref({ username: '', email: '', first_name: '', last_name: '', password: '' })
+
+/**
+ * Alta pública. Al terminar NO se inicia sesión sola: la cuenta nace sin el
+ * correo verificado y se le dice, para que sepa por qué ciertas cosas no le
+ * dejarán hasta que pulse el enlace.
+ */
+async function handleRegister() {
+  loading.value = true
+  try {
+    const res = await fetch('/users/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reg.value),
+    })
+    const body = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      // Un 422 dice qué campo falla y por qué; sin traducirlo, el usuario solo
+      // veía "no se pudo crear la cuenta" y no tenía forma de arreglarlo.
+      showAlert(
+        validationMessage(body) || body.error_description || 'No se pudo crear la cuenta.',
+        'error',
+      )
+      return
+    }
+
+    showAlert(
+      'Cuenta creada. Revisa tu correo para confirmarla y ya puedes entrar.',
+      'success',
+    )
+    username.value = reg.value.username
+    reg.value = { username: '', email: '', first_name: '', last_name: '', password: '' }
+    mode.value = 'login'
+  } catch {
+    showAlert('No se pudo conectar con el servidor.', 'error')
+  } finally {
+    loading.value = false
+  }
+}
 const mfaChallengeToken = ref('')
 const mfaCode = ref('')
 const useRecovery = ref(false)
@@ -336,7 +462,12 @@ onMounted(() => {
       'warning',
     )
   }
-  if (!reduceMotion) document.getElementById('username')?.focus()
+  // En modo registro el campo `username` no existe (los del alta van con
+  // prefijo `reg-`), así que el foco caía en la nada al entrar por /login?registro.
+  if (!reduceMotion) {
+    const primerCampo = mode.value === 'register' ? 'reg-username' : 'username'
+    document.getElementById(primerCampo)?.focus()
+  }
 })
 
 onBeforeUnmount(() => {})
@@ -404,7 +535,7 @@ onBeforeUnmount(() => {})
   transform: translateY(-1px);
 }
 .wordmark-text {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.34em; text-transform: uppercase;
   color: var(--text);
@@ -413,14 +544,14 @@ onBeforeUnmount(() => {})
 /* Título */
 .title {
   text-align: center;
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-size: var(--fs-page-title); font-weight: 600;
   color: var(--text); letter-spacing: 0.02em;
   line-height: 1.1;
 }
 .subtitle {
   text-align: center;
-  font-family: var(--font-display); font-style: italic;
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-style: italic;
   font-size: var(--fs-lg); color: var(--text-dim);
   margin-top: 0.25rem;
 }
@@ -434,7 +565,7 @@ onBeforeUnmount(() => {})
 .gate-alert {
   display: flex; align-items: flex-start; gap: 0.5rem;
   border-radius: 9px; padding: 0.7rem 0.9rem; font-size: var(--fs-sm);
-  margin-bottom: 1.1rem; font-family: var(--font-body);
+  margin-bottom: 1.1rem; font-family: var(--font-body); font-size-adjust: var(--fsa-body);
 }
 .gate-alert svg { flex-shrink: 0; margin-top: 2px; }
 .gate-alert-error   { background: var(--danger-dim);  border: 1px solid var(--danger);  color: var(--danger); }
@@ -447,7 +578,7 @@ onBeforeUnmount(() => {})
 .field { margin-bottom: 1.15rem; }
 .field label {
   display: flex; align-items: center; gap: 0.25rem;
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-label); font-weight: 600; color: var(--text-dim);
   margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.18em;
   transition: color 0.25s ease;
@@ -455,7 +586,7 @@ onBeforeUnmount(() => {})
 .field.focused label { color: var(--accent); }
 .caps-warn {
   margin-left: auto; font-size: var(--fs-caption); letter-spacing: 0.04em;
-  color: var(--warn); text-transform: none; font-family: var(--font-body);
+  color: var(--warn); text-transform: none; font-family: var(--font-body); font-size-adjust: var(--fsa-body);
 }
 .caps-enter-active, .caps-leave-active { transition: opacity 0.2s ease; }
 .caps-enter-from, .caps-leave-to { opacity: 0; }
@@ -470,7 +601,7 @@ onBeforeUnmount(() => {})
   width: 100%; padding: 0.82rem 2.7rem 0.82rem 2.5rem;
   background: var(--surface-2);
   border: 1px solid var(--border-solid); border-radius: 10px;
-  color: var(--text); font-size: var(--fs-input); font-family: var(--font-body); outline: none;
+  color: var(--text); font-size: var(--fs-input); font-family: var(--font-body); font-size-adjust: var(--fsa-body); outline: none;
   transition: border-color 0.3s, box-shadow 0.3s, background 0.3s;
 }
 .field-box input::placeholder { color: var(--text-muted); opacity: 0.6; }
@@ -504,7 +635,7 @@ onBeforeUnmount(() => {})
   display: flex; align-items: center; justify-content: center; gap: 0.5rem;
   background: var(--accent);
   color: var(--surface);
-  font-family: var(--font-epic); font-weight: 600;
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-weight: 600;
   font-size: var(--fs-btn); letter-spacing: 0.16em; text-transform: uppercase;
   border: none; border-radius: 10px; cursor: pointer;
   box-shadow: 0 6px 20px var(--accent-dim);
@@ -518,7 +649,7 @@ onBeforeUnmount(() => {})
 .submit:hover:not(:disabled) .submit-arrow { transform: translateX(4px); }
 .submit:active:not(:disabled) { transform: translateY(0); }
 .submit:disabled { opacity: 0.6; cursor: not-allowed; }
-.submit-label, .submit-arrow { position: relative; z-index: 1; }
+.submit-label, .submit-arrow { position: relative; z-index: 1; font-size: var(--fs-md); }
 .submit-arrow { transition: transform 0.25s ease; }
 .submit.loading .submit-label, .submit.loading .submit-arrow { opacity: 0; }
 .submit-spin {
@@ -536,7 +667,7 @@ onBeforeUnmount(() => {})
 }
 .link-btn {
   background: none; border: none; cursor: pointer; padding: 0.2rem;
-  font-family: var(--font-body); font-size: var(--fs-sm); color: var(--text-dim);
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body); font-size: var(--fs-sm); color: var(--text-dim);
   text-decoration: underline; text-underline-offset: 2px;
   transition: color 0.2s ease;
 }
@@ -547,7 +678,7 @@ onBeforeUnmount(() => {})
 .portal-foot {
   display: flex; align-items: center; justify-content: space-between;
   margin-top: 1.6rem; padding-top: 1rem; border-top: 1px solid var(--border);
-  font-family: var(--font-mono); font-size: var(--fs-caption); color: var(--text-muted);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-caption); color: var(--text-muted);
 }
 .foot-pulse { display: inline-flex; align-items: center; gap: 0.4rem; }
 .foot-pulse i {
@@ -556,6 +687,8 @@ onBeforeUnmount(() => {})
 }
 @keyframes live-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.7); } }
 .foot-ver { opacity: 0.8; letter-spacing: 0.04em; }
+.signup-hint { padding: 0.5rem 0 }
+
 
 /* ═══════════ Umbral cruzado ═══════════ */
 .grant-screen {
@@ -572,12 +705,12 @@ onBeforeUnmount(() => {})
 @keyframes ring-fade { to { opacity: 1; } }
 @keyframes ring-turn { to { transform: rotate(360deg); } }
 .grant-title {
-  margin-top: 1rem; font-family: var(--font-display); font-weight: 600;
+  margin-top: 1rem; font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-weight: 600;
   font-size: var(--fs-3xl); letter-spacing: 0.04em; color: var(--text);
   opacity: 0; animation: fade-up 0.5s 0.85s ease forwards;
 }
 .grant-sub {
-  font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-dim); letter-spacing: 0.08em;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-sm); color: var(--text-dim); letter-spacing: 0.08em;
   opacity: 0; animation: fade-up 0.5s 1.05s ease forwards;
 }
 @keyframes fade-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }

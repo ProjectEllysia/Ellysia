@@ -89,8 +89,54 @@
             </div>
           </Transition>
         </section>
+
+        <!-- ───────── Baja de la cuenta ───────── -->
+        <section class="profile-section profile-section--danger">
+          <h2>Borrar mi cuenta</h2>
+          <p class="danger-text">
+            Se borra todo lo tuyo: bóvedas, escaneos, análisis, activos y listas.
+            No hay vuelta atrás.
+          </p>
+
+          <!-- La consecuencia sobre terceros: la que quien pulsa no tiene
+               presente, y por eso va antes y destacada. -->
+          <p v-if="deletion?.ownedOrganization" class="danger-warning">
+            <strong>Tu organización «{{ deletion.ownedOrganization.name }}» desaparecerá con tu cuenta.</strong>
+            {{ membersWarning }}
+            Conservarán su cuenta, sus datos y su plan personal, pero perderán
+            todo lo que tu plan les daba.
+          </p>
+          <p v-else-if="deletion?.leavesOrganizationId" class="danger-note">
+            Saldrás de tu organización. Los demás no se ven afectados.
+          </p>
+
+          <form class="profile-form" @submit.prevent="askToDelete">
+            <div class="form-row form-row--single">
+              <div class="form-group">
+                <label for="delete-pwd">Confirma con tu contraseña</label>
+                <input id="delete-pwd" v-model="deletePassword" type="password"
+                       class="inp" placeholder="••••••••" required />
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn--danger" :disabled="deleting">
+                {{ deleting ? 'Borrando…' : 'Borrar mi cuenta' }}
+              </button>
+            </div>
+          </form>
+        </section>
       </template>
     </main>
+
+    <ConfirmModal
+      :show="confirmDelete"
+      title="¿Seguro que quieres borrar tu cuenta?"
+      :message="confirmMessage"
+      :danger="true"
+      confirm-label="Sí, borrar mi cuenta"
+      @confirm="handleDelete"
+      @cancel="confirmDelete = false"
+    />
 
     <MfaSetupModal
       :open="!!mfa.pendingSetup.secret"
@@ -100,8 +146,6 @@
       @confirm="handleConfirmMfa"
       @cancel="mfa.cancelSetup()"
     />
-
-    <AppToast />
   </div>
 </template>
 
@@ -110,8 +154,10 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
-import AppToast from '@/components/shared/AppToast.vue'
 import MfaSetupModal from '@/components/shared/MfaSetupModal.vue'
+import ConfirmModal from '@/components/shared/ConfirmModal.vue'
+import { useApi } from '@/composables/useApi'
+import { useToastStore } from '@/stores/toastStore'
 import { useProfileStore } from '@/stores/profileStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useMfaStore } from '@/stores/mfaStore'
@@ -136,6 +182,60 @@ const savingPassword = ref(false)
 const passwordError = ref('')
 const initials = computed(() => getInitials(store.profile.first_name, store.profile.last_name))
 
+/* ── Baja de la cuenta ── */
+const { apiFetch, apiError } = useApi()
+const toast = useToastStore()
+
+/** Lo que el servidor dice que se va a destruir. Se pide al entrar, no al
+ *  pulsar: el aviso tiene que estar delante ANTES de escribir la contraseña. */
+const deletion = ref(null)
+const deletePassword = ref('')
+const deleting = ref(false)
+const confirmDelete = ref(false)
+
+const membersWarning = computed(() => {
+  const count = deletion.value?.ownedOrganization?.membersLosingAccess ?? 0
+  if (count === 0) return 'No hay nadie más dentro.'
+  if (count === 1) return '1 persona se quedará sin organización.'
+  return `${count} personas se quedarán sin organización.`
+})
+
+const confirmMessage = computed(() => {
+  const base = 'Se borrará todo lo tuyo y no se puede deshacer.'
+  if (!deletion.value?.ownedOrganization) return base
+  return `${base} Además, tu organización «${deletion.value.ownedOrganization.name}» `
+    + `desaparecerá: ${membersWarning.value.toLowerCase()}`
+})
+
+async function loadDeletionPreview() {
+  const res = await apiFetch('/users/me/deletion-preview')
+  if (res?.ok) deletion.value = await res.json()
+}
+
+function askToDelete() {
+  confirmDelete.value = true
+}
+
+async function handleDelete() {
+  confirmDelete.value = false
+  deleting.value = true
+  try {
+    const res = await apiFetch('/users/me', {
+      method: 'DELETE',
+      body: JSON.stringify({ password: deletePassword.value }),
+    })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo borrar la cuenta.'), 'error')
+      return
+    }
+    toast.show('Tu cuenta se ha eliminado.', 'success')
+    auth.logout()
+  } finally {
+    deleting.value = false
+    deletePassword.value = ''
+  }
+}
+
 /* ── MFA (TOTP) ── */
 const startingSetup = ref(false)
 const confirming = ref(false)
@@ -148,6 +248,7 @@ onMounted(async () => {
   firstName.value = store.profile.first_name
   lastName.value = store.profile.last_name
   await mfa.loadStatus()
+  await loadDeletionPreview()
 })
 
 async function handleProfileSubmit() { if (!firstName.value.trim() || !lastName.value.trim()) return; savingProfile.value = true; await store.updateProfile(firstName.value.trim(), lastName.value.trim()); savingProfile.value = false }
@@ -193,14 +294,25 @@ function downloadRecoveryCodes() {
 </script>
 
 <style scoped>
+/* ── Baja de la cuenta ── */
+.profile-section--danger { border-color: var(--danger); }
+.profile-section--danger h2 { color: var(--danger); }
+.danger-text { color: var(--text-muted); font-size: var(--fs-md); margin-top: 0.5rem; }
+.danger-warning {
+  margin-top: 1rem; padding: 0.9rem 1.1rem; border-radius: 8px;
+  background: var(--danger-dim); border: 1px solid var(--danger);
+  color: var(--text); font-size: var(--fs-md); line-height: 1.55;
+}
+.danger-note { margin-top: 1rem; color: var(--text-muted); font-size: var(--fs-md); }
+
 .profile-page { min-height: 100vh; background: var(--bg); padding-top: var(--topbar-h); position: relative; }
 .main { max-width: 1020px; margin: 0 auto; padding: 1.75rem 1.1rem; position: relative; z-index: 1; }
 .profile-header { text-align: center; margin-bottom: 2rem; }
-.profile-avatar { width: 72px; height: 72px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: var(--fs-3xl); font-weight: 700; font-family: var(--font-display); display: flex; align-items: center; justify-content: center; margin: 0 auto 0.75rem; }
-.profile-display-name { font-size: var(--fs-2xl); font-weight: 700; color: var(--text); margin: 0 0 0.2rem; font-family: var(--font-display); }
+.profile-avatar { width: 72px; height: 72px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: var(--fs-3xl); font-weight: 700; font-family: var(--font-display); font-size-adjust: var(--fsa-display); display: flex; align-items: center; justify-content: center; margin: 0 auto 0.75rem; }
+.profile-display-name { font-size: var(--fs-2xl); font-weight: 700; color: var(--text); margin: 0 0 0.2rem; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .profile-username { font-size: var(--fs-lg); color: var(--text-muted); margin: 0; }
 .profile-section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.1rem; }
-.profile-section h2 { font-size: var(--fs-xl); font-weight: 600; margin: 0 0 0.85rem; color: var(--text); font-family: var(--font-display); }
+.profile-section h2 { font-size: var(--fs-xl); font-weight: 600; margin: 0 0 0.85rem; color: var(--text); font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .profile-form { display: flex; flex-direction: column; gap: 0.85rem; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; }
 .form-row--single { grid-template-columns: 1fr; }
@@ -222,7 +334,7 @@ function downloadRecoveryCodes() {
   list-style: none; margin: 0 0 1rem; padding: 0.75rem; background: var(--bg);
   border: 1px solid var(--border-solid); border-radius: 6px;
 }
-.mfa-recovery-list code { font-family: monospace; font-size: var(--fs-lg); color: var(--text); }
+.mfa-recovery-list code { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-lg); color: var(--text); }
 .loading-block { padding: 3.5rem 0; display: flex; justify-content: center; }
 .skeleton { background: var(--surface); border-radius: 8px; animation: pulse 1.4s ease-in-out infinite; }
 .skeleton--lg { width: 100%; height: 240px; }

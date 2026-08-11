@@ -20,6 +20,14 @@ decorators, populating the registry — see ``registry.py``.
 """
 
 from ..registry import iris_rules, RuleResult
+
+# Estas importaciones no tienen referencias directas más abajo -- su único
+# propósito es el efecto colateral de importar el módulo: cada uno dispara
+# sus decoradores @iris_rules.register al cargar, que es como se puebla el
+# registro. Sin ellas `iris_rules.get_rules()` devuelve una lista vacía y
+# el motor evalúa cero reglas (todo sale Legitimate) salvo que algún otro
+# import fortuito de un módulo de reglas concreto lo rescate primero -- lo
+# que un linter de "imports no usados" no puede distinguir de basura muerta.
 from . import (
     attachment_media_rules,
     auth_rules,

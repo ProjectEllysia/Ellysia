@@ -289,13 +289,13 @@ function verdictClass(v) {
 }
 
 .doc-id {
-  font-family: var(--font-mono);
-  font-size: var(--fs-lg);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
+  font-size: var(--fs-md);
   color: var(--text-dim);
 }
 
 .doc-verdict {
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 5px;

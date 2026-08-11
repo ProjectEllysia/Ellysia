@@ -16,7 +16,13 @@ export const useHygeiaStore = defineStore('hygeia', () => {
   const state = reactive({
     assets: [], loading: false, error: null,
     selectedId: null,
-    metrics: [], metricsLoading: false, metricsError: null,
+    metrics: [], metricsTruncated: false, metricsLoading: false, metricsError: null,
+    latest: null, latestError: null,
+    inventory: [], inventoryCollectedAt: null, inventoryLoading: false, inventoryError: null,
+    // Resumen del último análisis del inventario con Lybra (Fase I). `scanId`
+    // nulo = nunca analizado, que es el estado inicial de todo activo, no un
+    // error. El desglose completo vive en Themis; aquí solo los recuentos.
+    analysis: null, analysisLoading: false, analyzing: false, analysisError: null,
     lastAgentKey: null,
   })
 
@@ -77,16 +83,24 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     } catch { state.error = 'No se pudo conectar con la API.'; return null }
   }
 
-  /** Selecciona un activo para ver su detalle y carga su serie de métricas. */
+  /** Selecciona un activo para ver su detalle y carga sus métricas. */
   function selectAsset(id) {
     state.selectedId = id
     state.metrics = []
+    state.metricsTruncated = false
     state.metricsError = null
-    if (id) fetchMetrics(id)
+    state.latest = null
+    state.latestError = null
+    state.inventory = []
+    state.inventoryCollectedAt = null
+    state.inventoryError = null
+    state.analysis = null
+    state.analysisError = null
+    if (id) { fetchMetrics(id); fetchLatest(id); fetchInventory(id); fetchAnalysis(id) }
   }
 
   /**
-   * Carga la serie temporal de CPU/memoria del activo dado.
+   * Carga la serie temporal de métricas escalares del activo dado.
    *
    * @param {number} id - Id del activo.
    * @param {object} [opts]
@@ -96,12 +110,105 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     if (!silent) state.metricsLoading = true
     try {
       const res = await apiFetch(`/hygeia/assets/${id}/metrics`)
+      // La selección puede haber cambiado mientras la petición volaba: sin
+      // esta guarda, la respuesta del activo anterior pisaría la del actual.
+      if (state.selectedId !== id) return
       if (!res?.ok) { state.metricsError = await apiError(res, 'No se pudieron cargar las métricas.'); return }
       const data = await res.json()
       state.metrics = data.snapshots ?? []
+      state.metricsTruncated = data.truncated ?? false
       state.metricsError = null
-    } catch { state.metricsError = 'No se pudo conectar con la API.' }
+    } catch { if (state.selectedId === id) state.metricsError = 'No se pudo conectar con la API.' }
     finally { if (!silent) state.metricsLoading = false }
+  }
+
+  /**
+   * Carga el último heartbeat completo del activo: disco por montaje, red por
+   * interfaz, procesos y uso por núcleo — lo que no cabe en la serie temporal.
+   *
+   * Un activo que aún no ha reportado responde 200 con `metrics: null`, que no
+   * es un error: se refleja como ausencia de datos, no como fallo.
+   *
+   * No tiene variante `silent` como `fetchMetrics`: es un único punto, se
+   * pinta en secciones que ya existen y su llegada no hace parpadear nada, así
+   * que nunca ha necesitado levantar un flag de carga propio.
+   *
+   * @param {number} id - Id del activo.
+   */
+  async function fetchLatest(id) {
+    try {
+      const res = await apiFetch(`/hygeia/assets/${id}/metrics/latest`)
+      if (state.selectedId !== id) return
+      if (!res?.ok) { state.latestError = await apiError(res, 'No se pudo cargar el último heartbeat.'); return }
+      state.latest = await res.json()
+      state.latestError = null
+    } catch { if (state.selectedId === id) state.latestError = 'No se pudo conectar con la API.' }
+  }
+
+  /**
+   * Carga el último inventario de software conocido del activo dado.
+   *
+   * No tiene variante `silent`: el inventario solo cambia cada horas (§
+   * contrato de ingesta v1.0, cadencia típica 6h), así que no lo toca el
+   * sondeo de 15s de la vista — solo la selección de activo y el refresco manual.
+   *
+   * @param {number} id - Id del activo.
+   */
+  async function fetchInventory(id) {
+    state.inventoryLoading = true
+    try {
+      const res = await apiFetch(`/hygeia/assets/${id}/inventory`)
+      if (state.selectedId !== id) return
+      if (!res?.ok) { state.inventoryError = await apiError(res, 'No se pudo cargar el inventario.'); return }
+      const data = await res.json()
+      state.inventory = data.software ?? []
+      state.inventoryCollectedAt = data.collectedAt ?? null
+      state.inventoryError = null
+    } catch { if (state.selectedId === id) state.inventoryError = 'No se pudo conectar con la API.' }
+    finally { if (state.selectedId === id) state.inventoryLoading = false }
+  }
+
+  /**
+   * Carga el resumen del último análisis de inventario del activo (Fase I).
+   *
+   * @param {number} id - Id del activo.
+   * @param {object} [opts]
+   * @param {boolean} [opts.silent=false] - No levanta el flag de carga. Lo usa
+   *   el sondeo mientras un análisis está en curso, para no parpadear.
+   */
+  async function fetchAnalysis(id, { silent = false } = {}) {
+    if (!silent) state.analysisLoading = true
+    try {
+      const res = await apiFetch(`/hygeia/assets/${id}/analysis`)
+      // La selección puede haber cambiado mientras la petición volaba.
+      if (state.selectedId !== id) return
+      if (!res?.ok) { state.analysisError = await apiError(res, 'No se pudo cargar el análisis.'); return }
+      state.analysis = await res.json()
+      state.analysisError = null
+    } catch { if (state.selectedId === id) state.analysisError = 'No se pudo conectar con la API.' }
+    finally { if (state.selectedId === id) state.analysisLoading = false }
+  }
+
+  /**
+   * Lanza un análisis del inventario del activo con el motor Lybra (Fase I).
+   *
+   * El escaneo corre en la TaskQueue, así que al volver solo hay un id: el
+   * sondeo de la vista es quien refresca el resumen hasta que termine.
+   *
+   * @param {number} id - Id del activo.
+   * @returns {Promise<number|null>} Id del escaneo lanzado, o null si falló.
+   */
+  async function analyzeInventory(id) {
+    state.analyzing = true
+    try {
+      const res = await apiFetch(`/hygeia/assets/${id}/analyze`, { method: 'POST' })
+      if (!res?.ok) { state.analysisError = await apiError(res, 'No se pudo lanzar el análisis.'); return null }
+      const data = await res.json()
+      state.analysisError = null
+      await fetchAnalysis(id)
+      return data.scanId ?? null
+    } catch { state.analysisError = 'No se pudo conectar con la API.'; return null }
+    finally { state.analyzing = false }
   }
 
   /** Descarta la clave de agente mostrada — llamar al cerrar el modal de una sola vez. */
@@ -112,7 +219,10 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     Object.assign(state, {
       assets: [], loading: false, error: null,
       selectedId: null,
-      metrics: [], metricsLoading: false, metricsError: null,
+      metrics: [], metricsTruncated: false, metricsLoading: false, metricsError: null,
+      latest: null, latestError: null,
+      inventory: [], inventoryCollectedAt: null, inventoryLoading: false, inventoryError: null,
+      analysis: null, analysisLoading: false, analyzing: false, analysisError: null,
       lastAgentKey: null,
     })
   }
@@ -120,7 +230,8 @@ export const useHygeiaStore = defineStore('hygeia', () => {
   return {
     state,
     fetchAssets, createAsset, deleteAsset, rotateKey,
-    selectAsset, fetchMetrics, clearAgentKey,
+    selectAsset, fetchMetrics, fetchLatest, fetchInventory, clearAgentKey,
+    fetchAnalysis, analyzeInventory,
     $reset,
   }
 })

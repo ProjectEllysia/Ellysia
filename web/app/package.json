@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:acheron": "node test/acheron.interop.test.mjs && node test/acheron.crud.test.mjs"
+    "test:acheron": "node test/acheron.interop.test.mjs && node test/acheron.crud.test.mjs && node test/acheron.sync.test.mjs",
+    "test:hygeia": "node test/hygeia.format.test.mjs",
+    "test:polling": "node test/usePolling.test.mjs"
   },
   "dependencies": {
     "hash-wasm": "^4.12.0",

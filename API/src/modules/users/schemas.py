@@ -52,6 +52,29 @@ class SignUpResponseSchema(Schema):
     role = fields.String()
 
 
+class RegisterRequestSchema(Schema):
+    """Alta pública. Sin ``role``: siempre role_user, y no es negociable —
+    aceptarlo del cliente sería regalar el panel de administración."""
+
+    username = fields.String(required=True, validate=validate.Length(min=3, max=64))
+    email = fields.Email(required=True, validate=validate.Length(max=128))
+    first_name = fields.String(required=True, validate=validate.Length(min=1, max=64))
+    last_name = fields.String(required=True, validate=validate.Length(min=1, max=64))
+    password = fields.String(required=True, validate=validate.Length(min=8, max=256))
+
+
+class RegisterResponseSchema(Schema):
+    message = fields.String()
+    userId = fields.Integer()
+    username = fields.String()
+    email = fields.String()
+    emailVerified = fields.Boolean()
+
+
+class VerifyEmailRequestSchema(Schema):
+    token = fields.String(required=True)
+
+
 class CheckCredentialsRequestSchema(Schema):
     username = fields.String(required=True)
     password = fields.String(required=True)
@@ -89,6 +112,8 @@ class UserProfileSchema(Schema):
     role = fields.String()
     created_at = UTCDateTime(allow_none=True)
     password_changed_at = UTCDateTime(allow_none=True)
+    emailVerified = fields.Boolean()
+    mustChangePassword = fields.Boolean()
 
 
 class UserListItemSchema(Schema):
@@ -164,3 +189,26 @@ class MfaDisableRequestSchema(Schema):
 class MfaStatusResponseSchema(Schema):
     enabled = fields.Boolean()
     confirmedAt = UTCDateTime(allow_none=True)
+
+
+class OwnedOrganizationPreviewSchema(Schema):
+    id = fields.Integer()
+    name = fields.String()
+    membersLosingAccess = fields.Integer()
+
+
+class DeletionPreviewSchema(Schema):
+    """Lo que se destruye al borrar la cuenta.
+
+    ``ownedOrganization`` no es ``null`` cuando el usuario es dueño de una: al
+    borrarse, la organización desaparece con él y sus miembros se quedan sin
+    ella. Es la consecuencia sobre terceros y la que hay que enseñar antes de
+    confirmar.
+    """
+
+    ownedOrganization = fields.Nested(OwnedOrganizationPreviewSchema, allow_none=True)
+    leavesOrganizationId = fields.Integer(allow_none=True)
+
+
+class DeleteAccountRequestSchema(Schema):
+    password = fields.String(required=True)

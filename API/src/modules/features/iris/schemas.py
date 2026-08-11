@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from marshmallow import Schema, ValidationError, fields, validate, validates_schema
 
+import src.modules.system.config_reading as CR
 from src.modules.shared import UTCDateTime
 
 
@@ -30,6 +31,24 @@ class AnalyzeRequestSchema(Schema):
                 field_name="headers",
             )
 
+    @validates_schema
+    def validate_max_size(self, data, **kwargs):
+        """C4: sin tope superior, un .eml de decenas de MB (adjuntos incluidos)
+        entraba entero a una columna Text y se re-parseaba completo (incluida
+        la decodificación base64) en cada lectura posterior. Leído con CR en
+        cada validación, no horneado al importar el módulo, para que un
+        cambio vía PUT /system surta efecto sin reiniciar la API (mismo
+        patrón que ``hygeia/schemas.py::validate_array_limits``).
+        """
+        max_bytes = CR.iris_config().max_message_bytes
+        for field_name in ("headers", "message"):
+            value = data.get(field_name)
+            if value and len(value.encode("utf-8", errors="ignore")) > max_bytes:
+                raise ValidationError(
+                    f"'{field_name}' excede el tamaño máximo permitido ({max_bytes} bytes).",
+                    field_name=field_name,
+                )
+
 
 class AnalysisIdQuerySchema(Schema):
     """Query parameter for ``GET /iris/status`` — supplied as ``?id=...``."""
@@ -37,9 +56,25 @@ class AnalysisIdQuerySchema(Schema):
 
 
 class ResultsQuerySchema(Schema):
-    """Query parameters for the paginated results list."""
+    """Query parameters for the paginated results list.
+
+    ``search``/``verdict``/``status``/``source`` are optional filters (all
+    default to "no filter" so existing callers are unaffected); ``sort_by``/
+    ``sort_dir`` control server-side ordering — previously the endpoint only
+    ever returned ``created_at DESC``, so any client-side "sort by score"
+    only reordered whatever page happened to be loaded.
+    """
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))
     per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
+    search = fields.String(load_default=None, validate=validate.Length(max=120))
+    verdict = fields.String(load_default=None,
+                             validate=validate.OneOf(["Legitimate", "Suspicious", "Phishing"]))
+    status = fields.String(load_default=None,
+                            validate=validate.OneOf(["pending", "running", "finished", "failed", "cancelled"]))
+    source = fields.String(load_default=None, validate=validate.OneOf(["manual", "mailbox"]))
+    sort_by = fields.String(load_default="date",
+                             validate=validate.OneOf(["date", "score", "verdict", "title", "status"]))
+    sort_dir = fields.String(load_default="desc", validate=validate.OneOf(["asc", "desc"]))
 
 
 class AnalyzeResponseSchema(Schema):
@@ -114,6 +149,18 @@ class AnalysisListItemSchema(Schema):
     verdict = fields.String(load_default=None)
     startedAt = fields.String(load_default=None)
     finishedAt = fields.String(load_default=None)
+    connectionId = fields.Integer(load_default=None)
+    provider = fields.String(load_default=None)
+    accountEmail = fields.String(load_default=None)
+
+
+class VerdictThresholdsSchema(Schema):
+    """Score thresholds used to classify a verdict — sent alongside the list
+    so the frontend can render them (e.g. a score rail) without hardcoding
+    ``iris.legitimate_threshold``/``iris.suspicious_threshold``.
+    """
+    legitimate = fields.Float()
+    suspicious = fields.Float()
 
 
 class AnalysisListResponseSchema(Schema):
@@ -122,6 +169,7 @@ class AnalysisListResponseSchema(Schema):
     total = fields.Integer()
     page = fields.Integer()
     perPage = fields.Integer()
+    thresholds = fields.Nested(VerdictThresholdsSchema)
 
 
 class AnalysisDeleteResponseSchema(Schema):
@@ -274,3 +322,74 @@ class IrisDocumentDeleteResponseSchema(Schema):
     """Confirmation after deleting an IrisDocument."""
     message = fields.String()
     documentId = fields.Integer()
+
+
+# =============================================================================
+# Mailbox connector (Fase 4) — Gmail / Microsoft Graph
+# =============================================================================
+
+class IrisMailboxProvidersResponseSchema(Schema):
+    """Providers configured/supported for the mailbox connector."""
+    providers = fields.List(fields.String())
+
+
+class IrisMailboxConnectRequestSchema(Schema):
+    """Request body for ``POST /iris/mailbox/connect``."""
+    provider = fields.String(required=True)
+    fullMessageMode = fields.Boolean(load_default=False)
+    folder = fields.String(load_default=None, allow_none=True)
+
+
+class IrisMailboxConnectResponseSchema(Schema):
+    """Authorization URL to redirect the user to."""
+    authorizeUrl = fields.String()
+
+
+class IrisMailboxConnectionItemSchema(Schema):
+    """A connected mailbox — never includes tokens, encrypted or otherwise."""
+    connectionId = fields.Integer()
+    provider = fields.String()
+    accountEmail = fields.String()
+    folder = fields.String(allow_none=True)
+    fullMessageMode = fields.Boolean()
+    status = fields.String()
+    lastSyncAt = UTCDateTime(allow_none=True)
+    lastError = fields.String(allow_none=True)
+    createdAt = UTCDateTime(allow_none=True)
+
+
+class IrisMailboxConnectionListResponseSchema(Schema):
+    """All mailbox connections belonging to the current user."""
+    connections = fields.List(fields.Nested(IrisMailboxConnectionItemSchema))
+    total = fields.Integer()
+
+
+class IrisMailboxUpdateConnectionRequestSchema(Schema):
+    """Request body for ``PATCH /iris/mailbox/connections/<id>``."""
+    folder = fields.String(load_default=None, allow_none=True)
+    status = fields.String(load_default=None, allow_none=True,
+                            validate=validate.OneOf(["active", "paused"]))
+
+
+class IrisMailboxConnectionDeleteResponseSchema(Schema):
+    """Confirmation after deleting a mailbox connection."""
+    message = fields.String()
+    connectionId = fields.Integer()
+
+
+class IrisMailboxSyncResponseSchema(Schema):
+    """Confirmation after queuing a manual sync."""
+    message = fields.String()
+    connectionId = fields.Integer()
+
+
+class IrisMailboxCallbackQuerySchema(Schema):
+    """Query params on the OAuth redirect back from Google/Microsoft.
+
+    ``error`` is present instead of ``code`` when the user denies consent —
+    both are optional here so the endpoint can distinguish and redirect
+    accordingly rather than failing schema validation on a normal decline.
+    """
+    state = fields.String(required=True)
+    code = fields.String(load_default=None)
+    error = fields.String(load_default=None)

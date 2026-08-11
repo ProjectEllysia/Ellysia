@@ -24,8 +24,6 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from sqlalchemy.orm import Session
-
 from src.modules.shared import utcnow_naive
 from src.modules.features.aegis.model import (
     AegisDocument,
@@ -40,19 +38,17 @@ from src.modules.features.aegis.model import (
     Recipient,
     Topic,
 )
-from src.modules.infrastructure import BaseRepository, UnitOfWork
+from src.modules.infrastructure import BaseRepository, DocumentRepository
 
 
-class AegisDocumentRepository(BaseRepository[AegisDocument]):
+class AegisDocumentRepository(DocumentRepository[AegisDocument]):
     """
     Repository for the AegisDocument entity (security awareness pills).
 
-    Inherits all generic CRUD and query operations from BaseRepository[AegisDocument]
-    and adds domain-specific query methods.
-
-    Attributes:
-        _model:  AegisDocument (inherited from BaseRepository).
-        _uow:    Active Unit of Work (inherited from BaseRepository).
+    Las tres consultas de documentos las aporta ``DocumentRepository`` (A9).
+    A diferencia de Themis e Iris, Aegis ordena por ``generated_at`` y no por
+    ``created_at``: es la fecha que su listado muestra, y se mantiene tal
+    cual para no cambiar el orden que el usuario ya ve.
 
     Example:
     >>> with UnitOfWork() as uow:
@@ -62,72 +58,14 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
     ...     repo.delete(doc)
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(AegisDocument, uow=uow, session=session)
-
-    # =========================================================================
-    # DOMAIN QUERIES
-    # =========================================================================
+    _MODEL = AegisDocument
+    _PARENT_FK = "topic_id"
+    _ORDER_COLUMN = "generated_at"
 
     def get_documents_by_user(self, user_id: int, limit: int = 100) -> List[AegisDocument]:
-        """
-        Retrieve all documents for a user, ordered by generation date (desc).
-
-        Args:
-            user_id: Primary key of the user.
-            limit: Maximum number of documents to return (default: 100).
-
-        Returns:
-            List of AegisDocument instances.
-        """
-        return (
-            self._session.query(AegisDocument)
-            .filter(AegisDocument.user_id == user_id)
-            .order_by(AegisDocument.generated_at.desc())
-            .limit(limit)
-            .all()
-        )
-
-    def get_documents_by_topic(self, topic_id: int, limit: int = 50) -> List[AegisDocument]:
-        """
-        Retrieve all documents for a topic.
-
-        Args:
-            topic_id: Primary key of the topic.
-            limit: Maximum number of documents to return (default: 50).
-
-        Returns:
-            List of AegisDocument instances.
-        """
-        return (
-            self._session.query(AegisDocument)
-            .filter(AegisDocument.topic_id == topic_id)
-            .order_by(AegisDocument.generated_at.desc())
-            .limit(limit)
-            .all()
-        )
-
-    def get_documents_by_status(
-        self, user_id: int, status: str, limit: int = 50
-    ) -> List[AegisDocument]:
-        """
-        Retrieve documents by status for a specific user.
-
-        Args:
-            user_id: Primary key of the user.
-            status: Document status ('pending', 'running', 'done', 'error').
-            limit: Maximum number of documents to return (default: 50).
-
-        Returns:
-            List of AegisDocument instances.
-        """
-        return (
-            self._session.query(AegisDocument)
-            .filter(AegisDocument.user_id == user_id, AegisDocument.status == status)
-            .order_by(AegisDocument.created_at.desc())
-            .limit(limit)
-            .all()
-        )
+        """Documentos de un usuario. Solo fija el ``limit`` por defecto (100)
+        que este módulo venía usando; la consulta es la de la base."""
+        return super().get_documents_by_user(user_id, limit=limit)
 
     # =========================================================================
     # TOPIC QUERIES
@@ -183,21 +121,21 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
         Returns:
             Updated AegisDocument instance, or None if not found.
         """
-        doc = self._session.get(AegisDocument, doc_id)
-        if doc is None:
+        document = self._session.get(AegisDocument, doc_id)
+        if document is None:
             return None
 
-        doc.status = status
+        document.status = status
         if title:
-            doc.title = title[:64]
+            document.title = title[:64]
         if filename:
-            doc.filename = filename[:128]
+            document.filename = filename[:128]
         if status == "done":
-            doc.generated_at = utcnow_naive()
+            document.generated_at = utcnow_naive()
         if error and status == "error":
-            doc.title = f"[ERR{doc_id}] {error[:50]}"[:64]
+            document.title = f"[ERR{doc_id}] {error[:50]}"[:64]
 
-        return doc
+        return document
 
     # =========================================================================
     # CONTENT PERSISTENCE
@@ -226,17 +164,17 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
         Returns:
             Updated AegisDocument instance, or None if not found.
         """
-        doc = self._session.get(AegisDocument, doc_id)
-        if doc is None:
+        document = self._session.get(AegisDocument, doc_id)
+        if document is None:
             return None
 
-        doc.subtitle = subtitle
-        doc.intro = intro
-        doc.closing = closing
-        doc.contact_email = contact_email
-        doc.company = company
+        document.subtitle = subtitle
+        document.intro = intro
+        document.closing = closing
+        document.contact_email = contact_email
+        document.company = company
 
-        return doc
+        return document
 
     def save_tips(self, doc_id: int, tips_data: list[dict]) -> None:
         """
@@ -254,7 +192,7 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
         for i, tip_data in enumerate(tips_data, 1):
             links_value = tip_data.get("links")
             if links_value:
-                links_value = [{"text": lk["text"], "url": lk["url"]} for lk in links_value]
+                links_value = [{"text": link["text"], "url": link["url"]} for link in links_value]
 
             self._session.add(AegisTip(
                 document_id=doc_id,
@@ -347,7 +285,7 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
         ts = utcnow_naive().strftime("%Y%m%d_%H%M%S")
         placeholder = f"pending_{ts}_{user_id}_{topic_id}"
 
-        doc = AegisDocument(
+        document = AegisDocument(
             title=placeholder[:64],
             filename=f"{placeholder}.json"[:128],
             status="pending",
@@ -357,10 +295,10 @@ class AegisDocumentRepository(BaseRepository[AegisDocument]):
             is_ai_generated=1,
         )
 
-        self._session.add(doc)
+        self._session.add(document)
         self._session.flush()
-        self._session.refresh(doc)
-        return doc
+        self._session.refresh(document)
+        return document
 
 
 class AegisOrgProfileRepository(BaseRepository[AegisOrgProfile]):
@@ -370,8 +308,7 @@ class AegisOrgProfileRepository(BaseRepository[AegisOrgProfile]):
     One row per user; inherits generic CRUD from BaseRepository.
     """
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(AegisOrgProfile, uow=uow, session=session)
+    _MODEL = AegisOrgProfile
 
     def get_by_user_id(self, user_id: int) -> Optional[AegisOrgProfile]:
         """Retrieve the org profile for a user, or None if not set up yet."""
@@ -381,8 +318,7 @@ class AegisOrgProfileRepository(BaseRepository[AegisOrgProfile]):
 class DistributionListRepository(BaseRepository[DistributionList]):
     """Repository for DistributionList and its Recipient rows."""
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(DistributionList, uow=uow, session=session)
+    _MODEL = DistributionList
 
     def get_lists_by_user(self, user_id: int) -> List[DistributionList]:
         """Retrieve all distribution lists owned by a user, newest first."""
@@ -395,11 +331,11 @@ class DistributionListRepository(BaseRepository[DistributionList]):
 
     def create_list(self, user_id: int, name: str) -> DistributionList:
         """Create a new, empty distribution list."""
-        dist_list = DistributionList(user_id=user_id, name=name)
-        self._session.add(dist_list)
+        distribution_list = DistributionList(user_id=user_id, name=name)
+        self._session.add(distribution_list)
         self._session.flush()
-        self._session.refresh(dist_list)
-        return dist_list
+        self._session.refresh(distribution_list)
+        return distribution_list
 
     def add_recipients(self, list_id: int, recipients_data: list[dict]) -> List[Recipient]:
         """
@@ -458,8 +394,7 @@ class DistributionListRepository(BaseRepository[DistributionList]):
 class CampaignRepository(BaseRepository[Campaign]):
     """Repository for Campaign, CampaignRecipient, and CampaignAnswer."""
 
-    def __init__(self, uow: UnitOfWork | None = None, session: Session | None = None) -> None:
-        super().__init__(Campaign, uow=uow, session=session)
+    _MODEL = Campaign
 
     # =========================================================================
     # CAMPAIGN
@@ -471,6 +406,19 @@ class CampaignRepository(BaseRepository[Campaign]):
             self._session.query(Campaign)
             .filter(Campaign.user_id == user_id)
             .order_by(Campaign.created_at.desc())
+            .all()
+        )
+
+    def get_campaigns_by_document(self, document_id: int) -> List[Campaign]:
+        """All campaigns built on a given document, regardless of owner.
+
+        Used to cascade-delete a document's campaigns before the document
+        itself: 'document_id' on Campaign has no ON DELETE CASCADE at the DB
+        level, so deleting the document first would fail the FK constraint.
+        """
+        return (
+            self._session.query(Campaign)
+            .filter(Campaign.document_id == document_id)
             .all()
         )
 

@@ -4,7 +4,7 @@ import logging
 import hashlib
 from datetime import timedelta
 import src.modules.system.config_reading as CR
-from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin, job_context
+from src.modules.system.taskqueue import TaskTrackingMixin, job_context
 from src.modules.infrastructure import UnitOfWork
 from src.modules.shared import utcnow_naive, isoformat_utc
 from ..repositories import TracerouteRepository
@@ -39,8 +39,8 @@ class TracerouteManager(TaskTrackingMixin):
           enough to retry soon and overridable via refresh).
         - ``pending`` → a job is enqueued/running, or one was just submitted.
 
-    Results are cached per (user, target) and reused across all scan types
-    (Nmap, Nikto, OpenVAS). Every operation is scoped to the owning user via
+    Results are cached per (user, target) and reused across all scan types.
+    Every operation is scoped to the owning user via
     ``ScanManager.assert_scan_ownership`` so a user can only ever trace targets
     from their own scans.
     """
@@ -48,14 +48,7 @@ class TracerouteManager(TaskTrackingMixin):
     EXTERNAL_ID_PREFIX = "themis-traceroute:"
     TASK_CATEGORY = "themis.traceroute"
 
-    def __init__(self, task_queue: ITaskQueue | None = None) -> None:
-        """Initialize the manager.
-
-        Args:
-            task_queue: Task queue to use (injectable for tests). Defaults to
-                the singleton ``TaskQueue``.
-        """
-        self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
+    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin (A10).
 
     # =========================================================================
     # REQUEST-SIDE (non-blocking)
@@ -101,8 +94,8 @@ class TracerouteManager(TaskTrackingMixin):
         be RQ-safe (letters, numbers, _, -); external_id can have other chars.
         """
         key = self._trace_key(user_id, target)
-        timeout = int(CR.get_themis_traceroute_timeout()) + 30
-        self._tq.submit(
+        timeout = int(CR.traceroute_config().timeout) + 30
+        self._task_queue.submit(
             func=TracerouteManager.execute_traceroute,
             args=(user_id, target),
             name=f"traceroute_{key}",  # RQ-safe job name
@@ -124,9 +117,9 @@ class TracerouteManager(TaskTrackingMixin):
             if trace is None:
                 return None
             if trace.hops:
-                max_age = timedelta(hours=CR.get_themis_traceroute_cache_hours())
+                max_age = timedelta(hours=CR.traceroute_config().cache_hours)
             else:
-                max_age = timedelta(minutes=CR.get_themis_traceroute_retry_failed_minutes())
+                max_age = timedelta(minutes=CR.traceroute_config().retry_failed_minutes)
             if utcnow_naive() - trace.created_at > max_age:
                 return None
             return self._format(trace, cached_hit=True)

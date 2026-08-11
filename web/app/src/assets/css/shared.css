@@ -65,33 +65,81 @@
   --mist:         rgba(240,205,130,0.16);
   --temple:       var(--accent);
 
-  /* tipografía */
+  /* ── tipografía ────────────────────────────────────────────────
+     Cada familia va emparejada con su corrección óptica. Ver el bloque
+     "corrección óptica entre familias" más abajo para el porqué. */
   --font-epic:    'Cinzel', 'Times New Roman', serif;          /* inscripciones: wordmark, héroes */
   --font-display: 'Cormorant Garamond', Georgia, serif;        /* títulos de vistas y tarjetas */
   --font-body:    'Alegreya Sans', system-ui, sans-serif;
   --font-mono:    'JetBrains Mono', monospace;
 
-  /* escala tipográfica — terreno medio */
-  --fs-xs:        0.75rem;   /* 11px — badges, pie fino */
-  --fs-sm:        0.875rem;  /* 13px — captions, labels */
-  --fs-body:      1.05rem;   /* 16px — cuerpo base */
-  --fs-input:     1.40rem;   /* 17px — campos de formulario */
-  --fs-md:        1.2rem;    /* 18px — cuerpo enfatizado, botones */
-  --fs-lg:        1.4rem;    /* 21px — títulos de tarjeta, subcabeceras */
-  --fs-xl:        1.7rem;    /* 25.5px — h3 de modal, estadísticas */
-  --fs-2xl:       2.0rem;    /* 30px — h1 de vista */
-  --fs-3xl:       2.4rem;    /* 36px — héroes, nombre de perfil */
-  --fs-stat-hero: 4.32rem;   /* 65px — puntuación Iris (mantener) */
+  /* ── corrección óptica entre familias ──────────────────────────
+     El mismo font-size NO da el mismo tamaño percibido en fuentes
+     distintas: lo que el ojo mide es la altura de la x, no la caja de
+     la fuente. Medido en navegador sobre las cuatro familias reales:
 
-  /* aliases semánticos */
+       Alegreya Sans ...... x/em = 0.46   (referencia: es el cuerpo)
+       Cormorant Garamond . x/em = 0.39   → se veía un 15% más pequeña
+       JetBrains Mono ..... x/em = 0.55   → se veía un 20% más grande
+       Cinzel ............. altura de mayúscula/em = 0.70 (vs 0.65 del cuerpo)
+
+     Por eso "el tamaño ideal cambia según la fuente": no cambiaba el
+     token, cambiaba la fuente. `font-size-adjust` normaliza justo eso,
+     así que un mismo --fs-* rinde igual en las cuatro. Cinzel se ajusta
+     por altura de mayúscula, no de x, porque va siempre en versalitas
+     (text-transform: uppercase) y ahí la x no pinta nada.
+
+     Toca estos cuatro números, no los --fs-*, si una familia concreta
+     te sigue pareciendo grande o pequeña. */
+  --fsa-body:    0.46;
+  --fsa-display: 0.46;
+  --fsa-mono:    0.46;
+  --fsa-epic:    cap-height 0.65;
+
+  /* ── escala tipográfica ────────────────────────────────────────
+     Fluida: clamp(mínimo en móvil, interpolación, máximo en escritorio),
+     recta entre 375px y 1280px de ancho. Los máximos coinciden con los
+     tamaños fijos anteriores, así que en escritorio nada se mueve.
+
+     --fs-scale es el mando maestro: un solo número sube o baja TODA la
+     escala sin tocar los 91 componentes. 1.05 = todo un 5% más grande. */
+  --fs-scale:     1;
+
+  --fs-xs:        calc(var(--fs-scale) * clamp(0.68rem, 0.67rem + 0.04vw, 0.70rem));  /* badges, pie fino */
+  --fs-sm:        calc(var(--fs-scale) * clamp(0.79rem, 0.78rem + 0.05vw, 0.82rem));  /* captions, labels */
+  --fs-body:      calc(var(--fs-scale) * clamp(0.94rem, 0.92rem + 0.07vw, 0.98rem));  /* cuerpo base */
+  --fs-md:        calc(var(--fs-scale) * clamp(1.04rem, 1.00rem + 0.15vw, 1.125rem)); /* cuerpo enfatizado, botones */
+  --fs-lg:        calc(var(--fs-scale) * clamp(1.16rem, 1.10rem + 0.27vw, 1.31rem));  /* títulos de tarjeta */
+  --fs-xl:        calc(var(--fs-scale) * clamp(1.32rem, 1.21rem + 0.48vw, 1.59rem));  /* h3 de modal, estadísticas */
+  --fs-2xl:       calc(var(--fs-scale) * clamp(1.50rem, 1.34rem + 0.66vw, 1.875rem)); /* h1 de vista */
+  --fs-3xl:       calc(var(--fs-scale) * clamp(1.70rem, 1.47rem + 0.97vw, 2.25rem));  /* héroes, nombre de perfil */
+  --fs-4xl:       calc(var(--fs-scale) * clamp(2.10rem, 1.56rem + 2.30vw, 3.40rem));  /* titulares de portada */
+  --fs-stat-hero: calc(var(--fs-scale) * clamp(2.60rem, 2.00rem + 2.56vw, 4.05rem));  /* puntuación Iris */
+
+  /* aliases semánticos — la puerta de entrada recomendada: dicen para
+     QUÉ es el tamaño, no cuánto mide, así que se pueden recalibrar sin
+     buscar y reemplazar. */
   --fs-page-title:  var(--fs-3xl);
-  --fs-modal-title: var(--fs-xl);
-  --fs-section:     var(--fs-lg);
-  --fs-card-title:  var(--fs-lg);
   --fs-label:       var(--fs-sm);
   --fs-caption:     var(--fs-xs);
   --fs-btn:         var(--fs-md);
-  --fs-btn-sm:      0.8rem;
+  --fs-btn-sm:      var(--fs-sm);
+  /* Un campo de formulario es cuerpo enfatizado, no un título. Antes era
+     1.40rem, idéntico a --fs-lg (el tamaño de un título de tarjeta), con
+     un comentario que decía "17px" cuando eran 21. */
+  --fs-input:       var(--fs-md);
+
+  /* ── breakpoints oficiales ─────────────────────────────────────
+     Las media queries no aceptan var(), así que esto es documentación,
+     no código. Había 13 anchos distintos repartidos por los componentes
+     (520, 540, 560, 600, 640, 680, 700, 720, 768, 800, 860, 900, 1100)
+     y ninguno coincidía con el único que definía este archivo. Cualquier
+     @media nueva usa uno de estos cuatro:
+
+       560px  — móvil
+       768px  — móvil grande / tableta en vertical
+       960px  — tableta en horizontal
+       1200px — escritorio estrecho */
 
   --radius:      10px;
   --radius-sm:   6px;
@@ -218,8 +266,15 @@ html, body {
   min-height: 100vh;
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-body);
-  font-size: 15px;
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body);
+  /* 100%, no 15px: un tamaño en px ignora el ajuste de letra del
+     navegador, que es la única palanca que tiene quien no ve bien. Los
+     máximos de la escala están recalibrados para que el resultado en
+     escritorio caiga donde caía antes. */
+  font-size: 100%;
+  /* Normaliza el tamaño percibido de la familia de cuerpo; cada regla que
+     cambia de familia repone el suyo (la propiedad se hereda). */
+  font-size-adjust: var(--fsa-body);
   line-height: 1.7;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
@@ -235,7 +290,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 }
 
 input, select, textarea {
-  font-family: var(--font-body);
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body);
   background: var(--surface-2);
   border: 1px solid var(--border-solid);
   border-radius: var(--radius-sm);
@@ -292,7 +347,7 @@ select option { background: var(--surface); color: var(--text); }
 .topbar-sep { color: var(--border-med); font-size: var(--fs-md); user-select: none; }
 .topbar-title {
   font-size: var(--fs-xl); font-weight: 900; letter-spacing: 0.02em;
-  color: var(--text); font-family: var(--font-epic);
+  color: var(--text); font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
 }
 .topbar-badge {
   padding: 3px 9px; border-radius: 4px;
@@ -325,7 +380,7 @@ select option { background: var(--surface); color: var(--text); }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
   padding: 8px 14px; border-radius: var(--radius-sm);
-  font-family: var(--font-body); font-size: var(--fs-btn); font-weight: 600;
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body); font-size: var(--fs-btn); font-weight: 600;
   letter-spacing: 0.02em; cursor: pointer;
   transition: all var(--transition);
   border: 1px solid transparent;
@@ -369,7 +424,7 @@ select option { background: var(--surface); color: var(--text); }
   position: fixed; bottom: 24px; left: 50%;
   transform: translateX(-50%) translateY(16px);
   background: var(--surface-3); border: 1px solid var(--border-med);
-  color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm);
+  color: var(--text); font-family: var(--font-body); font-size-adjust: var(--fsa-body); font-size: var(--fs-md);
   padding: 10px 18px; border-radius: var(--radius);
   opacity: 0; pointer-events: none;
   transition: opacity 0.22s ease, transform 0.22s ease;
@@ -383,7 +438,7 @@ select option { background: var(--surface); color: var(--text); }
 
 .badge {
   display: inline-block; padding: 2px 7px; border-radius: 4px;
-  font-family: var(--font-body); font-size: var(--fs-caption); font-weight: 600;
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body); font-size: var(--fs-caption); font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.04em;
 }
 .badge--running   { background: var(--info-dim);    color: var(--info);    }
@@ -398,6 +453,67 @@ select option { background: var(--surface); color: var(--text); }
   text-align: center;
 }
 .empty-state svg { opacity: 0.25; }
+
+/* ── Superficie de tarjeta ──────────────────────────────────────────────
+   Solo la superficie: fondo, borde y radio. El interior (padding, rejilla,
+   tipografía) lo pone cada componente, porque ahí es donde de verdad
+   difieren — una tarjeta de estadística y una de escaneo programado no se
+   parecen por dentro, pero sí por fuera.
+
+   Nace de una deriva medida: el mismo recuadro estaba escrito a mano en más
+   de veinte componentes con seis radios distintos (5, 6, 7, 8, 9 y 10px)
+   según quién lo escribiera. Aquí el radio es uno.
+
+   No la usan las tarjetas que hacen algo más que ser una superficie
+   (`.modal-card` es un diálogo con tope de alto, `.engine-card` lleva
+   degradado, `.pantheon-card` es la pieza del hub): forzarlas aquí las
+   dejaría peor, no mejor. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+/* Elevación al pasar por encima, para las tarjetas que son accionables. */
+.card--interactive { transition: border-color var(--transition), transform var(--transition); }
+.card--interactive:hover { border-color: var(--accent); transform: translateY(-2px); }
+
+/* ── Esqueletos de carga ────────────────────────────────────────────────
+   `seq-shimmer` llevaba definido desde siempre sin un solo consumidor: la
+   aplicación entera anunciaba la espera con texto ("Cargando…") o con un
+   spinner, y al llegar el contenido la página daba un salto porque el hueco
+   reservado no medía lo mismo que lo que acababa de entrar.
+
+   Un esqueleto ocupa el sitio del contenido real, así que no hay salto y
+   además se lee de un vistazo QUÉ está llegando (una tabla, una ficha, un
+   párrafo), no solo que algo tarda.
+
+   Va marcado como decorativo: quien usa lector de pantalla no gana nada con
+   siete cajas vacías. El estado de carga se anuncia con aria-busy en el
+   contenedor, no repitiendo la silueta. */
+.skeleton {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-3) 50%,
+    var(--surface-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: seq-shimmer 1.4s linear infinite;
+}
+/* Una línea de texto. `em` y no `rem`: así hereda el tamaño de donde se
+   ponga y una línea de titular sale más gruesa que una de cuerpo, sin
+   tener que declararlo. */
+.skeleton--line   { height: 0.75em; border-radius: 4px; }
+.skeleton--title  { height: 1.1em;  border-radius: 4px; width: 60%; }
+.skeleton--block  { height: 4.5rem; }
+.skeleton--circle { border-radius: 50%; aspect-ratio: 1; }
+/* Anchos para que las líneas no queden todas iguales, que es lo que delata
+   un esqueleto como adorno en vez de como silueta. */
+.skeleton--w80 { width: 80%; }
+.skeleton--w60 { width: 60%; }
+.skeleton--w40 { width: 40%; }
 
 .alert {
   border-radius: var(--radius-sm);
@@ -414,9 +530,10 @@ select option { background: var(--surface); color: var(--text); }
 .alert-success { background: var(--success-dim); border: 1px solid var(--success); color: var(--success); }
 .alert svg     { flex-shrink: 0; margin-top: 1px; }
 
-::-webkit-scrollbar       { width: 3px; height: 3px; }
+::-webkit-scrollbar       { width: 15px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 2px; }
+::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-med); background-clip: padding-box; }
 
 @keyframes seq-pulse {
   0%, 100% { opacity: 1; }
@@ -440,6 +557,11 @@ select option { background: var(--surface); color: var(--text); }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
+  /* El esqueleto se queda: sigue reservando el hueco y evitando el salto,
+     que es su trabajo principal. Lo que se va es el brillo en movimiento. */
+  .skeleton { animation: none; }
+  .card--interactive { transition: none; }
+  .card--interactive:hover { transform: none; }
 }
 
 .modal {
@@ -470,7 +592,7 @@ select option { background: var(--surface); color: var(--text); }
 }
 .modal-header h2 {
   font-size: var(--fs-md); font-weight: 600; color: var(--text);
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
 }
 .modal-close {
   background: none; border: none; color: var(--text-muted);

@@ -3,7 +3,7 @@
 Cancellation is cooperative (ScanManager.cancel_scan / TaskQueue.cancel only
 signal the worker, they never kill the OS-level subprocess directly). If a
 delete path ignores that signal's success/failure and deletes the scan row
-regardless, a still-running nmap/nikto/openvas process is orphaned: invisible
+regardless, a still-running nmap/nikto process is orphaned: invisible
 to the app forever, since its Scan row and TaskQueue mapping are gone. See
 endpoints.delete_scan and ScanManager.bulk_delete_scans for the guard.
 """

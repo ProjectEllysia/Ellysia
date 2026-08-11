@@ -4,13 +4,8 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
-import { useAuthStore } from '@/stores/authStore'
+// La sesión se restaura en main.js, antes de instalar el router: aquí era
+// demasiado tarde, porque la primera navegación (y su guard) ya se había
+// resuelto para cuando corría este `onMounted`.
 import AppToast from '@/components/shared/AppToast.vue'
-
-const auth = useAuthStore()
-
-onMounted(() => {
-  auth.loadFromStorage()
-})
 </script>

@@ -1,6 +1,6 @@
 import logging
 
-from flask import request, send_file, Response
+from flask import send_file, Response
 from flask_smorest import Blueprint as SmorestBlueprint
 
 import src.modules.system.config_reading as CR
@@ -14,14 +14,7 @@ from .exceptions import (
     DocumentError,
     DocumentNotFoundError,
     DocumentNotReadyError,
-    CampaignAlreadyLaunchedError,
-    CampaignEmptyListError,
     CampaignError,
-    CampaignNoQuestionsError,
-    CampaignNotFoundError,
-    DistributionListNotFoundError,
-    QuizAlreadyCompletedError,
-    QuizTokenInvalidError,
     EllysiaException,
 )
 from .services import (
@@ -43,7 +36,7 @@ from .schemas import (
     GenerateResponseSchema,
     DeleteDocumentResponseSchema,
     DocumentListResponseSchema,
-    BrandsCatalogResponseSchema,
+    ProductSearchQuerySchema,
     ExportFormatsResponseSchema,
     ExportResultResponseSchema,
     DistributionListCreateSchema,
@@ -64,16 +57,16 @@ USER_MANAGER = UserManager()
 
 
 def _get_document_checked(manager, doc_id: int, user_id: int) -> dict:
-    doc = manager.get_document(doc_id)
-    if doc.get("userId") != user_id:
+    document = manager.get_document(doc_id)
+    if document.get("userId") != user_id:
         logger.warning(
             "Documento %s no encontrado o acceso denegado | user=%s (userId=%s)",
             doc_id, current_actor(), user_id
         )
         raise DocumentNotFoundError(doc_id)
-    if doc["status"] != "done":
-        raise DocumentNotReadyError(doc_id, doc["status"])
-    return doc
+    if document["status"] != "done":
+        raise DocumentNotReadyError(doc_id, document["status"])
+    return document
 
 
 # ============================================================================
@@ -97,8 +90,8 @@ def aegis_generate(data):
     tweaks = data.get("tweaks") or {}
 
     user = get_current_user()
-    mgr = AegisManager(user)
-    document_id = mgr.generate(topic_id=topic_id, tweaks=tweaks)
+    manager = AegisManager(user)
+    document_id = manager.generate(topic_id=topic_id, tweaks=tweaks)
     logger.info(
         f"Aegis generate lanzado -- topicId={topic_id} "
         f"documentId={document_id} user={get_current_user().username}"
@@ -130,9 +123,9 @@ def aegis_status(args):
     doc_id = args["id"]
     user = get_current_user()
 
-    mgr = AegisManager(user)
-    mgr.assert_document_ownership(doc_id)
-    doc_info = mgr.get_document(doc_id)
+    manager = AegisManager(user)
+    manager.assert_document_ownership(doc_id)
+    doc_info = manager.get_document(doc_id)
 
     if doc_info["status"] != "done":
         raise DocumentNotReadyError(doc_id, doc_info["status"])
@@ -155,11 +148,11 @@ def aegis_get_document(args):
     """Obtener contenido estructurado de un documento terminado"""
     doc_id = args["id"]
     user = get_current_user()
-    mgr = AegisManager(user)
+    manager = AegisManager(user)
 
-    mgr.assert_document_ownership(doc_id)
+    manager.assert_document_ownership(doc_id)
 
-    doc_info = mgr.get_document(doc_id)
+    doc_info = manager.get_document(doc_id)
     if doc_info["status"] != "done":
         raise DocumentNotReadyError(doc_id, doc_info["status"])
 
@@ -183,10 +176,10 @@ def aegis_update_document(args, data):
     """Reemplazar (upsert) el contenido editable de una pildora generada"""
     doc_id = args["id"]
     user = get_current_user()
-    mgr = AegisManager(user)
+    manager = AegisManager(user)
 
-    _get_document_checked(mgr, doc_id, user.id)
-    updated = mgr.update_pill(doc_id, data)
+    _get_document_checked(manager, doc_id, user.id)
+    updated = manager.update_pill(doc_id, data)
 
     logger.info("Aegis doc %s actualizado | user=%s", doc_id, current_actor())
     return updated
@@ -208,8 +201,8 @@ def aegis_update_document(args, data):
 def aegis_get_org_profile():
     """Obtener el perfil de organización del usuario actual (o defaults)"""
     user = get_current_user()
-    mgr = AegisOrgProfileManager(user)
-    return mgr.get_or_default()
+    manager = AegisOrgProfileManager(user)
+    return manager.get_or_default()
 
 
 @aegis_blp.put("/org-profile")
@@ -225,8 +218,8 @@ def aegis_get_org_profile():
 def aegis_save_org_profile(data):
     """Crear o actualizar (upsert) el perfil de organización del usuario actual"""
     user = get_current_user()
-    mgr = AegisOrgProfileManager(user)
-    saved = mgr.upsert(data)
+    manager = AegisOrgProfileManager(user)
+    saved = manager.upsert(data)
     logger.info("Perfil de organización de Aegis guardado | user=%s", current_actor())
     return saved
 
@@ -247,15 +240,15 @@ def aegis_download(args):
     doc_id = args["id"]
     user = get_current_user()
 
-    mgr = AegisManager(user)
-    mgr.assert_document_ownership(doc_id)
+    manager = AegisManager(user)
+    manager.assert_document_ownership(doc_id)
 
-    doc_info = mgr.get_document(doc_id)
+    doc_info = manager.get_document(doc_id)
     if doc_info["status"] != "done":
         raise DocumentNotReadyError(doc_id, doc_info["status"])
 
     try:
-        path = mgr.get_document_path(doc_id)
+        path = manager.get_document_path(doc_id)
     except (ValueError, FileNotFoundError):
         raise DocumentNotFoundError(doc_id)
 
@@ -280,10 +273,10 @@ def aegis_delete_document(args):
     """Eliminar un documento Aegis (BD + archivo en disco)"""
     doc_id = args["id"]
     user = get_current_user()
-    mgr = AegisManager(user)
+    manager = AegisManager(user)
 
-    mgr.assert_document_ownership(doc_id)
-    mgr.delete_document(doc_id)
+    manager.assert_document_ownership(doc_id)
+    manager.delete_document(doc_id)
 
     logger.info("Aegis doc %s eliminado | user=%s", doc_id, current_actor())
     return {"message": "Documento eliminado correctamente", "documentId": doc_id}
@@ -300,8 +293,8 @@ def aegis_delete_document(args):
 def aegis_list_user_documents():
     """Listar todos los documentos Aegis del usuario autenticado"""
     user = get_current_user()
-    mgr = AegisManager(user)
-    docs = mgr.list_user_documents()
+    manager = AegisManager(user)
+    docs = manager.list_user_documents()
 
     return {"count": len(docs), "documents": docs}
 
@@ -315,22 +308,23 @@ def aegis_list_user_documents():
 def aegis_get_topics():
     """Listar temas disponibles para generar pildoras"""
     user = get_current_user()
-    mgr = AegisManager(user)
-    topics = mgr.get_topics()
+    manager = AegisManager(user)
+    topics = manager.get_topics()
 
     return topics
 
 
-@aegis_blp.get("/brands")
-@aegis_blp.response(200, BrandsCatalogResponseSchema, description="Catalog of brands")
+@aegis_blp.get("/products")
+@aegis_blp.arguments(ProductSearchQuerySchema, location="query")
+@aegis_blp.response(200, description="Products matching the search term")
 @aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @limiter.limit("120 per hour; 600 per day")
 @require_oauth_token
 @handle_exceptions(default_exception=DocumentError, logger=logger)
-def aegis_get_brands():
-    """Catalogo de marcas disponibles para filtrado de alertas"""
-    brands = CR.get_aegis_brands()
-    return {"count": len(brands), "brands": brands}
+def aegis_search_products(args):
+    """Buscar productos vigilables en el índice CPE del espejo local de NVD"""
+    products = AegisOrgProfileManager.search_products(args["q"], limit=args["limit"])
+    return {"count": len(products), "products": products}
 
 
 # ============================================================================
@@ -408,8 +402,8 @@ def export_document(data, doc_id):
         )
 
     user = get_current_user()
-    mgr = AegisManager(user)
-    doc_info = _get_document_checked(mgr, doc_id, user.id)
+    manager = AegisManager(user)
+    doc_info = _get_document_checked(manager, doc_id, user.id)
 
     export_data = ExportData.from_document_dict(doc_info, doc_id)
 
@@ -469,8 +463,8 @@ def download_export(args, doc_id):
         )
 
     user = get_current_user()
-    mgr = AegisManager(user)
-    doc_info = _get_document_checked(mgr, doc_id, user.id)
+    manager = AegisManager(user)
+    doc_info = _get_document_checked(manager, doc_id, user.id)
 
     export_data = ExportData.from_document_dict(doc_info, doc_id)
     exporter = get_exporter_for_format(export_format)
@@ -511,8 +505,8 @@ def quick_export_markdown(args, doc_id):
     include_alerts = not args.get("noAlerts", False)
 
     user = get_current_user()
-    mgr = AegisManager(user)
-    doc_info = _get_document_checked(mgr, doc_id, user.id)
+    manager = AegisManager(user)
+    doc_info = _get_document_checked(manager, doc_id, user.id)
 
     export_data = ExportData.from_document_dict(doc_info, doc_id)
     if not include_alerts:
@@ -559,10 +553,10 @@ def quick_export_markdown(args, doc_id):
 def create_distribution_list(data):
     """Crear una lista de distribución vacía"""
     user = get_current_user()
-    mgr = CampaignManager(user)
-    dist_list = mgr.create_list(data["name"])
-    logger.info(f"Lista {dist_list['id']} creada | user={current_actor()}")
-    return dist_list, 201
+    manager = CampaignManager(user)
+    distribution_list = manager.create_list(data["name"])
+    logger.info(f"Lista {distribution_list['id']} creada | user={current_actor()}")
+    return distribution_list, 201
 
 
 @aegis_blp.get("/lists")
@@ -576,8 +570,8 @@ def create_distribution_list(data):
 def list_distribution_lists():
     """Listar las listas de distribución del usuario autenticado"""
     user = get_current_user()
-    mgr = CampaignManager(user)
-    lists = mgr.list_lists()
+    manager = CampaignManager(user)
+    lists = manager.list_lists()
     return {"count": len(lists), "lists": lists}
 
 
@@ -593,8 +587,8 @@ def list_distribution_lists():
 def get_distribution_list(list_id):
     """Obtener el detalle de una lista de distribución"""
     user = get_current_user()
-    mgr = CampaignManager(user)
-    return mgr.get_list(list_id)
+    manager = CampaignManager(user)
+    return manager.get_list(list_id)
 
 
 @aegis_blp.delete("/lists/<int:list_id>")
@@ -609,8 +603,8 @@ def get_distribution_list(list_id):
 def delete_distribution_list(list_id):
     """Eliminar una lista de distribución y sus destinatarios"""
     user = get_current_user()
-    mgr = CampaignManager(user)
-    mgr.delete_list(list_id)
+    manager = CampaignManager(user)
+    manager.delete_list(list_id)
     logger.info(f"Lista {list_id} eliminada | user={current_actor()}")
     return {"message": "Lista eliminada correctamente", "listId": list_id}
 
@@ -629,8 +623,8 @@ def delete_distribution_list(list_id):
 def add_list_recipients(data, list_id):
     """Añadir destinatarios a una lista (los emails duplicados se ignoran)"""
     user = get_current_user()
-    mgr = CampaignManager(user)
-    created = mgr.add_recipients(list_id, data["recipients"])
+    manager = CampaignManager(user)
+    created = manager.add_recipients(list_id, data["recipients"])
     logger.info(f"{len(created)} destinatarios añadidos a lista {list_id} | user={current_actor()}")
     return {"count": len(created), "recipients": created}, 201
 
@@ -647,8 +641,8 @@ def add_list_recipients(data, list_id):
 def get_list_recipients(list_id):
     """Listar los destinatarios de una lista"""
     user = get_current_user()
-    mgr = CampaignManager(user)
-    recipients = mgr.get_recipients(list_id)
+    manager = CampaignManager(user)
+    recipients = manager.get_recipients(list_id)
     return {"count": len(recipients), "recipients": recipients}
 
 
@@ -664,8 +658,8 @@ def get_list_recipients(list_id):
 def delete_list_recipient(list_id, recipient_id):
     """Eliminar un destinatario de una lista"""
     user = get_current_user()
-    mgr = CampaignManager(user)
-    mgr.remove_recipient(list_id, recipient_id)
+    manager = CampaignManager(user)
+    manager.remove_recipient(list_id, recipient_id)
     logger.info(f"Destinatario {recipient_id} eliminado de lista {list_id} | user={current_actor()}")
     return {"message": "Destinatario eliminado correctamente"}
 
@@ -689,8 +683,8 @@ def delete_list_recipient(list_id, recipient_id):
 def create_campaign(data):
     """Crear una campaña en borrador (píldora + lista, aún sin lanzar)"""
     user = get_current_user()
-    mgr = CampaignManager(user)
-    campaign = mgr.create_campaign(data["documentId"], data["listId"], data["name"])
+    manager = CampaignManager(user)
+    campaign = manager.create_campaign(data["documentId"], data["listId"], data["name"])
     logger.info(f"Campaña {campaign['id']} creada (draft) | user={current_actor()}")
     return campaign, 201
 
@@ -706,8 +700,8 @@ def create_campaign(data):
 def list_campaigns():
     """Listar las campañas del usuario autenticado"""
     user = get_current_user()
-    mgr = CampaignManager(user)
-    campaigns = mgr.list_campaigns()
+    manager = CampaignManager(user)
+    campaigns = manager.list_campaigns()
     return {"count": len(campaigns), "campaigns": campaigns}
 
 
@@ -723,8 +717,26 @@ def list_campaigns():
 def get_campaign(campaign_id):
     """Obtener el detalle de una campaña, incluyendo el tracking por destinatario"""
     user = get_current_user()
-    mgr = CampaignManager(user)
-    return mgr.get_campaign(campaign_id)
+    manager = CampaignManager(user)
+    return manager.get_campaign(campaign_id)
+
+
+@aegis_blp.delete("/campaigns/<int:campaign_id>")
+@aegis_blp.response(200, description="Campaign deleted")
+@aegis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@aegis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@aegis_blp.alt_response(404, schema=ErrorSchema, description="Campaign not found")
+@limiter.limit("30 per hour; 100 per day")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.AEGIS_DELETE])
+@handle_exceptions(default_exception=CampaignError, logger=logger)
+def delete_campaign(campaign_id):
+    """Eliminar una campaña y su tracking — invalida los enlaces de quiz ya enviados"""
+    user = get_current_user()
+    manager = CampaignManager(user)
+    manager.delete_campaign(campaign_id)
+    logger.info(f"Campaña {campaign_id} eliminada | user={current_actor()}")
+    return {"message": "Campaña eliminada correctamente", "campaignId": campaign_id}
 
 
 @aegis_blp.post("/campaigns/<int:campaign_id>/launch")
@@ -740,8 +752,8 @@ def get_campaign(campaign_id):
 def launch_campaign(campaign_id):
     """Lanzar una campaña: congela el quiz, genera tokens y encola el envío"""
     user = get_current_user()
-    mgr = CampaignManager(user)
-    campaign = mgr.launch_campaign(campaign_id)
+    manager = CampaignManager(user)
+    campaign = manager.launch_campaign(campaign_id)
     logger.info(f"Campaña {campaign_id} lanzada | user={current_actor()}")
     return {"message": "Campaña lanzada correctamente", "campaign": campaign}
 

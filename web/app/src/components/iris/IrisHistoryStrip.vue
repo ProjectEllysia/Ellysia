@@ -38,6 +38,9 @@
           @click="$emit('select', item.analysisId)"
         >
           <span class="strip-dot" :class="`dot--${item.status || 'pending'}`"></span>
+          <span class="strip-origin" :class="item.connectionId ? 'strip-origin--auto' : 'strip-origin--manual'">
+            {{ item.connectionId ? 'AUTO' : 'MANUAL' }}
+          </span>
           <span v-if="item.title" class="strip-title">{{ item.title }}</span>
           <span v-else class="strip-id">#{{ item.analysisId }}</span>
           <span v-if="item.verdict && item.status === 'finished'" class="strip-verdict" :class="`verdict--${verdictClass(item.verdict)}`">
@@ -70,16 +73,6 @@
         </div>
       </div>
 
-      <!-- Load more -->
-      <button v-if="hasMore && !loadingMore && items.length" type="button" class="strip-item strip-item--load-more" @click="emit('load-more')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="more-chevron"><polyline points="9 18 15 12 9 6"/></svg>
-        <span>Cargar m&aacute;s</span>
-      </button>
-      <div v-else-if="loadingMore" class="strip-item strip-item--loading" aria-disabled="true">
-        <span class="spinner-sm"></span>
-        <span>Cargando…</span>
-      </div>
-
       <div class="strip-fade"></div>
     </div>
 
@@ -100,6 +93,10 @@
           <span class="card-label">Fecha</span>
           <span class="card-value">{{ formatDate(hoverItem.startedAt) }}</span>
         </div>
+        <div class="card-row">
+          <span class="card-label">Origen</span>
+          <span class="card-value">{{ originLabel(hoverItem) }}</span>
+        </div>
         <div class="card-row" v-if="hoverItem.status === 'finished'">
           <span class="card-label">Puntuación</span>
           <span class="card-value" :class="scoreClass(hoverItem.totalScore)">{{ hoverItem.totalScore }}</span>
@@ -115,17 +112,14 @@
       </div>
     </Transition>
 
-    <div class="strip-tools">
-      <button type="button" class="tool-btn" title="Ordenar" @click="sortOpen = !sortOpen">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="12" y1="18" x2="12" y2="18"/></svg>
-      </button>
-      <div v-if="sortOpen" class="sort-menu">
-        <button :class="{ active: sort === 'date-desc' }" @click="changeSort('date-desc')">Más recientes</button>
-        <button :class="{ active: sort === 'date-asc' }" @click="changeSort('date-asc')">Más antiguos</button>
-        <button :class="{ active: sort === 'score-desc' }" @click="changeSort('score-desc')">Mayor score</button>
-        <button :class="{ active: sort === 'score-asc' }" @click="changeSort('score-asc')">Menor score</button>
-      </div>
-    </div>
+    <button type="button" class="archive-btn" title="Ver el archivo completo de análisis (Ctrl/Cmd+K)" @click="$emit('open-archive')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+        <path d="M3 9h18M9 21V9"/>
+      </svg>
+      <span class="archive-btn-label">Archivo</span>
+      <span v-if="total" class="archive-btn-count">{{ total }}</span>
+    </button>
   </div>
 </template>
 
@@ -135,14 +129,13 @@ import { ref, computed, watch, nextTick, onMounted } from 'vue'
 const props = defineProps({
   items: { type: Array, default: () => [] },
   activeId: { type: [Number, null], default: null },
-  sort: { type: String, default: 'date-desc' },
-  hasMore: { type: Boolean, default: false },
-  loadingMore: { type: Boolean, default: false },
+  // Total real de análisis del usuario (no solo los del bench) — alimenta
+  // el contador "Archivo · N" del acceso al histórico completo.
+  total: { type: Number, default: 0 },
 })
 
-const emit = defineEmits(['select', 'sort', 'delete', 'load-more'])
+const emit = defineEmits(['select', 'delete', 'open-archive'])
 
-const sortOpen = ref(false)
 const hoverId = ref(null)
 const confirmDeleteId = ref(null)
 const stripRef = ref(null)
@@ -231,14 +224,16 @@ function scoreClass(s) {
   return 'score--neutral'
 }
 
-function changeSort(val) {
-  sortOpen.value = false
-  emit('sort', val)
-}
-
 function handleDelete(id) {
   confirmDeleteId.value = null
   emit('delete', id)
+}
+
+function originLabel(item) {
+  if (!item?.connectionId) return 'Manual'
+  const providerNames = { microsoft: 'Microsoft 365', gmail: 'Gmail' }
+  const provider = providerNames[item.provider] || item.provider || 'Buzón'
+  return item.accountEmail ? `${provider} (${item.accountEmail})` : provider
 }
 
 function verdictClass(v) {
@@ -318,7 +313,16 @@ function verdictClass(v) {
   gap: 2px;
   flex-shrink: 0;
   position: relative;
+  animation: seq-fade-up 0.3s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
+
+/* Entrada escalonada — el bench tiene como mucho BENCH_SIZE (5) elementos,
+   así que enumerarlos a mano es más simple que una fórmula genérica. */
+.strip-item-wrap:nth-child(2) { animation-delay: 0.03s; }
+.strip-item-wrap:nth-child(3) { animation-delay: 0.06s; }
+.strip-item-wrap:nth-child(4) { animation-delay: 0.09s; }
+.strip-item-wrap:nth-child(5) { animation-delay: 0.12s; }
+.strip-item-wrap:nth-child(6) { animation-delay: 0.15s; }
 
 .strip-del {
   display: flex;
@@ -370,6 +374,7 @@ function verdictClass(v) {
   top: calc(100% + 8px);
   transform: translateX(-50%);
   z-index: 100;
+  width: 20%;
   min-width: 220px;
   background: var(--surface);
   border: 1px solid var(--border-solid);
@@ -410,7 +415,7 @@ function verdictClass(v) {
   color: var(--text-dim);
   text-align: right;
   word-break: break-word;
-  max-width: 140px;
+  max-width: 70%;
 }
 
 .card-value--title {
@@ -523,13 +528,34 @@ function verdictClass(v) {
 .dot--failed { background: var(--danger); }
 .dot--cancelled { background: var(--text-muted); }
 
+.strip-origin {
+  flex-shrink: 0;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.1rem 0.32rem;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+
+.strip-origin--auto {
+  color: var(--accent-bright);
+  background: var(--accent-dim);
+}
+
+.strip-origin--manual {
+  color: var(--text-muted);
+  background: var(--surface-2);
+}
+
 .strip-id {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-lg);
 }
 
 .strip-title {
-  font-family: var(--font-body);
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body);
   font-size: var(--fs-lg);
   font-weight: 500;
   max-width: 160px;
@@ -539,7 +565,7 @@ function verdictClass(v) {
 }
 
 .strip-verdict {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-lg);
   font-weight: 700;
   margin-left: 0.15rem;
@@ -567,69 +593,46 @@ function verdictClass(v) {
   pointer-events: none;
 }
 
-.strip-tools {
-  position: relative;
-  flex-shrink: 0;
-  padding-right: 0.65rem;
-}
-
-.tool-btn {
+.archive-btn {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 34px;
+  gap: 0.4rem;
+  flex-shrink: 0;
   height: 34px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
+  margin-right: 0.65rem;
+  padding: 0 0.75rem;
+  border-radius: 7px;
+  border: 1px solid var(--border-med);
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text-dim);
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body);
+  font-size: var(--fs-md);
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.15s;
 }
 
-.tool-btn:hover {
+.archive-btn:hover {
   border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-dim);
-}
-
-.tool-btn svg {
-  width: 16px;
-  height: 16px;
-}
-
-.sort-menu {
-  position: absolute;
-  right: 0.65rem;
-  top: 100%;
-  margin-top: 5px;
-  z-index: 30;
-  background: var(--surface);
-  border: 1px solid var(--border-solid);
-  border-radius: 8px;
-  overflow: hidden;
-  min-width: 160px;
-  box-shadow: 0 8px 20px rgba(0,0,0,0.4);
-}
-
-.sort-menu button {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 0.5rem 0.8rem;
-  font-size: var(--fs-lg);
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  cursor: pointer;
-  transition: background 0.1s;
-  font-family: var(--font-body);
-}
-
-.sort-menu button:hover,
-.sort-menu button.active {
-  background: var(--accent-dim);
   color: var(--accent-bright);
+  background: var(--accent-dim);
+}
+
+.archive-btn svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.archive-btn-count {
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--accent-bright);
+  background: var(--accent-dim);
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
 }
 
 /* ── Scroll arrows ─────────────────────────────────────── */
@@ -655,50 +658,19 @@ function verdictClass(v) {
   padding: 0;
 }
 .strip-arrow--left { left: 4px; }
-.strip-arrow--right { right: 48px; }
+.strip-arrow--right { right: 150px; }
 .strip-arrow:hover {
   background: var(--surface-2);
   color: var(--accent);
   border-color: var(--accent);
 }
 
-/* ── Load-more button ──────────────────────────────────── */
-.strip-item--load-more {
-  border-style: dashed;
-  gap: 0.25rem;
-  color: var(--text-muted);
-  font-size: var(--fs-lg);
-}
-.strip-item--load-more:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-.more-chevron {
-  width: 14px;
-  height: 14px;
-}
-
-.strip-item--loading {
-  gap: 0.35rem;
-  pointer-events: none;
-  color: var(--text-muted);
-  font-size: var(--fs-lg);
-}
-
-/* small spinner re-usable in this component scope */
-.spinner-sm {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--border);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: hstrip-spin 0.7s linear infinite;
-  flex-shrink: 0;
-}
-@keyframes hstrip-spin {
-  to { transform: rotate(360deg); }
-}
 
 .strip-scroll:focus { outline: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .strip-item-wrap { animation: none; }
+  .dot--running, .dot--pending { animation: none; }
+  .card-enter-active, .card-leave-active { transition: opacity 0.01s linear !important; }
+}
 </style>

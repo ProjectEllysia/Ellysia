@@ -216,7 +216,7 @@ onUnmounted(() => observer?.disconnect())
   position: absolute;
   top: 50%; left: 50%;
   transform: translate(-50%, -50%);
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: clamp(5rem, 17vw, 13rem);
   font-weight: 700;
   letter-spacing: 0.18em;
@@ -268,7 +268,7 @@ onUnmounted(() => observer?.disconnect())
 /* ── Kicker: numeral · nombre · epígrafe ── */
 .hero-kicker {
   display: block;
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.34em; text-transform: uppercase;
   color: var(--accent);
@@ -276,7 +276,7 @@ onUnmounted(() => observer?.disconnect())
 
 /* ── Titular benefit-led: aquí manda lo que hace, no cómo se llama ── */
 .hero-claim {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-size: clamp(2.6rem, 6vw, 4.2rem);
   font-weight: 600;
   line-height: 1.12;
@@ -286,7 +286,7 @@ onUnmounted(() => observer?.disconnect())
   text-wrap: balance;
 }
 .hero-myth {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-style: italic;
   font-size: clamp(1.5rem, 3vw, 1.9rem);
   color: var(--text-dim);
@@ -300,7 +300,7 @@ onUnmounted(() => observer?.disconnect())
   margin-top: 2.2rem; flex-wrap: wrap;
 }
 .cta {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.18em; text-transform: uppercase;
   padding: 0.9rem 2.1rem;
@@ -340,14 +340,14 @@ onUnmounted(() => observer?.disconnect())
 }
 .hero-plaque :slotted(.metric-label),
 .hero-plaque .metric-label {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--text-muted);
 }
 .hero-plaque :slotted(.metric-value),
 .hero-plaque .metric-value {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-size: var(--fs-3xl); font-weight: 600;
   color: var(--accent-bright);
   line-height: 1.2;
@@ -355,14 +355,14 @@ onUnmounted(() => observer?.disconnect())
 }
 .hero-plaque :slotted(.metric-sub),
 .hero-plaque .metric-sub {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   color: var(--text-dim);
 }
 .hero-plaque :slotted(.metric-loading),
 .hero-plaque :slotted(.metric-empty),
 .hero-plaque .metric-empty {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-md);
   color: var(--text-muted);
 }
@@ -373,7 +373,7 @@ onUnmounted(() => observer?.disconnect())
   margin-top: 1.4rem; flex-wrap: wrap;
 }
 .shortcut {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
   font-size: var(--fs-lg);
   color: var(--text-dim);
   padding-bottom: 0.15rem;
@@ -418,14 +418,14 @@ onUnmounted(() => observer?.disconnect())
 }
 .rites-intro { text-align: center; margin-bottom: 3.5rem; }
 .rites-title {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: clamp(1.5rem, 3.4vw, 2.2rem);
   font-weight: 600;
   letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--text);
 }
 .rites-bajada {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-style: italic;
   font-size: var(--fs-xl);
   color: var(--text-muted);
@@ -446,13 +446,13 @@ onUnmounted(() => observer?.disconnect())
 }
 .rite.revealed { opacity: 1; transform: translateY(0); }
 .rite-kicker {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.28em; text-transform: uppercase;
   color: var(--accent);
 }
 .rite-title {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-size: var(--fs-2xl); font-weight: 600;
   line-height: 1.25;
   color: var(--text);
@@ -474,7 +474,7 @@ onUnmounted(() => observer?.disconnect())
   text-align: center;
 }
 .scrolls-title {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--accent);
@@ -504,7 +504,7 @@ onUnmounted(() => observer?.disconnect())
   padding: 0 2rem 5rem;
 }
 .pantheon-title {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--accent);
@@ -532,7 +532,7 @@ onUnmounted(() => observer?.disconnect())
 }
 .pantheon-card img { width: 40px; height: 40px; object-fit: contain; }
 .pantheon-name {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--accent);
@@ -552,14 +552,14 @@ onUnmounted(() => observer?.disconnect())
   padding: 4rem 2rem 4.4rem;
 }
 .call-epigraph {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.4em; text-transform: uppercase;
   color: var(--on-accent);
   opacity: 0.65;
 }
 .call-title {
-  font-family: var(--font-display);
+  font-family: var(--font-display); font-size-adjust: var(--fsa-display);
   font-size: clamp(1.8rem, 4vw, 2.7rem);
   font-weight: 600;
   color: var(--on-accent);
@@ -569,7 +569,7 @@ onUnmounted(() => observer?.disconnect())
 .call-cta {
   display: inline-block;
   margin-top: 1.8rem;
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-lg); font-weight: 600;
   letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--text);

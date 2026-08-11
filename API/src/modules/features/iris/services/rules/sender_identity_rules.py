@@ -28,18 +28,22 @@ from __future__ import annotations
 
 import re
 
+import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
-from ..shared import (
-    brand_trusted_domains, canonical_brands, extract_display_name,
-    extract_domain, is_free_provider, levenshtein, multi_level_tlds,
-    normalize_homoglyphs, registrable_label, subdomain_action_words,
-    suspicious_tlds,
+from ..wordlists import (
+    brand_trusted_domains, canonical_brands, multi_level_tlds,
+    subdomain_action_words, suspicious_tlds,
+)
+from ..text import (
+    extract_display_name, extract_domain, is_free_provider,
+    is_plausible_typo, levenshtein, normalize_homoglyphs,
+    registrable_domain, registrable_label,
 )
 from ..parsers import decode_mime_words
 
 
 @iris_rules.register(
-    name="From header check", category="header_analysis",
+    name="From header check", category="header_analysis", family="identity",
     description="Verifica que la cabecera From esté presente y no esté vacía",
 )
 def check_from_header(headers: dict) -> RuleResult:
@@ -47,7 +51,7 @@ def check_from_header(headers: dict) -> RuleResult:
 
     if not from_addr or "<>" in from_addr:
         return RuleResult(
-            score=-10, verdict="fail",
+            score=CR.get_iris_scoring_weight("from_header.missing", -5), verdict="fail",
             details={"from": from_addr or "missing"},
             recommendation="La cabecera From está vacía o es inválida. "
                            "Un correo legítimo siempre tiene un remitente identificable.",
@@ -74,7 +78,7 @@ def _domain_matches_trusted(domain: str, trusted_domains: tuple[str, ...]) -> bo
 
 
 @iris_rules.register(
-    name="Display Name Spoofing", category="header_analysis",
+    name="Display Name Spoofing", category="header_analysis", family="identity",
     description="Detecta si el nombre del remitente suplanta a una marca conocida pero el dominio del correo no pertenece a ella",
 )
 def check_display_name_spoof(headers: dict) -> RuleResult:
@@ -132,7 +136,7 @@ def check_display_name_spoof(headers: dict) -> RuleResult:
     free_provider = is_free_provider(domain)
 
     if free_provider:
-        score = -12
+        score = CR.get_iris_scoring_weight("display_name_spoof.free_provider", -12)
         recommendation = (
             f"El nombre del remitente contiene '{', '.join(matched_brands)}' pero el correo "
             f"proviene de un proveedor de correo gratuito ({domain}). "
@@ -140,7 +144,7 @@ def check_display_name_spoof(headers: dict) -> RuleResult:
             "Esto es un fuerte indicador de suplantación (phishing)."
         )
     else:
-        score = -8
+        score = CR.get_iris_scoring_weight("display_name_spoof.paid_domain", -8)
         recommendation = (
             f"El nombre del remitente contiene '{', '.join(matched_brands)}' pero el dominio "
             f"real del correo ({domain}) no pertenece a la marca. "
@@ -180,12 +184,12 @@ def _is_random_local(local: str) -> bool:
         return False
     if len(local) < 8:
         return False
-    has_digit = any(c.isdigit() for c in local)
-    has_letter = any(c.isalpha() for c in local)
+    has_digit = any(character.isdigit() for character in local)
+    has_letter = any(character.isalpha() for character in local)
     has_dot_or_plus = "." in local or "+" in local
     if not (has_digit and has_letter):
         return False
-    digit_ratio = sum(c.isdigit() for c in local) / len(local)
+    digit_ratio = sum(character.isdigit() for character in local) / len(local)
     if digit_ratio > 0.35 and has_dot_or_plus:
         return True
     if len(local) >= 12 and has_digit and has_letter and has_dot_or_plus:
@@ -195,7 +199,7 @@ def _is_random_local(local: str) -> bool:
 
 @iris_rules.register(
     name="Display Name Email Mismatch",
-    category="header_analysis",
+    category="header_analysis", family="identity",
     description=(
         "Detecta cuando el display name suplanta a una organización pero "
         "la dirección de email real es de otro dominio con local-part aleatorio "
@@ -222,7 +226,7 @@ def check_display_name_email_mismatch(headers: dict) -> RuleResult:
         return RuleResult(score=0, verdict="neutral", details={"from": from_header}, recommendation=None)
 
     return RuleResult(
-        score=-10, verdict="fail",
+        score=CR.get_iris_scoring_weight("display_name_email_mismatch.random_local", -8), verdict="fail",
         details={
             "from": from_header,
             "display_name": display_name,
@@ -241,7 +245,7 @@ def check_display_name_email_mismatch(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Lookalike Sender Domain", category="header_analysis",
+    name="Lookalike Sender Domain", category="header_analysis", family="identity",
     description="Detecta si el dominio real del remitente imita a una marca conocida (typosquatting, homóglifos, cousin domain o punycode/IDN)",
 )
 def check_lookalike_domain(headers: dict) -> RuleResult:
@@ -263,7 +267,7 @@ def check_lookalike_domain(headers: dict) -> RuleResult:
     # Punycode / IDN homograph — any xn-- label is inherently suspicious.
     if any(label.startswith("xn--") for label in domain.split(".")):
         return RuleResult(
-            score=-15, verdict="fail",
+            score=CR.get_iris_scoring_weight("lookalike_domain.punycode", -15), verdict="fail",
             details={"domain": domain, "type": "punycode"},
             recommendation=(
                 f"El dominio del remitente ({domain}) usa codificación punycode (IDN, 'xn--'). "
@@ -282,7 +286,7 @@ def check_lookalike_domain(headers: dict) -> RuleResult:
     if label in brands:
         return RuleResult(score=1, verdict="pass", details={"domain": domain}, recommendation=None)
 
-    tokens = [t for t in re.split(r"[^a-z0-9]+", label) if len(t) >= 4]
+    tokens = [token for token in re.split(r"[^a-z0-9]+", label) if len(token) >= 4]
     findings: list[dict] = []
 
     for token in tokens:
@@ -298,16 +302,16 @@ def check_lookalike_domain(headers: dict) -> RuleResult:
         for brand in brands:
             if len(brand) < 5 or abs(len(token) - len(brand)) > 1:
                 continue
-            if levenshtein(token, brand) == 1:
+            if is_plausible_typo(token, brand):
                 findings.append({"token": token, "brand": brand, "type": "typo"})
                 break
 
     if not findings:
         return RuleResult(score=1, verdict="pass", details={"domain": domain}, recommendation=None)
 
-    matched_brand_names = ", ".join(sorted({f["brand"] for f in findings}))
+    matched_brand_names = ", ".join(sorted({finding["brand"] for finding in findings}))
     return RuleResult(
-        score=-15, verdict="fail",
+        score=CR.get_iris_scoring_weight("lookalike_domain.typosquat", -15), verdict="fail",
         details={"domain": domain, "registrable_label": label, "findings": findings},
         recommendation=(
             f"El dominio real del remitente ({domain}) imita a una marca conocida ({matched_brand_names}) "
@@ -323,7 +327,7 @@ def _is_trusted_brand_domain(domain: str) -> bool:
 
 @iris_rules.register(
     name="Subdomain Impersonation",
-    category="header_analysis",
+    category="header_analysis", family="identity",
     description=(
         "Detecta trucos de subdominio donde un nombre de marca conocido aparece "
         "como subdominio o combinado con action-words en un dominio controlado "
@@ -344,7 +348,7 @@ def check_subdomain_impersonation(headers: dict) -> RuleResult:
 
     if "xn--" in domain:
         return RuleResult(
-            score=-10, verdict="fail",
+            score=CR.get_iris_scoring_weight("subdomain_impersonation.punycode", -10), verdict="fail",
             details={"domain": domain, "type": "punycode_in_subdomain"},
             recommendation=(
                 f"El dominio {domain} usa codificación punycode. Combinado con la "
@@ -360,8 +364,8 @@ def check_subdomain_impersonation(headers: dict) -> RuleResult:
     if reg_label in brands:
         return RuleResult(score=0, verdict="neutral", details={"domain": domain}, recommendation=None)
 
-    pre_labels = [l for l in labels[:-2] if l] if ".".join(labels[-2:]) in multi_level_tlds() \
-        else [l for l in labels[:-1] if l]
+    pre_labels = [label for label in labels[:-2] if label] if ".".join(labels[-2:]) in multi_level_tlds() \
+        else [label for label in labels[:-1] if label]
 
     findings: list[dict] = []
 
@@ -381,10 +385,10 @@ def check_subdomain_impersonation(headers: dict) -> RuleResult:
         if lbl in brands:
             continue
         tokens = re.split(r"-+", lbl)
-        brand_hits = [t for t in tokens if t in brands]
-        action_hits = [t for t in tokens if t in action_words]
+        brand_hits = [token for token in tokens if token in brands]
+        action_hits = [token for token in tokens if token in action_words]
         if brand_hits and action_hits:
-            if not any(f.get("label") == lbl and f.get("type") == "brand_action_combo" for f in findings):
+            if not any(finding.get("label") == lbl and finding.get("type") == "brand_action_combo" for finding in findings):
                 findings.append({
                     "label": lbl, "brand": brand_hits[0], "action": action_hits[0],
                     "type": "brand_action_combo",
@@ -393,8 +397,12 @@ def check_subdomain_impersonation(headers: dict) -> RuleResult:
     if not findings:
         return RuleResult(score=0, verdict="neutral", details={"domain": domain}, recommendation=None)
 
-    types = sorted({f["type"] for f in findings})
-    score = -12 if any(f["type"] == "brand_in_subdomain" for f in findings) else -8
+    types = sorted({finding["type"] for finding in findings})
+    score = (
+        CR.get_iris_scoring_weight("subdomain_impersonation.brand_in_subdomain", -10)
+        if any(finding["type"] == "brand_in_subdomain" for finding in findings)
+        else CR.get_iris_scoring_weight("subdomain_impersonation.brand_action_combo", -8)
+    )
 
     return RuleResult(
         score=score, verdict="fail",
@@ -460,7 +468,7 @@ def _find_typosquats(text: str) -> list[dict]:
 
 
 @iris_rules.register(
-    name="Misspelled Brand Names", category="content_analysis",
+    name="Misspelled Brand Names", category="content_analysis", family="identity",
     description="Detecta homóglifos y errores tipográficos de marcas conocidas en el asunto y nombre del remitente",
 )
 def check_misspelled_brands(headers: dict) -> RuleResult:
@@ -477,26 +485,26 @@ def check_misspelled_brands(headers: dict) -> RuleResult:
             recommendation=None,
         )
 
-    found = _find_typosquats(combined)
+    typosquat_matches = _find_typosquats(combined)
 
-    if not found:
+    if not typosquat_matches:
         return RuleResult(
             score=0, verdict="pass",
             details={"subject": subject, "display_name": display_name},
             recommendation=None,
         )
 
-    count = len(found)
-    types = set(f["type"] for f in found)
-    names = ", ".join(f["found"] for f in found)
+    count = len(typosquat_matches)
+    types = set(typosquat_match["type"] for typosquat_match in typosquat_matches)
+    names = ", ".join(typosquat_match["found"] for typosquat_match in typosquat_matches)
 
     return RuleResult(
-        score=-5 * min(count, 2),
+        score=CR.get_iris_scoring_weight("misspelled_brands.per_match", -4) * min(count, 2),
         verdict="fail",
         details={
             "subject": subject,
             "display_name": display_name,
-            "suspicious_words": found,
+            "suspicious_words": typosquat_matches,
             "count": count,
         },
         recommendation=(
@@ -510,7 +518,7 @@ def check_misspelled_brands(headers: dict) -> RuleResult:
 
 
 @iris_rules.register(
-    name="Suspicious TLD", category="header_analysis",
+    name="Suspicious TLD", category="header_analysis", family="identity",
     description="Detecta si el dominio del remitente usa TLDs frecuentemente asociados con phishing",
 )
 def check_suspicious_tld(headers: dict) -> RuleResult:
@@ -545,12 +553,25 @@ def check_suspicious_tld(headers: dict) -> RuleResult:
             recommendation=None,
         )
 
+    # Dedupe by domain before scoring (B4): the same domain in From,
+    # Reply-To *and* Return-Path is one suspicious fact, not three — the
+    # loop above appends one entry per header it appears in, so a single
+    # domain could otherwise cost -15 instead of -5.
+    unique_domains = {found_tld["domain"]: found_tld for found_tld in found_tlds}
+    found_tlds = list(unique_domains.values())
     count = len(found_tlds)
-    domains_str = ", ".join(d["domain"] for d in found_tlds)
-    tlds_str = ", ".join(d["tld"] for d in found_tlds)
+    domains_str = ", ".join(found_tld["domain"] for found_tld in found_tlds)
+    tlds_str = ", ".join(found_tld["tld"] for found_tld in found_tlds)
+
+    # Recalibración de pesos: techo máx -10 -- corroboración honesta, no
+    # debe poder salirse del techo de familia identidad por acumular TLDs.
+    score = max(
+        CR.get_iris_scoring_weight("suspicious_tld.max", -10),
+        CR.get_iris_scoring_weight("suspicious_tld.per_domain", -5) * count,
+    )
 
     return RuleResult(
-        score=-5 * count,
+        score=score,
         verdict="fail",
         details={
             "suspicious_tlds_found": found_tlds,
@@ -560,5 +581,149 @@ def check_suspicious_tld(headers: dict) -> RuleResult:
             f"Se detectaron dominios con TLDs sospechosos ({tlds_str}) en las cabeceras del correo: "
             f"{domains_str}. Estos TLDs son utilizados desproporcionadamente en campañas de phishing "
             f"debido a su bajo costo y falta de verificación."
+        ),
+    )
+
+
+def _recipient_domain(headers: dict) -> str | None:
+    """El dominio de la organización destinataria, best-effort.
+
+    ``Delivered-To``/``X-Original-To`` son más fiables que ``To`` (el sobre
+    real de entrega, no la lista de destinatarios visible que puede incluir
+    CC/otros dominios), pero se acepta ``To`` como respaldo cuando faltan.
+    """
+    for key in ("delivered-to", "x-original-to", "to"):
+        domain = extract_domain(headers.get(key, ""))
+        if domain:
+            return registrable_domain(domain)
+    return None
+
+
+@iris_rules.register(
+    name="Recipient Domain Lookalike",
+    category="header_analysis", family="identity",
+    description=(
+        "Detecta cuando el dominio del remitente es un typosquat/homoglifo "
+        "del dominio de la propia organización destinataria -- el vector "
+        "BEC más común, y a diferencia de Lookalike Sender Domain no "
+        "depende de una lista de marcas conocidas: cualquier organización "
+        "es un objetivo válido de su propio dominio."
+    ),
+)
+def check_recipient_domain_lookalike(headers: dict) -> RuleResult:
+    from_domain = registrable_domain(extract_domain(headers.get("from", "")))
+    recipient_domain = _recipient_domain(headers)
+
+    if not from_domain or not recipient_domain or from_domain == recipient_domain:
+        return RuleResult(score=0, verdict="neutral",
+                          details={"from_domain": from_domain, "recipient_domain": recipient_domain},
+                          recommendation=None)
+
+    # Un destinatario en un webmail gratuito no tiene "dominio propio" que
+    # suplantar -- comparar contra gmail.com/outlook.com etc. dispararía
+    # falsos positivos en cualquier organización con clientes/proveedores
+    # que reciben en una cuenta personal.
+    if is_free_provider(recipient_domain):
+        return RuleResult(score=0, verdict="neutral",
+                          details={"from_domain": from_domain, "recipient_domain": recipient_domain},
+                          recommendation=None)
+
+    from_label = registrable_label(from_domain)
+    recipient_label = registrable_label(recipient_domain)
+
+    if not from_label or not recipient_label or from_label == recipient_label:
+        # Mismo label, TLD distinto (acme.com vs acme.es) -- puede ser una
+        # filial/sede legítima, no un typosquat; no hay señal aquí.
+        return RuleResult(score=0, verdict="neutral", details={}, recommendation=None)
+
+    normalized_from = normalize_homoglyphs(from_label)
+    is_homoglyph = normalized_from != from_label and normalized_from == recipient_label
+
+    is_typo = False
+    if not is_homoglyph and len(recipient_label) >= 5 and abs(len(from_label) - len(recipient_label)) <= 1:
+        is_typo = is_plausible_typo(from_label, recipient_label)
+
+    if not (is_homoglyph or is_typo):
+        return RuleResult(score=0, verdict="neutral", details={}, recommendation=None)
+
+    finding_type = "homoglyph" if is_homoglyph else "typo"
+    return RuleResult(
+        score=CR.get_iris_scoring_weight("recipient_domain_lookalike.fail", -18), verdict="fail",
+        details={
+            "from_domain": from_domain,
+            "recipient_domain": recipient_domain,
+            "type": finding_type,
+        },
+        recommendation=(
+            f"El dominio del remitente ({from_domain}) es un "
+            f"{'homóglifo' if is_homoglyph else 'error tipográfico'} del dominio de tu propia "
+            f"organización ({recipient_domain}). Este es el vector de BEC más común: un "
+            "atacante registra un dominio casi idéntico al tuyo para suplantar a un "
+            "compañero, proveedor o superior. Verifica el dominio letra a letra antes de "
+            "confiar en este mensaje."
+        ),
+    )
+
+
+# Cualquier cosa con forma de dirección de correo, para detectar un display
+# name que ES una dirección en vez de un nombre (G-C).
+_EMAIL_LIKE_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}")
+
+
+@iris_rules.register(
+    name="Display Name Foreign Address",
+    category="header_analysis", family="identity",
+    description=(
+        "Detecta cuando el display name del remitente ES una dirección de "
+        "correo cuyo dominio difiere del dominio real de From "
+        "('ceo@acme.com' <attacker@evil.com>) -- spoofing genérico de "
+        "remitente sin depender de una lista de marcas."
+    ),
+)
+def check_display_name_foreign_address(headers: dict) -> RuleResult:
+    from_header = headers.get("from", "")
+    display_name = extract_display_name(from_header)
+
+    # `extract_domain`/`_extract_email` buscan el primer "@" de TODA la
+    # cabecera -- si el display name es en sí una dirección (justo el
+    # ataque que esta regla busca), ese "@" aparece primero y devuelve el
+    # dominio de la dirección FALSA, no el real. La dirección real siempre
+    # está entre <...> cuando hay display name.
+    real_email = from_header
+    if "<" in from_header and ">" in from_header:
+        real_email = from_header.split("<", 1)[1].split(">", 1)[0].strip()
+    from_domain = registrable_domain(extract_domain(real_email))
+
+    if not display_name or not from_domain:
+        return RuleResult(score=0, verdict="neutral", details={}, recommendation=None)
+
+    match = _EMAIL_LIKE_RE.search(display_name)
+    if not match:
+        return RuleResult(score=0, verdict="neutral", details={}, recommendation=None)
+
+    display_domain = registrable_domain(extract_domain(match.group(0)))
+    if not display_domain or display_domain == from_domain:
+        return RuleResult(score=0, verdict="neutral", details={"display_domain": display_domain}, recommendation=None)
+
+    recipient_domain = _recipient_domain(headers)
+    impersonates_target = (
+        registrable_label(display_domain) in canonical_brands()
+        or (recipient_domain is not None and display_domain == recipient_domain)
+    )
+
+    return RuleResult(
+        score=CR.get_iris_scoring_weight("display_name_foreign_address.fail", -10), verdict="fail",
+        details={
+            "display_name": display_name,
+            "display_domain": display_domain,
+            "from_domain": from_domain,
+            "impersonates_target": impersonates_target,
+        },
+        recommendation=(
+            f"El nombre visible del remitente es en sí una dirección de correo "
+            f"({display_domain}) distinta del dominio real del envío ({from_domain}). "
+            "Muchos clientes de correo solo muestran el display name en la vista "
+            "compacta; esto suplanta visualmente una dirección de confianza mientras "
+            "el envío real es de otro dominio."
         ),
     )

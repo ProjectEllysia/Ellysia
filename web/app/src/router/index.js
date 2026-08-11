@@ -51,6 +51,16 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    // Quiz público de una campaña de Aegis: el destino del enlace del correo.
+    // PÚBLICA a propósito — el destinatario no tiene cuenta y el token de la
+    // query es su única identidad. Cuelga de /quiz y no de /aegis/quiz porque
+    // todo lo que empieza por /aegis/ lo captura el proxy hacia Flask
+    // (nginx.conf, vite.config.js) y se serviría el JSON de la API.
+    path: '/quiz',
+    name: 'Quiz',
+    component: () => import('@/views/QuizView.vue'),
+  },
+  {
     path: '/iris',
     name: 'IrisHub',
     component: () => import('@/views/IrisHubView.vue'),
@@ -59,6 +69,12 @@ const routes = [
     path: '/iris/analisis',
     name: 'Iris',
     component: () => import('@/views/IrisView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/iris/conexiones',
+    name: 'IrisConnections',
+    component: () => import('@/views/IrisConnectionsView.vue'),
     meta: { requiresAuth: true },
   },
   {
@@ -82,6 +98,46 @@ const routes = [
     name: 'Hygeia',
     component: () => import('@/views/HygeiaView.vue'),
     meta: { requiresAuth: true },
+  },
+  // Capa comercial: planes, plan propio y organización.
+  {
+    // Pública: es la tabla de precios, la ve quien todavía no tiene cuenta.
+    path: '/planes',
+    name: 'Plans',
+    component: () => import('@/views/PlansView.vue'),
+  },
+  {
+    path: '/mi-plan',
+    name: 'MyPlan',
+    component: () => import('@/views/MyPlanView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/organizacion',
+    name: 'Organization',
+    component: () => import('@/views/OrganizationView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/admin/planes',
+    name: 'AdminPlans',
+    component: () => import('@/views/AdminPlansView.vue'),
+    meta: { requiresAuth: true, requiresRoot: true },
+  },
+  // Aterrizajes de los enlaces de correo. PÚBLICOS a propósito: el token es la
+  // única identidad, así que el enlace tiene que funcionar en el móvil donde se
+  // abrió el correo, sin sesión abierta.
+  {
+    path: '/verificar',
+    name: 'VerifyEmail',
+    component: () => import('@/views/InvitationLandingView.vue'),
+    props: { kind: 'verify' },
+  },
+  {
+    path: '/invitacion',
+    name: 'AcceptInvitation',
+    component: () => import('@/views/InvitationLandingView.vue'),
+    props: { kind: 'invitation' },
   },
   // Páginas informativas públicas (enlazadas desde el pie).
   {
@@ -146,6 +202,20 @@ const routes = [
     name: 'Queue',
     component: () => import('@/views/QueueView.vue'),
     meta: { requiresAuth: true },
+  },
+
+  /**
+   * Comodín, SIEMPRE el último: vue-router resuelve por orden y una ruta
+   * comodín colocada antes se tragaría todo lo que venga detrás.
+   *
+   * Sin esto, una dirección desconocida no encajaba con ninguna ruta y la SPA
+   * renderizaba un `<router-view>` vacío: pantalla en blanco, sin cabecera ni
+   * pie, indistinguible de un fallo de carga.
+   */
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'NotFound',
+    component: () => import('@/views/NotFoundView.vue'),
   },
 ]
 

@@ -1,0 +1,79 @@
+{% if recipient_name %}Hola, {{ recipient_name }}:{% else %}Hola:{% endif %}
+
+
+{% if company %}Desde {{ company }} te{% else %}Te{% endif %} hacemos llegar una nueva formación
+dentro de nuestro programa de concienciación en seguridad. A continuación tienes
+el contenido completo; te llevará solo unos minutos leerlo, y al final encontrarás
+un breve test para comprobar qué has aprendido.
+
+{{ pill_title }}
+{{ '=' * pill_title|length }}
+
+{% if intro %}
+{% for paragraph in intro.split('\n\n') %}
+{% if paragraph.strip() %}
+{{ paragraph.strip() }}
+
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if tips %}
+RECOMENDACIONES
+----------------
+{% for tip in tips %}
+{% if tip.headline %}* {{ tip.headline }}{% endif %}
+{% if tip.body %}
+{% for paragraph in tip.body.split('\n') %}
+{% if paragraph.strip() %}  {{ paragraph.strip() }}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if tip.links %}
+{% for link in tip.links %}  - {{ link.text }}: {{ link.url }}
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+{% endif %}
+{% if closing %}
+PARA TERMINAR
+-------------
+{% for paragraph in closing.split('\n') %}
+{% if paragraph.strip() %}{{ paragraph.strip() }}
+
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if alerts %}
+AVISOS RECIENTES QUE TE AFECTAN
+-------------------------------
+Vulnerabilidades publicadas últimamente en el software que usamos. No hace falta
+que hagas nada con ellas: están aquí para que te suenen si oyes hablar del tema.
+{% for alert in alerts %}
+* {{ alert.title }}{% if alert.severity %} [{{ alert.severity|upper }}]{% endif %}
+{% if alert.description %}  {{ alert.description }}
+{% endif %}
+  {{ alert.sourceLabel or alert.source }}{% if alert.published %} · {{ alert.published }}{% endif %}
+  {{ alert.url }}
+{% endfor %}
+
+{% endif %}
+Cuando termines de leerla, te pedimos que respondas al test de comprobación: son
+solo un par de minutos y nos ayuda a saber si la formación se está entendiendo bien.
+
+Completar el test:
+{{ link }}
+
+El enlace es personal y solo puede usarse una vez. Te pedimos que no lo reenvíes.
+{% if contact_email %}
+{% if contact_is_placeholder %}
+Si tienes alguna duda sobre esta formación, puedes escribir al responsable de seguridad
+en tu empresa.
+{% else %}
+Si tienes alguna duda sobre esta formación, puedes escribir a {{ contact_email }}.
+{% endif %}
+{% endif %}
+
+--
+Este mensaje se ha enviado automáticamente desde {{ brand.productName }}. No respondas a esta dirección.
+{% if brand.supportEmail %}¿Dudas? Escribe a {{ brand.supportEmail }}.{% endif %}

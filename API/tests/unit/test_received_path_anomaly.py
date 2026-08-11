@@ -3,9 +3,9 @@
 Cubre todas las ramas:
 - Sin chain (headers-only) → neutral
 - Cadena limpia 2 hops → pass +2
-- TLS downgrade → fail -6
-- Cadena larga (≥5 hops) → fail -4
-- Missing timestamps parcial → suspicious -3
+- TLS downgrade → fail -4
+- Cadena larga (≥5 hops) → fail -3
+- Missing timestamps parcial → 0 (informativo)
 - Señales combinadas → score acumulativo
 """
 
@@ -26,6 +26,8 @@ TS1 = "Wed, 25 Jun 2026 10:01:00 +0000"
 TS2 = "Wed, 25 Jun 2026 10:02:00 +0000"
 TS3 = "Wed, 25 Jun 2026 10:03:00 +0000"
 TS4 = "Wed, 25 Jun 2026 10:04:00 +0000"
+TS5 = "Wed, 25 Jun 2026 10:05:00 +0000"
+TS6 = "Wed, 25 Jun 2026 10:06:00 +0000"
 
 
 def _ctx(received_headers: list[str]) -> MessageContext:
@@ -90,7 +92,7 @@ def test_tls_downgrade():
     ]
     result = check_received_path_anomaly(_ctx(chain))
     assert result.verdict == "fail"
-    assert result.score == -6
+    assert result.score == -4
     assert "tls_downgrade" in result.details["unique_signals"]
     assert len(result.details["tls_downgrade_hops"]) == 1
 
@@ -103,7 +105,7 @@ def test_tls_downgrade_multi_hop():
     ]
     result = check_received_path_anomaly(_ctx(chain))
     assert result.verdict == "fail"
-    assert result.score == -6  # single downgrade penalty (only 1->2)
+    assert result.score == -4  # single downgrade penalty (only 1->2)
     assert len(result.details["tls_downgrade_hops"]) == 1
 
 
@@ -134,8 +136,10 @@ def test_https_handoff_is_encrypted_not_a_downgrade():
 # Long chain
 # ======================================================================
 
-def test_long_chain_5_hops_unique_ips():
+def test_long_chain_7_hops_unique_ips():
     chain = [
+        f"from [192.0.2.7] by mx7.g.com with ESMTPS; {TS6}",
+        f"from [192.0.2.6] by mx6.f.com with ESMTPS; {TS5}",
         f"from [192.0.2.5] by mx5.e.com with ESMTPS; {TS4}",
         f"from [192.0.2.4] by mx4.d.com with ESMTPS; {TS3}",
         f"from [192.0.2.3] by mx3.c.com with ESMTPS; {TS2}",
@@ -144,12 +148,28 @@ def test_long_chain_5_hops_unique_ips():
     ]
     result = check_received_path_anomaly(_ctx(chain))
     assert result.verdict == "fail"
-    assert result.score == -4
+    assert result.score == -3
     assert "long_chain" in result.details["unique_signals"]
 
 
-def test_long_chain_5_hops_repeated_ip_not_long():
+def test_long_chain_5_hops_is_normal_m365_delivery():
+    # Calibración FP: 5 saltos con IPs distintas es la ruta de entrega normal
+    # de Microsoft 365 / Google Workspace, por debajo del umbral (7).
     chain = [
+        f"from [192.0.2.5] by mx5.e.com with ESMTPS; {TS4}",
+        f"from [192.0.2.4] by mx4.d.com with ESMTPS; {TS3}",
+        f"from [192.0.2.3] by mx3.c.com with ESMTPS; {TS2}",
+        f"from [192.0.2.2] by mx2.b.com with ESMTPS; {TS1}",
+        f"from [192.0.2.1] by mx1.a.com with ESMTPS; {TS0}",
+    ]
+    result = check_received_path_anomaly(_ctx(chain))
+    assert "long_chain" not in result.details.get("unique_signals", [])
+
+
+def test_long_chain_7_hops_repeated_ip_not_long():
+    chain = [
+        f"from [192.0.2.1] by mx7.g.com with ESMTPS; {TS6}",
+        f"from [192.0.2.1] by mx6.f.com with ESMTPS; {TS5}",
         f"from [192.0.2.1] by mx5.e.com with ESMTPS; {TS4}",
         f"from [192.0.2.1] by mx4.d.com with ESMTPS; {TS3}",
         f"from [192.0.2.1] by mx3.c.com with ESMTPS; {TS2}",
@@ -174,7 +194,7 @@ def test_missing_timestamps_3_hops():
     result = check_received_path_anomaly(_ctx(chain))
     # TLS downgrade (SMTP → ESMTPS) dominates → fail, not suspicious
     assert result.verdict == "fail"
-    assert result.score == -9
+    assert result.score == -4
     assert "tls_downgrade" in result.details["unique_signals"]
     assert "missing_timestamps" in result.details["unique_signals"]
 
@@ -198,16 +218,18 @@ def test_missing_timestamps_2_hops_not_flagged():
 
 def test_tls_downgrade_and_long_chain():
     chain = [
-        f"from [192.0.2.5] by mx5.e.com with SMTP; {TS4}",
-        f"from [192.0.2.4] by mx4.d.com with SMTP; {TS3}",
+        f"from [192.0.2.7] by mx7.g.com with SMTP; {TS6}",
+        f"from [192.0.2.6] by mx6.f.com with SMTP; {TS5}",
+        f"from [192.0.2.5] by mx5.e.com with ESMTPS; {TS4}",
+        f"from [192.0.2.4] by mx4.d.com with ESMTPS; {TS3}",
         f"from [192.0.2.3] by mx3.c.com with ESMTPS; {TS2}",
         f"from [192.0.2.2] by mx2.b.com with ESMTPS; {TS1}",
         f"from [192.0.2.1] by mx1.a.com with ESMTPS; {TS0}",
     ]
     result = check_received_path_anomaly(_ctx(chain))
     assert result.verdict == "fail"
-    # tls_downgrade -6 + long_chain -4 = -10
-    assert result.score == -10
+    # tls_downgrade -4 + long_chain -3 = -7
+    assert result.score == -7
     assert "tls_downgrade" in result.details["unique_signals"]
     assert "long_chain" in result.details["unique_signals"]
 
@@ -220,7 +242,7 @@ def test_downgrade_and_missing_ts():
     ]
     result = check_received_path_anomaly(_ctx(chain))
     assert result.verdict == "fail"  # tls_downgrade dominates
-    assert result.score == -9
+    assert result.score == -4
 
 
 # ======================================================================

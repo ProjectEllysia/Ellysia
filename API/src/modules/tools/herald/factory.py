@@ -4,7 +4,7 @@ herald.factory
 Construcción de ``Mailer`` por inyección de dependencias.
 
 ``build_mailer(module)`` decide qué estrategia usar leyendo
-``SecOpsConfig.json`` (bloque ``email``) — permitiendo una estrategia
+``SecOpsConfig.json`` (bloque ``tools.herald``) — permitiendo una estrategia
 distinta por módulo — y la construye con las credenciales del ``.env``.
 Espejo exacto de ``scribe.factory.build_generator``.
 """
@@ -16,32 +16,21 @@ from typing import Optional
 
 import src.modules.system.config_reading as CR
 
-from .exceptions import EmailConfigurationError
 from .mailer import Mailer
-from .strategies import EmailStrategy, SmtpStrategy
+from .strategies import EmailStrategy
 
 logger = logging.getLogger(__name__)
 
 
 def _build_strategy(name: str) -> EmailStrategy:
-    """Instancia la estrategia ``name`` con credenciales de entorno/config."""
+    """Instancia la estrategia ``name`` con credenciales de entorno/config.
+
+    Despacha por ``EmailStrategy._registry`` (B4) en vez de una cadena
+    ``if/elif`` por nombre — mismo mecanismo que ``scribe.factory``.
+    """
     name = (name or "smtp").lower()
-    email_cfg = CR.get_email_config()
-    overrides = email_cfg.get("strategies", {}).get(name, {})
-
-    if name == "smtp":
-        creds = CR.get_smtp_environment()
-        return SmtpStrategy(
-            host=overrides.get("host", "localhost"),
-            port=int(overrides.get("port", 587)),
-            from_address=overrides.get("fromAddress") or creds.get("username", ""),
-            from_name=overrides.get("fromName"),
-            use_tls=bool(overrides.get("useTls", True)),
-            username=creds.get("username"),
-            password=creds.get("password"),
-        )
-
-    raise EmailConfigurationError(f"estrategia desconocida: '{name}'")
+    overrides = CR.herald_config().options_for(name)
+    return EmailStrategy.resolve(name, overrides)
 
 
 def build_mailer(module: Optional[str] = None) -> Mailer:
@@ -55,7 +44,7 @@ def build_mailer(module: Optional[str] = None) -> Mailer:
     Returns:
         Un Mailer listo para ``send``/``send_bulk``.
     """
-    strategy_name = CR.get_email_strategy_for(module)
+    strategy_name = CR.herald_config().strategy_for(module)
     logger.info("[herald] módulo=%s → estrategia=%s", module, strategy_name)
     strategy = _build_strategy(strategy_name)
     return Mailer(strategy=strategy)

@@ -23,7 +23,7 @@ from email.message import EmailMessage as MimeMessage
 from email.utils import make_msgid
 from typing import Optional
 
-from .exceptions import EmailConnectionError, EmailSendError
+from .exceptions import EmailConfigurationError, EmailConnectionError, EmailSendError
 from .inputs import EmailMessage, SendResult
 
 logger = logging.getLogger(__name__)
@@ -38,10 +38,46 @@ def _html_to_text(html: str) -> str:
 
 
 class EmailStrategy(ABC):
-    """Contrato de una estrategia de envío de correo."""
+    """Contrato de una estrategia de envío de correo.
+
+    ``register``/``resolve`` (B4) centralizan lo que ``herald.factory`` hacía
+    con una cadena ``if/elif`` por nombre — hoy con una sola rama, pero el
+    propio docstring del módulo ya anticipa una segunda (una API
+    transaccional), que se dará de alta junto a su clase en vez de abrir
+    esta factory.
+    """
 
     #: Nombre legible de la estrategia (para logs y configuración).
     name: str = "email"
+
+    _registry: dict[str, type["EmailStrategy"]] = {}
+
+    @classmethod
+    def register(cls, name: str):
+        def decorator(subclass: type["EmailStrategy"]) -> type["EmailStrategy"]:
+            cls._registry[name] = subclass
+            return subclass
+        return decorator
+
+    @classmethod
+    def resolve(cls, name: str, overrides: dict) -> "EmailStrategy":
+        """Instancia la estrategia ``name`` con credenciales de entorno/config."""
+        strategy_cls = cls._registry.get(name)
+        if strategy_cls is None:
+            raise EmailConfigurationError(f"estrategia desconocida: '{name}'")
+        return strategy_cls.from_config(overrides)
+
+    @classmethod
+    def from_config(cls, overrides: dict) -> "EmailStrategy":
+        """Construye esta estrategia a partir de las credenciales de entorno
+        (``.env``) y las ``overrides`` de ``SecOpsConfig.json``
+        (``tools.herald.modules.<módulo>``).
+
+        No es ``@abstractmethod``: un doble de test que construye la
+        estrategia directamente (sin pasar por ``resolve``/config real) no
+        tiene por qué implementarlo — solo lo necesitan las estrategias
+        registradas de verdad (ver ``tests/unit/test_herald.py::FakeEmailStrategy``)."""
+        raise NotImplementedError
 
     @abstractmethod
     def send(self, message: EmailMessage) -> SendResult:
@@ -54,10 +90,30 @@ class EmailStrategy(ABC):
         """
 
 
+@EmailStrategy.register("smtp")
 class SmtpStrategy(EmailStrategy):
     """Estrategia que envía correo vía un relay SMTP."""
 
     name = "smtp"
+
+    @classmethod
+    def from_config(cls, overrides: dict) -> "SmtpStrategy":
+        import src.modules.system.config_reading as CR
+        try:
+            creds = CR.get_smtp_environment()
+        except ValueError as exc:
+            # get_smtp_environment lanza ValueError pelado; aquí dentro es un
+            # fallo de configuración y debe salir como tal.
+            raise EmailConfigurationError(str(exc)) from exc
+        return cls(
+            host=overrides.get("host", "localhost"),
+            port=int(overrides.get("port", 587)),
+            from_address=overrides.get("fromAddress") or creds.get("username", ""),
+            from_name=overrides.get("fromName"),
+            use_tls=bool(overrides.get("useTls", True)),
+            username=creds.get("username"),
+            password=creds.get("password"),
+        )
 
     def __init__(
         self,

@@ -25,17 +25,15 @@
       </button>
 
       <router-link v-if="!auth.isAuthenticated" to="/login" class="enter-btn">Entrar</router-link>
-      <router-link v-else to="/profile" class="avatar-btn" :aria-label="`Perfil de ${auth.username()}`">
-        {{ initial }}
-      </router-link>
+      <AccountMenu v-else />
     </div>
   </header>
 </template>
 
 <script setup>
-import { computed } from 'vue'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
+import AccountMenu from '@/components/shared/AccountMenu.vue'
 
 const auth = useAuthStore()
 const theme = useThemeStore()
@@ -48,7 +46,6 @@ const modules = [
   { id: 'hygeia', name: 'Hygeia', route: '/hygeia' },
 ]
 
-const initial = computed(() => (auth.username()?.[0] || 'U').toUpperCase())
 </script>
 
 <style scoped>
@@ -73,7 +70,7 @@ const initial = computed(() => (auth.username()?.[0] || 'U').toUpperCase())
   box-shadow: 0 0 0 3px var(--accent-dim), 0 0 10px var(--accent-dim);
 }
 .brand-text {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-xl); font-weight: 600;
   letter-spacing: 0.32em; text-transform: uppercase;
   color: var(--text);
@@ -82,7 +79,7 @@ const initial = computed(() => (auth.username()?.[0] || 'U').toUpperCase())
 /* ── Navegación de módulos ── */
 .site-nav { display: flex; gap: 1.5rem; margin-left: auto; }
 .nav-link {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-md); font-weight: 500;
   letter-spacing: 0.2em; text-transform: uppercase;
   color: var(--text-dim);
@@ -105,7 +102,7 @@ const initial = computed(() => (auth.username()?.[0] || 'U').toUpperCase())
 .icon-btn:hover { border-color: var(--accent); box-shadow: 0 0 12px var(--accent-dim); }
 .icon-btn svg { width: 18px; height: 18px; }
 .enter-btn {
-  font-family: var(--font-epic);
+  font-family: var(--font-epic); font-size-adjust: var(--fsa-epic);
   font-size: var(--fs-md); font-weight: 600;
   letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--accent-bright);
@@ -116,19 +113,9 @@ const initial = computed(() => (auth.username()?.[0] || 'U').toUpperCase())
   transition: all var(--transition);
 }
 .enter-btn:hover { background: var(--accent); color: var(--on-accent); }
-.avatar-btn {
-  width: 40px; height: 40px; border-radius: 50%;
-  display: grid; place-items: center;
-  background: var(--accent-dim);
-  border: 1.5px solid var(--border-med);
-  color: var(--accent-bright);
-  font-size: var(--fs-md); font-weight: 700;
-  transition: all var(--transition);
-}
-.avatar-btn:hover { border-color: var(--accent); box-shadow: 0 0 12px var(--accent-dim); }
 
 .icon-btn:focus-visible, .enter-btn:focus-visible,
-.avatar-btn:focus-visible, .nav-link:focus-visible, .brand:focus-visible {
+.nav-link:focus-visible, .brand:focus-visible {
   outline: 2px solid var(--accent-bright);
   outline-offset: 3px;
 }

@@ -29,7 +29,6 @@ from urllib.parse import urlparse
 
 from src.modules.shared import utcnow_naive, isoformat_utc
 from src.modules.features.aegis.exceptions import (
-    ExporterError,
     ExporterFormatError,
     ExporterConfigurationError,
 )
@@ -103,26 +102,26 @@ class ExportData:
     document_id:   int   = 0
 
     @classmethod
-    def from_document_dict(cls, doc: dict, doc_id: int | None = None) -> "ExportData":
+    def from_document_dict(cls, document: dict, doc_id: int | None = None) -> "ExportData":
         """
         Construye un ExportData a partir del dict devuelto por
         AegisManager.get_document(). Centraliza el mapeo de claves
         para que endpoints y managers no lo repitan.
         """
-        pill = doc.get("pill") or {}
+        pill = document.get("pill") or {}
         return cls(
-            topic_id      = doc.get("topicId", 0),
-            topic_title   = doc.get("title", "Sin título"),
-            company       = pill.get("company") or doc.get("company", "Empresa"),
+            topic_id      = document.get("topicId", 0),
+            topic_title   = document.get("title", "Sin título"),
+            company       = pill.get("company") or document.get("company", "Empresa"),
             language      = pill.get("language", "es"),
-            generated_at  = doc.get("generatedAt", ""),
+            generated_at  = document.get("generatedAt", ""),
             subtitle      = pill.get("subtitle", ""),
             intro         = pill.get("intro", ""),
             tips          = pill.get("tips", []),
             closing       = pill.get("closing", ""),
             contact_email = pill.get("contactEmail", ""),
-            alerts        = doc.get("alerts", []),
-            document_id   = doc_id if doc_id is not None else doc.get("id", 0),
+            alerts        = document.get("alerts", []),
+            document_id   = doc_id if doc_id is not None else document.get("id", 0),
         )
 
 
@@ -161,7 +160,7 @@ class AegisExporter(ABC):
 
     def _validate_configuration(self) -> None:
         required = ["format", "extension", "mimetype"]
-        missing = [a for a in required if not getattr(self, a, None)]
+        missing = [required_field for required_field in required if not getattr(self, required_field, None)]
         if missing:
             raise ExporterConfigurationError(missing)
 
@@ -171,7 +170,7 @@ class AegisExporter(ABC):
 
     def generate_filename(self, data: ExportData, suffix: str = "") -> str:
         timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_name   = "".join(c for c in data.company if c.isalnum() or c in "-_").lower()[:20]
+        safe_name   = "".join(character for character in data.company if character.isalnum() or character in "-_").lower()[:20]
         base        = f"aegis_{safe_name}_{data.topic_id}_{timestamp}"
         if suffix:
             base += f"_{suffix}"
@@ -272,7 +271,7 @@ class MarkdownExporter(AegisExporter):
         ]
 
     def _intro(self, data: ExportData) -> list[str]:
-        paragraphs = [p.strip() for p in self._sanitize(data.intro).split("\n\n") if p.strip()]
+        paragraphs = [paragraph.strip() for paragraph in self._sanitize(data.intro).split("\n\n") if paragraph.strip()]
         lines: list[str] = []
         for paragraph in paragraphs:
             lines.append(paragraph)

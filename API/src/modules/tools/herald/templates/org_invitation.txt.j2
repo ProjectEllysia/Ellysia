@@ -1,0 +1,17 @@
+{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}
+
+
+{{ organization_name }} te ha invitado a formar parte de su organización en {{ brand.productName }}.
+
+Aceptar no cambia tu plan: el tuyo sigue siendo tuyo, y lo que la organización
+incluya se suma a lo que ya tienes. Tus datos siguen siendo privados — quien
+gestiona la organización no ve tus bóvedas, ni tus correos analizados, ni tus
+escaneos.
+
+Aceptar la invitación: {{ accept_url }}
+
+El enlace caduca en {{ ttl_hours }} horas. Si no reconoces esta organización,
+ignora este mensaje: sin aceptar, no pasa nada.
+
+--
+Este mensaje se ha enviado automáticamente desde {{ brand.productName }}. No respondas a esta dirección.

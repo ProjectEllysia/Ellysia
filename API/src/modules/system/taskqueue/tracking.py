@@ -9,7 +9,7 @@ external_id y, si existe, leer estado/progreso". Este mixin lo centraliza y
 fija en un único lugar el formato del ``external_id`` y la categoría de cola.
 
 La subclase debe:
-- exponer ``self._tq`` (una ``ITaskQueue``), y
+- exponer ``self._task_queue`` (una ``ITaskQueue``), y
 - definir ``EXTERNAL_ID_PREFIX`` y ``TASK_CATEGORY``.
 """
 
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .queue import ITaskQueue
+from .queue import ITaskQueue, TaskQueue
 from .task import Task
 
 
@@ -37,7 +37,7 @@ class TaskTrackingMixin:
         class ScanManager(TaskTrackingMixin):
             EXTERNAL_ID_PREFIX = "themis-scan:"  # ← define el prefijo
             TASK_CATEGORY = "themis.scan"         # ← define la categoría de cola
-            _tq: ITaskQueue  # ← inyectable (singleton o fake en tests)
+            _task_queue: ITaskQueue  # ← inyectable (singleton o fake en tests)
 
             def get_scan_status(self, scan_id: int) -> Optional[str]:
                 return self.task_status_of(scan_id)  # ← busca por scan_id
@@ -60,7 +60,18 @@ class TaskTrackingMixin:
     EXTERNAL_ID_PREFIX: str = ""
     TASK_CATEGORY: Optional[str] = None
 
-    _tq: ITaskQueue
+    _task_queue: ITaskQueue
+
+    def __init__(self, task_queue: Optional[ITaskQueue] = None, *args, **kwargs) -> None:
+        """Centraliza ``self._task_queue = task_queue or TaskQueue.get_instance()``,
+        repetido antes en cada manager que hereda de este mixin (A10).
+
+        ``*args``/``**kwargs`` se reenvían a ``super().__init__`` para no
+        romper cooperación con otras clases base en el MRO (p. ej.
+        ``ScanManager(TaskTrackingMixin, ABC)``).
+        """
+        self._task_queue: ITaskQueue = task_queue or TaskQueue.get_instance()
+        super().__init__(*args, **kwargs)
 
     def external_id_for(self, entity_id) -> str:
         """Construye el external_id canónico para una entidad.
@@ -80,7 +91,7 @@ class TaskTrackingMixin:
             - El job fue eliminado del historial (TTL expirado)
             - El external_id no coincide con el TASK_CATEGORY esperado
         """
-        return self._tq.get_task_by_external_id(
+        return self._task_queue.get_task_by_external_id(
             self.external_id_for(entity_id), self.TASK_CATEGORY
         )
 

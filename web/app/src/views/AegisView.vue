@@ -33,6 +33,7 @@
             v-else
             key="viewer"
             :viewer-doc="store.viewerDoc"
+            :generating="store.generating"
             @close="store.closeViewer()"
             @export="(fmt) => store.downloadExport(store.currentDocId, fmt)"
             @preview="() => store.previewMarkdown(store.currentDocId)"
@@ -73,8 +74,6 @@
       :doc="store.viewerDoc.data"
       @close="store.closeCampaignModal()"
     />
-
-    <AppToast />
   </div>
 </template>
 
@@ -82,7 +81,6 @@
 import { computed, onMounted } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
-import AppToast from '@/components/shared/AppToast.vue'
 import { useAegisStore } from '@/stores/aegisStore'
 import { usePanelCollapse } from '@/composables/usePanelCollapse'
 import OrgProfilePanel from '@/components/aegis/OrgProfilePanel.vue'
@@ -99,7 +97,7 @@ const { collapsed: rightCollapsed, toggle: toggleRight } = usePanelCollapse('aeg
 const leftWidth = computed(() => (leftCollapsed.value ? '48px' : '400px'))
 const rightWidth = computed(() => (rightCollapsed.value ? '48px' : '320px'))
 
-onMounted(async () => { await Promise.all([store.loadTopics(), store.loadBrands()]); await store.loadHistory() })
+onMounted(async () => { await store.loadTopics(); await store.loadHistory() })
 </script>
 
 <style scoped>
@@ -150,12 +148,16 @@ onMounted(async () => { await Promise.all([store.loadTopics(), store.loadBrands(
 .fade-swap-enter-active, .fade-swap-leave-active { transition: opacity 0.15s ease; }
 .fade-swap-enter-from, .fade-swap-leave-to { opacity: 0; }
 
-@media (max-width: 1100px) {
+@media (max-width: 1200px) {
   .app-layout { flex-direction: column; }
   /* !important necesario: pisa el width inline calculado por leftWidth/rightWidth. */
-  .panel--left, .panel--right { flex: 0 1 auto !important; width: auto !important; transition: none; border: none; border-bottom: 1px solid var(--border-med); max-height: 40vh; }
-  .panel--collapsed { max-height: 3rem; }
-  .panel-toggle { display: none; }
+  .panel--left, .panel--right { flex: 0 1 auto !important; width: auto !important; transition: none; border: none; border-bottom: 1px solid var(--border-med); }
+  /* El `max-height: 40vh` que había aquí iba acompañado de ocultar el botón de
+     plegar, así que el perfil de organización —un formulario largo— quedaba
+     encerrado en una caja de 40vh con scroll y sin forma de agrandarla.
+     Apilados, los paneles pueden ocupar lo que necesiten: la página ya se
+     desplaza. El botón de plegar se queda, que es lo que da el control. */
+  .panel--collapsed { max-height: 3rem; overflow: hidden; }
 }
 
 @media (prefers-reduced-motion: reduce) {

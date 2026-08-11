@@ -66,6 +66,6 @@ const visiblePages = computed(() => {
 .page-btn svg { width: 14px; height: 14px; }
 .page-count {
   margin-left: 0.5rem; font-size: var(--fs-md); color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
 }
 </style>

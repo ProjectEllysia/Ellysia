@@ -15,7 +15,7 @@ defineEmits(['switch'])
 const tabs = [
   { id: 'nmap', label: 'Nmap' },
   { id: 'nikto', label: 'Nikto' },
-  { id: 'openvas', label: 'OpenVAS' },
+  { id: 'nuclei', label: 'Nuclei' },
 ]
 </script>
 
@@ -27,5 +27,5 @@ const tabs = [
 .tab-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .nmap .tab-dot { background: var(--success); }
 .nikto .tab-dot { background: var(--warn); }
-.openvas .tab-dot { background: var(--danger); }
+.nuclei .tab-dot { background: var(--info); }
 </style>

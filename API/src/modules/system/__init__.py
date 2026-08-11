@@ -6,7 +6,7 @@ Proporciona endpoints para leer y escribir SecOpsConfig.json.
 
 from .logging import configure_logging
 from .endpoints import system_blp
-from .taskqueue import TaskQueue, Task, TaskStatus
+from .taskqueue import TaskQueue, Task, TaskStatus, ping_redis
 
 __all__ = [
     "configure_logging",
@@ -14,4 +14,5 @@ __all__ = [
     "TaskQueue",
     "Task",
     "TaskStatus",
+    "ping_redis",
 ]

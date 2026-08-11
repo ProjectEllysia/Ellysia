@@ -35,7 +35,7 @@ const roleLabel = computed(() => { const r = props.user.role || 'role_user'; if 
 .user-card--root  { border-left: 3px solid var(--danger); }
 .user-card--admin { border-left: 3px solid var(--warn); }
 .user-card--user  { border-left: 3px solid var(--info); }
-.card-avatar { width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: var(--fs-xl); font-weight: 700; background: var(--accent-dim); color: var(--accent-bright); font-family: var(--font-mono); }
+.card-avatar { width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: var(--fs-xl); font-weight: 700; background: var(--accent-dim); color: var(--accent-bright); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .user-card--root  .card-avatar { background: rgba(217,108,108,0.15); color: var(--danger); }
 .user-card--admin .card-avatar { background: rgba(212,160,74,0.15); color: var(--warn); }
 .user-card--user  .card-avatar { background: rgba(96,128,224,0.15); color: var(--info); }
@@ -44,7 +44,7 @@ const roleLabel = computed(() => { const r = props.user.role || 'role_user'; if 
 .card-username { font-size: var(--fs-lg); color: var(--text-dim); }
 .card-meta { display: flex; gap: 0.65rem; font-size: var(--fs-md); color: var(--text-muted); }
 .card-email { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
-.card-id { font-family: var(--font-mono); opacity: 0.6; font-size: var(--fs-md); }
+.card-id { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); opacity: 0.6; font-size: var(--fs-md); }
 .card-footer { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.15rem; }
 .card-role-badge { font-size: var(--fs-body); font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; padding: 0.1rem 0.4rem; border-radius: 4px; }
 .role-badge--root  { background: rgba(217,108,108,0.15);  color: var(--danger); }

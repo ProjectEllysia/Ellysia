@@ -8,12 +8,14 @@ Hierarchy:
     ├── IngestPayloadTooLargeError (413)
     ├── IngestClockSkewError      (400)
     ├── IngestTooFrequentError    (429)
-    └── AnomalyNotFoundError      (404)
+    ├── AnomalyNotFoundError      (404)
+    ├── AnomalyStillOpenError     (409)
+    └── InventoryNotAvailableError (409)
 """
 
 from __future__ import annotations
 
-from src.modules.shared._exceptions import EllysiaException, ErrorCode
+from src.modules.shared._exceptions import EllysiaException, EntityNotFoundError, ErrorCode
 
 
 class HygeiaError(EllysiaException):
@@ -22,22 +24,15 @@ class HygeiaError(EllysiaException):
     default_status_code = 500
 
 
-class AssetNotFoundError(HygeiaError):
+class AssetNotFoundError(EntityNotFoundError, HygeiaError):
     """Se lanza cuando un activo no existe o no pertenece al usuario.
 
     Sirve también como capa de privacidad: la misma excepción se devuelve
     tanto si el activo no existe como si pertenece a otro usuario, para no
     permitir enumerar IDs ajenos por diferencia de respuesta.
     """
-    default_code = ErrorCode.ENTITY_NOT_FOUND
-    default_status_code = 404
-
-    def __init__(self, asset_id: int) -> None:
-        super().__init__(
-            message=f"Activo {asset_id} no encontrado",
-            details={"asset_id": asset_id},
-            user_message="Activo no encontrado.",
-        )
+    entity_label = "Activo"
+    id_field = "asset_id"
 
 
 class AssetQuotaExceededError(HygeiaError):
@@ -96,14 +91,46 @@ class IngestTooFrequentError(HygeiaError):
         )
 
 
-class AnomalyNotFoundError(HygeiaError):
+class AnomalyNotFoundError(EntityNotFoundError, HygeiaError):
     """Se lanza cuando una anomalía no existe o no pertenece al usuario."""
-    default_code = ErrorCode.ENTITY_NOT_FOUND
-    default_status_code = 404
+    entity_label = "Anomalía"
+    entity_is_feminine = True
+    id_field = "anomaly_id"
+
+
+class AnomalyStillOpenError(HygeiaError):
+    """Se lanza al intentar borrar una anomalía que sigue en estado ``open``.
+
+    Solo se puede borrar una anomalía ya reconocida o resuelta: una abierta
+    todavía representa una condición activa sin atender, y borrarla la
+    haría desaparecer del panel sin que nadie la haya visto ni resuelto.
+    """
+    default_code = ErrorCode.CONSTRAINT_VIOLATION
+    default_status_code = 409
 
     def __init__(self, anomaly_id: int) -> None:
         super().__init__(
-            message=f"Anomalía {anomaly_id} no encontrada",
+            message=f"Anomalía {anomaly_id} sigue abierta, no se puede borrar",
             details={"anomaly_id": anomaly_id},
-            user_message="Anomalía no encontrada.",
+            user_message="Solo se pueden borrar anomalías reconocidas o resueltas.",
+        )
+
+
+class InventoryNotAvailableError(HygeiaError):
+    """Se intenta analizar un activo que todavía no ha reportado inventario.
+
+    No es un fallo del sistema sino un estado legítimo del activo (agente
+    recién instalado, o el escaneo de software —que va cada ~6h, no en cada
+    heartbeat— aún no le ha tocado), así que el frontend simplemente no
+    ofrece el botón hasta que haya inventario. Esto es la red de seguridad
+    para la llamada directa.
+    """
+    default_code = ErrorCode.CONSTRAINT_VIOLATION
+    default_status_code = 409
+
+    def __init__(self, asset_id: int) -> None:
+        super().__init__(
+            message=f"El activo {asset_id} no tiene inventario de software que analizar",
+            details={"asset_id": asset_id},
+            user_message="Este activo aún no ha reportado un inventario de software.",
         )

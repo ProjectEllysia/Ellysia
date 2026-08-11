@@ -29,14 +29,18 @@ from urllib.parse import parse_qs, urlparse
 import cv2
 import numpy as np
 
+import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
-from ..shared import analyze_url, extract_domain, redirect_params, registrable_domain, url_host
+from ..wordlists import esp_tracker_domains, redirect_params
+from ..text import analyze_url, extract_domain, registrable_domain, url_host
 
-MAX_SCORE_FLOOR = -25
+
+def _max_score_floor() -> float:
+    return CR.get_iris_scoring_weight("body_links.floor", -25)
 
 
 @iris_rules.register(
-    name="Body Links", category="content_analysis",
+    name="Body Links", category="content_analysis", family="links",
     description=(
         "Analiza los enlaces reales del cuerpo: texto visible vs href, "
         "punycode/IDN, IPs literales, acortadores de URL, credenciales en la "
@@ -60,12 +64,12 @@ def check_body_links(context) -> RuleResult:
         link_findings, link_score = analyze_url(link.href or "", sender_domain, link.text or "")
         findings.extend(link_findings)
         score += link_score
-        seen_types.update(f["type"] for f in link_findings)
+        seen_types.update(link_finding["type"] for link_finding in link_findings)
 
     if not findings:
         return RuleResult(score=1, verdict="pass", details={"link_count": len(links)})
 
-    score = max(score, MAX_SCORE_FLOOR)
+    score = max(score, _max_score_floor())
     return RuleResult(
         score=score, verdict="fail",
         details={"link_count": len(links), "findings": findings, "types": sorted(seen_types)},
@@ -76,7 +80,8 @@ def check_body_links(context) -> RuleResult:
     )
 
 
-QR_SCORE_FLOOR = -25
+def _qr_score_floor() -> float:
+    return CR.get_iris_scoring_weight("qr_code_links.floor", -25)
 
 
 def _decode_qr_urls(image_bytes: bytes) -> list[str]:
@@ -103,7 +108,7 @@ def _decode_qr_urls(image_bytes: bytes) -> list[str]:
 
 
 @iris_rules.register(
-    name="QR Code Links", category="content_analysis",
+    name="QR Code Links", category="content_analysis", family="links",
     description=(
         "Decodifica códigos QR en imágenes inline/adjuntas y analiza la URL "
         "resultante con la misma batería de chequeos que Body Links "
@@ -130,7 +135,7 @@ def check_qr_code_links(context) -> RuleResult:
             for f in url_findings:
                 findings.append({**f, "source": "qr_code", "filename": image.filename})
             score += url_score
-            seen_types.update(f["type"] for f in url_findings)
+            seen_types.update(url_finding["type"] for url_finding in url_findings)
 
     if not qr_urls:
         return RuleResult(score=0, verdict="pass", details={"image_count": len(images), "qr_count": 0})
@@ -141,7 +146,7 @@ def check_qr_code_links(context) -> RuleResult:
             details={"image_count": len(images), "qr_count": len(qr_urls), "qr_urls": qr_urls},
         )
 
-    score = max(score, QR_SCORE_FLOOR)
+    score = max(score, _qr_score_floor())
     return RuleResult(
         score=score, verdict="fail",
         details={
@@ -166,13 +171,13 @@ def _looks_opaque_path(path: str) -> bool:
         return False
     if "." in cleaned:
         return False
-    alnum_ratio = sum(c.isalnum() for c in cleaned) / len(cleaned)
+    alnum_ratio = sum(character.isalnum() for character in cleaned) / len(cleaned)
     return alnum_ratio >= 0.95
 
 
 @iris_rules.register(
     name="Compromised Legitimate Domain",
-    category="content_analysis",
+    category="content_analysis", family="links",
     description=(
         "Detecta enlaces a dominios legítimos que probablemente han sido "
         "comprometidos: open redirectors, paths opacos generados por kits "
@@ -220,7 +225,11 @@ def check_compromised_legitimate_domain(context) -> RuleResult:
                 "host": host,
                 "evidence": evidence,
             })
-            score -= 6 if len(evidence) == 1 else 9
+            score += (
+                CR.get_iris_scoring_weight("compromised_domain.single_evidence", -6)
+                if len(evidence) == 1
+                else CR.get_iris_scoring_weight("compromised_domain.multi_evidence", -9)
+            )
 
     if not findings:
         return RuleResult(score=0, verdict="pass", details={"link_count": len(links)})
@@ -234,4 +243,44 @@ def check_compromised_legitimate_domain(context) -> RuleResult:
             "paths opacos generados por kits). Verifica el destino real antes "
             "de hacer clic: el dominio puede haber sido hackeado o abusado."
         ),
+    )
+
+
+@iris_rules.register(
+    name="External Login Link",
+    category="content_analysis",
+    description=(
+        "Señal informativa (score 0): ¿hay algún enlace del cuerpo cuyo "
+        "dominio registrable difiere del From y no es un ESP conocido? Se "
+        "combina con Alarming Keywords fuerte (G-E) para aproximar el "
+        "'primo autenticado' -- dominio propio, auth limpia, marca fuera de "
+        "`canonical_brands` -- sin depender de esa lista."
+    ),
+    needs_context=True,
+)
+def check_external_login_link(context) -> RuleResult:
+    links = context.links or []
+    if not links:
+        return RuleResult(score=0, verdict="pass", details={"link_count": 0})
+
+    from_domain = registrable_domain(extract_domain(context.headers.get("from", "")))
+    esp_domains = esp_tracker_domains()
+
+    external_hosts: set[str] = set()
+    for link in links:
+        host = url_host(link.href or "")
+        if not host:
+            continue
+        reg = registrable_domain(host)
+        if not reg or reg == from_domain or reg in esp_domains or host in esp_domains:
+            continue
+        external_hosts.add(reg)
+
+    if not external_hosts:
+        return RuleResult(score=0, verdict="pass", details={"link_count": len(links)})
+
+    return RuleResult(
+        score=0, verdict="fail",
+        details={"link_count": len(links), "external_hosts": sorted(external_hosts)},
+        recommendation=None,
     )

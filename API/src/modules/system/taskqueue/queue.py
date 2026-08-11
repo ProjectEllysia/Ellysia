@@ -4,7 +4,7 @@ taskqueue/queue.py
 Cola de tareas asincrónica respaldada por RQ + Redis.
 
 **Flujo completo (cómo funciona)**:
-    1. Manager: self._tq.submit(func=MyManager.execute_task, category="mi.tarea", ...)
+    1. Manager: self._task_queue.submit(func=MyManager.execute_task, category="mi.tarea", ...)
     2. TaskQueue.submit() → enqueue en RQ (Redis) → retorna Task (PENDING)
     3. Worker (proceso separado): escucha colas vía QueueRegistry.names()
     4. Cuando ve un job → Job.fetch() → ejecuta func(args)
@@ -155,15 +155,15 @@ class QueueRegistry:
 
 def _record_terminal(job: "Job", status: "TaskStatus", error: str | None = None) -> None:
     try:
-        tq = TaskQueue.get_instance()
+        task_queue = TaskQueue.get_instance()
         data = Task.from_rq_job(job).to_dict()
         data["status"] = str(status)
         if error and not data.get("error"):
             data["error"] = error
         if not data.get("finishedAt"):
             data["finishedAt"] = datetime.now(timezone.utc).isoformat()
-        tq._history.record(data)
-        tq._external.remove_by_job_id(job.id)
+        task_queue._history.record(data)
+        task_queue._external.remove_by_job_id(job.id)
     except Exception:  # noqa: BLE001 - un fallo de historial no debe tumbar el job
         logger.warning(
             "No se pudo registrar el historial del job %s",
@@ -329,7 +329,7 @@ class TaskQueue:
     _instance_lock = threading.Lock()
 
     def __init__(self) -> None:
-        taskqueue_cfg = CR.get_taskqueue_config()
+        taskqueue_cfg = CR.taskqueue_config()
 
         self._redis = RedisConnectionFactory.raw()
         self._decoded = RedisConnectionFactory.decoded()
@@ -338,8 +338,8 @@ class TaskQueue:
         self._cancel = CancellationStore(self._decoded)
         self._history = HistoryStore(
             self._decoded,
-            int(taskqueue_cfg.get("history_max_items", 200)),
-            int(taskqueue_cfg.get("history_ttl_seconds", 3600)),
+            taskqueue_cfg.history_max_items,
+            taskqueue_cfg.history_ttl_seconds,
         )
 
         self._queue_cache: Dict[str, rq.Queue] = {}
@@ -390,7 +390,7 @@ class TaskQueue:
         que registran snapshots en el historial (últimas N tareas por TTL).
 
         **Ejemplo (manager)**:
-            self._tq.submit(
+            self._task_queue.submit(
                 func=NmapScanManager.execute_nmap_scan,
                 name=f"scan-{scan_id}",
                 category="themis.scan",
@@ -613,7 +613,7 @@ class TaskQueue:
             pending_count = 0
 
         return {
-            "maxWorkers":    CR.get_taskqueue_config().get("max_workers", 4),
+            "maxWorkers":    CR.taskqueue_config().max_workers,
             "aliveWorkers":  self._count_alive_workers(),
             "runningCount":  running_count,
             "pendingCount":  pending_count,

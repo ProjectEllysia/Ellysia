@@ -2,7 +2,7 @@
 themis.services.parsing
 ──────────────────────────
 Parsers y validadores de especificaciones de IP y puertos para escaneos
-Themis (Nmap/Nikto/OpenVAS). Aislado de managers.py: son funciones puras
+Themis (Nmap/Nikto/Lybra/Nuclei). Aislado de managers.py: son funciones puras
 sobre strings, sin sesión de BD ni TaskQueue de por medio.
 
 Formatos de IP soportados (``validate_ip``):
@@ -171,7 +171,7 @@ def _expand_single_ip_segment(segmento: str) -> List[str]:
 
 def _reject_private_ips(lista_ips: List[str]) -> None:
     """Raise if any IP is private and local IPs aren't allowed by config."""
-    if not CR.are_local_ips_allowed():
+    if not CR.themis_config().are_local_ips_allowed:
         private_ips = [
             ip for ip in lista_ips
             if ipaddress.ip_address(ip).is_private
@@ -182,7 +182,7 @@ def _reject_private_ips(lista_ips: List[str]) -> None:
 
 def reject_private_ip(ip: str) -> None:
     """Single-IP entry point for callers that resolve a hostname/URL
-    themselves (Nikto, OpenVAS) instead of expanding a CIDR/range spec via
+    themselves (Nikto) instead of expanding a CIDR/range spec via
     ``validate_ip``."""
     _reject_private_ips([ip])
 
@@ -207,7 +207,7 @@ def validate_ip(ips_str: str, max_hosts: int = 10) -> List[str]:
     """
     ips_str = _require_non_empty(ips_str, IPValidationError)
 
-    segmentos = [s.strip() for s in ips_str.split(",")]
+    segmentos = [ip_string.strip() for ip_string in ips_str.split(",")]
     lista_ips = []
     for segmento in segmentos:
         if not segmento:

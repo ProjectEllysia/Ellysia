@@ -76,7 +76,7 @@ def initialize(database_url: Optional[str] = None) -> Engine:
         )
 
     from src.modules.system import config_reading as CR
-    isolation_level = CR.get_db_isolation_level()
+    isolation_level = CR.database_config().isolation_level
 
     engine_kwargs = dict(
         pool_pre_ping=True,
@@ -88,12 +88,7 @@ def initialize(database_url: Optional[str] = None) -> Engine:
     # Pool sizing applies to QueuePool (PostgreSQL etc.). SQLite uses a
     # different pool implementation where these args are invalid, so skip them.
     if not database_url.startswith("sqlite"):
-        pool_cfg = CR.get_db_pool_config()
-        engine_kwargs.update(
-            pool_size=pool_cfg["pool_size"],
-            max_overflow=pool_cfg["max_overflow"],
-            pool_timeout=pool_cfg["pool_timeout"],
-        )
+        engine_kwargs.update(CR.database_config().pool_kwargs())
 
     ENGINE = create_engine(database_url, **engine_kwargs)
 

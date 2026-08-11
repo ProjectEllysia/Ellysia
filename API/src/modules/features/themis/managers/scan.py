@@ -4,11 +4,14 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urlparse
+
 import src.modules.system.config_reading as CR
-from src.modules.system.taskqueue import ITaskQueue, TaskQueue, TaskTrackingMixin
+
+from src.modules.shared._exceptions import EllysiaException, ValidationError
+from src.modules.system.taskqueue import TaskQueue, TaskTrackingMixin
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
-from src.modules.shared import assert_owned
+from src.modules.shared import assert_owned, utcnow_naive
 from ..services.csv_logger import ScanLoggerFactory
 from ..repositories import (
     ScanRepository,
@@ -24,7 +27,8 @@ from ..services import (
     _Task,
 )
 from ..services import parsing, reachability
-from ..exceptions import ScanError, ScanNotFoundError
+from ..exceptions import IPValidationError, MaxHostsExceededError, PrivateIPRequested, ScanError, ScanNotFoundError
+from ..lybra import compute_dedup_key
 
 
 logger = logging.getLogger(__name__)
@@ -69,15 +73,26 @@ class ScanManager(TaskTrackingMixin, ABC):
     EXTERNAL_ID_PREFIX = "scan:"
     TASK_CATEGORY = "themis.scan"
 
-    def __init__(self, task_queue: ITaskQueue | None = None) -> None:
-        """
-        Initialize the scan manager.
+    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin (A10).
 
-        Args:
-            task_queue: Cola de tareas a usar (inyectable para tests). Por
-                defecto, el singleton ``TaskQueue``.
+    # Contrato para el lanzamiento programado (B1): qué claves de
+    # ProgramedScan.arguments son obligatorias para este tipo, y cómo
+    # traducirlas a los kwargs de run_scan(). Con esto ThemisScheduler
+    # despacha por el mismo _registry que resolve_manager en vez de llevar
+    # su propio mapeo scan_type -> función de lanzamiento en paralelo.
+    SCHEDULED_REQUIRED_ARGS: tuple = ()
+
+    @classmethod
+    def scheduled_run_kwargs(cls, arguments: dict) -> dict:
+        """Map a ``ProgramedScan.arguments`` dict to this scan type's
+        ``run_scan()`` kwargs (B1).
+
+        Default: every required arg passed through unchanged (arg name ==
+        ``run_scan`` parameter name). Override when a kwarg needs
+        translation — an optional arg, a different name, a type coercion —
+        see ``LybraEngineManager.scheduled_run_kwargs`` for an example.
         """
-        self._tq: ITaskQueue = task_queue or TaskQueue.get_instance()
+        return {name: arguments[name] for name in cls.SCHEDULED_REQUIRED_ARGS}
 
 
     # =========================================================================
@@ -99,7 +114,7 @@ class ScanManager(TaskTrackingMixin, ABC):
             Scan instance (typed to ``self._MODEL``), or None if not found.
         """
         # Q3: _MODEL es Optional a nivel de la clase base porque solo las
-        # subclases concretas lo fijan (Nmap/Nikto/OpenVAS/Lybra) — nunca es
+        # subclases concretas lo fijan (Nmap/Nikto/Lybra/Nuclei) — nunca es
         # None en una instancia real. El assert lo deja explícito para el
         # checker de tipos y sirve de red si alguna subclase nueva lo olvidara.
         assert self._MODEL is not None, f"{type(self).__name__} no define _MODEL"
@@ -223,10 +238,10 @@ class ScanManager(TaskTrackingMixin, ABC):
             if not scan:
                 return False
 
-            docs = build_repository(ThemisReportRepository).get_documents_by_scan(scan_id)
-            for doc in docs:
+            docs = build_repository(ThemisReportRepository).get_documents_by_parent(scan_id)
+            for document in docs:
                 delete_document_with_file(
-                    doc.id, ThemisReportRepository,
+                    document.id, ThemisReportRepository,
                     lambda eid: ValueError(f"Documento {eid} no existe"),
                 )
 
@@ -261,9 +276,9 @@ class ScanManager(TaskTrackingMixin, ABC):
         results = []
         for scan_id in scan_ids:
             try:
-                mgr = cls.resolve_manager(scan_id)
+                manager = cls.resolve_manager(scan_id)
                 cls.assert_scan_ownership(scan_id, user_id)
-                scan = mgr.get_scan_by_id(scan_id)
+                scan = manager.get_scan_by_id(scan_id)
                 if not scan:
                     results.append({"scanId": scan_id, "status": "error", "error": "not_found"})
                     continue
@@ -274,19 +289,19 @@ class ScanManager(TaskTrackingMixin, ABC):
                     # (ver el mismo guard en endpoints.delete_scan), así que este
                     # escaneo se salta y se reporta como fallido en vez de forzar
                     # la eliminación.
-                    if not mgr.cancel_scan(scan_id, user_id):
+                    if not manager.cancel_scan(scan_id, user_id):
                         results.append({
                             "scanId": scan_id, "status": "error",
                             "error": "no_se_pudo_cancelar",
                         })
                         continue
 
-                mgr.delete_scan(scan_id)
+                manager.delete_scan(scan_id)
                 results.append({"scanId": scan_id, "status": "ok", "error": None})
             except Exception as e:
                 results.append({"scanId": scan_id, "status": "error", "error": str(e)})
 
-        deleted = sum(1 for r in results if r["status"] == "ok")
+        deleted = sum(1 for result in results if result["status"] == "ok")
         failed = len(results) - deleted
         return {
             "deletedCount": deleted,
@@ -361,16 +376,16 @@ class ScanManager(TaskTrackingMixin, ABC):
                 )
                 return False
 
-            sq_task = self.find_task(scan_id)
+            queued_task = self.find_task(scan_id)
 
-            if sq_task is None:
+            if queued_task is None:
                 logger.warning(
                     f"No se encontro tarea activa para el escaneo {scan_id}"
                 )
                 return False
 
-            cancelled = self._tq.cancel(sq_task.id)
-            if not cancelled:
+            was_cancelled = self._task_queue.cancel(queued_task.id)
+            if not was_cancelled:
                 logger.warning(f"No se pudo cancelar la tarea del escaneo {scan_id}")
                 return False
 
@@ -379,11 +394,11 @@ class ScanManager(TaskTrackingMixin, ABC):
                 # la ventana entre la señal cooperativa y esta escritura, no lo
                 # sobrescribimos a CANCELLED — evita mostrar resultados reales
                 # como si el escaneo se hubiera cancelado.
-                written = ScanRepository(uow).update_status_if(
+                was_written = ScanRepository(uow).update_status_if(
                     scan_id, {ScanStatus.PENDING, ScanStatus.RUNNING}, ScanStatus.CANCELLED
                 )
 
-            if not written:
+            if not was_written:
                 logger.warning(
                     f"Escaneo {scan_id} ya no estaba pending/running al cancelar "
                     "(probablemente terminó justo antes)"
@@ -411,13 +426,13 @@ class ScanManager(TaskTrackingMixin, ABC):
         Returns:
             Número de escaneos marcados como FAILED.
         """
-        tq = TaskQueue.get_instance()
+        task_queue = TaskQueue.get_instance()
         fixed = 0
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
             for scan in repo.get_active_scans():
                 external_id = f"{cls.EXTERNAL_ID_PREFIX}{scan.id}"
-                task = tq.get_task_by_external_id(external_id, cls.TASK_CATEGORY)
+                task = task_queue.get_task_by_external_id(external_id, cls.TASK_CATEGORY)
 
                 if task is not None and task.status == TaskStatus.PENDING:
                     continue
@@ -454,22 +469,21 @@ class ScanManager(TaskTrackingMixin, ABC):
                 if not scan:
                     logger.error(f"Escaneo {scan_id} no encontrado en el hilo")
                     return
-                # B7: leer estos atributos aquí, dentro de la sesión que los
+                # B7: leer este atributo aquí, dentro de la sesión que lo
                 # cargó, en vez de en instancia detached más abajo — antes
                 # solo funcionaba porque expire_on_commit=False lo permite
                 # implícitamente, no por contrato.
-                target    = scan.target
-                scan_type = scan.scan_type
+                target = scan.target
 
             thread_manager.update_scan_status(scan_id, ScanStatus.RUNNING)
             logger.info(f"Iniciando escaneo {scan_id}")
 
-            if CR.is_host_reachability_check_enabled():
+            if CR.host_reachability_check().enabled:
                 raw_target = target if "://" in target else f"tcp://{target}"
                 parsed_target = urlparse(url=raw_target) # type: ignore
                 host = parsed_target.hostname or target
-                reachable_port = parsed_target.port or CR.get_host_reachability_check_port()
-                reachable_timeout = CR.get_host_reachability_check_timeout()
+                reachable_port = parsed_target.port or CR.host_reachability_check().port
+                reachable_timeout = CR.host_reachability_check().timeout
                 if not self.is_host_reachable(host=host, port=reachable_port, timeout=reachable_timeout): # type: ignore
                     logger.warning(
                         f"Host '{host}' inalcanzable en puerto {reachable_port}. "
@@ -479,13 +493,13 @@ class ScanManager(TaskTrackingMixin, ABC):
                     return
 
             task.scan()
-            success = task.wait(
+            did_succeed = task.wait(
                 timeout=task.timeout + self._scan_timeout_margin,
                 cancel_check=cancel_check,
             )
 
             no_results = task.results is None
-            if not success or no_results:
+            if not did_succeed or no_results:
                 if task.status == TaskStatus.CANCELLED:
                     logger.info(f"Escaneo {scan_id} cancelado por el usuario")
                     thread_manager.update_scan_status(scan_id, ScanStatus.CANCELLED)
@@ -496,8 +510,8 @@ class ScanManager(TaskTrackingMixin, ABC):
 
             logger.info(f"Procesando resultados de escaneo {scan_id}")
 
-            processor  = thread_manager.result_processor # type: ignore
-            domain_data = processor.process(task.results, target) if scan_type == "nmap" else processor.process(task.results)
+            processor   = thread_manager.result_processor # type: ignore
+            domain_data = thread_manager._process_results(processor, task.results, target)
 
             with UnitOfWork() as uow:
                 scan_repo  = ScanRepository(uow)
@@ -507,11 +521,11 @@ class ScanManager(TaskTrackingMixin, ABC):
                 # que este worker terminó de escanear y esta transacción, no lo
                 # sobrescribimos a FINISHED — los resultados quedan igual
                 # persistidos, pero el estado respeta la cancelación pedida.
-                finished = scan_repo.update_status_if(
+                is_finished = scan_repo.update_status_if(
                     scan_id, {ScanStatus.PENDING, ScanStatus.RUNNING}, ScanStatus.FINISHED
                 )
 
-            if finished:
+            if is_finished:
                 logger.info(f"Escaneo {scan_id} completado exitosamente")
             else:
                 logger.info(
@@ -528,6 +542,19 @@ class ScanManager(TaskTrackingMixin, ABC):
                 logger.error(f"Error en escaneo {scan_id}: {e}", exc_info=True)
                 thread_manager.update_scan_status(scan_id, ScanStatus.FAILED)
             thread_manager._log_to_csv(scan_id, fresh_scan, task)
+
+    def _process_results(self, processor, results, target: str):
+        """Hand raw task results to this scan type's result processor (B2).
+
+        Default: every processor except Nmap's only needs ``results``. Nmap
+        overrides this because its processor also needs ``target`` (to
+        resolve the scanned host) — see ``NmapScanManager._process_results``.
+        Keeping the dispatch here as an overridable method, rather than the
+        base class branching on ``scan_type == "nmap"``, means a future scan
+        type whose processor also needs ``target`` doesn't require editing
+        this base class again.
+        """
+        return processor.process(results)
 
     def update_scan_status(self, scan_id: int, status: ScanStatus) -> None:
         """
@@ -575,10 +602,10 @@ class ScanManager(TaskTrackingMixin, ABC):
                     "duration_sec": round(duration, 2),
                     "status": status,
                     # Q3: get_status() es admin/monitoring, fuera a propósito
-                    # del contrato ITaskQueue (per-tarea) — self._tq aquí es
+                    # del contrato ITaskQueue (per-tarea) — self._task_queue aquí es
                     # siempre el TaskQueue real (nunca un doble de test, que
                     # no llega a este código de logging en segundo plano).
-                    "concurrent_tasks": self._tq.get_status()["runningCount"],  # type: ignore[attr-defined]
+                    "concurrent_tasks": self._task_queue.get_status()["runningCount"],  # type: ignore[attr-defined]
                 }
 
                 self.append_csv_data(data, fresh_scan, task)
@@ -637,7 +664,7 @@ class ScanManager(TaskTrackingMixin, ABC):
     @classmethod
     def all_managers(cls) -> List["ScanManager"]:
         """Una instancia por cada tipo de escaneo registrado."""
-        return [m() for m in cls._registry.values()]
+        return [scan_manager() for scan_manager in cls._registry.values()]
 
     # Name of the ScanRepository method that eager-loads this manager's scan
     # type for background-thread use (e.g. "get_nmap_rich"). None means the
@@ -705,7 +732,7 @@ class ScanManager(TaskTrackingMixin, ABC):
             scan_id: Id del escaneo a revisar
 
         Returns:
-            Tipo del escaneo ("nmap", "nikto", "openvas")
+            Tipo del escaneo ("nmap", "nikto", "lybra", "nuclei")
         """
 
         with UnitOfWork() as uow:
@@ -725,10 +752,25 @@ class ScanManager(TaskTrackingMixin, ABC):
         """Append the latest document ID and status to a scan result dict."""
         from .reports import ThemisReportManager
         inst = ThemisReportManager()
-        doc = inst.get_latest_document_by_scan_id(scan.id)
-        if doc:
-            result["documentId"] = doc.id
-            result["documentStatus"] = doc.status
+        document = inst.get_latest_document_by_parent(scan.id)
+        if document:
+            result["documentId"] = document.id
+            result["documentStatus"] = document.status
+    
+    @classmethod
+    def validate_targets(cls, raw: str, max_hosts: int = 10) -> list[str]:
+        """
+        Validate ``raw`` as a target spec via ``ScanManager.validate_ip``,
+        translating its domain exceptions into the HTTP-facing ones.
+        """
+        try:
+            return cls.validate_ip(raw, max_hosts=max_hosts)
+        except IPValidationError as exc:
+            raise ValidationError(field="target", message=str(exc), value=raw) from exc
+        except MaxHostsExceededError as exc:
+            raise ValidationError(str(exc.user_message or exc))
+        except PrivateIPRequested as exc:
+            raise EllysiaException(str(exc.user_message or exc), status_code=403)
 
     @staticmethod
     def validate_ip(ips_str: str, max_hosts: int = 10) -> List[str]:
@@ -752,7 +794,7 @@ class ScanManager(TaskTrackingMixin, ABC):
     def reject_private_ip(ip: str) -> None:
         """Lanza ``PrivateIPRequested`` si ``ip`` es privada y
         'areLocalIpsAllowed' está en falso. Para llamantes que resuelven un
-        hostname/URL ellos mismos (Nikto, OpenVAS) en vez de expandir un
+        hostname/URL ellos mismos (Nikto) en vez de expandir un
         rango vía ``validate_ip``.
         """
         parsing.reject_private_ip(ip)
@@ -777,9 +819,49 @@ class ScanManager(TaskTrackingMixin, ABC):
     def run_scan(self, **kwargs) -> int:
         """Start a new scan. Returns the scan's primary key."""
 
-    @abstractmethod
-    def _create_scan_record(self, **kwargs) -> Scan:
-        """Create and persist the initial scan record."""
+    def _create_scan_record(
+        self, target: str, user_id: int, programed_scan_id: Optional[int] = None, **extra
+    ) -> Scan:
+        """Create and persist the initial scan record for ``self._MODEL`` (A4).
+
+        Default implementation shared by every scan type whose model needs
+        no columns beyond target/user_id/started_at/programed_scan_id.
+        Subclasses whose model has extra columns (e.g. ``LybraScan``'s
+        ``source_scan_id``/``asset_id``) pass them via ``**extra`` instead of
+        overriding this method wholesale — see
+        ``LybraEngineManager._create_scan_record``.
+        """
+        assert self._MODEL is not None, f"{type(self).__name__} no define _MODEL"
+        scan = self._MODEL(
+            target=target, user_id=user_id, started_at=utcnow_naive(),
+            programed_scan_id=programed_scan_id, **extra,
+        )
+        with UnitOfWork() as uow:
+            ScanRepository(uow).save(scan)
+            # Durable antes de encolar: el worker corre en otro proceso.
+            uow.commit_for_handoff()
+        return scan
+
+    def _previous_findings_map(
+        self, scan_repo: ScanRepository, user_id: int, target: str, exclude_scan_id: int
+    ) -> dict:
+        """Build ``dedup_key -> {state, snapshot}`` from the previous scan of
+        this type against ``target``, for lifecycle comparison (A6).
+
+        Shared by every manager that does lifecycle correlation over
+        ``Finding`` (Lybra, Nuclei) — uses ``self.SCAN_TYPE`` to pick the
+        right previous scan, so the two hand-rolled copies (identical save
+        for which scan type they filtered on) collapse into one.
+        """
+        if not user_id or not target:
+            return {}
+        result: dict = {}
+        for pf in scan_repo.get_previous_findings(user_id, target, self.SCAN_TYPE.value, exclude_scan_id):
+            snapshot = pf.snapshot
+            key = pf.dedup_key or compute_dedup_key(snapshot)
+            snapshot["dedup_key"] = key
+            result[key] = {"state": pf.state or "open", "snapshot": snapshot}
+        return result
 
     @abstractmethod
     def _persist_scan_results(self, uow, scan, domain_data) -> None:

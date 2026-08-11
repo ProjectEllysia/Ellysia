@@ -11,7 +11,7 @@ Hierarchy:
 
 from __future__ import annotations
 
-from src.modules.shared._exceptions import EllysiaException, ErrorCode
+from src.modules.shared._exceptions import EllysiaException, EntityNotFoundError, ErrorCode
 
 
 class IrisError(EllysiaException):
@@ -20,17 +20,14 @@ class IrisError(EllysiaException):
     default_status_code = 500
 
 
-class IrisAnalysisNotFoundError(IrisError):
+class IrisAnalysisNotFoundError(EntityNotFoundError, IrisError):
     """Raised when an analysis ID does not exist or is not owned by the user.
 
     This also serves as a privacy layer — the same error is returned
     whether the analysis does not exist or belongs to another user.
     """
-    default_code = ErrorCode.ENTITY_NOT_FOUND
-    default_status_code = 404
-
-    def __init__(self, analysis_id: int) -> None:
-        super().__init__(f"Analysis {analysis_id} not found")
+    entity_label = "Análisis"
+    id_field = "analysis_id"
 
 
 class IrisAnalysisNotReadyError(IrisError):
@@ -61,4 +58,34 @@ class IrisInvalidInputError(IrisError):
     """Raised when the submitted headers do not contain enough valid entries
     to perform a meaningful analysis."""
     default_code = ErrorCode.VALIDATION_ERROR
+    default_status_code = 400
+
+
+class IrisMailboxConnectionNotFoundError(EntityNotFoundError, IrisError):
+    """Raised when a mailbox connection id does not exist or is not owned
+    by the user (same error for both, prevents ID enumeration)."""
+    entity_label = "Conexión de buzón"
+    entity_is_feminine = True
+    id_field = "connection_id"
+
+
+class IrisMailboxInvalidProviderError(IrisError):
+    """Raised when connecting to an unsupported mailbox provider."""
+    default_code = ErrorCode.VALIDATION_ERROR
+    default_status_code = 400
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"Unsupported mailbox provider: {provider}")
+
+
+class IrisMailboxQuotaExceededError(IrisError):
+    """Raised when a user tries to connect more mailboxes than iris.maxConnectionsPerUser."""
+    default_code = ErrorCode.VALIDATION_ERROR
+    default_status_code = 400
+
+
+class IrisMailboxOAuthStateError(IrisError):
+    """Raised when the OAuth callback's `state` fails to verify — expired,
+    tampered, or never issued by start_connect (CSRF protection)."""
+    default_code = ErrorCode.AUTHENTICATION_ERROR
     default_status_code = 400

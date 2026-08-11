@@ -16,7 +16,7 @@ import pytest
 
 from src.modules.system.taskqueue import Task, TaskStatus
 
-import src.modules.features.iris.managers as managers_mod
+import src.modules.features.iris.managers.analysis as managers_mod
 import src.modules.features.iris.services.reports as reports_mod
 
 pytestmark = pytest.mark.integration
@@ -99,8 +99,8 @@ def test_generate_document_requires_authentication(client):
     assert resp.status_code == 401
 
 
-def test_generate_document_requires_create_attribute(client, regular_user, auth_headers):
-    resp = client.post("/iris/results/1/document", headers=auth_headers(regular_user))
+def test_generate_document_requires_create_attribute(client, stripped_user, auth_headers):
+    resp = client.post("/iris/results/1/document", headers=auth_headers(stripped_user))
     assert resp.status_code == 403
 
 

@@ -10,57 +10,86 @@
         </button>
       </div>
     </div>
-    <Transition name="fade-swap" mode="out-in">
-      <div v-if="showLoading" key="loading" class="empty-state">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="spin"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-        <span>Cargando…</span>
+    <!-- Sin mode="out-in": esperaría un transitionend de salida que el
+         navegador no emite en pestañas de fondo, y ahí es justo donde vive
+         un escaneo largo. La tabla se quedaba congelada a medio cambio de
+         estado al volver a la pestaña. Mismo motivo que en AssetList. -->
+    <Transition name="fade-swap">
+      <!-- Filas fantasma con el ancho de las columnas reales: al llegar los
+           datos ocupan el mismo sitio y la tabla no da el salto que daba
+           antes, cuando el hueco era un "Cargando…" centrado de una línea. -->
+      <div v-if="showLoading" key="loading" class="table-scroll" aria-busy="true" aria-label="Cargando escaneos">
+        <table class="skeleton-table" aria-hidden="true">
+          <thead><tr>
+            <th class="chk-col"></th>
+            <th>ID</th><th>Target</th><th>Estado</th>
+            <th v-if="type === 'nmap'">Puertos</th>
+            <th v-if="type === 'nikto'">Incidencias</th>
+            <template v-if="type === 'nuclei'"><th>Hallazgos</th><th>Críticos</th><th>Altos</th></template>
+            <th>Fecha</th><th>Acciones</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="n in SKELETON_ROWS" :key="n">
+              <td class="chk-col"><span class="skeleton skeleton--circle chk-ghost"></span></td>
+              <td v-for="col in dataColumnCount" :key="col"><span class="skeleton skeleton--line"></span></td>
+              <td class="actions"><span class="skeleton skeleton--line actions-ghost"></span></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
       <div v-else-if="error" key="error" class="empty-state error-state">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
         <span>{{ error }}</span>
         <button class="btn-refresh" @click="$emit('refresh')">Reintentar</button>
       </div>
-      <div v-else-if="!rows.length" key="empty" class="empty-state">
+      <div v-else-if="!rows.length && !loading" key="empty" class="empty-state">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         <span>No hay escaneos todavía. ¡Lanza el primero!</span>
       </div>
-      <table v-else key="table">
+      <!-- El scroll va en un envoltorio propio, no en .table-wrap: ahí dentro
+           están también la barra de herramientas y el paginador, que no deben
+           desplazarse con la tabla. -->
+      <div v-else key="table" class="table-scroll">
+      <table>
         <thead><tr>
-          <th class="chk-col"><input type="checkbox" :checked="allSelected" :indeterminate="someSelected" @change="$emit('select-all', rows.map(r => r.id))" /></th>
+          <th class="chk-col"><input type="checkbox" aria-label="Seleccionar todos los escaneos de la página" :checked="allSelected" :indeterminate="someSelected" @change="$emit('select-all', rows.map(r => r.id))" /></th>
           <th>ID</th><th>Target</th><th>Estado</th>
           <th v-if="type === 'nmap'">Puertos</th>
           <th v-if="type === 'nikto'">Incidencias</th>
-          <template v-if="type === 'openvas'"><th>Vulns</th><th>Críticas</th><th>Altas</th></template>
+          <template v-if="type === 'nuclei'"><th>Hallazgos</th><th>Críticos</th><th>Altos</th></template>
           <th>Fecha</th><th>Acciones</th>
         </tr></thead>
         <TransitionGroup name="row" tag="tbody">
           <tr v-for="row in rows" :key="row.id" :class="{ selected: _selectedSet.has(row.id) }">
-            <td class="chk-col"><input type="checkbox" :checked="_selectedSet.has(row.id)" @change="$emit('toggle-select', row.id)" /></td>
+            <td class="chk-col"><input type="checkbox" :aria-label="`Seleccionar el escaneo #${row.id}`" :checked="_selectedSet.has(row.id)" @change="$emit('toggle-select', row.id)" /></td>
             <td class="mono">#{{ row.id }}</td>
             <td class="target">{{ row.target }}</td>
             <td><StatusBadge :status="row.status" /></td>
             <td v-if="type === 'nmap'" class="mono">{{ row.totalOpenPorts ?? 0 }} <span class="muted">puertos</span></td>
             <td v-if="type === 'nikto'" class="mono">{{ row.totalIncidents ?? 0 }} <span class="muted">hallazgos</span></td>
-            <template v-if="type === 'openvas'">
-              <td class="mono">{{ row.totalVulnerabilities ?? 0 }}</td>
+            <template v-if="type === 'nuclei'">
+              <td class="mono">{{ row.totalFindings ?? 0 }}</td>
               <td class="sev-critical"><span v-if="row.criticalCount">{{ row.criticalCount }}</span><span v-else class="muted">0</span></td>
               <td class="sev-high"><span v-if="row.highCount">{{ row.highCount }}</span><span v-else class="muted">0</span></td>
             </template>
             <td class="date">{{ formatDate(row.startedAt) }}</td>
             <td class="actions">
-              <button class="act-btn" title="Vista previa" @click="$emit('preview', row.id, type)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-              </button>
-              <button v-if="isActive(row.status)" class="act-btn warn" title="Cancelar" @click="confirmCancel(row.id)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-              </button>
-              <button class="act-btn danger" title="Eliminar" @click="confirmDelete(row.id)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
-              </button>
+              <div class="actions-row">
+                <button class="act-btn" :aria-label="`Vista previa del escaneo #${row.id}`" title="Vista previa" @click="$emit('preview', row.id, type)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+                <button v-if="isActive(row.status)" class="act-btn warn" :aria-label="`Cancelar el escaneo #${row.id}`" title="Cancelar" @click="confirmCancel(row.id)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                </button>
+                <button class="act-btn danger" :aria-label="`Eliminar el escaneo #${row.id}`" title="Eliminar" @click="confirmDelete(row.id)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+                </button>
+              </div>
             </td>
           </tr>
         </TransitionGroup>
       </table>
+      </div>
     </Transition>
     <div class="table-footer">
       <AppPagination v-if="totalCount > perPage" :current="currentPage" :total="totalCount" :per-page="perPage" @go="page => $emit('page-change', page)" />
@@ -87,9 +116,27 @@ const emit = defineEmits(['preview', 'cancel', 'delete', 'refresh', 'page-change
 
 const _selectedSet = computed(() => new Set(props.selectedIds))
 
+/** Filas fantasma mientras carga: las que caben sin alargar la caja. */
+const SKELETON_ROWS = 5
+
+/**
+ * Columnas de datos entre la casilla y las acciones, que es lo que varía
+ * entre pestañas: ID/Target/Estado/Fecha son fijas, y cada herramienta añade
+ * las suyas (Nmap 1, Nikto 1, Nuclei 3). El esqueleto tiene que dibujar
+ * exactamente las mismas para no cambiar de ancho al llegar los datos.
+ */
+const EXTRA_COLUMNS = { nmap: 1, nikto: 1, nuclei: 3 }
+const dataColumnCount = computed(() => 4 + (EXTRA_COLUMNS[props.type] ?? 0))
+
+/* Los 200ms de gracia evitan que un parpadeo de carga aparezca y desaparezca
+   en respuestas rápidas. `immediate` porque sin él, montar el componente con
+   una petición YA en vuelo (volver a una pestaña que estaba cargando) se
+   saltaba el estado de carga entero: el watcher no había llegado a dispararse
+   nunca, así que caía en el estado vacío y anunciaba "No hay escaneos
+   todavía" mientras los escaneos venían de camino. */
 const showLoading = ref(false)
 let loadingTimer = null
-watch(() => props.loading, (val) => { clearTimeout(loadingTimer); if (val) loadingTimer = setTimeout(() => { showLoading.value = true }, 200); else showLoading.value = false })
+watch(() => props.loading, (val) => { clearTimeout(loadingTimer); if (val) loadingTimer = setTimeout(() => { showLoading.value = true }, 200); else showLoading.value = false }, { immediate: true })
 onUnmounted(() => clearTimeout(loadingTimer))
 
 const allSelected = computed(() => props.rows.length > 0 && props.rows.every(r => _selectedSet.value.has(r.id)))
@@ -109,7 +156,7 @@ function formatDate(iso) { if (!iso) return '—'; return new Date(iso).toLocale
 </script>
 
 <style scoped>
-.table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.table-wrap { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .table-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1.1rem; border-bottom: 1px solid var(--border); }
 .toolbar-title { font-size: var(--fs-lg); font-weight: 600; color: var(--text-dim); }
 .btn-refresh { display: flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.6rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); font-size: var(--fs-md); cursor: pointer; transition: all 0.2s; }
@@ -117,7 +164,24 @@ function formatDate(iso) { if (!iso) return '—'; return new Date(iso).toLocale
 .btn-refresh:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-refresh svg { width: 11px; height: 11px; }
 .toolbar-actions { display: flex; gap: 0.5rem; align-items: center; }
-table { width: 100%; border-collapse: collapse; }
+/* La pestaña de Nuclei son 10 columnas. Antes .table-wrap tenía `overflow:
+   hidden` y nada más, así que en una pantalla estrecha las últimas columnas
+   —incluida la de Acciones— quedaban recortadas y sin forma de alcanzarlas:
+   no se podía ni previsualizar ni borrar un escaneo desde el móvil.
+   El degradado del borde derecho avisa de que la tabla sigue. */
+.table-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  background:
+    linear-gradient(to right, var(--surface) 30%, transparent) left / 24px 100% no-repeat,
+    linear-gradient(to left,  var(--surface) 30%, transparent) right / 24px 100% no-repeat,
+    radial-gradient(farthest-side at 0 50%, rgba(0,0,0,0.16), transparent) left / 10px 100% no-repeat,
+    radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,0.16), transparent) right / 10px 100% no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
+/* Por debajo de este ancho las celdas se aplastarían hasta partir palabras;
+   mejor desplazar que hacer ilegible. */
+table { width: 100%; min-width: 620px; border-collapse: collapse; }
 th { padding: 0.55rem 0.85rem; text-align: left; font-size: var(--fs-md); font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; background: var(--surface-2); }
 td { padding: 0.55rem 0.85rem; font-size: var(--fs-lg); border-top: 1px solid var(--border); color: var(--text); }
 tr:hover td { background: var(--surface-2); }
@@ -142,18 +206,37 @@ tr.selected td { background: rgba(99,102,241,0.06); }
   background: var(--accent-dim) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cline x1='3' y1='6' x2='9' y2='6' stroke='%23d4a04a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") center/8px no-repeat;
   border-color: var(--border-med);
 }
-.mono { font-family: var(--font-mono); font-size: var(--fs-lg); }
-.muted { color: var(--text-muted); font-family: var(--font-body); font-size: var(--fs-md); }
+.mono { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-lg); }
+.muted { color: var(--text-muted); font-family: var(--font-body); font-size-adjust: var(--fsa-body); font-size: var(--fs-md); }
 .date { font-size: var(--fs-md); color: var(--text-dim); white-space: nowrap; }
 .target { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sev-critical { color: var(--danger); font-weight: 600; }
 .sev-high { color: var(--warn); font-weight: 600; }
-.actions { display: flex; gap: 0.25rem; }
+.actions { vertical-align: middle; }
+.actions-row { display: flex; gap: 0.25rem; }
 .act-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); cursor: pointer; transition: all 0.15s; }
 .act-btn:hover { border-color: var(--accent); color: var(--accent); }
 .act-btn svg { width: 13px; height: 13px; }
+/* El anillo global de shared.css se dibuja fuera del botón y aquí lo recorta
+   la celda; dentro de la tabla se dibuja pegado al borde. */
+.act-btn:focus-visible,
+.btn-refresh:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.chk-col input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .act-btn.warn:hover { border-color: var(--warn); color: var(--warn); }
 .act-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+/* 3.375rem = el alto medido de una fila real. No sale del padding de la celda
+   sino de la insignia de estado, que es más alta que el texto: por eso no se
+   puede deducir de --fs-lg y hay que fijarlo. Si cambia el alto de .badge,
+   este número deja de cuadrar y vuelve el salto. */
+.skeleton-table td { height: 3.375rem; }
+.chk-ghost { width: 12px; margin: 0 auto; }
+.actions-ghost { width: 62px; }
+
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; padding: 2.5rem 1rem; color: var(--text-muted); font-size: var(--fs-lg); text-align: center; }
 .empty-state svg { opacity: 0.2; }
 .error-state { color: var(--danger); }
@@ -165,6 +248,11 @@ tr.selected td { background: rgba(99,102,241,0.06); }
 
 .fade-swap-enter-active, .fade-swap-leave-active { transition: opacity 0.18s ease; }
 .fade-swap-enter-from, .fade-swap-leave-to { opacity: 0; }
+/* Sin mode="out-in" los dos estados coexisten durante el cruce. Sacando el
+   saliente del flujo, el entrante ocupa su sitio desde el primer fotograma y
+   la caja no crece durante esos 180 ms. Es lo que hacía mode="out-in", pero
+   sin depender de un transitionend que las pestañas de fondo no emiten. */
+.fade-swap-leave-active { position: absolute; inset-inline: 0; }
 
 .row-move { transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
 .row-enter-active { transition: opacity 0.25s ease; }

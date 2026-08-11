@@ -1,10 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Tuple, Set
+from typing import List, Dict, Any, Tuple
 import json
 import logging
 import re
 import xml.etree.ElementTree as ET
-import lxml.etree as lxml_etree
 from pathlib import Path
 
 
@@ -156,11 +155,11 @@ class NmapResultProcessor(ScanResultProcessor):
         stats = {}
         runstats = root.find("runstats")
         if runstats is not None:
-            finished = runstats.find("finished")
+            finished_node = runstats.find("finished")
             hosts_el = runstats.find("hosts")
             stats = {
-                "timestr": finished.get("timestr", "") if finished is not None else "",
-                "elapsed": finished.get("elapsed", "") if finished is not None else "",
+                "timestr": finished_node.get("timestr", "") if finished_node is not None else "",
+                "elapsed": finished_node.get("elapsed", "") if finished_node is not None else "",
                 "uphosts": hosts_el.get("up", "0") if hosts_el is not None else "0",
                 "downhosts": hosts_el.get("down", "0") if hosts_el is not None else "0",
                 "totalhosts": hosts_el.get("total", "0") if hosts_el is not None else "0",
@@ -403,180 +402,47 @@ class NiktoResultProcessor(ScanResultProcessor):
             return []
 
 
-class OpenVASResultProcessor(ScanResultProcessor):
-    """Procesa resultados de escaneos OpenVAS/GVM."""
+class NucleiResultProcessor(ScanResultProcessor):
+    """Procesa resultados de escaneos Nuclei (JSONL, una línea por hallazgo)."""
 
-    def process(self, raw_data: Any) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Set[str]]:
-        """Procesa datos de OpenVAS (ya parseados por OpenVASTask).
+    def process(self, raw_data: List[dict] | str) -> List[Dict[str, Any]]:
+        """Extrae los hallazgos de un fichero JSONL de Nuclei.
 
         Args:
-            raw_data: XML string o dict con estructura {'vulnerabilities': [], 'scan_results': [], 'hosts': []}
+            raw_data: Ruta al fichero ``.jsonl``, o una lista ya vacía (el caso
+                "escaneo limpio, Nuclei no escribió fichero" que
+                ``NucleiScanTask._process_results`` produce directamente).
 
         Returns:
-            Tuple conteniendo:
-            - Lista de dicts con datos de vulnerabilidades (OpenVASVulnerability)
-            - Lista de dicts con datos de resultados por host (OpenVASScanResult)
-            - Set de IPs de hosts afectados
+            Lista de diccionarios, uno por línea JSONL decodificada. Más
+            simple que Nikto: sin XML, sin ``DOCTYPE`` que limpiar. Una línea
+            corrupta se salta con log en vez de tumbar el escaneo entero.
         """
         if isinstance(raw_data, str):
-            raw_data = self._parse_openvas_structure(raw_data)
+            return self._parse_nuclei_jsonl(raw_data)
+        return list(raw_data or [])
 
-        vulnerabilities = raw_data.get('vulnerabilities', [])
-        scan_results = raw_data.get('scan_results', [])
-        hosts = set(raw_data.get('hosts', []))
+    def _parse_nuclei_jsonl(self, jsonl_path: str) -> List[Dict[str, Any]]:
+        path = Path(jsonl_path)
+        if not path.is_file():
+            return []
 
-        return vulnerabilities, scan_results, hosts
+        results: List[Dict[str, Any]] = []
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, IOError) as e:
+            logger.error(f"Error leyendo JSONL de Nuclei: {e}", exc_info=True)
+            return []
 
-    def _parse_openvas_structure(self, report_xml: str) -> dict:
-        """Extrae estructura de datos del XML de OpenVAS."""
-        if isinstance(report_xml, str):
-            root = lxml_etree.fromstring(report_xml.encode('utf-8'))
-        elif isinstance(report_xml, bytes):
-            root = lxml_etree.fromstring(report_xml)
-        else:
-            import xml.etree.ElementTree as ET
-            xml_str = ET.tostring(report_xml, encoding='unicode')
-            root = lxml_etree.fromstring(xml_str.encode('utf-8'))
-
-        report = root.xpath('//report')[0]
-        report_id = report.get('id')
-
-        task = root.xpath('//task')[0]
-        task_id = task.get('id')
-
-        results = root.xpath('//report/results/result')
-
-        vulnerabilities = {}
-        scan_results = []
-        hosts_found = set()
-
-        for result in results:
-            host_ip = result.xpath('host/text()')[0] if result.xpath('host/text()') else None
-            if not host_ip:
+        for line_number, raw_line in enumerate(content.splitlines(), start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                results.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                logger.warning(f"Línea {line_number} del JSONL de Nuclei corrupta, se salta: {e}")
                 continue
 
-            hosts_found.add(host_ip)
+        return results
 
-            nvt = result.xpath('nvt')[0] if result.xpath('nvt') else None
-            if nvt is None:
-                continue
-
-            nvt_oid = nvt.get('oid')
-            if not nvt_oid:
-                continue
-
-            # Procesar vulnerabilidad si es nueva
-            if nvt_oid not in vulnerabilities:
-                vuln_data = self._extract_vulnerability_data(nvt, result)
-                vulnerabilities[nvt_oid] = vuln_data
-
-            # Agregar resultado de detección
-            scan_results.append({
-                'nvt_oid': nvt_oid,
-                'host_ip': host_ip,
-                'port': result.xpath('port/text()')[0] if result.xpath('port/text()') else None,
-                'threat': result.xpath('threat/text()')[0] if result.xpath('threat/text()') else None
-            })
-
-        return {
-            'scan_data': {
-                'task_id': task_id,
-                'report_id': report_id,
-            },
-            'vulnerabilities': list(vulnerabilities.values()),
-            'scan_results': scan_results,
-            'hosts': hosts_found
-        }
-
-    def _extract_vulnerability_data(self, nvt, result) -> dict:
-        """Extrae datos completos de una vulnerabilidad NVT."""
-        name = nvt.xpath('name/text()')[0] if nvt.xpath('name/text()') else 'Unknown'
-        family = nvt.xpath('family/text()')[0] if nvt.xpath('family/text()') else None
-
-        severity = result.xpath('severity/text()')[0] if result.xpath('severity/text()') else '0.0'
-        severity_score = float(severity) if severity else 0.0
-
-        cvss_base = nvt.xpath('cvss_base/text()')[0] if nvt.xpath('cvss_base/text()') else None
-        cvss_base_score = float(cvss_base) if cvss_base else severity_score
-
-        # Extraer CVSS Vector de tags
-        cvss_vector = None
-        cvss_tags = nvt.xpath('tags/text()')
-        tags_dict = {}
-
-        if cvss_tags:
-            tags_text = cvss_tags[0]
-            for tag in tags_text.split('|'):
-                if '=' in tag:
-                    key, value = tag.split('=', 1)
-                    tags_dict[key.strip().lower()] = value.strip()
-                if 'cvss_base_vector=' in tag.lower():
-                    cvss_vector = tag.split('=', 1)[1].strip()
-
-        # Extraer referencias
-        refs = nvt.xpath('refs/ref')
-        cve_ids, cert_refs, bugtraq_ids, other_refs = self._categorize_references(refs)
-
-        # Quality of Detection
-        qod = nvt.xpath('qod')[0] if nvt.xpath('qod') else None
-        qod_value = int(qod.xpath('value/text()')[0]) if qod and qod.xpath('value/text()') else None
-        qod_type = qod.xpath('type/text()')[0] if qod and qod.xpath('type/text()') else None
-
-        return {
-            'nvt_oid': nvt.get('oid'),
-            'name': name,
-            'severity_score': severity_score,
-            'severity_class': self._categorize_severity(severity_score),
-            'cvss_base_score': cvss_base_score,
-            'cvss_vector': cvss_vector,
-            'cve_ids': ','.join(cve_ids) if cve_ids else None,
-            'cert_refs': ','.join(cert_refs) if cert_refs else None,
-            'bugtraq_ids': ','.join(bugtraq_ids) if bugtraq_ids else None,
-            'other_refs': ','.join(other_refs) if other_refs else None,
-            'summary': tags_dict.get('summary', ''),
-            'description': result.xpath('description/text()')[0] if result.xpath('description/text()') else tags_dict.get('vuldetect', ''),
-            'impact': tags_dict.get('impact', ''),
-            'insight': tags_dict.get('insight', ''),
-            'affected_software': tags_dict.get('affected', ''),
-            'solution_type': tags_dict.get('solution_type', 'Mitigation'),
-            'solution': tags_dict.get('solution', ''),
-            'qod_value': qod_value,
-            'qod_type': qod_type,
-            'family': family,
-            'category': nvt.xpath('category/text()')[0] if nvt.xpath('category/text()') else None
-        }
-
-    def _categorize_severity(self, score: float) -> str:
-        """Clasifica la severidad según score CVSS."""
-        if score == 0.0:
-            return 'Log'
-        elif score < 4.0:
-            return 'Low'
-        elif score < 7.0:
-            return 'Medium'
-        elif score < 9.0:
-            return 'High'
-        else:
-            return 'Critical'
-
-    def _categorize_references(self, refs) -> Tuple[List[str], List[str], List[str], List[str]]:
-        """Clasifica referencias por tipo."""
-        cve_ids = []
-        cert_refs = []
-        bugtraq_ids = []
-        other_refs = []
-
-        for ref in refs:
-            ref_type = ref.get('type', '').upper()
-            ref_id = ref.get('id', '')
-
-            if ref_type == 'CVE':
-                cve_ids.append(ref_id)
-            elif ref_type in ['CERT-BUND', 'DFN-CERT']:
-                cert_refs.append(f"{ref_type}:{ref_id}")
-            elif ref_type == 'BID':
-                bugtraq_ids.append(ref_id)
-            else:
-                other_refs.append(f"{ref_type}:{ref_id}")
-
-        return cve_ids, cert_refs, bugtraq_ids, other_refs

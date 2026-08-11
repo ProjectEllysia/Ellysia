@@ -1,17 +1,26 @@
 """Integration tests for Lybra Fase 6 ("análisis profundo").
 
 Two things to prove:
-1. Corroborator selection/launch: which of Nmap/Nikto/OpenVAS get fired given
+1. Corroborator selection/launch: which of Nmap/Nikto/Nuclei get fired given
    the scan's mode and discovered services, and that a launch failure for one
-   never breaks the Lybra scan itself.
+   never breaks the Lybra scan itself. OpenVAS no longer launches here at all
+   — removed in E0 of the OpenVAS teardown (roadmap §7/§6.3, Ronda 0); the
+   corroborator pool is Nmap + Nikto + Nuclei.
 2. Read-time merge: format_scan fuses Lybra's own findings with the linked
    corroborators' Finding rows (merge_findings, Fase 5) without persisting
-   anything new — the actual payoff of the roadmap's "Nmap/Nikto/OpenVAS become
-   complements of Lybra, not the other way around".
+   anything new — the actual payoff of the roadmap's "Nmap/Nikto/Nuclei
+   become complements of Lybra, not the other way around". Any historical
+   OpenVAS Finding row (``source="openvas"``) would still merge the same
+   way — the merge logic is source-agnostic — but the seed used below is
+   Nuclei's now, since nothing produces an OpenVAS Finding anymore.
 
 Corroborator managers' run_scan is always monkeypatched: it calls
 TaskQueue.submit (real RQ+Redis), which this suite never runs against (see
 conftest.py — only redis.Redis.ping/close are stubbed for app startup).
+
+Nuclei (Fase U2) shares Nikto's gate exactly — both are HTTP-only tools, both
+fire only when at least one HTTP-like service was found — so it rides along in
+the same scenarios rather than getting a parallel set of tests.
 """
 
 from datetime import datetime
@@ -19,11 +28,11 @@ from datetime import datetime
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.features.themis.model import NmapScan, NiktoScan, OpenVASScan, ScanStatus
+from src.modules.features.themis.model import NmapScan, NiktoScan, NucleiScan, ScanStatus
 from src.modules.features.themis.repositories import ScanRepository, KbRepository
 from src.modules.features.themis.managers import (
     LybraEngineManager, ScanManager,
-    NmapScanManager, NiktoScanManager, OpenVASScanManager,
+    NmapScanManager, NiktoScanManager, NucleiScanManager,
 )
 from src.modules.features.themis.lybra import DEFAULT_PORTS
 from src.modules.features.themis.services.parsing import validate_port
@@ -53,33 +62,36 @@ def _seed_nmap_scan(app, user_id: int, ports=None) -> int:
     return scan_id
 
 
-def _seed_openvas_cve_finding(app, user_id: int, cve_id="CVE-2021-41773", qod_value=99) -> int:
-    """A finished OpenVAS scan whose additive Finding matches the CVE the
-    Lybra KB matcher would find on the seeded Nmap scan's port 80."""
-    vulnerabilities_data = [{
-        "nvt_oid": "1.3.6.1.4.1.25623.1.0.999", "name": "Apache Path Traversal",
-        "severity_score": 9.8, "severity_class": "Critical", "cvss_base_score": 9.8,
-        "cvss_vector": "CVSS:3.1/AV:N", "cve_ids": cve_id,
-        "cert_refs": None, "bugtraq_ids": None, "other_refs": None,
-        "summary": "", "description": "Path traversal", "impact": "", "insight": "",
-        "affected_software": "", "solution_type": "VendorFix", "solution": "Upgrade",
-        "qod_value": qod_value, "qod_type": "exploit", "family": "Web Servers", "category": "3",
-    }]
-    scan_results_data = [{
-        "nvt_oid": "1.3.6.1.4.1.25623.1.0.999", "host_ip": "10.0.0.5",
-        "port": "80/tcp", "threat": "Critical",
+def _seed_nuclei_cve_finding(app, user_id: int, cve_id="CVE-2021-41773") -> int:
+    """A finished Nuclei scan whose additive Finding matches the CVE the
+    Lybra KB matcher would find on the seeded Nmap scan's port 80.
+
+    Replaces the pre-Ronda-2 OpenVAS seed (roadmap §7/§6.3, Ronda 2 — E2):
+    same purpose (a second, independent source reporting the same CVE so the
+    merge test below has something real to fuse), different scanner. Nikto
+    can't stand in for this — its findings never carry a CVE at all (no CVE,
+    no CVSS, no CPE, by design)."""
+    results_data = [{
+        "template-id": "CVE-2021-41773-path-traversal",
+        "info": {
+            "name": "Apache Path Traversal",
+            "severity": "critical",
+            "classification": {"cve-id": [cve_id.lower()], "cvss-score": 9.8},
+        },
+        "type": "http",
+        "matched-at": "http://10.0.0.5:80/",
+        "host": "10.0.0.5",
     }]
     with app.app_context():
         with UnitOfWork() as uow:
-            scan = OpenVASScan(target="10.0.0.5", user_id=user_id, started_at=datetime.now(),
-                              status=ScanStatus.FINISHED.value, task_id="t1", report_id="r1")
+            scan = NucleiScan(target="10.0.0.5", user_id=user_id, started_at=datetime.now(),
+                              status=ScanStatus.FINISHED.value)
             ScanRepository(uow).save(scan)
             scan_id = scan.id
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
             scan = repo.get_by_id(scan_id)
-            domain_data = (vulnerabilities_data, scan_results_data, {"10.0.0.5"})
-            OpenVASScanManager()._persist_scan_results(uow, scan, domain_data)
+            NucleiScanManager()._persist_scan_results(uow, scan, results_data)
     return scan_id
 
 
@@ -100,8 +112,9 @@ def _seed_kb_apache_cve(app):
 # ------------------------------------------------------- corroborator launch
 
 def _patch_corroborators(monkeypatch, calls: dict):
-    """Stub run_scan on all three corroborator managers; records calls, never
-    touches the (Redis-backed) TaskQueue."""
+    """Stub run_scan on the three corroborator managers; records calls, never
+    touches the (Redis-backed) TaskQueue. OpenVASScanManager is not stubbed
+    here — nothing launches it anymore (E0)."""
     def make_stub(name, next_id):
         def stub(self, **kwargs):
             calls.setdefault(name, []).append(kwargs)
@@ -109,15 +122,16 @@ def _patch_corroborators(monkeypatch, calls: dict):
         return stub
     monkeypatch.setattr(NmapScanManager, "run_scan", make_stub("nmap", 901))
     monkeypatch.setattr(NiktoScanManager, "run_scan", make_stub("nikto", 902))
-    monkeypatch.setattr(OpenVASScanManager, "run_scan", make_stub("openvas", 903))
+    monkeypatch.setattr(NucleiScanManager, "run_scan", make_stub("nuclei", 904))
 
 
-def test_deep_self_discovery_launches_all_three_with_http_service(app, admin_user, monkeypatch):
+def test_deep_self_discovery_launches_three_with_http_service(app, admin_user, monkeypatch):
     calls: dict = {}
     _patch_corroborators(monkeypatch, calls)
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [80, 22])
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
 
     with app.app_context():
         mgr = LybraEngineManager()
@@ -127,8 +141,8 @@ def test_deep_self_discovery_launches_all_three_with_http_service(app, admin_use
         with UnitOfWork() as uow:
             escan = ScanRepository(uow).get_by_id(escan.id)
 
-    assert set(calls.keys()) == {"nmap", "nikto", "openvas"}
-    assert sorted(escan.deep_scan_ids) == [901, 902, 903]
+    assert set(calls.keys()) == {"nmap", "nikto", "nuclei"}
+    assert sorted(escan.deep_scan_ids) == [901, 902, 904]
 
 
 def test_deep_skips_nmap_when_source_scan_id_present(app, admin_user, monkeypatch):
@@ -143,10 +157,10 @@ def test_deep_skips_nmap_when_source_scan_id_present(app, admin_user, monkeypatc
 
     # A fresh Nmap corroborator would be redundant: Lybra already has Nmap ports.
     assert "nmap" not in calls
-    assert "nikto" in calls and "openvas" in calls
+    assert "nikto" in calls and "nuclei" in calls
 
 
-def test_deep_skips_nikto_without_http_service(app, admin_user, monkeypatch):
+def test_deep_skips_nikto_and_nuclei_without_http_service(app, admin_user, monkeypatch):
     calls: dict = {}
     _patch_corroborators(monkeypatch, calls)
     nmap_id = _seed_nmap_scan(app, admin_user.id, ports=_SSH_ONLY_PORTS)
@@ -157,7 +171,7 @@ def test_deep_skips_nikto_without_http_service(app, admin_user, monkeypatch):
         mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=True)
 
     assert "nikto" not in calls
-    assert "openvas" in calls          # unconditional
+    assert "nuclei" not in calls       # same HTTP-only gate as Nikto
 
 
 def test_deep_false_launches_nothing(app, admin_user, monkeypatch):
@@ -182,10 +196,11 @@ def test_deep_one_corroborator_failure_does_not_fail_the_scan(app, admin_user, m
         raise RuntimeError("queue unavailable")
     monkeypatch.setattr(NiktoScanManager, "run_scan", failing_nikto)
     monkeypatch.setattr(NmapScanManager, "run_scan", lambda self, **k: 901)
-    monkeypatch.setattr(OpenVASScanManager, "run_scan", lambda self, **k: 903)
+    monkeypatch.setattr(NucleiScanManager, "run_scan", lambda self, **k: 904)
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [80])
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
 
     with app.app_context():
         mgr = LybraEngineManager()
@@ -196,7 +211,7 @@ def test_deep_one_corroborator_failure_does_not_fail_the_scan(app, admin_user, m
             escan = ScanRepository(uow).get_by_id(escan.id)
 
     assert escan.status == ScanStatus.FINISHED.value   # Nikto's failure didn't sink the scan
-    assert sorted(escan.deep_scan_ids) == [901, 903]    # only the two that succeeded
+    assert sorted(escan.deep_scan_ids) == [901, 904]   # only the ones that succeeded
 
 
 def test_deep_nmap_port_string_is_valid():
@@ -211,7 +226,7 @@ def test_deep_nmap_port_string_is_valid():
 def test_format_scan_merges_corroborator_finding_without_double_counting(app, admin_user):
     _seed_kb_apache_cve(app)
     nmap_id = _seed_nmap_scan(app, admin_user.id)
-    openvas_id = _seed_openvas_cve_finding(app, admin_user.id, qod_value=99)
+    nuclei_id = _seed_nuclei_cve_finding(app, admin_user.id)
 
     with app.app_context():
         mgr = LybraEngineManager()
@@ -222,19 +237,19 @@ def test_format_scan_merges_corroborator_finding_without_double_counting(app, ad
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
             e = repo.get_by_id(escan.id)
-            e.deep_scan_ids = [openvas_id]
+            e.deep_scan_ids = [nuclei_id]
 
         result = mgr.format_scan(escan.id)
 
     assert result["deep"] is True
-    assert result["deepScanIds"] == [openvas_id]
+    assert result["deepScanIds"] == [nuclei_id]
 
     cve_findings = [f for f in result["findings"] if f["cveIds"] == ["CVE-2021-41773"]]
     assert len(cve_findings) == 1                        # merged, not duplicated
     merged = cve_findings[0]
-    assert set(merged["source"].split(",")) == {"lybra", "openvas"}
-    assert merged["qod"] == 99                            # OpenVAS's stronger signal wins
-    assert merged["confirmed"] is True                    # escalated by the OpenVAS side
+    assert set(merged["source"].split(",")) == {"lybra", "nuclei"}
+    assert merged["qod"] == 90                            # Nuclei's stronger signal wins (QOD_NUCLEI_MATCH)
+    assert merged["confirmed"] is True                    # escalated by the Nuclei side
 
     # The two open_port informational findings (Lybra-only) are untouched.
     assert sum(1 for f in result["findings"] if f["category"] == "open_port") == 2

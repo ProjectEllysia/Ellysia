@@ -1,7 +1,7 @@
-"""Unit tests for Lybra's own fingerprinting (Fase F): HTTP/SSH dissectors,
+"""Unit tests for Lybra's own fingerprinting (Fase F): HTTP/SSH/FTP dissectors,
 raw SSH_MSG_KEXINIT parsing, the HASSH formula, and oracle concordance.
 
-Pure logic + a fake socket for SshProbe — no real network anywhere.
+Pure logic + a fake socket for SshProbe/FtpProbe — no real network anywhere.
 """
 
 import hashlib
@@ -16,11 +16,14 @@ from src.modules.features.themis.lybra import (
     parse_kexinit,
     compute_hassh_server,
     SshProbe,
+    parse_ftp_banner,
+    fingerprint_ftp,
+    FtpProbe,
     agrees_with_nmap,
     concordance_rate,
 )
 from src.modules.features.themis.lybra.checks import Response
-from src.modules.features.themis.lybra.fingerprint import SSH_MSG_KEXINIT
+from src.modules.features.themis.lybra.fingerprinting.ssh import SSH_MSG_KEXINIT
 from src.modules.features.themis.lybra.engine import Service
 from src.modules.features.themis.managers import LybraEngineManager
 
@@ -251,6 +254,68 @@ def test_ssh_probe_returns_none_on_connect_failure():
 def test_ssh_probe_returns_none_on_empty_banner():
     probe = SshProbe(connect=lambda addr, timeout: _FakeSocket(b""))
     assert probe.fetch("10.0.0.5", 22) is None
+
+
+# ============================================================== FTP dissector
+
+def test_parse_ftp_banner_vsftpd_parenthesised_form():
+    product, version = parse_ftp_banner("220 (vsFTPd 2.3.4)")
+    assert (product, version) == ("vsFTPd", "2.3.4")
+
+
+def test_parse_ftp_banner_proftpd_bare_form():
+    product, version = parse_ftp_banner(
+        "220 ProFTPD 1.3.5 Server (Debian) [::ffff:10.0.0.1]"
+    )
+    assert (product, version) == ("ProFTPD", "1.3.5")
+
+
+def test_parse_ftp_banner_filezilla_two_word_product():
+    product, version = parse_ftp_banner("220-FileZilla Server 0.9.60beta")
+    assert (product, version) == ("FileZilla Server", "0.9.60beta")
+
+
+def test_parse_ftp_banner_versionless_pureftpd_yields_nothing():
+    # Pure-FTPd's default banner deliberately omits the version — no CPE
+    # should be invented for what was never actually observed.
+    banner = "220---------- Welcome to Pure-FTPd [privsep] [TLS] ----------"
+    assert parse_ftp_banner(banner) == (None, None)
+
+
+def test_parse_ftp_banner_rejects_non_220_lines():
+    assert parse_ftp_banner("530 Login incorrect.") == (None, None)
+    assert parse_ftp_banner("") == (None, None)
+
+
+def test_fingerprint_ftp_confidence_reflects_whether_a_version_was_found():
+    hit = fingerprint_ftp("220 (vsFTPd 2.3.4)")
+    assert hit.product == "vsFTPd" and hit.version == "2.3.4" and hit.confidence == 0.9
+
+    miss = fingerprint_ftp("220 Service ready.")
+    assert miss.product is None and miss.confidence == 0.0
+
+
+# =============================================================== FTP probe
+
+def test_ftp_probe_reads_banner_over_fake_socket():
+    fake_sock = _FakeSocket(b"220 (vsFTPd 2.3.4)\r\n")
+    probe = FtpProbe(connect=lambda addr, timeout: fake_sock)
+
+    banner = probe.fetch("10.0.0.5", 21)
+
+    assert banner == "220 (vsFTPd 2.3.4)"
+    assert fake_sock.closed is True
+
+
+def test_ftp_probe_returns_none_on_connect_failure():
+    def failing_connect(addr, timeout):
+        raise OSError("connection refused")
+    assert FtpProbe(connect=failing_connect).fetch("10.0.0.5", 21) is None
+
+
+def test_ftp_probe_returns_none_on_empty_banner():
+    probe = FtpProbe(connect=lambda addr, timeout: _FakeSocket(b""))
+    assert probe.fetch("10.0.0.5", 21) is None
 
 
 # ================================================================== oracle

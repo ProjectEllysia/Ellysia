@@ -4,7 +4,7 @@ Managers for security scan orchestration and result persistence.
 This package provides manager classes for coordinating security scans:
 - NmapScanManager: Network exploration and security scanning.
 - NiktoScanManager: Web server vulnerability scanning.
-- OpenVASScanManager: Comprehensive vulnerability management.
+- NucleiScanManager: Template-based vulnerability scanning (roadmap Fase U1).
 - LybraEngineManager: self-built detection engine (Lybra).
 
 Each manager handles the complete lifecycle of a scan:
@@ -36,9 +36,12 @@ from .programed import ProgramedScanManager
 from .scan_folder import ScanFolderManager
 from .scan_history import ScanHistoryManager
 from .traceroute import TracerouteManager
-from .thirdparty_scans_managers import NmapScanManager, NiktoScanManager, OpenVASScanManager
-from .lybra_engine import LybraEngineManager, AuthorizedTargetManager
-from .kb import KbSyncManager
+from .nmap import NmapScanManager
+from .nikto import NiktoScanManager
+from .nuclei import NucleiScanManager
+from .authorized_target import AuthorizedTargetManager
+from .lybra import LybraEngineManager
+from .kb_sync import CveAdvisory, KbProduct, KbQueryManager, KbSyncManager
 from .reports import ThemisReportManager
 
 __all__ = [
@@ -50,9 +53,13 @@ __all__ = [
     "TracerouteManager",
     "NmapScanManager",
     "NiktoScanManager",
-    "OpenVASScanManager",
+    "NucleiScanManager",
     "LybraEngineManager",
     "KbSyncManager",
+    # Lectura de la KB local: contrato público para otros módulos (Aegis).
+    "KbQueryManager",
+    "CveAdvisory",
+    "KbProduct",
     "AuthorizedTargetManager",
     "ThemisReportManager",
 ]

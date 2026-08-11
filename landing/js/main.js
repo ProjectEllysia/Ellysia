@@ -11,7 +11,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ── Boot log ──────────────────────────────────────────────────
 const BOOT_LINES = [
   { prefix: '> initializing ellysia',                       tail: 'ok', cls: 'mod' },
-  { prefix: '> loading sentinel · nmap/nikto/openvas',   tail: 'ok', cls: 'mod' },
+  { prefix: '> loading sentinel · nmap/nikto/nuclei',   tail: 'ok', cls: 'mod' },
   { prefix: '> loading aegis · 73 topics · 19 brands',   tail: 'ok', cls: 'mod' },
   { prefix: '> loading iris · 37 header rules',          tail: 'ok', cls: 'mod' },
   { prefix: '> loading acheron · aes-256-gcm',           tail: 'ok', cls: 'mod' },

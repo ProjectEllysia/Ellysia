@@ -1,6 +1,28 @@
 <template>
   <div class="viewer">
-    <div v-if="!viewerDoc.data && !viewerDoc.loading" class="viewer-empty">
+    <!-- Generar con IA es la acción más lenta de la aplicación y el único
+         indicio era un spinner en el botón del panel lateral: el centro seguía
+         enseñando el vacío de antes, así que no había forma de saber si estaba
+         pasando algo. Aquí se dibuja la forma de lo que va a llegar, y el
+         contador confirma que sigue vivo. No se inventan fases: no hay
+         endpoint de progreso para la generación, y unas etapas de adorno
+         mentirían sobre en qué punto está. -->
+    <div v-if="generating" class="viewer-generating">
+      <p class="gen-title">Redactando la píldora…</p>
+      <p class="gen-elapsed">{{ elapsedLabel }}</p>
+      <div class="gen-skeleton" aria-hidden="true">
+        <span class="skeleton skeleton--title"></span>
+        <span class="skeleton skeleton--line"></span>
+        <span class="skeleton skeleton--line"></span>
+        <span class="skeleton skeleton--line skeleton--w60"></span>
+        <span class="skeleton skeleton--block"></span>
+        <span class="skeleton skeleton--line"></span>
+        <span class="skeleton skeleton--line skeleton--w60"></span>
+      </div>
+      <p class="gen-note">Puedes seguir usando el resto de Aegis mientras tanto.</p>
+    </div>
+
+    <div v-else-if="!viewerDoc.data && !viewerDoc.loading" class="viewer-empty">
       <h3>Visor de Documentos</h3>
       <p>Selecciona un documento del historial o genera una nueva píldora para ver su contenido aquí.</p>
     </div>
@@ -11,18 +33,20 @@
     </div>
 
     <Transition name="pill-reveal" mode="out-in">
-      <div v-if="viewerDoc.data && !viewerDoc.loading" class="viewer-content">
+      <div v-if="viewerDoc.data && !viewerDoc.loading && !generating" class="viewer-content">
         <div class="viewer-toolbar">
           <span class="doc-id">Doc #{{ viewerDoc.data.id }}</span>
           <span v-if="viewerDoc.data.topicId" class="doc-topic">Tema #{{ viewerDoc.data.topicId }}</span>
           <span class="doc-date">{{ formatDate(viewerDoc.data.generatedAt) }}</span>
           <div class="toolbar-spacer"></div>
           <div class="export-dropdown">
-            <button type="button" class="toolbar-btn" @click="exportOpen = !exportOpen">Exportar</button>
-            <div v-if="exportOpen" class="export-menu">
-              <button @click="emitExport('md')">Markdown</button>
-              <button @click="emitExport('html')">HTML</button>
-              <button @click="emitExport('json')">JSON</button>
+            <button type="button" class="toolbar-btn"
+              :aria-expanded="exportOpen" aria-haspopup="menu"
+              @click="exportOpen = !exportOpen">Exportar</button>
+            <div v-if="exportOpen" class="export-menu" role="menu">
+              <button role="menuitem" @click="emitExport('md')">Markdown</button>
+              <button role="menuitem" @click="emitExport('html')">HTML</button>
+              <button role="menuitem" @click="emitExport('json')">JSON</button>
             </div>
           </div>
           <button type="button" class="toolbar-btn" @click="emit('preview')">Vista previa</button>
@@ -36,6 +60,8 @@
             v-if="viewerDoc.data.status === 'done'"
             type="button"
             class="toolbar-btn toolbar-btn--campaign"
+            :disabled="!hasQuestions"
+            :title="hasQuestions ? 'Lanzar una campaña con esta píldora' : 'Añade preguntas al test desde el editor para poder lanzar una campaña'"
             @click="emit('campaign')"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -92,17 +118,51 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { useUtils } from '@/composables/useUtils'
+import { useDismissable } from '@/composables/useDismissable'
 
 const { formatDate } = useUtils()
-defineProps({ viewerDoc: { type: Object, default: () => ({ loading: false, data: null }) } })
+const props = defineProps({
+  viewerDoc: { type: Object, default: () => ({ loading: false, data: null }) },
+  generating: { type: Boolean, default: false },
+})
+
+// Sin preguntas el backend rechaza el lanzamiento (CampaignNoQuestionsError);
+// mejor decirlo aquí que dejar al usuario rellenar el modal para nada.
+const hasQuestions = computed(() => (props.viewerDoc?.data?.pill?.questions?.length || 0) > 0)
 const emit = defineEmits(['close', 'export', 'preview', 'edit', 'campaign'])
 const exportOpen = ref(false)
 
 const sevIcons = { critica: '🔴', alta: '🟠', media: '🟡', baja: '🟢', informativa: '🔵' }
 function sevIcon(sev) { return sevIcons[sev] || sevIcons.informativa }
 function emitExport(fmt) { exportOpen.value = false; emit('export', fmt) }
+
+// Clic fuera y Escape: el menú solo se cerraba volviendo a pulsar "Exportar".
+useDismissable('.export-dropdown', () => { exportOpen.value = false })
+
+/* ── Contador de la generación ──────────────────────────────────────────
+   Un tic por segundo mientras se genera, y ni uno más: el intervalo solo
+   existe entre que empieza y termina. */
+const elapsed = ref(0)
+let elapsedTimer = null
+
+watch(() => props.generating, (activo) => {
+  clearInterval(elapsedTimer)
+  if (!activo) return
+  elapsed.value = 0
+  elapsedTimer = setInterval(() => { elapsed.value += 1 }, 1000)
+}, { immediate: true })
+
+onUnmounted(() => clearInterval(elapsedTimer))
+
+const elapsedLabel = computed(() => {
+  const s = elapsed.value
+  if (s < 60) return `${s} s`
+  const minutos = Math.floor(s / 60)
+  const segundos = String(s % 60).padStart(2, '0')
+  return `${minutos}:${segundos} min`
+})
 </script>
 
 <style scoped>
@@ -114,23 +174,46 @@ function emitExport(fmt) { exportOpen.value = false; emit('export', fmt) }
 .spinner-lg { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: seq-spin .7s linear infinite; }
 .viewer-content { flex: 1; display: flex; flex-direction: column; }
 .viewer-toolbar { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.85rem; background: var(--surface); border-bottom: 1px solid var(--border); font-size: var(--fs-md); color: var(--text-muted); flex-wrap: wrap; }
-.doc-id, .doc-topic { font-weight: 600; color: var(--text-dim); font-family: var(--font-mono); font-size: var(--fs-md); }
+.doc-id, .doc-topic { font-weight: 600; color: var(--text-dim); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-md); }
 .toolbar-spacer { flex: 1; }
 .toolbar-btn { padding: 0.25rem 0.6rem; font-size: var(--fs-md); font-weight: 600; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text-dim); cursor: pointer; transition: all 0.2s; }
-.toolbar-btn:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.toolbar-btn:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .toolbar-btn--campaign { display: inline-flex; align-items: center; gap: 0.3rem; background: var(--accent-dim); border-color: var(--accent); color: var(--accent-bright); }
-.toolbar-btn--campaign:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); box-shadow: 0 0 14px var(--accent-dim); }
+.toolbar-btn--campaign:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); border-color: var(--accent); box-shadow: 0 0 14px var(--accent-dim); }
+.toolbar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .toolbar-close { border: none; background: none; font-size: var(--fs-lg); padding: 0 0.25rem; line-height: 1; }
 .toolbar-close:hover { background: none; color: var(--danger); }
 .export-dropdown { position: relative; }
 .export-menu { position: absolute; right: 0; top: 100%; margin-top: 3px; z-index: 20; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; overflow: hidden; min-width: 100px; }
 .export-menu button { display: block; width: 100%; text-align: left; padding: 0.35rem 0.6rem; font-size: var(--fs-md); background: none; border: none; color: var(--text-dim); cursor: pointer; transition: background 0.15s; }
 .export-menu button:hover { background: var(--accent); color: var(--on-accent); }
-.pill-body { padding: 1.25rem; overflow-y: auto; flex: 1; }
-.pill-title { font-size: var(--fs-xl); font-weight: 800; color: var(--text); margin: 0 0 0.2rem; font-family: var(--font-display); }
+.toolbar-btn:focus-visible,
+.export-menu button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ── Generación en curso ── */
+.viewer-generating { padding: 2rem 1.5rem; }
+.gen-title {
+  margin: 0; font-family: var(--font-display); font-size-adjust: var(--fsa-display);
+  font-size: var(--fs-xl); font-weight: 600; color: var(--text);
+}
+.gen-elapsed {
+  margin: 0.15rem 0 1.4rem;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
+  font-size: var(--fs-sm); color: var(--accent); letter-spacing: 0.06em;
+}
+.gen-note { margin: 1.4rem 0 0; font-size: var(--fs-sm); color: var(--text-muted); }
+
+/* La silueta de la píldora que va a llegar: cuando aparece de verdad, ocupa
+   el mismo sitio y no hay salto. La forma la pone `.skeleton` de shared.css;
+   aquí solo el ritmo vertical propio de un documento. */
+.gen-skeleton { display: flex; flex-direction: column; gap: 0.7rem; }
+.gen-skeleton .skeleton--title { margin-bottom: 0.5rem; }
+.gen-skeleton .skeleton--block { margin: 0.5rem 0; }
+.pill-body { padding: 1.25rem 4rem; overflow-y: auto; flex: 1; }
+.pill-title { font-size: var(--fs-3xl); font-weight: 800; color: var(--text); margin: 0 0 0.8rem; font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); text-align: center; }
 .pill-subtitle { font-size: var(--fs-lg); color: var(--text-dim); margin: 0 0 1.25rem; }
 .pill-section { margin-bottom: 1.25rem; }
-.pill-section h3 { font-size: var(--fs-xl); font-weight: 700; color: var(--accent); margin: 0 0 0.65rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--border); font-family: var(--font-display); }
+.pill-section h3 { font-size: var(--fs-xl); font-weight: 700; color: var(--accent); margin: 0 0 0.65rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--border); font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .pill-intro, .pill-closing { font-size: var(--fs-lg); line-height: 1.6; color: var(--text); white-space: pre-wrap; }
 .pill-tip { display: flex; gap: 0.65rem; margin-bottom: 0.85rem; }
 .tip-num { width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0; background: var(--accent); color: var(--on-accent); font-size: var(--fs-md); font-weight: 700; display: flex; align-items: center; justify-content: center; }

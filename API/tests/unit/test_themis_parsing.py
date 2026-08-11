@@ -63,7 +63,7 @@ class TestValidateIpFormats:
 
     @pytest.fixture(autouse=True)
     def _allow_local_ips(self, monkeypatch):
-        monkeypatch.setattr(CR, "are_local_ips_allowed", lambda: True)
+        monkeypatch.setattr(CR, "themis_config", lambda: CR.ThemisConfig(are_local_ips_allowed=True))
 
     def test_single_ip(self):
         assert validate_ip("192.168.1.1") == ["192.168.1.1"]
@@ -108,19 +108,19 @@ class TestPrivateIpPolicy:
     default de config_reading es False; SecOpsConfig.json debe coincidir)."""
 
     def test_validate_ip_rejects_private_by_default(self, monkeypatch):
-        monkeypatch.setattr(CR, "are_local_ips_allowed", lambda: False)
+        monkeypatch.setattr(CR, "themis_config", lambda: CR.ThemisConfig(are_local_ips_allowed=False))
         with pytest.raises(PrivateIPRequested):
             validate_ip("192.168.1.1")
 
     def test_validate_ip_allows_private_when_configured(self, monkeypatch):
-        monkeypatch.setattr(CR, "are_local_ips_allowed", lambda: True)
+        monkeypatch.setattr(CR, "themis_config", lambda: CR.ThemisConfig(are_local_ips_allowed=True))
         assert validate_ip("192.168.1.1") == ["192.168.1.1"]
 
     def test_reject_private_ip_rejects_private_by_default(self, monkeypatch):
-        monkeypatch.setattr(CR, "are_local_ips_allowed", lambda: False)
+        monkeypatch.setattr(CR, "themis_config", lambda: CR.ThemisConfig(are_local_ips_allowed=False))
         with pytest.raises(PrivateIPRequested):
             reject_private_ip("10.0.0.5")
 
     def test_reject_private_ip_allows_public(self, monkeypatch):
-        monkeypatch.setattr(CR, "are_local_ips_allowed", lambda: False)
+        monkeypatch.setattr(CR, "themis_config", lambda: CR.ThemisConfig(are_local_ips_allowed=False))
         reject_private_ip("8.8.8.8")  # no debe lanzar

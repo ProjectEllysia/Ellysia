@@ -9,9 +9,12 @@
     </div>
 
     <Transition name="fade-swap" mode="out-in">
-      <div v-if="loading && !scans.length" key="loading" class="empty-state">
-        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="spin"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-        <span>Cargando…</span>
+      <div v-if="loading && !scans.length" key="loading" class="scan-list"
+           aria-busy="true" aria-label="Cargando veredictos">
+        <div v-for="n in SKELETON_ROWS" :key="n" class="scan-ghost" aria-hidden="true">
+          <span class="skeleton skeleton--circle ghost-dot"></span>
+          <span class="skeleton skeleton--line skeleton--w60"></span>
+        </div>
       </div>
       <div v-else-if="!scans.length" key="empty" class="empty-state">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M12 3v18M7 21h10M5 7h14M5 7l-2.5 5a3 3 0 0 0 5 0L5 7zM19 7l-2.5 5a3 3 0 0 0 5 0L19 7z"/></svg>
@@ -108,9 +111,21 @@
                 </Transition>
               </template>
 
-              <div v-if="scan.status === 'finished' && scan.targetAuthorized === false" class="body-unauth-hint">
+              <!-- No se muestra para un escaneo de agente (Fase I, `assetId`): ahí el
+                   fingerprinting y las comprobaciones activas están desactivados
+                   siempre, por diseño (modo payload) — autorizar el objetivo no
+                   cambiaría nada, así que sugerirlo sería un consejo sin efecto. -->
+              <div v-if="scan.status === 'finished' && scan.targetAuthorized === false && !scan.assetId" class="body-unauth-hint">
                 Objetivo no autorizado: el fingerprinting propio y las comprobaciones activas de Lybra no se
                 ejecutaron sobre '{{ scan.target }}'. Autorízalo en el panel de lanzamiento para un análisis más completo.
+              </div>
+
+              <!-- Solo cuando hay paquetes que el matcher no pudo ni identificar. -->
+              <div v-if="scan.status === 'finished' && coverageGap(scan)" class="body-coverage-hint">
+                Nota de cobertura: {{ coverageGap(scan).unresolved }} de los {{ coverageGap(scan).packages }}
+                paquetes inventariados no se pudieron identificar contra el catálogo de vulnerabilidades,
+                así que no se comprobaron. El resto sí se comprobó — su ausencia de hallazgos es una
+                verificación real.
               </div>
 
               <div v-if="scan.status === 'finished'" class="doc-section">
@@ -123,7 +138,12 @@
 
                 <div v-if="docsLoading(scan.id) && !docsFor(scan.id).length" class="doc-empty">Cargando documentos…</div>
                 <div v-else-if="!docsFor(scan.id).length" class="doc-empty">Sin documentos generados</div>
-                <div v-else class="doc-list">
+                <!-- TransitionGroup: la tarjeta de un documento nuevo (recién generado) entra
+                     con una animación en vez de aparecer de golpe, y el resto se desliza para
+                     hacerle sitio. El estado (pendiente → generando → listo) es un cambio en el
+                     mismo doc, no una entrada/salida de la lista, así que ese swap lo anima el
+                     <Transition> interno de .doc-right, con key por estado. -->
+                <TransitionGroup v-else tag="div" name="doc-item" class="doc-list">
                   <div v-for="doc in docsFor(scan.id)" :key="doc.documentId" class="doc-item">
                     <div class="doc-left">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="doc-icon"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -131,20 +151,22 @@
                       <span v-if="doc.createdAt" class="doc-date">{{ fmtDate(doc.createdAt) }}</span>
                     </div>
                     <div class="doc-right">
-                      <template v-if="doc.status === 'done'">
-                        <button class="doc-icon-btn" @click="$emit('download-doc', doc.documentId)" title="Descargar">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                        </button>
-                        <button class="doc-icon-btn danger" @click="$emit('delete-doc', scan.id, doc.documentId)" title="Eliminar">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
-                        </button>
-                      </template>
-                      <span v-else-if="doc.status === 'running'" class="doc-status running">Generando…</span>
-                      <span v-else-if="doc.status === 'pending'" class="doc-status pending">Pendiente</span>
-                      <span v-else-if="doc.status === 'error'" class="doc-status error">Error</span>
+                      <Transition name="fade-swap" mode="out-in">
+                        <span v-if="doc.status === 'done'" key="done" class="doc-actions">
+                          <button class="doc-icon-btn" @click="$emit('download-doc', doc.documentId)" title="Descargar">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                          </button>
+                          <button class="doc-icon-btn danger" @click="$emit('delete-doc', scan.id, doc.documentId)" title="Eliminar">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                          </button>
+                        </span>
+                        <span v-else-if="doc.status === 'running'" key="running" class="doc-status running">Generando…</span>
+                        <span v-else-if="doc.status === 'pending'" key="pending" class="doc-status pending">Pendiente</span>
+                        <span v-else-if="doc.status === 'error'" key="error" class="doc-status error">Error</span>
+                      </Transition>
                     </div>
                   </div>
-                </div>
+                </TransitionGroup>
 
                 <div class="doc-gen-bar">
                   <label class="doc-checkbox"><input type="checkbox" v-model="aiFlags[scan.id]" /><span>Análisis IA</span></label>
@@ -181,6 +203,9 @@ const props = defineProps({
   docsByScan: { type: Object, default: () => ({}) },
 })
 const emit = defineEmits(['refresh', 'delete', 'load-docs', 'generate-pdf', 'download-doc', 'delete-doc', 'load-more'])
+
+/** Veredictos fantasma mientras carga: los que caben sin alargar la caja. */
+const SKELETON_ROWS = 4
 
 const LADDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 const PRIO_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 }
@@ -239,6 +264,25 @@ function summary(scan) {
   return out
 }
 
+/**
+ * Detecta un análisis de inventario (Fase I) con paquetes sin identificar.
+ *
+ * `cpeResolved` (Fase I-b, `Finding.cpe_resolved`) da el número exacto de
+ * paquetes que el matcher no pudo ni resolver a un CPE — ya no es una
+ * heurística sobre ausencia de detecciones, que mezclaba eso con "KB sin
+ * sincronizar" o simplemente "comprobado y limpio".
+ *
+ * Devuelve `null` si no aplica (sin paquetes, o todos resueltos), o
+ * `{ packages, unresolved }` cuando el aviso debe mostrarse.
+ */
+function coverageGap(scan) {
+  const findings = scan.findings || []
+  const packages = findings.filter(f => f.category === 'installed_package').length
+  const unresolved = findings.filter(f => f.category === 'installed_package' && f.cpeResolved === false).length
+  if (!packages || !unresolved) return null
+  return { packages, unresolved }
+}
+
 /** Ordena los hallazgos por prioridad (crítico primero), luego confirmados antes. */
 function sortedFindings(scan) {
   return [...(scan.findings || [])].sort((a, b) => {
@@ -258,7 +302,7 @@ function fmtDate(iso) {
 <style scoped>
 .results-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .results-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 0.7rem 1rem; border-bottom: 1px solid var(--border); }
-.toolbar-title { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-xl); color: var(--text); }
+.toolbar-title { font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-weight: 600; font-size: var(--fs-xl); color: var(--text); }
 .btn-refresh { display: flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.7rem; background: var(--surface-2); border: 1px solid var(--border-solid); border-radius: 6px; color: var(--text-dim); font-size: var(--fs-md); cursor: pointer; transition: all 0.2s; }
 .btn-refresh:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
 .btn-refresh svg { width: 12px; height: 12px; }
@@ -272,6 +316,15 @@ function fmtDate(iso) {
 
 /* ── Tarjeta de escaneo ── */
 .scan-list { display: flex; flex-direction: column; }
+/* Mismo alto y mismo padding que .scan-head, para que al llegar los
+   veredictos la lista no cambie de tamaño. */
+.scan-ghost {
+  display: flex; align-items: center; gap: 0.65rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.ghost-dot { width: 15px; flex-shrink: 0; }
+
 .scan-card { border-bottom: 1px solid var(--border); }
 .scan-card:last-child { border-bottom: none; }
 .scan-card.open { background: var(--surface-2); }
@@ -293,9 +346,9 @@ function fmtDate(iso) {
 .deep-badge { font-size: var(--fs-md); padding: 0.12rem 0.45rem; border-radius: 5px; color: var(--accent-bright); background: var(--accent-dim); flex-shrink: 0; }
 
 .prio-summary { display: flex; align-items: center; gap: 0.25rem; margin-left: auto; flex-shrink: 0; }
-.prio-pill { min-width: 20px; text-align: center; font-size: var(--fs-md); font-weight: 700; padding: 0.1rem 0.35rem; border-radius: 5px; font-family: var(--font-mono); }
+.prio-pill { min-width: 20px; text-align: center; font-size: var(--fs-md); font-weight: 700; padding: 0.1rem 0.35rem; border-radius: 5px; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .prio-clean { font-size: var(--fs-md); color: var(--success); }
-.scan-date { font-size: var(--fs-md); color: var(--text-muted); font-family: var(--font-mono); flex-shrink: 0; white-space: nowrap; }
+.scan-date { font-size: var(--fs-md); color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); flex-shrink: 0; white-space: nowrap; }
 
 /* Escala de severidad (compartida por pills de resumen y chips de finding) */
 .critical { color: var(--danger); background: var(--danger-dim); }
@@ -339,7 +392,7 @@ function fmtDate(iso) {
 .findings-chevron { display: grid; place-items: center; color: var(--text-muted); transition: transform 0.2s; }
 .findings-chevron svg { width: 12px; height: 12px; }
 .findings-chevron.rot { transform: rotate(90deg); }
-.findings-count { font-size: var(--fs-body); font-weight: 700; color: var(--text-muted); background: var(--surface-2); padding: 0.05rem 0.45rem; border-radius: 8px; font-family: var(--font-mono); }
+.findings-count { font-size: var(--fs-body); font-weight: 700; color: var(--text-muted); background: var(--surface-2); padding: 0.05rem 0.45rem; border-radius: 8px; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .load-more-findings {
   display: block; width: 100%; margin-top: 0.4rem; padding: 0.45rem;
   background: none; border: 1px dashed var(--border-solid); border-radius: 7px;
@@ -362,7 +415,7 @@ function fmtDate(iso) {
 .f-conf.hypothesis { color: var(--text-muted); background: var(--surface-2); border: 1px dashed var(--border-solid); }
 .f-title { font-size: var(--fs-lg); color: var(--text); }
 .f-meta { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
-.f-tag { font-size: var(--fs-md); font-family: var(--font-mono); padding: 0.1rem 0.4rem; border-radius: 4px; background: var(--surface-2); color: var(--text-dim); }
+.f-tag { font-size: var(--fs-md); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); padding: 0.1rem 0.4rem; border-radius: 4px; background: var(--surface-2); color: var(--text-dim); }
 .f-tag.cve { color: var(--accent-bright); background: var(--accent-dim); }
 .f-tag.kev { color: var(--danger); background: var(--danger-dim); font-weight: 700; }
 .f-tag.epss { color: var(--warn); background: var(--warn-dim); }
@@ -372,6 +425,7 @@ function fmtDate(iso) {
 .f-tag.src { color: var(--info); background: var(--info-dim); }
 
 .body-unauth-hint { margin-top: 0.6rem; padding: 0.55rem 0.7rem; font-size: var(--fs-md); line-height: 1.4; color: var(--warn); background: var(--warn-dim); border: 1px dashed var(--warn); border-radius: 7px; }
+.body-coverage-hint { margin-top: 0.6rem; padding: 0.55rem 0.7rem; font-size: var(--fs-md); line-height: 1.4; color: var(--warn); background: var(--warn-dim); border: 1px dashed var(--warn); border-radius: 7px; }
 
 /* ── Documentos PDF ── */
 .doc-section { margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--border); }
@@ -383,9 +437,18 @@ function fmtDate(iso) {
 .doc-refresh-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .doc-refresh-btn svg { width: 12px; height: 12px; }
 .doc-empty { font-size: var(--fs-md); color: var(--text-muted); padding: 0.5rem 0; }
-.doc-list { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.6rem; }
+.doc-list { position: relative; display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.6rem; }
 .doc-item { display: flex; align-items: center; justify-content: space-between; padding: 0.4rem 0.55rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
 .doc-item:hover { border-color: var(--accent); }
+/* Mismo patrón que .finding-item: la tarjeta entra deslizándose, el resto de
+   la lista se mueve para hacerle sitio, y una salida (eliminar documento) no
+   deja un hueco brusco. */
+.doc-item-enter-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.doc-item-enter-from { opacity: 0; transform: translateY(-8px); }
+.doc-item-leave-active { transition: opacity 0.15s ease; position: absolute; width: 100%; }
+.doc-item-leave-to { opacity: 0; }
+.doc-item-move { transition: transform 0.25s ease; }
+.doc-actions { display: flex; gap: 0.2rem; align-items: center; }
 .doc-left { display: flex; align-items: center; gap: 0.4rem; min-width: 0; flex: 1; }
 .doc-icon { width: 13px; height: 13px; color: var(--text-muted); flex-shrink: 0; }
 .doc-name { font-size: var(--fs-md); color: var(--text); font-weight: 500; white-space: nowrap; }
@@ -402,9 +465,24 @@ function fmtDate(iso) {
 .doc-status.error   { background: var(--danger-dim); color: var(--danger); }
 .doc-gen-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
 .doc-checkbox { display: flex; align-items: center; gap: 0.35rem; font-size: var(--fs-md); color: var(--text-dim); cursor: pointer; user-select: none; }
-.doc-checkbox input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; padding: 0; border: 1.5px solid var(--text-muted); border-radius: 3px; background: transparent; cursor: pointer; margin: 0; flex-shrink: 0; position: relative; }
+/* align-items:center alinea la CAJA de la casilla con la caja de línea del
+   texto, no con su tinta: Alegreya Sans reserva descendente aunque "Análisis
+   IA" no tenga ninguna letra que baje de la línea base, así que esa caja
+   queda descentrada respecto al texto visible. translateY corrige ese
+   desfase óptico (medido con canvas measureText: ~1.5px a este tamaño). */
+.doc-checkbox input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; padding: 0; border: 1.5px solid var(--text-muted); border-radius: 3px; background: transparent; cursor: pointer; margin: 0; flex-shrink: 0; position: relative; transform: translateY(-1.5px); transition: background 0.15s ease, border-color 0.15s ease; }
 .doc-checkbox input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
-.doc-checkbox input[type="checkbox"]:checked::after { content: ''; position: absolute; top: 1px; left: 2px; width: 3px; height: 6px; border: solid var(--on-accent); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+/* Centrado por porcentaje + translate(-50%,-50%) en vez de top/left fijos en
+   píxeles: esos quedaban descuadrados según el redondeo del borde y se veían
+   corridos a la izquierda. El ::after existe siempre (no solo en :checked)
+   para poder animar entre opacity/scale 0 y 1 en vez de aparecer de golpe. */
+.doc-checkbox input[type="checkbox"]::after {
+  content: ''; position: absolute; left: 50%; top: 45%; width: 28%; height: 55%;
+  border: solid var(--on-accent); border-width: 0 1.5px 1.5px 0;
+  transform: translate(-50%, -50%) rotate(45deg) scale(0); opacity: 0;
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.12s ease;
+}
+.doc-checkbox input[type="checkbox"]:checked::after { transform: translate(-50%, -50%) rotate(45deg) scale(1); opacity: 1; }
 .doc-gen-btn { display: flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.7rem; font-size: var(--fs-md); font-weight: 600; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 6px; color: var(--accent-bright); cursor: pointer; transition: all 0.2s; }
 .doc-gen-btn:hover { background: var(--accent); color: var(--on-accent); }
 .doc-gen-btn svg { width: 12px; height: 12px; }
@@ -431,6 +509,8 @@ function fmtDate(iso) {
   .spin { animation: none !important; }
   .chevron, .expand-enter-active, .expand-leave-active, .fade-swap-enter-active, .fade-swap-leave-active,
   .findings-panel-enter-active, .findings-panel-leave-active,
-  .finding-item-enter-active, .finding-item-leave-active, .finding-item-move { transition: none !important; }
+  .finding-item-enter-active, .finding-item-leave-active, .finding-item-move,
+  .doc-checkbox input[type="checkbox"], .doc-checkbox input[type="checkbox"]::after,
+  .doc-item-enter-active, .doc-item-leave-active, .doc-item-move { transition: none !important; }
 }
 </style>

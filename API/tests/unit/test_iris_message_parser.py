@@ -132,17 +132,39 @@ def test_received_chain_neutral_when_absent():
     assert result.score == 0
 
 
-def test_received_chain_flags_private_origin_ip():
+def test_received_chain_reports_private_origin_ip_without_penalising():
+    # Calibración FP: la línea Received del origen la escribe el MTA que
+    # aceptó el mensaje, anotando la IP del par que se lo entregó. Si es
+    # RFC1918, ese par estaba en su propia red: es cómo se inyecta TODO el
+    # correo legítimo (API REST de un ESP, relay Exchange, app interna). Se
+    # reporta como observación, sin peso ni gate.
     ctx = MessageContext(
         headers={"date": "Wed, 25 Jun 2025 10:00:00 +0000"},
         received_headers=[
             "from mx.example.com by mx2.example.com; Wed, 25 Jun 2025 10:00:00 +0000",
-            "from [10.0.0.5] by mx.example.com; Wed, 25 Jun 2025 09:59:00 +0000",
+            "from mx3.example.com ([203.0.113.9]) by mx.example.com; Wed, 25 Jun 2025 09:59:30 +0000",
+            "from [10.0.0.5] by mx3.example.com; Wed, 25 Jun 2025 09:59:00 +0000",
         ],
     )
     result = check_received_chain(ctx)
-    assert result.verdict == "fail"
-    assert result.score < 0
+    assert result.verdict != "fail"
+    assert result.score == 0
+    assert result.details["notes"]
+
+
+def test_received_chain_exempts_fully_internal_origin():
+    # El mismo hecho (IP de origen privada) con la cadena ENTERAMENTE en
+    # RFC1918 -- un relay corporativo interno normal, no debe penalizar.
+    ctx = MessageContext(
+        headers={"date": "Wed, 25 Jun 2025 10:00:00 +0000"},
+        received_headers=[
+            "from mail1.internal (mail1.internal [10.0.1.5]) by mx.acme.com; Wed, 25 Jun 2025 10:00:00 +0000",
+            "from [10.0.0.5] by mail1.internal; Wed, 25 Jun 2025 09:59:00 +0000",
+        ],
+    )
+    result = check_received_chain(ctx)
+    assert result.verdict != "fail"
+    assert result.score == 0
 
 
 def test_received_chain_flags_date_mismatch():
@@ -182,6 +204,45 @@ def test_body_links_flags_cloaked_link():
     )
     ctx = parse_raw_message(raw)
     result = check_body_links(ctx)
+    assert result.verdict == "fail"
+    assert "cloaked_link" in result.details["types"]
+
+
+def test_body_links_exempts_sender_own_click_tracking():
+    # Calibración FP: el click-tracking reescribe el href a un subdominio
+    # redirector del propio remitente dejando el texto visible intacto. El
+    # destino es quien la víctima ya ve en el From, no un tercero.
+    raw = (
+        "From: hola@boletin.example\r\nSubject: Hi\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n\r\n"
+        '<a href="https://eot.boletin.example/f/a/abc">https://youtu.be/JMezeu2Zl-U</a>\r\n'
+    )
+    result = check_body_links(parse_raw_message(raw))
+    assert "cloaked_link" not in result.details.get("types", [])
+
+
+def test_body_links_exempts_same_registrable_domain_subdomain():
+    # Texto visible y href en el mismo dominio registrable, distinto
+    # subdominio: es la misma organización, no un engaño de destino.
+    raw = (
+        "From: hola@otro.example\r\nSubject: Hi\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n\r\n"
+        '<a href="https://eot.boletin.example/f/a/abc">https://lgtm.boletin.example</a>\r\n'
+    )
+    result = check_body_links(parse_raw_message(raw))
+    assert "cloaked_link" not in result.details.get("types", [])
+
+
+def test_body_links_flags_brand_text_even_on_sender_own_domain():
+    # La exención NO aplica cuando el texto visible promete una marca
+    # conocida: ahí el href al dominio del propio remitente es justo el
+    # cloaking que la señal existe para detectar.
+    raw = (
+        "From: service@paypal-secure-verify.com\r\nSubject: Hi\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n\r\n"
+        '<a href="https://login.paypal-secure-verify.com/signin">https://www.paypal.com</a>\r\n'
+    )
+    result = check_body_links(parse_raw_message(raw))
     assert result.verdict == "fail"
     assert "cloaked_link" in result.details["types"]
 
@@ -365,6 +426,12 @@ def test_body_content_flags_hidden_link():
     result = check_body_content(ctx)
     assert result.verdict == "fail"
     assert result.details["hidden_text"] is True
+    # Este texto no contiene ninguna frase de credential_phrases -- el
+    # mensaje al usuario no debe afirmar que sí ("frases típicas de
+    # phishing") cuando phrases_found está vacío.
+    assert result.details["phrases_found"] == []
+    assert "frases" not in result.recommendation
+    assert "texto oculto" in result.recommendation
 
 
 def test_body_content_flags_hidden_credential_phrase():

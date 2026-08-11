@@ -97,7 +97,12 @@ def test_admin_lists_users(client, admin_user, auth_headers):
 
 
 def test_admin_manages_user_attributes(client, admin_user, make_user, auth_headers):
-    target = make_user(role="role_user")
+    """Alta y baja de un atributo, ida y vuelta.
+
+    El objetivo se crea sin ningún atributo para que las dos mitades midan algo:
+    sobre un usuario con el conjunto por defecto, el PUT sería un no-op.
+    """
+    target = make_user(role="role_user", attributes=[])
     headers = auth_headers(admin_user)
 
     add = client.put(f"/users/{target.id}/attributes", headers=headers, json={
@@ -113,3 +118,39 @@ def test_admin_manages_user_attributes(client, admin_user, make_user, auth_heade
         "attributes": ["themis_create"],
     })
     assert removed.status_code == 200
+
+
+def test_admin_can_actually_revoke_an_attribute(client, admin_user, regular_user, auth_headers):
+    """Quitar un atributo tiene efecto real, no solo un 200.
+
+    Antes de vaciar el baseline de Role.USER esto era imposible: themis_read lo
+    concedía el rol, `require_attributes` calculaba la unión y borrar la fila no
+    cambiaba nada. Con el baseline vacío, retirar el permiso se nota.
+    """
+    headers = auth_headers(admin_user)
+
+    removed = client.delete(f"/users/{regular_user.id}/attributes", headers=headers, json={
+        "attributes": ["themis_read"],
+    })
+    assert removed.status_code == 200
+
+    listed = client.get(f"/users/{regular_user.id}/attributes", headers=headers)
+    assert "themis_read" not in listed.get_json()["attributes"]
+
+    denied = client.get("/themis/results", headers=auth_headers(regular_user))
+    assert denied.status_code == 403
+
+
+def test_role_user_cannot_grant_attributes_to_itself(client, regular_user, auth_headers):
+    """Un usuario normal no puede autoconcederse permisos.
+
+    Hoy lo tapa `require_role(Role.ADMIN)` en el endpoint. Cuando la fase 5 lo
+    retire para que el dueño de una organización pueda gestionar a los suyos, la
+    única barrera será `can_manage_user` — que empieza con
+    `if actor_id == target_id: return True` y convertiría esta llamada en una
+    escalada de privilegios. Este test es el que lo impedirá.
+    """
+    resp = client.put(f"/users/{regular_user.id}/attributes",
+                      headers=auth_headers(regular_user),
+                      json={"attributes": ["themis_create"]})
+    assert resp.status_code == 403

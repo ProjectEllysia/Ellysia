@@ -1,6 +1,6 @@
 """Tests de integración del módulo Themis (escaneos y carpetas).
 
-Los escaneos reales (nmap/nikto/openvas) corren en el worker en segundo plano;
+Los escaneos reales (nmap/nikto/lybra/nuclei) corren en el worker en segundo plano;
 aquí se verifica la frontera de autorización y los caminos síncronos de lectura
 y de carpetas, sin lanzar herramientas externas ni depender de Redis.
 """
@@ -26,9 +26,9 @@ def test_start_nmap_requires_authentication(client):
     assert client.post("/themis/nmap", json=_VALID_NMAP_BODY).status_code == 401
 
 
-def test_start_nmap_requires_create_attribute(client, regular_user, auth_headers):
-    # role_user no incluye themis_create en su baseline.
-    resp = client.post("/themis/nmap", headers=auth_headers(regular_user),
+def test_start_nmap_requires_create_attribute(client, stripped_user, auth_headers):
+    # Usuario al que le han retirado themis_create.
+    resp = client.post("/themis/nmap", headers=auth_headers(stripped_user),
                        json=_VALID_NMAP_BODY)
     assert resp.status_code == 403
 
@@ -108,7 +108,7 @@ def themis_creator(make_user):
 
 @pytest.fixture(autouse=True)
 def _reject_local_ips(monkeypatch):
-    monkeypatch.setattr(CR, "are_local_ips_allowed", lambda: False)
+    monkeypatch.setattr(CR, "themis_config", lambda: CR.ThemisConfig(are_local_ips_allowed=False))
 
 
 def test_nikto_rejects_loopback_target(client, themis_creator, auth_headers):
@@ -203,16 +203,56 @@ def test_get_scan_status_fallback_uses_finished_vocabulary(app, regular_user, mo
         assert status == "finished"
 
 
-def test_openvas_scheduled_flow_rejects_private_ip(app):
-    # C3: la validación de host único/IP privada vivía solo en el endpoint
-    # HTTP; el flujo programado (scheduling._run_openvas_scan) llamaba a
-    # OpenVASScanManager.run_scan() directo, sin pasar por validate_targets().
+def test_nmap_scheduled_flow_rejects_private_ip(app):
+    # Mismo hueco que C3 (OpenVAS) pero en Nmap: scheduling._run_nmap_scan
+    # llama a NmapScanManager.run_scan() directo, sin pasar por
+    # validate_targets() del endpoint HTTP.
     from src.modules.features.themis.exceptions import PrivateIPRequested
-    from src.modules.features.themis.managers import OpenVASScanManager
+    from src.modules.features.themis.managers import NmapScanManager
 
     with app.app_context():
         with pytest.raises(PrivateIPRequested):
-            OpenVASScanManager().run_scan(target="10.0.0.5", user_id=1)
+            NmapScanManager().run_scan(target_host="10.0.0.5", target_ports="80", user_id=1)
+
+
+def test_nikto_scheduled_flow_rejects_private_ip(app):
+    # Mismo hueco que C3 (OpenVAS) pero en Nikto: scheduling._run_nikto_scan
+    # llama a NiktoScanManager.run_scan() directo, sin pasar por
+    # validate_nikto_target() del endpoint HTTP.
+    from src.modules.features.themis.exceptions import PrivateIPRequested
+    from src.modules.features.themis.managers import NiktoScanManager
+
+    with app.app_context():
+        with pytest.raises(PrivateIPRequested):
+            NiktoScanManager().run_scan(target_domain="10.0.0.5", user_id=1)
+
+
+def test_lybra_scheduled_flow_rejects_private_ip(app):
+    # Mismo hueco que C3 (OpenVAS) pero en Lybra (autodescubrimiento):
+    # scheduling._run_lybra_scan llama a run_scan() directo, sin pasar por
+    # validate_targets() del endpoint HTTP. El registro de objetivos
+    # autorizados (AuthorizedTargetManager) es un gate legal, no de red: no
+    # sustituye el rechazo de IP privada, así que debe fallar antes de
+    # siquiera comprobar autorización.
+    from src.modules.features.themis.exceptions import PrivateIPRequested
+    from src.modules.features.themis.managers import LybraEngineManager
+
+    with app.app_context():
+        with pytest.raises(PrivateIPRequested):
+            LybraEngineManager().run_scan(target="10.0.0.5", user_id=1)
+
+
+def test_nuclei_scheduled_flow_rejects_private_ip(app):
+    # Mismo hueco que C3 (OpenVAS) pero en Nuclei: scheduling._run_nuclei_scan
+    # llama a NucleiScanManager.run_scan() directo, sin pasar por
+    # validate_web_target()/el gate de objetivos autorizados del endpoint
+    # HTTP (ver start_nuclei_scan).
+    from src.modules.features.themis.exceptions import PrivateIPRequested
+    from src.modules.features.themis.managers import NucleiScanManager
+
+    with app.app_context():
+        with pytest.raises(PrivateIPRequested):
+            NucleiScanManager().run_scan(target="http://10.0.0.5", user_id=1)
 
 
 # --------------------------------------------------------------- N1 IDOR docs
@@ -293,23 +333,3 @@ def test_format_scan_accepts_preloaded_instance(app, regular_user):
         assert result["scanType"] == "nmap"
         # openPorts y severityBreakdown ahora viven en format_scan (A7)
         assert "openPorts" in result
-
-
-def test_format_scan_openvas_includes_severity_breakdown(app, regular_user):
-    # A7: severityBreakdown antes vivía en el endpoint; ahora en format_scan.
-    from src.modules.features.themis.managers import OpenVASScanManager
-    from src.modules.features.themis.model import OpenVASScan
-
-    with app.app_context():
-        with UnitOfWork() as uow:
-            scan = OpenVASScan(target="10.0.0.1", user_id=regular_user.id, started_at=datetime.now())
-            scan.status = ScanStatus.FINISHED.value
-            scan.task_id = "t1"
-            scan.report_id = "r1"
-            ScanRepository(uow).save(scan)
-            scan_id = scan.id
-
-        mgr = OpenVASScanManager()
-        result = mgr.format_scan(scan_id)
-        assert "severityBreakdown" in result
-        assert set(result["severityBreakdown"].keys()) == {"critical", "high", "medium", "low", "info"}

@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 
-from flask import send_file
+from flask import redirect, send_file
 from flask_smorest import Blueprint as SmorestBlueprint
 
 from src.modules.users import (
@@ -26,15 +26,17 @@ from src.modules.users import (
 )
 from src.modules.shared import handle_exceptions, limiter
 from src.modules.shared.schemas import ErrorSchema
-from src.modules.shared._exceptions import DocumentError, DocumentNotFoundError, DocumentNotReadyError
+from src.modules.shared._exceptions import DocumentError, DocumentNotReadyError
 
-from .managers import IrisManager, IrisReportManager
+import src.modules.system.config_reading as CR
+
+from .managers import IrisManager, IrisReportManager, IrisMailboxManager
 from .exceptions import (
     IrisAnalysisNotFoundError,
-    IrisAnalysisNotReadyError,
     IrisExecutionError,
     IrisInvalidInputError,
-    IrisInvalidStateError,
+    IrisMailboxConnectionNotFoundError,
+    IrisMailboxOAuthStateError,
 )
 from .schemas import (
     AnalysisIdQuerySchema,
@@ -55,6 +57,15 @@ from .schemas import (
     IrisDocumentListResponseSchema,
     AnalysisDocumentsResponseSchema,
     IrisDocumentDeleteResponseSchema,
+    IrisMailboxProvidersResponseSchema,
+    IrisMailboxConnectRequestSchema,
+    IrisMailboxConnectResponseSchema,
+    IrisMailboxConnectionItemSchema,
+    IrisMailboxConnectionListResponseSchema,
+    IrisMailboxUpdateConnectionRequestSchema,
+    IrisMailboxConnectionDeleteResponseSchema,
+    IrisMailboxSyncResponseSchema,
+    IrisMailboxCallbackQuerySchema,
 )
 
 
@@ -145,20 +156,24 @@ def get_analysis_status(args: dict):
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
 def list_analyses(args):
-    """Listar todos los analisis del usuario con paginacion"""
+    """Listar todos los analisis del usuario con paginacion, filtros y orden"""
     page = args["page"]
     per_page = args["per_page"]
     user = get_current_user()
 
     manager = IrisManager()
-    results, total = manager.get_analyses_for_user(user.id, page, per_page)
-    total_pages = (total + per_page - 1) // per_page
+    results, total, thresholds = manager.get_analyses_for_user(
+        user.id, page, per_page,
+        search=args["search"], verdict=args["verdict"], status=args["status"], source=args["source"],
+        sort_by=args["sort_by"], sort_dir=args["sort_dir"],
+    )
 
     return {
         "analyses": results,
         "total": total,
         "page": page,
         "perPage": per_page,
+        "thresholds": thresholds,
     }
 
 
@@ -321,9 +336,9 @@ def delete_analysis(analysis_id: int):
     }
 
 
-def _download_url_for(doc) -> str | None:
-    if doc.status == "done" and doc.filename:
-        return f"/iris/document/{doc.id}/download"
+def _download_url_for(document) -> str | None:
+    if document.status == "done" and document.filename:
+        return f"/iris/document/{document.id}/download"
     return None
 
 
@@ -371,24 +386,18 @@ def get_document_status(args):
     analysis_id = args.get("analysisId")
 
     doc_mgr = IrisReportManager()
-    doc = doc_mgr.get_document_by_id(document_id) if document_id else (
-        doc_mgr.get_latest_document_by_analysis_id(analysis_id) if analysis_id else None
-    )
-
-    if not doc:
-        raise DocumentNotFoundError(document_id or analysis_id)
-
-    if doc.user_id != user.id:
-        raise DocumentNotFoundError(document_id or analysis_id)
+    # E4: lookup dual (por documentId o, si no, el último documento del
+    # análisis) + verificación de ownership viven en el manager, no aquí.
+    document = doc_mgr.get_document_status(document_id, analysis_id, user.id)
 
     return {
-        "documentId": doc.id,
-        "analysisId": doc.analysis_id,
-        "status": doc.status,
-        "verdict": doc.verdict,
-        "createdAt": doc.created_at,
-        "generatedAt": doc.generated_at,
-        "downloadUrl": _download_url_for(doc),
+        "documentId": document.id,
+        "analysisId": document.analysis_id,
+        "status": document.status,
+        "verdict": document.verdict,
+        "createdAt": document.created_at,
+        "generatedAt": document.generated_at,
+        "downloadUrl": _download_url_for(document),
     }
 
 
@@ -408,14 +417,14 @@ def get_all_documents():
     documents = doc_mgr.get_documents_for_user(user.id)
 
     docs_list = [{
-        "documentId": doc.id,
-        "analysisId": doc.analysis_id,
-        "status": doc.status,
-        "verdict": doc.verdict,
-        "createdAt": doc.created_at,
-        "generatedAt": doc.generated_at,
-        "downloadUrl": _download_url_for(doc),
-    } for doc in documents]
+        "documentId": document.id,
+        "analysisId": document.analysis_id,
+        "status": document.status,
+        "verdict": document.verdict,
+        "createdAt": document.created_at,
+        "generatedAt": document.generated_at,
+        "downloadUrl": _download_url_for(document),
+    } for document in documents]
 
     return {"documents": docs_list, "total": len(docs_list)}
 
@@ -435,17 +444,17 @@ def get_documents_by_analysis(analysis_id: int):
     IrisManager.assert_analysis_ownership(analysis_id, user.id)
 
     doc_mgr = IrisReportManager()
-    documents = doc_mgr.get_documents_by_analysis_id(analysis_id)
+    documents = doc_mgr.get_documents_by_parent(analysis_id)
 
     docs_list = [{
-        "documentId": doc.id,
-        "analysisId": doc.analysis_id,
-        "status": doc.status,
-        "verdict": doc.verdict,
-        "createdAt": doc.created_at,
-        "generatedAt": doc.generated_at,
-        "downloadUrl": _download_url_for(doc),
-    } for doc in documents]
+        "documentId": document.id,
+        "analysisId": document.analysis_id,
+        "status": document.status,
+        "verdict": document.verdict,
+        "createdAt": document.created_at,
+        "generatedAt": document.generated_at,
+        "downloadUrl": _download_url_for(document),
+    } for document in documents]
 
     return {"analysisId": analysis_id, "documents": docs_list, "total": len(docs_list)}
 
@@ -464,17 +473,17 @@ def download_document(document_id: int):
     user = get_current_user()
 
     doc_mgr = IrisReportManager()
-    doc = doc_mgr.assert_document_ownership(document_id, user.id)
+    document = doc_mgr.assert_document_ownership(document_id, user.id)
 
-    if doc.status != "done" or not doc.filename or not os.path.exists(doc.filename):
-        raise DocumentNotReadyError(document_id, doc.status)
+    if document.status != "done" or not document.filename or not os.path.exists(document.filename):
+        raise DocumentNotReadyError(document_id, document.status)
 
-    logger.info(f"Serving Iris document {document_id}: {doc.filename}")
+    logger.info(f"Serving Iris document {document_id}: {document.filename}")
     return send_file(
-        doc.filename,
+        document.filename,
         mimetype="application/pdf",
         as_attachment=True,
-        download_name=f"iris_analysis_{doc.analysis_id}.pdf",
+        download_name=f"iris_analysis_{document.analysis_id}.pdf",
     )
 
 
@@ -497,3 +506,163 @@ def delete_document(document_id: int):
 
     logger.info(f"Documento {document_id} eliminado por usuario {user.username}")
     return {"message": "Documento eliminado correctamente", "documentId": document_id}
+
+
+# =============================================================================
+# Mailbox connector (Fase 4) — Gmail / Microsoft Graph
+# =============================================================================
+
+def _serialize_connection(connection) -> dict:
+    """Never includes refresh_token_enc/access_token_enc — those must not
+    leave the server under any circumstance."""
+    return {
+        "connectionId": connection.id,
+        "provider": connection.provider,
+        "accountEmail": connection.account_email,
+        "folder": connection.folder,
+        "fullMessageMode": connection.full_message_mode,
+        "status": connection.status,
+        "lastSyncAt": connection.last_sync_at,
+        "lastError": connection.last_error,
+        "createdAt": connection.created_at,
+    }
+
+
+@iris_blp.get("/mailbox/providers")
+@iris_blp.response(200, IrisMailboxProvidersResponseSchema, description="Supported mailbox providers")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+def list_mailbox_providers():
+    """Proveedores de buzón soportados por el conector"""
+    return {"providers": IrisMailboxManager.list_providers()}
+
+
+@iris_blp.post("/mailbox/connect")
+@iris_blp.arguments(IrisMailboxConnectRequestSchema)
+@iris_blp.response(201, IrisMailboxConnectResponseSchema, description="Authorization URL")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Invalid provider or quota exceeded")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_CREATE])
+@limiter.limit("20 per hour; 100 per day")
+@handle_exceptions(default_exception=IrisExecutionError, logger=logger)
+def connect_mailbox(data):
+    """Iniciar la conexión de un buzón externo (Gmail / Microsoft 365).
+
+    Devuelve la URL de autorización del proveedor; el frontend debe abrir
+    una ventana/redirigir ahí. El proveedor redirige de vuelta a
+    ``GET /iris/mailbox/callback`` cuando el usuario consiente (o lo rechaza).
+    """
+    user = get_current_user()
+    authorize_url = IrisMailboxManager().start_connect(
+        user.id, data["provider"],
+        full_message_mode=data.get("fullMessageMode", False),
+        folder=data.get("folder"),
+    )
+    logger.info(f"Usuario {user.username} inició conexión de buzón ({data['provider']})")
+    return {"authorizeUrl": authorize_url}, 201
+
+
+@iris_blp.get("/mailbox/callback")
+@iris_blp.arguments(IrisMailboxCallbackQuerySchema, location="query")
+@iris_blp.response(302, description="Redirect to the frontend")
+def mailbox_oauth_callback(args: dict):
+    """Callback OAuth de Google/Microsoft.
+
+    Sin ``require_oauth_token``: llega como navegación directa del
+    navegador tras el redirect del proveedor, sin Authorization header
+    posible. El ``state`` firmado (ver ``IrisMailboxManager._verify_state``)
+    hace de protección CSRF y liga la petición al usuario que inició
+    ``/mailbox/connect`` — es la única identidad que este endpoint necesita.
+    """
+    connections_url = f"{CR.general_config().public_url}/iris/conexiones"
+
+    if args.get("error"):
+        logger.info(f"Mailbox OAuth callback: consentimiento denegado ({args['error']})")
+        return redirect(f"{connections_url}?error=consent_denied")
+
+    if not args.get("code"):
+        return redirect(f"{connections_url}?error=missing_code")
+
+    try:
+        IrisMailboxManager().handle_callback(args["state"], args["code"])
+    except IrisMailboxOAuthStateError:
+        logger.warning("Mailbox OAuth callback: state inválido o caducado")
+        return redirect(f"{connections_url}?error=invalid_state")
+    except Exception as e:
+        logger.error(f"Mailbox OAuth callback falló: {e}", exc_info=True)
+        return redirect(f"{connections_url}?error=connection_failed")
+
+    return redirect(f"{connections_url}?connected=1")
+
+
+@iris_blp.get("/mailbox/connections")
+@iris_blp.response(200, IrisMailboxConnectionListResponseSchema, description="Mailbox connections")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+def list_mailbox_connections():
+    """Listar las conexiones de buzón del usuario actual (nunca expone tokens)"""
+    user = get_current_user()
+    connections = IrisMailboxManager.list_connections(user.id)
+    items = [_serialize_connection(connection) for connection in connections]
+    return {"connections": items, "total": len(items)}
+
+
+@iris_blp.patch("/mailbox/connections/<int:connection_id>")
+@iris_blp.arguments(IrisMailboxUpdateConnectionRequestSchema)
+@iris_blp.response(200, IrisMailboxConnectionItemSchema, description="Connection updated")
+@iris_blp.alt_response(400, schema=ErrorSchema, description="Invalid status")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Connection not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("60 per hour; 300 per day")
+@handle_exceptions(default_exception=IrisMailboxConnectionNotFoundError, logger=logger)
+def update_mailbox_connection(data, connection_id: int):
+    """Cambiar la carpeta vigilada o pausar/reactivar una conexión"""
+    user = get_current_user()
+    connection = IrisMailboxManager().update_connection(
+        connection_id, user.id, folder=data.get("folder"), status=data.get("status"),
+    )
+    logger.info(f"Conexión {connection_id} actualizada por usuario {user.username}")
+    return _serialize_connection(connection)
+
+
+@iris_blp.delete("/mailbox/connections/<int:connection_id>")
+@iris_blp.response(200, IrisMailboxConnectionDeleteResponseSchema, description="Connection deleted")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Connection not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_DELETE])
+@limiter.limit("60 per hour; 200 per day")
+@handle_exceptions(default_exception=IrisMailboxConnectionNotFoundError, logger=logger)
+def delete_mailbox_connection(connection_id: int):
+    """Desconectar un buzón: revoca el token en el proveedor (best-effort) y borra la fila"""
+    user = get_current_user()
+    IrisMailboxManager().delete_connection(connection_id, user.id)
+    logger.info(f"Conexión {connection_id} eliminada por usuario {user.username}")
+    return {"message": "Conexión eliminada correctamente", "connectionId": connection_id}
+
+
+@iris_blp.post("/mailbox/connections/<int:connection_id>/sync")
+@iris_blp.response(202, IrisMailboxSyncResponseSchema, description="Sync queued")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Connection not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("30 per hour; 100 per day")
+@handle_exceptions(default_exception=IrisMailboxConnectionNotFoundError, logger=logger)
+def sync_mailbox_connection(connection_id: int):
+    """Sondeo manual de una conexión (fuera del ciclo periódico del scheduler)"""
+    user = get_current_user()
+    IrisMailboxManager().trigger_sync(connection_id, user.id)
+    logger.info(f"Sync manual de la conexión {connection_id} encolado por usuario {user.username}")
+    return {"message": "Sincronización encolada correctamente", "connectionId": connection_id}, 202

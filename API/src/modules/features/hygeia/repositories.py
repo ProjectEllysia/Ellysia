@@ -13,9 +13,8 @@ from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import update
-from sqlalchemy.orm import Session
 
-from src.modules.infrastructure import BaseRepository, UnitOfWork
+from src.modules.infrastructure import BaseRepository
 
 from .model import Anomaly, AssetSnapshot, MonitoredAsset
 
@@ -23,8 +22,7 @@ from .model import Anomaly, AssetSnapshot, MonitoredAsset
 class MonitoredAssetRepository(BaseRepository[MonitoredAsset]):
     """Acceso a datos de MonitoredAsset."""
 
-    def __init__(self, uow: Optional[UnitOfWork] = None, session: Optional[Session] = None) -> None:
-        super().__init__(MonitoredAsset, uow=uow, session=session)
+    _MODEL = MonitoredAsset
 
     def get_by_user(self, user_id: int) -> List[MonitoredAsset]:
         """Devuelve todos los activos monitorizados de un usuario, más recientes primero."""
@@ -106,19 +104,30 @@ class MonitoredAssetRepository(BaseRepository[MonitoredAsset]):
 class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
     """Acceso a datos de AssetSnapshot (heartbeats)."""
 
-    def __init__(self, uow: Optional[UnitOfWork] = None, session: Optional[Session] = None) -> None:
-        super().__init__(AssetSnapshot, uow=uow, session=session)
+    _MODEL = AssetSnapshot
 
     def get_series(
         self, asset_id: int, since: Optional[datetime] = None,
         until: Optional[datetime] = None, limit: int = 1000,
     ) -> List[AssetSnapshot]:
-        """Devuelve la serie temporal de snapshots de un activo, ordenada cronológicamente.
+        """Devuelve los ``limit`` snapshots **más recientes** de un activo, en orden cronológico.
+
+        El recorte se aplica por la cola, no por la cabeza: se ordena de más
+        nuevo a más viejo, se corta a ``limit`` y se reinvierte en memoria. Un
+        ``ORDER BY ... ASC`` con ``LIMIT`` devolvería los puntos más antiguos,
+        que para una gráfica de pulso es justo lo contrario de lo que se pide.
+
+        El eje es ``received_at`` (reloj del servidor), nunca ``collected_at``
+        (reloj del agente): ``check_clock_skew`` solo acota la deriva del
+        agente a una banda de ± unos minutos, y dentro de esa banda un reloj
+        desviado bastaría para desordenar la serie o para anclar la ventana
+        en filas viejas. Los filtros ``since``/``until`` se aplican sobre el
+        mismo campo, para que ventana y orden hablen del mismo reloj.
 
         Args:
             asset_id: Activo cuya serie se consulta.
-            since: Límite inferior opcional de ``collected_at``.
-            until: Límite superior opcional de ``collected_at``.
+            since: Límite inferior opcional de ``received_at``.
+            until: Límite superior opcional de ``received_at``.
             limit: Máximo de puntos a devolver, para no cargar un histórico sin fin.
 
         Returns:
@@ -126,19 +135,40 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
         """
         query = self._session.query(AssetSnapshot).filter(AssetSnapshot.asset_id == asset_id)
         if since is not None:
-            query = query.filter(AssetSnapshot.collected_at >= since)
+            query = query.filter(AssetSnapshot.received_at >= since)
         if until is not None:
-            query = query.filter(AssetSnapshot.collected_at <= until)
-        return query.order_by(AssetSnapshot.collected_at.asc()).limit(limit).all()
+            query = query.filter(AssetSnapshot.received_at <= until)
+
+        rows = query.order_by(AssetSnapshot.received_at.desc()).limit(limit).all()
+        rows.reverse()
+        return rows
+
+    def get_latest(self, asset_id: int) -> Optional[AssetSnapshot]:
+        """Devuelve el último snapshot recibido de un activo, o ``None`` si nunca reportó.
+
+        Ordena por ``received_at`` como ``get_series``, y por el mismo motivo:
+        con ``collected_at``, un agente con el reloj adelantado se declararía
+        "el más reciente" indefinidamente.
+        """
+        return (
+            self._session.query(AssetSnapshot)
+            .filter(AssetSnapshot.asset_id == asset_id)
+            .order_by(AssetSnapshot.received_at.desc())
+            .first()
+        )
 
     def delete_older_than(self, cutoff: datetime) -> int:
         """Elimina snapshots anteriores a ``cutoff`` (job de retención, §7.3).
+
+        Poda por ``received_at``, el mismo eje que ordena la serie: con
+        ``collected_at`` las filas de un agente con el reloj adelantado
+        sobrevivirían a su ventana de retención.
 
         Returns:
             Número de filas eliminadas.
         """
         result = self._session.query(AssetSnapshot).filter(
-            AssetSnapshot.collected_at < cutoff
+            AssetSnapshot.received_at < cutoff
         ).delete(synchronize_session=False)
         return result
 
@@ -146,8 +176,7 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
 class AnomalyRepository(BaseRepository[Anomaly]):
     """Acceso a datos de Anomaly."""
 
-    def __init__(self, uow: Optional[UnitOfWork] = None, session: Optional[Session] = None) -> None:
-        super().__init__(Anomaly, uow=uow, session=session)
+    _MODEL = Anomaly
 
     #: Estados que cuentan como "todavía activa" a efectos de detección:
     #: reconocer una anomalía (``acknowledged``) no la da por resuelta, así

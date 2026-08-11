@@ -79,8 +79,6 @@
 
       <AppPagination :current="store.currentPage" :total="store.totalCount" :per-page="store.perPage" @go="store.goToPage" />
     </main>
-
-    <AppToast />
   </div>
 </template>
 
@@ -88,7 +86,6 @@
 import { onMounted } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
-import AppToast from '@/components/shared/AppToast.vue'
 import AppPagination from '@/components/shared/AppPagination.vue'
 import { useQueueStore } from '@/stores/queueStore'
 import { useUtils } from '@/composables/useUtils'
@@ -107,12 +104,12 @@ async function handleCancel(id) { await store.cancelTask(id) }
 .queue-page { min-height: 100vh; background: var(--bg); padding-top: var(--topbar-h); position: relative; }
 .main { max-width: 960px; margin: 0 auto; padding: 1.75rem 1.1rem 4rem; position: relative; z-index: 1; }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.85rem; }
-.page-header h1 { font-size: var(--fs-3xl); font-weight: 800; color: var(--text); margin: 0; font-family: var(--font-display); }
+.page-header h1 { font-size: var(--fs-3xl); font-weight: 800; color: var(--text); margin: 0; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .subtitle { font-size: var(--fs-lg); color: var(--text-dim); margin: 0.2rem 0 0; }
-.status-bar { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; padding: 0.85rem 1.1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 1.25rem; }
+.status-bar { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; padding: 0.85rem 1.1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 1.25rem; justify-content: space-between }
 .stat-item { display: flex; flex-direction: column; gap: 0.1rem; min-width: 90px; }
-.stat-label { font-size: var(--fs-md); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.02em; font-weight: 600; }
-.stat-value { font-size: var(--fs-2xl); font-weight: 700; color: var(--text); font-family: var(--font-mono); }
+.stat-label { font-size: var(--fs-lg); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.02em; font-weight: 600; }
+.stat-value { font-size: var(--fs-lg); font-weight: 700; color: var(--text); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); text-align: center }
 .stat-item--running .stat-value { color: var(--info); }
 .stat-item--pending .stat-value { color: var(--warn); }
 .stat-item--history .stat-value { color: var(--text-dim); }
@@ -120,7 +117,7 @@ async function handleCancel(id) { await store.cancelTask(id) }
 .tab-btn { padding: 0.5rem 0.85rem; border: none; background: none; color: var(--text-dim); font-size: var(--fs-lg); font-weight: 600; cursor: pointer; border-radius: 6px 6px 0 0; border-bottom: 2px solid transparent; display: flex; align-items: center; gap: 0.35rem; transition: all 0.2s ease; }
 .tab-btn:hover { color: var(--text); }
 .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
-.tab-count { font-size: var(--fs-body); padding: 0.1rem 0.4rem; border-radius: 8px; background: var(--surface-2); font-family: var(--font-mono); }
+.tab-count { font-size: var(--fs-body); padding: 0.1rem 0.4rem; border-radius: 8px; background: var(--surface-2); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .task-list { display: flex; flex-direction: column; gap: 0.4rem; }
 .task-row { display: flex; align-items: center; gap: 0.85rem; padding: 0.85rem 1.1rem; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; transition: border-color 0.2s; flex-wrap: wrap; }
 .task-row:hover { border-color: var(--border-med); }
@@ -138,7 +135,7 @@ async function handleCancel(id) { await store.cancelTask(id) }
 .task-icon--cancelled { background: var(--surface-2); border-color: var(--border); color: var(--text-muted); }
 .task-info { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; min-width: 160px; }
 .task-name { font-weight: 700; color: var(--text); font-size: var(--fs-lg); }
-.task-category { font-size: var(--fs-md); color: var(--text-muted); font-family: var(--font-mono); }
+.task-category { font-size: var(--fs-md); color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .task-status-badge { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 4px; font-size: var(--fs-body); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; width: fit-content; }
 .status--pending { background: var(--warn-dim); color: var(--warn); }
 .status--running { background: var(--info-dim); color: var(--info); }
@@ -146,12 +143,12 @@ async function handleCancel(id) { await store.cancelTask(id) }
 .status--failed { background: var(--danger-dim); color: var(--danger); }
 .status--cancelled { background: var(--surface-2); color: var(--text-muted); }
 .task-times { display: flex; flex-direction: column; gap: 0.05rem; flex: 1.2; min-width: 140px; }
-.task-time { font-size: var(--fs-md); color: var(--text-dim); font-family: var(--font-mono); }
+.task-time { font-size: var(--fs-md); color: var(--text-dim); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .task-error { font-size: var(--fs-body); color: var(--danger); margin-top: 0.15rem; word-break: break-word; max-width: 260px; }
 .task-progress { display: flex; align-items: center; gap: 0.4rem; width: 110px; flex-shrink: 0; }
 .progress-track { flex: 1; height: 3px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--info); border-radius: 2px; transition: width 0.6s ease; }
-.progress-text { font-size: var(--fs-body); color: var(--text-muted); font-family: var(--font-mono); min-width: 28px; text-align: right; }
+.progress-text { font-size: var(--fs-body); color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); min-width: 28px; text-align: right; }
 .btn-cancel { padding: 0.35rem 0.7rem; border-radius: 6px; border: 1px solid var(--danger); background: var(--danger-dim); color: var(--danger); font-size: var(--fs-md); font-weight: 600; cursor: pointer; transition: all 0.2s ease; flex-shrink: 0; }
 .btn-cancel:hover { background: var(--danger); color: #fff; }
 .loading-block { display: flex; flex-direction: column; gap: 0.4rem; padding: 1.5rem 0; }

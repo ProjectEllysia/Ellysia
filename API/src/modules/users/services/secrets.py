@@ -18,18 +18,13 @@ import os
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
-from cryptography.fernet import Fernet
 
 import src.modules.system.config_reading as CR
+from src.modules.shared._crypto import decrypt_at_rest, encrypt_at_rest
 
 
 def _get_hasher() -> PasswordHasher:
-    cfg = CR.get_argon2_config()
-    return PasswordHasher(
-        time_cost=cfg.get("time_cost", 3),
-        memory_cost=cfg.get("memory_cost", 65536),
-        parallelism=cfg.get("parallelism", 4),
-    )
+    return PasswordHasher(**CR.argon2_config().as_kwargs())
 
 
 def hash_password(password: str) -> str:
@@ -98,17 +93,44 @@ def hash_password_with_salt(password: str, salt: str) -> str:
 # someone reading the database directly, not hidden from the application.
 # ---------------------------------------------------------------------------
 
-def _get_fernet() -> Fernet:
-    key = CR.get_mfa_config()["encryption_key"]
-    key_bytes = key.encode("utf-8") if isinstance(key, str) else key
-    return Fernet(key_bytes)
-
-
 def encrypt_totp_secret(secret: str) -> str:
     """Encrypt a TOTP secret for storage, using the server-side MFA_ENCRYPTION_KEY."""
-    return _get_fernet().encrypt(secret.encode("utf-8")).decode("utf-8")
+    return encrypt_at_rest(secret, purpose="mfa")
 
 
 def decrypt_totp_secret(token: str) -> str:
     """Decrypt a TOTP secret previously produced by encrypt_totp_secret()."""
-    return _get_fernet().decrypt(token.encode("utf-8")).decode("utf-8")
+    return decrypt_at_rest(token, purpose="mfa")
+
+
+# =========================================================================
+# TOKENS OPACOS DE UN SOLO USO (verificación de correo, invitaciones)
+# =========================================================================
+
+def generate_opaque_token() -> str:
+    """Token aleatorio para enlaces de un solo uso.
+
+    32 bytes de ``secrets.token_urlsafe`` — el mismo criterio que la clave de
+    agente de Hygeia o el token del quiz de Aegis: entropía suficiente para que
+    el token sea, por sí solo, la identidad de quien pulsa el enlace.
+    """
+    import secrets as _secrets
+
+    return _secrets.token_urlsafe(32)
+
+
+def hash_opaque_token(token: str) -> str:
+    """SHA-256 del token, que es lo único que se guarda.
+
+    A diferencia de las contraseñas y de los códigos de recuperación de MFA,
+    aquí NO se usa Argon2: un KDF lento existe para encarecer la fuerza bruta
+    sobre secretos que un humano podría adivinar, y esto son 256 bits
+    aleatorios. Lo que sí importa es no guardar el token en claro, para que una
+    lectura de la base de datos no permita verificar cuentas ajenas.
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def verify_opaque_token(token: str, stored_hash: str) -> bool:
+    """Comparación en tiempo constante del token contra su hash guardado."""
+    return hmac.compare_digest(hash_opaque_token(token), stored_hash or "")

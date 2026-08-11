@@ -29,6 +29,7 @@ import pytest
 import src.modules.system.config_reading as CR
 from src.modules.infrastructure import UnitOfWork
 from src.modules.features.themis.lybra import scan_ports_sync, port_concordance
+from src.modules.features.themis.exceptions import DuplicateAuthorizedTargetError
 from src.modules.features.themis.managers import LybraEngineManager, AuthorizedTargetManager
 from src.modules.features.themis.repositories import ScanRepository, KbRepository
 
@@ -186,10 +187,20 @@ def tls_expired_port():
 
 
 def _run_self_discovery(app, admin_user, target: str, port: int, monkeypatch):
-    """Lanza un escaneo Lybra de autodescubrimiento real contra ``target:port``."""
-    monkeypatch.setattr(CR, "is_host_reachability_check_enabled", lambda: False)
+    """Lanza un escaneo Lybra de autodescubrimiento real contra ``target:port``.
+
+    La autorización del objetivo es idempotente a propósito: un test que barre
+    varios contenedores en un solo caso —el banco de precisión de la Fase R—
+    llama aquí una vez por objetivo con la misma IP y la misma BD, y el registro
+    rechaza duplicados. Lo que este helper necesita es "que esté autorizado", no
+    "que se acabe de añadir".
+    """
+    monkeypatch.setattr(CR, "host_reachability_check", lambda: CR.HostReachabilityCheck(enabled=False))
     with app.app_context():
-        AuthorizedTargetManager().add(admin_user.id, target)
+        try:
+            AuthorizedTargetManager().add(admin_user.id, target)
+        except DuplicateAuthorizedTargetError:
+            pass
         mgr = LybraEngineManager()
         scan = mgr._create_scan_record(target=target, user_id=admin_user.id, source_scan_id=None)
         mgr._run_lybra(scan.id, None, [port], False)

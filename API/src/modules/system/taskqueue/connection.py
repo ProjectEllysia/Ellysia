@@ -13,9 +13,22 @@ se dupliquen entre la cola y el worker.
 
 from __future__ import annotations
 
+import logging
+
 import redis as redis_lib
 
 import src.modules.system.config_reading as CR
+
+_logger = logging.getLogger(__name__)
+
+def ping_redis() -> bool:
+    try:
+        r = redis_lib.Redis(**CR.redis_config().connection_kwargs())
+        r.ping()
+        r.close()
+        _logger.info("Redis conectado correctamente")
+    except Exception as e:
+        _logger.warning("Redis no disponible — la cola de tareas no funcionara: %s", e)
 
 
 class RedisConnectionFactory:
@@ -23,12 +36,12 @@ class RedisConnectionFactory:
 
     @staticmethod
     def _kwargs(blocking: bool = False) -> dict:
-        cfg = CR.get_redis_config()
+        cfg = CR.redis_config()
         kwargs = {
-            "host": cfg["host"],
-            "port": cfg["port"],
-            "db": cfg["db"],
-            "password": cfg["password"],
+            "host": cfg.host,
+            "port": cfg.port,
+            "db": cfg.db,
+            "password": cfg.password,
             # Sin connect timeout, un Redis caído bloquearía indefinidamente al
             # conectar, dejando el API colgado y "comiéndose" los CTRL+C.
             "socket_connect_timeout": 5,

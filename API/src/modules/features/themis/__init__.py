@@ -4,7 +4,6 @@ src.modules.features.themis - Módulo de escaneos de seguridad
 Exponente:
     - NmapScanManager: Escaneo de puertos
     - NiktoScanManager: Escaneo web
-    - OpenVASScanManager: Escaneo de vulnerabilidades
     - Modelos: Scan, Host, Port, etc.
     - Endpoints: themis_bp
 """
@@ -17,9 +16,6 @@ from .model import (
     NiktoScan,
     NmapScan,
     OpenPort,
-    OpenVASScan,
-    OpenVASScanResult,
-    OpenVASVulnerability,
     Port,
     ProgramedScan,
     Scan,
@@ -33,7 +29,6 @@ from .model import (
 from .managers import (
     NmapScanManager,
     NiktoScanManager,
-    OpenVASScanManager,
     ProgramedScanManager,
     ScanManager,
     ScanFolderManager,
@@ -48,9 +43,8 @@ from .repositories import (
 from .services import (
     NmapPrintingStrategy,
     NiktoPrintingStrategy,
-    OpenVASPrintingStrategy,
     PDFCreator,
-    Scheduler,
+    ThemisScheduler,
 )
 
 from .endpoints import themis_blp
@@ -60,15 +54,14 @@ QueueRegistry.register("themis.scan", "themis.report", "themis.traceroute")
 
 __all__ = [
     "Host", "NiktoIncident", "NiktoScan", "NmapScan", "OpenPort",
-    "OpenVASScan", "OpenVASScanResult", "OpenVASVulnerability", "Port",
+    "Port",
     "ProgramedScan", "Scan", "ScanFolder", "ScanIncident", "ScanStatus",
     "ThemisDocument", "TargetPort",
-    "NmapScanManager", "NiktoScanManager", "OpenVASScanManager",
+    "NmapScanManager", "NiktoScanManager",
     "ProgramedScanManager", "ScanManager", "ScanFolderManager",
     "ProgramedScanRepository", "ScanRepository", "ScanFolderRepository",
     "ThemisReportRepository",
     "themis_blp",
     "PDFCreator", "NmapPrintingStrategy", "NiktoPrintingStrategy",
-    "OpenVASPrintingStrategy",
-    "Scheduler",
+    "ThemisScheduler",
 ]

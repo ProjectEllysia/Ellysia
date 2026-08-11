@@ -98,7 +98,7 @@ function submit() {
   display: flex; align-items: center; justify-content: space-between;
   padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border);
 }
-.modal-title { font-family: var(--font-display); font-size: var(--fs-2xl); color: var(--text); }
+.modal-title { font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-size: var(--fs-2xl); color: var(--text); }
 .modal-close {
   background: none; border: none; color: var(--text-muted); cursor: pointer;
   padding: 0.25rem; display: grid; place-items: center;
@@ -123,7 +123,7 @@ function submit() {
 .mfa-secret {
   display: block; padding: 0.6rem 0.75rem;
   background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border-med); border-radius: 8px;
-  font-family: monospace; font-size: var(--fs-lg); letter-spacing: 0.05em; word-break: break-all;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-lg); letter-spacing: 0.05em; word-break: break-all;
   color: var(--text); overflow: hidden;
 }
 .collapse-enter-active, .collapse-leave-active { transition: all 0.2s ease; }
@@ -131,13 +131,13 @@ function submit() {
 
 .form-field { display: flex; flex-direction: column; gap: 0.35rem; }
 .form-label {
-  font-family: var(--font-mono); font-size: var(--fs-md); text-transform: uppercase;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-md); text-transform: uppercase;
   letter-spacing: 0.06em; color: var(--text-muted);
 }
 .modal-form input {
   width: 100%; padding: 0.65rem 0.8rem; background: rgba(0, 0, 0, 0.25);
   border: 1px solid var(--border-med); border-radius: 9px; color: var(--text);
-  font-size: var(--fs-xl); font-family: var(--font-mono); letter-spacing: 0.1em;
+  font-size: var(--fs-xl); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); letter-spacing: 0.1em;
   transition: border-color 0.2s ease;
 }
 .modal-form input:focus { outline: none; border-color: rgba(160, 122, 192, 0.55); }

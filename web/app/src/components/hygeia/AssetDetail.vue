@@ -19,6 +19,14 @@
         <dt>Sistema</dt>
         <dd>{{ asset.os || 'Desconocido' }}</dd>
       </div>
+      <div v-if="asset.kernel" class="meta-item">
+        <dt>Kernel</dt>
+        <dd>{{ asset.kernel }}</dd>
+      </div>
+      <div v-if="bootedAgo" class="meta-item">
+        <dt>Arrancado</dt>
+        <dd>{{ bootedAgo }}</dd>
+      </div>
       <div class="meta-item">
         <dt>Agente</dt>
         <dd>{{ asset.agentVersion || 'Sin reportar' }}</dd>
@@ -29,60 +37,434 @@
       </div>
     </dl>
 
-    <section class="section">
-      <h4 class="section-title">Constantes</h4>
-      <p v-if="metricsLoading" class="state-msg">Cargando métricas…</p>
-      <p v-else-if="metricsError" class="state-msg state-msg--error">{{ metricsError }}</p>
-      <MetricsChart v-else :snapshots="metrics" />
-    </section>
+    <AssetTabs
+      :active="activeTab"
+      :anomaly-count="openAnomalyCount"
+      :stats-warning="statsWarning"
+      @switch="activeTab = $event"
+    />
 
-    <section class="section">
-      <h4 class="section-title">
-        Anomalías
-        <span v-if="anomalies.length" class="count">{{ anomalies.length }}</span>
-      </h4>
+    <div v-if="activeTab === 'graficas'" class="tab-panel"
+         role="tabpanel" id="panel-graficas" aria-labelledby="tab-graficas" tabindex="0">
+      <section class="section">
+        <h4 class="section-title">Constantes</h4>
+        <!-- Una silueta por constante, con el alto real de sus tarjetas: con
+             el "Cargando métricas…" de una línea, la ficha entera daba un salto
+             de varios cientos de píxeles al llegar los datos.
 
-      <p v-if="!anomalies.length" class="state-msg">Ninguna anomalía registrada. El activo está sano.</p>
+             Solo cuando no hay nada que enseñar todavía: al refrescar a mano,
+             las métricas anteriores siguen en la store, y taparlas con un
+             esqueleto sería un parpadeo gratuito y un salto de más. -->
+        <div v-if="metricsLoading && !metrics.length" class="vitals-ghost" aria-busy="true" aria-label="Cargando métricas">
+          <span v-for="n in VITAL_SKELETONS" :key="n" class="skeleton vital-ghost" aria-hidden="true"></span>
+        </div>
+        <p v-else-if="metricsError && !metrics.length" class="state-msg state-msg--error">{{ metricsError }}</p>
+        <MetricsChart v-else :snapshots="metrics" :truncated="metricsTruncated" />
+      </section>
+    </div>
 
-      <ul v-else class="anomalies">
-        <li v-for="a in anomalies" :key="a.id" class="anomaly" :class="`anomaly--${a.severity}`">
-          <div class="anomaly-top">
-            <span class="anomaly-kind">{{ kindLabel(a.kind) }}</span>
-            <span class="anomaly-state" :class="`anomaly-state--${a.state}`">{{ stateLabel(a.state) }}</span>
+    <!-- Todo lo que sigue es el último heartbeat: tiene cardinalidad por
+         entidad (montaje, interfaz, proceso, núcleo) y solo tiene sentido
+         "ahora", así que no viaja en la serie temporal. -->
+    <div v-if="activeTab === 'estadisticas'" class="tab-panel"
+         role="tabpanel" id="panel-estadisticas" aria-labelledby="tab-estadisticas" tabindex="0">
+      <p v-if="latestError" class="state-msg state-msg--error">{{ latestError }}</p>
+
+      <template v-if="m">
+        <section v-if="memory" class="section">
+          <h4 class="section-title">Memoria</h4>
+          <dl class="readout">
+            <div class="readout-item">
+              <dt>En uso</dt>
+              <dd>{{ used.text }}<small class="unit--wide">{{ used.unit }}</small></dd>
+            </div>
+            <div class="readout-item">
+              <dt>Total</dt>
+              <dd>{{ totalMem.text }}<small class="unit--wide">{{ totalMem.unit }}</small></dd>
+            </div>
+            <div v-if="memory.swapUsedPct !== null && memory.swapUsedPct !== undefined" class="readout-item">
+              <dt>Swap</dt>
+              <dd>{{ fmtPct(memory.swapUsedPct) }}<small>%</small></dd>
+            </div>
+          </dl>
+        </section>
+
+        <section v-if="disks.length" class="section">
+          <h4 class="section-title">Almacenamiento</h4>
+          <ul class="rows">
+            <li v-for="d in disks" :key="d.mount" class="row row--disk">
+              <span class="row-name" :title="d.mount">{{ d.mount }}</span>
+              <span class="bar" :class="{ 'bar--hot': d.usagePct >= 85 }">
+                <span class="bar-fill" :style="{ width: `${Math.min(100, d.usagePct)}%` }"></span>
+              </span>
+              <span class="row-value">{{ fmtPct(d.usagePct) }}%</span>
+              <span class="row-note">{{ free(d).text }} {{ free(d).unit }} libres</span>
+            </li>
+          </ul>
+        </section>
+
+        <section v-if="nets.length" class="section">
+          <h4 class="section-title">
+            Red
+            <span class="hint">el gráfico suma solo las no-loopback</span>
+          </h4>
+          <ul class="rows">
+            <li v-for="n in nets" :key="n.iface" class="row row--net">
+              <span class="row-name" :title="n.iface">{{ n.iface }}</span>
+              <span class="row-value">↓ {{ rate(n.rxBytesPerSec).text }} <small>{{ rate(n.rxBytesPerSec).unit }}</small></span>
+              <span class="row-value">↑ {{ rate(n.txBytesPerSec).text }} <small>{{ rate(n.txBytesPerSec).unit }}</small></span>
+              <span v-if="errorsOf(n)" class="row-note row-note--bad">{{ errorsOf(n) }} err</span>
+            </li>
+          </ul>
+        </section>
+
+        <section v-if="topCpu.length || topMem.length || cores.length" class="section">
+          <h4 class="section-title">
+            Procesos
+            <span v-if="procTotal !== null" class="count">{{ procTotal }}</span>
+          </h4>
+
+          <div v-if="cores.length" class="cores-block">
+            <div class="cores">
+              <span
+                v-for="(pct, i) in cores"
+                :key="i"
+                class="core"
+                :class="{ 'core--hot': pct >= 85 }"
+                :title="`Núcleo ${i}: ${fmtPct(pct)} %`"
+              >
+                <span class="core-fill" :style="{ height: `${Math.min(100, pct)}%` }"></span>
+              </span>
+            </div>
+            <p v-if="hiddenCores" class="hint hint--block">+{{ hiddenCores }} núcleos más sin representar</p>
           </div>
 
-          <p v-if="a.metric" class="anomaly-reading">
-            <span class="reading-value">{{ a.value }}%</span>
-            <span class="reading-ctx">{{ a.metric }} · umbral {{ a.threshold }}%</span>
+          <div class="proc-cols">
+            <div v-if="topCpu.length" class="proc-col">
+              <h5 class="proc-head">Por CPU</h5>
+              <TransitionGroup tag="ul" name="proc-row" class="rows">
+                <li v-for="p in topCpu" :key="`c${p.pid}`" class="row row--proc">
+                  <span class="row-name" :title="p.name">{{ p.name }}</span>
+                  <span class="row-pid">{{ p.pid }}</span>
+                  <span class="row-value">{{ fmtPct(p.cpuPct) }}%</span>
+                </li>
+              </TransitionGroup>
+            </div>
+
+            <div v-if="topMem.length" class="proc-col">
+              <h5 class="proc-head">Por memoria</h5>
+              <TransitionGroup tag="ul" name="proc-row" class="rows">
+                <li v-for="p in topMem" :key="`m${p.pid}`" class="row row--proc">
+                  <span class="row-name" :title="p.name">{{ p.name }}</span>
+                  <span class="row-pid">{{ p.pid }}</span>
+                  <span class="row-value">{{ fmtPct(p.memPct) }}%</span>
+                </li>
+              </TransitionGroup>
+            </div>
+          </div>
+
+          <p v-if="zombies" class="hint hint--block">{{ zombies }} en estado zombi</p>
+        </section>
+      </template>
+    </div>
+
+    <div v-if="activeTab === 'inventario'" class="tab-panel"
+         role="tabpanel" id="panel-inventario" aria-labelledby="tab-inventario" tabindex="0">
+      <section class="section">
+        <h4 class="section-title">
+          Inventario de software
+          <span v-if="inventory.length" class="count">{{ inventory.length }}</span>
+        </h4>
+
+        <p v-if="inventoryError" class="state-msg state-msg--error">{{ inventoryError }}</p>
+        <div v-else-if="inventoryLoading" class="inventory-ghost" aria-busy="true"
+             aria-label="Cargando inventario">
+          <span v-for="n in SKELETON_ROWS" :key="n"
+                class="skeleton skeleton--line" aria-hidden="true"></span>
+        </div>
+
+        <template v-else>
+          <p v-if="inventoryCollectedAt" class="inventory-scanned">
+            Escaneado {{ timeAgo(inventoryCollectedAt) }}
           </p>
 
-          <p class="anomaly-time">Abierta {{ timeAgo(a.openedAt) }}</p>
+          <!-- Análisis con Lybra (Fase I). Solo se ofrece si hay algo que
+               analizar: sin inventario el backend responde 409, así que el
+               botón no debe existir siquiera. -->
+          <div v-if="inventory.length" class="analysis-bar">
+            <div class="analysis-state">
+              <template v-if="hasAnalysis">
+                <span class="analysis-dot" :class="analysisTone"></span>
+                <span class="analysis-text">
+                  <template v-if="analysisRunning">Analizando el inventario…</template>
+                  <template v-else-if="analysis.vulnerableCount">
+                    {{ analysis.vulnerableCount }} {{ analysis.vulnerableCount === 1 ? 'paquete' : 'paquetes' }} con CVE conocida
+                  </template>
+                  <template v-else>Sin vulnerabilidades conocidas</template>
+                </span>
+              </template>
+              <span v-else class="analysis-text analysis-text--muted">
+                Sin analizar contra la base de vulnerabilidades
+              </span>
+            </div>
 
-          <div v-if="a.state !== 'resolved'" class="anomaly-actions">
-            <button v-if="a.state === 'open'" class="btn-sm" @click="$emit('ack', a.id)">Reconocer</button>
-            <button class="btn-sm btn-sm--primary" @click="$emit('resolve', a.id)">Resolver</button>
+            <div class="analysis-actions">
+              <button v-if="hasAnalysis" type="button" class="btn-analysis" @click="$emit('view-analysis')">
+                Ver análisis
+              </button>
+              <button
+                type="button"
+                class="btn-analysis btn-analysis--primary"
+                :disabled="analyzing || analysisRunning"
+                @click="$emit(hasAnalysis ? 'reanalyze' : 'analyze')"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spin: analyzing }"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                {{ hasAnalysis ? 'Volver a analizar' : 'Analizar con Lybra' }}
+              </button>
+            </div>
           </div>
-        </li>
-      </ul>
-    </section>
+
+          <p v-if="!inventory.length && !inventoryCollectedAt" class="state-msg">
+            Este activo aún no ha reportado un escaneo de inventario.
+          </p>
+          <p v-else-if="!inventory.length" class="state-msg">
+            El último escaneo no encontró software instalado.
+          </p>
+
+          <template v-else>
+            <input
+              v-model="inventoryFilter"
+              type="search"
+              class="inventory-filter"
+              placeholder="Filtrar por nombre o fabricante…"
+            />
+
+            <p v-if="!filteredInventory.length" class="state-msg">Ningún resultado para «{{ inventoryFilter }}».</p>
+
+            <ul v-else class="rows inventory-rows">
+              <li v-for="(sw, i) in filteredInventory" :key="`${sw.name}-${i}`" class="row row--software">
+                <div class="sw-main">
+                  <span class="row-name" :title="sw.name">{{ sw.name }}</span>
+                  <span v-if="sw.version" class="sw-version">{{ sw.version }}</span>
+                </div>
+                <span v-if="sw.vendor" class="sw-vendor" :title="sw.vendor">{{ sw.vendor }}</span>
+                <span v-if="sw.sizeBytes" class="row-value sw-size">
+                  {{ fmtBytes(sw.sizeBytes).text }}<small>{{ fmtBytes(sw.sizeBytes).unit }}</small>
+                </span>
+                <span v-if="sw.installedAt" class="row-note sw-installed">{{ formatDate(sw.installedAt) }}</span>
+              </li>
+            </ul>
+          </template>
+        </template>
+      </section>
+    </div>
+
+    <div v-if="activeTab === 'anomalias'" class="tab-panel"
+         role="tabpanel" id="panel-anomalias" aria-labelledby="tab-anomalias" tabindex="0">
+      <section class="section">
+        <h4 class="section-title">
+          Anomalías
+          <span v-if="anomalies.length" class="count">{{ anomalies.length }}</span>
+        </h4>
+
+        <p v-if="!anomalies.length" class="state-msg">Ninguna anomalía registrada. El activo está sano.</p>
+
+        <TransitionGroup v-else tag="ul" name="anomaly-row" class="anomalies">
+          <li v-for="a in anomalies" :key="a.id" class="anomaly" :class="`anomaly--${a.severity}`">
+            <div class="anomaly-top">
+              <span class="anomaly-kind">{{ kindLabel(a.kind) }}</span>
+              <span class="anomaly-state" :class="`anomaly-state--${a.state}`">{{ stateLabel(a.state) }}</span>
+            </div>
+
+            <p v-if="a.metric" class="anomaly-reading">
+              <span class="reading-value">{{ a.value }}%</span>
+              <span class="reading-ctx">{{ a.metric }} · umbral {{ a.threshold }}%</span>
+            </p>
+
+            <p class="anomaly-time">Abierta {{ timeAgo(a.openedAt) }}</p>
+
+            <div class="anomaly-actions">
+              <button v-if="a.state === 'open'" class="btn-sm" @click="$emit('ack', a.id)">Reconocer</button>
+              <button v-if="a.state !== 'resolved'" class="btn-sm btn-sm--primary" @click="$emit('resolve', a.id)">Resolver</button>
+              <button v-if="a.state !== 'open'" class="btn-sm btn-sm--danger" @click="$emit('delete', a.id)">Borrar</button>
+            </div>
+          </li>
+        </TransitionGroup>
+      </section>
+    </div>
   </div>
 </template>
 
 <script setup>
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import MetricsChart from '@/components/hygeia/MetricsChart.vue'
+import AssetTabs from '@/components/hygeia/AssetTabs.vue'
 import { useUtils } from '@/composables/useUtils'
-import { timeAgo } from './format'
+import { fmtBytes, fmtPct, fmtRate, timeAgo } from './format'
 
-defineProps({
+const props = defineProps({
   asset: { type: Object, default: null },
   metrics: { type: Array, default: () => [] },
+  metricsTruncated: { type: Boolean, default: false },
   metricsLoading: { type: Boolean, default: false },
   metricsError: { type: String, default: null },
+  // Último heartbeat completo: { collectedAt, receivedAt, metrics }. `metrics`
+  // llega a null mientras el activo no haya reportado nunca.
+  latest: { type: Object, default: null },
+  latestError: { type: String, default: null },
+  // Último inventario de software conocido (§ contrato de ingesta v1.0):
+  // reemplaza por completo en cada escaneo, sin delta. `inventoryCollectedAt`
+  // null significa que el activo nunca ha mandado un escaneo.
+  inventory: { type: Array, default: () => [] },
+  inventoryCollectedAt: { type: String, default: null },
+  inventoryLoading: { type: Boolean, default: false },
+  inventoryError: { type: String, default: null },
+  // Resumen del último análisis del inventario con Lybra (Fase I). `null` o
+  // `scanId` nulo = nunca analizado.
+  analysis: { type: Object, default: null },
+  analyzing: { type: Boolean, default: false },
   anomalies: { type: Array, default: () => [] },
 })
-defineEmits(['ack', 'resolve'])
+defineEmits(['ack', 'resolve', 'delete', 'analyze', 'reanalyze', 'view-analysis'])
 
 const { formatDate } = useUtils()
+
+const TAB_IDS = ['graficas', 'estadisticas', 'inventario', 'anomalias']
+const TAB_STORAGE_PREFIX = 'ellysia:hygeia:lastTab:'
+
+/* Siluetas mientras carga.
+   Cuántas constantes llegarán no se sabe de antemano: MetricsChart dibuja una
+   por serie con datos, de hasta seis posibles (CPU, memoria, swap, disco y red
+   en los dos sentidos), y un agente reporta las que reporta. Cinco es lo
+   medido en un host Linux sin swap (CPU, memoria, disco y red en ambos
+   sentidos), que es el caso corriente. Si acierta poco, el esqueleto sigue
+   reservando mucho más hueco del que reservaba el texto de una línea que había
+   antes, así que el salto baja igual aunque no llegue a cero. */
+const VITAL_SKELETONS = 5
+const SKELETON_ROWS = 6
+
+const activeTab = ref('graficas')
+/** Al cambiar de activo se recupera la última pestaña que se miró en ESE
+ *  host (persistida por id), no la que quedó abierta en el anterior. */
+watch(() => props.asset?.id, (id) => {
+  const stored = id ? localStorage.getItem(TAB_STORAGE_PREFIX + id) : null
+  activeTab.value = TAB_IDS.includes(stored) ? stored : 'graficas'
+}, { immediate: true })
+
+watch(activeTab, (tab) => {
+  const id = props.asset?.id
+  if (id) localStorage.setItem(TAB_STORAGE_PREFIX + id, tab)
+})
+
+const KEY_TO_TAB = { '1': 'graficas', '2': 'estadisticas', '3': 'inventario', '4': 'anomalias' }
+
+function isTypingTarget(el) {
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+}
+
+/** Atajos 1/2/3 para saltar de pestaña sin ratón; se ignoran mientras se
+ *  escribe en un campo o con teclas modificadoras (para no pisar otros
+ *  atajos del navegador). */
+function handleTabShortcut(event) {
+  if (!props.asset || event.ctrlKey || event.metaKey || event.altKey) return
+  if (isTypingTarget(event.target)) return
+  const tab = KEY_TO_TAB[event.key]
+  if (tab) activeTab.value = tab
+}
+
+onMounted(() => window.addEventListener('keydown', handleTabShortcut))
+onUnmounted(() => window.removeEventListener('keydown', handleTabShortcut))
+
+const openAnomalyCount = computed(() =>
+  props.anomalies.filter((a) => a.state !== 'resolved').length
+)
+
+const inventoryFilter = ref('')
+/** Al cambiar de activo se descarta el filtro anterior: no tiene sentido
+ *  conservar un texto de búsqueda escrito para un host distinto. */
+watch(() => props.asset?.id, () => { inventoryFilter.value = '' })
+
+const filteredInventory = computed(() => {
+  const needle = inventoryFilter.value.trim().toLowerCase()
+  if (!needle) return props.inventory
+  return props.inventory.filter((sw) =>
+    sw.name?.toLowerCase().includes(needle) || sw.vendor?.toLowerCase().includes(needle)
+  )
+})
+
+/* ── Análisis del inventario con Lybra (Fase I) ── */
+const hasAnalysis = computed(() => !!props.analysis?.scanId)
+const analysisRunning = computed(() => ['pending', 'running'].includes(props.analysis?.status))
+const analysisTone = computed(() => {
+  if (analysisRunning.value) return 'running'
+  if (props.analysis?.status === 'failed') return 'failed'
+  return props.analysis?.vulnerableCount ? 'vulnerable' : 'clean'
+})
+
+/**
+ * Un host con muchos núcleos re-renderizaría cientos de barras cada 15 s. El
+ * contrato de ingesta admite hasta 1024, así que se corta y se dice cuántos
+ * quedan fuera en vez de pintarlos todos.
+ */
+const MAX_CORES = 128
+
+/** Bloque `metrics` del último heartbeat, o null si el activo no ha reportado. */
+const m = computed(() => props.latest?.metrics ?? null)
+
+const memory = computed(() => m.value?.memory ?? null)
+const used = computed(() => fmtBytes(memory.value?.usedBytes))
+const totalMem = computed(() => fmtBytes(memory.value?.totalBytes))
+
+/** Montajes de más lleno a más vacío: lo que está a punto de reventar, arriba. */
+const disks = computed(() =>
+  [...(m.value?.disk ?? [])].sort((a, b) => (b.usagePct ?? 0) - (a.usagePct ?? 0)),
+)
+
+/**
+ * Interfaces tal como las reporta el agente, loopback incluida.
+ *
+ * El gráfico suma solo las no-loopback, así que aquí aparece una fila que no
+ * cuenta para esa traza — de ahí la nota junto al título. Es intencionado:
+ * ver el desglose completo es justamente para lo que sirve esta tabla.
+ */
+const nets = computed(() => m.value?.network ?? [])
+
+const cores = computed(() => (m.value?.cpu?.perCorePct ?? []).slice(0, MAX_CORES))
+const coreCount = computed(() => (m.value?.cpu?.perCorePct ?? []).length)
+
+/** Mismo umbral que ya pinta discos y núcleos en rojo (`>= 85`) — el punto
+ *  de la pestaña "Estadísticas" es solo un adelanto de que hay algo así
+ *  dentro, sin duplicar el criterio. */
+const statsWarning = computed(() =>
+  disks.value.some((d) => d.usagePct >= 85) || cores.value.some((pct) => pct >= 85)
+)
+const hiddenCores = computed(() => Math.max(0, coreCount.value - MAX_CORES))
+
+const topCpu = computed(() => m.value?.processes?.topCpu ?? [])
+const topMem = computed(() => m.value?.processes?.topMem ?? [])
+const procTotal = computed(() => m.value?.processes?.total ?? null)
+const zombies = computed(() => m.value?.processes?.zombie ?? 0)
+
+/**
+ * Antigüedad del arranque del host.
+ *
+ * Se deriva de `lastSeenAt - uptimeSec` en lugar de mostrar el uptime crudo:
+ * el uptime es un valor instantáneo que envejece entre sondeos, mientras que
+ * el instante de arranque es fijo y `timeAgo` lo mantiene correcto solo.
+ */
+const bootedAgo = computed(() => {
+  const uptime = props.asset?.uptimeSec
+  const seen = props.asset?.lastSeenAt
+  if (uptime === null || uptime === undefined || !seen) return null
+
+  const bootedAt = new Date(seen).getTime() - uptime * 1000
+  if (Number.isNaN(bootedAt)) return null
+  return timeAgo(new Date(bootedAt).toISOString())
+})
+
+function free(disk) { return fmtBytes(disk.freeBytes) }
+function rate(value) { return fmtRate(value) }
+function errorsOf(iface) { return (iface.errIn ?? 0) + (iface.errOut ?? 0) }
 
 const STATUS_LABELS = { pending: 'Pendiente', online: 'En línea', stale: 'Inestable', offline: 'Caído' }
 function statusLabel(status) { return STATUS_LABELS[status] || status }
@@ -107,7 +489,7 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 .head-id { min-width: 0; }
 .detail-host {
   margin: 0;
-  font-family: var(--font-mono); font-size: 1.5rem; font-weight: 600;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: 1.5rem; font-weight: 600;
   color: var(--text); word-break: break-all; line-height: 1.2;
 }
 .detail-seen { margin: 0.25rem 0 0; font-size: var(--fs-body); color: var(--text-muted); }
@@ -119,10 +501,35 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
   border: 1px solid currentColor;
 }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* 134px es el alto medido de una .vital real de MetricsChart (cabecera,
+   lectura actual, gráfica de 48px, pie de máximos y media). Si esa tarjeta
+   cambia de alto, este número deja de cuadrar y vuelve el salto. */
+.vitals-ghost { display: flex; flex-direction: column; gap: 0.85rem; }
+.vital-ghost { height: 134px; border-radius: 8px; }
+.inventory-ghost { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.6rem; }
 .status--pending { color: var(--text-muted); }
 .status--online  { color: var(--success); }
 .status--stale   { color: var(--warn); }
 .status--offline { color: var(--danger); }
+
+/* Hygeia vela por las constantes vitales: el ritmo del propio distintivo dice
+   cómo está el activo antes de leer la palabra. Sano late tranquilo; con el
+   latido atrasado, deprisa e inquieto; caído no late — el silencio es el dato.
+   Es el mismo gesto que ya usa la lista de activos (AssetList, .pulse--online),
+   traído a la cabecera del detalle para que las dos vistas hablen igual. */
+.status--online .status-dot  { animation: pulse-vital 2.4s ease-out infinite; }
+.status--stale  .status-dot  { animation: pulse-vital 0.9s ease-out infinite; }
+
+@keyframes pulse-vital {
+  0%        { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); }
+  70%, 100% { box-shadow: 0 0 0 6px transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status--online .status-dot,
+  .status--stale .status-dot { animation: none; }
+}
 
 /* ── Metadatos ── */
 .meta {
@@ -150,11 +557,202 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
   font-size: var(--fs-sm); letter-spacing: 0;
 }
 
+.tab-panel { display: flex; flex-direction: column; gap: 1.3rem; }
+
 .state-msg { margin: 0; padding: 1.4rem 1rem; text-align: center; color: var(--text-muted); font-size: var(--fs-body); }
 .state-msg--error { color: var(--danger); }
 
+.hint { font-size: var(--fs-xs); font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+.hint--block { margin: 0.5rem 0 0; }
+
+/* ── Lecturas puntuales (memoria) ── */
+.readout { display: flex; flex-wrap: wrap; gap: 0 1.8rem; margin: 0; }
+.readout-item { display: flex; flex-direction: column; gap: 0.15rem; }
+.readout dt {
+  font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--text-muted);
+}
+.readout dd {
+  margin: 0;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-lg); font-weight: 500;
+  color: var(--text); font-variant-numeric: tabular-nums;
+}
+.readout dd small { margin-left: 0.15em; font-size: 0.7em; color: var(--text-muted); }
+/* Las unidades de varias letras necesitan más aire que un "%". */
+.readout dd small.unit--wide { margin-left: 0.35em; }
+
+/* ── Filas por entidad (montajes, interfaces, procesos) ── */
+.rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.row {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.5rem 0.5rem; border-radius: 6px;
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+}
+.row-name {
+  flex: 1 1 0; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); color: var(--text-dim);
+}
+.row-value {
+  flex-shrink: 0;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); color: var(--text); font-variant-numeric: tabular-nums;
+}
+.row-value small { color: var(--text-muted); }
+.row-pid { flex-shrink: 0; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-xs); color: var(--text-muted); }
+.row-note { flex-shrink: 0; font-size: var(--fs-xs); color: var(--text-muted); }
+.row-note--bad { color: var(--danger); }
+
+.row--disk .row-name { flex: 0 1 8rem; }
+.row--net .row-value { min-width: 5.5rem; text-align: right; }
+
+/* ── Inventario de software ── */
+.inventory-scanned { margin: -0.3rem 0 0.7rem; font-size: var(--fs-sm); color: var(--text-muted); }
+
+/* ── Análisis con Lybra (Fase I) ── */
+.analysis-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+  flex-wrap: wrap; margin-bottom: 0.8rem; padding: 0.6rem 0.75rem;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+}
+.analysis-state { display: flex; align-items: center; gap: 0.45rem; min-width: 0; }
+.analysis-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.analysis-dot.clean { background: var(--success); }
+.analysis-dot.vulnerable { background: var(--danger); }
+.analysis-dot.running { background: var(--info); }
+.analysis-dot.failed { background: var(--warn); }
+.analysis-text { font-size: var(--fs-md); color: var(--text-dim); }
+.analysis-text--muted { color: var(--text-muted); }
+.analysis-actions { display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; }
+.btn-analysis {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.35rem 0.7rem; border-radius: 6px; cursor: pointer;
+  font-size: var(--fs-md); font-weight: 600;
+  background: none; border: 1px solid var(--border-solid); color: var(--text-dim);
+  transition: all 0.2s;
+}
+.btn-analysis:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+.btn-analysis--primary { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-bright); }
+.btn-analysis--primary:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
+.btn-analysis:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-analysis svg { width: 12px; height: 12px; }
+.btn-analysis .spin { animation: seq-spin 0.8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .btn-analysis .spin { animation: none; } }
+
+.inventory-filter {
+  width: 100%; margin-bottom: 0.7rem;
+  padding: 0.45rem 0.7rem; border-radius: 6px;
+  background: var(--surface-2); border: 1px solid var(--border-med);
+  color: var(--text); font-size: var(--fs-body);
+}
+.inventory-filter:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 1px; }
+
+.inventory-rows { max-height: 26rem; overflow-y: auto; }
+
+.row--software { flex-wrap: wrap; }
+.sw-main { display: flex; align-items: baseline; gap: 0.5rem; flex: 1 1 12rem; min-width: 0; }
+.sw-version { flex-shrink: 0; font-size: var(--fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.sw-vendor {
+  flex: 1 1 10rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-sm); color: var(--text-muted);
+}
+.sw-size { min-width: 4.5rem; text-align: right; }
+.sw-installed { min-width: 5.5rem; text-align: right; font-size: var(--fs-md)}
+
+.bar {
+  flex: 1 1 0; min-width: 3rem; height: 6px;
+  border-radius: 999px; background: var(--surface-3); overflow: hidden;
+}
+.bar-fill {
+  display: block; height: 100%; background: var(--accent); border-radius: inherit;
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.3s ease;
+}
+.bar--hot .bar-fill { background: var(--danger); }
+
+/* ── Núcleos ──
+   Viven dentro de la sección "Procesos", a ancho completo, justo debajo de
+   su cabecera y antes de las columnas por CPU/memoria: son el contexto
+   inmediato de esos rankings, no una sección aparte.
+   Antes tan pequeños (8×26px) que la sección quedaba enana junto al resto de
+   monitores; se agrandan a un tamaño comparable a las barras de disco. El
+   relleno transiciona en vez de saltar entre heartbeats. */
+.cores-block { margin-bottom: 0.9rem; }
+.cores { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 4px; }
+.core {
+  display: flex; align-items: flex-end;
+  width: 14px; height: 52px;
+  border-radius: 3px; background: var(--surface-3); overflow: hidden;
+}
+.core-fill {
+  width: 100%; background: var(--accent-bright); border-radius: inherit;
+  transition: height 0.5s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.3s ease;
+}
+.core--hot .core-fill { background: var(--danger); }
+
+/* ── Procesos ── */
+.proc-cols { display: flex; flex-wrap: wrap; gap: 0.9rem; }
+.proc-col { flex: 1 1 14rem; min-width: 0; }
+.proc-head {
+  margin: 0 0 0.35rem;
+  font-size: var(--fs-xs); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted);
+}
+
+/* Las cards de proceso cambian de orden en cada heartbeat según quién
+   consuma más CPU/memoria; TransitionGroup anima ese reordenamiento (FLIP)
+   en vez de que las filas salten de sitio de golpe.
+   A propósito NO se usa `position: absolute` en `-leave-active` (el truco
+   habitual para que una fila saliente no desplace al resto durante su
+   fundido): con esa variante, al forzar reordenamientos rápidos con un
+   mismo pid saliendo y volviendo a entrar al top-N, aparecían filas
+   atascadas con opacidad 0 que nunca se retiraban del DOM. No se pudo
+   aislar con certeza si la causa era la combinación de `transform`
+   compartido entre `-move` y `-leave-active`, o una limitación del propio
+   entorno de verificación (el pintado no llegó a confirmarse ahí). Se
+   mantiene esta versión, más simple y sin ese riesgo, por precaución: es
+   además la receta estándar de Vue para listas. El coste es un salto de
+   layout mínimo mientras una fila se desvanece, imperceptible con filas de
+   una sola línea. */
+.proc-row-move {
+  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.proc-row-enter-active,
+.proc-row-leave-active {
+  transition: opacity 0.3s ease;
+}
+.proc-row-enter-from,
+.proc-row-leave-to {
+  opacity: 0;
+}
+
 /* ── Anomalías ── */
-.anomalies { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.anomalies { position: relative; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+
+/* Al borrar, la tarjeta se saca del flujo (`position: absolute`) para que el
+   resto reacomode con `.anomaly-row-move` mientras ella se desvanece hacia
+   la derecha en su sitio. A diferencia de `.proc-row-*` (que a propósito NO
+   usa `position: absolute` por el bug de churn rápido documentado ahí
+   arriba), aquí no hay reordenamiento continuo — solo un borrado puntual —
+   así que la técnica estándar de Vue es segura. */
+.anomaly-row-move {
+  transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.anomaly-row-enter-active {
+  transition: opacity 0.3s ease;
+}
+.anomaly-row-leave-active {
+  transition: opacity 0.35s ease, transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  position: absolute;
+  width: 100%;
+}
+.anomaly-row-enter-from {
+  opacity: 0;
+}
+.anomaly-row-leave-to {
+  opacity: 0;
+  transform: translateX(28px);
+}
+
 .anomaly {
   padding: 0.65rem 0.85rem;
   background: var(--surface-2);
@@ -172,13 +770,14 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 .anomaly-state--acknowledged { background: var(--warn-dim); color: var(--warn); }
 .anomaly-state--resolved { background: var(--success-dim); color: var(--success); }
 
-.anomaly-reading { display: flex; align-items: baseline; gap: 0.5rem; margin: 0.4rem 0 0; }
+.anomaly-reading { display: flex; flex-direction: column; margin: 0.4rem 0 0; }
 .reading-value {
-  font-family: var(--font-mono); font-size: var(--fs-xl); font-weight: 600;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-xl); font-weight: 600;
   color: var(--text); font-variant-numeric: tabular-nums;
+  margin: -0rem 0 -0.7rem 0;
 }
 .reading-ctx { font-size: var(--fs-sm); color: var(--text-muted); }
-.anomaly-time { margin: 0.2rem 0 0; font-size: var(--fs-sm); color: var(--text-muted); }
+.anomaly-time { margin: 0.3rem 0 0; font-size: var(--fs-sm); color: var(--text-muted); }
 
 .anomaly-actions { display: flex; gap: 0.4rem; margin-top: 0.6rem; }
 .btn-sm {
@@ -190,6 +789,8 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 .btn-sm:hover { border-color: var(--text-muted); color: var(--text); }
 .btn-sm--primary { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-bright); }
 .btn-sm--primary:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.btn-sm--danger { border-color: var(--danger-dim); color: var(--danger); }
+.btn-sm--danger:hover { background: var(--danger-dim); border-color: var(--danger); color: var(--danger); }
 
 .btn-sm:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 </style>

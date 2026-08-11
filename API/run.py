@@ -31,6 +31,8 @@ from flask_smorest          import Api as FlaskSmorestApi
 from sqlalchemy             import create_engine, text
 from urllib.parse           import quote_plus
 
+from dotenv                 import load_dotenv
+
 from src.modules.shared     import limiter
 from src.modules.infrastructure import unit_of_work
 from src.modules.shared._exceptions import (
@@ -39,12 +41,13 @@ from src.modules.shared._exceptions import (
     EllysiaException,
     create_error_response
 )
-from src.modules.system     import configure_logging, config_reading, system_blp
+from src.modules.system     import configure_logging, config_reading, system_blp, ping_redis
 from src.modules.users      import (
     UserManager,
     oauth_blp,
     users_blp
 )
+from src.modules.accounts   import organizations_blp, plans_blp
 from src.modules.users.services.secrets import hash_password as _hash_password
 from src.modules.features.themis   import themis_blp
 from src.modules.features.acheron    import acheron_blp
@@ -56,18 +59,17 @@ import src.modules.system.config_reading as CR
 
 
 APP_CONTEXT = CR.get_app_context()
+_IS_SHUTTING_DOWN = False
+_WORKER = {"proc": None}
+# Tope duro de apagado: pase lo que pase con la limpieza (Redis lento, scheduler
+# bloqueado, subproceso colgado), el proceso SIEMPRE sale antes de este límite.
+_SHUTDOWN_DEADLINE_S = 6
 
 _logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", message="Multiple schemas resolved to the name")
 
-_IS_SHUTTING_DOWN = False
-_WORKER = {"proc": None}
-
-# Tope duro de apagado: pase lo que pase con la limpieza (Redis lento, scheduler
-# bloqueado, subproceso colgado), el proceso SIEMPRE sale antes de este límite.
-_SHUTDOWN_DEADLINE_S = 6
-
+load_dotenv()  # Carga variables de entorno desde .env (solo en desarrollo)
 
 def _kill_worker_tree() -> None:
     """Mata el subproceso worker y TODOS sus descendientes (nmap, nikto…).
@@ -130,8 +132,8 @@ def _run_shutdown_cleanup() -> None:
 
     _logger.info("[Shutdown] Deteniendo scheduler...")
     try:
-        from src.modules.features.themis.services.scheduling import Scheduler
-        Scheduler.stop()
+        from src.modules.features.themis.services.scheduling import ThemisScheduler
+        ThemisScheduler.stop()
     except Exception as e:
         _logger.error(f"Error deteniendo scheduler: {e}")
 
@@ -141,6 +143,20 @@ def _run_shutdown_cleanup() -> None:
         HygeiaScheduler.stop()
     except Exception as e:
         _logger.error(f"Error deteniendo scheduler de Hygeia: {e}")
+
+    _logger.info("[Shutdown] Deteniendo scheduler de accounts...")
+    try:
+        from src.modules.accounts.services.scheduling import AccountsScheduler
+        AccountsScheduler.stop()
+    except Exception as e:
+        _logger.error(f"Error deteniendo scheduler de accounts: {e}")
+
+    _logger.info("[Shutdown] Deteniendo scheduler de buzones de Iris...")
+    try:
+        from src.modules.features.iris.services.mailbox.scheduling import IrisMailboxScheduler
+        IrisMailboxScheduler.stop()
+    except Exception as e:
+        _logger.error(f"Error deteniendo scheduler de buzones de Iris: {e}")
 
     _logger.info("[Shutdown] Cerrando sesiones de base de datos...")
     try:
@@ -184,145 +200,31 @@ def _graceful_shutdown(signum, *args) -> None:
         )
     os._exit(0)
 
-def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_migrations: bool = True) -> Flask:
-    """
-    Factory de la aplicación Flask Ellysia.
 
-    Configura todos los componentes necesarios para servir la API REST.
-
-    Args:
-        fresh_db_init: Si True, reinicializa la base de datos completamente
-                        (destructivo). Por defecto False.
-
-    Returns:
-        Flask: Aplicación completamente configurada y lista para servir.
-    """
-    from src.modules.features.themis.services.scheduling import Scheduler
-    from src.modules.features.hygeia.services.scheduling import HygeiaScheduler
-    from werkzeug.middleware.proxy_fix import ProxyFix
-
-    configure_logging()
-
-    app = Flask(__name__)
-    # S5: la app corre detrás de nginx (ver web/nginx.conf) — sin esto,
-    # request.remote_addr (y por tanto el rate limiter y los logs de
-    # auditoría) ven la IP del contenedor de nginx, no la del cliente real.
-    # x_for=1 confía en un único salto de X-Forwarded-For (el proxy inmediato).
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1) # type: ignore
-
-    _logger.info("Inicializando la aplicación Ellysia...")
+def _build_cors(app: Flask) -> None:
     _logger.info("Inicializando CORS...")
-    # E10: el default apuntaba a :8080 (nadie sirve ahí) y el origen de dev
-    # viajaba siempre, incluso en producción. El dev server real de Vite es
-    # :5173 (ver web/app/CLAUDE.md); el origen extra solo se añade en dev.
+
     raw     = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173")
     origins = [o.strip() for o in raw.split(",") if o.strip()]
     if config_reading.is_development():
         origins.append("http://127.0.0.1:5173")
     CORS(app, origins=origins, supports_credentials=True)
 
-    _logger.info("Inicializando rate limiting...")
-    # T4: RATELIMIT_STORAGE_URI explícita (mismo patrón que ALLOWED_ORIGINS)
-    # tiene prioridad sobre el Redis derivado de la config — permite apuntar
-    # el backend del limiter a otro storage (p. ej. "memory://" en tests)
-    # sin depender de un Redis real.
-    storage_uri = os.environ.get("RATELIMIT_STORAGE_URI")
-    if not storage_uri:
-        redis_cfg = CR.get_redis_config()
-        redis_auth = f":{quote_plus(redis_cfg['password'])}@" if redis_cfg.get("password") else ""
-        storage_uri = f"redis://{redis_auth}{redis_cfg['host']}:{redis_cfg['port']}/{redis_cfg['db']}"
-    app.config["RATELIMIT_STORAGE_URI"] = storage_uri
-    limiter.init_app(app)
 
-    _logger.info("Inicializando documentación OpenAPI...")
-    app.config["API_TITLE"]             = "Ellysia API"
-    app.config["API_VERSION"]           = CR.get_app_version()
-    app.config["OPENAPI_VERSION"]       = "3.0.3"
-    app.config["OPENAPI_URL_PREFIX"]    = "/api-docs"
-    app.config["OPENAPI_SWAGGER_UI_PATH"] = "/swagger"
-    app.config["OPENAPI_SWAGGER_UI_URL"] = "https://cdn.jsdelivr.net/npm/swagger-ui-dist/"
-    flask_smorest_api = FlaskSmorestApi(app)
-
+def _register_blueprints(app: Flask) -> None:
     _logger.info("Añadiendo endpoints...")
-    flask_smorest_api.register_blueprint(system_blp,  url_prefix="/system")
-    flask_smorest_api.register_blueprint(oauth_blp,   url_prefix="/oauth")
-    flask_smorest_api.register_blueprint(users_blp,   url_prefix="/users")
-    flask_smorest_api.register_blueprint(themis_blp, url_prefix="/themis")
-    flask_smorest_api.register_blueprint(acheron_blp,  url_prefix="/acheron")
-    flask_smorest_api.register_blueprint(aegis_blp,    url_prefix="/aegis")
-    flask_smorest_api.register_blueprint(iris_blp,     url_prefix="/iris")
-    flask_smorest_api.register_blueprint(hygeia_blp,   url_prefix="/hygeia")
+    flask_smorest_api = FlaskSmorestApi(app)
+    flask_smorest_api.register_blueprint(system_blp,    url_prefix="/system")
+    flask_smorest_api.register_blueprint(oauth_blp,     url_prefix="/oauth")
+    flask_smorest_api.register_blueprint(users_blp,     url_prefix="/users")
+    flask_smorest_api.register_blueprint(plans_blp,     url_prefix="/plans")
+    flask_smorest_api.register_blueprint(organizations_blp, url_prefix="/organizations")
+    flask_smorest_api.register_blueprint(themis_blp,    url_prefix="/themis")
+    flask_smorest_api.register_blueprint(acheron_blp,   url_prefix="/acheron")
+    flask_smorest_api.register_blueprint(aegis_blp,     url_prefix="/aegis")
+    flask_smorest_api.register_blueprint(iris_blp,      url_prefix="/iris")
+    flask_smorest_api.register_blueprint(hygeia_blp,    url_prefix="/hygeia")
 
-    _logger.info("Registrando manejadores de error globales...")
-    _register_error_handlers(app)
-
-    _logger.info("Registrando auditoría de peticiones...")
-    _register_request_audit(app)
-
-    if fresh_db_init:
-        _init_db()
-    elif run_migrations:
-        _run_migrations()
-
-    _logger.info("Inicializando base de datos...")
-    engine = unit_of_work.initialize()
-    unit_of_work.warmup()
-
-    _logger.info("Configurando sesión por-request...")
-    from src.modules.infrastructure.session import (
-        init_request_session,
-        shutdown_request_session,
-    )
-    # Abrir la sesión al inicio de la petición (no de forma perezosa) hace que
-    # un fallo de conexión se detecte pronto, y garantiza que g.db_session
-    # exista para que UnitOfWork la comparta de forma consistente.
-    app.before_request(init_request_session)
-    app.teardown_request(shutdown_request_session)
-
-    if start_scheduler:
-        _logger.info("Reconciliando escaneos huérfanos...")
-        try:
-            from src.modules.features.themis.managers import ScanManager
-            fixed = ScanManager.reconcile_orphaned_scans()
-            if fixed:
-                _logger.info("Se marcaron %d escaneo(s) huérfano(s) como FAILED", fixed)
-        except Exception as e:
-            _logger.warning("No se pudo reconciliar escaneos huérfanos: %s", e)
-
-        _logger.info("Reconciliando análisis Iris huérfanos...")
-        try:
-            from src.modules.features.iris.managers import IrisManager
-            fixed_iris = IrisManager.reconcile_orphaned_analyses()
-            if fixed_iris:
-                _logger.info("Se marcaron %d análisis Iris huérfano(s) como failed", fixed_iris)
-        except Exception as e:
-            _logger.warning("No se pudo reconciliar análisis Iris huérfanos: %s", e)
-
-        _logger.info("Arrancando scheduler de tareas programadas...")
-        Scheduler.start()
-
-        _logger.info("Arrancando scheduler de Hygeia...")
-        HygeiaScheduler.start()
-
-    _logger.info("Verificando conexion a Redis...")
-    import redis as redis_lib
-    try:
-        redis_cfg = CR.get_redis_config()
-        r = redis_lib.Redis(
-            host=redis_cfg["host"],
-            port=redis_cfg["port"],
-            db=redis_cfg["db"],
-            password=redis_cfg["password"],
-            socket_connect_timeout=redis_cfg.get("socket_connect_timeout", 2),
-        )
-        r.ping()
-        r.close()
-        _logger.info("Redis conectado correctamente")
-    except Exception as e:
-        _logger.warning("Redis no disponible — la cola de tareas no funcionara: %s", e)
-
-    _logger.info("Aplicación Ellysia iniciada correctamente")
-    return app
 
 def _register_error_handlers(app: Flask) -> None:
     """
@@ -340,6 +242,8 @@ def _register_error_handlers(app: Flask) -> None:
         - 429 Too Many Requests: Rate limit superado.
         - 500 Internal Server Error: Errores inesperados.
     """
+    _logger.info("Registrando manejadores de error globales...")
+
     @app.errorhandler(404)
     def not_found(error):
         _logger.warning(f"Ruta no encontrada: {request.method} {request.url}")
@@ -368,10 +272,28 @@ def _register_error_handlers(app: Flask) -> None:
         # real en producción habría lanzado TypeError en vez de la respuesta
         # JSON esperada.
         _logger.warning("Rate limit superado: %s", request.remote_addr)
-        return jsonify({
+
+        # Cuánto falta para que se renueve la ventana. Sin este dato el cliente
+        # solo puede adivinar: reintentaba a ciegas y volvía a chocarse, o se
+        # rendía y enseñaba un error genérico. `Retry-After` en segundos es lo
+        # que espera cualquier cliente HTTP (RFC 9110 §10.2.3).
+        retry_after = None
+        current = getattr(limiter, "current_limit", None)
+        if current is not None and getattr(current, "reset_at", None):
+            retry_after = max(1, int(current.reset_at - time.time()))
+
+        payload = {
             "error": "too_many_requests",
             "error_description": "Has superado el límite de peticiones. Espera un momento e inténtalo de nuevo.",
-        }), 429
+        }
+        if retry_after is not None:
+            payload["retryAfter"] = retry_after
+
+        response = jsonify(payload)
+        response.status_code = 429
+        if retry_after is not None:
+            response.headers["Retry-After"] = str(retry_after)
+        return response
 
     @app.errorhandler(EllysiaException)
     def handle_secops_exception(error):
@@ -410,6 +332,48 @@ def _register_error_handlers(app: Flask) -> None:
             "error_description": "Ha ocurrido un error inesperado en el servidor.",
         }), 500
 
+
+def _register_conditional_get(app: Flask) -> None:
+    """
+    Añade ETag a las lecturas y responde 304 cuando el cliente ya tiene el dato.
+
+    Las vistas más sondeadas devuelven casi siempre lo mismo: la lista de
+    escaneos cambia cuando uno termina (minutos), los activos de Hygeia cuando
+    alguien da uno de alta (días). Aun así se reenviaba el JSON entero en cada
+    vuelta. Con un ETag, si nada ha cambiado el cliente recibe un 304 vacío.
+
+    Va en un solo ``after_request`` en vez de endpoint por endpoint porque corre
+    DESPUÉS de que flask-smorest serialice: los endpoints devuelven diccionarios
+    que el decorador ``@blp.response`` convierte en respuesta, así que desde
+    dentro de la vista no hay todavía un cuerpo al que calcularle el hash.
+
+    Lo que esto NO hace: ahorrar cupo del rate limiter. El límite cuenta
+    peticiones, no bytes, y un 304 es una petición. El cupo se ahorra sondeando
+    menos (backoff en el cliente); esto ahorra ancho de banda y re-pintado.
+
+    Args:
+        app: Instancia de la aplicación Flask.
+    """
+    _logger.info("Registrando GET condicional (ETag/304)...")
+
+    @app.after_request
+    def _add_etag(response):
+        if request.method not in ("GET", "HEAD") or response.status_code != 200:
+            return response
+        # Acheron y /system ya usan ETag como testigo de concurrencia optimista
+        # (el cliente lo reenvía en If-Match para detectar escrituras pisadas).
+        # Recalcularlo aquí lo sustituiría por un hash del cuerpo y rompería esa
+        # comprobación, así que si ya hay uno se respeta.
+        if response.headers.get("ETag"):
+            return response
+        # direct_passthrough = ficheros y streams: acceder a .data los consumiría.
+        if response.direct_passthrough or not response.is_json:
+            return response
+
+        response.add_etag()
+        return response.make_conditional(request)
+
+
 def _register_request_audit(app: Flask) -> None:
     """
     Registra la auditoría de acceso de la API.
@@ -426,6 +390,7 @@ def _register_request_audit(app: Flask) -> None:
     Args:
         app: Instancia de la aplicación Flask.
     """
+    _logger.info("Registrando auditoría de peticiones...")
     audit_logger = logging.getLogger("ellysia.audit")
 
     @app.before_request
@@ -454,6 +419,44 @@ def _register_request_audit(app: Flask) -> None:
             duration_ms,
         )
         return response
+
+
+def _configure_scheduling() -> None:
+    from src.modules.features.themis.services.scheduling import ThemisScheduler
+    from src.modules.features.hygeia.services.scheduling import HygeiaScheduler
+    from src.modules.features.iris.services.mailbox.scheduling import IrisMailboxScheduler
+    from src.modules.accounts.services.scheduling import AccountsScheduler
+
+    _logger.info("Reconciliando escaneos huérfanos...")
+    try:
+        from src.modules.features.themis.managers import ScanManager
+        fixed = ScanManager.reconcile_orphaned_scans()
+        if fixed:
+            _logger.info("Se marcaron %d escaneo(s) huérfano(s) como FAILED", fixed)
+    except Exception as e:
+        _logger.warning("No se pudo reconciliar escaneos huérfanos: %s", e)
+
+    _logger.info("Reconciliando análisis Iris huérfanos...")
+    try:
+        from src.modules.features.iris.managers import IrisManager
+        fixed_iris = IrisManager.reconcile_orphaned_analyses()
+        if fixed_iris:
+            _logger.info("Se marcaron %d análisis Iris huérfano(s) como failed", fixed_iris)
+    except Exception as e:
+        _logger.warning("No se pudo reconciliar análisis Iris huérfanos: %s", e)
+
+    _logger.info("Arrancando scheduler de tareas programadas...")
+    ThemisScheduler.start()
+
+    _logger.info("Arrancando scheduler de Hygeia...")
+    HygeiaScheduler.start()
+
+    _logger.info("Arrancando scheduler de buzones de Iris...")
+    IrisMailboxScheduler.start()
+
+    _logger.info("Arrancando scheduler de avisos de suscripcion...")
+    AccountsScheduler.start()
+
 
 def _run_migrations() -> None:
     """
@@ -575,15 +578,98 @@ def _init_db() -> None:
     )
 
 
-def app_factory() -> Flask:
-    """Factory para gunicorn (``gunicorn --factory run:app_factory``).
+def _run_workers() -> None:
+    popen_kwargs = {
+        "cwd": os.path.dirname(os.path.abspath(__file__)),
+        "start_new_session": True,
+    }
 
-    En Docker el worker RQ corre en su propio contenedor (``ellysia-worker``,
-    ver docker-compose.yml), así que aquí no hace falta la lógica de
-    subprocess del bloque ``__main__`` — solo replicar la llamada a
-    ``create_app`` que hace ``python run.py`` sin ``--with-worker``.
+    command = [sys.executable, "-m", "src.modules.system.taskqueue.worker"]
+    _WORKER["proc"] = subprocess.Popen(
+        command,
+        **popen_kwargs,
+    )
+    _logger.info("Worker iniciado como subproceso (PID %d)", _WORKER["proc"].pid)
+
+
+def create_app(fresh_db_init: bool = False, start_scheduler: bool = True, run_migrations: bool = True) -> Flask:
     """
-    return create_app(APP_CONTEXT.create_database)
+    Factory de la aplicación Flask Ellysia.
+
+    Configura todos los componentes necesarios para servir la API REST.
+
+    Args:
+        fresh_db_init: Si ``True``, reinicializa la base de datos completamente
+                        (destructivo). Por defecto ``False``.
+        start_scheduler: Si ``True``, arranca los schedulers de tareas programadas. Por defecto ``True``
+        run_migrations: Si ``True``, aplica migraciones pendientes de Alembic.
+
+    Returns:
+        Flask: Aplicación completamente configurada y lista para servir.
+    """
+    from werkzeug.middleware.proxy_fix import ProxyFix
+
+    configure_logging()
+
+    app = Flask(__name__)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1) # type: ignore
+
+    _logger.info("Inicializando la aplicación Ellysia...")
+    _build_cors(app)
+    _logger.info("Inicializando rate limiting...")
+
+    storage_uri = os.environ.get("RATELIMIT_STORAGE_URI")
+    if not storage_uri:
+        redis_cfg = CR.redis_config()
+        redis_auth = f":{quote_plus(redis_cfg.password)}@" if redis_cfg.password else ""
+        storage_uri = f"redis://{redis_auth}{redis_cfg.host}:{redis_cfg.port}/{redis_cfg.db}"
+    app.config["RATELIMIT_STORAGE_URI"] = storage_uri
+    # Sin esto, flask-limiter no manda NADA: ni cuánto queda del cupo ni cuándo
+    # se renueva. El cliente no tenía forma de saber que se estaba acercando al
+    # límite y descubría el 429 chocándose con él, sin saber cuánto esperar. Con
+    # las cabeceras activas el front puede frenar antes de agotar el cupo.
+    app.config["RATELIMIT_HEADERS_ENABLED"] = True
+    limiter.init_app(app)
+
+    _logger.info("Inicializando documentación OpenAPI...")
+    app.config["API_TITLE"]             = "Ellysia API"
+    app.config["API_VERSION"]           = CR.get_app_version()
+    app.config["OPENAPI_VERSION"]       = "3.0.3"
+    app.config["OPENAPI_URL_PREFIX"]    = "/api-docs"
+    app.config["OPENAPI_SWAGGER_UI_PATH"] = "/swagger"
+    app.config["OPENAPI_SWAGGER_UI_URL"] = "https://cdn.jsdelivr.net/npm/swagger-ui-dist/"
+
+    _register_blueprints(app)
+    _register_error_handlers(app)
+    _register_conditional_get(app)
+    _register_request_audit(app)
+
+    if fresh_db_init:
+        _init_db()
+    elif run_migrations:
+        _run_migrations()
+
+    _logger.info("Inicializando base de datos...")
+    unit_of_work.initialize()
+    unit_of_work.warmup()
+
+    _logger.info("Configurando sesión por-request...")
+    from src.modules.infrastructure.session import (
+        init_request_session,
+        shutdown_request_session,
+    )
+
+    app.before_request(init_request_session)
+    app.teardown_request(shutdown_request_session)
+
+    if start_scheduler:
+        _configure_scheduling()
+
+    _logger.info("Verificando conexion a Redis...")
+    ping_redis()
+    _logger.info("Aplicación Ellysia iniciada correctamente")
+    return app
+
 
 
 if __name__ == "__main__":
@@ -593,38 +679,27 @@ if __name__ == "__main__":
     _args, _ = parser.parse_known_args()
 
     signal.signal(
-        signal.SIGTERM,
-        _graceful_shutdown
+        signalnum   = signal.SIGTERM,
+        handler     = _graceful_shutdown
     )
     signal.signal(
-        signal.SIGINT,
-        _graceful_shutdown
+        signalnum   = signal.SIGINT,
+        handler     = _graceful_shutdown
     )
 
-    app = create_app(APP_CONTEXT.create_database)
+    app = create_app(
+        fresh_db_init = APP_CONTEXT.create_database
+    )
 
     if _args.with_worker:
-        # El worker se lanza en su PROPIA sesión para que el CTRL+C de la
-        # consola NO se le difunda (ni a sus descendientes: nmap, nikto).
-        # Así run.py es el único gestor de la señal y su _graceful_shutdown
-        # termina el worker explícitamente, evitando carreras de señales.
-        popen_kwargs = {
-            "cwd": os.path.dirname(os.path.abspath(__file__)),
-            "start_new_session": True,
-        }
-
-        _WORKER["proc"] = subprocess.Popen( # type: ignore
-            [sys.executable, "-m", "src.modules.system.taskqueue.worker"],
-            **popen_kwargs,
-        )
-        _logger.info("Worker iniciado como subproceso (PID %d)", _WORKER["proc"].pid)
+        _run_workers()
 
     try:
         app.run(
-            debug=APP_CONTEXT.debug,
-            host=APP_CONTEXT.host,
-            port=APP_CONTEXT.port,
-            use_reloader=False
+            debug           = APP_CONTEXT.debug,
+            host            = APP_CONTEXT.host,
+            port            = APP_CONTEXT.port,
+            use_reloader    = False
         )
     except KeyboardInterrupt:
         _logger.info("KeyboardInterrupt caught, initiating shutdown...")
