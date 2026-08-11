@@ -260,7 +260,13 @@
   --border: rgba(44,79,56,0.10); --border-med: rgba(44,79,56,0.20);
 }
 
-html { scroll-behavior: smooth; }
+/* El recorte horizontal vive SOLO aquí. Puesto también en `body`, el valor de
+   `html` se propaga al viewport y el de `body` se queda en `body`; un
+   `overflow-x` no-`visible` computa `overflow-y: auto`, así que `body` pasaba a
+   ser contenedor de scroll. Como su altura es automática nunca desborda, nunca
+   scrollea, y todo `position: sticky` descendiente se resolvía contra un
+   scrollport inmóvil — es decir, se comportaba como `static`. */
+html { scroll-behavior: smooth; overflow-x: hidden; }
 
 html, body {
   min-height: 100vh;
@@ -277,7 +283,6 @@ html, body {
   font-size-adjust: var(--fsa-body);
   line-height: 1.7;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
 }
 body { transition: background-color 0.4s ease, color 0.4s ease; }
 
