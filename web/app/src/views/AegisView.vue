@@ -16,6 +16,12 @@
         <div class="panel-content" v-show="!leftCollapsed">
           <OrgProfilePanel />
           <TweaksForm />
+          <!-- Mantenimiento de listas: hasta ahora solo se podían crear desde
+               el modal de campaña, y no había forma de editarlas después. -->
+          <button type="button" class="lists-btn" @click="store.openListsModal()">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+            Editar listas de distribución
+          </button>
         </div>
       </aside>
 
@@ -74,6 +80,11 @@
       :doc="store.viewerDoc.data"
       @close="store.closeCampaignModal()"
     />
+
+    <DistributionListsModal
+      v-if="store.listsModalOpen"
+      @close="store.closeListsModal()"
+    />
   </div>
 </template>
 
@@ -89,6 +100,7 @@ import DocumentViewer from '@/components/aegis/DocumentViewer.vue'
 import DocumentEditor from '@/components/aegis/DocumentEditor.vue'
 import HistoryPanel from '@/components/aegis/HistoryPanel.vue'
 import CampaignModal from '@/components/aegis/CampaignModal.vue'
+import DistributionListsModal from '@/components/aegis/DistributionListsModal.vue'
 
 const store = useAegisStore()
 
@@ -115,6 +127,17 @@ onMounted(async () => { await store.loadTopics(); await store.loadHistory() })
    el mismo fondo y solo un hairline casi invisible las separaba. */
 .panel--center { flex: 1 1 0%; min-width: 0; background: var(--surface-2); overflow-y: auto; }
 .panel-content { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
+
+.lists-btn {
+  display: flex; align-items: center; justify-content: center; gap: 0.45rem;
+  width: calc(100% - 2rem); margin: 0 1rem 1rem;
+  padding: 0.5rem 0.75rem; border-radius: 7px;
+  background: var(--bg); border: 1px solid var(--border-solid);
+  color: var(--text-dim); font-family: inherit; font-size: var(--fs-md); font-weight: 600;
+  cursor: pointer; transition: all 0.15s;
+}
+.lists-btn:hover { border-color: var(--accent); color: var(--accent-bright); }
+.lists-btn:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 
 /* ── Entrada escalonada al cargar — mismo lenguaje que ThemisView ── */
 .panel--left   { animation: seq-fade-up 0.45s ease-out backwards; }

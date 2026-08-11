@@ -104,6 +104,12 @@ export const useAegisStore = defineStore('aegis', () => {
   const loadingCampaignDetail = ref(false)
   /** Eliminación de campaña en curso */
   const deletingCampaign = ref(false)
+  /** Modal de mantenimiento de listas de distribución abierto/cerrado */
+  const listsModalOpen = ref(false)
+  /** Destinatarios de la lista desplegada en ese modal */
+  const listRecipients = ref([])
+  /** Id de la lista desplegada (null = ninguna) */
+  const expandedListId = ref(null)
 
   /* ── CARGA INICIAL ── */
 
@@ -531,6 +537,84 @@ export const useAegisStore = defineStore('aegis', () => {
     } finally { creatingList.value = false }
   }
 
+  /* ── MANTENIMIENTO DE LISTAS ── */
+
+  /** Abre el modal de listas y (re)carga las listas del usuario */
+  async function openListsModal() {
+    listsModalOpen.value = true
+    expandedListId.value = null
+    listRecipients.value = []
+    await loadDistributionLists()
+  }
+
+  /** Cierra el modal de listas */
+  function closeListsModal() {
+    listsModalOpen.value = false
+    expandedListId.value = null
+    listRecipients.value = []
+  }
+
+  /**
+   * Despliega una lista y carga sus destinatarios. Llamar con la lista ya
+   * desplegada la pliega (mismo patrón que loadCampaignDetail).
+   * @param {number} listId
+   */
+  async function toggleListRecipients(listId) {
+    if (expandedListId.value === listId) { expandedListId.value = null; listRecipients.value = []; return }
+    expandedListId.value = listId
+    listRecipients.value = []
+    const res = await apiFetch(`/aegis/lists/${listId}/recipients`)
+    if (!res?.ok) { toast.show('No se pudieron cargar los destinatarios.', 'error'); return }
+    const data = await res.json()
+    listRecipients.value = data.recipients ?? []
+  }
+
+  /**
+   * Añade destinatarios a una lista existente. Los duplicados los ignora el
+   * backend, así que el recuento se relee de la lista en lugar de sumarse.
+   * @param {number} listId
+   * @param {Array<{email: string, name?: string}>} recipients
+   */
+  async function addRecipientsToList(listId, recipients) {
+    if (!recipients.length) return false
+    const res = await apiFetch(`/aegis/lists/${listId}/recipients`, {
+      method: 'POST',
+      body: JSON.stringify({ recipients }),
+    })
+    if (!res?.ok) { toast.show('No se pudieron añadir los destinatarios.', 'error'); return false }
+    const data = await res.json().catch(() => ({}))
+    listRecipients.value = [...listRecipients.value, ...(data.recipients ?? [])]
+    await loadDistributionLists()
+    toast.show(`${data.count ?? recipients.length} destinatario(s) añadido(s).`, 'success')
+    return true
+  }
+
+  /**
+   * Elimina un destinatario de una lista.
+   * @param {number} listId
+   * @param {number} recipientId
+   */
+  async function removeRecipientFromList(listId, recipientId) {
+    const res = await apiFetch(`/aegis/lists/${listId}/recipients/${recipientId}`, { method: 'DELETE' })
+    if (!res?.ok) { toast.show('No se pudo eliminar el destinatario.', 'error'); return false }
+    listRecipients.value = listRecipients.value.filter(r => r.id !== recipientId)
+    await loadDistributionLists()
+    return true
+  }
+
+  /**
+   * Elimina una lista de distribución entera con sus destinatarios.
+   * @param {number} listId
+   */
+  async function deleteDistributionList(listId) {
+    const res = await apiFetch(`/aegis/lists/${listId}`, { method: 'DELETE' })
+    if (!res?.ok) { toast.show('No se pudo eliminar la lista.', 'error'); return false }
+    if (expandedListId.value === listId) { expandedListId.value = null; listRecipients.value = [] }
+    distributionLists.value = distributionLists.value.filter(l => l.id !== listId)
+    toast.show('Lista eliminada.', 'success')
+    return true
+  }
+
   /**
    * Crea una campaña (draft) y la lanza inmediatamente: congela el quiz,
    * genera un token por destinatario y encola el envío en segundo plano.
@@ -603,6 +687,9 @@ export const useAegisStore = defineStore('aegis', () => {
     campaignDetail.value = null
     loadingCampaignDetail.value = false
     deletingCampaign.value = false
+    listsModalOpen.value = false
+    listRecipients.value = []
+    expandedListId.value = null
   }
 
   return {
@@ -619,6 +706,9 @@ export const useAegisStore = defineStore('aegis', () => {
     creatingList, launchingCampaign, campaignDetail, loadingCampaignDetail, deletingCampaign,
     openCampaignModal, closeCampaignModal, loadDistributionLists,
     createDistributionListWithRecipients, launchNewCampaign, loadCampaignDetail, deleteCampaign,
+    listsModalOpen, listRecipients, expandedListId,
+    openListsModal, closeListsModal, toggleListRecipients,
+    addRecipientsToList, removeRecipientFromList, deleteDistributionList,
     $reset,
   }
 })

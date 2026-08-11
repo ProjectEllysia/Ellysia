@@ -170,7 +170,7 @@ const props = defineProps({ doc: { type: Object, required: true } })
 const emit = defineEmits(['close'])
 
 const store = useAegisStore()
-const { formatDate } = useUtils()
+const { formatDate, parseEmails } = useUtils()
 
 function defaultCampaignName() {
   const title = props.doc?.subtitle || props.doc?.title || 'Píldora'
@@ -188,18 +188,7 @@ const launchedCount = ref(0)
 
 const questionCount = computed(() => props.doc?.pill?.questions?.length || 0)
 
-const parsedRecipients = computed(() => {
-  const seen = new Set()
-  const out = []
-  for (const raw of emailsRaw.value.split(/[\n,;]+/)) {
-    const email = raw.trim().toLowerCase()
-    if (!email || seen.has(email)) continue
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue
-    seen.add(email)
-    out.push({ email })
-  }
-  return out
-})
+const parsedRecipients = computed(() => parseEmails(emailsRaw.value))
 const recipientCount = computed(() => parsedRecipients.value.length)
 
 const canLaunch = computed(() => {
