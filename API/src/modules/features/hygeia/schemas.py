@@ -55,6 +55,20 @@ class AssetTagsRequestSchema(Schema):
     tagIds = fields.List(fields.Integer(), required=True)
 
 
+class InventoryReportRequestSchema(Schema):
+    """Petición del informe PDF del inventario de activos.
+
+    ``scope`` distingue "mis activos" de "los de toda mi organización"; el
+    segundo solo lo puede pedir el dueño, y de eso se encarga el manager, no
+    este schema. ``includeSoftware`` viene desactivado porque el anexo de
+    software puede multiplicar por veinte el tamaño del documento.
+    """
+    scope = fields.String(
+        load_default="user", validate=validate.OneOf(("user", "organization")),
+    )
+    includeSoftware = fields.Boolean(load_default=False)
+
+
 class AssetCreateRequestSchema(Schema):
     """Alta de un nuevo activo a monitorizar."""
     hostname = fields.String(required=True, validate=validate.Length(min=1, max=255))

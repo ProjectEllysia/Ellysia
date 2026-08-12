@@ -16,6 +16,7 @@
           @rotate="handleRotate"
           @toggle-persistent="handleTogglePersistent"
           @tag="handleTagRequest"
+          @report="showReportModal = true"
           @refresh="refreshNow"
         />
       </section>
@@ -61,6 +62,16 @@
       :show="!!store.state.lastAgentKey"
       :agent-key="store.state.lastAgentKey || ''"
       @close="store.clearAgentKey()"
+    />
+
+    <InventoryReportModal
+      :show="showReportModal"
+      :asset-count="store.state.assets.length"
+      :organization="account.organization"
+      :generating="generatingReport"
+      :error="reportError"
+      @submit="handleReportSubmit"
+      @close="closeReportModal"
     />
 
     <AssetTagsModal
@@ -137,18 +148,23 @@ import AssetDetail from '@/components/hygeia/AssetDetail.vue'
 import CreateAssetModal from '@/components/hygeia/CreateAssetModal.vue'
 import AgentKeyModal from '@/components/hygeia/AgentKeyModal.vue'
 import AssetTagsModal from '@/components/hygeia/AssetTagsModal.vue'
+import InventoryReportModal from '@/components/hygeia/InventoryReportModal.vue'
 import InventoryAnalysisModal from '@/components/hygeia/InventoryAnalysisModal.vue'
 import { usePolling } from '@/composables/usePolling'
+import { useApi } from '@/composables/useApi'
 import { useHygeiaStore } from '@/stores/hygeiaStore'
 import { useHygeiaAlertsStore } from '@/stores/hygeiaAlertsStore'
 import { useHygeiaTagsStore } from '@/stores/hygeiaTagsStore'
+import { useAccountStore } from '@/stores/accountStore'
 import { useToastStore } from '@/stores/toastStore'
 
 const store = useHygeiaStore()
 const alerts = useHygeiaAlertsStore()
 const tagsStore = useHygeiaTagsStore()
+const account = useAccountStore()
 const toast = useToastStore()
 const router = useRouter()
+const { apiFetch, apiError } = useApi()
 
 const showCreateModal = ref(false)
 const creating = ref(false)
@@ -160,6 +176,9 @@ const showAnalysisModal = ref(false)
 const taggingAssetId = ref(null)
 const savingTags = ref(false)
 const tagsError = ref('')
+const showReportModal = ref(false)
+const generatingReport = ref(false)
+const reportError = ref('')
 
 const selectedAsset = computed(() =>
   store.state.assets.find((a) => a.id === store.state.selectedId) || null
@@ -224,6 +243,57 @@ async function handleTogglePersistent(id) {
       : `«${asset.hostname}» se marca como host que se apaga a propósito: no se avisará de sus caídas.`,
     'success',
   )
+}
+
+/* ── Informe PDF del inventario ── */
+
+function closeReportModal() {
+  showReportModal.value = false
+  reportError.value = ''
+}
+
+/**
+ * Pide el PDF y lo descarga.
+ *
+ * Va por `apiFetch` y no por una navegación directa del navegador porque la
+ * ruta exige el JWT, y una descarga nativa no lleva la cabecera. Así que llega
+ * como blob y se dispara con un enlace temporal.
+ */
+async function handleReportSubmit({ scope, includeSoftware }) {
+  generatingReport.value = true
+  reportError.value = ''
+  try {
+    const res = await apiFetch('/hygeia/inventory/report', {
+      method: 'POST',
+      body: JSON.stringify({ scope, includeSoftware }),
+    })
+    if (!res?.ok) {
+      reportError.value = await apiError(res, 'No se pudo generar el inventario.')
+      return
+    }
+
+    // El nombre lo decide el servidor (Content-Disposition); si por lo que sea
+    // no viniera, uno razonable evita que el fichero se llame "descarga".
+    const disposition = res.headers.get('Content-Disposition') || ''
+    const match = disposition.match(/filename="?([^";]+)"?/)
+    const blob = await res.blob()
+
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = match ? match[1] : 'inventario-hygeia.pdf'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+
+    closeReportModal()
+    toast.show('Inventario descargado.', 'success')
+  } catch {
+    reportError.value = 'No se pudo conectar con la API.'
+  } finally {
+    generatingReport.value = false
+  }
 }
 
 /* ── Etiquetas ── */
@@ -434,7 +504,11 @@ const poller = usePolling(poll, { intervalMs: POLL_MS, immediate: false })
 onMounted(async () => {
   // El catálogo no entra en el sondeo: solo cambia cuando el propio usuario
   // crea o borra una etiqueta, y de eso ya se entera el store en el momento.
-  await Promise.all([store.fetchAssets(), tagsStore.fetchTags()])
+  // La organización hace falta para saber si el informe puede pedirse con
+  // ámbito de empresa. Se pide sin condición: `organization` a null significa
+  // tanto "no la he cargado" como "no tiene", así que no se puede distinguir
+  // para ahorrársela — y es una sola petición al montar, como el catálogo.
+  await Promise.all([store.fetchAssets(), tagsStore.fetchTags(), account.loadOrganization()])
   if (store.state.assets.length) {
     await handleSelect(store.state.assets[0].id)
   }

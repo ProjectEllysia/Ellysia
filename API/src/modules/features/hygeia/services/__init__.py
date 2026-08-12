@@ -18,9 +18,11 @@ from .ingest_guard import (
     enforce_ingest_limits,
 )
 from .inventory_adapter import services_from_inventory
+from .reports import build_inventory_report
 
 __all__ = [
     "services_from_inventory",
+    "build_inventory_report",
     "agent_key_id_from_request",
     "generate_agent_key",
     "require_agent_key",

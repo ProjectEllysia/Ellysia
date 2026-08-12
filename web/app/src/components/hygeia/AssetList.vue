@@ -9,6 +9,13 @@
             <path d="M7 7h.01" />
           </svg>
         </RouterLink>
+        <button class="btn-icon" title="Inventario en PDF" aria-label="Descargar el inventario en PDF"
+          @click="$emit('report')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <path d="M14 2v6h6M12 18v-6M9 15l3 3 3-3" />
+          </svg>
+        </button>
         <button class="btn-icon" title="Recargar" aria-label="Recargar activos" @click="$emit('refresh')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path d="M23 4v6h-6M1 20v-6h6" />
@@ -138,7 +145,7 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   error: { type: String, default: null },
 })
-defineEmits(['select', 'create', 'delete', 'rotate', 'refresh', 'toggle-persistent', 'tag'])
+defineEmits(['select', 'create', 'delete', 'rotate', 'refresh', 'toggle-persistent', 'tag', 'report'])
 
 /** Filas fantasma mientras carga: las que caben sin alargar el panel. */
 const SKELETON_ROWS = 4

@@ -14,7 +14,8 @@ Hierarchy:
     ├── TagNotFoundError          (404)
     ├── TagAlreadyExistsError     (409)
     ├── TagQuotaExceededError     (409)
-    └── SystemTagImmutableError   (403)
+    ├── SystemTagImmutableError   (403)
+    └── OrganizationScopeNotAllowedError (403)
 """
 
 from __future__ import annotations
@@ -193,4 +194,30 @@ class SystemTagImmutableError(HygeiaError):
             message=f"La etiqueta {tag_id} es del catálogo común y no se puede borrar",
             details={"tag_id": tag_id},
             user_message="Las etiquetas del catálogo común no se pueden borrar.",
+        )
+
+
+class OrganizationScopeNotAllowedError(HygeiaError):
+    """Se pide el inventario de toda la organización sin ser su dueño.
+
+    Cubre dos situaciones con la misma respuesta, y es deliberado: no
+    pertenecer a ninguna organización y pertenecer a una que no es tuya son,
+    desde fuera, indistinguibles. Distinguirlas revelaría a un miembro
+    cualquiera si su organización existe y quién manda en ella.
+
+    Hoy solo hay dos roles (``owner`` y ``member``) y no hay uno intermedio,
+    así que "cualquier miembro" significaría cualquiera a quien se haya
+    invitado alguna vez — y este informe lista hostnames, kernels y software
+    de todos sus compañeros.
+    """
+    default_code = ErrorCode.AUTHORIZATION_ERROR
+    default_status_code = 403
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="El ámbito de organización exige ser dueño de una organización",
+            user_message=(
+                "Solo el dueño de una organización puede generar el inventario "
+                "de todos sus activos."
+            ),
         )

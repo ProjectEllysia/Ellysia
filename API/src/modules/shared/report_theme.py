@@ -1,8 +1,16 @@
 """
-Tema visual de los informes PDF de Themis: paleta y estilos.
+Tema visual de los informes PDF: paleta y estilos.
 
-D5 en ``plans/deuda-tecnica-y-calidad.md`` — extraído del ``reports.py`` de
-85 KB, el fichero más grande del repositorio.
+Nació en Themis (D5 en ``plans/deuda-tecnica-y-calidad.md``, extraído del
+``reports.py`` de 85 KB, el fichero más grande del repositorio) y vive aquí
+desde que Hygeia también imprime. No sabe nada de escaneos ni de activos: solo
+importa ``reportlab``, así que cualquier módulo que genere un PDF puede
+heredarlo y salir con la misma cara que el resto del producto.
+
+A propósito **no** se reexporta desde ``src.modules.shared``: ese ``__init__``
+lo importa medio backend, y colgar de él la carga de ``reportlab`` haría que
+la pagara hasta quien solo quiere ``utcnow_naive``. Quien imprime, lo importa
+por su ruta completa.
 """
 
 from enum import Enum

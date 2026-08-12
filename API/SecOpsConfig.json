@@ -1179,6 +1179,14 @@
       "offlineAfterMissed": 4,
       "retentionDays": 30,
       "retentionCron": "0 4 * * *",
+      "colorPalette": {
+        "black": "#121212",
+        "dark": "#24402c",
+        "light": "#5a8f6d",
+        "main": "#3e6b4a",
+        "secondary": "#555b6e",
+        "white": "#f5f5f5"
+      },
       "thresholds": {
         "cpuPct": {
           "warning": 85,

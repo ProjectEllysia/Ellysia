@@ -948,6 +948,18 @@ def get_tool_color_palette(tool) -> dict:
 
 
 @_lazy_load
+def get_hygeia_color_palette() -> dict:
+    """Paleta del informe de inventario de Hygeia.
+
+    Vive fuera de ``get_tool_color_palette`` porque aquella está parametrizada
+    por escáner de Themis y esto no es un escáner. El consumidor conserva sus
+    colores de respaldo, así que un JSON sin este bloque imprime igual, solo
+    que sin poder retocarse desde la configuración.
+    """
+    return _cfg("features.hygeia.colorPalette", {})
+
+
+@_lazy_load
 def get_themis_csv_dir() -> str:
     return get_directory_of(DirectoryType.CSV_THEMIS)
 

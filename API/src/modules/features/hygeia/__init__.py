@@ -4,6 +4,7 @@ src.modules.features.hygeia - Monitorización de activos (agente Hygeia)
 Exponente:
     - HygeiaAssetManager: alta, consulta y credenciales de activos monitorizados.
     - HygeiaTagManager: catálogo de etiquetas y su asignación a los activos.
+    - HygeiaReportManager: informe PDF del inventario de activos.
     - Modelos: MonitoredAsset, AssetSnapshot, Anomaly, HygeiaTag (SystemTag, UserTag).
     - Endpoints: hygeia_blp.
 """
@@ -11,7 +12,7 @@ Exponente:
 from src.modules.system.taskqueue import QueueRegistry
 
 from .model import Anomaly, AssetSnapshot, AssetTag, HygeiaTag, MonitoredAsset, SystemTag, UserTag
-from .managers import HygeiaAssetManager, HygeiaTagManager
+from .managers import HygeiaAssetManager, HygeiaReportManager, HygeiaTagManager
 from .endpoints import hygeia_blp
 
 # Registro de las categorías de cola de este módulo (OCP). Los jobs de
@@ -30,6 +31,7 @@ __all__ = [
     "SystemTag",
     "UserTag",
     "HygeiaAssetManager",
+    "HygeiaReportManager",
     "HygeiaTagManager",
     "hygeia_blp",
 ]

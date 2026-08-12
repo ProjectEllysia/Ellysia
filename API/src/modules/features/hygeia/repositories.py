@@ -33,6 +33,23 @@ class MonitoredAssetRepository(BaseRepository[MonitoredAsset]):
             .all()
         )
 
+    def get_by_users(self, user_ids: List[int]) -> List[MonitoredAsset]:
+        """Activos de un conjunto de usuarios, para el informe de organización.
+
+        Ordena por dueño y luego por hostname para que el informe salga ya
+        agrupado sin reordenar en Python. Una lista vacía devuelve una lista
+        vacía en vez de todos los activos del sistema: un ``IN ()`` mal formado
+        aquí sería una fuga de datos, no un error de rendimiento.
+        """
+        if not user_ids:
+            return []
+        return (
+            self._session.query(MonitoredAsset)
+            .filter(MonitoredAsset.user_id.in_(user_ids))
+            .order_by(MonitoredAsset.user_id.asc(), MonitoredAsset.hostname.asc())
+            .all()
+        )
+
     def get_by_agent_key_id(self, agent_key_id: str) -> Optional[MonitoredAsset]:
         """Localiza el activo cuya clave de agente empieza por ``agent_key_id``.
 

@@ -16,7 +16,7 @@ from datetime import timedelta
 from typing import Optional
 
 import src.modules.system.config_reading as CR
-from src.modules.accounts import LimitKey, QuotaManager
+from src.modules.accounts import LimitKey, OrganizationManager, QuotaManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive
@@ -31,6 +31,7 @@ from .exceptions import (
     AssetQuotaExceededError,
     IngestTooFrequentError,
     InventoryNotAvailableError,
+    OrganizationScopeNotAllowedError,
     SystemTagImmutableError,
     TagAlreadyExistsError,
     TagNotFoundError,
@@ -43,7 +44,10 @@ from .repositories import (
     HygeiaTagRepository,
     MonitoredAssetRepository,
 )
-from .services import check_clock_skew, denormalize, evaluate, generate_agent_key, services_from_inventory
+from .services import (
+    build_inventory_report, check_clock_skew, denormalize, evaluate, generate_agent_key,
+    services_from_inventory,
+)
 
 # ---------------------------------------------------------------------------
 # Dependencia de Hygeia sobre Themis (Fase I del roadmap de Lybra).
@@ -641,6 +645,84 @@ class HygeiaTagManager:
             MonitoredAssetRepository(uow).update(asset)
 
             return asset.to_dict()
+
+
+class HygeiaReportManager:
+    """
+    Genera el informe PDF del inventario de activos de un usuario.
+
+    Síncrono a propósito: un inventario son filas de una tabla, no un escaneo.
+    Construirlo cuesta milisegundos, así que no necesita cola, ni fila en
+    ``Document``, ni que la SPA sondee un estado — se pide y se descarga. Si
+    algún día hubiera que archivarlo o tardara segundos, ese es el momento de
+    llevarlo a la TaskQueue, no antes.
+    """
+
+    def __init__(self, user: User) -> None:
+        self.user = user
+
+    def build_inventory_report(self, scope: str, include_software: bool) -> tuple[bytes, str]:
+        """
+        Construye el PDF del inventario.
+
+        Args:
+            scope: ``"user"`` (los activos propios) u ``"organization"`` (los
+                de todos los miembros, solo para el dueño).
+            include_software: Añade el anexo con el software instalado.
+
+        Returns:
+            ``(bytes del PDF, nombre de fichero sugerido)``.
+
+        Raises:
+            OrganizationScopeNotAllowedError: Si se pide el ámbito de
+                organización sin ser dueño de una.
+        """
+        if scope == "organization":
+            assets, scope_label, owner_names = self._organization_scope()
+        else:
+            assets = build_repository(MonitoredAssetRepository).get_by_user(self.user.id)
+            scope_label, owner_names = "Mis activos", {}
+
+        author = f"{self.user.first_name} {self.user.last_name}".strip() or self.user.username
+        pdf = build_inventory_report(
+            assets=assets,
+            scope_label=scope_label,
+            author=author,
+            include_software=include_software,
+            owner_names=owner_names,
+        )
+
+        stamp = utcnow_naive().strftime("%Y%m%d")
+        suffix = "organizacion" if scope == "organization" else "propio"
+        return pdf, f"inventario-hygeia-{suffix}-{stamp}.pdf"
+
+    def _organization_scope(self) -> tuple[list, str, dict]:
+        """Activos de toda la organización, si el usuario es su dueño.
+
+        Se apoya en la superficie pública de ``accounts`` (``OrganizationManager``)
+        y no en sus repositorios: el recuento de miembros y sus nombres ya los
+        resuelve ``list_members`` con un solo JOIN, y de paso vuelve a exigir la
+        propiedad ahí dentro. Tampoco usa el decorador
+        ``require_organization_owner``, que espera un ``organization_id`` en la
+        ruta mientras que aquí el ámbito viaja en el cuerpo.
+
+        No tener organización y tener una que no es tuya fallan igual y con el
+        mismo error: distinguirlos diría a un miembro cualquiera si su
+        organización existe y quién manda en ella.
+        """
+        organization_manager = OrganizationManager()
+        organization = organization_manager.get_mine(self.user.id)
+        if organization is None or not organization.get("isOwner"):
+            raise OrganizationScopeNotAllowedError()
+
+        members = organization_manager.list_members(organization["id"], self.user.id)
+        owner_names = {
+            member["userId"]: member["fullName"] or member["username"]
+            for member in members
+        }
+
+        assets = build_repository(MonitoredAssetRepository).get_by_users(list(owner_names))
+        return assets, organization["name"], owner_names
 
 
 class HygeiaIngestManager:

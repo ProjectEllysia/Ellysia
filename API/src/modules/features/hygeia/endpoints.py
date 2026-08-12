@@ -13,9 +13,10 @@ Dos superficies separadas:
       heartbeats (``POST /hygeia/ingest``).
 """
 
+import io
 import logging
 
-from flask import request
+from flask import request, send_file
 from flask_smorest import Blueprint as SmorestBlueprint
 
 from src.modules.shared import handle_exceptions, limiter, current_actor
@@ -31,7 +32,8 @@ from .exceptions import (
     TagNotFoundError,
 )
 from .managers import (
-    HygeiaAlertManager, HygeiaAssetManager, HygeiaIngestManager, HygeiaTagManager,
+    HygeiaAlertManager, HygeiaAssetManager, HygeiaIngestManager, HygeiaReportManager,
+    HygeiaTagManager,
 )
 from .schemas import (
     AnalyzeInventoryResponseSchema,
@@ -49,6 +51,7 @@ from .schemas import (
     AssetTagsRequestSchema,
     AssetUpdateRequestSchema,
     IngestRequestSchema,
+    InventoryReportRequestSchema,
     IngestResponseSchema,
     InventoryAnalysisSummarySchema,
     RotateKeyResponseSchema,
@@ -246,6 +249,40 @@ def delete_asset(asset_id):
     manager = HygeiaAssetManager(user)
     manager.delete_asset(asset_id)
     logger.info(f"Activo Hygeia {asset_id} eliminado | user={current_actor()}")
+
+
+@hygeia_blp.post("/inventory/report")
+@hygeia_blp.arguments(InventoryReportRequestSchema)
+@hygeia_blp.response(200, description="PDF del inventario de activos")
+@hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@hygeia_blp.alt_response(403, schema=ErrorSchema, description="Organization scope requires ownership")
+# 20 por hora, muy por debajo del resto de lecturas de Hygeia (600): construir
+# el PDF es trabajo de CPU en el hilo de la petición, y ese es el precio de
+# haberlo hecho síncrono.
+@limiter.limit("20 per hour")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.HYGEIA_READ])
+@handle_exceptions(default_exception=HygeiaError, logger=logger)
+def download_inventory_report(data):
+    """Descargar el inventario de activos en PDF, propio o de toda la organización"""
+    user = get_current_user()
+    manager = HygeiaReportManager(user)
+    pdf, filename = manager.build_inventory_report(
+        scope=data["scope"], include_software=data["includeSoftware"],
+    )
+    logger.info(
+        f"Informe de inventario generado | user={current_actor()} "
+        f"scope={data['scope']} software={data['includeSoftware']} bytes={len(pdf)}"
+    )
+    # POST y no GET aunque sea una lectura: `run.py` registra un GET
+    # condicional (ETag/304) global, y un PDF que cambia cada vez que se da de
+    # alta un activo no debe pasar por esa caché.
+    return send_file(
+        io.BytesIO(pdf),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=filename,
+    )
 
 
 # =============================================================================
