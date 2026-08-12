@@ -10,7 +10,11 @@ Hierarchy:
     ├── IngestTooFrequentError    (429)
     ├── AnomalyNotFoundError      (404)
     ├── AnomalyStillOpenError     (409)
-    └── InventoryNotAvailableError (409)
+    ├── InventoryNotAvailableError (409)
+    ├── TagNotFoundError          (404)
+    ├── TagAlreadyExistsError     (409)
+    ├── TagQuotaExceededError     (409)
+    └── SystemTagImmutableError   (403)
 """
 
 from __future__ import annotations
@@ -133,4 +137,60 @@ class InventoryNotAvailableError(HygeiaError):
             message=f"El activo {asset_id} no tiene inventario de software que analizar",
             details={"asset_id": asset_id},
             user_message="Este activo aún no ha reportado un inventario de software.",
+        )
+
+
+class TagNotFoundError(EntityNotFoundError, HygeiaError):
+    """Se lanza cuando una etiqueta no existe o no es visible para el usuario.
+
+    Igual que con los activos: una etiqueta personal de otro usuario da el
+    mismo 404 que una inexistente, para no permitir enumerar el catálogo
+    ajeno por diferencia de respuesta.
+    """
+    entity_label = "Etiqueta"
+    entity_is_feminine = True
+    id_field = "tag_id"
+
+
+class TagAlreadyExistsError(HygeiaError):
+    """El usuario ya tiene (o el catálogo común ya trae) una etiqueta con ese nombre."""
+    default_code = ErrorCode.CONSTRAINT_VIOLATION
+    default_status_code = 409
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            message=f"Ya existe una etiqueta llamada {name!r}",
+            details={"name": name},
+            user_message=f"Ya existe una etiqueta «{name}».",
+        )
+
+
+class TagQuotaExceededError(HygeiaError):
+    """El usuario ha llegado al tope de etiquetas personales."""
+    default_code = ErrorCode.CONSTRAINT_VIOLATION
+    default_status_code = 409
+
+    def __init__(self, max_tags: int) -> None:
+        super().__init__(
+            message=f"Tope de etiquetas personales superado (máximo {max_tags})",
+            details={"max_tags": max_tags},
+            user_message=f"Has alcanzado el máximo de {max_tags} etiquetas personales.",
+        )
+
+
+class SystemTagImmutableError(HygeiaError):
+    """Se intenta borrar una etiqueta del catálogo común.
+
+    No es un 404 a propósito: la etiqueta existe y el usuario la ve, así que
+    fingir que no está sería confuso. Lo que no puede es tocarla — el
+    catálogo es común, y borrarla se la quitaría a todo el mundo.
+    """
+    default_code = ErrorCode.AUTHORIZATION_ERROR
+    default_status_code = 403
+
+    def __init__(self, tag_id: int) -> None:
+        super().__init__(
+            message=f"La etiqueta {tag_id} es del catálogo común y no se puede borrar",
+            details={"tag_id": tag_id},
+            user_message="Las etiquetas del catálogo común no se pueden borrar.",
         )

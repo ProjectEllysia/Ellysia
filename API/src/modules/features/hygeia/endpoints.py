@@ -7,7 +7,8 @@ repositorio (regla del repo).
 
 Dos superficies separadas:
     - Usuario (``@require_oauth_token``): alta, listado, detalle, baja y
-      rotación de clave de los activos monitorizados.
+      rotación de clave de los activos monitorizados, más el catálogo de
+      etiquetas con el que se agrupan.
     - Agente (``@require_agent_key``): la ruta caliente de ingesta de
       heartbeats (``POST /hygeia/ingest``).
 """
@@ -27,8 +28,11 @@ from .exceptions import (
     AnomalyNotFoundError,
     AssetNotFoundError,
     HygeiaError,
+    TagNotFoundError,
 )
-from .managers import HygeiaAlertManager, HygeiaAssetManager, HygeiaIngestManager
+from .managers import (
+    HygeiaAlertManager, HygeiaAssetManager, HygeiaIngestManager, HygeiaTagManager,
+)
 from .schemas import (
     AnalyzeInventoryResponseSchema,
     AnomalyListResponseSchema,
@@ -42,11 +46,15 @@ from .schemas import (
     AssetMetricsQuerySchema,
     AssetMetricsResponseSchema,
     AssetSchema,
+    AssetTagsRequestSchema,
     AssetUpdateRequestSchema,
     IngestRequestSchema,
     IngestResponseSchema,
     InventoryAnalysisSummarySchema,
     RotateKeyResponseSchema,
+    TagCreateRequestSchema,
+    TagListResponseSchema,
+    TagSchema,
 )
 from .services import agent_key_id_from_request, enforce_ingest_limits, require_agent_key
 
@@ -238,6 +246,87 @@ def delete_asset(asset_id):
     manager = HygeiaAssetManager(user)
     manager.delete_asset(asset_id)
     logger.info(f"Activo Hygeia {asset_id} eliminado | user={current_actor()}")
+
+
+# =============================================================================
+# ETIQUETAS — catálogo común + repositorio personal, y su asignación a activos.
+#
+# No estrenan atributos propios: una etiqueta es una propiedad de los activos
+# de Hygeia, no un recurso aparte, así que reutilizan los HYGEIA_* que ya
+# gobiernan el módulo.
+# =============================================================================
+
+
+@hygeia_blp.get("/tags")
+@hygeia_blp.response(200, TagListResponseSchema, description="Etiquetas visibles para el usuario")
+@hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@limiter.limit("600 per hour")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.HYGEIA_READ])
+@handle_exceptions(default_exception=HygeiaError, logger=logger)
+def list_tags():
+    """Listar el catálogo de etiquetas del usuario con el recuento de activos de cada una"""
+    user = get_current_user()
+    manager = HygeiaTagManager(user)
+    return {"tags": manager.list_tags()}
+
+
+@hygeia_blp.post("/tags")
+@hygeia_blp.arguments(TagCreateRequestSchema)
+@hygeia_blp.response(201, TagSchema, description="Etiqueta personal creada")
+@hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@hygeia_blp.alt_response(409, schema=ErrorSchema, description="Tag name taken or quota exceeded")
+@limiter.limit("60 per hour")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.HYGEIA_CREATE])
+@handle_exceptions(default_exception=HygeiaError, logger=logger)
+def create_tag(data):
+    """Añadir una etiqueta al repositorio personal del usuario"""
+    user = get_current_user()
+    manager = HygeiaTagManager(user)
+    result = manager.create_tag(name=data["name"], color=data["color"])
+    logger.info(f"Etiqueta Hygeia creada | user={current_actor()} name={data['name']}")
+    return result
+
+
+@hygeia_blp.delete("/tags/<int:tag_id>")
+@hygeia_blp.response(200, description="Etiqueta eliminada")
+@hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@hygeia_blp.alt_response(403, schema=ErrorSchema, description="System tags cannot be deleted")
+@hygeia_blp.alt_response(404, schema=ErrorSchema, description="Tag not found")
+@limiter.limit("60 per hour")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.HYGEIA_DELETE])
+@handle_exceptions(default_exception=TagNotFoundError, logger=logger)
+def delete_tag(tag_id):
+    """Borrar una etiqueta personal, quitándola de todos los activos que la llevaran"""
+    user = get_current_user()
+    manager = HygeiaTagManager(user)
+    manager.delete_tag(tag_id)
+    logger.info(f"Etiqueta Hygeia {tag_id} eliminada | user={current_actor()}")
+
+
+@hygeia_blp.put("/assets/<int:asset_id>/tags")
+@hygeia_blp.arguments(AssetTagsRequestSchema)
+@hygeia_blp.response(200, AssetSchema, description="Activo con sus etiquetas actualizadas")
+@hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@hygeia_blp.alt_response(404, schema=ErrorSchema, description="Asset or tag not found")
+@limiter.limit("120 per hour")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.HYGEIA_UPDATE])
+@handle_exceptions(default_exception=AssetNotFoundError, logger=logger)
+def set_asset_tags(data, asset_id):
+    """Fijar el conjunto completo de etiquetas de un activo"""
+    user = get_current_user()
+    manager = HygeiaTagManager(user)
+    result = manager.set_asset_tags(asset_id, data["tagIds"])
+    logger.info(
+        f"Etiquetas del activo {asset_id} = {data['tagIds']} | user={current_actor()}"
+    )
+    return result
     return {"message": "Asset eliminado correctamente"}
 
 
