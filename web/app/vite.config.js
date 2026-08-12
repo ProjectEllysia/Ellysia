@@ -70,6 +70,7 @@ const FRONTEND_SUBROUTES = new Set([
   '/iris/conexiones',
   '/acheron/boveda',
   '/hygeia/activos',
+  '/hygeia/etiquetas',
 ])
 
 function proxyBypass(req) {

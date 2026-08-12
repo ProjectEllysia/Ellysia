@@ -13,7 +13,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import CondPageBreak, Paragraph, Spacer, Table, TableStyle
 import src.modules.system.config_reading as CR
 
-from .theme import ColorType
+from src.modules.shared.report_theme import ColorType
 from .base import PrintingStrategy
 
 

@@ -245,6 +245,21 @@ class Organization(Base):
     Comparte plan y factura, **no datos**: no hay ninguna relación desde aquí
     hacia bóvedas, escaneos o análisis, y nunca debe haberla. Acheron es
     zero-knowledge (el servidor solo ve cifrado) e Iris analiza correo personal.
+
+    La regla tiene desde 2026-08 **una excepción, y solo una**: el informe de
+    inventario de Hygeia (``POST /hygeia/inventory/report`` con
+    ``scope="organization"``) lista los activos de todos los miembros. Se
+    abrió porque un parque de servidores es dato corporativo, no personal —
+    justo lo que una organización necesita ver junto para auditarse—, a
+    diferencia de una bóveda de contraseñas o de un buzón de correo.
+
+    Sigue sin haber relación en el modelo: el informe resuelve los miembros por
+    la superficie pública de ``OrganizationManager`` y consulta Hygeia con esos
+    ids. Y solo lo puede pedir el **dueño**, porque hoy no hay rol intermedio
+    entre ``owner`` y ``member``.
+
+    Antes de abrir la segunda excepción conviene tener una razón igual de
+    concreta: la frase de arriba sigue siendo la regla, no una recomendación.
     """
 
     __tablename__ = "Organization"

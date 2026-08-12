@@ -37,20 +37,29 @@ class _FakeTaskQueue:
     transiciona a offline; este banco solo verifica la transición y la
     apertura de la anomalía, no el envío async, así que el submit se
     descarta sin tocar TaskQueue/Redis (mismo patrón que test_traceroute.py
-    y test_iris_documents.py).
+    y test_iris_documents.py). Se anotan las llamadas para poder afirmar que
+    un activo no persistente tampoco encola correo.
     """
 
+    def __init__(self):
+        self.submissions = []
+
     def submit(self, **kwargs):
+        self.submissions.append(kwargs)
         return None
 
 
 @pytest.fixture(autouse=True)
-def _fake_task_queue():
-    with mock.patch.object(hygeia_managers.TaskQueue, "get_instance", return_value=_FakeTaskQueue()):
-        yield
+def fake_task_queue():
+    fake = _FakeTaskQueue()
+    with mock.patch.object(hygeia_managers.TaskQueue, "get_instance", return_value=fake):
+        yield fake
 
 
-def _create_asset(app, user_id: int, status: str, last_seen_at, interval: int = _INTERVAL) -> int:
+def _create_asset(
+    app, user_id: int, status: str, last_seen_at,
+    interval: int = _INTERVAL, is_persistent: bool = True,
+) -> int:
     with app.app_context():
         with UnitOfWork() as uow:
             asset = MonitoredAsset(
@@ -60,6 +69,7 @@ def _create_asset(app, user_id: int, status: str, last_seen_at, interval: int = 
                 heartbeat_interval_sec=interval,
                 status=status,
                 last_seen_at=last_seen_at,
+                is_persistent=is_persistent,
                 user_id=user_id,
             )
             MonitoredAssetRepository(uow).save(asset)
@@ -125,6 +135,21 @@ def test_stale_asset_past_offline_cutoff_transitions_and_opens_host_down(app, re
     assert len(anomalies) == 1
     assert anomalies[0].severity == "critical"
     assert anomalies[0].state == "open"
+
+
+def test_non_persistent_asset_goes_offline_without_anomaly_or_email(
+    app, regular_user, fake_task_queue,
+):
+    """Un host que se apaga a propósito transiciona igual, pero en silencio."""
+    last_seen = utcnow_naive() - timedelta(seconds=_INTERVAL * _OFFLINE_AFTER_MISSED + 5)
+    asset_id = _create_asset(app, regular_user.id, "stale", last_seen, is_persistent=False)
+
+    with app.app_context():
+        HygeiaMaintenanceManager.execute_presence_check()
+
+    assert _fetch_asset(app, asset_id).status == "offline", "el estado sigue siendo un hecho"
+    assert _open_anomalies(app, asset_id) == []
+    assert fake_task_queue.submissions == [], "una caída esperada no manda correo"
 
 
 def test_offline_asset_is_excluded_from_presence_check(app, regular_user):

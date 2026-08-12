@@ -30,6 +30,10 @@ load_dotenv()
 _configs: dict | None = None
 _configs_path: Path | None = None
 
+# mtime del fichero en el momento de la última lectura. Solo lo usa
+# ``reload_if_changed()`` para no releer en cada job del worker.
+_configs_mtime: float = 0.0
+
 # =============================================================================
 # ENUMERACIONES ÚTILES
 # =============================================================================
@@ -70,7 +74,7 @@ def _lazy_load(func):
     """Decorador que carga la configuración antes de ejecutar la función."""
     @wraps(func)
     def wrapper(*args, **kwargs):
-        global _configs, _configs_path
+        global _configs, _configs_path, _configs_mtime
         if _configs is None:
             if _configs_path is None:
                 this_file = Path(__file__).resolve()
@@ -82,6 +86,7 @@ def _lazy_load(func):
                 _configs_path = next((candidate for candidate in candidates if candidate.exists()), None)
                 if _configs_path is None:
                     raise FileNotFoundError("No se encontró ningún archivo de configuración.")
+            _configs_mtime = _read_mtime(_configs_path)
             with open(_configs_path, "r", encoding="utf-8") as f:
                 _configs = json.load(f)
         return func(*args, **kwargs)
@@ -97,6 +102,54 @@ def reload() -> None:
     global _configs, _configs_path
     _configs = None
     _configs_path = None
+
+
+def _read_mtime(path: Path) -> float:
+    """mtime del fichero, o 0.0 si no se puede leer (no es motivo para fallar)."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def reload_if_changed() -> bool:
+    """Relee la configuración solo si el fichero cambió en disco.
+
+    Existe por los procesos de vida larga que no ven un ``PUT /system``: el
+    proceso API refresca ``_configs`` en memoria al guardar, pero el worker de
+    RQ es otro proceso (sin ``fork``, ver ``taskqueue/worker.py``) y se quedaría
+    con la config que leyó al arrancar hasta que se le reinicie.
+
+    A diferencia de ``reload()`` no pasa por ``_configs = None``: lee a una
+    variable local y sustituye el diccionario entero de golpe. Varios hilos de
+    worker leen la config a la vez, y el hueco en el que ``_configs`` vale
+    ``None`` haría reventar al de al lado con ``IllegalStateError``.
+
+    Returns:
+        True si hubo recarga. La caché de bloques se invalida sola: compara por
+        identidad contra ``_configs`` (ver ``load_block``).
+    """
+    global _configs, _configs_mtime
+    if _configs is None or _configs_path is None:
+        return False  # aún no se ha cargado nada: ya lo hará _lazy_load
+
+    mtime = _read_mtime(_configs_path)
+    if mtime == _configs_mtime:
+        return False
+
+    try:
+        with open(_configs_path, "r", encoding="utf-8") as f:
+            new_configs = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        # Un fichero a medio escribir o ilegible no puede tumbar un job: se
+        # sigue con la config anterior y se reintenta en el siguiente.
+        logger.warning("No se pudo recargar la configuración (%s): %s", _configs_path, exc)
+        return False
+
+    _configs = new_configs
+    _configs_mtime = mtime
+    logger.info("Configuración recargada desde disco (%s)", _configs_path)
+    return True
 
 
 def _require_configs() -> dict:
@@ -441,6 +494,12 @@ class AegisConfig:
 
     tips_amount: int = 7
     """Consejos que se le piden a la IA por píldora."""
+
+    questions_amount: int = 5
+    """Preguntas de test que se le piden a la IA, y tope de las que se aceptan."""
+
+    options_amount: int = 4
+    """Opciones por pregunta que se le piden a la IA, y tope de las que se aceptan."""
 
     vulnerabilities_antiquity: int = 5
     """Antigüedad máxima (años) de una alerta para seguir considerándola vigente."""
@@ -889,6 +948,18 @@ def get_tool_color_palette(tool) -> dict:
 
 
 @_lazy_load
+def get_hygeia_color_palette() -> dict:
+    """Paleta del informe de inventario de Hygeia.
+
+    Vive fuera de ``get_tool_color_palette`` porque aquella está parametrizada
+    por escáner de Themis y esto no es un escáner. El consumidor conserva sus
+    colores de respaldo, así que un JSON sin este bloque imprime igual, solo
+    que sin poder retocarse desde la configuración.
+    """
+    return _cfg("features.hygeia.colorPalette", {})
+
+
+@_lazy_load
 def get_themis_csv_dir() -> str:
     return get_directory_of(DirectoryType.CSV_THEMIS)
 
@@ -925,7 +996,7 @@ def save_full_config(new_config: dict, expected_version: Optional[str] = None) -
     (ETag de ``get_config_version()``), lanza ``IllegalStateError`` (409) en
     vez de sobrescribir — evita el last-write-wins silencioso de C9.
     """
-    global _configs
+    global _configs, _configs_mtime
     if _configs_path is None:
         raise FileNotFoundError("No se encontró ningún archivo de configuración.")
     if expected_version is not None:
@@ -947,6 +1018,7 @@ def save_full_config(new_config: dict, expected_version: Optional[str] = None) -
     with open(_configs_path, "w", encoding="utf-8") as f:
         json.dump(new_config, f, indent=2, ensure_ascii=False)
     _configs = new_config
+    _configs_mtime = _read_mtime(_configs_path)
     return new_config
 
 

@@ -7,7 +7,7 @@ import src.modules.system.config_reading as CR
 
 from ...model import Host, NmapScan, ScanType
 from ..analyzers import NmapAIWriter
-from .theme import ColorType, ReportTheme
+from src.modules.shared.report_theme import ColorType, ReportTheme
 from .base import PrintingStrategy
 
 

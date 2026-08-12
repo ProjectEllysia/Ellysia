@@ -422,6 +422,19 @@ class CampaignRepository(BaseRepository[Campaign]):
             .all()
         )
 
+    def get_campaigns_by_list(self, list_id: int) -> List[Campaign]:
+        """All campaigns targeting a given distribution list, regardless of owner.
+
+        Mismo motivo que 'get_campaigns_by_document': 'list_id' tampoco tiene
+        ON DELETE CASCADE, así que borrar la lista con campañas colgando de
+        ella violaría la FK.
+        """
+        return (
+            self._session.query(Campaign)
+            .filter(Campaign.list_id == list_id)
+            .all()
+        )
+
     def create_campaign(
         self, user_id: int, document_id: int, list_id: int, name: str,
     ) -> Campaign:

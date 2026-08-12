@@ -99,6 +99,12 @@ const routes = [
     component: () => import('@/views/HygeiaView.vue'),
     meta: { requiresAuth: true },
   },
+  {
+    path: '/hygeia/etiquetas',
+    name: 'HygeiaTags',
+    component: () => import('@/views/HygeiaTagsView.vue'),
+    meta: { requiresAuth: true },
+  },
   // Capa comercial: planes, plan propio y organización.
   {
     // Pública: es la tabla de precios, la ve quien todavía no tiene cuenta.

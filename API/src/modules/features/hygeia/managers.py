@@ -16,7 +16,7 @@ from datetime import timedelta
 from typing import Optional
 
 import src.modules.system.config_reading as CR
-from src.modules.accounts import LimitKey, QuotaManager
+from src.modules.accounts import LimitKey, OrganizationManager, QuotaManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive
@@ -31,10 +31,23 @@ from .exceptions import (
     AssetQuotaExceededError,
     IngestTooFrequentError,
     InventoryNotAvailableError,
+    OrganizationScopeNotAllowedError,
+    SystemTagImmutableError,
+    TagAlreadyExistsError,
+    TagNotFoundError,
+    TagQuotaExceededError,
 )
-from .model import Anomaly, MonitoredAsset, AssetSnapshot
-from .repositories import AnomalyRepository, AssetSnapshotRepository, MonitoredAssetRepository
-from .services import check_clock_skew, denormalize, evaluate, generate_agent_key, services_from_inventory
+from .model import Anomaly, MonitoredAsset, AssetSnapshot, UserTag
+from .repositories import (
+    AnomalyRepository,
+    AssetSnapshotRepository,
+    HygeiaTagRepository,
+    MonitoredAssetRepository,
+)
+from .services import (
+    build_inventory_report, check_clock_skew, denormalize, evaluate, generate_agent_key,
+    services_from_inventory,
+)
 
 # ---------------------------------------------------------------------------
 # Dependencia de Hygeia sobre Themis (Fase I del roadmap de Lybra).
@@ -53,6 +66,23 @@ from .services import check_clock_skew, denormalize, evaluate, generate_agent_ke
 from src.modules.features.themis.managers import LybraEngineManager
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_host_down_if_open(uow: UnitOfWork, asset_id: int) -> None:
+    """Cierra una anomalía ``host_down`` abierta de este activo, si la había.
+
+    Dos caminos la resuelven, y por eso vive aquí y no dentro de un manager:
+    recibir un heartbeat **es** la condición de resolución para este tipo
+    concreto de anomalía (§7.2, no hace falta mirar las métricas del
+    payload), y marcar el activo como no persistente también — silenciar un
+    host mientras su aviso sigue sonando no silenciaría nada.
+    """
+    anomaly_repo = AnomalyRepository(uow)
+    open_host_down = anomaly_repo.get_active(asset_id, "host_down")
+    if open_host_down is not None:
+        open_host_down.state = "resolved"
+        open_host_down.resolved_at = utcnow_naive()
+        anomaly_repo.update(open_host_down)
 
 
 class HygeiaAssetManager:
@@ -100,7 +130,9 @@ class HygeiaAssetManager:
         repo = build_repository(MonitoredAssetRepository)
         return any(asset.inventory for asset in repo.get_by_user(user_id))
 
-    def create_asset(self, hostname: str, os_name: Optional[str], labels: dict) -> dict:
+    def create_asset(
+        self, hostname: str, os_name: Optional[str], labels: dict, is_persistent: bool = True,
+    ) -> dict:
         """
         Da de alta un nuevo activo y emite su clave de agente.
 
@@ -112,6 +144,9 @@ class HygeiaAssetManager:
             hostname: Nombre del host que reportará el agente.
             os_name: Sistema operativo del host, si se conoce de antemano.
             labels: Etiquetas libres del activo (entorno, rol, ubicación...).
+            is_persistent: Si se espera que el host esté siempre encendido.
+                ``False`` para un host que se apaga a propósito: su caída no
+                abrirá anomalía ni disparará correo.
 
         Returns:
             Diccionario con ``asset`` (vista serializada del activo) y
@@ -144,6 +179,7 @@ class HygeiaAssetManager:
                 agent_key_id=key_id,
                 agent_key_hash=secret_hash,
                 heartbeat_interval_sec=CR.hygeia_config().heartbeat_interval_sec,
+                is_persistent=is_persistent,
                 user_id=self.user.id,
             )
             saved = repo.save(asset)
@@ -399,6 +435,39 @@ class HygeiaAssetManager:
             )
             MonitoredAssetRepository(uow).delete(asset)
 
+    def set_persistence(self, asset_id: int, is_persistent: bool) -> dict:
+        """
+        Cambia la expectativa de encendido de un activo.
+
+        Al marcarlo como no persistente se resuelve además su ``host_down``
+        abierto, si lo hay: quien silencia un host caído está silenciando ese
+        aviso concreto, no solo los futuros.
+
+        Args:
+            asset_id: Activo a modificar.
+            is_persistent: ``True`` si el host debería estar siempre
+                encendido; ``False`` si se apaga a propósito.
+
+        Returns:
+            La vista serializada del activo ya actualizado.
+
+        Raises:
+            AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
+        """
+        with UnitOfWork() as uow:
+            asset = assert_owned(
+                MonitoredAssetRepository, asset_id, self.user.id,
+                AssetNotFoundError, uow=uow,
+            )
+
+            asset.is_persistent = is_persistent
+            if not is_persistent:
+                _resolve_host_down_if_open(uow, asset.id)
+            MonitoredAssetRepository(uow).update(asset)
+
+            # Serializado dentro del bloque: fuera, la instancia queda detached.
+            return asset.to_dict()
+
     def rotate_key(self, asset_id: int) -> dict:
         """
         Regenera la clave de agente de un activo, invalidando la anterior.
@@ -425,6 +494,235 @@ class HygeiaAssetManager:
             MonitoredAssetRepository(uow).update(asset)
 
         return {"agentKey": full_key}
+
+
+#: Tope de etiquetas personales por usuario.
+#:
+#: Es una constante de módulo y no un valor de ``SecOpsConfig.json`` a
+#: propósito: nadie va a querer ajustar este número, y llevarlo a la
+#: configuración obligaría a tocar ``config_reading.py``, el JSON, la vista de
+#: configuración de la SPA y ``test_config_shape.py`` para algo que solo existe
+#: para que la tabla no crezca sin fondo si alguien automatiza el alta.
+MAX_TAGS_PER_USER = 50
+
+
+class HygeiaTagManager:
+    """
+    Gestiona el catálogo de etiquetas de un usuario y su asignación a activos.
+
+    Un usuario ve dos cosas como si fueran una: el catálogo común
+    (``SystemTag``, sembrado por migración) y su repositorio personal
+    (``UserTag``). Puede asignar cualquiera de las dos a sus activos, pero
+    solo crear y borrar las suyas.
+    """
+
+    def __init__(self, user: User) -> None:
+        self.user = user
+
+    def list_tags(self) -> list[dict]:
+        """
+        Devuelve el catálogo visible con el recuento de activos de cada etiqueta.
+
+        Returns:
+            Lista de diccionarios ``{id, name, color, tagType, assetCount}``,
+            las de sistema primero y por nombre dentro de cada grupo.
+        """
+        tag_repository = build_repository(HygeiaTagRepository)
+        counts = tag_repository.count_assets_per_tag(self.user.id)
+
+        return [
+            {**tag.to_dict(), "assetCount": counts.get(tag.id, 0)}
+            for tag in tag_repository.get_visible_for_user(self.user.id)
+        ]
+
+    def create_tag(self, name: str, color: str) -> dict:
+        """
+        Crea una etiqueta personal.
+
+        El nombre se normaliza (espacios de sobra colapsados y recortados)
+        antes de comprobar duplicados: «  Base   de datos » y «Base de datos»
+        son la misma etiqueta escrita con menos cuidado, no dos.
+
+        Args:
+            name: Texto de la etiqueta.
+            color: Nombre del color, ya validado contra ``TAG_COLORS`` por el schema.
+
+        Returns:
+            La vista serializada de la etiqueta creada, con ``assetCount`` a 0.
+
+        Raises:
+            TagAlreadyExistsError: Si ya existe una con ese nombre (sin
+                distinguir mayúsculas), sea del catálogo común o suya.
+            TagQuotaExceededError: Si ya tiene ``MAX_TAGS_PER_USER`` etiquetas.
+        """
+        normalized_name = " ".join(name.split())
+
+        with UnitOfWork() as uow:
+            tag_repository = HygeiaTagRepository(uow)
+
+            if tag_repository.count_user_tags(self.user.id) >= MAX_TAGS_PER_USER:
+                raise TagQuotaExceededError(MAX_TAGS_PER_USER)
+            if tag_repository.get_by_name_for_user(self.user.id, normalized_name) is not None:
+                raise TagAlreadyExistsError(normalized_name)
+
+            tag = UserTag(name=normalized_name, color=color, user_id=self.user.id)
+            tag_repository.save(tag)
+
+            # Serializado dentro del bloque: fuera, la instancia queda detached.
+            return {**tag.to_dict(), "assetCount": 0}
+
+    def delete_tag(self, tag_id: int) -> None:
+        """
+        Borra una etiqueta personal del usuario.
+
+        Se lleva por delante sus asociaciones con los activos —esa es la
+        operación—, pero **ningún activo**: quitar la etiqueta «Producción»
+        del catálogo no borra los servidores de producción. De la limpieza se
+        encargan el ORM (que vacía la tabla de asociación al borrar el padre)
+        y el ``ondelete="CASCADE"`` de ``AssetTag``.
+
+        Args:
+            tag_id: Etiqueta a borrar.
+
+        Raises:
+            TagNotFoundError: Si no existe o es de otro usuario.
+            SystemTagImmutableError: Si es del catálogo común.
+        """
+        with UnitOfWork() as uow:
+            tag_repository = HygeiaTagRepository(uow)
+            tag = tag_repository.get_by_id(tag_id)
+
+            # Una etiqueta de sistema sí existe y sí se ve, así que decir "no
+            # existe" sería mentir; una de otro usuario, en cambio, no debe
+            # distinguirse de una inexistente.
+            if tag is not None and tag.user_id is None:
+                raise SystemTagImmutableError(tag_id)
+            if tag is None or tag.user_id != self.user.id:
+                raise TagNotFoundError(tag_id)
+
+            tag_repository.delete(tag)
+
+    def set_asset_tags(self, asset_id: int, tag_ids: list[int]) -> dict:
+        """
+        Reemplaza el conjunto de etiquetas de un activo.
+
+        Es un reemplazo y no un añadido: llega la lista definitiva, y lo que
+        no aparezca se quita. Así poner y quitar son la misma operación y el
+        cliente no tiene que calcular diferencias ni encadenar llamadas.
+
+        Args:
+            asset_id: Activo a etiquetar.
+            tag_ids: Ids de las etiquetas que debe llevar al terminar.
+
+        Returns:
+            La vista serializada del activo ya actualizado.
+
+        Raises:
+            AssetNotFoundError: Si el activo no existe o es de otro usuario.
+            TagNotFoundError: Si alguna etiqueta no existe o no es visible
+                para el usuario.
+        """
+        requested_ids = set(tag_ids)
+
+        with UnitOfWork() as uow:
+            asset = assert_owned(
+                MonitoredAssetRepository, asset_id, self.user.id,
+                AssetNotFoundError, uow=uow,
+            )
+
+            # Se resuelven contra las visibles, no por id suelto: así una
+            # etiqueta personal ajena da el mismo 404 que una inexistente y no
+            # se puede colar en un activo propio.
+            visible = {
+                tag.id: tag
+                for tag in HygeiaTagRepository(uow).get_visible_for_user(self.user.id)
+            }
+            unknown_ids = requested_ids - visible.keys()
+            if unknown_ids:
+                raise TagNotFoundError(min(unknown_ids))
+
+            asset.tags = [visible[tag_id] for tag_id in requested_ids]
+            MonitoredAssetRepository(uow).update(asset)
+
+            return asset.to_dict()
+
+
+class HygeiaReportManager:
+    """
+    Genera el informe PDF del inventario de activos de un usuario.
+
+    Síncrono a propósito: un inventario son filas de una tabla, no un escaneo.
+    Construirlo cuesta milisegundos, así que no necesita cola, ni fila en
+    ``Document``, ni que la SPA sondee un estado — se pide y se descarga. Si
+    algún día hubiera que archivarlo o tardara segundos, ese es el momento de
+    llevarlo a la TaskQueue, no antes.
+    """
+
+    def __init__(self, user: User) -> None:
+        self.user = user
+
+    def build_inventory_report(self, scope: str, include_software: bool) -> tuple[bytes, str]:
+        """
+        Construye el PDF del inventario.
+
+        Args:
+            scope: ``"user"`` (los activos propios) u ``"organization"`` (los
+                de todos los miembros, solo para el dueño).
+            include_software: Añade el anexo con el software instalado.
+
+        Returns:
+            ``(bytes del PDF, nombre de fichero sugerido)``.
+
+        Raises:
+            OrganizationScopeNotAllowedError: Si se pide el ámbito de
+                organización sin ser dueño de una.
+        """
+        if scope == "organization":
+            assets, scope_label, owner_names = self._organization_scope()
+        else:
+            assets = build_repository(MonitoredAssetRepository).get_by_user(self.user.id)
+            scope_label, owner_names = "Mis activos", {}
+
+        author = f"{self.user.first_name} {self.user.last_name}".strip() or self.user.username
+        pdf = build_inventory_report(
+            assets=assets,
+            scope_label=scope_label,
+            author=author,
+            include_software=include_software,
+            owner_names=owner_names,
+        )
+
+        stamp = utcnow_naive().strftime("%Y%m%d")
+        suffix = "organizacion" if scope == "organization" else "propio"
+        return pdf, f"inventario-hygeia-{suffix}-{stamp}.pdf"
+
+    def _organization_scope(self) -> tuple[list, str, dict]:
+        """Activos de toda la organización, si el usuario es su dueño.
+
+        Se apoya en la superficie pública de ``accounts`` (``OrganizationManager``)
+        y no en sus repositorios: el recuento de miembros y sus nombres ya los
+        resuelve ``list_members`` con un solo JOIN, y de paso vuelve a exigir la
+        propiedad ahí dentro. Tampoco usa el decorador
+        ``require_organization_owner``, que espera un ``organization_id`` en la
+        ruta mientras que aquí el ámbito viaja en el cuerpo.
+
+        No tener organización y tener una que no es tuya fallan igual y con el
+        mismo error: distinguirlos diría a un miembro cualquiera si su
+        organización existe y quién manda en ella.
+        """
+        organization_manager = OrganizationManager()
+        organization = organization_manager.get_mine(self.user.id)
+        if organization is None or not organization.get("isOwner"):
+            raise OrganizationScopeNotAllowedError()
+
+        members = organization_manager.list_members(organization["id"], self.user.id)
+        owner_names = {
+            member["userId"]: member["fullName"] or member["username"]
+            for member in members
+        }
+
+        assets = build_repository(MonitoredAssetRepository).get_by_users(list(owner_names))
+        return assets, organization["name"], owner_names
 
 
 class HygeiaIngestManager:
@@ -499,7 +797,7 @@ class HygeiaIngestManager:
                 asset.inventory_collected_at = now
             asset_repo.update(asset)
 
-            self._resolve_host_down_if_open(uow, asset.id)
+            _resolve_host_down_if_open(uow, asset.id)
 
             metrics = payload["metrics"]
             # La forma del payload la conocen el schema de ingesta y
@@ -549,21 +847,6 @@ class HygeiaIngestManager:
         elapsed = (now - asset.last_seen_at).total_seconds()
         if elapsed < min_interval:
             raise IngestTooFrequentError(min_interval)
-
-    @staticmethod
-    def _resolve_host_down_if_open(uow: UnitOfWork, asset_id: int) -> None:
-        """Cierra una anomalía ``host_down`` abierta de este activo, si la había.
-
-        Recibir el heartbeat **es** la condición de resolución para este
-        tipo concreto de anomalía (§7.2) — no hace falta ninguna otra
-        comprobación sobre las métricas del payload.
-        """
-        anomaly_repo = AnomalyRepository(uow)
-        open_host_down = anomaly_repo.get_active(asset_id, "host_down")
-        if open_host_down is not None:
-            open_host_down.state = "resolved"
-            open_host_down.resolved_at = utcnow_naive()
-            anomaly_repo.update(open_host_down)
 
     @staticmethod
     def _evaluate_thresholds(uow: UnitOfWork, asset: MonitoredAsset, metrics: dict) -> list[int]:
@@ -733,8 +1016,13 @@ class HygeiaMaintenanceManager:
            señal visual en el listado de activos, no abre ninguna incidencia.
         2. ``stale`` → ``offline`` en un segundo corte más permisivo
            (``offlineAfterMissed`` heartbeats perdidos): solo esta segunda
-           transición abre ``Anomaly(kind="host_down")``, y solo si no había
-           ya una abierta (apertura idempotente).
+           transición abre ``Anomaly(kind="host_down")``, y solo si el activo
+           es persistente y no había ya una abierta (apertura idempotente).
+
+        Un activo no persistente (``is_persistent=False``: un host que se
+        apaga a propósito) transiciona igual — su estado es un hecho
+        observado y la lista debe mostrarlo — pero no abre anomalía, y al no
+        haber anomalía tampoco hay correo.
 
         Cada activo se compara contra su propio ``heartbeat_interval_sec``
         (el que tiene configurado, tras un posible auto-ajuste), no contra
@@ -774,7 +1062,11 @@ class HygeiaMaintenanceManager:
                     transitioned = asset_repo.transition_status_if_still_silent(
                         asset.id, offline_cutoff, "stale", "offline",
                     )
-                    if transitioned and anomaly_repo.get_active(asset.id, "host_down") is None:
+                    if (
+                        transitioned
+                        and asset.is_persistent
+                        and anomaly_repo.get_active(asset.id, "host_down") is None
+                    ):
                         saved = anomaly_repo.save(Anomaly(
                             asset_id=asset.id, kind="host_down", severity="critical",
                         ))

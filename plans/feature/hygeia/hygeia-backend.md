@@ -358,7 +358,15 @@ métricas, solo silencio:
 3. **Apertura idempotente.** Antes de crear la `Anomaly`, comprobar que no exista ya una
    `open` del mismo `kind="host_down"` para ese activo. Un job que corre cada minuto no debe
    abrir una anomalía nueva cada vez que se ejecuta mientras el activo sigue caído.
-4. **A salvo de la carrera con un heartbeat que llega a la vez.** No hagas "leer
+4. **Activos que se apagan a propósito.** `MonitoredAsset.is_persistent` (`isPersistent` en la
+   API, `true` por defecto) dice si se espera que el host esté siempre encendido. Un activo no
+   persistente — un portátil, un equipo que se suspende de noche — transiciona exactamente
+   igual, porque su estado es un hecho observado y el listado debe mostrarlo, pero **no abre
+   `Anomaly(kind="host_down")`**, y al no haber anomalía tampoco hay correo (§8): el aviso
+   viaja siempre colgado de una anomalía, nunca por su cuenta. Se marca en el alta o con
+   `PATCH /hygeia/assets/<id>`; desmarcar la persistencia resuelve además el `host_down`
+   abierto que hubiera, porque silenciar un host mientras su aviso suena no silenciaría nada.
+5. **A salvo de la carrera con un heartbeat que llega a la vez.** No hagas "leer
    `last_seen_at`, decidir en Python, escribir" en dos pasos: si un heartbeat entra justo
    cuando el job está evaluando, esa lectura pudo quedar obsoleta un instante después. Haz el
    corte con una escritura condicional atómica (`UPDATE ... WHERE last_seen_at < :umbral AND

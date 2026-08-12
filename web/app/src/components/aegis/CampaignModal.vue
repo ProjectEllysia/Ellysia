@@ -170,7 +170,7 @@ const props = defineProps({ doc: { type: Object, required: true } })
 const emit = defineEmits(['close'])
 
 const store = useAegisStore()
-const { formatDate } = useUtils()
+const { formatDate, parseEmails } = useUtils()
 
 function defaultCampaignName() {
   const title = props.doc?.subtitle || props.doc?.title || 'Píldora'
@@ -188,18 +188,7 @@ const launchedCount = ref(0)
 
 const questionCount = computed(() => props.doc?.pill?.questions?.length || 0)
 
-const parsedRecipients = computed(() => {
-  const seen = new Set()
-  const out = []
-  for (const raw of emailsRaw.value.split(/[\n,;]+/)) {
-    const email = raw.trim().toLowerCase()
-    if (!email || seen.has(email)) continue
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue
-    seen.add(email)
-    out.push({ email })
-  }
-  return out
-})
+const parsedRecipients = computed(() => parseEmails(emailsRaw.value))
 const recipientCount = computed(() => parsedRecipients.value.length)
 
 const canLaunch = computed(() => {
@@ -276,6 +265,7 @@ const stats = computed(() => {
 </script>
 
 <style scoped>
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 1rem; }
 .modal--campaign { background: var(--surface); border: 1px solid var(--border-solid); border-radius: var(--radius); max-width: 460px; width: 100%; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
 
 .campaign-header { display: flex; align-items: flex-start; gap: 0.75rem; padding: 1.1rem 1.25rem 0.9rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }

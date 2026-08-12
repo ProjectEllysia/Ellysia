@@ -159,10 +159,13 @@ class AegisQuizData:
     correct_index: int
 
     def __post_init__(self) -> None:
+        max_options = CR.aegis_config().options_amount
         if not self.prompt or len(self.prompt) > 300:
             raise AegisValidationError("prompt debe tener entre 1 y 300 caracteres", field="prompt")
-        if not (2 <= len(self.options) <= 4):
-            raise AegisValidationError("options debe tener entre 2 y 4 elementos", field="options")
+        if not (2 <= len(self.options) <= max_options):
+            raise AegisValidationError(
+                f"options debe tener entre 2 y {max_options} elementos", field="options"
+            )
         if not all(isinstance(opt, str) and opt for opt in self.options):
             raise AegisValidationError("cada option debe ser un string no vacío", field="options")
         if not (0 <= self.correct_index < len(self.options)):
@@ -767,6 +770,8 @@ class AegisAIWriter:
             "verified_resources": verified_resources[:MAX_PROMPT_RESOURCES_CHARS],
             "advisories": AegisAIWriter._format_advisories(advisories),
             "tips_amount": str(CR.aegis_config().tips_amount),
+            "questions_amount": str(CR.aegis_config().questions_amount),
+            "options_amount": str(CR.aegis_config().options_amount),
             "intro_context": intro_context,
         }
 
@@ -863,7 +868,6 @@ class AegisAIWriter:
         result = self._generator.digest(ai_input)
 
         data = result.parse_json()
-        tips_amount = CR.aegis_config().tips_amount
         raw_subtitle = str(data.get("subtitle", "")).strip()
         
         if not raw_subtitle or raw_subtitle.lower() == topic_title.lower():
@@ -905,16 +909,25 @@ class AegisAIWriter:
             except AegisValidationError as exc:
                 logger.warning(f"Tip {i + 1} descartado: {exc}")
 
-        # Construcción y validación del quiz
+        # Construcción y validación del quiz. Los dos topes salen de la config
+        # (features.aegis.questionsAmount / optionsAmount): son los mismos
+        # números que el prompt le pide al modelo, así que recortar aquí solo
+        # entra en juego cuando el modelo se pasa de lo que se le pidió.
+        aegis_config = CR.aegis_config()
+        raw_questions = data.get("questions")
+        # El modelo a veces devuelve un objeto en vez de una lista; sin esto el
+        # recorte de abajo reventaría fuera del try y se perdería la píldora entera.
+        raw_questions = raw_questions[:aegis_config.questions_amount] if isinstance(raw_questions, list) else []
+
         questions: list[AegisQuizData] = []
-        for i, q_data in enumerate(data.get("questions", [])):
+        for i, q_data in enumerate(raw_questions):
             if not isinstance(q_data, dict):
                 continue
             try:
                 options = [
                     str(opt)[:200] for opt in (q_data.get("options") or [])
                     if isinstance(opt, (str, int, float))
-                ][:4]
+                ][:aegis_config.options_amount]
                 questions.append(AegisQuizData(
                     prompt        = str(q_data.get("prompt", f"Pregunta {i + 1}"))[:300],
                     options       = options,

@@ -11,11 +11,77 @@ import src.modules.system.config_reading as CR
 from src.modules.shared.schemas import UTCDateTime
 
 
+TAG_COLORS = ("slate", "green", "teal", "blue", "violet", "amber", "red", "pink")
+"""Paleta cerrada de colores de etiqueta.
+
+Se guarda el **nombre** del color, no un valor CSS: el frontend lo traduce a
+la variable que toque, así que cambiar el tema (o el matiz exacto de "amber")
+no obliga a reescribir ninguna fila. Cerrada, además, porque una paleta libre
+acaba siendo diez tonos de gris indistinguibles en un badge de 11px.
+"""
+
+
+class TagSchema(Schema):
+    """Vista de una etiqueta.
+
+    ``assetCount`` solo lo rellena el listado del catálogo; las etiquetas
+    anidadas dentro de un activo lo omiten (allí no significaría nada).
+    """
+    id = fields.Integer()
+    name = fields.String()
+    color = fields.String()
+    tagType = fields.String()
+    assetCount = fields.Integer()
+
+
+class TagCreateRequestSchema(Schema):
+    """Alta de una etiqueta personal."""
+    name = fields.String(required=True, validate=validate.Length(min=1, max=48))
+    color = fields.String(load_default="slate", validate=validate.OneOf(TAG_COLORS))
+
+
+class TagListResponseSchema(Schema):
+    """Catálogo visible para el usuario: las de sistema más las suyas."""
+    tags = fields.List(fields.Nested(TagSchema))
+
+
+class AssetTagsRequestSchema(Schema):
+    """Conjunto completo de etiquetas de un activo.
+
+    Es un reemplazo, no un añadido: lo que llega es la lista definitiva, y
+    las que no aparezcan se quitan. Una sola operación cubre poner, quitar y
+    reordenar sin que el cliente tenga que calcular diferencias.
+    """
+    tagIds = fields.List(fields.Integer(), required=True)
+
+
+class InventoryReportRequestSchema(Schema):
+    """Petición del informe PDF del inventario de activos.
+
+    ``scope`` distingue "mis activos" de "los de toda mi organización"; el
+    segundo solo lo puede pedir el dueño, y de eso se encarga el manager, no
+    este schema. ``includeSoftware`` viene desactivado porque el anexo de
+    software puede multiplicar por veinte el tamaño del documento.
+    """
+    scope = fields.String(
+        load_default="user", validate=validate.OneOf(("user", "organization")),
+    )
+    includeSoftware = fields.Boolean(load_default=False)
+
+
 class AssetCreateRequestSchema(Schema):
     """Alta de un nuevo activo a monitorizar."""
     hostname = fields.String(required=True, validate=validate.Length(min=1, max=255))
     os = fields.String(load_default=None, validate=validate.Length(max=64))
     labels = fields.Dict(load_default=dict)
+    # Por defecto se espera un host siempre encendido: es el comportamiento
+    # que tenía todo activo antes de que existiera esta propiedad.
+    isPersistent = fields.Boolean(load_default=True)
+
+
+class AssetUpdateRequestSchema(Schema):
+    """Modificación de un activo. Solo la expectativa de encendido es editable."""
+    isPersistent = fields.Boolean(required=True)
 
 
 class AssetSchema(Schema):
@@ -25,7 +91,9 @@ class AssetSchema(Schema):
     os = fields.String(allow_none=True)
     kernel = fields.String(allow_none=True)
     labels = fields.Dict()
+    tags = fields.List(fields.Nested(TagSchema))
     status = fields.String()
+    isPersistent = fields.Boolean()
     lastSeenAt = UTCDateTime(allow_none=True)
     uptimeSec = fields.Integer(allow_none=True)
     agentVersion = fields.String(allow_none=True)

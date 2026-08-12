@@ -57,8 +57,11 @@
               <p class="question-prompt">{{ question.prompt }}</p>
             </div>
 
+            <!-- Se itera el orden barajado, pero `optionIndex` sigue siendo el
+                 índice ORIGINAL: es el que se guarda en `answers` y el que se
+                 envía, porque es contra el que corrige el servidor. -->
             <label
-              v-for="(option, optionIndex) in question.options"
+              v-for="optionIndex in orderFor(question)"
               :key="optionIndex"
               class="option"
               :class="{ 'option--picked': answers[question.position] === optionIndex }"
@@ -70,7 +73,7 @@
                 :checked="answers[question.position] === optionIndex"
                 @change="answers[question.position] = optionIndex"
               />
-              <span class="option-text">{{ option }}</span>
+              <span class="option-text">{{ question.options[optionIndex] }}</span>
             </label>
           </fieldset>
 
@@ -108,6 +111,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import StarBackground from '@/components/shared/StarBackground.vue'
+import { shuffledOrder } from '@/components/aegis/quizShuffle.js'
 
 const route = useRoute()
 const token = String(route.query.t || '')
@@ -117,6 +121,10 @@ const state = ref('loading')
 const quiz = ref({ pillTitle: '', questions: [] })
 const result = ref({ score: 0, total: 0 })
 const answers = reactive({})
+// position → orden de pintado de sus opciones. Se calcula UNA vez al cargar:
+// generarlo dentro del v-for lo recalcularía en cada render y las opciones
+// bailarían con cada clic.
+const optionOrder = reactive({})
 const justSubmitted = ref(false)
 const submitError = ref('')
 const errorTitle = ref('')
@@ -134,6 +142,12 @@ const scoreMessage = computed(() => {
     ? 'Buen trabajo. Has superado la comprobación.'
     : 'Repasa la formación con tu responsable de seguridad.'
 })
+
+/** Orden barajado de la pregunta, o el natural si por lo que sea falta: una
+ *  pregunta en blanco es peor que una pregunta sin barajar. */
+function orderFor(question) {
+  return optionOrder[question.position] ?? question.options.map((_, index) => index)
+}
 
 function fail(title, detail) {
   errorTitle.value = title
@@ -180,6 +194,11 @@ async function load() {
     fail('Formación sin preguntas', 'Esta campaña no tiene ningún test asociado. Avisa a quien te la envió.')
     return
   }
+
+  for (const question of quiz.value.questions) {
+    optionOrder[question.position] = shuffledOrder(question.options.length)
+  }
+
   state.value = 'quiz'
 }
 

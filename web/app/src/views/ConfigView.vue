@@ -144,6 +144,16 @@
                 <div class="form-group"><label>Cabeceras mínimas</label><input v-model.number="store.configFlat['features.iris.minHeaders']" type="number" min="0" max="50" class="inp" /></div>
                 <div class="form-group"><label>Tamaño máx. del mensaje (bytes)</label><input v-model.number="store.configFlat['features.iris.maxMessageBytes']" type="number" min="1024" step="1024" class="inp" /><span class="field-hint">10485760 = 10 MiB</span></div>
               </div>
+              <h3 class="subsection-title">Buzones vigilados</h3>
+              <div class="cfg-grid">
+                <div class="form-group"><label>Conexiones por usuario</label><input v-model.number="store.configFlat['features.iris.maxConnectionsPerUser']" type="number" min="1" max="50" class="inp" /></div>
+                <div class="form-group"><label>Correos ingeridos al día</label><input v-model.number="store.configFlat['features.iris.maxIngestedPerDay']" type="number" min="1" max="10000" class="inp" /></div>
+                <div class="form-group"><label>Intervalo de sondeo (min)</label><input v-model.number="store.configFlat['features.iris.pollIntervalMinutes']" type="number" min="1" max="1440" class="inp" /></div>
+                <div class="form-group"><label>Directorio de salida</label><input v-model="store.configFlat['features.iris.directories.output']" type="text" class="inp" /></div>
+              </div>
+              <h3 class="subsection-title">Resumen con IA</h3>
+              <PromptField v-model="store.configFlat['features.iris.prompts.summary.system']" label="Prompt del sistema" title="Iris — prompt del sistema" />
+              <PromptField v-model="store.configFlat['features.iris.prompts.summary.userTemplate']" label="Plantilla de usuario" title="Iris — plantilla de usuario" />
             </div>
           </section>
 
@@ -178,6 +188,29 @@
             <div class="scanner-grid">
               <ScannerCard name="Nmap" icon="scan" :flat="store.configFlat" prefix="features.themis.scanners.nmap" />
               <ScannerCard name="Nikto" icon="web" :flat="store.configFlat" prefix="features.themis.scanners.nikto" />
+              <ScannerCard name="Nuclei" icon="vuln" :flat="store.configFlat" prefix="features.themis.scanners.nuclei">
+                <div class="cfg-grid cfg-grid--tight">
+                  <div class="form-group"><label>Binario</label><input v-model="store.configFlat['features.themis.scanners.nuclei.binaryPath']" type="text" class="inp mono" /></div>
+                  <div class="form-group"><label>Directorio de plantillas</label><input v-model="store.configFlat['features.themis.scanners.nuclei.templatesDir']" type="text" class="inp mono" /><span class="field-hint">Vacío = las que trae el binario</span></div>
+                  <div class="form-group"><label>Versión de plantillas</label><input v-model="store.configFlat['features.themis.scanners.nuclei.templatesVersion']" type="text" class="inp mono" /></div>
+                  <div class="form-group"><label>Peticiones por segundo</label><input v-model.number="store.configFlat['features.themis.scanners.nuclei.rateLimit']" type="number" min="1" max="1000" class="inp" /></div>
+                  <div class="form-group"><label>Timeout por petición (s)</label><input v-model.number="store.configFlat['features.themis.scanners.nuclei.requestTimeout']" type="number" min="1" max="120" class="inp" /></div>
+                  <div class="form-group"><label>Timeout del escaneo (s)</label><input v-model.number="store.configFlat['features.themis.scanners.nuclei.timeout']" type="number" min="60" max="14400" class="inp" /></div>
+                </div>
+              </ScannerCard>
+              <ScannerCard name="Lybra" icon="scan" :flat="store.configFlat" prefix="features.themis.scanners.lybra">
+                <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.themis.scanners.lybra.activeChecks']" type="checkbox" class="toggle" /><span>Comprobaciones activas</span></label></div>
+                <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.themis.scanners.lybra.fingerprintingEnabled']" type="checkbox" class="toggle" /><span>Fingerprinting</span></label></div>
+                <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.themis.scanners.lybra.ingest.enabled']" type="checkbox" class="toggle" /><span>Ingesta de hallazgos</span></label></div>
+                <div class="cfg-grid cfg-grid--tight">
+                  <div class="form-group"><label>Severidad mínima</label>
+                    <select v-model="store.configFlat['features.themis.scanners.lybra.ingest.minSeverity']" class="inp sel">
+                      <option v-for="sev in severities" :key="sev" :value="sev">{{ sev }}</option>
+                    </select>
+                  </div>
+                  <div class="form-group"><label>Máx. comprobaciones</label><input v-model.number="store.configFlat['features.themis.scanners.lybra.ingest.maxChecks']" type="number" min="1" max="5000" class="inp" /></div>
+                </div>
+              </ScannerCard>
             </div>
           </section>
 
@@ -187,16 +220,47 @@
               <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.aegis.enabled']" type="checkbox" class="toggle" /><span>Habilitado</span></label></div>
               <div class="cfg-grid">
                 <div class="form-group"><label>Consejos por píldora</label><input v-model.number="store.configFlat['features.aegis.tipsAmount']" type="number" min="1" max="20" class="inp" /></div>
+                <div class="form-group"><label>Preguntas del test</label><input v-model.number="store.configFlat['features.aegis.questionsAmount']" type="number" min="1" max="20" class="inp" /></div>
+                <div class="form-group"><label>Opciones por pregunta</label><input v-model.number="store.configFlat['features.aegis.optionsAmount']" type="number" min="2" max="8" class="inp" /></div>
                 <div class="form-group"><label>Antigüedad máx. de alertas (años)</label><input v-model.number="store.configFlat['features.aegis.vulnerabilitiesAntiquity']" type="number" min="1" max="30" class="inp" /></div>
               </div>
-              <div class="grid">
+              <div class="cfg-grid">
                 <div class="form-group"><label>Directorio de salida</label><input v-model="store.configFlat['features.aegis.directories.output']" type="text" class="inp" /></div>
                 <div class="form-group"><label>Stack de documentos</label><input v-model="store.configFlat['features.aegis.directories.stack']" type="text" class="inp" /></div>
               </div>
-              <h3 class="subsection-title">Prompt del sistema</h3>
-              <textarea v-model="store.configFlat['features.aegis.prompts.system']" rows="10" class="txta"></textarea>
-              <h3 class="subsection-title">Plantilla de usuario</h3>
-              <textarea v-model="store.configFlat['features.aegis.prompts.userTemplate']" rows="8" class="txta"></textarea>
+              <PromptField v-model="store.configFlat['features.aegis.prompts.system']" label="Prompt del sistema" title="Aegis — prompt del sistema" />
+              <PromptField v-model="store.configFlat['features.aegis.prompts.userTemplate']" label="Plantilla de usuario" title="Aegis — plantilla de usuario" />
+            </div>
+          </section>
+
+          <section id="section-hygeia" class="section">
+            <div class="section-head"><h2>Hygeia</h2><p class="section-desc">Monitorización de activos vía agente</p></div>
+            <div class="section-body">
+              <p class="field-hint">Un activo pasa a «desconectado» cuando falla el número de latidos seguidos indicado. Bajar el intervalo multiplica el volumen de datos: la retención es la que decide cuánto histórico se conserva.</p>
+              <div class="cfg-grid">
+                <div class="form-group"><label>Intervalo de latido (s)</label><input v-model.number="store.configFlat['features.hygeia.heartbeatIntervalSec']" type="number" min="5" max="3600" class="inp" /></div>
+                <div class="form-group"><label>Latidos perdidos para desconectar</label><input v-model.number="store.configFlat['features.hygeia.offlineAfterMissed']" type="number" min="1" max="100" class="inp" /></div>
+                <div class="form-group"><label>Retención (días)</label><input v-model.number="store.configFlat['features.hygeia.retentionDays']" type="number" min="1" max="3650" class="inp" /></div>
+                <div class="form-group"><label>Cron de purga</label><input v-model="store.configFlat['features.hygeia.retentionCron']" type="text" class="inp mono" /><span class="field-hint">Formato cron de cinco campos</span></div>
+              </div>
+              <h3 class="subsection-title">Umbrales</h3>
+              <p class="field-hint">«Latidos sostenidos» evita las alertas por un pico puntual: la métrica tiene que seguir alta ese número de latidos seguidos. Disco y swap avisan al primero.</p>
+              <div class="cfg-grid">
+                <template v-for="metric in hygeiaMetrics" :key="metric.key">
+                  <div class="form-group"><label>{{ metric.label }} — aviso</label><input v-model.number="store.configFlat[`features.hygeia.thresholds.${metric.key}.warning`]" type="number" min="1" max="100" class="inp" /></div>
+                  <div class="form-group"><label>{{ metric.label }} — crítico</label><input v-model.number="store.configFlat[`features.hygeia.thresholds.${metric.key}.critical`]" type="number" min="1" max="100" class="inp" /></div>
+                  <div v-if="metric.sustained" class="form-group"><label>{{ metric.label }} — latidos sostenidos</label><input v-model.number="store.configFlat[`features.hygeia.thresholds.${metric.key}.sustainedHeartbeats`]" type="number" min="1" max="60" class="inp" /></div>
+                </template>
+              </div>
+              <h3 class="subsection-title">Límites</h3>
+              <p class="field-hint">Topes de lo que el agente puede enviar y de lo que la API acepta. Recortarlos protege a la API de un agente comprometido o mal configurado.</p>
+              <div class="cfg-grid">
+                <div v-for="limit in hygeiaLimits" :key="limit.key" class="form-group">
+                  <label>{{ limit.label }}</label>
+                  <input v-model.number="store.configFlat[`features.hygeia.limits.${limit.key}`]" type="number" min="1" class="inp" />
+                  <span v-if="limit.hint" class="field-hint">{{ limit.hint }}</span>
+                </div>
+              </div>
             </div>
           </section>
 
@@ -211,11 +275,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
 import { useConfigStore } from '@/stores/configStore'
 import ScannerCard from '@/components/config/ScannerCard.vue'
+import PromptField from '@/components/shared/PromptField.vue'
 
 const store = useConfigStore()
 
@@ -229,6 +294,7 @@ const ICON = {
   iris:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>',
   themis:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
   aegis:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
+  hygeia:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
 }
 
 const navGroups = [
@@ -244,6 +310,7 @@ const navGroups = [
     { id: 'iris',     label: 'Iris',     icon: ICON.iris },
     { id: 'themis', label: 'Themis', icon: ICON.themis },
     { id: 'aegis',    label: 'Aegis',    icon: ICON.aegis },
+    { id: 'hygeia',   label: 'Hygeia',   icon: ICON.hygeia },
   ]},
 ]
 const navSections = navGroups.flatMap((g) => g.items)
@@ -253,15 +320,51 @@ const aiStrategies = [
   { value: 'ollama', label: 'Ollama (local)' },
   { value: 'openai', label: 'OpenAI' },
 ]
+const severities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+
+// Los umbrales y los límites de Hygeia son 22 campos con la misma forma: se
+// describen aquí y se pintan con v-for en vez de a mano uno por uno.
+const hygeiaMetrics = [
+  { key: 'cpuPct',  label: 'CPU (%)',    sustained: true },
+  { key: 'memPct',  label: 'Memoria (%)', sustained: true },
+  { key: 'diskPct', label: 'Disco (%)',  sustained: false },
+  { key: 'swapPct', label: 'Swap (%)',   sustained: false },
+]
+const hygeiaLimits = [
+  { key: 'maxBodyBytes',         label: 'Tamaño máx. del cuerpo (bytes)', hint: '1048576 = 1 MiB' },
+  { key: 'maxDecompressedBytes', label: 'Tamaño máx. descomprimido (bytes)', hint: '4194304 = 4 MiB' },
+  { key: 'maxProcesses',         label: 'Procesos por latido' },
+  { key: 'maxDiskMounts',        label: 'Puntos de montaje' },
+  { key: 'maxNetInterfaces',     label: 'Interfaces de red' },
+  { key: 'maxSeriesPoints',      label: 'Puntos por serie temporal' },
+  { key: 'minIntervalSec',       label: 'Intervalo mínimo entre latidos (s)' },
+  { key: 'clockSkewSec',         label: 'Desfase de reloj tolerado (s)' },
+  { key: 'maxAssetsPerUser',     label: 'Activos por usuario' },
+  { key: 'maxInventoryItems',    label: 'Elementos de inventario' },
+]
 
 const activeSection = ref('general')
 let observer = null
 function scrollTo(sectionId) { const el = document.getElementById(`section-${sectionId}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
 
-onMounted(() => {
-  store.loadConfig()
-  observer = new IntersectionObserver((entries) => { for (const e of entries) { if (e.isIntersecting) activeSection.value = e.target.id.replace('section-', '') } }, { rootMargin: '-80px 0px -60% 0px' })
-  requestAnimationFrame(() => { for (const s of navSections) { const el = document.getElementById(`section-${s.id}`); if (el) observer.observe(el) } })
+onMounted(async () => {
+  // Hay que esperar a la carga: mientras `store.loading` es true el formulario
+  // no está en el DOM (v-else), así que registrar el observer antes dejaba el
+  // resaltado del nav sin observar nada — no fallaba, simplemente no hacía nada.
+  await store.loadConfig()
+  await nextTick()
+  observer = new IntersectionObserver((entries) => {
+    // Con este rootMargin varias secciones intersecan a la vez; la activa es la
+    // más alta de las visibles, no la última que reporte el observer.
+    const visible = entries.filter((entry) => entry.isIntersecting)
+    if (!visible.length) return
+    visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+    activeSection.value = visible[0].target.id.replace('section-', '')
+  }, { rootMargin: '-80px 0px -60% 0px' })
+  for (const section of navSections) {
+    const el = document.getElementById(`section-${section.id}`)
+    if (el) observer.observe(el)
+  }
 })
 onUnmounted(() => { if (observer) observer.disconnect() })
 
@@ -276,7 +379,9 @@ function handleSave() { store.saveConfig() }
 .main { max-width: 1600px; margin: 0 auto; padding: 1.75rem 1.1rem 4rem; position: relative; z-index: 1; }
 .config-layout { display: flex; gap: 1.25rem; align-items: flex-start; }
 .config-nav-column { width: 160px; flex-shrink: 0; align-self: stretch; }
-.config-nav { position: sticky; top: calc(var(--topbar-h) + 1.75rem); }
+/* El overflow propio no rompe el sticky (solo lo rompería en un ancestro): es la
+   válvula para que el nav siga siendo usable en pantallas bajas. */
+.config-nav { position: sticky; top: calc(var(--topbar-h) + 1.75rem); max-height: calc(100vh - var(--topbar-h) - 3.5rem); overflow-y: auto; }
 .config-nav nav { display: flex; flex-direction: column; gap: 0.2rem; }
 .nav-link { display: flex; align-items: center; gap: 0.45rem; padding: 0.45rem 0.6rem; border-radius: 7px; color: var(--text-muted); font-size: var(--fs-lg); font-weight: 500; text-decoration: none; transition: all var(--transition); }
 .nav-link:hover { background: var(--surface-2); color: var(--text-dim); }
@@ -296,6 +401,7 @@ function handleSave() { store.saveConfig() }
 .section-body { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.1rem 1.25rem; display: flex; flex-direction: column; gap: 0.85rem; }
 .subsection-title { font-size: var(--fs-lg); font-weight: 600; color: var(--text-dim); margin: 0.2rem 0 0.3rem; }
 .cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.85rem; }
+.cfg-grid--tight { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.5rem; }
 .cfg-row { display: flex; align-items: center; }
 .scanner-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.85rem; margin-top: 0.85rem; }
 .form-group { display: flex; flex-direction: column; gap: 0.25rem; }
@@ -304,14 +410,17 @@ function handleSave() { store.saveConfig() }
 .inp:focus { border-color: var(--accent); }
 .sel { cursor: pointer; appearance: none; -webkit-appearance: none; padding-right: 1.8rem; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2382829a' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.55rem center; background-size: 0.85rem; }
 .sel option { background: var(--surface-2); color: var(--text); }
-.txta { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 6px; padding: 0.5rem 0.6rem; color: var(--text); font-size: var(--fs-input); outline: none; resize: vertical; width: 100%; min-height: 70px; box-sizing: border-box; transition: border-color 0.2s; }
-.txta:focus { border-color: var(--accent); }
 .mono { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .toggle-row { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: var(--fs-lg); font-weight: 500; color: var(--text); }
 .toggle { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 .field-hint { font-size: var(--fs-md); color: var(--text-muted); line-height: 1.5; }
 .field-hint code { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-md); background: var(--surface-2); padding: 1px 4px; border-radius: 3px; color: var(--text-dim); }
-.form-actions { display: flex; gap: 0.6rem; justify-content: flex-end; position: sticky; bottom: 0.85rem; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem 1.1rem; z-index: 10; }
+/* Barra flotante, no una tarjeta más: con `--surface` y `--border` era idéntica
+   a los `.section-body` por encima de los que pasa, y al solaparse parecía una
+   sección rota. `--surface-2` es un tono distinto del de las tarjetas en los dos
+   temas (`--topbar-bg` no valía: en dawn es el mismo color de tarjeta al 85%), y
+   la sombra la despega del contenido que va pasando por debajo. */
+.form-actions { display: flex; gap: 0.6rem; justify-content: flex-end; position: sticky; bottom: 0.85rem; background: var(--surface-2); border: 1px solid var(--border-med); border-radius: 10px; padding: 0.85rem 1.1rem; box-shadow: 0 4px 20px rgba(0,0,0,0.28); z-index: 10; }
 .loading-block { padding: 5rem 0; display: flex; justify-content: center; width: 100%; }
 .skeleton { background: var(--surface); border-radius: 8px; animation: pulse 1.4s ease-in-out infinite; }
 .skeleton--lg { width: 100%; height: 380px; }

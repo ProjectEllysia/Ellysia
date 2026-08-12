@@ -10,6 +10,9 @@ Classes:
     MonitoredAsset: Activo (host/máquina) vigilado por un agente Hygeia.
     AssetSnapshot: Instantánea de métricas de un activo en un heartbeat.
     Anomaly: Incidencia abierta por la detección de umbrales.
+    HygeiaTag: Etiqueta con la que agrupar activos (base polimórfica).
+    SystemTag: Etiqueta del catálogo común, sembrada por migración.
+    UserTag: Etiqueta personal, siempre asociada a su dueño.
 
 Example:
     >>> from src.modules.features.hygeia.model import MonitoredAsset
@@ -21,6 +24,8 @@ Example:
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     Float,
@@ -28,11 +33,39 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Table,
+    UniqueConstraint,
+    true,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from src.modules.shared import Base, utcnow_naive
+
+
+# =========================================================================
+# ASSOCIATION TABLES
+# =========================================================================
+
+AssetTag = Table(
+    "AssetTag",
+    Base.metadata,
+    Column(
+        "asset_id", Integer,
+        ForeignKey("MonitoredAsset.id", ondelete="CASCADE"), primary_key=True,
+    ),
+    Column(
+        "tag_id", Integer,
+        ForeignKey("HygeiaTag.id", ondelete="CASCADE"), primary_key=True,
+    ),
+)
+"""Qué etiquetas lleva cada activo.
+
+Los dos ``ondelete="CASCADE"`` son la mitad de la garantía que pide el
+producto: borrar una etiqueta borra sus asociaciones, **nunca los activos**
+que la llevaban. La otra mitad la pone el ORM, que limpia la tabla de
+asociación al borrar cualquiera de los dos extremos de la relación.
+"""
 
 
 class MonitoredAsset(Base):
@@ -75,6 +108,14 @@ class MonitoredAsset(Base):
             tras el último heartbeat evaluado. Es la memoria que necesita
             la histéresis de ``services/detection.py`` para decidir cuándo
             abrir una anomalía sin tener que releer snapshots históricos.
+        is_persistent: Si el host debería estar encendido siempre. ``True``
+            (por defecto) es el comportamiento de un servidor 24/7: quedarse
+            callado es una incidencia y el detector de presencia abre
+            ``host_down``. ``False`` marca un host que se apaga a propósito
+            (un portátil, un sobremesa que se suspende de noche): sigue
+            transicionando a ``offline`` porque el estado es un hecho, pero
+            no abre anomalía ni dispara correo — una caída esperada avisando
+            cada noche solo entrena al dueño a ignorar los avisos de verdad.
         thresholds: Umbrales específicos de este activo, en el mismo formato
             que el bloque ``features.hygeia.thresholds`` de la configuración global.
             Si una métrica no aparece aquí, se usa el umbral global.
@@ -95,6 +136,7 @@ class MonitoredAsset(Base):
         created_at: Instante de alta del activo.
         snapshots: Heartbeats recibidos de este activo.
         anomalies: Anomalías (abiertas o resueltas) de este activo.
+        tags: Etiquetas con las que el dueño agrupa este activo.
     """
 
     __tablename__ = "MonitoredAsset"
@@ -115,6 +157,7 @@ class MonitoredAsset(Base):
     heartbeat_interval_sec = Column(Integer, nullable=True)
     breach_counters        = Column(JSONB, nullable=True)
     thresholds             = Column(JSONB, nullable=True)
+    is_persistent          = Column(Boolean, nullable=False, default=True, server_default=true())
 
     inventory               = Column(JSONB, nullable=True)
     inventory_collected_at  = Column(DateTime, nullable=True)
@@ -127,6 +170,12 @@ class MonitoredAsset(Base):
     )
     anomalies = relationship(
         "Anomaly", back_populates="asset", cascade="all, delete-orphan",
+    )
+    # `selectin` y no lazy por defecto: `list_assets()` serializa todos los
+    # activos del usuario y la SPA sondea ese endpoint cada minuto. Con carga
+    # perezosa serían N+1 consultas por listado; así son dos.
+    tags = relationship(
+        "HygeiaTag", secondary=AssetTag, back_populates="assets", lazy="selectin",
     )
 
     def to_dict(self) -> dict:
@@ -142,8 +191,8 @@ class MonitoredAsset(Base):
         con sufijo de zona horaria, igual que en el resto de módulos.
 
         Returns:
-            Diccionario con id, hostname, os, kernel, labels, status,
-            lastSeenAt, uptimeSec, agentVersion y createdAt.
+            Diccionario con id, hostname, os, kernel, labels, tags, status,
+            isPersistent, lastSeenAt, uptimeSec, agentVersion y createdAt.
         """
         return {
             "id":           self.id,
@@ -151,7 +200,9 @@ class MonitoredAsset(Base):
             "os":           self.os,
             "kernel":       self.kernel,
             "labels":       self.labels or {},
+            "tags":         [tag.to_dict() for tag in self.tags],
             "status":       self.status,
+            "isPersistent": self.is_persistent,
             "lastSeenAt":   self.last_seen_at,
             "uptimeSec":    self.uptime_sec,
             "agentVersion": self.agent_version,
@@ -350,3 +401,97 @@ class Anomaly(Base):
             f"<Anomaly(id={self.id}, asset={self.asset_id}, "
             f"kind='{self.kind}', state='{self.state}')>"
         )
+
+
+class HygeiaTag(Base):
+    """
+    Etiqueta con la que agrupar activos monitorizados.
+
+    Hay dos clases de etiqueta y comparten tabla (herencia *single-table*,
+    discriminada por ``tag_type``), porque son la misma cosa desde el punto
+    de vista de un activo: un nombre y un color que se le cuelgan. Lo único
+    que las distingue es de quién son.
+
+    - ``SystemTag``: catálogo común, sembrado por migración. ``user_id`` es
+      ``NULL``, todo el mundo las ve y nadie las crea ni las borra.
+    - ``UserTag``: repositorio personal. ``user_id`` es obligatorio y solo
+      su dueño la ve, la asigna y la borra.
+
+    Esa regla no vive solo en el manager: el ``CheckConstraint`` de más
+    abajo la impone en la base de datos, así que ni una migración torcida
+    ni un ``INSERT`` a mano pueden dejar una etiqueta personal huérfana ni
+    una de sistema con dueño.
+
+    Attributes:
+        id: Clave primaria, autoincremental.
+        name: Texto de la etiqueta, tal como se pinta en el badge.
+        color: Nombre del color de la paleta cerrada (ver ``TAG_COLORS`` en
+            ``schemas.py``). No es un valor CSS: el frontend lo traduce, para
+            que un cambio de tema no obligue a reescribir filas.
+        tag_type: Discriminador ("system" | "user").
+        user_id: Dueño de la etiqueta; ``NULL`` en las de sistema.
+        created_at: Instante de alta de la etiqueta.
+        assets: Activos que llevan esta etiqueta.
+    """
+
+    __tablename__ = "HygeiaTag"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    name       = Column(String(48), nullable=False)
+    color      = Column(String(16), nullable=False, default="slate")
+    tag_type   = Column(String(16), nullable=False)
+    user_id    = Column(Integer, ForeignKey("User.id", ondelete="CASCADE"), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    assets = relationship("MonitoredAsset", secondary=AssetTag, back_populates="tags")
+
+    # Sin `polymorphic_identity` en la base a propósito: toda fila es de un
+    # tipo concreto, `HygeiaTag` nunca se instancia directamente.
+    __mapper_args__ = {"polymorphic_on": tag_type}
+
+    __table_args__ = (
+        # Un usuario no repite nombre. Las de sistema quedan fuera (en
+        # Postgres los NULL son distintos entre sí) y no hace falta más: su
+        # único escritor es la migración de siembra.
+        UniqueConstraint("user_id", "name", name="uq_hygeiatag_user_name"),
+        CheckConstraint(
+            "(tag_type = 'system' AND user_id IS NULL) OR "
+            "(tag_type = 'user' AND user_id IS NOT NULL)",
+            name="ck_hygeiatag_owner",
+        ),
+        Index("ix_hygeiatag_user", "user_id"),
+    )
+
+    def to_dict(self) -> dict:
+        """
+        Serializa la etiqueta para respuestas de API.
+
+        No incluye ``userId``: quien la recibe es siempre su dueño (o el de
+        una etiqueta de sistema, que no tiene), así que el dato no añade
+        nada y sí revela la forma interna del modelo.
+
+        Returns:
+            Diccionario con id, name, color y tagType.
+        """
+        return {
+            "id":      self.id,
+            "name":    self.name,
+            "color":   self.color,
+            "tagType": self.tag_type,
+        }
+
+    def __repr__(self) -> str:
+        """Representación de depuración con id, nombre y tipo."""
+        return f"<HygeiaTag(id={self.id}, name='{self.name}', type='{self.tag_type}')>"
+
+
+class SystemTag(HygeiaTag):
+    """Etiqueta del catálogo común: sin dueño, visible para todos, inmutable."""
+
+    __mapper_args__ = {"polymorphic_identity": "system"}
+
+
+class UserTag(HygeiaTag):
+    """Etiqueta personal: siempre con dueño, y solo su dueño la usa."""
+
+    __mapper_args__ = {"polymorphic_identity": "user"}

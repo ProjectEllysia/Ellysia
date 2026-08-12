@@ -1,22 +1,22 @@
 """
 Acceso a datos del módulo Hygeia.
 
-Extiende BaseRepository para CRUD tipado sobre MonitoredAsset, AssetSnapshot
-y Anomaly. Las lecturas se construyen con ``build_repository`` (sesión
-ambiental, sin demarcar transacción); las escrituras, dentro de un
+Extiende BaseRepository para CRUD tipado sobre MonitoredAsset, AssetSnapshot,
+Anomaly y HygeiaTag. Las lecturas se construyen con ``build_repository``
+(sesión ambiental, sin demarcar transacción); las escrituras, dentro de un
 ``UnitOfWork``. Ningún método de este módulo crea ni cierra sesiones.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
-from sqlalchemy import update
+from sqlalchemy import func, update
 
 from src.modules.infrastructure import BaseRepository
 
-from .model import Anomaly, AssetSnapshot, MonitoredAsset
+from .model import Anomaly, AssetSnapshot, AssetTag, HygeiaTag, MonitoredAsset
 
 
 class MonitoredAssetRepository(BaseRepository[MonitoredAsset]):
@@ -30,6 +30,23 @@ class MonitoredAssetRepository(BaseRepository[MonitoredAsset]):
             self._session.query(MonitoredAsset)
             .filter(MonitoredAsset.user_id == user_id)
             .order_by(MonitoredAsset.created_at.desc())
+            .all()
+        )
+
+    def get_by_users(self, user_ids: List[int]) -> List[MonitoredAsset]:
+        """Activos de un conjunto de usuarios, para el informe de organización.
+
+        Ordena por dueño y luego por hostname para que el informe salga ya
+        agrupado sin reordenar en Python. Una lista vacía devuelve una lista
+        vacía en vez de todos los activos del sistema: un ``IN ()`` mal formado
+        aquí sería una fuga de datos, no un error de rendimiento.
+        """
+        if not user_ids:
+            return []
+        return (
+            self._session.query(MonitoredAsset)
+            .filter(MonitoredAsset.user_id.in_(user_ids))
+            .order_by(MonitoredAsset.user_id.asc(), MonitoredAsset.hostname.asc())
             .all()
         )
 
@@ -253,3 +270,67 @@ class AnomalyRepository(BaseRepository[Anomaly]):
         if asset_id is not None:
             query = query.filter(Anomaly.asset_id == asset_id)
         return query.order_by(Anomaly.opened_at.desc()).all()
+
+
+class HygeiaTagRepository(BaseRepository[HygeiaTag]):
+    """Acceso a datos de HygeiaTag (etiquetas de sistema y personales)."""
+
+    _MODEL = HygeiaTag
+
+    def get_visible_for_user(self, user_id: int) -> List[HygeiaTag]:
+        """Catálogo de sistema más el repositorio personal de un usuario.
+
+        Es el conjunto que el usuario puede ver y asignar; cualquier otra
+        etiqueta le es invisible. Ordenado primero por tipo (``system``
+        antes que ``user``) y luego por nombre, para que la lista salga ya
+        agrupada de la base de datos y el frontend no tenga que reordenarla.
+        """
+        return (
+            self._session.query(HygeiaTag)
+            .filter(
+                (HygeiaTag.user_id.is_(None)) | (HygeiaTag.user_id == user_id)
+            )
+            .order_by(HygeiaTag.tag_type.asc(), HygeiaTag.name.asc())
+            .all()
+        )
+
+    def count_assets_per_tag(self, user_id: int) -> Dict[int, int]:
+        """Cuántos activos **del usuario** lleva cada etiqueta.
+
+        El filtro por dueño no es cosmético: una etiqueta de sistema la usa
+        todo el mundo, y contar sus asociaciones sin filtrar delataría
+        cuántos activos ajenos hay. Las etiquetas sin activos no aparecen en
+        el diccionario; el manager las completa con 0.
+        """
+        rows = (
+            self._session.query(AssetTag.c.tag_id, func.count(AssetTag.c.asset_id))
+            .join(MonitoredAsset, MonitoredAsset.id == AssetTag.c.asset_id)
+            .filter(MonitoredAsset.user_id == user_id)
+            .group_by(AssetTag.c.tag_id)
+            .all()
+        )
+        return dict(rows)
+
+    def get_by_name_for_user(self, user_id: int, name: str) -> Optional[HygeiaTag]:
+        """Busca una etiqueta visible para el usuario por nombre, sin distinguir mayúsculas.
+
+        Se compara en minúsculas porque «Producción» y «producción» son la
+        misma etiqueta para quien la lee: permitir ambas llenaría el catálogo
+        de duplicados que solo se distinguen mirándolos con lupa.
+        """
+        return (
+            self._session.query(HygeiaTag)
+            .filter(
+                (HygeiaTag.user_id.is_(None)) | (HygeiaTag.user_id == user_id),
+                func.lower(HygeiaTag.name) == name.lower(),
+            )
+            .first()
+        )
+
+    def count_user_tags(self, user_id: int) -> int:
+        """Cuántas etiquetas personales tiene ya creadas un usuario (tope §MAX_TAGS_PER_USER)."""
+        return (
+            self._session.query(HygeiaTag)
+            .filter(HygeiaTag.user_id == user_id)
+            .count()
+        )

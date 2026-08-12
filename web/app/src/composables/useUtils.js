@@ -121,5 +121,24 @@ export function useUtils() {
     return cd.match(/filename="?([^";\n]+)"?/i)?.[1] ?? fallback
   }
 
-  return { formatDate, getInitials, flatten, unflatten, deepMerge, triggerDownload, filenameFromResponse }
+  /**
+   * Convierte un textarea de emails (uno por línea, o separados por coma o
+   * punto y coma) en destinatarios únicos y válidos, en minúscula.
+   * @param {string} raw
+   * @returns {Array<{email: string}>}
+   */
+  function parseEmails(raw) {
+    const seen = new Set()
+    const out = []
+    for (const chunk of (raw ?? '').split(/[\n,;]+/)) {
+      const email = chunk.trim().toLowerCase()
+      if (!email || seen.has(email)) continue
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue
+      seen.add(email)
+      out.push({ email })
+    }
+    return out
+  }
+
+  return { formatDate, getInitials, flatten, unflatten, deepMerge, triggerDownload, filenameFromResponse, parseEmails }
 }
