@@ -15,6 +15,7 @@
           @delete="handleDeleteRequest"
           @rotate="handleRotate"
           @toggle-persistent="handleTogglePersistent"
+          @tag="handleTagRequest"
           @refresh="refreshNow"
         />
       </section>
@@ -60,6 +61,16 @@
       :show="!!store.state.lastAgentKey"
       :agent-key="store.state.lastAgentKey || ''"
       @close="store.clearAgentKey()"
+    />
+
+    <AssetTagsModal
+      :show="!!taggingAsset"
+      :asset="taggingAsset"
+      :tags="tagsStore.state.tags"
+      :submitting="savingTags"
+      :error="tagsError"
+      @submit="handleTagsSubmit"
+      @close="closeTagsModal"
     />
 
     <ConfirmModal
@@ -125,14 +136,17 @@ import AssetList from '@/components/hygeia/AssetList.vue'
 import AssetDetail from '@/components/hygeia/AssetDetail.vue'
 import CreateAssetModal from '@/components/hygeia/CreateAssetModal.vue'
 import AgentKeyModal from '@/components/hygeia/AgentKeyModal.vue'
+import AssetTagsModal from '@/components/hygeia/AssetTagsModal.vue'
 import InventoryAnalysisModal from '@/components/hygeia/InventoryAnalysisModal.vue'
 import { usePolling } from '@/composables/usePolling'
 import { useHygeiaStore } from '@/stores/hygeiaStore'
 import { useHygeiaAlertsStore } from '@/stores/hygeiaAlertsStore'
+import { useHygeiaTagsStore } from '@/stores/hygeiaTagsStore'
 import { useToastStore } from '@/stores/toastStore'
 
 const store = useHygeiaStore()
 const alerts = useHygeiaAlertsStore()
+const tagsStore = useHygeiaTagsStore()
 const toast = useToastStore()
 const router = useRouter()
 
@@ -143,6 +157,9 @@ const pendingRotateId = ref(null)
 const pendingDeleteAnomalyId = ref(null)
 const pendingReanalyze = ref(false)
 const showAnalysisModal = ref(false)
+const taggingAssetId = ref(null)
+const savingTags = ref(false)
+const tagsError = ref('')
 
 const selectedAsset = computed(() =>
   store.state.assets.find((a) => a.id === store.state.selectedId) || null
@@ -150,6 +167,12 @@ const selectedAsset = computed(() =>
 
 const assetAnomalies = computed(() =>
   alerts.state.anomalies.filter((a) => a.assetId === store.state.selectedId)
+)
+
+// Se resuelve contra la lista en vez de guardar el objeto: así el modal ve las
+// etiquetas actualizadas después de guardar, sin tener que refrescarlo a mano.
+const taggingAsset = computed(() =>
+  store.state.assets.find((a) => a.id === taggingAssetId.value) || null
 )
 
 /**
@@ -201,6 +224,62 @@ async function handleTogglePersistent(id) {
       : `«${asset.hostname}» se marca como host que se apaga a propósito: no se avisará de sus caídas.`,
     'success',
   )
+}
+
+/* ── Etiquetas ── */
+
+function handleTagRequest(id) {
+  tagsError.value = ''
+  taggingAssetId.value = id
+}
+
+function closeTagsModal() {
+  taggingAssetId.value = null
+  tagsError.value = ''
+}
+
+/**
+ * Guarda las etiquetas de un activo en una sola pasada.
+ *
+ * Lo escrito en el modal y no existente se crea antes en el repositorio
+ * personal; después va un único `PUT` con el conjunto definitivo. Si falla
+ * el alta de alguna, se para ahí: asignar un conjunto incompleto sería peor
+ * que no asignar nada, porque el `PUT` reemplaza y se llevaría por delante
+ * las que sí estaban.
+ */
+async function handleTagsSubmit({ tagIds, newTags }) {
+  const assetId = taggingAssetId.value
+  if (!assetId) return
+
+  savingTags.value = true
+  tagsError.value = ''
+  try {
+    const finalIds = [...tagIds]
+    for (const pending of newTags) {
+      const created = await tagsStore.createTag(pending)
+      if (!created) {
+        tagsError.value = tagsStore.state.error || 'No se pudo crear la etiqueta.'
+        return
+      }
+      finalIds.push(created.id)
+    }
+
+    const before = (taggingAsset.value?.tags ?? []).map((tag) => tag.id)
+    const ok = await store.setAssetTags(assetId, finalIds)
+    if (!ok) {
+      tagsError.value = store.state.error || 'No se pudieron guardar las etiquetas.'
+      return
+    }
+
+    tagsStore.adjustCounts(
+      finalIds.filter((id) => !before.includes(id)),
+      before.filter((id) => !finalIds.includes(id)),
+    )
+    closeTagsModal()
+    toast.show('Etiquetas actualizadas.', 'success')
+  } finally {
+    savingTags.value = false
+  }
 }
 
 function handleDeleteRequest(id) {
@@ -353,7 +432,9 @@ async function poll() {
 const poller = usePolling(poll, { intervalMs: POLL_MS, immediate: false })
 
 onMounted(async () => {
-  await store.fetchAssets()
+  // El catálogo no entra en el sondeo: solo cambia cuando el propio usuario
+  // crea o borra una etiqueta, y de eso ya se entera el store en el momento.
+  await Promise.all([store.fetchAssets(), tagsStore.fetchTags()])
   if (store.state.assets.length) {
     await handleSelect(store.state.assets[0].id)
   }

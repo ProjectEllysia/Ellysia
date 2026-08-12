@@ -104,6 +104,48 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     } catch { state.error = 'No se pudo conectar con la API.'; return false }
   }
 
+  /**
+   * Fija el conjunto completo de etiquetas de un activo.
+   *
+   * La lista que se manda es la definitiva: lo que no vaya en `tagIds` se
+   * quita. Igual que `setPersistence`, reemplaza la fila con la que devuelve
+   * la API en vez de esperar al siguiente sondeo — los badges tienen que
+   * aparecer en el momento en que se guarda, no un minuto después.
+   *
+   * @param {number} id - Id del activo.
+   * @param {number[]} tagIds - Etiquetas que debe llevar al terminar.
+   */
+  async function setAssetTags(id, tagIds) {
+    try {
+      const res = await apiFetch(`/hygeia/assets/${id}/tags`, {
+        method: 'PUT',
+        body: JSON.stringify({ tagIds }),
+      })
+      if (!res?.ok) { state.error = await apiError(res, 'No se pudieron guardar las etiquetas.'); return false }
+      const asset = await res.json()
+      const index = state.assets.findIndex((a) => a.id === id)
+      if (index !== -1) state.assets[index] = asset
+      return true
+    } catch { state.error = 'No se pudo conectar con la API.'; return false }
+  }
+
+  /**
+   * Quita una etiqueta de todos los activos que la llevaban, en local.
+   *
+   * La borra el backend (con sus asociaciones), pero la lista de activos ya
+   * está en memoria y volver a pedirla entera por una etiqueta menos sería
+   * una petición de más para un cambio que el cliente ya sabe hacer.
+   *
+   * @param {number} tagId - Etiqueta recién borrada.
+   */
+  function dropTagFromAssets(tagId) {
+    for (const asset of state.assets) {
+      if (asset.tags?.some((tag) => tag.id === tagId)) {
+        asset.tags = asset.tags.filter((tag) => tag.id !== tagId)
+      }
+    }
+  }
+
   /** Selecciona un activo para ver su detalle y carga sus métricas. */
   function selectAsset(id) {
     state.selectedId = id
@@ -251,6 +293,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
   return {
     state,
     fetchAssets, createAsset, deleteAsset, rotateKey, setPersistence,
+    setAssetTags, dropTagFromAssets,
     selectAsset, fetchMetrics, fetchLatest, fetchInventory, clearAgentKey,
     fetchAnalysis, analyzeInventory,
     $reset,
