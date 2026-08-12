@@ -99,22 +99,38 @@ def check_clock_skew(collected_at: datetime) -> None:
     Rechaza un heartbeat cuyo ``collectedAt`` se sale de la ventana de
     cordura respecto al reloj del servidor.
 
-    El reloj del agente no es de fiar (§16.3): una clave robada no debe
-    poder inyectar snapshots fechados en el pasado o futuro lejano, que
-    envenenarían el orden de la serie temporal o taparían un hueco de
-    presencia. El histórico y la detección siempre se ordenan por
-    ``received_at`` (reloj del servidor), nunca por ``collected_at``; esta
-    comprobación solo acota cuánto puede desviarse uno del otro.
+    El reloj del agente no es de fiar (§16.3), pero las dos direcciones de la
+    desviación no significan lo mismo, así que la ventana es **asimétrica**:
+
+    - **Hacia el futuro** (``clockSkewSec``, corto): un heartbeat fechado por
+      delante del servidor no tiene explicación legítima — ningún retardo de
+      red adelanta un reloj. Es un reloj mal puesto o un payload manipulado, y
+      en ambos casos conviene rechazarlo pronto y ruidosamente.
+    - **Hacia el pasado** (``maxBackfillSec``, largo): un heartbeat viejo sí
+      tiene una explicación legítima y esperada — es el buffer en disco del
+      agente drenando lo que guardó mientras el backend estaba caído. Con una
+      ventana simétrica corta, ese buffer era decorativo: el agente retiene
+      horas de histórico y aquí se rechazaba todo lo de más de cinco minutos,
+      así que una caída larga se perdía entera pese a estar guardada.
+
+    Ampliar el lado del pasado no reabre el riesgo que motivó esta guarda: el
+    histórico y el detector de presencia se ordenan por ``received_at`` (reloj
+    del servidor), nunca por ``collected_at``, así que un payload viejo no
+    puede reordenar la serie ni tapar un hueco de presencia. Solo acota cuánto
+    puede desviarse un reloj del otro.
 
     Args:
         collected_at: Marca de tiempo que trae el payload del agente.
 
     Raises:
-        IngestClockSkewError: Si la desviación supera ``clockSkewSec``.
+        IngestClockSkewError: Si el ``collectedAt`` se adelanta más de
+            ``clockSkewSec`` o se atrasa más de ``maxBackfillSec``.
     """
-    max_skew = CR.hygeia_limits().clock_skew_sec
-    skew_seconds = abs((utcnow_naive() - collected_at).total_seconds())
-    if skew_seconds > max_skew:
+    limits = CR.hygeia_limits()
+    # Positivo = el agente va por detrás del servidor (payload viejo, backfill).
+    # Negativo = el agente va por delante (reloj adelantado).
+    lag_seconds = (utcnow_naive() - collected_at).total_seconds()
+    if lag_seconds < -limits.clock_skew_sec or lag_seconds > limits.max_backfill_sec:
         raise IngestClockSkewError(collected_at.isoformat())
 
 

@@ -1216,6 +1216,7 @@
         "maxSeriesPoints": 1000,
         "minIntervalSec": 5,
         "clockSkewSec": 300,
+        "maxBackfillSec": 86400,
         "maxAssetsPerUser": 500,
         "maxInventoryItems": 2000
       }
