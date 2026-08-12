@@ -24,11 +24,12 @@ from datetime import datetime
 from typing import Dict, Optional, Sequence
 
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
-    KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
 )
 
 import src.modules.system.config_reading as CR
@@ -104,52 +105,164 @@ def _cell(text: str, style) -> Paragraph:
     return Paragraph(text or "—", style)
 
 
-def _data_table_style(theme: ReportTheme) -> TableStyle:
-    """Estilo común de las tablas de datos: cabecera en color, filas cebradas."""
+def _data_table_style(theme: ReportTheme, header_rows: int = 1) -> TableStyle:
+    """Estilo común de las tablas de datos: cabecera en color, filas cebradas.
+
+    ``header_rows`` es 2 en el anexo de software, donde la primera fila es el
+    nombre del activo abarcando las cuatro columnas y la segunda los títulos.
+    """
     main = colors.HexColor(theme.palette[ColorType.MAIN])
+    dark = colors.HexColor(theme.palette[ColorType.DARK])
     light = colors.HexColor(theme.palette[ColorType.LIGHT])
     white = colors.HexColor(theme.palette[ColorType.WHITE])
+    last_header = header_rows - 1
 
-    return TableStyle([
-        ("BACKGROUND",    (0, 0), (-1, 0), main),
-        ("TEXTCOLOR",     (0, 0), (-1, 0), white),
+    commands = [
+        ("BACKGROUND",    (0, 0), (-1, last_header), main),
+        ("TEXTCOLOR",     (0, 0), (-1, last_header), white),
         ("VALIGN",        (0, 0), (-1, -1), "TOP"),
         ("GRID",          (0, 0), (-1, -1), 0.4, light),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f2f5f2")]),
+        ("ROWBACKGROUNDS", (0, header_rows), (-1, -1),
+                          [colors.white, colors.HexColor("#f2f5f2")]),
         ("LEFTPADDING",   (0, 0), (-1, -1), 4),
         ("RIGHTPADDING",  (0, 0), (-1, -1), 4),
         ("TOPPADDING",    (0, 0), (-1, -1), 3),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ])
+    ]
+
+    if header_rows == 2:
+        # La fila del activo, más oscura y a todo lo ancho, para que se lea como
+        # un título y no como una fila más de la tabla.
+        commands += [
+            ("SPAN",          (0, 0), (-1, 0)),
+            ("BACKGROUND",    (0, 0), (-1, 0), dark),
+            ("TOPPADDING",    (0, 0), (-1, 0), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+            ("LEFTPADDING",   (0, 0), (-1, 0), 8),
+        ]
+
+    return TableStyle(commands)
 
 
 def _cover(
     theme: ReportTheme, assets: Sequence, scope_label: str, author: str,
     generated_at: datetime,
 ) -> list:
-    """Portada: de qué va el informe, quién lo pidió y qué hay dentro."""
-    elements: list = []
-    elements.extend(theme.section_header("Inventario de activos", "HYGEIA"))
-    elements.append(Spacer(1, 0.25 * inch))
+    """Portada del informe.
 
-    counts = {status: 0 for status in _STATUS_ORDER}
+    Sigue el molde de los informes de Themis (``reports/creator.py``,
+    ``append_cover_page``): banda de título en color, subtítulo, ficha
+    enmarcada y barra decorativa. Antes esto era una tabla clave-valor y
+    parecía un formulario, no la primera página de un documento.
+    """
+    main = colors.HexColor(theme.palette[ColorType.MAIN])
+    light = colors.HexColor(theme.palette[ColorType.LIGHT])
+    white = colors.HexColor(theme.palette[ColorType.WHITE])
+    black = colors.HexColor(theme.palette[ColorType.BLACK])
+
+    elements: list = [Spacer(1, 1.9 * inch)]
+
+    title_style = ParagraphStyle(
+        "CoverTitle", parent=theme.styles["Heading1"],
+        fontSize=28, leading=32, textColor=white,
+        alignment=TA_CENTER, fontName="Helvetica-Bold",
+    )
+    title_band = Table([[Paragraph("Inventario de activos", title_style)]], colWidths=[6 * inch])
+    title_band.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), main),
+        ("TOPPADDING",    (0, 0), (-1, -1), 16),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 16),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 24),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 24),
+    ]))
+    elements.append(title_band)
+
+    subtitle_style = ParagraphStyle(
+        "CoverSubtitle", parent=theme.styles["Normal"],
+        fontSize=13, leading=16, textColor=black, alignment=TA_CENTER,
+    )
+    elements.append(Spacer(1, 0.3 * inch))
+    elements.append(Paragraph(scope_label, subtitle_style))
+
+    elements.append(Spacer(1, 0.9 * inch))
+    info_table = Table(
+        [["Generado por:", author], ["Fecha:", _format_datetime(generated_at)]],
+        colWidths=[1.8 * inch, 3.2 * inch],
+    )
+    info_table.setStyle(TableStyle([
+        ("TEXTCOLOR",     (0, 0), (0, -1), main),
+        ("TEXTCOLOR",     (1, 0), (1, -1), black),
+        ("FONTNAME",      (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE",      (0, 0), (-1, -1), 10),
+        ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING",    (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ("BOX",           (0, 0), (-1, -1), 1, light),
+    ]))
+    elements.append(info_table)
+
+    elements.append(Spacer(1, 0.5 * inch))
+    elements.append(_status_strip(theme, assets))
+
+    elements.append(Spacer(1, 0.6 * inch))
+    decoration = Table([[""]], colWidths=[6 * inch], rowHeights=[0.12 * inch])
+    decoration.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), light)]))
+    elements.append(decoration)
+
+    elements.append(PageBreak())
+    return elements
+
+
+def _status_strip(theme: ReportTheme, assets: Sequence) -> Table:
+    """Cifras de un vistazo: el total y el desglose por estado.
+
+    Es la respuesta a "¿qué hay aquí dentro?" sin pasar de página, y lo que
+    convierte la portada en algo que se mira en vez de leerse. Los estados sin
+    ningún activo no se pintan: una columna a cero no informa, estorba.
+    """
+    main = colors.HexColor(theme.palette[ColorType.MAIN])
+    light = colors.HexColor(theme.palette[ColorType.LIGHT])
+    white = colors.HexColor(theme.palette[ColorType.WHITE])
+
+    counts: Dict[str, int] = {}
     for asset in assets:
         counts[asset.status] = counts.get(asset.status, 0) + 1
 
-    summary = [
-        ["Ámbito", scope_label],
-        ["Generado por", author],
-        ["Fecha", _format_datetime(generated_at)],
-        ["Activos totales", str(len(assets))],
-    ]
-    summary.extend(
-        [_STATUS_LABELS[status], str(counts.get(status, 0))]
+    columns = [("Activos", len(assets))]
+    columns.extend(
+        (_STATUS_LABELS[status], counts[status])
         for status in _STATUS_ORDER
         if counts.get(status)
     )
 
-    elements.append(theme.kv_table(summary, col_widths=[2.2 * inch, 3.8 * inch]))
-    return elements
+    number_style = ParagraphStyle(
+        "StatNumber", parent=theme.styles["Normal"],
+        fontSize=20, leading=23, alignment=TA_CENTER,
+        fontName="Helvetica-Bold", textColor=white,
+    )
+    label_style = ParagraphStyle(
+        "StatLabel", parent=theme.styles["Normal"],
+        fontSize=7.5, leading=10, alignment=TA_CENTER, textColor=white,
+    )
+
+    cells = [
+        [Paragraph(str(value), number_style), Paragraph(label.upper(), label_style)]
+        for label, value in columns
+    ]
+    inner = [
+        Table([[cell[0]], [cell[1]]], colWidths=[6 * inch / len(columns)])
+        for cell in cells
+    ]
+
+    strip = Table([inner], colWidths=[6 * inch / len(columns)] * len(columns))
+    strip.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), main),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",    (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ("LINEAFTER",     (0, 0), (-2, -1), 0.6, light),
+    ]))
+    return strip
 
 
 def _asset_register(theme: ReportTheme, assets: Sequence, owner_names: Dict[int, str]) -> list:
@@ -185,8 +298,8 @@ def _asset_register(theme: ReportTheme, assets: Sequence, owner_names: Dict[int,
     table = Table(rows, colWidths=widths, repeatRows=1)
     table.setStyle(_data_table_style(theme))
 
-    elements: list = [PageBreak()]
-    elements.extend(theme.section_header("Registro de activos", "INVENTARIO"))
+    # Sin `PageBreak` aquí: la portada ya termina con uno.
+    elements: list = list(theme.section_header("Registro de activos", "INVENTARIO"))
     elements.append(Spacer(1, 0.15 * inch))
     elements.append(table)
     return elements
@@ -212,11 +325,35 @@ def _software_appendix(theme: ReportTheme, assets: Sequence) -> list:
         ))
         return elements
 
-    header = [_cell(text, theme.label) for text in ("Nombre", "Fabricante", "Versión", "Arq.")]
     widths = [2.6 * inch, 1.6 * inch, 1.1 * inch, 0.7 * inch]
 
+    # El nombre del activo va DENTRO de la tabla, como fila que abarca las
+    # cuatro columnas, y no como párrafo suelto encima.
+    #
+    # Es la única forma de que no quede huérfano: tanto `KeepTogether` como
+    # `keepWithNext` obligan al bloque título+tabla a caber entero en una
+    # página, y una tabla de cientos de aplicaciones no cabe nunca — así que
+    # ReportLab la empujaba a la siguiente y dejaba el encabezado solo, con
+    # la página medio en blanco. Como fila de la propia tabla, hay un único
+    # flowable, que se parte por donde haga falta.
+    #
+    # `repeatRows=2` remata la jugada: al continuar en la página siguiente se
+    # repiten el nombre del activo y la cabecera de columnas, así que nunca hay
+    # una página de aplicaciones sin saber de quién son.
+    title_style = ParagraphStyle(
+        "SoftwareAssetTitle", parent=theme.styles["Normal"],
+        fontSize=10.5, leading=13, fontName="Helvetica-Bold",
+        textColor=colors.HexColor(theme.palette[ColorType.WHITE]),
+    )
+
     for asset in with_inventory:
-        rows = [header]
+        count = len(asset.inventory)
+        caption = f"{asset.hostname} — {count} {'aplicación' if count == 1 else 'aplicaciones'}"
+
+        rows = [
+            [Paragraph(caption, title_style), "", "", ""],
+            [_cell(text, theme.label) for text in ("Nombre", "Fabricante", "Versión", "Arq.")],
+        ]
         for entry in asset.inventory:
             rows.append([
                 _cell(entry.get("name") or "—", theme.body),
@@ -225,18 +362,10 @@ def _software_appendix(theme: ReportTheme, assets: Sequence) -> list:
                 _cell(entry.get("architecture") or "—", theme.body),
             ])
 
-        table = Table(rows, colWidths=widths, repeatRows=1)
-        table.setStyle(_data_table_style(theme))
-
-        # El título y el arranque de su tabla no deben quedar separados por un
-        # salto de página: un encabezado huérfano al pie hace pensar que el
-        # activo no tiene software.
-        heading = Paragraph(
-            f"<b>{asset.hostname}</b> — {len(asset.inventory)} aplicaciones",
-            theme.subtitle,
-        )
-        elements.append(KeepTogether([heading, Spacer(1, 0.06 * inch), table]))
-        elements.append(Spacer(1, 0.2 * inch))
+        table = Table(rows, colWidths=widths, repeatRows=2)
+        table.setStyle(_data_table_style(theme, header_rows=2))
+        elements.append(table)
+        elements.append(Spacer(1, 0.3 * inch))
 
     return elements
 
@@ -291,21 +420,45 @@ def build_inventory_report(
     )
     document.build(
         elements,
-        onFirstPage=lambda canvas, doc: _draw_footer(canvas, doc, theme),
-        onLaterPages=lambda canvas, doc: _draw_footer(canvas, doc, theme),
+        onFirstPage=lambda canvas, doc: _draw_page_furniture(canvas, doc, theme),
+        onLaterPages=lambda canvas, doc: _draw_page_furniture(canvas, doc, theme),
     )
 
     buffer.seek(0)
     return buffer.read()
 
 
-def _draw_footer(canvas, document, theme: ReportTheme) -> None:
-    """Pie con el número de página, en todas."""
+def _draw_page_furniture(canvas, document, theme: ReportTheme) -> None:
+    """Barra de acento, cabecera y número de página.
+
+    Mismo aparejo que los informes de Themis (``creator.py::_on_page``), para
+    que los dos documentos se reconozcan como del mismo producto.
+
+    La portada se queda limpia: una cabecera y un pie en la página 1 son
+    justamente lo que hace que una portada no parezca una portada.
+    """
+    if canvas.getPageNumber() == 1:
+        return
+
+    width, height = document.pagesize
+    main = colors.HexColor(theme.palette[ColorType.MAIN])
+    dark = colors.HexColor(theme.palette[ColorType.DARK])
+
     canvas.saveState()
-    canvas.setFont("Helvetica", 7.5)
-    canvas.setFillColor(colors.HexColor(theme.palette[ColorType.SECONDARY]))
-    canvas.drawRightString(
-        document.pagesize[0] - 0.6 * inch, 0.45 * inch, f"Página {document.page}",
-    )
-    canvas.drawString(0.6 * inch, 0.45 * inch, "Ellysia · Hygeia")
+
+    canvas.setFillColor(main)
+    canvas.rect(20, 20, 6, height - 40, stroke=0, fill=1)
+
+    canvas.setFont("Helvetica-Bold", 12)
+    canvas.setFillColor(dark)
+    canvas.drawString(40, height - 30, "Ellysia · Inventario de activos")
+
+    canvas.setStrokeColor(colors.HexColor("#e0e0e0"))
+    canvas.setLineWidth(0.5)
+    canvas.line(36, height - 42, width - 36, height - 42)
+
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.HexColor("#999999"))
+    canvas.drawRightString(width - 40, 28, f"Página {canvas.getPageNumber()}")
+
     canvas.restoreState()
