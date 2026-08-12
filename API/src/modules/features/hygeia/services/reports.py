@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import io
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Optional, Sequence
 
 from reportlab.lib import colors
@@ -29,11 +30,26 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
-    PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
 )
 
 import src.modules.system.config_reading as CR
 from src.modules.shared.report_theme import ColorType, ReportTheme
+
+#: Logotipo de Hygeia, dentro del propio módulo.
+#:
+#: No usa un directorio de recursos configurable como Themis
+#: (``DirectoryType.RESOURCES_THEMIS``) a propósito: esa ruta apunta a
+#: ``API/resources/themis``, que no existe en el repositorio, así que el logo de
+#: sus informes se salta en silencio (``if os.path.exists(...)``). Un recurso
+#: que viaja con el código no puede faltar: está en el checkout, en la imagen de
+#: Docker y en cualquier despliegue, sin configuración que cuadrar.
+#:
+#: Es una copia reducida y con paleta de 16 colores del original de la SPA
+#: (``assets/images/hygeia/Hygeia-DarkGreen-BgW.png``): se embebe en cada PDF
+#: que se genera, y 372 KB por documento para un dibujo de línea a dos tintas
+#: no se sostienen.
+_LOGO_PATH = Path(__file__).resolve().parent.parent / "resources" / "hygeia-logo.png"
 
 #: Colores de respaldo, iguales al acento de Hygeia en la SPA
 #: (``[data-module="hygeia"]`` en ``shared.css``). Se usan si
@@ -160,7 +176,18 @@ def _cover(
     white = colors.HexColor(theme.palette[ColorType.WHITE])
     black = colors.HexColor(theme.palette[ColorType.BLACK])
 
-    elements: list = [Spacer(1, 1.9 * inch)]
+    elements: list = [Spacer(1, 0.9 * inch)]
+
+    # El logo manda en la portada, encima del título. Si faltara el fichero se
+    # imprime igual, sin él: un informe sin logotipo es feo, uno que revienta
+    # al generarse es un fallo.
+    if _LOGO_PATH.exists():
+        logo = Image(str(_LOGO_PATH), width=1.15 * inch, height=1.23 * inch)
+        logo.hAlign = "CENTER"
+        elements.append(logo)
+        elements.append(Spacer(1, 0.45 * inch))
+    else:
+        elements.append(Spacer(1, 1.0 * inch))
 
     title_style = ParagraphStyle(
         "CoverTitle", parent=theme.styles["Heading1"],
@@ -456,6 +483,16 @@ def _draw_page_furniture(canvas, document, theme: ReportTheme) -> None:
     canvas.setStrokeColor(colors.HexColor("#e0e0e0"))
     canvas.setLineWidth(0.5)
     canvas.line(36, height - 42, width - 36, height - 42)
+
+    # Logo pequeño en la esquina, como en los informes de Themis. Dibujarlo en
+    # todas las páginas no multiplica el peso: ReportLab cachea la imagen por
+    # ruta, así que las N páginas interiores comparten un único objeto embebido
+    # (medido: un PDF de 11 páginas lleva 2 imágenes, esta y la de la portada).
+    if _LOGO_PATH.exists():
+        canvas.drawImage(
+            str(_LOGO_PATH), width - 52, height - 38,
+            width=0.3 * inch, height=0.32 * inch, preserveAspectRatio=True,
+        )
 
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(colors.HexColor("#999999"))
