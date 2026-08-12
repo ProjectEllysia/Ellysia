@@ -16,27 +16,23 @@
 
               <label class="option">
                 <input v-model="scope" type="radio" value="user" />
-                <span class="option-text">
-                  Mis activos
-                  <small>Los {{ assetCount }} activos dados de alta con tu cuenta.</small>
-                </span>
+                <span class="option-title">Mis activos</span>
+                <small class="option-hint">{{ ownScopeHint }}</small>
               </label>
 
               <label class="option" :class="{ 'option--off': !canUseOrganization }">
                 <input v-model="scope" type="radio" value="organization" :disabled="!canUseOrganization" />
-                <span class="option-text">
-                  Toda la organización
-                  <small>{{ organizationHint }}</small>
-                </span>
+                <span class="option-title">Toda la organización</span>
+                <small class="option-hint">{{ organizationHint }}</small>
               </label>
             </fieldset>
 
-            <label class="check">
+            <label class="option">
               <input v-model="includeSoftware" type="checkbox" />
-              <span class="check-text">
-                Incluir el software instalado
-                <small>Añade un anexo con las aplicaciones de cada activo. Alarga bastante el documento.</small>
-              </span>
+              <span class="option-title">Incluir el software instalado</span>
+              <small class="option-hint">
+                Añade un anexo con las aplicaciones de cada activo. Alarga bastante el documento.
+              </small>
             </label>
 
             <p v-if="error" class="error">{{ error }}</p>
@@ -80,6 +76,13 @@ const includeSoftware = ref(false)
  */
 const canUseOrganization = computed(() => props.organization?.isOwner === true)
 
+/** «Los 1 activos» no lo dice nadie. */
+const ownScopeHint = computed(() =>
+  props.assetCount === 1
+    ? 'El único activo dado de alta con tu cuenta.'
+    : `Los ${props.assetCount} activos dados de alta con tu cuenta.`,
+)
+
 /** Se deshabilita con explicación, no se oculta: una opción que desaparece
  *  parece que no existe; una deshabilitada que dice por qué, enseña. */
 const organizationHint = computed(() => {
@@ -111,18 +114,40 @@ function submit() {
 .modal-body { padding: 1rem 1.1rem; }
 
 .field-label { font-size: var(--fs-sm); color: var(--text-muted); padding: 0; }
-.scope { border: none; margin: 0 0 0.9rem; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.scope { border: none; margin: 0 0 0.85rem; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
 
-.option { display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; }
-.option input { margin-top: 0.2rem; accent-color: var(--accent); }
+/* Rejilla de dos filas en vez de flex con `margin-top` a ojo: el control y su
+   título comparten la fila 1, así que `align-items: center` los alinea entre
+   sí, y la explicación cae en la fila 2 bajo el título. Con flex había que
+   empujar el control con un margen fijo, y las fuentes de aquí son fluidas
+   (`--fs-md` es un `clamp()`): el número acertaba a un ancho de ventana y
+   fallaba en todos los demás. */
+.option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.5rem;
+  row-gap: 0.1rem;
+  align-items: center;
+  cursor: pointer;
+}
+.option input {
+  grid-column: 1; grid-row: 1;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.option-title {
+  grid-column: 2; grid-row: 1;
+  font-size: var(--fs-md); color: var(--text);
+}
+.option-hint {
+  grid-column: 2; grid-row: 2;
+  font-size: var(--fs-sm); color: var(--text-muted); line-height: 1.4;
+}
 .option--off { cursor: not-allowed; opacity: 0.55; }
-.option-text { display: flex; flex-direction: column; gap: 0.1rem; font-size: var(--fs-md); color: var(--text); }
-.option-text small { font-size: var(--fs-sm); color: var(--text-muted); }
 
-.check { display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.85rem; cursor: pointer; }
-.check input { margin-top: 0.15rem; accent-color: var(--accent); }
-.check-text { display: flex; flex-direction: column; gap: 0.15rem; font-size: var(--fs-md); color: var(--text); }
-.check-text small { font-size: var(--fs-sm); color: var(--text-muted); }
+/* La casilla del anexo es una opción más, con el mismo molde, pero separada
+   del grupo de ámbito: no es una alternativa, es un añadido. */
+.scope + .option { margin-bottom: 0.85rem; }
 
 .error { color: var(--danger); font-size: var(--fs-sm); margin: 0 0 0.6rem; }
 
