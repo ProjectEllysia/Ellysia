@@ -4,8 +4,28 @@
 
 Monorepo:
 - **API** (`API/`) — Python/Flask REST backend (primary work area)
-- **web** (`web/app/`) — Vue 3 SPA (Vite + Pinia + Vue Router)
-- **mobile** (`mobile/AcheronMobile/`) — Android/Kotlin + AcheronCore Java
+- **web** (`web/`) — Vue 3 SPA in `web/app/` (Vite + Pinia + Vue Router), plus the
+  nginx that serves it and proxies the API (`nginx.conf`, `api-locations.conf`)
+- **landing** (`landing/`) — static marketing site, published to `gh-pages` by
+  `.github/workflows/landing.yml`. No build step, no coupling to the other two.
+
+The Android client and its `AcheronCore` Java engine live in a separate repo
+([SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile)); they consume
+`/acheron` over HTTP.
+
+**API and web stay in the same repository on purpose.** They share a deployment
+(one `docker-compose.yml`, one nginx that proxies to `Ellysia-API:5000` by container
+name) and a contract that only a single repo can verify: `web/api-locations.conf`
+has to track both `run.py:_register_blueprints` and the SPA router.
+`API/tests/unit/test_nginx_api_locations.py` enforces it — a test in `API/` that
+reads files from `web/`, impossible once split.
+
+**Brand assets: the SPA is the source of truth** (`web/app/src/assets/images/`).
+When an API report needs an image, copy that one file into the module that uses it
+(`API/src/modules/features/hygeia/resources/hygeia-logo.png` is the pattern —
+downscaled for its actual use, with a comment saying why). Do not mirror the whole
+asset tree into `API/`; that copy existed, was 18 MB, was byte-identical, was baked
+into the Docker image, and was referenced by nothing.
 
 ## Platform
 

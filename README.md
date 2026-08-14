@@ -107,7 +107,7 @@ Ellysia/
 | **Scribe** | Abstraction layer for AI generation — pluggable strategies (Ollama, OpenAI, Google Gemini) per module. | Operational |
 | **Herald** | Abstraction layer for email sending — pluggable strategies (SMTP relay) per module, transversal like Scribe. | Operational |
 | **Ellysia Web** | Vue 3 SPA with hub dashboard, scan management, analysis viewer, vault client, asset monitoring dashboard, plans/organization management, and admin panel. | Operational |
-| **AcheronMobile** | Android app with Jetpack Compose UI, Material 3 design, and Java crypto core for offline vault operations. | Operational |
+| **AcheronMobile** ↗ | Android app with Jetpack Compose UI, Material 3 design, and Java crypto core for offline vault operations. Lives in [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile), not in this repository — it consumes `/acheron` over HTTP like any other client. | Operational |
 
 ## Quick start
 
