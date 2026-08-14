@@ -16,11 +16,96 @@ campos y se marca la procedencia.
 from __future__ import annotations
 
 import logging
-from typing import List
+import re
+from typing import Callable, Dict, List
 
 from src.modules.features.themis.lybra import Service, extract_trailing_version, services_from_payload
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# VERSIÓN DE ORIGEN vs. VERSIÓN DEL PAQUETE
+# =============================================================================
+
+# La época de Debian: "1:9.6p1-3ubuntu13.5" -> se quita el "1:".
+_DEBIAN_EPOCH_RE = re.compile(r"^\d+:")
+
+
+def _debian_upstream_version(version: str) -> str:
+    """Devuelve la versión de origen de una versión de paquete de Debian.
+
+    La gramática de Debian es ``[época:]versión_de_origen[-revisión]``, y el
+    separador de la revisión es el ÚLTIMO guion (la versión de origen solo
+    puede contener guiones si hay revisión, así que no hay ambigüedad).
+
+    Por qué hace falta, y no es una preferencia estética: ``version_compare``
+    parte la cadena en tramos de dígitos y de letras, y las letras ordenan por
+    debajo de los números. Con la versión completa::
+
+        "2.39-0ubuntu8.3"  ->  [2, 39, 0, "ubuntu", 8, 3]
+        "2.39"             ->  [2, 39]
+
+    la instalada sale *más antigua* que 2.39 por culpa del sufijo de
+    empaquetado, así que un rango ``version_start_including="2.39"`` no casa y
+    la vulnerabilidad no se reporta. Es un falso negativo, que es el peor tipo
+    de fallo que puede tener esto.
+
+    El precio, dicho claramente: se pierde la señal de si la distribución tiene
+    el parche aplicado. Debian y Ubuntu estables **corrigen vulnerabilidades
+    sin subir la versión de origen** —``9.6p1-3ubuntu13.5`` puede llevar ya el
+    parche de una CVE que afecta a ``9.6p1``—, así que esto puede reportar como
+    vulnerable algo que ya está corregido.
+
+    Pero ese falso positivo **existe igual con la versión completa**: el NVD no
+    sabe expresar "corregido en la revisión 13.5 de Ubuntu", así que sus rangos
+    tampoco la excluirían. Recortar no lo empeora; solo deja de perder las
+    coincidencias del primer caso. Resolverlo de verdad exige otra fuente de
+    datos —los avisos de la propia distribución: DSA, USN, OVAL—, que es otro
+    trabajo.
+
+    Args:
+        version: La versión tal como la reporta dpkg, p. ej.
+            ``"1:9.6p1-3ubuntu13.5"``.
+
+    Returns:
+        La versión de origen (``"9.6p1"``), o la cadena original si recortarla
+        la dejaría vacía.
+    """
+    upstream = _DEBIAN_EPOCH_RE.sub("", version, count=1)
+    head, separator, _revision = upstream.rpartition("-")
+    if separator and head:
+        upstream = head
+    return upstream or version
+
+
+# Solo dpkg. RPM no lo necesita: el agente ya manda %{VERSION}, que es la
+# versión de origen, y deja fuera %{RELEASE}, que es el empaquetado.
+#
+# Snap queda fuera a propósito aunque sus versiones se le parezcan
+# ("firefox 122.0-2"). Ahí la cadena la declara quien publica el snap y no
+# sigue ninguna gramática, así que recortar por el último guion podría
+# llevarse una etiqueta de versión preliminar de verdad. Debian no tiene ese
+# riesgo: sus preliminares usan "~", no "-".
+_UPSTREAM_VERSION_BY_SOURCE: Dict[str, Callable[[str], str]] = {
+    "dpkg": _debian_upstream_version,
+}
+
+
+def _package_version(item: dict) -> str:
+    """Devuelve la versión de un paquete en la forma que el motor sabe comparar.
+
+    La normalización vive aquí y no en el agente a propósito: así
+    ``MonitoredAsset.inventory`` conserva la versión exacta del paquete —que es
+    lo que hay que enseñar en el informe en PDF, y lo que dice si un parche de
+    la distribución está aplicado— y solo el motor ve la recortada.
+    """
+    version = (item.get("version") or "").strip()
+    if not version:
+        return ""
+    source = (item.get("source") or "").strip().lower()
+    normalize = _UPSTREAM_VERSION_BY_SOURCE.get(source)
+    return normalize(version) if normalize else version
 
 
 def services_from_inventory(software: list) -> List[Service]:
@@ -59,6 +144,13 @@ def services_from_inventory(software: list) -> List[Service]:
     dos existen, así que preferir la incrustada no cambia nada — solo
     corrige el caso donde discrepan.
 
+    Y una quinta, aparecida al implementar el inventario de Linux: **de los
+    paquetes de dpkg se usa la versión de origen, no la del paquete**
+    (``"9.6p1"``, no ``"1:9.6p1-3ubuntu13.5"``). El sufijo de empaquetado hace
+    que ``version_compare`` ordene la versión instalada por debajo de la misma
+    versión sin sufijo, y eso pierde coincidencias reales. Ver
+    :func:`_debian_upstream_version`, que explica también lo que cuesta.
+
     Args:
         software: Lista de aplicaciones tal como las guarda
             ``MonitoredAsset.inventory`` (claves del ``SoftwareSchema``:
@@ -72,7 +164,7 @@ def services_from_inventory(software: list) -> List[Service]:
         name = (item.get("name") or "").strip()
         if not name:
             continue
-        version = extract_trailing_version(name) or (item.get("version") or "").strip()
+        version = extract_trailing_version(name) or _package_version(item)
         if not version:
             continue
         payload.append({
