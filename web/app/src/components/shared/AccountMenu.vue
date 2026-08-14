@@ -51,7 +51,7 @@
 
           <template v-if="auth.isAdmin">
             <div class="drop-divider"></div>
-            <router-link to="/users" class="drop-item" @click="open = false">Usuarios</router-link>
+            <router-link to="/usuarios" class="drop-item" @click="open = false">Usuarios</router-link>
             <router-link v-if="auth.isRoot" to="/config" class="drop-item" @click="open = false">Configuración</router-link>
             <router-link v-if="auth.isRoot" to="/admin/planes" class="drop-item" @click="open = false">Gestor de planes</router-link>
             <router-link to="/queue" class="drop-item" @click="open = false">Cola de tareas</router-link>

@@ -198,7 +198,16 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
-    path: '/users',
+    // En español a propósito, como el resto de rutas de la SPA (/planes,
+    // /organizacion, /acheron/boveda...). Aquí además es obligatorio: `/users`
+    // chocaba de frente con el `location = /users` de web/api-locations.conf,
+    // que proxea a Flask porque GET /users es un endpoint real. Un `location =`
+    // no puede servir al SPA y a la API a la vez, así que al recargar la página
+    // o pegar la URL a mano salía el JSON de la API (o un 401) en vez de la
+    // vista. La navegación interna de vue-router no pasa por nginx, por eso no
+    // se veía. Las llamadas apiFetch('/users/...') de los stores NO cambian:
+    // esas sí son la API.
+    path: '/usuarios',
     name: 'Users',
     component: () => import('@/views/UsersView.vue'),
     meta: { requiresAuth: true, requiresAdmin: true },
