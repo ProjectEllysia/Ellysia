@@ -491,19 +491,19 @@ immediately if either is missing:
   internet (not just open in a local firewall — check any cloud provider
   security group / NAT rule in front of the VM too).
 - Every name passed with `-d` must resolve via public DNS to that host's
-  public IP.
+  public IP. Let's Encrypt fails the **whole** request if a single `-d` does
+  not validate, so a name that does not resolve takes the working ones down
+  with it.
 
-**The apex `ellysia.es` is deliberately not in the certificate.** The host
-is behind a residential connection with an ISP-assigned dynamic IP, so the
-names point at a DDNS hostname via CNAME — and a DNS apex cannot be a CNAME
-(it already carries the zone's SOA and NS records). With no fixed address to
-put in an A record either, `ellysia.es` cannot be made to resolve at all, and
-Let's Encrypt fails the whole request if any single `-d` does not validate.
-`www.ellysia.es` and `api.ellysia.es` are the names actually in use; the SPA
-is served from the first and the API, including every `hygeia-agent`, talks
-to the second. If the deployment ever moves to a static IP (or to a DNS
-provider offering ALIAS/ANAME or CNAME flattening at the apex), add
-`-d ellysia.es` back and re-issue.
+**The target deployment is a VPS with a static public IP.** That is what the
+rest of this section assumes. Point all three names at it with plain `A`
+records — apex included — and nothing else here needs adapting:
+
+```
+ellysia.es.       A   <VPS IP>
+www.ellysia.es.   A   <VPS IP>
+api.ellysia.es.   A   <VPS IP>
+```
 
 **First issuance** — run this once, from the repo root, on the machine that
 already has `docker compose --profile container up -d web` running:
@@ -512,17 +512,43 @@ already has `docker compose --profile container up -d web` running:
 docker compose --profile container run --rm certbot certonly \
   --webroot -w /var/www/certbot \
   --cert-name ellysia.es \
-  -d www.ellysia.es -d api.ellysia.es \
+  -d ellysia.es -d www.ellysia.es -d api.ellysia.es \
   --email you@example.com --agree-tos --no-eff-email
 ```
 
-`--cert-name ellysia.es` is not cosmetic. Certbot names the lineage — and
-therefore the `live/<name>/` directory — after the **first** `-d` unless told
-otherwise, so without it the certificate would land in
-`live/www.ellysia.es/`. Both the copy step below and `web/ssl/renew.sh` read
-the fixed path `live/ellysia.es/`, and `renew.sh` skips silently when that
-path is missing (it prints "sin cambios (certificado aún vigente)"), so a
-renamed lineage would mean renewals that never happen and never complain.
+`--cert-name ellysia.es` is not cosmetic, and it is what keeps the rest of
+the tooling independent of which names the certificate happens to cover.
+Certbot names the lineage — and therefore the `live/<name>/` directory —
+after the **first** `-d` unless told otherwise. Both the copy step below and
+`web/ssl/renew.sh` read the fixed path `live/ellysia.es/`, and `renew.sh`
+skips its work in silence when that path is missing (it prints "sin cambios
+(certificado aún vigente)"), so a lineage that got named after some other
+domain would mean renewals that never happen and never complain — an expired
+certificate with nobody watching. Pinning the name means the `-d` list can
+change freely without touching a single script.
+
+> [!NOTE]
+> **Exception: hosts without a static IP (temporary).** On a residential
+> connection the ISP assigns a dynamic address, so the names have to be
+> CNAMEs to a DDNS hostname — and a DNS **apex cannot be a CNAME**, because
+> it already carries the zone's SOA and NS records. There is no A record to
+> use either, so `ellysia.es` simply cannot resolve, and including it fails
+> the whole issuance. Drop it from the `-d` list for that case only:
+>
+> ```bash
+> --cert-name ellysia.es -d www.ellysia.es -d api.ellysia.es
+> ```
+>
+> The SPA is then reached at `www.ellysia.es` and the API — including every
+> `hygeia-agent` — at `api.ellysia.es`. Because `--cert-name` pins the
+> lineage, this is the only line that differs: the copy step, `renew.sh` and
+> the cron entry are all identical. Moving to a VPS later means re-issuing
+> with `-d ellysia.es` added and nothing else.
+>
+> Renewal is also less reliable here: if the ISP rotates the address while
+> the nightly cron runs, that attempt fails. Certbot retries daily through
+> the 30 days before expiry, so an isolated failure is harmless — but this
+> is the setup where a real `--email` actually matters.
 
 `--email` is not strictly required — pass
 `--register-unsafely-without-email --agree-tos` instead of `--email ... --agree-tos`

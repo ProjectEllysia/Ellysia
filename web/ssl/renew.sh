@@ -20,12 +20,12 @@ docker compose --profile container run --rm certbot renew --webroot -w /var/www/
 # certbot guarda cada renovación en un directorio nuevo (live/ -> archive/N/)
 # — un symlink roto ahí sería un fallo silencioso hasta el próximo reinicio
 # del contenedor.
-# Nombre del LINAJE (--cert-name), no de un dominio del certificado: el apex
-# ellysia.es no está en él y no puede estarlo (es un CNAME al DDNS, y un apex
-# no admite CNAME). El certificado cubre www.ellysia.es y api.ellysia.es, pero
-# se emitió con `--cert-name ellysia.es` justo para que esta ruta sea estable
-# aunque cambien los nombres cubiertos. Ver el README, "SSL certificates
-# (production)".
+# Nombre del LINAJE (`--cert-name`), no necesariamente un dominio cubierto por
+# el certificado. Se fija al emitir para que esta ruta sea estable aunque la
+# lista de `-d` cambie: en el VPS de destino el certificado cubre ellysia.es,
+# www y api, pero un host sin IP fija tiene que emitir sin el apex (no puede
+# resolver: un apex no admite CNAME). Con el linaje pinchado, este script no
+# se entera de la diferencia. Ver el README, "SSL certificates (production)".
 DOMAIN=ellysia.es
 LE_LIVE="web/ssl/letsencrypt/live/$DOMAIN"
 if [ -f "$LE_LIVE/fullchain.pem" ]; then
