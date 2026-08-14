@@ -260,11 +260,23 @@ services:
       - secops-net
     profiles:
       - container
-    # Sin comando por defecto: se invoca a demanda con
+    # Sin acción por defecto: se invoca a demanda con
     #   docker compose --profile container run --rm certbot certonly ...
     # para la primera emisión, y desde un cron del host para la renovación.
     # Un "command: renew" en bucle aquí competiría con ese cron.
-    entrypoint: ["/bin/true"]
+    #
+    # Tiene que ser `command`, NO `entrypoint`. La imagen trae
+    # ENTRYPOINT ["certbot"], así que los argumentos de `run` se le pasan a él.
+    # Con `entrypoint: ["/bin/true"]` aquí, esos argumentos pasaban a ser
+    # argumentos de /bin/true: el `certonly` de la documentación ejecutaba
+    # `/bin/true certonly --webroot ...`, salía con código 0 y no emitía nada.
+    # Un fallo mudo — sin error, sin salida, sin certificado — que solo se
+    # nota mucho después, cuando nginx sigue sirviendo el autofirmado y los
+    # agentes rechazan la conexión con "unknown authority".
+    #
+    # `--version` como acción por defecto: si algún `up` levanta el servicio,
+    # imprime la versión y termina, en vez de quedarse esperando.
+    command: ["--version"]
 
 volumes:
   postgres_data:
