@@ -459,8 +459,107 @@ The `web/ssl/` directory is gitignored — each developer keeps their own
 certificates. The Nginx config references generic container paths
 (`/etc/nginx/ssl/ellysia.crt` / `ellysia.key`).
 
-For production, replace the self-signed certs with a valid certificate (Let's
-Encrypt, etc.) and update `nginx.conf` paths accordingly.
+### SSL certificates (production)
+
+A self-signed certificate is fine for local development, but it is not
+something to ship to real clients: any agent or browser that connects has to
+either trust it explicitly (a hygeia-agent needs its `caFile` config field
+pointed at it, and every other API consumer needs the same kind of
+workaround) or fail closed. There is no path from self-signed to
+production-safe other than replacing the certificate.
+
+The `container` profile ships a `certbot` service for exactly that, wired to
+issue and renew a real certificate from Let's Encrypt **against the same
+Nginx that is already running** — no separate proxy, no downtime, no change
+to how the `web` service is started day to day.
+
+**How it fits together.** `web/nginx.conf` already reserves
+`/.well-known/acme-challenge/` on port 80 for the real domains
+(`ellysia.es`, `www.ellysia.es`, `api.ellysia.es`) — that block existed
+before certbot was added, precisely so this would slot in without editing
+Nginx's config. Docker Compose gives `web` and `certbot` a shared named
+volume (`certbot-webroot`, mounted at `/var/www/certbot` in both
+containers): certbot writes the ACME challenge file there, Nginx serves it
+straight from disk. Nothing needs to listen on a new port, and `web` never
+has to be stopped.
+
+**Prerequisites**, both mandatory — Let's Encrypt validates the challenge by
+making an HTTP request to the domain from the public internet, so it fails
+immediately if either is missing:
+
+- Ports **80 and 443** on the host must actually be reachable from the
+  internet (not just open in a local firewall — check any cloud provider
+  security group / NAT rule in front of the VM too).
+- `ellysia.es`, `www.ellysia.es` and `api.ellysia.es` must all resolve via
+  public DNS to that host's public IP.
+
+**First issuance** — run this once, from the repo root, on the machine that
+already has `docker compose --profile container up -d web` running:
+
+```bash
+docker compose --profile container run --rm certbot certonly \
+  --webroot -w /var/www/certbot \
+  -d ellysia.es -d www.ellysia.es -d api.ellysia.es \
+  --email you@example.com --agree-tos --no-eff-email
+```
+
+`--email` is not strictly required — pass
+`--register-unsafely-without-email --agree-tos` instead of `--email ... --agree-tos`
+if you'd rather skip it — but it is what Let's Encrypt uses to warn about
+upcoming expiry if renewal ever silently fails, and it does not have to be a
+domain-specific address; any inbox someone actually reads works, including a
+personal Gmail. Skipping it means nobody gets warned before an expired
+certificate takes every connected agent down at once.
+
+This writes the certificate and its account/private keys under
+`web/ssl/letsencrypt/` (gitignored — this is real key material, not the
+dev self-signed cert). It does **not** touch `web/ssl/ellysia.crt` or
+`ellysia.key` yet — those are the fixed paths `nginx.conf` actually reads,
+so the new certificate has to be copied there and Nginx reloaded to pick it
+up:
+
+```bash
+cp web/ssl/letsencrypt/live/ellysia.es/fullchain.pem web/ssl/ellysia.crt
+cp web/ssl/letsencrypt/live/ellysia.es/privkey.pem   web/ssl/ellysia.key
+docker compose --profile container restart web
+```
+
+**Renewal.** Let's Encrypt certificates are valid for 90 days, so this has
+to happen again well before that, automatically, or the site goes back to
+serving an expired certificate with nobody watching. `web/ssl/renew.sh`
+does the full sequence — `certbot renew`, then the same copy-and-reload
+step above, but only if a renewal actually happened (certbot itself skips
+renewing anything with more than 30 days left, so running it daily is
+harmless and doesn't burn into Let's Encrypt's rate limits). It is meant to
+run from the **host's** cron, not inside a container — it shells out to
+`docker compose`, which needs the Compose project to be reachable, and no
+container in the stack has that by design:
+
+```bash
+# crontab -e, on the host:
+0 3 * * * cd /path/to/EllysiaServer && ./web/ssl/renew.sh >> /var/log/hygeia-renew.log 2>&1
+```
+
+**Two things that look right and are not**, both worth knowing before
+touching this again:
+
+- The `certbot-webroot` volume must be **read-write** on the `web` side,
+  not read-only. Nginx itself only ever reads from it, but the volume is
+  shared — certbot has to be able to write the challenge file into the same
+  mount, and Docker doesn't grant per-container write access on a shared
+  named volume; it's either writable for whoever mounts it read-write, or
+  not. Mounting it `:ro` on `web` looks safer and silently breaks every
+  future renewal with a plain "Read-only file system" error inside the
+  certbot container — the kind of failure nobody notices until the
+  certificate has already expired.
+- Testing the challenge path by IP (`curl http://<ip>/.well-known/...`)
+  will hit Nginx's `localhost` server block instead of the real-domain one,
+  because that's how Nginx picks a `server {}` block without a matching
+  `Host` header — and the `localhost` block doesn't have the ACME location,
+  so it falls through to the SPA and returns HTML instead of the challenge
+  file. That's a false alarm, not a broken deployment: send the real
+  `Host` header (`curl -H "Host: api.ellysia.es" http://<ip>/...`) or just
+  test against the real domain name once DNS is pointed at it.
 
 ### Ports
 
