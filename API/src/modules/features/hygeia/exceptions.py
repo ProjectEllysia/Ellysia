@@ -84,9 +84,19 @@ class IngestTooFrequentError(HygeiaError):
 
     Protege la DB de un agente en bucle cerrado (con un bug, o comprometido):
     el heartbeat se descarta sin persistir nada, no se intenta procesar.
+
+    ``details`` viaja al cliente (``expose_details``, mismo criterio que
+    ``PlanLimitError`` en accounts) porque es el contrato: sin saber el suelo,
+    un agente honesto no puede acompasarse y solo puede adivinar. El caso real
+    es el drenado del buffer, que envía los heartbeats aplazados uno detrás de
+    otro: sin este dato el agente reintentaba a ciegas con backoff exponencial,
+    gastando intentos que el suelo iba a rechazar igual. No es información
+    sensible — es un parámetro público de cadencia, justo lo que un
+    ``Retry-After`` publicaría de todas formas.
     """
     default_code = ErrorCode.CONSTRAINT_VIOLATION
     default_status_code = 429
+    expose_details = True
 
     def __init__(self, min_interval_sec: int) -> None:
         super().__init__(

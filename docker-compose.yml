@@ -216,6 +216,18 @@ services:
       - "443:443"
     volumes:
       - ./web/ssl:/etc/nginx/ssl:ro
+      # certbot escribe el reto ACME aquí y nginx lo sirve por
+      # /.well-known/acme-challenge/, que ya está declarado en nginx.conf.
+      # Volumen con nombre, no bind mount: no hace falta que exista en el
+      # host de antemano y los dos contenedores lo ven igual.
+      #
+      # rw, no ro: nginx solo LEE de aquí, pero el volumen es compartido y
+      # certbot necesita ESCRIBIR el reto en él. Con :ro en los dos lados el
+      # volumen queda de solo lectura para ambos y certbot no puede dejar el
+      # fichero que nginx tiene que servir — comprobado en este mismo
+      # despliegue: con :ro aquí, `mkdir` dentro de web daba
+      # "Read-only file system".
+      - certbot-webroot:/var/www/certbot
     depends_on:
       ellysia:
         condition: service_started
@@ -229,6 +241,31 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Emite y renueva el certificado de Let's Encrypt contra el mismo nginx que
+  # ya sirve /.well-known/acme-challenge/ en el puerto 80. No hace falta parar
+  # "web" ni cambiar de proxy: certbot solo escribe ficheros, no escucha
+  # ningún puerto.
+  #
+  # certonly --webroot, no el plugin de nginx: el plugin quiere editar la
+  # configuración del servidor directamente, y aquí nginx.conf ya es la
+  # fuente de verdad. certonly solo emite el certificado y lo deja en un
+  # fichero; recargar nginx para que lo recoja es cosa nuestra.
+  certbot:
+    image: certbot/certbot:latest
+    container_name: Ellysia-Certbot
+    volumes:
+      - ./web/ssl/letsencrypt:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot:rw
+    networks:
+      - secops-net
+    profiles:
+      - container
+    # Sin comando por defecto: se invoca a demanda con
+    #   docker compose --profile container run --rm certbot certonly ...
+    # para la primera emisión, y desde un cron del host para la renovación.
+    # Un "command: renew" en bucle aquí competiría con ese cron.
+    entrypoint: ["/bin/true"]
+
 volumes:
   postgres_data:
     name: ellysia_postgres_data
@@ -240,6 +277,7 @@ volumes:
   ellysia_data:
   scan_temp:
   scan_logs:
+  certbot-webroot:
 
 networks:
   secops-net:

@@ -474,6 +474,13 @@ Sin cambios destructivos: son tablas nuevas, no tocan nada existente.
 
 ## 11. Contrato de ingesta — la costura entre los dos repos
 
+> **Fuente única (2026-08-13).** El contrato vive ahora en el repositorio del agente, en
+> `HygeiaAgent/docs/CONTRATO-INGESTA.md`, versionado y con historial de cambios. Lo que
+> sigue en esta sección se conserva como registro del diseño original, pero **ya no es
+> autoritativo**: las dos copias divergieron —esta nunca llegó a mencionar `inventory`— y
+> de esa divergencia salieron tres fallos reales de pérdida de datos. Ante cualquier duda,
+> manda el documento del agente.
+
 **Este es el único acoplamiento entre el repo del backend y el del agente (`Ellysia -
 Hygeia`).** Congélalo pronto y versiónalo (`agentVersion`). Claves **camelCase**
 (convención de la API). El agente empuja `POST /hygeia/ingest` con

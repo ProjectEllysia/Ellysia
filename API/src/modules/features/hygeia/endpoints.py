@@ -364,7 +364,6 @@ def set_asset_tags(data, asset_id):
         f"Etiquetas del activo {asset_id} = {data['tagIds']} | user={current_actor()}"
     )
     return result
-    return {"message": "Asset eliminado correctamente"}
 
 
 @hygeia_blp.post("/assets/<int:asset_id>/rotate-key")

@@ -1355,7 +1355,29 @@ class HygeiaLimits:  # pylint: disable=too-many-instance-attributes
     """Suelo de cadencia entre heartbeats de una misma clave, en segundos (§16.2)."""
 
     clock_skew_sec: int = 300
-    """Ventana de cordura (± segundos) para el ``collectedAt`` del agente (§16.3)."""
+    """Cuánto puede ADELANTARSE el ``collectedAt`` del agente al reloj del servidor (§16.3).
+
+    Solo acota el futuro. Un heartbeat fechado por delante del servidor no
+    tiene explicación legítima —ningún retardo de red produce eso— así que un
+    margen corto sigue detectando un reloj mal puesto en vez de tragárselo en
+    silencio. Para el pasado manda ``max_backfill_sec``, que es otra cosa.
+    """
+
+    max_backfill_sec: int = 86400
+    """Cuánto puede ATRASARSE el ``collectedAt`` respecto al servidor (§16.3).
+
+    Un heartbeat viejo sí tiene explicación legítima, y es la razón de ser del
+    buffer en disco del agente: si el backend estuvo caído, el agente guarda
+    los heartbeats y los entrega al recuperar la conexión. Con la ventana
+    simétrica de 300 s anterior ese buffer era decorativo — el agente retiene
+    horas de histórico y el servidor rechazaba todo lo de más de cinco
+    minutos, así que una caída larga se perdía entera pese a estar guardada.
+
+    Ampliarlo no reabre el riesgo del §16.3 (una clave robada inyectando
+    snapshots que envenenen el orden de la serie o tapen un hueco de
+    presencia): tanto el histórico como el detector de presencia se ordenan
+    por ``received_at``, el reloj del SERVIDOR, nunca por este campo.
+    """
 
     max_assets_per_user: int = 500
     """Cuota de activos monitorizados que puede dar de alta un usuario (§16.4)."""

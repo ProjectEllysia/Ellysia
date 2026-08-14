@@ -70,6 +70,9 @@ Thumbs.db
 web/ssl/*.key
 web/ssl/*.crt
 web/ssl/*.pem
+# Todo lo que gestiona certbot: la clave de cuenta ACME y la clave privada
+# de cada certificado emitido. web/ssl/renew.sh sí se versiona.
+web/ssl/letsencrypt/
 
 # Otros
 # ============================================
