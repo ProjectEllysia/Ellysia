@@ -415,9 +415,11 @@ def verify_directory(directory: DirectoryType) -> Path:
 _DIRECTORY_ENV_MAPPING = {
     "tempdir": "TEMP_DIR",
     "logdir": "LOG_DIR",
-    "output": "OUTPUT_DIR",
-    "stack": "OUTPUT_DIR",
+    "themis.output": "OUTPUT_DIR",
     "themis.csv": "CSV_THEMIS_DIR",
+    "aegis.output": "OUTPUT_DIR",
+    "aegis.stack": "OUTPUT_DIR",
+    "iris.output": "OUTPUT_DIR",
 }
 
 
@@ -427,11 +429,27 @@ def _normalize_dir_key(directory_type) -> str:
 
 
 def _env_override_for(dir_key: str) -> Optional[str]:
-    """Devuelve el valor de la variable de entorno que sobreescribe ``dir_key``, si existe."""
+    """Devuelve el valor de la variable de entorno que sobreescribe ``dir_key``, si existe.
+
+    Varios módulos (themis, aegis, iris) comparten la misma variable
+    (``OUTPUT_DIR``) para que sus datos vivan bajo un único volumen montado
+    en despliegues con contenedores separados para API y worker — sin esto,
+    cada contenedor resuelve la ruta relativa del JSON contra su propia capa
+    de filesystem, invisible para el otro (causa real de 409 al descargar
+    documentos: el worker genera el PDF, pero el proceso que sirve la
+    descarga nunca lo ve). El subdirectorio propio de cada ``dir_key`` se
+    mantiene bajo esa raíz para que no colisionen entre sí nombres de
+    fichero de módulos distintos.
+    """
     env_var = _DIRECTORY_ENV_MAPPING.get(dir_key)
-    if env_var:
-        return os.getenv(env_var) or None
-    return None
+    if not env_var:
+        return None
+    base = os.getenv(env_var) or None
+    if not base:
+        return None
+    if "." in dir_key:
+        return os.path.join(base, *dir_key.split("."))
+    return base
 
 
 def _lookup_raw_path(cfg: dict, dir_key: str) -> str:
