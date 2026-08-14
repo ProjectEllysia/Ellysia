@@ -1,3 +1,21 @@
+# Nombre del proyecto, fijado a proposito. Sin esto Compose lo deduce del
+# directorio, asi que un checkout en ~/EllysiaServer da el proyecto
+# "ellysiaserver" y uno en ~/ellysia da "ellysia" — y el nombre del proyecto es
+# el prefijo de los volumenes y las redes.
+#
+# El despliegue real se creo como "ellysia". Ejecutar desde un directorio con
+# otro nombre no da error: Compose crea un juego PARALELO de volumenes vacios
+# (ellysiaserver_certbot-webroot, ellysiaserver_ellysia_data...) y trabaja
+# contra ellos mientras los contenedores en marcha siguen montando los
+# originales. Asi se perdio una emision de Let's Encrypt: certbot escribia el
+# reto ACME en su volumen y nginx lo buscaba en el otro, devolviendo un 404 que
+# no apuntaba a ninguna parte.
+#
+# postgres_data, redis_data y ollama_models se salvaron de eso porque llevan
+# `name:` explicito (sin prefijo de proyecto), pero eso es una red de seguridad
+# para los datos, no una solucion: el resto de volumenes si se duplicaban.
+name: ellysia
+
 services:
 
   postgres:
