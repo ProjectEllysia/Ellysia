@@ -1,7 +1,7 @@
 <!-- prettier-ignore -->
 <div align="center">
 
-<img src="./API/resources/images/ellysia/Ellysia-BgN.png" alt="Ellysia" height="110" />
+<img src="./web/app/src/assets/images/ellysia/Ellysia-BgN.png" alt="Ellysia" height="110" />
 
 # Ellysia — Security Operations Platform
 
