@@ -308,7 +308,8 @@ class CampaignManager(TaskTrackingMixin):
 
                 # /quiz, no /aegis/quiz: la página del quiz vive en el SPA y
                 # todo lo que cuelga de /aegis/ lo captura el proxy hacia Flask
-                # (nginx.conf, vite.config.js) — el destinatario vería el JSON.
+                # (matcher @api del Caddyfile, vite.config.js) — el
+                # destinatario vería el JSON.
                 link = f"{base_url}/quiz?t={recipient.token}"
                 html_body, text_body = render_email(
                     "campaign",

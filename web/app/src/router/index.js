@@ -55,7 +55,8 @@ const routes = [
     // PÚBLICA a propósito — el destinatario no tiene cuenta y el token de la
     // query es su única identidad. Cuelga de /quiz y no de /aegis/quiz porque
     // todo lo que empieza por /aegis/ lo captura el proxy hacia Flask
-    // (nginx.conf, vite.config.js) y se serviría el JSON de la API.
+    // (el matcher @api del Caddyfile, vite.config.js) y se serviría el JSON
+    // de la API.
     path: '/quiz',
     name: 'Quiz',
     component: () => import('@/views/QuizView.vue'),
@@ -200,13 +201,14 @@ const routes = [
   {
     // En español a propósito, como el resto de rutas de la SPA (/planes,
     // /organizacion, /acheron/boveda...). Aquí además es obligatorio: `/users`
-    // chocaba de frente con el `location = /users` de web/api-locations.conf,
-    // que proxea a Flask porque GET /users es un endpoint real. Un `location =`
-    // no puede servir al SPA y a la API a la vez, así que al recargar la página
-    // o pegar la URL a mano salía el JSON de la API (o un 401) en vez de la
-    // vista. La navegación interna de vue-router no pasa por nginx, por eso no
-    // se veía. Las llamadas apiFetch('/users/...') de los stores NO cambian:
-    // esas sí son la API.
+    // chocaba de frente con el `/users` del matcher @api de web/Caddyfile,
+    // que proxea a Flask porque GET /users es un endpoint real. Una misma URL
+    // no puede servir al SPA y a la API a la vez —ningún proxy puede adivinar
+    // cuál de las dos—, así que al recargar la página o pegar la URL a mano
+    // salía el JSON de la API (o un 401) en vez de la vista. La navegación
+    // interna de vue-router no pasa por el proxy, por eso no se veía. Las
+    // llamadas apiFetch('/users/...') de los stores NO cambian: esas sí son
+    // la API.
     path: '/usuarios',
     name: 'Users',
     component: () => import('@/views/UsersView.vue'),

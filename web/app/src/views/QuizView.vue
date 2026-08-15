@@ -105,7 +105,8 @@
  * un JWT y hace logout+redirección cuando no lo hay.
  *
  * La página vive en /quiz y no en /aegis/quiz a propósito: todo lo que cuelga
- * de /aegis/ lo captura el proxy hacia Flask (nginx.conf, vite.config.js), y
+ * de /aegis/ lo captura el proxy hacia Flask (el matcher @api del Caddyfile,
+ * vite.config.js), y
  * el destinatario acabaría viendo el JSON de la API en vez de esta vista.
  */
 import { computed, onMounted, reactive, ref } from 'vue'

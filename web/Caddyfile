@@ -1,0 +1,129 @@
+{
+	# Contacto para los avisos de caducidad de Let's Encrypt. Sin esto Caddy
+	# emite igual, pero nadie recibe aviso si la renovación se atasca.
+	email gmiganescu@gmail.com
+}
+
+# ── Fragmentos reutilizables ────────────────────────────────────
+# Equivalente al antiguo proxy-common.conf. Caddy ya envía X-Forwarded-For,
+# X-Forwarded-Proto y X-Forwarded-Host, y preserva el Host original, por
+# defecto: de las 5 cabeceras que ponía nginx a mano solo falta X-Real-IP.
+#
+# `Ellysia-API` es el container_name del servicio `ellysia` en
+# docker-compose.yml, no el nombre del servicio. Renombrarlo rompe esto.
+(api_backend) {
+	reverse_proxy Ellysia-API:5000 {
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+(spa) {
+	root * /srv
+	try_files {path} /index.html
+	file_server
+}
+
+# ── SPA (Vue) + rutas de API del mismo origen ───────────────────
+# localhost va en la MISMA lista de direcciones a propósito: en nginx.conf
+# esta tabla de rutas estaba escrita dos veces (un `server` por origen) y ya
+# había divergido — a una de las dos copias le faltaban /hygeia, /plans y
+# /organizations, y el síntoma era `Unexpected token '<'` en el navegador
+# (A15). Con una sola lista no hay dos copias que puedan divergir.
+#
+# El prefijo `http://` sirve esa dirección en HTTP plano y la deja fuera del
+# HTTPS automático. localhost y 127.0.0.1 siguen siendo *secure context*
+# para el navegador, así que el WebCrypto de Acheron funciona igual.
+#
+# Ya no hay bloque catch-all por IP: quien escanee la IP a pelo del servidor
+# no recibe el SPA, recibe un 404.
+#
+# `ellysia.es` (el apex) NO está en la lista, a propósito y temporalmente: el
+# despliegue actual no tiene IP fija (www/api van por CNAME a un hostname de
+# DDNS, lvivii.ddns.net) y un apex no puede ser un CNAME —lleva el SOA/NS de
+# la zona—, así que no hay registro A posible y Let's Encrypt no puede
+# validarlo. Confirmado en producción: "no valid A records found for
+# ellysia.es" al pedir el reto. Añadirlo de nuevo es tan simple como sumarlo
+# a esta lista el día que el VPS tenga IP fija; hasta entonces, la SPA se
+# sirve en www.ellysia.es.
+www.ellysia.es, http://localhost, http://127.0.0.1 {
+	encode gzip
+
+	# ponytail: límite fijo de subida (cubre adjuntos .eml de Iris y PDFs);
+	# si algún endpoint necesita más, subir aquí primero — el 413 del proxy
+	# llega antes que cualquier validación de Flask.
+	request_body {
+		max_size 20MB
+	}
+
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	# Assets con hash de Vite (dist/assets/*.[hash].js|css): cache larga, el
+	# hash del nombre ya invalida cuando cambia el contenido.
+	#
+	# Sin try_files a propósito: un asset que falta tiene que dar 404, no el
+	# index.html. Servir HTML donde el navegador espera JS es la misma clase
+	# de fallo que el `Unexpected token '<'` de A15, y desde el import map
+	# se diagnostica todavía peor.
+	handle /assets/* {
+		root * /srv
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	# Rutas del SPA (Vue Router) que cuelgan de los MISMOS prefijos que la
+	# API: el hub de cada módulo con barra final (los usuarios la escriben o
+	# la pegan a mano) y sus subrutas de trabajo. Sin esto, al recargar la
+	# página o escribir la URL a mano el matcher @api de abajo se la lleva
+	# entera a Flask, que no tiene esa ruta, y devuelve 404 en vez de servir
+	# el SPA. Solo se ve en producción y solo al recargar.
+	#
+	# VAN PRIMERO, y el orden es lo único que lo garantiza: los `handle` son
+	# mutuamente excluyentes y se evalúan en el orden ESCRITO — no hay
+	# precedencia implícita como la de `location =` de nginx, que ganaba
+	# siempre sin importar el orden en el fichero. Y `path /themis/*` sí
+	# casa con `/themis/` (el `*` casa con la cadena vacía), así que
+	# invertir los dos bloques no da error: manda /hygeia/activos a Flask.
+	#
+	# Tiene que seguir a `routes` en web/app/src/router/index.js.
+	# API/tests/unit/test_caddy_api_routes.py falla en CI si divergen, y
+	# también si se invierte el orden de los dos `handle`.
+	#
+	# En una sola línea a propósito, por larga que sea: `caddy fmt` reescribe
+	# las continuaciones con `\` a un único espacio inicial, así que la
+	# alineación bonita no sobrevive al formateador. Una línea por matcher es
+	# lo que el formateador deja en paz.
+	@spa_bajo_prefijo_api path /themis/ /themis/escaneos /aegis/ /aegis/generador /iris/ /iris/analisis /iris/conexiones /acheron/ /acheron/boveda /hygeia/ /hygeia/activos /hygeia/etiquetas
+	handle @spa_bajo_prefijo_api {
+		import spa
+	}
+
+	# Todo lo demás bajo esos prefijos es la API. Tiene que seguir a
+	# `API/run.py:_register_blueprints`, que es la verdad. Al añadir un
+	# blueprint nuevo, esta lista es el único sitio que tocar.
+	#
+	# Las formas sin `/*` son los endpoints que existen SIN barra final:
+	# GET /users, GET/PUT /system, GET/POST /plans, POST /organizations.
+	# Los prefijos de módulo (/themis, /aegis...) no la llevan a propósito:
+	# a secas son rutas del SPA (el hub), y caen al `handle` final.
+	@api path /system /system/* /oauth/* /users /users/* /plans /plans/* /organizations /organizations/* /themis/* /aegis/* /iris/* /acheron/* /hygeia/*
+	handle @api {
+		import api_backend
+	}
+
+	handle {
+		import spa
+	}
+}
+
+# ── api.ellysia.es  →  Flask API ────────────────────────────────
+api.ellysia.es {
+	encode gzip
+
+	request_body {
+		max_size 20MB
+	}
+
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	import api_backend
+}
