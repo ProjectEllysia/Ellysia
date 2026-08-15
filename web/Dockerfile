@@ -6,18 +6,14 @@ RUN npm install -g pnpm@11.10.0 && pnpm install --frozen-lockfile
 COPY app/ .
 RUN pnpm build
 
-# Stage 2: Serve with Nginx
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-# E6: sin COPY ssl/ — la clave privada no debe quedar horneada en ninguna
-# capa de la imagen (ni en un registry si se sube). docker-compose.yml ya
-# monta ./web/ssl como volumen read-only en /etc/nginx/ssl; ejecutar esta
-# imagen sin ese volumen falla al arrancar (certs ausentes) en vez de
-# arrancar con la clave anterior horneada.
-COPY proxy-common.conf /etc/nginx/conf.d/proxy-common.conf
-# A15: fuera de conf.d/ a propósito — la imagen base incluye conf.d/*.conf
-# dentro de http{}, y un `location` en ese contexto impide arrancar.
-COPY api-locations.conf /etc/nginx/api-locations.conf
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Stage 2: Serve with Caddy
+#
+# E6 ya no aplica: no hay clave privada que se pueda hornear en una capa de
+# la imagen. Caddy emite y guarda el certificado él mismo, en el volumen
+# `caddy_data` que docker-compose.yml monta en /data.
+FROM caddy:2-alpine
+COPY --from=builder /app/dist /srv
+COPY Caddyfile /etc/caddy/Caddyfile
 EXPOSE 80 443
-CMD ["nginx", "-g", "daemon off;"]
+# Sin CMD: la imagen base ya arranca
+# `caddy run --config /etc/caddy/Caddyfile --adapter caddyfile`.
