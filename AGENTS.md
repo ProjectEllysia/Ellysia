@@ -5,7 +5,7 @@
 Monorepo:
 - **API** (`API/`) — Python/Flask REST backend (primary work area)
 - **web** (`web/`) — Vue 3 SPA in `web/app/` (Vite + Pinia + Vue Router), plus the
-  nginx that serves it and proxies the API (`nginx.conf`, `api-locations.conf`)
+  Caddy that serves it, proxies the API and manages TLS on its own (`Caddyfile`)
 - **landing** (`landing/`) — static marketing site, published to `gh-pages` by
   `.github/workflows/landing.yml`. No build step, no coupling to the other two.
 
@@ -14,11 +14,13 @@ The Android client and its `AcheronCore` Java engine live in a separate repo
 `/acheron` over HTTP.
 
 **API and web stay in the same repository on purpose.** They share a deployment
-(one `docker-compose.yml`, one nginx that proxies to `Ellysia-API:5000` by container
-name) and a contract that only a single repo can verify: `web/api-locations.conf`
-has to track both `run.py:_register_blueprints` and the SPA router.
-`API/tests/unit/test_nginx_api_locations.py` enforces it — a test in `API/` that
-reads files from `web/`, impossible once split.
+(one `docker-compose.yml`, one Caddy that proxies to `Ellysia-API:5000` by container
+name) and a contract that only a single repo can verify: the `@api` and
+`@spa_bajo_prefijo_api` matchers in `web/Caddyfile` have to track both
+`run.py:_register_blueprints` and the SPA router.
+`API/tests/unit/test_caddy_api_routes.py` enforces it — a test in `API/` that
+reads files from `web/`, impossible once split. It also pins the *order* of the two
+`handle` blocks, which in Caddy is the whole precedence rule.
 
 **Brand assets: the SPA is the source of truth** (`web/app/src/assets/images/`).
 When an API report needs an image, copy that one file into the module that uses it

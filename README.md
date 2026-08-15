@@ -433,186 +433,57 @@ Ellysia ships overlay files for GPU-accelerated local AI:
 - `docker-compose.gpu-intel.yml`
 - `docker-compose.gpu-amd.yml`
 
-### SSL certificates (development)
+### SSL certificates
 
-The `container` profile serves the web app and API over HTTPS via Nginx as a
-TLS terminator. A self-signed certificate for local/dev use is generated once
-per developer machine and mounted into the web container as a read-only volume
-(`./web/ssl:/etc/nginx/ssl`).
+The `container` profile serves the web app and API through **Caddy**, which
+terminates TLS and obtains its own certificates. There is nothing to run, no
+certbot to invoke, no cron entry to install, and no certificate to copy
+anywhere: Caddy starts without one and gets it itself.
 
-```powershell
-# Windows — requires OpenSSL (ships with Git for Windows)
-.\web\ssl\generate.ps1
-```
+**In development** (`http://localhost`), Caddy serves plain HTTP and never
+talks to an ACME server at all. `localhost` and `127.0.0.1` are still treated
+as secure contexts by browsers, so the WebCrypto that Acheron's vault client
+depends on works normally. No self-signed certificate to generate.
 
-```bash
-# Linux / WSL
-openssl req -x509 -nodes -days 365 \
-  -subj "/CN=ellysia.es" \
-  -addext "subjectAltName=DNS:ellysia.es,DNS:*.ellysia.es,DNS:api.ellysia.es" \
-  -newkey rsa:2048 \
-  -keyout web/ssl/ellysia.key \
-  -out    web/ssl/ellysia.crt
-```
+**In production**, Caddy sees the domain names as site addresses in
+`web/Caddyfile` and turns on
+[automatic HTTPS](https://caddyserver.com/docs/automatic-https): it requests
+the certificate on first start, installs it, and renews it in the background
+for the rest of its life. Two prerequisites, both of them about the outside
+world rather than about this repository:
 
-The `web/ssl/` directory is gitignored — each developer keeps their own
-certificates. The Nginx config references generic container paths
-(`/etc/nginx/ssl/ellysia.crt` / `ellysia.key`).
+- Ports **80 and 443** on the host must be reachable from the internet (check
+  the cloud provider's security group / any NAT rule in front of the VM, not
+  just the local firewall).
+- Every name in the `Caddyfile`'s site addresses must resolve via public DNS to
+  that host's public IP. Unlike certbot, a name that does not resolve does
+  **not** take the others down with it — Caddy manages each name separately.
 
-### SSL certificates (production)
+Caddy tries the challenge types it has available (HTTP-01 on port 80,
+TLS-ALPN-01 on 443, which needs no port 80 at all) and learns which one works
+in that environment. On failure it retries, switches challenge type, switches
+issuer (Let's Encrypt → ZeroSSL) and backs off exponentially, **using Let's
+Encrypt's staging environment during the retries** so failed attempts do not
+burn the real rate limit.
 
-A self-signed certificate is fine for local development, but it is not
-something to ship to real clients: any agent or browser that connects has to
-either trust it explicitly (a hygeia-agent needs its `caFile` config field
-pointed at it, and every other API consumer needs the same kind of
-workaround) or fail closed. There is no path from self-signed to
-production-safe other than replacing the certificate.
+The `email` in the `Caddyfile`'s global block is what Let's Encrypt uses to
+warn about upcoming expiry if renewal ever silently fails. It does not have to
+be a domain address; any inbox someone actually reads works.
 
-The `container` profile ships a `certbot` service for exactly that, wired to
-issue and renew a real certificate from Let's Encrypt **against the same
-Nginx that is already running** — no separate proxy, no downtime, no change
-to how the `web` service is started day to day.
-
-**How it fits together.** `web/nginx.conf` already reserves
-`/.well-known/acme-challenge/` on port 80 for the real domains
-(`ellysia.es`, `www.ellysia.es`, `api.ellysia.es`) — that block existed
-before certbot was added, precisely so this would slot in without editing
-Nginx's config. Docker Compose gives `web` and `certbot` a shared named
-volume (`certbot-webroot`, mounted at `/var/www/certbot` in both
-containers): certbot writes the ACME challenge file there, Nginx serves it
-straight from disk. Nothing needs to listen on a new port, and `web` never
-has to be stopped.
-
-**Prerequisites**, both mandatory — Let's Encrypt validates the challenge by
-making an HTTP request to the domain from the public internet, so it fails
-immediately if either is missing:
-
-- Ports **80 and 443** on the host must actually be reachable from the
-  internet (not just open in a local firewall — check any cloud provider
-  security group / NAT rule in front of the VM too).
-- Every name passed with `-d` must resolve via public DNS to that host's
-  public IP. Let's Encrypt fails the **whole** request if a single `-d` does
-  not validate, so a name that does not resolve takes the working ones down
-  with it.
-
-**The target deployment is a VPS with a static public IP.** That is what the
-rest of this section assumes. Point all three names at it with plain `A`
-records — apex included — and nothing else here needs adapting:
-
-```
-ellysia.es.       A   <VPS IP>
-www.ellysia.es.   A   <VPS IP>
-api.ellysia.es.   A   <VPS IP>
-```
-
-**First issuance** — run this once, from the repo root, on the machine that
-already has `docker compose --profile container up -d web` running:
-
-```bash
-docker compose --profile container run --rm certbot certonly \
-  --webroot -w /var/www/certbot \
-  --cert-name ellysia.es \
-  -d ellysia.es -d www.ellysia.es -d api.ellysia.es \
-  --email you@example.com --agree-tos --no-eff-email
-```
-
-`--cert-name ellysia.es` is not cosmetic, and it is what keeps the rest of
-the tooling independent of which names the certificate happens to cover.
-Certbot names the lineage — and therefore the `live/<name>/` directory —
-after the **first** `-d` unless told otherwise. Both the copy step below and
-`web/ssl/renew.sh` read the fixed path `live/ellysia.es/`, and `renew.sh`
-skips its work in silence when that path is missing (it prints "sin cambios
-(certificado aún vigente)"), so a lineage that got named after some other
-domain would mean renewals that never happen and never complain — an expired
-certificate with nobody watching. Pinning the name means the `-d` list can
-change freely without touching a single script.
-
-> [!NOTE]
-> **Exception: hosts without a static IP (temporary).** On a residential
-> connection the ISP assigns a dynamic address, so the names have to be
-> CNAMEs to a DDNS hostname — and a DNS **apex cannot be a CNAME**, because
-> it already carries the zone's SOA and NS records. There is no A record to
-> use either, so `ellysia.es` simply cannot resolve, and including it fails
-> the whole issuance. Drop it from the `-d` list for that case only:
->
-> ```bash
-> --cert-name ellysia.es -d www.ellysia.es -d api.ellysia.es
-> ```
->
-> The SPA is then reached at `www.ellysia.es` and the API — including every
-> `hygeia-agent` — at `api.ellysia.es`. Because `--cert-name` pins the
-> lineage, this is the only line that differs: the copy step, `renew.sh` and
-> the cron entry are all identical. Moving to a VPS later means re-issuing
-> with `-d ellysia.es` added and nothing else.
->
-> Renewal is also less reliable here: if the ISP rotates the address while
-> the nightly cron runs, that attempt fails. Certbot retries daily through
-> the 30 days before expiry, so an isolated failure is harmless — but this
-> is the setup where a real `--email` actually matters.
-
-`--email` is not strictly required — pass
-`--register-unsafely-without-email --agree-tos` instead of `--email ... --agree-tos`
-if you'd rather skip it — but it is what Let's Encrypt uses to warn about
-upcoming expiry if renewal ever silently fails, and it does not have to be a
-domain-specific address; any inbox someone actually reads works, including a
-personal Gmail. Skipping it means nobody gets warned before an expired
-certificate takes every connected agent down at once.
-
-This writes the certificate and its account/private keys under
-`web/ssl/letsencrypt/` (gitignored — this is real key material, not the
-dev self-signed cert). It does **not** touch `web/ssl/ellysia.crt` or
-`ellysia.key` yet — those are the fixed paths `nginx.conf` actually reads,
-so the new certificate has to be copied there and Nginx reloaded to pick it
-up:
-
-```bash
-cp web/ssl/letsencrypt/live/ellysia.es/fullchain.pem web/ssl/ellysia.crt
-cp web/ssl/letsencrypt/live/ellysia.es/privkey.pem   web/ssl/ellysia.key
-docker compose --profile container restart web
-```
-
-**Renewal.** Let's Encrypt certificates are valid for 90 days, so this has
-to happen again well before that, automatically, or the site goes back to
-serving an expired certificate with nobody watching. `web/ssl/renew.sh`
-does the full sequence — `certbot renew`, then the same copy-and-reload
-step above, but only if a renewal actually happened (certbot itself skips
-renewing anything with more than 30 days left, so running it daily is
-harmless and doesn't burn into Let's Encrypt's rate limits). It is meant to
-run from the **host's** cron, not inside a container — it shells out to
-`docker compose`, which needs the Compose project to be reachable, and no
-container in the stack has that by design:
-
-```bash
-# crontab -e, on the host:
-0 3 * * * cd /path/to/EllysiaServer && ./web/ssl/renew.sh >> /var/log/hygeia-renew.log 2>&1
-```
-
-**Two things that look right and are not**, both worth knowing before
-touching this again:
-
-- The `certbot-webroot` volume must be **read-write** on the `web` side,
-  not read-only. Nginx itself only ever reads from it, but the volume is
-  shared — certbot has to be able to write the challenge file into the same
-  mount, and Docker doesn't grant per-container write access on a shared
-  named volume; it's either writable for whoever mounts it read-write, or
-  not. Mounting it `:ro` on `web` looks safer and silently breaks every
-  future renewal with a plain "Read-only file system" error inside the
-  certbot container — the kind of failure nobody notices until the
-  certificate has already expired.
-- Testing the challenge path by IP (`curl http://<ip>/.well-known/...`)
-  will hit Nginx's `localhost` server block instead of the real-domain one,
-  because that's how Nginx picks a `server {}` block without a matching
-  `Host` header — and the `localhost` block doesn't have the ACME location,
-  so it falls through to the SPA and returns HTML instead of the challenge
-  file. That's a false alarm, not a broken deployment: send the real
-  `Host` header (`curl -H "Host: api.ellysia.es" http://<ip>/...`) or just
-  test against the real domain name once DNS is pointed at it.
+> [!WARNING]
+> **The one thing that can go wrong: do not delete the `ellysia_caddy_data`
+> volume.** It holds the issued certificates and the ACME account key. If it
+> does not persist, Caddy re-issues on *every* restart and exhausts Let's
+> Encrypt's duplicate-certificate limit (5 per week), leaving the site without
+> valid TLS until the window rolls over. It carries an explicit `name:` in
+> `docker-compose.yml` precisely so that running Compose from a differently
+> named directory cannot orphan it.
 
 ### Ports
 
 | Service | Port | Note |
 |---|---|---|
-| Web (Nginx) | 80 / 443 | HTTP → HTTPS redirect, SPA + API proxy |
+| Web (Caddy) | 80 / 443 | Automatic HTTPS, HTTP → HTTPS redirect, SPA + API proxy |
 | API | 5000 | `0.0.0.0:5000` (HTTP internally) |
 | PostgreSQL | 15432 | Container maps 5432 → 15432 |
 | Redis | 6379 | Required for TaskQueue |

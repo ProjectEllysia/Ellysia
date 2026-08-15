@@ -65,13 +65,19 @@ build/
 Thumbs.db
 
 # ============================================
-# Certificados SSL (desarrollo / autofirmados)
+# Certificados SSL — restos de la era nginx+certbot
 # ============================================
+# Caddy ya no usa nada de esto: emite y guarda sus certificados en el volumen
+# ellysia_caddy_data, y en local sirve HTTP plano sin autofirmado.
+#
+# Estas entradas se quedan a propósito hasta que se cierre la ventana de vuelta
+# atrás de la migración (paso 6 del runbook, en plans/refactors/). Mientras
+# tanto el servidor conserva en web/ssl/ material de clave real —la clave de
+# cuenta ACME y la privada de cada certificado emitido— que tiene que seguir
+# ignorado. Al retirar web/ssl/ del host, borrar también estas cinco líneas.
 web/ssl/*.key
 web/ssl/*.crt
 web/ssl/*.pem
-# Todo lo que gestiona certbot: la clave de cuenta ACME y la clave privada
-# de cada certificado emitido. web/ssl/renew.sh sí se versiona.
 web/ssl/letsencrypt/
 
 # Otros

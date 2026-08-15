@@ -173,6 +173,12 @@ Merece un comentario en el compose tan explícito como el que ya lleva
 Traducción directa de la estructura actual. Sirve como referencia de
 implementación, no como fichero final.
 
+> **El fichero final es `web/Caddyfile`, y difiere de este borrador**: el
+> bloque `:80` de abajo no llegó a existir, y el `handle` de `/assets/` sí.
+> Las tres diferencias, con su porqué, están en §6.1. Este borrador se
+> conserva porque el razonamiento que lo acompaña sigue siendo válido, pero no
+> hay que copiarlo.
+
 ```caddyfile
 {
 	# Contacto para avisos de caducidad. Sin esto Caddy emite igual, pero
@@ -370,32 +376,224 @@ Windows/macOS hasta que exista alguien que instale el agente ahí**.
 
 ---
 
-## 6. Plan de migración
+## 6. Migración
 
-### Fase 1 — Preparar (sin tocar producción)
-1. Escribir `web/Caddyfile` traduciendo los cuatro bloques `server` actuales.
-2. Reescribir `web/Dockerfile`: `FROM caddy:2-alpine` en la etapa final, `COPY --from=builder /app/dist /srv`, `COPY Caddyfile /etc/caddy/Caddyfile`. La etapa de build de la SPA no cambia.
-3. `docker-compose.yml`: añadir `caddy_data` y `caddy_config` con `name:` explícito; eliminar el servicio `certbot`, el volumen `certbot-webroot` y el bind mount `./web/ssl`.
-4. Adaptar `API/tests/unit/test_nginx_api_locations.py` para parsear el `Caddyfile`, y renombrarlo a `test_caddy_api_routes.py`. **Debe seguir pasando antes de continuar.**
+### 6.1 Fases 1, 2 y 4 — hechas en el repositorio
 
-### Fase 2 — Verificar en local
-5. `docker compose --profile container up -d --build web` en local. Caddy emitirá un certificado autofirmado propio para `localhost`, sin ACME.
-6. Recorrer a mano las rutas que la tabla protege: `/hygeia/etiquetas`, `/usuarios`, `/themis/escaneos`, `/acheron/boveda`, y una llamada de API real desde el SPA.
+Lo que se ha cambiado, todo fuera de producción:
 
-### Fase 3 — Desplegar
-7. Levantar Caddy. Obtendrá el certificado él solo en el primer arranque.
-8. Verificar desde fuera con `openssl s_client` y con `hygeia-agent doctor`.
-9. **Solo entonces**, retirar: `crontab -e` (quitar `renew.sh`), `web/ssl/renew.sh`, `web/ssl/generate.ps1`, `web/nginx.conf`, `web/api-locations.conf`, `web/proxy-common.conf`, y los volúmenes `ellysia_certbot-webroot` y los cuatro `ellysiaserver_*` huérfanos.
+| Fichero | Cambio |
+|---|---|
+| `web/Caddyfile` | **Nuevo.** Sustituye a `nginx.conf` + `api-locations.conf` + `proxy-common.conf` (~180 líneas → ~110, comentarios incluidos). |
+| `web/Dockerfile` | Etapa 2: `nginx:alpine` → `caddy:2-alpine`, `/srv` en vez de `/usr/share/nginx/html`, un `COPY` en vez de tres. La etapa de build de la SPA no cambia. |
+| `docker-compose.yml` | Fuera el servicio `certbot`, el volumen `certbot-webroot` y el bind mount `./web/ssl`. Dentro `caddy_data` y `caddy_config`, con `name:` explícito. |
+| `API/tests/unit/test_caddy_api_routes.py` | Sustituye a `test_nginx_api_locations.py`. Mismas tres aserciones + una cuarta para el orden de los `handle`. |
+| `README.md` | Las dos secciones de SSL (~175 líneas, tres fases manuales, dos "gotchas" y un cron) → una sección corta con una sola advertencia. |
+| `AGENTS.md`, `CLAUDE.md`, `web/app/CLAUDE.md` | Referencias a nginx → Caddy. |
 
-### Fase 4 — Documentar
-10. Reescribir `README.md` §"SSL certificates": las dos secciones actuales (dev autofirmado + producción con sus tres fases y dos "gotchas") se sustituyen por la explicación de que Caddy lo hace solo, más **la única advertencia que queda: no borrar el volumen `ellysia_caddy_data`**.
-11. Actualizar `AGENTS.md` y `web/app/CLAUDE.md` donde mencionen Nginx.
+Borrados: `web/nginx.conf`, `web/api-locations.conf`, `web/proxy-common.conf`,
+`web/ssl/renew.sh`, `web/ssl/generate.ps1`.
 
-### Vuelta atrás
-Hasta la fase 3 no se toca producción. Después, revertir es `git revert` del
-merge y `up -d --build web`: los certificados de Let's Encrypt emitidos por
-certbot siguen en `web/ssl/letsencrypt/` mientras no se borren a mano, así que
-el Nginx anterior vuelve a arrancar con el certificado válido.
+**Decisiones que el §3 dejaba abiertas, ya cerradas:**
+
+1. **No hay bloque catch-all por IP.** El `:80` del borrador se ha sustituido
+   por meter `http://localhost, http://127.0.0.1` en la MISMA lista de
+   direcciones que los dominios: una sola tabla de rutas, que es justo lo que
+   A15 demostró que hace falta. Caddy la parte en dos servidores internos (uno
+   HTTPS con redirección automática, otro HTTP puro para local) — verificado
+   con `caddy validate`. Quien escanee la IP a pelo del servidor ya no recibe
+   el SPA.
+2. **En local no hay HTTPS ni certificado autofirmado.** `localhost` y
+   `127.0.0.1` siguen siendo *secure context* para el navegador, así que el
+   WebCrypto de Acheron funciona igual. Eso es lo que permite borrar
+   `generate.ps1` sin sustituirlo por nada.
+3. **Cada matcher va en una sola línea, por larga que sea.** `caddy fmt`
+   reescribe las continuaciones con `\` a un espacio inicial, así que la
+   alineación en varias líneas no sobrevive al formateador y deja un aviso en
+   cada arranque.
+
+**Diferencias de comportamiento respecto a nginx**, todas deliberadas:
+
+- Un asset que falta bajo `/assets/` da **404**, igual que el
+  `try_files $uri =404` de nginx. Se ha escrito como un `handle` propio sin
+  `try_files` a propósito: la alternativa devolvía `index.html` con
+  `Content-Type: text/html` donde el navegador espera JavaScript.
+- `localhost` ya no responde por HTTPS (antes el bloque `:443` lo incluía en su
+  `server_name`, cosa que el comentario "BORRAR CUANDO..." no cubría).
+- La redirección HTTP → HTTPS de los tres dominios la genera Caddy sola; no hay
+  bloque que mantener, ni `/.well-known/acme-challenge/`.
+
+### 6.2 Fase 3 — Runbook de producción
+
+Cada paso lleva su verificación. El patrón de fallo del 14 de agosto fue
+encadenar pasos sin comprobar el anterior: seis de los siete fallos eran mudos.
+
+#### Paso 0 — Antes de tocar nada
+
+```bash
+# ¿Desde qué checkout se levantaron los contenedores en marcha? Hay dos en el
+# servidor (~/Ellysia y ~/EllysiaServer) y el `git pull` tiene que ir al bueno.
+docker inspect Ellysia-Web \
+  --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
+```
+
+Todo lo que sigue se ejecuta en esa ruta.
+
+```bash
+# La vuelta atrás: copia del material de clave actual.
+tar czf ~/ssl-backup-$(date +%F).tar.gz web/ssl/
+# Y la imagen de nginx en marcha, etiquetada por si hay que volver sin rebuild.
+docker tag $(docker inspect Ellysia-Web --format '{{.Image}}') ellysia-web:nginx-backup
+```
+
+Comprobar que ningún `hygeia-agent` desplegado tiene `caFile` apuntando a un
+certificado concreto: Caddy usa Let's Encrypt por defecto pero cae a ZeroSSL si
+falla, y un agente con la CA pinchada rompería en esa caída. Deben usar el
+almacén de confianza del sistema.
+
+#### Paso 1 — Neutralizar el cron ANTES del cambio
+
+```bash
+crontab -e   # comentar la línea de web/ssl/renew.sh; borrarla en el paso 6
+```
+
+Si el cron dispara a mitad de la migración, `certbot renew` falla el reto (Caddy
+ya no sirve `/var/www/certbot`) y `set -e` corta el script. Ruido inofensivo,
+pero es exactamente el tipo de señal que confunde el diagnóstico si algo más va
+mal a la vez.
+
+#### Paso 2 — Traer el código
+
+```bash
+git fetch origin && git checkout <rama> && git pull
+git log -1 --oneline && ls web/Caddyfile
+```
+
+#### Paso 3 — Pasada contra el staging de Let's Encrypt
+
+Añadir **temporalmente** al bloque global de `web/Caddyfile`:
+
+```caddyfile
+acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+```
+
+```bash
+docker compose --profile container up -d --build web
+docker compose --profile container logs -f web
+```
+
+Esperar `certificate obtained successfully` para los tres nombres, y comprobar
+el emisor:
+
+```bash
+echo | openssl s_client -connect api.ellysia.es:443 -servername api.ellysia.es 2>/dev/null \
+  | openssl x509 -noout -issuer -dates
+```
+
+Tiene que decir **`(STAGING)`**. El navegador avisará de certificado no
+confiable: eso es lo esperado en este paso, no un fallo. Si el reto falla aquí,
+el log de Caddy da el nombre exacto y el tipo de reto — y no ha costado cuota
+real.
+
+Aprovechar la ventana para recorrer la tabla de rutas contra producción
+(`-k` ignora el certificado de staging):
+
+```bash
+curl -k -o /dev/null -w '%{http_code} %{content_type}\n' https://www.ellysia.es/hygeia/etiquetas   # 200 text/html
+curl -k -o /dev/null -w '%{http_code} %{content_type}\n' https://www.ellysia.es/themis/escaneos    # 200 text/html
+curl -k -o /dev/null -w '%{http_code} %{content_type}\n' https://www.ellysia.es/usuarios           # 200 text/html
+curl -k -o /dev/null -w '%{http_code} %{content_type}\n' https://www.ellysia.es/users              # 401 application/json
+curl -k -o /dev/null -w '%{http_code} %{content_type}\n' https://www.ellysia.es/assets/noexiste.js # 404
+curl -k -o /dev/null -w '%{http_code} %{content_type}\n' https://api.ellysia.es/system             # 401 application/json
+```
+
+El discriminante es el `content_type`, no el código: `text/html` donde debería
+ir `application/json` es el fallo de A15, y al revés es una ruta del SPA que se
+va a Flask.
+
+#### Paso 4 — Emisión real
+
+```bash
+# 1. Quitar la línea acme_ca del Caddyfile.
+# 2. Borrar SOLO los certificados de staging, para que Caddy reemita contra
+#    producción en vez de reutilizarlos. La clave de cuenta se queda.
+docker compose --profile container exec web rm -rf /data/caddy/certificates
+docker compose --profile container restart web
+docker compose --profile container logs -f web
+```
+
+Verificar **desde fuera del servidor** — una regla NAT puede hacer que funcione
+desde dentro y no desde internet:
+
+```bash
+for host in ellysia.es www.ellysia.es api.ellysia.es; do
+  echo "== $host"
+  echo | openssl s_client -connect "$host":443 -servername "$host" 2>/dev/null \
+    | openssl x509 -noout -issuer -subject -dates
+done
+curl -sI http://www.ellysia.es/ | head -1     # 308 a https, generado por Caddy
+```
+
+Emisor esperado: Let's Encrypt. Después: `hygeia-agent doctor` desde una máquina
+con agente, y un login real desde el SPA en un navegador.
+
+> **Si falla el apex `ellysia.es` y `www` + `api` funcionan**, es la trampa nº4
+> y no la arregla ningún proxy: un apex necesita registro `A` y no admite CNAME.
+> En un VPS con IP fija hay registro A y no aplica. Si el despliegue todavía va
+> por DDNS, quitar `ellysia.es` de la lista de direcciones del `Caddyfile`. A
+> diferencia de certbot, aquí un nombre que no resuelve **no arrastra a los
+> otros dos**: Caddy gestiona cada nombre por separado.
+
+#### Paso 5 — Reposo
+
+Dejarlo funcionando **una semana** antes de borrar nada — el tiempo mínimo para
+que aparezca una ruta rota que las comprobaciones no cubran (una URL guardada,
+un agente con otro endpoint).
+
+```bash
+docker compose --profile container logs web | grep -i error
+docker compose --profile container restart web
+docker volume inspect ellysia_caddy_data --format '{{.Mountpoint}}'
+```
+
+Ese `restart` seguido del `inspect` es *la* comprobación que previene la única
+trampa nueva: si `caddy_data` sobrevive al reinicio, no habrá reemisión.
+
+#### Paso 6 — Retirar lo viejo
+
+Solo tras el reposo:
+
+```bash
+crontab -e                                # borrar ya la línea de renew.sh
+docker volume rm ellysia_certbot-webroot
+docker volume ls | grep ellysiaserver_    # revisar antes de borrar: alguno
+                                          # podría no estar vacío
+rm -rf web/ssl/                           # la copia del paso 0 sigue en ~/
+```
+
+Y en el repositorio, en un commit aparte: retirar de `.gitignore` las entradas
+`web/ssl/*.key|crt|pem` y `web/ssl/letsencrypt/`, que quedan muertas. **No
+antes**: mientras exista la vuelta atrás ese material de clave sigue en el host
+y tiene que seguir ignorado.
+
+### 6.3 Vuelta atrás
+
+Hasta el paso 3 no se ha tocado producción de forma irreversible. Después:
+
+```bash
+git revert <merge>
+docker compose --profile container up -d --build web
+```
+
+Los certificados de certbot siguen en `web/ssl/letsencrypt/` y las rutas fijas
+`web/ssl/ellysia.crt` / `.key` siguen ahí mientras no se ejecute el paso 6, así
+que el nginx anterior vuelve a arrancar con un certificado válido. Si el revert
+tampoco arranca, `ellysia-web:nginx-backup` es la imagen exacta que estaba en
+marcha.
+
+Restaurar el cron — **y arreglar de una vez el `cp` sin permisos de
+`renew.sh`**, que sigue roto y es la razón por la que la renovación automática
+no funciona hoy.
 
 ---
 
