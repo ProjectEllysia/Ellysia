@@ -13,7 +13,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import CondPageBreak, Paragraph, Spacer, Table, TableStyle
 import src.modules.system.config_reading as CR
 
-from src.modules.shared.report_theme import ColorType
+from src.modules.shared.report_theme import ColorType, safe_markup
 from .base import PrintingStrategy
 
 
@@ -404,7 +404,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
             desc_style = ParagraphStyle(
                 "LybraFindingDesc", parent=theme.body, fontSize=8.5, leading=11.5,
             )
-            para = Paragraph(f"Qué implica: {text}", desc_style)
+            para = Paragraph(f"Qué implica: {safe_markup(text)}", desc_style)
             desc_table = Table([[para]], colWidths=[6 * inch])
             desc_table.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, -1), colors.white),

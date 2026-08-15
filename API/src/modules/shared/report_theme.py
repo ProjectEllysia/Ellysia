@@ -13,12 +13,59 @@ la pagara hasta quien solo quiere ``utcnow_naive``. Quien imprime, lo importa
 por su ruta completa.
 """
 
+import re
+
 from enum import Enum
+from xml.etree import ElementTree
+from xml.sax.saxutils import escape
+
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, Table, TableStyle
+
+_MARKDOWN_BOLD = re.compile(r"\*\*(?!\s)(.+?)(?<!\s)\*\*", re.DOTALL)
+
+
+def safe_markup(text: str) -> str:
+    """Convierte texto no confiable en el mini-HTML que entiende ``Paragraph``.
+
+    Todo lo que un informe imprime sin haberlo escrito nosotros pasa por aquí:
+    la prosa del modelo, las descripciones de NVD y los hallazgos de Nikto.
+    Dos motivos, y el primero no es cosmético:
+
+    1. ``Paragraph`` parsea sus marcas como XML, así que un ``<`` seguido de
+       letra aborta el build entero con ValueError — no imprime el texto en
+       crudo, tumba el PDF. No es hipotético: unas 4.000 descripciones de NVD
+       traen construcciones así ("Listen to !nick <source>"), y una de cada
+       diez basta para reventar el informe entero.
+    2. Los modelos escriben markdown por costumbre aunque se les pida que no.
+       ``**Apache 2.4.7**`` salía literal en el papel, y traducirlo aquí es
+       más fiable que confiar en que el prompt se respete siempre.
+
+    Solo se traduce ``**negrita**``. Ni ``__x__`` ni ``*cursiva*``: sobre texto
+    arbitrario disparan constantemente — los volcados de kernel de NVD están
+    llenos de ``****`` y de ``__mutex_lock_common``, y emparejarlos generaba
+    etiquetas cruzadas que rompían justo lo que esta función debía evitar.
+
+    Por eso el resultado se valida antes de devolverlo: si la conversión no ha
+    quedado bien formada, se descarta y sale el texto escapado a secas. Feo
+    antes que caído — ninguna entrada puede tumbar el PDF.
+    """
+    if not text:
+        return ""
+
+    plain = escape(str(text)).replace("\n", "<br/>")
+    markup = _MARKDOWN_BOLD.sub(r"<b>\1</b>", plain)
+
+    if markup != plain:
+        try:
+            ElementTree.fromstring(f"<p>{markup}</p>")
+        except ElementTree.ParseError:
+            return plain
+
+    return markup
 
 
 class ColorType(Enum):

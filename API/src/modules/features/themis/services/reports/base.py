@@ -21,7 +21,7 @@ import src.modules.system.config_reading as CR
 
 from src.modules.shared._exceptions import IllegalStateError, ValidationError
 from ...model import Scan, ScanType
-from src.modules.shared.report_theme import ColorType, ReportTheme
+from src.modules.shared.report_theme import ColorType, ReportTheme, safe_markup
 
 logger = logging.getLogger(__name__)
 
@@ -187,14 +187,14 @@ class PrintingStrategy(ABC):
         if exec_summary and isinstance(exec_summary, str):
             elements.append(Paragraph("Resumen Ejecutivo", theme.subtitle))
             elements.append(Spacer(1, 0.05 * inch))
-            elements.append(Paragraph(exec_summary, theme.body))
+            elements.append(Paragraph(safe_markup(exec_summary), theme.body))
             elements.append(Spacer(1, 0.15 * inch))
 
         tech_analysis = ai_analysis.get("technical_analysis", "")
         if tech_analysis and isinstance(tech_analysis, str):
             elements.append(Paragraph("Análisis Técnico", theme.subtitle))
             elements.append(Spacer(1, 0.05 * inch))
-            elements.append(Paragraph(tech_analysis, theme.body))
+            elements.append(Paragraph(safe_markup(tech_analysis), theme.body))
             elements.append(Spacer(1, 0.15 * inch))
 
         recommendations = ai_analysis.get("recommendations", [])
@@ -219,13 +219,13 @@ class PrintingStrategy(ABC):
                 pri_color = priority_colors.get(priority.upper(), colors.HexColor("#757575"))
 
                 rec_flowables = []
-                rec_flowables.append(Paragraph(f"<b>{i}. {title}</b> — Prioridad: {priority}", theme.info))
+                rec_flowables.append(Paragraph(f"<b>{i}. {safe_markup(title)}</b> — Prioridad: {priority}", theme.info))
                 if desc:
                     rec_flowables.append(Spacer(1, 0.05 * inch))
-                    rec_flowables.append(Paragraph(desc[:self._MAX_RECOMMENDATION_CHARS], theme.body))
+                    rec_flowables.append(Paragraph(safe_markup(desc[:self._MAX_RECOMMENDATION_CHARS]), theme.body))
                 if remediation:
                     rec_flowables.append(Spacer(1, 0.05 * inch))
-                    rec_flowables.append(Paragraph(f"<b>Acción:</b> {remediation[:self._MAX_RECOMMENDATION_CHARS]}", theme.body))
+                    rec_flowables.append(Paragraph(f"<b>Acción:</b> {safe_markup(remediation[:self._MAX_RECOMMENDATION_CHARS])}", theme.body))
                 if isinstance(cve_refs, list) and cve_refs:
                     rec_flowables.append(Spacer(1, 0.05 * inch))
                     refs = ", ".join(str(cve) for cve in cve_refs[:self._MAX_CVE_REFS])
@@ -239,7 +239,7 @@ class PrintingStrategy(ABC):
             elements.append(Spacer(1, 0.1 * inch))
             elements.append(Paragraph("Conclusiones", theme.subtitle))
             elements.append(Spacer(1, 0.05 * inch))
-            elements.append(Paragraph(conclusions, theme.body))
+            elements.append(Paragraph(safe_markup(conclusions), theme.body))
 
         disclaimer_text = """
         <b>Nota:</b> El contenido de esta sección ha sido generado mediante
