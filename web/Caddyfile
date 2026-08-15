@@ -36,7 +36,16 @@
 #
 # Ya no hay bloque catch-all por IP: quien escanee la IP a pelo del servidor
 # no recibe el SPA, recibe un 404.
-ellysia.es, www.ellysia.es, http://localhost, http://127.0.0.1 {
+#
+# `ellysia.es` (el apex) NO está en la lista, a propósito y temporalmente: el
+# despliegue actual no tiene IP fija (www/api van por CNAME a un hostname de
+# DDNS, lvivii.ddns.net) y un apex no puede ser un CNAME —lleva el SOA/NS de
+# la zona—, así que no hay registro A posible y Let's Encrypt no puede
+# validarlo. Confirmado en producción: "no valid A records found for
+# ellysia.es" al pedir el reto. Añadirlo de nuevo es tan simple como sumarlo
+# a esta lista el día que el VPS tenga IP fija; hasta entonces, la SPA se
+# sirve en www.ellysia.es.
+www.ellysia.es, http://localhost, http://127.0.0.1 {
 	encode gzip
 
 	# ponytail: límite fijo de subida (cubre adjuntos .eml de Iris y PDFs);
