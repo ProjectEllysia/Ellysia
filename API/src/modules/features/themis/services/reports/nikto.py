@@ -10,7 +10,7 @@ import src.modules.system.config_reading as CR
 
 from ...model import NiktoScan, ScanType
 from ..analyzers import NiktoAIWriter
-from src.modules.shared.report_theme import ColorType
+from src.modules.shared.report_theme import ColorType, safe_markup
 from .base import PrintingStrategy
 
 
@@ -263,7 +263,7 @@ class NiktoPrintingStrategy(PrintingStrategy):
         desc = getattr(incident, "description", None)
         if desc:
             text = desc[:500] + ("..." if len(desc) > 500 else "")
-            para = Paragraph(f"Descripción: {text}", description_style)
+            para = Paragraph(f"Descripción: {safe_markup(text)}", description_style)
             table = Table([[para]], colWidths=[6 * inch])
             table.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, -1), colors.white),
@@ -279,7 +279,7 @@ class NiktoPrintingStrategy(PrintingStrategy):
         refs = getattr(incident, "references", None)
         if refs:
             text = refs[:300] + ("..." if len(refs) > 300 else "")
-            para = Paragraph(f"Referencias: {text}", description_style)
+            para = Paragraph(f"Referencias: {safe_markup(text)}", description_style)
             table = Table([[para]], colWidths=[6 * inch])
             table.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f0f8ff")),
