@@ -58,6 +58,9 @@
       "strategies": {
         "google": {
           "model": ""
+        },
+        "openai": {
+          "model": "gpt-5.3-chat-latest"
         }
       }
     },
