@@ -41,6 +41,14 @@ class PrintingStrategy(ABC):
 
     _registry: Dict[ScanType, type["PrintingStrategy"]] = {}
 
+    # `theme.card` envuelve sus flowables en una Table, y las tablas de ReportLab
+    # no se parten entre páginas: una recomendación más alta que la página no se
+    # recorta, revienta el build entero con LayoutError. Estos topes son el
+    # cinturón de seguridad frente a una respuesta del modelo desbocada, no un
+    # límite de estilo — a ~2.000 caracteres una tarjeta sigue cabiendo de sobra.
+    _MAX_RECOMMENDATION_CHARS = 2000
+    _MAX_CVE_REFS = 12
+
     def __init__(self, scan: Scan) -> None:
         super().__init__()
         self.scan = scan
@@ -93,8 +101,18 @@ class PrintingStrategy(ABC):
         scan = ScanManager.get_scan_rich(scan_id)
         return strategy_class(scan=scan)
 
-    def _append_ai_analysis(self, elements: list, theme: ReportTheme) -> None:
-        """Append AI-generated security analysis to the report."""
+    def _append_ai_analysis(self, elements: list, theme: ReportTheme, **writer_kwargs) -> None:
+        """Append AI-generated security analysis to the report.
+
+        Args:
+            elements: Flowables del documento en construcción.
+            theme: Tema de estilos del informe.
+            **writer_kwargs: Extras que se reenvían tal cual a
+                ``writer.generate``. Lo usa la estrategia basada en `Finding`
+                para pasarle al writer los hallazgos que ya enriqueció con
+                contexto de CVE, en vez de que éste los reconsulte con menos
+                datos. Nmap y Nikto no pasan nada y siguen igual.
+        """
         tool_key = self.scan.scan_type
         logger.info(f"[IA] Iniciando para scan {self.scan.id} ({tool_key})")
 
@@ -115,7 +133,7 @@ class PrintingStrategy(ABC):
             if self.writer is None:
                 raise IllegalStateError("Writer detectado como None")
 
-            ai_analysis = self.writer.generate(self.scan)
+            ai_analysis = self.writer.generate(self.scan, **writer_kwargs)
         except Exception as e:
             logger.error(f"[IA] Excepción: {e}", exc_info=True)
             ai_analysis = {}
@@ -196,6 +214,7 @@ class PrintingStrategy(ABC):
                 desc = rec.get("description", "") if isinstance(rec, dict) else ""
                 priority = rec.get("priority", "MEDIA") if isinstance(rec, dict) else "MEDIA"
                 remediation = rec.get("remediation", "") if isinstance(rec, dict) else ""
+                cve_refs = rec.get("cve_refs", []) if isinstance(rec, dict) else []
 
                 pri_color = priority_colors.get(priority.upper(), colors.HexColor("#757575"))
 
@@ -203,10 +222,14 @@ class PrintingStrategy(ABC):
                 rec_flowables.append(Paragraph(f"<b>{i}. {title}</b> — Prioridad: {priority}", theme.info))
                 if desc:
                     rec_flowables.append(Spacer(1, 0.05 * inch))
-                    rec_flowables.append(Paragraph(desc, theme.body))
+                    rec_flowables.append(Paragraph(desc[:self._MAX_RECOMMENDATION_CHARS], theme.body))
                 if remediation:
                     rec_flowables.append(Spacer(1, 0.05 * inch))
-                    rec_flowables.append(Paragraph(f"<b>Acción:</b> {remediation}", theme.body))
+                    rec_flowables.append(Paragraph(f"<b>Acción:</b> {remediation[:self._MAX_RECOMMENDATION_CHARS]}", theme.body))
+                if isinstance(cve_refs, list) and cve_refs:
+                    rec_flowables.append(Spacer(1, 0.05 * inch))
+                    refs = ", ".join(str(cve) for cve in cve_refs[:self._MAX_CVE_REFS])
+                    rec_flowables.append(Paragraph(f"<b>Referencias:</b> {refs}", theme.info))
 
                 elements.append(theme.card(rec_flowables, severity_color=pri_color))
                 elements.append(Spacer(1, 0.1 * inch))
