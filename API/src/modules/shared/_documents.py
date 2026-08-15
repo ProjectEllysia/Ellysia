@@ -70,6 +70,28 @@ def run_report_generation(
         raise
     
 
+def submit_report_generation(task_queue, document_id: int, repo_cls: Type, **submit_kwargs) -> None:
+    """Encola la generación del PDF y revierte el documento si el encolado falla.
+
+    ``_create_document`` deja el documento en ``running`` de forma durable
+    antes de llamar aquí (el worker corre en otro proceso). Si ``submit()``
+    rechaza el job — p. ej. dos clics rápidos del mismo informe chocan con
+    ``_reject_if_still_running`` — nadie más va a procesar ese documento: sin
+    este manejo se quedaba en ``running`` para siempre ("Generando..." que
+    nunca acaba), aunque el usuario sí viera el error de "ya hay una tarea
+    en curso". Se marca ``error`` y se re-lanza para que el caller siga
+    devolviendo el mismo error al cliente.
+    """
+    try:
+        task_queue.submit(**submit_kwargs)
+    except Exception:
+        with UnitOfWork() as uow:
+            document = repo_cls(uow).get_by_id(document_id)
+            if document:
+                document.status = "error"
+        raise
+
+
 def delete_document_with_file(
     document_id: int,
     repo_cls: Type,
