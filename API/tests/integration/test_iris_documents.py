@@ -115,6 +115,29 @@ def test_generate_document_not_finished_returns_409(client, app, root_user, root
     assert resp.status_code == 409
 
 
+def test_generate_document_submit_failure_marks_document_error(client, app, root_user, root_headers):
+    """Si el encolado rechaza el job (p.ej. choque con uno en curso), el
+    documento ya creado no debe quedarse en "running" para siempre."""
+    analysis_id = _seed_analysis(app, root_user.id)
+
+    class _RejectingQueue(_SyncTaskQueue):
+        def submit(self, *args, **kwargs):
+            raise RuntimeError("job ya en ejecución")
+
+    queue = _RejectingQueue()
+    with mock.patch.object(managers_mod.TaskQueue, "get_instance", return_value=queue):
+        resp = client.post(f"/iris/results/{analysis_id}/document", headers=root_headers)
+    assert resp.status_code == 500
+
+    from src.modules.features.iris.repositories import IrisReportRepository
+    from src.modules.infrastructure import UnitOfWork
+    with app.app_context():
+        with UnitOfWork() as uow:
+            docs = IrisReportRepository(uow).get_documents_by_parent(analysis_id)
+            assert len(docs) == 1
+            assert docs[0].status == "error"
+
+
 def test_generate_document_success_then_download(client, app, root_user, root_headers, fake_queue):
     analysis_id = _seed_analysis(app, root_user.id)
 

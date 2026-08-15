@@ -156,6 +156,7 @@ onMounted(() => {
   // sin la tarjeta del plan ni las entradas de organización en cualquier otra
   // vista — que es justo lo que el §10.2 del diseño quería resolver.
   if (auth.isAuthenticated && !account.plan) account.loadAll()
+  if (auth.isAuthenticated && !profileStore.profile.first_name && !profileStore.profile.last_name) profileStore.loadProfile()
 
   clickOutside = (event) => {
     if (rootRef.value && !rootRef.value.contains(event.target)) open.value = false

@@ -150,7 +150,11 @@ class FindingsPrintingStrategy(PrintingStrategy):
                 self._append_finding_card(theme, elements, f, idx)
 
         if ai_report:
-            self._append_ai_analysis(elements, theme)
+            # La misma lista que imprime las fichas: ya priorizada por
+            # `score_finding` y ya enriquecida con descripción y versión
+            # corregida. Así el análisis puede recomendar la versión destino
+            # concreta y no puede contradecir al cuerpo del informe.
+            self._append_ai_analysis(elements, theme, findings=findings)
 
         # ponytail: no per-target history chart yet — _append_history_stats'
         # tool_map only knows the Nmap/Nikto scan classes, since it relies on

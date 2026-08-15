@@ -14,7 +14,7 @@ import logging
 from src.modules.shared._exceptions import DocumentNotFoundError
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
-from src.modules.shared._documents import run_report_generation, DocumentManager
+from src.modules.shared._documents import run_report_generation, submit_report_generation, DocumentManager
 from src.modules.system.taskqueue import job_context
 
 from ..exceptions import IrisAnalysisNotReadyError
@@ -86,7 +86,8 @@ class IrisReportManager(DocumentManager):
 
         doc_id = self._create_document(analysis)
 
-        self._task_queue.submit(
+        submit_report_generation(
+            self._task_queue, doc_id, self._REPOSITORY,
             func=IrisReportManager.execute_report_generation,
             args=(doc_id, analysis_id),
             name=f"PDFGeneration-Analysis-{analysis_id}",

@@ -18,31 +18,17 @@ analysis, recommendations, and risk assessments based on scan data.
 import json
 import re
 
-from typing import Optional
+from typing import Dict, Optional
 
 import src.modules.system.config_reading as CR
 from src.modules.tools.scribe import AIInput, AIGenerator, build_generator, WEB_SEARCH_TOOL
-from src.modules.tools.scribe.exceptions import AIResponseError
 
 from ..model import NmapScan, NiktoScan, LybraScan
 
 
-def _extract_json_with_regex(raw: str) -> Optional[dict]:
-    """Best-effort JSON recovery from a model response that failed ``json.loads``.
-
-    Tries a couple of regex patterns (a top-level ``{...}`` object and a fenced
-    ```` ```json ```` block) and returns the first one that parses, or ``None``
-    if none do. Shared by the AI writers' ``_parse_response`` fallback branches.
-    """
-    for pattern in [r'\{[\s\S]*?\}(?=\s*$)', r'```(?:json)?\s*([\s\S]*?)\s*```']:
-        match = re.search(pattern, raw, re.MULTILINE)
-        if match:
-            try:
-                json_str = match.group(1) if match.groups() else match.group()
-                return json.loads(json_str)
-            except json.JSONDecodeError:
-                continue
-    return None
+# Escala de riesgo de menor a mayor, compartida por los tres writers para
+# validar el nivel devuelto y aplicar techos (LAN en Nmap).
+_RISK_ORDER = ["INFORMATIVO", "BAJO", "MEDIO", "ALTO", "CRÍTICO"]
 
 
 class NmapAIWriter:
@@ -241,61 +227,44 @@ class NmapAIWriter:
             system_prompt = self._build_system_prompt(),
             user_prompt   = prompt,
             tools         = [WEB_SEARCH_TOOL],
-            num_predict   = 2048,
+            num_predict   = 4096,
             temperature   = 0.15,
             top_p         = 0.8,
             repeat_penalty = 1.2,
         )
 
         result = self._generator.digest(ai_input)
-        return self._parse_response(result.text, network_ctx=network_ctx)
+        return self._validate(result.parse_json(), network_ctx=network_ctx)
 
-    def _parse_response(self, raw: str, attempt: int = 0, network_ctx: Optional[dict] = None) -> dict:
-        """Parseo robusto de la respuesta JSON con validación de integridad."""
-        if not raw:
-            raise AIResponseError("Respuesta vacía del modelo", attempt=attempt)
+    def _validate(self, result: dict, network_ctx: Optional[dict] = None) -> dict:
+        """Aplica al JSON ya parseado las reglas de dominio de Nmap.
 
-        _RISK_ORDER = ["INFORMATIVO", "BAJO", "MEDIO", "ALTO", "CRÍTICO"]
+        El parseo (incluida la detección de truncado por límite de tokens) lo
+        hace ``AIResult.parse_json``. Aquí sólo queda lo que es propio de este
+        writer: saneado de ``cve_refs``, nivel de riesgo válido y el techo de
+        riesgo de LAN, que antes se saltaba en cuanto la respuesta llegaba
+        envuelta en markdown y caía por la rama de recuperación.
+        """
+        if isinstance(result.get("recommendations"), list):
+            for rec in result["recommendations"]:
+                if not isinstance(rec.get("cve_refs"), list):
+                    rec["cve_refs"] = []
+                else:
+                    rec["cve_refs"] = [
+                        cve for cve in rec["cve_refs"]
+                        if isinstance(cve, str) and re.match(r'^CVE-\d{4}-\d{4,}$', cve)
+                    ]
 
-        try:
-            result = json.loads(raw)
+        risk_level = result.get("risk_level")
+        if risk_level is None or not isinstance(risk_level, str) or risk_level.upper() not in _RISK_ORDER:
+            result["risk_level"] = "INFORMATIVO"
 
-            if isinstance(result.get("recommendations"), list):
-                for rec in result["recommendations"]:
-                    if not isinstance(rec.get("cve_refs"), list):
-                        rec["cve_refs"] = []
-                    else:
-                        rec["cve_refs"] = [
-                            cve for cve in rec["cve_refs"]
-                            if isinstance(cve, str) and re.match(r'^CVE-\d{4}-\d{4,}$', cve)
-                        ]
+        if network_ctx:
+            cap = network_ctx.get("max_risk_level", "CRÍTICO").upper()
+            if _RISK_ORDER.index(result["risk_level"].upper()) > _RISK_ORDER.index(cap):
+                result["risk_level"] = cap
 
-            valid_levels = ["CRÍTICO", "ALTO", "MEDIO", "BAJO", "INFORMATIVO"]
-            risk_level = result.get("risk_level")
-            if risk_level is None or not isinstance(risk_level, str) or risk_level.upper() not in valid_levels:
-                result["risk_level"] = "INFORMATIVO"
-
-            if network_ctx:
-                cap = network_ctx.get("max_risk_level", "CRÍTICO").upper()
-                current = result["risk_level"].upper()
-                if _RISK_ORDER.index(current) > _RISK_ORDER.index(cap):
-                    result["risk_level"] = cap
-
-            return result
-
-        except json.JSONDecodeError:
-            pass
-
-        recovered = _extract_json_with_regex(raw)
-        if recovered is not None:
-            return recovered
-
-        cleaned = re.sub(r'^[^{]*', '', raw)
-        cleaned = re.sub(r'[^}]*$', '', cleaned)
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            raise ValueError(f"No se pudo parsear la respuesta: {raw[:200]}")
+        return result
 
 
 class NiktoAIWriter:
@@ -491,38 +460,28 @@ class NiktoAIWriter:
             system_prompt = self._build_system_prompt(),
             user_prompt   = prompt,
             tools         = [WEB_SEARCH_TOOL],
-            num_predict   = 2048,
+            num_predict   = 4096,
             temperature   = 0.1,
             top_p         = 0.75,
             repeat_penalty = 1.3,
         )
 
         result = self._generator.digest(ai_input)
-        return self._parse_response(result.text)
+        return self._validate(result.parse_json())
 
-    def _parse_response(self, raw: str, attempt: int = 0) -> dict:
-        """Parse the AI response JSON with validation."""
-        if not raw:
-            raise AIResponseError("Respuesta vacía", attempt=attempt)
+    @staticmethod
+    def _validate(result: dict) -> dict:
+        """Aplica al JSON ya parseado las reglas de dominio de Nikto."""
+        risk_level = result.get("risk_level")
+        if risk_level is None or not isinstance(risk_level, str) or risk_level.upper() not in _RISK_ORDER:
+            result["risk_level"] = "BAJO"
 
-        try:
-            result = json.loads(raw)
-            valid_severities = ["CRÍTICO", "ALTO", "MEDIO", "BAJO", "INFORMATIVO"]
-            risk_level = result.get("risk_level")
-            if risk_level is None or not isinstance(risk_level, str) or risk_level.upper() not in valid_severities:
-                result["risk_level"] = "BAJO"
+        result.setdefault("executive_summary", "Análisis completado.")
+        result.setdefault("technical_analysis", "Análisis de controles de seguridad completado.")
+        result.setdefault("recommendations", [])
+        result.setdefault("conclusions", "Continuar monitoreo de seguridad.")
 
-            result.setdefault("executive_summary", "Análisis completado.")
-            result.setdefault("technical_analysis", "Análisis de controles de seguridad completado.")
-            result.setdefault("recommendations", [])
-            result.setdefault("conclusions", "Continuar monitoreo de seguridad.")
-
-            return result
-        except json.JSONDecodeError:
-            recovered = _extract_json_with_regex(raw)
-            if recovered is not None:
-                return recovered
-            raise AIResponseError(f"Respuesta inválida: {raw[:200]}", attempt=attempt)
+        return result
 
 
 class LybraAIWriter:
@@ -545,6 +504,17 @@ class LybraAIWriter:
         _generator: scribe AIGenerator used for model calling.
     """
 
+    # Tope de hallazgos detallados que viajan al prompt. Los confirmados y los
+    # de KEV nunca se recortan; el tope sólo acota la cola ordenada por
+    # prioridad. El rollup por servicio cubre igualmente los que no entran, así
+    # que un host con cientos de CVEs sigue describiéndose entero.
+    _MAX_HIGHLIGHTED_FINDINGS = 25
+    _MAX_DESCRIPTION_CHARS = 300
+
+    # Mismo orden que FindingsPrintingStrategy._PRIORITY_ORDER: el informe y el
+    # análisis deben priorizar igual o se contradicen entre páginas.
+    _PRIORITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+
     def __init__(self, generator: Optional[AIGenerator] = None, prompt_key: str = "lybra") -> None:
         """Initialize the writer.
 
@@ -566,6 +536,104 @@ class LybraAIWriter:
         prompts_config = CR.get_prompts_config()
         return prompts_config.get(self._prompt_key, {}).get("system", "")
 
+    @staticmethod
+    def _group_label(finding: dict) -> str:
+        """Etiqueta de la unidad remediable a la que pertenece el hallazgo.
+
+        Con CPE resuelto la unidad es el producto y su versión ("http server
+        2.4.7"): actualizarlo cierra todos sus CVEs de golpe. Sin CPE —
+        cabeceras ausentes, puertos abiertos, fingerprints— la unidad es la
+        categoría sobre ese servicio, no el hallazgo suelto: las tres cabeceras
+        que faltan en http:80 se arreglan de una sola pasada por la
+        configuración del servidor, así que agruparlas por título produciría
+        tres "productos" de un elemento y desdibujaría el inventario.
+        """
+        from src.modules.features.themis.lybra import parse_cpe23
+
+        parsed = parse_cpe23(finding["cpe"]) if finding.get("cpe") else None
+        if parsed and parsed.get("product"):
+            product = parsed["product"].replace("_", " ")
+            version = parsed.get("version") or ""
+            return f"{product} {version}".strip() if version not in ("*", "-", "") else product
+
+        category = finding.get("category") or "hallazgo"
+        service = finding.get("service") or "servicio"
+        return f"{category} ({service})"
+
+    def _build_service_rollup(self, findings: list) -> list:
+        """Resume los hallazgos por servicio afectado.
+
+        Un host con 151 hallazgos suele ser en realidad dos o tres productos
+        desactualizados. Mandar la lista plana desperdicia el contexto y hace
+        imposible escribir una recomendación concreta; el rollup le da al modelo
+        la unidad sobre la que se actúa de verdad (producto + puerto) junto con
+        la versión a la que hay que subir para cerrar todo el grupo de golpe.
+        """
+        groups: Dict[tuple, dict] = {}
+
+        for finding in findings:
+            key = (finding.get("port"), finding.get("service"), self._group_label(finding))
+            group = groups.setdefault(key, {
+                "producto": key[2],
+                "puerto": finding.get("port"),
+                "servicio": finding.get("service"),
+                "total_hallazgos": 0,
+                "cves": set(),
+                "cves_en_kev": set(),
+                "max_cvss": None,
+                "max_epss": None,
+                "corregido_en": None,
+                "confirmados": 0,
+                "por_prioridad": {},
+            })
+
+            group["total_hallazgos"] += 1
+            group["cves"].update(finding.get("cve_ids") or [])
+            if finding.get("in_kev"):
+                group["cves_en_kev"].update(finding.get("cve_ids") or [])
+            if finding.get("confirmed"):
+                group["confirmados"] += 1
+
+            priority = finding.get("priority", "INFO")
+            group["por_prioridad"][priority] = group["por_prioridad"].get(priority, 0) + 1
+
+            for field, value in (("max_cvss", finding.get("cvss_score")), ("max_epss", finding.get("epss_score"))):
+                if value is not None and (group[field] is None or value > group[field]):
+                    group[field] = value
+
+            # La cota más alta cierra también todas las inferiores del grupo, así
+            # que es la única versión destino que tiene sentido recomendar.
+            fixed = finding.get("fixed_version")
+            if fixed and (group["corregido_en"] is None or self._version_key(fixed) > self._version_key(group["corregido_en"])):
+                group["corregido_en"] = fixed
+
+        rollup = []
+        for group in groups.values():
+            group["total_cves"] = len(group["cves"])
+            group["cves_en_kev"] = sorted(group["cves_en_kev"])
+            del group["cves"]
+            rollup.append(group)
+
+        return sorted(rollup, key=lambda group: -(group["max_cvss"] or 0))
+
+    @staticmethod
+    def _version_key(version: str) -> tuple:
+        """Ordena versiones tipo '2.4.52' numéricamente, no lexicográficamente.
+
+        Sin esto '2.4.9' saldría por encima de '2.4.52'. Los segmentos no
+        numéricos (p.ej. '1p1') caen a 0: basta para elegir la cota más alta.
+        """
+        return tuple(int(part) if part.isdigit() else 0 for part in str(version).split("."))
+
+    def _sort_key(self, finding: dict) -> tuple:
+        """Mismo criterio de orden que las fichas del PDF (findings.py)."""
+        return (
+            self._PRIORITY_ORDER.get(finding.get("priority", "INFO"), 5),
+            not finding.get("confirmed"),
+            -(finding.get("cvss_score") or 0),
+            -(finding.get("epss_score") or 0),
+        )
+
     def _build_user_prompt(self, scan_data: dict, findings: list) -> str:
         target = scan_data.get("target", "desconocido")
         started = scan_data.get("started_at", "N/A")
@@ -574,16 +642,22 @@ class LybraAIWriter:
         confirmed = [finding for finding in findings if finding.get("confirmed")]
         kev = [finding for finding in findings if finding.get("in_kev")]
 
-        # Cap the payload to the highest-signal findings rather than dumping
-        # everything: confirmed + KEV first (never dropped), then a sample of
-        # the rest, so a host with hundreds of open-port entries doesn't drown
-        # the handful of real vulnerabilities in the prompt.
+        # Confirmados y KEV van siempre; la cola se ordena por prioridad real
+        # (no por orden de repositorio) antes de recortarse, para que los
+        # hallazgos destacados sean los mismos que encabezan el informe.
         priority_ids = {id(finding) for finding in confirmed} | {id(finding) for finding in kev}
-        sample = confirmed + kev + [finding for finding in findings if id(finding) not in priority_ids][:15]
+        rest = sorted(
+            (finding for finding in findings if id(finding) not in priority_ids),
+            key=self._sort_key,
+        )
+        highlighted = (confirmed + kev + rest)[:self._MAX_HIGHLIGHTED_FINDINGS]
 
         findings_for_ai = [{
             "titulo": finding.get("title", "")[:160],
             "categoria": finding.get("category", ""),
+            "puerto": finding.get("port"),
+            "servicio": finding.get("service"),
+            "prioridad": finding.get("priority"),
             "cve_ids": finding.get("cve_ids") or [],
             "cvss": finding.get("cvss_score"),
             "epss": finding.get("epss_score"),
@@ -591,7 +665,9 @@ class LybraAIWriter:
             "confirmado": bool(finding.get("confirmed")),
             "qod": finding.get("qod"),
             "estado": finding.get("state", "open"),
-        } for finding in sample]
+            "corregido_en": finding.get("fixed_version"),
+            "descripcion": (finding.get("description") or "")[:self._MAX_DESCRIPTION_CHARS],
+        } for finding in highlighted]
 
         prompts_config = CR.get_prompts_config()
         template = prompts_config.get(self._prompt_key, {}).get("userTemplate", "")
@@ -602,38 +678,57 @@ class LybraAIWriter:
                     .replace("{{total_findings}}", str(len(findings))) \
                     .replace("{{confirmed_count}}", str(len(confirmed))) \
                     .replace("{{kev_count}}", str(len(kev))) \
+                    .replace("{{services_json}}", json.dumps(self._build_service_rollup(findings), indent=2, ensure_ascii=False)) \
                     .replace("{{findings_json}}", json.dumps(findings_for_ai, indent=2, ensure_ascii=False))
 
-    def generate(self, scan) -> dict:
+    def generate(self, scan, findings: Optional[list] = None) -> dict:
         """Generate AI security analysis for a Lybra or Nuclei scan.
 
-        Reads the scan's own `Finding` rows directly via the repository —
-        neither `LybraScan` nor `NucleiScan` carries an ORM relationship to
-        `Finding` (see `repositories.py`), so this mirrors how the manager/
-        report code already fetches them rather than adding one just for this
-        writer. ``LybraEngineManager.exposure_for`` is reused as-is: it reads
-        only ``scan.target`` and an optional ``asset_id`` (absent on
-        ``NucleiScan``, so it degrades to the plain ``classify_exposure`` path),
-        so it works for either scan type without a Nuclei-specific branch.
+        Args:
+            scan: The ``LybraScan`` or ``NucleiScan`` being reported on.
+            findings: Los hallazgos ya enriquecidos y priorizados por
+                ``FindingsPrintingStrategy.append_body`` — la misma lista que
+                imprime las fichas del PDF, con ``priority``, ``description`` y
+                ``fixed_version`` ya resueltos. Pasarla evita repetir la consulta
+                y, sobre todo, es lo que permite que el análisis cite la versión
+                destino concreta en vez de "actualizar a la última versión".
+                Si no se pasa, se consultan los hallazgos aquí (sin el contexto
+                de CVE del informe, que es cosa de la capa de impresión).
+
+        ``LybraEngineManager.exposure_for`` is reused as-is: it reads only
+        ``scan.target`` and an optional ``asset_id`` (absent on ``NucleiScan``,
+        so it degrades to the plain ``classify_exposure`` path), so it works for
+        either scan type without a Nuclei-specific branch.
         """
         from src.modules.infrastructure.session import build_repository
         from ..repositories import ScanRepository
+        from src.modules.features.themis.lybra import score_finding
         # Diferido como el resto de imports de esta función: `managers` importa
         # `services`, así que a nivel de módulo sería un ciclo.
         from ..managers.lybra import LybraEngineManager
 
+        exposure = LybraEngineManager.exposure_for(scan)
         scan_data = {
             "target": scan.target,
             "started_at": scan.started_at.isoformat() if getattr(scan, 'started_at', None) else "N/A",
-            "exposure": LybraEngineManager.exposure_for(scan),
+            "exposure": exposure,
         }
 
-        rows = build_repository(ScanRepository).get_findings_by_scan(scan.id)
-        findings = [{
-            "title": row.title, "category": row.category, "cve_ids": row.cve_ids,
-            "cvss_score": row.cvss_score, "epss_score": row.epss_score, "in_kev": row.in_kev,
-            "confirmed": row.confirmed, "qod": row.qod, "state": row.state,
-        } for row in rows]
+        if findings is None:
+            # Neither `LybraScan` nor `NucleiScan` carries an ORM relationship to
+            # `Finding` (see `repositories.py`), so this mirrors how the manager/
+            # report code already fetches them rather than adding one just for
+            # this writer.
+            rows = build_repository(ScanRepository).get_findings_by_scan(scan.id)
+            findings = [{
+                "title": row.title, "category": row.category, "port": row.port,
+                "service": row.service, "cpe": row.cpe, "cve_ids": row.cve_ids,
+                "cvss_score": row.cvss_score, "epss_score": row.epss_score, "in_kev": row.in_kev,
+                "confirmed": row.confirmed, "qod": row.qod, "state": row.state,
+            } for row in rows]
+
+        for finding in findings:
+            finding.setdefault("priority", score_finding(finding, exposure))
 
         if not findings:
             return {
@@ -650,35 +745,25 @@ class LybraAIWriter:
             system_prompt = self._build_system_prompt(),
             user_prompt   = prompt,
             tools         = [WEB_SEARCH_TOOL],
-            num_predict   = 2048,
+            num_predict   = 4096,
             temperature   = 0.1,
             top_p         = 0.75,
             repeat_penalty = 1.3,
         )
 
         result = self._generator.digest(ai_input)
-        return self._parse_response(result.text)
+        return self._validate(result.parse_json())
 
-    def _parse_response(self, raw: str, attempt: int = 0) -> dict:
-        """Parse the AI response JSON with validation."""
-        if not raw:
-            raise AIResponseError("Respuesta vacía", attempt=attempt)
+    @staticmethod
+    def _validate(result: dict) -> dict:
+        """Aplica al JSON ya parseado las reglas de dominio de Lybra/Nuclei."""
+        risk_level = result.get("risk_level")
+        if risk_level is None or not isinstance(risk_level, str) or risk_level.upper() not in _RISK_ORDER:
+            result["risk_level"] = "BAJO"
 
-        try:
-            result = json.loads(raw)
-            valid_severities = ["CRÍTICO", "ALTO", "MEDIO", "BAJO", "INFORMATIVO"]
-            risk_level = result.get("risk_level")
-            if risk_level is None or not isinstance(risk_level, str) or risk_level.upper() not in valid_severities:
-                result["risk_level"] = "BAJO"
+        result.setdefault("executive_summary", "Análisis completado.")
+        result.setdefault("technical_analysis", "Análisis de vulnerabilidades completado.")
+        result.setdefault("recommendations", [])
+        result.setdefault("conclusions", "Continuar con el plan de remediación.")
 
-            result.setdefault("executive_summary", "Análisis completado.")
-            result.setdefault("technical_analysis", "Análisis de vulnerabilidades completado.")
-            result.setdefault("recommendations", [])
-            result.setdefault("conclusions", "Continuar con el plan de remediación.")
-
-            return result
-        except json.JSONDecodeError:
-            recovered = _extract_json_with_regex(raw)
-            if recovered is not None:
-                return recovered
-            raise AIResponseError(f"Respuesta inválida: {raw[:200]}", attempt=attempt)
+        return result

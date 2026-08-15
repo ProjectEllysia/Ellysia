@@ -4,7 +4,7 @@ import logging
 from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.system.taskqueue import job_context
 from src.modules.shared._exceptions import DocumentError
-from src.modules.shared._documents import run_report_generation, DocumentManager
+from src.modules.shared._documents import run_report_generation, submit_report_generation, DocumentManager
 from src.modules.infrastructure import UnitOfWork
 from ..repositories import ThemisReportRepository
 from ..model import ThemisDocument
@@ -86,7 +86,8 @@ class ThemisReportManager(DocumentManager):
 
         doc_id = self._create_document(scan, ai_report)
 
-        self._task_queue.submit(
+        submit_report_generation(
+            self._task_queue, doc_id, self._REPOSITORY,
             func=ThemisReportManager.execute_report_generation,
             args=(doc_id, scan.id, ai_report),
             name=f"PDFGeneration-Scan-{scan.id}",
