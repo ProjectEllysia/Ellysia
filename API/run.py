@@ -9,7 +9,7 @@ Responsabilidades de este fiche:
     5. Gestionar el apagado graceful.
     6. Arrancar el servidor de desarrollo si se ejecuta directamente.
 
-En producción, Nginx sirve el frontend Vue. En desarrollo, Vite sirve
+En producción, Caddy sirve el frontend Vue. En desarrollo, Vite sirve
 el frontend con proxy inverso al backend. La API no sirve contenido
 estático.
 """

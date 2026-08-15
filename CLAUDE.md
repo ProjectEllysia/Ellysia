@@ -58,12 +58,12 @@ docker compose --profile container up -d  # full stack incl. API, worker, web
 
 Monorepo with three deliverables:
 - **`API/`** — Flask REST backend (primary work area). Entry: `run.py` → `create_app()`.
-- **`web/`** — Vue 3 SPA in `web/app/` (Vite + Pinia + Vue Router), plus the nginx that serves it and proxies the API.
+- **`web/`** — Vue 3 SPA in `web/app/` (Vite + Pinia + Vue Router), plus the Caddy that serves it, proxies the API and manages TLS on its own.
 - **`landing/`** — static marketing site, published to `gh-pages` by `.github/workflows/landing.yml`.
 
 The Android client lives in a separate repo ([SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile)) and consumes `/acheron` over HTTP.
 
-`API/` and `web/` stay together on purpose: they share a deployment and the `run.py` ↔ nginx ↔ SPA-router contract that `API/tests/unit/test_nginx_api_locations.py` verifies. Brand assets live only in `web/app/src/assets/images/`; an API report that needs an image copies that single file into its own module (see `hygeia/resources/hygeia-logo.png`).
+`API/` and `web/` stay together on purpose: they share a deployment and the `run.py` ↔ `web/Caddyfile` ↔ SPA-router contract that `API/tests/unit/test_caddy_api_routes.py` verifies. Brand assets live only in `web/app/src/assets/images/`; an API report that needs an image copies that single file into its own module (see `hygeia/resources/hygeia-logo.png`).
 
 ### Backend module layout (`API/src/modules/`)
 Each feature module (`themis`, `iris`, `aegis`, `acheron`, `hygeia`, `users`, `system`) follows the same layering — respect it when adding code:

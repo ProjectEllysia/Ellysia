@@ -5,15 +5,18 @@
 #
 # El despliegue real se creo como "ellysia". Ejecutar desde un directorio con
 # otro nombre no da error: Compose crea un juego PARALELO de volumenes vacios
-# (ellysiaserver_certbot-webroot, ellysiaserver_ellysia_data...) y trabaja
-# contra ellos mientras los contenedores en marcha siguen montando los
-# originales. Asi se perdio una emision de Let's Encrypt: certbot escribia el
+# (ellysiaserver_ellysia_data, ellysiaserver_scan_logs...) y trabaja contra
+# ellos mientras los contenedores en marcha siguen montando los originales. Asi
+# se perdio una emision de Let's Encrypt en la epoca de certbot: escribia el
 # reto ACME en su volumen y nginx lo buscaba en el otro, devolviendo un 404 que
-# no apuntaba a ninguna parte.
+# no apuntaba a ninguna parte. Con Caddy el mismo error sale mas caro todavia:
+# un caddy_data huerfano son los certificados perdidos y una reemision contra
+# el limite de Let's Encrypt.
 #
-# postgres_data, redis_data y ollama_models se salvaron de eso porque llevan
-# `name:` explicito (sin prefijo de proyecto), pero eso es una red de seguridad
-# para los datos, no una solucion: el resto de volumenes si se duplicaban.
+# postgres_data, redis_data, ollama_models y los dos de caddy se salvan de eso
+# porque llevan `name:` explicito (sin prefijo de proyecto), pero eso es una red
+# de seguridad para los datos, no una solucion: el resto de volumenes si se
+# duplican.
 name: ellysia
 
 services:
@@ -233,19 +236,18 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./web/ssl:/etc/nginx/ssl:ro
-      # certbot escribe el reto ACME aquí y nginx lo sirve por
-      # /.well-known/acme-challenge/, que ya está declarado en nginx.conf.
-      # Volumen con nombre, no bind mount: no hace falta que exista en el
-      # host de antemano y los dos contenedores lo ven igual.
+      # LA ÚNICA TRAMPA DE CADDY, y hay que tomársela en serio: en /data
+      # viven los certificados emitidos y la clave de cuenta ACME. Si este
+      # volumen no persiste, Caddy vuelve a emitir en CADA reinicio y agota
+      # el límite de Let's Encrypt (5 certificados duplicados por semana),
+      # dejando el sitio sin TLS válido hasta que la ventana pase. Es el
+      # fallo más reportado de Caddy en producción.
       #
-      # rw, no ro: nginx solo LEE de aquí, pero el volumen es compartido y
-      # certbot necesita ESCRIBIR el reto en él. Con :ro en los dos lados el
-      # volumen queda de solo lectura para ambos y certbot no puede dejar el
-      # fichero que nginx tiene que servir — comprobado en este mismo
-      # despliegue: con :ro aquí, `mkdir` dentro de web daba
-      # "Read-only file system".
-      - certbot-webroot:/var/www/certbot
+      # No hay bind mount ni copia a ninguna otra ruta: Caddy sirve el
+      # certificado desde aquí directamente. Ese es justamente el paso que
+      # desaparece respecto a nginx+certbot.
+      - caddy_data:/data
+      - caddy_config:/config
     depends_on:
       ellysia:
         condition: service_started
@@ -259,43 +261,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Emite y renueva el certificado de Let's Encrypt contra el mismo nginx que
-  # ya sirve /.well-known/acme-challenge/ en el puerto 80. No hace falta parar
-  # "web" ni cambiar de proxy: certbot solo escribe ficheros, no escucha
-  # ningún puerto.
-  #
-  # certonly --webroot, no el plugin de nginx: el plugin quiere editar la
-  # configuración del servidor directamente, y aquí nginx.conf ya es la
-  # fuente de verdad. certonly solo emite el certificado y lo deja en un
-  # fichero; recargar nginx para que lo recoja es cosa nuestra.
-  certbot:
-    image: certbot/certbot:latest
-    container_name: Ellysia-Certbot
-    volumes:
-      - ./web/ssl/letsencrypt:/etc/letsencrypt
-      - certbot-webroot:/var/www/certbot:rw
-    networks:
-      - secops-net
-    profiles:
-      - container
-    # Sin acción por defecto: se invoca a demanda con
-    #   docker compose --profile container run --rm certbot certonly ...
-    # para la primera emisión, y desde un cron del host para la renovación.
-    # Un "command: renew" en bucle aquí competiría con ese cron.
-    #
-    # Tiene que ser `command`, NO `entrypoint`. La imagen trae
-    # ENTRYPOINT ["certbot"], así que los argumentos de `run` se le pasan a él.
-    # Con `entrypoint: ["/bin/true"]` aquí, esos argumentos pasaban a ser
-    # argumentos de /bin/true: el `certonly` de la documentación ejecutaba
-    # `/bin/true certonly --webroot ...`, salía con código 0 y no emitía nada.
-    # Un fallo mudo — sin error, sin salida, sin certificado — que solo se
-    # nota mucho después, cuando nginx sigue sirviendo el autofirmado y los
-    # agentes rechazan la conexión con "unknown authority".
-    #
-    # `--version` como acción por defecto: si algún `up` levanta el servicio,
-    # imprime la versión y termina, en vez de quedarse esperando.
-    command: ["--version"]
-
 volumes:
   postgres_data:
     name: ellysia_postgres_data
@@ -307,7 +272,14 @@ volumes:
   ellysia_data:
   scan_temp:
   scan_logs:
-  certbot-webroot:
+  # `name:` explícito por la razón que explica la cabecera del fichero: un
+  # checkout en un directorio con otro nombre no puede dejarlos huérfanos.
+  # Aquí importa más que en ninguno — perder caddy_data es perder los
+  # certificados y la clave de cuenta ACME, y reemitir contra el límite.
+  caddy_data:
+    name: ellysia_caddy_data # certificados y claves ACME — NO borrar
+  caddy_config:
+    name: ellysia_caddy_config
 
 networks:
   secops-net:
