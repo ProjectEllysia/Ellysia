@@ -18,7 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     git \
     perl \
+    libio-socket-ssl-perl \
     libjson-perl \
+    libnet-ssleay-perl \
     libxml-writer-perl \
     && git clone --depth 1 https://github.com/sullo/nikto.git /nikto \
     && chmod +x /nikto/program/nikto.pl \

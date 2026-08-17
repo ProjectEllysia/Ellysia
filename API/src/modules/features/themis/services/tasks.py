@@ -182,6 +182,9 @@ class _Task(ABC):
             returncode = self._proc.poll()
 
             if returncode is not None and returncode != 0:
+                output, _ = self._proc.communicate(timeout=1)
+                if output and output.strip():
+                    logger.error("Salida del proceso fallido:\n%s", output.strip())
                 if self.status != TaskStatus.CANCELLED:
                     self.status = TaskStatus.FAILED
                 raise RuntimeError(f"Proceso falló al iniciar (código {returncode})")
