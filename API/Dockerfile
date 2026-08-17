@@ -11,6 +11,7 @@ WORKDIR /app
 ARG NUCLEI_VERSION=3.3.7
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    sudo \
     nmap \
     traceroute \
     curl \
