@@ -49,6 +49,20 @@ def _fetch(app, ps_id: int):
             return ProgramedScanRepository(uow).get_by_id(ps_id)
 
 
+def test_delete_scheduled_scan_endpoint(client, app, make_user, auth_headers):
+    user = make_user(role="role_user", attributes=["themis_schedule_delete"])
+    ps_id, _ = _register(app, user.id)
+
+    response = client.delete(
+        f"/themis/scheduled-scans/{ps_id}/permanent",
+        headers=auth_headers(user),
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["programedScanId"] == ps_id
+    assert _fetch(app, ps_id) is None
+
+
 def test_execute_persists_run_timestamps_to_the_database(app, regular_user):
     """The bug: next_run_at must change in the DB, not just in memory."""
     ps_id, original_next_run = _register(app, regular_user.id)
