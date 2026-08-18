@@ -28,10 +28,12 @@ from .schemas import (
     LogQuerySchema,
     SystemLogsResponseSchema,
 )
-from .services import (
+from .exceptions import (
     LogNotFoundError,
     LogQueryError,
     LogSnapshotChangedError,
+)
+from .services import (
     read_logs,
 )
 

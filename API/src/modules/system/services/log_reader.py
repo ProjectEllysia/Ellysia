@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import src.modules.system.config_reading as CR
+from ..exceptions import LogNotFoundError, LogQueryError, LogSnapshotChangedError
 
 
 DEFAULT_PAGE_SIZE = 100
@@ -32,18 +33,6 @@ _LOG_LINE_RE = re.compile(
 _SNAPSHOT_TOKEN_RE = re.compile(
     r"^(?P<device>\d+):(?P<inode>\d+):(?P<size>\d+):(?P<prefix>[0-9a-f]{64})$"
 )
-
-
-class LogNotFoundError(Exception):
-    """El handler de logging todavía no ha creado el fichero."""
-
-
-class LogSnapshotChangedError(Exception):
-    """El fichero fue reemplazado o truncado durante una consulta paginada."""
-
-
-class LogQueryError(Exception):
-    """Los filtros solicitados son incompatibles o no son válidos."""
 
 
 @dataclass(frozen=True)
