@@ -1,4 +1,4 @@
-from marshmallow import Schema, fields
+from marshmallow import Schema, fields, validate
 
 
 class HelloResponseSchema(Schema):
@@ -79,3 +79,60 @@ class TaskPaginationQuerySchema(Schema):
     per_page = fields.Integer(load_default=20, validate=lambda n: 1 <= n <= 100)
     category = fields.String(load_default=None)
     status = fields.String(load_default=None)
+
+
+class LogQuerySchema(Schema):
+    """Filtros de lectura del log del sistema.
+
+    Las fechas del fichero actual no incluyen zona horaria; el servicio las
+    interpreta en la zona horaria local de la API y la devuelve en la respuesta.
+    """
+
+    page = fields.Integer(load_default=1, validate=validate.Range(min=1))
+    per_page = fields.Integer(load_default=100, validate=validate.Range(min=1, max=500))
+    position = fields.String(
+        load_default="tail",
+        validate=validate.OneOf(["head", "tail"]),
+    )
+    from_ = fields.DateTime(data_key="from", load_default=None, allow_none=True)
+    to = fields.DateTime(load_default=None, allow_none=True)
+    level = fields.String(
+        load_default=None,
+        allow_none=True,
+        validate=validate.OneOf(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
+    )
+    contains = fields.String(
+        load_default=None,
+        allow_none=True,
+        validate=validate.Length(max=200),
+    )
+    snapshot = fields.String(
+        load_default=None,
+        allow_none=True,
+        validate=validate.Length(max=512),
+    )
+
+
+class SystemLogsResponseSchema(Schema):
+    compression = fields.String(required=True)
+    encoding = fields.String(required=True)
+    content = fields.String(required=True)
+    totalBytes = fields.Integer(required=True)
+    returnedBytes = fields.Integer(required=True)
+    compressedBytes = fields.Integer(required=True)
+    truncated = fields.Boolean(required=True)
+    totalLines = fields.Integer(required=True)
+    returnedLines = fields.Integer(required=True)
+    page = fields.Integer(required=True)
+    perPage = fields.Integer(required=True)
+    totalPages = fields.Integer(required=True)
+    position = fields.String(required=True)
+    hasPrevious = fields.Boolean(required=True)
+    hasNext = fields.Boolean(required=True)
+    snapshot = fields.String(required=True)
+    snapshotBytes = fields.Integer(required=True)
+    currentBytes = fields.Integer(required=True)
+    lastModified = fields.String(required=True)
+    timeZone = fields.String(required=True)
+    firstLine = fields.Integer(allow_none=True)
+    lastLine = fields.Integer(allow_none=True)

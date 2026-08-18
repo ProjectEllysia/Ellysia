@@ -4,7 +4,7 @@ import sys
 import psutil
 
 from flask_smorest import Blueprint as SmorestBlueprint
-from flask import request
+from flask import jsonify, request
 
 from src.modules.users.services.permissions import Role
 from src.modules.shared._endpoints import limiter, current_actor
@@ -25,6 +25,14 @@ from .schemas import (
     TaskQueueStatusSchema,
     TaskQueueConfigSchema,
     TaskPaginationQuerySchema,
+    LogQuerySchema,
+    SystemLogsResponseSchema,
+)
+from .services import (
+    LogNotFoundError,
+    LogQueryError,
+    LogSnapshotChangedError,
+    read_logs,
 )
 
 import src.modules.system.config_reading as CR
@@ -99,6 +107,38 @@ def status():
         },
         "status": "ok",
     }
+
+
+@system_blp.get("/logs")
+@system_blp.arguments(LogQuerySchema, location="query")
+@system_blp.response(200, SystemLogsResponseSchema, description="Paginated system log")
+@system_blp.alt_response(400, schema=ErrorSchema, description="Invalid log query")
+@system_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@system_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@system_blp.alt_response(404, schema=ErrorSchema, description="Log file not found")
+@system_blp.alt_response(409, schema=ErrorSchema, description="Log changed during pagination")
+@limiter.limit("30 per hour; 100 per day")
+@require_oauth_token
+@require_role(minimum_role=Role.ADMIN)
+def system_logs(query_args):
+    """Devuelve una página filtrada del log central de la aplicación."""
+    try:
+        return read_logs(query_args)
+    except LogNotFoundError:
+        return jsonify({
+            "error": "log_not_found",
+            "error_description": "No hay ningún log disponible en este momento.",
+        }), 404
+    except LogSnapshotChangedError:
+        return jsonify({
+            "error": "log_changed",
+            "error_description": "El log cambió durante la consulta. Inicia una nueva lectura.",
+        }), 409
+    except LogQueryError as exc:
+        return jsonify({
+            "error": "invalid_log_query",
+            "error_description": str(exc),
+        }), 400
 
 
 @system_blp.get("")
