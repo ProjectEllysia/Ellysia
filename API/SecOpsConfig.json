@@ -77,7 +77,8 @@
       "modules": {
         "aegis": "smtp",
         "hygeia": "smtp",
-        "accounts": "smtp"
+        "accounts": "smtp",
+        "iris": "smtp"
       },
       "strategies": {
         "smtp": {
