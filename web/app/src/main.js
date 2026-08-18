@@ -22,14 +22,18 @@ import './assets/css/shared.css'
 applyStoredTheme()
 
 const app = createApp(App)
-app.use(createPinia())
+const pinia = createPinia()
+app.use(pinia)
 
 // La sesión se restaura ANTES de instalar el router, y no en el `onMounted` de
 // App.vue: `app.use(router)` lanza ya la primera navegación, así que su guard
-// leía `isAuthenticated` cuando todavía valía false. Toda carga dura de una
-// ruta protegida (F5, URL escrita a mano, enlace de un correo) rebotaba a
-// /login y además borraba la sesión de camino.
-useAuthStore().loadFromStorage()
+// debe conocer el resultado de la comprobación del JWT y, si hace falta, de su
+// renovación. Toda carga dura de una ruta protegida (F5, URL escrita a mano,
+// enlace de un correo) espera a esta decisión antes de poder rebotar a /login.
+async function bootstrap() {
+  await useAuthStore().restoreSession()
+  app.use(router)
+  app.mount('#app')
+}
 
-app.use(router)
-app.mount('#app')
+bootstrap()

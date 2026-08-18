@@ -3,7 +3,9 @@ import { ref, computed } from 'vue'
 import router from '@/router'
 
 /**
- * Clave usada en sessionStorage para persistir los datos de sesión.
+ * Clave usada en localStorage para persistir los datos de sesión del usuario.
+ * La bóveda de Acheron no se guarda aquí: sus claves y datos descifrados viven
+ * únicamente en memoria.
  * @type {string}
  */
 const STORAGE_KEY = 'seq_session'
@@ -15,6 +17,9 @@ const STORAGE_KEY = 'seq_session'
  */
 const REASON_KEY = 'seq_session_end_reason'
 
+/** Margen para renovar el access token antes de que llegue a caducar. */
+const TOKEN_REFRESH_MARGIN_MS = 60 * 1000
+
 /**
  * Store de autenticación — gestiona JWT, login, logout y refresh automático.
  *
@@ -24,7 +29,7 @@ const REASON_KEY = 'seq_session_end_reason'
  * @example
  * import { useAuthStore } from '@/stores/authStore'
  * const auth = useAuthStore()
- * auth.login('root', 'root')  // POST /oauth/token, guarda en sessionStorage
+ * auth.login('root', 'root')  // POST /oauth/token, guarda en localStorage
  * auth.isAdmin                 // true si el rol es admin o root
  * auth.username()              // extraído del payload JWT
  */
@@ -48,6 +53,9 @@ export const useAuthStore = defineStore('auth', () => {
    *  pinta, solo sirve para que los refrescos concurrentes se fusionen. */
   let _refreshInFlight = null
 
+  /** Motivo detectado durante un refresco de arranque fallido. */
+  let _refreshFailureReason = null
+
   /** @type {import('vue').ComputedRef<boolean>} True si hay un access token vigente */
   const isAuthenticated = computed(() => !!accessToken.value)
   /** @type {import('vue').ComputedRef<boolean>} True si es admin o root */
@@ -63,10 +71,31 @@ export const useAuthStore = defineStore('auth', () => {
    */
   function parseJwt(token) {
     try {
-      return JSON.parse(atob(token.split('.')[1]))
+      const encoded = token.split('.')[1]
+      if (!encoded) return {}
+      const base64 = encoded.replace(/-/g, '+').replace(/_/g, '/')
+      const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=')
+      const bytes = Uint8Array.from(atob(padded), char => char.charCodeAt(0))
+      return JSON.parse(new TextDecoder().decode(bytes))
     } catch {
       return {}
     }
+  }
+
+  /**
+   * Devuelve la caducidad real declarada por el JWT, en milisegundos.
+   * El cliente solo usa este dato para no presentar una sesión obsoleta; la
+   * firma y la revocación las sigue comprobando el servidor.
+   */
+  function jwtExpiresAt(token) {
+    const exp = parseJwt(token).exp
+    return Number.isFinite(exp) && exp > 0 ? exp * 1000 : 0
+  }
+
+  function clearStoredSession() {
+    localStorage.removeItem(STORAGE_KEY)
+    // Limpia también la ubicación antigua tras una migración o un logout.
+    sessionStorage.removeItem(STORAGE_KEY)
   }
 
   /**
@@ -81,42 +110,70 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /**
-   * Restaura la sesión desde sessionStorage.
-   * Se llama en App.vue al montar la aplicación.
+   * Restaura la sesión desde localStorage.
+   *
+   * Si todavía existe una sesión de una versión anterior en sessionStorage, se
+   * migra una sola vez. El JWT se valida localmente antes de aceptarlo; si el
+   * access token está caducado, `restoreSession()` intentará renovarlo con el
+   * refresh token antes de que el router haga su primera navegación.
    * @returns {boolean} True si se encontró una sesión válida
    */
   function loadFromStorage() {
-    const raw = sessionStorage.getItem(STORAGE_KEY)
+    let raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) {
+      raw = sessionStorage.getItem(STORAGE_KEY)
+      if (raw) {
+        try {
+          localStorage.setItem(STORAGE_KEY, raw)
+          sessionStorage.removeItem(STORAGE_KEY)
+        } catch {
+          // Si el navegador no permite escribir localStorage, se puede usar
+          // esta carga una vez sin romper el arranque de la SPA.
+        }
+      }
+    }
     if (!raw) return false
     try {
       const data = JSON.parse(raw)
-      if (!data?.accessToken) return false
+      if (!data?.accessToken) {
+        clearStoredSession()
+        return false
+      }
+      const tokenExpiry = jwtExpiresAt(data.accessToken)
+      if (!tokenExpiry) {
+        clearStoredSession()
+        return false
+      }
       accessToken.value = data.accessToken
-      refreshToken.value = data.refreshToken
-      expiresAt.value = data.expiresAt
+      refreshToken.value = data.refreshToken || null
+      // `expiresAt` es una ayuda de cliente; el claim exp del JWT es la fuente
+      // fiable para decidir si hay que renovar el access token.
+      expiresAt.value = tokenExpiry
       role.value = data.role || 'role_user'
       return true
     } catch {
+      clearStoredSession()
       return false
     }
   }
 
   /**
-   * Persiste el estado actual de la sesión en sessionStorage.
+   * Persiste el estado actual de la sesión en localStorage.
    * Se llama automáticamente tras login() y refreshAccessToken().
    */
   function saveToStorage() {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
       accessToken: accessToken.value,
       refreshToken: refreshToken.value,
       expiresAt: expiresAt.value,
       role: role.value,
     }))
+    sessionStorage.removeItem(STORAGE_KEY)
   }
 
   /**
    * Autentica al usuario contra /oauth/token con grant_type password.
-   * En caso de éxito, persiste los tokens en sessionStorage y actualiza
+   * En caso de éxito, persiste los tokens en localStorage y actualiza
    * el estado reactivo del store. Si la cuenta tiene MFA activado, el
    * servidor no devuelve tokens todavía: devuelve un `challengeToken` que
    * hay que canjear con verifyMfa() tras introducir el código TOTP.
@@ -178,9 +235,35 @@ export const useAuthStore = defineStore('auth', () => {
   function _applyTokens(data) {
     accessToken.value = data.access_token
     refreshToken.value = data.refresh_token
-    expiresAt.value = Date.now() + data.expires_in * 1000
+    expiresAt.value = jwtExpiresAt(data.access_token) || Date.now() + data.expires_in * 1000
     role.value = data.role || 'role_user'
     saveToStorage()
+  }
+
+  /**
+   * Restaura la sesión antes de instalar el router.
+   *
+   * Un access token caducado no implica necesariamente que haya que pedir las
+   * credenciales otra vez: mientras el refresh token siga vigente, se renueva
+   * aquí. Si no se puede renovar, se elimina la sesión persistida sin intentar
+   * navegar, porque el router todavía no ha empezado su primera navegación.
+   * @returns {Promise<boolean>} True si la sesión quedó restaurada.
+   */
+  async function restoreSession() {
+    if (!loadFromStorage()) return false
+
+    const token = await getToken()
+    if (token) return true
+
+    const reason = _refreshFailureReason
+    accessToken.value = null
+    refreshToken.value = null
+    expiresAt.value = 0
+    role.value = 'role_user'
+    sessionEndReason.value = reason
+    clearStoredSession()
+    if (reason) sessionStorage.setItem(REASON_KEY, reason)
+    return false
   }
 
   /**
@@ -191,7 +274,7 @@ export const useAuthStore = defineStore('auth', () => {
    */
   async function getToken() {
     if (!accessToken.value) return null
-    if (Date.now() > expiresAt.value - 60000) {
+    if (Date.now() > expiresAt.value - TOKEN_REFRESH_MARGIN_MS) {
       const ok = await refreshAccessToken()
       if (!ok) return null
     }
@@ -217,6 +300,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function _doRefresh() {
+    _refreshFailureReason = null
     if (!refreshToken.value) return false
     try {
       const res = await fetch('/oauth/token', {
@@ -224,10 +308,19 @@ export const useAuthStore = defineStore('auth', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ grantType: 'refresh_token', refresh_token: refreshToken.value }),
       })
-      if (!res.ok) return false
+      if (!res.ok) {
+        let body = null
+        try { body = await res.clone().json() } catch { /* respuesta sin JSON */ }
+        if (body?.code === 1609 || body?.error === 'password_changed') {
+          _refreshFailureReason = 'password_changed'
+        }
+        return false
+      }
       const data = await res.json()
+      if (!data.access_token) return false
       accessToken.value = data.access_token
-      expiresAt.value = Date.now() + data.expires_in * 1000
+      expiresAt.value = jwtExpiresAt(data.access_token) || Date.now() + data.expires_in * 1000
+      if (data.role) role.value = data.role
       saveToStorage()
       return true
     } catch {
@@ -278,7 +371,7 @@ export const useAuthStore = defineStore('auth', () => {
     expiresAt.value = 0
     role.value = 'role_user'
     sessionEndReason.value = null
-    sessionStorage.removeItem(STORAGE_KEY)
+    clearStoredSession()
     if (token) {
       fetch('/oauth/revoke', {
         method: 'POST',
@@ -305,7 +398,7 @@ export const useAuthStore = defineStore('auth', () => {
     expiresAt.value = 0
     role.value = 'role_user'
     sessionEndReason.value = reason || null
-    sessionStorage.removeItem(STORAGE_KEY)
+    clearStoredSession()
     if (reason) sessionStorage.setItem(REASON_KEY, reason)
     _resetOtherStores()
     router.push('/login')
@@ -322,7 +415,7 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     accessToken, refreshToken, expiresAt, role, sessionEndReason,
     isAuthenticated, isAdmin, isRoot,
-    username, loadFromStorage, saveToStorage,
+    username, loadFromStorage, restoreSession, saveToStorage,
     login, verifyMfa, getToken, logout, refreshAccessToken, endSession, takeSessionEndReason,
   }
 })
