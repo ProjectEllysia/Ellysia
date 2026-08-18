@@ -193,6 +193,12 @@ const routes = [
     meta: { requiresAuth: true, requiresRoot: true },
   },
   {
+    path: '/logs',
+    name: 'Logs',
+    component: () => import('@/views/LogsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  {
     path: '/profile',
     name: 'Profile',
     component: () => import('@/views/ProfileView.vue'),
