@@ -5,6 +5,35 @@
 }
 
 # ── Fragmentos reutilizables ────────────────────────────────────
+
+# Cabeceras de seguridad generales. Se aplican tanto en producción como en
+# desarrollo. HSTS queda fuera porque solo debe enviarse sobre HTTPS y no
+# tiene sentido aplicarlo a localhost/127.0.0.1 servidos explícitamente por HTTP.
+(security_headers) {
+	header {
+		# Evita que el navegador intente deducir un MIME distinto al declarado.
+		X-Content-Type-Options "nosniff"
+
+		# Impide que otros orígenes embeber Ellysia en un frame.
+		# SAMEORIGIN permite frames del propio origen; si nunca fueran
+		# necesarios podría endurecerse a DENY.
+		X-Frame-Options "SAMEORIGIN"
+
+		# Reduce la información que se filtra mediante Referer al navegar
+		# hacia otros orígenes, conservándola dentro del mismo origen.
+		Referrer-Policy "strict-origin-when-cross-origin"
+
+		# Ellysia no necesita actualmente estas APIs del navegador.
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	}
+}
+
+# HSTS separado de las cabeceras generales porque los hosts locales de
+# desarrollo se sirven por HTTP explícitamente.
+(hsts) {
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}
+
 # Equivalente al antiguo proxy-common.conf. Caddy ya envía X-Forwarded-For,
 # X-Forwarded-Proto y X-Forwarded-Host, y preserva el Host original, por
 # defecto: de las 5 cabeceras que ponía nginx a mano solo falta X-Real-IP.
@@ -24,15 +53,14 @@
 }
 
 # ── SPA (Vue) + rutas de API del mismo origen ───────────────────
-# localhost va en la MISMA lista de direcciones a propósito: en nginx.conf
-# esta tabla de rutas estaba escrita dos veces (un `server` por origen) y ya
-# había divergido — a una de las dos copias le faltaban /hygeia, /plans y
-# /organizations, y el síntoma era `Unexpected token '<'` en el navegador
-# (A15). Con una sola lista no hay dos copias que puedan divergir.
 #
-# El prefijo `http://` sirve esa dirección en HTTP plano y la deja fuera del
-# HTTPS automático. localhost y 127.0.0.1 siguen siendo *secure context*
-# para el navegador, así que el WebCrypto de Acheron funciona igual.
+# Producción y desarrollo comparten deliberadamente esta tabla de rutas para
+# que no existan dos copias que puedan divergir. Las diferencias específicas
+# de producción (actualmente HSTS) se aplican mediante un matcher de host.
+#
+# El prefijo `http://` sirve localhost y 127.0.0.1 en HTTP plano y los deja
+# fuera del HTTPS automático. Ambos siguen siendo secure contexts para el
+# navegador, así que el WebCrypto de Acheron funciona igualmente.
 #
 # Ya no hay bloque catch-all por IP: quien escanee la IP a pelo del servidor
 # no recibe el SPA, recibe un 404.
@@ -46,6 +74,13 @@
 # a esta lista el día que el VPS tenga IP fija; hasta entonces, la SPA se
 # sirve en www.ellysia.es.
 www.ellysia.es, http://localhost, http://127.0.0.1 {
+	import security_headers
+
+	# HSTS únicamente para el host de producción. No se envía en las
+	# respuestas de localhost ni 127.0.0.1.
+	@production host www.ellysia.es
+	header @production Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
 	encode gzip
 
 	# ponytail: límite fijo de subida (cubre adjuntos .eml de Iris y PDFs);
@@ -54,8 +89,6 @@ www.ellysia.es, http://localhost, http://127.0.0.1 {
 	request_body {
 		max_size 20MB
 	}
-
-	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
 	# Assets con hash de Vite (dist/assets/*.[hash].js|css): cache larga, el
 	# hash del nombre ya invalida cuando cambia el contenido.
@@ -115,15 +148,16 @@ www.ellysia.es, http://localhost, http://127.0.0.1 {
 	}
 }
 
-# ── api.ellysia.es  →  Flask API ────────────────────────────────
+# ── api.ellysia.es → Flask API ──────────────────────────────────
 api.ellysia.es {
+	import security_headers
+	import hsts
+
 	encode gzip
 
 	request_body {
 		max_size 20MB
 	}
-
-	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
 	import api_backend
 }
