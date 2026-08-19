@@ -41,6 +41,7 @@ from ..services.text import extract_domain, is_free_provider, url_host
 from ..services import parse_raw_message
 from ..services.parsers import build_path, parse_received_line
 from ..services.ai_writer import IrisAIWriter
+from .notifications import IrisPhishingNotifyManager
 
 
 logger = logging.getLogger(__name__)
@@ -753,6 +754,9 @@ class IrisManager(TaskTrackingMixin):
                 self._fail_analysis(analysis_id)
                 return
 
+            if verdict == "Phishing":
+                self._enqueue_phishing_notification(analysis_id, verdict)
+
             logger.info(f"Analysis {analysis_id} completed: score={total_score}, verdict={verdict}")
 
     @staticmethod
@@ -1202,3 +1206,27 @@ class IrisManager(TaskTrackingMixin):
             self._update_analysis(analysis_id, status="failed", finished_at=utcnow_naive())
         except Exception as e:
             logger.error(f"Failed to mark analysis {analysis_id} as failed: {e}", exc_info=True)
+
+    def _enqueue_phishing_notification(self, analysis_id: int, verdict: str) -> None:
+        """Encola el correo de alerta de un veredicto Phishing (ver
+        ``IrisPhishingNotifyManager``).
+
+        Solo notifican los análisis llegados por un buzón conectado
+        (``connection_id`` no nulo): un análisis manual lo ha pedido el
+        propio usuario, que ya está viendo el informe en el panel. El envío
+        es fire-and-forget — un fallo de Redis/SMTP se registra y no debe
+        tumbar un análisis ya finalizado.
+        """
+        if verdict != "Phishing":
+            return
+        analysis = self.get_analysis(analysis_id)
+        if analysis is None or analysis.connection_id is None:
+            return
+        try:
+            IrisPhishingNotifyManager.enqueue_for(analysis_id)
+            logger.info(f"Notificación de phishing encolada para el análisis {analysis_id}")
+        except Exception as e:
+            logger.error(
+                f"Fallo encolando la notificación de phishing del análisis {analysis_id}: {e}",
+                exc_info=True,
+            )

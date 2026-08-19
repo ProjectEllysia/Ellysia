@@ -41,6 +41,7 @@ from .analysis import IrisManager
 from ..model import IrisMailboxConnection
 from ..repositories import IrisMailboxConnectionRepository
 from ..services.mailbox import MAILBOX_CONNECTORS, MailboxConnector, get_connector
+from ..services.parsers import build_subject_title
 
 logger = logging.getLogger(__name__)
 
@@ -363,18 +364,19 @@ class IrisMailboxManager(TaskTrackingMixin):
 
     def _ingest_message(self, connection: IrisMailboxConnection, connector: MailboxConnector,
                          access_token: str, ref) -> None:
-        title = f"Auto ({connection.account_email})"
         if connection.full_message_mode:
             raw_message = connector.fetch_raw(access_token, ref)
             IrisManager().analyze(
                 raw_headers=None, raw_message=raw_message, user_id=connection.user_id,
-                title=title, connection_id=connection.id, source_message_uid=ref.provider_message_id,
+                title=build_subject_title(raw_message), connection_id=connection.id,
+                source_message_uid=ref.provider_message_id,
             )
         else:
             raw_headers = connector.fetch_headers(access_token, ref)
             IrisManager().analyze(
                 raw_headers=raw_headers, user_id=connection.user_id,
-                title=title, connection_id=connection.id, source_message_uid=ref.provider_message_id,
+                title=build_subject_title(raw_headers), connection_id=connection.id,
+                source_message_uid=ref.provider_message_id,
             )
 
     def _ensure_access_token(self, connection: IrisMailboxConnection) -> tuple[str, MailboxConnector]:

@@ -174,6 +174,39 @@ class TestAnomalyTemplate:
         assert "None" not in html
 
 
+class TestIrisPhishingTemplate:
+    def test_renders_subject_analysis_id_and_score(self):
+        html, text = render_email(
+            "iris_phishing",
+            subject="Tu factura caduca hoy",
+            analysis_id=42,
+            score=12.0,
+            recipient_name="Ana",
+        )
+        assert "Ten cuidado con el correo" in html
+        assert "Tu factura caduca hoy" in html
+        assert "#42" in html
+        assert "12.0" in html
+        assert "TEN CUIDADO CON EL CORREO" in text
+        assert "Tu factura caduca hoy" in text
+        assert "#42" in text
+
+    def test_score_row_omitted_when_absent(self):
+        html, text = render_email(
+            "iris_phishing", subject="X", analysis_id=1, recipient_name=None,
+        )
+        assert "Puntuación" not in html
+        assert "Puntuación" not in text
+        assert "None" not in html
+
+    def test_escapes_untrusted_subject(self):
+        html, _ = render_email(
+            "iris_phishing", subject='<script>alert(1)</script>', analysis_id=1, recipient_name=None,
+        )
+        assert "<script>" not in html
+        assert "&lt;script&gt;" in html
+
+
 def test_brand_defaults_are_injected():
     """Sin ``brand`` explícita, render_email la saca de la config + defaults."""
     html, _ = render_email("campaign", pill_title="X", link="https://e.es/q", recipient_name=None)

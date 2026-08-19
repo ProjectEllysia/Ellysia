@@ -6,7 +6,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.modules.features.iris.services.parsers import parse_raw_message, MessageContext, Attachment
+from src.modules.features.iris.services.parsers import (
+    build_subject_title,
+    parse_raw_message,
+    MessageContext,
+    Attachment,
+)
 from src.modules.features.iris.services.rules.received_timing_rules import check_received_chain
 from src.modules.features.iris.services.rules.body_links_rules import check_body_links
 from src.modules.features.iris.services.rules.body_content_rules import check_body_content
@@ -121,6 +126,50 @@ def test_multipart_with_regular_attachment_is_not_unwrapped():
     )
     ctx = parse_raw_message(raw)
     assert ctx.unwrapped_from_forward is False
+
+
+# ------------------------------------------- Subject-derived title (ingesta de buzón)
+
+def test_subject_title_uses_the_subject_of_the_message():
+    raw = "From: a@b.com\nSubject: Factura pendiente\nDate: Wed, 25 Jun 2025 10:00:00 +0000\n"
+    assert build_subject_title(raw) == "Factura pendiente"
+
+
+def test_subject_title_decodes_rfc2047_encoded_words():
+    raw = "From: a@b.com\r\nSubject: =?UTF-8?Q?Factura_pendiente?=\r\n\r\n"
+    assert build_subject_title(raw) == "Factura pendiente"
+
+
+def test_subject_title_collapses_folded_whitespace():
+    raw = "From: a@b.com\nSubject: Factura\n pendiente\nDate: Wed, 25 Jun 2025 10:00:00 +0000\n"
+    title = build_subject_title(raw)
+    assert title == "Factura pendiente"
+    assert "\n" not in title
+
+
+def test_subject_title_strips_control_characters():
+    raw = "From: a@b.com\nSubject: Factura\x07 pendiente\n"
+    assert build_subject_title(raw) == "Factura pendiente"
+
+
+def test_subject_title_falls_back_when_missing():
+    raw = "From: a@b.com\nDate: Wed, 25 Jun 2025 10:00:00 +0000\n"
+    assert build_subject_title(raw) == "Correo sin asunto"
+
+
+def test_subject_title_falls_back_when_whitespace_only():
+    raw = "From: a@b.com\nSubject:   \n"
+    assert build_subject_title(raw) == "Correo sin asunto"
+
+
+def test_subject_title_truncates_to_title_column_limit():
+    raw = "From: a@b.com\nSubject: " + "x" * 300 + "\n"
+    assert len(build_subject_title(raw)) == 120
+
+
+def test_subject_title_uses_inner_subject_of_report_phishing_forward():
+    raw = _forward_with_nested_original(inner_subject="Tu factura caduca hoy")
+    assert build_subject_title(raw) == "Tu factura caduca hoy"
 
 
 # --------------------------------------------------------------- Received chain (C3/C8)

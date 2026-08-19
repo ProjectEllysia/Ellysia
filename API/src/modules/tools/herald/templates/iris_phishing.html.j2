@@ -1,0 +1,45 @@
+{# Aviso de phishing detectado por Iris en la ingesta automática de buzón.
+   Contexto: subject (asunto del correo detectado), analysis_id,
+   score (opcional), recipient_name (opcional). #}
+{% extends "base.html.j2" %}
+{% from "_macros.html.j2" import data_row %}
+
+{% block title %}Ten cuidado con el correo: {{ subject }}{% endblock %}
+
+{% block preheader %}Iris ha detectado un posible phishing: {{ subject }}.{% endblock %}
+
+{% block header_tagline %}
+<div style="margin-top:8px; font-family:Helvetica,Arial,sans-serif; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#8a857c;">
+  Iris — Análisis de correo
+</div>
+{% endblock %}
+
+{% block content %}
+<p style="margin:0 0 16px;">{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}</p>
+
+<p style="margin:0 0 20px;"><strong>Ten cuidado con el correo: «{{ subject }}».</strong></p>
+
+<p style="margin:0 0 20px;">Iris ha analizado automáticamente un correo de tu buzón conectado y lo ha clasificado como
+<strong>phishing</strong>: hay una alta probabilidad de que intente engañarte para que reveles datos, pulses un enlace
+malicioso o abras un adjunto dañino.</p>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="margin:0 0 20px; background-color:#faf8f5; border-left:3px solid #c0392b; border-radius:0 6px 6px 0;">
+  <tr>
+    <td style="padding:16px 20px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+        {{ data_row("Asunto", subject) }}
+        {{ data_row("Análisis", "#" ~ analysis_id) }}
+        {% if score is defined and score is not none %}
+        {{ data_row("Puntuación de riesgo", score) }}
+        {% endif %}
+      </table>
+    </td>
+  </tr>
+</table>
+
+<p style="margin:0 0 20px;">No abras enlaces ni adjuntos del correo original, y no respondas a él. Si reconoces al remitente,
+contacta por otro canal antes de hacer nada: su cuenta puede estar comprometida.</p>
+
+<p style="margin:0;">Puedes revisar el informe completo desde tu panel de Iris.</p>
+{% endblock %}
