@@ -276,20 +276,20 @@ onMounted(() => {
 })
 onBeforeUnmount(() => store.stopScanPolling())
 
-// Carga la lista de Lybra y el registro de objetivos autorizados la primera
-// vez que se entra a su mundo.
+// Lybra (escaneos propios + objetivos autorizados) se carga la primera vez
+// que se entra a su mundo; los agentes, en cambio, se refrescan a cada
+// entrada: sus tarjetas muestran el contador de hallazgos del último
+// análisis, un dato que nace en Hygeia al margen de Themis — un re-análisis
+// cerrado mientras se estaba en otro mundo no llegaría nunca a la rejilla
+// si la lista no se volviera a pedir.
 let lybraLoaded = false
-let agentsLoaded = false
 watch(() => store.world, (w) => {
   if (w === 'lybra' && !lybraLoaded) {
     lybraLoaded = true
     store.loadLybraScans()
     store.loadAuthorizedTargets()
   }
-  if (w === 'agents' && !agentsLoaded) {
-    agentsLoaded = true
-    hygeiaStore.fetchAssets()
-  }
+  if (w === 'agents') hygeiaStore.fetchAssets()
 }, { immediate: true })
 
 async function handleLaunchLybra(payload) { await store.launchLybra(payload) }
