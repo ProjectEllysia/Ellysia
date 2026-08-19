@@ -104,7 +104,7 @@ Ellysia/
 | **Accounts** | Commercial layer: plan catalog, per-key usage limits/metering, subscription lifecycle, and shared-billing organizations with invitations. | Operational |
 | **Scribe** | Abstraction layer for AI generation — pluggable strategies (Ollama, OpenAI, Google Gemini) per module. | Operational |
 | **Herald** | Abstraction layer for email sending — pluggable strategies (SMTP relay) per module, transversal like Scribe. | Operational |
-| **Ellysia Web** | Vue 3 SPA with module hubs (Themis, Iris, Aegis, Acheron, Hygeia), scan/analysis workspaces, vault client, asset dashboard, plans & organization management, public quiz, and an admin area (config, logs, queue, plans, users). | Operational |
+| **Ellysia Web** | Vue 3 SPA with module hubs (Themis, Iris, Aegis, Acheron, Hygeia), scan/analysis workspaces, vault client, asset dashboard, plans & organization management, public quiz, an admin area (config, logs, queue, plans, users), and a single catalog-driven error view for HTTP failures (404 / 403 / 409 / 500 + generic codes, wired into the router, the app error handlers and Caddy's `handle_errors`). | Operational |
 | **AcheronMobile** ↗ | Android app with Jetpack Compose UI, Material 3 design, and Java crypto core for offline vault operations. Lives in [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile), not in this repository — it consumes `/acheron` over HTTP like any other client. | Operational |
 
 ## Quick start
@@ -635,4 +635,4 @@ Config is read through frozen dataclasses bound to a branch of the tree (`@confi
 - `API/src/data/` and `docs/` are gitignored (scan outputs, generated PDFs).
 - PostgreSQL uses port **15432** locally (not standard 5432).
 - `themis/services/tasks.py` defines its own `TaskStatus` enum — distinct from `taskqueue.TaskStatus`. Don't conflate them.
-- The API version is declared as `appVersion` in `SecOpsConfig.json` (currently `0.5.5`, read by `CR.get_app_version()`).
+- The API version is declared as `appVersion` in `SecOpsConfig.json` (currently `0.5.6`, read by `CR.get_app_version()`).

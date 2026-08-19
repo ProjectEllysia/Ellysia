@@ -90,6 +90,22 @@ www.ellysia.es, http://localhost, http://127.0.0.1 {
 		max_size 20MB
 	}
 
+	# Errores que genera el PROPIO Caddy (502/503/504: la API no responde o el
+	# proxy falla) → la vista de error de la SPA. `handle_errors` no ve los 5xx
+	# que devuelve Flask — esos pasan tal cual y los maneja la SPA con toasts
+	# desde apiFetch.
+	#
+	# Solo se redirigen navegaciones de página reales (Accept: text/html): un
+	# fetch() de la SPA pide */* y se queda con el error crudo, y un asset
+	# roto se queda en su 404 — servir HTML donde se esperaba JS/CSS es el
+	# fallo "Unexpected token '<'" que esta regla evita.
+	handle_errors 5xx {
+		@navegacion header Accept text/html
+		handle @navegacion {
+			redir /error/{err.status_code} 302
+		}
+	}
+
 	# Assets con hash de Vite (dist/assets/*.[hash].js|css): cache larga, el
 	# hash del nombre ya invalida cuando cambia el contenido.
 	#

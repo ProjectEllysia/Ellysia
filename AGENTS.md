@@ -144,6 +144,25 @@ Two profiles:
 
 GPU: `-f docker-compose.gpu-nvidia.yml / .gpu-intel.yml / .gpu-amd.yml`
 
+## README Maintenance
+
+The root `README.md` is the public contract of the repository (API surface,
+TaskQueue categories, Docker profiles, ports, config, module inventory) and it
+drifts silently if nothing forces it to stay fresh. Two rules:
+
+- **Review `README.md` after finishing any task.** When a session changes
+  anything user-visible — new or modified endpoints, TaskQueue categories or
+  external IDs, module capabilities, migrations, config keys, environment
+  variables, Docker profiles/ports, versions — update the README to match
+  before declaring the task done. Do not wait for a periodic audit; the review
+  is part of finishing the task, not a separate chore.
+- **All README.md changes go in a single commit.** Never mix README edits into
+  feature/fix commits, and never spread them across several commits: stage
+  `README.md` separately and commit it alone (`docs(readme): keep in sync with
+  ...`), even when the session's changes span multiple commits. If the session
+  already produced a README commit, fold any further README updates into it
+  instead of opening a new one — one README commit per session.
+
 ## Things That Bite
 
 - `.env` files contain credentials — never commit. `API/.env` is gitignored.
