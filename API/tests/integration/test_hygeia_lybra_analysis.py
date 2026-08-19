@@ -299,3 +299,22 @@ def test_analysis_summary_before_and_after(client, app, admin_user, auth_headers
     assert after["totalFindings"] >= 1
     assert after["vulnerableCount"] == 1
     assert after["byPriority"].get("HIGH") == 1
+
+
+def test_asset_list_carries_findings_count(client, app, admin_user, auth_headers):
+    """La rejilla de agentes de Themis pinta el contador de cada tarjeta con
+    el ``totalFindings`` que trae el listado: null antes del primer análisis
+    y el recuento real después. Sin esto, cada tarjeta tendría que pedir su
+    resumen por separado (N requests por render) para mostrar lo mismo."""
+    _seed_kb_apache_cve(app)
+    asset_id = _create_asset(app, admin_user, inventory=[_software("Apache httpd", "2.4.49")])
+
+    before = client.get("/hygeia/assets", headers=auth_headers(admin_user)).get_json()
+    assets_before = {asset["id"]: asset for asset in before["assets"]}
+    assert assets_before[asset_id]["totalFindings"] is None
+
+    _analyze(app, admin_user, asset_id)
+
+    after = client.get("/hygeia/assets", headers=auth_headers(admin_user)).get_json()
+    assets_after = {asset["id"]: asset for asset in after["assets"]}
+    assert assets_after[asset_id]["totalFindings"] >= 1

@@ -94,6 +94,9 @@ class AssetSchema(Schema):
     tags = fields.List(fields.Nested(TagSchema))
     status = fields.String()
     isPersistent = fields.Boolean()
+    # Hallazgos del último análisis Lybra del activo, o null si nunca se
+    # analizó: lo que la rejilla de agentes de Themis pinta en cada tarjeta.
+    totalFindings = fields.Integer(allow_none=True, load_default=None)
     lastSeenAt = UTCDateTime(allow_none=True)
     uptimeSec = fields.Integer(allow_none=True)
     agentVersion = fields.String(allow_none=True)

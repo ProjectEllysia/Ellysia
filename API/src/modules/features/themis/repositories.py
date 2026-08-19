@@ -26,9 +26,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import joinedload
 from src.modules.infrastructure import BaseRepository, DocumentRepository
@@ -256,6 +256,70 @@ class ScanRepository(BaseRepository[Scan]):
             .all()
         )
         return [row[0] for row in rows]
+
+    def get_latest_scan_by_asset(self, user_id: int, asset_ids: List[int]) -> List[LybraScan]:
+        """El escaneo más reciente por activo Hygeia, en una sola query.
+
+        ``ROW_NUMBER`` sobre ``started_at`` desc particionado por activo:
+        así la rejilla de agentes de Themis (Fase I) recibe el contador de
+        hallazgos de cada tarjeta sin un request por tarjeta, que es justo
+        lo que ``GET /hygeia/assets`` ahorra con esto. La función de ventana
+        es portable entre Postgres y el SQLite de los tests (≥ 3.25).
+
+        Args:
+            user_id:   Dueño de los escaneos.
+            asset_ids: Activos cuyos últimos escaneos se quieren; vacío
+                devuelve lista vacía sin tocar la base de datos.
+
+        Returns:
+            Lista con, a lo sumo, un :class:`LybraScan` por activo.
+        """
+        if not asset_ids:
+            return []
+
+        row_number = func.row_number().over(
+            partition_by=LybraScan.asset_id,
+            order_by=LybraScan.started_at.desc(),
+        ).label("_rn")
+        ranked = (
+            self._session.query(LybraScan, row_number)
+            .filter(
+                LybraScan.user_id == user_id,
+                LybraScan.asset_id.in_(asset_ids),
+            )
+            .subquery()
+        )
+        return (
+            self._session.query(LybraScan)
+            .join(ranked, LybraScan.id == ranked.c.id)
+            .filter(ranked.c._rn == 1)
+            .all()
+        )
+
+    def count_findings_by_scan(self, scan_ids: List[int]) -> Dict[int, int]:
+        """Número de hallazgos por escaneo, en una sola query agrupada.
+
+        Complementa a :meth:`get_latest_scan_by_asset`: el contador que
+        pinta la tarjeta de un agente es el ``totalFindings`` de su último
+        análisis, y calcularlo fila a fila serían N consultas en lugar de
+        una.
+
+        Args:
+            scan_ids: Escaneos cuyo recuento de hallazgos se quiere.
+
+        Returns:
+            Dict ``{scan_id: count}``; los escaneos sin hallazgos pueden
+            faltar, que es lo mismo que un cero.
+        """
+        if not scan_ids:
+            return {}
+        rows = (
+            self._session.query(Finding.scan_id, func.count(Finding.id))
+            .filter(Finding.scan_id.in_(scan_ids))
+            .group_by(Finding.scan_id)
+            .all()
+        )
+        return {scan_id: count for scan_id, count in rows}
 
     def get_stats(self, user_id: int) -> dict:
         """
