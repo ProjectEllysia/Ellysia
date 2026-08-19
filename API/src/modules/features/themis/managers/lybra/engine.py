@@ -728,6 +728,33 @@ class LybraEngineManager(ScanManager):
         items, total_count = repo.get_lybra_scans_paginated(user_id, page, per_page, asset_id)
         return [self.format_scan(item.id, _scan=item) for item in items], total_count
 
+    def latest_findings_by_asset(self, user_id: int, asset_ids: List[int]) -> dict:
+        """Hallazgos del último análisis por activo Hygeia, en un par de queries.
+
+        Es lo que la rejilla de agentes de Themis necesita para pintar el
+        "N hallazgos" de cada tarjeta sin un request por activo: el
+        ``totalFindings`` del último escaneo de inventario del activo, o
+        ``None`` (ausente del dict) si nunca se analizó.
+
+        Args:
+            user_id:   Dueño de los escaneos.
+            asset_ids: Activos cuyo último recuento se quiere.
+
+        Returns:
+            Dict ``{asset_id: count}`` solo con los activos que ya tienen
+            algún análisis.
+        """
+        if not asset_ids:
+            return {}
+        repo = build_repository(ScanRepository)
+        latest = repo.get_latest_scan_by_asset(user_id, asset_ids)
+        counts = repo.count_findings_by_scan([scan.id for scan in latest])
+        return {
+            scan.asset_id: counts.get(scan.id, 0)
+            for scan in latest
+            if scan.asset_id is not None
+        }
+
     def delete_scans_for_asset(self, asset_id: int) -> int:
         """Delete every Lybra scan produced from a Hygeia asset's inventory.
 

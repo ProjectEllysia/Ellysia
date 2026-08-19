@@ -354,7 +354,7 @@
       <span class="plaque-sep" aria-hidden="true">·</span>
       <span class="plaque-item">v{{ appVersion }}</span>
       <span class="plaque-sep" aria-hidden="true">·</span>
-      <a class="plaque-item plaque-link" href="https://github.com/ProjectEllysia/Ellysia" target="_blank" rel="noopener noreferrer">
+      <a class="plaque-item plaque-link" href="https://github.com/ProjectEllysia/EllysiaServer" target="_blank" rel="noopener noreferrer">
         ProjectEllysia / Ellysia ↗
       </a>
     </section>

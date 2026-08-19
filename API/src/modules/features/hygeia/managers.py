@@ -187,9 +187,24 @@ class HygeiaAssetManager:
         return {"asset": saved.to_dict(), "agentKey": full_key}
 
     def list_assets(self) -> list[dict]:
-        """Devuelve todos los activos monitorizados del usuario, más recientes primero."""
+        """Devuelve todos los activos monitorizados del usuario, más recientes primero.
+
+        Cada activo trae además ``totalFindings``: los hallazgos de su
+        último análisis Lybra, o ``None`` si nunca se analizó. Lo pide el
+        mundo de agentes de Themis para pintar el contador de cada tarjeta
+        sin un request por activo (una query agrupada para todos); el
+        detalle completo de Hygeia sigue viniendo de
+        ``get_analysis_summary``.
+        """
         repo = build_repository(MonitoredAssetRepository)
-        return [asset.to_dict() for asset in repo.get_by_user(self.user.id)]
+        assets = repo.get_by_user(self.user.id)
+        counts = LybraEngineManager().latest_findings_by_asset(
+            self.user.id, [asset.id for asset in assets],
+        )
+        return [
+            {**asset.to_dict(), "totalFindings": counts.get(asset.id)}
+            for asset in assets
+        ]
 
     def get_metrics(
         self, asset_id: int, since: Optional[object] = None, until: Optional[object] = None,

@@ -29,18 +29,18 @@
         @click="$emit('select', selectedAssetId === asset.id ? null : asset.id)"
       >
         <span class="agent-top">
-          <span class="agent-status" :class="asset.status" :title="STATUS_LABEL[asset.status] || asset.status"></span>
+          <span class="agent-status" :class="asset.status" :title="statusLabel(asset)"></span>
           <span class="agent-host" :title="asset.hostname">{{ asset.hostname }}</span>
         </span>
         <span class="agent-meta">
           <span v-if="asset.os" class="agent-os">{{ asset.os }}</span>
-          <span class="agent-state-label">{{ STATUS_LABEL[asset.status] || asset.status }}</span>
+          <span class="agent-state-label">{{ statusLabel(asset) }}</span>
         </span>
         <span class="agent-findings">
-          <span v-if="countFor(asset.id) === null" class="agent-pill muted">Sin analizar</span>
-          <span v-else-if="countFor(asset.id) === 0" class="agent-pill clean">Sin hallazgos</span>
+          <span v-if="countFor(asset) === null" class="agent-pill muted">Sin analizar</span>
+          <span v-else-if="countFor(asset) === 0" class="agent-pill clean">Sin hallazgos</span>
           <span v-else class="agent-pill vulnerable">
-            {{ countFor(asset.id) }} {{ countFor(asset.id) === 1 ? 'hallazgo' : 'hallazgos' }}
+            {{ countFor(asset) }} {{ countFor(asset) === 1 ? 'hallazgo' : 'hallazgos' }}
           </span>
         </span>
       </button>
@@ -102,6 +102,16 @@ defineEmits([
 
 const STATUS_LABEL = { pending: 'Sin reportar', online: 'En línea', stale: 'Con retraso', offline: 'Caído' }
 
+/**
+ * Texto del estado de un activo. Un activo no persistente está "caído" por
+ * diseño — se apaga a propósito, así que no es un fallo del agente de
+ * Hygeia sino el comportamiento esperado, y eso es lo que el texto dice.
+ */
+function statusLabel(asset) {
+  if (asset.status === 'offline' && asset.isPersistent === false) return 'Apagado'
+  return STATUS_LABEL[asset.status] || asset.status
+}
+
 const selectedAsset = computed(() =>
   props.assets.find(a => a.id === props.selectedAssetId) || null
 )
@@ -109,15 +119,17 @@ const selectedAsset = computed(() =>
 /**
  * Hallazgos del último análisis de un activo, o `null` si nunca se analizó.
  *
- * Se deriva de los escaneos ya cargados en vez de pedir un resumen por
- * tarjeta: solo hay datos del activo abierto, que es justo cuando importa —
- * las demás tarjetas muestran "sin analizar" hasta que se abren, y ahorrar
- * N peticiones por render de la rejilla lo compensa de sobra.
+ * La rejilla entera lo sabe sin N peticiones por render: `GET /hygeia/assets`
+ * enriquece cada activo con su `totalFindings` (una query agrupada en el
+ * backend, no una por tarjeta). La tarjeta abierta manda además con los
+ * escaneos en vivo mientras están cargados: eso mantiene el contador al día
+ * al terminar un análisis sin esperar al refresco de la lista de activos.
  */
-function countFor(assetId) {
-  if (assetId !== props.selectedAssetId) return null
-  const latest = props.scans[0]
-  return latest ? (latest.totalFindings ?? 0) : null
+function countFor(asset) {
+  if (asset.id === props.selectedAssetId && props.scans.length) {
+    return props.scans[0].totalFindings ?? 0
+  }
+  return asset.totalFindings ?? null
 }
 </script>
 

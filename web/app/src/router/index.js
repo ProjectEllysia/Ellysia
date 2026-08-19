@@ -193,6 +193,12 @@ const routes = [
     meta: { requiresAuth: true, requiresRoot: true },
   },
   {
+    path: '/logs',
+    name: 'Logs',
+    component: () => import('@/views/LogsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
+  {
     path: '/profile',
     name: 'Profile',
     component: () => import('@/views/ProfileView.vue'),
@@ -222,17 +228,33 @@ const routes = [
   },
 
   /**
+   * Vista de error genérica, conducida por el código HTTP (`/error/403`,
+   * `/error/500`...). PÚBLICA a propósito: la usan los guards del router, el
+   * `onError` de navegación y Caddy (el `handle_errors` del Caddyfile
+   * redirige aquí los 5xx que genera él mismo), así que no puede exigir
+   * sesión. El contenido lo decide `ErrorView.vue` contra
+   * `views/errorCatalog.js`.
+   */
+  {
+    path: '/error/:code(\\d{3})',
+    name: 'Error',
+    component: () => import('@/views/ErrorView.vue'),
+  },
+
+  /**
    * Comodín, SIEMPRE el último: vue-router resuelve por orden y una ruta
    * comodín colocada antes se tragaría todo lo que venga detrás.
    *
-   * Sin esto, una dirección desconocida no encajaba con ninguna ruta y la SPA
-   * renderizaba un `<router-view>` vacío: pantalla en blanco, sin cabecera ni
-   * pie, indistinguible de un fallo de carga.
+   * Una dirección desconocida cae aquí y se pinta la vista de error 404.
+   * Sin esto, no encajaba con ninguna ruta y la SPA renderizaba un
+   * `<router-view>` vacío: pantalla en blanco, sin cabecera ni pie,
+   * indistinguible de un fallo de carga.
    */
   {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
-    component: () => import('@/views/NotFoundView.vue'),
+    component: () => import('@/views/ErrorView.vue'),
+    meta: { errorCode: 404 },
   },
 ]
 
@@ -259,6 +281,8 @@ const router = createRouter({
  *
  * - Si la ruta requiere auth y no hay sesión → redirige a /login.
  * - Si la ruta es de invitado (login) y ya hay sesión → redirige a la landing.
+ * - Si la ruta exige un rol y la cuenta no lo tiene → /error/403 (antes caía
+ *   a la portada en silencio, sin explicar nada).
  * - En cualquier otro caso, deja pasar la navegación.
  */
 router.beforeEach((to) => {
@@ -268,9 +292,23 @@ router.beforeEach((to) => {
   } else if (to.meta.guest && auth.isAuthenticated) {
     return '/'
   } else if (to.meta.requiresRoot && !auth.isRoot) {
-    return '/'
+    return { path: '/error/403' }
   } else if (to.meta.requiresAdmin && !auth.isAdmin) {
-    return '/'
+    return { path: '/error/403' }
+  }
+})
+
+/**
+ * Errores de navegación (p. ej. una carga perezosa de chunk que falla tras un
+ * despliegue) → vista de error 500 en vez de dejar la pantalla en blanco o la
+ * vista anterior medio rota. La guarda evita el bucle si el fallo está en la
+ * propia vista de error.
+ */
+router.onError((error) => {
+  console.error('[Ellysia] Error de navegación:', error)
+  const name = router.currentRoute.value.name
+  if (name !== 'Error' && name !== 'NotFound') {
+    router.replace({ name: 'Error', params: { code: '500' } })
   }
 })
 

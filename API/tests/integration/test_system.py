@@ -1,6 +1,8 @@
 """Tests de integración del módulo system."""
 
 import copy
+import base64
+import gzip
 import json
 from unittest import mock
 
@@ -28,6 +30,31 @@ def _isolated_system_config(tmp_path, monkeypatch):
     snapshot = copy.deepcopy(CR._configs)
     yield
     CR._configs = snapshot
+
+
+@pytest.fixture
+def _isolated_log_file(tmp_path, monkeypatch):
+    """Hace que el endpoint lea un log pequeño y controlado por el test."""
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    log_path = log_dir / "secops.log"
+    log_path.write_text(
+        "\n".join([
+            "[+] [INFO] (2026-08-18 10:00:00,000) test.one: inicio",
+            "[+] [WARNING] (2026-08-18 10:01:00,000) test.two: aviso",
+            "[+] [ERROR] (2026-08-18 10:02:00,000) test.three: fallo",
+            "[+] [INFO] (2026-08-18 10:03:00,000) test.one: final",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(CR, "get_directory_of", lambda _directory: str(log_dir))
+    return log_path
+
+
+def _decode_log_content(response):
+    payload = response.get_json()
+    compressed = base64.b64decode(payload["content"])
+    return payload, gzip.decompress(compressed).decode("utf-8")
 
 
 class _FakeTaskQueue:
@@ -60,6 +87,118 @@ def test_say_hello_is_public(client):
 
 def test_status_requires_authentication(client):
     assert client.get("/system/status").status_code == 401
+
+
+def test_logs_require_authentication(client):
+    assert client.get("/system/logs").status_code == 401
+
+
+def test_logs_require_admin_role(client, regular_user, auth_headers):
+    assert client.get("/system/logs", headers=auth_headers(regular_user)).status_code == 403
+
+
+def test_admin_reads_last_log_lines(client, admin_user, auth_headers, _isolated_log_file):
+    response = client.get(
+        "/system/logs?position=tail&per_page=2",
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 200
+    payload, content = _decode_log_content(response)
+    assert content.splitlines() == [
+        "[+] [ERROR] (2026-08-18 10:02:00,000) test.three: fallo",
+        "[+] [INFO] (2026-08-18 10:03:00,000) test.one: final",
+    ]
+    assert payload["totalLines"] == 4
+    assert payload["totalPages"] == 2
+    assert payload["returnedLines"] == 2
+    assert payload["hasNext"] is True
+    assert payload["compression"] == "gzip"
+    assert payload["encoding"] == "base64"
+
+
+def test_root_reads_log_and_head_pagination_filters(
+    client, root_user, auth_headers, _isolated_log_file
+):
+    response = client.get(
+        "/system/logs",
+        query_string={
+            "position": "head",
+            "per_page": 10,
+            "from": "2026-08-18T10:01:00",
+            "to": "2026-08-18T10:02:00",
+            "level": "ERROR",
+            "contains": "FALLO",
+        },
+        headers=auth_headers(root_user),
+    )
+
+    assert response.status_code == 200
+    payload, content = _decode_log_content(response)
+    assert content.splitlines() == [
+        "[+] [ERROR] (2026-08-18 10:02:00,000) test.three: fallo",
+    ]
+    assert payload["position"] == "head"
+    assert payload["totalLines"] == 1
+    assert payload["firstLine"] == 3
+    assert payload["lastLine"] == 3
+
+
+def test_log_snapshot_survives_appends(client, admin_user, auth_headers, _isolated_log_file):
+    first = client.get(
+        "/system/logs?position=tail&per_page=1",
+        headers=auth_headers(admin_user),
+    )
+    assert first.status_code == 200
+    first_payload, first_content = _decode_log_content(first)
+    assert first_content.endswith("final")
+
+    with _isolated_log_file.open("a", encoding="utf-8") as handle:
+        handle.write("[+] [INFO] (2026-08-18 10:04:00,000) test.one: añadido\n")
+
+    second = client.get(
+        "/system/logs",
+        query_string={
+            "position": "tail",
+            "page": 2,
+            "per_page": 1,
+            "snapshot": first_payload["snapshot"],
+        },
+        headers=auth_headers(admin_user),
+    )
+    assert second.status_code == 200
+    second_payload, second_content = _decode_log_content(second)
+    assert second_content.endswith("test.three: fallo")
+    assert second_payload["totalLines"] == 4
+
+
+def test_log_snapshot_rejects_truncation(client, admin_user, auth_headers, _isolated_log_file):
+    first = client.get("/system/logs", headers=auth_headers(admin_user))
+    assert first.status_code == 200
+    snapshot = first.get_json()["snapshot"]
+
+    _isolated_log_file.write_text("[+] [INFO] (2026-08-18 11:00:00,000) test: nuevo\n")
+    response = client.get(
+        "/system/logs",
+        query_string={"snapshot": snapshot},
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error"] == "log_changed"
+
+
+def test_logs_return_not_found_when_file_is_missing(
+    client, admin_user, auth_headers, tmp_path, monkeypatch
+):
+    log_dir = tmp_path / "empty-logs"
+    log_dir.mkdir()
+    monkeypatch.setattr(CR, "get_directory_of", lambda _directory: str(log_dir))
+
+    response = client.get("/system/logs", headers=auth_headers(admin_user))
+
+    assert response.status_code == 404
+    assert response.get_json()["error"] == "log_not_found"
 
 
 def test_status_requires_admin_role(client, regular_user, auth_headers):

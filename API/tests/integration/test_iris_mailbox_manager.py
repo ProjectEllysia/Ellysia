@@ -341,6 +341,26 @@ def test_sync_connection_ingests_new_messages_and_advances_cursor(app, regular_u
             assert len(analyses) == 1
             assert analyses[0].connection_id == connection_id
             assert analyses[0].source_message_uid == "msg-1"
+            # La ingesta automática usa el asunto del correo como título, no
+            # el opaco "Auto (<cuenta>)".
+            assert analyses[0].title == "Hi"
+
+
+def test_sync_connection_uses_subject_as_title_in_full_message_mode(app, regular_user):
+    with app.app_context():
+        connection_id = _save(app, _connection(
+            regular_user.id, sync_cursor="cursor-0", full_message_mode=True,
+        ))
+
+        fake_queue = _FakeTaskQueue()
+        with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=_FakeConnector()), \
+             mock.patch.object(analysis_managers_mod.TaskQueue, "get_instance", return_value=fake_queue):
+            IrisMailboxManager()._sync_connection(connection_id)
+
+        with UnitOfWork() as uow:
+            analyses = IrisAnalysisRepository(uow).get_by_user(regular_user.id)
+            assert len(analyses) == 1
+            assert analyses[0].title == "Hi"
 
 
 def test_sync_connection_stops_at_daily_quota(app, regular_user, monkeypatch):

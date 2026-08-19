@@ -364,6 +364,44 @@ def parse_raw_message(raw: str) -> MessageContext:
 
 
 # =============================================================================
+# Título de presentación derivado del asunto
+# =============================================================================
+#
+# La ingesta automática desde buzón no tiene título aportado por el usuario:
+# se deriva del ``Subject`` del mensaje en vez de etiquetar el análisis como
+# "Auto (<cuenta>)" — el asunto es la etiqueta natural de un correo en el
+# historial.
+
+_SUBJECT_FALLBACK_TITLE = "Correo sin asunto"
+
+#: Límite del campo ``IrisAnalysis.title`` (String(120)).
+_MAX_TITLE_LENGTH = 120
+
+
+def build_subject_title(raw: str) -> str:
+    """Título de presentación de un análisis ingerido: el asunto del mensaje.
+
+    Se lee del contexto ya desenvuelto por ``parse_raw_message`` — cuando la
+    ingesta captura un "report phishing" forward (``message/rfc822``), el
+    asunto que interesa es el del mensaje interno analizado, no el del
+    envoltorio. El asunto llega en bruto desde el proveedor, así que se
+    decodifican los encoded-words RFC 2047 (``=?UTF-8?B?...?=``), se eliminan
+    los caracteres de control (un asunto plegado no debe colar saltos de
+    línea al campo ``title`` ni al asunto de un correo posterior) y se
+    recorta a los 120 caracteres que admite ``IrisAnalysis.title``.
+
+    Returns:
+        El asunto normalizado, o ``_SUBJECT_FALLBACK_TITLE`` si el mensaje
+        no trae asunto.
+    """
+    context = parse_raw_message(raw)
+    subject = decode_mime_words(context.headers.get("subject", ""))
+    subject = re.sub(r"[\x00-\x1f\x7f]", "", subject)
+    subject = " ".join(subject.split())
+    return subject[:_MAX_TITLE_LENGTH].strip() or _SUBJECT_FALLBACK_TITLE
+
+
+# =============================================================================
 # ``Received:`` header parsing
 # =============================================================================
 #

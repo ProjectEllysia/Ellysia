@@ -274,7 +274,7 @@ class PrintingStrategy(ABC):
         """
         from reportlab.graphics.shapes import Drawing
         from reportlab.graphics.charts.barcharts import VerticalBarChart
-        from ..managers import ScanHistoryManager
+        from ...managers import ScanHistoryManager
 
         tool_map = {
             "NmapScan": ScanType.NMAP,

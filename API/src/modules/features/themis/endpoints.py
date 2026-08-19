@@ -1016,7 +1016,7 @@ def schedule_scan(data):
     }
 
 
-@themis_blp.delete("/scheduled-scans/<int:ps_id>")
+@themis_blp.delete("/scheduled-scans/<int:programed_scan_id>")
 @themis_blp.response(200, ScheduledScanActionResponseSchema, description="Scheduled scan revoked")
 @themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
@@ -1039,7 +1039,7 @@ def revoke_scheduled_scan(programed_scan_id: int):
     }
 
 
-@themis_blp.delete("/scheduled-scans/<int:ps_id>/permanent")
+@themis_blp.delete("/scheduled-scans/<int:programed_scan_id>/permanent")
 @themis_blp.response(200, ScheduledScanActionResponseSchema, description="Scheduled scan permanently deleted")
 @themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
