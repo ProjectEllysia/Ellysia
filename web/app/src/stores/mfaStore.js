@@ -26,10 +26,11 @@ export const useMfaStore = defineStore('mfa', () => {
     loading.value = true
     try {
       const res = await apiFetch('/users/mfa')
-      if (!res?.ok) return
+      if (!res?.ok) return null
       const data = await res.json()
       status.enabled = data.enabled
       status.confirmedAt = data.confirmedAt
+      return { enabled: status.enabled, confirmedAt: status.confirmedAt }
     } finally { loading.value = false }
   }
 

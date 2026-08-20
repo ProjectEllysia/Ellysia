@@ -27,6 +27,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import joinedload, selectinload
 
 from .model import (
@@ -160,6 +161,37 @@ class UserRepository(BaseRepository[User]):
             .distinct()
             .all()
         )
+
+    def get_pending_mfa_reminder_users(self, before: datetime) -> List[User]:
+        """Devuelve usuarios verificados cuyo recordatorio ya ha vencido.
+
+        Una credencial TOTP sin confirmar sigue siendo MFA inactivo: el usuario
+        todavía no ha demostrado que controla el dispositivo autenticador.
+        """
+        return (
+            self._session.query(User)
+            .outerjoin(MFATotpCredential, MFATotpCredential.user_id == User.id)
+            .filter(
+                User.email_verified_at.isnot(None),
+                or_(
+                    MFATotpCredential.id.is_(None),
+                    MFATotpCredential.confirmed_at.is_(None),
+                ),
+                or_(
+                    User.last_mfa_reminder_at.is_(None),
+                    User.last_mfa_reminder_at <= before,
+                ),
+            )
+            .order_by(User.id)
+            .all()
+        )
+
+    def mark_mfa_reminder_sent(self, user_id: int, sent_at: datetime) -> None:
+        """Registra el envío confirmado de un recordatorio de MFA."""
+        self._session.query(User).filter(User.id == user_id).update(
+            {"last_mfa_reminder_at": sent_at}, synchronize_session=False
+        )
+        self._session.flush()
 
 
 class TokenRepository(BaseRepository[AccessToken]):
