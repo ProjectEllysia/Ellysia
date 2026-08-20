@@ -42,7 +42,7 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
 - **Infrastructure monitoring** — Lightweight agent heartbeats (CPU/memory/disk/network/processes) feed presence detection, software inventory (tagged), Lybra-powered inventory analysis, threshold-based anomaly alerting, and email notification on critical events.
 - **Plans, usage limits & organizations** — A commercial layer meters usage per plan (scans, pills, campaigns, mailbox connections, assets, ...) and lets a subscriber invite members into a shared-billing organization.
 - **Persistent task queue** — Background jobs survive API restarts (Redis-backed RQ), run in isolated OS processes, and support cooperative cancellation.
-- **OAuth 2.0 + JWT + TOTP MFA** — Refresh tokens, token revocation, Argon2id password hashing, TOTP two-factor auth with recovery codes, role-based access with ABAC attributes.
+- **OAuth 2.0 + JWT + TOTP MFA** — Refresh tokens, token revocation, Argon2id password hashing, TOTP two-factor auth with recovery codes, role-based access with ABAC attributes, and in-app/email reminders for accounts without MFA.
 - **Hardened web serving** — Security headers and HSTS applied by Caddy, which also terminates TLS and proxies the SPA and API.
 - **Database migrations** — Schema changes are versioned, reversible, and applied automatically on startup via Alembic.
 
@@ -176,6 +176,8 @@ Content-Type: application/json
 
 > [!WARNING]
 > All protected endpoints require `Authorization: Bearer <access_token>`. `POST /oauth/revoke` revokes the current token, `POST /oauth/revoke-all` invalidates all tokens for the authenticated user. If the user has TOTP MFA enabled, `/oauth/token` returns a challenge instead of tokens, resolved via `POST /oauth/mfa/verify`.
+
+The web application checks MFA once when an authenticated session enters the SPA. If MFA is not active, it shows a dismissible toast linking to `/profile#mfa`. A daily users scheduler sends the same reminder by email to verified users without a confirmed TOTP credential, respecting `general.security.mfa.notice_interval_days` (30 days by default).
 
 ## API Reference
 
@@ -617,7 +619,7 @@ IRIS_MAILBOX_ENCRYPTION_KEY=... # Fernet key that encrypts stored OAuth refresh 
 
 Ellysia uses a layered configuration system (`API/src/modules/system/config_reading.py`, imported as `CR`):
 
-1. **`API/SecOpsConfig.json`** — base configuration. Exactly five root entries: `appVersion`, `general` (directories, security, registration), `infrastructure` (database, redis, taskqueue), `tools` (`scribe`, `herald` strategy selection), `features` (`themis`, `aegis`, `iris`, `hygeia` per-module settings).
+1. **`API/SecOpsConfig.json`** — base configuration. Exactly five root entries: `appVersion`, `general` (directories, security, registration), `infrastructure` (database, redis, taskqueue), `tools` (`scribe`, `herald` strategy selection), `features` (`themis`, `aegis`, `iris`, `hygeia` per-module settings). `general.security.mfa.notice_interval_days` controls the periodic email reminder cadence.
 2. **`API/.env`** — environment variables that **override** JSON values (required for the JWT secret, DB/Redis/SMTP/AI credentials, `PUBLIC_WEB_URL`).
 3. **Root `.env`** — docker-compose only (Postgres, Redis credentials — not read by the API).
 
