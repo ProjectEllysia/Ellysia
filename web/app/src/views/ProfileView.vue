@@ -48,7 +48,7 @@
           </form>
         </section>
 
-        <section class="profile-section">
+        <section id="mfa" class="profile-section">
           <h2>Verificación en dos pasos (MFA)</h2>
 
           <Transition name="mfa-fade" mode="out-in">
@@ -150,7 +150,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
@@ -248,6 +248,11 @@ onMounted(async () => {
   firstName.value = store.profile.first_name
   lastName.value = store.profile.last_name
   await mfa.loadStatus()
+  if (router.currentRoute.value.hash === '#mfa') {
+    await nextTick()
+    const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+    document.getElementById('mfa')?.scrollIntoView({ behavior, block: 'start' })
+  }
   await loadDeletionPreview()
 })
 
@@ -312,6 +317,7 @@ function downloadRecoveryCodes() {
 .profile-display-name { font-size: var(--fs-2xl); font-weight: 700; color: var(--text); margin: 0 0 0.2rem; font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .profile-username { font-size: var(--fs-lg); color: var(--text-muted); margin: 0; }
 .profile-section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.1rem; }
+.profile-section[id="mfa"] { scroll-margin-top: calc(var(--topbar-h) + 1rem); }
 .profile-section h2 { font-size: var(--fs-xl); font-weight: 600; margin: 0 0 0.85rem; color: var(--text); font-family: var(--font-display); font-size-adjust: var(--fsa-display); }
 .profile-form { display: flex; flex-direction: column; gap: 0.85rem; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; }

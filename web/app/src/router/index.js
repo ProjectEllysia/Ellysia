@@ -272,7 +272,9 @@ const router = createRouter({
    * queremos restaurar la posición donde estabas (savedPosition).
    */
   scrollBehavior(to, from, savedPosition) {
-    return savedPosition || { top: 0 }
+    if (savedPosition) return savedPosition
+    if (to.hash) return { el: to.hash, top: 16 }
+    return { top: 0 }
   },
 })
 
