@@ -13,7 +13,7 @@
 [![Ollama](https://img.shields.io/badge/Ollama-llama3.2-ff7000?style=flat-square&logo=ollama)](https://ollama.com)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com)
 
-[Overview](#overview) · [Features](#features) · [Architecture](#architecture) · [Modules](#modules) · [Quick start](#quick-start) · [Authentication](#authentication) · [API reference](#api-reference) · [TaskQueue](#taskqueue-rq--redis) · [Testing](#testing) · [Database migrations](#database-migrations) · [Docker](#docker) · [AI & email](#ai-and-email-configuration) · [Technology stack](#technology-stack) · [Configuration](#configuration)
+[Overview](#overview) · [Features](#features) · [Architecture](#architecture) · [Modules](#modules) · [Quick start](#quick-start) · [Authentication](#authentication) · [API reference](#api-reference) · [TaskQueue](#taskqueue-rq--redis) · [Testing](#testing) · [Continuous deployment (CI/CD)](#continuous-deployment-cicd) · [Database migrations](#database-migrations) · [Docker](#docker) · [AI & email](#ai-and-email-configuration) · [Technology stack](#technology-stack) · [Configuration](#configuration)
 
 ---
 
@@ -406,7 +406,7 @@ pytest -m integration     # boots create_app() + test HTTP client
 pytest -m oracle          # differential-oracle bench against real Docker containers (skipped in CI by default)
 ```
 
-CI (`.github/workflows/tests.yml`) runs `python -m pytest -q -m "not oracle"` on push/PR to `main`. Some tests use `xfail(strict=True)` to document real known bugs — when a bug is fixed the test XPASSes and the marker must be removed.
+CI (`.github/workflows/tests.yml`) runs `python -m pytest -q -m "not oracle"` on push/PR to `main`. Some tests use `xfail(strict=True)` to document real known bugs — when a bug is fixed the test XPASSes and the marker must be removed. A green push to `main` (a merged pull request) additionally triggers the automatic production deploy — see [Continuous deployment](#continuous-deployment-cicd).
 
 ### Web SPA (node, no framework)
 
@@ -418,6 +418,60 @@ npm run test:polling      # usePolling composable tests
 npm run test:quiz         # aegis quiz-shuffle permutation tests
 npm run test:logs         # gzip log-payload decoding tests
 ```
+
+## Continuous deployment (CI/CD)
+
+Every merge to `main` is deployed automatically to the production machine, **after** the CI tests of the merged commit pass. The pipeline lives in `.github/workflows/deploy.yml` and chains to `.github/workflows/tests.yml` via the `workflow_run` trigger: when the "API Tests" workflow completes with `success` on a push to `main`, the deploy job connects by SSH to the target host and runs:
+
+```bash
+cd <checkout> && \
+git fetch origin && \
+git reset --hard origin/main && \
+docker compose --profile container up -d --build && \
+docker image prune -f
+```
+
+Then it polls the public health endpoint `https://<host>/system/say-hello` as a smoke test and fails the run if the API does not answer within a few minutes.
+
+> The deploy is strictly *after* the tests: the `workflow_run` trigger fires on the `main`-push run of "API Tests", and its `branches: [main]` filter excludes the PR-triggered runs (there `head_branch` is the source branch). If the tests fail, the deploy is skipped. To deploy without waiting for CI, change the trigger to `push: branches: [main]`; nothing else needs to change.
+
+### One-time setup
+
+Before the first automatic deploy works:
+
+1. **On the server** — a checkout of this repo in a fixed path (e.g. `~/ellysia`), a root `.env` with the real credentials (start from `.env.example`), and a SSH user that can run Docker without `sudo` (`usermod -aG docker <user>`). The API applies Alembic migrations automatically on startup, and the existing volumes (`ellysia_caddy_data` included) are reused, so a redeploy never re-issues certificates or drops data.
+2. **First boot is manual** — a fresh server needs `CREATE_DATABASE=True` in the server's `.env` for the *very first* `docker compose --profile container up -d --build` (it seeds the root user, its ABAC attributes and the awareness topics — it is **destructive**, set it back to `False` afterwards). From then on, deploys are fully automatic.
+3. **The checkout that deploy targets** — pin `DEPLOY_PATH` to the checkout the running containers came from:
+   ```bash
+   docker inspect Ellysia-Web --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
+   ```
+   The compose file already pins the project name (`name: ellysia`) and names the critical volumes explicitly, so running from a different directory cannot orphan volumes — but `git reset --hard` must run in the checkout you keep as canonical, and `DEPLOY_PATH` must be that one.
+4. **Server → GitHub access** — the repository is private, so `git fetch` on the server needs credentials. The least-privilege option is a read-only deploy key:
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/ellysia_deploy -N "" -C "server@ellysia"
+   # add ~/.ssh/ellysia_deploy.pub to Repo → Settings → Deploy keys (read-only)
+   cd ~/ellysia && git config core.sshCommand "ssh -i ~/.ssh/ellysia_deploy"
+   ```
+5. **CI → server SSH key** — a dedicated key for the deploy job; the public half goes in the deploy user's `authorized_keys`:
+   ```bash
+   ssh-keygen -t ed25519 -a 100 -f deploy_key -N "" -C "github-actions-deploy@ellysia"
+   ```
+6. **Repository secrets** — Settings → Secrets and variables → Actions → New repository secret:
+
+   | Secret | Value |
+   |---|---|
+   | `DEPLOY_HOST` | `www.ellysia.es` — el **dominio**, no la IP del VPS (Caddy no tiene catch-all por IP, el smoke test fallaría contra la IP; la DNS ya apunta el dominio a la IP) |
+   | `DEPLOY_USER` | the SSH user on the server |
+   | `DEPLOY_PATH` | absolute path to the server checkout (e.g. `/home/deploy/ellysia`) |
+   | `DEPLOY_KEY` | the full contents of the private `deploy_key` file |
+
+### Notes
+
+- **The domain is the identity, not the IP.** The workflow connects to `DEPLOY_HOST`, so changing VPS only means pointing the DNS (and `DEPLOY_HOST`) at the new IP. The first connection to the new host key is accepted automatically (`StrictHostKeyChecking=accept-new`); nothing else changes.
+- **`git reset --hard origin/main`** makes the tracked files of the checkout exactly match `main`; any local modification to tracked files is discarded. The `.env` is gitignored and never touched.
+- **Rollback:** push a revert to `main` (or restore a previous commit) and the next green push deploys it. Data lives in the volumes, only the images are rebuilt.
+- **Manual deploy:** the workflow also has a manual trigger (Actions → "Deploy to production" → Run workflow) that deploys `main` on demand without waiting for a push — useful for a rollback or to re-run after fixing the server.
+- **Renaming the "API Tests" workflow breaks the trigger:** `deploy.yml` references it by name (`workflows: ["API Tests"]`).
 
 ## Database Migrations
 
@@ -465,6 +519,9 @@ alembic downgrade -1
 
 > [!NOTE]
 > Ollama is deliberately **not** part of the `container` profile — the shipped config uses OpenAI by default, and a local LLM reserves 4–8 GB of RAM. Include it explicitly with `--profile local-ai`.
+
+> [!NOTE]
+> Production deploys on every merge to `main` are automated — see [Continuous deployment](#continuous-deployment-cicd) for the exact command the pipeline runs and the one-time setup.
 
 ```bash
 # Infrastructure only (develop locally)
