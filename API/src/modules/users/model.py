@@ -189,6 +189,10 @@ class User(Base):
     # cambió", que también es cierto de las cuentas antiguas.
     must_change_password = Column(Boolean, nullable=False, default=False)
 
+    # Último recordatorio de MFA enviado. Pertenece al usuario porque el aviso
+    # se dirige a quien todavía no tiene una credencial TOTP confirmada.
+    last_mfa_reminder_at = Column(DateTime, nullable=True)
+
     scans          = relationship("Scan",         back_populates="user", cascade="all, delete-orphan")
     tokens         = relationship("AccessToken",  back_populates="user", cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")

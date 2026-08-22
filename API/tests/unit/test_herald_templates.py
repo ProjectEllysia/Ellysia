@@ -207,6 +207,32 @@ class TestIrisPhishingTemplate:
         assert "&lt;script&gt;" in html
 
 
+class TestMfaReminderTemplate:
+    def test_renders_profile_link_in_html_and_text(self):
+        html, text = render_email(
+            "mfa_reminder",
+            recipient_name="Ana",
+            profile_url="https://ellysia.es/profile",
+        )
+
+        assert "Activa la autenticación multifactor" in html
+        assert "https://ellysia.es/profile" in html
+        assert "https://ellysia.es/profile" in text
+        assert "Hola Ana" in html
+        assert "Hola Ana" in text
+
+    def test_escapes_recipient_and_profile_url(self):
+        html, text = render_email(
+            "mfa_reminder",
+            recipient_name='<script>alert(1)</script>',
+            profile_url="https://ellysia.es/profile?a=1&amp;b=2",
+        )
+
+        assert "<script>" not in html
+        assert "&lt;script&gt;" in html
+        assert "&amp;amp;" in html
+
+
 def test_brand_defaults_are_injected():
     """Sin ``brand`` explícita, render_email la saca de la config + defaults."""
     html, _ = render_email("campaign", pill_title="X", link="https://e.es/q", recipient_name=None)

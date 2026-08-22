@@ -1206,6 +1206,9 @@ class MfaConfig:
     recovery_codes_count: int = field(
         default=10, metadata={"key": "recovery_codes_count"}
     )
+    notice_interval_days: int = field(
+        default=30, metadata={"key": "notice_interval_days"}
+    )
 
     @property
     def encryption_key(self) -> str:

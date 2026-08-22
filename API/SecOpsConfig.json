@@ -20,7 +20,8 @@
         "challenge_expiry_minutes": 5,
         "issuer": "Ellysia",
         "max_challenge_attempts": 5,
-        "recovery_codes_count": 10
+        "recovery_codes_count": 10,
+        "notice_interval_days": 30
       }
     },
     "registration": {

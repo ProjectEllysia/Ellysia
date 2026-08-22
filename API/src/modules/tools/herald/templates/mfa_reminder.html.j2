@@ -1,0 +1,30 @@
+{# Recordatorio periódico para activar MFA. Solo recibe nombre y URL del perfil. #}
+{% extends "base.html.j2" %}
+{% from "_macros.html.j2" import button %}
+
+{% block title %}Activa la autenticación multifactor{% endblock %}
+
+{% block preheader %}Añade una capa extra de protección a tu cuenta de Ellysia.{% endblock %}
+
+{% block header_tagline %}
+<div style="margin-top:8px; font-family:Helvetica,Arial,sans-serif; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#8a857c;">
+  Protección de la cuenta
+</div>
+{% endblock %}
+
+{% block content %}
+<p style="margin:0 0 16px;">{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}</p>
+
+<p style="margin:0 0 20px;">
+  Tu cuenta de Ellysia todavía no tiene activada la autenticación multifactor
+  (MFA). Activarla añade una segunda comprobación, además de tu contraseña,
+  cuando inicias sesión.
+</p>
+
+<p style="margin:0 0 20px;">
+  Te recomendamos configurarla para reducir el riesgo si tu contraseña se filtra
+  o alguien consigue reutilizarla.
+</p>
+
+{{ button(profile_url, "Activar MFA", brand.accentColor) }}
+{% endblock %}
