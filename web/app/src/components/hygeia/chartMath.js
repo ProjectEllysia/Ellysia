@@ -278,6 +278,16 @@ export function splitAtRanges(points, ranges) {
   return segments
 }
 
+/**
+ * Anchura útil del trazado, dejando un carril para las etiquetas del eje Y.
+ *
+ * @param {number} totalWidth - Anchura total del SVG en píxeles.
+ * @returns {number} Anchura del área de datos.
+ */
+export function plotWidthForAxis(totalWidth) {
+  return Math.max(0, totalWidth - 68)
+}
+
 /* ── Formato de lectura ────────────────────────────────────────────────── */
 
 /**

@@ -29,7 +29,7 @@
           <line
             v-for="t in yTickValues"
             :key="`y${t}`"
-            :x1="0" :x2="plotW" :y1="yFor(t)" :y2="yFor(t)"
+            :x1="0" :x2="plotDataW" :y1="yFor(t)" :y2="yFor(t)"
             class="grid-line"
           />
           <line
@@ -154,7 +154,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   DEFAULT_WINDOW_MS, SERIES, detectGaps, fmtDuration, formatTimeTick, formatValue,
-  gapThresholdMs, medianDeltaMs, seriesOf, splitAtRanges, timeTicks, yRange, yTicks,
+  gapThresholdMs, medianDeltaMs, plotWidthForAxis, seriesOf, splitAtRanges, timeTicks,
+  yRange, yTicks,
 } from './chartMath'
 
 const props = defineProps({
@@ -195,6 +196,7 @@ const t1 = computed(() => Date.now())
 
 const plotEl = ref(null)
 const plotW = ref(600)
+const plotDataW = computed(() => plotWidthForAxis(plotW.value))
 let resizeObserver = null
 
 onMounted(() => {
@@ -206,7 +208,7 @@ onMounted(() => {
 onUnmounted(() => resizeObserver?.disconnect())
 
 const clampTime = (t) => Math.min(Math.max(t, t0.value), t1.value)
-const xFor = (t) => ((clampTime(t) - t0.value) / Math.max(1, t1.value - t0.value)) * plotW.value
+const xFor = (t) => ((clampTime(t) - t0.value) / Math.max(1, t1.value - t0.value)) * plotDataW.value
 
 /* ── Puntos de la métrica seleccionada ── */
 
@@ -363,7 +365,10 @@ function onPointerMove(event) {
   if (!pts.value.length || !plotEl.value) return
   const rect = plotEl.value.getBoundingClientRect()
   const x = event.clientX - rect.left
-  if (x < 0 || x > plotW.value) return
+  if (x < 0 || x > plotDataW.value) {
+    hover.value = null
+    return
+  }
 
   // El punto más cercano en el eje X entre los que tienen valor.
   let nearest = pts.value[0]
@@ -384,7 +389,7 @@ function onPointerLeave() { hover.value = null }
 
 const tooltipLeft = computed(() => {
   if (!hover.value) return 0
-  return Math.min(Math.max(hover.value.x + 12, 8), Math.max(8, plotW.value - TOOLTIP_W))
+  return Math.min(Math.max(hover.value.x + 12, 8), Math.max(8, plotDataW.value - TOOLTIP_W))
 })
 
 const tooltipTop = computed(() => {

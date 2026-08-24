@@ -10,7 +10,7 @@
 import {
   SERIES, niceCeil, yRange, yTicks, timeTicks, formatTimeTick, fmtDuration,
   medianDeltaMs, gapThresholdMs, detectGaps, splitAtRanges, formatValue, bucketForWindow,
-  WINDOW_PRESETS, DEFAULT_WINDOW_MS,
+  plotWidthForAxis, WINDOW_PRESETS, DEFAULT_WINDOW_MS,
 } from '../src/components/hygeia/chartMath.js'
 
 let passed = 0
@@ -124,6 +124,10 @@ eq('corta el trazado en varias franjas',
   splitAtRanges(trace, [{ start: 0, end: 60000 }, { start: 150000, end: 180000 }])
     .map((part) => part.map((p) => p.t)),
   [[0], [60000, 120000], [180000]])
+
+console.log('\ncarril del eje Y')
+eq('reserva espacio para el eje Y en escritorio', plotWidthForAxis(900), 832)
+eq('reserva espacio suficiente para etiquetas de tasa', plotWidthForAxis(300), 232)
 
 console.log('\nformatValue')
 eq('porcentaje pegado', formatValue({ text: '37', unit: '%' }), '37%')
