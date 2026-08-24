@@ -21,7 +21,7 @@
         v-if="points.length"
         class="plot-svg"
         :width="plotW"
-        :height="PLOT_H"
+        :height="SVG_H"
         aria-hidden="true"
         focusable="false"
       >
@@ -35,7 +35,7 @@
           <line
             v-for="(t, i) in xTickValues"
             :key="`x${i}`"
-            :x1="xFor(t)" :x2="xFor(t)" :y1="0" :y2="PLOT_H"
+            :x1="xFor(t)" :x2="xFor(t)" :y1="PLOT_TOP" :y2="PLOT_BOTTOM"
             class="grid-line grid-line--x"
           />
         </g>
@@ -48,7 +48,7 @@
             :key="`g${i}`"
             :x="xFor(g.start)"
             :width="Math.max(1, xFor(g.end) - xFor(g.start))"
-            :y="0" :height="PLOT_H"
+            :y="PLOT_TOP" :height="PLOT_H"
             class="gap-band"
           >
             <title>Sin señal: {{ fmtDuration(g.end - g.start) }}</title>
@@ -64,7 +64,7 @@
             :key="`ab${i}`"
             :x="xFor(a.start)"
             :width="Math.max(1, xFor(a.end) - xFor(a.start))"
-            :y="0" :height="PLOT_H"
+            :y="PLOT_TOP" :height="PLOT_H"
             class="anomaly-band"
           >
             <title>{{ a.title }}</title>
@@ -72,31 +72,33 @@
           <line
             v-for="(m, i) in anomalyMarks"
             :key="`am${i}`"
-            :x1="xFor(m.at)" :x2="xFor(m.at)" :y1="0" :y2="PLOT_H"
+            :x1="xFor(m.at)" :x2="xFor(m.at)" :y1="PLOT_TOP" :y2="PLOT_BOTTOM"
             class="anomaly-mark"
           >
             <title>{{ m.title }}</title>
           </line>
         </g>
 
-        <polygon v-if="area" :points="area" class="spark-area" />
-        <polyline
-          v-if="line"
-          :key="drawKey"
-          :points="line"
-          class="spark-line"
-          :class="{ draw: drawKey > 0 }"
-          pathLength="1"
-          vector-effect="non-scaling-stroke"
-        />
-        <circle
-          v-else-if="pts.length === 1"
-          :cx="pts[0].x" :cy="pts[0].y" r="3.5"
-          class="spark-dot"
-        />
+        <template v-for="(segment, i) in plotSegments" :key="`segment${i}`">
+          <polygon v-if="segment.area" :points="segment.area" class="spark-area" />
+          <polyline
+            v-if="segment.line"
+            :key="`${drawKey}-${i}`"
+            :points="segment.line"
+            class="spark-line"
+            :class="{ draw: drawKey > 0 }"
+            pathLength="1"
+            vector-effect="non-scaling-stroke"
+          />
+          <circle
+            v-else-if="segment.points.length === 1"
+            :cx="segment.points[0].x" :cy="segment.points[0].y" r="3.5"
+            class="spark-dot"
+          />
+        </template>
 
         <g v-if="hover" class="crosshair">
-          <line :x1="hover.x" :x2="hover.x" :y1="0" :y2="PLOT_H" class="crosshair-line" />
+          <line :x1="hover.x" :x2="hover.x" :y1="PLOT_TOP" :y2="PLOT_BOTTOM" class="crosshair-line" />
           <circle :cx="hover.x" :cy="hover.y" r="3.5" class="crosshair-dot" />
         </g>
 
@@ -152,7 +154,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   DEFAULT_WINDOW_MS, SERIES, detectGaps, fmtDuration, formatTimeTick, formatValue,
-  gapThresholdMs, medianDeltaMs, seriesOf, timeTicks, yRange, yTicks,
+  gapThresholdMs, medianDeltaMs, seriesOf, splitAtRanges, timeTicks, yRange, yTicks,
 } from './chartMath'
 
 const props = defineProps({
@@ -170,6 +172,12 @@ const props = defineProps({
 })
 
 const PLOT_H = 190
+const PLOT_PAD_Y = 12
+const SVG_H = PLOT_H + PLOT_PAD_Y * 2
+const PLOT_TOP = PLOT_PAD_Y
+const PLOT_BOTTOM = PLOT_TOP + PLOT_H
+const TOOLTIP_W = 130
+const TOOLTIP_H = 48
 
 const metric = computed(() => seriesOf(props.metricKey))
 
@@ -222,7 +230,7 @@ const range = computed(() => {
   return yRange(metric.value, points.value.map((p) => p.v))
 })
 
-const yFor = (v) => PLOT_H - ((v - range.value.lo) / (range.value.hi - range.value.lo)) * PLOT_H
+const yFor = (v) => PLOT_BOTTOM - ((v - range.value.lo) / (range.value.hi - range.value.lo)) * PLOT_H
 
 /** Puntos ya proyectados a la geometría del SVG (x/y en px). */
 const pts = computed(() => points.value.map((p) => ({ ...p, x: xFor(p.t), y: yFor(p.v) })))
@@ -234,22 +242,6 @@ const xTickValues = computed(() => timeTicks(t0.value, t1.value))
 function formatTick(value) {
   return formatValue(metric.value.fmt(value))
 }
-
-/* ── Trazo ── */
-
-const line = computed(() => {
-  if (pts.value.length < 2) return ''
-  return pts.value
-    .map((p) => `${Math.round(p.x)},${Math.round(p.y)}`)
-    .join(' ')
-})
-
-const area = computed(() => {
-  if (!line.value) return ''
-  const first = pts.value[0]
-  const last = pts.value[pts.value.length - 1]
-  return `${Math.round(first.x)},${PLOT_H} ${line.value} ${Math.round(last.x)},${PLOT_H}`
-})
 
 // La animación de trazado se dispara al cambiar de métrica o de ventana,
 // nunca en el sondeo: un parpadeo cada 30 s sería ruido, no feedback.
@@ -288,6 +280,23 @@ const anomalyBands = computed(() =>
       return { start, end, title: `host_down: ${fmtDuration(end - start)}` }
     })
     .filter(Boolean)
+)
+
+/* El trazo no debe saltar por encima de una zona sin señal o de un incidente. */
+const plotSegments = computed(() =>
+  splitAtRanges(pts.value, [...gaps.value, ...anomalyBands.value]).map((points) => {
+    const line = points.length < 2
+      ? ''
+      : points.map((p) => `${Math.round(p.x)},${Math.round(p.y)}`).join(' ')
+    if (!line) return { points, line: '', area: '' }
+    const first = points[0]
+    const last = points[points.length - 1]
+    return {
+      points,
+      line,
+      area: `${Math.round(first.x)},${PLOT_BOTTOM} ${line} ${Math.round(last.x)},${PLOT_BOTTOM}`,
+    }
+  })
 )
 
 const anomalyMarks = computed(() =>
@@ -375,12 +384,12 @@ function onPointerLeave() { hover.value = null }
 
 const tooltipLeft = computed(() => {
   if (!hover.value) return 0
-  return Math.min(Math.max(hover.value.x + 12, 8), plotW.value - 130)
+  return Math.min(Math.max(hover.value.x + 12, 8), Math.max(8, plotW.value - TOOLTIP_W))
 })
 
 const tooltipTop = computed(() => {
   if (!hover.value) return 0
-  return Math.min(Math.max(hover.value.y - 44, 8), PLOT_H - 30)
+  return Math.min(Math.max(hover.value.y - 44, 8), PLOT_BOTTOM - TOOLTIP_H)
 })
 
 function formatTooltipTime(ts) {
@@ -402,7 +411,7 @@ function formatTooltipTime(ts) {
 .metric-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
 .metric-name {
   margin: 0;
-  font-size: var(--fs-xs); font-weight: 700;
+  font-size: var(--fs-sm); font-weight: 700;
   letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--text-muted);
 }
@@ -472,7 +481,7 @@ function formatTooltipTime(ts) {
    debajo. */
 .axis-y-label {
   font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
-  font-size: 10px; fill: var(--text-muted);
+  font-size: var(--fs-sm); fill: var(--text-muted);
   paint-order: stroke; stroke: var(--surface-2); stroke-width: 3px;
 }
 
@@ -481,11 +490,19 @@ function formatTooltipTime(ts) {
 .axis-x-label {
   position: absolute; top: 0;
   transform: translateX(-50%);
-  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-xs);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-sm);
   color: var(--text-muted); white-space: nowrap;
 }
 .axis-x-label:first-child { transform: none; left: 0 !important; }
 .axis-x-label:last-child { transform: translateX(-100%); }
+
+/* En móvil las ventanas largas siguen teniendo seis instantes, pero sus
+   fechas ya no caben sin pisarse: se conservan inicio, mitad y fin. */
+@media (max-width: 520px) {
+  .axis-x-label:nth-child(2),
+  .axis-x-label:nth-child(3),
+  .axis-x-label:nth-child(5) { display: none; }
+}
 
 /* Crosshair: línea vertical + punto sobre la traza. */
 .crosshair-line { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 2 3; }
@@ -495,13 +512,14 @@ function formatTooltipTime(ts) {
   position: absolute; z-index: 2;
   display: flex; flex-direction: column; gap: 0.1rem;
   padding: 0.3rem 0.55rem;
+  box-sizing: border-box; max-width: calc(100% - 16px);
   background: var(--surface-3); border: 1px solid var(--border-med); border-radius: 6px;
   box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
   pointer-events: none;
   animation: tooltip-in 0.15s ease;
 }
 @keyframes tooltip-in { from { opacity: 0; transform: translateY(2px); } }
-.tooltip-time { font-size: var(--fs-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tooltip-time { font-size: var(--fs-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .tooltip-value {
   font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-md);
   font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums;
@@ -509,8 +527,8 @@ function formatTooltipTime(ts) {
 
 /* ── Leyenda ── */
 .plot-legend {
-  display: flex; gap: 0.9rem; margin: 0.15rem 0 0;
-  font-size: var(--fs-xs); color: var(--text-muted);
+  display: flex; flex-wrap: wrap; gap: 0.4rem 0.9rem; margin: 0.15rem 0 0;
+  font-size: var(--fs-sm); color: var(--text-muted);
 }
 .legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
 .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
@@ -521,14 +539,17 @@ function formatTooltipTime(ts) {
 }
 
 /* ── Pie ── */
-.metric-foot { display: flex; gap: 1.1rem; margin: 0.5rem 0 0; font-size: var(--fs-xs); color: var(--text-muted); }
+.metric-foot {
+  display: flex; flex-wrap: wrap; gap: 0.4rem 0.85rem;
+  margin: 0.5rem 0 0; font-size: var(--fs-sm); color: var(--text-muted);
+}
 .stat b {
   font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-weight: 600;
   color: var(--text-dim); font-variant-numeric: tabular-nums;
 }
 .stat--reads { margin-left: auto; }
 
-.metric-window-note { margin: 0.3rem 0 0; text-align: right; font-size: var(--fs-xs); color: var(--text-muted); }
+.metric-window-note { margin: 0.3rem 0 0; text-align: right; font-size: var(--fs-sm); color: var(--text-muted); }
 
 /* ── Estados vacíos ── */
 .metric-empty {

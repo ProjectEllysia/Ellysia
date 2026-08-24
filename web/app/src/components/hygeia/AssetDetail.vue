@@ -49,7 +49,7 @@
       <section class="section">
         <h4 class="section-title">Constantes</h4>
         <!-- Silueta de una sola tarjeta de gráfica, con el alto real de la
-             nueva MetricsChart (cabecera, gráfico de 190px, eje X, pie y
+             nueva MetricsChart (cabecera, gráfico de 214px, eje X, pie y
              nota de ventana). Si esa tarjeta cambia de alto, este número
              deja de cuadrar y vuelve el salto. -->
         <div v-if="metricsLoading && !metrics.length" class="vitals-ghost" aria-busy="true" aria-label="Cargando métricas">
@@ -546,11 +546,11 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
-/* 356px es el alto medido de una .metric-card de MetricsChart (cabecera,
-   gráfico de 190px, eje X, leyenda, pie y nota de ventana). Si esa tarjeta
+/* 380px es el alto medido de una .metric-card de MetricsChart (cabecera,
+   gráfico de 214px, eje X, leyenda, pie y nota de ventana). Si esa tarjeta
    cambia de alto, este número deja de cuadrar y vuelve el salto. */
 .vitals-ghost { display: flex; flex-direction: column; gap: 0.85rem; }
-.vital-ghost { height: 356px; border-radius: 8px; }
+.vital-ghost { height: 380px; border-radius: 8px; }
 .inventory-ghost { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.6rem; }
 .status--pending { color: var(--text-muted); }
 .status--online  { color: var(--success); }

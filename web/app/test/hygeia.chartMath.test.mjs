@@ -9,7 +9,7 @@
 
 import {
   SERIES, niceCeil, yRange, yTicks, timeTicks, formatTimeTick, fmtDuration,
-  medianDeltaMs, gapThresholdMs, detectGaps, formatValue, bucketForWindow,
+  medianDeltaMs, gapThresholdMs, detectGaps, splitAtRanges, formatValue, bucketForWindow,
   WINDOW_PRESETS, DEFAULT_WINDOW_MS,
 } from '../src/components/hygeia/chartMath.js'
 
@@ -114,6 +114,16 @@ eq('un tramo parcial tras el cubo no es una caida',
 eq('el hueco inicial de cubos empieza en el borde de ventana',
   detectGaps([150000], thr, 0, 180000, 60000),
   [{ start: 0, end: 150000 }])
+
+console.log('\ntramos del trazado')
+const trace = [{ t: 0 }, { t: 60000 }, { t: 120000 }, { t: 180000 }]
+eq('corta el trazado al atravesar una franja roja',
+  splitAtRanges(trace, [{ start: 60000, end: 120000 }]).map((part) => part.map((p) => p.t)),
+  [[0, 60000], [120000, 180000]])
+eq('corta el trazado en varias franjas',
+  splitAtRanges(trace, [{ start: 0, end: 60000 }, { start: 150000, end: 180000 }])
+    .map((part) => part.map((p) => p.t)),
+  [[0], [60000, 120000], [180000]])
 
 console.log('\nformatValue')
 eq('porcentaje pegado', formatValue({ text: '37', unit: '%' }), '37%')

@@ -251,6 +251,33 @@ export function detectGaps(timesMs, thresholdMs, t0Ms, t1Ms, coveredMs = 0) {
   return gaps
 }
 
+/**
+ * Divide los puntos en tramos cuando el segmento entre dos de ellos cruza
+ * una franja que no debe llevar trazado.
+ *
+ * @param {Array<{t: number}>} points - Puntos ordenados por instante.
+ * @param {Array<{start: number, end: number}>} ranges - Franjas a respetar.
+ * @returns {Array<Array<{t: number}>>} Tramos consecutivos.
+ */
+export function splitAtRanges(points, ranges) {
+  if (!points.length) return []
+
+  const segments = []
+  let segment = [points[0]]
+  for (let i = 1; i < points.length; i += 1) {
+    const previous = points[i - 1]
+    const point = points[i]
+    const crossesRange = ranges.some((range) => previous.t < range.end && point.t > range.start)
+    if (crossesRange) {
+      segments.push(segment)
+      segment = []
+    }
+    segment.push(point)
+  }
+  segments.push(segment)
+  return segments
+}
+
 /* ── Formato de lectura ────────────────────────────────────────────────── */
 
 /**
