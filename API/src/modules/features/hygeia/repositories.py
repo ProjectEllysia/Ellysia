@@ -233,7 +233,7 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
         def bucket_start(bucket_no: int) -> datetime:
             """Inicio del cubo como datetime naive-UTC, desde su número de epoch."""
             return datetime.fromtimestamp(
-                bucket_no * bucket, tz=timezone.utc,
+                int(bucket_no) * bucket, tz=timezone.utc,
             ).replace(tzinfo=None)
 
         return [

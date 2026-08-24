@@ -103,6 +103,17 @@ eq('hueco interior grande y borde derecho', detectGaps([0, 120000, 300000], thr,
   [{ start: 0, end: 120000 }, { start: 120000, end: 300000 }, { start: 300000, end: 420000 }])
 eq('sin datos: toda la ventana es hueco', detectGaps([], thr, 0, 120000),
   [{ start: 0, end: 120000 }])
+eq('hueco entre cubos empieza tras el cubo ocupado',
+  detectGaps([0, 120000], thr, 0, 180000, 60000),
+  [{ start: 60000, end: 120000 }])
+eq('hueco al final empieza tras el ultimo cubo ocupado',
+  detectGaps([0], thr, 0, 180000, 60000),
+  [{ start: 60000, end: 180000 }])
+eq('un tramo parcial tras el cubo no es una caida',
+  detectGaps([0, 60000], thr, 0, 150000, 60000), [])
+eq('el hueco inicial de cubos empieza en el borde de ventana',
+  detectGaps([150000], thr, 0, 180000, 60000),
+  [{ start: 0, end: 150000 }])
 
 console.log('\nformatValue')
 eq('porcentaje pegado', formatValue({ text: '37', unit: '%' }), '37%')

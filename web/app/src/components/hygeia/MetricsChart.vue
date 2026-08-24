@@ -266,7 +266,12 @@ const thresholdMs = computed(() =>
 )
 
 const gaps = computed(() =>
-  times.value.length ? detectGaps(times.value, thresholdMs.value, t0.value, t1.value) : []
+  times.value.length
+    ? detectGaps(
+      times.value, thresholdMs.value, t0.value, t1.value,
+      (props.bucketSec || 0) * 1000,
+    )
+    : []
 )
 
 /* ── Incidencias ── */

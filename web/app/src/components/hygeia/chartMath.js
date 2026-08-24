@@ -202,24 +202,52 @@ export function medianDeltaMs(timesMs) {
  * al empezar la ventana) y el último puede llegar al borde derecho (sigue
  * apagado ahora mismo): ambos son información y se pintan.
  *
- * El umbral es estricto (un hueco debe ser MAYOR que el umbral): una serie
- * espaciada exactamente al umbral — un agente que late justo al límite de
- * lo tolerado — no se declara apagada.
+ * En serie cruda el umbral es estricto (un hueco debe ser MAYOR que el
+ * umbral). En serie agregada se descuenta la duración que cubre cada punto,
+ * de forma que un cubo vacío exacto ya cuenta como ausencia.
  *
  * @param {number[]} timesMs - Instantes con datos (epoch ms), ordenados.
  * @param {number} thresholdMs - Umbral de `gapThresholdMs`.
  * @param {number} t0Ms - Inicio de la ventana.
  * @param {number} t1Ms - Fin de la ventana.
+ * @param {number} coveredMs - Tiempo que cubre cada punto agregado.
  * @returns {Array<{start: number, end: number}>} Huecos, en ms.
  */
-export function detectGaps(timesMs, thresholdMs, t0Ms, t1Ms) {
+export function detectGaps(timesMs, thresholdMs, t0Ms, t1Ms, coveredMs = 0) {
   const gaps = []
   let prev = t0Ms
+  let previousIsPoint = false
+
   for (const t of timesMs) {
-    if (t - prev > thresholdMs) gaps.push({ start: prev, end: t })
+    const gapLength = t - prev - (previousIsPoint ? coveredMs : 0)
+    const isGap = previousIsPoint && coveredMs
+      ? gapLength >= thresholdMs
+      : t - prev > thresholdMs
+    if (isGap) {
+      gaps.push({
+        start: previousIsPoint
+          ? (coveredMs ? Math.max(prev + coveredMs, t0Ms) : prev)
+          : t0Ms,
+        end: t,
+      })
+    }
     prev = t
+    previousIsPoint = true
   }
-  if (t1Ms - prev > thresholdMs) gaps.push({ start: prev, end: t1Ms })
+
+  const tailLength = t1Ms - prev - (previousIsPoint ? coveredMs : 0)
+  const tailIsGap = previousIsPoint && coveredMs
+    ? tailLength >= thresholdMs
+    : t1Ms - prev > thresholdMs
+  if (tailIsGap) {
+    gaps.push({
+      start: previousIsPoint
+        ? (coveredMs ? Math.max(prev + coveredMs, t0Ms) : prev)
+        : t0Ms,
+      end: t1Ms,
+    })
+  }
+
   return gaps
 }
 

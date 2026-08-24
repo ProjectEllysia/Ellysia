@@ -1,7 +1,12 @@
 """Tests unitarios de hygeia.services.aggregation.denormalize (escalares por snapshot)."""
 
+from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import Mock
+
 import pytest
 
+from src.modules.features.hygeia.repositories import AssetSnapshotRepository
 from src.modules.features.hygeia.services.aggregation import denormalize
 
 pytestmark = pytest.mark.unit
@@ -184,3 +189,28 @@ def test_partial_network_readings_sum_what_exists():
 def test_empty_payload_yields_all_none():
     """Defensa en el borde: nada explota si el payload llega vacío."""
     assert all(value is None for value in denormalize({}).values())
+
+
+def test_bucketed_series_accepts_postgres_decimal_bucket_ids():
+    """PostgreSQL devuelve Decimal para FLOOR(EXTRACT(...))."""
+    query = Mock()
+    query.filter.return_value = query
+    query.group_by.return_value = query
+    query.order_by.return_value = query
+    query.limit.return_value = query
+    query.all.return_value = [SimpleNamespace(
+        bucket_id=Decimal("29793074"),
+        cpu_pct=12.5,
+        mem_pct=None,
+        swap_pct=None,
+        load1=None,
+        disk_max_pct=None,
+        net_rx_bps=None,
+        net_tx_bps=None,
+    )]
+
+    repository = AssetSnapshotRepository(session=Mock(query=Mock(return_value=query)))
+
+    points = repository.get_series_bucketed(1, 60)
+
+    assert points[0]["cpuPct"] == 12.5
