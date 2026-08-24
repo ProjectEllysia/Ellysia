@@ -102,6 +102,20 @@ export function fmtRate(bytesPerSec) {
 }
 
 /**
+ * Carga media a 1 minuto (load1), con un decimal fijo.
+ *
+ * No tiene unidad ni techo natural: es un número de procesos en cola de
+ * ejecución, así que la precisión la da el decimal, no la escala.
+ *
+ * @param {number|null} value - Carga media, o null si no la reporta (Windows).
+ * @returns {string} "1.5", "0.0" o "—".
+ */
+export function fmtLoad1(value) {
+  if (isMissing(value)) return '—'
+  return value.toFixed(1)
+}
+
+/**
  * Tiempo encendido en lenguaje natural, con dos unidades de precisión.
  *
  * Se usa sobre el instante de arranque derivado, no sobre el uptime crudo:

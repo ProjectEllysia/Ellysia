@@ -9,7 +9,7 @@ Anomaly y HygeiaTag. Las lecturas se construyen con ``build_repository``
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy import func, update
@@ -159,6 +159,98 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
         rows = query.order_by(AssetSnapshot.received_at.desc()).limit(limit).all()
         rows.reverse()
         return rows
+
+    def get_series_bucketed(
+        self, asset_id: int, bucket: int, since: Optional[datetime] = None,
+        until: Optional[datetime] = None, limit: int = 1000,
+    ) -> List[dict]:
+        """Serie temporal agregada por cubos de ``bucket`` segundos.
+
+        Un punto por cubo con **el máximo** de cada métrica desnormalizada:
+        es el agregado que no se traga un pico puntual dentro de un cubo de
+        ítems — para una gráfica de monitorización, perder el pico sería
+        mentir sobre el tramo. Los cubos sin ningún heartbeat simplemente no
+        existen en el resultado: la ausencia de señal es precisamente el dato
+        que el frontend pinta como tiempo apagado.
+
+        El instante del punto es el **inicio** del cubo (suelo de
+        ``epoch(received_at) / bucket``), así el punto se lee como "el estado
+        de este intervalo" y el eje sigue siendo ``received_at``, el mismo de
+        la serie cruda.
+
+        El agrupado se hace con ``floor(extract(epoch, received_at) / bucket)``,
+        portable entre Postgres y el SQLite de los tests: en SQLite el
+        ``extract`` se compila a ``strftime('%s')`` (división entera, que para
+        valores positivos ya aplana) y en Postgres a doble precisión con
+        ``floor`` — mismo resultado.
+
+        ``disk_max_mount`` se queda fuera del agregado: el montaje asociado al
+        máximo exigiría una función de ventana por cubo para un dato que el
+        gráfico de líneas no consume; llega ``None`` y se documenta en el
+        contrato.
+
+        Args:
+            asset_id: Activo cuya serie se consulta.
+            bucket: Tamaño del cubo en segundos.
+            since: Límite inferior opcional de ``received_at``.
+            until: Límite superior opcional de ``received_at``.
+            limit: Tope de cubos, por defensa (una ventana de 30 días con un
+                cubo de 1 s sería 2,5 millones de filas).
+
+        Returns:
+            Lista de puntos agregados (diccionarios en la misma forma que
+            ``AssetSnapshot.to_dict``), de más antiguo a más reciente.
+        """
+        bucket_id = func.floor(
+            func.extract("epoch", AssetSnapshot.received_at) / bucket
+        ).label("bucket_id")
+
+        query = (
+            self._session.query(
+                bucket_id,
+                func.max(AssetSnapshot.cpu_pct).label("cpu_pct"),
+                func.max(AssetSnapshot.mem_pct).label("mem_pct"),
+                func.max(AssetSnapshot.swap_pct).label("swap_pct"),
+                func.max(AssetSnapshot.load1).label("load1"),
+                func.max(AssetSnapshot.disk_max_pct).label("disk_max_pct"),
+                func.max(AssetSnapshot.net_rx_bps).label("net_rx_bps"),
+                func.max(AssetSnapshot.net_tx_bps).label("net_tx_bps"),
+            )
+            .filter(AssetSnapshot.asset_id == asset_id)
+        )
+        if since is not None:
+            query = query.filter(AssetSnapshot.received_at >= since)
+        if until is not None:
+            query = query.filter(AssetSnapshot.received_at <= until)
+
+        rows = (
+            query.group_by(bucket_id)
+            .order_by(bucket_id.asc())
+            .limit(limit)
+            .all()
+        )
+
+        def bucket_start(bucket_no: int) -> datetime:
+            """Inicio del cubo como datetime naive-UTC, desde su número de epoch."""
+            return datetime.fromtimestamp(
+                bucket_no * bucket, tz=timezone.utc,
+            ).replace(tzinfo=None)
+
+        return [
+            {
+                "collectedAt": bucket_start(row.bucket_id),
+                "receivedAt": bucket_start(row.bucket_id),
+                "cpuPct": row.cpu_pct,
+                "memPct": row.mem_pct,
+                "swapPct": row.swap_pct,
+                "load1": row.load1,
+                "diskMaxPct": row.disk_max_pct,
+                "diskMaxMount": None,
+                "netRxBps": row.net_rx_bps,
+                "netTxBps": row.net_tx_bps,
+            }
+            for row in rows
+        ]
 
     def get_latest(self, asset_id: int) -> Optional[AssetSnapshot]:
         """Devuelve el último snapshot recibido de un activo, o ``None`` si nunca reportó.

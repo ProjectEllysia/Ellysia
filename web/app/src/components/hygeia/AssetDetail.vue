@@ -48,18 +48,44 @@
          role="tabpanel" id="panel-graficas" aria-labelledby="tab-graficas" tabindex="0">
       <section class="section">
         <h4 class="section-title">Constantes</h4>
-        <!-- Una silueta por constante, con el alto real de sus tarjetas: con
-             el "Cargando métricas…" de una línea, la ficha entera daba un salto
-             de varios cientos de píxeles al llegar los datos.
-
-             Solo cuando no hay nada que enseñar todavía: al refrescar a mano,
-             las métricas anteriores siguen en la store, y taparlas con un
-             esqueleto sería un parpadeo gratuito y un salto de más. -->
+        <!-- Silueta de una sola tarjeta de gráfica, con el alto real de la
+             nueva MetricsChart (cabecera, gráfico de 190px, eje X, pie y
+             nota de ventana). Si esa tarjeta cambia de alto, este número
+             deja de cuadrar y vuelve el salto. -->
         <div v-if="metricsLoading && !metrics.length" class="vitals-ghost" aria-busy="true" aria-label="Cargando métricas">
-          <span v-for="n in VITAL_SKELETONS" :key="n" class="skeleton vital-ghost" aria-hidden="true"></span>
+          <span class="skeleton vital-ghost" aria-hidden="true"></span>
         </div>
         <p v-else-if="metricsError && !metrics.length" class="state-msg state-msg--error">{{ metricsError }}</p>
-        <MetricsChart v-else :snapshots="metrics" :truncated="metricsTruncated" />
+        <template v-else>
+          <MetricNav :active="activeMetric" @switch="switchMetric" />
+
+          <div class="window-bar">
+            <span class="window-bar-label">Ventana</span>
+            <div class="window-presets" role="group" aria-label="Ventana temporal del gráfico">
+              <button
+                v-for="w in WINDOW_PRESETS"
+                :key="w.ms"
+                type="button"
+                class="window-preset"
+                :class="{ active: w.ms === metricsWindow }"
+                :aria-pressed="w.ms === metricsWindow"
+                @click="$emit('window-change', w.ms)"
+              >{{ w.label }}</button>
+            </div>
+          </div>
+
+          <Transition name="chart-swap" mode="out-in">
+            <MetricsChart
+              :key="activeMetric"
+              :metric-key="activeMetric"
+              :snapshots="metrics"
+              :window-ms="metricsWindow"
+              :bucket-sec="bucketForWindow(metricsWindow)"
+              :truncated="metricsTruncated"
+              :anomalies="anomalies"
+            />
+          </Transition>
+        </template>
       </section>
     </div>
 
@@ -298,7 +324,9 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import MetricsChart from '@/components/hygeia/MetricsChart.vue'
+import MetricNav from '@/components/hygeia/MetricNav.vue'
 import AssetTabs from '@/components/hygeia/AssetTabs.vue'
+import { WINDOW_PRESETS, bucketForWindow } from '@/components/hygeia/chartMath'
 import { useUtils } from '@/composables/useUtils'
 import { fmtBytes, fmtPct, fmtRate, timeAgo } from './format'
 
@@ -308,6 +336,9 @@ const props = defineProps({
   metricsTruncated: { type: Boolean, default: false },
   metricsLoading: { type: Boolean, default: false },
   metricsError: { type: String, default: null },
+  // Ventana temporal activa del gráfico (ms). La decide la vista, que es
+  // quien pide los datos con ese rango; aquí solo se muestra y se notifica.
+  metricsWindow: { type: Number, default: 60 * 60e3 },
   // Último heartbeat completo: { collectedAt, receivedAt, metrics }. `metrics`
   // llega a null mientras el activo no haya reportado nunca.
   latest: { type: Object, default: null },
@@ -325,22 +356,14 @@ const props = defineProps({
   analyzing: { type: Boolean, default: false },
   anomalies: { type: Array, default: () => [] },
 })
-defineEmits(['ack', 'resolve', 'delete', 'analyze', 'reanalyze', 'view-analysis'])
+defineEmits(['ack', 'resolve', 'delete', 'analyze', 'reanalyze', 'view-analysis', 'window-change'])
 
 const { formatDate } = useUtils()
 
 const TAB_IDS = ['graficas', 'estadisticas', 'inventario', 'anomalias']
 const TAB_STORAGE_PREFIX = 'ellysia:hygeia:lastTab:'
+const METRIC_STORAGE_PREFIX = 'ellysia:hygeia:lastMetric:'
 
-/* Siluetas mientras carga.
-   Cuántas constantes llegarán no se sabe de antemano: MetricsChart dibuja una
-   por serie con datos, de hasta seis posibles (CPU, memoria, swap, disco y red
-   en los dos sentidos), y un agente reporta las que reporta. Cinco es lo
-   medido en un host Linux sin swap (CPU, memoria, disco y red en ambos
-   sentidos), que es el caso corriente. Si acierta poco, el esqueleto sigue
-   reservando mucho más hueco del que reservaba el texto de una línea que había
-   antes, así que el salto baja igual aunque no llegue a cero. */
-const VITAL_SKELETONS = 5
 const SKELETON_ROWS = 6
 
 const activeTab = ref('graficas')
@@ -355,6 +378,27 @@ watch(activeTab, (tab) => {
   const id = props.asset?.id
   if (id) localStorage.setItem(TAB_STORAGE_PREFIX + id, tab)
 })
+
+/* ── Métrica del gráfico ──
+   Igual que la pestaña: se recuerda por activo, y al cambiar de host se
+   recupera la que se miraba en ESE host. La lista de claves válidas es la de
+   `SERIES` (chartMath), no un inventario local. */
+const SERIES_KEYS = ['cpu', 'mem', 'swap', 'disk', 'net-rx', 'net-tx', 'load1']
+const activeMetric = ref('cpu')
+
+watch(() => props.asset?.id, (id) => {
+  const stored = id ? localStorage.getItem(METRIC_STORAGE_PREFIX + id) : null
+  activeMetric.value = SERIES_KEYS.includes(stored) ? stored : 'cpu'
+}, { immediate: true })
+
+watch(activeMetric, (key) => {
+  const id = props.asset?.id
+  if (id) localStorage.setItem(METRIC_STORAGE_PREFIX + id, key)
+})
+
+function switchMetric(key) {
+  activeMetric.value = key
+}
 
 const KEY_TO_TAB = { '1': 'graficas', '2': 'estadisticas', '3': 'inventario', '4': 'anomalias' }
 
@@ -502,11 +546,11 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
-/* 134px es el alto medido de una .vital real de MetricsChart (cabecera,
-   lectura actual, gráfica de 48px, pie de máximos y media). Si esa tarjeta
+/* 356px es el alto medido de una .metric-card de MetricsChart (cabecera,
+   gráfico de 190px, eje X, leyenda, pie y nota de ventana). Si esa tarjeta
    cambia de alto, este número deja de cuadrar y vuelve el salto. */
 .vitals-ghost { display: flex; flex-direction: column; gap: 0.85rem; }
-.vital-ghost { height: 134px; border-radius: 8px; }
+.vital-ghost { height: 356px; border-radius: 8px; }
 .inventory-ghost { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.6rem; }
 .status--pending { color: var(--text-muted); }
 .status--online  { color: var(--success); }
@@ -555,6 +599,42 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
   padding: 0.05rem 0.4rem; border-radius: 999px;
   background: var(--surface-3); color: var(--text-dim);
   font-size: var(--fs-sm); letter-spacing: 0;
+}
+
+/* ── Filtro de ventana del gráfico ── */
+.window-bar {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin-bottom: 0.7rem;
+}
+.window-bar-label {
+  font-size: var(--fs-xs); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted);
+}
+.window-presets {
+  display: flex; gap: 0.2rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 0.18rem;
+}
+.window-preset {
+  padding: 0.22rem 0.6rem;
+  background: none; border: none; border-radius: 6px;
+  color: var(--text-muted); font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+  transition: all 0.2s ease;
+}
+.window-preset:hover { color: var(--text-dim); }
+.window-preset.active { background: var(--surface-3); color: var(--text); }
+.window-preset:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ── Cambio de métrica: la anterior se desvanece y la nueva entra ── */
+.chart-swap-enter-active,
+.chart-swap-leave-active {
+  transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.chart-swap-enter-from { opacity: 0; transform: translateY(10px); }
+.chart-swap-leave-to { opacity: 0; transform: translateY(-10px); }
+@media (prefers-reduced-motion: reduce) {
+  .chart-swap-enter-active,
+  .chart-swap-leave-active { transition: none; }
 }
 
 .tab-panel { display: flex; flex-direction: column; gap: 1.3rem; }

@@ -140,7 +140,9 @@ def get_asset_metrics(args, asset_id):
     """Obtener la serie temporal de métricas escalares de un activo, para el gráfico de la SPA"""
     user = get_current_user()
     manager = HygeiaAssetManager(user)
-    return manager.get_metrics(asset_id, since=args["since"], until=args["until"])
+    return manager.get_metrics(
+        asset_id, since=args["since"], until=args["until"], bucket=args["bucket"],
+    )
 
 
 @hygeia_blp.get("/assets/<int:asset_id>/metrics/latest")

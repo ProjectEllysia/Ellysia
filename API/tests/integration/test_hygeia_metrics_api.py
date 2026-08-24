@@ -12,7 +12,7 @@ construir una serie densa.
 """
 
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -302,6 +302,140 @@ def test_latest_on_asset_without_snapshots_is_200_with_nulls(client, app, regula
     assert body["metrics"] is None
     assert body["collectedAt"] is None
     assert body["receivedAt"] is None
+
+
+# =============================================================================
+# SERIE AGREGADA POR CUBOS (bucket) — ventanas largas sin recortar
+# =============================================================================
+
+def test_series_bucketed_one_point_per_bucket_with_max(client, app, regular_user, auth_headers):
+    """Un punto por cubo, con el máximo de cada métrica dentro del cubo.
+
+    La alineación de los cubos depende del segundo exacto del reloj en el
+    momento de sembrar, así que el recuento y los máximos se calculan contra
+    los propios ``received_at`` sembrados, no contra constantes.
+    """
+    asset_id = _create_asset(app, regular_user.id)
+    stamps = _seed_snapshots(app, asset_id, 300)  # 300 × 15 s ≈ 75 min
+
+    body = client.get(
+        f"/hygeia/assets/{asset_id}/metrics?bucket=60", headers=auth_headers(regular_user)
+    ).get_json()
+
+    assert body["bucket"] == 60
+    assert body["truncated"] is False
+
+    def utc_epoch(t):
+        return t.replace(tzinfo=timezone.utc).timestamp()
+
+    first_bucket = int(utc_epoch(stamps[0]) // 60)
+    expected = int(utc_epoch(stamps[-1]) // 60) - first_bucket + 1
+    assert len(body["snapshots"]) == expected
+
+    # El índice numera la CPU por snapshot (i % 100): cada cubo debe llevar
+    # el valor más alto entre los snapshots que caen dentro de su minuto.
+    for offset, point in enumerate(body["snapshots"]):
+        bucket_no = first_bucket + offset
+        in_bucket = [
+            i % 100 for i, stamp in enumerate(stamps)
+            if int(utc_epoch(stamp) // 60) == bucket_no
+        ]
+        assert point["cpuPct"] == max(in_bucket)
+        # La memoria es constante 20.0: el máximo por cubo la conserva.
+        assert point["memPct"] == 20.0
+
+
+def test_series_bucketed_points_are_bucket_starts_and_ordered(client, app, regular_user, auth_headers):
+    """El instante del punto es el inicio del cubo, y la serie va en orden."""
+    asset_id = _create_asset(app, regular_user.id)
+    stamps = _seed_snapshots(app, asset_id, 10)  # 10 × 15 s = 2,5 min → 3 cubos
+
+    snapshots = client.get(
+        f"/hygeia/assets/{asset_id}/metrics?bucket=60", headers=auth_headers(regular_user)
+    ).get_json()["snapshots"]
+
+    assert len(snapshots) == 3
+    received = [datetime.fromisoformat(s["receivedAt"]).replace(tzinfo=None) for s in snapshots]
+    collected = [datetime.fromisoformat(s["collectedAt"]).replace(tzinfo=None) for s in snapshots]
+
+    # Alineados al minuto (inicio de cubo) y en orden cronológico.
+    assert all(t.second == 0 and t.microsecond == 0 for t in received)
+    assert received == sorted(received)
+    # El primero es el suelo del snapshot más antiguo; el último, el del más reciente.
+    assert received[0] == stamps[0].replace(second=0, microsecond=0)
+    assert received[-1] == stamps[-1].replace(second=0, microsecond=0)
+    # El punto sintético usa el mismo instante en ambos ejes.
+    assert received == collected
+
+
+def test_series_bucketed_omits_empty_buckets(client, app, regular_user, auth_headers):
+    """Un cubo sin heartbeats no existe: la ausencia es el dato de la caída."""
+    asset_id = _create_asset(app, regular_user.id)
+    _seed_snapshots(app, asset_id, 2, step_sec=3600)  # dos puntos a una hora
+
+    snapshots = client.get(
+        f"/hygeia/assets/{asset_id}/metrics?bucket=60", headers=auth_headers(regular_user)
+    ).get_json()["snapshots"]
+
+    assert len(snapshots) == 2
+
+
+def test_series_bucketed_respects_from(client, app, regular_user, auth_headers):
+    """La ventana ``from`` se aplica igual sobre los cubos."""
+    asset_id = _create_asset(app, regular_user.id)
+    stamps = _seed_snapshots(app, asset_id, 300)  # 75 min de histórico
+
+    since = stamps[0] + timedelta(seconds=1800)  # últimos 30 min
+
+    def utc_epoch(t):
+        return t.replace(tzinfo=timezone.utc).timestamp()
+
+    body = client.get(
+        f"/hygeia/assets/{asset_id}/metrics?bucket=60&from={since.isoformat()}",
+        headers=auth_headers(regular_user),
+    ).get_json()
+
+    expected = int(utc_epoch(stamps[-1]) // 60) - int(utc_epoch(since) // 60) + 1
+    assert len(body["snapshots"]) == expected
+    first = datetime.fromisoformat(body["snapshots"][0]["receivedAt"]).replace(tzinfo=None)
+    assert first >= since.replace(second=0, microsecond=0)
+
+
+def test_series_bucketed_drops_disk_max_mount(client, app, regular_user, auth_headers):
+    """En modo agregado el montaje del máximo no viaja: llega null, sin romper."""
+    asset_id = _create_asset(app, regular_user.id)
+    _seed_snapshots(app, asset_id, 5)
+
+    point = client.get(
+        f"/hygeia/assets/{asset_id}/metrics?bucket=60", headers=auth_headers(regular_user)
+    ).get_json()["snapshots"][0]
+
+    assert point["diskMaxPct"] == 72.0
+    assert point["diskMaxMount"] is None
+
+
+def test_series_bucketed_echoes_null_in_raw_mode(client, app, regular_user, auth_headers):
+    """Sin ``bucket``, la respuesta lo dice: la serie es cruda."""
+    asset_id = _create_asset(app, regular_user.id)
+    _seed_snapshots(app, asset_id, 5)
+
+    body = client.get(
+        f"/hygeia/assets/{asset_id}/metrics", headers=auth_headers(regular_user)
+    ).get_json()
+
+    assert body["bucket"] is None
+    assert len(body["snapshots"]) == 5
+
+
+@pytest.mark.parametrize("bucket", ["0", "-30", "1.5", "abc"])
+def test_series_bucketed_rejects_invalid_bucket(client, app, regular_user, auth_headers, bucket):
+    asset_id = _create_asset(app, regular_user.id)
+
+    resp = client.get(
+        f"/hygeia/assets/{asset_id}/metrics?bucket={bucket}", headers=auth_headers(regular_user)
+    )
+
+    assert resp.status_code == 422
 
 
 # =============================================================================
