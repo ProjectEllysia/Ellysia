@@ -106,9 +106,9 @@
           <text
             v-for="t in yTickValues"
             :key="`l${t}`"
-            :x="plotW - 4" :y="yFor(t) + 3"
+            :x="plotDataW + 4" :y="yFor(t) + 3"
             class="axis-y-label"
-            text-anchor="end"
+            text-anchor="start"
           >{{ formatTick(t) }}</text>
         </g>
       </svg>

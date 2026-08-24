@@ -126,8 +126,8 @@ eq('corta el trazado en varias franjas',
   [[0], [60000, 120000], [180000]])
 
 console.log('\ncarril del eje Y')
-eq('reserva espacio para el eje Y en escritorio', plotWidthForAxis(900), 832)
-eq('reserva espacio suficiente para etiquetas de tasa', plotWidthForAxis(300), 232)
+eq('reserva espacio para el eje Y en escritorio', plotWidthForAxis(900), 836)
+eq('reserva espacio suficiente para etiquetas de tasa', plotWidthForAxis(300), 236)
 
 console.log('\nformatValue')
 eq('porcentaje pegado', formatValue({ text: '37', unit: '%' }), '37%')

@@ -285,7 +285,7 @@ export function splitAtRanges(points, ranges) {
  * @returns {number} Anchura del área de datos.
  */
 export function plotWidthForAxis(totalWidth) {
-  return Math.max(0, totalWidth - 68)
+  return Math.max(0, totalWidth - 64)
 }
 
 /* ── Formato de lectura ────────────────────────────────────────────────── */
