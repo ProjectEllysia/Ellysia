@@ -10,7 +10,7 @@ recuperacion: uno de recuperacion no debe canjearse por tokens en
 POST /oauth/mfa/verify ni uno de login disparar el envio del enlace. Las filas
 que ya existan quedan como "login", que es lo unico que habia.
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: d6e7f8a9b0c1
 Revises: c8d9e0f1a2b3
 Create Date: 2026-08-25 12:00:00.000000
 
@@ -22,7 +22,7 @@ from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision: str = "a1b2c3d4e5f6"
+revision: str = "d6e7f8a9b0c1"
 down_revision: Union[str, Sequence[str], None] = "c8d9e0f1a2b3"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
