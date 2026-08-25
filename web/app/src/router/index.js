@@ -146,6 +146,16 @@ const routes = [
     component: () => import('@/views/InvitationLandingView.vue'),
     props: { kind: 'invitation' },
   },
+  {
+    // Destino del enlace de recuperación de contraseña. PÚBLICA por el mismo
+    // motivo que /verificar y /quiz: el token es la única identidad. Cuelga de
+    // un segmento propio y no de /users/... porque todo lo que empieza por
+    // /users/ lo captura el proxy hacia Flask (mismo motivo que /quiz y
+    // /usuarios).
+    path: '/recuperar',
+    name: 'Recover',
+    component: () => import('@/views/RecoverView.vue'),
+  },
   // Páginas informativas públicas (enlazadas desde el pie).
   {
     path: '/sobre',

@@ -27,7 +27,8 @@
     "registration": {
       "enabled": true,
       "verificationTtlHours": 48,
-      "invitationTtlHours": 168
+      "invitationTtlHours": 168,
+      "passwordResetTtlMinutes": 30
     }
   },
   "infrastructure": {
