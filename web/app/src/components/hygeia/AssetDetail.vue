@@ -52,7 +52,7 @@
              nueva MetricsChart (cabecera, gráfico de 214px, eje X, pie y
              nota de ventana). Si esa tarjeta cambia de alto, este número
              deja de cuadrar y vuelve el salto. -->
-        <div v-if="metricsLoading && !metrics.length" class="vitals-ghost" aria-busy="true" aria-label="Cargando métricas">
+        <div v-if="metricsLoading" class="vitals-ghost" aria-busy="true" aria-label="Cargando métricas">
           <span class="skeleton vital-ghost" aria-hidden="true"></span>
         </div>
         <p v-else-if="metricsError && !metrics.length" class="state-msg state-msg--error">{{ metricsError }}</p>
