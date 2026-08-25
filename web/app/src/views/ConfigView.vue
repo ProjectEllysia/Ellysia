@@ -50,6 +50,10 @@
                   <input v-model.number="store.configFlat['general.registration.verificationTtlHours']" type="number" min="1" max="720" class="inp" />
                 </div>
                 <div class="form-group">
+                  <label>Vigencia del enlace de recuperación (minutos)</label>
+                  <input v-model.number="store.configFlat['general.registration.passwordResetTtlMinutes']" type="number" min="5" max="1440" class="inp" />
+                </div>
+                <div class="form-group">
                   <label>Vigencia de la invitación a una organización (horas)</label>
                   <input v-model.number="store.configFlat['general.registration.invitationTtlHours']" type="number" min="1" max="2160" class="inp" />
                 </div>

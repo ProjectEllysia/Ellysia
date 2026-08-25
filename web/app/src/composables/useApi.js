@@ -54,6 +54,8 @@ const FIELD_LABELS = {
   monthlyPriceCents: 'El precio',
   operation: 'La operación',
   token: 'El token',
+  identifier: 'El identificador o correo',
+  newPassword: 'La nueva contraseña',
 }
 
 /**

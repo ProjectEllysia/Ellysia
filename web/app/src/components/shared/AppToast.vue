@@ -5,7 +5,7 @@ const toast = useToastStore()
 
 <template>
   <Teleport to="body">
-    <Transition name="toast" mode="out-in">
+    <Transition name="toast">
       <div v-if="toast.visible" :key="toast.id" class="toast"
            :class="toast.type ? `toast--${toast.type}` : ''"
            role="alert" aria-live="assertive">

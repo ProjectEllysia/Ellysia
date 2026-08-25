@@ -27,6 +27,7 @@ from typing import List, Optional, Tuple
 import jwt
 
 import src.modules.system.config_reading as CR
+from src.modules.shared._exceptions import EllysiaException
 from src.modules.users.exceptions import (
     DatabaseError,
     EmailAlreadyVerifiedError,
@@ -40,6 +41,8 @@ from src.modules.users.exceptions import (
     MfaAlreadyEnabledError,
     MfaNotEnabledError,
     InvalidMfaCodeError,
+    MfaChallengeInvalidError,
+    PasswordResetTokenInvalidError,
 )
 from src.modules.infrastructure import UnitOfWork
 from src.modules.shared import utcnow_naive
@@ -72,6 +75,15 @@ from .services import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Propósito de un MFAChallenge: "login" (POST /oauth/mfa/verify) o
+# "password_reset" (recuperación de contraseña). El challenge de un flujo no
+# debe canjearse en el otro.
+MFA_CHALLENGE_PURPOSE_PASSWORD_RESET = "password_reset"
+
+# Pausa mínima entre dos enlaces de recuperación para una misma cuenta: evita
+# que alguien que conozca el nombre de usuario inunde el buzón de la víctima.
+_PASSWORD_RESET_COOLDOWN_MINUTES = 2
 
 
 def _to_utc_epoch(dt: Optional[datetime]) -> Optional[int]:
@@ -352,6 +364,194 @@ Raises:
             ))
         except Exception as exc:  # pylint: disable=broad-except
             logger.error(f"No se pudo enviar el correo de verificacion a {recipient}: {exc}")
+
+    # =========================================================================
+    # RECUPERACIÓN DE CONTRASEÑA
+    # =========================================================================
+
+    def request_password_reset(self, identifier: str) -> dict:
+        """Fase 1 de la recuperación: dado un identificador (usuario o correo),
+        decide qué hace falta para mandar el enlace.
+
+        - Cuenta inexistente: responde igual que el éxito — el endpoint no debe
+          servir de oráculo de usuarios registrados.
+        - Con MFA: se emite un challenge de propósito "password_reset"; el
+          enlace no sale hasta que el segundo factor se verifica. Un buzón
+          robado no basta para resetear una cuenta con MFA.
+        - Sin MFA: se minta el token y se envía el correo directamente.
+
+        Returns:
+            ``{"sent": True}`` o ``{"mfaRequired": True, "challengeToken": ...}``.
+        """
+        user = build_repository(UserRepository).get_by_email_or_username(identifier.strip())
+        if user is None:
+            return {"sent": True}
+
+        if MFAManager().is_enabled(user.id):
+            challenge_token = OAuthTokenManager().create_mfa_challenge(
+                user.id, purpose=MFA_CHALLENGE_PURPOSE_PASSWORD_RESET,
+            )
+            logger.info(f"Recuperacion: MFA requerido para usuario {user.id}")
+            return {"mfaRequired": True, "challengeToken": challenge_token}
+
+        self._mint_and_send_password_reset(user.id)
+        return {"sent": True}
+
+    def confirm_password_reset_mfa(
+        self,
+        challenge_token: str,
+        code: Optional[str] = None,
+        recovery_code: Optional[str] = None,
+    ) -> dict:
+        """Fase 2 con MFA: valida el challenge de recuperación y el segundo
+        factor, y solo entonces minta el enlace y lo envía.
+
+        Raises:
+            MfaChallengeInvalidError: challenge ausente, caducado o agotado.
+            InvalidMfaCodeError: el factor no verifica (y suma un intento).
+        """
+        oauth = OAuthTokenManager()
+        user_id = oauth.verify_mfa_challenge(
+            challenge_token, purpose=MFA_CHALLENGE_PURPOSE_PASSWORD_RESET,
+        )
+        if user_id is None:
+            raise MfaChallengeInvalidError(
+                user_message="La verificacion ha expirado. Vuelve a solicitar la recuperacion.",
+            )
+
+        verified = MFAManager().verify_totp_or_recovery(
+            user_id, code=code, recovery_code=recovery_code,
+        )
+        if not verified:
+            oauth.register_mfa_challenge_failure(challenge_token)
+            logger.warning(f"Codigo MFA invalido en recuperacion para usuario {user_id}")
+            raise InvalidMfaCodeError()
+
+        oauth.consume_mfa_challenge(challenge_token)
+        self._mint_and_send_password_reset(user_id)
+        return {"sent": True}
+
+    def _mint_and_send_password_reset(self, user_id: int) -> None:
+        """Genera un token de recuperación, guarda su hash y envía el enlace.
+
+        Anti-bombardeo de correo: si ya hay un enlace vivo emitido hace menos
+        de ``_PASSWORD_RESET_COOLDOWN_MINUTES``, no se re-minta ni se reenvía —
+        el usuario ya tiene el enlace en el buzón. Pasada la pausa, un enlace
+        nuevo invalida el anterior.
+        """
+        token = generate_opaque_token()
+        ttl_minutes = CR.registration_config().password_reset_ttl_minutes
+        now = utcnow_naive()
+        expires_at = now + timedelta(minutes=ttl_minutes)
+        cooldown = timedelta(minutes=_PASSWORD_RESET_COOLDOWN_MINUTES)
+
+        with UnitOfWork() as uow:
+            repo = UserRepository(uow)
+            user = repo.get_by_id(user_id)
+            if user is None:
+                raise UserNotFoundError(user_id)
+
+            previous_expires = user.password_reset_expires_at
+            if previous_expires is not None:
+                previous_created = previous_expires - timedelta(minutes=ttl_minutes)
+                if now - previous_created < cooldown:
+                    return
+
+            repo.set_password_reset(user.id, hash_opaque_token(token), expires_at)
+            recipient, name = user.email, user.first_name
+
+        self._send_password_reset_email(recipient, name, token, ttl_minutes)
+
+    @staticmethod
+    def _send_password_reset_email(
+        recipient: str, name: str, token: str, ttl_minutes: int,
+    ) -> None:
+        """Manda el correo con el enlace de recuperación. Los fallos se
+        registran, no se propagan: el usuario puede pedir otro enlace."""
+        reset_url = f"{CR.general_config().public_url}/recuperar?token={token}"
+        try:
+            html, text = render_email(
+                "password_reset",
+                recipient_name=name,
+                reset_url=reset_url,
+                ttl_minutes=ttl_minutes,
+            )
+            build_mailer("accounts").send(EmailMessage(
+                to=recipient,
+                to_name=name,
+                subject="Recupera tu clave de Ellysia",
+                html_body=html,
+                text_body=text,
+            ))
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error(f"No se pudo enviar el correo de recuperacion a {recipient}: {exc}")
+
+    def check_password_reset_token(self, token: str) -> bool:
+        """True si el enlace de recuperación sigue vivo (existe y no caducó).
+
+        No consume el token: quien llama con el token en la mano ya lo tiene;
+        comprobarlo solo decide qué pantalla enseñar.
+        """
+        with UnitOfWork() as uow:
+            repo = UserRepository(uow)
+            user = repo.get_by_password_reset_hash(hash_opaque_token(token))
+            if user is None or user.password_reset_expires_at is None:
+                return False
+            return utcnow_naive() < user.password_reset_expires_at
+
+    def clear_pending_password_reset(self, user_id: int) -> None:
+        """Anula un enlace de recuperación pendiente.
+
+        Un login con la contraseña correcta demuestra que la recuperación ya
+        no hace falta: el enlace pedido "por si acaso" no debe quedar vivo en
+        un buzón por si alguien más lo tiene.
+        """
+        with UnitOfWork() as uow:
+            UserRepository(uow).clear_password_reset(user_id)
+
+    def complete_password_reset(self, token: str, new_password: str) -> int:
+        """Consume el enlace de recuperación y cambia la contraseña.
+
+        El enlace vale una sola vez: al consumirlo se borran hash y caducidad.
+        La clave nueva no puede ser igual a la actual — un reset no debe servir
+        para "reconfirmar" una credencial que ya funciona.
+
+        Returns:
+            El id del usuario, para que el endpoint revoque sus tokens.
+
+        Raises:
+            PasswordResetTokenInvalidError: si el enlace no existe, se usó o
+                caducó. Los tres casos comparten error para no revelar cuáles
+                existieron.
+        """
+        with UnitOfWork() as uow:
+            repo = UserRepository(uow)
+            user = repo.get_by_password_reset_hash(hash_opaque_token(token))
+
+            if user is None or user.password_reset_expires_at is None:
+                raise PasswordResetTokenInvalidError()
+            if utcnow_naive() >= user.password_reset_expires_at:
+                raise PasswordResetTokenInvalidError()
+
+            same_password, _ = verify_password(user.password_hash, new_password)
+            if same_password:
+                raise EllysiaException(
+                    "La nueva contraseña es igual a la actual",
+                    status_code=400,
+                    user_message="La nueva clave no puede ser igual a la actual.",
+                )
+
+            user.password_hash = hash_password(new_password)
+            user.password_salt = ""
+            user.password_changed_at = utcnow_naive()
+            # El reset también satisface la obligación de cambiar la clave de
+            # las cuentas nacidas por invitación.
+            user.must_change_password = False
+            repo.clear_password_reset(user.id)
+            user_id = user.id
+
+        logger.info(f"Contrasenya restablecida por enlace para usuario {user_id}")
+        return user_id
 
     # =========================================================================
     # QUERIES
@@ -1018,14 +1218,18 @@ class OAuthTokenManager:
     # MFA CHALLENGE
     # =========================================================================
 
-    def create_mfa_challenge(self, user_id: int) -> str:
+    def create_mfa_challenge(self, user_id: int, purpose: str = "login") -> str:
         """
         Issue a short-lived opaque challenge after a password grant succeeds
         for a user with MFA enabled. Exchanged for real tokens at
         POST /oauth/mfa/verify once the user proves the second factor.
 
+        ``purpose`` marca el flujo que emite el challenge ("login" o
+        "password_reset"): el de un flujo no debe canjearse en el otro.
+
         Args:
             user_id: User primary key.
+            purpose: "login" (por defecto) o "password_reset".
 
         Returns:
             Opaque challenge token string (not a JWT).
@@ -1037,12 +1241,14 @@ class OAuthTokenManager:
 
         with UnitOfWork() as uow:
             MFARepository(uow).save_challenge(
-                MFAChallenge(token=token, user_id=user_id, expires_at=expires_at)
+                MFAChallenge(
+                    token=token, user_id=user_id, expires_at=expires_at, purpose=purpose,
+                )
             )
 
         return token
 
-    def verify_mfa_challenge(self, token: str) -> Optional[int]:
+    def verify_mfa_challenge(self, token: str, purpose: Optional[str] = None) -> Optional[int]:
         """
         Return the user_id for a still-valid MFA challenge (not expired, under
         the max attempt count), or None otherwise.
@@ -1053,11 +1259,12 @@ class OAuthTokenManager:
 
         Args:
             token: Opaque challenge token string.
+            purpose: Filtra por propósito del challenge; None acepta cualquiera.
 
         Returns:
             User primary key if valid, None otherwise.
         """
-        challenge = build_repository(MFARepository).get_challenge(token)
+        challenge = build_repository(MFARepository).get_challenge(token, purpose=purpose)
         max_attempts = CR.mfa_config().max_challenge_attempts
         if challenge is None or not challenge.is_valid(max_attempts):
             return None

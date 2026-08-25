@@ -126,6 +126,10 @@
           </button>
 
           <p class="signup-hint">
+            <button type="button" class="link-btn" @click="enterRecover">
+              ¿Olvidaste tu clave?
+            </button>
+            <span class="hint-sep">·</span>
             ¿No tienes cuenta?
             <button type="button" class="link-btn" @click="mode = 'register'">
               Regístrate gratis y prueba Ellysia
@@ -191,6 +195,46 @@
             <button type="button" class="link-btn" @click="mode = 'login'">
               Ya tengo cuenta
             </button>
+          </p>
+        </form>
+
+        <!-- ───────── Recuperar clave ───────── -->
+        <form v-else-if="!mfaStep && mode === 'recover'" novalidate @submit.prevent="handleRecoverSubmit">
+          <p class="recover-hint">
+            Te enviaremos un enlace para restablecer tu clave. Si tu cuenta
+            tiene verificación en dos pasos, te la pediremos antes de enviarlo.
+          </p>
+
+          <div class="field" :class="{ focused: focus === 'recover-id' }">
+            <label for="recover-identifier">Identificador o correo</label>
+            <div class="field-box">
+              <svg class="field-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <circle cx="12" cy="8" r="4" />
+                <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
+              </svg>
+              <input
+                id="recover-identifier"
+                v-model="recover.identifier"
+                type="text"
+                placeholder="nombre de usuario o correo"
+                autocomplete="username"
+                spellcheck="false"
+                required
+                :disabled="loading"
+                @focus="focus = 'recover-id'"
+                @blur="focus = ''"
+              />
+            </div>
+          </div>
+
+          <button type="submit" class="submit" :class="{ loading }" :disabled="loading">
+            <span class="submit-label">{{ loading ? 'Enviando…' : 'Recuperar mi clave' }}</span>
+            <span class="submit-arrow" aria-hidden="true">→</span>
+            <span class="submit-spin" aria-hidden="true"></span>
+          </button>
+
+          <p class="signup-hint">
+            <button type="button" class="link-btn" @click="mode = 'login'">← Volver a entrar</button>
           </p>
         </form>
 
@@ -291,18 +335,24 @@ const granted = ref(false)
 const mfaStep = ref(false)
 
 /**
- * 'login' o 'register'. Un paso más del mismo formulario, como el de MFA, y no
- * una vista aparte: el alta pública es la puerta de entrada al plan gratuito, y
- * mandar a otra pantalla para volver aquí sobra.
+ * 'login', 'register' o 'recover'. Un paso más del mismo formulario, como el
+ * de MFA, y no una vista aparte: el alta pública es la puerta de entrada al
+ * plan gratuito, y mandar a otra pantalla para volver aquí sobra.
  *
  * `/login?registro` arranca directamente en el alta. Sin esto, los CTA de la
  * portada que dicen "Crear cuenta" aterrizaban en el formulario de entrar y
  * había que encontrar el enlace pequeño de abajo: el embudo se rompía justo en
  * el paso que más importa. Se comprueba con `!== undefined` para que valga
- * tanto `?registro` como `?registro=1`.
+ * tanto `?registro` como `?registro=1`. Lo mismo vale para `?recuperar`, que
+ * arranca en la recuperación de clave.
  */
-const mode = ref(route.query.registro !== undefined ? 'register' : 'login')
+const mode = ref(
+  route.query.registro !== undefined ? 'register'
+    : route.query.recuperar !== undefined ? 'recover'
+    : 'login',
+)
 const reg = ref({ username: '', email: '', first_name: '', last_name: '', password: '' })
+const recover = ref({ identifier: '' })
 
 /**
  * Alta pública. Al terminar NO se inicia sesión sola: la cuenta nace sin el
@@ -342,6 +392,96 @@ async function handleRegister() {
     loading.value = false
   }
 }
+
+/**
+ * Recuperación de clave. El servidor responde siempre lo mismo — exista la
+ * cuenta o no — para que el formulario no sirva de oráculo; si la cuenta
+ * tiene MFA, primero devuelve un challenge y el enlace no sale hasta que el
+ * segundo factor verifica.
+ */
+function enterRecover() {
+  recover.value.identifier = username.value.trim()
+  username.value = ''
+  password.value = ''
+  showPassword.value = false
+  mode.value = 'recover'
+}
+
+function finishRecover() {
+  mfaStep.value = false
+  mfaChallengeToken.value = ''
+  mfaCode.value = ''
+  useRecovery.value = false
+  recover.value.identifier = ''
+  mode.value = 'login'
+}
+
+async function handleRecoverSubmit() {
+  alertMsg.value = ''
+  const identifier = recover.value.identifier.trim()
+  if (!identifier) {
+    showAlert('Introduce tu identificador o correo.', 'error')
+    document.getElementById('recover-identifier')?.focus()
+    return
+  }
+
+  loading.value = true
+  try {
+    const res = await fetch('/users/password-reset/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      showAlert(
+        validationMessage(body) || body.error_description || 'No se pudo procesar la solicitud.',
+        'error',
+      )
+      return
+    }
+
+    if (body.mfaRequired) {
+      mfaChallengeToken.value = body.challengeToken
+      mfaStep.value = true
+      return
+    }
+
+    showAlert(
+      'Si la cuenta existe, te hemos enviado un enlace para restablecer tu clave. Revisa tu correo.',
+      'success',
+    )
+    finishRecover()
+  } catch {
+    showAlert('No se pudo conectar con el servidor.', 'error')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function submitRecoverMfa(value) {
+  try {
+    const res = await fetch('/users/password-reset/mfa', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        challengeToken: mfaChallengeToken.value,
+        ...(useRecovery.value ? { recoveryCode: value } : { code: value }),
+      }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(body.error_description || 'El código no es válido o la verificación caducó.')
+    }
+    showAlert(
+      'Si la cuenta existe, te hemos enviado un enlace para restablecer tu clave. Revisa tu correo.',
+      'success',
+    )
+    finishRecover()
+  } finally {
+    loading.value = false
+  }
+}
 const mfaChallengeToken = ref('')
 const mfaCode = ref('')
 const useRecovery = ref(false)
@@ -350,8 +490,7 @@ const reduceMotion =
   typeof window !== 'undefined' &&
   window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
-/* ── detección de Bloq Mayús ── */
-function checkCaps(e) {
+/* ── detección de Bloq Mayús ── */function checkCaps(e) {
   if (typeof e.getModifierState === 'function') {
     capsOn.value = e.getModifierState('CapsLock')
   }
@@ -411,6 +550,10 @@ async function handleMfaSubmit() {
 
   loading.value = true
   try {
+    if (mode.value === 'recover') {
+      await submitRecoverMfa(value)
+      return
+    }
     await auth.verifyMfa(
       mfaChallengeToken.value,
       useRecovery.value ? { recoveryCode: value } : { code: value },
@@ -465,7 +608,9 @@ onMounted(() => {
   // En modo registro el campo `username` no existe (los del alta van con
   // prefijo `reg-`), así que el foco caía en la nada al entrar por /login?registro.
   if (!reduceMotion) {
-    const primerCampo = mode.value === 'register' ? 'reg-username' : 'username'
+    const primerCampo = mode.value === 'register' ? 'reg-username'
+      : mode.value === 'recover' ? 'recover-identifier'
+      : 'username'
     document.getElementById(primerCampo)?.focus()
   }
 })
@@ -688,6 +833,12 @@ onBeforeUnmount(() => {})
 @keyframes live-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.7); } }
 .foot-ver { opacity: 0.8; letter-spacing: 0.04em; }
 .signup-hint { padding: 0.5rem 0 }
+.hint-sep { color: var(--text-muted); margin: 0 0.25rem; }
+.recover-hint {
+  margin: 0 0 1.2rem;
+  font-family: var(--font-body); font-size-adjust: var(--fsa-body);
+  font-size: var(--fs-sm); color: var(--text-dim);
+}
 
 
 /* ═══════════ Umbral cruzado ═══════════ */

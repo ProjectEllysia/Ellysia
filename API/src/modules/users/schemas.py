@@ -212,3 +212,51 @@ class DeletionPreviewSchema(Schema):
 
 class DeleteAccountRequestSchema(Schema):
     password = fields.String(required=True)
+
+
+# =========================================================================
+# RECUPERACIÓN DE CONTRASEÑA
+# =========================================================================
+
+
+class PasswordResetRequestSchema(Schema):
+    """Fase 1: solo el identificador. El segundo factor, si la cuenta lo
+    tiene, vive en PasswordResetMfaSchema — endpoints separados para poder
+    aplicarles rate limits distintos (la fase 2 admite reintentos, la 1 no).
+    """
+
+    identifier = fields.String(required=True)
+
+
+class PasswordResetMfaSchema(Schema):
+    challengeToken = fields.String(required=True)
+    code = fields.String(allow_none=True)
+    recoveryCode = fields.String(allow_none=True)
+
+    @validates_schema
+    def validate_code_or_recovery(self, data, **kwargs):
+        if not data.get("code") and not data.get("recoveryCode"):
+            raise ValidationError("Se requiere 'code' o 'recoveryCode'")
+
+
+class PasswordResetRequestResponseSchema(Schema):
+    # "sent" en TODAS las respuestas de la fase 1 (cuenta exista o no), para
+    # que el endpoint no sirva de oráculo de usuarios registrados.
+    sent = fields.Boolean(required=False)
+    # Presentes en vez de "sent" cuando la cuenta tiene MFA: primero el
+    # segundo factor, y solo entonces se envía el enlace.
+    mfaRequired = fields.Boolean(required=False)
+    challengeToken = fields.String(required=False)
+
+
+class PasswordResetCheckRequestSchema(Schema):
+    token = fields.String(required=True)
+
+
+class PasswordResetCheckResponseSchema(Schema):
+    valid = fields.Boolean()
+
+
+class PasswordResetCompleteRequestSchema(Schema):
+    token = fields.String(required=True)
+    newPassword = fields.String(required=True, validate=validate.Length(min=8, max=256))

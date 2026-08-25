@@ -208,6 +208,7 @@ class HygeiaAssetManager:
 
     def get_metrics(
         self, asset_id: int, since: Optional[object] = None, until: Optional[object] = None,
+        bucket: Optional[int] = None,
     ) -> dict:
         """
         Devuelve la serie temporal de métricas de un activo del usuario, para
@@ -220,13 +221,22 @@ class HygeiaAssetManager:
         interfaz) o solo tiene sentido "ahora" (procesos, núcleos) se sirve
         por ``get_latest_metrics``.
 
+        Con ``bucket`` (segundos) la serie viaja agregada — un punto por cubo
+        con el máximo de cada métrica (``get_series_bucketed``) — para que
+        ventanas largas no se recorten contra el tope de puntos: a 15 s de
+        heartbeat, 24 h son 5.760 puntos y 7 días 40.320, pero 288 y 336
+        cubos respectivamente. Sin ``bucket``, el camino es el de siempre.
+
         Args:
             asset_id: Activo cuya serie se consulta.
             since: Límite inferior opcional de ``receivedAt``.
             until: Límite superior opcional de ``receivedAt``.
+            bucket: Segundos del cubo de agregación; ``None`` para serie cruda.
 
         Returns:
-            Diccionario con ``snapshots`` y ``truncated``. Este último avisa
+            Diccionario con ``snapshots``, ``truncated`` y ``bucket``. Este
+            último ecoa el cubo usado (``None`` en serie cruda) para que el
+            consumidor rotule la ventana con honestidad. ``truncated`` avisa
             de que el histórico da para más puntos de los devueltos, para que
             la SPA pueda rotular la ventana con honestidad en vez de
             presentar un recorte silencioso como si fuera la serie entera.
@@ -238,12 +248,20 @@ class HygeiaAssetManager:
 
         limit = CR.hygeia_limits().max_series_points
         snapshot_repo = build_repository(AssetSnapshotRepository)
-        snapshots = snapshot_repo.get_series(
-            asset_id, since=since, until=until, limit=limit,
-        )
+        if bucket:
+            snapshots = snapshot_repo.get_series_bucketed(
+                asset_id, bucket, since=since, until=until, limit=limit,
+            )
+        else:
+            raw = snapshot_repo.get_series(
+                asset_id, since=since, until=until, limit=limit,
+            )
+            snapshots = [snapshot.to_dict() for snapshot in raw]
+
         return {
-            "snapshots": [snapshot.to_dict() for snapshot in snapshots],
+            "snapshots": snapshots,
             "truncated": len(snapshots) == limit,
+            "bucket": bucket,
         }
 
     def get_latest_metrics(self, asset_id: int) -> dict:

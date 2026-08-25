@@ -32,6 +32,7 @@
           :metrics-truncated="store.state.metricsTruncated"
           :metrics-loading="store.state.metricsLoading"
           :metrics-error="store.state.metricsError"
+          :metrics-window="store.state.metricsWindowMs"
           :latest="store.state.latest"
           :latest-error="store.state.latestError"
           :inventory="store.state.inventory"
@@ -47,6 +48,7 @@
           @analyze="handleAnalyze"
           @reanalyze="pendingReanalyze = true"
           @view-analysis="showAnalysisModal = true"
+          @window-change="handleWindowChange"
         />
       </section>
     </main>
@@ -152,6 +154,7 @@ import InventoryReportModal from '@/components/hygeia/InventoryReportModal.vue'
 import InventoryAnalysisModal from '@/components/hygeia/InventoryAnalysisModal.vue'
 import { usePolling } from '@/composables/usePolling'
 import { useApi } from '@/composables/useApi'
+import { WINDOW_PRESETS } from '@/components/hygeia/chartMath'
 import { useHygeiaStore } from '@/stores/hygeiaStore'
 import { useHygeiaAlertsStore } from '@/stores/hygeiaAlertsStore'
 import { useHygeiaTagsStore } from '@/stores/hygeiaTagsStore'
@@ -203,10 +206,31 @@ const taggingAsset = computed(() =>
  */
 const mobilePane = ref('list')
 
+/**
+ * Ventana temporal del gráfico, recordada por activo (mismo patrón que la
+ * pestaña dentro de AssetDetail). Al elegir un host se recupera la ventana
+ * que se miraba en ESE host; los presets válidos viven en `chartMath`.
+ */
+const WINDOW_STORAGE_PREFIX = 'ellysia:hygeia:lastWindow:'
+
+function restoreWindowMs(id) {
+  if (!id) return null
+  const stored = Number(localStorage.getItem(WINDOW_STORAGE_PREFIX + id))
+  return WINDOW_PRESETS.some((w) => w.ms === stored) ? stored : null
+}
+
 async function handleSelect(id) {
-  store.selectAsset(id)
+  store.selectAsset(id, { windowMs: restoreWindowMs(id) })
   mobilePane.value = 'detail'
   await alerts.fetchAlerts({ assetId: id })
+}
+
+/** Cambio de ventana en la pestaña Gráficas: re-pide al instante y la recuerda. */
+function handleWindowChange(ms) {
+  const id = store.state.selectedId
+  if (!id) return
+  store.fetchMetrics(id, { windowMs: ms })
+  localStorage.setItem(WINDOW_STORAGE_PREFIX + id, String(ms))
 }
 
 async function handleCreate({ hostname, os, isPersistent }) {
