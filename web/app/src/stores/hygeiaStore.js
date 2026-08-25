@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { reactive } from 'vue'
 import { useApi } from '@/composables/useApi'
+import { DEFAULT_WINDOW_MS, bucketForWindow } from '@/components/hygeia/chartMath'
 
 /**
  * Store de activos monitorizados de Hygeia: alta, listado, baja, rotación
@@ -17,6 +18,10 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     assets: [], loading: false, error: null,
     selectedId: null,
     metrics: [], metricsTruncated: false, metricsLoading: false, metricsError: null,
+    // Ventana temporal activa de la serie (ms): la guarda el store para que
+    // el sondeo periódico re-pida siempre el mismo tramo que eligió el
+    // usuario, sin tener que viajar por cada llamada.
+    metricsWindowMs: DEFAULT_WINDOW_MS,
     latest: null, latestError: null,
     inventory: [], inventoryCollectedAt: null, inventoryLoading: false, inventoryError: null,
     // Resumen del último análisis del inventario con Lybra (Fase I). `scanId`
@@ -147,7 +152,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
   }
 
   /** Selecciona un activo para ver su detalle y carga sus métricas. */
-  function selectAsset(id) {
+  function selectAsset(id, { windowMs = null } = {}) {
     state.selectedId = id
     state.metrics = []
     state.metricsTruncated = false
@@ -159,20 +164,37 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     state.inventoryError = null
     state.analysis = null
     state.analysisError = null
-    if (id) { fetchMetrics(id); fetchLatest(id); fetchInventory(id); fetchAnalysis(id) }
+    if (id) {
+      fetchMetrics(id, { windowMs })
+      fetchLatest(id)
+      fetchInventory(id)
+      fetchAnalysis(id)
+    }
   }
 
   /**
    * Carga la serie temporal de métricas escalares del activo dado.
    *
+   * La serie se pide siempre en la ventana activa (`windowMs` desde el
+   * momento actual hacia el pasado): el sondeo no pasa ventana y reutiliza
+   * la que el usuario dejó elegida, y un cambio de ventana explícito la
+   * actualiza y re-pide al instante. Las ventanas largas viajan agregadas
+   * por cubos (`bucket`), para no chocar con el tope de puntos del servidor.
+   *
    * @param {number} id - Id del activo.
    * @param {object} [opts]
    * @param {boolean} [opts.silent=false] - No levanta el flag de carga (ver `fetchAssets`).
+   * @param {number|null} [opts.windowMs] - Ventana en ms; null reutiliza la activa.
    */
-  async function fetchMetrics(id, { silent = false } = {}) {
+  async function fetchMetrics(id, { silent = false, windowMs = null } = {}) {
+    if (windowMs !== null && windowMs !== undefined) state.metricsWindowMs = windowMs
     if (!silent) state.metricsLoading = true
     try {
-      const res = await apiFetch(`/hygeia/assets/${id}/metrics`)
+      const params = new URLSearchParams()
+      params.set('from', new Date(Date.now() - state.metricsWindowMs).toISOString())
+      const bucket = bucketForWindow(state.metricsWindowMs)
+      if (bucket) params.set('bucket', String(bucket))
+      const res = await apiFetch(`/hygeia/assets/${id}/metrics?${params}`)
       // La selección puede haber cambiado mientras la petición volaba: sin
       // esta guarda, la respuesta del activo anterior pisaría la del actual.
       if (state.selectedId !== id) return
@@ -283,6 +305,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
       assets: [], loading: false, error: null,
       selectedId: null,
       metrics: [], metricsTruncated: false, metricsLoading: false, metricsError: null,
+      metricsWindowMs: DEFAULT_WINDOW_MS,
       latest: null, latestError: null,
       inventory: [], inventoryCollectedAt: null, inventoryLoading: false, inventoryError: null,
       analysis: null, analysisLoading: false, analyzing: false, analysisError: null,

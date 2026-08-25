@@ -1,308 +1,577 @@
 <template>
-  <div class="vitals">
-    <div v-if="!vitals.length" class="vitals-empty">
-      <p class="empty-title">Sin señal</p>
-      <p class="empty-sub">En cuanto el agente envíe su primer heartbeat, el pulso del activo aparecerá aquí.</p>
+  <article v-if="metric" class="metric-card" :class="`metric--${metric.key}`"
+           :style="{ '--metric-color': metric.color }">
+    <header class="metric-head">
+      <h5 class="metric-name">{{ metric.name }}</h5>
+      <p v-if="current" class="metric-now">
+        <span class="now-value">{{ current.text }}</span><span
+          v-if="current.unit"
+          class="now-unit"
+          :class="{ 'now-unit--wide': current.unit !== '%' }"
+        >{{ current.unit }}</span>
+      </p>
+    </header>
+
+    <!-- El gráfico manda sobre la tarjeta: el eje Y con techo natural (los
+         porcentajes no escalan al máximo registrado), el eje X en tiempo
+         real para localizar spikes, y las bandas de tiempo sin señal para
+         que una caída se vea como caída y no como un salto entre puntos. -->
+    <div ref="plotEl" class="metric-plot" @pointermove="onPointerMove" @pointerleave="onPointerLeave">
+      <svg
+        v-if="points.length"
+        class="plot-svg"
+        :width="plotW"
+        :height="SVG_H"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <g class="grid">
+          <line
+            v-for="t in yTickValues"
+            :key="`y${t}`"
+            :x1="0" :x2="plotDataW" :y1="yFor(t)" :y2="yFor(t)"
+            class="grid-line"
+          />
+          <line
+            v-for="(t, i) in xTickValues"
+            :key="`x${i}`"
+            :x1="xFor(t)" :x2="xFor(t)" :y1="PLOT_TOP" :y2="PLOT_BOTTOM"
+            class="grid-line grid-line--x"
+          />
+        </g>
+
+        <!-- Bandas de tiempo sin señal: huecos sin heartbeats por encima del
+             umbral adaptativo, incluidos los bordes de la ventana. -->
+        <g v-if="gaps.length" class="gaps">
+          <rect
+            v-for="(g, i) in gaps"
+            :key="`g${i}`"
+            :x="xFor(g.start)"
+            :width="Math.max(1, xFor(g.end) - xFor(g.start))"
+            :y="PLOT_TOP" :height="PLOT_H"
+            class="gap-band"
+          >
+            <title>Sin señal: {{ fmtDuration(g.end - g.start) }}</title>
+          </rect>
+        </g>
+
+        <!-- Incidencias registradas: host_down como banda (el tramo exacto
+             que el servidor declaró caído), el resto como marca vertical en
+             el instante de apertura. -->
+        <g v-if="anomalyBands.length || anomalyMarks.length" class="anomaly-layer">
+          <rect
+            v-for="(a, i) in anomalyBands"
+            :key="`ab${i}`"
+            :x="xFor(a.start)"
+            :width="Math.max(1, xFor(a.end) - xFor(a.start))"
+            :y="PLOT_TOP" :height="PLOT_H"
+            class="anomaly-band"
+          >
+            <title>{{ a.title }}</title>
+          </rect>
+          <line
+            v-for="(m, i) in anomalyMarks"
+            :key="`am${i}`"
+            :x1="xFor(m.at)" :x2="xFor(m.at)" :y1="PLOT_TOP" :y2="PLOT_BOTTOM"
+            class="anomaly-mark"
+          >
+            <title>{{ m.title }}</title>
+          </line>
+        </g>
+
+        <template v-for="(segment, i) in plotSegments" :key="`segment${i}`">
+          <polygon v-if="segment.area" :points="segment.area" class="spark-area" />
+          <polyline
+            v-if="segment.line"
+            :key="`${drawKey}-${i}`"
+            :points="segment.line"
+            class="spark-line"
+            :class="{ draw: drawKey > 0 }"
+            pathLength="1"
+            vector-effect="non-scaling-stroke"
+          />
+          <circle
+            v-else-if="segment.points.length === 1"
+            :cx="segment.points[0].x" :cy="segment.points[0].y" r="3.5"
+            class="spark-dot"
+          />
+        </template>
+
+        <g v-if="hover" class="crosshair">
+          <line :x1="hover.x" :x2="hover.x" :y1="PLOT_TOP" :y2="PLOT_BOTTOM" class="crosshair-line" />
+          <circle :cx="hover.x" :cy="hover.y" r="3.5" class="crosshair-dot" />
+        </g>
+
+        <g class="axis-y">
+          <text
+            v-for="t in yTickValues"
+            :key="`l${t}`"
+            :x="plotDataW + 4" :y="yFor(t) + 3"
+            class="axis-y-label"
+            text-anchor="start"
+          >{{ formatTick(t) }}</text>
+        </g>
+      </svg>
+
+      <div v-if="hover" class="tooltip" :style="{ left: tooltipLeft + 'px', top: tooltipTop + 'px' }">
+        <span class="tooltip-time">{{ formatTooltipTime(hover.t) }}</span>
+        <span class="tooltip-value">{{ hover.text }}</span>
+      </div>
     </div>
 
-    <template v-else>
-      <article
-        v-for="v in vitals"
-        :key="v.key"
-        class="vital"
-        :class="`vital--${v.key}`"
-        :style="{ '--vital-color': v.color }"
-      >
-        <header class="vital-head">
-          <h5 class="vital-name">{{ v.name }}</h5>
-          <p class="vital-now">
-            <span class="now-value">{{ v.current.text }}</span><span
-              class="now-unit"
-              :class="{ 'now-unit--wide': v.current.unit !== '%' }"
-            >{{ v.current.unit }}</span>
-          </p>
-        </header>
+    <div v-if="points.length" class="axis-x">
+      <span
+        v-for="(t, i) in xTickValues"
+        :key="i"
+        class="axis-x-label"
+        :style="{ left: (xFor(t) / plotW) * 100 + '%' }"
+      >{{ formatTimeTick(t, windowMs) }}</span>
+    </div>
 
-        <div class="vital-plot">
-          <svg class="spark" viewBox="0 0 100 34" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-            <polygon :points="v.area" class="spark-area" />
-            <polyline :points="v.line" class="spark-line" vector-effect="non-scaling-stroke" />
-          </svg>
-          <span class="axis-mark axis-mark--hi">{{ v.hiLabel }}</span>
-          <span class="axis-mark axis-mark--lo">{{ v.loLabel }}</span>
-        </div>
+    <p v-if="gaps.length || anomalyBands.length" class="plot-legend">
+      <span v-if="gaps.length" class="legend-item"><i class="swatch swatch--gap"></i>sin señal</span>
+      <span v-if="anomalyBands.length" class="legend-item"><i class="swatch swatch--hostdown"></i>incidente host_down</span>
+    </p>
 
-        <p class="vital-foot">
-          <span class="stat"><b>{{ v.maxLabel }}</b> máx</span>
-          <span class="stat"><b>{{ v.avgLabel }}</b> media</span>
-          <span class="stat stat--reads">{{ v.reads }}</span>
-        </p>
+    <footer class="metric-foot">
+      <span class="stat"><b>{{ maxLabel }}</b> máx</span>
+      <span class="stat"><b>{{ avgLabel }}</b> media</span>
+      <span class="stat"><b>{{ minLabel }}</b> mín</span>
+      <span class="stat stat--reads">{{ reads }}</span>
+    </footer>
 
-        <p class="sr-only">{{ v.srText }}</p>
-      </article>
+    <p class="metric-window-note">{{ windowNote }}</p>
+    <p class="sr-only">{{ srText }}</p>
+  </article>
 
-      <p class="vitals-window">{{ windowLabel }}</p>
-    </template>
+  <div v-else class="metric-empty" role="status">
+    <p class="empty-title">{{ emptyTitle }}</p>
+    <p class="empty-sub">{{ emptySub }}</p>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { fmtPct, fmtRate } from './format'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import {
+  DEFAULT_WINDOW_MS, SERIES, detectGaps, fmtDuration, formatTimeTick, formatValue,
+  gapThresholdMs, medianDeltaMs, plotWidthForAxis, seriesOf, splitAtRanges, timeTicks,
+  yRange, yTicks,
+} from './chartMath'
 
 const props = defineProps({
+  metricKey: { type: String, required: true },
   snapshots: { type: Array, default: () => [] },
-  // La serie venía recortada al máximo de puntos: hay más histórico del que
-  // se está pintando, y el rótulo de la ventana debe decirlo.
+  // Duración de la ventana: define el dominio del eje X (desde ahora-hacia
+  // atrás hasta ahora). Una caída en curso se ve como banda hasta el borde.
+  windowMs: { type: Number, default: DEFAULT_WINDOW_MS },
+  // Segundos del cubo de agregación; null = serie cruda (un punto por heartbeat).
+  bucketSec: { type: Number, default: null },
   truncated: { type: Boolean, default: false },
+  // Anomalías del activo (ya filtradas por asset en la vista): host_down se
+  // pinta como banda de incidente; el resto, como marca de apertura.
+  anomalies: { type: Array, default: () => [] },
 })
 
-/**
- * Series que se trazan, y todo lo que las distingue entre sí.
- *
- * El componente no sabe nada de porcentajes: cada serie trae su unidad
- * (`fmt`), sus topes (`clamp`) y el rango mínimo que tiene sentido mostrar
- * (`minSpan`, en la unidad de la propia serie). Por eso la red puede
- * convivir con CPU y memoria en el mismo panel sin fingir que es un
- * porcentaje — no lo es, y no tiene techo natural.
- *
- * - `clamp`: `[min, max]`; `null` en cualquiera de los dos = sin tope por
- *   ese lado. Un porcentaje no pasa de 100; unos bytes/s pueden pasar de
- *   cualquier cosa.
- * - `minSpan`: amplitud mínima del eje Y aunque la serie sea plana. Sin este
- *   suelo, un host en reposo amplificaría el ruido de décimas hasta parecer
- *   un sismógrafo.
- * - `color`: se inyecta como custom property, no como clase CSS, para que
- *   añadir una serie no obligue a tocar la hoja de estilos.
- */
-const PCT = (v) => ({ text: fmtPct(v), unit: '%' })
+const PLOT_H = 190
+const PLOT_PAD_Y = 12
+const SVG_H = PLOT_H + PLOT_PAD_Y * 2
+const PLOT_TOP = PLOT_PAD_Y
+const PLOT_BOTTOM = PLOT_TOP + PLOT_H
+const TOOLTIP_W = 130
+const TOOLTIP_H = 48
 
-const SERIES = [
-  { key: 'cpu',    name: 'CPU',       field: 'cpuPct',   color: 'var(--accent-bright)',
-    clamp: [0, 100],  minSpan: 6,    fmt: PCT },
-  { key: 'mem',    name: 'Memoria',   field: 'memPct',   color: 'var(--info)',
-    clamp: [0, 100],  minSpan: 6,    fmt: PCT },
-  { key: 'swap',   name: 'Swap',      field: 'swapPct',  color: 'var(--warn)',
-    clamp: [0, 100],  minSpan: 6,    fmt: PCT },
-  { key: 'disk',   name: 'Disco',     field: 'diskMaxPct', color: 'var(--danger)',
-    clamp: [0, 100],  minSpan: 6,    fmt: PCT },
-  // Entrada y salida comparten tono a propósito: son la misma magnitud en dos
-  // sentidos, y la paleta no tiene seis matices distintos que repartir.
-  { key: 'net-rx', name: 'Red · in',  field: 'netRxBps', color: 'var(--success)',
-    clamp: [0, null], minSpan: 8192, fmt: fmtRate },
-  { key: 'net-tx', name: 'Red · out', field: 'netTxBps',
-    color: 'color-mix(in srgb, var(--success) 50%, var(--text-muted))',
-    clamp: [0, null], minSpan: 8192, fmt: fmtRate },
-]
+const metric = computed(() => seriesOf(props.metricKey))
 
-/** Alto del viewBox y margen interno para que el trazo no se recorte arriba/abajo. */
-const VB_H = 34
-const INSET = 3
+/* ── Geometría: eje X en tiempo real ── */
 
-function round(v) { return Math.round(v * 100) / 100 }
+/** Instantes de TODOS los snapshots: la presencia manda, no la métrica. */
+const times = computed(() =>
+  props.snapshots
+    .map((s) => new Date(s.receivedAt ?? s.collectedAt).getTime())
+    .filter(Number.isFinite)
+)
 
-/** Aplica los topes de la serie; `null` significa "sin tope por ese lado". */
-function clampTo(value, [min, max]) {
-  let v = value
-  if (min !== null && min !== undefined) v = Math.max(min, v)
-  if (max !== null && max !== undefined) v = Math.min(max, v)
-  return v
-}
+const t0 = computed(() => Date.now() - (props.windowMs || DEFAULT_WINDOW_MS))
+const t1 = computed(() => Date.now())
 
-/** Une número y unidad: pegados en porcentaje, separados en el resto. */
-function label(formatted) {
-  if (!formatted.unit) return formatted.text
-  return formatted.unit === '%' ? `${formatted.text}%` : `${formatted.text} ${formatted.unit}`
-}
+const plotEl = ref(null)
+const plotW = ref(600)
+const plotDataW = computed(() => plotWidthForAxis(plotW.value))
+let resizeObserver = null
 
-/**
- * Construye una traza a partir de una serie del payload.
- *
- * El eje Y se ajusta a los datos, no al rango teórico: una máquina sana
- * reporta un 9 % de memoria, que en escala fija 0-100 queda pegado al eje e
- * indistinguible de la CPU. En las series sin techo (bytes/s) la escala
- * automática no es una mejora sino el único modo posible. El rango real se
- * rotula sobre el gráfico para que la escala variable no engañe.
- *
- * @returns {object|null} Traza lista para pintar, o null si la serie no tiene ni un dato.
- */
-function buildVital({ key, name, field, color, clamp, minSpan, fmt }) {
-  const total = props.snapshots.length
-  let points = []
-  props.snapshots.forEach((snapshot, i) => {
-    const value = snapshot[field]
-    if (value === null || value === undefined || Number.isNaN(value)) return
-    points.push({
-      x: total <= 1 ? 50 : (i / (total - 1)) * 100,
-      v: clampTo(value, clamp),
-    })
+onMounted(() => {
+  resizeObserver = new ResizeObserver(() => {
+    plotW.value = plotEl.value?.clientWidth || 0
   })
-  // Una serie que el agente no reporta (Windows no manda load1, un host sin
-  // interfaces visibles no manda red) simplemente no se dibuja.
-  if (!points.length) return null
+  resizeObserver.observe(plotEl.value)
+})
+onUnmounted(() => resizeObserver?.disconnect())
 
-  const reads = points.length
+const clampTime = (t) => Math.min(Math.max(t, t0.value), t1.value)
+const xFor = (t) => ((clampTime(t) - t0.value) / Math.max(1, t1.value - t0.value)) * plotDataW.value
 
-  // Con una sola lectura no hay trazo posible: se extiende a lo ancho como
-  // línea plana en vez de dejar el gráfico vacío.
-  if (points.length === 1) {
-    points = [{ x: 0, v: points[0].v }, { x: 100, v: points[0].v }]
+/* ── Puntos de la métrica seleccionada ── */
+
+const points = computed(() => {
+  const field = metric.value?.field
+  if (!field) return []
+  const pts = []
+  for (const snapshot of props.snapshots) {
+    const v = snapshot[field]
+    if (v === null || v === undefined || Number.isNaN(v)) continue
+    const t = new Date(snapshot.receivedAt ?? snapshot.collectedAt).getTime()
+    if (!Number.isFinite(t)) continue
+    pts.push({ t, v })
+  }
+  pts.sort((a, b) => a.t - b.t)
+  return pts
+})
+
+const range = computed(() => {
+  if (!points.value.length) return { lo: 0, hi: 1 }
+  return yRange(metric.value, points.value.map((p) => p.v))
+})
+
+const yFor = (v) => PLOT_BOTTOM - ((v - range.value.lo) / (range.value.hi - range.value.lo)) * PLOT_H
+
+/** Puntos ya proyectados a la geometría del SVG (x/y en px). */
+const pts = computed(() => points.value.map((p) => ({ ...p, x: xFor(p.t), y: yFor(p.v) })))
+
+const yTickValues = computed(() => yTicks(metric.value, range.value))
+
+const xTickValues = computed(() => timeTicks(t0.value, t1.value))
+
+function formatTick(value) {
+  return formatValue(metric.value.fmt(value))
+}
+
+// La animación de trazado se dispara al cambiar de métrica o de ventana,
+// nunca en el sondeo: un parpadeo cada 30 s sería ruido, no feedback.
+const drawKey = ref(0)
+watch(
+  () => [props.metricKey, props.windowMs, props.bucketSec],
+  () => { drawKey.value += 1 },
+)
+
+/* ── Tiempo sin señal ── */
+
+const thresholdMs = computed(() =>
+  gapThresholdMs(medianDeltaMs(times.value), props.bucketSec)
+)
+
+const gaps = computed(() =>
+  times.value.length
+    ? detectGaps(
+      times.value, thresholdMs.value, t0.value, t1.value,
+      (props.bucketSec || 0) * 1000,
+    )
+    : []
+)
+
+/* ── Incidencias ── */
+
+const anomalyBands = computed(() =>
+  props.anomalies
+    .filter((a) => a.kind === 'host_down' && a.openedAt)
+    .map((a) => {
+      const start = Math.max(new Date(a.openedAt).getTime(), t0.value)
+      const end = a.resolvedAt
+        ? Math.min(new Date(a.resolvedAt).getTime(), t1.value)
+        : t1.value
+      if (!Number.isFinite(start) || end <= start) return null
+      return { start, end, title: `host_down: ${fmtDuration(end - start)}` }
+    })
+    .filter(Boolean)
+)
+
+/* El trazo no debe saltar por encima de una zona sin señal o de un incidente. */
+const plotSegments = computed(() =>
+  splitAtRanges(pts.value, [...gaps.value, ...anomalyBands.value]).map((points) => {
+    const line = points.length < 2
+      ? ''
+      : points.map((p) => `${Math.round(p.x)},${Math.round(p.y)}`).join(' ')
+    if (!line) return { points, line: '', area: '' }
+    const first = points[0]
+    const last = points[points.length - 1]
+    return {
+      points,
+      line,
+      area: `${Math.round(first.x)},${PLOT_BOTTOM} ${line} ${Math.round(last.x)},${PLOT_BOTTOM}`,
+    }
+  })
+)
+
+const anomalyMarks = computed(() =>
+  props.anomalies
+    .filter((a) => a.kind !== 'host_down' && a.openedAt)
+    .map((a) => {
+      const at = new Date(a.openedAt).getTime()
+      if (!Number.isFinite(at) || at < t0.value || at > t1.value) return null
+      return { at, title: `${a.kind} · ${formatValue(metric.value.fmt(a.value))}` }
+    })
+    .filter(Boolean)
+)
+
+/* ── Lecturas ── */
+
+const values = computed(() => points.value.map((p) => p.v))
+const current = computed(() => {
+  if (!values.value.length) return null
+  return metric.value.fmt(values.value[values.value.length - 1])
+})
+const maxLabel = computed(() => formatValue(metric.value.fmt(Math.max(...values.value))))
+const minLabel = computed(() => formatValue(metric.value.fmt(Math.min(...values.value))))
+const avgLabel = computed(() => formatValue(metric.value.fmt(
+  values.value.reduce((a, b) => a + b, 0) / values.value.length,
+)))
+
+const reads = computed(() => {
+  const n = points.value.length
+  if (props.bucketSec) return n === 1 ? '1 cubo' : `${n} cubos`
+  return n === 1 ? '1 lectura' : `${n} lecturas`
+})
+
+const windowNote = computed(() => {
+  const span = fmtDuration(props.windowMs || DEFAULT_WINDOW_MS)
+  const bucket = props.bucketSec ? ` · cubos de ${fmtDuration(props.bucketSec * 1000)}` : ''
+  const cut = props.truncated ? ' · hay más histórico del que cabe' : ''
+  return `${span}${bucket}${cut}`
+})
+
+const srText = computed(() => {
+  if (!metric.value || !points.value.length) return ''
+  const gapsText = gaps.value.length ? `; ${gaps.value.length} tramo${gaps.value.length === 1 ? '' : 's'} sin señal` : ''
+  return `${metric.value.name}: ${formatValue(current.value)} ahora, ${maxLabel.value} máximo, ${avgLabel.value} de media, ${minLabel.value} mínimo, sobre ${points.value.length} ${props.bucketSec ? 'cubos' : 'lecturas'}${gapsText}.`
+})
+
+/* ── Estados vacíos ── */
+
+const emptyTitle = computed(() =>
+  props.snapshots.length ? `Sin datos de ${metric.value?.name ?? 'esta métrica'}` : 'Sin señal en este tramo'
+)
+
+const emptySub = computed(() => {
+  if (!props.snapshots.length) {
+    return 'El agente no ha reportado ningún heartbeat en esta ventana.'
+  }
+  return `La métrica «${metric.value?.name ?? ''}» no aparece aquí — algunos agentes no la reportan (p. ej. la carga en Windows).`
+})
+
+/* ── Crosshair ── */
+
+const hover = ref(null)
+
+function onPointerMove(event) {
+  if (!pts.value.length || !plotEl.value) return
+  const rect = plotEl.value.getBoundingClientRect()
+  const x = event.clientX - rect.left
+  if (x < 0 || x > plotDataW.value) {
+    hover.value = null
+    return
   }
 
-  const values = points.map((p) => p.v)
-  const max = Math.max(...values)
-  const min = Math.min(...values)
-  const avg = values.reduce((a, b) => a + b, 0) / values.length
-  const current = values[values.length - 1]
-
-  let lo = min
-  let hi = max
-  if (hi - lo < minSpan) {
-    const mid = (hi + lo) / 2
-    lo = mid - minSpan / 2
-    hi = mid + minSpan / 2
-  } else {
-    const pad = (hi - lo) * 0.15
-    lo -= pad
-    hi += pad
+  // El punto más cercano en el eje X entre los que tienen valor.
+  let nearest = pts.value[0]
+  let best = Math.abs(nearest.x - x)
+  for (const p of pts.value) {
+    const d = Math.abs(p.x - x)
+    if (d < best) { best = d; nearest = p }
   }
-  lo = clampTo(lo, clamp)
-  hi = clampTo(hi, clamp)
-  // Tras recortar contra los topes el rango puede quedar degenerado, y una
-  // división por cero en `yFor` dejaría el trazo en NaN. Se reabre con la
-  // amplitud mínima de la propia serie — nunca con una constante, que solo
-  // tendría sentido en porcentaje — y hacia abajo si estamos contra el techo.
-  if (hi - lo <= 0) {
-    const ceiling = clamp[1]
-    if (ceiling !== null && ceiling !== undefined && hi >= ceiling) lo = hi - minSpan
-    else hi = lo + minSpan
-  }
-
-  const yFor = (v) => VB_H - INSET - ((v - lo) / (hi - lo)) * (VB_H - INSET * 2)
-  const line = points.map((p) => `${round(p.x)},${round(yFor(p.v))}`).join(' ')
-
-  const currentFmt = fmt(current)
-  const maxLabel = label(fmt(max))
-  const avgLabel = label(fmt(avg))
-
-  return {
-    key,
-    name,
-    color,
-    line,
-    area: `${round(points[0].x)},${VB_H} ${line} ${round(points[points.length - 1].x)},${VB_H}`,
-    current: currentFmt,
-    maxLabel,
-    avgLabel,
-    hiLabel: label(fmt(hi)),
-    loLabel: label(fmt(lo)),
-    reads: reads === 1 ? '1 lectura' : `${reads} lecturas`,
-    srText: `${name}: ${label(currentFmt)} ahora, ${maxLabel} máximo, ${avgLabel} de media, sobre ${reads} lecturas.`,
+  hover.value = {
+    x: nearest.x,
+    y: nearest.y,
+    t: nearest.t,
+    text: formatValue(metric.value.fmt(nearest.v)),
   }
 }
 
-const vitals = computed(() => SERIES.map(buildVital).filter(Boolean))
+function onPointerLeave() { hover.value = null }
 
-/**
- * Tramo temporal cubierto por la ventana.
- *
- * El recuento de lecturas vive en cada tarjeta, no aquí: tras añadir métricas
- * nuevas, las trazas no tienen por qué cubrir los mismos puntos (las filas
- * anteriores a la instrumentación llegan a null), así que un único total
- * mentiría sobre las series más cortas.
- */
-const windowLabel = computed(() => {
-  const total = props.snapshots.length
-  if (!total) return ''
-
-  const first = new Date(props.snapshots[0].receivedAt ?? props.snapshots[0].collectedAt).getTime()
-  const last = new Date(props.snapshots[total - 1].receivedAt ?? props.snapshots[total - 1].collectedAt).getTime()
-  const minutes = Math.round((last - first) / 60000)
-
-  let span
-  if (!Number.isFinite(minutes) || minutes < 1) span = 'último minuto'
-  else if (minutes < 60) span = `${minutes} min`
-  else span = `${Math.floor(minutes / 60)} h`
-
-  // Sin este aviso, un recorte silencioso se presentaría como si fuera todo
-  // el histórico disponible.
-  return props.truncated ? `${span} · hay más histórico del que cabe aquí` : span
+const tooltipLeft = computed(() => {
+  if (!hover.value) return 0
+  return Math.min(Math.max(hover.value.x + 12, 8), Math.max(8, plotDataW.value - TOOLTIP_W))
 })
+
+const tooltipTop = computed(() => {
+  if (!hover.value) return 0
+  return Math.min(Math.max(hover.value.y - 44, 8), PLOT_BOTTOM - TOOLTIP_H)
+})
+
+function formatTooltipTime(ts) {
+  const d = new Date(ts)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
 </script>
 
 <style scoped>
-.vitals { display: flex; flex-direction: column; gap: 0.85rem; }
-
-.vitals-empty {
-  padding: 2.2rem 1rem; text-align: center;
-  border: 1px dashed var(--border-med); border-radius: 8px;
-}
-.empty-title { margin: 0 0 0.25rem; font-size: var(--fs-lg); color: var(--text-dim); }
-.empty-sub { margin: 0 auto; max-width: 42ch; font-size: var(--fs-sm); color: var(--text-muted); }
-
-.vital {
-  padding: 0.7rem 0.9rem 0.65rem;
+.metric-card {
+  padding: 0.85rem 0.95rem 0.7rem;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 8px;
 }
 
-.vital-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
-.vital-name {
+/* ── Cabecera ── */
+.metric-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.metric-name {
   margin: 0;
-  font-size: var(--fs-xs); font-weight: 700;
+  font-size: var(--fs-sm); font-weight: 700;
   letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--text-muted);
 }
-.vital-now { margin: 0; line-height: 1; }
+.metric-now { margin: 0; line-height: 1; }
 .now-value {
   font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: 1.6rem; font-weight: 500;
   color: var(--text); font-variant-numeric: tabular-nums;
 }
 .now-unit { margin-left: 0.1em; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: 0.95rem; color: var(--text-muted); }
-/* El margen justo funciona para "%", pero pega el número a unidades de varias
-   letras: "758KB/s" en lugar de "758 KB/s". */
 .now-unit--wide { margin-left: 0.3em; }
 
-.vital-plot { position: relative; margin: 0.6rem 0 0.45rem; }
-.spark { display: block; width: 100%; height: 48px; }
+/* ── Zona del gráfico ── */
+.metric-plot { position: relative; margin-top: 0.6rem; }
+.plot-svg { display: block; width: 100%; }
+
+.grid-line {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+}
+.grid-line--x { opacity: 0.6; }
+
+/* Banda de ausencia: el silencio también es dato. Tono suave para no
+   competir con el trazo; el rojo lo hereda de --danger translúcido. */
+.gap-band { fill: color-mix(in srgb, var(--danger) 10%, transparent); }
+
+/* Incidente host_down: más intenso que la ausencia (es un hecho declarado
+   por el servidor, no un hueco inferido), con borde para que se recorte. */
+.anomaly-band {
+  fill: color-mix(in srgb, var(--danger) 22%, transparent);
+  stroke: color-mix(in srgb, var(--danger) 45%, transparent);
+  stroke-width: 1;
+}
+/* Cualquier otra anomalía: una marca vertical en su apertura. */
+.anomaly-mark {
+  stroke: var(--warn);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+  opacity: 0.85;
+}
+
 .spark-line { fill: none; stroke-width: 1.75; stroke-linejoin: round; stroke-linecap: round; }
 .spark-area { stroke: none; }
 
-/* El color de cada traza llega como custom property desde el descriptor de la
-   serie, no como una regla por clase: así añadir una métrica es una línea de
-   JS y no obliga a tocar esta hoja. La clase .vital--{key} se conserva como
-   gancho de estilo puntual y de test. */
-.spark-line { stroke: var(--vital-color); }
-.spark-area { fill: color-mix(in srgb, var(--vital-color) 15%, transparent); }
+/* El color de la traza llega como custom property desde el descriptor de la
+   serie, no como una regla por clase: añadir una métrica es una línea de JS
+   y no obliga a tocar esta hoja. La clase .metric--{key} se conserva como
+   gancho de estilo puntual. */
+.spark-line { stroke: var(--metric-color); }
+.spark-area { fill: color-mix(in srgb, var(--metric-color) 15%, transparent); }
+.spark-dot { fill: var(--metric-color); }
 
-/* El rango real se rotula sobre el trazo: la escala es variable, así que
-   ocultarla convertiría el gráfico en un adorno sin unidades. */
-.axis-mark {
-  position: absolute; right: 0;
-  padding: 0 0.25rem;
-  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-xs);
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
-  pointer-events: none;
+/* Trazado animado solo al cambiar de métrica/ventana (key sobre la polyline);
+   con prefers-reduced-motion se dibuja de golpe. pathLength=1 hace que las
+   unidades del dash sean fracciones del trazo, sea cual sea su longitud. */
+.spark-line.draw {
+  stroke-dasharray: 1;
+  animation: draw-line 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
-.axis-mark--hi { top: -0.3rem; }
-.axis-mark--lo { bottom: -0.3rem; }
+@keyframes draw-line {
+  from { stroke-dashoffset: 1; }
+  to   { stroke-dashoffset: 0; }
+}
 
-.vital-foot { display: flex; gap: 1.1rem; margin: 0; font-size: var(--fs-xs); color: var(--text-muted); }
+/* Rejilla y etiquetas del eje Y, dentro del SVG: pintura con contorno del
+   color de la tarjeta para que el texto se lea aunque pase un trazo por
+   debajo. */
+.axis-y-label {
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
+  font-size: var(--fs-sm); fill: var(--text-muted);
+  paint-order: stroke; stroke: var(--surface-2); stroke-width: 3px;
+}
+
+/* Eje X: etiquetas en HTML (no escalan con el SVG) sobre una fila propia. */
+.axis-x { position: relative; height: 18px; margin-top: 2px; }
+.axis-x-label {
+  position: absolute; top: 0;
+  transform: translateX(-50%);
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-sm);
+  color: var(--text-muted); white-space: nowrap;
+}
+.axis-x-label:first-child { transform: none; left: 0 !important; }
+.axis-x-label:last-child { transform: translateX(-100%); }
+
+/* En móvil las ventanas largas siguen teniendo seis instantes, pero sus
+   fechas ya no caben sin pisarse: se conservan inicio, mitad y fin. */
+@media (max-width: 520px) {
+  .axis-x-label:nth-child(2),
+  .axis-x-label:nth-child(3),
+  .axis-x-label:nth-child(5) { display: none; }
+}
+
+/* Crosshair: línea vertical + punto sobre la traza. */
+.crosshair-line { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 2 3; }
+.crosshair-dot { fill: var(--metric-color); stroke: var(--surface-2); stroke-width: 1.5; }
+
+.tooltip {
+  position: absolute; z-index: 2;
+  display: flex; flex-direction: column; gap: 0.1rem;
+  padding: 0.3rem 0.55rem;
+  box-sizing: border-box; max-width: calc(100% - 16px);
+  background: var(--surface-3); border: 1px solid var(--border-med); border-radius: 6px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
+  pointer-events: none;
+  animation: tooltip-in 0.15s ease;
+}
+@keyframes tooltip-in { from { opacity: 0; transform: translateY(2px); } }
+.tooltip-time { font-size: var(--fs-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tooltip-value {
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-md);
+  font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums;
+}
+
+/* ── Leyenda ── */
+.plot-legend {
+  display: flex; flex-wrap: wrap; gap: 0.4rem 0.9rem; margin: 0.15rem 0 0;
+  font-size: var(--fs-sm); color: var(--text-muted);
+}
+.legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.swatch--gap { background: color-mix(in srgb, var(--danger) 35%, transparent); }
+.swatch--hostdown {
+  background: color-mix(in srgb, var(--danger) 55%, transparent);
+  border: 1px solid var(--danger);
+}
+
+/* ── Pie ── */
+.metric-foot {
+  display: flex; flex-wrap: wrap; gap: 0.4rem 0.85rem;
+  margin: 0.5rem 0 0; font-size: var(--fs-sm); color: var(--text-muted);
+}
 .stat b {
   font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-weight: 600;
   color: var(--text-dim); font-variant-numeric: tabular-nums;
 }
-/* Cada traza cubre sus propios puntos: una serie recién instrumentada tiene
-   menos lecturas que CPU, y el recuento va por tarjeta para no mentir. */
 .stat--reads { margin-left: auto; }
 
-.vitals-window { margin: 0; text-align: right; font-size: var(--fs-xs); color: var(--text-muted); }
+.metric-window-note { margin: 0.3rem 0 0; text-align: right; font-size: var(--fs-sm); color: var(--text-muted); }
+
+/* ── Estados vacíos ── */
+.metric-empty {
+  padding: 2rem 1rem; text-align: center;
+  border: 1px dashed var(--border-med); border-radius: 8px;
+}
+.empty-title { margin: 0 0 0.25rem; font-size: var(--fs-lg); color: var(--text-dim); }
+.empty-sub { margin: 0 auto; max-width: 44ch; font-size: var(--fs-sm); color: var(--text-muted); }
 
 .sr-only {
   position: absolute; width: 1px; height: 1px;
   padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spark-line.draw { animation: none; }
+  .tooltip { animation: none; }
 }
 </style>

@@ -353,6 +353,11 @@ class AssetMetricsQuerySchema(Schema):
     """
     since = fields.DateTime(data_key="from", load_default=None, format="iso")
     until = fields.DateTime(data_key="to", load_default=None, format="iso")
+    # Tamaño del cubo de agregación en segundos. Sin él la serie viaja cruda
+    # (un punto por heartbeat); con él, un punto por cubo con el máximo de
+    # cada métrica, para que ventanas largas (24 h/7 d) no se recorten contra
+    # el tope de puntos y los spikes sigan siendo visibles.
+    bucket = fields.Integer(load_default=None, validate=validate.Range(min=1))
 
     @post_load
     def normalize_range(self, data, **kwargs):
@@ -387,12 +392,18 @@ class AssetSnapshotPointSchema(Schema):
 
 
 class AssetMetricsResponseSchema(Schema):
-    """Serie temporal de métricas de un activo, para el gráfico de la SPA."""
+    """Serie temporal de métricas de un activo, para el gráfico de la SPA.
+
+    ``bucket`` ecoa el cubo de agregación usado: ``null`` = serie cruda (un
+    punto por heartbeat), un entero = un punto por cubo con el máximo de cada
+    métrica. Así el consumidor rotula la ventana con honestidad sin adivinar.
+    """
     snapshots = fields.List(fields.Nested(AssetSnapshotPointSchema))
     truncated = fields.Boolean(
         metadata={"description": "La serie se recortó al máximo de puntos: "
                                  "hay más histórico del que se devuelve."},
     )
+    bucket = fields.Integer(allow_none=True, load_default=None)
 
 
 class AssetLatestResponseSchema(Schema):

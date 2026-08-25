@@ -7,7 +7,7 @@
  *   node web/app/test/hygeia.format.test.mjs
  */
 
-import { fmtBytes, fmtRate, fmtUptime, fmtPct } from '../src/components/hygeia/format.js'
+import { fmtBytes, fmtRate, fmtUptime, fmtPct, fmtLoad1 } from '../src/components/hygeia/format.js'
 
 let passed = 0
 let failed = 0
@@ -51,6 +51,11 @@ eq('días y horas', fmtUptime(12 * 86400 + 4 * 3600), '12 d 4 h')
 eq('segundos sueltos', fmtUptime(42), '42 s')
 eq('sin dato', fmtUptime(null), '—')
 eq('negativo no es un uptime', fmtUptime(-5), '—')
+
+console.log('\nfmtLoad1')
+eq('carga con un decimal', fmtLoad1(1.5), '1.5')
+eq('cero es un dato, no una ausencia', fmtLoad1(0), '0.0')
+eq('sin dato (Windows no la reporta)', fmtLoad1(null), '—')
 
 console.log(`\n${passed} pasados, ${failed} fallidos\n`)
 process.exit(failed === 0 ? 0 : 1)
