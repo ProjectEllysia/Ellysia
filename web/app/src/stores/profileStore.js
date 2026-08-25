@@ -41,6 +41,10 @@ export const useProfileStore = defineStore('profile', () => {
   }
 
   function _snapshot() {
+    // emailVerified se queda fuera a propósito: la confirmación llega desde
+    // fuera de la SPA (el clic en el enlace del correo, quizá en otra pestaña)
+    // y una copia en caché la mantendría obsoleta tras recargar — la tarjeta
+    // de "confirma tu correo" seguiría visible pese a tener la cuenta activada.
     return {
       first_name: profile.first_name,
       last_name: profile.last_name,
@@ -48,7 +52,6 @@ export const useProfileStore = defineStore('profile', () => {
       username: profile.username,
       role: profile.role,
       created_at: profile.created_at,
-      emailVerified: profile.emailVerified,
       mustChangePassword: profile.mustChangePassword,
     }
   }
@@ -60,7 +63,14 @@ export const useProfileStore = defineStore('profile', () => {
   async function loadProfile() {
     const cached = profileCache.get(CACHE_KEY)
     if (cached) {
-      _hydrate(cached)
+      // El resto del perfil sale de la caché, pero el estado del correo se
+      // pide siempre al servidor: es el único dato que cambia "desde fuera"
+      // (activar la cuenta desde el correo) y la caché de sesión lo dejaría
+      // obsoleto durante su TTL. Se descarta el valor cacheado, también el de
+      // las entradas antiguas que aún lo llevan.
+      const { emailVerified: _ignored, ...rest } = cached
+      _hydrate(rest)
+      await refreshEmailVerification()
       return
     }
 
@@ -72,6 +82,26 @@ export const useProfileStore = defineStore('profile', () => {
       _hydrate(data)
       profileCache.set(CACHE_KEY, _snapshot())
     } finally { loading.value = false }
+  }
+
+  /**
+   * Revalida la confirmación del correo contra el servidor.
+   *
+   * La cuenta se activa pulsando el enlace del correo, que puede abrirse en
+   * otra pestaña o ventana: esta pestaña no recibe ninguna notificación, así
+   * que cada carga de perfil lo comprueba para no mostrar la tarjeta de
+   * "confirma tu correo" a quien ya la activó y acaba de recargar.
+   */
+  async function refreshEmailVerification() {
+    try {
+      const res = await apiFetch('/users/me')
+      if (!res?.ok) return
+      const data = await res.json()
+      profile.emailVerified = data.emailVerified ?? null
+    } catch {
+      // Sin respuesta no se sabe si el correo está confirmado: se mantiene el
+      // valor anterior (null si venía de caché) y no se acusa a nadie.
+    }
   }
 
   /**
