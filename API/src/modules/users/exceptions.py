@@ -1,3 +1,5 @@
+from typing import Optional
+
 from src.modules.shared._exceptions import (
     EllysiaException,
     EntityNotFoundError,
@@ -162,14 +164,18 @@ class InvalidMfaCodeError(AuthenticationError):
 
 
 class MfaChallengeInvalidError(AuthenticationError):
-    """El challenge de ``POST /oauth/mfa/verify`` no existe, expiró o agotó sus
-    intentos — el cliente debe reiniciar el login desde cero."""
+    """El challenge de MFA no existe, expiró o agotó sus intentos.
+
+    ``user_message`` es pisable porque los dos flujos que lo usan siguen
+    caminos distintos: el de login debe decir "inicia sesión de nuevo" y el de
+    recuperación de contraseña "vuelve a solicitarlo".
+    """
     default_code = ErrorCode.MFA_CHALLENGE_INVALID
 
-    def __init__(self):
+    def __init__(self, user_message: Optional[str] = None):
         super().__init__(
             message="El challenge de MFA es inválido, expiró o agotó sus intentos",
-            user_message="La verificación ha expirado. Inicia sesión de nuevo.",
+            user_message=user_message or "La verificación ha expirado. Inicia sesión de nuevo.",
         )
 
 # =========================================================================
@@ -226,4 +232,29 @@ class EmailAlreadyVerifiedError(EllysiaException):
         super().__init__(
             message="El correo ya esta verificado",
             user_message="Tu correo ya esta confirmado.",
+        )
+
+
+# =========================================================================
+# RECUPERACIÓN DE CONTRASEÑA
+# =========================================================================
+
+
+class PasswordResetTokenInvalidError(AuthenticationError):
+    """Enlace de recuperación inexistente, ya usado o caducado.
+
+    Los tres casos dan el mismo error a propósito: distinguirlos permitiría
+    averiguar qué enlaces existieron.
+    """
+
+    default_code = ErrorCode.PASSWORD_RESET_TOKEN_INVALID
+    default_status_code = 400
+
+    def __init__(self) -> None:
+        super().__init__(
+            message="Token de recuperacion invalido o caducado",
+            user_message=(
+                "Este enlace de recuperación no es válido o ha caducado. "
+                "Puedes pedir uno nuevo desde la pantalla de acceso."
+            ),
         )

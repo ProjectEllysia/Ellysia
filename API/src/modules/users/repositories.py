@@ -24,10 +24,11 @@ Usage:
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload, selectinload
 
 from .model import (
@@ -42,6 +43,19 @@ from .model import (
 
 from src.modules.infrastructure.base_repository import BaseRepository
 from src.modules.shared import utcnow_naive
+
+
+# Forma mínima de un correo: parte local y dominio sin espacios, un "@" y un
+# dominio con al menos un punto y un TLD alfabético. El TLD va de 2 caracteres
+# en adelante y no de 2 a 3 como suele verse en ejemplos: hay TLD reales más
+# largos (.info, .travel, .software) y encorsetar a 3 los desviaría a la
+# búsqueda por nombre de usuario.
+_EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
+
+
+def _looks_like_email(identifier: str) -> bool:
+    """True si la cadena encaja con la estructura común de una dirección."""
+    return _EMAIL_SHAPE.fullmatch(identifier) is not None
 
 
 class UserRepository(BaseRepository[User]):
@@ -135,6 +149,60 @@ class UserRepository(BaseRepository[User]):
         que la base de datos conoce.
         """
         return self.get_by_field("email_verification_hash", token_hash)
+
+    def get_by_email_or_username(self, identifier: str) -> Optional[User]:
+        """Usuario por correo (si el identificador tiene forma de email) o por
+        nombre de usuario. Es el identificador único del formulario de
+        recuperación de contraseña.
+
+        La guarda es estructural y no solo un ``"@" in identifier``: cualquier
+        cadena con una arroba (una URL, un nombre raro) caería si no en la
+        búsqueda por correo. Es una heurística de enrutado, no una validación —
+        si no encaja se busca por nombre de usuario, y la respuesta genérica
+        del endpoint no revela cuál de las dos vías se usó.
+
+        El correo se compara sin distinguir mayúsculas (un usuario escribe su
+        dirección como se la dieron, no como la tecleó el día del alta); el
+        nombre de usuario sigue siendo sensible a mayúsculas, igual que en el
+        login.
+        """
+        if _looks_like_email(identifier):
+            return (
+                self._session.query(User)
+                .options(selectinload(User.attributes))
+                .filter(func.lower(User.email) == identifier.lower())
+                .first()
+            )
+        return self.get_by_username(identifier)
+
+    def get_by_password_reset_hash(self, token_hash: str) -> Optional[User]:
+        """Usuario con ese hash de token de recuperación pendiente.
+
+        Igual que la verificación de correo: la búsqueda es por el hash, que es
+        lo único que la base de datos conoce del enlace.
+        """
+        return self.get_by_field("password_reset_hash", token_hash)
+
+    def set_password_reset(self, user_id: int, token_hash: str, expires_at: datetime) -> None:
+        """Registra un enlace de recuperación activo. Sobrescribir invalida el
+        anterior: el usuario que pide otro enlace porque "no le llegó" no debe
+        quedarse con dos vivos."""
+        self._session.query(User).filter(User.id == user_id).update(
+            {
+                "password_reset_hash": token_hash,
+                "password_reset_expires_at": expires_at,
+            },
+            synchronize_session=False,
+        )
+        self._session.flush()
+
+    def clear_password_reset(self, user_id: int) -> None:
+        """Borra hash y caducidad del enlace de recuperación (consumido)."""
+        self._session.query(User).filter(User.id == user_id).update(
+            {"password_reset_hash": None, "password_reset_expires_at": None},
+            synchronize_session=False,
+        )
+        self._session.flush()
 
     def email_exists(self, email: str) -> bool:
         """
@@ -611,13 +679,17 @@ class MFARepository(BaseRepository[MFATotpCredential]):
     # LOGIN CHALLENGES
     # =========================================================================
 
-    def get_challenge(self, token: str) -> Optional[MFAChallenge]:
-        """Retrieve an MFAChallenge record by its opaque token string."""
-        return (
-            self._session.query(MFAChallenge)
-            .filter(MFAChallenge.token == token)
-            .one_or_none()
-        )
+    def get_challenge(self, token: str, purpose: Optional[str] = None) -> Optional[MFAChallenge]:
+        """Retrieve an MFAChallenge record by its opaque token string.
+
+        ``purpose`` filtra por el propósito del challenge ("login" o
+        "password_reset") para que un challenge de un flujo no sirva en el
+        otro.
+        """
+        query = self._session.query(MFAChallenge).filter(MFAChallenge.token == token)
+        if purpose is not None:
+            query = query.filter(MFAChallenge.purpose == purpose)
+        return query.one_or_none()
 
     def save_challenge(self, challenge: MFAChallenge) -> MFAChallenge:
         """Persist a newly issued MFA challenge."""

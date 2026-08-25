@@ -1085,6 +1085,13 @@ class RegistrationConfig:
     invitation_ttl_hours: int = 168
     """Vigencia del enlace de invitación a una organización (una semana)."""
 
+    password_reset_ttl_minutes: int = 30
+    """Vigencia del enlace de recuperación de contraseña (media hora).
+
+    Más corto que el de verificación a propósito: es un enlace capaz de
+    cambiar una credencial, no solo de confirmar una dirección.
+    """
+
 
 def registration_config() -> RegistrationConfig:
     return load_block(RegistrationConfig)

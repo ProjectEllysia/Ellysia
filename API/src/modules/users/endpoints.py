@@ -50,6 +50,12 @@ from .schemas import (
     RegisterRequestSchema,
     RegisterResponseSchema,
     VerifyEmailRequestSchema,
+    PasswordResetRequestSchema,
+    PasswordResetRequestResponseSchema,
+    PasswordResetMfaSchema,
+    PasswordResetCheckRequestSchema,
+    PasswordResetCheckResponseSchema,
+    PasswordResetCompleteRequestSchema,
     DeletionPreviewSchema,
     DeleteAccountRequestSchema,
 )
@@ -127,6 +133,11 @@ def oauth_token(data: dict[str, Any]):
             raise InvalidCredentialsError()
 
         user = USER_MANAGER.get_user_by_id(user_id)
+
+        # Un login con la contraseña correcta anula el enlace de recuperación
+        # pendiente: la recuperación ya no hace falta y el enlace no debe
+        # quedar vivo en el buzón por si alguien más lo tiene.
+        USER_MANAGER.clear_pending_password_reset(user_id)
 
         # MFA activado: en vez de tokens reales, se emite un challenge de corta
         # duración que el cliente debe canjear en POST /oauth/mfa/verify tras
@@ -223,7 +234,9 @@ def oauth_mfa_verify(data: dict[str, Any]):
     """Verificar el segundo factor (TOTP o codigo de recuperacion) y emitir tokens"""
     challenge_token = data["challengeToken"]
 
-    user_id = OAUTH_MANAGER.verify_mfa_challenge(challenge_token)
+    # Solo challenges de propósito "login": uno emitido para la recuperación de
+    # contraseña no debe canjearse aquí por tokens reales.
+    user_id = OAUTH_MANAGER.verify_mfa_challenge(challenge_token, purpose="login")
     if user_id is None:
         raise MfaChallengeInvalidError()
 
@@ -503,6 +516,76 @@ def resend_email_verification():
     user = get_current_user()
     USER_MANAGER.issue_email_verification(user.id)
     return {"message": "Te hemos enviado un correo de confirmacion."}
+
+
+# =========================================================================
+# RECUPERACIÓN DE CONTRASEÑA
+# =========================================================================
+
+
+@users_blp.post("/password-reset/request")
+@users_blp.arguments(PasswordResetRequestSchema)
+@users_blp.response(200, PasswordResetRequestResponseSchema, description="Reset requested")
+@limiter.limit("3 per hour; 10 per day")
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def password_reset_request(data: dict[str, Any]):
+    """Solicitar la recuperacion de contrasenya (fase 1)
+
+    La respuesta es generica — ``sent`` tanto si la cuenta existe como si no,
+    para que el endpoint no sirva de oraculo de usuarios. Si la cuenta tiene
+    MFA, en su lugar devuelve un challenge para POST /password-reset/mfa: el
+    enlace no sale hasta que el segundo factor verifica.
+    """
+    return USER_MANAGER.request_password_reset(data["identifier"])
+
+
+@users_blp.post("/password-reset/mfa")
+@users_blp.arguments(PasswordResetMfaSchema)
+@users_blp.response(200, PasswordResetRequestResponseSchema, description="MFA verified, reset link sent")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Invalid MFA code or challenge")
+@limiter.limit("10 per minute; 30 per hour")
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def password_reset_mfa(data: dict[str, Any]):
+    """Verificar el segundo factor de la recuperacion (fase 2)
+
+    Endpoint aparte de la fase 1 para poder darle el rate limit del resto de
+    verificaciones MFA (reintentos permitidos): compartir el 3/hora de la
+    solicitud bloquearia a un usuario legitimo que errase un par de codigos.
+    Solo tras el factor correcto se minta el enlace y se envia al correo
+    registrado de la cuenta.
+    """
+    return USER_MANAGER.confirm_password_reset_mfa(
+        data["challengeToken"],
+        code=data.get("code"),
+        recovery_code=data.get("recoveryCode"),
+    )
+
+
+@users_blp.post("/password-reset/check")
+@users_blp.arguments(PasswordResetCheckRequestSchema)
+@users_blp.response(200, PasswordResetCheckResponseSchema, description="Token validity")
+@limiter.limit("10 per minute; 60 per hour")
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def password_reset_check(data: dict[str, Any]):
+    """Comprobar si un enlace de recuperacion sigue vivo.
+
+    Publico a proposito: quien pulsa el enlace no tiene por que tener la sesion
+    abierta. No consume el token ni revela a que cuenta pertenece.
+    """
+    return {"valid": USER_MANAGER.check_password_reset_token(data["token"])}
+
+
+@users_blp.post("/password-reset/reset")
+@users_blp.arguments(PasswordResetCompleteRequestSchema)
+@users_blp.response(200, SuccessMessageSchema, description="Password updated")
+@users_blp.alt_response(400, schema=ErrorSchema, description="Invalid or expired token")
+@limiter.limit("5 per hour; 10 per day")
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def password_reset_complete(data: dict[str, Any]):
+    """Cambiar la contrasenya con el enlace de recuperacion. Invalida todos los tokens."""
+    user_id = USER_MANAGER.complete_password_reset(data["token"], data["newPassword"])
+    OAUTH_MANAGER.revoke_all_user_tokens(user_id)
+    return {"message": "Contrasenya actualizada. Ya puedes entrar con tu nueva clave."}
 
 
 @users_blp.get("")

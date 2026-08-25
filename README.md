@@ -341,6 +341,9 @@ A subscription with no explicit plan falls back to the default plan (seeded by m
 | `POST` | `/oauth/mfa/verify` | Resolve a TOTP challenge (code or recovery code) into tokens |
 | `POST` | `/users/sign-up` | Registration (username, password, email, alias) |
 | `POST` | `/users/verify-email` · `/verify-email/resend` | Confirm an account's email address |
+| `POST` | `/users/password-reset/request` | **Public** — request a reset link by username or email; generic response (anti-enumeration); MFA-enabled accounts first get a challenge |
+| `POST` | `/users/password-reset/mfa` | **Public** — resolve the reset challenge (TOTP or recovery code); only then is the link emailed to the account's registered address |
+| `POST` | `/users/password-reset/check` · `/users/password-reset/reset` | **Public** — validate a reset link / set the new password (single-use, 30-min TTL, revokes all sessions) |
 | `POST` | `/users/check-credentials` | Validate credentials without issuing tokens |
 | `GET/PUT` | `/users/me` | Read / update the authenticated user's own profile |
 | `GET` | `/users/me/deletion-preview` | Preview what account self-deletion would remove |

@@ -233,6 +233,45 @@ class TestMfaReminderTemplate:
         assert "&amp;amp;" in html
 
 
+class TestPasswordResetTemplate:
+    def test_renders_the_reset_link_and_ttl(self):
+        html, text = render_email(
+            "password_reset",
+            recipient_name="Ana",
+            reset_url="https://ellysia.es/recuperar?token=abc123",
+            ttl_minutes=30,
+        )
+
+        assert "https://ellysia.es/recuperar?token=abc123" in html
+        assert "https://ellysia.es/recuperar?token=abc123" in text
+        assert "30 minutos" in html
+        assert "30 minutos" in text
+        assert "Hola Ana," in html
+        assert "<table" in html
+        assert "<link" not in html
+        assert "<" not in text
+
+    def test_escapes_the_reset_url(self):
+        html, _ = render_email(
+            "password_reset",
+            recipient_name=None,
+            reset_url="https://ellysia.es/recuperar?token=<script>",
+            ttl_minutes=30,
+        )
+        assert "<script>" not in html
+        assert "&lt;script&gt;" in html
+
+    def test_warns_when_not_requested(self):
+        html, text = render_email(
+            "password_reset",
+            recipient_name=None,
+            reset_url="https://ellysia.es/recuperar?token=abc123",
+            ttl_minutes=30,
+        )
+        assert "ignora este mensaje" in html
+        assert "ignora este mensaje" in text
+
+
 def test_brand_defaults_are_injected():
     """Sin ``brand`` explícita, render_email la saca de la config + defaults."""
     html, _ = render_email("campaign", pill_title="X", link="https://e.es/q", recipient_name=None)

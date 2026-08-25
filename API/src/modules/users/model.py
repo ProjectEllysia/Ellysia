@@ -183,6 +183,13 @@ class User(Base):
     email_verification_hash       = Column(String(128),  nullable=True)
     email_verification_expires_at = Column(DateTime,     nullable=True)
 
+    # Recuperación de contraseña. Mismo patrón que la verificación de correo:
+    # un solo enlace vivo por usuario (re-solicitar invalida el anterior) y del
+    # token se guarda solo el SHA-256 — leer la base de datos no debe permitir
+    # fabricar un enlace válido. NULL en ambos = sin solicitud pendiente.
+    password_reset_hash       = Column(String(128), nullable=True)
+    password_reset_expires_at = Column(DateTime,     nullable=True)
+
     # La cuenta nació con una contraseña que el usuario no eligió (alta por
     # invitación a una organización) y tiene que cambiarla. Va aparte de
     # password_changed_at porque ese NULL ya significa otra cosa: "nunca se
@@ -343,9 +350,15 @@ class MFAChallenge(Base):
     guesses can be capped server-side — a 6-digit TOTP code is brute-forceable
     online, unlike Acheron's client-side-only vault checker.
 
+    ``purpose`` separa los challenges de login de los de recuperación de
+    contraseña: un challenge de recuperación no debe canjearse por tokens en
+    POST /oauth/mfa/verify, ni uno de login disparar el envío del enlace de
+    recuperación.
+
     Attributes:
         token: Opaque random string handed to the client (not a JWT).
         user_id: Foreign key to User.id.
+        purpose: "login" (POST /oauth/mfa/verify) o "password_reset".
         expires_at: Short expiry (minutes, see config_reading.MfaConfig).
         attempts: Number of failed verification attempts so far.
         created_at: Issuance timestamp.
@@ -355,6 +368,7 @@ class MFAChallenge(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     token = Column(String(512), unique=True, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
+    purpose = Column(String(32), nullable=False, default="login")
     expires_at = Column(DateTime, nullable=False)
     attempts = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
@@ -366,4 +380,7 @@ class MFAChallenge(Base):
         return self.attempts < max_attempts and utcnow_naive() < self.expires_at
 
     def __repr__(self) -> str:
-        return f"<MFAChallenge id={self.id} user_id={self.user_id} attempts={self.attempts}>"
+        return (
+            f"<MFAChallenge id={self.id} user_id={self.user_id} "
+            f"purpose={self.purpose} attempts={self.attempts}>"
+        )
