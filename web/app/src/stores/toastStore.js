@@ -26,7 +26,7 @@ export const useToastStore = defineStore('toast', () => {
   const visible = ref(false)
   /** @type {import('vue').Ref<{label: string, to: string}|null>} Acción opcional */
   const action = ref(null)
-  /** Clave para animar también el reemplazo de un toast visible. */
+  /** Clave para reanudar la animación de entrada entre toasts distintos. */
   const id = ref(0)
 
   /** @type {number|null} Referencia al timeout de auto-ocultación */
@@ -46,7 +46,11 @@ export const useToastStore = defineStore('toast', () => {
     message.value = msg
     type.value = variant || ''
     action.value = nextAction
-    id.value += 1
+    // Solo se anima la entrada cuando el toast no está visible. Si ya hay uno
+    // mostrándose, se actualiza en el sitio: cambiar `id` reemplazaría el
+    // elemento y `mode="out-in"` haría la animación de salida+entrada
+    // (doble amago de aparecer) aunque sea el mismo aviso.
+    if (!visible.value) id.value += 1
     visible.value = true
     timer = setTimeout(dismiss, duration)
   }
