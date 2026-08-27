@@ -41,7 +41,14 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
-from src.modules.shared import Base, Document, utcnow_naive, isoformat_utc
+from src.modules.shared import (
+    Base,
+    Document,
+    WhiteLabelColumns,
+    WhiteLabelLevel,
+    utcnow_naive,
+    isoformat_utc,
+)
 
 
 # =========================================================================
@@ -71,7 +78,7 @@ class Topic(Base):
 # ORGANIZATION PROFILE
 # =========================================================================
 
-class AegisOrgProfile(Base):
+class AegisOrgProfile(WhiteLabelColumns, Base):
     """
     Stable per-user defaults for Aegis pill generation.
 
@@ -104,6 +111,10 @@ class AegisOrgProfile(Base):
             manual ``tracked_products`` list. Defaults to True so that
             registering a first agent starts paying off without extra setup;
             the UI only surfaces the control once such an agent exists.
+        white_label_level: How much of the Ellysia brand the campaign
+            recipients see ('none' | 'logo' | 'full'). From WhiteLabelColumns.
+        brand_logo: The organization's logo as a base64 data URI, shown in the
+            campaign email. From WhiteLabelColumns.
         created_at: Creation timestamp.
     """
 
@@ -147,6 +158,8 @@ class AegisOrgProfile(Base):
             "employeeCount":    self.employee_count,
             "trackedProducts":  self.tracked_products or [],
             "useHygeiaInventory": bool(self.use_hygeia_inventory),
+            "whiteLabelLevel":  self.white_label_level or WhiteLabelLevel.NONE.value,
+            "brandLogo":        self.brand_logo or "",
         }
 
     def __repr__(self) -> str:

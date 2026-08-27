@@ -9,7 +9,10 @@ tracking de apertura/finalización del quiz público, consumido por los
 endpoints sin autenticación.
 
 El envío de email delega en el módulo transversal ``herald``
-(``build_mailer("aegis").send(...)``): este manager no sabe nada de SMTP.
+(``build_mailer("aegis").send(...)``): este manager no sabe nada de SMTP —
+tampoco de cómo se pinta una marca: el white-labeling se resuelve con las
+piezas compartidas (``shared.WhiteLabel`` + ``herald.apply_white_label``) y
+aquí solo se leen los ajustes del perfil de la organización.
 """
 
 from __future__ import annotations
@@ -32,16 +35,24 @@ from src.modules.features.aegis.exceptions import (
 )
 import src.modules.system.config_reading as CR
 from src.modules.accounts import LimitKey, QuotaManager
-from src.modules.tools.herald import EmailMessage, Mailer, build_mailer, render_email
+from src.modules.tools.herald import (
+    EmailMessage,
+    Mailer,
+    apply_white_label,
+    build_mailer,
+    default_brand,
+    render_email,
+)
 from src.modules.users import User
 from src.modules.system.taskqueue import ITaskQueue, TaskTrackingMixin, job_context
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
-from src.modules.shared import assert_owned
+from src.modules.shared import WhiteLabel, assert_owned
 
 from ..model import Campaign, CampaignRecipient, DistributionList
 from ..repositories import (
     AegisDocumentRepository,
+    AegisOrgProfileRepository,
     CampaignRepository,
     DistributionListRepository,
 )
@@ -299,6 +310,19 @@ class CampaignManager(TaskTrackingMixin):
                 for alert in sorted(document.alerts, key=lambda a: a.position)
             ] if document else []
 
+            # White-labeling: los ajustes son del perfil de la organización y
+            # se leen una vez, no por destinatario — la marca es la misma para
+            # toda la campaña. El nombre con el que sustituir la del producto
+            # es el que el destinatario ya lee en el cuerpo ("Desde X, te
+            # hacemos llegar…"), para que cabecera y texto no se contradigan.
+            profile = build_repository(AegisOrgProfileRepository).get_by_user_id(self.user.id)
+            white_label = WhiteLabel.from_stored(
+                profile.white_label_level if profile else None,
+                profile.brand_logo if profile else None,
+                pill_company or (profile.company if profile else ""),
+            )
+            brand, brand_images = apply_white_label(default_brand(), white_label)
+
             sent_count = 0
             was_cancelled = False
             for i, recipient in enumerate(recipients):
@@ -313,6 +337,7 @@ class CampaignManager(TaskTrackingMixin):
                 link = f"{base_url}/quiz?t={recipient.token}"
                 html_body, text_body = render_email(
                     "campaign",
+                    brand=brand,
                     pill_title=pill_title,
                     link=link,
                     recipient_name=recipient.recipient_name,
@@ -330,6 +355,7 @@ class CampaignManager(TaskTrackingMixin):
                     subject=f"Formación de concienciación: {pill_title}",
                     html_body=html_body,
                     text_body=text_body,
+                    inline_images=brand_images,
                 )
                 try:
                     mailer.send(message)

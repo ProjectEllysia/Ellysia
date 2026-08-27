@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.modules.shared import WhiteLabelLevel
 from src.modules.users import User
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
@@ -38,6 +39,8 @@ _ORG_PROFILE_DEFAULTS: dict[str, Any] = {
     "employeeCount": None,
     "trackedProducts": [],
     "useHygeiaInventory": True,
+    "whiteLabelLevel": WhiteLabelLevel.NONE.value,
+    "brandLogo": "",
 }
 
 
@@ -111,6 +114,8 @@ class AegisOrgProfileManager:
             profile.employee_count = data["employeeCount"]
             profile.tracked_products = data["trackedProducts"]
             profile.use_hygeia_inventory = data["useHygeiaInventory"]
+            profile.white_label_level = data["whiteLabelLevel"]
+            profile.brand_logo = data["brandLogo"] or None
 
             saved = repo.save(profile)
             return saved.to_dict()

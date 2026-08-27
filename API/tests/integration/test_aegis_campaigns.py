@@ -514,3 +514,126 @@ def test_public_quiz_is_rate_limited(client, rate_limiting_enabled):
 
     resp = client.get("/aegis/quiz?t=this-token-does-not-exist")
     assert resp.status_code == 429
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# White-labeling
+# ─────────────────────────────────────────────────────────────────────────
+
+#: PNG de 1x1, el logo más pequeño que un cliente de correo acepta.
+_LOGO_URI = (
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA"
+    "CklEQVR4nGNgAAAAAgABf6ZX1AAAAABJRU5ErkJggg=="
+)
+
+
+def _save_org_profile(client, headers, **overrides):
+    payload = {
+        "company": "ACME S.L.",
+        "mentionContact": "seguridad@acme.test",
+        "tone": "profesional",
+        "companySize": "",
+        "jurisdiction": "",
+        "language": "es",
+        "sector": "",
+        "workModel": "",
+        "employeeCount": None,
+        "trackedProducts": [],
+        "useHygeiaInventory": False,
+    }
+    payload.update(overrides)
+    return client.put("/aegis/org-profile", headers=headers, json=payload)
+
+
+def _run_campaign(client, app, headers, user_id, doc_id, email="empleado@empresa.test"):
+    list_id = client.post("/aegis/lists", headers=headers, json={"name": "Plantilla"}).get_json()["id"]
+    client.post(
+        f"/aegis/lists/{list_id}/recipients", headers=headers,
+        json={"recipients": [{"email": email, "name": "Empleado"}]},
+    )
+    campaign_id = client.post(
+        "/aegis/campaigns", headers=headers,
+        json={"documentId": doc_id, "listId": list_id, "name": "Campaña"},
+    ).get_json()["id"]
+    with mock.patch.object(TaskQueue, "get_instance", return_value=_FakeTaskQueue()):
+        client.post(f"/aegis/campaigns/{campaign_id}/launch", headers=headers)
+    with app.app_context():
+        CampaignManager.execute_campaign_send(campaign_id, user_id)
+    return campaign_id
+
+
+def test_org_profile_round_trips_white_label_settings(client, admin_headers):
+    saved = _save_org_profile(
+        client, admin_headers, whiteLabelLevel="logo", brandLogo=_LOGO_URI,
+    ).get_json()
+
+    assert saved["whiteLabelLevel"] == "logo"
+    assert saved["brandLogo"] == _LOGO_URI
+
+    fetched = client.get("/aegis/org-profile", headers=admin_headers).get_json()
+    assert fetched["whiteLabelLevel"] == "logo"
+    assert fetched["brandLogo"] == _LOGO_URI
+
+
+def test_org_profile_defaults_to_no_white_label(client, admin_headers):
+    """Un perfil que nunca tocó el ajuste manda el correo de siempre."""
+    profile = client.get("/aegis/org-profile", headers=admin_headers).get_json()
+    assert profile["whiteLabelLevel"] == "none"
+    assert profile["brandLogo"] == ""
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"brandLogo": "https://cdn.acme.test/logo.png"},
+        {"brandLogo": "data:image/svg+xml;base64,PHN2Zy8+"},
+        {"whiteLabelLevel": "parcial"},
+    ],
+)
+def test_org_profile_rejects_invalid_white_label_input(client, admin_headers, overrides):
+    assert _save_org_profile(client, admin_headers, **overrides).status_code == 422
+
+
+def test_campaign_email_without_white_label_keeps_the_product_brand(
+    app, client, admin_user, admin_headers, make_aegis_doc_with_quiz, local_email_config,
+):
+    doc_id = make_aegis_doc_with_quiz(admin_user.id)
+    _save_org_profile(client, admin_headers)
+
+    _run_campaign(client, app, admin_headers, admin_user.id, doc_id)
+
+    sent = local_email_config.messages[0]
+    assert "Ellysia" in sent["html"]
+    assert "cid:" not in sent["html"]
+
+
+def test_campaign_email_with_logo_level_embeds_the_customer_logo(
+    app, client, admin_user, admin_headers, make_aegis_doc_with_quiz, local_email_config,
+):
+    doc_id = make_aegis_doc_with_quiz(admin_user.id)
+    _save_org_profile(client, admin_headers, whiteLabelLevel="logo", brandLogo=_LOGO_URI)
+
+    _run_campaign(client, app, admin_headers, admin_user.id, doc_id)
+
+    sent = local_email_config.messages[0]
+    assert 'src="cid:brand-logo"' in sent["html"]
+    # La imagen viaja dentro del mensaje: nada que descargar de un servidor.
+    assert "image/png" in sent["content"]
+    # Este nivel solo añade: la marca del producto sigue en cabecera y pie.
+    assert "Ellysia" in sent["html"]
+
+
+def test_campaign_email_with_full_level_removes_the_product_brand(
+    app, client, admin_user, admin_headers, make_aegis_doc_with_quiz, local_email_config,
+):
+    doc_id = make_aegis_doc_with_quiz(admin_user.id)
+    _save_org_profile(client, admin_headers, whiteLabelLevel="full", brandLogo=_LOGO_URI)
+
+    _run_campaign(client, app, admin_headers, admin_user.id, doc_id)
+
+    sent = local_email_config.messages[0]
+    assert "Ellysia" not in sent["html"]
+    # La marca que sustituye es la misma que el destinatario lee en el cuerpo
+    # ("Desde ACME, te hacemos llegar…"), que es la de la píldora.
+    assert "ACME" in sent["html"]
+    assert 'src="cid:brand-logo"' in sent["html"]
