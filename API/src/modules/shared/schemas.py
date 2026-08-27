@@ -1,6 +1,8 @@
 from datetime import timezone
 
-from marshmallow import Schema, fields, validate
+from marshmallow import Schema, ValidationError, fields, validate
+
+from ._white_label import WhiteLabelLevel, validate_logo_data_uri
 
 
 class UTCDateTime(fields.DateTime):
@@ -33,3 +35,30 @@ class SuccessMessageSchema(Schema):
 class PaginationQuerySchema(Schema):
     page = fields.Integer(load_default=1, validate=validate.Range(min=1))
     per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
+
+
+def _validate_brand_logo(value: str) -> None:
+    """Adapta la validación compartida del logo al contrato de marshmallow."""
+    if not value:
+        return
+    try:
+        validate_logo_data_uri(value)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+class WhiteLabelSchemaMixin:
+    """
+    Campos de white-labeling para el esquema de cualquier módulo que lo ofrezca.
+
+    Se hereda junto a ``Schema`` (``class MiSchema(WhiteLabelSchemaMixin, Schema)``)
+    y aporta la pareja de campos ya validada — el logo llega del navegador, así
+    que su tipo y su tamaño se comprueban aquí, en el borde de confianza, y no
+    en el manager ni en la plantilla.
+    """
+
+    whiteLabelLevel = fields.String(
+        load_default=WhiteLabelLevel.NONE.value,
+        validate=validate.OneOf([level.value for level in WhiteLabelLevel]),
+    )
+    brandLogo = fields.String(load_default="", allow_none=True, validate=_validate_brand_logo)

@@ -25,6 +25,7 @@ from .strategies import EmailStrategy, SmtpStrategy
 from .mailer import Mailer
 from .factory import build_mailer
 from .rendering import render_email
+from .branding import LOGO_CONTENT_ID, apply_white_label, default_brand
 from .exceptions import (
     EmailConnectionError,
     EmailSendError,
@@ -40,6 +41,9 @@ __all__ = [
     "Mailer",
     "build_mailer",
     "render_email",
+    "apply_white_label",
+    "default_brand",
+    "LOGO_CONTENT_ID",
     "EmailConnectionError",
     "EmailSendError",
     "EmailConfigurationError",

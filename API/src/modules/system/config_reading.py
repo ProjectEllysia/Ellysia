@@ -586,7 +586,7 @@ class HeraldConfig(_StrategySelection):
     branding: dict = field(default_factory=dict)
     """Marca que pintan las plantillas: ``productName``, ``accentColor``,
     ``logoUrl``, ``supportEmail``, ``footerNote``. Lo que no se declare aquí
-    lo rellena ``herald.rendering._DEFAULT_BRAND``."""
+    lo rellena ``herald.branding.DEFAULT_BRAND``."""
 
     templates_dir: str = ""
     """Directorio externo con plantillas que pisan a las del paquete. Vacío
