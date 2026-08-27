@@ -46,7 +46,6 @@ const toast = useToastStore()
   position: fixed; bottom: 2rem; right: 2rem;
   z-index: 9999;
   pointer-events: none;
-  max-width: min(460px, calc(100vw - 2rem));
 }
 
 .toast {
@@ -56,7 +55,10 @@ const toast = useToastStore()
   font-size: var(--fs-body); font-weight: 500; line-height: 1.35;
   background: var(--surface-3); border: 1px solid var(--border);
   color: var(--text);
-  max-width: 100%; max-height: 7.5rem; overflow-y: auto;
+  /* El tope va aquí y no en la región: la región es `position: fixed` sin
+     ancho, o sea shrink-to-fit, y un `max-width: 100%` del hijo contra eso es
+     circular — el navegador lo ignora y el toast se estira más de la cuenta. */
+  max-width: min(460px, calc(100vw - 2rem)); max-height: 7.5rem; overflow-y: auto;
   overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap;
   backdrop-filter: blur(12px);
   box-shadow: 0 12px 32px rgba(0,0,0,0.34);
@@ -118,11 +120,8 @@ const toast = useToastStore()
 }
 
 @media (max-width: 560px) {
-  .toast-region {
-    right: 1rem; bottom: 1rem;
-    max-width: calc(100vw - 2rem);
-  }
-  .toast { align-items: flex-start; }
+  .toast-region { right: 1rem; bottom: 1rem; }
+  .toast { align-items: flex-start; max-width: calc(100vw - 2rem); }
   .toast__action { white-space: normal; }
 }
 
