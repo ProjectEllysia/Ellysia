@@ -37,6 +37,12 @@ export const useAegisStore = defineStore('aegis', () => {
   const useHygeiaInventory = ref(true)
   /** Si el usuario tiene algún agente con inventario (decide si se ofrece) */
   const hygeiaInventoryAvailable = ref(false)
+  /** Ajustes de white-labeling del perfil (v-model de WhiteLabelFields).
+      `ref` y no `reactive`: el componente emite un objeto nuevo en cada
+      cambio, y a un `reactive` del store no se le puede reasignar. */
+  const whiteLabel = ref({ level: 'none', logo: '' })
+  /** Nivel máximo que concede el plan contratado; lo dicta el servidor */
+  const maxWhiteLabelLevel = ref('none')
   /** Resultados del buscador de productos */
   const productResults = ref([])
   /** Búsqueda de productos en curso */
@@ -219,6 +225,8 @@ export const useAegisStore = defineStore('aegis', () => {
       trackedProducts.value = [...(data.trackedProducts ?? [])]
       useHygeiaInventory.value = data.useHygeiaInventory ?? true
       hygeiaInventoryAvailable.value = data.hygeiaInventoryAvailable ?? false
+      whiteLabel.value = { level: data.whiteLabelLevel || 'none', logo: data.brandLogo ?? '' }
+      maxWhiteLabelLevel.value = data.maxWhiteLabelLevel || 'none'
     } finally { loadingOrgProfile.value = false }
   }
 
@@ -242,6 +250,8 @@ export const useAegisStore = defineStore('aegis', () => {
         employeeCount:    tweaks.employeeCount || null,
         trackedProducts:  [...trackedProducts.value],
         useHygeiaInventory: useHygeiaInventory.value,
+        whiteLabelLevel:  whiteLabel.value.level,
+        brandLogo:        whiteLabel.value.logo,
       }
       const res = await apiFetch('/aegis/org-profile', { method: 'PUT', body: JSON.stringify(payload) })
       if (!res?.ok) {
@@ -721,6 +731,7 @@ export const useAegisStore = defineStore('aegis', () => {
   return {
     topics, documents, listError, selectedTopicId, currentDocId, sortMode,
     trackedProducts, useHygeiaInventory, hygeiaInventoryAvailable,
+    whiteLabel, maxWhiteLabelLevel,
     productResults, searchingProducts, productSearchError,
     generating, generateError, loading, editing, saving, tweaks, viewerDoc,
     loadingOrgProfile, savingOrgProfile, orgProfileConfigured,

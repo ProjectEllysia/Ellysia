@@ -153,6 +153,11 @@
             </button>
           </div>
 
+          <WhiteLabelFields
+            v-model="store.whiteLabel"
+            :max-level="store.maxWhiteLabelLevel"
+          />
+
           <button
             type="button"
             class="btn-save-profile"
@@ -182,6 +187,7 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
 import { useAegisStore } from "@/stores/aegisStore";
+import WhiteLabelFields from "@/components/shared/WhiteLabelFields.vue";
 import TrackedProductsModal from "./TrackedProductsModal.vue";
 
 const store = useAegisStore();
