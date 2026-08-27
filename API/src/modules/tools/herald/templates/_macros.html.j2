@@ -1,5 +1,5 @@
 {# Piezas reutilizables de los correos. Importar con:
-   {% from "_macros.html.j2" import button, data_row %} #}
+   {% from "_macros.html.j2" import button, data_row, brand_banner %} #}
 
 {#
   Botón "a prueba de balas": una tabla con el color de fondo y un <a> con
@@ -22,4 +22,25 @@
   <td style="padding:6px 12px 6px 0; font-family:Helvetica,Arial,sans-serif; font-size:14px; color:#8a857c; white-space:nowrap; vertical-align:top;">{{ label }}</td>
   <td style="padding:6px 0; font-family:Helvetica,Arial,sans-serif; font-size:14px; color:#2c2a26; font-weight:bold;">{{ value }}</td>
 </tr>
+{%- endmacro %}
+
+{#
+  Logo del cliente sobre el cuerpo del correo (white-labeling de nivel "logo").
+  No se pinta solo: se apoya en brand.customerLogoUrl, que herald.branding
+  rellena únicamente cuando ese nivel está activo — en el nivel "full" el logo
+  ya ocupa la cabecera y repetirlo aquí lo duplicaría en la misma pantalla.
+  `alt` es el nombre del cliente: brand.productName sigue siendo el del
+  producto mientras la marca no se haya retirado.
+#}
+{% macro brand_banner(brand, alt="") -%}
+{% if brand.customerLogoUrl %}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
+  <tr>
+    <td>
+      <img src="{{ brand.customerLogoUrl }}" alt="{{ alt }}" width="160"
+           style="display:block; border:0; max-width:160px; height:auto;">
+    </td>
+  </tr>
+</table>
+{% endif %}
 {%- endmacro %}
