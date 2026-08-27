@@ -4,7 +4,7 @@ Las dos columnas del mixin ``shared.WhiteLabelColumns``. El nivel por defecto
 es 'none', que reproduce exactamente el correo de antes: una organizacion que
 no toque nada no nota el cambio.
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: a1b2c3d4e5f7
 Revises: e79879ec2b67
 Create Date: 2026-08-27
 
