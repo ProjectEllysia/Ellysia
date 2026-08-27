@@ -46,7 +46,7 @@ _PLANS: tuple[tuple, ...] = (
 #: Topes del ambito "holder": lo que se lleva quien contrata el plan.
 #: limit_key -> (period, {code_de_plan: valor})
 #: None = ilimitado · 0 = no incluido.
-#: Las 15 claves aparecen para los 4 planes a proposito: una fila ausente se
+#: Todas las claves aparecen para los 4 planes a proposito: una fila ausente se
 #: leeria como 0 y desactivaria la caracteristica en silencio.
 _HOLDER_LIMITS: dict[str, tuple[str, dict[str, int | None]]] = {
     "themis.lybra.scans":       ("month", {"freemium":  3, "bronze":  25, "silver":  100, "gold":   400}),
@@ -56,6 +56,9 @@ _HOLDER_LIMITS: dict[str, tuple[str, dict[str, int | None]]] = {
     "aegis.pills":              ("month", {"freemium":  2, "bronze":  15, "silver":   60, "gold":   200}),
     "aegis.campaigns":          ("month", {"freemium":  0, "bronze":   2, "silver":   10, "gold":    40}),
     "aegis.recipients":         ("stock", {"freemium":  0, "bronze": 100, "silver":  500, "gold":  2000}),
+    # Nivel, no cantidad: 0 sin white-labeling, 1 logo propio, 2 sin rastro de
+    # la marca del producto. Ver WhiteLabelLevel.from_allowance.
+    "aegis.white_label":        ("tier",  {"freemium":  0, "bronze":   1, "silver":    2, "gold":     2}),
     "iris.analyses":            ("month", {"freemium": 10, "bronze": 100, "silver":  500, "gold":  None}),
     "iris.ai_summaries":        ("month", {"freemium":  2, "bronze":  25, "silver":  100, "gold":   400}),
     "iris.mailbox.connections": ("stock", {"freemium":  0, "bronze":   1, "silver":    3, "gold":    10}),

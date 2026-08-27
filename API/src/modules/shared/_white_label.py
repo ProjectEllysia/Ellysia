@@ -54,6 +54,24 @@ class WhiteLabelLevel(str, Enum):
     LOGO = "logo"
     FULL = "full"
 
+    @property
+    def rank(self) -> int:
+        """Posición en la escalera. Es también el valor que concede el plan."""
+        return _LEVEL_ORDER.index(self)
+
+    @classmethod
+    def from_allowance(cls, allowance: int | None) -> "WhiteLabelLevel":
+        """El nivel máximo que concede un tope de plan.
+
+        Traduce el ``value`` de una fila de ``PlanLimit`` (``None`` = sin
+        techo, ``0`` = no incluido, ``n`` = escalón n) al nivel. Un tope mayor
+        que el último escalón no es un error: concede el más alto, para que
+        añadir escalones más adelante no obligue a reescribir los planes.
+        """
+        if allowance is None:
+            return _LEVEL_ORDER[-1]
+        return _LEVEL_ORDER[max(0, min(allowance, len(_LEVEL_ORDER) - 1))]
+
     @classmethod
     def coerce(cls, value: "WhiteLabelLevel | str | None") -> "WhiteLabelLevel":
         """Convierte lo que haya en la BD (o None) en un nivel válido.
@@ -68,6 +86,15 @@ class WhiteLabelLevel(str, Enum):
             return cls(str(value or "").lower())
         except ValueError:
             return cls.NONE
+
+
+#: La escalera, de menos a más. El índice es el ``rank`` y el valor que un plan
+#: declara en ``PlanLimit`` para conceder ese nivel.
+_LEVEL_ORDER: tuple[WhiteLabelLevel, ...] = (
+    WhiteLabelLevel.NONE,
+    WhiteLabelLevel.LOGO,
+    WhiteLabelLevel.FULL,
+)
 
 
 def validate_logo_data_uri(value: str) -> tuple[str, bytes]:
@@ -159,6 +186,18 @@ class WhiteLabel:
         if self.level is WhiteLabelLevel.LOGO and not self.logo:
             return WhiteLabelLevel.NONE
         return self.level
+
+    def capped_to(self, maximum: WhiteLabelLevel) -> "WhiteLabel":
+        """Los mismos ajustes, sin pasar de ``maximum``.
+
+        El tope lo pone el plan, y se aplica **también al usar** los ajustes,
+        no solo al guardarlos: al bajar de plan, un nivel que era legal deja de
+        serlo, y nadie borra nada — igual que unas existencias que quedan por
+        encima del tope entran en solo lectura en vez de desaparecer.
+        """
+        if self.level.rank <= maximum.rank:
+            return self
+        return WhiteLabel(level=maximum, logo=self.logo, brand_name=self.brand_name)
 
     def decoded_logo(self) -> tuple[str, bytes] | None:
         """El logo como ``(mimetype, bytes)``, o None si no hay o no es válido.

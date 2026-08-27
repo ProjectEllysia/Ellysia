@@ -49,6 +49,7 @@ from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import WhiteLabel, assert_owned
 
+from .org_profile import AegisOrgProfileManager
 from ..model import Campaign, CampaignRecipient, DistributionList
 from ..repositories import (
     AegisDocumentRepository,
@@ -320,6 +321,11 @@ class CampaignManager(TaskTrackingMixin):
                 profile.white_label_level if profile else None,
                 profile.brand_logo if profile else None,
                 pill_company or (profile.company if profile else ""),
+            )
+            # El tope del plan se vuelve a aplicar aquí: entre que se guardó el
+            # ajuste y se envía la campaña la suscripción puede haber bajado.
+            white_label = white_label.capped_to(
+                AegisOrgProfileManager.max_white_label_level(self.user.id)
             )
             brand, brand_images = apply_white_label(default_brand(), white_label)
 

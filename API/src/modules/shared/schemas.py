@@ -62,3 +62,8 @@ class WhiteLabelSchemaMixin:
         validate=validate.OneOf([level.value for level in WhiteLabelLevel]),
     )
     brandLogo = fields.String(load_default="", allow_none=True, validate=_validate_brand_logo)
+    #: Solo de salida: no es un ajuste sino el techo que concede el plan. El
+    #: frontend lo usa para no ofrecer niveles que se van a rechazar. Sin
+    #: ``dump_only`` el mismo esquema, que también valida la escritura, lo
+    #: descartaría al serializar.
+    maxWhiteLabelLevel = fields.String(dump_only=True)

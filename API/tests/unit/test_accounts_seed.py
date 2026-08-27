@@ -78,7 +78,7 @@ def test_seed_plan_codes_in_limits_exist():
 
 
 def test_seed_covers_every_holder_key_for_every_plan():
-    """Las 15 claves, en los 4 planes, explícitamente.
+    """Todas las claves, en los 4 planes, explícitamente.
 
     Omitir una no da error: se lee como 0 y desactiva la característica. Es el
     fallo cerrado que queremos cuando alguien añade una clave nueva y se olvida

@@ -119,6 +119,12 @@ class QuotaManager:
             )
             raise PlanFeatureDisabledError(key.db_name, entitlement.plan_code)
 
+        if entitlement.period is LimitPeriod.TIER:
+            raise NotImplementedError(
+                f"'{key.db_name}' es una clave de nivel: no se consume. Su tope se "
+                f"lee con resolve_entitlement(...).limit y se respeta al aplicarlo."
+            )
+
         if entitlement.period is LimitPeriod.STOCK:
             self._consume_stock(entitlement, amount)
         else:
@@ -251,6 +257,11 @@ class QuotaManager:
             pass  # ya existía: seguimos al UPDATE.
 
     def _current_usage(self, entitlement: Entitlement) -> int:
+        # Un nivel no se gasta: lo consumido es siempre 0 y lo que importa es
+        # el tope. Así "Mi plan" puede pintarlo sin caso especial.
+        if entitlement.period is LimitPeriod.TIER:
+            return 0
+
         if entitlement.period is LimitPeriod.STOCK:
             return self._count_stock(entitlement)
 

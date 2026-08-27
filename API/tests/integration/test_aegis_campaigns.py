@@ -637,3 +637,83 @@ def test_campaign_email_with_full_level_removes_the_product_brand(
     # ("Desde ACME, te hacemos llegar…"), que es la de la píldora.
     assert "ACME" in sent["html"]
     assert 'src="cid:brand-logo"' in sent["html"]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Tope de nivel por plan (aegis.white_label)
+# ─────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture()
+def white_label_allowance(app):
+    """Fija el tope que concede el plan del usuario de test.
+
+    El plan por defecto de la suite lo da todo por ilimitado; aquí se baja a
+    un escalón concreto para ejercitar el corte.
+    """
+    def _set(value):
+        from src.modules.accounts.model import PlanLimit
+        from src.modules.infrastructure.unit_of_work import UnitOfWork
+
+        with app.app_context():
+            with UnitOfWork() as uow:
+                rows = uow.session.query(PlanLimit).filter(
+                    PlanLimit.limit_key == "aegis.white_label",
+                ).all()
+                for row in rows:
+                    row.value = value
+    return _set
+
+
+def test_profile_reports_the_level_its_plan_allows(client, admin_headers, white_label_allowance):
+    white_label_allowance(1)
+    profile = client.get("/aegis/org-profile", headers=admin_headers).get_json()
+    assert profile["maxWhiteLabelLevel"] == "logo"
+
+    white_label_allowance(0)
+    profile = client.get("/aegis/org-profile", headers=admin_headers).get_json()
+    assert profile["maxWhiteLabelLevel"] == "none"
+
+
+def test_saving_a_level_above_the_plan_is_rejected(client, admin_headers, white_label_allowance):
+    white_label_allowance(1)
+
+    rejected = _save_org_profile(
+        client, admin_headers, whiteLabelLevel="full", brandLogo=_LOGO_URI,
+    )
+    assert rejected.status_code == 402
+
+    allowed = _save_org_profile(
+        client, admin_headers, whiteLabelLevel="logo", brandLogo=_LOGO_URI,
+    )
+    assert allowed.status_code == 200
+
+
+def test_plan_without_white_label_cannot_even_add_a_logo(client, admin_headers, white_label_allowance):
+    white_label_allowance(0)
+    assert _save_org_profile(
+        client, admin_headers, whiteLabelLevel="logo", brandLogo=_LOGO_URI,
+    ).status_code == 402
+    # El nivel "none" es el de siempre y no depende del plan.
+    assert _save_org_profile(client, admin_headers, whiteLabelLevel="none").status_code == 200
+
+
+def test_campaign_send_caps_the_level_to_the_current_plan(
+    app, client, admin_user, admin_headers, make_aegis_doc_with_quiz, local_email_config,
+    white_label_allowance,
+):
+    """Una bajada de plan surte efecto en el siguiente envío, sin tocar lo guardado."""
+    doc_id = make_aegis_doc_with_quiz(admin_user.id)
+    _save_org_profile(client, admin_headers, whiteLabelLevel="full", brandLogo=_LOGO_URI)
+
+    white_label_allowance(1)
+    _run_campaign(client, app, admin_headers, admin_user.id, doc_id)
+
+    sent = local_email_config.messages[0]
+    # Degradado a "logo": el logo sigue, la marca del producto vuelve.
+    assert 'src="cid:brand-logo"' in sent["html"]
+    assert "Ellysia" in sent["html"]
+
+    # Y lo guardado no se ha tocado: al recuperar el plan vuelve a aplicarse.
+    assert client.get(
+        "/aegis/org-profile", headers=admin_headers
+    ).get_json()["whiteLabelLevel"] == "full"
