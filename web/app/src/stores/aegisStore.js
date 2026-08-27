@@ -168,8 +168,11 @@ export const useAegisStore = defineStore('aegis', () => {
       const data = await res.json()
       productResults.value = data.products ?? []
     } catch {
+      // Aquí solo se llega si `res.json()` no puede parsear el cuerpo: los
+      // fallos de red los absorbe `apiFetch`, que devuelve `null` y entra por
+      // la rama de arriba. Mismo mensaje: para el usuario es el mismo problema.
       productResults.value = []
-      productSearchError.value = 'No se pudo conectar con el catálogo de vulnerabilidades.'
+      productSearchError.value = 'No se pudo consultar el catálogo de vulnerabilidades.'
     }
     finally { searchingProducts.value = false }
   }
