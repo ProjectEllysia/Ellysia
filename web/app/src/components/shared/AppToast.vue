@@ -94,6 +94,13 @@ const toast = useToastStore()
   animation: toast-out 0.22s ease-in both;
 }
 
+/* Estado inicial de la entrada y final de la salida. En el caso normal los
+   `@keyframes` lo pisan, pero son lo único que queda cuando reduced-motion
+   anula la animación: sin estas dos reglas ahí no había nada que transicionar
+   y el fundido declarado más abajo era un corte seco. */
+.toast-enter-from,
+.toast-leave-to { opacity: 0; }
+
 @keyframes toast-in {
   0% { opacity: 0; transform: translate3d(0, 1.2rem, 0) scale(0.96); filter: blur(4px); }
   65% { opacity: 1; transform: translate3d(0, -0.15rem, 0) scale(1.005); filter: blur(0); }
