@@ -5,30 +5,59 @@ const toast = useToastStore()
 
 <template>
   <Teleport to="body">
-    <Transition name="toast">
-      <div v-if="toast.visible" :key="toast.id" class="toast"
-           :class="toast.type ? `toast--${toast.type}` : ''"
-           role="alert" aria-live="assertive">
-        <span class="toast__message">{{ toast.message }}</span>
-        <RouterLink v-if="toast.action?.to" class="toast__action" :to="toast.action.to"
-                    @click="toast.dismiss">
-          {{ toast.action.label }}
-        </RouterLink>
-        <button type="button" class="toast__close" aria-label="Cerrar notificación"
-                @click="toast.dismiss">&times;</button>
-      </div>
-    </Transition>
+    <!--
+      La región live está siempre montada, aunque no haya toast. Un `aria-live`
+      solo se anuncia si ya existía en el DOM antes de que cambie su contenido;
+      cuando el `role="alert"` iba en el <div> del toast, que nace y muere con
+      el v-if, los lectores de pantalla no decían nada.
+
+      El toast tampoco lleva ya `:key`: con un único elemento bajo `v-if` la
+      clave es redundante (el <div> se crea de cero al pasar de oculto a
+      visible, y la animación de entrada corre igual), y cambiarla mientras la
+      salida seguía animando metía el entrante y el saliente a la vez en el DOM
+      — dos toasts `position: fixed` superpuestos en el mismo píxel.
+    -->
+    <div class="toast-region" role="alert" aria-live="assertive" aria-atomic="true">
+      <Transition name="toast">
+        <!-- La cuenta atrás se congela mientras el toast se lee o se recorre
+             con el teclado; `focusin`/`focusout` burbujean, así que cubren
+             también el enlace de acción y el botón de cerrar. -->
+        <div v-if="toast.visible" class="toast"
+             :class="toast.type ? `toast--${toast.type}` : ''"
+             @mouseenter="toast.pause" @mouseleave="toast.resume"
+             @focusin="toast.pause" @focusout="toast.resume">
+          <span class="toast__message">{{ toast.message }}</span>
+          <RouterLink v-if="toast.action?.to" class="toast__action" :to="toast.action.to"
+                      @click="toast.dismiss">
+            {{ toast.action.label }}
+          </RouterLink>
+          <button type="button" class="toast__close" aria-label="Cerrar notificación"
+                  @click="toast.dismiss">&times;</button>
+        </div>
+      </Transition>
+    </div>
   </Teleport>
 </template>
 
 <style scoped>
-.toast {
+/* El posicionamiento vive en la región, no en el toast: la región está montada
+   siempre, así que no debe interceptar clics cuando está vacía. */
+.toast-region {
   position: fixed; bottom: 2rem; right: 2rem;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
   display: flex; align-items: center; gap: 0.75rem;
   padding: 0.8rem 0.8rem 0.8rem 1.1rem; border-radius: 8px;
   font-size: var(--fs-body); font-weight: 500; line-height: 1.35;
   background: var(--surface-3); border: 1px solid var(--border);
-  color: var(--text); z-index: 9999;
+  color: var(--text);
+  /* El tope va aquí y no en la región: la región es `position: fixed` sin
+     ancho, o sea shrink-to-fit, y un `max-width: 100%` del hijo contra eso es
+     circular — el navegador lo ignora y el toast se estira más de la cuenta. */
   max-width: min(460px, calc(100vw - 2rem)); max-height: 7.5rem; overflow-y: auto;
   overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap;
   backdrop-filter: blur(12px);
@@ -72,6 +101,13 @@ const toast = useToastStore()
   animation: toast-out 0.22s ease-in both;
 }
 
+/* Estado inicial de la entrada y final de la salida. En el caso normal los
+   `@keyframes` lo pisan, pero son lo único que queda cuando reduced-motion
+   anula la animación: sin estas dos reglas ahí no había nada que transicionar
+   y el fundido declarado más abajo era un corte seco. */
+.toast-enter-from,
+.toast-leave-to { opacity: 0; }
+
 @keyframes toast-in {
   0% { opacity: 0; transform: translate3d(0, 1.2rem, 0) scale(0.96); filter: blur(4px); }
   65% { opacity: 1; transform: translate3d(0, -0.15rem, 0) scale(1.005); filter: blur(0); }
@@ -84,11 +120,8 @@ const toast = useToastStore()
 }
 
 @media (max-width: 560px) {
-  .toast {
-    right: 1rem; bottom: 1rem;
-    align-items: flex-start;
-    max-width: calc(100vw - 2rem);
-  }
+  .toast-region { right: 1rem; bottom: 1rem; }
+  .toast { align-items: flex-start; max-width: calc(100vw - 2rem); }
   .toast__action { white-space: normal; }
 }
 
