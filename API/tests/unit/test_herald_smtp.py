@@ -18,7 +18,7 @@ aiosmtpd_controller = pytest.importorskip("aiosmtpd.controller")
 Controller = aiosmtpd_controller.Controller
 
 from src.modules.tools.herald.exceptions import EmailConnectionError, EmailSendError
-from src.modules.tools.herald.inputs import EmailMessage
+from src.modules.tools.herald.inputs import EmailMessage, InlineImage
 from src.modules.tools.herald.strategies import SmtpStrategy
 
 pytestmark = pytest.mark.unit
@@ -171,3 +171,71 @@ def test_smtp_strategy_raises_send_error_when_recipient_rejected(rejecting_smtp_
 
     with pytest.raises(EmailSendError):
         strategy.send(message)
+
+
+# Un PNG de 1x1 real: basta para que el generador MIME lo trate como imagen.
+_PNG_1x1 = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+    "890000000a49444154789c6360000002000100ffff03000006000557bfabd400"
+    "00000049454e44ae426082"
+)
+
+
+def test_smtp_strategy_embeds_inline_images_as_related_parts(smtp_server):
+    """La imagen inline viaja dentro del mensaje y con su Content-ID.
+
+    Es lo que hace que ``<img src="cid:...">`` resuelva en el cliente: si la
+    imagen colgara de la raíz en vez de la alternativa HTML, llegaría como
+    adjunto suelto y el <img> saldría roto.
+    """
+    controller, handler = smtp_server
+    strategy = SmtpStrategy(
+        host=controller.hostname,
+        port=controller.port,
+        from_address="noreply@ellysia.test",
+        use_tls=False,
+    )
+    message = EmailMessage(
+        to="empleado@empresa.test",
+        subject="Con logo",
+        html_body='<p><img src="cid:brand-logo"></p>',
+        inline_images=(InlineImage(content_id="brand-logo", data=_PNG_1x1, mimetype="image/png"),),
+    )
+
+    result = strategy.send(message)
+
+    assert result.ok is True
+    received = handler.messages[0]
+    assert "cid:brand-logo" in received["html"]
+
+    images = [
+        part for part in received["headers"].walk()
+        if part.get_content_type() == "image/png"
+    ]
+    assert len(images) == 1
+    assert images[0]["Content-ID"] == "<brand-logo>"
+    assert images[0].get_payload(decode=True) == _PNG_1x1
+
+    # La imagen va emparentada con el HTML, no colgada de la raíz.
+    related = [
+        part for part in received["headers"].walk()
+        if part.get_content_type() == "multipart/related"
+    ]
+    assert len(related) == 1
+    assert {part.get_content_type() for part in related[0].iter_parts()} == {
+        "text/html", "image/png",
+    }
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"content_id": "", "data": _PNG_1x1, "mimetype": "image/png"},
+        {"content_id": "<logo>", "data": _PNG_1x1, "mimetype": "image/png"},
+        {"content_id": "logo", "data": b"", "mimetype": "image/png"},
+        {"content_id": "logo", "data": _PNG_1x1, "mimetype": "text/html"},
+    ],
+)
+def test_inline_image_rejects_invalid_input(kwargs):
+    with pytest.raises(ValueError):
+        InlineImage(**kwargs)

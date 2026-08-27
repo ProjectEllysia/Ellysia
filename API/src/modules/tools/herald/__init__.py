@@ -20,7 +20,7 @@ Uso típico:
     ... ))
 """
 
-from .inputs import EmailMessage, SendResult
+from .inputs import EmailMessage, InlineImage, SendResult
 from .strategies import EmailStrategy, SmtpStrategy
 from .mailer import Mailer
 from .factory import build_mailer
@@ -33,6 +33,7 @@ from .exceptions import (
 
 __all__ = [
     "EmailMessage",
+    "InlineImage",
     "SendResult",
     "EmailStrategy",
     "SmtpStrategy",
