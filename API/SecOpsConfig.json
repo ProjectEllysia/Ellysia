@@ -84,8 +84,8 @@
       },
       "strategies": {
         "smtp": {
-          "fromAddress": "awareness@ellysia.es",
-          "fromName": "Ellysia Awareness",
+          "fromAddress": "herald@ellysia.es",
+          "fromName": "Ellysia Herald",
           "host": "smtp-relay.brevo.com",
           "port": 587,
           "useTls": true
