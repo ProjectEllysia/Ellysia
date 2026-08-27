@@ -41,6 +41,11 @@ export const useAegisStore = defineStore('aegis', () => {
   const productResults = ref([])
   /** Búsqueda de productos en curso */
   const searchingProducts = ref(false)
+  /**
+   * Motivo por el que la última búsqueda no devolvió nada, cuando no fue
+   * porque el catálogo no tuviera coincidencias. Cadena vacía si fue bien.
+   */
+  const productSearchError = ref('')
   /** Generación en curso */
   const generating = ref(false)
   /** Último fallo de generación, para pintarlo donde ocurrió y no solo en un
@@ -141,14 +146,31 @@ export const useAegisStore = defineStore('aegis', () => {
    */
   async function searchProducts(term) {
     const query = (term || '').trim()
+    productSearchError.value = ''
     if (query.length < 2) { productResults.value = []; return }
     searchingProducts.value = true
     try {
       const res = await apiFetch(`/aegis/products?q=${encodeURIComponent(query)}`)
-      if (!res?.ok) { productResults.value = []; return }
+      if (!res?.ok) {
+        productResults.value = []
+        // Un fallo vaciaba `productResults` igual que una búsqueda sin
+        // coincidencias, así que la UI no podía distinguirlos y enseñaba "sin
+        // coincidencias en el catálogo" — al usuario le decía que su producto
+        // no existe cuando lo que pasa es que no hemos podido preguntarlo.
+        // El 429 además tiene su propio aviso porque el endpoint está limitado
+        // a 120 peticiones/hora; useApi ya lanza un toast, pero el toast se va
+        // a los pocos segundos y esto se queda junto a la lista vacía.
+        productSearchError.value = res?.status === 429
+          ? 'Has agotado las búsquedas por ahora. Inténtalo de nuevo en unos minutos.'
+          : 'No se pudo consultar el catálogo de vulnerabilidades.'
+        return
+      }
       const data = await res.json()
       productResults.value = data.products ?? []
-    } catch { productResults.value = [] }
+    } catch {
+      productResults.value = []
+      productSearchError.value = 'No se pudo conectar con el catálogo de vulnerabilidades.'
+    }
     finally { searchingProducts.value = false }
   }
 
@@ -664,6 +686,7 @@ export const useAegisStore = defineStore('aegis', () => {
     hygeiaInventoryAvailable.value = false
     productResults.value = []
     searchingProducts.value = false
+    productSearchError.value = ''
     generating.value = false
     loading.value = false
     editing.value = false
@@ -695,7 +718,7 @@ export const useAegisStore = defineStore('aegis', () => {
   return {
     topics, documents, listError, selectedTopicId, currentDocId, sortMode,
     trackedProducts, useHygeiaInventory, hygeiaInventoryAvailable,
-    productResults, searchingProducts,
+    productResults, searchingProducts, productSearchError,
     generating, generateError, loading, editing, saving, tweaks, viewerDoc,
     loadingOrgProfile, savingOrgProfile, orgProfileConfigured,
     searchProducts, addTrackedProduct, removeTrackedProduct,
