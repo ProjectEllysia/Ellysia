@@ -21,6 +21,7 @@ __pycache__/
 .env.local
 .agents
 skills-lock.json
+.mcp.json
 
 # ============================================
 # Datos y logs
@@ -40,23 +41,6 @@ docs/
 .vscode/
 .idea/
 *.iml
-
-# ============================================
-# Android / Gradle
-# ============================================
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-build/
-/captures
-.local.properties
-.externalNativeBuild
-.cxx
 
 # ============================================
 # Sistema operativo
@@ -98,3 +82,6 @@ API/src/tmp
 # Análisis interno
 # ============================================
 MEJORAS.md
+
+# ============================================
+.serena
