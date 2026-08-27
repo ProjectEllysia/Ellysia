@@ -19,8 +19,13 @@ const toast = useToastStore()
     -->
     <div class="toast-region" role="alert" aria-live="assertive" aria-atomic="true">
       <Transition name="toast">
+        <!-- La cuenta atrás se congela mientras el toast se lee o se recorre
+             con el teclado; `focusin`/`focusout` burbujean, así que cubren
+             también el enlace de acción y el botón de cerrar. -->
         <div v-if="toast.visible" class="toast"
-             :class="toast.type ? `toast--${toast.type}` : ''">
+             :class="toast.type ? `toast--${toast.type}` : ''"
+             @mouseenter="toast.pause" @mouseleave="toast.resume"
+             @focusin="toast.pause" @focusout="toast.resume">
           <span class="toast__message">{{ toast.message }}</span>
           <RouterLink v-if="toast.action?.to" class="toast__action" :to="toast.action.to"
                       @click="toast.dismiss">
