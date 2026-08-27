@@ -346,15 +346,25 @@ def test_series_bucketed_one_point_per_bucket_with_max(client, app, regular_user
 
 
 def test_series_bucketed_points_are_bucket_starts_and_ordered(client, app, regular_user, auth_headers):
-    """El instante del punto es el inicio del cubo, y la serie va en orden."""
+    """El instante del punto es el inicio del cubo, y la serie va en orden.
+
+    La alineación de los cubos depende del segundo exacto del reloj en el
+    momento de sembrar (ver test_series_bucketed_one_point_per_bucket_with_max),
+    así que el recuento esperado se calcula contra los propios ``received_at``
+    sembrados, no contra una constante.
+    """
     asset_id = _create_asset(app, regular_user.id)
-    stamps = _seed_snapshots(app, asset_id, 10)  # 10 × 15 s = 2,5 min → 3 cubos
+    stamps = _seed_snapshots(app, asset_id, 10)  # 10 × 15 s = 2,5 min
 
     snapshots = client.get(
         f"/hygeia/assets/{asset_id}/metrics?bucket=60", headers=auth_headers(regular_user)
     ).get_json()["snapshots"]
 
-    assert len(snapshots) == 3
+    def utc_epoch(t):
+        return t.replace(tzinfo=timezone.utc).timestamp()
+
+    expected = int(utc_epoch(stamps[-1]) // 60) - int(utc_epoch(stamps[0]) // 60) + 1
+    assert len(snapshots) == expected
     received = [datetime.fromisoformat(s["receivedAt"]).replace(tzinfo=None) for s in snapshots]
     collected = [datetime.fromisoformat(s["collectedAt"]).replace(tzinfo=None) for s in snapshots]
 
