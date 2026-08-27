@@ -47,7 +47,7 @@ from src.modules.users import User
 from src.modules.system.taskqueue import ITaskQueue, TaskTrackingMixin, job_context
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
-from src.modules.shared import WhiteLabel, assert_owned
+from src.modules.shared import WhiteLabel, WhiteLabelLevel, assert_owned
 
 from .org_profile import AegisOrgProfileManager
 from ..model import Campaign, CampaignRecipient, DistributionList
@@ -410,11 +410,14 @@ class CampaignManager(TaskTrackingMixin):
         campaign = recipient.campaign
         snapshot = campaign.questions_snapshot or []
 
+        white_label = CampaignManager._public_white_label(campaign)
+
         if recipient.status == "completed":
             return {
                 "status": "completed",
                 "score": recipient.score,
                 "total": len(snapshot),
+                "whiteLabel": white_label,
             }
 
         if recipient.status == "sent":
@@ -424,11 +427,42 @@ class CampaignManager(TaskTrackingMixin):
         document = campaign.document
         return {
             "status": "opened",
+            "whiteLabel": white_label,
             "pillTitle": (document.subtitle or document.title) if document else "",
             "questions": [
                 {"position": question["position"], "prompt": question["prompt"], "options": question["options"]}
                 for question in snapshot
             ],
+        }
+
+    @staticmethod
+    def _public_white_label(campaign: Campaign) -> dict:
+        """Marca que ve el destinatario en la página del test.
+
+        La misma que en el correo y resuelta igual (ajustes del perfil, topados
+        por el plan): el test es la segunda mitad de la campaña y sería raro
+        que la primera llegara sin marca del producto y la segunda con ella.
+
+        Se sirve por un endpoint sin autenticar, así que solo sale lo que ese
+        destinatario ya ha recibido en su correo — nombre y logo de su propia
+        organización, nada más.
+        """
+        document = campaign.document
+        if document is None:
+            return {"level": WhiteLabelLevel.NONE.value, "brandName": "", "brandLogo": ""}
+
+        profile = build_repository(AegisOrgProfileRepository).get_by_user_id(document.user_id)
+        white_label = WhiteLabel.from_stored(
+            profile.white_label_level if profile else None,
+            profile.brand_logo if profile else None,
+            document.company or (profile.company if profile else ""),
+        ).capped_to(AegisOrgProfileManager.max_white_label_level(document.user_id))
+
+        level = white_label.effective_level
+        return {
+            "level": level.value,
+            "brandName": white_label.brand_name if level is not WhiteLabelLevel.NONE else "",
+            "brandLogo": white_label.logo if level is not WhiteLabelLevel.NONE else "",
         }
 
     @staticmethod

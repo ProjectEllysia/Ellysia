@@ -4,7 +4,9 @@
 
     <main class="quiz-shell">
       <header class="quiz-brand">
-        <span class="brand-mark">Ellysia</span>
+        <img v-if="whiteLabel.brandLogo" class="brand-logo" :src="whiteLabel.brandLogo" :alt="whiteLabel.brandName" />
+        <span v-if="productBrandVisible" class="brand-mark">Ellysia</span>
+        <span v-else-if="!whiteLabel.brandLogo" class="brand-mark">{{ whiteLabel.brandName }}</span>
         <span class="brand-sub">Formación de concienciación</span>
       </header>
 
@@ -90,7 +92,7 @@
         </form>
       </template>
 
-      <footer class="quiz-foot">Ellysia · Concienciación en seguridad</footer>
+      <footer class="quiz-foot">{{ footerBrand }} · Concienciación en seguridad</footer>
     </main>
   </div>
 </template>
@@ -126,10 +128,21 @@ const answers = reactive({})
 // generarlo dentro del v-for lo recalcularía en cada render y las opciones
 // bailarían con cada clic.
 const optionOrder = reactive({})
+// Marca de la campaña: la sirve el propio endpoint del quiz, resuelta igual
+// que la del correo (ajustes de la organización, topados por su plan). Sin
+// white-labeling llega en nivel 'none' y la página queda como siempre.
+const whiteLabel = ref({ level: 'none', brandName: '', brandLogo: '' })
 const justSubmitted = ref(false)
 const submitError = ref('')
 const errorTitle = ref('')
 const errorDetail = ref('')
+
+/** En nivel 'full' la marca del producto desaparece de la página, igual que
+ *  desaparece del correo. En 'logo' solo se suma el logo del cliente. */
+const productBrandVisible = computed(() => whiteLabel.value.level !== 'full')
+const footerBrand = computed(
+  () => (productBrandVisible.value ? 'Ellysia' : whiteLabel.value.brandName),
+)
 
 const pendingCount = computed(
   () => quiz.value.questions.filter(q => answers[q.position] === undefined).length
@@ -184,6 +197,7 @@ async function load() {
   }
 
   const data = await response.json()
+  if (data.whiteLabel) whiteLabel.value = data.whiteLabel
   if (data.status === 'completed') {
     result.value = { score: data.score ?? 0, total: data.total ?? 0 }
     state.value = 'completed'
@@ -263,6 +277,7 @@ onMounted(load)
 
 /* ── Cabecera de marca (sin Topbar: el destinatario no tiene sesión) ── */
 .quiz-brand { text-align: center; margin-bottom: 1.25rem; }
+.brand-logo { display: block; margin: 0 auto 0.6rem; max-width: 180px; max-height: 64px; object-fit: contain; }
 .brand-mark {
   display: block; font-family: var(--font-epic); font-size-adjust: var(--fsa-epic); font-size: var(--fs-2xl);
   letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent);

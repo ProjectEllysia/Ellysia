@@ -717,3 +717,32 @@ def test_campaign_send_caps_the_level_to_the_current_plan(
     assert client.get(
         "/aegis/org-profile", headers=admin_headers
     ).get_json()["whiteLabelLevel"] == "full"
+
+
+def test_public_quiz_serves_the_same_brand_as_the_email(
+    app, client, admin_user, admin_headers, make_aegis_doc_with_quiz, local_email_config,
+):
+    """El test es la segunda mitad de la campaña: llega con la misma marca."""
+    doc_id = make_aegis_doc_with_quiz(admin_user.id)
+    _save_org_profile(client, admin_headers, whiteLabelLevel="full", brandLogo=_LOGO_URI)
+    campaign_id = _run_campaign(client, app, admin_headers, admin_user.id, doc_id)
+    token = _fetch_token_for_email(app, campaign_id, "empleado@empresa.test")
+
+    quiz = client.get(f"/aegis/quiz?t={token}").get_json()
+
+    assert quiz["whiteLabel"] == {
+        "level": "full", "brandName": "ACME", "brandLogo": _LOGO_URI,
+    }
+
+
+def test_public_quiz_without_white_label_reports_nothing_to_replace(
+    app, client, admin_user, admin_headers, make_aegis_doc_with_quiz, local_email_config,
+):
+    doc_id = make_aegis_doc_with_quiz(admin_user.id)
+    _save_org_profile(client, admin_headers)
+    campaign_id = _run_campaign(client, app, admin_headers, admin_user.id, doc_id)
+    token = _fetch_token_for_email(app, campaign_id, "empleado@empresa.test")
+
+    quiz = client.get(f"/aegis/quiz?t={token}").get_json()
+
+    assert quiz["whiteLabel"] == {"level": "none", "brandName": "", "brandLogo": ""}
