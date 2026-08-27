@@ -149,7 +149,7 @@ function onFile(event) {
 .wl-legend {
   padding: 0; font-size: var(--fs-md); font-weight: 600; color: var(--text);
 }
-.wl-hint { margin: 0; font-size: var(--fs-xs); color: var(--text-muted); }
+.wl-hint { margin: 0; font-size: var(--fs-sm); color: var(--text-muted); }
 
 .wl-option {
   display: flex; align-items: flex-start; gap: 0.55rem;
@@ -163,7 +163,7 @@ function onFile(event) {
 .wl-option input { margin-top: 0.2rem; accent-color: var(--accent); }
 .wl-option-text { display: flex; flex-direction: column; gap: 0.15rem; }
 .wl-option-title { font-size: var(--fs-md); font-weight: 600; color: var(--text); }
-.wl-option-text small { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.35; }
+.wl-option-text small { font-size: var(--fs-sm); color: var(--text-muted); line-height: 1.35; }
 .wl-lock {
   margin-left: 0.4rem; padding: 0 0.35rem; border-radius: 4px;
   font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase;
@@ -198,6 +198,6 @@ function onFile(event) {
 .wl-note {
   margin: 0.2rem 0 0; padding: 0.5rem 0.65rem; border-radius: 6px;
   background: var(--surface-2); border-left: 2px solid var(--border-med);
-  font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.4;
+  font-size: var(--fs-sm); color: var(--text-muted); line-height: 1.4;
 }
 </style>
