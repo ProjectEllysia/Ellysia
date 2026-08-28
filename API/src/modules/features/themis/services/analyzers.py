@@ -48,6 +48,13 @@ class NmapAIWriter:
         _generator: scribe AIGenerator used for model calling.
     """
 
+    # Tope de puertos detallados que viajan al prompt (#118): un host con
+    # cientos de puertos abiertos (mala configuración, o un rango escaneado
+    # como si fuera un solo host) podía generar un 'ports_json' sin límite.
+    # '{{total_ports}}' sigue reportando el recuento real (no el recortado),
+    # así que el modelo nunca lee "hay menos puertos de los que realmente hay".
+    _MAX_PORTS = 60
+
     def __init__(self, generator: Optional[AIGenerator] = None) -> None:
         """Initialize Nmap AI writer.
 
@@ -129,6 +136,9 @@ class NmapAIWriter:
                 "categoria_funcional": self._infer_functional_category(service, port_num)
             })
 
+        total_ports = len(ports_info)
+        ports_info = ports_info[:self._MAX_PORTS]
+
         prompts_config = CR.get_prompts_config()
         template = prompts_config.get("nmap", {}).get("userTemplate", "")
 
@@ -140,7 +150,7 @@ class NmapAIWriter:
 
         rendered = template.replace("{{target}}", str(target)) \
                         .replace("{{started}}", str(started)) \
-                        .replace("{{total_ports}}", str(len(ports_info))) \
+                        .replace("{{total_ports}}", str(total_ports)) \
                         .replace("{{distribution}}", str(analysis_context["distribution"])) \
                         .replace("{{profile_type}}", str(analysis_context["profile_type"])) \
                         .replace("{{ports_json}}", json.dumps(ports_info, indent=2, ensure_ascii=False))
@@ -504,12 +514,21 @@ class LybraAIWriter:
         _generator: scribe AIGenerator used for model calling.
     """
 
-    # Tope de hallazgos detallados que viajan al prompt. Los confirmados y los
-    # de KEV nunca se recortan; el tope sólo acota la cola ordenada por
-    # prioridad. El rollup por servicio cubre igualmente los que no entran, así
-    # que un host con cientos de CVEs sigue describiéndose entero.
+    # Tope de hallazgos detallados que viajan al prompt. Se aplica al conjunto
+    # completo (confirmados + KEV + cola), no solo a la cola: un scan con más
+    # de _MAX_HIGHLIGHTED_FINDINGS hallazgos confirmados/KEV podía generar un
+    # payload sin límite real pese a este tope, porque antes solo recortaba
+    # "rest" (Issue #118). El rollup por servicio cubre igualmente los que no
+    # entran, así que un host con cientos de CVEs sigue describiéndose entero.
     _MAX_HIGHLIGHTED_FINDINGS = 25
     _MAX_DESCRIPTION_CHARS = 300
+
+    # Tope de grupos del rollup por servicio (#118): un objetivo con muchos
+    # productos/puertos distintos (un rango de red, no un solo host) podía
+    # generar un 'services_json' sin límite pese a que ya es una compresión
+    # de los hallazgos. Ordenado por severidad (ver _build_service_rollup),
+    # así que un recorte siempre descarta primero los grupos menos graves.
+    _MAX_SERVICE_GROUPS = 40
 
     # Mismo orden que FindingsPrintingStrategy._PRIORITY_ORDER: el informe y el
     # análisis deben priorizar igual o se contradicen entre páginas.
@@ -614,7 +633,8 @@ class LybraAIWriter:
             del group["cves"]
             rollup.append(group)
 
-        return sorted(rollup, key=lambda group: -(group["max_cvss"] or 0))
+        rollup.sort(key=lambda group: -(group["max_cvss"] or 0))
+        return rollup[:self._MAX_SERVICE_GROUPS]
 
     @staticmethod
     def _version_key(version: str) -> tuple:
@@ -639,18 +659,24 @@ class LybraAIWriter:
         started = scan_data.get("started_at", "N/A")
         exposure = scan_data.get("exposure", "unknown")
 
-        confirmed = [finding for finding in findings if finding.get("confirmed")]
-        kev = [finding for finding in findings if finding.get("in_kev")]
+        # Confirmados y KEV se priorizan siempre por delante de la cola, y se
+        # deduplican por identidad antes de ordenar: un hallazgo puede ser
+        # confirmado Y estar en KEV a la vez, y una concatenación ingenua lo
+        # metía dos veces. Se ordenan por prioridad real (no por orden de
+        # repositorio) para que, al recortar, sobrevivan los más graves —
+        # y se recortan igual que la cola: antes solo _rest_ tenía tope, así
+        # que un scan con más de _MAX_HIGHLIGHTED_FINDINGS confirmados/KEV
+        # generaba un payload sin límite real pese a la constante (#118).
+        priority = list({id(finding): finding for finding in findings
+                          if finding.get("confirmed") or finding.get("in_kev")}.values())
+        priority.sort(key=self._sort_key)
 
-        # Confirmados y KEV van siempre; la cola se ordena por prioridad real
-        # (no por orden de repositorio) antes de recortarse, para que los
-        # hallazgos destacados sean los mismos que encabezan el informe.
-        priority_ids = {id(finding) for finding in confirmed} | {id(finding) for finding in kev}
+        priority_ids = {id(finding) for finding in priority}
         rest = sorted(
             (finding for finding in findings if id(finding) not in priority_ids),
             key=self._sort_key,
         )
-        highlighted = (confirmed + kev + rest)[:self._MAX_HIGHLIGHTED_FINDINGS]
+        highlighted = (priority + rest)[:self._MAX_HIGHLIGHTED_FINDINGS]
 
         findings_for_ai = [{
             "titulo": finding.get("title", "")[:160],
@@ -677,8 +703,8 @@ class LybraAIWriter:
                     .replace("{{started}}", str(started)) \
                     .replace("{{exposure}}", str(exposure)) \
                     .replace("{{total_findings}}", str(len(findings))) \
-                    .replace("{{confirmed_count}}", str(len(confirmed))) \
-                    .replace("{{kev_count}}", str(len(kev))) \
+                    .replace("{{confirmed_count}}", str(sum(1 for finding in findings if finding.get("confirmed")))) \
+                    .replace("{{kev_count}}", str(sum(1 for finding in findings if finding.get("in_kev")))) \
                     .replace("{{services_json}}", json.dumps(self._build_service_rollup(findings), indent=2, ensure_ascii=False)) \
                     .replace("{{findings_json}}", json.dumps(findings_for_ai, indent=2, ensure_ascii=False))
 
