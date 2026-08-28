@@ -13,6 +13,17 @@ from src.modules.tools.herald import render_email
 
 pytestmark = pytest.mark.unit
 
+#: Marca del producto tal y como la deja una instancia configurada.
+_BASE_BRAND = {
+    "productName": "Ellysia",
+    "accentColor": "#d4a04a",
+    "logoUrl": "",
+    "supportEmail": "soporte@ellysia.test",
+    "footerNote": "Ellysia S.L.",
+    "customerLogoUrl": "",
+    "whiteLabelLevel": "none",
+}
+
 
 class TestCampaignTemplate:
     def test_renders_shell_and_link(self):
@@ -276,3 +287,97 @@ def test_brand_defaults_are_injected():
     """Sin ``brand`` explícita, render_email la saca de la config + defaults."""
     html, _ = render_email("campaign", pill_title="X", link="https://e.es/q", recipient_name=None)
     assert "Ellysia" in html
+
+
+class TestWhiteLabel:
+    """Los tres niveles, vistos desde el correo ya renderizado.
+
+    Las plantillas no ramifican por nivel: leen las claves de ``brand`` que
+    ``apply_white_label`` deja puestas. Por eso el nivel FULL lo hereda
+    cualquier plantilla que use la envoltura, no solo la de campaña.
+    """
+
+    _LOGO_URI = (
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA"
+        "CklEQVR4nGNgAAAAAgABf6ZX1AAAAABJRU5ErkJggg=="
+    )
+
+    _COLOR = "#1a73e8"
+
+    def _render(self, level, brand_name="ACME S.L.", logo=_LOGO_URI, color=_COLOR):
+        from src.modules.shared import WhiteLabel, WhiteLabelLevel
+        from src.modules.tools.herald.branding import apply_white_label
+
+        brand, images = apply_white_label(
+            {**_BASE_BRAND},
+            WhiteLabel(
+                level=WhiteLabelLevel(level), logo=logo, color=color, brand_name=brand_name,
+            ),
+        )
+        html, text = render_email(
+            "campaign",
+            brand=brand,
+            pill_title="Phishing por SMS",
+            link="https://ellysia.es/quiz?t=abc",
+            company="ACME S.L.",
+        )
+        return html, text, images
+
+    def test_none_keeps_the_product_brand_and_adds_no_image(self):
+        html, text, images = self._render("none")
+
+        assert "ELLYSIA" in html.upper()
+        assert "cid:" not in html
+        assert images == ()
+        assert "Ellysia" in text
+        # Ni siquiera el acento cambia: el correo sale como saldría sin esto.
+        assert _BASE_BRAND["accentColor"] in html
+        assert self._COLOR not in html
+
+    def test_color_level_only_repaints_the_accent(self):
+        html, _, images = self._render("color")
+
+        assert self._COLOR in html
+        assert _BASE_BRAND["accentColor"] not in html
+        # Un logo guardado no se pinta todavía en este escalón.
+        assert "cid:" not in html
+        assert images == ()
+        assert "Ellysia" in html
+
+    def test_logo_level_shows_the_customer_logo_above_the_intro(self):
+        html, _, images = self._render("logo")
+
+        assert self._COLOR in html
+        assert 'src="cid:brand-logo"' in html
+        assert 'alt="ACME S.L."' in html
+        # El logo va antes del saludo, no al final del cuerpo.
+        assert html.index("cid:brand-logo") < html.index("Hola:")
+        # La marca del producto sigue en su sitio: este nivel solo añade.
+        assert "Ellysia" in html
+        assert len(images) == 1
+
+    def test_full_level_removes_every_trace_of_the_product_brand(self):
+        html, text, images = self._render("full")
+
+        assert "Ellysia" not in html
+        assert "Ellysia" not in text
+        assert "ACME S.L." in text
+        # El logo ocupa la cabecera y no se repite sobre el cuerpo.
+        assert html.count("cid:brand-logo") == 1
+        assert len(images) == 1
+
+    def test_full_level_without_logo_falls_back_to_the_customer_name(self):
+        html, text, images = self._render("full", logo="")
+
+        assert "Ellysia" not in html
+        assert "Ellysia" not in text
+        assert "ACME S.L." in html
+        assert images == ()
+
+    def test_level_degrades_instead_of_rendering_half_a_brand(self):
+        """FULL sin nombre no puede retirar la marca: se queda en el logo."""
+        html, _, images = self._render("full", brand_name="")
+
+        assert "Ellysia" in html
+        assert 'src="cid:brand-logo"' in html
+        assert len(images) == 1

@@ -23,7 +23,7 @@ import threading
 import time
 from typing import Optional
 
-from .exceptions import AIFallbackExhaustedError, CircuitBreakerOpenError
+from .exceptions import AIFallbackExhaustedError, AIPayloadTooLargeError, CircuitBreakerOpenError
 from .inputs import AIInput, AIResult
 from .strategies import ModelStrategy, ToolExecutor
 from .tools import web_search
@@ -85,6 +85,29 @@ class AIGenerator:
             self._failures += 1
             self._last_failure_time = time.time()
 
+    # ── Guardarraíl de tamaño (Issue #118) ──────────────────────────────────
+
+    @staticmethod
+    def _check_payload_size(ai_input: AIInput) -> None:
+        """Rechaza un prompt sobredimensionado antes de llamar al backend.
+
+        Registra el tamaño estimado incluso cuando no excede el límite —
+        observabilidad para diagnosticar el próximo 429 sin depender de que
+        el backend lo reporte, que es exactamente lo que faltó para
+        diagnosticar el caso original de este issue.
+        """
+        import src.modules.system.config_reading as CR
+
+        estimated = ai_input.estimated_tokens()
+        limit = CR.scribe_config().max_input_tokens
+        logger.info("[scribe] prompt estimado: %d tokens (límite: %d)", estimated, limit)
+        if estimated > limit:
+            logger.warning(
+                "[scribe] prompt de ~%d tokens supera el límite de %d — rechazado sin llamar al backend",
+                estimated, limit,
+            )
+            raise AIPayloadTooLargeError(estimated, limit)
+
     # ── API pública ──────────────────────────────────────────────────────────
 
     def digest(
@@ -106,9 +129,15 @@ class AIGenerator:
 
         Raises:
             CircuitBreakerOpenError: Si el breaker del backend está abierto.
+            AIPayloadTooLargeError: Si el prompt estimado supera el tope
+                configurado — se comprueba antes de llamar a la estrategia y
+                no se reintenta (Issue #118): un prompt sobredimensionado
+                falla igual en cada intento, así que reintentarlo solo
+                desperdicia llamadas y tiempo.
             AIFallbackExhaustedError: Si se agotan los reintentos.
         """
         self._check_breaker()
+        self._check_payload_size(ai_input)
         executor = tool_executor or _default_tool_executor
 
         last_error: str = ""

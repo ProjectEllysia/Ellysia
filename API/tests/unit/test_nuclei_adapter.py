@@ -5,7 +5,7 @@ Pure functions over dicts (one decoded JSONL line) — no DB, no subprocess.
 
 import pytest
 
-from src.modules.features.themis.lybra.adapters import nuclei_result_to_finding, QOD_NUCLEI_MATCH
+from src.modules.features.themis.lybra.adapters import nuclei_result_to_finding, finding_to_json, QOD_NUCLEI_MATCH
 
 pytestmark = pytest.mark.unit
 
@@ -168,3 +168,22 @@ def test_cpe_and_cvss_vector_read_from_classification():
     }))
     assert f["cpe"] == "cpe:2.3:a:apache:http_server:2.4.49"
     assert f["cvss_vector"] == "CVSS:3.1/x"
+
+
+# ------------------------------------------------------- finding_to_json (#118)
+
+def test_finding_to_json_exposes_required_os_and_feeds_the_cap_into_priority():
+    """An unconfirmed, platform-gated CVSS 9.8 finding must serialize its
+    required_os and, via score_finding, read as MEDIUM rather than CRITICAL —
+    the same cap the PDF report and the AI writer apply."""
+    f = {"cvss_score": 9.8, "confirmed": False, "required_os": "windows_10"}
+    out = finding_to_json(f, exposure="public")
+    assert out["requiredOs"] == "windows_10"
+    assert out["priority"] == "MEDIUM"
+
+
+def test_finding_to_json_required_os_absent_is_none():
+    f = {"cvss_score": 9.8, "confirmed": False}
+    out = finding_to_json(f, exposure="public")
+    assert out["requiredOs"] is None
+    assert out["priority"] == "CRITICAL"

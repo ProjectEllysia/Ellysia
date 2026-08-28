@@ -283,6 +283,11 @@ def test_the_limit_key_catalog_is_offered_to_the_panel(
     body = client.get("/plans/limit-keys", headers=auth_headers(root_user)).get_json()
     keys = {entry["key"]: entry["period"] for entry in body["keys"]}
 
-    assert len(keys) == 15
+    # Contra el enum y no contra un número: el catálogo crece, y una cuenta a
+    # mano solo obliga a editar este test cada vez que se añade una clave.
+    from src.modules.accounts.services.limits import LimitKey
+
+    assert set(keys) == {key.value for key in LimitKey}
     assert keys["iris.analyses"] == "month"
     assert keys["acheron.vaults"] == "stock"
+    assert keys["aegis.white_label"] == "tier"

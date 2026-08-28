@@ -22,18 +22,11 @@ from jinja2 import ChoiceLoader, Environment, FileSystemLoader, TemplateNotFound
 
 import src.modules.system.config_reading as CR
 
+from .branding import default_brand
+
 logger = logging.getLogger(__name__)
 
 _PACKAGE_TEMPLATES = Path(__file__).parent / "templates"
-
-#: Marca por defecto. La config solo tiene que declarar lo que quiera cambiar.
-_DEFAULT_BRAND = {
-    "productName": "Ellysia",
-    "accentColor": "#d4a04a",
-    "logoUrl": "",
-    "supportEmail": "",
-    "footerNote": "",
-}
 
 #: (templatesDir configurado, entorno) — se reconstruye si la config cambia.
 _env_cache: tuple[str, Environment] | None = None
@@ -72,15 +65,17 @@ def render_email(template: str, **context) -> tuple[str, str | None]:
 
     Args:
         template: Nombre base de la plantilla, sin extensión ('campaign').
-        **context: Variables de la plantilla. ``brand`` se inyecta sola desde
-            ``tools.herald.branding`` si el llamante no la pasa.
+        **context: Variables de la plantilla. ``brand`` se inyecta sola con la
+            marca del producto (``branding.default_brand``) si el llamante no
+            la pasa — quien haga white-labeling pasa la suya ya resuelta con
+            ``branding.apply_white_label``.
 
     Returns:
         ``(html, text)``. ``text`` es None si la plantilla no tiene gemelo
         ``.txt.j2`` — en ese caso la estrategia SMTP deriva el texto del HTML.
     """
     env = _environment()
-    context.setdefault("brand", {**_DEFAULT_BRAND, **CR.herald_config().branding})
+    context.setdefault("brand", default_brand())
 
     html = env.get_template(f"{template}.html.j2").render(**context)
 

@@ -425,21 +425,14 @@ select option { background: var(--surface); color: var(--text); }
 .btn.loading .btn-spin  { display: inline-block; }
 .btn.loading .btn-label { display: none; }
 
-.toast {
-  position: fixed; bottom: 24px; left: 50%;
-  transform: translateX(-50%) translateY(16px);
-  background: var(--surface-3); border: 1px solid var(--border-med);
-  color: var(--text); font-family: var(--font-body); font-size-adjust: var(--fsa-body); font-size: var(--fs-md);
-  padding: 10px 18px; border-radius: var(--radius);
-  opacity: 0; pointer-events: none;
-  transition: opacity 0.22s ease, transform 0.22s ease;
-  z-index: 9999; white-space: nowrap;
-}
-.toast.visible         { opacity: 1; transform: translateX(-50%) translateY(0); }
-.toast--error    { border-color: var(--danger);  color: var(--danger);  }
-.toast--success  { border-color: var(--success); color: var(--success); }
-.toast--warn     { border-color: var(--warn);    color: var(--warn);    }
-.toast--info     { border-color: var(--accent);  color: var(--accent);  }
+/* Aquí vivían los estilos del `SeqToast` legacy (`.toast`, `.toast.visible`,
+   `.toast--*`). El toast lo renderiza AppToast.vue desde la migración a Vue
+   (cdf50d35) con sus propios estilos scoped, y nada volvió a poner la clase
+   `visible`, así que este bloque quedó muerto — pero no inerte: al ser global
+   seguía ganando en toda propiedad que el bloque scoped no declarase. Su
+   `opacity: 0` volvía el toast invisible en cuanto Vue retiraba
+   `.toast-enter-active` al acabar la animación de entrada (0.42 s), y su
+   `left: 50%` + `transform: translateX(-50%)` lo descolocaban. Ver #127. */
 
 .badge {
   display: inline-block; padding: 2px 7px; border-radius: 4px;
@@ -569,12 +562,6 @@ select option { background: var(--surface); color: var(--text); }
   .card--interactive:hover { transform: none; }
 }
 
-.modal {
-  position: fixed; inset: 0; z-index: 1000;
-  display: none; align-items: center; justify-content: center;
-  padding: 1rem;
-}
-.modal.visible { display: flex; }
 .modal-backdrop {
   position: absolute; inset: 0;
   background: rgba(0,0,0,0.6);

@@ -20,7 +20,7 @@ import json
 import pytest
 
 import src.modules.system.config_reading as CR
-from src.modules.features.themis.services.analyzers import LybraAIWriter
+from src.modules.features.themis.services.analyzers import LybraAIWriter, NmapAIWriter
 
 pytestmark = pytest.mark.unit
 
@@ -150,3 +150,127 @@ def test_la_cola_se_recorta_por_prioridad_y_nunca_descarta_confirmados(monkeypat
     assert hallazgos[0]["confirmado"] is True
     # El recuento total sigue siendo el real aunque el detalle esté recortado.
     assert sum(group["total_hallazgos"] for group in payload["servicios"]) == len(ruido) + 1
+
+
+def test_confirmados_y_kev_tambien_se_recortan_al_tope(monkeypatch):
+    """#118: antes solo la cola ('rest') tenía tope — un scan con más
+    confirmados/KEV que _MAX_HIGHLIGHTED_FINDINGS generaba un payload sin
+    límite real pese a la constante. Deben recortarse igual, priorizando por
+    severidad."""
+    muchos_confirmados = [
+        _finding(
+            title=f"CVE-2021-{40000 + i}", cve_ids=[f"CVE-2021-{40000 + i}"],
+            confirmed=True, cvss_score=5.0 + (i % 5), priority="MEDIUM",
+            port=1000 + i,
+        )
+        for i in range(LybraAIWriter._MAX_HIGHLIGHTED_FINDINGS + 15)
+    ]
+    # El más grave del lote, al final de la lista de entrada — debe
+    # sobrevivir al recorte pese a no ser el primero en orden de repositorio.
+    muchos_confirmados[-1] = _finding(
+        title="El más grave", cve_ids=["CVE-2021-99999"],
+        confirmed=True, cvss_score=9.8, priority="CRITICAL", port=9999,
+    )
+
+    hallazgos = _build(muchos_confirmados, monkeypatch)["hallazgos"]
+
+    assert len(hallazgos) == LybraAIWriter._MAX_HIGHLIGHTED_FINDINGS
+    assert all(h["confirmado"] for h in hallazgos)
+    assert hallazgos[0]["titulo"] == "El más grave"
+
+
+def test_hallazgo_confirmado_y_en_kev_no_se_duplica_en_el_payload(monkeypatch):
+    """Antes de deduplicar, un hallazgo confirmado Y en KEV a la vez entraba
+    dos veces en la lista destacada (concatenación ingenua confirmed + kev)."""
+    doble = _finding(confirmed=True, in_kev=True)
+
+    hallazgos = _build([doble], monkeypatch)["hallazgos"]
+
+    assert len(hallazgos) == 1
+
+
+def test_rollup_de_servicios_se_recorta_al_tope_priorizando_severidad(monkeypatch):
+    """#118: un objetivo con muchos productos/puertos distintos (un rango de
+    red, no un solo host) podía generar un 'services_json' sin límite."""
+    muchos_servicios = [
+        _finding(
+            title=f"Servicio {i}", cve_ids=[f"CVE-2020-{10000 + i}"],
+            port=2000 + i, service=f"svc{i}",
+            cpe=f"cpe:2.3:a:vendor{i}:product{i}:1.0:*:*:*:*:*:*:*",
+            cvss_score=float(i % 10), priority="LOW",
+        )
+        for i in range(LybraAIWriter._MAX_SERVICE_GROUPS + 20)
+    ]
+    mas_grave = _finding(
+        title="El más grave", cve_ids=["CVE-2020-99999"],
+        port=9999, service="svc-critico",
+        cpe="cpe:2.3:a:vendor-critico:product-critico:1.0:*:*:*:*:*:*:*",
+        cvss_score=9.8, priority="CRITICAL",
+    )
+
+    servicios = _build(muchos_servicios + [mas_grave], monkeypatch)["servicios"]
+
+    assert len(servicios) == LybraAIWriter._MAX_SERVICE_GROUPS
+    assert servicios[0]["producto"] == "product-critico 1.0"
+
+
+# ------------------------------------------------------- NmapAIWriter (#118)
+
+_FAKE_NMAP_PROMPTS = {
+    "nmap": {
+        "system": "Eres un analista senior.",
+        "userTemplate": (
+            "Objetivo {{target}} inicio {{started}} total {{total_ports}} "
+            "distribucion {{distribution}} perfil {{profile_type}}\n"
+            "PUERTOS:\n{{ports_json}}"
+        ),
+    }
+}
+
+
+def _open_port(port: int, service: str = "http") -> dict:
+    return {
+        "port": {"port": port, "protocol": "tcp"},
+        "given_use": service,
+        "product": "Apache",
+        "version": "2.4.7",
+        "reason": "syn-ack",
+    }
+
+
+def _build_nmap(open_ports: list, monkeypatch) -> dict:
+    monkeypatch.setattr(CR, "get_prompts_config", lambda: _FAKE_NMAP_PROMPTS)
+
+    writer = NmapAIWriter(generator=object())
+    network_ctx = {
+        "is_private": False, "network_type": "Red pública",
+        "max_risk_level": "CRÍTICO", "context_note": "CONTEXTO DE RED CONFIRMADO: público.",
+    }
+    prompt = writer._build_user_prompt(
+        {"target": "45.33.32.156", "started_at": "2026-08-11"}, open_ports, network_ctx,
+    )
+
+    header, _, ports_block = prompt.partition("PUERTOS:\n")
+    total_ports = int(header.split("total ")[1].split(" ")[0])
+    return {"total_ports": total_ports, "puertos": json.loads(ports_block)}
+
+
+def test_ports_se_recortan_al_tope_pero_total_ports_sigue_siendo_el_real(monkeypatch):
+    """#118: un host con muchos más puertos abiertos que el tope no debe
+    generar un 'ports_json' sin límite, pero '{{total_ports}}' debe seguir
+    reportando el recuento real — nunca menos puertos de los que hay."""
+    open_ports = [_open_port(1000 + i) for i in range(NmapAIWriter._MAX_PORTS + 25)]
+
+    payload = _build_nmap(open_ports, monkeypatch)
+
+    assert len(payload["puertos"]) == NmapAIWriter._MAX_PORTS
+    assert payload["total_ports"] == len(open_ports)
+
+
+def test_ports_bajo_el_tope_no_se_recortan(monkeypatch):
+    open_ports = [_open_port(80), _open_port(22, "ssh")]
+
+    payload = _build_nmap(open_ports, monkeypatch)
+
+    assert len(payload["puertos"]) == 2
+    assert payload["total_ports"] == 2

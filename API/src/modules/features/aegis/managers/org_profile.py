@@ -12,6 +12,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.modules.shared import WhiteLabelLevel
+from src.modules.accounts import LimitKey
+from src.modules.accounts.exceptions import PlanFeatureDisabledError
+from src.modules.accounts.services.entitlements import resolve_entitlement
 from src.modules.users import User
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
@@ -38,6 +42,9 @@ _ORG_PROFILE_DEFAULTS: dict[str, Any] = {
     "employeeCount": None,
     "trackedProducts": [],
     "useHygeiaInventory": True,
+    "whiteLabelLevel": WhiteLabelLevel.NONE.value,
+    "brandLogo": "",
+    "brandColor": "",
 }
 
 
@@ -51,6 +58,19 @@ class AegisOrgProfileManager:
 
     def __init__(self, user: User) -> None:
         self.user = user
+
+    @staticmethod
+    def max_white_label_level(user_id: int) -> WhiteLabelLevel:
+        """Hasta dónde puede llegar el white-labeling de este usuario.
+
+        Lo decide el plan contratado, con la clave ``aegis.white_label``: su
+        tope no es una cantidad sino el escalón concedido (ver
+        ``LimitPeriod.TIER``). Una fila ausente vale 0, así que un plan al que
+        nadie se lo declare se queda sin white-labeling — fallo cerrado, que es
+        lo que se quiere de una característica que no debe llegar a todos.
+        """
+        entitlement = resolve_entitlement(user_id, LimitKey.AEGIS_WHITE_LABEL)
+        return WhiteLabelLevel.from_allowance(entitlement.limit)
 
     @staticmethod
     def search_products(term: str, limit: int = 20) -> list[dict]:
@@ -81,6 +101,10 @@ class AegisOrgProfileManager:
         profile = repo.get_by_user_id(self.user.id)
         result = dict(_ORG_PROFILE_DEFAULTS) if profile is None else profile.to_dict()
         result["hygeiaInventoryAvailable"] = self._hygeia_inventory_available()
+        # Igual que el anterior: no es un campo del perfil sino del entorno
+        # comercial. El frontend lo usa para no ofrecer niveles que el plan no
+        # concede, y el guardado lo vuelve a comprobar de todas formas.
+        result["maxWhiteLabelLevel"] = self.max_white_label_level(self.user.id).value
         return result
 
     def _hygeia_inventory_available(self) -> bool:
@@ -93,7 +117,14 @@ class AegisOrgProfileManager:
             return False
 
     def upsert(self, data: dict) -> dict:
-        """Crea o actualiza el perfil de organización del usuario actual."""
+        """Crea o actualiza el perfil de organización del usuario actual.
+
+        Raises:
+            PlanFeatureDisabledError: si se pide un nivel de white-labeling por
+                encima del que concede el plan (402).
+        """
+        self._assert_white_label_allowed(data["whiteLabelLevel"])
+
         with UnitOfWork() as uow:
             repo = AegisOrgProfileRepository(uow)
             profile = repo.get_by_user_id(self.user.id)
@@ -111,6 +142,29 @@ class AegisOrgProfileManager:
             profile.employee_count = data["employeeCount"]
             profile.tracked_products = data["trackedProducts"]
             profile.use_hygeia_inventory = data["useHygeiaInventory"]
+            profile.white_label_level = data["whiteLabelLevel"]
+            profile.brand_logo = data["brandLogo"] or None
+            profile.brand_color = data["brandColor"] or None
 
             saved = repo.save(profile)
             return saved.to_dict()
+
+    def _assert_white_label_allowed(self, requested: str) -> None:
+        """Corta si el plan no llega al nivel pedido.
+
+        Se comprueba al guardar para que el usuario se entere en el momento, y
+        otra vez al enviar (``WhiteLabel.capped_to``) para que una bajada de
+        plan posterior surta efecto sin tener que tocar lo ya guardado.
+        """
+        level = WhiteLabelLevel.coerce(requested)
+        maximum = self.max_white_label_level(self.user.id)
+        if level.rank > maximum.rank:
+            entitlement = resolve_entitlement(self.user.id, LimitKey.AEGIS_WHITE_LABEL)
+            logger.info(
+                "Corte por plan | user=%s key=%s plan=%s nivel_pedido=%s maximo=%s",
+                self.user.id, LimitKey.AEGIS_WHITE_LABEL.db_name,
+                entitlement.plan_code, level.value, maximum.value,
+            )
+            raise PlanFeatureDisabledError(
+                LimitKey.AEGIS_WHITE_LABEL.db_name, entitlement.plan_code
+            )

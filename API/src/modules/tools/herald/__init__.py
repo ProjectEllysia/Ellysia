@@ -20,11 +20,12 @@ Uso típico:
     ... ))
 """
 
-from .inputs import EmailMessage, SendResult
+from .inputs import EmailMessage, InlineImage, SendResult
 from .strategies import EmailStrategy, SmtpStrategy
 from .mailer import Mailer
 from .factory import build_mailer
 from .rendering import render_email
+from .branding import LOGO_CONTENT_ID, apply_white_label, default_brand
 from .exceptions import (
     EmailConnectionError,
     EmailSendError,
@@ -33,12 +34,16 @@ from .exceptions import (
 
 __all__ = [
     "EmailMessage",
+    "InlineImage",
     "SendResult",
     "EmailStrategy",
     "SmtpStrategy",
     "Mailer",
     "build_mailer",
     "render_email",
+    "apply_white_label",
+    "default_brand",
+    "LOGO_CONTENT_ID",
     "EmailConnectionError",
     "EmailSendError",
     "EmailConfigurationError",

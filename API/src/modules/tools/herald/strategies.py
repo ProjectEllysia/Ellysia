@@ -149,6 +149,22 @@ class SmtpStrategy(EmailStrategy):
 
         mime.set_content(message.text_body or _html_to_text(message.html_body))
         mime.add_alternative(message.html_body, subtype="html")
+
+        # Las imágenes incrustadas cuelgan de la alternativa HTML, no del
+        # mensaje: ``add_related`` la convierte en un multipart/related con la
+        # imagen dentro, que es lo que hace que ``cid:`` resuelva. Colgarlas
+        # de la raíz las dejaría como adjuntos sueltos y el <img> saldría roto.
+        if message.inline_images:
+            html_part = mime.get_payload()[-1]
+            for image in message.inline_images:
+                maintype, subtype = image.mime_parts
+                html_part.add_related(
+                    image.data,
+                    maintype=maintype,
+                    subtype=subtype,
+                    cid=f"<{image.content_id}>",
+                )
+
         return mime
 
     def send(self, message: EmailMessage) -> SendResult:

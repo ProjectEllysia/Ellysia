@@ -41,6 +41,50 @@ def test_cves_for_cpe_respects_version_range(app):
     assert wrong_product == []
 
 
+def test_cves_for_cpe_tags_result_with_required_os(app):
+    """#118: a match gated behind a platform (CpeMatch.required_os) must
+    surface on the returned CveEntry so the caller (LybraEngine) can avoid
+    treating an unverifiable OS precondition as a confirmed risk."""
+    match = {"vendor": "apache", "product": "http_server", "exact_version": "2.4.59",
+             "version_start_including": None, "version_start_excluding": None,
+             "version_end_including": None, "version_end_excluding": None,
+             "required_os": "windows_10"}
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).upsert_cve(_cve_row(), [match])
+
+        with UnitOfWork() as uow:
+            hit = KbRepository(uow).cves_for_cpe("apache", "http_server", "2.4.59")
+
+    assert [c.cve_id for c in hit] == ["CVE-2021-41773"]
+    assert hit[0].required_os == "windows_10"
+
+
+def test_cves_for_cpe_unconditional_rule_wins_over_os_gated_one(app):
+    """The same CVE can have several applicability rows for the same product
+    (different ranges from different NVD configuration nodes). If even one of
+    the rows matching this version is unconditional, the CVE genuinely
+    applies regardless of platform — the OS gate from the other row must not
+    leak into the result."""
+    windows_only = {"vendor": "apache", "product": "http_server", "exact_version": "2.4.59",
+                     "version_start_including": None, "version_start_excluding": None,
+                     "version_end_including": None, "version_end_excluding": None,
+                     "required_os": "windows_10"}
+    unconditional = {"vendor": "apache", "product": "http_server",
+                      "version_start_including": "2.4.0", "version_end_excluding": "2.4.60",
+                      "version_start_excluding": None, "version_end_including": None,
+                      "exact_version": None, "required_os": None}
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).upsert_cve(_cve_row(), [windows_only, unconditional])
+
+        with UnitOfWork() as uow:
+            hit = KbRepository(uow).cves_for_cpe("apache", "http_server", "2.4.59")
+
+    assert [c.cve_id for c in hit] == ["CVE-2021-41773"]
+    assert hit[0].required_os is None
+
+
 def test_upsert_cve_is_idempotent_and_replaces_matches(app):
     m1 = {"vendor": "apache", "product": "http_server", "exact_version": "2.4.49",
           "version_start_including": None, "version_start_excluding": None,

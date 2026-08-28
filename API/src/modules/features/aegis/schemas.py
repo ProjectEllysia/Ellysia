@@ -1,6 +1,7 @@
 from marshmallow import Schema, ValidationError, fields, validate, validates_schema
 
 import src.modules.system.config_reading as CR
+from src.modules.shared import WhiteLabelSchemaMixin
 
 
 class TrackedProductSchema(Schema):
@@ -50,12 +51,15 @@ class AegisTweaksSchema(Schema):
     recentIncident    = fields.String(load_default="", validate=validate.Length(max=500))
 
 
-class AegisOrgProfileSchema(Schema):
+class AegisOrgProfileSchema(WhiteLabelSchemaMixin, Schema):
     """
     Perfil de organización de Aegis: valores estables que casi nunca cambian
     entre generaciones (empresa, contacto, tono, tamaño, jurisdicción, marcas
     habituales). Comparte nombres de campo con AegisTweaksSchema para que el
     frontend pueda precargar el formulario de generación sin traducirlos.
+
+    Los campos de white-labeling (``whiteLabelLevel``, ``brandLogo``) llegan
+    del mixin compartido, que es también quien valida el logo.
     """
     company           = fields.String(load_default="", validate=validate.Length(max=128))
     mentionContact    = fields.String(load_default="", validate=validate.Length(max=128))

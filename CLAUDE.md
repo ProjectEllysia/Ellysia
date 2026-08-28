@@ -153,3 +153,19 @@ A few things stay plain functions on purpose: env-only credentials (`get_*_envir
 - API version is config-driven: `create_app()` reads it via `CR.get_app_version()` from `appVersion` in `SecOpsConfig.json` (currently `4.2`) — it is not hardcoded.
 - `features.themis.areLocalIpsAllowed` is set to `true` in `SecOpsConfig.json` (intentional, for local dev against private IPs) — with it `true`, 3 SSRF tests don't trigger (`test_nikto_rejects_loopback_target`, `test_nikto_rejects_cloud_metadata_target`, `test_nmap_rejects_private_ip_target`; not a regression). **Must be reverted to `false` before any real deployment**, or the anti-SSRF defense stays disabled in production.
 - OpenVAS was removed from the product (roadmap `plans/feature/themis/lybra-engine-roadmap.md` §7/§6.3, Ronda 2). Its scheduled-flow SSRF fix (`run_scan()` self-validating via `ScanManager.reject_private_ip`) set the pattern the surviving scanners now all follow: each of Nmap, Nikto, Nuclei and Lybra self-validates inside its own `run_scan()` (`thirdparty_scans_managers.py`, `lybra_sources.py`), not just at the HTTP endpoint — so the scheduled flow (`scheduling.py` calling `run_scan()` directly) is covered. The one mode that is *not* validated by design is Lybra's `ExternalPayload` source (`lybra_sources.py`, `probes_target_network = False`): it analyses a services list the caller already resolved without touching the network, so there is no target to reject — deep corroborators from that mode require an explicit authorized-targets entry instead (`deep_requires_authorization = True`).
+
+## Tooling
+
+### Code exploration
+- Prefer **Serena** for semantic navigation, symbol lookup, references,
+  and structural refactoring when those capabilities provide a clear advantage.
+- Use native search/read/git tools when they are more appropriate, especially
+  for exact text, configuration, logs, non-code files, or repository history.
+- Avoid broadly reading files when a targeted lookup is sufficient.
+
+### External documentation
+- Use **Context7** when implementing or debugging against external libraries,
+  frameworks, or APIs.
+- Check the project's actual dependency version first.
+- Use Context7 selectively; do not query documentation when project code already
+  provides the required information.

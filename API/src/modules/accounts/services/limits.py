@@ -29,11 +29,17 @@ class LimitPeriod(str, Enum):
     - ``STOCK``: **existencias**. No hay contador: se cuenta la tabla real. Un
       contador de existencias se desincroniza en el primer borrado, y la base
       de datos ya sabe la respuesta.
+    - ``TIER``: **nivel**. Ni se consume ni se cuenta: el ``value`` de la fila
+      *es* el escalón que concede el plan (0 = ninguno, n = escalón n,
+      ``NULL`` = el más alto). Se lee con ``resolve_entitlement(...).limit`` y
+      no pasa por ``consume()``: no hay nada que gastar, solo un techo que
+      respetar.
     """
 
     MONTH = "month"
     DAY = "day"
     STOCK = "stock"
+    TIER = "tier"
 
 
 class LimitKey(Enum):
@@ -44,9 +50,10 @@ class LimitKey(Enum):
     THEMIS_SCHEDULED        = "themis.scheduled"
     THEMIS_REPORTS_AI       = "themis.reports.ai"
 
-    AEGIS_PILLS      = "aegis.pills"
-    AEGIS_CAMPAIGNS  = "aegis.campaigns"
-    AEGIS_RECIPIENTS = "aegis.recipients"
+    AEGIS_PILLS       = "aegis.pills"
+    AEGIS_CAMPAIGNS   = "aegis.campaigns"
+    AEGIS_RECIPIENTS  = "aegis.recipients"
+    AEGIS_WHITE_LABEL = "aegis.white_label"
 
     IRIS_ANALYSES            = "iris.analyses"
     IRIS_AI_SUMMARIES        = "iris.ai_summaries"
@@ -79,6 +86,9 @@ PERIODS: dict[LimitKey, LimitPeriod] = {
     LimitKey.AEGIS_PILLS:      LimitPeriod.MONTH,
     LimitKey.AEGIS_CAMPAIGNS:  LimitPeriod.MONTH,
     LimitKey.AEGIS_RECIPIENTS: LimitPeriod.STOCK,
+    # Nivel, no cantidad: hasta dónde puede llegar el white-labeling de sus
+    # campañas. Ver WhiteLabelLevel.from_allowance.
+    LimitKey.AEGIS_WHITE_LABEL: LimitPeriod.TIER,
 
     LimitKey.IRIS_ANALYSES:            LimitPeriod.MONTH,
     LimitKey.IRIS_AI_SUMMARIES:        LimitPeriod.MONTH,

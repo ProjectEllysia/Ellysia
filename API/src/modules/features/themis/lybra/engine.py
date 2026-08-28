@@ -118,7 +118,9 @@ class LybraEngine:
 
     Args:
         cve_lookup: A callable ``(vendor, product, version) -> iterable`` of CVE
-            rows, each exposing ``cve_id`` / ``cvss_score`` / ``cvss_vector``.
+            rows, each exposing ``cve_id`` / ``cvss_score`` / ``cvss_vector``
+            and, optionally, ``required_os`` (the platform the match is gated
+            behind, or ``None`` — see ``KbRepository.cves_for_cpe``).
             Passing ``None`` disables version detection, leaving only the
             informational findings.
         kev_lookup: A callable ``(cve_id) -> bool`` telling whether the CVE is in
@@ -206,6 +208,7 @@ class LybraEngine:
             "cvss_vector":  cve.cvss_vector,
             "epss_score":   self._epss_lookup(cve_id) if self._epss_lookup else None,
             "in_kev":       self._kev_lookup(cve_id) if self._kev_lookup else False,
+            "required_os":  getattr(cve, "required_os", None),
             "source":       "lybra",
             "check_id":     "lybra:version-match@1",
             "feed_version": self.FEED_VERSION,

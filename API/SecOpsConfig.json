@@ -1,5 +1,5 @@
 {
-  "appVersion": "0.5.7",
+  "appVersion": "0.5.8",
   "general": {
     "directories": {
       "logdir": "..",
@@ -53,6 +53,7 @@
   "tools": {
     "scribe": {
       "defaultStrategy": "openai",
+      "maxInputTokens": 24000,
       "modules": {
         "aegis": "openai",
         "themis": "openai"
@@ -84,8 +85,8 @@
       },
       "strategies": {
         "smtp": {
-          "fromAddress": "awareness@ellysia.es",
-          "fromName": "Ellysia Awareness",
+          "fromAddress": "herald@ellysia.es",
+          "fromName": "Ellysia Herald",
           "host": "smtp-relay.brevo.com",
           "port": 587,
           "useTls": true

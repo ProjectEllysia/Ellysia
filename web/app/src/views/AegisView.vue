@@ -89,7 +89,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onBeforeUnmount } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
 import { useAegisStore } from '@/stores/aegisStore'
@@ -109,11 +109,37 @@ const { collapsed: rightCollapsed, toggle: toggleRight } = usePanelCollapse('aeg
 const leftWidth = computed(() => (leftCollapsed.value ? '48px' : '400px'))
 const rightWidth = computed(() => (rightCollapsed.value ? '48px' : '320px'))
 
-onMounted(async () => { await store.loadTopics(); await store.loadHistory() })
+// El layout de escritorio es de una sola pantalla (.app-layout mide
+// calc(100vh - topbar) con overflow:hidden) y cada panel scrollea por su
+// cuenta en .panel-content. Pero `html` sí puede desplazarse (overflow-x
+// hidden fuerza overflow-y:auto, ver comentario en shared.css) y Chromium,
+// al devolver el foco al <input type="file"> oculto de WhiteLabelFields tras
+// cerrar el diálogo nativo, se salta `.app-layout` (overflow:hidden no cuenta
+// como contenedor de scroll) y desplaza `html` en su lugar — aunque el input
+// ya era visible. Como la página mide justo 100vh, ese scroll no revela más
+// contenido: revela hueco, con el fondo fijo de StarBackground asomando.
+// Bloquear el scroll de html en este rango de anchura (el mismo en el que
+// .app-layout es de una sola pantalla) impide que ese salto tenga adónde ir,
+// sin tocar el modo apilado por debajo de 1200px, donde sí debe desplazarse.
+onMounted(async () => {
+  document.documentElement.classList.add('aegis-scroll-lock')
+  await store.loadTopics()
+  await store.loadHistory()
+})
+onBeforeUnmount(() => {
+  document.documentElement.classList.remove('aegis-scroll-lock')
+})
 </script>
 
 <style scoped>
 .aegis-page { min-height: 100vh; background: var(--bg); padding-top: var(--topbar-h); position: relative; }
+
+/* Ver el porqué en el onMounted de <script setup>. Acotado al mismo ancho en
+   el que .app-layout es de una sola pantalla (media query de más abajo
+   apila los paneles y necesita que la página SÍ pueda desplazarse). */
+@media (min-width: 1201px) {
+  :global(html.aegis-scroll-lock) { overflow-y: hidden; }
+}
 
 /* Flex, no grid: el ancho de cada barra llega por :style inline (calculado
    en leftWidth/rightWidth) y se anima con "transition: width". */

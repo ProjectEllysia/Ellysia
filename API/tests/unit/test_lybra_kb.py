@@ -93,7 +93,24 @@ def test_normalize_cpe_23_passthrough():
 
 def test_parse_cpe23_extracts_fields():
     parsed = parse_cpe23("cpe:/a:apache:http_server:2.4.49")
-    assert parsed == {"part": "a", "vendor": "apache", "product": "http_server", "version": "2.4.49"}
+    assert parsed == {
+        "part": "a", "vendor": "apache", "product": "http_server", "version": "2.4.49",
+        "target_sw": None,
+    }
+
+
+def test_parse_cpe23_extracts_target_sw():
+    parsed = parse_cpe23("cpe:2.3:a:apache:http_server:2.4.59:*:*:*:*:windows:*:*")
+    assert parsed["target_sw"] == "windows"
+
+
+@pytest.mark.parametrize("cpe", [
+    "cpe:2.3:a:apache:http_server:2.4.59:*:*:*:*:*:*:*",   # wildcard
+    "cpe:2.3:a:apache:http_server:2.4.59:*:*:*:*:*:-:*",   # not-applicable marker
+    "cpe:/a:apache:http_server:2.4.49",                     # 2.2 form has no target_sw field at all
+])
+def test_parse_cpe23_target_sw_none_when_unset(cpe):
+    assert parse_cpe23(cpe)["target_sw"] is None
 
 
 # ---------------------------------------------------------------- NVD ingest
@@ -158,6 +175,83 @@ def test_ingest_nvd_cve_range_beats_pinned_version():
 
 def test_ingest_nvd_cve_malformed_returns_none():
     assert ingest_nvd_cve({"cve": {}}) is None
+
+
+# ------------------------------------------------- platform-gated CVEs (#118)
+
+def _and_node_item(platform_cpe: str) -> dict:
+    """One CVE whose only applicability node ANDs an Apache match with a
+    platform-only CPE — the shape NVD uses for "product X, but only on
+    OS Y" CVEs."""
+    return {"cve": {
+        "id": "CVE-2024-00001",
+        "descriptions": [{"lang": "en", "value": "x"}],
+        "configurations": [{"nodes": [{
+            "operator": "AND",
+            "cpeMatch": [
+                {"vulnerable": True, "criteria": "cpe:2.3:a:apache:http_server:2.4.59:*:*:*:*:*:*:*"},
+                {"vulnerable": True, "criteria": platform_cpe},
+            ],
+        }]}],
+    }}
+
+
+def test_ingest_nvd_cve_and_node_tags_software_match_with_platform():
+    """NVD's 'product AND platform' node shape must gate the software row
+    with the platform's product token — the mechanism behind CVE-2024-38472-
+    style ("...on Windows") false positives reported against non-Windows
+    hosts (Issue #118)."""
+    item = _and_node_item("cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:*:*:*")
+    _cve, matches = ingest_nvd_cve(item)
+    assert len(matches) == 1  # the platform-only cpeMatch produces no row of its own
+    assert matches[0]["product"] == "http_server"
+    assert matches[0]["required_os"] == "windows_10"
+
+
+def test_ingest_nvd_cve_or_node_does_not_gate():
+    """An 'OR' node is not the 'product AND this one platform' shape — must
+    not guess a required_os from it."""
+    item = _and_node_item("cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:*:*:*")
+    item["cve"]["configurations"][0]["nodes"][0]["operator"] = "OR"
+    _cve, matches = ingest_nvd_cve(item)
+    # Both entries survive as independent rows once there is no AND to fold.
+    assert {m["product"] for m in matches} == {"http_server"}
+    assert matches[0]["required_os"] is None
+
+
+def test_ingest_nvd_cve_multiple_platforms_in_and_node_does_not_gate():
+    """Two distinct platform products under the same AND node is a shape this
+    module does not attempt to resolve (would need real node-tree/OR
+    semantics) — conservatively leaves required_os unset rather than
+    guessing either platform."""
+    item = {"cve": {
+        "id": "CVE-2024-00002",
+        "descriptions": [{"lang": "en", "value": "x"}],
+        "configurations": [{"nodes": [{
+            "operator": "AND",
+            "cpeMatch": [
+                {"vulnerable": True, "criteria": "cpe:2.3:a:apache:http_server:2.4.59:*:*:*:*:*:*:*"},
+                {"vulnerable": True, "criteria": "cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:*:*:*"},
+                {"vulnerable": True, "criteria": "cpe:2.3:o:microsoft:windows_11:*:*:*:*:*:*:*:*"},
+            ],
+        }]}],
+    }}
+    _cve, matches = ingest_nvd_cve(item)
+    assert matches[0]["required_os"] is None
+
+
+def test_ingest_nvd_cve_target_sw_on_software_cpe_gates_directly():
+    """When NVD encodes the platform on the software's own CPE (target_sw)
+    rather than via a sibling AND node, that must gate the match too."""
+    item = {"cve": {
+        "id": "CVE-2024-00003",
+        "descriptions": [{"lang": "en", "value": "x"}],
+        "configurations": [{"nodes": [{"cpeMatch": [
+            {"vulnerable": True, "criteria": "cpe:2.3:a:apache:http_server:2.4.59:*:*:*:*:windows:*:*"},
+        ]}]}],
+    }}
+    _cve, matches = ingest_nvd_cve(item)
+    assert matches[0]["required_os"] == "windows"
 
 
 # --------------------------------------------------------------- KEV / EPSS
