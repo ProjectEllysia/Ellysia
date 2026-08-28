@@ -28,7 +28,9 @@ Decisiones de diseño (ver el plan de tests):
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import socket
 import sys
 from pathlib import Path
 
@@ -212,6 +214,74 @@ def _redis_always_unavailable():
         raise redis_lib.ConnectionError("Redis deshabilitado en la suite de tests")
 
     with mock.patch.object(redis_lib.connection.ConnectionPool, "get_connection", _unavailable):
+        yield
+
+
+# ---------------------------------------------------------------------------
+# 3-ter. Ningún socket sale de loopback
+# ---------------------------------------------------------------------------
+
+def _is_loopback(address) -> bool:
+    """¿Apunta ``address`` (el argumento de ``socket.connect``) a loopback?
+
+    Sockets Unix (dirección = ruta) y familias exóticas se dejan pasar: aquí
+    solo interesa el tráfico IP. Una dirección sin resolver (nombre en vez de
+    IP) se considera externa, que es el lado conservador.
+    """
+    if not isinstance(address, tuple) or not address:
+        return True
+    try:
+        return ipaddress.ip_address(address[0]).is_loopback
+    except ValueError:
+        return address[0] in ("localhost", "")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_outbound_sockets():
+    """Corta cualquier conexión que no sea a loopback, al instante.
+
+    Varios tests de Lybra ejecutan el motor completo contra ``10.0.0.5`` (una
+    IP privada que no enruta a ninguna parte). Cada check activo abría un
+    socket de verdad y esperaba su timeout completo — ``HttpProbe`` usa 8 s, y
+    un solo test se comía 10 checks × 8 s = 80 s. Los tests ya mockean las
+    sondas que recuerdan (``HttpProbe.fetch`` y compañía), pero basta con
+    olvidar una para que el escaneo salga a la red.
+
+    Se corta en ``socket.connect``, no sonda a sonda, porque es el único punto
+    por el que pasan todas: urllib (``HttpProbe``), TLS, las sesiones TCP
+    crudas de la Fase N y el descubrimiento de puertos. Un ``ConnectionRefused``
+    instantáneo es indistinguible de un host inalcanzable para el código bajo
+    test — que trata cualquier ``OSError`` como "no hay servicio" — solo que
+    sin la espera.
+
+    Loopback sí se permite: los tests de herald levantan un servidor SMTP real
+    (aiosmtpd) en 127.0.0.1 y tienen que poder hablar con él.
+    """
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+    real_gethostbyaddr = socket.gethostbyaddr
+
+    def guarded_connect(self, address):
+        if not _is_loopback(address):
+            raise ConnectionRefusedError(
+                f"La suite de tests no permite conexiones fuera de loopback: {address!r}"
+            )
+        return real_connect(self, address)
+
+    def guarded_connect_ex(self, address):
+        if not _is_loopback(address):
+            return 111  # ECONNREFUSED, la convención de connect_ex
+        return real_connect_ex(self, address)
+
+    def guarded_gethostbyaddr(ip):
+        # El DNS inverso es la otra forma de irse a la red sin abrir un socket
+        # propio: resolver 10.0.0.5 colgaba 16 s en un test de Lybra. El único
+        # caller (shared._endpoints) ya trata socket.herror como "no resuelve".
+        if not _is_loopback((ip,)):
+            raise socket.herror(f"DNS inverso bloqueado en tests: {ip!r}")
+        return real_gethostbyaddr(ip)
+
+    with mock.patch.object(socket.socket, "connect", guarded_connect),          mock.patch.object(socket.socket, "connect_ex", guarded_connect_ex),          mock.patch.object(socket, "gethostbyaddr", guarded_gethostbyaddr):
         yield
 
 
