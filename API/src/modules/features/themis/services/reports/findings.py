@@ -118,6 +118,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
             "cpe": row.cpe, "cve_ids": row.cve_ids or [], "cvss_score": row.cvss_score,
             "epss_score": row.epss_score, "in_kev": row.in_kev, "qod": row.qod, "confirmed": row.confirmed,
             "source": row.source, "state": row.state, "cpe_resolved": row.cpe_resolved,
+            "required_os": row.required_os,
         } for row in rows]
         for f in findings:
             f["priority"] = score_finding(f, exposure)
@@ -374,6 +375,8 @@ class FindingsPrintingStrategy(PrintingStrategy):
             details.append(["EPSS (30 días):", f"{finding['epss_score'] * 100:.1f}%"])
         if finding.get("in_kev"):
             details.append(["CISA KEV:", "Sí — explotada activamente"])
+        if finding.get("required_os") and not finding.get("confirmed"):
+            details.append(["Requiere SO:", f"{finding['required_os']} (no verificado en este escaneo)"])
         if finding.get("fixed_version"):
             details.append(["Corregido en:", f"{finding['fixed_version']} o superior"])
         if finding.get("state") and finding["state"] != "open":

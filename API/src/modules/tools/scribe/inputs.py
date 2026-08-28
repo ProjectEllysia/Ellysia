@@ -22,6 +22,29 @@ from .exceptions import AIResponseError
 
 logger = logging.getLogger(__name__)
 
+# Caracteres por token, aproximación heurística (sin dependencia nueva tipo
+# tiktoken, que además tokeniza distinto por modelo/backend). ~4 es la cifra
+# que la propia documentación de OpenAI da como regla general para texto en
+# inglés/español; de sobra para un guardarraín de "no mandes un payload
+# disparatado" — no hace falta precisión exacta para eso (Issue #118).
+_CHARS_PER_TOKEN = 4
+
+
+def estimate_tokens(text: str) -> int:
+    """Estimación heurística y barata del número de tokens de ``text``.
+
+    No es un tokenizador real: es la aproximación mínima necesaria para
+    detectar un prompt varias veces más grande que el límite configurado
+    antes de gastar una llamada de red en descubrirlo por el 429 del backend.
+
+    Args:
+        text: El texto a estimar.
+
+    Returns:
+        Una cota aproximada del número de tokens.
+    """
+    return (len(text) + _CHARS_PER_TOKEN - 1) // _CHARS_PER_TOKEN
+
 
 @dataclass(frozen=True)
 class Example:
@@ -70,6 +93,15 @@ class AIInput:
             messages.append({"role": "assistant", "content": ex.assistant})
         messages.append({"role": "user", "content": self.user_prompt})
         return messages
+
+    def estimated_tokens(self) -> int:
+        """Estimación heurística del tamaño del prompt completo (Issue #118).
+
+        Suma sobre todos los mensajes que ``to_messages`` enviaría — no solo
+        el último — porque es el total lo que un backend factura contra su
+        límite de tokens, no un mensaje aislado.
+        """
+        return sum(estimate_tokens(message["content"]) for message in self.to_messages())
 
 
 @dataclass

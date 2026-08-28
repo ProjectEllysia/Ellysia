@@ -222,7 +222,8 @@ def finding_to_json(f: dict, exposure: str) -> dict:
     """
     priority = score_finding(
         {"cvss_score": f.get("cvss_score"), "in_kev": f.get("in_kev"),
-         "epss_score": f.get("epss_score"), "confirmed": f.get("confirmed")},
+         "epss_score": f.get("epss_score"), "confirmed": f.get("confirmed"),
+         "required_os": f.get("required_os")},
         exposure,
     )
     return {
@@ -243,4 +244,5 @@ def finding_to_json(f: dict, exposure: str) -> dict:
         "state":       f.get("state"),
         "dedupKey":    f.get("dedup_key"),
         "priority":    priority,
+        "requiredOs":  f.get("required_os"),
     }

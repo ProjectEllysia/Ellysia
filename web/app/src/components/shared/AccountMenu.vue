@@ -198,6 +198,8 @@ onUnmounted(() => {
 .drop {
   position: absolute; top: calc(100% + 0.7rem); right: 0; z-index: 60;
   width: 300px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border-solid);
   border-radius: 10px;

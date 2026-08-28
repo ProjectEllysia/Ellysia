@@ -623,11 +623,15 @@ onUnmounted(() => {
 }
 
 /* ═══════════ HERO — la vista ═══════════ */
+/* Sin overflow:hidden aquí: `ElysianScene` ya se recorta a sí misma
+   (`.scene { overflow: hidden }`), así que este `overflow` no protegía nada
+   del fondo — solo recortaba, sin querer, cualquier desplegable de la
+   cabecera (AccountMenu, Herramientas, Documentación) que no cupiera en los
+   100vh del hero (issue #140). */
 .vista {
   position: relative;
   height: 100vh;
   min-height: 640px;
-  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
