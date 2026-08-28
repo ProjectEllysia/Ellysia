@@ -127,6 +127,20 @@ function fmtDate(iso) { if (!iso) return ''; return new Date(iso).toLocaleDateSt
 </script>
 
 <style scoped>
+/* Antes heredado de la regla global `.modal`/`.modal.visible` de shared.css
+   (legacy pre-Vue): posición, capa y centrado propios, ahora que ese bloque
+   se borra (#131). */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.modal.visible { display: flex; }
+
 .preview-modal { max-width: 520px; animation: none; }
 
 .modal-enter-active, .modal-leave-active { transition: opacity 0.2s ease; }
