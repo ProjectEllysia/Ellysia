@@ -575,6 +575,20 @@ class ScribeConfig(_StrategySelection):
 
     default_strategy: str = "ollama"
 
+    max_input_tokens: int = 24000
+    """Tope de tokens estimados del prompt (system + examples + user) que
+    ``AIGenerator.digest`` deja pasar antes de invocar la estrategia (Issue
+    #118).
+
+    Sin esto, un writer de dominio (p.ej. ``LybraAIWriter`` con un scan de
+    muchos hallazgos) podía generar un payload que OpenAI rechazaba con un
+    429 'Request too large' — tras haber quemado ``max_retries`` reintentos
+    con backoff, porque el mismo prompt sobredimensionado vuelve a fallar en
+    cada intento. 24000 deja margen bajo el límite TPM de 30000 observado en
+    el error original, incluso en la organización más ajustada; se aplica al
+    total estimado (no solo al último mensaje) e independientemente del
+    backend, ya que un contexto local también tiene un tope real."""
+
 
 @config_block("tools.herald")
 @dataclass(frozen=True)

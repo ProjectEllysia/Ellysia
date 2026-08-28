@@ -888,7 +888,16 @@ class KbRepository(BaseRepository[CveEntry]):
 
         Filters candidate applicability rows by (vendor, product) in SQL, then
         applies the version-range logic in Python (see ``lybra.kb``). Results
-        are de-duplicated by CVE.
+        are de-duplicated by CVE — a CVE can have several ``CpeMatch`` rows for
+        the same product (different ranges, some OS-gated and some not); when
+        that happens the *least* restrictive rule wins, since an unconditional
+        applicability rule proves the CVE genuinely applies here regardless of
+        any other, narrower rule that also happens to match.
+
+        Each returned ``CveEntry`` carries a transient ``required_os``
+        attribute (not a mapped column — set on this query's result objects
+        only) telling the caller which platform, if any, every contributing
+        match required. ``None`` means unconditional.
         """
         from .lybra import version_in_range
 
@@ -898,12 +907,24 @@ class KbRepository(BaseRepository[CveEntry]):
             .options(joinedload(CpeMatch.cve))
             .all()
         )
-        seen: set[int] = set()
-        result: List[CveEntry] = []
+        order: List[int] = []
+        entries: Dict[int, CveEntry] = {}
+        required_os: Dict[int, Optional[str]] = {}
         for match in candidates:
-            if version_in_range(version, match) and match.cve_id not in seen:
-                seen.add(match.cve_id)
-                result.append(match.cve)
+            if not version_in_range(version, match):
+                continue
+            cve_id = match.cve_id
+            if cve_id not in entries:
+                order.append(cve_id)
+                entries[cve_id] = match.cve
+                required_os[cve_id] = match.required_os
+            elif required_os[cve_id] and not match.required_os:
+                required_os[cve_id] = None
+        result: List[CveEntry] = []
+        for cve_id in order:
+            entry = entries[cve_id]
+            entry.required_os = required_os[cve_id]  # type: ignore[attr-defined]
+            result.append(entry)
         return result
 
     def resolve_product_alias(self, normalized_name: str) -> Optional[Tuple[str, str]]:

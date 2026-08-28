@@ -20,6 +20,7 @@ from reportlab.platypus import PageBreak, Paragraph, Spacer, Table, TableStyle
 import src.modules.system.config_reading as CR
 
 from src.modules.shared._exceptions import IllegalStateError, ValidationError
+from src.modules.tools.scribe import AIPayloadTooLargeError
 from ...model import Scan, ScanType
 from src.modules.shared.report_theme import ColorType, ReportTheme, safe_markup
 
@@ -134,6 +135,16 @@ class PrintingStrategy(ABC):
                 raise IllegalStateError("Writer detectado como None")
 
             ai_analysis = self.writer.generate(self.scan, **writer_kwargs)
+        except AIPayloadTooLargeError as e:
+            logger.warning(f"[IA] Payload demasiado grande para scan {self.scan.id}: {e}")
+            elements.append(PageBreak())
+            elements.extend(theme.section_header("Análisis de Seguridad IA", "INTELIGENCIA ARTIFICIAL"))
+            elements.append(Paragraph(
+                "Este escaneo tiene demasiados hallazgos para generar un análisis de IA completo. "
+                "Consulta el detalle técnico del informe: contiene la misma información, sin resumir.",
+                theme.body,
+            ))
+            return
         except Exception as e:
             logger.error(f"[IA] Excepción: {e}", exc_info=True)
             ai_analysis = {}
