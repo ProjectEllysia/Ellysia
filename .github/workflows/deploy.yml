@@ -1,0 +1,124 @@
+# Despliegue automático a producción.
+#
+# Se dispara cuando el workflow "API Tests" (tests.yml) termina con éxito tras
+# un push a `main` — es decir, cuando un pull request se ha aceptado y los
+# tests del commit mergeado han pasado. Decisiones de diseño, con su porqué:
+#
+# - Se usa `workflow_run` en vez de un simple `push: branches: [main]` para
+#   que el deploy sea estrictamente POSTERIOR a los tests del commit que se
+#   va a desplegar. Si algún día se quiere desplegar sin esperar al CI, basta
+#   con cambiar el trigger; el resto del workflow no cambia.
+# - El filtro `branches: [main]` del evento excluye las ejecuciones de
+#   tests.yml disparadas por pull requests (ahí `head_branch` es la rama de
+#   origen, no `main`): este workflow solo se lanza para el push del merge.
+# - El deploy va por SSH desde un runner de GitHub hacia la máquina objetivo
+#   (www.ellysia.es o la IP fija del VPS): la máquina no necesita un runner
+#   propio, y las credenciales viven como secretos del repositorio. El `.env`
+#   de producción —con las credenciales reales— nunca sale del servidor.
+# - `DEPLOY_HOST` debe ser el DOMINIO (www.ellysia.es), no la IP: Caddy no
+#   tiene bloque catch-all por IP, así que el smoke test de abajo contra la IP
+#   no encontraría sitio y fallaría. La IP del VPS solo la conoce la DNS.
+# - `StrictHostKeyChecking=accept-new` hace que la primera conexión a un VPS
+#   nuevo (IP nueva, host key nueva) se acepte automáticamente sin romper la
+#   verificación en las siguientes. Es lo único que hay que recordar el día
+#   que cambie la IP del VPS: la DNS y el secret `DEPLOY_HOST` deben apuntar
+#   a la nueva IP, y nada más.
+#
+# Preparación (una sola vez) — instrucciones completas en README.md
+# §"Continuous deployment (CI/CD)":
+#   1. En el servidor: checkout del repo en una ruta fija (p. ej. ~/ellysia),
+#      el `.env` con las credenciales reales, y el usuario SSH con permisos de
+#      `docker`.
+#   2. Generar un par de claves SSH dedicado al deploy y añadir la pública a
+#      ~/.ssh/authorized_keys del usuario del deploy:
+#        ssh-keygen -t ed25519 -a 100 -f deploy_key -N "" -C "github-actions-deploy@ellysia"
+#   3. Guardar como secretos del repositorio (Settings → Secrets and variables
+#      → Actions → New repository secret):
+#        DEPLOY_HOST  → www.ellysia.es   (o la IP fija del VPS)
+#        DEPLOY_USER  → usuario SSH del deploy
+#        DEPLOY_PATH  → ruta ABSOLUTA al checkout del servidor (p. ej. /home/<user>/ellysia)
+#        DEPLOY_KEY   → el contenido COMPLETO del fichero privado deploy_key
+name: Deploy to production
+
+on:
+  workflow_run:
+    workflows: ["API Tests"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # El filtro `branches` del evento ya excluye las PRs; este `if` es la
+    # segunda red de seguridad y cubre también conclusiones distintas de
+    # success (failure, cancelled, skipped...). La rama manual
+    # (workflow_dispatch) se permite siempre: sirve para desplegar a mano
+    # sin esperar a un push a main (p. ej. un rollback).
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    steps:
+      - name: Check secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          for var in DEPLOY_HOST DEPLOY_USER DEPLOY_KEY DEPLOY_PATH; do
+            if [ -z "${!var}" ]; then
+              echo "::error::Falta el secreto ${var}. Configúralo en Settings → Secrets and variables → Actions (ver README.md §Continuous deployment)."
+              exit 1
+            fi
+          done
+
+      - name: Write SSH key
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          cat > ~/.ssh/deploy_key <<EOF
+          $DEPLOY_KEY
+          EOF
+          chmod 600 ~/.ssh/deploy_key
+          # Falla con un mensaje claro si el secret no es una clave legible.
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null
+
+      - name: Deploy via SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "cd '${DEPLOY_PATH}' && \
+             git fetch origin && \
+             git reset --hard origin/main && \
+             git log -1 --oneline && \
+             docker compose --profile container up -d --build && \
+             docker image prune -f"
+
+      - name: Smoke test
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 10 "https://${DEPLOY_HOST}/system/say-hello" >/dev/null 2>&1; then
+              echo "::notice::Deploy verificado: la API responde en https://${DEPLOY_HOST}/system/say-hello"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::La API no respondió en https://${DEPLOY_HOST}/system/say-hello tras el deploy"
+          exit 1
