@@ -59,13 +59,7 @@
       </div>
 
       <label class="wl-file">
-        <input
-          type="file"
-          :accept="ACCEPTED_TYPES.join(',')"
-          @click="captureScroll"
-          @focus="restoreScroll"
-          @change="onFile"
-        />
+        <input type="file" :accept="ACCEPTED_TYPES.join(',')" @change="onFile" />
         <span>{{ modelValue.logo ? 'Cambiar imagen' : 'Añadir imagen corporativa' }}</span>
       </label>
 
@@ -170,26 +164,6 @@ function clearLogo() {
   update({ logo: '' })
 }
 
-// Al cerrar el diálogo nativo de selección de fichero, el navegador devuelve
-// el foco a este input y desplaza la página para revelarlo — aunque ya fuera
-// visible, y aunque `.app-layout` bloquee su propio scroll con overflow:
-// hidden (ver aegis-scroll-lock en AegisView.vue). Ese bloqueo frena el
-// scroll por rueda/teclado y las llamadas a scrollTo(), pero no el
-// scroll-into-view que dispara la propia gestión de foco del navegador — va
-// por un camino interno distinto. Refs #135.
-let scrollBeforeDialog = null
-function captureScroll() {
-  scrollBeforeDialog = { x: window.scrollX, y: window.scrollY }
-}
-function restoreScroll() {
-  if (!scrollBeforeDialog) return
-  const { x, y } = scrollBeforeDialog
-  // rAF: el desplazamiento del navegador ocurre después del propio evento
-  // 'focus', así que corregir en el mismo tick no sirve — hay que esperar al
-  // siguiente frame, cuando ya ha tenido lugar.
-  requestAnimationFrame(() => window.scrollTo(x, y))
-}
-
 function onFile(event) {
   const file = event.target.files?.[0]
   // El input se vacía siempre: si no, elegir el mismo fichero dos veces
@@ -269,6 +243,13 @@ function onFile(event) {
    que lo envuelve hace de botón. */
 .wl-file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .wl-file {
+  /* Ancla el containing block del input absoluto a esta misma etiqueta. Sin
+     esto, saltaba hasta .panel--left (el primer ancestro con position !=
+     static) — que no hace scroll — dejando el input clavado en un punto fijo
+     mientras .panel-content (el que sí scrollea, y queda por medio) se movía
+     por su cuenta. Al enfocarlo el navegador lo llevaba a su posición real
+     (desincronizada), desplazando toda la página. Refs #135. */
+  position: relative;
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0.4rem 0.75rem; border-radius: 7px; cursor: pointer;
   background: var(--bg); border: 1px solid var(--border-solid);
