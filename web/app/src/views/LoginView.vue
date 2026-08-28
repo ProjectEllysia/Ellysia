@@ -140,7 +140,7 @@
         <!-- ───────── Alta pública ───────── -->
         <form v-else-if="!mfaStep && mode === 'register'" novalidate @submit.prevent="handleRegister">
           <div class="field" :class="{ focused: focus === 'reg-user' }">
-            <label for="reg-username">Identificador</label>
+            <label for="reg-username">Nombre de usuario</label>
             <div class="field-box">
               <input id="reg-username" v-model="reg.username" type="text" required
                      minlength="3" maxlength="64" autocomplete="username"
@@ -181,6 +181,16 @@
                      @focus="focus = 'reg-pass'" @blur="focus = ''" />
             </div>
             <span class="field-hint">Mínimo 8 caracteres.</span>
+          </div>
+
+          <div class="field" :class="{ focused: focus === 'reg-pass2' }">
+            <label for="reg-password-confirm">Repite la clave</label>
+            <div class="field-box">
+              <input id="reg-password-confirm" v-model="regConfirm" type="password" required
+                     autocomplete="new-password"
+                     :class="{ 'has-error': regConfirm && regConfirm !== reg.password }"
+                     @focus="focus = 'reg-pass2'" @blur="focus = ''" />
+            </div>
           </div>
 
           <button type="submit" class="submit" :class="{ loading }" :disabled="loading">
@@ -352,6 +362,9 @@ const mode = ref(
     : 'login',
 )
 const reg = ref({ username: '', email: '', first_name: '', last_name: '', password: '' })
+// Fuera de `reg` a propósito: ese objeto se manda tal cual a /users/register y
+// la confirmación es cosa del formulario, no del alta.
+const regConfirm = ref('')
 const recover = ref({ identifier: '' })
 
 /**
@@ -360,6 +373,12 @@ const recover = ref({ identifier: '' })
  * dejarán hasta que pulse el enlace.
  */
 async function handleRegister() {
+  // Lo único que el servidor no puede comprobar: nunca ve la confirmación.
+  if (reg.value.password !== regConfirm.value) {
+    showAlert('Las claves no coinciden. Repítela tal cual la escribiste.', 'error')
+    return
+  }
+
   loading.value = true
   try {
     const res = await fetch('/users/register', {
@@ -385,6 +404,7 @@ async function handleRegister() {
     )
     username.value = reg.value.username
     reg.value = { username: '', email: '', first_name: '', last_name: '', password: '' }
+    regConfirm.value = ''
     mode.value = 'login'
   } catch {
     showAlert('No se pudo conectar con el servidor.', 'error')
