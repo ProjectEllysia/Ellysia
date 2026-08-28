@@ -254,12 +254,20 @@ def score_finding(finding: dict, exposure: str) -> str:
       least 0.5 — pushes the priority up one band.
     * An actively-confirmed finding with no CVSS (e.g. an exposed path) is floored
       at MEDIUM, so a confirmed issue never reads as merely informational.
+    * An unconfirmed match whose CVE only applies on a specific platform
+      (``required_os`` set — see ``CpeMatch.required_os``) is capped at
+      MEDIUM: Lybra has no OS-detection signal, so it cannot verify that
+      precondition, and treating an unverifiable "on Windows"-type CVE as
+      CRITICAL against every banner-matched host — regardless of its actual
+      OS — is exactly the false-positive pattern this cap closes. A
+      confirmed finding (Hygeia inventory, where the host's own OS is already
+      known) is exempt.
     * A private-LAN target caps the priority at HIGH, since it is not exposed to
       the internet.
 
     Args:
         finding: A finding dict, read for ``cvss_score`` / ``in_kev`` /
-            ``epss_score`` / ``confirmed``.
+            ``epss_score`` / ``confirmed`` / ``required_os``.
         exposure: ``"private"`` or ``"public"``, as returned by
             :func:`classify_exposure`.
 
@@ -274,6 +282,9 @@ def score_finding(finding: dict, exposure: str) -> str:
 
     if finding.get("confirmed") and cvss == 0.0:
         band = max(band, PRIORITY_LADDER.index("MEDIUM"))
+
+    if finding.get("required_os") and not finding.get("confirmed"):
+        band = min(band, PRIORITY_LADDER.index("MEDIUM"))
 
     if exposure == "private":
         band = min(band, PRIORITY_LADDER.index("HIGH"))

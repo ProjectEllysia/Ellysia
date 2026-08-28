@@ -127,9 +127,10 @@ def test_nmap_processor_keeps_cpe_in_ports_data():
 
 # ------------------------------------------------ version matcher (Fase 1)
 
-def _fake_cve(cve_id="CVE-2021-41773"):
+def _fake_cve(cve_id="CVE-2021-41773", required_os=None):
     return types.SimpleNamespace(
         cve_id=cve_id, cvss_score=7.5, cvss_vector="CVSS:3.1/AV:N", severity="HIGH",
+        required_os=required_os,
     )
 
 
@@ -176,6 +177,33 @@ def test_version_finding_from_nmap_cpe():
     assert vuln["epss_score"] == 0.97
     assert vuln["check_id"] == "lybra:version-match@1"
     assert vuln["cpe"] == "cpe:2.3:a:apache:http_server:2.4.49:*:*:*:*:*:*:*"
+
+
+def test_version_finding_carries_required_os_from_the_cve_lookup():
+    """#118: a cve_lookup result flagged with a platform gate (KbRepository's
+    transient CveEntry.required_os) must reach the finding dict, so
+    score_finding can avoid crowning an unverifiable platform hypothesis as
+    CRITICAL."""
+    engine = LybraEngine(cve_lookup=lambda *a: [_fake_cve(required_os="windows_10")])
+    service = Service(80, "tcp", "http", "Apache httpd", "2.4.59",
+                      "cpe:/a:apache:http_server:2.4.59")
+
+    findings = engine.analyze([service])
+
+    vuln = findings[1]
+    assert vuln["required_os"] == "windows_10"
+
+
+def test_version_finding_required_os_defaults_to_none():
+    """A cve_lookup result with no required_os attribute at all (a stub, or a
+    genuinely unconditional match) must not blow up — getattr defaults it."""
+    engine = LybraEngine(cve_lookup=_lookup_for(("apache", "http_server")))
+    service = Service(80, "tcp", "http", "Apache httpd", "2.4.49",
+                      "cpe:/a:apache:http_server:2.4.49")
+
+    findings = engine.analyze([service])
+
+    assert findings[1]["required_os"] is None
 
 
 def test_version_finding_via_override_when_no_cpe():

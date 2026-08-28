@@ -667,6 +667,7 @@ class LybraAIWriter:
             "estado": finding.get("state", "open"),
             "corregido_en": finding.get("fixed_version"),
             "descripcion": (finding.get("description") or "")[:self._MAX_DESCRIPTION_CHARS],
+            "requiere_so": finding.get("required_os"),
         } for finding in highlighted]
 
         prompts_config = CR.get_prompts_config()
@@ -725,6 +726,7 @@ class LybraAIWriter:
                 "service": row.service, "cpe": row.cpe, "cve_ids": row.cve_ids,
                 "cvss_score": row.cvss_score, "epss_score": row.epss_score, "in_kev": row.in_kev,
                 "confirmed": row.confirmed, "qod": row.qod, "state": row.state,
+                "required_os": row.required_os,
             } for row in rows]
 
         for finding in findings:

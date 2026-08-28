@@ -328,13 +328,22 @@ def parse_cpe23(cpe: str) -> Optional[dict]:
         cpe: A CPE string in 2.2 or 2.3 form.
 
     Returns:
-        A dict with ``"part"``, ``"vendor"``, ``"product"`` and ``"version"``, or
-        ``None`` if the string is not a recognisable CPE.
+        A dict with ``"part"``, ``"vendor"``, ``"product"``, ``"version"`` and
+        ``"target_sw"``, or ``None`` if the string is not a recognisable CPE.
+        ``target_sw`` is the CPE 2.3 form's 11th field (index 10) — the
+        platform a CVE's applicability rule requires (e.g. ``"windows"``)
+        when NVD encodes it directly on the software's own CPE rather than as
+        a sibling platform CPE in the same configuration node. Missing on a
+        2.2-form or short string, in which case it is ``None``.
     """
     parts = normalize_cpe_to_23(cpe).split(":")
     if len(parts) < 6 or parts[0] != "cpe" or parts[1] != "2.3":
         return None
-    return {"part": parts[2], "vendor": parts[3], "product": parts[4], "version": parts[5]}
+    target_sw = parts[10] if len(parts) > 10 else None
+    return {
+        "part": parts[2], "vendor": parts[3], "product": parts[4], "version": parts[5],
+        "target_sw": target_sw if target_sw not in (None, "*", "-") else None,
+    }
 
 
 # The curated product-name -> (vendor, product) alias feed (Fase I-b, paso 3),
@@ -473,17 +482,56 @@ def ingest_nvd_cve(item: dict) -> Optional[Tuple[dict, List[dict]]]:
     matches: List[dict] = []
     for config in cve.get("configurations", []):
         for node in config.get("nodes", []):
+            node_os = _node_required_os(node)
             for cm in node.get("cpeMatch", []):
                 if not cm.get("vulnerable"):
                     continue
-                row = _cpe_match_row(cm)
+                row = _cpe_match_row(cm, node_required_os=node_os)
                 if row:
                     matches.append(row)
 
     return cve_row, matches
 
 
-def _cpe_match_row(cm: dict) -> Optional[dict]:
+def _node_required_os(node: dict) -> Optional[str]:
+    """Derive the platform an NVD configuration node's software match requires.
+
+    NVD sometimes expresses "product X, but only when running on Windows" as
+    two sibling ``cpeMatch`` entries in the same node — one ``part="a"`` (the
+    software) and one ``part="o"`` (the operating system) — joined by
+    ``operator: "AND"``. Flattening every ``cpeMatch`` in a node into
+    independent rows (as this module used to) loses that joint condition
+    entirely, so a Windows-only CVE ends up matched against the same software
+    regardless of OS. This walks one node's siblings and, when exactly the
+    "AND with a single platform CPE" shape holds, returns that platform's CPE
+    ``product`` token (e.g. ``"windows_10"``) so the caller can tag the
+    software row with it.
+
+    Deliberately conservative: a node with ``operator != "AND"``, no platform
+    CPE, or more than one distinct platform product (an "OR" of platforms,
+    which would need real node-tree semantics to resolve exactly) returns
+    ``None`` rather than guess — the same "no OS gate" behaviour the matcher
+    already had before this existed.
+
+    Args:
+        node: One NVD configuration node.
+
+    Returns:
+        The single required platform's CPE ``product`` token, or ``None``.
+    """
+    if node.get("operator") != "AND" or node.get("negate"):
+        return None
+    platforms = set()
+    for cm in node.get("cpeMatch", []):
+        if not cm.get("vulnerable"):
+            continue
+        parsed = parse_cpe23(cm.get("criteria", ""))
+        if parsed and parsed["part"] == "o":
+            platforms.add(parsed["product"])
+    return next(iter(platforms)) if len(platforms) == 1 else None
+
+
+def _cpe_match_row(cm: dict, node_required_os: Optional[str] = None) -> Optional[dict]:
     """Turn one NVD ``cpeMatch`` object into a ``CpeMatch`` row dict.
 
     A CPE that pins a concrete version (not ``*`` or ``-``) becomes an
@@ -491,15 +539,23 @@ def _cpe_match_row(cm: dict) -> Optional[dict]:
     bounds, in which case the range takes precedence and the pinned version is
     ignored.
 
+    A platform-only entry (``part="o"``, e.g. ``cpe:2.3:o:microsoft:windows_10:...``)
+    is not itself a matchable product — no scanner ever reports "Windows 10"
+    as a network service — so it produces no row of its own; it only exists to
+    gate its AND-sibling software row via ``node_required_os``
+    (see :func:`_node_required_os`).
+
     Args:
         cm: One ``cpeMatch`` object from an NVD configuration node.
+        node_required_os: The platform this match's sibling ``AND`` condition
+            requires, from :func:`_node_required_os`, or ``None``.
 
     Returns:
         A dict of ``CpeMatch`` column values, or ``None`` if the object's CPE
-        string cannot be parsed.
+        string cannot be parsed or is a platform-only entry.
     """
     parsed = parse_cpe23(cm.get("criteria", ""))
-    if not parsed:
+    if not parsed or parsed["part"] == "o":
         return None
     bounds = (
         cm.get("versionStartIncluding"), cm.get("versionStartExcluding"),
@@ -514,6 +570,10 @@ def _cpe_match_row(cm: dict) -> Optional[dict]:
         "version_end_including":   cm.get("versionEndIncluding"),
         "version_end_excluding":   cm.get("versionEndExcluding"),
         "exact_version":           None if any(bounds) else pinned,
+        # The software's own CPE can encode the platform directly
+        # (target_sw), or it can come from an AND-sibling platform CPE in the
+        # same node; either is a genuine applicability gate NVD intends.
+        "required_os": parsed["target_sw"] or node_required_os,
     }
 
 

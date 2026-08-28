@@ -785,6 +785,11 @@ class Finding(Base):
             collide the two.
         cve_ids / cvss_score / cvss_vector / epss_score / in_kev /
             exploit_maturity: Vulnerability correlation (filled from Fase 1 on).
+        required_os: CPE platform token (e.g. "windows_10") this finding's CVE
+            match is gated behind, or None if unconditional. Set from
+            ``CpeMatch.required_os`` at correlation time; used by
+            ``score_finding`` to avoid treating an unverifiable platform
+            precondition as a confirmed risk.
         source: Which scanner produced it ("lybra" | "nikto" | "nuclei" | "nmap",
             or historically "openvas" — that scanner no longer runs).
         check_id: Which own check produced it ("lybra:git-config-exposure@3").
@@ -821,6 +826,7 @@ class Finding(Base):
     epss_score       = Column(Float)
     in_kev           = Column(Boolean, default=False)
     exploit_maturity = Column(String(16))   # none|poc|functional|weaponized|in_the_wild
+    required_os      = Column(String(64))   # CPE platform token this finding's CVE match is gated behind (see CpeMatch.required_os), or None
 
     # Quality / provenance
     source       = Column(String(32), index=True)
@@ -849,9 +855,10 @@ class Finding(Base):
             "cve_ids": self.cve_ids,
             "cvss_score": self.cvss_score, 
             "cvss_vector": self.cvss_vector,
-            "epss_score": self.epss_score, 
+            "epss_score": self.epss_score,
             "in_kev": self.in_kev,
-            "exploit_maturity": self.exploit_maturity, 
+            "exploit_maturity": self.exploit_maturity,
+            "required_os": self.required_os,
             "source": self.source,
             "check_id": self.check_id, 
             "feed_version": self.feed_version,
@@ -915,6 +922,7 @@ class CpeMatch(Base):
     version_end_including   = Column(String(64))
     version_end_excluding   = Column(String(64))
     exact_version           = Column(String(64))  # set when the CPE pins a single version
+    required_os             = Column(String(64))  # CPE product token of an AND-linked platform gate (see lybra/kb.py::_node_required_os), or None
 
     cve = relationship("CveEntry", back_populates="cpe_matches")
 

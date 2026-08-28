@@ -144,6 +144,16 @@ def test_lifecycle_does_not_recarry_already_fixed():
     ({"cvss_score": 5.0, "epss_score": 0.6}, "public", "HIGH"),     # high EPSS escalates
     ({"cvss_score": 0.0, "confirmed": True}, "public", "MEDIUM"),   # confirmed w/o CVSS floors
     ({"cvss_score": 0.0}, "public", "INFO"),
+    # required_os (#118): an unconfirmed, platform-gated CVSS 9.8 match cannot
+    # be verified without OS-detection, so it is capped at MEDIUM instead of
+    # reading as CRITICAL.
+    ({"cvss_score": 9.8, "required_os": "windows_10"}, "public", "MEDIUM"),
+    ({"cvss_score": 9.8, "required_os": "windows_10", "in_kev": True}, "public", "MEDIUM"),  # cap wins over the KEV boost
+    # A confirmed finding (Hygeia inventory, host OS already known) is exempt
+    # from the cap — the platform precondition isn't a guess in that case.
+    ({"cvss_score": 9.8, "required_os": "windows_10", "confirmed": True}, "public", "CRITICAL"),
+    # required_os alongside a private-LAN target: both caps apply, smallest wins.
+    ({"cvss_score": 9.8, "required_os": "windows_10"}, "private", "MEDIUM"),
 ])
 def test_score_finding(finding, exposure, expected):
     assert score_finding(finding, exposure) == expected
