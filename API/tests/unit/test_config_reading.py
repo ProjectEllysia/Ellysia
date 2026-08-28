@@ -20,6 +20,26 @@ def test_redis_config_prefers_the_environment(monkeypatch):
     assert config.password is None
 
 
+def test_redis_connection_kwargs_honour_the_configured_connect_timeout(monkeypatch):
+    """El factory del taskqueue tiene que leer el timeout del fichero.
+
+    Hardcodeaba un 5 que ignoraba `infrastructure.redis.socket_connect_timeout`
+    y dejaba muerto el valor que sí usa ping_redis().
+    """
+    from src.modules.system.taskqueue.connection import RedisConnectionFactory
+
+    monkeypatch.setattr(
+        CR, "redis_config",
+        lambda: CR.RedisConfig(socket_connect_timeout=7),
+    )
+
+    kwargs = RedisConnectionFactory._kwargs()
+    assert kwargs["socket_connect_timeout"] == 7
+    # El de lectura no se aplica al worker: RQ saca jobs con BLPOP.
+    assert kwargs["socket_timeout"] == 5
+    assert "socket_timeout" not in RedisConnectionFactory._kwargs(blocking=True)
+
+
 def test_jwt_config_from_env():
     config = CR.jwt_config()
     assert config.secret == "test-secret-key-not-for-production"

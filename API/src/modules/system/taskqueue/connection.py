@@ -36,16 +36,13 @@ class RedisConnectionFactory:
 
     @staticmethod
     def _kwargs(blocking: bool = False) -> dict:
-        cfg = CR.redis_config()
-        kwargs = {
-            "host": cfg.host,
-            "port": cfg.port,
-            "db": cfg.db,
-            "password": cfg.password,
-            # Sin connect timeout, un Redis caído bloquearía indefinidamente al
-            # conectar, dejando el API colgado y "comiéndose" los CTRL+C.
-            "socket_connect_timeout": 5,
-        }
+        # connection_kwargs() ya trae host/port/db/password y el
+        # socket_connect_timeout de la configuración — sin ese timeout, un
+        # Redis caído bloquearía indefinidamente al conectar, dejando el API
+        # colgado y "comiéndose" los CTRL+C. Antes se hardcodeaba aquí un 5
+        # que ignoraba el valor del fichero (y dejaba muerto el que sí usa
+        # ping_redis, que llama a connection_kwargs directamente).
+        kwargs = CR.redis_config().connection_kwargs()
         if not blocking:
             # Timeout de lectura para que un Redis lento no cuelgue las
             # operaciones normales (estado de la cola, cancelación, apagado).

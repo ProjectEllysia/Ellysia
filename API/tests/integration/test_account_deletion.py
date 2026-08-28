@@ -156,6 +156,51 @@ def test_preview_does_not_delete_anything(client, owner, auth_headers):
     assert client.get("/users/me", headers=auth_headers(owner)).status_code == 200
 
 
+def test_admin_preview_warns_about_the_organization_that_dies_with_the_user(
+    client, app, admin_user, owner, make_user, auth_headers
+):
+    """El mismo aviso, pero para quien da de baja a otro.
+
+    Un administrador que borra al duenyo de una organizacion la disuelve sin
+    saberlo si nadie se lo dice.
+    """
+    from src.modules.accounts.model import OrganizationMember
+
+    organization = client.post("/organizations", headers=auth_headers(owner),
+                               json={"name": "Acme"}).get_json()
+    member = make_user()
+    with app.app_context():
+        with unit_of_work.UnitOfWork() as uow:
+            uow.session.add(OrganizationMember(
+                organization_id=organization["id"], user_id=member.id,
+                member_role="member",
+            ))
+            uow.session.flush()
+
+    body = client.get(f"/users/{owner.id}/deletion-preview",
+                      headers=auth_headers(admin_user)).get_json()
+
+    assert body["ownedOrganization"]["name"] == "Acme"
+    assert body["ownedOrganization"]["membersLosingAccess"] == 1
+
+
+def test_admin_preview_does_not_delete_anything(client, admin_user, regular_user, auth_headers):
+    client.get(f"/users/{regular_user.id}/deletion-preview", headers=auth_headers(admin_user))
+    assert client.get("/users/me", headers=auth_headers(regular_user)).status_code == 200
+
+
+def test_admin_preview_needs_the_same_permission_as_deleting(
+    client, admin_user, regular_user, make_user, auth_headers
+):
+    """El aviso solo lo ve quien puede ejecutar la baja."""
+    other_admin = make_user(role="role_admin")
+
+    assert client.get(f"/users/{regular_user.id}/deletion-preview",
+                      headers=auth_headers(regular_user)).status_code == 403
+    assert client.get(f"/users/{other_admin.id}/deletion-preview",
+                      headers=auth_headers(admin_user)).status_code == 403
+
+
 # ----------------------------------------------------------------- el borrado
 
 def test_deleting_requires_the_password(client, regular_user, auth_headers):
