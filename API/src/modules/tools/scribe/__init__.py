@@ -14,7 +14,7 @@ Uso típico:
     >>> data = result.parse_json()
 """
 
-from .inputs import AIInput, AIResult, Example
+from .inputs import AIInput, AIResult, Example, estimate_tokens
 from .strategies import ModelStrategy, OllamaStrategy, OpenAIStrategy, GoogleStrategy, ToolExecutor
 from .generator import AIGenerator
 from .factory import build_generator
@@ -23,6 +23,7 @@ from .exceptions import (
     AIConnectionError,
     AIResponseError,
     AIFallbackExhaustedError,
+    AIPayloadTooLargeError,
     CircuitBreakerOpenError,
     AIStrategyConfigurationError,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "AIInput",
     "AIResult",
     "Example",
+    "estimate_tokens",
     "ModelStrategy",
     "OllamaStrategy",
     "OpenAIStrategy",
@@ -43,6 +45,7 @@ __all__ = [
     "AIConnectionError",
     "AIResponseError",
     "AIFallbackExhaustedError",
+    "AIPayloadTooLargeError",
     "CircuitBreakerOpenError",
     "AIStrategyConfigurationError",
 ]

@@ -45,6 +45,29 @@ class AIResponseError(EllysiaException):
         )
 
 
+class AIPayloadTooLargeError(EllysiaException):
+    """El prompt estimado supera el tope de tokens configurado (Issue #118).
+
+    Se lanza *antes* de invocar la estrategia — nunca es transitorio (el mismo
+    prompt sobredimensionado fallaría igual en cada reintento), así que
+    ``AIGenerator.digest`` no la reintenta como hace con el resto de errores.
+    """
+
+    default_code = ErrorCode.VALIDATION_ERROR
+    default_status_code = 422
+    default_severity = ErrorSeverity.MEDIUM
+
+    def __init__(self, estimated_tokens: int, max_tokens: int):
+        super().__init__(
+            message=(
+                f"Prompt de ~{estimated_tokens} tokens estimados supera el "
+                f"límite configurado de {max_tokens}."
+            ),
+            details={"estimated_tokens": estimated_tokens, "max_tokens": max_tokens},
+            user_message="El escaneo es demasiado grande para generar un análisis de IA completo.",
+        )
+
+
 class AIFallbackExhaustedError(EllysiaException):
     """Se agotaron todos los reintentos sin obtener una respuesta válida."""
 
