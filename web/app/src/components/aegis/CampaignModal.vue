@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
-    <div class="modal-overlay" data-module="aegis" @click.self="close" @keydown.esc="close">
-      <div class="modal--campaign" role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title">
+    <div class="modal-overlay" data-module="aegis" @click.self="close">
+      <div ref="boxRef" class="modal--campaign" role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title" tabindex="-1">
         <header class="campaign-header">
           <div class="campaign-header-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -164,6 +164,7 @@ bob@empresa.com"
 import { computed, ref } from 'vue'
 import { useAegisStore } from '@/stores/aegisStore'
 import { useUtils } from '@/composables/useUtils'
+import { useModalA11y } from '@/composables/useModalA11y'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 
 const props = defineProps({ doc: { type: Object, required: true } })
@@ -171,6 +172,8 @@ const emit = defineEmits(['close'])
 
 const store = useAegisStore()
 const { formatDate, parseEmails } = useUtils()
+
+const boxRef = ref(null)
 
 function defaultCampaignName() {
   const title = props.doc?.subtitle || props.doc?.title || 'Píldora'
@@ -226,6 +229,8 @@ async function handleLaunch() {
 
 function close() { emit('close') }
 
+useModalA11y(() => true, { boxRef, onClose: close })
+
 const deleteTarget = ref(null)
 async function confirmDelete() {
   const campaign = deleteTarget.value
@@ -266,7 +271,7 @@ const stats = computed(() => {
 
 <style scoped>
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 1rem; }
-.modal--campaign { background: var(--surface); border: 1px solid var(--border-solid); border-radius: var(--radius); max-width: 460px; width: 100%; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
+.modal--campaign { background: var(--surface); border: 1px solid var(--border-solid); border-radius: var(--radius); max-width: 460px; width: 100%; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; outline: none; }
 
 .campaign-header { display: flex; align-items: flex-start; gap: 0.75rem; padding: 1.1rem 1.25rem 0.9rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .campaign-header-icon { width: 34px; height: 34px; border-radius: 9px; background: var(--accent-dim); color: var(--accent-bright); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }

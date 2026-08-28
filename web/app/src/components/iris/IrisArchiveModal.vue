@@ -158,9 +158,10 @@
  * campo — antes inexistentes (el "orden" de la tira solo reordenaba lo ya
  * cargado en cliente).
  */
-import { ref, watch, nextTick, onBeforeUnmount } from 'vue'
+import { ref, watch, onBeforeUnmount } from 'vue'
 import AppPagination from '@/components/shared/AppPagination.vue'
 import { useIrisStore } from '@/stores/irisStore'
+import { useModalA11y } from '@/composables/useModalA11y'
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -214,22 +215,16 @@ watch(() => props.show, (visible) => {
   if (visible) {
     searchInput.value = store.archive.filters.search
     focusedIndex.value = -1
-    document.body.style.overflow = 'hidden'
     store.fetchArchive()
-    nextTick(() => searchRef.value?.focus())
-    window.addEventListener('keydown', onGlobalKeydown)
-  } else {
-    document.body.style.overflow = ''
-    window.removeEventListener('keydown', onGlobalKeydown)
   }
 })
 
 onBeforeUnmount(() => {
-  document.body.style.overflow = ''
-  window.removeEventListener('keydown', onGlobalKeydown)
   clearTimeout(searchDebounce)
   clearTimeout(loadingTimer)
 })
+
+useModalA11y(() => props.show, { boxRef, autofocusRef: searchRef, onClose: close, onKeydown: onExtraKeydown })
 
 function close() {
   emit('close')
@@ -278,13 +273,11 @@ function formatDate(iso) {
   catch { return iso }
 }
 
-/** Escape cierra; "/" enfoca la búsqueda; ↑/↓ recorren filas; Enter abre la
- * fila enfocada; Tab queda atrapado dentro del modal mientras está abierto —
- * ConfirmModal no hace ninguna de las dos últimas cosas, pero a esta escala
- * (una tabla completa) se echan en falta. */
-function onGlobalKeydown(e) {
-  if (e.key === 'Escape') { close(); return }
-
+/** "/" enfoca la búsqueda; ↑/↓ recorren filas; Enter abre la fila enfocada —
+ * Escape y Tab ya los cubre useModalA11y. ConfirmModal no hace ninguna de
+ * las dos cosas de aquí, pero a esta escala (una tabla completa) se echan en
+ * falta. */
+function onExtraKeydown(e) {
   if (e.key === '/' && document.activeElement !== searchRef.value) {
     e.preventDefault()
     searchRef.value?.focus()
@@ -305,28 +298,9 @@ function onGlobalKeydown(e) {
   if (e.key === 'Enter' && focusedIndex.value >= 0) {
     const item = items[focusedIndex.value]
     if (item) choose(item.analysisId)
-    return
-  }
-  if (e.key === 'Tab') {
-    trapFocus(e)
   }
 }
 
-function trapFocus(e) {
-  const root = boxRef.value
-  if (!root) return
-  const focusables = Array.from(root.querySelectorAll('button:not(:disabled), input, [tabindex]:not([tabindex="-1"])'))
-  if (!focusables.length) return
-  const first = focusables[0]
-  const last = focusables[focusables.length - 1]
-  if (e.shiftKey && document.activeElement === first) {
-    e.preventDefault()
-    last.focus()
-  } else if (!e.shiftKey && document.activeElement === last) {
-    e.preventDefault()
-    first.focus()
-  }
-}
 </script>
 
 <style scoped>

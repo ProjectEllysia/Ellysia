@@ -138,8 +138,9 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useAegisStore } from "@/stores/aegisStore";
+import { useModalA11y } from "@/composables/useModalA11y";
 
 const props = defineProps({
   show: { type: Boolean, default: false },
@@ -183,8 +184,7 @@ function close() {
   emit("close");
 }
 
-// Al abrir se parte de cero; al cerrar se sueltan el bloqueo del scroll y el
-// listener global.
+// Al abrir se parte de cero; al cerrar se limpia el debounce pendiente.
 watch(
   () => props.show,
   (visible) => {
@@ -193,56 +193,13 @@ watch(
       // Con menos de 2 caracteres esto solo limpia resultados y error, sin
       // llegar a pedir nada. Evita tocar el estado del store a mano.
       store.searchProducts("");
-      document.body.style.overflow = "hidden";
-      nextTick(() => searchRef.value?.focus());
-      window.addEventListener("keydown", onGlobalKeydown);
     } else {
       clearTimeout(queryTimer);
-      document.body.style.overflow = "";
-      window.removeEventListener("keydown", onGlobalKeydown);
     }
   },
 );
 
-onBeforeUnmount(() => {
-  document.body.style.overflow = "";
-  window.removeEventListener("keydown", onGlobalKeydown);
-  clearTimeout(queryTimer);
-});
-
-/**
- * Escape cierra y Tab queda atrapado dentro del modal. El listener va en
- * `window` y no como `@keydown.esc` en el overlay: sobre un div solo dispara
- * si el foco está dentro, que es el fallo que arrastran CampaignModal y
- * DistributionListsModal.
- */
-function onGlobalKeydown(e) {
-  if (e.key === "Escape") {
-    close();
-    return;
-  }
-  if (e.key === "Tab") trapFocus(e);
-}
-
-function trapFocus(e) {
-  const root = boxRef.value;
-  if (!root) return;
-  const focusables = Array.from(
-    root.querySelectorAll(
-      'button:not(:disabled), input, [tabindex]:not([tabindex="-1"])',
-    ),
-  );
-  if (!focusables.length) return;
-  const first = focusables[0];
-  const last = focusables[focusables.length - 1];
-  if (e.shiftKey && document.activeElement === first) {
-    e.preventDefault();
-    last.focus();
-  } else if (!e.shiftKey && document.activeElement === last) {
-    e.preventDefault();
-    first.focus();
-  }
-}
+useModalA11y(() => props.show, { boxRef, autofocusRef: searchRef, onClose: close });
 </script>
 
 <style scoped>
