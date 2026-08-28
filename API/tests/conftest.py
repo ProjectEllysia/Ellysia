@@ -20,7 +20,8 @@ Decisiones de diseño (ver el plan de tests):
     inexistentes en SQLite. Antes de crear el esquema se sustituyen *en memoria*
     por ``JSON`` genérico. No se toca ningún fichero de ``src/``.
 
-4.  **Servicios externos mockeados.** El ``ping`` a Redis de ``create_app`` se
+4.  **Servicios externos mockeados.** Redis se corta de raíz para toda la
+    sesión (``_redis_always_unavailable``); el ``ping`` de ``create_app`` se
     parchea; el scheduler se desactiva con ``start_scheduler=False``; el rate
     limiter se desactiva para no contaminar tests entre sí.
 """
@@ -66,17 +67,16 @@ os.environ.setdefault("SHUTDOWN_TIMEOUT", "30")
 # la app (que sigue mockeando Redis para create_app()).
 os.environ.setdefault("RATELIMIT_STORAGE_URI", "memory://")
 
-# T5: aislar Redis del de desarrollo. Solo se mockean `ping`/`close` (arriba)
-# para que create_app() arranque sin depender de un Redis real -- cualquier
-# otra operación (p. ej. un TaskQueue.submit() no mockeado en algún test) sí
-# llega a un Redis de verdad. Sin esto, esos tests encolaban jobs reales en la
-# MISMA base Redis que usa el servidor de desarrollo (REDIS_HOST/DB comparten
-# valor con .env), dejando jobs huérfanos que un worker real recogía más
-# tarde y fallaban con FK violation contra una fila que solo existió en el
-# SQLite efímero del test. Redis soporta 16 bases lógicas (0-15); moviendo los
-# tests a la 15 quedan en un espacio de claves separado del de dev (DB 0) sin
-# necesitar un Redis distinto. Asignación incondicional (no `setdefault`):
-# tiene que ganar aunque `.env` ya fije REDIS_DB.
+# T5: aislar Redis del de desarrollo. Segunda línea de defensa por debajo del
+# fixture `_redis_always_unavailable` (que ya corta cualquier conexión): si
+# alguien lo desactiva a propósito para depurar, los tests siguen escribiendo
+# en la base 15 y no en la del servidor de desarrollo. Sin ninguna de las dos,
+# un TaskQueue.submit() no mockeado encola jobs reales en la MISMA base Redis
+# que usa dev (REDIS_HOST/DB comparten valor con .env), dejando jobs huérfanos
+# que un worker real recoge más tarde y fallan con FK violation contra una
+# fila que solo existió en el SQLite efímero del test. Redis soporta 16 bases
+# lógicas (0-15). Asignación incondicional (no `setdefault`): tiene que ganar
+# aunque `.env` ya fije REDIS_DB.
 os.environ["REDIS_DB"] = "15"
 
 # Redis/Ollama: valores inertes; los servicios se mockean.
@@ -86,6 +86,7 @@ os.environ.setdefault("OLLAMA_HOST", "http://localhost:11434")
 from unittest import mock  # noqa: E402
 
 import pytest  # noqa: E402
+import redis as redis_lib  # noqa: E402
 import sqlalchemy as sa  # noqa: E402
 from sqlalchemy.dialects.postgresql import JSONB  # noqa: E402
 
@@ -178,6 +179,40 @@ def _initialized_db(_sqlite_url):
     yield engine
     Base.metadata.drop_all(engine)
     session_factory.remove()
+
+
+# ---------------------------------------------------------------------------
+# 3-bis. Redis: siempre caído, siempre al instante
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session", autouse=True)
+def _redis_always_unavailable():
+    """Hace que cualquier operación contra Redis falle *al instante*.
+
+    La suite no necesita un Redis: los tests que ejercitan el encolado mockean
+    ``TaskQueue.get_instance`` con un doble. Pero basta con olvidarlo en un
+    test para que la operación salga a la red de verdad, y ahí el coste no es
+    un error rápido sino una espera larguísima: en Windows un ECONNREFUSED
+    contra ``localhost`` tarda ~4 s (resolución dual-stack, ~2 s por ``::1`` y
+    otros ~2 s por ``127.0.0.1``) y redis-py reintenta varias veces, así que un
+    único comando se comía ~48 s. Tres tests despistados sumaban 220 s de los
+    375 s de la suite entera. En el runner Linux de CI el rechazo es inmediato,
+    por eso el pipeline nunca lo delató.
+
+    Se parchea ``ConnectionPool.get_connection`` en vez de la fachada
+    ``Redis``: es el único punto por el que pasan tanto los comandos sueltos
+    como los pipelines, y deja intactos los objetos ``Redis`` reales, de modo
+    que el código bajo test sigue viendo un ``redis.ConnectionError`` (lo que
+    ya captura hoy) y no un doble con otra forma.
+
+    Efecto secundario buscado: el resultado deja de depender de si la máquina
+    tiene o no el Redis de desarrollo levantado.
+    """
+    def _unavailable(*_args, **_kwargs):
+        raise redis_lib.ConnectionError("Redis deshabilitado en la suite de tests")
+
+    with mock.patch.object(redis_lib.connection.ConnectionPool, "get_connection", _unavailable):
+        yield
 
 
 # ---------------------------------------------------------------------------
