@@ -75,6 +75,18 @@ def test_validate_logo_data_uri_rejects_invalid(value):
         validate_logo_data_uri(value)
 
 
+def test_validate_logo_data_uri_accepts_wrapped_base64():
+    """Base64 partido en líneas (RFC 2045) es válido y hay codificadores que lo
+    generan solos — ``base64.encodebytes``, sin ir más lejos. El regex ya lo
+    admitía; lo que fallaba era la decodificación con ``validate=True``."""
+    wrapped = "data:image/png;base64," + base64.encodebytes(_PNG_BYTES).decode()
+
+    mimetype, data = validate_logo_data_uri(wrapped)
+
+    assert mimetype == "image/png"
+    assert data == _PNG_BYTES
+
+
 def test_validate_logo_data_uri_rejects_oversized_logo():
     oversized = "data:image/png;base64," + base64.b64encode(b"\x00" * (MAX_LOGO_BYTES + 1)).decode()
     with pytest.raises(ValueError, match="máximo"):
