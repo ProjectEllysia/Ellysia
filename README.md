@@ -351,6 +351,7 @@ A subscription with no explicit plan falls back to the default plan (seeded by m
 | `PUT` | `/users/change-password` | Password change (invalidates all tokens) |
 | `GET/POST/DELETE` | `/users/mfa`, `/users/mfa/totp/setup`, `/users/mfa/totp/confirm`, `/users/mfa/totp` | Check status / enroll / confirm / disable TOTP MFA |
 | `GET` | `/users` · `GET/PUT/DELETE /users/<id>/attributes` | (admin/root) User list and ABAC attribute management |
+| `GET` | `/users/<id>/deletion-preview` | (admin/root) Preview what deleting that user destroys — notably the organization they own |
 | `DELETE` | `/users/<id>` | (admin/root) Delete another user's account; same purge as self-deletion, hierarchy enforced (an admin cannot delete an admin or the root), own account excluded |
 | `GET` | `/system/say-hello` | **Public** health check, reports the API version |
 | `GET` | `/system/info` · `/system/status` | (admin) App metadata / CPU-mem-disk status |

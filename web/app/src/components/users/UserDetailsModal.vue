@@ -53,7 +53,7 @@
               Se borra la cuenta y todo lo que cuelga de ella: escaneos, campañas,
               informes y su bóveda. No hay vuelta atrás.
             </p>
-            <button class="btn btn--sm btn--danger" @click="showDeleteConfirm = true">
+            <button class="btn btn--sm btn--danger" @click="askDelete">
               Eliminar usuario
             </button>
           </div>
@@ -94,6 +94,7 @@ const loadingUser = ref(false)
 const showAttrForm = ref(false)
 const selectedAttrs = ref([])
 const showDeleteConfirm = ref(false)
+const deletionPreview = ref(null)
 
 const canManage = computed(() => auth.isAdmin)
 
@@ -105,9 +106,18 @@ const canDelete = computed(() => {
   if (user.value.username === auth.username()) return false
   return auth.isRoot || (user.value.role || 'role_user') === 'role_user'
 })
-const deleteMessage = computed(
-  () => `Vas a eliminar la cuenta de @${user.value?.username} y todos sus datos.`,
-)
+const deleteMessage = computed(() => {
+  const base = `Vas a eliminar la cuenta de @${user.value?.username} y todos sus datos.`
+  const owned = deletionPreview.value?.ownedOrganization
+  if (!owned) return base
+  // La única consecuencia que sale de la cuenta borrada: su organización se
+  // disuelve con ella y los demás se enteran después si nadie lo dice antes.
+  const members = owned.membersLosingAccess
+  const tail = members
+    ? ` y ${members} ${members === 1 ? 'miembro se queda' : 'miembros se quedan'} sin ella`
+    : ''
+  return `${base} También desaparece su organización «${owned.name}»${tail}.`
+})
 const ALL_ATTRIBUTES = [
   { module: 'Aegis', attrs: [{ name: 'aegis_read', desc: 'Lectura' }, { name: 'aegis_write', desc: 'Escritura' }, { name: 'aegis_create', desc: 'Creación' }, { name: 'aegis_delete', desc: 'Eliminación' }] },
   { module: 'Themis', attrs: [{ name: 'themis_read', desc: 'Lectura' }, { name: 'themis_write', desc: 'Escritura' }, { name: 'themis_create', desc: 'Creación' }, { name: 'themis_delete', desc: 'Eliminación' }] },
@@ -120,11 +130,17 @@ const roleLabel = computed(() => { const r = user.value?.role || 'role_user'; if
 
 watch(() => props.show, async (v) => {
   if (!v || !props.userId) return
-  loadingUser.value = true; showAttrForm.value = false; selectedAttrs.value = []; showDeleteConfirm.value = false
+  loadingUser.value = true; showAttrForm.value = false; selectedAttrs.value = []; showDeleteConfirm.value = false; deletionPreview.value = null
   try { user.value = store.users.find(u => u.id == props.userId) || null; attributes.value = await store.loadUserAttributes(props.userId) } finally { loadingUser.value = false }
 })
 
 async function handleRemoveAttribute(attr) { const ok = await store.removeAttributes(props.userId, [attr]); if (ok) attributes.value = await store.loadUserAttributes(props.userId) }
+/** El aviso se pide al abrir la confirmación, no al abrir la ficha: así solo
+ *  se consulta cuando alguien va en serio. */
+async function askDelete() {
+  deletionPreview.value = await store.loadDeletionPreview(props.userId)
+  showDeleteConfirm.value = true
+}
 /** El store ya recarga la lista al terminar, así que aquí solo queda cerrar. */
 async function handleDelete() {
   showDeleteConfirm.value = false

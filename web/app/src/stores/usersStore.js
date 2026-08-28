@@ -91,6 +91,21 @@ export const useUsersStore = defineStore('users', () => {
   }
 
   /**
+   * Consecuencias de dar de baja a un usuario (GET /users/{id}/deletion-preview).
+   *
+   * Es un aviso, no un requisito: si la llamada falla se confirma igual, con el
+   * mensaje genérico, en vez de bloquear la baja por no poder adornarla.
+   * @param {number|string} userId - ID del usuario
+   * @returns {Promise<object|null>} {ownedOrganization, leavesOrganizationId} o null
+   */
+  async function loadDeletionPreview(userId) {
+    try {
+      const res = await apiFetch(`/users/${userId}/deletion-preview`)
+      return res?.ok ? await res.json() : null
+    } catch { return null }
+  }
+
+  /**
    * Obtiene los atributos ABAC de un usuario.
    * @param {number|string} userId - ID del usuario
    * @returns {Promise<string[]>} Lista de nombres de atributos
@@ -150,5 +165,5 @@ export const useUsersStore = defineStore('users', () => {
     loading.value = false
   }
 
-  return { users, loading, grouped, loadUsers, createUser, deleteUser, loadUserAttributes, addAttributes, removeAttributes, $reset }
+  return { users, loading, grouped, loadUsers, createUser, deleteUser, loadDeletionPreview, loadUserAttributes, addAttributes, removeAttributes, $reset }
 })

@@ -685,6 +685,32 @@ def remove_user_attribute(data: dict[str, Any], target_user_id: int):
     return {"message": "Attributes removed", "attributes": attrs_to_remove}
 
 
+@users_blp.get("/<int:target_user_id>/deletion-preview")
+@users_blp.response(200, DeletionPreviewSchema, description="What deleting that user destroys")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@users_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@require_oauth_token
+@require_role(Role.ADMIN)
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def preview_user_deletion(target_user_id: int):
+    """Que se destruye si se da de baja a ese usuario. No borra nada.
+
+    El mismo aviso que ve quien se da de baja a si mismo, para quien lo hace en
+    su nombre: si el usuario es duenyo de una organizacion, esta DESAPARECE con
+    su cuenta y sus miembros se quedan sin ella. Lleva la autorizacion del
+    borrado —no de la lectura— porque solo tiene sentido antes de borrar.
+    """
+    current_user_id = get_current_user().id
+
+    if not USER_MANAGER.can_administer_user(current_user_id, target_user_id):
+        raise EllysiaException(
+            "No tienes permiso para eliminar a este usuario",
+            status_code=403,
+        )
+
+    return USER_MANAGER.preview_deletion(target_user_id)
+
+
 @users_blp.delete("/<int:target_user_id>")
 @users_blp.response(200, SuccessMessageSchema, description="User deleted")
 @users_blp.alt_response(400, schema=ErrorSchema, description="Cannot delete your own account here")
