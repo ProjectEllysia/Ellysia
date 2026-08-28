@@ -39,11 +39,14 @@
         @input="update({ color: $event.target.value })"
       />
       <code class="wl-color-value">{{ modelValue.color || DEFAULT_COLOR }}</code>
+      <!-- "Restablecer" vuelve al acento del producto de forma explícita, no
+           vaciando el campo: un color vacío deja el nivel sin su dato y el
+           envío lo degradaría en silencio. -->
       <button
-        v-if="modelValue.color"
+        v-if="modelValue.color && modelValue.color !== DEFAULT_COLOR"
         type="button"
         class="wl-remove"
-        @click="update({ color: '' })"
+        @click="update({ color: DEFAULT_COLOR })"
       >
         Restablecer
       </button>
@@ -61,6 +64,10 @@
       </label>
 
       <p v-if="error" class="wl-error">{{ error }}</p>
+      <p v-else-if="!modelValue.logo" class="wl-warning">
+        Sin imagen este nivel no se aplica: los envíos saldrán con el escalón
+        anterior, «Aplicar color corporativo».
+      </p>
       <p v-else class="wl-hint">PNG, JPG o GIF, hasta {{ MAX_KB }} KB.</p>
     </div>
 
@@ -74,10 +81,11 @@
 
 <script setup>
 /**
- * Ajustes de white-labeling de un módulo: nivel y logo de la organización.
+ * Ajustes de white-labeling de un módulo: nivel, color y logo de la
+ * organización.
  *
  * No sabe de qué módulo son los ajustes ni cómo se guardan — se ata con
- * `v-model` a un objeto `{ level, logo }` y avisa de los cambios. El tope lo
+ * `v-model` a un objeto `{ level, color, logo }` y avisa de los cambios. El tope lo
  * decide el plan y llega en `maxLevel`; el servidor lo vuelve a comprobar al
  * guardar, así que aquí solo se evita ofrecer lo que se va a rechazar.
  *
@@ -88,7 +96,7 @@ import { computed, ref } from 'vue'
 
 const props = defineProps({
   modelValue: { type: Object, required: true },
-  /** Nivel máximo que concede el plan ('none' | 'logo' | 'full'). */
+  /** Nivel máximo que concede el plan ('none' | 'color' | 'logo' | 'full'). */
   maxLevel: { type: String, default: 'none' },
 })
 const emit = defineEmits(['update:modelValue'])
@@ -142,7 +150,13 @@ function update(patch) {
 
 function setLevel(level) {
   if (isLocked(level)) return
-  update({ level })
+  // El color del selector entra en el modelo en cuanto el nivel lo usa. Si no,
+  // se enseñaba DEFAULT_COLOR en la muestra y se guardaba una cadena vacía: el
+  // nivel quedaba sin su dato y el envío lo degradaba en silencio (el servidor
+  // acepta el guardado, así que no había ni error ni aviso).
+  const patch = { level }
+  if (level !== 'none' && !props.modelValue.color) patch.color = DEFAULT_COLOR
+  update(patch)
 }
 
 function clearLogo() {
@@ -238,6 +252,7 @@ function onFile(event) {
 .wl-file:focus-within { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 
 .wl-error { margin: 0; font-size: var(--fs-xs); color: var(--danger, #c2621d); }
+.wl-warning { margin: 0; font-size: var(--fs-sm); color: var(--warn, #a8842a); line-height: 1.35; }
 .wl-note {
   margin: 0.2rem 0 0; padding: 0.5rem 0.65rem; border-radius: 6px;
   background: var(--surface-2); border-left: 2px solid var(--border-med);

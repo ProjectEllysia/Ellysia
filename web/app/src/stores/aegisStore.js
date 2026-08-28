@@ -702,6 +702,11 @@ export const useAegisStore = defineStore('aegis', () => {
     trackedProducts.value = []
     useHygeiaInventory.value = true
     hygeiaInventoryAvailable.value = false
+    // El logo y el color son del usuario que se va: dejarlos aquí los enseña
+    // al siguiente que entre en la misma pestaña, y si su GET del perfil falla
+    // (loadOrgProfile no sobrescribe nada entonces) se los acabaría guardando.
+    whiteLabel.value = { level: 'none', logo: '', color: '' }
+    maxWhiteLabelLevel.value = 'none'
     productResults.value = []
     searchingProducts.value = false
     productSearchError.value = ''

@@ -112,7 +112,8 @@ class AegisOrgProfile(WhiteLabelColumns, Base):
             registering a first agent starts paying off without extra setup;
             the UI only surfaces the control once such an agent exists.
         white_label_level: How much of the Ellysia brand the campaign
-            recipients see ('none' | 'logo' | 'full'). From WhiteLabelColumns.
+            recipients see ('none' | 'color' | 'logo' | 'full'). Each step adds
+            to the previous one. From WhiteLabelColumns.
         brand_logo: The organization's logo as a base64 data URI, shown in the
             campaign email. From WhiteLabelColumns.
         brand_color: The organization's accent colour ('#1a73e8'), replacing

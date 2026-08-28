@@ -140,8 +140,13 @@ def validate_logo_data_uri(value: str) -> tuple[str, bytes]:
         allowed = ", ".join(sorted(ALLOWED_LOGO_MIMETYPES))
         raise ValueError(f"Formato de logo no admitido: '{mimetype}'. Admitidos: {allowed}.")
 
+    # Los espacios se quitan antes de decodificar, no después de rechazarlos:
+    # el regex los admite a propósito porque hay codificadores que parten el
+    # base64 en líneas de 76 caracteres (``base64.encodebytes``, RFC 2045), y
+    # ``validate=True`` los trata como alfabeto inválido.
+    payload = re.sub(r"\s+", "", match.group("payload"))
     try:
-        data = base64.b64decode(match.group("payload"), validate=True)
+        data = base64.b64decode(payload, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise ValueError("El logo no es base64 válido.") from exc
 
