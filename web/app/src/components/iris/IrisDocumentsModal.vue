@@ -110,6 +110,22 @@ function verdictClass(v) {
 </script>
 
 <style scoped>
+/* Antes heredado de la regla global `.modal`/`.modal.visible` de shared.css
+   (legacy pre-Vue): posición, capa y centrado propios, ahora que ese bloque
+   se borra (#131). */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.modal.visible {
+  display: flex;
+}
+
 .docs-modal-content {
   max-width: 560px;
 }
