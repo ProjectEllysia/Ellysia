@@ -71,6 +71,15 @@ def apply_white_label(
     if level is WhiteLabelLevel.NONE:
         return brand, ()
 
+    # El color entra desde el primer escalón y no se toca más arriba: las
+    # plantillas ya lo leen de brand.accentColor en el filete, el botón y los
+    # bordes, así que basta con sustituirlo aquí.
+    if white_label.color:
+        brand["accentColor"] = white_label.color
+
+    if level is WhiteLabelLevel.COLOR:
+        return brand, ()
+
     decoded = white_label.decoded_logo()
     images: tuple[InlineImage, ...] = ()
     logo_url = ""

@@ -525,6 +525,7 @@ _LOGO_URI = (
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA"
     "CklEQVR4nGNgAAAAAgABf6ZX1AAAAABJRU5ErkJggg=="
 )
+_COLOR = "#1a73e8"
 
 
 def _save_org_profile(client, headers, **overrides):
@@ -564,15 +565,17 @@ def _run_campaign(client, app, headers, user_id, doc_id, email="empleado@empresa
 
 def test_org_profile_round_trips_white_label_settings(client, admin_headers):
     saved = _save_org_profile(
-        client, admin_headers, whiteLabelLevel="logo", brandLogo=_LOGO_URI,
+        client, admin_headers, whiteLabelLevel="logo", brandLogo=_LOGO_URI, brandColor=_COLOR,
     ).get_json()
 
     assert saved["whiteLabelLevel"] == "logo"
     assert saved["brandLogo"] == _LOGO_URI
+    assert saved["brandColor"] == _COLOR
 
     fetched = client.get("/aegis/org-profile", headers=admin_headers).get_json()
     assert fetched["whiteLabelLevel"] == "logo"
     assert fetched["brandLogo"] == _LOGO_URI
+    assert fetched["brandColor"] == _COLOR
 
 
 def test_org_profile_defaults_to_no_white_label(client, admin_headers):
@@ -580,6 +583,7 @@ def test_org_profile_defaults_to_no_white_label(client, admin_headers):
     profile = client.get("/aegis/org-profile", headers=admin_headers).get_json()
     assert profile["whiteLabelLevel"] == "none"
     assert profile["brandLogo"] == ""
+    assert profile["brandColor"] == ""
 
 
 @pytest.mark.parametrize(
@@ -588,6 +592,8 @@ def test_org_profile_defaults_to_no_white_label(client, admin_headers):
         {"brandLogo": "https://cdn.acme.test/logo.png"},
         {"brandLogo": "data:image/svg+xml;base64,PHN2Zy8+"},
         {"whiteLabelLevel": "parcial"},
+        {"brandColor": "rojo"},
+        {"brandColor": "#fff; background:url(http://x)"},
     ],
 )
 def test_org_profile_rejects_invalid_white_label_input(client, admin_headers, overrides):
@@ -607,11 +613,29 @@ def test_campaign_email_without_white_label_keeps_the_product_brand(
     assert "cid:" not in sent["html"]
 
 
+def test_campaign_email_with_color_level_only_repaints_the_accent(
+    app, client, admin_user, admin_headers, make_aegis_doc_with_quiz, local_email_config,
+):
+    doc_id = make_aegis_doc_with_quiz(admin_user.id)
+    _save_org_profile(
+        client, admin_headers, whiteLabelLevel="color", brandLogo=_LOGO_URI, brandColor=_COLOR,
+    )
+
+    _run_campaign(client, app, admin_headers, admin_user.id, doc_id)
+
+    sent = local_email_config.messages[0]
+    assert _COLOR in sent["html"]
+    assert "cid:" not in sent["html"]
+    assert "Ellysia" in sent["html"]
+
+
 def test_campaign_email_with_logo_level_embeds_the_customer_logo(
     app, client, admin_user, admin_headers, make_aegis_doc_with_quiz, local_email_config,
 ):
     doc_id = make_aegis_doc_with_quiz(admin_user.id)
-    _save_org_profile(client, admin_headers, whiteLabelLevel="logo", brandLogo=_LOGO_URI)
+    _save_org_profile(
+        client, admin_headers, whiteLabelLevel="logo", brandLogo=_LOGO_URI, brandColor=_COLOR,
+    )
 
     _run_campaign(client, app, admin_headers, admin_user.id, doc_id)
 
@@ -627,7 +651,9 @@ def test_campaign_email_with_full_level_removes_the_product_brand(
     app, client, admin_user, admin_headers, make_aegis_doc_with_quiz, local_email_config,
 ):
     doc_id = make_aegis_doc_with_quiz(admin_user.id)
-    _save_org_profile(client, admin_headers, whiteLabelLevel="full", brandLogo=_LOGO_URI)
+    _save_org_profile(
+        client, admin_headers, whiteLabelLevel="full", brandLogo=_LOGO_URI, brandColor=_COLOR,
+    )
 
     _run_campaign(client, app, admin_headers, admin_user.id, doc_id)
 
@@ -665,7 +691,7 @@ def white_label_allowance(app):
 
 
 def test_profile_reports_the_level_its_plan_allows(client, admin_headers, white_label_allowance):
-    white_label_allowance(1)
+    white_label_allowance(2)
     profile = client.get("/aegis/org-profile", headers=admin_headers).get_json()
     assert profile["maxWhiteLabelLevel"] == "logo"
 
@@ -675,23 +701,23 @@ def test_profile_reports_the_level_its_plan_allows(client, admin_headers, white_
 
 
 def test_saving_a_level_above_the_plan_is_rejected(client, admin_headers, white_label_allowance):
-    white_label_allowance(1)
+    white_label_allowance(1)  # solo el color
 
     rejected = _save_org_profile(
-        client, admin_headers, whiteLabelLevel="full", brandLogo=_LOGO_URI,
+        client, admin_headers, whiteLabelLevel="full", brandLogo=_LOGO_URI, brandColor=_COLOR,
     )
     assert rejected.status_code == 402
 
     allowed = _save_org_profile(
-        client, admin_headers, whiteLabelLevel="logo", brandLogo=_LOGO_URI,
+        client, admin_headers, whiteLabelLevel="color", brandColor=_COLOR,
     )
     assert allowed.status_code == 200
 
 
-def test_plan_without_white_label_cannot_even_add_a_logo(client, admin_headers, white_label_allowance):
+def test_plan_without_white_label_cannot_even_change_the_color(client, admin_headers, white_label_allowance):
     white_label_allowance(0)
     assert _save_org_profile(
-        client, admin_headers, whiteLabelLevel="logo", brandLogo=_LOGO_URI,
+        client, admin_headers, whiteLabelLevel="color", brandColor=_COLOR,
     ).status_code == 402
     # El nivel "none" es el de siempre y no depende del plan.
     assert _save_org_profile(client, admin_headers, whiteLabelLevel="none").status_code == 200
@@ -703,14 +729,17 @@ def test_campaign_send_caps_the_level_to_the_current_plan(
 ):
     """Una bajada de plan surte efecto en el siguiente envío, sin tocar lo guardado."""
     doc_id = make_aegis_doc_with_quiz(admin_user.id)
-    _save_org_profile(client, admin_headers, whiteLabelLevel="full", brandLogo=_LOGO_URI)
+    _save_org_profile(
+        client, admin_headers, whiteLabelLevel="full", brandLogo=_LOGO_URI, brandColor=_COLOR,
+    )
 
-    white_label_allowance(1)
+    white_label_allowance(2)  # baja de "sin marca" a "logo"
     _run_campaign(client, app, admin_headers, admin_user.id, doc_id)
 
     sent = local_email_config.messages[0]
-    # Degradado a "logo": el logo sigue, la marca del producto vuelve.
+    # Degradado a "logo": el logo y el color siguen, la marca del producto vuelve.
     assert 'src="cid:brand-logo"' in sent["html"]
+    assert _COLOR in sent["html"]
     assert "Ellysia" in sent["html"]
 
     # Y lo guardado no se ha tocado: al recuperar el plan vuelve a aplicarse.
@@ -724,14 +753,16 @@ def test_public_quiz_serves_the_same_brand_as_the_email(
 ):
     """El test es la segunda mitad de la campaña: llega con la misma marca."""
     doc_id = make_aegis_doc_with_quiz(admin_user.id)
-    _save_org_profile(client, admin_headers, whiteLabelLevel="full", brandLogo=_LOGO_URI)
+    _save_org_profile(
+        client, admin_headers, whiteLabelLevel="full", brandLogo=_LOGO_URI, brandColor=_COLOR,
+    )
     campaign_id = _run_campaign(client, app, admin_headers, admin_user.id, doc_id)
     token = _fetch_token_for_email(app, campaign_id, "empleado@empresa.test")
 
     quiz = client.get(f"/aegis/quiz?t={token}").get_json()
 
     assert quiz["whiteLabel"] == {
-        "level": "full", "brandName": "ACME", "brandLogo": _LOGO_URI,
+        "level": "full", "brandName": "ACME", "brandLogo": _LOGO_URI, "brandColor": _COLOR,
     }
 
 
@@ -745,4 +776,6 @@ def test_public_quiz_without_white_label_reports_nothing_to_replace(
 
     quiz = client.get(f"/aegis/quiz?t={token}").get_json()
 
-    assert quiz["whiteLabel"] == {"level": "none", "brandName": "", "brandLogo": ""}
+    assert quiz["whiteLabel"] == {
+        "level": "none", "brandName": "", "brandLogo": "", "brandColor": "",
+    }

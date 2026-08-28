@@ -115,6 +115,8 @@ class AegisOrgProfile(WhiteLabelColumns, Base):
             recipients see ('none' | 'logo' | 'full'). From WhiteLabelColumns.
         brand_logo: The organization's logo as a base64 data URI, shown in the
             campaign email. From WhiteLabelColumns.
+        brand_color: The organization's accent colour ('#1a73e8'), replacing
+            the product's in the campaign email. From WhiteLabelColumns.
         created_at: Creation timestamp.
     """
 
@@ -160,6 +162,7 @@ class AegisOrgProfile(WhiteLabelColumns, Base):
             "useHygeiaInventory": bool(self.use_hygeia_inventory),
             "whiteLabelLevel":  self.white_label_level or WhiteLabelLevel.NONE.value,
             "brandLogo":        self.brand_logo or "",
+            "brandColor":       self.brand_color or "",
         }
 
     def __repr__(self) -> str:

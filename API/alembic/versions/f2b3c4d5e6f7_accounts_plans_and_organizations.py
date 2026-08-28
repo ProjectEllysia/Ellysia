@@ -56,9 +56,10 @@ _HOLDER_LIMITS: dict[str, tuple[str, dict[str, int | None]]] = {
     "aegis.pills":              ("month", {"freemium":  2, "bronze":  15, "silver":   60, "gold":   200}),
     "aegis.campaigns":          ("month", {"freemium":  0, "bronze":   2, "silver":   10, "gold":    40}),
     "aegis.recipients":         ("stock", {"freemium":  0, "bronze": 100, "silver":  500, "gold":  2000}),
-    # Nivel, no cantidad: 0 sin white-labeling, 1 logo propio, 2 sin rastro de
-    # la marca del producto. Ver WhiteLabelLevel.from_allowance.
-    "aegis.white_label":        ("tier",  {"freemium":  0, "bronze":   1, "silver":    2, "gold":     2}),
+    # Nivel, no cantidad: 0 sin white-labeling, 1 color de enfasis propio,
+    # 2 ademas el logo, 3 sin rastro de la marca del producto. Ver
+    # WhiteLabelLevel.from_allowance.
+    "aegis.white_label":        ("tier",  {"freemium":  0, "bronze":   1, "silver":    2, "gold":     3}),
     "iris.analyses":            ("month", {"freemium": 10, "bronze": 100, "silver":  500, "gold":  None}),
     "iris.ai_summaries":        ("month", {"freemium":  2, "bronze":  25, "silver":  100, "gold":   400}),
     "iris.mailbox.connections": ("stock", {"freemium":  0, "bronze":   1, "silver":    3, "gold":    10}),

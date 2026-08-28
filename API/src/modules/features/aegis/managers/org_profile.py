@@ -44,6 +44,7 @@ _ORG_PROFILE_DEFAULTS: dict[str, Any] = {
     "useHygeiaInventory": True,
     "whiteLabelLevel": WhiteLabelLevel.NONE.value,
     "brandLogo": "",
+    "brandColor": "",
 }
 
 
@@ -143,6 +144,7 @@ class AegisOrgProfileManager:
             profile.use_hygeia_inventory = data["useHygeiaInventory"]
             profile.white_label_level = data["whiteLabelLevel"]
             profile.brand_logo = data["brandLogo"] or None
+            profile.brand_color = data["brandColor"] or None
 
             saved = repo.save(profile)
             return saved.to_dict()

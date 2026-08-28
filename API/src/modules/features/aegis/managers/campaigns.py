@@ -320,6 +320,7 @@ class CampaignManager(TaskTrackingMixin):
             white_label = WhiteLabel.from_stored(
                 profile.white_label_level if profile else None,
                 profile.brand_logo if profile else None,
+                profile.brand_color if profile else None,
                 pill_company or (profile.company if profile else ""),
             )
             # El tope del plan se vuelve a aplicar aquí: entre que se guardó el
@@ -449,20 +450,30 @@ class CampaignManager(TaskTrackingMixin):
         """
         document = campaign.document
         if document is None:
-            return {"level": WhiteLabelLevel.NONE.value, "brandName": "", "brandLogo": ""}
+            return {
+                "level": WhiteLabelLevel.NONE.value,
+                "brandName": "", "brandLogo": "", "brandColor": "",
+            }
 
         profile = build_repository(AegisOrgProfileRepository).get_by_user_id(document.user_id)
         white_label = WhiteLabel.from_stored(
             profile.white_label_level if profile else None,
             profile.brand_logo if profile else None,
+            profile.brand_color if profile else None,
             document.company or (profile.company if profile else ""),
         ).capped_to(AegisOrgProfileManager.max_white_label_level(document.user_id))
 
         level = white_label.effective_level
+        if level is WhiteLabelLevel.NONE:
+            return {"level": level.value, "brandName": "", "brandLogo": "", "brandColor": ""}
+
         return {
             "level": level.value,
-            "brandName": white_label.brand_name if level is not WhiteLabelLevel.NONE else "",
-            "brandLogo": white_label.logo if level is not WhiteLabelLevel.NONE else "",
+            "brandName": white_label.brand_name,
+            # El logo solo se pinta desde el escalón que lo introduce; en COLOR
+            # el ajuste puede existir y no tocar todavía.
+            "brandLogo": white_label.logo if level.rank >= WhiteLabelLevel.LOGO.rank else "",
+            "brandColor": white_label.color,
         }
 
     @staticmethod
