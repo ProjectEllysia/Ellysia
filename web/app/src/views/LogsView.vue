@@ -221,7 +221,7 @@ onMounted(() => applyFilters())
 }
 .page-header h1 { margin: 0.35rem 0 0; color: var(--text); font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-size: var(--fs-3xl); font-weight: 800; }
 .subtitle { margin: 0.35rem 0 0; color: var(--text-dim); font-size: var(--fs-lg); }
-.filter-panel, .log-card { background: rgba(15, 19, 28, 0.72); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,0.18); }
+.filter-panel, .log-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,0.18); }
 .filter-panel { padding: 1.15rem; margin-bottom: 1.1rem; }
 .filter-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding-bottom: 0.9rem; border-bottom: 1px solid var(--border); }
 .filter-heading h2, .log-card-head h2 { margin: 0.25rem 0 0; color: var(--text); font-family: var(--font-display); font-size-adjust: var(--fsa-display); font-size: var(--fs-xl); }
@@ -242,8 +242,8 @@ onMounted(() => applyFilters())
 .log-card-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; padding: 1.1rem 1.15rem; border-bottom: 1px solid var(--border); }
 .log-stats { display: flex; gap: 0.85rem; color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-sm); text-align: right; }
 .notice { padding: 0.6rem 1.15rem; background: var(--warn-dim); color: var(--warn); border-bottom: 1px solid var(--border); font-size: var(--fs-md); }
-.log-window { max-height: 62vh; overflow: auto; background: #090c12; }
-.log-window pre { min-width: max-content; margin: 0; padding: 1rem 1.15rem 1.25rem; color: #d9e2ed; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-sm); line-height: 1.65; tab-size: 4; }
+.log-window { max-height: 62vh; overflow: auto; background: var(--bg); }
+.log-window pre { min-width: max-content; margin: 0; padding: 1rem 1.15rem 1.25rem; color: var(--text); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-sm); line-height: 1.65; tab-size: 4; }
 .log-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.85rem 1.15rem; border-top: 1px solid var(--border); }
 .line-range, .page-status { color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-sm); }
 .pagination { display: flex; align-items: center; gap: 0.65rem; }
