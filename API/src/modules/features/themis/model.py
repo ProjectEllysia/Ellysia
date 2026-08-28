@@ -826,7 +826,7 @@ class Finding(Base):
     epss_score       = Column(Float)
     in_kev           = Column(Boolean, default=False)
     exploit_maturity = Column(String(16))   # none|poc|functional|weaponized|in_the_wild
-    required_os      = Column(String(64))   # CPE platform token this finding's CVE match is gated behind (see CpeMatch.required_os), or None
+    required_os      = Column(String(64))   # Platform this finding's CVE match is gated behind (see CpeMatch.required_os), or None
 
     # Quality / provenance
     source       = Column(String(32), index=True)
@@ -922,7 +922,7 @@ class CpeMatch(Base):
     version_end_including   = Column(String(64))
     version_end_excluding   = Column(String(64))
     exact_version           = Column(String(64))  # set when the CPE pins a single version
-    required_os             = Column(String(64))  # CPE product token of an AND-linked platform gate (see lybra/kb.py::_node_required_os), or None
+    required_os             = Column(String(64))  # AND-linked platform gate (lybra/kb.py::_node_required_os), or None
 
     cve = relationship("CveEntry", back_populates="cpe_matches")
 
