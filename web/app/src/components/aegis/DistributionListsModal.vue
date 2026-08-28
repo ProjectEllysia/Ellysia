@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
-    <div class="modal-overlay" data-module="aegis" @click.self="close" @keydown.esc="close">
-      <div class="modal--lists" role="dialog" aria-modal="true" aria-labelledby="lists-modal-title">
+    <div class="modal-overlay" data-module="aegis" @click.self="close">
+      <div ref="boxRef" class="modal--lists" role="dialog" aria-modal="true" aria-labelledby="lists-modal-title" tabindex="-1">
         <header class="lists-header">
           <div class="lists-header-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
@@ -127,12 +127,15 @@
 import { computed, ref, watch } from 'vue'
 import { useAegisStore } from '@/stores/aegisStore'
 import { useUtils } from '@/composables/useUtils'
+import { useModalA11y } from '@/composables/useModalA11y'
 import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 
 const emit = defineEmits(['close'])
 
 const store = useAegisStore()
 const { parseEmails } = useUtils()
+
+const boxRef = ref(null)
 
 /* Una sola caja de "añadir": solo hay una lista desplegada a la vez. */
 const addRaw = ref('')
@@ -162,11 +165,13 @@ async function confirmDelete() {
 }
 
 function close() { emit('close') }
+
+useModalA11y(() => true, { boxRef, onClose: close })
 </script>
 
 <style scoped>
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 1rem; }
-.modal--lists { background: var(--surface); border: 1px solid var(--border-solid); border-radius: var(--radius); max-width: 460px; width: 100%; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; }
+.modal--lists { background: var(--surface); border: 1px solid var(--border-solid); border-radius: var(--radius); max-width: 460px; width: 100%; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; outline: none; }
 
 .lists-header { display: flex; align-items: flex-start; gap: 0.75rem; padding: 1.1rem 1.25rem 0.9rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .lists-header-icon { width: 34px; height: 34px; border-radius: 9px; background: var(--accent-dim); color: var(--accent-bright); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
