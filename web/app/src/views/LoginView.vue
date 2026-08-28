@@ -743,12 +743,16 @@ onBeforeUnmount(() => {})
 }
 .field.focused .field-ico { color: var(--accent); }
 .field-box input {
-  width: 100%; padding: 0.82rem 2.7rem 0.82rem 2.5rem;
+  width: 100%; padding: 0.82rem 0.95rem;
   background: var(--surface-2);
   border: 1px solid var(--border-solid); border-radius: 10px;
   color: var(--text); font-size: var(--fs-input); font-family: var(--font-body); font-size-adjust: var(--fsa-body); outline: none;
   transition: border-color 0.3s, box-shadow 0.3s, background 0.3s;
 }
+/* El hueco lateral solo se reserva si hay algo que lo ocupe: los campos sin
+   icono ni botón arrancaban el texto desplazado 2.5rem hacia la derecha. */
+.field-box:has(.field-ico) input { padding-left: 2.5rem; }
+.field-box:has(.reveal) input { padding-right: 2.7rem; }
 .field-box input::placeholder { color: var(--text-muted); opacity: 0.6; }
 .field-box input:focus {
   border-color: var(--accent);
