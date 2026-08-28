@@ -1,6 +1,6 @@
 """aegis org profile: white-labeling de las campanyas
 
-Las dos columnas del mixin ``shared.WhiteLabelColumns``. El nivel por defecto
+Las columnas del mixin ``shared.WhiteLabelColumns``. El nivel por defecto
 es 'none', que reproduce exactamente el correo de antes: una organizacion que
 no toque nada no nota el cambio.
 
@@ -32,8 +32,10 @@ def upgrade() -> None:
         ),
     )
     op.add_column("AegisOrgProfile", sa.Column("brand_logo", sa.Text(), nullable=True))
+    op.add_column("AegisOrgProfile", sa.Column("brand_color", sa.String(length=7), nullable=True))
 
 
 def downgrade() -> None:
+    op.drop_column("AegisOrgProfile", "brand_color")
     op.drop_column("AegisOrgProfile", "brand_logo")
     op.drop_column("AegisOrgProfile", "white_label_level")

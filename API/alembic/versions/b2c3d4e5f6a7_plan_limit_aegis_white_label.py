@@ -6,7 +6,8 @@ inserta en las bases que ya estaban desplegadas, con los mismos valores que el
 literal congelado de la migracion de siembra.
 
 Su 'value' no es una cantidad sino el escalon concedido (LimitPeriod.TIER):
-0 ninguno, 1 logo propio, 2 sin rastro de la marca del producto.
+0 ninguno, 1 color de enfasis propio, 2 ademas el logo, 3 sin rastro de la
+marca del producto.
 
 Revision ID: b2c3d4e5f6a7
 Revises: a1b2c3d4e5f6
@@ -27,7 +28,7 @@ depends_on: Union[str, Sequence[str], None] = None
 _LIMIT_KEY = "aegis.white_label"
 
 #: Mismos valores que _HOLDER_LIMITS en la migracion de siembra.
-_VALUES: dict[str, int] = {"freemium": 0, "bronze": 1, "silver": 2, "gold": 2}
+_VALUES: dict[str, int] = {"freemium": 0, "bronze": 1, "silver": 2, "gold": 3}
 
 
 def upgrade() -> None:

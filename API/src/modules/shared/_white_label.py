@@ -14,7 +14,8 @@ Piezas:
     WhiteLabelLevel     — los tres niveles.
     WhiteLabel          — los ajustes ya resueltos, con el logo decodificable.
     WhiteLabelColumns   — mixin de columnas para persistirlos en cualquier modelo.
-    validate_logo_data_uri — validación del logo en el borde de confianza.
+    validate_logo_data_uri / validate_brand_color — validación en el borde de
+        confianza.
 """
 
 from __future__ import annotations
@@ -37,6 +38,11 @@ ALLOWED_LOGO_MIMETYPES: frozenset[str] = frozenset({"image/png", "image/jpeg", "
 #: tamaños de mensaje que aceptan los relays.
 MAX_LOGO_BYTES: int = 200 * 1024
 
+#: Color de énfasis: solo hexadecimal de 6 dígitos. Este valor acaba dentro de
+#: atributos ``style`` de la plantilla del correo, así que la validación es
+#: estricta a propósito — no se admite ningún valor CSS libre.
+_BRAND_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
 _DATA_URI_RE = re.compile(r"^data:(?P<mimetype>[\w.+-]+/[\w.+-]+);base64,(?P<payload>[A-Za-z0-9+/=\s]+)$")
 
 
@@ -44,13 +50,17 @@ class WhiteLabelLevel(str, Enum):
     """Cuánta marca propia sustituye a la del producto.
 
     NONE  — nada: el destinatario ve exactamente lo de siempre.
-    LOGO  — se añade el logo del cliente al contenido; la marca del producto
-            sigue en cabecera y pie.
+    COLOR — el color de énfasis pasa a ser el del cliente. Es el escalón
+            barato: un color lo tiene a mano cualquier marca, mientras que un
+            logo con fondo transparente y proporciones sanas no siempre.
+    LOGO  — además, se añade el logo del cliente al contenido; la marca del
+            producto sigue en cabecera y pie.
     FULL  — además, la marca del producto desaparece: cabecera, pie y página
             pública pasan a la del cliente.
     """
 
     NONE = "none"
+    COLOR = "color"
     LOGO = "logo"
     FULL = "full"
 
@@ -92,6 +102,7 @@ class WhiteLabelLevel(str, Enum):
 #: declara en ``PlanLimit`` para conceder ese nivel.
 _LEVEL_ORDER: tuple[WhiteLabelLevel, ...] = (
     WhiteLabelLevel.NONE,
+    WhiteLabelLevel.COLOR,
     WhiteLabelLevel.LOGO,
     WhiteLabelLevel.FULL,
 )
@@ -142,6 +153,25 @@ def validate_logo_data_uri(value: str) -> tuple[str, bytes]:
     return mimetype, data
 
 
+def validate_brand_color(value: str) -> str:
+    """
+    Valida un color de énfasis y lo normaliza a minúsculas.
+
+    Args:
+        value: Color hexadecimal de 6 dígitos ('#1a73e8').
+
+    Returns:
+        El mismo color en minúsculas.
+
+    Raises:
+        ValueError: Si no es un hexadecimal de 6 dígitos.
+    """
+    value = (value or "").strip()
+    if not _BRAND_COLOR_RE.match(value):
+        raise ValueError("El color debe ser hexadecimal de 6 dígitos ('#1a73e8').")
+    return value.lower()
+
+
 @dataclass(frozen=True)
 class WhiteLabel:
     """
@@ -150,13 +180,15 @@ class WhiteLabel:
     Attributes:
         level: Nivel aplicado.
         logo: Logo del cliente como data URI, o cadena vacía.
+        color: Color de énfasis del cliente ('#1a73e8'), o cadena vacía.
         brand_name: Nombre con el que sustituir la marca del producto en el
             nivel FULL. Sin él, el nivel FULL se queda sin nombre que poner y
-            degrada a LOGO (ver ``effective_level``).
+            degrada un escalón (ver ``effective_level``).
     """
 
     level: WhiteLabelLevel = WhiteLabelLevel.NONE
     logo: str = ""
+    color: str = ""
     brand_name: str = ""
 
     @classmethod
@@ -164,12 +196,14 @@ class WhiteLabel:
         cls,
         level: "WhiteLabelLevel | str | None",
         logo: str | None,
+        color: str | None,
         brand_name: str | None,
     ) -> "WhiteLabel":
         """Construye los ajustes a partir de lo persistido, tolerando NULLs."""
         return cls(
             level=WhiteLabelLevel.coerce(level),
             logo=(logo or "").strip(),
+            color=(color or "").strip(),
             brand_name=(brand_name or "").strip(),
         )
 
@@ -177,15 +211,20 @@ class WhiteLabel:
     def effective_level(self) -> WhiteLabelLevel:
         """El nivel que de verdad puede aplicarse con los datos que hay.
 
-        Pedir FULL sin nombre de marca dejaría el correo sin cabecera ni pie
-        legibles; pedir LOGO sin logo no cambia nada. En ambos casos se baja
-        un escalón en vez de entregar algo a medias.
+        Cada escalón necesita su dato: FULL un nombre con el que sustituir la
+        marca, LOGO un logo, COLOR un color. Si falta, se baja un escalón (y se
+        vuelve a comprobar) en vez de entregar algo a medias — un FULL sin
+        nombre dejaría el correo sin cabecera ni pie legibles.
         """
-        if self.level is WhiteLabelLevel.FULL and not self.brand_name:
-            return WhiteLabelLevel.LOGO if self.logo else WhiteLabelLevel.NONE
-        if self.level is WhiteLabelLevel.LOGO and not self.logo:
-            return WhiteLabelLevel.NONE
-        return self.level
+        requirements = {
+            WhiteLabelLevel.FULL:  self.brand_name,
+            WhiteLabelLevel.LOGO:  self.logo,
+            WhiteLabelLevel.COLOR: self.color,
+        }
+        level = self.level
+        while level is not WhiteLabelLevel.NONE and not requirements[level]:
+            level = _LEVEL_ORDER[level.rank - 1]
+        return level
 
     def capped_to(self, maximum: WhiteLabelLevel) -> "WhiteLabel":
         """Los mismos ajustes, sin pasar de ``maximum``.
@@ -197,7 +236,9 @@ class WhiteLabel:
         """
         if self.level.rank <= maximum.rank:
             return self
-        return WhiteLabel(level=maximum, logo=self.logo, brand_name=self.brand_name)
+        return WhiteLabel(
+            level=maximum, logo=self.logo, color=self.color, brand_name=self.brand_name,
+        )
 
     def decoded_logo(self) -> tuple[str, bytes] | None:
         """El logo como ``(mimetype, bytes)``, o None si no hay o no es válido.
@@ -229,3 +270,5 @@ class WhiteLabelColumns:
     #: Data URI del logo. Text, no bytes: se guarda como llega del navegador y
     #: se sirve igual al frontend para previsualizarlo, sin recodificar.
     brand_logo = Column(Text, nullable=True)
+    #: Color de énfasis en hexadecimal ('#1a73e8').
+    brand_color = Column(String(7), nullable=True)

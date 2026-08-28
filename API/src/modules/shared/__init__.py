@@ -27,6 +27,7 @@ from ._white_label import (
     WhiteLabel,
     WhiteLabelColumns,
     WhiteLabelLevel,
+    validate_brand_color,
     validate_logo_data_uri,
 )
 from .schemas import (
@@ -59,5 +60,6 @@ __all__ = [
     "WhiteLabelColumns",
     "WhiteLabelLevel",
     "WhiteLabelSchemaMixin",
+    "validate_brand_color",
     "validate_logo_data_uri",
 ]

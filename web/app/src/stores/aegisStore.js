@@ -40,7 +40,7 @@ export const useAegisStore = defineStore('aegis', () => {
   /** Ajustes de white-labeling del perfil (v-model de WhiteLabelFields).
       `ref` y no `reactive`: el componente emite un objeto nuevo en cada
       cambio, y a un `reactive` del store no se le puede reasignar. */
-  const whiteLabel = ref({ level: 'none', logo: '' })
+  const whiteLabel = ref({ level: 'none', logo: '', color: '' })
   /** Nivel máximo que concede el plan contratado; lo dicta el servidor */
   const maxWhiteLabelLevel = ref('none')
   /** Resultados del buscador de productos */
@@ -225,7 +225,11 @@ export const useAegisStore = defineStore('aegis', () => {
       trackedProducts.value = [...(data.trackedProducts ?? [])]
       useHygeiaInventory.value = data.useHygeiaInventory ?? true
       hygeiaInventoryAvailable.value = data.hygeiaInventoryAvailable ?? false
-      whiteLabel.value = { level: data.whiteLabelLevel || 'none', logo: data.brandLogo ?? '' }
+      whiteLabel.value = {
+        level: data.whiteLabelLevel || 'none',
+        logo:  data.brandLogo ?? '',
+        color: data.brandColor ?? '',
+      }
       maxWhiteLabelLevel.value = data.maxWhiteLabelLevel || 'none'
     } finally { loadingOrgProfile.value = false }
   }
@@ -252,6 +256,7 @@ export const useAegisStore = defineStore('aegis', () => {
         useHygeiaInventory: useHygeiaInventory.value,
         whiteLabelLevel:  whiteLabel.value.level,
         brandLogo:        whiteLabel.value.logo,
+        brandColor:       whiteLabel.value.color,
       }
       const res = await apiFetch('/aegis/org-profile', { method: 'PUT', body: JSON.stringify(payload) })
       if (!res?.ok) {

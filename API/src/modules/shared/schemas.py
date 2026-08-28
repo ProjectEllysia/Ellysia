@@ -2,7 +2,7 @@ from datetime import timezone
 
 from marshmallow import Schema, ValidationError, fields, validate
 
-from ._white_label import WhiteLabelLevel, validate_logo_data_uri
+from ._white_label import WhiteLabelLevel, validate_brand_color, validate_logo_data_uri
 
 
 class UTCDateTime(fields.DateTime):
@@ -47,14 +47,24 @@ def _validate_brand_logo(value: str) -> None:
         raise ValidationError(str(exc)) from exc
 
 
+def _validate_brand_color_field(value: str) -> None:
+    """Adapta la validación compartida del color al contrato de marshmallow."""
+    if not value:
+        return
+    try:
+        validate_brand_color(value)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+
+
 class WhiteLabelSchemaMixin:
     """
     Campos de white-labeling para el esquema de cualquier módulo que lo ofrezca.
 
     Se hereda junto a ``Schema`` (``class MiSchema(WhiteLabelSchemaMixin, Schema)``)
-    y aporta la pareja de campos ya validada — el logo llega del navegador, así
-    que su tipo y su tamaño se comprueban aquí, en el borde de confianza, y no
-    en el manager ni en la plantilla.
+    y aporta los campos ya validados — el logo y el color llegan del navegador,
+    así que su forma se comprueba aquí, en el borde de confianza, y no en el
+    manager ni en la plantilla (donde el color acaba dentro de un ``style``).
     """
 
     whiteLabelLevel = fields.String(
@@ -62,6 +72,7 @@ class WhiteLabelSchemaMixin:
         validate=validate.OneOf([level.value for level in WhiteLabelLevel]),
     )
     brandLogo = fields.String(load_default="", allow_none=True, validate=_validate_brand_logo)
+    brandColor = fields.String(load_default="", allow_none=True, validate=_validate_brand_color_field)
     #: Solo de salida: no es un ajuste sino el techo que concede el plan. El
     #: frontend lo usa para no ofrecer niveles que se van a rechazar. Sin
     #: ``dump_only`` el mismo esquema, que también valida la escritura, lo

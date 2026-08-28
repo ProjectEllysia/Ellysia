@@ -27,9 +27,29 @@
       </span>
     </label>
 
-    <!-- La imagen solo se pide cuando algún nivel la usa: pedirla en "none"
-         sería ofrecer un campo que no se pinta en ninguna parte. -->
-    <div v-if="modelValue.level !== 'none'" class="wl-logo">
+    <!-- Cada campo se pide desde el escalón que lo usa: ofrecerlo antes sería
+         un control que no se pinta en ninguna parte. -->
+    <div v-if="modelValue.level !== 'none'" class="wl-color">
+      <label class="wl-color-label" for="wl-color-input">Color de énfasis</label>
+      <input
+        id="wl-color-input"
+        type="color"
+        class="wl-swatch"
+        :value="modelValue.color || DEFAULT_COLOR"
+        @input="update({ color: $event.target.value })"
+      />
+      <code class="wl-color-value">{{ modelValue.color || DEFAULT_COLOR }}</code>
+      <button
+        v-if="modelValue.color"
+        type="button"
+        class="wl-remove"
+        @click="update({ color: '' })"
+      >
+        Restablecer
+      </button>
+    </div>
+
+    <div v-if="levelRank >= LEVELS.indexOf('logo')" class="wl-logo">
       <div v-if="modelValue.logo" class="wl-preview">
         <img :src="modelValue.logo" alt="Logo de la organización" />
         <button type="button" class="wl-remove" @click="clearLogo">Quitar</button>
@@ -79,7 +99,11 @@ const emit = defineEmits(['update:modelValue'])
 const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/gif']
 const MAX_KB = 200
 
-const LEVELS = ['none', 'logo', 'full']
+//: El acento del producto, que es lo que se sustituye. Sirve de punto de
+//: partida del selector cuando la organización todavía no ha elegido color.
+const DEFAULT_COLOR = '#d4a04a'
+
+const LEVELS = ['none', 'color', 'logo', 'full']
 
 const options = [
   {
@@ -88,9 +112,14 @@ const options = [
     description: 'Los envíos salen con la marca de Ellysia, como hasta ahora.',
   },
   {
+    value: 'color',
+    title: 'Aplicar color corporativo',
+    description: 'El color de énfasis (botones, filetes y bordes) pasa a ser el de la organización.',
+  },
+  {
     value: 'logo',
     title: 'Añadir imagen corporativa',
-    description: 'Se añade el logo de la organización al contenido, sobre el texto introductorio.',
+    description: 'Además del color, se añade el logo de la organización sobre el texto introductorio.',
   },
   {
     value: 'full',
@@ -101,6 +130,7 @@ const options = [
 
 const error = ref('')
 
+const levelRank = computed(() => Math.max(0, LEVELS.indexOf(props.modelValue.level)))
 const maxRank = computed(() => Math.max(0, LEVELS.indexOf(props.maxLevel)))
 function isLocked(level) {
   return LEVELS.indexOf(level) > maxRank.value
@@ -169,6 +199,19 @@ function onFile(event) {
   font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.04em; color: var(--text-dim); background: var(--surface-3);
 }
+
+.wl-color { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.2rem; }
+.wl-color-label { font-size: var(--fs-sm); color: var(--text-dim); }
+/* El selector nativo trae un marco y un relleno propios en cada navegador:
+   se recortan para que la muestra sea solo el color. */
+.wl-swatch {
+  width: 34px; height: 26px; padding: 0; cursor: pointer;
+  background: none; border: 1px solid var(--border-solid); border-radius: 5px;
+}
+.wl-swatch::-webkit-color-swatch-wrapper { padding: 2px; }
+.wl-swatch::-webkit-color-swatch { border: none; border-radius: 3px; }
+.wl-swatch:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+.wl-color-value { font-size: var(--fs-xs); color: var(--text-muted); }
 
 .wl-logo { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.2rem; }
 .wl-preview { display: flex; align-items: center; gap: 0.6rem; }

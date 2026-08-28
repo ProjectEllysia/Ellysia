@@ -2,7 +2,7 @@
   <div class="quiz-page" data-module="aegis">
     <StarBackground />
 
-    <main class="quiz-shell">
+    <main class="quiz-shell" :style="brandStyle">
       <header class="quiz-brand">
         <img v-if="whiteLabel.brandLogo" class="brand-logo" :src="whiteLabel.brandLogo" :alt="whiteLabel.brandName" />
         <span v-if="productBrandVisible" class="brand-mark">Ellysia</span>
@@ -131,7 +131,7 @@ const optionOrder = reactive({})
 // Marca de la campaña: la sirve el propio endpoint del quiz, resuelta igual
 // que la del correo (ajustes de la organización, topados por su plan). Sin
 // white-labeling llega en nivel 'none' y la página queda como siempre.
-const whiteLabel = ref({ level: 'none', brandName: '', brandLogo: '' })
+const whiteLabel = ref({ level: 'none', brandName: '', brandLogo: '', brandColor: '' })
 const justSubmitted = ref(false)
 const submitError = ref('')
 const errorTitle = ref('')
@@ -140,6 +140,14 @@ const errorDetail = ref('')
 /** En nivel 'full' la marca del producto desaparece de la página, igual que
  *  desaparece del correo. En 'logo' solo se suma el logo del cliente. */
 const productBrandVisible = computed(() => whiteLabel.value.level !== 'full')
+/** El color del cliente se inyecta como variable local del contenedor: pisa
+ *  el acento del tema solo dentro de esta página, sin tocar el resto de la
+ *  app ni el resto de variables. */
+const brandStyle = computed(() =>
+  whiteLabel.value.brandColor
+    ? { '--accent': whiteLabel.value.brandColor, '--accent-bright': whiteLabel.value.brandColor }
+    : {},
+)
 const footerBrand = computed(
   () => (productBrandVisible.value ? 'Ellysia' : whiteLabel.value.brandName),
 )
