@@ -685,6 +685,47 @@ def remove_user_attribute(data: dict[str, Any], target_user_id: int):
     return {"message": "Attributes removed", "attributes": attrs_to_remove}
 
 
+@users_blp.delete("/<int:target_user_id>")
+@users_blp.response(200, SuccessMessageSchema, description="User deleted")
+@users_blp.alt_response(400, schema=ErrorSchema, description="Cannot delete your own account here")
+@users_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@users_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@require_oauth_token
+@require_role(Role.ADMIN)
+@handle_exceptions(default_exception=DatabaseError, logger=logger)
+def delete_user(target_user_id: int):
+    """Dar de baja a otro usuario desde el panel de administracion.
+
+    Borra lo mismo que la baja voluntaria —el barrido de
+    ``services/account_deletion.py``, con la disolucion de la organizacion que
+    el usuario tuviera— asi que la jerarquia se comprueba con
+    ``can_administer_user``: un admin no puede borrar a otro admin ni al root.
+
+    La propia cuenta no se borra por aqui aunque ``can_administer_user`` se lo
+    permita al root: para eso esta ``DELETE /users/me``, que re-verifica la
+    contrasenya. Sin este corte, un root se quedaria sin sistema de un clic.
+    """
+    current_user_id = get_current_user().id
+
+    if current_user_id == target_user_id:
+        raise EllysiaException(
+            "Usa DELETE /users/me para dar de baja tu propia cuenta",
+            status_code=400,
+        )
+
+    if not USER_MANAGER.can_administer_user(current_user_id, target_user_id):
+        logger.warning(f"Usuario {current_user_id} intento eliminar a {target_user_id} sin permiso")
+        raise EllysiaException(
+            "No tienes permiso para eliminar a este usuario",
+            status_code=403,
+        )
+
+    USER_MANAGER.delete_user(target_user_id)
+
+    logger.info(f"Usuario {target_user_id} eliminado por el administrador {current_user_id}")
+    return {"message": "Usuario eliminado."}
+
+
 # =========================================================================
 # MFA (TOTP) ENDPOINTS
 # =========================================================================
