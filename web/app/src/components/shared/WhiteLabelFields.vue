@@ -59,7 +59,13 @@
       </div>
 
       <label class="wl-file">
-        <input type="file" :accept="ACCEPTED_TYPES.join(',')" @change="onFile" />
+        <input
+          type="file"
+          :accept="ACCEPTED_TYPES.join(',')"
+          @click="captureScroll"
+          @focus="restoreScroll"
+          @change="onFile"
+        />
         <span>{{ modelValue.logo ? 'Cambiar imagen' : 'Añadir imagen corporativa' }}</span>
       </label>
 
@@ -162,6 +168,26 @@ function setLevel(level) {
 function clearLogo() {
   error.value = ''
   update({ logo: '' })
+}
+
+// Al cerrar el diálogo nativo de selección de fichero, el navegador devuelve
+// el foco a este input y desplaza la página para revelarlo — aunque ya fuera
+// visible, y aunque `.app-layout` bloquee su propio scroll con overflow:
+// hidden (ver aegis-scroll-lock en AegisView.vue). Ese bloqueo frena el
+// scroll por rueda/teclado y las llamadas a scrollTo(), pero no el
+// scroll-into-view que dispara la propia gestión de foco del navegador — va
+// por un camino interno distinto. Refs #135.
+let scrollBeforeDialog = null
+function captureScroll() {
+  scrollBeforeDialog = { x: window.scrollX, y: window.scrollY }
+}
+function restoreScroll() {
+  if (!scrollBeforeDialog) return
+  const { x, y } = scrollBeforeDialog
+  // rAF: el desplazamiento del navegador ocurre después del propio evento
+  // 'focus', así que corregir en el mismo tick no sirve — hay que esperar al
+  // siguiente frame, cuando ya ha tenido lugar.
+  requestAnimationFrame(() => window.scrollTo(x, y))
 }
 
 function onFile(event) {
