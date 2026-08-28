@@ -281,7 +281,11 @@ def _no_outbound_sockets():
             raise socket.herror(f"DNS inverso bloqueado en tests: {ip!r}")
         return real_gethostbyaddr(ip)
 
-    with mock.patch.object(socket.socket, "connect", guarded_connect),          mock.patch.object(socket.socket, "connect_ex", guarded_connect_ex),          mock.patch.object(socket, "gethostbyaddr", guarded_gethostbyaddr):
+    with (
+        mock.patch.object(socket.socket, "connect", guarded_connect),
+        mock.patch.object(socket.socket, "connect_ex", guarded_connect_ex),
+        mock.patch.object(socket, "gethostbyaddr", guarded_gethostbyaddr),
+    ):
         yield
 
 
