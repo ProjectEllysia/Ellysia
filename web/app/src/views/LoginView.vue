@@ -140,7 +140,7 @@
         <!-- ───────── Alta pública ───────── -->
         <form v-else-if="!mfaStep && mode === 'register'" novalidate @submit.prevent="handleRegister">
           <div class="field" :class="{ focused: focus === 'reg-user' }">
-            <label for="reg-username">Identificador</label>
+            <label for="reg-username">Nombre de usuario</label>
             <div class="field-box">
               <input id="reg-username" v-model="reg.username" type="text" required
                      minlength="3" maxlength="64" autocomplete="username"
@@ -176,11 +176,69 @@
           <div class="field" :class="{ focused: focus === 'reg-pass' }">
             <label for="reg-password">Clave de acceso</label>
             <div class="field-box">
-              <input id="reg-password" v-model="reg.password" type="password" required
+              <input id="reg-password" v-model="reg.password"
+                     :type="showRegPassword ? 'text' : 'password'" required
                      minlength="8" autocomplete="new-password"
                      @focus="focus = 'reg-pass'" @blur="focus = ''" />
+              <button
+                type="button"
+                class="reveal reveal-gen"
+                tabindex="-1"
+                aria-label="Generar una clave segura"
+                title="Generar una clave segura"
+                @click="generateRegPassword"
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="23 4 23 10 17 10" />
+                  <polyline points="1 20 1 14 7 14" />
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="reveal"
+                tabindex="-1"
+                :aria-label="showRegPassword ? 'Ocultar las claves' : 'Mostrar las claves'"
+                @click="showRegPassword = !showRegPassword"
+              >
+                <svg v-if="!showRegPassword" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <svg v-else width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              </button>
             </div>
             <span class="field-hint">Mínimo 8 caracteres.</span>
+          </div>
+
+          <div class="field" :class="{ focused: focus === 'reg-pass2' }">
+            <label for="reg-password-confirm">Repite la clave</label>
+            <div class="field-box">
+              <input id="reg-password-confirm" v-model="regConfirm"
+                     :type="showRegPassword ? 'text' : 'password'" required
+                     autocomplete="new-password"
+                     :class="{ 'has-error': regConfirm && regConfirm !== reg.password }"
+                     @focus="focus = 'reg-pass2'" @blur="focus = ''" />
+              <button
+                type="button"
+                class="reveal"
+                tabindex="-1"
+                :aria-label="showRegPassword ? 'Ocultar las claves' : 'Mostrar las claves'"
+                @click="showRegPassword = !showRegPassword"
+              >
+                <svg v-if="!showRegPassword" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <svg v-else width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           <button type="submit" class="submit" :class="{ loading }" :disabled="loading">
@@ -310,6 +368,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { validationMessage } from '@/composables/useApi'
+import { generatePassword } from '@/acheron/passwordGenerator.js'
 import ElysianScene from '@/components/shared/ElysianScene.vue'
 import ellysiaIcon from '@/assets/images/ellysia/Ellysia-BgN.png'
 
@@ -352,7 +411,23 @@ const mode = ref(
     : 'login',
 )
 const reg = ref({ username: '', email: '', first_name: '', last_name: '', password: '' })
+// Fuera de `reg` a propósito: ese objeto se manda tal cual a /users/register y
+// la confirmación es cosa del formulario, no del alta.
+const regConfirm = ref('')
+const showRegPassword = ref(false)
 const recover = ref({ identifier: '' })
+
+/**
+ * Aprovecha el generador de Acheron para el alta. Rellena también la
+ * confirmación —hacer teclear a mano una clave de 20 caracteres aleatorios solo
+ * sirve para equivocarse— y descubre ambos campos: una clave que no se puede
+ * leer no se puede guardar en ningún sitio.
+ */
+function generateRegPassword() {
+  reg.value.password = regConfirm.value = generatePassword()
+  showRegPassword.value = true
+}
+
 
 /**
  * Alta pública. Al terminar NO se inicia sesión sola: la cuenta nace sin el
@@ -360,6 +435,12 @@ const recover = ref({ identifier: '' })
  * dejarán hasta que pulse el enlace.
  */
 async function handleRegister() {
+  // Lo único que el servidor no puede comprobar: nunca ve la confirmación.
+  if (reg.value.password !== regConfirm.value) {
+    showAlert('Las claves no coinciden. Repítela tal cual la escribiste.', 'error')
+    return
+  }
+
   loading.value = true
   try {
     const res = await fetch('/users/register', {
@@ -385,6 +466,8 @@ async function handleRegister() {
     )
     username.value = reg.value.username
     reg.value = { username: '', email: '', first_name: '', last_name: '', password: '' }
+    regConfirm.value = ''
+    showRegPassword.value = false
     mode.value = 'login'
   } catch {
     showAlert('No se pudo conectar con el servidor.', 'error')
@@ -743,12 +826,17 @@ onBeforeUnmount(() => {})
 }
 .field.focused .field-ico { color: var(--accent); }
 .field-box input {
-  width: 100%; padding: 0.82rem 2.7rem 0.82rem 2.5rem;
+  width: 100%; padding: 0.82rem 0.95rem;
   background: var(--surface-2);
   border: 1px solid var(--border-solid); border-radius: 10px;
   color: var(--text); font-size: var(--fs-input); font-family: var(--font-body); font-size-adjust: var(--fsa-body); outline: none;
   transition: border-color 0.3s, box-shadow 0.3s, background 0.3s;
 }
+/* El hueco lateral solo se reserva si hay algo que lo ocupe: los campos sin
+   icono ni botón arrancaban el texto desplazado 2.5rem hacia la derecha. */
+.field-box:has(.field-ico) input { padding-left: 2.5rem; }
+.field-box:has(.reveal) input { padding-right: 2.7rem; }
+.field-box:has(.reveal-gen) input { padding-right: 4.6rem; }
 .field-box input::placeholder { color: var(--text-muted); opacity: 0.6; }
 .field-box input:focus {
   border-color: var(--accent);
@@ -770,6 +858,7 @@ onBeforeUnmount(() => {})
   background: none; border: none; color: var(--text-muted); cursor: pointer;
   border-radius: 7px; transition: color 0.2s, background 0.2s;
 }
+.reveal-gen { right: 40px; }
 .reveal:hover:not(:disabled) { color: var(--accent); background: var(--accent-dim); }
 .reveal:disabled { cursor: not-allowed; opacity: 0.4; }
 
