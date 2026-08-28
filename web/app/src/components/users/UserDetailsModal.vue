@@ -47,9 +47,30 @@
               </div>
             </div>
           </div>
+          <div v-if="canDelete" class="detail-section danger-zone">
+            <h4>Dar de baja</h4>
+            <p class="danger-note">
+              Se borra la cuenta y todo lo que cuelga de ella: escaneos, campañas,
+              informes y su bóveda. No hay vuelta atrás.
+            </p>
+            <button class="btn btn--sm btn--danger" @click="showDeleteConfirm = true">
+              Eliminar usuario
+            </button>
+          </div>
         </template>
       </div>
     </div>
+
+    <ConfirmModal
+      :show="showDeleteConfirm"
+      title="Eliminar usuario"
+      emphasis="Esta acción no se puede deshacer."
+      :message="deleteMessage"
+      confirm-label="Eliminar"
+      danger
+      @confirm="handleDelete"
+      @cancel="showDeleteConfirm = false"
+    />
   </Teleport>
 </template>
 
@@ -58,6 +79,7 @@ import { ref, computed, watch } from 'vue'
 import { useUtils } from '@/composables/useUtils'
 import { useAuthStore } from '@/stores/authStore'
 import { useUsersStore } from '@/stores/usersStore'
+import ConfirmModal from '@/components/shared/ConfirmModal.vue'
 
 const { formatDate, getInitials } = useUtils()
 const auth = useAuthStore()
@@ -71,8 +93,21 @@ const attributes = ref([])
 const loadingUser = ref(false)
 const showAttrForm = ref(false)
 const selectedAttrs = ref([])
+const showDeleteConfirm = ref(false)
 
 const canManage = computed(() => auth.isAdmin)
+
+/** La jerarquía real la aplica el backend; aquí solo se evita ofrecer un 403.
+ *  Un admin llega a los usuarios normales, el root llega a todos, y nadie se
+ *  da de baja a sí mismo desde aquí: para eso está el perfil. */
+const canDelete = computed(() => {
+  if (!canManage.value || !user.value) return false
+  if (user.value.username === auth.username()) return false
+  return auth.isRoot || (user.value.role || 'role_user') === 'role_user'
+})
+const deleteMessage = computed(
+  () => `Vas a eliminar la cuenta de @${user.value?.username} y todos sus datos.`,
+)
 const ALL_ATTRIBUTES = [
   { module: 'Aegis', attrs: [{ name: 'aegis_read', desc: 'Lectura' }, { name: 'aegis_write', desc: 'Escritura' }, { name: 'aegis_create', desc: 'Creación' }, { name: 'aegis_delete', desc: 'Eliminación' }] },
   { module: 'Themis', attrs: [{ name: 'themis_read', desc: 'Lectura' }, { name: 'themis_write', desc: 'Escritura' }, { name: 'themis_create', desc: 'Creación' }, { name: 'themis_delete', desc: 'Eliminación' }] },
@@ -85,11 +120,16 @@ const roleLabel = computed(() => { const r = user.value?.role || 'role_user'; if
 
 watch(() => props.show, async (v) => {
   if (!v || !props.userId) return
-  loadingUser.value = true; showAttrForm.value = false; selectedAttrs.value = []
+  loadingUser.value = true; showAttrForm.value = false; selectedAttrs.value = []; showDeleteConfirm.value = false
   try { user.value = store.users.find(u => u.id == props.userId) || null; attributes.value = await store.loadUserAttributes(props.userId) } finally { loadingUser.value = false }
 })
 
 async function handleRemoveAttribute(attr) { const ok = await store.removeAttributes(props.userId, [attr]); if (ok) attributes.value = await store.loadUserAttributes(props.userId) }
+/** El store ya recarga la lista al terminar, así que aquí solo queda cerrar. */
+async function handleDelete() {
+  showDeleteConfirm.value = false
+  if (await store.deleteUser(props.userId)) emit('close')
+}
 async function handleAddAttributes() { if (selectedAttrs.value.length === 0) return; const ok = await store.addAttributes(props.userId, selectedAttrs.value); if (ok) { showAttrForm.value = false; selectedAttrs.value = []; attributes.value = await store.loadUserAttributes(props.userId) } }
 </script>
 
@@ -132,4 +172,7 @@ async function handleAddAttributes() { if (selectedAttrs.value.length === 0) ret
 .attr-check { display: flex; align-items: center; gap: 0.25rem; font-size: var(--fs-md); color: var(--text); cursor: pointer; }
 .attr-check input { accent-color: var(--accent); cursor: pointer; }
 .attr-form-actions { display: flex; gap: 0.4rem; justify-content: flex-end; margin-top: 0.65rem; }
+.danger-zone { border-top: 1px solid var(--border); padding-top: 1rem; }
+.danger-zone h4 { color: var(--danger); }
+.danger-note { font-size: var(--fs-md); color: var(--text-muted); margin: 0 0 0.65rem; }
 </style>

@@ -71,6 +71,26 @@ export const useUsersStore = defineStore('users', () => {
   }
 
   /**
+   * Da de baja a un usuario vía DELETE /users/{id}.
+   *
+   * Borra la cuenta y todo lo que cuelga de ella; el backend es quien decide
+   * si el actor llega a ese usuario (un admin no llega a otro admin).
+   * @param {number|string} userId - ID del usuario
+   * @returns {Promise<boolean>} True si se eliminó correctamente
+   */
+  async function deleteUser(userId) {
+    const res = await apiFetch(`/users/${userId}`, { method: 'DELETE' })
+    if (!res?.ok) {
+      if (res?.status === 403) toast.show('No tienes permiso para eliminar a este usuario.', 'error')
+      else toast.show(await apiError(res, 'Error al eliminar el usuario.'), 'error')
+      return false
+    }
+    toast.show('Usuario eliminado.', 'success')
+    await loadUsers()
+    return true
+  }
+
+  /**
    * Obtiene los atributos ABAC de un usuario.
    * @param {number|string} userId - ID del usuario
    * @returns {Promise<string[]>} Lista de nombres de atributos
@@ -130,5 +150,5 @@ export const useUsersStore = defineStore('users', () => {
     loading.value = false
   }
 
-  return { users, loading, grouped, loadUsers, createUser, loadUserAttributes, addAttributes, removeAttributes, $reset }
+  return { users, loading, grouped, loadUsers, createUser, deleteUser, loadUserAttributes, addAttributes, removeAttributes, $reset }
 })
