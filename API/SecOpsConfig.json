@@ -53,6 +53,7 @@
   "tools": {
     "scribe": {
       "defaultStrategy": "openai",
+      "maxInputTokens": 24000,
       "modules": {
         "aegis": "openai",
         "themis": "openai"
