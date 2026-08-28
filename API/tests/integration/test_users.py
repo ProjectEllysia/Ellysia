@@ -154,3 +154,53 @@ def test_role_user_cannot_grant_attributes_to_itself(client, regular_user, auth_
                       headers=auth_headers(regular_user),
                       json={"attributes": ["themis_create"]})
     assert resp.status_code == 403
+
+
+def test_admin_deletes_a_user(client, admin_user, make_user, auth_headers):
+    """La baja administrativa borra de verdad: el usuario deja de estar en la lista."""
+    target = make_user(role="role_user")
+    headers = auth_headers(admin_user)
+
+    resp = client.delete(f"/users/{target.id}", headers=headers)
+    assert resp.status_code == 200
+
+    listed = client.get("/users", headers=headers)
+    assert target.username not in [u["username"] for u in listed.get_json()]
+
+
+def test_delete_user_requires_admin(client, regular_user, make_user, auth_headers):
+    target = make_user(role="role_user")
+    resp = client.delete(f"/users/{target.id}", headers=auth_headers(regular_user))
+    assert resp.status_code == 403
+
+
+def test_admin_cannot_delete_another_admin(client, admin_user, make_user, auth_headers):
+    """La jerarquia de `can_administer_user`: un admin solo llega a role_user.
+
+    Sin esta comprobacion, `require_role(Role.ADMIN)` dejaria que cualquier
+    administrador se quitase de encima a sus pares y al root.
+    """
+    other_admin = make_user(role="role_admin")
+    root = make_user(role="role_root")
+    headers = auth_headers(admin_user)
+
+    assert client.delete(f"/users/{other_admin.id}", headers=headers).status_code == 403
+    assert client.delete(f"/users/{root.id}", headers=headers).status_code == 403
+
+
+def test_root_cannot_delete_itself_from_the_admin_panel(client, root_user, auth_headers):
+    """Auto-borrado cortado a mano.
+
+    `can_administer_user` se lo permite al root a proposito (lo necesita para
+    sus propios atributos), asi que sin este corte el root se quedaria sin
+    sistema de un clic. Para darse de baja esta DELETE /users/me, que
+    re-verifica la contrasenya.
+    """
+    resp = client.delete(f"/users/{root_user.id}", headers=auth_headers(root_user))
+    assert resp.status_code == 400
+
+
+def test_root_deletes_an_admin(client, root_user, make_user, auth_headers):
+    target = make_user(role="role_admin")
+    resp = client.delete(f"/users/{target.id}", headers=auth_headers(root_user))
+    assert resp.status_code == 200
