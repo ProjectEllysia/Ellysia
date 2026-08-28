@@ -243,6 +243,13 @@ function onFile(event) {
    que lo envuelve hace de botón. */
 .wl-file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .wl-file {
+  /* Ancla el containing block del input absoluto a esta misma etiqueta. Sin
+     esto, saltaba hasta .panel--left (el primer ancestro con position !=
+     static) — que no hace scroll — dejando el input clavado en un punto fijo
+     mientras .panel-content (el que sí scrollea, y queda por medio) se movía
+     por su cuenta. Al enfocarlo el navegador lo llevaba a su posición real
+     (desincronizada), desplazando toda la página. Refs #135. */
+  position: relative;
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0.4rem 0.75rem; border-radius: 7px; cursor: pointer;
   background: var(--bg); border: 1px solid var(--border-solid);
