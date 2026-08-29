@@ -372,10 +372,10 @@ def _parse_dt(value):
     if not value:
         return utcnow_naive()
     try:
-        dt = datetime.fromisoformat(value)
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-        return dt
+        parsed_datetime = datetime.fromisoformat(value)
+        if parsed_datetime.tzinfo is not None:
+            parsed_datetime = parsed_datetime.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed_datetime
     except Exception:
         logger.warning("Failed to parse datetime value %r, defaulting to utcnow", value, exc_info=True)
         return utcnow_naive()

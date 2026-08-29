@@ -272,15 +272,15 @@ def services_from_open_ports(open_ports: Iterable) -> List[Service]:
         The corresponding list of :class:`Service` values.
     """
     services: List[Service] = []
-    for op in open_ports:
-        port, protocol = _split_protocol(getattr(getattr(op, "port", None), "protocol", ""))
+    for open_port in open_ports:
+        port, protocol = _split_protocol(getattr(getattr(open_port, "port", None), "protocol", ""))
         services.append(Service(
             port=port,
             protocol=protocol,
-            name=(op.given_use or "").strip(),
-            product=(op.product or "").strip(),
-            version=(op.version or "").strip(),
-            cpe=(op.cpe or None),
+            name=(open_port.given_use or "").strip(),
+            product=(open_port.product or "").strip(),
+            version=(open_port.version or "").strip(),
+            cpe=(open_port.cpe or None),
         ))
     return services
 

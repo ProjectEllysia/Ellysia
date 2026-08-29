@@ -858,8 +858,8 @@ class IrisManager(TaskTrackingMixin):
             return named_results.get(name)
 
         def verdict_is(name: str, *verdicts: str) -> bool:
-            r = res(name)
-            return r is not None and r.verdict in verdicts
+            rule_result = res(name)
+            return rule_result is not None and rule_result.verdict in verdicts
 
         # ARC (RFC 8617): a legitimate forwarding intermediary (mailing
         # list, forwarder) that validated ("cv=pass") the original

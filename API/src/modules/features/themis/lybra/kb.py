@@ -97,11 +97,11 @@ def version_compare(a: str, b: str) -> int:
     """
     ka, kb = _version_key(a), _version_key(b)
     for i in range(max(len(ka), len(kb))):
-        ta = ka[i] if i < len(ka) else (1, 0, "")
-        tb = kb[i] if i < len(kb) else (1, 0, "")
-        if ta < tb:
+        token_a = ka[i] if i < len(ka) else (1, 0, "")
+        token_b = kb[i] if i < len(kb) else (1, 0, "")
+        if token_a < token_b:
             return -1
-        if ta > tb:
+        if token_a > token_b:
             return 1
     return 0
 
@@ -483,10 +483,10 @@ def ingest_nvd_cve(item: dict) -> Optional[Tuple[dict, List[dict]]]:
     for config in cve.get("configurations", []):
         for node in config.get("nodes", []):
             node_os = _node_required_os(node)
-            for cm in node.get("cpeMatch", []):
-                if not cm.get("vulnerable"):
+            for cpe_match in node.get("cpeMatch", []):
+                if not cpe_match.get("vulnerable"):
                     continue
-                row = _cpe_match_row(cm, node_required_os=node_os)
+                row = _cpe_match_row(cpe_match, node_required_os=node_os)
                 if row:
                     matches.append(row)
 
@@ -522,10 +522,10 @@ def _node_required_os(node: dict) -> Optional[str]:
     if node.get("operator") != "AND" or node.get("negate"):
         return None
     platforms = set()
-    for cm in node.get("cpeMatch", []):
-        if not cm.get("vulnerable"):
+    for cpe_match in node.get("cpeMatch", []):
+        if not cpe_match.get("vulnerable"):
             continue
-        parsed = parse_cpe23(cm.get("criteria", ""))
+        parsed = parse_cpe23(cpe_match.get("criteria", ""))
         if parsed and parsed["part"] == "o":
             platforms.add(parsed["product"])
     return next(iter(platforms)) if len(platforms) == 1 else None

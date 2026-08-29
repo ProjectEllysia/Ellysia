@@ -186,8 +186,8 @@ class AegisExporter(ABC):
 
     def _format_datetime(self, iso_string: str) -> str:
         try:
-            dt = datetime.fromisoformat(iso_string.replace("Z", "+00:00"))
-            return dt.strftime("%d de %B de %Y, %H:%M")
+            parsed_datetime = datetime.fromisoformat(iso_string.replace("Z", "+00:00"))
+            return parsed_datetime.strftime("%d de %B de %Y, %H:%M")
         except Exception:
             return iso_string
 
@@ -461,9 +461,9 @@ class HTMLExporter(AegisExporter):
     def _html_intro(self, data: ExportData) -> list[str]:
         parts: list[str] = []
         if data.intro:
-            for p in data.intro.split("\n\n"):
-                if p.strip():
-                    parts.append(f"<p>{self._esc(p.strip())}</p>")
+            for paragraph in data.intro.split("\n\n"):
+                if paragraph.strip():
+                    parts.append(f"<p>{self._esc(paragraph.strip())}</p>")
         return parts
 
     def _html_tips(self, data: ExportData) -> list[str]:
@@ -477,9 +477,9 @@ class HTMLExporter(AegisExporter):
                 if headline:
                     parts.append(f"<h3>{headline}</h3>")
                 if body:
-                    for p in body.split("\n"):
-                        if p.strip():
-                            parts.append(f"<p>{p.strip()}</p>")
+                    for line in body.split("\n"):
+                        if line.strip():
+                            parts.append(f"<p>{line.strip()}</p>")
                 links = tip.get("links") or []
                 if links:
                     parts.append("<p><strong>Recursos relacionados:</strong></p>")
@@ -524,9 +524,9 @@ class HTMLExporter(AegisExporter):
         parts: list[str] = []
         if data.closing:
             parts.append("<h2>Conclusión</h2>")
-            for p in data.closing.split("\n"):
-                if p.strip():
-                    parts.append(f"<p>{self._esc(p.strip())}</p>")
+            for paragraph in data.closing.split("\n"):
+                if paragraph.strip():
+                    parts.append(f"<p>{self._esc(paragraph.strip())}</p>")
         return parts
 
     def _html_footer(self, data: ExportData) -> str:

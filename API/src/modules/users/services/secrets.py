@@ -53,10 +53,10 @@ def verify_password(
         legacy format or when Argon2 parameters have changed (check_needs_rehash).
     """
     if stored_hash.startswith("$argon2"):
-        ph = _get_hasher()
+        password_hasher = _get_hasher()
         try:
-            ph.verify(stored_hash, password)
-            needs_rehash = ph.check_needs_rehash(stored_hash)
+            password_hasher.verify(stored_hash, password)
+            needs_rehash = password_hasher.check_needs_rehash(stored_hash)
             return True, needs_rehash
         except VerifyMismatchError:
             return False, False

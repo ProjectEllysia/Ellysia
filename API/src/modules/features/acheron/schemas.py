@@ -57,9 +57,9 @@ class StorableCreateSchema(Schema):
             "wifi": ("ssid", "password", "securityType"),
             "license": ("product", "licenseKey", "licensedTo", "version"),
         }
-        for f in required_by_kind.get(data["kind"], ()):
-            if not data.get(f):
-                raise ValidationError(f"{f} is required for {data['kind']} storables")
+        for field_name in required_by_kind.get(data["kind"], ()):
+            if not data.get(field_name):
+                raise ValidationError(f"{field_name} is required for {data['kind']} storables")
 
 
 class StorableDeleteSchema(Schema):

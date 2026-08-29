@@ -220,13 +220,13 @@ def _decode_payload(part: Message) -> str:
 def _extract_links(html: str) -> List[Link]:
     links: List[Link] = []
     seen_hrefs = set()
-    for m in _ANCHOR_RE.finditer(html):
-        href = m.group(1).strip()
-        text = _TAG_RE.sub("", m.group(2)).strip()
+    for match in _ANCHOR_RE.finditer(html):
+        href = match.group(1).strip()
+        text = _TAG_RE.sub("", match.group(2)).strip()
         links.append(Link(href=href, text=text))
         seen_hrefs.add(href)
-    for m in _HREF_RE.finditer(html):
-        href = m.group(1).strip()
+    for match in _HREF_RE.finditer(html):
+        href = match.group(1).strip()
         if href not in seen_hrefs:
             links.append(Link(href=href, text=""))
             seen_hrefs.add(href)
@@ -456,9 +456,9 @@ def _hop_timestamp(line: str) -> Optional[datetime]:
 
 def _extract_ip(text: str) -> Optional[str]:
     """Return the first IPv4 literal found in *text*, or ``None``."""
-    m = _IP_RE.search(text)
-    if m:
-        return m.group(1)
+    match = _IP_RE.search(text)
+    if match:
+        return match.group(1)
     # Fallback: bare IPv4 not in brackets, common in HELO/EHLO echoes.
     bare = re.search(r"(?<!\d)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?!\d)", text)
     return bare.group(1) if bare else None
@@ -480,19 +480,19 @@ def _split_tokens(prefix: str) -> List[str]:
     tokens: List[str] = []
     buf: List[str] = []
     depth = 0
-    for ch in flat:
-        if ch == "(":
+    for character in flat:
+        if character == "(":
             depth += 1
-            buf.append(ch)
-        elif ch == ")":
+            buf.append(character)
+        elif character == ")":
             depth = max(0, depth - 1)
-            buf.append(ch)
-        elif ch.isspace() and depth == 0:
+            buf.append(character)
+        elif character.isspace() and depth == 0:
             if buf:
                 tokens.append("".join(buf))
                 buf = []
         else:
-            buf.append(ch)
+            buf.append(character)
     if buf:
         tokens.append("".join(buf))
     return tokens

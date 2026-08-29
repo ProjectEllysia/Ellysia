@@ -464,8 +464,8 @@ class AegisManager(TaskTrackingMixin):
                 self._persist_alerts_atomic(document_id, alerts)
 
                 # 6. Escritura del archivo de archivo
-                ts       = utcnow_naive().strftime("%Y%m%d_%H%M%S")
-                filename = f"{ts}_{self.user.id}_{resolved_id}.json"
+                timestamp       = utcnow_naive().strftime("%Y%m%d_%H%M%S")
+                filename = f"{timestamp}_{self.user.id}_{resolved_id}.json"
                 filepath = cfg["output_dir"] / filename
 
                 with open(filepath, "w", encoding="utf-8") as fh:
@@ -647,21 +647,21 @@ class AegisManager(TaskTrackingMixin):
 
         files = sorted(stack_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
         contents = []
-        for f in files[:3]:
+        for stack_file in files[:3]:
             try:
-                content = f.read_text(encoding="utf-8")
+                content = stack_file.read_text(encoding="utf-8")
                 if len(content) > 50_000:
                     content = content[:50_000] + "\n... [truncado]"
                 contents.append(content)
             except Exception as exc:
-                logger.warning(f"No se pudo leer {f}: {exc}", exc_info=True)
+                logger.warning(f"No se pudo leer {stack_file}: {exc}", exc_info=True)
 
         return "\n\n---\n\n".join(contents)
 
     def _create_pending_document(self, topic_id: int) -> int:
         """Crea un registro AegisDocument en estado 'pending' y devuelve su ID."""
-        ts = utcnow_naive().strftime("%Y%m%d_%H%M%S")
-        placeholder = f"pending_{ts}_{self.user.id}_{topic_id}"
+        timestamp = utcnow_naive().strftime("%Y%m%d_%H%M%S")
+        placeholder = f"pending_{timestamp}_{self.user.id}_{topic_id}"
 
         document = AegisDocument(
             title=placeholder[:64],

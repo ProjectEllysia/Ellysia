@@ -135,9 +135,9 @@ class OllamaStrategy(ModelStrategy):
                     "content": response.message.content or "",
                     "tool_calls": tool_calls,
                 })
-                for tc in tool_calls:
-                    args = tc.function.arguments or {}
-                    result = tool_executor(tc.function.name, dict(args))
+                for tool_call in tool_calls:
+                    args = tool_call.function.arguments or {}
+                    result = tool_executor(tool_call.function.name, dict(args))
                     messages.append({"role": "tool", "content": result})
 
                 response = self._client.chat(
@@ -222,15 +222,15 @@ class OpenAIStrategy(ModelStrategy):
                         for tool_call in tool_calls
                     ],
                 })
-                for tc in tool_calls:
+                for tool_call in tool_calls:
                     try:
-                        args = json.loads(tc.function.arguments or "{}")
+                        args = json.loads(tool_call.function.arguments or "{}")
                     except json.JSONDecodeError:
                         args = {}
-                    result = tool_executor(tc.function.name, args)
+                    result = tool_executor(tool_call.function.name, args)
                     messages.append({
                         "role": "tool",
-                        "tool_call_id": tc.id,
+                        "tool_call_id": tool_call.id,
                         "content": result,
                     })
 
@@ -305,14 +305,14 @@ class GoogleStrategy(ModelStrategy):
             if content:
                 parts.append({"text": content})
 
-            tc = msg.get("tool_calls")
-            if tc:
-                for t in tc:
-                    fn = t.get("function", t)
+            message_tool_calls = msg.get("tool_calls")
+            if message_tool_calls:
+                for tool_call in message_tool_calls:
+                    function_spec = tool_call.get("function", tool_call)
                     parts.append({
                         "functionCall": {
-                            "name": fn["name"],
-                            "args": fn.get("arguments", {}),
+                            "name": function_spec["name"],
+                            "args": function_spec.get("arguments", {}),
                         }
                     })
 
@@ -360,17 +360,17 @@ class GoogleStrategy(ModelStrategy):
             if tool_executor and tools:
                 candidate = response.candidates[0] if response.candidates else None
                 part = candidate.content.parts[0] if candidate and candidate.content.parts else None
-                fc = getattr(part, "function_call", None) if part else None
+                function_call = getattr(part, "function_call", None) if part else None
 
-                if fc:
-                    logger.info("[scribe/google] tool_call: %s", fc.name)
-                    result = tool_executor(fc.name, dict(fc.args))
+                if function_call:
+                    logger.info("[scribe/google] tool_call: %s", function_call.name)
+                    result = tool_executor(function_call.name, dict(function_call.args))
 
                     contents.append({
                         "role": "user",
                         "parts": [{
                             "functionResponse": {
-                                "name": fc.name,
+                                "name": function_call.name,
                                 "response": {"result": result},
                             }
                         }],

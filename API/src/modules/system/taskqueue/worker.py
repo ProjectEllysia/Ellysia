@@ -272,19 +272,19 @@ def start_worker() -> None:
 
     threads = []
     for i in range(max_workers):
-        t = threading.Thread(
+        thread = threading.Thread(
             target=_worker_thread,
             args=(i + 1,),
             daemon=True,
         )
-        t.start()
-        threads.append(t)
+        thread.start()
+        threads.append(thread)
         logging.info("Worker %d started", i + 1)
 
     try:
         while any(thread.is_alive() for thread in threads):
-            for t in threads:
-                t.join(timeout=0.5)
+            for thread in threads:
+                thread.join(timeout=0.5)
     except KeyboardInterrupt:
         logging.info("KeyboardInterrupt received, stopping workers...")
         _stop_workers()

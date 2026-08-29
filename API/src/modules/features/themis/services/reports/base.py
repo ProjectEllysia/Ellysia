@@ -355,26 +355,26 @@ class PrintingStrategy(ABC):
 
         drawing = Drawing(460, 210)
         drawing.hAlign = "CENTER"
-        bc = VerticalBarChart()
-        bc.x = 45
-        bc.y = 45
-        bc.height = 135
-        bc.width = 390
-        bc.data = [[point["y"] for point in points]]
-        bc.categoryAxis.categoryNames = [point["x"] for point in points]
-        bc.categoryAxis.labels.boxAnchor = "ne"
-        bc.categoryAxis.labels.angle = 30
-        bc.categoryAxis.labels.fontName = "Helvetica"
-        bc.categoryAxis.labels.fontSize = 6
-        bc.categoryAxis.labels.dy = -2
-        bc.valueAxis.valueMin = 0
-        bc.valueAxis.valueMax = max(max_val + step, step)
-        bc.valueAxis.valueStep = step
-        bc.valueAxis.labels.fontName = "Helvetica"
-        bc.valueAxis.labels.fontSize = 7
-        bc.bars[0].fillColor = main_color
-        bc.bars[0].strokeColor = light_color
-        drawing.add(bc)
+        bar_chart = VerticalBarChart()
+        bar_chart.x = 45
+        bar_chart.y = 45
+        bar_chart.height = 135
+        bar_chart.width = 390
+        bar_chart.data = [[point["y"] for point in points]]
+        bar_chart.categoryAxis.categoryNames = [point["x"] for point in points]
+        bar_chart.categoryAxis.labels.boxAnchor = "ne"
+        bar_chart.categoryAxis.labels.angle = 30
+        bar_chart.categoryAxis.labels.fontName = "Helvetica"
+        bar_chart.categoryAxis.labels.fontSize = 6
+        bar_chart.categoryAxis.labels.dy = -2
+        bar_chart.valueAxis.valueMin = 0
+        bar_chart.valueAxis.valueMax = max(max_val + step, step)
+        bar_chart.valueAxis.valueStep = step
+        bar_chart.valueAxis.labels.fontName = "Helvetica"
+        bar_chart.valueAxis.labels.fontSize = 7
+        bar_chart.bars[0].fillColor = main_color
+        bar_chart.bars[0].strokeColor = light_color
+        drawing.add(bar_chart)
         elements.append(drawing)
         elements.append(Spacer(1, 0.18 * inch))
 

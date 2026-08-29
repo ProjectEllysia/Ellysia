@@ -120,8 +120,8 @@ class FindingsPrintingStrategy(PrintingStrategy):
             "source": row.source, "state": row.state, "cpe_resolved": row.cpe_resolved,
             "required_os": row.required_os,
         } for row in rows]
-        for f in findings:
-            f["priority"] = score_finding(f, exposure)
+        for finding in findings:
+            finding["priority"] = score_finding(finding, exposure)
         self._enrich_with_cve_context(findings)
 
         self._append_finding_header(theme, elements, findings, exposure)
@@ -141,14 +141,14 @@ class FindingsPrintingStrategy(PrintingStrategy):
             # ties *within* the same priority band, confirmed findings before hypotheses.
             sorted_findings = sorted(
                 findings,
-                key=lambda f: (
-                    self._PRIORITY_ORDER.get(f["priority"], 5),
-                    not f["confirmed"],
-                    -(f["cvss_score"] or 0),
+                key=lambda finding: (
+                    self._PRIORITY_ORDER.get(finding["priority"], 5),
+                    not finding["confirmed"],
+                    -(finding["cvss_score"] or 0),
                 ),
             )
-            for idx, f in enumerate(sorted_findings, start=1):
-                self._append_finding_card(theme, elements, f, idx)
+            for idx, finding in enumerate(sorted_findings, start=1):
+                self._append_finding_card(theme, elements, finding, idx)
 
         if ai_report:
             # La misma lista que imprime las fichas: ya priorizada por
@@ -181,16 +181,16 @@ class FindingsPrintingStrategy(PrintingStrategy):
 
         entries = {cve_entry.cve_id: cve_entry for cve_entry in build_repository(KbRepository).get_cves_with_matches(cve_ids)}
 
-        for f in findings:
-            ids = f.get("cve_ids") or []
+        for finding in findings:
+            ids = finding.get("cve_ids") or []
             if not ids:
                 continue
             entry = entries.get(ids[0])
             if entry is None:
                 continue
-            f["description"] = entry.description
-            f["cwe_ids"] = entry.cwe_ids or []
-            f["fixed_version"] = self._find_fixed_version(entry, f.get("cpe"), parse_cpe23)
+            finding["description"] = entry.description
+            finding["cwe_ids"] = entry.cwe_ids or []
+            finding["fixed_version"] = self._find_fixed_version(entry, finding.get("cpe"), parse_cpe23)
 
     @staticmethod
     def _find_fixed_version(entry, cpe, parse_cpe23) -> Optional[str]:
@@ -202,12 +202,12 @@ class FindingsPrintingStrategy(PrintingStrategy):
         parsed = parse_cpe23(cpe)
         if not parsed:
             return None
-        for m in entry.cpe_matches:
-            if m.vendor == parsed["vendor"] and m.product == parsed["product"]:
-                if m.version_end_excluding:
-                    return m.version_end_excluding
-                if m.version_end_including:
-                    return m.version_end_including
+        for cpe_match in entry.cpe_matches:
+            if cpe_match.vendor == parsed["vendor"] and cpe_match.product == parsed["product"]:
+                if cpe_match.version_end_excluding:
+                    return cpe_match.version_end_excluding
+                if cpe_match.version_end_including:
+                    return cpe_match.version_end_including
         return None
 
     def _append_finding_header(self, theme: "ReportTheme", elements: list, findings: list, exposure: str) -> None:
@@ -252,8 +252,8 @@ class FindingsPrintingStrategy(PrintingStrategy):
         elements.append(Spacer(1, 0.1 * inch))
 
         counts: Dict[str, int] = {}
-        for f in findings:
-            counts[f["priority"]] = counts.get(f["priority"], 0) + 1
+        for finding in findings:
+            counts[finding["priority"]] = counts.get(finding["priority"], 0) + 1
 
         data = [["Prioridad", "Cantidad"]]
         for prio in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):

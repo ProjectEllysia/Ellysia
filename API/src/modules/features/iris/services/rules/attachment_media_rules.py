@@ -305,14 +305,14 @@ def _check_headers_fallback(headers: dict) -> RuleResult:
 
     score = 0
     ext_descriptions: list[str] = []
-    for f in findings:
-        if "extension" in f:
-            ext_descriptions.append(f["extension"])
-            if f.get("double_extension"):
+    for finding in findings:
+        if "extension" in finding:
+            ext_descriptions.append(finding["extension"])
+            if finding.get("double_extension"):
                 score += CR.get_iris_scoring_weight("attachment_header_fallback.double_extension_bonus", -2)
             score += CR.get_iris_scoring_weight("attachment_header_fallback.dangerous_extension", -6)
-        if "mime_type" in f:
-            ext_descriptions.append(f["mime_type"])
+        if "mime_type" in finding:
+            ext_descriptions.append(finding["mime_type"])
             score += CR.get_iris_scoring_weight("attachment_header_fallback.suspicious_mime", -5)
 
     score = max(score, _attachment_score_floor())

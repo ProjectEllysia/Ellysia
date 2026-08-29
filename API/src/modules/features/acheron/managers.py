@@ -50,10 +50,10 @@ class VaultManager:
         if not value:
             return utcnow_naive()
         try:
-            dt = datetime.fromisoformat(value)
-            if dt.tzinfo is not None:
-                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-            return dt
+            parsed_datetime = datetime.fromisoformat(value)
+            if parsed_datetime.tzinfo is not None:
+                parsed_datetime = parsed_datetime.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed_datetime
         except Exception as e:
             logger.warning("Failed to parse datetime value %r, defaulting to utcnow", value, exc_info=True)
             return utcnow_naive()
@@ -484,9 +484,9 @@ class VaultManager:
             if current_vault is not None:
                 self._require_revision(current_vault, expected_revision)
 
-        for op in operations:
-            internal_id = op.get("internalId")
-            is_recovery = bool(op.get("isRecovery", False))
+        for operation in operations:
+            internal_id = operation.get("internalId")
+            is_recovery = bool(operation.get("isRecovery", False))
 
             if not internal_id:
                 results.append({
@@ -497,7 +497,7 @@ class VaultManager:
                 })
                 continue
 
-            changes = op.get("changes") or {}
+            changes = operation.get("changes") or {}
             if not isinstance(changes, dict) or not changes:
                 results.append({
                     "internalId": internal_id,

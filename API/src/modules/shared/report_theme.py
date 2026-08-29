@@ -203,9 +203,9 @@ class ReportTheme:
         Returns:
             Table with applied key-value style.
         """
-        t = Table(data, colWidths=col_widths)
-        t.setStyle(self.kv_table_style)
-        return t
+        table = Table(data, colWidths=col_widths)
+        table.setStyle(self.kv_table_style)
+        return table
 
     def section_header(self, title_text: str, tag_text: str) -> list:
         """
@@ -306,8 +306,8 @@ class ReportTheme:
 
     def severity_header_table(self, left_text: str, right_text: str, bg_color) -> Table:
         data = [[left_text, right_text]]
-        t = Table(data, colWidths=[3 * inch, 3 * inch])
-        t.setStyle(TableStyle([
+        table = Table(data, colWidths=[3 * inch, 3 * inch])
+        table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), bg_color),
             ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor(self.palette[ColorType.BLACK])),
             ("ALIGN", (0, 0), (0, -1), "LEFT"),
@@ -318,5 +318,5 @@ class ReportTheme:
             ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
             ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor(self.palette[ColorType.LIGHT])),
         ]))
-        return t
+        return table
 

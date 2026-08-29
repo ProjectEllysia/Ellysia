@@ -338,13 +338,13 @@ def check_domain_alignment(headers: dict) -> RuleResult:
 
     candidates: dict[str, str] = {}
     if "dkim=pass" in auth:
-        d = _dkim_domain(headers)
-        if d:
-            candidates["dkim"] = d
+        dkim_domain = _dkim_domain(headers)
+        if dkim_domain:
+            candidates["dkim"] = dkim_domain
     if "spf=pass" in auth:
-        mf = _spf_mailfrom_domain(headers)
-        if mf:
-            candidates["spf"] = mf
+        mailfrom_domain = _spf_mailfrom_domain(headers)
+        if mailfrom_domain:
+            candidates["spf"] = mailfrom_domain
 
     if not candidates:
         return RuleResult(
@@ -425,22 +425,22 @@ def check_arc_chain(headers: dict) -> RuleResult:
         )
 
     match = _ARC_CV_RE.search(arc_seal) or _ARC_CV_RE.search(arc_auth_results)
-    cv = match.group(1).lower() if match else None
+    chain_validation = match.group(1).lower() if match else None
 
-    if cv == "pass":
+    if chain_validation == "pass":
         return RuleResult(
             score=2, verdict="pass",
-            details={"cv": cv},
+            details={"cv": chain_validation},
             recommendation=None,
         )
 
-    if cv == "fail":
+    if chain_validation == "fail":
         # Fuera del techo de familia de auth: un hop ARC declarando su
         # propia autenticación rota es un hecho distinto ("un intermediario
         # certificó el problema"), no otra forma de "no autenticado".
         return RuleResult(
             score=CR.get_iris_scoring_weight("arc_chain.fail", -6), verdict="fail",
-            details={"cv": cv},
+            details={"cv": chain_validation},
             recommendation=(
                 "La cadena ARC (Authenticated Received Chain) declara que la "
                 "autenticación de un salto anterior falló (cv=fail). Un intermediario "
@@ -451,7 +451,7 @@ def check_arc_chain(headers: dict) -> RuleResult:
 
     return RuleResult(
         score=0, verdict="neutral",
-        details={"cv": cv or "unknown"},
+        details={"cv": chain_validation or "unknown"},
         recommendation=None,
     )
 
