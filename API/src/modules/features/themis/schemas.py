@@ -44,6 +44,12 @@ class LybraScanRequestSchema(Schema):
     ports = fields.String()
     # Fase 6 "análisis profundo": also launch Nmap/Nikto/Nuclei as independent
     # corroborator scans, fused with Lybra's own findings when read.
+    #
+    # C2: dentro de Python el flag se llama ``is_deep_analysis``, pero esta
+    # clave se queda como "deep" — es el nombre en el cable (lo manda
+    # LybraLaunchPanel.vue) y también el que quedó persistido en la columna
+    # JSON ``arguments`` de los ProgramedScan ya creados. Renombrarla sería un
+    # cambio de ruptura, no un renombrado.
     deep = fields.Boolean(load_default=False)
     timeout = fields.Integer(load_default=120, validate=validate.Range(min=1))
 

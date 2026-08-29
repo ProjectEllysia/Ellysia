@@ -309,7 +309,7 @@ def test_lybra_payload_mode_produces_confirmed_inventory_findings(app, admin_use
         mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.9.9.9", user_id=admin_user.id)
         mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None,
-                       deep=False, services_payload=services)
+                       is_deep_analysis=False, services_payload=services)
 
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
@@ -344,7 +344,7 @@ def test_lybra_payload_mode_surface_tracking_distinguishes_portless_packages(app
         ]
         baseline = mgr._create_scan_record(target="10.9.9.20", user_id=admin_user.id)
         mgr._run_lybra(baseline.id, source_scan_id=None, discover_ports=None,
-                       deep=False, services_payload=baseline_services)
+                       is_deep_analysis=False, services_payload=baseline_services)
 
         with UnitOfWork() as uow:
             tracked = ScanRepository(uow).get_host_services(
@@ -360,7 +360,7 @@ def test_lybra_payload_mode_surface_tracking_distinguishes_portless_packages(app
         ]
         rescan = mgr._create_scan_record(target="10.9.9.20", user_id=admin_user.id)
         mgr._run_lybra(rescan.id, source_scan_id=None, discover_ports=None,
-                       deep=False, services_payload=rescan_services)
+                       is_deep_analysis=False, services_payload=rescan_services)
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(rescan.id)
@@ -391,7 +391,7 @@ def test_lybra_payload_mode_deep_corroborators_require_authorization(app, admin_
         # Not authorized: skipped entirely, no corroborator ids recorded.
         escan = mgr._create_scan_record(target="10.9.9.10", user_id=admin_user.id)
         mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None,
-                       deep=True, services_payload=services)
+                       is_deep_analysis=True, services_payload=services)
         assert calls == []
         with UnitOfWork() as uow:
             escan = ScanRepository(uow).get_by_id(escan.id)
@@ -401,7 +401,7 @@ def test_lybra_payload_mode_deep_corroborators_require_authorization(app, admin_
         AuthorizedTargetManager().add(admin_user.id, "10.9.9.11")
         escan2 = mgr._create_scan_record(target="10.9.9.11", user_id=admin_user.id)
         mgr._run_lybra(escan2.id, source_scan_id=None, discover_ports=None,
-                       deep=True, services_payload=services)
+                       is_deep_analysis=True, services_payload=services)
         assert calls == ["10.9.9.11"]
 
 
