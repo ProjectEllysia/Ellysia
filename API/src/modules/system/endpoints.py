@@ -307,9 +307,9 @@ def taskqueue_update_config(json_data):
     if not isinstance(max_workers, int) or max_workers < 1:
         raise ValidationError("max_workers must be a positive integer")
 
-    cfg = CR.get_full_config()
-    cfg.setdefault("infrastructure", {}).setdefault("taskqueue", {})["max_workers"] = max_workers
-    CR.save_full_config(cfg)
+    config = CR.get_full_config()
+    config.setdefault("infrastructure", {}).setdefault("taskqueue", {})["max_workers"] = max_workers
+    CR.save_full_config(config)
     CR.reload()
     TaskQueue._reset_instance()
     return TaskQueue.get_instance().get_status()

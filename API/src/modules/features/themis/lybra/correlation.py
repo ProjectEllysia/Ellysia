@@ -151,11 +151,11 @@ def merge_findings(findings: List[dict]) -> List[dict]:
         finding = dict(original)
         key = finding.get("dedup_key") or compute_dedup_key(finding)
         finding["dedup_key"] = key
-        src = finding.get("source")
+        source = finding.get("source")
 
         if key not in merged:
             merged[key] = finding
-            sources[key] = [src] if src else []
+            sources[key] = [source] if source else []
             continue
 
         merged_finding = merged[key]
@@ -166,8 +166,8 @@ def merge_findings(findings: List[dict]) -> List[dict]:
         merged_finding["confirmed"] = bool(merged_finding.get("confirmed")) or bool(finding.get("confirmed"))
         merged_finding["in_kev"] = bool(merged_finding.get("in_kev")) or bool(finding.get("in_kev"))
         merged_finding["cve_ids"] = _union_cves(merged_finding.get("cve_ids"), finding.get("cve_ids"))
-        if src and src not in sources[key]:
-            sources[key].append(src)
+        if source and source not in sources[key]:
+            sources[key].append(source)
 
     for key, merged_finding in merged.items():
         if sources[key]:

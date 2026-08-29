@@ -168,13 +168,13 @@ def fingerprint_smb(dialect_revision: int, security_mode: int) -> SmbFingerprint
 
 def _read_exact(sock, n: int) -> bytes:
     """Read up to ``n`` bytes, returning fewer if the connection closes early."""
-    buf = b""
-    while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
+    buffer = b""
+    while len(buffer) < n:
+        chunk = sock.recv(n - len(buffer))
         if not chunk:
             break
-        buf += chunk
-    return buf
+        buffer += chunk
+    return buffer
 
 
 class SmbProbe:

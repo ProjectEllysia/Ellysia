@@ -290,22 +290,22 @@ class GoogleStrategy(ModelStrategy):
         'assistant' → 'model', 'tool' → 'user' (como functionResponse).
         """
         contents = []
-        for msg in messages:
-            if msg["role"] == "system":
+        for message in messages:
+            if message["role"] == "system":
                 continue
-            elif msg["role"] == "assistant":
+            elif message["role"] == "assistant":
                 role = "model"
-            elif msg["role"] == "tool":
+            elif message["role"] == "tool":
                 role = "user"
             else:
-                role = msg["role"]
+                role = message["role"]
 
             parts = []
-            content = msg.get("content", "")
+            content = message.get("content", "")
             if content:
                 parts.append({"text": content})
 
-            message_tool_calls = msg.get("tool_calls")
+            message_tool_calls = message.get("tool_calls")
             if message_tool_calls:
                 for tool_call in message_tool_calls:
                     function_spec = tool_call.get("function", tool_call)

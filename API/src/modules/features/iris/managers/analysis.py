@@ -698,7 +698,7 @@ class IrisManager(TaskTrackingMixin):
             completed_steps = 0
 
             evaluations: List[tuple[str, float, list[str], List[RuleResult]]] = []
-            for ctx in contexts_to_evaluate:
+            for evaluated_context in contexts_to_evaluate:
                 results: List[RuleResult] = []
                 named_results: Dict[str, RuleResult] = {}
 
@@ -708,7 +708,8 @@ class IrisManager(TaskTrackingMixin):
                         return
 
                     try:
-                        rule_input = ctx if rule_def.get("needs_context") else ctx.headers
+                        rule_input = (evaluated_context if rule_def.get("needs_context")
+                                      else evaluated_context.headers)
                         result = rule_def["func"](rule_input)
                     except Exception as e:
                         logger.error(f"Rule '{rule_def['name']}' failed for analysis {analysis_id}: {e}", exc_info=True)

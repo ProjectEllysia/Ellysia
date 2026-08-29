@@ -197,13 +197,13 @@ def _read_exact(sock, n: int) -> bytes:
     Raises:
         ValueError: If the connection closes before ``n`` bytes arrive.
     """
-    buf = b""
-    while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
+    buffer = b""
+    while len(buffer) < n:
+        chunk = sock.recv(n - len(buffer))
         if not chunk:
             raise ValueError("connection closed while reading SSH data")
-        buf += chunk
-    return buf
+        buffer += chunk
+    return buffer
 
 
 def _read_line(sock) -> str:

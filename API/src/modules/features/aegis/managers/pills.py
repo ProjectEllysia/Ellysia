@@ -284,8 +284,8 @@ class AegisManager(TaskTrackingMixin):
         if not document.filename:
             raise ValueError(f"Documento {document_id} no tiene filename")
 
-        cfg = self._read_cfg()
-        path = cfg["output_dir"] / document.filename
+        config = self._read_cfg()
+        path = config["output_dir"] / document.filename
         if not path.exists():
             raise FileNotFoundError(f"Archivo no encontrado: {document.filename}")
 
@@ -294,7 +294,7 @@ class AegisManager(TaskTrackingMixin):
     def delete_document(self, document_id: int) -> None:
         """Elimina el documento de BD y el archivo en disco de forma atómica."""
 
-        cfg = self._read_cfg()
+        config = self._read_cfg()
         try:
             with UnitOfWork() as uow:
                 repo = AegisDocumentRepository(uow)
@@ -303,7 +303,7 @@ class AegisManager(TaskTrackingMixin):
                     raise ValueError(f"Documento {document_id} no existe")
 
                 if document.filename:
-                    file_path = cfg["output_dir"] / document.filename
+                    file_path = config["output_dir"] / document.filename
                     if file_path.exists():
                         import os
                         try:
@@ -406,9 +406,9 @@ class AegisManager(TaskTrackingMixin):
     ) -> None:
         """Orquesta todos los pasos de generación en el thread secundario."""
         with job_context():
-            cfg = self._read_cfg()
+            config = self._read_cfg()
 
-            if not cfg["enabled"]:
+            if not config["enabled"]:
                 raise RuntimeError("Aegis deshabilitado en configuración")
 
             # El campo company es el único requerido en tweaks
@@ -432,7 +432,7 @@ class AegisManager(TaskTrackingMixin):
                     resolved_title = topic.title
 
                 # 2. Carga de referencias de disco
-                reference = self._load_reference_stack(cfg["stack_dir"])
+                reference = self._load_reference_stack(config["stack_dir"])
 
                 # 3. Avisos vigentes — ANTES de generar, no después.
                 #
@@ -466,7 +466,7 @@ class AegisManager(TaskTrackingMixin):
                 # 6. Escritura del archivo de archivo
                 timestamp       = utcnow_naive().strftime("%Y%m%d_%H%M%S")
                 filename = f"{timestamp}_{self.user.id}_{resolved_id}.json"
-                filepath = cfg["output_dir"] / filename
+                filepath = config["output_dir"] / filename
 
                 with open(filepath, "w", encoding="utf-8") as fh:
                     json.dump(content.to_json_dict(document_id, alerts), fh, ensure_ascii=False, indent=2)

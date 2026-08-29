@@ -57,10 +57,10 @@ def check_external_image_tracking(context) -> RuleResult:
     esp_domains = esp_tracker_domains()
 
     findings: list[dict] = []
-    for src in sources:
-        if not src.startswith(("http://", "https://")):
+    for source_url in sources:
+        if not source_url.startswith(("http://", "https://")):
             continue
-        host = url_host(src)
+        host = url_host(source_url)
         if not host:
             continue
         reg = registrable_domain(host)
@@ -68,7 +68,7 @@ def check_external_image_tracking(context) -> RuleResult:
             continue
         if reg in esp_domains or host in esp_domains:
             continue
-        findings.append({"src": src, "host": host, "registrable": reg})
+        findings.append({"src": source_url, "host": host, "registrable": reg})
 
     if not findings:
         return RuleResult(
@@ -238,17 +238,17 @@ def _content_hashes(content: bytes) -> dict[str, str] | None:
 
 def _inspect_real_attachment(att) -> dict | None:
     filename = att.filename or ""
-    ext = _get_extension(filename) if filename else ""
+    extension = _get_extension(filename) if filename else ""
 
-    if ext in macro_extensions():
-        return {"filename": filename, "extension": ext, "reason": "macro_enabled"}
-    if ext in dangerous_extensions():
-        return {"filename": filename, "extension": ext, "reason": "dangerous_extension"}
+    if extension in macro_extensions():
+        return {"filename": filename, "extension": extension, "reason": "macro_enabled"}
+    if extension in dangerous_extensions():
+        return {"filename": filename, "extension": extension, "reason": "dangerous_extension"}
     if filename and _has_double_extension(filename):
-        return {"filename": filename, "extension": ext or "(none)", "reason": "double_extension"}
+        return {"filename": filename, "extension": extension or "(none)", "reason": "double_extension"}
     if att.content_type == "text/html":
         return {"filename": filename or "(html part)", "reason": "html_attachment_possible_smuggling"}
-    if ext in ZIP_EXTENSIONS or att.content_type in ZIP_MIME_TYPES:
+    if extension in ZIP_EXTENSIONS or att.content_type in ZIP_MIME_TYPES:
         if _zip_contains_executable(att.content):
             return {"filename": filename, "reason": "archive_contains_executable"}
     return None
@@ -280,16 +280,16 @@ def _check_headers_fallback(headers: dict) -> RuleResult:
     findings: list[dict] = []
 
     if filename:
-        ext = _get_extension(filename)
-        if ext in dangerous_extensions():
+        extension = _get_extension(filename)
+        if extension in dangerous_extensions():
             findings.append({
-                "filename": filename, "extension": ext,
+                "filename": filename, "extension": extension,
                 "double_extension": _has_double_extension(filename),
                 "source": "content-disposition",
             })
         elif _has_double_extension(filename):
             findings.append({
-                "filename": filename, "extension": ext or "(none)",
+                "filename": filename, "extension": extension or "(none)",
                 "double_extension": True, "source": "content-disposition",
             })
 
