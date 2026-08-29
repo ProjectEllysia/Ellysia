@@ -8,6 +8,32 @@
 > Verificado directamente contra el código en la rama `feature/aegis/campaignes`
 > (2026-08-03), no contra planes anteriores. Cada punto cita fichero y línea.
 
+> ## ⚠️ Estado: este documento es el diagnóstico, no el marcador
+>
+> Las referencias a fichero y línea de aquí abajo son las de **2026-08-03** y muchas ya no
+> resuelven: `thirdparty_scans_managers.py`, `lybra_engine.py`, `lybra_sources.py`,
+> `aegis/managers.py`, `iris/managers.py`, `iris/services/shared.py` y
+> `themis/services/reports.py` ya no existen como tales — se partieron en los paquetes que este
+> mismo documento proponía. Léelo como el porqué de cada cambio, no como el mapa del código
+> actual.
+>
+> **El estado vivo está en el proyecto de GitHub
+> [«Deuda técnica y calidad»](https://github.com/orgs/ProjectEllysia/projects/2)**, un issue por
+> punto.
+>
+> Auditado contra el código el **2026-08-29** (rama `v0.5.11`), suite en verde: **38 de 41
+> puntos cerrados**. Lo que sigue abierto:
+>
+> | Punto | Estado | Qué falta |
+> |---|---|---|
+> | **A11** | Stand By | La alternativa ⚡ está hecha (`tests/unit/test_config_view_paths.py`). El endpoint `GET /system/config-schema` queda aparcado con argumentos, ver §A11. |
+> | **C1** | In Progress | Las abreviaturas con nombre (`mgr`, `doc`, `tq`, `uid`, `fp`, `dist_list`…) están a cero en código real. Quedan ~22 variables de comprensión de una letra (`for f in findings`, `for p in …`). |
+> | **C2** | In Progress | La parte (b) está entera y la (a) casi: falta `deep` → `is_deep_analysis`, que es justo el que el documento señala como peor (viaja por cinco firmas, un schema de la API y los args serializados de la TaskQueue). |
+>
+> Además, `A15` ya no aplica en su forma original: **nginx se sustituyó por Caddy**
+> (`web/Caddyfile`), y el test que ata los prefijos a `run.py` es hoy
+> `API/tests/unit/test_caddy_api_routes.py`.
+
 ---
 
 ## 0. Cómo leer este documento
