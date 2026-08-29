@@ -419,6 +419,27 @@ nada lo obliga a estar fresco. Dos reglas:
 
 ---
 
+## Ramas y versiones
+
+- **`main`** — producción. Solo recibe una rama de versión cuando esa versión sale. Es la rama
+  por defecto del repositorio y la única desde la que despliega `deploy.yml`.
+- **`vX.Y`** (`v0.5`, luego `v0.6`, …) — la línea de trabajo de una versión. Es la rama de
+  integración: el trabajo del día a día sale de aquí y vuelve aquí por PR.
+- **Ramas de trabajo** — `<tipo>/<módulo>/<descripción>` (`refactor/themis/deep-flag-naming`).
+  Salen de la `vX.Y` vigente, vuelven a ella por PR, y se borran al mergear.
+
+**No hay rama `develop`/`develope`.** Existió, y se retiró: no aportaba ningún commit propio
+(estaba contenida entera en la rama de versión), se rodeaba en 9 de cada 12 merges, y duplicaba
+el papel que la `vX.Y` ya cumple. Si ves una referencia a ella en algún sitio, está caducada.
+
+El CI (`tests.yml`) corre en `main` **y** en las `vX.Y` (`branches: [main, 'v[0-9]+.[0-9]+']`).
+`deploy.yml` sigue filtrando por `main`, así que una rama de versión ejecuta tests pero nunca
+despliega.
+
+> Ojo al desfase: la `vX.Y` puede ir por delante de `main` con cosas sin publicar, y el
+> `appVersion` de `SecOpsConfig.json` puede ir por detrás del nombre de la rama. Ninguna de las
+> dos cosas es un error, pero conviene mirarlas antes de afirmar «esto ya está en producción».
+
 ## Deuda técnica
 
 `plans/deuda-tecnica-y-calidad.md` es la auditoría de origen (fechada 2026-08-03) y `plans/` en
