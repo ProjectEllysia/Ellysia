@@ -88,9 +88,9 @@ class AIInput:
     def to_messages(self) -> list[dict]:
         """Construye la lista de mensajes en formato chat (rol/contenido)."""
         messages: list[dict] = [{"role": "system", "content": self.system_prompt}]
-        for ex in self.examples:
-            messages.append({"role": "user", "content": ex.user})
-            messages.append({"role": "assistant", "content": ex.assistant})
+        for example in self.examples:
+            messages.append({"role": "user", "content": example.user})
+            messages.append({"role": "assistant", "content": example.assistant})
         messages.append({"role": "user", "content": self.user_prompt})
         return messages
 

@@ -119,12 +119,12 @@ class NmapAIWriter:
         analysis_context = self._analyze_port_patterns(open_ports)
 
         ports_info = []
-        for op in open_ports:
-            port_num = op.get("port", {}).get("port", "N/A")
-            protocol = op.get("port", {}).get("protocol", "tcp")
-            service = op.get("given_use", "unknown")
-            product = op.get("product", "")
-            version = op.get("version", "")
+        for open_port in open_ports:
+            port_num = open_port.get("port", {}).get("port", "N/A")
+            protocol = open_port.get("port", {}).get("protocol", "tcp")
+            service = open_port.get("given_use", "unknown")
+            product = open_port.get("product", "")
+            version = open_port.get("version", "")
 
             port_type = "sistema" if isinstance(port_num, int) and port_num < 1024 else "usuario"
 
@@ -163,10 +163,10 @@ class NmapAIWriter:
             return {"distribution": "ninguno", "profile_type": "Host sin servicios detectados"}
 
         ports = []
-        for op in open_ports:
-            p = op.get("port", {}).get("port", 0)
-            if isinstance(p, int):
-                ports.append(p)
+        for open_port in open_ports:
+            port_number = open_port.get("port", {}).get("port", 0)
+            if isinstance(port_number, int):
+                ports.append(port_number)
 
         priviliged = sum(1 for port in ports if port < 1024)
         userland = sum(1 for port in ports if port >= 1024)
@@ -370,16 +370,20 @@ class NiktoAIWriter:
 
             # Show the most severe findings first so a CRITICAL/HIGH incident
             # never gets silently dropped behind three LOW ones sharing a control.
-            ranked = sorted(findings, key=lambda f: self._severity_rank(f.get("severity", "INFO")), reverse=True)
+            ranked = sorted(
+                findings,
+                key=lambda finding: self._severity_rank(finding.get("severity", "INFO")),
+                reverse=True,
+            )
 
             unique_issues = []
             seen = set()
-            for f in ranked[:3]:
-                desc = f.get("description", "")[:120]
+            for finding in ranked[:3]:
+                desc = finding.get("description", "")[:120]
                 if desc in seen:
                     continue
                 seen.add(desc)
-                unique_issues.append(f"[{str(f.get('severity', 'INFO')).upper()}] {desc}")
+                unique_issues.append(f"[{str(finding.get('severity', 'INFO')).upper()}] {desc}")
 
             controls_summary[control_name] = {
                 "instancias_detectadas": len(findings),
@@ -429,8 +433,8 @@ class NiktoAIWriter:
         risk_order = ["INFORMATIVO", "BAJO", "MEDIO", "ALTO", "CRÍTICO"]
 
         real_max = "INFORMATIVO"
-        for f in findings:
-            translated = nikto_to_local.get(str(f.get("severity", "INFO")).upper(), "INFORMATIVO")
+        for finding in findings:
+            translated = nikto_to_local.get(str(finding.get("severity", "INFO")).upper(), "INFORMATIVO")
             if risk_order.index(translated) > risk_order.index(real_max):
                 real_max = translated
 

@@ -662,11 +662,11 @@ class LybraEngineManager(ScanManager):
     # _previous_findings_map: usa el default de ScanManager (A6).
 
     @classmethod
-    def _finding_view_dict(cls, f: Finding) -> dict:
-        d = f.snapshot
-        d["id"] = f.id
-        d["state"] = f.state
-        return d
+    def _finding_view_dict(cls, finding: Finding) -> dict:
+        view = finding.snapshot
+        view["id"] = finding.id
+        view["state"] = finding.state
+        return view
 
     def set_finding_state(self, finding_id: int, user_id: int, state: str):
         """Set a finding's lifecycle state (e.g. mark a risk as ``accepted``).

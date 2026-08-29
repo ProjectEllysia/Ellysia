@@ -451,8 +451,8 @@ class AegisAlertFetcher:
 
             # Limpieza de descripción
             desc_text = re.sub(r"<[^>]+>", "", desc_raw).strip()
-            m = re.search(r"Descripción.*?<p>(.*?)</p>", desc_raw, re.DOTALL)
-            summary = html.unescape(m.group(1)) if m else desc_text[:300]
+            match = re.search(r"Descripción.*?<p>(.*?)</p>", desc_raw, re.DOTALL)
+            summary = html.unescape(match.group(1)) if match else desc_text[:300]
 
             # Detección de severidad
             haystack = (title + " " + desc_text).lower()

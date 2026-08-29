@@ -856,11 +856,11 @@ class ScanManager(TaskTrackingMixin, ABC):
         if not user_id or not target:
             return {}
         result: dict = {}
-        for pf in scan_repo.get_previous_findings(user_id, target, self.SCAN_TYPE.value, exclude_scan_id):
-            snapshot = pf.snapshot
-            key = pf.dedup_key or compute_dedup_key(snapshot)
+        for previous_finding in scan_repo.get_previous_findings(user_id, target, self.SCAN_TYPE.value, exclude_scan_id):
+            snapshot = previous_finding.snapshot
+            key = previous_finding.dedup_key or compute_dedup_key(snapshot)
             snapshot["dedup_key"] = key
-            result[key] = {"state": pf.state or "open", "snapshot": snapshot}
+            result[key] = {"state": previous_finding.state or "open", "snapshot": snapshot}
         return result
 
     @abstractmethod

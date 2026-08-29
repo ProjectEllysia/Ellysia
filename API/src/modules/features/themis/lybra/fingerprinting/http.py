@@ -201,7 +201,7 @@ def fingerprint_http(
     product, version = _parse_server_header(server)
     title = _extract_title(response.body)
     evidence = _tech_evidence(response, title, error_resp)
-    technologies = tuple(sig.name for sig in _TECH_SIGNATURES if _signature_matches(sig, evidence))
+    technologies = tuple(signature.name for signature in _TECH_SIGNATURES if _signature_matches(signature, evidence))
     favicon_hash = hashlib.sha256(favicon).hexdigest() if favicon else None
 
     if not product and technologies:

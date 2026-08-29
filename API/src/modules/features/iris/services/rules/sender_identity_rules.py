@@ -107,9 +107,9 @@ def check_display_name_spoof(headers: dict) -> RuleResult:
     brand_entries = brand_trusted_domains()
 
     for keywords, trusted_domains in brand_entries:
-        for kw in keywords:
-            if kw in display_lower:
-                matched_brands.append(kw)
+        for keyword in keywords:
+            if keyword in display_lower:
+                matched_brands.append(keyword)
                 break
 
     if not matched_brands:
@@ -120,7 +120,7 @@ def check_display_name_spoof(headers: dict) -> RuleResult:
         )
 
     for keywords, trusted_domains in brand_entries:
-        if any(kw in matched_brands for kw in keywords):
+        if any(keyword in matched_brands for keyword in keywords):
             if _domain_matches_trusted(domain, trusted_domains):
                 return RuleResult(
                     score=5, verdict="pass",

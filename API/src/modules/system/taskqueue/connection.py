@@ -23,9 +23,9 @@ _logger = logging.getLogger(__name__)
 
 def ping_redis() -> bool:
     try:
-        r = redis_lib.Redis(**CR.redis_config().connection_kwargs())
-        r.ping()
-        r.close()
+        redis_client = redis_lib.Redis(**CR.redis_config().connection_kwargs())
+        redis_client.ping()
+        redis_client.close()
         _logger.info("Redis conectado correctamente")
     except Exception as e:
         _logger.warning("Redis no disponible — la cola de tareas no funcionara: %s", e)

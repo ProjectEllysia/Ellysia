@@ -83,13 +83,13 @@ def fingerprint_mysql(payload: bytes) -> MysqlFingerprint:
 def _read_exact(sock, n: int) -> bytes:
     """Read up to ``n`` bytes, returning fewer if the connection closes early
     (no exception — the caller checks the returned length)."""
-    buf = b""
-    while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
+    buffer = b""
+    while len(buffer) < n:
+        chunk = sock.recv(n - len(buffer))
         if not chunk:
             break
-        buf += chunk
-    return buf
+        buffer += chunk
+    return buffer
 
 
 class MysqlProbe:

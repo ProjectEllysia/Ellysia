@@ -148,16 +148,16 @@ def is_free_provider(domain: Optional[str]) -> bool:
 def levenshtein(a: str, b: str) -> int:
     """Distancia de edición clásica entre dos strings (DP en O(len_a*len_b))."""
     m, n = len(a), len(b)
-    dp = list(range(n + 1))
+    distances = list(range(n + 1))
     for i in range(1, m + 1):
-        prev = dp[0]
-        dp[0] = i
+        prev = distances[0]
+        distances[0] = i
         for j in range(1, n + 1):
-            temp = dp[j]
+            temp = distances[j]
             cost = 0 if a[i - 1] == b[j - 1] else 1
-            dp[j] = min(dp[j] + 1, dp[j - 1] + 1, prev + cost)
+            distances[j] = min(distances[j] + 1, distances[j - 1] + 1, prev + cost)
             prev = temp
-    return dp[n]
+    return distances[n]
 
 
 # Adyacencia física de teclas en un layout QWERTY (la misma tabla que usa
@@ -419,7 +419,7 @@ def analyze_url(href: str, sender_domain: Optional[str] = None,
     )
     if is_multitenant_host or (host_reg != sender_domain and registrable_label(host) not in brands):
         path_and_query = f"{parsed.path} {parsed.query}".lower()
-        kw_hits = [kw for kw in phishing_keywords if kw in path_and_query]
+        kw_hits = [keyword for keyword in phishing_keywords if keyword in path_and_query]
         if kw_hits:
             if is_multitenant_host:
                 finding_type = "multitenant_credential_page"

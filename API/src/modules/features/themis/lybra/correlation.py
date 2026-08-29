@@ -148,30 +148,30 @@ def merge_findings(findings: List[dict]) -> List[dict]:
     merged: Dict[str, dict] = {}
     sources: Dict[str, list] = {}
     for original in findings:
-        f = dict(original)
-        key = f.get("dedup_key") or compute_dedup_key(f)
-        f["dedup_key"] = key
-        src = f.get("source")
+        finding = dict(original)
+        key = finding.get("dedup_key") or compute_dedup_key(finding)
+        finding["dedup_key"] = key
+        source = finding.get("source")
 
         if key not in merged:
-            merged[key] = f
-            sources[key] = [src] if src else []
+            merged[key] = finding
+            sources[key] = [source] if source else []
             continue
 
-        m = merged[key]
-        if (f.get("qod") or 0) > (m.get("qod") or 0):
-            m["qod"] = f.get("qod")
-            m["title"] = f.get("title", m.get("title"))
-            m["cvss_score"] = f.get("cvss_score", m.get("cvss_score"))
-        m["confirmed"] = bool(m.get("confirmed")) or bool(f.get("confirmed"))
-        m["in_kev"] = bool(m.get("in_kev")) or bool(f.get("in_kev"))
-        m["cve_ids"] = _union_cves(m.get("cve_ids"), f.get("cve_ids"))
-        if src and src not in sources[key]:
-            sources[key].append(src)
+        merged_finding = merged[key]
+        if (finding.get("qod") or 0) > (merged_finding.get("qod") or 0):
+            merged_finding["qod"] = finding.get("qod")
+            merged_finding["title"] = finding.get("title", merged_finding.get("title"))
+            merged_finding["cvss_score"] = finding.get("cvss_score", merged_finding.get("cvss_score"))
+        merged_finding["confirmed"] = bool(merged_finding.get("confirmed")) or bool(finding.get("confirmed"))
+        merged_finding["in_kev"] = bool(merged_finding.get("in_kev")) or bool(finding.get("in_kev"))
+        merged_finding["cve_ids"] = _union_cves(merged_finding.get("cve_ids"), finding.get("cve_ids"))
+        if source and source not in sources[key]:
+            sources[key].append(source)
 
-    for key, m in merged.items():
+    for key, merged_finding in merged.items():
         if sources[key]:
-            m["source"] = ",".join(sorted(set(sources[key])))
+            merged_finding["source"] = ",".join(sorted(set(sources[key])))
     return list(merged.values())
 
 
@@ -206,18 +206,18 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict]) -> List[dict
         finding for each issue that has just disappeared.
     """
     current_keys = set()
-    for f in current:
-        key = f["dedup_key"]
+    for finding in current:
+        key = finding["dedup_key"]
         current_keys.add(key)
         prev = previous.get(key)
         if prev is None:
-            f["state"] = "open"
+            finding["state"] = "open"
         elif prev["state"] == "accepted":
-            f["state"] = "accepted"            # the user's decision is sticky
+            finding["state"] = "accepted"            # the user's decision is sticky
         elif prev["state"] == "fixed":
-            f["state"] = "regressed"           # was gone, has come back
+            finding["state"] = "regressed"           # was gone, has come back
         else:
-            f["state"] = "open"
+            finding["state"] = "open"
 
     carried: List[dict] = []
     for key, prev in previous.items():

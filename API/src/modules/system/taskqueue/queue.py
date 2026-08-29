@@ -697,12 +697,12 @@ class TaskQueue:
             for queue_name in QueueRegistry.names():
                 clean_worker_registry(self._queue_for(queue_name))
             alive = 0
-            for w in Worker.all(connection=self._redis):
-                if self._worker_alive(w.name):
+            for worker in Worker.all(connection=self._redis):
+                if self._worker_alive(worker.name):
                     alive += 1
                 else:
                     try:
-                        self._redis.srem("rq:workers", w.key)
+                        self._redis.srem("rq:workers", worker.key)
                     except Exception:
                         pass
             return alive

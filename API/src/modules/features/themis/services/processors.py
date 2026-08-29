@@ -176,12 +176,12 @@ class NmapResultProcessor(ScanResultProcessor):
 
             addresses = {}
             vendor = {}
-            for a in host.findall("address"):
-                atype = a.get("addrtype", "")
-                addr_val = a.get("addr", "")
+            for address_node in host.findall("address"):
+                atype = address_node.get("addrtype", "")
+                addr_val = address_node.get("addr", "")
                 addresses[atype] = addr_val
-                if atype == "mac" and a.get("vendor"):
-                    vendor[addr_val] = a.get("vendor", "")
+                if atype == "mac" and address_node.get("vendor"):
+                    vendor[addr_val] = address_node.get("vendor", "")
 
             status_el = host.find("status")
             status = {
@@ -192,8 +192,8 @@ class NmapResultProcessor(ScanResultProcessor):
             hostnames = []
             hostnames_el = host.find("hostnames")
             if hostnames_el is not None:
-                for hn in hostnames_el.findall("hostname"):
-                    hostnames.append({"name": hn.get("name", ""), "type": hn.get("type", "")})
+                for hostname_node in hostnames_el.findall("hostname"):
+                    hostnames.append({"name": hostname_node.get("name", ""), "type": hostname_node.get("type", "")})
             if not hostnames:
                 hostnames.append({"name": ip, "type": "PTR"})
 

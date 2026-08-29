@@ -698,7 +698,7 @@ class IrisManager(TaskTrackingMixin):
             completed_steps = 0
 
             evaluations: List[tuple[str, float, list[str], List[RuleResult]]] = []
-            for ctx in contexts_to_evaluate:
+            for evaluated_context in contexts_to_evaluate:
                 results: List[RuleResult] = []
                 named_results: Dict[str, RuleResult] = {}
 
@@ -708,7 +708,8 @@ class IrisManager(TaskTrackingMixin):
                         return
 
                     try:
-                        rule_input = ctx if rule_def.get("needs_context") else ctx.headers
+                        rule_input = (evaluated_context if rule_def.get("needs_context")
+                                      else evaluated_context.headers)
                         result = rule_def["func"](rule_input)
                     except Exception as e:
                         logger.error(f"Rule '{rule_def['name']}' failed for analysis {analysis_id}: {e}", exc_info=True)
@@ -858,8 +859,8 @@ class IrisManager(TaskTrackingMixin):
             return named_results.get(name)
 
         def verdict_is(name: str, *verdicts: str) -> bool:
-            r = res(name)
-            return r is not None and r.verdict in verdicts
+            rule_result = res(name)
+            return rule_result is not None and rule_result.verdict in verdicts
 
         # ARC (RFC 8617): a legitimate forwarding intermediary (mailing
         # list, forwarder) that validated ("cv=pass") the original

@@ -160,9 +160,9 @@ class IrisReportTheme:
 
     def kv_table(self, data, col_widths):
         """Create a key-value style table."""
-        t = Table(data, colWidths=col_widths)
-        t.setStyle(self.kv_table_style)
-        return t
+        table = Table(data, colWidths=col_widths)
+        table.setStyle(self.kv_table_style)
+        return table
 
     def section_header(self, title_text: str, tag_text: str) -> list:
         """Return [pill, centered title, accent divider] flowables."""
@@ -375,12 +375,12 @@ class IrisPDFCreator:
 
         subject = _get("subject")
         from_ = _get("from")
-        to = _get("to")
+        to_address = _get("to")
         reply_to = _get("reply-to")
         return_path = _get("return-path")
         date = _get("date")
 
-        if not any([subject, from_, to, reply_to, return_path, date]):
+        if not any([subject, from_, to_address, reply_to, return_path, date]):
             return
 
         elements.extend(theme.section_header("Vista Previa del Correo", "CONTENIDO"))
@@ -407,8 +407,8 @@ class IrisPDFCreator:
             rows.append(["Asunto:", Paragraph(_esc(subject), value_style)])
         if from_:
             rows.append(["De:", Paragraph(_esc(from_), value_style)])
-        if to:
-            rows.append(["Para:", Paragraph(_esc(to), value_style)])
+        if to_address:
+            rows.append(["Para:", Paragraph(_esc(to_address), value_style)])
         if reply_to:
             # Compara solo la dirección (sin el nombre visible) para no
             # marcar como discrepancia un simple cambio de formato.
@@ -508,14 +508,14 @@ class IrisPDFCreator:
             Paragraph("Puntuación", theme.cell_header),
             Paragraph("Veredicto", theme.cell_header),
         ]]
-        for r in rules:
-            score = r.get("score", 0)
+        for rule in rules:
+            score = rule.get("score", 0)
             sign = "+" if score > 0 else ""
             rule_data.append([
-                Paragraph(_esc(r.get("ruleName", "")), theme.cell_left),
-                Paragraph(_esc(r.get("category") or "-"), theme.cell_left),
+                Paragraph(_esc(rule.get("ruleName", "")), theme.cell_left),
+                Paragraph(_esc(rule.get("category") or "-"), theme.cell_left),
                 Paragraph(f"{sign}{score}", theme.cell_center),
-                Paragraph(_esc(r.get("verdict", "")), theme.cell_center),
+                Paragraph(_esc(rule.get("verdict", "")), theme.cell_center),
             ])
 
         rule_table = Table(
@@ -543,8 +543,8 @@ class IrisPDFCreator:
         if flagged:
             elements.append(Paragraph("Detalle de hallazgos", theme.subtitle))
             elements.append(Spacer(1, 0.08 * inch))
-            for r in flagged:
-                text = f"<b>{_esc(r.get('ruleName'))}:</b> {_esc(r.get('recommendation'))}"
+            for flagged_rule in flagged:
+                text = f"<b>{_esc(flagged_rule.get('ruleName'))}:</b> {_esc(flagged_rule.get('recommendation'))}"
                 elements.append(Paragraph(text, theme.body))
             elements.append(Spacer(1, 0.15 * inch))
 
@@ -611,10 +611,11 @@ class IrisPDFCreator:
             elements.append(Spacer(1, 0.15 * inch))
             elements.append(Paragraph("Transiciones sospechosas detectadas", theme.subtitle))
             elements.append(Spacer(1, 0.05 * inch))
-            for t in suspicious:
-                reasons = _esc(", ".join(t.get("reasons") or []))
+            for suspicious_transition in suspicious:
+                reasons = _esc(", ".join(suspicious_transition.get("reasons") or []))
                 elements.append(Paragraph(
-                    f"Salto {_esc(t.get('from'))} → {_esc(t.get('to'))}: {reasons}", theme.body
+                    f"Salto {_esc(suspicious_transition.get('from'))} → "
+                    f"{_esc(suspicious_transition.get('to'))}: {reasons}", theme.body
                 ))
 
     def append_raw_headers(self, elements: list, theme: IrisReportTheme) -> None:

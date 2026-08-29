@@ -770,19 +770,19 @@ class CheckRuntime:
 
     def _finding(self, check: Check, service: Service) -> dict:
         """Build the finding dict for a check that fired against a service."""
-        f = check.finding
+        finding_template = check.finding
         return {
-            "title":        f.get("title", check.id),
+            "title":        finding_template.get("title", check.id),
             "category":     check.category,
             "port":         service.port,
             "service":      service.name or check.service,
             "protocol":     service.protocol,
-            "cve_ids":      f.get("cve_ids"),
+            "cve_ids":      finding_template.get("cve_ids"),
             "source":       "lybra",
             "check_id":     check.check_id,
             "feed_version": check.feed_version or CHECKS_FEED_VERSION,
-            "qod":          f.get("qod", QOD_CONFIRMED),
-            "confirmed":    f.get("confirmed", True),
+            "qod":          finding_template.get("qod", QOD_CONFIRMED),
+            "confirmed":    finding_template.get("confirmed", True),
             "state":        "open",
         }
 

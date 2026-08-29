@@ -80,27 +80,27 @@ class VaultRevisionMismatchError(VaultError):
         self.current_revision = current
         self.provided_revision = provided
         if provided is None:
-            msg = (
+            message = (
                 f"Falta la cabecera If-Match; la revisión actual del vault "
                 f"es {current}"
             )
-            user_msg = (
+            user_facing_message = (
                 "Esta operación exige indicar la revisión del vault "
                 "(cabecera If-Match)."
             )
         else:
-            msg = (
+            message = (
                 f"Revisión de vault obsoleta: el cliente envió {provided} "
                 f"y la actual es {current}"
             )
-            user_msg = (
+            user_facing_message = (
                 "El vault cambió desde otro dispositivo. Recarga y vuelve a "
                 "intentarlo."
             )
         super().__init__(
-            message=msg,
+            message=message,
             details={"currentRevision": current, "yourRevision": provided},
-            user_message=user_msg,
+            user_message=user_facing_message,
         )
 
 

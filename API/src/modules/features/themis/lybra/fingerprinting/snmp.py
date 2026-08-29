@@ -86,10 +86,10 @@ def parse_snmp_sysdescr(reply: bytes) -> Optional[str]:
         (``NULL`` sin valor, ``noSuchObject``/``noSuchInstance``/
         ``endOfMibView``), o si está truncada.
     """
-    idx = reply.find(_SYSDESCR_OID_TLV)
-    if idx == -1:
+    index = reply.find(_SYSDESCR_OID_TLV)
+    if index == -1:
         return None
-    value_tag_offset = idx + len(_SYSDESCR_OID_TLV)
+    value_tag_offset = index + len(_SYSDESCR_OID_TLV)
     if value_tag_offset >= len(reply):
         return None
     tag = reply[value_tag_offset]
