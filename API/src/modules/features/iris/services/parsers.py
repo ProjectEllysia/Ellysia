@@ -220,13 +220,13 @@ def _decode_payload(part: Message) -> str:
 def _extract_links(html: str) -> List[Link]:
     links: List[Link] = []
     seen_hrefs = set()
-    for m in _ANCHOR_RE.finditer(html):
-        href = m.group(1).strip()
-        text = _TAG_RE.sub("", m.group(2)).strip()
+    for match in _ANCHOR_RE.finditer(html):
+        href = match.group(1).strip()
+        text = _TAG_RE.sub("", match.group(2)).strip()
         links.append(Link(href=href, text=text))
         seen_hrefs.add(href)
-    for m in _HREF_RE.finditer(html):
-        href = m.group(1).strip()
+    for match in _HREF_RE.finditer(html):
+        href = match.group(1).strip()
         if href not in seen_hrefs:
             links.append(Link(href=href, text=""))
             seen_hrefs.add(href)
@@ -341,9 +341,9 @@ def parse_raw_message(raw: str) -> MessageContext:
         ``MessageContext`` for why analyzing only the unwrapped inner
         message is unsafe once submissions are no longer human-forwarded.
     """
-    msg = message_from_string(raw)
+    message = message_from_string(raw)
 
-    nested = _find_nested_forward(msg)
+    nested = _find_nested_forward(message)
     if nested is not None:
         # NOTE: deliberately read the wrapper's From/Subject via the
         # already-parsed ``msg`` object, not ``parse_raw_headers(raw)``.
@@ -355,12 +355,12 @@ def parse_raw_message(raw: str) -> MessageContext:
         # whole point of capturing the wrapper's identity.
         context = _message_context_from(nested, nested.as_string())
         context.unwrapped_from_forward = True
-        context.wrapper_from = decode_mime_words(msg.get("from", "") or "")
-        context.wrapper_subject = decode_mime_words(msg.get("subject", "") or "")
-        context.wrapper_context = _message_context_from(msg, raw)
+        context.wrapper_from = decode_mime_words(message.get("from", "") or "")
+        context.wrapper_subject = decode_mime_words(message.get("subject", "") or "")
+        context.wrapper_context = _message_context_from(message, raw)
         return context
 
-    return _message_context_from(msg, raw)
+    return _message_context_from(message, raw)
 
 
 # =============================================================================
@@ -456,9 +456,9 @@ def _hop_timestamp(line: str) -> Optional[datetime]:
 
 def _extract_ip(text: str) -> Optional[str]:
     """Return the first IPv4 literal found in *text*, or ``None``."""
-    m = _IP_RE.search(text)
-    if m:
-        return m.group(1)
+    match = _IP_RE.search(text)
+    if match:
+        return match.group(1)
     # Fallback: bare IPv4 not in brackets, common in HELO/EHLO echoes.
     bare = re.search(r"(?<!\d)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?!\d)", text)
     return bare.group(1) if bare else None
@@ -478,23 +478,23 @@ def _split_tokens(prefix: str) -> List[str]:
         return []
     # Walk char-by-char; collapse "( ... )" into the surrounding token.
     tokens: List[str] = []
-    buf: List[str] = []
+    buffer: List[str] = []
     depth = 0
-    for ch in flat:
-        if ch == "(":
+    for character in flat:
+        if character == "(":
             depth += 1
-            buf.append(ch)
-        elif ch == ")":
+            buffer.append(character)
+        elif character == ")":
             depth = max(0, depth - 1)
-            buf.append(ch)
-        elif ch.isspace() and depth == 0:
-            if buf:
-                tokens.append("".join(buf))
-                buf = []
+            buffer.append(character)
+        elif character.isspace() and depth == 0:
+            if buffer:
+                tokens.append("".join(buffer))
+                buffer = []
         else:
-            buf.append(ch)
-    if buf:
-        tokens.append("".join(buf))
+            buffer.append(character)
+    if buffer:
+        tokens.append("".join(buffer))
     return tokens
 
 
@@ -665,15 +665,15 @@ def build_path(received_headers: List[str]) -> Dict[str, Any]:
     parsed.reverse()
 
     transitions: List[Dict[str, Any]] = []
-    for idx in range(len(parsed) - 1):
-        prev_hop = parsed[idx]
-        curr_hop = parsed[idx + 1]
+    for index in range(len(parsed) - 1):
+        prev_hop = parsed[index]
+        curr_hop = parsed[index + 1]
         # Re-derive timestamps from the original delivery-order lines:
         # after `parsed.reverse()`, parsed[idx] corresponds to
         # received_headers[N-1-idx] where N == len(received_headers).
         n = len(received_headers)
-        prev_line = received_headers[n - 1 - idx]
-        curr_line = received_headers[n - 2 - idx]
+        prev_line = received_headers[n - 1 - index]
+        curr_line = received_headers[n - 2 - index]
         prev_ts = _hop_timestamp(prev_line)
         curr_ts = _hop_timestamp(curr_line)
         delay = _delay_ms(prev_ts, curr_ts)
@@ -685,8 +685,8 @@ def build_path(received_headers: List[str]) -> Dict[str, Any]:
             reasons.append("time_inversion")
 
         transitions.append({
-            "from": idx + 1,           # 1-based hop numbers for the UI
-            "to": idx + 2,
+            "from": index + 1,           # 1-based hop numbers for the UI
+            "to": index + 2,
             "delayMs": delay,
             "suspicious": bool(reasons),
             "reasons": reasons,
@@ -694,10 +694,10 @@ def build_path(received_headers: List[str]) -> Dict[str, Any]:
 
     # Re-stamp each hop with its 1-based index for the UI.
     hops: List[Dict[str, Any]] = []
-    for idx, hop in enumerate(parsed):
+    for index, hop in enumerate(parsed):
         stamped = dict(hop)
-        stamped["hop"] = idx + 1
-        stamped["index"] = len(parsed) - idx  # original index in delivery order
+        stamped["hop"] = index + 1
+        stamped["index"] = len(parsed) - index  # original index in delivery order
         hops.append(stamped)
 
     return {

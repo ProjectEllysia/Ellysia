@@ -523,13 +523,13 @@ class AttributeRepository(BaseRepository[UserAttribute]):
         Raises:
             exc: If the attribute already exists (constraint violation).
         """
-        ua = UserAttribute(
+        user_attribute = UserAttribute(
             user_id=user_id,
             attribute_name=attribute_name,
         )
-        self._session.add(ua)
+        self._session.add(user_attribute)
         self._session.flush()
-        return ua
+        return user_attribute
 
     def add_attributes(
         self,
@@ -550,12 +550,12 @@ class AttributeRepository(BaseRepository[UserAttribute]):
         for attr_name in attribute_names:
             existing = self.get_by_user_and_attribute(user_id, attr_name)
             if existing is None:
-                ua = UserAttribute(
+                user_attribute = UserAttribute(
                     user_id=user_id,
                     attribute_name=attr_name,
                 )
-                self._session.add(ua)
-                created.append(ua)
+                self._session.add(user_attribute)
+                created.append(user_attribute)
         self._session.flush()
         return created
 

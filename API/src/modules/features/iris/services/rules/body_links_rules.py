@@ -132,8 +132,8 @@ def check_qr_code_links(context) -> RuleResult:
         for url in _decode_qr_urls(image.content):
             qr_urls.append(url)
             url_findings, url_score = analyze_url(url, sender_domain)
-            for f in url_findings:
-                findings.append({**f, "source": "qr_code", "filename": image.filename})
+            for url_finding in url_findings:
+                findings.append({**url_finding, "source": "qr_code", "filename": image.filename})
             score += url_score
             seen_types.update(url_finding["type"] for url_finding in url_findings)
 
@@ -207,8 +207,8 @@ def check_compromised_legitimate_domain(context) -> RuleResult:
             continue
 
         evidence: list[str] = []
-        qs = parse_qs(parsed.query, keep_blank_values=True)
-        for param, values in qs.items():
+        query_params = parse_qs(parsed.query, keep_blank_values=True)
+        for param, values in query_params.items():
             if param.lower() in redirect_param_names and values:
                 target = values[0]
                 if target.startswith(("http://", "https://")):

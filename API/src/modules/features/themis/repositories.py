@@ -1153,6 +1153,30 @@ class KbRepository(BaseRepository[CveEntry]):
             .all()
         )
 
+    def knowledge_state(self) -> dict:
+        """The newest date each KB source carries, as the mirror stands right now.
+
+        This is what makes a finding reproducible: two scans of the same target
+        can disagree because the target changed **or** because the knowledge
+        base learned something in between, and without this there is no way to
+        tell those two apart after the fact.
+
+        Read from the data itself rather than from a sync log, because there is
+        no sync log — recording when each source was last synchronised is
+        #302. These dates are the closest honest proxy: not "when did we last
+        ask NVD", but "how recent is the newest thing we know". A source with
+        no rows, or whose rows carry no date, reports ``None``, which is
+        information too and must not be dressed up as a date.
+
+        Returns:
+            ``{"nvd": datetime | None, "kev": ..., "epss": ...}``.
+        """
+        return {
+            "nvd":  self._session.query(func.max(CveEntry.last_modified)).scalar(),
+            "kev":  self._session.query(func.max(KevEntry.date_added)).scalar(),
+            "epss": self._session.query(func.max(EpssScore.scored_at)).scalar(),
+        }
+
     def counts(self) -> dict:
         """Row counts per KB table (for the sync summary / health checks)."""
         return {

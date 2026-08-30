@@ -33,6 +33,7 @@ from ...lybra import (
     default_dissectors,
     agrees_with_nmap,
     HostRateLimiter,
+    kb_feed_version,
     load_checks,
     CheckRuntime,
     HttpProbe,
@@ -99,7 +100,10 @@ class LybraEngineManager(ScanManager):
         tiene un source_scan_id ni un payload de services que programar."""
         kwargs = super().scheduled_run_kwargs(arguments)
         kwargs["discover_ports"] = arguments.get("discover_ports")
-        kwargs["deep"] = bool(arguments.get("deep", False))
+        # La clave de lectura sigue siendo "deep": ``arguments`` es la columna
+        # JSON de ProgramedScan, es decir dato ya persistido. Renombrarla
+        # dejaría sin efecto el flag de los escaneos Lybra ya programados.
+        kwargs["is_deep_analysis"] = bool(arguments.get("deep", False))
         return kwargs
 
     def run_scan(self,
@@ -108,7 +112,7 @@ class LybraEngineManager(ScanManager):
         target: Optional[str] = None,
         services: Optional[List[Service]] = None,
         discover_ports: Optional[list] = None,
-        deep: bool = False,
+        is_deep_analysis: bool = False,
         timeout: int = 120,
         programed_scan_id: Optional[int] = None,
         asset_id: Optional[int] = None,
@@ -131,7 +135,7 @@ class LybraEngineManager(ScanManager):
           no Nmap needed. The caller validates the target (reject private, etc.).
 
         Args:
-            deep: Fase 6 "análisis profundo" — also launch Nmap/Nikto/Nuclei as
+            is_deep_analysis: Fase 6 "análisis profundo" — also launch Nmap/Nikto/Nuclei as
                 independent corroborator scans (fire-and-forget; their Finding
                 rows merge in at read time, see ``format_scan``). In the
                 external-payload mode, this additionally requires ``target`` to
@@ -172,14 +176,14 @@ class LybraEngineManager(ScanManager):
 
         self._task_queue.submit(
             func=LybraEngineManager.execute_lybra_scan, # type: ignore
-            args=(scan_id, source_scan_id, discover_ports, deep, services),
+            args=(scan_id, source_scan_id, discover_ports, is_deep_analysis, services),
             name=f"LybraScan-{scan_id}",
             category=self.TASK_CATEGORY, # type: ignore
             external_id=self.external_id_for(scan_id),
             timeout=timeout + self._scan_timeout_margin,
         )
 
-        mode = source.label + (" + análisis profundo" if deep else "")
+        mode = source.label + (" + análisis profundo" if is_deep_analysis else "")
         logger.info(f"Escaneo Lybra {scan_id} iniciado ({mode})")
         return scan_id  # type: ignore
 
@@ -188,7 +192,7 @@ class LybraEngineManager(ScanManager):
         scan_id: int,
         source_scan_id: Optional[int] = None,
         discover_ports: Optional[list] = None,
-        deep: bool = False,
+        is_deep_analysis: bool = False,
         services: Optional[List[Service]] = None
     ) -> None:
         """Entry point submitted to the TaskQueue. Runs the engine in the worker."""
@@ -198,7 +202,7 @@ class LybraEngineManager(ScanManager):
                 scan_id,
                 source_scan_id,
                 discover_ports,
-                deep,
+                is_deep_analysis,
                 services,
             )
 
@@ -207,7 +211,7 @@ class LybraEngineManager(ScanManager):
         scan_id: int,
         source_scan_id: Optional[int] = None,
         discover_ports: Optional[list] = None,
-        deep: bool = False,
+        is_deep_analysis: bool = False,
         services_payload: Optional[List[Service]] = None,
     ) -> None:
         """Resolve services (from Nmap, own discovery, or a payload), detect, persist.
@@ -272,6 +276,7 @@ class LybraEngineManager(ScanManager):
                     kev_lookup=lambda cve_id: kb_repo.get_kev(cve_id) is not None,
                     epss_lookup=lambda cve_id: getattr(kb_repo.get_epss(cve_id), "score", None),
                     product_alias_lookup=kb_repo.resolve_product_alias,
+                    feed_version=kb_feed_version(kb_repo.knowledge_state()),
                 )
                 findings_data = engine.analyze(services)
                 findings_data.extend(fingerprint_findings)
@@ -281,7 +286,7 @@ class LybraEngineManager(ScanManager):
                 findings_data.extend(self._run_active_checks(source_target, services))
 
             deep_scan_ids: list = []
-            if deep and source_target:
+            if is_deep_analysis and source_target:
                 if source.deep_requires_authorization and not is_target_authorized:
                     logger.info(
                         f"Análisis profundo omitido para el escaneo Lybra {scan_id}: objetivo no autorizado"
@@ -659,11 +664,11 @@ class LybraEngineManager(ScanManager):
     # _previous_findings_map: usa el default de ScanManager (A6).
 
     @classmethod
-    def _finding_view_dict(cls, f: Finding) -> dict:
-        d = f.snapshot
-        d["id"] = f.id
-        d["state"] = f.state
-        return d
+    def _finding_view_dict(cls, finding: Finding) -> dict:
+        view = finding.snapshot
+        view["id"] = finding.id
+        view["state"] = finding.state
+        return view
 
     def set_finding_state(self, finding_id: int, user_id: int, state: str):
         """Set a finding's lifecycle state (e.g. mark a risk as ``accepted``).
@@ -828,6 +833,8 @@ class LybraEngineManager(ScanManager):
             "target": scan.target,
             "sourceScanId": scan.source_scan_id,
             "assetId": scan.asset_id,
+            # "deep"/"deepScanIds" son claves de respuesta: contrato de la API,
+            # no acompañan al renombrado de ``is_deep_analysis``.
             "deep": bool(deep_scan_ids),
             "deepScanIds": deep_scan_ids,
             "exposure": exposure,

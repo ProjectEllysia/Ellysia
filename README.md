@@ -698,5 +698,5 @@ Config is read through frozen dataclasses bound to a branch of the tree (`@confi
 - `.env` files contain credentials — **never commit them**. `API/.env` is in `.gitignore`.
 - `API/src/data/` and `docs/` are gitignored (scan outputs, generated PDFs).
 - PostgreSQL uses port **15432** locally (not standard 5432).
-- `themis/services/tasks.py` defines its own `TaskStatus` enum — distinct from `taskqueue.TaskStatus`. Don't conflate them.
-- The API version is declared as `appVersion` in `SecOpsConfig.json` (currently `0.5.9`, read by `CR.get_app_version()`).
+- There is a single `TaskStatus` enum, in `system/taskqueue/task.py`; `themis/services/tasks.py` imports it rather than defining its own.
+- The API version is declared as `appVersion` in `SecOpsConfig.json` (currently `0.5.10`, read by `CR.get_app_version()`).

@@ -367,9 +367,9 @@ def check_received_path_anomaly(context) -> RuleResult:
             "long_chain": "cadena Received inusualmente larga",
             "missing_timestamps": "algunos hops no exponen timestamp parseable",
         }
-        msg = "; ".join(reasons[unique_signal] for unique_signal in unique_signals)
+        message = "; ".join(reasons[unique_signal] for unique_signal in unique_signals)
         recommendation = (
-            "El recorrido Received presenta anomalías: " + msg + "."
+            "El recorrido Received presenta anomalías: " + message + "."
         )
 
     details = {

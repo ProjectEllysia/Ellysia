@@ -24,7 +24,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional, Tuple
 
-from .kb import load_product_aliases, normalize_cpe_to_23, normalize_product_name, parse_cpe23
+from .kb import (
+    load_product_aliases,
+    normalize_cpe_to_23,
+    normalize_product_name,
+    parse_cpe23,
+    split_distro_version,
+)
 
 
 # Quality of Detection for a bare "the port is open" observation. It is low
@@ -132,6 +138,16 @@ class LybraEngine:
             ``CpeMatch`` rows (Fase I-b, paso 2), consulted only when neither an
             embedded CPE nor :data:`CPE_PRODUCT_OVERRIDES` resolved the service.
             ``None`` disables this third strategy, leaving the first two.
+        feed_version: The reproducibility mark stamped on every finding this
+            engine emits. The caller passes one describing the state of the
+            knowledge base the findings were resolved against; omitting it
+            keeps :data:`FEED_VERSION`, the constant every stored finding
+            carried before this became injectable.
+
+            Why it is injected and not read here: the mark describes the
+            contents of the database, and this package is deliberately free of
+            the ORM. The manager knows the KB's state; the engine only stamps
+            what it is told.
     """
 
     FEED_VERSION = "lybra-0"
@@ -142,11 +158,13 @@ class LybraEngine:
         kev_lookup: Optional[Callable[[str], bool]] = None,
         epss_lookup: Optional[Callable[[str], Optional[float]]] = None,
         product_alias_lookup: Optional[Callable[[str], Optional[Tuple[str, str]]]] = None,
+        feed_version: Optional[str] = None,
     ) -> None:
         self._cve_lookup = cve_lookup
         self._kev_lookup = kev_lookup
         self._epss_lookup = epss_lookup
         self._product_alias_lookup = product_alias_lookup
+        self._feed_version = feed_version or self.FEED_VERSION
 
     def analyze(self, services: Iterable[Service]) -> List[dict]:
         """Produce the findings for a set of services.
@@ -193,11 +211,18 @@ class LybraEngine:
         banner guess, so it earns a higher ``qod`` and is born ``confirmed`` —
         there is no back-port ambiguity to hedge against when the version came
         straight from the package manager.
+
+        When the discovered version is a distro package version, the title says
+        which upstream release it was matched as. Otherwise the finding is
+        unexplainable on its face: nothing in it would account for why a host
+        running ``2.4.49-1ubuntu1`` is reported against a CVE whose range ends
+        at ``2.4.49``, and "the matcher normalized it" is not something a
+        reader can be expected to know.
         """
         cve_id = cve.cve_id
         is_verified = service.origin == "inventory"
         return {
-            "title":        f"{service.label} — {cve_id}",
+            "title":        f"{self._version_label(service)} — {cve_id}",
             "category":     "outdated_software",
             "port":         service.port,
             "service":      service.name or service.product or None,
@@ -211,12 +236,33 @@ class LybraEngine:
             "required_os":  getattr(cve, "required_os", None),
             "source":       "lybra",
             "check_id":     "lybra:version-match@1",
-            "feed_version": self.FEED_VERSION,
+            "feed_version": self._feed_version,
             "qod":          QOD_INVENTORY_MATCH if is_verified else QOD_VERSION_MATCH,
             "confirmed":    is_verified,   # a network-inferred match stays a hypothesis; Fase R confirms it actively
             "cpe_resolved": True,   # this finding only exists because resolution succeeded
             "state":        "open",
         }
+
+    @staticmethod
+    def _version_label(service: Service) -> str:
+        """The service's label, naming the upstream release when they differ.
+
+        ``apache2 1:2.4.49-1ubuntu1`` becomes
+        ``apache2 1:2.4.49-1ubuntu1 (upstream 2.4.49)``. A vendor banner, an
+        NVD-shaped version or anything else that carries no epoch or revision
+        is left exactly as it was — the note only appears where there is
+        actually something to explain.
+
+        Args:
+            service: The service the finding is about.
+
+        Returns:
+            The label to put in the finding's title.
+        """
+        _epoch, upstream, _revision = split_distro_version(service.version or "")
+        if not upstream or upstream == (service.version or "").strip():
+            return service.label
+        return f"{service.label} (upstream {upstream})"
 
     def _informational_finding(self, service: Service, resolved) -> dict:
         """Build the baseline informational finding for one service.
@@ -248,7 +294,7 @@ class LybraEngine:
             "cpe":          normalize_cpe_to_23(service.cpe) if service.cpe else None,
             "source":       "lybra",
             "check_id":     "lybra:open-port@1",
-            "feed_version": self.FEED_VERSION,
+            "feed_version": self._feed_version,
             "qod":          QOD_OPEN_PORT,
             "confirmed":    False,
             "cpe_resolved": resolved is not None,
@@ -272,15 +318,15 @@ def services_from_open_ports(open_ports: Iterable) -> List[Service]:
         The corresponding list of :class:`Service` values.
     """
     services: List[Service] = []
-    for op in open_ports:
-        port, protocol = _split_protocol(getattr(getattr(op, "port", None), "protocol", ""))
+    for open_port in open_ports:
+        port, protocol = _split_protocol(getattr(getattr(open_port, "port", None), "protocol", ""))
         services.append(Service(
             port=port,
             protocol=protocol,
-            name=(op.given_use or "").strip(),
-            product=(op.product or "").strip(),
-            version=(op.version or "").strip(),
-            cpe=(op.cpe or None),
+            name=(open_port.given_use or "").strip(),
+            product=(open_port.product or "").strip(),
+            version=(open_port.version or "").strip(),
+            cpe=(open_port.cpe or None),
         ))
     return services
 

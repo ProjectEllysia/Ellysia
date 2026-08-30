@@ -55,7 +55,14 @@ _DIALECT_LABELS = {
 }
 
 # SMB2_NEGOTIATE_SIGNING_REQUIRED (MS-SMB2 §2.2.4, SecurityMode bit 0x0002).
-_SIGNING_REQUIRED_BIT = 0x0002
+#
+# Público a propósito: es el hecho de seguridad que el servidor declara sobre
+# sí mismo, y quien tenga que decidir sobre él —el fingerprint de aquí abajo,
+# el plugin `smb-signing-not-required` de ``script_checks``— debe leer este
+# bit y no la etiqueta legible que se deriva de él. Una etiqueta es prosa para
+# humanos; convertirla en el protocolo entre dos piezas de código hace que
+# retocar el texto apague un check en silencio.
+SIGNING_REQUIRED_BIT = 0x0002
 
 _SMB2_HEADER_LEN = 64
 _PROTOCOL_ID = b"\xfeSMB"
@@ -157,7 +164,7 @@ def fingerprint_smb(dialect_revision: int, security_mode: int) -> SmbFingerprint
     version = _DIALECT_LABELS.get(dialect_revision)
     if version is None:
         return SmbFingerprint(product=None, version=None, confidence=0.0)
-    signing_required = bool(security_mode & _SIGNING_REQUIRED_BIT)
+    signing_required = bool(security_mode & SIGNING_REQUIRED_BIT)
     product = "SMB2" if signing_required else "SMB2 (firma no requerida)"
     return SmbFingerprint(product=product, version=version, confidence=0.9)
 
@@ -168,13 +175,13 @@ def fingerprint_smb(dialect_revision: int, security_mode: int) -> SmbFingerprint
 
 def _read_exact(sock, n: int) -> bytes:
     """Read up to ``n`` bytes, returning fewer if the connection closes early."""
-    buf = b""
-    while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
+    buffer = b""
+    while len(buffer) < n:
+        chunk = sock.recv(n - len(buffer))
         if not chunk:
             break
-        buf += chunk
-    return buf
+        buffer += chunk
+    return buffer
 
 
 class SmbProbe:

@@ -284,8 +284,8 @@ class AegisManager(TaskTrackingMixin):
         if not document.filename:
             raise ValueError(f"Documento {document_id} no tiene filename")
 
-        cfg = self._read_cfg()
-        path = cfg["output_dir"] / document.filename
+        config = self._read_cfg()
+        path = config["output_dir"] / document.filename
         if not path.exists():
             raise FileNotFoundError(f"Archivo no encontrado: {document.filename}")
 
@@ -294,7 +294,7 @@ class AegisManager(TaskTrackingMixin):
     def delete_document(self, document_id: int) -> None:
         """Elimina el documento de BD y el archivo en disco de forma atómica."""
 
-        cfg = self._read_cfg()
+        config = self._read_cfg()
         try:
             with UnitOfWork() as uow:
                 repo = AegisDocumentRepository(uow)
@@ -303,7 +303,7 @@ class AegisManager(TaskTrackingMixin):
                     raise ValueError(f"Documento {document_id} no existe")
 
                 if document.filename:
-                    file_path = cfg["output_dir"] / document.filename
+                    file_path = config["output_dir"] / document.filename
                     if file_path.exists():
                         import os
                         try:
@@ -406,9 +406,9 @@ class AegisManager(TaskTrackingMixin):
     ) -> None:
         """Orquesta todos los pasos de generación en el thread secundario."""
         with job_context():
-            cfg = self._read_cfg()
+            config = self._read_cfg()
 
-            if not cfg["enabled"]:
+            if not config["enabled"]:
                 raise RuntimeError("Aegis deshabilitado en configuración")
 
             # El campo company es el único requerido en tweaks
@@ -432,7 +432,7 @@ class AegisManager(TaskTrackingMixin):
                     resolved_title = topic.title
 
                 # 2. Carga de referencias de disco
-                reference = self._load_reference_stack(cfg["stack_dir"])
+                reference = self._load_reference_stack(config["stack_dir"])
 
                 # 3. Avisos vigentes — ANTES de generar, no después.
                 #
@@ -464,9 +464,9 @@ class AegisManager(TaskTrackingMixin):
                 self._persist_alerts_atomic(document_id, alerts)
 
                 # 6. Escritura del archivo de archivo
-                ts       = utcnow_naive().strftime("%Y%m%d_%H%M%S")
-                filename = f"{ts}_{self.user.id}_{resolved_id}.json"
-                filepath = cfg["output_dir"] / filename
+                timestamp       = utcnow_naive().strftime("%Y%m%d_%H%M%S")
+                filename = f"{timestamp}_{self.user.id}_{resolved_id}.json"
+                filepath = config["output_dir"] / filename
 
                 with open(filepath, "w", encoding="utf-8") as fh:
                     json.dump(content.to_json_dict(document_id, alerts), fh, ensure_ascii=False, indent=2)
@@ -647,21 +647,21 @@ class AegisManager(TaskTrackingMixin):
 
         files = sorted(stack_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
         contents = []
-        for f in files[:3]:
+        for stack_file in files[:3]:
             try:
-                content = f.read_text(encoding="utf-8")
+                content = stack_file.read_text(encoding="utf-8")
                 if len(content) > 50_000:
                     content = content[:50_000] + "\n... [truncado]"
                 contents.append(content)
             except Exception as exc:
-                logger.warning(f"No se pudo leer {f}: {exc}", exc_info=True)
+                logger.warning(f"No se pudo leer {stack_file}: {exc}", exc_info=True)
 
         return "\n\n---\n\n".join(contents)
 
     def _create_pending_document(self, topic_id: int) -> int:
         """Crea un registro AegisDocument en estado 'pending' y devuelve su ID."""
-        ts = utcnow_naive().strftime("%Y%m%d_%H%M%S")
-        placeholder = f"pending_{ts}_{self.user.id}_{topic_id}"
+        timestamp = utcnow_naive().strftime("%Y%m%d_%H%M%S")
+        placeholder = f"pending_{timestamp}_{self.user.id}_{topic_id}"
 
         document = AegisDocument(
             title=placeholder[:64],

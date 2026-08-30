@@ -372,7 +372,9 @@ def start_nuclei_scan(data):
 def start_lybra_scan(data):
     """Lanzar un escaneo Lybra: sobre un Nmap previo, o autodescubriendo."""
     timeout = data["timeout"]
-    deep = data.get("deep", False)
+    # La clave JSON sigue siendo "deep": es contrato de la API (la manda
+    # LybraLaunchPanel.vue) y no acompaña al renombrado del identificador.
+    is_deep_analysis = data.get("deep", False)
     source_scan_id = data.get("sourceScanId")
     user = get_current_user()
     manager = LybraEngineManager()
@@ -386,8 +388,8 @@ def start_lybra_scan(data):
                 message="El escaneo fuente debe ser un escaneo Nmap",
                 value=source_scan_id,
             )
-        scan_id = manager.run_scan(user_id=user.id, source_scan_id=source_scan_id, deep=deep, timeout=timeout)
-        logger.info(f"Lybra lanzado: ID={scan_id} fuente={source_scan_id} deep={deep} user={user.username}")
+        scan_id = manager.run_scan(user_id=user.id, source_scan_id=source_scan_id, is_deep_analysis=is_deep_analysis, timeout=timeout)
+        logger.info(f"Lybra lanzado: ID={scan_id} fuente={source_scan_id} deep={is_deep_analysis} user={user.username}")
     else:
         # Autodescubrimiento: valida el objetivo (rechaza IPs privadas, etc.)
         # igual que un escaneo Nmap, ya que el transporte propio toca el objetivo.
@@ -403,10 +405,10 @@ def start_lybra_scan(data):
             user_id=user.id, 
             target=target, 
             discover_ports=discover_ports,
-            deep=deep, 
+            is_deep_analysis=is_deep_analysis,
             timeout=timeout
         )
-        logger.info(f"Lybra lanzado: ID={scan_id} autodescubrimiento target={target} deep={deep} user={user.username}")
+        logger.info(f"Lybra lanzado: ID={scan_id} autodescubrimiento target={target} deep={is_deep_analysis} user={user.username}")
 
     return {
         "message": "Escaneo Lybra iniciado correctamente",

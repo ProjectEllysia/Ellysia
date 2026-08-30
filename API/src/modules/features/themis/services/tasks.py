@@ -36,15 +36,15 @@ def _kill_process_tree(proc: Optional[subprocess.Popen], timeout: float = 3.0) -
     except psutil.NoSuchProcess:
         return
     targets = parent.children(recursive=True) + [parent]
-    for p in targets:
+    for process in targets:
         try:
-            p.terminate()
+            process.terminate()
         except psutil.NoSuchProcess:
             pass
     _, alive = psutil.wait_procs(targets, timeout=timeout)
-    for p in alive:
+    for process in alive:
         try:
-            p.kill()
+            process.kill()
         except psutil.NoSuchProcess:
             pass
 

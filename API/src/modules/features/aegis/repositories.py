@@ -282,8 +282,8 @@ class AegisDocumentRepository(DocumentRepository[AegisDocument]):
         Returns:
             Created AegisDocument instance.
         """
-        ts = utcnow_naive().strftime("%Y%m%d_%H%M%S")
-        placeholder = f"pending_{ts}_{user_id}_{topic_id}"
+        timestamp = utcnow_naive().strftime("%Y%m%d_%H%M%S")
+        placeholder = f"pending_{timestamp}_{user_id}_{topic_id}"
 
         document = AegisDocument(
             title=placeholder[:64],

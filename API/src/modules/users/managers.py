@@ -86,16 +86,16 @@ MFA_CHALLENGE_PURPOSE_PASSWORD_RESET = "password_reset"
 _PASSWORD_RESET_COOLDOWN_MINUTES = 2
 
 
-def _to_utc_epoch(dt: Optional[datetime]) -> Optional[int]:
+def _to_utc_epoch(moment: Optional[datetime]) -> Optional[int]:
     """Convierte un datetime *naive en UTC* (como ``utcnow_naive()``) a epoch
     en segundos, de forma consistente con cómo PyJWT codifica ``iat``/``exp``
     (siempre tratando el valor como UTC). Devuelve ``None`` si ``dt`` es ``None``.
     """
-    if dt is None:
+    if moment is None:
         return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return int(dt.timestamp())
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return int(moment.timestamp())
 
 class UserManager:
     """
@@ -155,10 +155,10 @@ class UserManager:
 
             if needs_rehash:
                 with UnitOfWork() as uow:
-                    u = UserRepository(uow).get_by_id(user.id)
-                    if u is not None:
-                        u.password_hash = hash_password(password)
-                        u.password_salt = ""
+                    stored_user = UserRepository(uow).get_by_id(user.id)
+                    if stored_user is not None:
+                        stored_user.password_hash = hash_password(password)
+                        stored_user.password_salt = ""
                 logger.info(f"Hash actualizado a Argon2 para usuario '{username}'")
 
             logger.info(f"Credenciales válidas para '{username}' (ID: {user.id})")

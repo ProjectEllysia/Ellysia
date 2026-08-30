@@ -136,7 +136,7 @@ def test_deep_self_discovery_launches_three_with_http_service(app, admin_user, m
     with app.app_context():
         mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.9", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None, deep=True)
+        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None, is_deep_analysis=True)
 
         with UnitOfWork() as uow:
             escan = ScanRepository(uow).get_by_id(escan.id)
@@ -153,7 +153,7 @@ def test_deep_skips_nmap_when_source_scan_id_present(app, admin_user, monkeypatc
     with app.app_context():
         mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=True)
+        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, is_deep_analysis=True)
 
     # A fresh Nmap corroborator would be redundant: Lybra already has Nmap ports.
     assert "nmap" not in calls
@@ -168,7 +168,7 @@ def test_deep_skips_nikto_and_nuclei_without_http_service(app, admin_user, monke
     with app.app_context():
         mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=True)
+        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, is_deep_analysis=True)
 
     assert "nikto" not in calls
     assert "nuclei" not in calls       # same HTTP-only gate as Nikto
@@ -182,7 +182,7 @@ def test_deep_false_launches_nothing(app, admin_user, monkeypatch):
     with app.app_context():
         mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=False)
+        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, is_deep_analysis=False)
 
         with UnitOfWork() as uow:
             escan = ScanRepository(uow).get_by_id(escan.id)
@@ -205,7 +205,7 @@ def test_deep_one_corroborator_failure_does_not_fail_the_scan(app, admin_user, m
     with app.app_context():
         mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.9", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None, deep=True)
+        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None, is_deep_analysis=True)
 
         with UnitOfWork() as uow:
             escan = ScanRepository(uow).get_by_id(escan.id)
@@ -231,7 +231,7 @@ def test_format_scan_merges_corroborator_finding_without_double_counting(app, ad
     with app.app_context():
         mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=False)
+        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, is_deep_analysis=False)
 
         # Simulate what _launch_deep_corroborators would have recorded.
         with UnitOfWork() as uow:
@@ -261,7 +261,7 @@ def test_format_scan_without_deep_scan_ids_is_unaffected(app, admin_user):
     with app.app_context():
         mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, deep=False)
+        mgr._run_lybra(escan.id, source_scan_id=nmap_id, discover_ports=None, is_deep_analysis=False)
         result = mgr.format_scan(escan.id)
 
     assert result["deep"] is False
@@ -284,7 +284,12 @@ def test_lybra_endpoint_accepts_deep_flag(client, app, admin_user, auth_headers,
                        json={"sourceScanId": nmap_id, "deep": True})
 
     assert resp.status_code == 201
-    assert captured.get("deep") is True
+    # C2: la clave del cable sigue siendo "deep" y el kwarg de Python es
+    # ``is_deep_analysis``. Esta aserción es justo la costura entre ambos: si
+    # alguien renombra el campo del schema, el endpoint deja de recibir nada y
+    # esto cae.
+    assert captured.get("is_deep_analysis") is True
+    assert "deep" not in captured
 
 
 def test_lybra_endpoint_deep_defaults_to_false(client, app, admin_user, auth_headers, monkeypatch):
@@ -300,4 +305,4 @@ def test_lybra_endpoint_deep_defaults_to_false(client, app, admin_user, auth_hea
                        json={"sourceScanId": nmap_id})
 
     assert resp.status_code == 201
-    assert captured.get("deep") is False
+    assert captured.get("is_deep_analysis") is False

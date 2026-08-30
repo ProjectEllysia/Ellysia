@@ -252,11 +252,11 @@ class NucleiScanManager(ScanManager):
         exposure = classify_exposure(scan.target)
 
         findings = []
-        for f in repo.get_findings_by_scan(scan_id):
-            d = f.snapshot
-            d["id"] = f.id
-            d["state"] = f.state
-            findings.append(d)
+        for finding_row in repo.get_findings_by_scan(scan_id):
+            snapshot = finding_row.snapshot
+            snapshot["id"] = finding_row.id
+            snapshot["state"] = finding_row.state
+            findings.append(snapshot)
 
         json_findings = [finding_to_json(finding, exposure) for finding in findings]
 
