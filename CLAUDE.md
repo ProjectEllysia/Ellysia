@@ -440,6 +440,29 @@ despliega.
 > `appVersion` de `SecOpsConfig.json` puede ir por detrás del nombre de la rama. Ninguna de las
 > dos cosas es un error, pero conviene mirarlas antes de afirmar «esto ya está en producción».
 
+## Cómo se escriben los PR, los issues y sus comentarios
+
+Se escriben para **alguien que no conoce el módulo que se está tocando**. Quien abre un PR de
+Themis puede no saber qué es Lybra, qué hace el runtime de checks o qué significa `feed_version`, y
+una descripción comprimida sólo la entiende quien ya sabía la respuesta: no informa a nadie, es un
+recordatorio para el autor disfrazado de documentación.
+
+Tres reglas concretas:
+
+- **Primero el problema en lenguaje llano, después el símbolo.** Antes de nombrar
+  `xfail(strict=True)`, `NetworkSession.exchange` o «bulk string RESP», di qué es y por qué importa
+  aquí. «Un *bulk string* de Redis es una respuesta que empieza por una línea con la longitud del
+  contenido, así que la primera línea no trae datos» cuesta una frase y ahorra el viaje al código.
+- **Nada de taquigrafía ni de explicaciones planas.** Una tabla o una lista siguen valiendo, pero
+  cada fila necesita su frase de contexto; una fila que sólo repite el nombre del test no explica
+  por qué falla.
+- **Vale alargarse; no vale dar por supuesto.** El coste de leer un párrafo de más es mucho menor
+  que el de reconstruir el contexto entrando al código.
+
+Esto aplica a los cuerpos de PR, a los issues que se abran y a los comentarios de seguimiento. No
+aplica al **código**: ahí manda la concisión de siempre (nombres completos, comentarios que
+explican el *por qué*, no el *qué*).
+
 ## Deuda técnica
 
 `plans/deuda-tecnica-y-calidad.md` es la auditoría de origen (fechada 2026-08-03) y `plans/` en
