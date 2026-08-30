@@ -24,7 +24,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional, Tuple
 
-from .kb import load_product_aliases, normalize_cpe_to_23, normalize_product_name, parse_cpe23
+from .kb import (
+    load_product_aliases,
+    normalize_cpe_to_23,
+    normalize_product_name,
+    parse_cpe23,
+    split_distro_version,
+)
 
 
 # Quality of Detection for a bare "the port is open" observation. It is low
@@ -193,11 +199,18 @@ class LybraEngine:
         banner guess, so it earns a higher ``qod`` and is born ``confirmed`` —
         there is no back-port ambiguity to hedge against when the version came
         straight from the package manager.
+
+        When the discovered version is a distro package version, the title says
+        which upstream release it was matched as. Otherwise the finding is
+        unexplainable on its face: nothing in it would account for why a host
+        running ``2.4.49-1ubuntu1`` is reported against a CVE whose range ends
+        at ``2.4.49``, and "the matcher normalized it" is not something a
+        reader can be expected to know.
         """
         cve_id = cve.cve_id
         is_verified = service.origin == "inventory"
         return {
-            "title":        f"{service.label} — {cve_id}",
+            "title":        f"{self._version_label(service)} — {cve_id}",
             "category":     "outdated_software",
             "port":         service.port,
             "service":      service.name or service.product or None,
@@ -217,6 +230,27 @@ class LybraEngine:
             "cpe_resolved": True,   # this finding only exists because resolution succeeded
             "state":        "open",
         }
+
+    @staticmethod
+    def _version_label(service: Service) -> str:
+        """The service's label, naming the upstream release when they differ.
+
+        ``apache2 1:2.4.49-1ubuntu1`` becomes
+        ``apache2 1:2.4.49-1ubuntu1 (upstream 2.4.49)``. A vendor banner, an
+        NVD-shaped version or anything else that carries no epoch or revision
+        is left exactly as it was — the note only appears where there is
+        actually something to explain.
+
+        Args:
+            service: The service the finding is about.
+
+        Returns:
+            The label to put in the finding's title.
+        """
+        _epoch, upstream, _revision = split_distro_version(service.version or "")
+        if not upstream or upstream == (service.version or "").strip():
+            return service.label
+        return f"{service.label} (upstream {upstream})"
 
     def _informational_finding(self, service: Service, resolved) -> dict:
         """Build the baseline informational finding for one service.
