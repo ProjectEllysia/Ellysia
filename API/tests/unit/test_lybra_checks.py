@@ -3,7 +3,11 @@
 Pure: an injected ``fetch``/``network_open`` returns crafted responses, so no
 real network. Exercises the bundled feed, the matchers, HTTP-service
 selection, the safe/aggressive gate, and the ``type: "network"`` family Fase N
-adds (a fake, in-memory session standing in for a real TCP connection).
+adds.
+
+Para la familia ``network``, el transporte se sustituye **a nivel de socket**
+(bytes) y no a nivel de sesión: la nota al principio de esa sección explica
+por qué, y es la regla que el resto de la casa ya sigue con los dissectors.
 """
 
 import json
@@ -130,14 +134,85 @@ def test_safe_mode_skips_aggressive_checks(tmp_path):
 
 
 # --------------------------------------------------- network checks (Fase N)
+#
+# **Dónde se sustituye el transporte, y por qué ahí.** Los tests de
+# comportamiento de protocolo de esta sección inyectan un *socket* falso y
+# dejan que el ``NetworkSession`` real haga su trabajo — la misma regla que ya
+# siguen los dissectors, que se ejercitan con bytes y no con probes falsos.
+#
+# Un doble que sustituya a ``NetworkSession`` entera acaba siendo más capaz que
+# la pieza real: entrega respuestas multilínea completas que ``exchange`` jamás
+# produciría, y con eso documenta lo que el autor creía que pasaba en vez de lo
+# que pasa. Así es como un bug de transporte sobrevivió a una sección entera de
+# tests en verde.
+#
+# ``_FakeNetworkSession`` se queda **sólo** para la orquestación del runtime
+# (que no se sondee un servicio que no aplica, que sin ``network_open`` no se
+# haga nada, que la sesión se cierre siempre): eso no es comportamiento de
+# protocolo y no necesita bytes.
 
 _FTP = Service(21, "tcp", "ftp", "", "", None)
+_REDIS = Service(6379, "tcp", "redis", "", "", None)
+
+# Saludo que un vsftpd real deja en el buffer en el instante de conectar, antes
+# de que el cliente escriba nada.
+_FTP_BANNER = b"220 (vsFTPd 3.0.3)\r\n"
+# El mismo saludo en su forma multilínea, igual de habitual (RFC 959 §4.2).
+_FTP_MULTILINE_BANNER = b"220-Bienvenido a este FTP\r\n220 (vsFTPd 3.0.3)\r\n"
+# Respuesta real de Redis a INFO: un bulk string RESP cuya primera línea es la
+# longitud, no el contenido.
+_REDIS_INFO = b"$3116\r\n# Server\r\nredis_version:7.0.11\r\nredis_mode:standalone\r\n"
+
+
+class _FakeNetSocket:
+    """Un socket falso a nivel de bytes: entrega un flujo y encola respuestas.
+
+    Modela las dos cosas que un doble por encima de la sesión borra: el saludo
+    ya está en el buffer en el instante de conectar, y cada respuesta aparece
+    **después** de que el cliente escriba su comando. Los trozos que devuelve
+    ``recv`` tampoco tienen por qué coincidir con las líneas del protocolo.
+
+    Args:
+        greeting: Los bytes que el servidor ya tiene puestos al conectar.
+        replies: Un flujo de respuesta por cada escritura del cliente, en orden.
+        chunk_size: El máximo de bytes que devuelve un ``recv``, para poder
+            trocear la respuesta de forma arbitraria.
+    """
+
+    def __init__(self, greeting: bytes = b"", replies=(), chunk_size: int = 65536):
+        self._buffer = greeting
+        self._replies = list(replies)
+        self._chunk = chunk_size
+        self.sent = b""
+        self.closed = False
+
+    def recv(self, size: int) -> bytes:
+        take = min(size, self._chunk)
+        chunk, self._buffer = self._buffer[:take], self._buffer[take:]
+        return chunk
+
+    def sendall(self, data: bytes) -> None:
+        self.sent += data
+        if self._replies:
+            self._buffer += self._replies.pop(0)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _network_open_over(sock):
+    """Un ``network_open`` que abre el :class:`NetworkSession` **real** sobre ``sock``."""
+    return NetworkProbe(connect=lambda address, timeout: sock).open
 
 
 class _FakeNetworkSession:
-    """A scripted stand-in for a real TCP connection: each ``exchange`` call
-    consumes the next canned reply, in order — exactly what a login sequence
-    like FTP's USER/PASS needs from a single, shared connection."""
+    """Doble de orquestación: apunta lo que se le pidió, sin hablar ningún protocolo.
+
+    Sólo para los tests que verifican *qué* hace el runtime (a qué servicios
+    abre sesión, si la cierra), nunca para los que verifican qué entiende del
+    otro extremo — para eso está :class:`_FakeNetSocket`, que es un nivel más
+    abajo y no puede inventarse capacidades que el transporte real no tiene.
+    """
 
     def __init__(self, replies):
         self._replies = list(replies)
@@ -156,7 +231,7 @@ class _FakeNetworkSession:
 
 
 def _network_open_for(replies):
-    """A ``network_open`` that hands out one fresh scripted session."""
+    """Un ``network_open`` que reparte una única sesión de orquestación."""
     session = _FakeNetworkSession(replies)
 
     def open_(host, port):
@@ -165,23 +240,58 @@ def _network_open_for(replies):
     return open_
 
 
-def test_ftp_anonymous_login_confirmed_when_both_steps_succeed():
-    open_ = _network_open_for(["331 Please specify the password.", "230 Login successful."])
-    findings = CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_FTP])
+def _findings_for(check_id, sock, service):
+    """Corre el feed sobre ``service`` con el transporte real y filtra por check."""
+    runtime = CheckRuntime(load_checks(), lambda *a: None, network_open=_network_open_over(sock))
+    return [f for f in runtime.run("h", [service]) if f["check_id"] == check_id]
 
-    ftp = [f for f in findings if f["check_id"] == "lybra:ftp-anonymous-login@1"]
+
+# ------------------------------------------ ftp-anonymous-login (comportamiento)
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="#265: exchange lee una línea suelta, y tras USER la línea pendiente "
+           "en el buffer sigue siendo el saludo 220, no el 331",
+)
+def test_ftp_anonymous_login_confirmed_when_both_steps_succeed():
+    sock = _FakeNetSocket(
+        greeting=_FTP_BANNER,
+        replies=[b"331 Please specify the password.\r\n", b"230 Login successful.\r\n"],
+    )
+
+    ftp = _findings_for("lybra:ftp-anonymous-login@1", sock, _FTP)
+
     assert len(ftp) == 1
     assert ftp[0]["qod"] == 99 and ftp[0]["confirmed"] is True
     assert ftp[0]["category"] == "default_credentials"
     assert ftp[0]["port"] == 21
-    # Both steps of the login sequence went over the same session, in order.
-    assert open_.session.sent == ["USER anonymous\r\n", "PASS anonymous@lybra.local\r\n"]
+    # Los dos pasos de la secuencia de login fueron por la misma sesión, en orden.
+    assert sock.sent == b"USER anonymous\r\nPASS anonymous@lybra.local\r\n"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="#265: un saludo multilínea desplaza la ventana de lectura una línea más",
+)
+def test_ftp_anonymous_login_confirmed_with_a_multiline_banner():
+    sock = _FakeNetSocket(
+        greeting=_FTP_MULTILINE_BANNER,
+        replies=[b"331 Please specify the password.\r\n", b"230 Login successful.\r\n"],
+    )
+    assert len(_findings_for("lybra:ftp-anonymous-login@1", sock, _FTP)) == 1
 
 
 def test_ftp_anonymous_login_absent_when_credentials_rejected():
-    open_ = _network_open_for(["331 Please specify the password.", "530 Login incorrect."])
-    findings = CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_FTP])
-    assert not any(f["check_id"] == "lybra:ftp-anonymous-login@1" for f in findings)
+    sock = _FakeNetSocket(
+        greeting=_FTP_BANNER,
+        replies=[b"331 Please specify the password.\r\n", b"530 Login incorrect.\r\n"],
+    )
+    assert _findings_for("lybra:ftp-anonymous-login@1", sock, _FTP) == []
+
+
+def test_ftp_anonymous_login_abandoned_when_the_server_says_nothing():
+    sock = _FakeNetSocket(greeting=b"", replies=[])
+    assert _findings_for("lybra:ftp-anonymous-login@1", sock, _FTP) == []
 
 
 def test_ftp_anonymous_login_abandoned_on_connect_failure():
@@ -190,6 +300,31 @@ def test_ftp_anonymous_login_abandoned_on_connect_failure():
     ).run("h", [_FTP])
     assert not any(f["check_id"] == "lybra:ftp-anonymous-login@1" for f in findings)
 
+
+# ------------------------------- redis-unauthenticated-access (comportamiento)
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="#265: la respuesta a INFO es un bulk string RESP y exchange corta en "
+           "su primera línea, que es la longitud ($3116), no el contenido",
+)
+def test_redis_unauthenticated_access_confirmed_when_info_succeeds():
+    sock = _FakeNetSocket(replies=[_REDIS_INFO])
+
+    redis_findings = _findings_for("lybra:redis-unauthenticated-access@1", sock, _REDIS)
+
+    assert len(redis_findings) == 1
+    assert redis_findings[0]["qod"] == 99 and redis_findings[0]["confirmed"] is True
+    assert redis_findings[0]["category"] == "default_credentials"
+    assert sock.sent == b"INFO\r\n"
+
+
+def test_redis_unauthenticated_access_absent_when_auth_required():
+    sock = _FakeNetSocket(replies=[b"-NOAUTH Authentication required.\r\n"])
+    assert _findings_for("lybra:redis-unauthenticated-access@1", sock, _REDIS) == []
+
+
+# ------------------------------------------------- selección y orquestación
 
 def test_network_checks_never_run_without_a_network_open_callable():
     # Mirrors test_only_http_services_are_probed: omitting network_open must
@@ -207,29 +342,6 @@ def test_only_ftp_services_are_probed_by_network_checks():
     assert is_ftp_service(_HTTP) is False
 
 
-# ---------------------------------------- redis-unauthenticated-access (Fase N)
-
-_REDIS = Service(6379, "tcp", "redis", "", "", None)
-
-
-def test_redis_unauthenticated_access_confirmed_when_info_succeeds():
-    reply = "$120\r\n# Server\r\nredis_version:7.0.11\r\nredis_mode:standalone\r\n"
-    open_ = _network_open_for([reply])
-    findings = CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_REDIS])
-
-    redis_findings = [f for f in findings if f["check_id"] == "lybra:redis-unauthenticated-access@1"]
-    assert len(redis_findings) == 1
-    assert redis_findings[0]["qod"] == 99 and redis_findings[0]["confirmed"] is True
-    assert redis_findings[0]["category"] == "default_credentials"
-    assert open_.session.sent == ["INFO\r\n"]
-
-
-def test_redis_unauthenticated_access_absent_when_auth_required():
-    open_ = _network_open_for(["-NOAUTH Authentication required.\r\n"])
-    findings = CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_REDIS])
-    assert not any(f["check_id"] == "lybra:redis-unauthenticated-access@1" for f in findings)
-
-
 def test_only_redis_services_are_probed_by_redis_check():
     open_ = _network_open_for(["$40\r\nredis_version:7.0.11\r\n"])
     CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_HTTP])
@@ -239,58 +351,53 @@ def test_only_redis_services_are_probed_by_redis_check():
     assert is_redis_service(_HTTP) is False
 
 
-# --------------------------------------------- NetworkProbe (fake socket)
+def test_the_session_of_a_network_check_is_always_closed():
+    open_ = _network_open_for([None])
+    CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_FTP])
+    assert open_.session.closed is True
 
-class _FakeNetSocket:
-    """A byte-stream-backed stand-in for a real network-check socket."""
 
-    def __init__(self, data: bytes):
-        self._buf = data
-        self.sent = b""
-        self.closed = False
-
-    def recv(self, n: int) -> bytes:
-        chunk, self._buf = self._buf[:n], self._buf[n:]
-        return chunk
-
-    def sendall(self, data: bytes) -> None:
-        self.sent += data
-
-    def close(self) -> None:
-        self.closed = True
-
+# ----------------------------------------------- NetworkProbe (socket falso)
 
 def test_network_probe_session_reads_banner_without_sending():
-    fake_sock = _FakeNetSocket(b"220 (vsFTPd 2.3.4)\r\n")
-    session = NetworkProbe(connect=lambda addr, timeout: fake_sock).open("10.0.0.5", 21)
+    sock = _FakeNetSocket(greeting=_FTP_BANNER)
+    session = NetworkProbe(connect=lambda address, timeout: sock).open("10.0.0.5", 21)
 
-    resp = session.exchange(None)
+    response = session.exchange(None)
 
-    assert resp.body == "220 (vsFTPd 2.3.4)"
-    assert fake_sock.sent == b""               # nothing written for a banner-only read
+    assert response.body == "220 (vsFTPd 3.0.3)"
+    assert sock.sent == b""                    # nothing written for a banner-only read
 
 
 def test_network_probe_session_sends_then_reads():
-    fake_sock = _FakeNetSocket(b"331 Please specify the password.\r\n")
-    session = NetworkProbe(connect=lambda addr, timeout: fake_sock).open("10.0.0.5", 21)
+    sock = _FakeNetSocket(replies=[b"331 Please specify the password.\r\n"])
+    session = NetworkProbe(connect=lambda address, timeout: sock).open("10.0.0.5", 21)
 
-    resp = session.exchange("USER anonymous\r\n")
+    response = session.exchange("USER anonymous\r\n")
 
-    assert fake_sock.sent == b"USER anonymous\r\n"
-    assert resp.body == "331 Please specify the password."
+    assert sock.sent == b"USER anonymous\r\n"
+    assert response.body == "331 Please specify the password."
     session.close()
-    assert fake_sock.closed is True
+    assert sock.closed is True
+
+
+def test_network_probe_session_reads_a_line_split_across_recv_chunks():
+    # Un servidor real no entrega la línea entera de una vez: el criterio de
+    # fin de respuesta es del protocolo, no del tamaño del trozo que llegue.
+    sock = _FakeNetSocket(greeting=_FTP_BANNER, chunk_size=1)
+    session = NetworkProbe(connect=lambda address, timeout: sock).open("10.0.0.5", 21)
+    assert session.exchange(None).body == "220 (vsFTPd 3.0.3)"
 
 
 def test_network_probe_returns_none_on_connect_failure():
-    def failing_connect(addr, timeout):
+    def failing_connect(address, timeout):
         raise OSError("connection refused")
     assert NetworkProbe(connect=failing_connect).open("10.0.0.5", 21) is None
 
 
 def test_network_session_exchange_returns_none_on_empty_read():
-    fake_sock = _FakeNetSocket(b"")
-    session = NetworkProbe(connect=lambda addr, timeout: fake_sock).open("10.0.0.5", 21)
+    sock = _FakeNetSocket(greeting=b"")
+    session = NetworkProbe(connect=lambda address, timeout: sock).open("10.0.0.5", 21)
     assert session.exchange(None) is None
 
 
