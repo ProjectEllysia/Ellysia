@@ -177,6 +177,93 @@ def test_ingest_nvd_cve_malformed_returns_none():
     assert ingest_nvd_cve({"cve": {}}) is None
 
 
+# ------------------------------------------------------- elección de métrica CVSS
+#
+# Un CVE puede publicar varias versiones de CVSS a la vez, y se coge la más
+# reciente porque es la más precisa. La v4.0 no estaba en esa cadena, así que un
+# CVE que sólo publicara v4 entraba sin puntuación — y aguas abajo "sin
+# puntuación" no es un hueco cosmético: se lee como 0.0, que es INFO. Una
+# vulnerabilidad crítica aparecía en el informe como informativa.
+
+def _nvd_item_with(metrics: dict) -> dict:
+    return {"cve": {
+        "id": "CVE-2026-0001",
+        "descriptions": [{"lang": "en", "value": "x"}],
+        "metrics": metrics,
+        "configurations": [{"nodes": [{"cpeMatch": [{
+            "vulnerable": True,
+            "criteria": "cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*",
+        }]}]}],
+    }}
+
+
+_CVSS_V40 = {"cvssMetricV40": [{"cvssData": {
+    "baseScore": 9.3,
+    "vectorString": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
+    "baseSeverity": "CRITICAL",
+}}]}
+
+_CVSS_V31 = {"cvssMetricV31": [{"cvssData": {
+    "baseScore": 7.5, "vectorString": "CVSS:3.1/AV:N", "baseSeverity": "HIGH",
+}}]}
+
+
+def test_a_cve_published_only_with_cvss_v4_is_scored():
+    cve_row, _matches = ingest_nvd_cve(_nvd_item_with(_CVSS_V40))
+
+    assert cve_row["cvss_score"] == 9.3
+    assert cve_row["severity"] == "CRITICAL"
+    assert cve_row["cvss_vector"].startswith("CVSS:4.0/")
+
+
+def test_v4_wins_over_v31_when_a_cve_publishes_both():
+    # La regla de la cadena es "la métrica más reciente que ofrezca la entrada",
+    # y v4 es más precisa que v3.1 sobre el mismo CVE.
+    cve_row, _matches = ingest_nvd_cve(_nvd_item_with({**_CVSS_V31, **_CVSS_V40}))
+
+    assert cve_row["cvss_score"] == 9.3
+    assert cve_row["severity"] == "CRITICAL"
+
+
+def test_v31_still_wins_when_there_is_no_v4():
+    cve_row, _matches = ingest_nvd_cve(_nvd_item_with(_CVSS_V31))
+    assert cve_row["cvss_score"] == 7.5
+    assert cve_row["severity"] == "HIGH"
+
+
+def test_a_cve_with_no_metric_at_all_stays_unscored():
+    # Regresión: no tener métrica sigue siendo distinto de tener una de cero.
+    cve_row, _matches = ingest_nvd_cve(_nvd_item_with({}))
+    assert (cve_row["cvss_score"], cve_row["cvss_vector"], cve_row["severity"]) == (None, None, None)
+
+
+def test_the_longest_possible_v4_vector_fits_in_the_column():
+    """Un vector v4 es bastante más largo que uno de v3.1, y se guarda entero.
+
+    El peor caso de la especificación —base completa, más amenaza, más entorno,
+    más suplementarias, cogiendo en cada métrica el valor más largo— se
+    construye aquí en vez de fiarse de un ejemplo suelto: un ejemplo corto que
+    quepa no demuestra nada sobre el que no quepa. Son 188 caracteres, así que
+    ``String(255)`` vale y no hace falta migración; si alguien acorta la
+    columna, este test lo dice.
+    """
+    from src.modules.features.themis.model import CveEntry
+
+    metricas = [
+        ("AV", "N"), ("AC", "L"), ("AT", "P"), ("PR", "N"), ("UI", "A"),
+        ("VC", "H"), ("VI", "H"), ("VA", "H"), ("SC", "H"), ("SI", "H"), ("SA", "H"),
+        ("E", "U"),
+        ("CR", "H"), ("IR", "H"), ("AR", "H"),
+        ("MAV", "N"), ("MAC", "L"), ("MAT", "P"), ("MPR", "N"), ("MUI", "A"),
+        ("MVC", "H"), ("MVI", "H"), ("MVA", "H"),
+        ("MSC", "H"), ("MSI", "Safety"), ("MSA", "Safety"),
+        ("S", "P"), ("AU", "Y"), ("R", "I"), ("V", "C"), ("RE", "M"), ("U", "Clear"),
+    ]
+    peor_caso = "/".join(["CVSS:4.0"] + [f"{metrica}:{valor}" for metrica, valor in metricas])
+
+    assert len(peor_caso) <= CveEntry.__table__.c.cvss_vector.type.length
+
+
 # ------------------------------------------------- platform-gated CVEs (#118)
 
 def _and_node_item(platform_cpe: str) -> dict:
