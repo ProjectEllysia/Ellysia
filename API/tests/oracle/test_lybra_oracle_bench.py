@@ -83,6 +83,50 @@ def _free_tls_port() -> int:
     return _TLS_PORT
 
 
+# Los checks ``network`` se seleccionan por nombre de servicio o por puerto
+# (``is_ftp_service`` / ``is_redis_service`` en checks.py), y el
+# autodescubrimiento sólo aporta el puerto. Así que estos contenedores tienen
+# que publicarse en el puerto canónico de su protocolo o el check ni se
+# consideraría. Son puertos fijos, no elegibles: si algo del host ya los ocupa
+# —un Redis de desarrollo en el 6379, por ejemplo— el caso se salta con un
+# motivo legible en vez de fallar por una colisión que no es del motor.
+_FTP_PORT = 21
+_REDIS_PORT = 6379
+
+
+def _require_free_port(port: int, label: str) -> None:
+    if not port_is_free("127.0.0.1", port):
+        pytest.skip(f"El puerto {port} ({label}) está ocupado en el host")
+
+
+def _vsftpd_container_cmd(anonymous: bool) -> str:
+    """Comando que instala y configura un vsftpd dentro del contenedor.
+
+    Se genera la configuración al arrancar, sin bind mount, por la misma razón
+    que el resto de fixtures de este módulo: evitar la traducción de rutas
+    WSL↔Docker Desktop.
+
+    ``no_anon_password=NO`` es deliberado y no un detalle: con ``YES`` el
+    servidor concede el acceso ya en el ``USER`` (responde 230 directamente) y
+    la secuencia USER→331→PASS→230 que el check espera no llega a existir. El
+    caso negativo mantiene ``local_enable=YES`` para que vsftpd tenga algún
+    modo de acceso habilitado y arranque, aunque no haya ninguna cuenta usable.
+    """
+    anonymous_enable = "YES" if anonymous else "NO"
+    local_enable = "NO" if anonymous else "YES"
+    settings = " ".join([
+        "'listen=YES'", "'listen_ipv6=NO'",
+        f"'anonymous_enable={anonymous_enable}'", f"'local_enable={local_enable}'",
+        "'no_anon_password=NO'", "'seccomp_sandbox=NO'", "'anon_root=/var/lib/ftp'",
+    ])
+    return (
+        "apk add --no-cache vsftpd >/dev/null 2>&1 && "
+        "mkdir -p /var/lib/ftp && chmod 555 /var/lib/ftp && "
+        f"printf '%s\\n' {settings} > /etc/vsftpd/vsftpd.conf && "
+        "vsftpd /etc/vsftpd/vsftpd.conf"
+    )
+
+
 def _tls_container_cmd(days: int, expired: bool) -> str:
     """Shell command that generates a self-signed cert *inside* the container
     at startup (no bind mount, same philosophy as ``git_exposed_port``) and
@@ -186,6 +230,65 @@ def tls_expired_port():
         docker_rm(_DOCKER, name)
 
 
+@pytest.fixture
+def ftp_anonymous_port():
+    """Un vsftpd real con el acceso anónimo **abierto**: el caso positivo."""
+    _require_free_port(_FTP_PORT, "FTP")
+    name = f"lybra-oracle-ftp-anon-{_FTP_PORT}"
+    _docker("run", "-d", "--name", name, "-p", f"{_FTP_PORT}:21", "alpine:3.19",
+            "sh", "-c", _vsftpd_container_cmd(anonymous=True))
+    try:
+        _wait_for_port("127.0.0.1", _FTP_PORT)
+        yield _FTP_PORT
+    finally:
+        docker_rm(_DOCKER, name)
+
+
+@pytest.fixture
+def ftp_no_anonymous_port():
+    """El mismo vsftpd con el acceso anónimo **cerrado**: el control negativo.
+
+    Sin él, el caso positivo no demuestra gran cosa — un check que disparase
+    siempre también pasaría el positivo.
+    """
+    _require_free_port(_FTP_PORT, "FTP")
+    name = f"lybra-oracle-ftp-noanon-{_FTP_PORT}"
+    _docker("run", "-d", "--name", name, "-p", f"{_FTP_PORT}:21", "alpine:3.19",
+            "sh", "-c", _vsftpd_container_cmd(anonymous=False))
+    try:
+        _wait_for_port("127.0.0.1", _FTP_PORT)
+        yield _FTP_PORT
+    finally:
+        docker_rm(_DOCKER, name)
+
+
+@pytest.fixture
+def redis_open_port():
+    """Un ``redis:7`` sin contraseña: cualquiera puede pedirle un INFO."""
+    _require_free_port(_REDIS_PORT, "Redis")
+    name = f"lybra-oracle-redis-open-{_REDIS_PORT}"
+    _docker("run", "-d", "--name", name, "-p", f"{_REDIS_PORT}:6379", "redis:7")
+    try:
+        _wait_for_port("127.0.0.1", _REDIS_PORT)
+        yield _REDIS_PORT
+    finally:
+        docker_rm(_DOCKER, name)
+
+
+@pytest.fixture
+def redis_password_port():
+    """El mismo ``redis:7`` con ``requirepass``: contesta ``-NOAUTH`` al INFO."""
+    _require_free_port(_REDIS_PORT, "Redis")
+    name = f"lybra-oracle-redis-auth-{_REDIS_PORT}"
+    _docker("run", "-d", "--name", name, "-p", f"{_REDIS_PORT}:6379", "redis:7",
+            "redis-server", "--requirepass", "lybra-oracle")
+    try:
+        _wait_for_port("127.0.0.1", _REDIS_PORT)
+        yield _REDIS_PORT
+    finally:
+        docker_rm(_DOCKER, name)
+
+
 def _run_self_discovery(app, admin_user, target: str, port: int, monkeypatch):
     """Lanza un escaneo Lybra de autodescubrimiento real contra ``target:port``.
 
@@ -280,6 +383,57 @@ def test_tls_expired_cert_detected_against_real_container(app, admin_user, tls_e
     tls_findings = {f.check_id for f in findings if f.category == "tls"}
     assert tls_findings == {"lybra:tls-self-signed-cert@1", "lybra:tls-expired-cert@1"}
     assert all(f.confirmed and f.qod == 99 for f in findings if f.category == "tls")
+
+
+# ------------------------------------------- familia network contra servidores reales
+#
+# Los cuatro casos que cierran #265. Hasta aquí, los dos únicos checks no-web
+# del motor sólo se habían ejercitado contra dobles, y por eso nadie vio que el
+# transporte leía una forma de respuesta que ni FTP ni Redis producen: el
+# escaneo terminaba en verde y el FTP anónimo seguía ahí. Un positivo y un
+# negativo por protocolo, contra el servidor de verdad.
+
+def test_ftp_anonymous_login_detected_against_real_vsftpd(app, admin_user, ftp_anonymous_port, monkeypatch):
+    """Con el acceso anónimo abierto, el check tiene que confirmarlo.
+
+    Es la prueba de que el saludo (``220 ...``) se consume antes de escribir
+    ``USER`` y de que la respuesta se lee como bloque de estado: sin las dos
+    cosas, el check evalúa el saludo contra el matcher del ``331`` y calla.
+    """
+    findings = _run_self_discovery(app, admin_user, "127.0.0.1", ftp_anonymous_port, monkeypatch)
+
+    ftp = [f for f in findings if f.check_id == "lybra:ftp-anonymous-login@2"]
+    assert len(ftp) == 1, f"hallazgos: {[(f.category, f.title) for f in findings]}"
+    assert ftp[0].confirmed is True and ftp[0].qod == 99
+    assert ftp[0].category == "default_credentials"
+    assert ftp[0].port == 21
+
+
+def test_ftp_anonymous_login_absent_against_a_locked_down_vsftpd(app, admin_user, ftp_no_anonymous_port, monkeypatch):
+    """Con el acceso anónimo cerrado, el mismo check no debe producir nada."""
+    findings = _run_self_discovery(app, admin_user, "127.0.0.1", ftp_no_anonymous_port, monkeypatch)
+    assert not any(f.check_id.startswith("lybra:ftp-anonymous-login") for f in findings)
+
+
+def test_redis_unauthenticated_access_detected_against_real_redis(app, admin_user, redis_open_port, monkeypatch):
+    """Un Redis sin contraseña contesta al INFO, y eso es el hallazgo.
+
+    Prueba de que la respuesta se lee como *bulk string*: el contenido va
+    detrás de una línea que sólo trae su longitud, así que leyendo una línea
+    suelta nunca se llegaba a ver ``redis_version``.
+    """
+    findings = _run_self_discovery(app, admin_user, "127.0.0.1", redis_open_port, monkeypatch)
+
+    redis_findings = [f for f in findings if f.check_id == "lybra:redis-unauthenticated-access@2"]
+    assert len(redis_findings) == 1, f"hallazgos: {[(f.category, f.title) for f in findings]}"
+    assert redis_findings[0].confirmed is True and redis_findings[0].qod == 99
+    assert redis_findings[0].category == "default_credentials"
+
+
+def test_redis_unauthenticated_access_absent_when_requirepass_is_set(app, admin_user, redis_password_port, monkeypatch):
+    """Con ``requirepass``, el INFO recibe ``-NOAUTH`` y no hay hallazgo."""
+    findings = _run_self_discovery(app, admin_user, "127.0.0.1", redis_password_port, monkeypatch)
+    assert not any(f.check_id.startswith("lybra:redis-unauthenticated-access") for f in findings)
 
 
 @pytest.mark.skipif(_NMAP is None, reason="nmap no disponible")
