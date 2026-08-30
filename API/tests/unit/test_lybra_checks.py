@@ -513,6 +513,118 @@ def test_an_unknown_read_mode_fails_at_load_time(tmp_path):
         load_checks(str(feed))
 
 
+# --------------------------------- sondas compartidas dentro de una ejecución
+#
+# Cada check corre por su cuenta, que es lo que los mantiene simples, pero el
+# feed tiene tres checks de cabeceras que miran la misma respuesta a `GET /` y
+# tres de TLS que evalúan reglas distintas sobre el mismo handshake. Ejecutado
+# al pie de la letra, eso son cuatro sondas de más por servicio: tiempo de
+# escaneo, esperas del limitador, y ruido en el registro del objetivo — que en
+# un escáner de seguridad no es un detalle, porque aparece en el SIEM de quien
+# nos contrata.
+
+_TLS_SERVICE = Service(443, "tcp", "https", "", "", None)
+
+
+class _TlsInfoFalso:
+    """Lo mínimo que las reglas TLS del feed consultan de un handshake."""
+
+    def __init__(self, self_signed=True, expired=False, protocol="TLSv1.3"):
+        self.self_signed = self_signed
+        self.expired = expired
+        self.protocol = protocol
+        self.days_until_expiry = 200
+
+
+def _contador_de_handshakes(info=None):
+    llamadas = []
+
+    def tls_fetch(host, port):
+        llamadas.append((host, port))
+        return info
+
+    tls_fetch.llamadas = llamadas
+    return tls_fetch
+
+
+def test_the_three_header_checks_make_one_request_between_them():
+    fetch = _fetcher({"/": Response(200, "<html>", {})})
+
+    findings = CheckRuntime(load_checks(), fetch).run("10.0.0.5", [_HTTP])
+
+    # Los tres checks de cabeceras disparan (el nginx de mentira no manda
+    # ninguna) y aun así "/" se pidió una sola vez.
+    cabeceras = [f for f in findings if f["category"] == "security_header"]
+    assert len(cabeceras) == 3
+    assert [ruta for _h, _p, _m, ruta in fetch.calls].count("/") == 1
+
+
+def test_each_distinct_path_is_still_requested():
+    # Compartir no es dejar de mirar: rutas distintas siguen siendo sondas
+    # distintas, una por ruta.
+    fetch = _fetcher({})
+    CheckRuntime(load_checks(), fetch).run("10.0.0.5", [_HTTP])
+
+    rutas = [ruta for _h, _p, _m, ruta in fetch.calls]
+    assert len(rutas) == len(set(rutas))
+    assert "/.git/config" in rutas and "/" in rutas
+
+
+def test_the_three_tls_checks_share_one_handshake():
+    tls_fetch = _contador_de_handshakes(_TlsInfoFalso(self_signed=True))
+
+    findings = CheckRuntime(
+        load_checks(), _fetcher({}), tls_fetch=tls_fetch
+    ).run("10.0.0.5", [_TLS_SERVICE])
+
+    assert any(f["check_id"] == "lybra:tls-self-signed-cert@1" for f in findings)
+    assert len(tls_fetch.llamadas) == 1
+
+
+def test_a_transport_failure_is_shared_too():
+    # El caso donde reintentar cuesta más y informa menos: un servicio caído.
+    # Sin compartir el fallo, los tres checks de TLS intentarían el handshake
+    # por separado contra algo que ya se sabe que no contesta.
+    tls_fetch = _contador_de_handshakes(None)
+
+    findings = CheckRuntime(
+        load_checks(), _fetcher({}), tls_fetch=tls_fetch
+    ).run("10.0.0.5", [_TLS_SERVICE])
+
+    assert findings == []
+    assert len(tls_fetch.llamadas) == 1
+
+
+def test_two_services_of_the_same_host_are_probed_separately():
+    # La sonda se comparte por (host, puerto, método, ruta): dos servicios
+    # distintos del mismo host son dos objetivos distintos.
+    fetch = _fetcher({"/": Response(200, "<html>", {})})
+    otro_http = Service(8080, "tcp", "http", "", "", None)
+
+    CheckRuntime(load_checks(), fetch).run("10.0.0.5", [_HTTP, otro_http])
+
+    puertos = {puerto for _h, puerto, _m, ruta in fetch.calls if ruta == "/"}
+    assert puertos == {80, 8080}
+
+
+def test_a_second_run_probes_again():
+    """La caché nace y muere con la ejecución, y eso es deliberado.
+
+    Dos escaneos del mismo objetivo tienen que volver a mirar: entre uno y otro
+    el objetivo ha podido cambiar, que es exactamente lo que un escáner mide.
+    Una caché que sobreviviera al escaneo convertiría el segundo informe en una
+    copia del primero.
+    """
+    fetch = _fetcher({"/": Response(200, "<html>", {})})
+    runtime = CheckRuntime(load_checks(), fetch)
+
+    runtime.run("10.0.0.5", [_HTTP])
+    peticiones_tras_la_primera = len(fetch.calls)
+    runtime.run("10.0.0.5", [_HTTP])
+
+    assert len(fetch.calls) == peticiones_tras_la_primera * 2
+
+
 # ------------------------------------------------ limitador de peticiones
 #
 # El limitador existe para no golpear a UN host más rápido de la cuenta. Con el
