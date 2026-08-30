@@ -72,11 +72,30 @@ QOD_CONFIRMED = 99
 # detection rules is the difference between being able to explain why a check
 # exists and not.
 _BUNDLED_FEED = Path(__file__).parent / "feeds" / "checks_feed.yaml"
-# Service names and ports that indicate an HTTP-speaking service worth probing.
+# Un mismo conjunto de puertos respondía antes a dos preguntas que no son la
+# misma —"¿esto habla TLS?" y "¿esto merece checks de higiene TLS?"— y las
+# respondía mal a las dos: tenía dos elementos, 443 y 8443. Un panel de
+# administración HTTPS en 9443 se sondeaba en claro y no recibía ningún check
+# de certificado.
+#
+# Ahora cada pregunta se responde por su lado. El **esquema** (http o https) ya
+# no se deduce del puerto: se observa, intentando el handshake (ver
+# :func:`negotiates_tls`). Lo que queda aquí es sólo la **candidatura**: a qué
+# servicios merece la pena acercarse siquiera.
 _HTTP_SERVICE_NAMES = {"http", "https", "http-proxy", "https-alt", "http-alt"}
-_HTTP_PORTS = {80, 443, 8080, 8443, 8000, 8888, 8008}
-# Ports we should reach over TLS.
-_TLS_PORTS = {443, 8443}
+
+# Puertos donde es habitual encontrar TLS. Deciden qué servicios reciben los
+# checks de higiene de certificado, no cómo se habla con ellos. La lista es una
+# red de seguridad barata, no una verdad: un TLS en un puerto que no esté aquí
+# se sondea igual de bien (el esquema se observa), pero no recibe los checks de
+# certificado. Ampliarla es gratis; hacerla innecesaria es #283, que ataca la
+# misma enfermedad —decidir por número de puerto— desde el otro lado.
+_TLS_HYGIENE_PORTS = {443, 8443, 9443, 10443, 4443, 7443, 8834, 9091, 5986}
+
+# Puertos que se consideran servicio HTTP. Incluye los de TLS: un HTTPS en 9443
+# tampoco entraba por esta puerta, así que ampliar sólo la lista de TLS no
+# habría servido de nada.
+_HTTP_PORTS = {80, 8080, 8000, 8888, 8008} | _TLS_HYGIENE_PORTS
 # Service names and ports for FTP — Fase N's first ``type: "network"`` family.
 _FTP_SERVICE_NAMES = {"ftp"}
 _FTP_PORTS = {21}
@@ -451,15 +470,22 @@ def is_http_service(service: Service) -> bool:
 
 
 def is_tls_service(service: Service) -> bool:
-    """Return whether a service should be probed by TLS hygiene checks.
+    """Return whether a service is a candidate for the TLS hygiene checks.
+
+    Candidacy, not identification: this says "merece la pena intentar el
+    handshake aquí", and the checks themselves abandon quietly if there is no
+    TLS on the other side. It is deliberately *not* the function that decides
+    whether to speak HTTPS to a service — that is observed, not guessed (see
+    :func:`negotiates_tls`).
 
     Args:
         service: The service to test.
 
     Returns:
-        ``True`` if the service's port is one we reach over TLS.
+        ``True`` if the service's port is one where TLS is common enough to be
+        worth a handshake.
     """
-    return service.port in _TLS_PORTS
+    return service.port in _TLS_HYGIENE_PORTS
 
 
 def is_ftp_service(service: Service) -> bool:
@@ -1033,6 +1059,45 @@ class HostRateLimiter:
             self._sleeper(wait)
 
 
+def negotiates_tls(host: str, port: int, timeout: float = 5.0, connect: Optional[Callable] = None) -> bool:
+    """Return whether ``host:port`` completes a TLS handshake.
+
+    The question "is this HTTPS?" used to be answered by looking the port up in
+    a set of two. This asks the service instead, which is the only way to be
+    right about a panel someone chose to publish on 9443, or about a plain HTTP
+    server sitting on 8443 — the inverse mistake, and just as real.
+
+    Deliberately implemented here with ``ssl`` rather than by reusing
+    ``fingerprinting.tls.TlsProbe``, which does exactly this handshake plus
+    certificate parsing: this module must not import the fingerprinting
+    package, because the dissectors in it import their applicability predicates
+    from here and the two imports would close a cycle (the same reason
+    ``_TLS_RULES`` is duck-typed). What is shared is the reasoning, not the
+    code — and what this needs is a yes/no, not a certificate.
+
+    Args:
+        host: The target host.
+        port: The target port.
+        timeout: The connection timeout, in seconds.
+        connect: An injectable ``(address, timeout) -> socket`` callable, the
+            same pattern the probes use.
+
+    Returns:
+        ``True`` if the handshake completed, ``False`` on any failure —
+        including a plaintext server, which answers a TLS ``ClientHello`` with
+        something that is not a ``ServerHello`` and fails the handshake.
+    """
+    connect = connect or socket.create_connection
+    context = ssl._create_unverified_context()
+    try:
+        with connect((host, port), timeout) as sock:
+            with context.wrap_socket(sock, server_hostname=host):
+                return True
+    except Exception as err:  # noqa: BLE001 - cualquier fallo significa "no es TLS"
+        logger.debug("Scheme detection: %s:%s does not speak TLS (%s)", host, port, err)
+        return False
+
+
 class HttpProbe:
     """Performs the runtime's actual HTTP requests — safe, read-only GETs.
 
@@ -1045,11 +1110,24 @@ class HttpProbe:
     Args:
         timeout: The per-request timeout, in seconds.
         max_bytes: The maximum number of response body bytes to read.
+        detect_scheme: An injectable ``(host, port) -> bool`` telling whether
+            the service speaks TLS. Defaults to :func:`negotiates_tls`; a test
+            passes a stub instead of opening a socket.
     """
 
-    def __init__(self, timeout: int = 8, max_bytes: int = 131072) -> None:
+    def __init__(
+        self,
+        timeout: int = 8,
+        max_bytes: int = 131072,
+        detect_scheme: Optional[Callable[[str, Optional[int]], bool]] = None,
+    ) -> None:
         self._timeout = timeout
         self._max_bytes = max_bytes
+        self._detect_scheme = detect_scheme or (lambda host, port: negotiates_tls(host, port, timeout))
+        # El esquema se observa una vez por servicio y se recuerda: la pregunta
+        # es sobre el servicio, no sobre la petición, y no cambia entre una y
+        # otra dentro del mismo escaneo.
+        self._schemes: Dict[tuple, str] = {}
         # E7: este probe se queda deliberadamente en ``urllib`` mientras el
         # resto del tráfico HTTP ordinario del proyecto (aegis/pills.py,
         # lybra/kb.py) usa ``requests``. Una sonda de seguridad necesita
@@ -1117,7 +1195,7 @@ class HttpProbe:
         HTTPS uses an unverified TLS context, since we are scanning arbitrary
         hosts whose certificates we do not control.
         """
-        scheme = "https" if port in _TLS_PORTS else "http"
+        scheme = self._scheme_for(host, port)
         netloc = f"{host}:{port}" if port else host
         url = f"{scheme}://{netloc}{path}"
         try:
@@ -1130,6 +1208,20 @@ class HttpProbe:
         except Exception as err:  # noqa: BLE001 - transport failure: abandon this check
             logger.debug("HTTP probe failed for %s: %s", url, err)
             return None
+
+    def _scheme_for(self, host: str, port: Optional[int]) -> str:
+        """Return ``"https"`` or ``"http"`` for a service, observing it once.
+
+        A service with no port at all (an inventory entry, say) is not
+        something to shake hands with, so it keeps the plain default rather
+        than paying for a probe that has nowhere to connect.
+        """
+        if port is None:
+            return "http"
+        key = (host, port)
+        if key not in self._schemes:
+            self._schemes[key] = "https" if self._detect_scheme(host, port) else "http"
+        return self._schemes[key]
 
     @staticmethod
     def _to_response(status: int, body: bytes, headers) -> Response:
