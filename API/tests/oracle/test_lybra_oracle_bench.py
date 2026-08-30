@@ -22,7 +22,9 @@ usuario, no como una puerta de cada commit.
 from __future__ import annotations
 
 import shutil
+import socket
 import subprocess
+import time
 
 import pytest
 
@@ -97,6 +99,49 @@ _REDIS_PORT = 6379
 def _require_free_port(port: int, label: str) -> None:
     if not port_is_free("127.0.0.1", port):
         pytest.skip(f"El puerto {port} ({label}) está ocupado en el host")
+
+
+def _wait_until_answering(port: int, expect: bytes, send: bytes = None, timeout: float = 120.0) -> None:
+    """Espera a que el servicio conteste lo que se espera de él, no sólo a que el puerto acepte.
+
+    ``wait_for_port`` no vale para estos dos contenedores. Docker publica el
+    puerto en el host en cuanto arranca el contenedor, así que el TCP acepta a
+    los 0,0 s — medido — mientras dentro todavía se está instalando el
+    servidor. Un escaneo lanzado en ese hueco encuentra una conexión que se
+    cierra sin decir nada, el check se abandona, y el test falla por una
+    carrera de arranque que no tiene nada que ver con el motor. Es exactamente
+    lo que pasó la primera vez que se ejecutaron estas pruebas.
+
+    Exigir además el saludo correcto (``220`` en FTP, ``+PONG`` o ``-NOAUTH``
+    en Redis) hace de paso de comprobación de que el contenedor quedó
+    configurado como el caso pide: un control negativo mal montado falla aquí,
+    en voz alta, en vez de pasar el test sin demostrar nada.
+
+    Args:
+        port: El puerto publicado en 127.0.0.1.
+        expect: El prefijo con el que debe empezar la respuesta.
+        send: Lo que hay que escribir para provocarla, o ``None`` si el
+            protocolo saluda solo.
+        timeout: Cuánto esperar antes de rendirse — generoso, porque la
+            primera ejecución instala paquetes dentro del contenedor.
+    """
+    deadline = time.monotonic() + timeout
+    seen = b""
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=2.0) as sock:
+                sock.settimeout(2.0)
+                if send is not None:
+                    sock.sendall(send)
+                seen = sock.recv(128)
+                if seen.startswith(expect):
+                    return
+        except OSError:
+            pass
+        time.sleep(0.3)
+    raise TimeoutError(
+        f"127.0.0.1:{port} no contestó {expect!r} en {timeout}s (última respuesta: {seen!r})"
+    )
 
 
 def _vsftpd_container_cmd(anonymous: bool) -> str:
@@ -238,7 +283,7 @@ def ftp_anonymous_port():
     _docker("run", "-d", "--name", name, "-p", f"{_FTP_PORT}:21", "alpine:3.19",
             "sh", "-c", _vsftpd_container_cmd(anonymous=True))
     try:
-        _wait_for_port("127.0.0.1", _FTP_PORT)
+        _wait_until_answering(_FTP_PORT, expect=b"220")
         yield _FTP_PORT
     finally:
         docker_rm(_DOCKER, name)
@@ -256,7 +301,7 @@ def ftp_no_anonymous_port():
     _docker("run", "-d", "--name", name, "-p", f"{_FTP_PORT}:21", "alpine:3.19",
             "sh", "-c", _vsftpd_container_cmd(anonymous=False))
     try:
-        _wait_for_port("127.0.0.1", _FTP_PORT)
+        _wait_until_answering(_FTP_PORT, expect=b"220")
         yield _FTP_PORT
     finally:
         docker_rm(_DOCKER, name)
@@ -269,7 +314,7 @@ def redis_open_port():
     name = f"lybra-oracle-redis-open-{_REDIS_PORT}"
     _docker("run", "-d", "--name", name, "-p", f"{_REDIS_PORT}:6379", "redis:7")
     try:
-        _wait_for_port("127.0.0.1", _REDIS_PORT)
+        _wait_until_answering(_REDIS_PORT, expect=b"+PONG", send=b"PING\r\n")
         yield _REDIS_PORT
     finally:
         docker_rm(_DOCKER, name)
@@ -283,7 +328,7 @@ def redis_password_port():
     _docker("run", "-d", "--name", name, "-p", f"{_REDIS_PORT}:6379", "redis:7",
             "redis-server", "--requirepass", "lybra-oracle")
     try:
-        _wait_for_port("127.0.0.1", _REDIS_PORT)
+        _wait_until_answering(_REDIS_PORT, expect=b"-NOAUTH", send=b"PING\r\n")
         yield _REDIS_PORT
     finally:
         docker_rm(_DOCKER, name)
