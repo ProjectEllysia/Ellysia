@@ -669,6 +669,41 @@ def test_smb_script_check_silent_on_unrecognised_dialect():
     assert findings == []
 
 
+def test_the_smb_verdict_survives_renaming_the_fingerprint_label(monkeypatch):
+    """Invariante: la etiqueta legible no es el protocolo entre dos piezas.
+
+    El plugin decidía buscando la subcadena ``"firma no requerida"`` dentro del
+    texto que produce ``fingerprint_smb``. Con eso, traducir esa etiqueta al
+    inglés —o corregirle una tilde— apagaba el check sin que fallara nada: se
+    ejecutaba, devolvía ``False``, y el SMB sin firma dejaba de aparecer.
+
+    Aquí se renombra la etiqueta a propósito, dejando intacto el dato que sí
+    importa (el ``SecurityMode``), y el veredicto tiene que ser el mismo en los
+    dos sentidos.
+    """
+    from src.modules.features.themis.lybra import script_checks as script_module
+
+    original = script_module.fingerprint_smb
+
+    def renamed(dialect_revision, security_mode):
+        fingerprint = original(dialect_revision, security_mode)
+        etiqueta = None if fingerprint.product is None else "SMB2 (unsigned!)"
+        return type(fingerprint)(
+            product=etiqueta, version=fingerprint.version, confidence=fingerprint.confidence,
+        )
+
+    monkeypatch.setattr(script_module, "fingerprint_smb", renamed)
+
+    sin_firma = _FakeSmbProbe((_DIALECT_302, _SIGNING_ENABLED_ONLY))
+    con_firma = _FakeSmbProbe((_DIALECT_302, _SIGNING_REQUIRED))
+
+    dispara = _script_runtime(sin_firma).run("10.0.0.5", [_SMB])
+    calla = _script_runtime(con_firma).run("10.0.0.5", [_SMB])
+
+    assert [f["check_id"] for f in dispara] == ["lybra:smb-signing-not-required@1"]
+    assert calla == []
+
+
 def test_script_checks_never_run_without_plugins_injected():
     """The default wiring of a caller that knows nothing about scripts."""
     findings = CheckRuntime(load_checks(), _fetcher({})).run("10.0.0.5", [_SMB])
