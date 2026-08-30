@@ -358,7 +358,7 @@ def _parse_check(c: dict) -> Check:
         )
         for request in c.get("requests", [])
     )
-    return Check(
+    check = Check(
         id=c["id"],
         version=c.get("version", 1),
         type=c.get("type", "http"),
@@ -371,6 +371,36 @@ def _parse_check(c: dict) -> Check:
         tls_rule=c.get("tlsRule"),
         script=c.get("script"),
         expect_banner=bool(c.get("expectBanner", False)),
+    )
+    _assert_service_is_reachable(check)
+    return check
+
+
+def _assert_service_is_reachable(check: Check) -> None:
+    """Fail loudly when a ``network`` check names a protocol nobody can match.
+
+    A check whose ``service`` has no predicate can never apply to anything: it
+    is a bug in the feed, not a runtime case. Left to fall through it looks
+    exactly like "this check simply did not fire against this host", which is
+    normal and unremarkable — so nobody ever finds out. Raising here puts the
+    error where a human is looking, at load time.
+
+    Only ``network`` checks are validated: the other families do not dispatch
+    on this field (``http`` and ``tls`` decide by service shape, ``script``
+    delegates to its plugin), so an odd ``service`` there is a label and not a
+    routing decision.
+
+    Args:
+        check: The freshly parsed check.
+
+    Raises:
+        ValueError: If a ``network`` check names an unknown protocol.
+    """
+    if check.type != "network" or check.service in _NETWORK_SERVICE_MATCHERS:
+        return
+    raise ValueError(
+        f"Check {check.id!r}: el servicio {check.service!r} no tiene predicado "
+        f"(disponibles: {', '.join(sorted(_NETWORK_SERVICE_MATCHERS))})"
     )
 
 
@@ -496,14 +526,34 @@ def is_snmp_service(service: Service) -> bool:
     return (service.name or "").lower() in _SNMP_SERVICE_NAMES or service.port in _SNMP_PORTS
 
 
-# Maps a ``type: "network"`` check's declared ``service`` (the feed's plain
-# string, e.g. ``"ftp"``) to the predicate that decides whether a discovered
-# Service is that protocol. One entry per protocol Fase N adds — the runtime
-# itself (``CheckRuntime._applies_network``) stays protocol-agnostic.
-_NETWORK_SERVICE_MATCHERS: Dict[str, Callable[[Service], bool]] = {
-    "ftp": is_ftp_service,
-    "redis": is_redis_service,
-}
+def _network_service_matchers() -> Dict[str, Callable[[Service], bool]]:
+    """Derive the ``service`` → predicate map from this module's own predicates.
+
+    A ``type: "network"`` check declares which protocol it targets as a plain
+    string (``service: ftp``), and the runtime needs the predicate that decides
+    whether a discovered service *is* that protocol. That map used to be
+    written out by hand and had **two** entries while the module already
+    defined eleven predicates: a check for SMTP, MySQL or VNC loaded fine,
+    validated fine, and was then dropped without a word.
+
+    Deriving it removes the second edit entirely — defining
+    ``is_mongodb_service`` is all it takes for ``service: mongodb`` to work.
+
+    Introspection rather than the ``@register_dissector`` decorator the
+    fingerprinting package uses, and for a reason: a decorator would have to
+    restate the protocol name (``@service_predicate("ftp")``) that the
+    function name already carries, which is one more place for the two to
+    disagree. Here the naming convention *is* the registration.
+    """
+    suffix = "_service"
+    return {
+        name[len("is_"):-len(suffix)]: predicate
+        for name, predicate in globals().items()
+        if name.startswith("is_") and name.endswith(suffix) and callable(predicate)
+    }
+
+
+_NETWORK_SERVICE_MATCHERS: Dict[str, Callable[[Service], bool]] = _network_service_matchers()
 
 
 # Protocol versions considered deprecated/weak for a service exposed today.
@@ -717,11 +767,25 @@ class CheckRuntime:
         :data:`_NETWORK_SERVICE_MATCHERS`, so the runtime itself never needs to
         know about a specific protocol — only each protocol's applicability
         predicate does.
+
+        A check the feed loader already rejected cannot reach this point, so an
+        unknown protocol here means a check that never went through it — one
+        translated from a Nuclei template, whose ``service`` is whatever the
+        upstream document said. It is still a check that can never fire, so it
+        is logged rather than silently skipped: the two cases (unknown protocol
+        / protocol that does not apply to this service) are not the same thing
+        and must not look the same.
         """
         if check.type != "network":
             return False
         matches = _NETWORK_SERVICE_MATCHERS.get(check.service)
-        if matches is None or not matches(service):
+        if matches is None:
+            logger.warning(
+                "Check %s declara el servicio %r, que no tiene predicado: no se ejecutará",
+                check.check_id, check.service,
+            )
+            return False
+        if not matches(service):
             return False
         return self._applies_mode(check)
 
