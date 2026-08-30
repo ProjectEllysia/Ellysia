@@ -54,9 +54,13 @@ logger = logging.getLogger(__name__)
 # ``type: "network"`` check; checks-3: "redis-unauthenticated-access", the
 # second ``network`` protocol; checks-4: "smb-signing-not-required", the first
 # ``type: "script"`` check; checks-5: "snmp-default-community", the first
-# check over UDP) — never for a fix to an existing check, which bumps that
-# check's own ``version`` instead (see ``Check.check_id``).
-CHECKS_FEED_VERSION = "lybra-checks-5"
+# check over UDP; checks-6: el vocabulario ``read``/``expectBanner``, que es
+# capacidad nueva del esquema y no el arreglo de un check suelto) — nunca por
+# arreglar un check ya existente, que sube su propio ``version`` (ver
+# ``Check.check_id``). Los dos checks ``network`` suben además a ``version: 2``
+# en checks-6: su comportamiento cambia, y un hallazgo guardado tiene que poder
+# decir cuál de las dos formas lo produjo.
+CHECKS_FEED_VERSION = "lybra-checks-6"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -193,12 +197,18 @@ class Request:
         send: For ``type: "network"``, the raw payload to write before
             reading a reply (e.g. ``"USER anonymous\\r\\n"``). ``None`` reads
             without writing anything first. Unused by ``type: "http"``.
+        read: For ``type: "network"``, how the reply *ends* — see
+            :data:`NETWORK_READ_MODES`. The transport cannot know this on its
+            own: where a reply stops is a fact about the protocol, so the feed
+            declares it. Defaults to ``"line"``, the original behaviour.
+            Unused by ``type: "http"``.
     """
     method: str = "GET"
     path: str = "/"
     matchers: tuple = ()
     condition: str = "and"
     send: Optional[str] = None
+    read: str = "line"
 
     def evaluate(self, response: Response) -> bool:
         """Return whether this request's matchers are satisfied by a response.
@@ -247,6 +257,14 @@ class Check:
             to fall back to :data:`CHECKS_FEED_VERSION`. A single global
             constant stopped being truthful once checks could come from two
             feeds with independent version lines.
+        expect_banner: For ``type: "network"``, whether the server volunteers a
+            greeting the moment the connection opens (FTP, SMTP, POP3 and IMAP
+            all do; Redis and MySQL do not). When set, the runtime reads and
+            **discards** that greeting before writing the check's first
+            payload. Without it the greeting is still sitting in the socket
+            buffer and every subsequent read comes back one reply out of step
+            — the whole check then matches against the wrong text and silently
+            never fires.
         tags: Free-form labels (Nuclei's ``info.tags``, plus vendor/product
             metadata). Not used by the runtime, which runs whatever it is
             given: they exist so a *selector* can decide which of thousands of
@@ -266,6 +284,7 @@ class Check:
     script: Optional[str] = None
     namespace: str = "lybra"
     feed_version: Optional[str] = None
+    expect_banner: bool = False
     tags: tuple = ()
 
     @property
@@ -326,6 +345,7 @@ def _parse_check(c: dict) -> Check:
             path=request.get("path", "/"),
             condition=request.get("matchers-condition", "and"),
             send=request.get("send"),
+            read=_parse_read_mode(request.get("read"), c.get("id")),
             matchers=tuple(
                 Matcher(
                     type=matcher["type"],
@@ -350,7 +370,38 @@ def _parse_check(c: dict) -> Check:
         finding=c.get("finding", {}),
         tls_rule=c.get("tlsRule"),
         script=c.get("script"),
+        expect_banner=bool(c.get("expectBanner", False)),
     )
+
+
+def _parse_read_mode(declared: Optional[str], check_id: Optional[str]) -> str:
+    """Validate a request's declared ``read`` mode, defaulting to ``"line"``.
+
+    A mode nobody implements is a feed bug, not a runtime case: left to fall
+    back silently it would read one line where the protocol needs a block and
+    the check would simply never fire — the same class of silent false
+    negative this whole change exists to remove. So it raises at load time,
+    where a human is looking.
+
+    Args:
+        declared: The feed's ``read`` value, or ``None`` when absent.
+        check_id: The check being parsed, for the error message.
+
+    Returns:
+        The validated mode name.
+
+    Raises:
+        ValueError: If ``declared`` names a mode that does not exist.
+    """
+    if declared is None:
+        return "line"
+    mode = str(declared).strip().lower()
+    if mode not in NETWORK_READ_MODES:
+        raise ValueError(
+            f"Check {check_id!r}: modo de lectura {declared!r} desconocido "
+            f"(disponibles: {', '.join(sorted(NETWORK_READ_MODES))})"
+        )
+    return mode
 
 
 # =========================================================================
@@ -727,6 +778,12 @@ class CheckRuntime:
         over it in order (combined with AND, same as ``_run_check``) — the
         session, not a fresh connection per request, is what lets a login
         sequence like FTP's ``USER``/``PASS`` see its own prior state.
+
+        When the check declares ``expectBanner``, the server's unprompted
+        greeting is read and thrown away first. It has to be: the greeting is
+        already in the socket buffer at connect time, so leaving it there would
+        put every later read one reply out of step — the check would evaluate
+        ``USER``'s matchers against the greeting and never fire.
         """
         if self._rl is not None:
             self._rl.acquire(host)
@@ -734,8 +791,12 @@ class CheckRuntime:
         if session is None:
             return None
         try:
+            if check.expect_banner:
+                # Read as a block: a greeting may span several continuation
+                # lines, and a single-line one ends the block immediately.
+                session.exchange(None, read="block")
             for request in check.requests:
-                response = session.exchange(request.send)
+                response = session.exchange(request.send, read=request.read)
                 if response is None or not request.evaluate(response):
                     return None
             return self._finding(check, service)
@@ -930,45 +991,81 @@ class HttpProbe:
 # NETWORK PROBE (the network edge for ``type: "network"`` checks — Fase N)
 # =========================================================================
 
+# How a reply ends, declared per request by the feed (``read:``). The transport
+# cannot infer this: "one line" is a property of some protocols and of no
+# others, and guessing it wrong does not raise — it just reads the wrong bytes
+# and the check never fires.
+#
+#   line       One line, terminated by LF. The original behaviour and the
+#              default: right for a protocol whose every reply is one line.
+#   block      A multi-line status block, the shape FTP/SMTP/POP3 use: lines
+#              whose status code is followed by "-" are continuations, and the
+#              first line *without* that dash closes the block. Degrades to a
+#              single line when the server does not use continuations, which is
+#              what makes it safe as the banner reader for any protocol.
+#   resp-bulk  Redis' RESP bulk string: a "$<n>" header line followed by
+#              exactly n bytes of payload. Any other first line (an error like
+#              "-NOAUTH ...", a simple "+OK") is returned as-is, because that
+#              *is* the whole reply.
+NETWORK_READ_MODES = ("line", "block", "resp-bulk")
+
+# A status line whose code is followed by "-" instead of a space: the reply
+# continues on the next line (RFC 959 §4.2 for FTP, RFC 5321 §4.2 for SMTP).
+_STATUS_CONTINUATION_RE = re.compile(rb"^\d{3}-")
+
+
 class NetworkSession:
     """One TCP connection, shared across every request of a single check run.
 
-    Deliberately protocol-agnostic: it knows nothing about FTP, SMB or any
-    other protocol a future check targets — it only writes a payload (if any)
-    and reads back one line, decoded as text so the existing word/regex
-    matchers can evaluate it exactly like an HTTP response (``status=0`` and
-    empty ``headers``, since neither concept exists here).
+    Deliberately protocol-agnostic: it knows nothing about FTP, Redis or any
+    other protocol a check targets. What it does know is that *where a reply
+    ends* is a protocol decision, so the feed declares it per request (see
+    :data:`NETWORK_READ_MODES`) and this class only implements the mechanics.
+    The reply comes back decoded as text, so the existing word/regex matchers
+    evaluate it exactly like an HTTP response (``status=0`` and empty
+    ``headers``, since neither concept exists here).
+
+    Reads are buffered: whatever a read mode does not consume stays for the
+    next one, which is what lets a bulk-string read hand back the leftovers
+    instead of losing them. It also stops the previous byte-at-a-time
+    ``recv(1)`` loop, one system call per byte received.
 
     Args:
         sock: The connected socket this session wraps.
-        max_bytes: The maximum number of bytes to read per line.
+        max_bytes: The maximum number of bytes to read for a single reply. A
+            hostile or broken server must not be able to make us read forever.
     """
 
-    def __init__(self, sock, max_bytes: int = 4096) -> None:
+    _CHUNK = 4096
+
+    def __init__(self, sock, max_bytes: int = 65536) -> None:
         self._sock = sock
         self._max_bytes = max_bytes
+        self._buffer = b""
 
-    def exchange(self, send: Optional[str]) -> Optional[Response]:
-        """Write ``send`` (if any), then read and return one line of reply.
+    def exchange(self, send: Optional[str], read: str = "line") -> Optional[Response]:
+        """Write ``send`` (if any), then read one reply under the given mode.
 
         Args:
             send: The raw payload to write first, or ``None`` to only read —
-                the shape a banner-only check needs, since some protocols
-                (FTP) volunteer a line unprompted right after connecting.
+                the shape a banner-only read needs, since some protocols (FTP)
+                volunteer a greeting unprompted right after connecting.
+            read: How the reply ends — one of :data:`NETWORK_READ_MODES`.
 
         Returns:
-            A :class:`Response` wrapping the decoded line (``status=0``,
-            empty ``headers``), or ``None`` on any transport failure.
+            A :class:`Response` wrapping the decoded reply (``status=0``,
+            empty ``headers``), or ``None`` on a transport failure or an empty
+            reply.
         """
         try:
             if send is not None:
                 self._sock.sendall(send.encode("utf-8"))
-            data = b""
-            while not data.endswith(b"\n") and len(data) < self._max_bytes:
-                chunk = self._sock.recv(1)
-                if not chunk:
-                    break
-                data += chunk
+            if read == "block":
+                data = self._read_block()
+            elif read == "resp-bulk":
+                data = self._read_resp_bulk()
+            else:
+                data = self._read_line()
         except OSError as err:
             logger.debug("Network check exchange failed: %s", err)
             return None
@@ -983,6 +1080,74 @@ class NetworkSession:
             self._sock.close()
         except OSError:
             pass
+
+    def _fill(self) -> bool:
+        """Pull one more chunk off the socket into the buffer.
+
+        Returns:
+            ``False`` when the peer closed the connection (nothing more will
+            ever arrive), ``True`` otherwise.
+        """
+        chunk = self._sock.recv(self._CHUNK)
+        if not chunk:
+            return False
+        self._buffer += chunk
+        return True
+
+    def _read_line(self) -> bytes:
+        """Read up to and including the next LF, or whatever arrived before EOF."""
+        while b"\n" not in self._buffer and len(self._buffer) < self._max_bytes:
+            if not self._fill():
+                break
+        line, separator, rest = self._buffer.partition(b"\n")
+        self._buffer = rest
+        return line + separator
+
+    def _read_block(self) -> bytes:
+        """Read a status block: continuation lines plus the line that closes it."""
+        block = b""
+        while len(block) < self._max_bytes:
+            line = self._read_line()
+            if not line:
+                break
+            block += line
+            if not _STATUS_CONTINUATION_RE.match(line):
+                break
+        return block
+
+    def _read_resp_bulk(self) -> bytes:
+        """Read a RESP bulk string, or hand back a non-bulk reply untouched.
+
+        A bulk string announces its own length (``$3116``), so unlike every
+        other reply here its end is a byte count and not a delimiter. A reply
+        that is not a bulk string — an error, a simple string — is complete as
+        the single line it already is.
+        """
+        header = self._read_line()
+        if not header.startswith(b"$"):
+            return header
+        try:
+            length = int(header[1:].strip())
+        except ValueError:
+            return header
+        if length < 0:                      # "$-1" is RESP's null bulk string
+            return header
+        length = min(length, self._max_bytes)
+        while len(self._buffer) < length:
+            if not self._fill():
+                break
+        payload, self._buffer = self._buffer[:length], self._buffer[length:]
+        # RESP cierra el bulk con un CRLF que no cuenta en la longitud
+        # anunciada. Se descarta si ya está en el buffer, para que no se cuele
+        # como una línea vacía en la lectura siguiente. Deliberadamente no se
+        # pide más al socket para conseguirlo: el servidor manda ese CRLF
+        # pegado al contenido, y un recv extra sólo podría bloquear hasta el
+        # timeout — perdiendo una respuesta que ya teníamos entera.
+        if self._buffer.startswith(b"\r\n"):
+            self._buffer = self._buffer[2:]
+        elif self._buffer.startswith(b"\n"):
+            self._buffer = self._buffer[1:]
+        return payload
 
 
 class NetworkProbe:
