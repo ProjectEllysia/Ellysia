@@ -16,6 +16,7 @@ from src.modules.features.themis.lybra import (
     services_from_payload,
     QOD_OPEN_PORT,
     QOD_INVENTORY_MATCH,
+    version_in_range,
 )
 from src.modules.features.themis.services.processors import NmapResultProcessor
 
@@ -318,6 +319,58 @@ def test_version_finding_from_inventory_origin_is_confirmed_with_high_qod():
     assert vuln["category"] == "outdated_software"
     assert vuln["qod"] == QOD_INVENTORY_MATCH == 95
     assert vuln["confirmed"] is True
+
+
+def test_an_inventory_package_resolves_the_same_cves_as_its_upstream_version():
+    """El criterio de cierre de #267, extremo a extremo dentro del motor.
+
+    El inventario de un agente entrega versiones de paquete de distribución
+    (`1:7.4-1ubuntu1`), y NVD sólo publica rangos sobre versiones de
+    fabricante (`7.4`). Si el paquete no cae en los mismos rangos que su
+    versión upstream, la Fase I entera —el sustituto del escaneo autenticado—
+    mide otra cosa.
+
+    La búsqueda que se inyecta aquí usa `version_in_range` de verdad, no una
+    tabla de respuestas: lo que se comprueba es el camino completo, no que el
+    doble diga que sí.
+    """
+    afectado = {"version_start_including": "7.0", "version_end_including": "7.4"}
+
+    def lookup(vendor, product, version):
+        return [_fake_cve()] if version_in_range(version, afectado) else []
+
+    engine = LybraEngine(cve_lookup=lookup)
+    upstream = Service(22, "tcp", "ssh", "OpenSSH", "7.4", None)
+    paquete = Service(port=None, protocol="", name="", product="OpenSSH",
+                      version="1:7.4-1ubuntu1", cpe=None, origin="inventory")
+
+    del_banner = [f for f in engine.analyze([upstream]) if f["category"] == "outdated_software"]
+    del_paquete = [f for f in engine.analyze([paquete]) if f["category"] == "outdated_software"]
+
+    assert len(del_banner) == 1
+    assert [f["cve_ids"] for f in del_paquete] == [f["cve_ids"] for f in del_banner]
+
+
+def test_a_normalized_version_says_so_in_the_finding():
+    # Sin esto, el hallazgo es inexplicable de puertas afuera: nada en él da
+    # cuenta de por qué un host con 1:7.4-1ubuntu1 sale contra un CVE cuyo
+    # rango termina en 7.4.
+    engine = LybraEngine(cve_lookup=_lookup_for(("openbsd", "openssh")))
+    paquete = Service(port=None, protocol="", name="", product="OpenSSH",
+                      version="1:7.4-1ubuntu1", cpe=None, origin="inventory")
+
+    vuln = [f for f in engine.analyze([paquete]) if f["category"] == "outdated_software"][0]
+
+    assert "1:7.4-1ubuntu1" in vuln["title"]      # lo que se descubrió, tal cual
+    assert "(upstream 7.4)" in vuln["title"]      # y contra qué se comparó
+
+
+def test_a_plain_vendor_version_gets_no_normalization_note():
+    # La nota sólo aparece donde hay algo que explicar.
+    engine = LybraEngine(cve_lookup=_lookup_for(("openbsd", "openssh")))
+    findings = engine.analyze([Service(22, "tcp", "ssh", "OpenSSH", "7.4", None)])
+
+    assert "upstream" not in findings[1]["title"]
 
 
 def test_version_finding_from_network_origin_stays_a_hypothesis():

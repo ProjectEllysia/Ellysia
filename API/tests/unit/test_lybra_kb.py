@@ -10,6 +10,7 @@ import pytest
 from src.modules.features.themis.lybra import (
     version_compare,
     version_in_range,
+    split_distro_version,
     normalize_cpe_to_23,
     normalize_product_name,
     extract_trailing_version,
@@ -37,6 +38,70 @@ pytestmark = pytest.mark.unit
 ])
 def test_version_compare(a, b, expected):
     assert version_compare(a, b) == expected
+
+
+# ------------------------------------------- versiones de paquete de distribución
+#
+# La versión de un paquete de distribución no es la del fabricante. Debian y sus
+# derivadas escriben `1:2.4.49-1ubuntu1`: el `1:` es el *epoch* (un contador que
+# la distribución sube cuando tiene que renumerar hacia abajo) y el `-1ubuntu1`
+# es la *revisión* (qué empaquetado de esa misma versión es). Alpine escribe
+# `2.4.49-r0`. Sólo el trozo del medio es lo que publicó el fabricante, y es lo
+# único de lo que habla NVD.
+#
+# Los dos extras rompían la comparación en direcciones opuestas: el epoch
+# arrastraba la versión hacia abajo (falsos positivos) y la revisión la
+# empujaba por encima del final del rango (CVEs perdidos).
+
+@pytest.mark.parametrize("raw,expected", [
+    ("1:2.4.49-1ubuntu1", (1, "2.4.49", "1ubuntu1")),   # Debian/Ubuntu completo
+    ("2.4.49-1ubuntu1", (None, "2.4.49", "1ubuntu1")),  # sin epoch
+    ("2.4.49-r0", (None, "2.4.49", "r0")),              # Alpine
+    ("2.4.49+dfsg-1", (None, "2.4.49", "1")),           # Debian con metadato de empaquetado
+    ("7.0.11", (None, "7.0.11", None)),                 # versión de fabricante, intacta
+    ("1.0.0-rc1", (None, "1.0.0-rc1", None)),           # preversión, NO es una revisión
+])
+def test_split_distro_version(raw, expected):
+    assert split_distro_version(raw) == expected
+
+
+@pytest.mark.parametrize("a,b,expected", [
+    # El caso que perdía CVEs: la revisión empujaba el paquete por encima del
+    # final del rango, así que un versionEndIncluding: 2.4.49 no casaba.
+    ("2.4.49-1ubuntu1", "2.4.49", 0),
+    ("1:2.4.49-1ubuntu1", "2.4.49", 0),
+    ("2.4.49-r0", "2.4.49", 0),
+    ("2.4.49+dfsg-1", "2.4.49", 0),
+    # El caso que producía falsos positivos: el epoch se leía como primer
+    # componente, así que 1:1.2.3 se ordenaba por debajo de 1.0.0.
+    ("1:1.2.3", "1.0.0", 1),
+    # Entre dos versiones de distribución sí mandan epoch y revisión.
+    ("1:1.0", "2:0.9", -1),
+    ("2.4.49-1", "2.4.49-2", -1),
+    ("2.4.49-2", "2.4.49-1", 1),
+    # Regresión: una preversión sigue ordenando por debajo de su versión final.
+    ("1.0.0-rc1", "1.0.0", -1),
+])
+def test_version_compare_with_distro_versions(a, b, expected):
+    assert version_compare(a, b) == expected
+
+
+def test_a_distro_package_lands_in_the_range_of_its_upstream_release():
+    """El criterio de cierre: un paquete de distribución tiene que casar los
+    mismos rangos que su versión upstream, ni más ni menos."""
+    rango = {"version_start_including": "2.4.0", "version_end_including": "2.4.49"}
+
+    assert version_in_range("2.4.49", rango) is True            # referencia
+    assert version_in_range("1:2.4.49-1ubuntu1", rango) is True  # el mismo paquete, empaquetado
+    assert version_in_range("2.4.49-r0", rango) is True          # y en Alpine
+
+    # Y sigue quedándose fuera lo que tiene que quedarse fuera.
+    assert version_in_range("2.4.50-1ubuntu1", rango) is False
+    assert version_in_range("2.3.9-1ubuntu1", rango) is False
+
+
+def test_an_exact_pinned_version_also_matches_the_packaged_form():
+    assert version_in_range("1:2.4.49-1ubuntu1", {"exact_version": "2.4.49"}) is True
 
 
 # --------------------------------------------------------------- version range
