@@ -72,6 +72,7 @@ from .kb import (
 )
 from .checks import (
     load_checks,
+    validate_checks,
     CheckRuntime,
     HttpProbe,
     HostRateLimiter,
@@ -205,6 +206,7 @@ __all__ = [
     "fetch_epss",
     "iter_nvd_pages",
     "load_checks",
+    "validate_checks",
     "CheckRuntime",
     "HttpProbe",
     "HostRateLimiter",

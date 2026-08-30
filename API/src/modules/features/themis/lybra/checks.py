@@ -45,6 +45,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 import yaml
 
 from .engine import Service
+from .correlation import PRIORITY_LADDER
 
 logger = logging.getLogger(__name__)
 
@@ -451,6 +452,138 @@ def _parse_read_mode(declared: Optional[str], check_id: Optional[str]) -> str:
             f"(disponibles: {', '.join(sorted(NETWORK_READ_MODES))})"
         )
     return mode
+
+
+# =========================================================================
+# FEED VALIDATION
+# =========================================================================
+
+# Las familias de check que el runtime sabe despachar. Un ``type`` fuera de
+# esta lista no lanza: cae por los cuatro ``_applies_*`` y desaparece.
+CHECK_TYPES = ("http", "tls", "network", "script")
+
+# Los modos de ejecución. ``aggressive`` sólo corre cuando el runtime lo
+# autoriza explícitamente; cualquier otra palabra deja el check sin modo
+# reconocible.
+CHECK_MODES = ("safe", "aggressive")
+
+# Las familias de hallazgo que un check puede declarar. No es el vocabulario
+# entero de ``Finding.category`` —el motor emite además ``open_port``,
+# ``outdated_software``, ``fingerprint`` y ``surface_change`` por su cuenta,
+# sin pasar por el feed—, sino lo que tiene sentido que declare una regla de
+# detección. Una categoría inventada no rompe nada visible: el hallazgo se
+# guarda igual y aparece bajo una familia que ningún filtro de la interfaz
+# conoce.
+CHECK_CATEGORIES = (
+    "exposed_path",
+    "default_credentials",
+    "security_header",
+    "network_config",
+    "tls",
+    "vulnerability",
+    "web_finding",
+)
+
+# Los tipos de matcher que ``Matcher._raw_match`` implementa. Cualquier otro
+# devuelve ``False`` sin decir nada, que en un matcher negativo significa
+# además lo contrario de lo que el autor quería.
+MATCHER_TYPES = ("status", "word", "regex")
+
+# Las partes de la respuesta que ``Matcher._part_text`` sabe leer. Una parte
+# desconocida cae en el defecto (``body``), así que un ``part: "headers"`` en
+# plural busca en el cuerpo y nunca encuentra la cabecera.
+MATCHER_PARTS = ("body", "header", "status")
+
+
+def validate_checks(checks: Iterable[Check]) -> List[str]:
+    """Comprobar que ningún check está muerto por construcción.
+
+    El feed son **datos que se ejecutan**: reglas que deciden si un hallazgo de
+    seguridad existe. Y su forma de fallar es siempre la misma, la peor: en
+    silencio. Un ``tlsRule`` mal escrito cae por ``check.tls_rule not in
+    _TLS_RULES`` y el check no aplica nunca; un ``script`` que no existe cae
+    por ``plugin is None``; un ``type`` con un typo no lo reconoce ninguno de
+    los cuatro ``_applies_*``. En los tres casos el escaneo termina en verde y
+    lo único que ocurre es que una vulnerabilidad deja de detectarse.
+
+    Esta función no juzga si un check es *bueno* —eso lo miden los bancos de la
+    Fase 1—, sólo si puede llegar a ejecutarse. Devuelve los problemas en vez
+    de lanzar, para poder revisar un feed entero de una pasada en lugar de
+    arreglar de uno en uno; el test que la usa afirma que la lista está vacía.
+
+    Args:
+        checks: Los checks ya parseados (``load_checks`` o ``translate_all``).
+
+    Returns:
+        Una lista de problemas legibles, vacía si el feed está sano.
+    """
+    # Importación diferida a propósito: ``script_checks`` importa predicados de
+    # este módulo, así que un import arriba cerraría el ciclo. Es el mismo
+    # motivo por el que ``ScriptContext`` vive aquí y no junto a los plugins.
+    from .script_checks import default_script_plugins
+
+    script_ids = set(default_script_plugins())
+    problems: List[str] = []
+    seen: set = set()
+
+    for check in checks:
+        name = check.id or "<sin id>"
+
+        if not check.id:
+            problems.append("Un check no declara 'id'")
+        if (check.id, check.version) in seen:
+            problems.append(f"Check {name!r}: duplicado en (id, version)={(check.id, check.version)}")
+        seen.add((check.id, check.version))
+
+        if not isinstance(check.version, int) or isinstance(check.version, bool) or check.version < 1:
+            problems.append(f"Check {name!r}: 'version' debe ser un entero positivo, no {check.version!r}")
+        if check.type not in CHECK_TYPES:
+            problems.append(f"Check {name!r}: tipo {check.type!r} desconocido (disponibles: {', '.join(CHECK_TYPES)})")
+        if check.mode not in CHECK_MODES:
+            problems.append(f"Check {name!r}: modo {check.mode!r} desconocido (disponibles: {', '.join(CHECK_MODES)})")
+        if check.severity not in PRIORITY_LADDER:
+            problems.append(f"Check {name!r}: severidad {check.severity!r} fuera de la escalera ({', '.join(PRIORITY_LADDER)})")
+        if check.category not in CHECK_CATEGORIES:
+            problems.append(f"Check {name!r}: categoría {check.category!r} desconocida (disponibles: {', '.join(CHECK_CATEGORIES)})")
+
+        if check.type == "tls" and check.tls_rule not in _TLS_RULES:
+            problems.append(
+                f"Check {name!r}: regla TLS {check.tls_rule!r} sin implementación "
+                f"(disponibles: {', '.join(sorted(_TLS_RULES))})"
+            )
+        if check.type == "script" and check.script not in script_ids:
+            problems.append(
+                f"Check {name!r}: script {check.script!r} sin plugin "
+                f"(disponibles: {', '.join(sorted(script_ids))})"
+            )
+        if check.type == "network" and check.service not in _NETWORK_SERVICE_MATCHERS:
+            problems.append(
+                f"Check {name!r}: el servicio {check.service!r} no tiene predicado "
+                f"(disponibles: {', '.join(sorted(_NETWORK_SERVICE_MATCHERS))})"
+            )
+
+        # Un check http/network sin peticiones no puede casar nada: el runtime
+        # exige que **todas** las peticiones acierten, y sobre cero peticiones
+        # eso es vacuamente cierto o directamente inalcanzable según el camino.
+        # Los tls y los script no las usan.
+        if check.type in ("http", "network") and not check.requests:
+            problems.append(f"Check {name!r}: de tipo {check.type!r} y sin ninguna petición")
+
+        for position, request in enumerate(check.requests):
+            where = f"Check {name!r}, petición {position}"
+            if request.read not in NETWORK_READ_MODES:
+                problems.append(f"{where}: modo de lectura {request.read!r} desconocido")
+            if not request.matchers:
+                problems.append(f"{where}: sin ningún matcher, así que nunca decide nada")
+            for matcher in request.matchers:
+                if matcher.type not in MATCHER_TYPES:
+                    problems.append(f"{where}: matcher de tipo {matcher.type!r} desconocido")
+                if matcher.part not in MATCHER_PARTS:
+                    problems.append(f"{where}: matcher sobre la parte {matcher.part!r}, que no existe")
+                if not matcher.values:
+                    problems.append(f"{where}: matcher {matcher.type!r} sin valores que buscar")
+
+    return problems
 
 
 # =========================================================================
