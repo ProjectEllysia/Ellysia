@@ -364,51 +364,33 @@ def start_nuclei_scan(data):
 @themis_blp.alt_response(400, schema=ErrorSchema, description="Validation error")
 @themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
-@themis_blp.alt_response(404, schema=ErrorSchema, description="Source scan not found")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.THEMIS_CREATE])
 @limiter.limit("20 per hour; 100 per day")
 @handle_exceptions(default_exception=ScanExecutionError, logger=logger)
 def start_lybra_scan(data):
-    """Lanzar un escaneo Lybra: sobre un Nmap previo, o autodescubriendo."""
+    """Lanzar un escaneo Lybra: descubre los servicios del objetivo por su cuenta."""
     timeout = data["timeout"]
-    # La clave JSON sigue siendo "deep": es contrato de la API (la manda
-    # LybraLaunchPanel.vue) y no acompaña al renombrado del identificador.
-    is_deep_analysis = data.get("deep", False)
-    source_scan_id = data.get("sourceScanId")
     user = get_current_user()
     manager = LybraEngineManager()
 
-    if source_scan_id:
-        # El escaneo fuente debe existir, ser del usuario y ser un Nmap.
-        source_scan = ScanManager.assert_scan_ownership(source_scan_id, user.id)
-        if source_scan.scan_type != ScanType.NMAP.value:
-            raise ValidationError(
-                field="sourceScanId",
-                message="El escaneo fuente debe ser un escaneo Nmap",
-                value=source_scan_id,
-            )
-        scan_id = manager.run_scan(user_id=user.id, source_scan_id=source_scan_id, is_deep_analysis=is_deep_analysis, timeout=timeout)
-        logger.info(f"Lybra lanzado: ID={scan_id} fuente={source_scan_id} deep={is_deep_analysis} user={user.username}")
-    else:
-        # Autodescubrimiento: valida el objetivo (rechaza IPs privadas, etc.)
-        # igual que un escaneo Nmap, ya que el transporte propio toca el objetivo.
-        target = ScanManager.validate_targets(data["target"], max_hosts=1)[0]
-        discover_ports = None
-        if data.get("ports"):
-            try:
-                discover_ports = ScanManager.validate_port(data["ports"])
-            except PortValidationError as exc:
-                raise ValidationError(field="ports", message=str(exc), value=data["ports"]) from exc
-            
-        scan_id = manager.run_scan(
-            user_id=user.id, 
-            target=target, 
-            discover_ports=discover_ports,
-            is_deep_analysis=is_deep_analysis,
-            timeout=timeout
-        )
-        logger.info(f"Lybra lanzado: ID={scan_id} autodescubrimiento target={target} deep={is_deep_analysis} user={user.username}")
+    # Autodescubrimiento: valida el objetivo (rechaza IPs privadas, etc.)
+    # igual que un escaneo Nmap, ya que el transporte propio toca el objetivo.
+    target = ScanManager.validate_targets(data["target"], max_hosts=1)[0]
+    discover_ports = None
+    if data.get("ports"):
+        try:
+            discover_ports = ScanManager.validate_port(data["ports"])
+        except PortValidationError as exc:
+            raise ValidationError(field="ports", message=str(exc), value=data["ports"]) from exc
+
+    scan_id = manager.run_scan(
+        user_id=user.id,
+        target=target,
+        discover_ports=discover_ports,
+        timeout=timeout
+    )
+    logger.info(f"Lybra lanzado: ID={scan_id} autodescubrimiento target={target} user={user.username}")
 
     return {
         "message": "Escaneo Lybra iniciado correctamente",
