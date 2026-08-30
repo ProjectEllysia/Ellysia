@@ -57,6 +57,7 @@ from .engine import (
 from .kb import (
     version_compare,
     split_distro_version,
+    kb_feed_version,
     version_in_range,
     normalize_cpe_to_23,
     normalize_product_name,
@@ -194,6 +195,7 @@ __all__ = [
     "QOD_INVENTORY_MATCH",
     "version_compare",
     "split_distro_version",
+    "kb_feed_version",
     "version_in_range",
     "normalize_cpe_to_23",
     "normalize_product_name",

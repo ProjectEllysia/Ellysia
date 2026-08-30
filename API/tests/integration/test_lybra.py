@@ -12,7 +12,7 @@ from datetime import datetime
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.features.themis.model import NmapScan, NiktoScan, ScanStatus
+from src.modules.features.themis.model import Finding, NmapScan, NiktoScan, ScanStatus
 from src.modules.features.themis.repositories import ScanRepository, KbRepository
 from src.modules.features.themis.managers import LybraEngineManager, ScanManager, AuthorizedTargetManager
 from src.modules.features.themis.lybra import Service
@@ -506,6 +506,49 @@ def _seed_kb_apache_cve(app):
                              "date_added": None, "due_date": None})
             repo.upsert_epss({"cve_id": "CVE-2021-41773", "score": 0.97,
                               "percentile": 0.99, "scored_at": None})
+
+
+def test_a_scan_stamps_findings_with_the_state_of_the_knowledge_base(app, admin_user):
+    """#270: la marca de reproducibilidad sale del estado real de la KB.
+
+    Era la constante ``"lybra-0"`` para todos los hallazgos por versión, así que
+    un hallazgo guardado no podía decir contra qué conocimiento se resolvió.
+    Aquí se siembra la KB con fechas conocidas en las tres fuentes y se
+    comprueba que el escaneo las estampa.
+    """
+    from datetime import datetime
+
+    _seed_kb_apache_cve(app)
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            repo.upsert_kev({"cve_id": "CVE-2021-41773", "known_ransomware": False,
+                             "date_added": datetime(2026, 8, 27), "due_date": None})
+            repo.upsert_epss({"cve_id": "CVE-2021-41773", "score": 0.97, "percentile": 0.99,
+                              "scored_at": datetime(2026, 8, 30)})
+            repo.upsert_cve(
+                {"cve_id": "CVE-2021-41773", "cvss_score": 7.5, "cvss_vector": "CVSS:3.1/AV:N",
+                 "severity": "HIGH", "description": "Path traversal", "cwe_ids": ["CWE-22"],
+                 "source": "nvd", "last_modified": datetime(2026, 8, 29, 13, 19)},
+                [{"vendor": "apache", "product": "http_server", "exact_version": "2.4.49",
+                  "version_start_including": None, "version_start_excluding": None,
+                  "version_end_including": None, "version_end_excluding": None}],
+            )
+
+    nmap_id = _seed_nmap_scan(app, admin_user.id)
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id,
+                                        source_scan_id=nmap_id)
+        mgr._run_lybra(escan.id, nmap_id)
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    assert vuln.feed_version == "lybra-kb:nvd=2026-08-29,kev=2026-08-27,epss=2026-08-30"
+    # Y la marca cabe entera en la columna, sin recortes silenciosos.
+    assert len(vuln.feed_version) <= Finding.__table__.c.feed_version.type.length
 
 
 def _seed_kb_vsftpd_cve(app):

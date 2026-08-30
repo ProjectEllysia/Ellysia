@@ -321,6 +321,79 @@ def test_version_finding_from_inventory_origin_is_confirmed_with_high_qod():
     assert vuln["confirmed"] is True
 
 
+# ------------------------------------------- marca de reproducibilidad (#270)
+#
+# Cada hallazgo lleva una marca que dice contra qué se resolvió. Para los checks
+# activos era cierta (sube cada vez que cambia el feed); para la detección por
+# versión —que produce la mayoría de los hallazgos con CVE— era la constante
+# "lybra-0" y no cambió nunca. Dos hallazgos separados por seis meses, uno
+# contra el catálogo completo y otro contra una KB a medio poblar, llevaban la
+# misma marca.
+
+def test_the_engine_stamps_the_mark_it_is_given():
+    engine = LybraEngine(
+        cve_lookup=_lookup_for(("openbsd", "openssh")),
+        feed_version="lybra-kb:nvd=2026-08-29,kev=2026-08-27,epss=2026-08-30",
+    )
+
+    findings = engine.analyze([Service(22, "tcp", "ssh", "OpenSSH", "7.4", None)])
+
+    assert {f["feed_version"] for f in findings} == {
+        "lybra-kb:nvd=2026-08-29,kev=2026-08-27,epss=2026-08-30"
+    }
+
+
+def test_without_a_mark_the_engine_keeps_the_old_constant():
+    # Compatibilidad con los hallazgos ya almacenados: quien no inyecte nada
+    # sigue estampando exactamente lo que estampaba antes.
+    engine = LybraEngine(cve_lookup=_lookup_for(("openbsd", "openssh")))
+    findings = engine.analyze([Service(22, "tcp", "ssh", "OpenSSH", "7.4", None)])
+
+    assert {f["feed_version"] for f in findings} == {"lybra-0"}
+
+
+def test_two_states_of_the_knowledge_base_produce_different_marks():
+    """El criterio de cierre: dos escaneos separados por una sincronización
+    tienen que distinguirse por la marca."""
+    from datetime import datetime
+
+    from src.modules.features.themis.lybra import kb_feed_version
+
+    antes = kb_feed_version({
+        "nvd": datetime(2026, 8, 29, 13, 19), "kev": datetime(2026, 8, 27), "epss": None,
+    })
+    despues = kb_feed_version({
+        "nvd": datetime(2026, 8, 30, 4, 0), "kev": datetime(2026, 8, 27),
+        "epss": datetime(2026, 8, 30),
+    })
+
+    assert antes == "lybra-kb:nvd=2026-08-29,kev=2026-08-27,epss=none"
+    assert despues == "lybra-kb:nvd=2026-08-30,kev=2026-08-27,epss=2026-08-30"
+    assert antes != despues
+
+
+def test_a_source_with_no_data_says_so_instead_of_pretending():
+    # Una fuente vacía es información, no un hueco que rellenar con la fecha de
+    # otra cosa: es justo lo que esta marca existe para hacer visible.
+    from src.modules.features.themis.lybra import kb_feed_version
+
+    assert kb_feed_version({}) == "lybra-kb:nvd=none,kev=none,epss=none"
+
+
+def test_the_mark_fits_in_the_column_that_stores_it():
+    from datetime import datetime
+
+    from src.modules.features.themis.lybra import kb_feed_version
+    from src.modules.features.themis.model import Finding
+
+    peor_caso = kb_feed_version({
+        "nvd": datetime(2026, 12, 31), "kev": datetime(2026, 12, 31),
+        "epss": datetime(2026, 12, 31),
+    })
+
+    assert len(peor_caso) <= Finding.__table__.c.feed_version.type.length
+
+
 def test_an_inventory_package_resolves_the_same_cves_as_its_upstream_version():
     """El criterio de cierre de #267, extremo a extremo dentro del motor.
 

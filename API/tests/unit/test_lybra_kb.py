@@ -432,6 +432,36 @@ def test_parse_epss_rows_skips_comment_header():
     assert rows[0]["scored_at"].year == 2026
 
 
+def test_the_scoring_date_is_read_from_the_header_the_feed_actually_publishes():
+    """La cabecera real usa dos puntos, no un igual, y eso costaba el campo entero.
+
+    El test de arriba —y sólo él— cubría este parser, con una cabecera escrita
+    a mano que usa ``score_date=``. El feed publica
+    ``#model_version:v2026.06.15,score_date:2026-08-30T12:03:42Z``. Con el
+    parser buscando únicamente el ``=``, la fecha salía ``None`` **siempre**:
+    353.521 filas en un espejo completo, ninguna con fecha, y sin un solo
+    error por el camino — una fecha ausente es indistinguible de un feed que
+    no la trae.
+
+    Es el motivo de que este caso exista: una fixture inventada valida el
+    código contra sí misma, no contra el mundo.
+    """
+    csv_text = (
+        "#model_version:v2026.06.15,score_date:2026-08-30T12:03:42Z\n"
+        "cve,epss,percentile\n"
+        "CVE-2021-41773,0.97,0.995\n"
+    )
+
+    rows = list(parse_epss_rows(csv_text))
+
+    assert rows[0]["scored_at"].date().isoformat() == "2026-08-30"
+
+
+def test_a_header_without_a_date_leaves_the_field_empty():
+    csv_text = "#model_version:v2026.06.15\ncve,epss,percentile\nCVE-2021-41773,0.97,0.995\n"
+    assert list(parse_epss_rows(csv_text))[0]["scored_at"] is None
+
+
 # --------------------------------------- product name normalization (Fase I-b)
 
 @pytest.mark.parametrize("raw,expected", [

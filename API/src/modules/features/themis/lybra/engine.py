@@ -138,6 +138,16 @@ class LybraEngine:
             ``CpeMatch`` rows (Fase I-b, paso 2), consulted only when neither an
             embedded CPE nor :data:`CPE_PRODUCT_OVERRIDES` resolved the service.
             ``None`` disables this third strategy, leaving the first two.
+        feed_version: The reproducibility mark stamped on every finding this
+            engine emits. The caller passes one describing the state of the
+            knowledge base the findings were resolved against; omitting it
+            keeps :data:`FEED_VERSION`, the constant every stored finding
+            carried before this became injectable.
+
+            Why it is injected and not read here: the mark describes the
+            contents of the database, and this package is deliberately free of
+            the ORM. The manager knows the KB's state; the engine only stamps
+            what it is told.
     """
 
     FEED_VERSION = "lybra-0"
@@ -148,11 +158,13 @@ class LybraEngine:
         kev_lookup: Optional[Callable[[str], bool]] = None,
         epss_lookup: Optional[Callable[[str], Optional[float]]] = None,
         product_alias_lookup: Optional[Callable[[str], Optional[Tuple[str, str]]]] = None,
+        feed_version: Optional[str] = None,
     ) -> None:
         self._cve_lookup = cve_lookup
         self._kev_lookup = kev_lookup
         self._epss_lookup = epss_lookup
         self._product_alias_lookup = product_alias_lookup
+        self._feed_version = feed_version or self.FEED_VERSION
 
     def analyze(self, services: Iterable[Service]) -> List[dict]:
         """Produce the findings for a set of services.
@@ -224,7 +236,7 @@ class LybraEngine:
             "required_os":  getattr(cve, "required_os", None),
             "source":       "lybra",
             "check_id":     "lybra:version-match@1",
-            "feed_version": self.FEED_VERSION,
+            "feed_version": self._feed_version,
             "qod":          QOD_INVENTORY_MATCH if is_verified else QOD_VERSION_MATCH,
             "confirmed":    is_verified,   # a network-inferred match stays a hypothesis; Fase R confirms it actively
             "cpe_resolved": True,   # this finding only exists because resolution succeeded
@@ -282,7 +294,7 @@ class LybraEngine:
             "cpe":          normalize_cpe_to_23(service.cpe) if service.cpe else None,
             "source":       "lybra",
             "check_id":     "lybra:open-port@1",
-            "feed_version": self.FEED_VERSION,
+            "feed_version": self._feed_version,
             "qod":          QOD_OPEN_PORT,
             "confirmed":    False,
             "cpe_resolved": resolved is not None,
