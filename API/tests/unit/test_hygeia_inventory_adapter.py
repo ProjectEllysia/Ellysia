@@ -121,24 +121,32 @@ def test_other_sources_are_left_alone():
         assert services[0].version == expected, f"{item} -> {services[0].version}"
 
 
-def test_the_stripped_version_matches_an_nvd_range_that_the_raw_one_missed():
+def test_the_stripped_version_matches_an_nvd_range():
     """El motivo de todo esto, comprobado contra el comparador de verdad.
 
     Un rango ``version_start_including="2.39"`` debe casar con la libc de un
-    Ubuntu que reporta "2.39-0ubuntu8.3". Con la versión sin recortar no casa:
-    ``version_compare`` parte la cadena en tramos de dígitos y letras, las
-    letras ordenan por debajo de los números, y el sufijo de empaquetado deja
-    la versión instalada por debajo del inicio del rango.
+    Ubuntu que reporta "2.39-0ubuntu8.3".
+
+    Este test afirmaba también lo contrario para la versión **sin** recortar
+    (``version_compare(raw, "2.39") < 0``), porque entonces era cierto: el
+    comparador partía la cadena en tramos de dígitos y de letras, y el sufijo
+    de empaquetado dejaba la instalada por debajo del inicio del rango. Desde
+    #267 ya no lo es — el comparador reconoce y separa la revisión de
+    distribución él mismo, así que las dos formas comparan igual. Afirmar aquí
+    el fallo antiguo sería congelarlo.
+
+    Que el recorte del adaptador siga existiendo no sobra: es lo que hace que
+    ``Service.version`` sea la versión de origen para el resto del motor. Pero
+    ya no es la única defensa, ni la que decide si la CVE se reporta.
     """
     from src.modules.features.themis.lybra import version_compare
 
     raw = "2.39-0ubuntu8.3"
-    # El fallo que se está corrigiendo: sin recortar, la instalada parece
-    # anterior al inicio del rango y la CVE no se reportaría.
-    assert version_compare(raw, "2.39") < 0
-
     services = services_from_inventory([_deb("libc6", raw)])
+
     assert version_compare(services[0].version, "2.39") == 0
+    # Y la cruda compara igual, sin depender del recorte de aguas arriba.
+    assert version_compare(raw, "2.39") == 0
 
 
 def test_stripping_never_leaves_the_version_empty():
