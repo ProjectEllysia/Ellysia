@@ -920,17 +920,40 @@ class HostRateLimiter:
     """Enforces a minimum interval between requests to the same host.
 
     Thread-safe, so it can be shared across concurrent probes without letting any
-    single host be hit faster than the configured rate.
+    single host be hit faster than the configured rate — and **without holding
+    anyone else up while it waits**. The waiting happens outside the lock: the
+    turn is reserved under it (a few microseconds of bookkeeping), and the
+    sleeping is done after releasing it.
+
+    That distinction is the whole point of this class's shape. With the sleep
+    inside the lock, a probe waiting its turn for host A also blocked every
+    probe heading for host B — a limiter meant to protect *one* host at a time
+    was throttling all of them at once, and the wait bought nobody any
+    protection.
+
+    Reserving the turn before sleeping (writing the *future* timestamp, not the
+    current one) is what makes concurrent callers for the same host stagger
+    instead of all waking up at the same instant and firing together.
 
     Args:
         min_interval: The minimum time, in seconds, between two requests to the
             same host.
+        clock: An injectable monotonic clock, so a test can assert the schedule
+            instead of waiting for it.
+        sleeper: An injectable sleep, same reason.
     """
 
-    def __init__(self, min_interval: float = 0.2) -> None:
+    def __init__(
+        self,
+        min_interval: float = 0.2,
+        clock: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._min = min_interval
         self._last: Dict[str, float] = {}
         self._lock = threading.Lock()
+        self._clock = clock
+        self._sleeper = sleeper
 
     def acquire(self, host: str) -> None:
         """Block, if necessary, until it is safe to hit ``host`` again.
@@ -939,10 +962,21 @@ class HostRateLimiter:
             host: The host about to be requested.
         """
         with self._lock:
-            wait = self._min - (time.monotonic() - self._last.get(host, 0.0))
-            if wait > 0:
-                time.sleep(wait)
-            self._last[host] = time.monotonic()
+            now = self._clock()
+            # El turno se reserva escribiendo la marca *futura*, no la actual:
+            # así dos hilos que piden el mismo host se escalonan en vez de
+            # despertarse a la vez y disparar juntos.
+            #
+            # Un host que no se ha visto nunca se distingue con None y no con
+            # un 0.0 por defecto: contra un reloj real da igual (0.0 queda
+            # infinitamente atrás), pero contra uno inyectado que empiece en
+            # cero, ese 0.0 haría esperar a la primera petición de cada host.
+            last_turn = self._last.get(host)
+            earliest = now if last_turn is None else max(now, last_turn + self._min)
+            self._last[host] = earliest
+        wait = earliest - now
+        if wait > 0:
+            self._sleeper(wait)
 
 
 class HttpProbe:
