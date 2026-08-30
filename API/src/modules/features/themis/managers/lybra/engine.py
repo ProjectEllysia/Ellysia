@@ -153,7 +153,7 @@ class LybraEngineManager(ScanManager):
             Primary key of the created LybraScan record.
         """
         source = ServiceSource.build_for_args(source_scan_id, services, discover_ports)
-        scan_target = source.scan_target(user_id, target)
+        scan_target = source.valid_scan_target(user_id, target)
 
         # La cuota se consume aquí y no en el endpoint: por este método pasan
         # también el flujo programado (scheduling.py llama a run_scan

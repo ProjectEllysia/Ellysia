@@ -111,7 +111,7 @@ class ServiceSource:
             return ExternalPayload(services)
         return SelfDiscovery(discover_ports)
 
-    def scan_target(self, user_id: int, target: Optional[str]) -> str:
+    def valid_scan_target(self, user_id: int, target: Optional[str]) -> str:
         """Resolve and validate this mode's target, before the scan record exists."""
         raise NotImplementedError
 
@@ -155,7 +155,7 @@ class NmapSourceScan(ServiceSource):
         self.source_scan_id = source_scan_id
         self.label = f"fuente Nmap {source_scan_id}"
 
-    def scan_target(
+    def valid_scan_target(
         self,
         user_id: int,
         target: Optional[str]
@@ -198,7 +198,7 @@ class ExternalPayload(ServiceSource):
     def __init__(self, services: List[Service]) -> None:
         self.services = services
 
-    def scan_target(self, user_id: int, target: Optional[str]) -> str:
+    def valid_scan_target(self, user_id: int, target: Optional[str]) -> str:
         if not target:
             raise ValueError("run_scan requires a target when services is set")
         return target
@@ -225,7 +225,7 @@ class SelfDiscovery(ServiceSource):
     def __init__(self, discover_ports: Optional[list]) -> None:
         self.discover_ports = discover_ports
 
-    def scan_target(self, user_id: int, target: Optional[str]) -> str:
+    def valid_scan_target(self, user_id: int, target: Optional[str]) -> str:
         if target is None:
             raise ValueError("run_scan requires source_scan_id, services, or target")
         # Self-discovery touches the target directly, unlike analysing a prior
@@ -243,10 +243,10 @@ class SelfDiscovery(ServiceSource):
         return target
 
     def resolve_services(
-            self,
-            scan_repo: ScanRepository,
-            probes: DiscoveryProbes,
-            target: Optional[str]
+        self,
+        scan_repo: ScanRepository,
+        probes: DiscoveryProbes,
+        target: Optional[str]
     ) -> Optional[ResolvedServices]:
         discovered_ports: list = []
         udp_ports: list = []
