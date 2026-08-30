@@ -133,9 +133,11 @@ def merge_findings(findings: List[dict]) -> List[dict]:
     When several findings describe the same issue, the merged result keeps the
     highest ``qod`` (along with that finding's title and CVSS score), is marked
     ``confirmed`` / ``in_kev`` if *any* input was, unions the CVE ids, and joins
-    the distinct sources into ``source`` (e.g. ``"lybra,nuclei"``). This is the
-    mechanism behind both within-scan dedup and the read-time fusion of
-    corroborator scans.
+    the distinct sources into ``source`` (e.g. ``"lybra,nuclei"``). Es el
+    mecanismo de deduplicación dentro de un mismo escaneo: dos checks que
+    describen el mismo problema se cuentan una vez. También sostuvo, hasta L52,
+    la fusión en lectura de los hallazgos de los escaneos corroboradores; esa
+    fusión desapareció con ellos, la deduplicación se queda.
 
     Args:
         findings: Findings to merge. Each may already carry a ``dedup_key``; any

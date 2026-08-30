@@ -18,6 +18,13 @@ from typing import Optional
 from ..engine import Service
 
 
+# Quality of Detection de un hallazgo de fingerprint: informativo y nada más.
+# Constata qué identificó el motor; nunca contribuye a la confianza de una
+# vulnerabilidad. Vivía en ``concordance.py`` hasta L52, cuando ese módulo se
+# fue al arnés de pruebas por medir contra Nmap dentro del producto.
+QOD_FINGERPRINT = 20
+
+
 @dataclass(frozen=True)
 class DissectorResult:
     """One protocol's identification of a service, ready for a fingerprint finding."""

@@ -48,7 +48,6 @@ from __future__ import annotations
 from .engine import (
     LybraEngine,
     Service,
-    services_from_open_ports,
     services_from_payload,
     QOD_OPEN_PORT,
     QOD_INVENTORY_MATCH,
@@ -165,8 +164,6 @@ from .fingerprinting import (
     fingerprint_snmp,
     SnmpProbe,
     SnmpDissector,
-    agrees_with_nmap,
-    concordance_rate,
     QOD_FINGERPRINT,
 )
 from .adapters import (
@@ -180,7 +177,6 @@ from .transport import (
     scan_ports_sync,
     scan_udp_ports_sync,
     services_from_discovered_ports,
-    port_concordance,
     DEFAULT_PORTS,
     UDP_PROBES,
     WELL_KNOWN_PORTS,
@@ -189,7 +185,6 @@ from .transport import (
 __all__ = [
     "LybraEngine",
     "Service",
-    "services_from_open_ports",
     "services_from_payload",
     "QOD_OPEN_PORT",
     "QOD_INVENTORY_MATCH",
@@ -296,8 +291,6 @@ __all__ = [
     "fingerprint_snmp",
     "SnmpProbe",
     "SnmpDissector",
-    "agrees_with_nmap",
-    "concordance_rate",
     "QOD_FINGERPRINT",
     "nikto_incident_to_finding",
     "nuclei_result_to_finding",
@@ -307,7 +300,6 @@ __all__ = [
     "scan_ports_sync",
     "scan_udp_ports_sync",
     "services_from_discovered_ports",
-    "port_concordance",
     "DEFAULT_PORTS",
     "UDP_PROBES",
     "WELL_KNOWN_PORTS",
