@@ -8,7 +8,7 @@
 # feedVersion sube cuando el feed gana una familia nueva o un protocolo nuevo
 # bajo una existente; el arreglo de un check ya presente sube el 'version' de
 # ese check, no esta cadena. Ver CHECKS_FEED_VERSION en checks.py.
-feedVersion: lybra-checks-5
+feedVersion: lybra-checks-6
 checks:
   - id: git-config-exposure
     version: 1
@@ -290,15 +290,24 @@ checks:
       title: Protocolo TLS obsoleto negociado (SSLv3/TLSv1.0/TLSv1.1)
       qod: 99
       confirmed: true
+  # expectBanner: un servidor FTP saluda (220 ...) en cuanto se abre la
+  # conexion, sin que el cliente pida nada. Ese saludo hay que consumirlo antes
+  # de escribir USER; si se deja en el buffer, la respuesta que se lee tras
+  # USER es el saludo y no el 331, y el check no dispara jamas.
+  # read: block — el saludo y las respuestas de FTP pueden venir en varias
+  # lineas (220-... / 220 ...), asi que el fin de la respuesta es "la primera
+  # linea cuyo codigo NO lleva guion", no "el primer salto de linea".
   - id: ftp-anonymous-login
-    version: 1
+    version: 2
     type: network
     category: default_credentials
     severity: HIGH
     service: ftp
     mode: safe
+    expectBanner: true
     requests:
       - send: "USER anonymous\r\n"
+        read: block
         matchers-condition: and
         matchers:
           - type: word
@@ -306,6 +315,7 @@ checks:
             words:
               - '331'
       - send: "PASS anonymous@lybra.local\r\n"
+        read: block
         matchers-condition: and
         matchers:
           - type: word
@@ -316,8 +326,14 @@ checks:
       title: 'FTP: login anónimo permitido'
       qod: 99
       confirmed: true
+  # Redis no saluda: no lleva expectBanner. Lo que si tiene es una respuesta
+  # que no termina en el primer salto de linea — INFO devuelve un "bulk string"
+  # RESP, es decir una linea con la longitud ($3116) seguida de esos bytes. Con
+  # read: line se leia "$3116" y se buscaba redis_version ahi dentro, que
+  # nunca esta. Una respuesta que no sea bulk (el error -NOAUTH, por ejemplo)
+  # vuelve tal cual, que es justo lo que el matcher negativo necesita ver.
   - id: redis-unauthenticated-access
-    version: 1
+    version: 2
     type: network
     category: default_credentials
     severity: CRITICAL
@@ -325,6 +341,7 @@ checks:
     mode: safe
     requests:
       - send: "INFO\r\n"
+        read: resp-bulk
         matchers-condition: and
         matchers:
           - type: word
