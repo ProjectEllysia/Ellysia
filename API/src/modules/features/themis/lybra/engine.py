@@ -12,7 +12,7 @@ Two design choices keep this module easy to reason about and to test:
   (CVE / KEV / EPSS) are passed in as callables, so a test can hand it fakes and
   a caller can hand it the real repository methods.
 * The mapping from Nmap's data model into the engine's lives *here*, in
-  :func:`services_from_open_ports`, rather than leaking into the manager.
+  :func:`services_from_discovered_ports`, rather than leaking into the manager.
 
 The persistence, correlation and network phases all happen around the engine, in
 the manager; the engine itself is a pure transformation from services to
@@ -302,35 +302,6 @@ class LybraEngine:
         }
 
 
-def services_from_open_ports(open_ports: Iterable) -> List[Service]:
-    """Map Nmap ``OpenPort`` rows into engine :class:`Service` values.
-
-    Reads the rows by duck typing (``op.port.protocol``, ``op.product`` and so
-    on) so the engine package does not depend on the ORM model. Anything
-    malformed — a bad protocol string, say — degrades gracefully to ``port=None``
-    instead of raising, so a single odd row never sinks a whole scan.
-
-    Args:
-        open_ports: An iterable of ``OpenPort`` rows (or anything exposing the
-            same attributes).
-
-    Returns:
-        The corresponding list of :class:`Service` values.
-    """
-    services: List[Service] = []
-    for open_port in open_ports:
-        port, protocol = _split_protocol(getattr(getattr(open_port, "port", None), "protocol", ""))
-        services.append(Service(
-            port=port,
-            protocol=protocol,
-            name=(open_port.given_use or "").strip(),
-            product=(open_port.product or "").strip(),
-            version=(open_port.version or "").strip(),
-            cpe=(open_port.cpe or None),
-        ))
-    return services
-
-
 def services_from_payload(raw: Iterable[dict]) -> List[Service]:
     """Build engine :class:`Service` values from an externally-supplied dataset.
 
@@ -341,8 +312,7 @@ def services_from_payload(raw: Iterable[dict]) -> List[Service]:
     directly does not need this at all; ``LybraEngineManager.run_scan``
     accepts either.
 
-    Unlike :func:`services_from_open_ports` and
-    :func:`services_from_discovered_ports`, this trusts an explicit
+    Unlike :func:`services_from_discovered_ports`, this trusts an explicit
     ``"origin"`` key if the payload sets one, defaulting to ``"network"`` so a
     producer that predates Fase 0.9 (there are none yet) would behave exactly
     as those two functions do.
@@ -367,27 +337,6 @@ def services_from_payload(raw: Iterable[dict]) -> List[Service]:
             origin=item.get("origin") or "network",
         ))
     return services
-
-
-def _split_protocol(protocol: str) -> tuple[Optional[int], str]:
-    """Split Nmap's "80/tcp" form into a ``(port, protocol)`` pair.
-
-    Tolerates malformed input by returning ``port=None`` rather than raising.
-
-    Args:
-        protocol: A protocol string such as ``"80/tcp"``.
-
-    Returns:
-        A ``(port_number_or_None, protocol_string)`` tuple, defaulting the
-        protocol to ``"tcp"``.
-    """
-    if not protocol:
-        return None, "tcp"
-    port_str, _, proto = protocol.partition("/")
-    try:
-        return int(port_str), (proto or "tcp")
-    except ValueError:
-        return None, (proto or "tcp")
 
 
 def _concrete_version(version: str) -> Optional[str]:

@@ -39,12 +39,9 @@
           <LybraLaunchPanel
             :launching="store.launching"
             :launched="hasActiveLybraScan"
-            :source-scans="store.sourceNmapScans.items"
-            :source-loading="store.sourceNmapScans.loading"
             :authorized-targets="store.authorizedTargets.items"
             :auth-targets-loading="store.authorizedTargets.loading"
             @launch="handleLaunchLybra"
-            @load-sources="store.loadSourceNmapScans()"
             @add-authorized-target="handleAddAuthorizedTarget"
             @remove-authorized-target="store.removeAuthorizedTarget" />
           <LybraResults

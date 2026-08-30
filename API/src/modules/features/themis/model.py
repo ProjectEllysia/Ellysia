@@ -663,20 +663,16 @@ class NiktoIncident(Base):
 class LybraScan(Scan):
     """Scan produced by Lybra's own vulnerability engine.
 
-    In the current phase (Fase 0) Lybra has no network transport of its own,
-    so a scan takes its services from a previous Nmap scan of the same target
-    (``source_scan_id``) and produces normalized :class:`Finding` rows. When the
-    engine gains its own transport (Fase T) ``source_scan_id`` becomes optional.
+    Lybra descubre los servicios del objetivo con su propio transporte
+    (Fase T) y produce filas :class:`Finding` normalizadas.
+
+    Tuvo dos columnas más, retiradas en L52 junto al resto del acoplamiento con
+    escáneres de terceros: ``source_scan_id`` (el escaneo Nmap previo cuyos
+    servicios se analizaban) y ``deep_scan_ids`` (los ids de los escaneos
+    Nmap/Nikto/Nuclei que el "análisis profundo" lanzaba como corroboradores).
 
     Attributes:
         id: Primary key (foreign key to Scan.id).
-        source_scan_id: The Nmap Scan whose discovered services were analysed.
-            Nullable so a future self-discovering scan can leave it empty.
-        deep_scan_ids: Fase 6 "análisis profundo" — ids of the Nmap/Nikto/Nuclei
-            corroborator scans launched alongside this one. Fire-and-forget:
-            each is an ordinary, independently-tracked Scan; their Finding rows
-            are merged in only at read time (see LybraEngineManager.format_scan),
-            never copied into this scan's own Finding rows.
         asset_id: Fase I — the Hygeia MonitoredAsset whose software inventory
             originated this scan, or None when it was launched from the Themis
             panel. Deliberately a plain Integer with no ForeignKey: it is a
@@ -690,17 +686,17 @@ class LybraScan(Scan):
     __tablename__ = "LybraScan"
 
     id             = Column(Integer, ForeignKey("Scan.id"), primary_key=True)
-    source_scan_id = Column(Integer, ForeignKey("Scan.id"), nullable=True)
-    deep_scan_ids  = Column(JSONB, nullable=True)
     asset_id       = Column(Integer, nullable=True, index=True)
 
+    # Sin ``inherit_condition``: hacía falta mientras existía ``source_scan_id``,
+    # una segunda clave foránea a ``Scan.id`` que dejaba ambigua la unión con la
+    # tabla padre. Con una sola, SQLAlchemy la resuelve por su cuenta.
     __mapper_args__ = {
         "polymorphic_identity": ScanType.LYBRA,
-        "inherit_condition":    id == Scan.id,
     }
 
     def __repr__(self):
-        return f"<LybraScan(id={self.id}, target='{self.target}', source={self.source_scan_id})>"
+        return f"<LybraScan(id={self.id}, target='{self.target}')>"
 
 
 class NucleiScan(Scan):
@@ -711,10 +707,7 @@ class NucleiScan(Scan):
     maps almost 1:1 onto ``Finding`` (``cve_ids``, ``cvss_score``, ``check_id``
     all come straight from the tool), so building a parallel ``NucleiFinding``
     table would only recreate the scaffolding the roadmap's §7 dismantled
-    for OpenVAS — not something to add fresh in a brand new scan type. Unlike
-    ``LybraScan`` there is no second identifying column (no ``source_scan_id``
-    equivalent), so no ``inherit_condition`` override is needed: SQLAlchemy
-    resolves the join against ``Scan.id`` on its own.
+    for OpenVAS — not something to add fresh in a brand new scan type.
 
     Attributes:
         id: Primary key (foreign key to Scan.id).

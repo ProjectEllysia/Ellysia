@@ -360,26 +360,3 @@ def scan_udp_ports_sync(
         if reply is not None:
             open_ports.append(port)
     return sorted(open_ports)
-
-
-def port_concordance(own_ports: Iterable[int], nmap_ports: Iterable[int]) -> float:
-    """Measure how well our discovered ports agree with Nmap's.
-
-    Computes the Jaccard index (size of the intersection over size of the union)
-    between the two port sets. This is the number the roadmap's Definition of
-    Done thresholds at 0.95 before the connect scan may become the default over
-    Nmap for discovery. Two empty sets count as full agreement — there is nothing
-    to disagree about.
-
-    Args:
-        own_ports: The ports Lybra's connect scan found.
-        nmap_ports: The ports Nmap found (the oracle).
-
-    Returns:
-        A value in ``[0.0, 1.0]``, where 1.0 is perfect agreement.
-    """
-    own, nmap = set(own_ports), set(nmap_ports)
-    union = own | nmap
-    if not union:
-        return 1.0
-    return len(own & nmap) / len(union)

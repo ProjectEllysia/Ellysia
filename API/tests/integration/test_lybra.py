@@ -1,10 +1,17 @@
-"""Integration tests for the Lybra engine scan (Fase 0).
+"""Integration tests for the Lybra engine scan.
 
 Covers the endpoint's authorization/validation boundary and the engine pipeline
-end to end: given an Nmap scan's services, the engine persists informational
-findings and they surface through the results endpoint. The engine body is run
-directly (``_run_lybra``) rather than through the task queue, mirroring how the
-other scan tests avoid Redis/the worker.
+end to end: el motor descubre los servicios por su cuenta (Fase T) o recibe una
+lista ya resuelta (payload externo), persiste hallazgos y estos afloran por el
+endpoint de resultados. El cuerpo del escaneo se ejecuta directo
+(``_run_lybra``) en vez de por la cola de tareas, igual que en los tests de los
+demás escáneres, para no depender de Redis ni de un worker.
+
+Hasta L52 casi todos estos tests partían de un escaneo Nmap sembrado a mano: el
+motor tenía un modo de arranque que analizaba los servicios que otro escáner ya
+había descubierto. Ese modo se retiró junto al resto del acoplamiento con
+herramientas de terceros, así que los servicios entran ahora por los dos
+caminos que de verdad quedan.
 """
 
 from datetime import datetime
@@ -12,7 +19,7 @@ from datetime import datetime
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.features.themis.model import Finding, NmapScan, NiktoScan, ScanStatus
+from src.modules.features.themis.model import Finding, ScanStatus
 from src.modules.features.themis.repositories import ScanRepository, KbRepository
 from src.modules.features.themis.managers import LybraEngineManager, ScanManager, AuthorizedTargetManager
 from src.modules.features.themis.lybra import Service
@@ -20,26 +27,33 @@ from src.modules.features.themis.lybra import Service
 pytestmark = pytest.mark.integration
 
 
-_PORTS = [
-    {"protocol": "80/tcp", "reason": "syn-ack", "product": "Apache httpd",
-     "version": "2.4.49", "given_use": "http", "cpe": "cpe:/a:apache:http_server:2.4.49"},
-    {"protocol": "22/tcp", "reason": "syn-ack", "product": "OpenSSH",
-     "version": "7.4", "given_use": "ssh", "cpe": ""},
-]
+def _network_services(apache_version: str = "2.4.49") -> list:
+    """Los dos servicios de red del escenario base: Apache en el 80 y OpenSSH
+    en el 22, con producto, versión y CPE ya resueltos.
+
+    Es un *payload externo* (el modo que usa Hygeia): una lista de servicios
+    que el llamante ya resolvió sin que el motor tenga que sondear la red. Antes
+    el mismo escenario se montaba sembrando un escaneo Nmap y arrancando Lybra
+    sobre él; ese modo ya no existe.
+    """
+    return [
+        Service(port=80, protocol="tcp", name="http", product="Apache httpd",
+                version=apache_version, cpe=f"cpe:/a:apache:http_server:{apache_version}"),
+        Service(port=22, protocol="tcp", name="ssh", product="OpenSSH", version="7.4"),
+    ]
 
 
-def _seed_nmap_scan(app, user_id: int, ports=None) -> int:
-    """Persist a finished Nmap scan with the given open ports; return its id."""
-    with app.app_context():
-        with UnitOfWork() as uow:
-            repo = ScanRepository(uow)
-            scan = NmapScan(target="10.0.0.5", user_id=user_id,
-                            started_at=datetime.now(), status=ScanStatus.FINISHED.value)
-            repo.save(scan)
-            host = repo.get_or_create_host("10.0.0.5", "10.0.0.5")
-            repo.persist_nmap_results(scan, host, ports if ports is not None else _PORTS)
-            scan_id = scan.id
-    return scan_id
+def _stub_self_discovery(monkeypatch, tcp_ports: list, udp_ports: list | None = None) -> None:
+    """Sustituye el descubrimiento de puertos y el chequeo de alcanzabilidad.
+
+    Deja correr de verdad todo lo que viene después (fingerprinting, checks
+    activos, correlación); lo único que no ocurre es el socket.
+    """
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
+                        lambda self, target, ports: list(tcp_ports))
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports",
+                        lambda self, target: list(udp_ports or []))
 
 
 def _authorize_target(app, user_id: int, target: str = "10.0.0.5") -> None:
@@ -52,38 +66,35 @@ def _authorize_target(app, user_id: int, target: str = "10.0.0.5") -> None:
         AuthorizedTargetManager().add(user_id, target)
 
 
-def _seed_nikto_scan(app, user_id: int) -> int:
-    with app.app_context():
-        with UnitOfWork() as uow:
-            scan = NiktoScan(target="example.com", user_id=user_id,
-                             started_at=datetime.now(), status=ScanStatus.FINISHED.value)
-            ScanRepository(uow).save(scan)
-            scan_id = scan.id
-    return scan_id
-
-
 # --------------------------------------------------------- endpoint boundary
 
 def test_lybra_requires_authentication(client):
-    assert client.post("/themis/lybra", json={"sourceScanId": 1}).status_code == 401
+    assert client.post("/themis/lybra", json={"target": "203.0.113.9"}).status_code == 401
 
 
 def test_lybra_requires_create_attribute(client, stripped_user, auth_headers):
     # Usuario al que le han retirado themis_create.
     resp = client.post("/themis/lybra", headers=auth_headers(stripped_user),
-                       json={"sourceScanId": 1})
+                       json={"target": "203.0.113.9"})
     assert resp.status_code == 403
 
 
-def test_lybra_source_scan_not_found(client, admin_user, auth_headers):
-    resp = client.post("/themis/lybra", headers=auth_headers(admin_user),
-                       json={"sourceScanId": 999999})
-    assert resp.status_code == 404
-
-
-def test_lybra_requires_a_mode(client, admin_user, auth_headers):
-    # Neither sourceScanId nor target -> schema rejects it.
+def test_lybra_requires_a_target(client, admin_user, auth_headers):
+    # Sin objetivo no hay escaneo: el schema lo rechaza. Antes de L52 valía
+    # también un ``sourceScanId`` (un escaneo Nmap previo) en su lugar.
     resp = client.post("/themis/lybra", headers=auth_headers(admin_user), json={})
+    assert resp.status_code in (400, 422)
+
+
+def test_lybra_no_longer_accepts_a_source_scan(client, app, admin_user, auth_headers):
+    """L52: lanzar Lybra desde un escaneo de otra herramienta ya no es posible.
+
+    El schema ya no declara ``sourceScanId``, así que mandarlo sin objetivo es
+    una petición sin modo válido — se rechaza en la validación, no se ignora en
+    silencio dejando que el escaneo salga con un objetivo vacío.
+    """
+    resp = client.post("/themis/lybra", headers=auth_headers(admin_user),
+                       json={"sourceScanId": 1})
     assert resp.status_code in (400, 422)
 
 
@@ -124,8 +135,8 @@ def test_lybra_self_discovery_produces_open_port_findings(app, admin_user, monke
 
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(target="8.8.8.8", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
+        escan = mgr._create_scan_record(target="8.8.8.8", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
 
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
@@ -152,8 +163,8 @@ def test_lybra_self_discovery_disambiguates_the_same_port_over_tcp_and_udp(app, 
 
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(target="8.8.4.4", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
+        escan = mgr._create_scan_record(target="8.8.4.4", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
@@ -175,8 +186,8 @@ def test_lybra_self_discovery_unreachable_host_fails_without_false_fixed(app, ad
 
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(target="10.0.0.99", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
+        escan = mgr._create_scan_record(target="10.0.0.99", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
 
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
@@ -196,8 +207,8 @@ def test_lybra_self_discovery_probe_failure_fails_without_false_fixed(app, admin
 
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
 
         with UnitOfWork() as uow:
             escan = ScanRepository(uow).get_by_id(escan.id)
@@ -216,16 +227,16 @@ def test_lybra_self_discovery_genuine_zero_ports_still_marks_fixed(app, admin_us
     with app.app_context():
         mgr = LybraEngineManager()
         # First scan: port 80 open.
-        e1 = mgr._create_scan_record(target="10.0.0.7", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_lybra(e1.id, source_scan_id=None, discover_ports=None)
+        e1 = mgr._create_scan_record(target="10.0.0.7", user_id=admin_user.id)
+        mgr._run_lybra(e1.id)
 
     # Second scan: discovery ran cleanly and genuinely found nothing open.
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
                         lambda self, target, ports: [])
     with app.app_context():
         mgr = LybraEngineManager()
-        e2 = mgr._create_scan_record(target="10.0.0.7", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_lybra(e2.id, source_scan_id=None, discover_ports=None)
+        e2 = mgr._create_scan_record(target="10.0.0.7", user_id=admin_user.id)
+        mgr._run_lybra(e2.id)
         with UnitOfWork() as uow:
             findings2 = ScanRepository(uow).get_findings_by_scan(e2.id)
             e2 = ScanRepository(uow).get_by_id(e2.id)
@@ -242,7 +253,7 @@ def test_lybra_self_discovery_reuses_host_created_by_nmap(app, admin_user):
             ScanRepository(uow).get_or_create_host(hostname="server.example.com", ip_address="10.0.0.42")
 
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(target="10.0.0.42", user_id=admin_user.id, source_scan_id=None)
+        escan = mgr._create_scan_record(target="10.0.0.42", user_id=admin_user.id)
 
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
@@ -308,8 +319,7 @@ def test_lybra_payload_mode_produces_confirmed_inventory_findings(app, admin_use
     with app.app_context():
         mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.9.9.9", user_id=admin_user.id)
-        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None,
-                       is_deep_analysis=False, services_payload=services)
+        mgr._run_lybra(escan.id, services_payload=services)
 
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
@@ -343,8 +353,7 @@ def test_lybra_payload_mode_surface_tracking_distinguishes_portless_packages(app
             Service(port=None, protocol="", product="curl", version="7.68.0", origin="inventory"),
         ]
         baseline = mgr._create_scan_record(target="10.9.9.20", user_id=admin_user.id)
-        mgr._run_lybra(baseline.id, source_scan_id=None, discover_ports=None,
-                       is_deep_analysis=False, services_payload=baseline_services)
+        mgr._run_lybra(baseline.id, services_payload=baseline_services)
 
         with UnitOfWork() as uow:
             tracked = ScanRepository(uow).get_host_services(
@@ -359,8 +368,7 @@ def test_lybra_payload_mode_surface_tracking_distinguishes_portless_packages(app
             Service(port=None, protocol="", product="sqlite", version="3.31.1", origin="inventory"),
         ]
         rescan = mgr._create_scan_record(target="10.9.9.20", user_id=admin_user.id)
-        mgr._run_lybra(rescan.id, source_scan_id=None, discover_ports=None,
-                       is_deep_analysis=False, services_payload=rescan_services)
+        mgr._run_lybra(rescan.id, services_payload=rescan_services)
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(rescan.id)
@@ -373,67 +381,15 @@ def test_lybra_payload_mode_surface_tracking_distinguishes_portless_packages(app
     assert not any("curl" in t for t in surface)
 
 
-def test_lybra_payload_mode_deep_corroborators_require_authorization(app, admin_user, monkeypatch):
-    """Deep corroborators touch the network, so — unlike fingerprinting/active
-    checks, which never run at all in payload mode — they specifically require
-    the authorized-targets register, since a payload target was never
-    validated by anything else before reaching this point."""
-    calls = []
-    monkeypatch.setattr(
-        LybraEngineManager, "_launch_deep_corroborators",
-        lambda self, user_id, target, source_scan_id, services: calls.append(target) or [999],
-    )
-    services = [Service(port=None, protocol="", product="openssl", version="1.1.1", origin="inventory")]
-
-    with app.app_context():
-        mgr = LybraEngineManager()
-
-        # Not authorized: skipped entirely, no corroborator ids recorded.
-        escan = mgr._create_scan_record(target="10.9.9.10", user_id=admin_user.id)
-        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None,
-                       is_deep_analysis=True, services_payload=services)
-        assert calls == []
-        with UnitOfWork() as uow:
-            escan = ScanRepository(uow).get_by_id(escan.id)
-        assert not escan.deep_scan_ids
-
-        # Authorized: launches as usual.
-        AuthorizedTargetManager().add(admin_user.id, "10.9.9.11")
-        escan2 = mgr._create_scan_record(target="10.9.9.11", user_id=admin_user.id)
-        mgr._run_lybra(escan2.id, source_scan_id=None, discover_ports=None,
-                       is_deep_analysis=True, services_payload=services)
-        assert calls == ["10.9.9.11"]
-
-
-def test_lybra_rejects_non_nmap_source(client, app, admin_user, auth_headers):
-    nikto_id = _seed_nikto_scan(app, admin_user.id)
-    resp = client.post("/themis/lybra", headers=auth_headers(admin_user),
-                       json={"sourceScanId": nikto_id})
-    assert resp.status_code == 400
-
-
-def test_lybra_rejects_another_users_source(client, app, make_user, auth_headers):
-    owner = make_user(role="role_admin")
-    other = make_user(role="role_admin")
-    nmap_id = _seed_nmap_scan(app, owner.id)
-    # The source scan belongs to `owner`; `other` must not be able to use it.
-    resp = client.post("/themis/lybra", headers=auth_headers(other),
-                       json={"sourceScanId": nmap_id})
-    assert resp.status_code == 404
-
-
 # ------------------------------------------------------- engine end to end
 
 def test_lybra_engine_persists_informational_findings(app, admin_user):
-    nmap_id = _seed_nmap_scan(app, admin_user.id)
 
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(
-            target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id,
-        )
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
         escan_id = escan.id
-        mgr._run_lybra(escan_id, nmap_id)
+        mgr._run_lybra(escan_id, services_payload=_network_services())
 
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
@@ -453,26 +409,22 @@ def test_lybra_surface_change_detects_new_port_and_version_bump(app, admin_user)
     """Fase 5: a host's first Lybra scan sets a silent baseline; a later scan
     with an extra port and a bumped Apache version reports both as
     surface_change findings, without repeating on a third, unchanged scan."""
-    nmap_id = _seed_nmap_scan(app, admin_user.id)
 
     with app.app_context():
         mgr = LybraEngineManager()
 
-        baseline = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_lybra(baseline.id, nmap_id)
+        baseline = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(baseline.id, services_payload=_network_services())
         with UnitOfWork() as uow:
             baseline_findings = ScanRepository(uow).get_findings_by_scan(baseline.id)
         assert not any(f.category == "surface_change" for f in baseline_findings)
 
-        changed_ports = _PORTS + [
-            {"protocol": "3306/tcp", "reason": "syn-ack", "product": "MySQL",
-             "version": "8.0", "given_use": "mysql", "cpe": ""},
+        changed = _network_services(apache_version="2.4.51") + [
+            Service(port=3306, protocol="tcp", name="mysql", product="MySQL", version="8.0"),
         ]
-        changed_ports[0] = dict(changed_ports[0], version="2.4.51")  # Apache bump
-        nmap_id_2 = _seed_nmap_scan(app, admin_user.id, ports=changed_ports)
 
-        rescan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id_2)
-        mgr._run_lybra(rescan.id, nmap_id_2)
+        rescan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(rescan.id, services_payload=changed)
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(rescan.id)
         surface = {f.title for f in findings if f.category == "surface_change"}
@@ -481,9 +433,8 @@ def test_lybra_surface_change_detects_new_port_and_version_bump(app, admin_user)
         assert any("2.4.49 -> Apache httpd 2.4.51" in t for t in surface)
 
         # A third, unchanged scan of the same (now-updated) surface stays quiet.
-        nmap_id_3 = _seed_nmap_scan(app, admin_user.id, ports=changed_ports)
-        stable = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id_3)
-        mgr._run_lybra(stable.id, nmap_id_3)
+        stable = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(stable.id, services_payload=changed)
         with UnitOfWork() as uow:
             stable_findings = ScanRepository(uow).get_findings_by_scan(stable.id)
         assert not any(f.category == "surface_change" for f in stable_findings)
@@ -535,12 +486,10 @@ def test_a_scan_stamps_findings_with_the_state_of_the_knowledge_base(app, admin_
                   "version_end_including": None, "version_end_excluding": None}],
             )
 
-    nmap_id = _seed_nmap_scan(app, admin_user.id)
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id,
-                                        source_scan_id=nmap_id)
-        mgr._run_lybra(escan.id, nmap_id)
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_network_services())
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
@@ -584,14 +533,11 @@ def _seed_kb_mysql_cve(app):
 
 def test_lybra_version_match_produces_cve_finding(app, admin_user):
     _seed_kb_apache_cve(app)
-    nmap_id = _seed_nmap_scan(app, admin_user.id)  # port 80 = Apache 2.4.49 with CPE
 
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(
-            target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id,
-        )
-        mgr._run_lybra(escan.id, nmap_id)
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_network_services())
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
@@ -623,14 +569,15 @@ def test_lybra_active_check_persists_confirmed_finding(app, admin_user, monkeypa
         return Response(404, "", {})
     monkeypatch.setattr(checks_mod.HttpProbe, "fetch", fake_fetch)
 
-    nmap_id = _seed_nmap_scan(app, admin_user.id)  # http service on port 80
+    # Autodescubrimiento: los checks activos sólo corren en el modo que sí toca
+    # la red. El puerto 80 se traduce a un servicio "http" por el catálogo de
+    # puertos conocidos, que es lo que hace aplicable a este check.
+    _stub_self_discovery(monkeypatch, [80])
     _authorize_target(app, admin_user.id)
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(
-            target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id,
-        )
-        mgr._run_lybra(escan.id, nmap_id)
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
@@ -681,18 +628,12 @@ def test_lybra_active_check_ftp_anonymous_login_persists_confirmed_finding(app, 
         lambda self, host, port: checks_mod.NetworkSession(_FakeFtpSocket()),
     )
 
-    ftp_ports = [
-        {"protocol": "21/tcp", "reason": "syn-ack", "product": "vsftpd",
-         "version": "2.3.4", "given_use": "ftp", "cpe": ""},
-    ]
-    nmap_id = _seed_nmap_scan(app, admin_user.id, ports=ftp_ports)
+    _stub_self_discovery(monkeypatch, [21])
     _authorize_target(app, admin_user.id)
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(
-            target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id,
-        )
-        mgr._run_lybra(escan.id, nmap_id)
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
@@ -709,19 +650,16 @@ def test_lybra_lifecycle_marks_fixed_when_cve_gone(app, admin_user):
     _seed_kb_apache_cve(app)
 
     # Scan 1 — vulnerable Apache 2.4.49.
-    nmap1 = _seed_nmap_scan(app, admin_user.id)
     with app.app_context():
         mgr = LybraEngineManager()
-        e1 = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap1)
-        mgr._run_lybra(e1.id, nmap1)
+        e1 = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(e1.id, services_payload=_network_services())
 
     # Scan 2 — patched Apache 2.4.51 (no CVE match in the KB).
-    patched = [dict(_PORTS[0], version="2.4.51", cpe="cpe:/a:apache:http_server:2.4.51"), _PORTS[1]]
-    nmap2 = _seed_nmap_scan(app, admin_user.id, patched)
     with app.app_context():
         mgr = LybraEngineManager()
-        e2 = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap2)
-        mgr._run_lybra(e2.id, nmap2)
+        e2 = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(e2.id, services_payload=_network_services(apache_version="2.4.51"))
         with UnitOfWork() as uow:
             findings2 = ScanRepository(uow).get_findings_by_scan(e2.id)
 
@@ -731,10 +669,10 @@ def test_lybra_lifecycle_marks_fixed_when_cve_gone(app, admin_user):
     assert any(f.category == "open_port" and f.state == "open" for f in findings2)
 
 
-def _run_scan_and_get_cve_finding_id(app, user_id, nmap_id):
+def _run_scan_and_get_cve_finding_id(app, user_id):
     mgr = LybraEngineManager()
-    escan = mgr._create_scan_record(target="10.0.0.5", user_id=user_id, source_scan_id=nmap_id)
-    mgr._run_lybra(escan.id, nmap_id)
+    escan = mgr._create_scan_record(target="10.0.0.5", user_id=user_id)
+    mgr._run_lybra(escan.id, services_payload=_network_services())
     with UnitOfWork() as uow:
         findings = ScanRepository(uow).get_findings_by_scan(escan.id)
         return next(f.id for f in findings if f.cve_ids)
@@ -742,9 +680,8 @@ def _run_scan_and_get_cve_finding_id(app, user_id, nmap_id):
 
 def test_accept_finding_via_endpoint(client, app, admin_user, auth_headers):
     _seed_kb_apache_cve(app)
-    nmap_id = _seed_nmap_scan(app, admin_user.id)
     with app.app_context():
-        finding_id = _run_scan_and_get_cve_finding_id(app, admin_user.id, nmap_id)
+        finding_id = _run_scan_and_get_cve_finding_id(app, admin_user.id)
 
     resp = client.patch(f"/themis/findings/{finding_id}",
                        headers=auth_headers(admin_user), json={"state": "accepted"})
@@ -765,7 +702,15 @@ def test_accept_nonexistent_finding_is_404(client, admin_user, auth_headers):
     assert resp.status_code == 404
 
 
-def test_lybra_fingerprinting_records_agreement_with_nmap(app, admin_user, monkeypatch):
+def test_lybra_fingerprinting_identifies_the_service_on_its_own(app, admin_user, monkeypatch):
+    """L52: el hallazgo de fingerprint constata qué identificó Lybra.
+
+    Antes comparaba con el producto/versión que traía el servicio desde Nmap y
+    titulaba el hallazgo con el veredicto («concuerda / no concuerda con
+    Nmap»). Retirado ese modo de arranque, la lectura propia no está
+    subordinada a nada y el hallazgo dice lo que el motor vio y con qué
+    dissector.
+    """
     # Enable fingerprinting and stub the HTTP probe (no real network).
     import src.modules.system.config_reading as CR
     from src.modules.features.themis.lybra.checks import HttpProbe, Response
@@ -778,12 +723,12 @@ def test_lybra_fingerprinting_records_agreement_with_nmap(app, admin_user, monke
     monkeypatch.setattr(HttpProbe, "fetch", fake_fetch)
     monkeypatch.setattr(HttpProbe, "fetch_bytes", lambda self, host, port, path: None)
 
-    nmap_id = _seed_nmap_scan(app, admin_user.id)  # port 80 = Apache httpd 2.4.49 (matches)
+    _stub_self_discovery(monkeypatch, [80])
     _authorize_target(app, admin_user.id)
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_lybra(escan.id, nmap_id)
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
@@ -792,19 +737,19 @@ def test_lybra_fingerprinting_records_agreement_with_nmap(app, admin_user, monke
     assert len(fingerprints) == 1
     assert fingerprints[0].qod == 20
     assert fingerprints[0].confirmed is False
-    assert "concuerda con Nmap" in fingerprints[0].title
-    assert "no concuerda" not in fingerprints[0].title
+    assert fingerprints[0].title == "Fingerprint propio (HTTP): Apache 2.4.49"
+    assert "Nmap" not in fingerprints[0].title
 
 
-def test_lybra_fingerprinting_skipped_for_unauthorized_target(app, admin_user):
+def test_lybra_fingerprinting_skipped_for_unauthorized_target(app, admin_user, monkeypatch):
     # activeChecks/fingerprintingEnabled default to True (roadmap §6): the real
     # gate is per-target authorization, not the config flag. No _authorize_target
     # call here on purpose.
-    nmap_id = _seed_nmap_scan(app, admin_user.id)
+    _stub_self_discovery(monkeypatch, [80])
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_lybra(escan.id, nmap_id)
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
 
@@ -817,12 +762,12 @@ def test_lybra_fingerprinting_config_flag_still_disables_even_if_authorized(app,
     import src.modules.system.config_reading as CR
     monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(fingerprinting_enabled=False))
 
-    nmap_id = _seed_nmap_scan(app, admin_user.id)
+    _stub_self_discovery(monkeypatch, [80])
     _authorize_target(app, admin_user.id)
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id)
-        mgr._run_lybra(escan.id, nmap_id)
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
 
@@ -830,11 +775,10 @@ def test_lybra_fingerprinting_config_flag_still_disables_even_if_authorized(app,
 
 
 def test_lybra_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, monkeypatch):
-    """The point of wiring fingerprint output into CPE resolution: a
-    self-discovered service (Fase T, no Nmap involved at all) must still be
-    able to match a CVE, using Lybra's own HTTP fingerprint instead of an
-    Nmap-emitted CPE. Without this wiring the version matcher has nothing to
-    look up and a self-discovery-only scan finds zero CVEs, ever.
+    """El sentido de enchufar el fingerprint a la resolución de CPE: un
+    servicio descubierto por el propio motor (Fase T) tiene que poder casar con
+    un CVE a partir de su propia lectura HTTP. Sin ese cableado el matcher de
+    versiones no tiene nada que buscar y un escaneo nunca encuentra un CVE.
     """
     import src.modules.system.config_reading as CR
     from src.modules.features.themis.lybra.checks import HttpProbe, Response
@@ -855,8 +799,8 @@ def test_lybra_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, mon
 
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
@@ -864,19 +808,16 @@ def test_lybra_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, mon
     vulns = [f for f in findings if f.category == "outdated_software"]
     assert len(vulns) == 1
     assert vulns[0].cve_ids == ["CVE-2021-41773"]
-    assert vulns[0].qod == 70            # hypothesis-tier, same as an Nmap-sourced match
+    assert vulns[0].qod == 70            # tier de hipótesis: la lectura es propia, no confirmada
     assert vulns[0].confirmed is False
-    # The fingerprint finding is honest about having no Nmap baseline, but the
-    # CVE match went through regardless — that honesty and the detection are
-    # independent of each other.
     fingerprints = [f for f in findings if f.category == "fingerprint"]
     assert len(fingerprints) == 1
-    assert "sin datos de Nmap para comparar" in fingerprints[0].title
+    assert fingerprints[0].title == "Fingerprint propio (HTTP): Apache 2.4.49"
 
 
 def test_lybra_ftp_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, monkeypatch):
-    """Fase N: FTP joins HTTP/SSH as a dissector that fills the CPE gap for a
-    self-discovered service (Fase T, no Nmap involved at all)."""
+    """Fase N: FTP se suma a HTTP/SSH como dissector que resuelve el CPE de un
+    servicio descubierto por el propio motor (Fase T)."""
     import src.modules.system.config_reading as CR
     from src.modules.features.themis.lybra import FtpProbe
 
@@ -890,8 +831,8 @@ def test_lybra_ftp_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user,
 
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
@@ -925,8 +866,8 @@ def test_lybra_mysql_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_use
 
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id, source_scan_id=None)
-        mgr._run_lybra(escan.id, source_scan_id=None, discover_ports=None)
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
@@ -941,13 +882,10 @@ def test_lybra_mysql_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_use
 
 
 def test_lybra_scan_surfaces_in_results_endpoint(client, app, admin_user, auth_headers):
-    nmap_id = _seed_nmap_scan(app, admin_user.id)
     with app.app_context():
         mgr = LybraEngineManager()
-        escan = mgr._create_scan_record(
-            target="10.0.0.5", user_id=admin_user.id, source_scan_id=nmap_id,
-        )
-        mgr._run_lybra(escan.id, nmap_id)
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_network_services())
 
     resp = client.get("/themis/results?type=lybra&page=1&per_page=10",
                      headers=auth_headers(admin_user))
@@ -956,5 +894,7 @@ def test_lybra_scan_surfaces_in_results_endpoint(client, app, admin_user, auth_h
     assert body["totalCount"] == 1
     result = body["results"][0]
     assert result["scanType"] == "lybra"
-    assert result["sourceScanId"] == nmap_id
     assert result["totalFindings"] == 2
+    # L52: la respuesta ya no lleva ``sourceScanId`` ni ``deep``/``deepScanIds``.
+    assert "sourceScanId" not in result
+    assert "deep" not in result

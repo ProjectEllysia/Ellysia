@@ -53,9 +53,9 @@ const features = [
     desc: 'Descubre los puertos por su cuenta, puntúa cada hallazgo en su contexto y sigue su ciclo de vida: abierto, corregido, reaparecido.',
   },
   {
-    kicker: 'Segunda opinión',
-    title: 'Los escáneres clásicos, como testigos',
-    desc: 'Nmap, Nikto y Nuclei corroboran el mismo objetivo cuando quieres contrastar el veredicto. Un objetivo, todas las miradas.',
+    kicker: 'Los clásicos',
+    title: 'Nmap, Nikto y Nuclei, cada uno por su cuenta',
+    desc: 'Los escáneres de siempre siguen aquí, como herramientas independientes que lanzas cuando los quieres. Ninguno manda sobre Lybra, y Lybra no manda sobre ninguno.',
   },
   {
     kicker: 'Informes',

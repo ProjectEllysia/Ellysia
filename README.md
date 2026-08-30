@@ -188,7 +188,7 @@ The web application checks MFA once when an authenticated session enters the SPA
 | `POST` | `/themis/nmap` | Port scan (supports CIDR ranges) |
 | `POST` | `/themis/nikto` | Web configuration / vulnerability scan |
 | `POST` | `/themis/nuclei` | Template-based scan (single host per scan) |
-| `POST` | `/themis/lybra` | Self-built engine scan (self-discovery or from a prior Nmap scan) |
+| `POST` | `/themis/lybra` | Self-built engine scan (own port discovery — `target` required) |
 | `GET` | `/themis/scan-status?id=` | Scan status / progress: pending · running · done · cancelled |
 | `POST` | `/themis/scans/<id>/cancel` | Cancel a running scan |
 | `GET` | `/themis/results` · `/themis/results/<id>` | List scans (filterable, paginated) / scan detail |
