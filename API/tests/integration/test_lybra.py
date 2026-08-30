@@ -601,24 +601,42 @@ def test_lybra_active_check_persists_confirmed_finding(app, admin_user, monkeypa
 
 def test_lybra_active_check_ftp_anonymous_login_persists_confirmed_finding(app, admin_user, monkeypatch):
     """Fase N: the runtime's first ``type: "network"`` check, wired end to
-    end through the real manager (not a bare ``CheckRuntime``) — a scripted
-    fake session stands in for the raw TCP connection."""
+    end through the real manager (not a bare ``CheckRuntime``).
+
+    Lo que se sustituye es el **socket**, no la sesión: el ``NetworkSession``
+    real hace su trabajo, saludo incluido. Un doble por encima de la sesión
+    entrega respuestas que el transporte real no produce, y eso fue justo lo
+    que ocultó el bug de #265 (ver la nota de ``tests/unit/test_lybra_checks.py``)."""
     import src.modules.system.config_reading as CR
     from src.modules.features.themis.lybra import checks as checks_mod
 
     monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(active_checks=True))
 
-    class _FakeSession:
-        def __init__(self):
-            self._replies = iter(["331 Please specify the password.", "230 Login successful."])
+    class _FakeFtpSocket:
+        """Un vsftpd de mentira: saluda al conectar y contesta a cada comando."""
 
-        def exchange(self, send):
-            return checks_mod.Response(status=0, body=next(self._replies), headers={})
+        def __init__(self):
+            self._buffer = b"220 (vsFTPd 2.3.4)\r\n"
+            self._replies = [
+                b"331 Please specify the password.\r\n",
+                b"230 Login successful.\r\n",
+            ]
+
+        def recv(self, size):
+            chunk, self._buffer = self._buffer[:size], self._buffer[size:]
+            return chunk
+
+        def sendall(self, data):
+            if self._replies:
+                self._buffer += self._replies.pop(0)
 
         def close(self):
             pass
 
-    monkeypatch.setattr(checks_mod.NetworkProbe, "open", lambda self, host, port: _FakeSession())
+    monkeypatch.setattr(
+        checks_mod.NetworkProbe, "open",
+        lambda self, host, port: checks_mod.NetworkSession(_FakeFtpSocket()),
+    )
 
     ftp_ports = [
         {"protocol": "21/tcp", "reason": "syn-ack", "product": "vsftpd",
@@ -636,7 +654,7 @@ def test_lybra_active_check_ftp_anonymous_login_persists_confirmed_finding(app, 
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(escan.id)
 
-    active = [f for f in findings if f.check_id == "lybra:ftp-anonymous-login@1"]
+    active = [f for f in findings if f.check_id == "lybra:ftp-anonymous-login@2"]
     assert len(active) == 1
     assert active[0].qod == 99
     assert active[0].confirmed is True

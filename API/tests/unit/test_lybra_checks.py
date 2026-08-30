@@ -185,8 +185,10 @@ class _FakeNetSocket:
         self._chunk = chunk_size
         self.sent = b""
         self.closed = False
+        self.recv_calls = 0
 
     def recv(self, size: int) -> bytes:
+        self.recv_calls += 1
         take = min(size, self._chunk)
         chunk, self._buffer = self._buffer[:take], self._buffer[take:]
         return chunk
@@ -219,7 +221,7 @@ class _FakeNetworkSession:
         self.sent: list = []
         self.closed = False
 
-    def exchange(self, send):
+    def exchange(self, send, read="line"):
         self.sent.append(send)
         if not self._replies:
             return None
@@ -248,18 +250,13 @@ def _findings_for(check_id, sock, service):
 
 # ------------------------------------------ ftp-anonymous-login (comportamiento)
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#265: exchange lee una línea suelta, y tras USER la línea pendiente "
-           "en el buffer sigue siendo el saludo 220, no el 331",
-)
 def test_ftp_anonymous_login_confirmed_when_both_steps_succeed():
     sock = _FakeNetSocket(
         greeting=_FTP_BANNER,
         replies=[b"331 Please specify the password.\r\n", b"230 Login successful.\r\n"],
     )
 
-    ftp = _findings_for("lybra:ftp-anonymous-login@1", sock, _FTP)
+    ftp = _findings_for("lybra:ftp-anonymous-login@2", sock, _FTP)
 
     assert len(ftp) == 1
     assert ftp[0]["qod"] == 99 and ftp[0]["confirmed"] is True
@@ -269,16 +266,12 @@ def test_ftp_anonymous_login_confirmed_when_both_steps_succeed():
     assert sock.sent == b"USER anonymous\r\nPASS anonymous@lybra.local\r\n"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#265: un saludo multilínea desplaza la ventana de lectura una línea más",
-)
 def test_ftp_anonymous_login_confirmed_with_a_multiline_banner():
     sock = _FakeNetSocket(
         greeting=_FTP_MULTILINE_BANNER,
         replies=[b"331 Please specify the password.\r\n", b"230 Login successful.\r\n"],
     )
-    assert len(_findings_for("lybra:ftp-anonymous-login@1", sock, _FTP)) == 1
+    assert len(_findings_for("lybra:ftp-anonymous-login@2", sock, _FTP)) == 1
 
 
 def test_ftp_anonymous_login_absent_when_credentials_rejected():
@@ -286,32 +279,27 @@ def test_ftp_anonymous_login_absent_when_credentials_rejected():
         greeting=_FTP_BANNER,
         replies=[b"331 Please specify the password.\r\n", b"530 Login incorrect.\r\n"],
     )
-    assert _findings_for("lybra:ftp-anonymous-login@1", sock, _FTP) == []
+    assert _findings_for("lybra:ftp-anonymous-login@2", sock, _FTP) == []
 
 
 def test_ftp_anonymous_login_abandoned_when_the_server_says_nothing():
     sock = _FakeNetSocket(greeting=b"", replies=[])
-    assert _findings_for("lybra:ftp-anonymous-login@1", sock, _FTP) == []
+    assert _findings_for("lybra:ftp-anonymous-login@2", sock, _FTP) == []
 
 
 def test_ftp_anonymous_login_abandoned_on_connect_failure():
     findings = CheckRuntime(
         load_checks(), lambda *a: None, network_open=lambda host, port: None
     ).run("h", [_FTP])
-    assert not any(f["check_id"] == "lybra:ftp-anonymous-login@1" for f in findings)
+    assert not any(f["check_id"] == "lybra:ftp-anonymous-login@2" for f in findings)
 
 
 # ------------------------------- redis-unauthenticated-access (comportamiento)
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#265: la respuesta a INFO es un bulk string RESP y exchange corta en "
-           "su primera línea, que es la longitud ($3116), no el contenido",
-)
 def test_redis_unauthenticated_access_confirmed_when_info_succeeds():
     sock = _FakeNetSocket(replies=[_REDIS_INFO])
 
-    redis_findings = _findings_for("lybra:redis-unauthenticated-access@1", sock, _REDIS)
+    redis_findings = _findings_for("lybra:redis-unauthenticated-access@2", sock, _REDIS)
 
     assert len(redis_findings) == 1
     assert redis_findings[0]["qod"] == 99 and redis_findings[0]["confirmed"] is True
@@ -321,7 +309,7 @@ def test_redis_unauthenticated_access_confirmed_when_info_succeeds():
 
 def test_redis_unauthenticated_access_absent_when_auth_required():
     sock = _FakeNetSocket(replies=[b"-NOAUTH Authentication required.\r\n"])
-    assert _findings_for("lybra:redis-unauthenticated-access@1", sock, _REDIS) == []
+    assert _findings_for("lybra:redis-unauthenticated-access@2", sock, _REDIS) == []
 
 
 # ------------------------------------------------- selección y orquestación
@@ -399,6 +387,129 @@ def test_network_session_exchange_returns_none_on_empty_read():
     sock = _FakeNetSocket(greeting=b"")
     session = NetworkProbe(connect=lambda address, timeout: sock).open("10.0.0.5", 21)
     assert session.exchange(None) is None
+
+
+def test_network_session_no_longer_reads_one_byte_per_syscall():
+    # El lector anterior pedía los bytes de uno en uno: una llamada al sistema
+    # por byte recibido. Una línea corta debe costar un puñado de recv, no uno
+    # por carácter.
+    sock = _FakeNetSocket(greeting=_FTP_BANNER)
+    session = NetworkProbe(connect=lambda address, timeout: sock).open("10.0.0.5", 21)
+
+    session.exchange(None)
+
+    assert sock.recv_calls < len(_FTP_BANNER)
+
+
+# ------------------------------------------- modos de lectura (``read:``)
+#
+# Dónde termina una respuesta es un hecho del protocolo, no del transporte. Un
+# modo mal elegido no da error: lee los bytes equivocados y el check deja de
+# disparar en silencio, que es el fallo que este bloque existe para impedir.
+
+def _session_over(greeting=b"", replies=()):
+    sock = _FakeNetSocket(greeting=greeting, replies=replies)
+    return NetworkProbe(connect=lambda address, timeout: sock).open("10.0.0.5", 21)
+
+
+def test_read_line_stops_at_the_first_newline():
+    session = _session_over(greeting=b"331 Primera\r\n230 Segunda\r\n")
+    assert session.exchange(None, read="line").body == "331 Primera"
+
+
+def test_read_block_joins_the_continuation_lines_of_a_status_reply():
+    # Un código seguido de "-" anuncia que la respuesta sigue; el mismo código
+    # seguido de espacio la cierra.
+    session = _session_over(greeting=b"220-Primera\r\n220-Segunda\r\n220 Ultima\r\n")
+
+    body = session.exchange(None, read="block").body
+
+    assert "Primera" in body and "Segunda" in body and "Ultima" in body
+
+
+def test_read_block_stops_at_a_line_that_is_not_a_continuation():
+    # Con una respuesta de una sola línea, "block" se comporta como "line": no
+    # se queda esperando más datos que no van a llegar.
+    session = _session_over(greeting=b"220 Unica\r\n331 De la siguiente respuesta\r\n")
+    assert session.exchange(None, read="block").body == "220 Unica"
+
+
+def test_read_block_does_not_over_read_a_banner_without_status_codes():
+    # Un saludo que no usa códigos de estado (SSH, por ejemplo) tampoco es una
+    # continuación, así que cierra el bloque en la primera línea. Sin esta
+    # regla, "block" se quedaría leyendo hasta agotar el tiempo de espera.
+    session = _session_over(greeting=b"SSH-2.0-OpenSSH_8.9\r\nmas cosas\r\n")
+    assert session.exchange(None, read="block").body == "SSH-2.0-OpenSSH_8.9"
+
+
+def test_read_resp_bulk_returns_the_announced_payload_and_not_its_header():
+    session = _session_over(replies=[_REDIS_INFO])
+
+    body = session.exchange("INFO\r\n", read="resp-bulk").body
+
+    assert body.startswith("# Server")
+    assert "redis_version:7.0.11" in body
+    assert "$" not in body                 # la línea de longitud no forma parte del contenido
+
+
+def test_read_resp_bulk_returns_a_non_bulk_reply_untouched():
+    # Un error de Redis es una línea suelta que empieza por "-": ya es la
+    # respuesta entera, y es justo la que el matcher negativo tiene que ver.
+    session = _session_over(replies=[b"-NOAUTH Authentication required.\r\n"])
+    assert session.exchange("INFO\r\n", read="resp-bulk").body == "-NOAUTH Authentication required."
+
+
+def test_read_resp_bulk_leaves_the_trailing_bytes_for_the_next_read():
+    # RESP cierra el bulk con un CRLF que no cuenta en la longitud anunciada.
+    # Ese sobrante se queda en el buffer y no puede comerse la respuesta
+    # siguiente.
+    session = _session_over(replies=[b"$2\r\nOK\r\n+PONG\r\n"])
+
+    assert session.exchange("INFO\r\n", read="resp-bulk").body == "OK"
+    assert session.exchange("PING\r\n", read="line").body == "+PONG"
+
+
+def test_a_truncated_bulk_reply_returns_what_arrived_instead_of_hanging():
+    # El servidor anuncia 3116 bytes y cierra la conexión tras unos pocos.
+    session = _session_over(replies=[b"$3116\r\nredis_version:7.0.11\r\n"])
+    assert "redis_version:7.0.11" in session.exchange("INFO\r\n", read="resp-bulk").body
+
+
+# ------------------------------------ el feed declara cómo termina cada respuesta
+
+def test_the_bundled_network_checks_declare_their_read_semantics():
+    checks = {check.id: check for check in load_checks()}
+
+    ftp = checks["ftp-anonymous-login"]
+    assert ftp.expect_banner is True       # FTP saluda al conectar
+    assert [request.read for request in ftp.requests] == ["block", "block"]
+
+    redis_check = checks["redis-unauthenticated-access"]
+    assert redis_check.expect_banner is False   # Redis no saluda
+    assert [request.read for request in redis_check.requests] == ["resp-bulk"]
+
+
+def test_a_request_without_a_declared_read_mode_keeps_the_original_behaviour():
+    git = next(check for check in load_checks() if check.id == "git-config-exposure")
+    assert git.requests[0].read == "line"
+    assert git.expect_banner is False
+
+
+def test_an_unknown_read_mode_fails_at_load_time(tmp_path):
+    # Un modo que nadie implementa es un bug del feed. Si se ignorase en
+    # silencio, el check leería una línea donde el protocolo necesita un
+    # bloque y no dispararía nunca: exactamente el falso negativo silencioso
+    # que este cambio elimina.
+    feed = tmp_path / "feed.json"
+    feed.write_text(json.dumps({"checks": [{
+        "id": "modo-inventado", "version": 1, "type": "network",
+        "category": "network_config", "severity": "HIGH", "service": "ftp",
+        "requests": [{"send": "PING\r\n", "read": "telepatia", "matchers": []}],
+        "finding": {"title": "x"},
+    }]}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="telepatia"):
+        load_checks(str(feed))
 
 
 # --------------------------------------------------- ``type: "script"`` (Fase R)
