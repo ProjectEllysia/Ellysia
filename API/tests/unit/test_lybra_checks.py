@@ -513,6 +513,110 @@ def test_an_unknown_read_mode_fails_at_load_time(tmp_path):
         load_checks(str(feed))
 
 
+# ------------------------------------------------ limitador de peticiones
+#
+# El limitador existe para no golpear a UN host más rápido de la cuenta. Con el
+# `sleep` dentro del lock limitaba a todos a la vez: mientras una sonda esperaba
+# su turno para el host A, cualquier sonda hacia el host B también estaba
+# bloqueada — una espera que no protegía a nadie.
+#
+# El reloj y el `sleep` se inyectan para poder afirmar el horario en vez de
+# esperarlo: un test que midiera tiempo real sería lento y frágil.
+
+class _RelojFalso:
+    """Un reloj monótono que sólo avanza cuando se le dice, y su `sleep`."""
+
+    def __init__(self, ahora: float = 1000.0):
+        self.ahora = ahora
+        self.esperas: list = []
+
+    def __call__(self) -> float:
+        return self.ahora
+
+    def sleep(self, segundos: float) -> None:
+        self.esperas.append(segundos)
+        self.ahora += segundos
+
+
+def _limiter(reloj, min_interval=0.2):
+    from src.modules.features.themis.lybra import HostRateLimiter
+    return HostRateLimiter(min_interval=min_interval, clock=reloj, sleeper=reloj.sleep)
+
+
+def test_the_first_request_to_a_host_never_waits():
+    reloj = _RelojFalso()
+    _limiter(reloj).acquire("10.0.0.5")
+    assert reloj.esperas == []
+
+
+def test_two_different_hosts_do_not_wait_for_each_other():
+    # El bug: la espera del host A bloqueaba también al host B.
+    reloj = _RelojFalso()
+    limiter = _limiter(reloj)
+
+    limiter.acquire("10.0.0.5")
+    limiter.acquire("10.0.0.6")
+    limiter.acquire("10.0.0.7")
+
+    assert reloj.esperas == []
+
+
+def test_two_requests_to_the_same_host_are_spaced_by_the_interval():
+    reloj = _RelojFalso()
+    limiter = _limiter(reloj, min_interval=0.2)
+
+    limiter.acquire("10.0.0.5")
+    limiter.acquire("10.0.0.5")
+
+    assert reloj.esperas == [pytest.approx(0.2)]
+
+
+def test_a_host_that_had_time_to_cool_down_does_not_wait():
+    reloj = _RelojFalso()
+    limiter = _limiter(reloj, min_interval=0.2)
+
+    limiter.acquire("10.0.0.5")
+    reloj.ahora += 5.0            # la sonda tardó lo suyo; el intervalo ya pasó
+    limiter.acquire("10.0.0.5")
+
+    assert reloj.esperas == []
+
+
+def test_concurrent_requests_to_one_host_get_distinct_increasing_turns():
+    """N hilos sobre el mismo host se reparten N turnos, sin solaparse.
+
+    Es lo que consigue reservar el turno *antes* de dormir: si cada hilo
+    escribiera la marca al despertarse, todos leerían el mismo "último turno",
+    dormirían lo mismo y despertarían juntos — que es exactamente el golpe que
+    el limitador existe para evitar.
+    """
+    import threading
+
+    from src.modules.features.themis.lybra import HostRateLimiter
+
+    esperas: list = []
+    apuntador = threading.Lock()
+
+    def anotar_espera(segundos):
+        with apuntador:
+            esperas.append(segundos)
+
+    # El reloj se queda quieto para que el reparto sea determinista: lo que se
+    # mide es cuánto le toca esperar a cada hilo, no cuánto tarda la máquina.
+    limiter = HostRateLimiter(min_interval=0.2, clock=lambda: 1000.0, sleeper=anotar_espera)
+
+    hilos = [threading.Thread(target=limiter.acquire, args=("10.0.0.5",)) for _ in range(5)]
+    for hilo in hilos:
+        hilo.start()
+    for hilo in hilos:
+        hilo.join()
+
+    # Uno entra sin esperar y los otros cuatro se escalonan de 0,2 en 0,2. Con
+    # el turno reservado al despertar, los cinco habrían esperado lo mismo.
+    assert sorted(esperas) == [pytest.approx(0.2), pytest.approx(0.4),
+                               pytest.approx(0.6), pytest.approx(0.8)]
+
+
 # --------------------------- a qué protocolo aplica un check ``network``
 #
 # Un check `network` dice a qué protocolo va dirigido con una cadena
