@@ -1,5 +1,9 @@
 """Unit tests for Lybra's own fingerprinting (Fase F): HTTP/SSH/FTP dissectors,
-raw SSH_MSG_KEXINIT parsing, the HASSH formula, and oracle concordance.
+raw SSH_MSG_KEXINIT parsing y la fórmula HASSH.
+
+La aritmética de la concordancia con Nmap ya no se prueba aquí: se fue al arnés
+de medición (``tests/oracle/test_concordance_metrics.py``) con el código que
+ejercita, en L52.
 
 Pure logic + a fake socket for SshProbe/FtpProbe — no real network anywhere.
 """
@@ -19,8 +23,6 @@ from src.modules.features.themis.lybra import (
     parse_ftp_banner,
     fingerprint_ftp,
     FtpProbe,
-    agrees_with_nmap,
-    concordance_rate,
 )
 from src.modules.features.themis.lybra.checks import Response
 from src.modules.features.themis.lybra.fingerprinting.ssh import SSH_MSG_KEXINIT
@@ -318,50 +320,24 @@ def test_ftp_probe_returns_none_on_empty_banner():
     assert probe.fetch("10.0.0.5", 21) is None
 
 
-# ================================================================== oracle
+# ============================== _fingerprint_finding: qué vio Lybra (manager)
 
-def test_agrees_with_nmap_token_overlap_and_version():
-    assert agrees_with_nmap("Apache", "2.4.49", "Apache httpd", "2.4.49") is True
-    assert agrees_with_nmap("OpenSSH", "7.4", "OpenSSH", "7.4") is True
-    assert agrees_with_nmap("nginx", None, "nginx", "1.18") is True   # no version to contradict
-    assert agrees_with_nmap("Apache", "2.4.49", "Apache httpd", "2.4.50") is False
-    assert agrees_with_nmap("nginx", None, "Apache", None) is False
-    assert agrees_with_nmap(None, None, "Apache", "2.4.49") is False
+def test_fingerprint_finding_states_what_lybra_read():
+    """El título es una constatación, no un veredicto sobre otra herramienta.
 
-
-def test_concordance_rate():
-    pairs = [
-        ("Apache", "2.4.49", "Apache httpd", "2.4.49"),   # agree
-        ("nginx", "1.18", "nginx", "1.19"),                # disagree (version)
-        ("OpenSSH", "7.4", "OpenSSH", "7.4"),               # agree
-    ]
-    assert concordance_rate(pairs) == pytest.approx(2 / 3)
-
-
-def test_concordance_rate_empty_is_zero_not_perfect():
-    assert concordance_rate([]) == 0.0
-
-
-# ================================= _fingerprint_finding title honesty (manager)
-
-def test_fingerprint_finding_reports_agreement_when_nmap_baseline_exists():
-    service = Service(port=80, protocol="tcp", name="http", product="Apache httpd", version="2.4.49")
-    finding = LybraEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
-    assert "concuerda con Nmap" in finding["title"]
-    assert "no concuerda" not in finding["title"]
-
-
-def test_fingerprint_finding_reports_disagreement_when_nmap_baseline_differs():
-    service = Service(port=80, protocol="tcp", name="http", product="nginx", version="1.18")
-    finding = LybraEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
-    assert "no concuerda con Nmap" in finding["title"]
-
-
-def test_fingerprint_finding_no_nmap_baseline_is_honest_not_a_false_disagreement():
-    """Self-discovered services carry no Nmap product/version at all — the
-    title must not claim disagreement when there is nothing to compare against."""
+    Hasta L52 decía "concuerda / no concuerda con Nmap": convertía un dato
+    propio en una nota al pie sobre el escáner al que el motor estaba
+    subordinado. Ese modo de arranque ya no existe.
+    """
     service = Service(port=80, protocol="tcp", name="http", product="", version="")
     finding = LybraEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
-    assert "no concuerda" not in finding["title"]
-    assert "concuerda con Nmap" not in finding["title"]
-    assert "sin datos de Nmap para comparar" in finding["title"]
+    assert finding["title"] == "Fingerprint propio (HTTP): Apache 2.4.49"
+    assert "Nmap" not in finding["title"]
+
+
+def test_fingerprint_finding_never_mentions_nmap_even_with_a_prior_reading():
+    """Un servicio puede llegar con producto ya puesto (payload externo de
+    Hygeia, por ejemplo). Ni siquiera entonces el título compara con nada."""
+    service = Service(port=80, protocol="tcp", name="http", product="nginx", version="1.18")
+    finding = LybraEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
+    assert finding["title"] == "Fingerprint propio (HTTP): Apache 2.4.49"

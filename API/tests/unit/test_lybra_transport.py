@@ -10,7 +10,6 @@ from src.modules.features.themis.lybra import (
     scan_ports_sync,
     scan_udp_ports_sync,
     services_from_discovered_ports,
-    port_concordance,
     DEFAULT_PORTS,
     UDP_PROBES,
 )
@@ -93,16 +92,6 @@ def test_services_from_discovered_ports_udp_protocol():
     services = services_from_discovered_ports([161], protocol="udp")
     assert services[0].protocol == "udp"
     assert services[0].name == "snmp"
-
-
-@pytest.mark.parametrize("own,nmap,expected", [
-    ({80, 443}, {80, 443}, 1.0),
-    ({80, 443}, {80, 443, 22}, 2 / 3),
-    (set(), set(), 1.0),                        # nothing to disagree on
-    ({80}, set(), 0.0),
-])
-def test_port_concordance(own, nmap, expected):
-    assert port_concordance(own, nmap) == pytest.approx(expected)
 
 
 # ----------------------------------------------------------------- UDP scan
