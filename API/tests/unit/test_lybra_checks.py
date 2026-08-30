@@ -16,6 +16,7 @@ import yaml
 
 import pytest
 
+from src.modules.features.themis.lybra import checks as checks_mod
 from src.modules.features.themis.lybra import (
     load_checks,
     CheckRuntime,
@@ -510,6 +511,95 @@ def test_an_unknown_read_mode_fails_at_load_time(tmp_path):
 
     with pytest.raises(ValueError, match="telepatia"):
         load_checks(str(feed))
+
+
+# --------------------------- a qué protocolo aplica un check ``network``
+#
+# Un check `network` dice a qué protocolo va dirigido con una cadena
+# (`service: ftp`), y el runtime necesita el predicado que decide si un
+# servicio descubierto es de ese protocolo. Ese mapa se mantenía a mano y tenía
+# dos entradas cuando el módulo ya definía once predicados: un check de SMTP o
+# de MySQL se cargaba, se validaba, y se descartaba sin decir nada.
+
+_MYSQL = Service(3306, "tcp", "mysql", "", "", None)
+
+_MYSQL_NETWORK_FEED = {
+    "checks": [{
+        "id": "mysql-saluda", "version": 1, "type": "network",
+        "category": "network_config", "severity": "INFO", "service": "mysql",
+        "mode": "safe",
+        "requests": [{"matchers": [{"type": "word", "part": "body", "words": ["mysql_native_password"]}]}],
+        "finding": {"title": "MySQL contesta"},
+    }]
+}
+
+
+def _feed_file(tmp_path, document):
+    feed = tmp_path / "feed.json"
+    feed.write_text(json.dumps(document), encoding="utf-8")
+    return str(feed)
+
+
+def test_every_service_predicate_is_available_to_a_network_check():
+    # Invariante al estilo de test_config_shape: definir un predicado nuevo
+    # basta para poder escribir checks de ese protocolo. Sin esto, cada
+    # protocolo costaba dos ediciones y olvidar la segunda no daba error.
+    predicates = {
+        name for name in dir(checks_mod)
+        if name.startswith("is_") and name.endswith("_service")
+    }
+    esperados = {name[len("is_"):-len("_service")] for name in predicates}
+
+    assert esperados == set(checks_mod._NETWORK_SERVICE_MATCHERS)
+    assert len(esperados) > 2, "el mapa derivado debe cubrir más que ftp y redis"
+
+
+def test_a_network_check_for_a_protocol_that_nobody_wired_by_hand_runs(tmp_path):
+    # MySQL nunca estuvo en la tabla escrita a mano, y su predicado sí existía.
+    checks = load_checks(_feed_file(tmp_path, _MYSQL_NETWORK_FEED))
+    sock = _FakeNetSocket(greeting=b"5.7.42-log\x00mysql_native_password\n")
+
+    findings = CheckRuntime(
+        checks, lambda *a: None, network_open=_network_open_over(sock)
+    ).run("h", [_MYSQL])
+
+    assert [f["check_id"] for f in findings] == ["lybra:mysql-saluda@1"]
+
+
+def test_an_unknown_service_fails_at_load_time(tmp_path):
+    # Un check que no puede aplicar a nada es un bug del feed. Si se ignora,
+    # se confunde con "no ha disparado contra este host", que es normal — y
+    # así nadie se entera nunca.
+    document = {"checks": [dict(_MYSQL_NETWORK_FEED["checks"][0], id="protocolo-inventado",
+                                service="noexiste")]}
+
+    with pytest.raises(ValueError, match="noexiste"):
+        load_checks(_feed_file(tmp_path, document))
+
+
+def test_every_network_service_in_the_bundled_feed_has_a_predicate():
+    network_services = {check.service for check in load_checks() if check.type == "network"}
+    assert network_services <= set(checks_mod._NETWORK_SERVICE_MATCHERS)
+
+
+def test_a_check_that_skipped_the_loader_with_an_unknown_service_is_logged(caplog):
+    # Los checks traducidos de plantillas de Nuclei se construyen directamente,
+    # sin pasar por el cargador, así que su `service` es lo que dijera el
+    # documento de origen. Ahí el aviso lo tiene que dar el runtime.
+    translated = checks_mod.Check(
+        id="traducido", version=1, type="network", category="network_config",
+        severity="INFO", service="protocolo-de-otro-mundo", mode="safe",
+        requests=(), finding={}, namespace="nuclei",
+    )
+    sock = _FakeNetSocket(greeting=b"lo que sea\r\n")
+
+    with caplog.at_level("WARNING"):
+        findings = CheckRuntime(
+            [translated], lambda *a: None, network_open=_network_open_over(sock)
+        ).run("h", [_FTP])
+
+    assert findings == []
+    assert "protocolo-de-otro-mundo" in caplog.text
 
 
 # --------------------------------------------------- ``type: "script"`` (Fase R)
