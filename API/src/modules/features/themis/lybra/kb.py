@@ -413,8 +413,21 @@ def _pick_cvss(metrics: dict) -> Tuple[Optional[float], Optional[str], Optional[
     """Choose the best available CVSS metric from an NVD ``metrics`` block.
 
     A CVE may carry several CVSS versions at once; we prefer the newest
-    (v3.1 over v3.0 over v2), since that is the most accurate scoring the entry
-    offers.
+    (v4.0 over v3.1 over v3.0 over v2), since that is the most accurate scoring
+    the entry offers.
+
+    **v4.0 goes first, and that is the whole point of the order.** It is the
+    most recent and most precise metric an entry can carry, which is the same
+    rule the rest of the chain already followed — but until it was listed here
+    a CVE whose *only* published metric was v4 came back empty, and empty is
+    not a cosmetic gap downstream: ``_cvss_band`` reads a missing score as
+    ``0.0``, which is INFO. A critical vulnerability published only with v4
+    was landing in reports as informational, and the AI summary described it
+    as such.
+
+    The v4 ``cvssData`` block exposes ``baseScore``, ``vectorString`` and
+    ``baseSeverity`` under the very same names as v3.x, so nothing below this
+    line has to know which version it is reading.
 
     Args:
         metrics: The ``metrics`` object of an NVD CVE record.
@@ -423,7 +436,7 @@ def _pick_cvss(metrics: dict) -> Tuple[Optional[float], Optional[str], Optional[
         A ``(base_score, vector_string, severity)`` tuple. Each element is
         ``None`` if no CVSS metric of any version is present.
     """
-    for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+    for key in ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
         entries = metrics.get(key) or []
         if not entries:
             continue
