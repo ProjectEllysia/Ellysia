@@ -205,6 +205,41 @@ def version_compare(a: str, b: str) -> int:
     return 0
 
 
+def kb_feed_version(state: Dict[str, Optional[datetime]]) -> str:
+    """Build the reproducibility mark for findings resolved against the KB.
+
+    Every version-detection finding used to carry the constant ``"lybra-0"``,
+    which never changed. Two findings emitted six months apart —one against a
+    knowledge base with the full catalogue, another against one half
+    populated— were stamped identically, so a stored finding could not say what
+    it had been compared against. That breaks three things at once: an old
+    report cannot be reproduced, a finding that disappeared cannot be
+    explained (was the host fixed, or did the KB change?), and the lifecycle
+    can mark something ``fixed`` that merely stopped matching because NVD
+    rewrote a range.
+
+    The mark reads ``lybra-kb:nvd=2026-08-29,kev=2026-08-27,epss=2026-08-30``.
+    Spelled out rather than hashed on purpose: the point is that someone
+    reading a finding a year from now can tell what it was resolved against,
+    and a hash only says "not the same as that other one" — it needs a lookup
+    table that does not exist yet (#302). A source with no date reports
+    ``none``, which is honest: an empty knowledge source is exactly the thing
+    this mark exists to make visible.
+
+    Args:
+        state: ``{"nvd": datetime | None, "kev": ..., "epss": ...}``, as
+            :meth:`KbRepository.knowledge_state` returns it.
+
+    Returns:
+        The mark, e.g. ``"lybra-kb:nvd=2026-08-29,kev=none,epss=2026-08-30"``.
+    """
+    parts = []
+    for source in ("nvd", "kev", "epss"):
+        moment = state.get(source)
+        parts.append(f"{source}={moment.date().isoformat() if moment else 'none'}")
+    return "lybra-kb:" + ",".join(parts)
+
+
 def _bound(match, name: str) -> Optional[str]:
     """Read one range-bound field off a match, whether it is an ORM row or a dict.
 
@@ -744,7 +779,16 @@ def parse_epss_rows(csv_text: str) -> Iterator[dict]:
 def _epss_scored_at(csv_text: str) -> Optional[datetime]:
     """Read the scoring date out of the EPSS file's comment header.
 
-    The header looks like ``#model_version:...,score_date=2026-07-01T...``.
+    The header looks like ``#model_version:v2026.06.15,score_date:2026-08-30T...``.
+
+    **Both separators are accepted, and that is not defensive coding.** This
+    used to look for ``score_date=`` only, and the feed publishes
+    ``score_date:`` — so the date came back ``None`` every single time, and the
+    column silently stayed empty: 353.521 EPSS rows in a full mirror, not one
+    of them with a scoring date. Nothing failed, because a missing date is
+    indistinguishable from a feed that does not carry one. Accepting either
+    character costs nothing and removes a whole class of "the header changed a
+    punctuation mark and we lost the field".
 
     Args:
         csv_text: The full decoded text of the EPSS CSV file.
@@ -752,7 +796,7 @@ def _epss_scored_at(csv_text: str) -> Optional[datetime]:
     Returns:
         The parsed scoring date, or ``None`` if the header does not carry one.
     """
-    match = re.search(r"score_date=(\d{4}-\d{2}-\d{2})", csv_text[:512])
+    match = re.search(r"score_date[=:](\d{4}-\d{2}-\d{2})", csv_text[:512])
     return _parse_dt(match.group(1)) if match else None
 
 
