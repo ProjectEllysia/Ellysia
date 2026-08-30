@@ -701,6 +701,10 @@ class CheckRuntime:
         self._tls_fetch = tls_fetch
         self._network_open = network_open
         self._script_plugins = dict(script_plugins or {})
+        # Sondas compartidas dentro de una ejecución; :meth:`run` las vacía al
+        # empezar. Aquí sólo para que el objeto esté completo desde que nace.
+        self._responses: Dict[tuple, Optional[Response]] = {}
+        self._handshakes: Dict[tuple, object] = {}
         self._families: Tuple[_CheckFamily, ...] = (
             _CheckFamily(
                 applies_to_service=is_http_service,
@@ -727,6 +731,11 @@ class CheckRuntime:
     def run(self, host: str, services: Iterable[Service]) -> List[dict]:
         """Run every applicable check against a host's HTTP, TLS and network services.
 
+        Probes are shared within one call: several checks reading the same
+        evidence make one request between them, not one each. See
+        :meth:`_probe_response` for why that is a property of this loop and not
+        a caching layer.
+
         Args:
             host: The target host.
             services: The host's discovered services (non-applicable ones are
@@ -735,6 +744,12 @@ class CheckRuntime:
         Returns:
             A finding dict for each check that fired.
         """
+        # La caché nace y muere con la ejecución: dos escaneos del mismo
+        # objetivo tienen que volver a mirar, porque entre uno y otro el
+        # objetivo ha podido cambiar — que es justo lo que un escáner mide.
+        self._responses: Dict[tuple, Optional[Response]] = {}
+        self._handshakes: Dict[tuple, object] = {}
+
         findings: List[dict] = []
         for service in services:
             for family in self._families:
@@ -815,12 +830,53 @@ class CheckRuntime:
         nothing.
         """
         for request in check.requests:
-            if self._rl is not None:
-                self._rl.acquire(host)
-            response = self._fetch(host, service.port, request.method, request.path)
+            response = self._probe_response(host, service, request.method, request.path)
             if response is None or not request.evaluate(response):
                 return None
         return self._finding(check, service)
+
+    def _probe_response(self, host: str, service: Service, method: str, path: str) -> Optional[Response]:
+        """Return the response for one request, asking the target only once.
+
+        Every check runs independently, which is what keeps them simple, but
+        the feed has three ``security_header`` checks and all three inspect the
+        headers of the same ``GET /``. Run literally, that is three identical
+        requests, three rate-limiter waits, and three entries in the target's
+        access log for one bit of information.
+
+        Noise on the target is not a side issue for a security scanner: it
+        shows up in the SIEM of whoever hired us. So a response is fetched once
+        per ``(method, path)`` and shared by every check that asks for it,
+        within one :meth:`run`.
+
+        A transport failure is remembered too. Not caching it would mean three
+        attempts against a service that is down — the case where retrying costs
+        the most and informs the least.
+        """
+        key = (host, service.port, method, path)
+        if key in self._responses:
+            return self._responses[key]
+        if self._rl is not None:
+            self._rl.acquire(host)
+        response = self._fetch(host, service.port, method, path)
+        self._responses[key] = response
+        return response
+
+    def _probe_handshake(self, host: str, service: Service):
+        """Return the TLS handshake facts for one service, negotiating once.
+
+        Same reasoning as :meth:`_probe_response`: the three ``tls`` checks in
+        the feed evaluate three different rules over the **same** ``TlsInfo``,
+        so there is no reason to shake hands three times with the same port.
+        """
+        key = (host, service.port)
+        if key in self._handshakes:
+            return self._handshakes[key]
+        if self._rl is not None:
+            self._rl.acquire(host)
+        info = self._tls_fetch(host, service.port)
+        self._handshakes[key] = info
+        return info
 
     def _run_tls_check(self, check: Check, host: str, service: Service) -> Optional[dict]:
         """Run one TLS hygiene check against one service's handshake.
@@ -828,9 +884,7 @@ class CheckRuntime:
         A transport failure (unreachable, handshake error) abandons the check —
         no evidence means no finding, the same rule ``_run_check`` follows.
         """
-        if self._rl is not None:
-            self._rl.acquire(host)
-        info = self._tls_fetch(host, service.port)
+        info = self._probe_handshake(host, service)
         if info is None or not _TLS_RULES[check.tls_rule](info):
             return None
         return self._finding(check, service)
