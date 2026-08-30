@@ -37,7 +37,7 @@ from typing import Dict, Optional
 
 from .checks import ScriptContext, ScriptPlugin, is_smb_service, is_snmp_service
 from .engine import Service
-from .fingerprinting.smb import SmbProbe, fingerprint_smb
+from .fingerprinting.smb import SIGNING_REQUIRED_BIT, SmbProbe, fingerprint_smb
 from .fingerprinting.snmp import SnmpProbe
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,15 @@ class SmbSigningNotRequiredPlugin(ScriptPlugin):
     manipular el tráfico SMB (la familia de ataques de relay). El dato no se
     infiere: sale del ``SecurityMode`` que el propio servidor devuelve en su
     respuesta NEGOTIATE, así que el hallazgo nace ``confirmed``.
+
+    **La decisión se toma sobre el bit, no sobre la etiqueta.** Este plugin
+    llegó a resolverse buscando la subcadena ``"firma no requerida"`` dentro
+    del texto legible que produce ``fingerprint_smb``. Eso ataba una decisión
+    de seguridad a una cadena de interfaz: traducir esa etiqueta, corregirle
+    una tilde o cambiarle el fraseo apagaba el check **en silencio** —seguía
+    ejecutándose, seguía devolviendo ``False``, y nadie se enteraba de que
+    había dejado de detectar nada—. El dato crudo estaba dos líneas más
+    arriba, en la misma tupla.
 
     Args:
         probe: Sonda inyectable, para que un test use un socket falso — mismo
@@ -71,12 +80,14 @@ class SmbSigningNotRequiredPlugin(ScriptPlugin):
             # Sin negociación no hay evidencia, y sin evidencia no hay hallazgo.
             return False
         dialect_revision, security_mode = result
-        fingerprint = fingerprint_smb(dialect_revision, security_mode)
-        if fingerprint.product is None:
+        if fingerprint_smb(dialect_revision, security_mode).version is None:
             # Respuesta no reconocible: se ignora en vez de asumir lo peor. Un
             # dialecto desconocido no es prueba de que la firma no se exija.
+            # Se consulta ``version`` —un campo con tipo— y no el texto del
+            # producto: lo que hace falta saber aquí es si la respuesta se
+            # entendió, y eso es justo lo que ese campo significa.
             return False
-        return "firma no requerida" in fingerprint.product
+        return not security_mode & SIGNING_REQUIRED_BIT
 
 
 class SnmpDefaultCommunityPlugin(ScriptPlugin):

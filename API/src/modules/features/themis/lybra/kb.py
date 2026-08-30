@@ -54,6 +54,68 @@ logger = logging.getLogger(__name__)
 # VERSION LOGIC
 # =========================================================================
 
+# Una revisión de distribución empieza por dígito ("1ubuntu1", "2",
+# "1+deb11u1") o es la forma de Alpine ("r0"). Lo que va tras un guion y no
+# encaja aquí —"rc1", "beta", "pre"— es una preversión del fabricante, que
+# significa lo contrario: no acompaña a una versión, la precede. Distinguirlas
+# importa porque se tratan al revés (la revisión no cuenta frente a NVD; la
+# preversión ordena por debajo de su versión final).
+_DISTRO_REVISION_RE = re.compile(r"^(?:\d|r\d+$)")
+
+
+def split_distro_version(version: str) -> Tuple[Optional[int], str, Optional[str]]:
+    """Split a distribution package version into ``(epoch, upstream, revision)``.
+
+    A distro package version is not the vendor's version: Debian and its
+    derivatives write ``1:2.4.49-1ubuntu1``, where ``1:`` is the *epoch* (a
+    counter the distribution bumps when it has to renumber downwards) and
+    ``-1ubuntu1`` is the *revision* (which packaging of that same upstream
+    release this is). Alpine writes ``2.4.49-r0``. Only the middle part —
+    ``2.4.49`` — is the version the vendor released, and the only one NVD ever
+    talks about.
+
+    Both extras break comparison in *opposite* directions, which is why they
+    have to come off before comparing rather than be tolerated:
+
+    * The epoch is read as a leading component, so ``1:2.4.49`` compares as
+      ``[1, 2, 4, 49]`` and lands *below* ``2.4.49``.
+    * The revision is read as a trailing component, so ``2.4.49-1ubuntu1``
+      compares *above* ``2.4.49`` and falls outside a range that ends there.
+
+    Anything after a ``+`` is packaging or build metadata (``2.4.49+dfsg``,
+    ``1.0.0+20130313144700``) and is dropped from the upstream part, following
+    the same rule semver §10 states for build metadata: it never affects
+    precedence.
+
+    Args:
+        version: A raw version string, distro-flavoured or not.
+
+    Returns:
+        ``(epoch, upstream, revision)``. ``epoch`` and ``revision`` are
+        ``None`` when the string does not carry them — which is the normal
+        case for a vendor banner or an NVD bound, and is exactly what tells
+        the comparator it is not looking at a distro version.
+    """
+    remainder = version.strip()
+
+    epoch: Optional[int] = None
+    head, colon, tail = remainder.partition(":")
+    if colon and head.isdigit():
+        epoch = int(head)
+        remainder = tail
+
+    revision: Optional[str] = None
+    if "-" in remainder:
+        # El último guion es el que separa: una versión upstream puede llevar
+        # guiones propios, la revisión de distribución nunca.
+        upstream, _, candidate = remainder.rpartition("-")
+        if _DISTRO_REVISION_RE.match(candidate):
+            revision = candidate
+            remainder = upstream
+
+    return epoch, remainder.split("+", 1)[0], revision
+
+
 def _version_key(version: str) -> List[tuple]:
     """Break a version string into components that sort correctly.
 
@@ -78,6 +140,18 @@ def _version_key(version: str) -> List[tuple]:
     return key
 
 
+def _compare_keys(key_a: List[tuple], key_b: List[tuple]) -> int:
+    """Compare two component lists, padding the shorter one with zeros."""
+    for index in range(max(len(key_a), len(key_b))):
+        token_a = key_a[index] if index < len(key_a) else (1, 0, "")
+        token_b = key_b[index] if index < len(key_b) else (1, 0, "")
+        if token_a < token_b:
+            return -1
+        if token_a > token_b:
+            return 1
+    return 0
+
+
 def version_compare(a: str, b: str) -> int:
     """Compare two version strings component by component.
 
@@ -87,6 +161,27 @@ def version_compare(a: str, b: str) -> int:
     are treated as equal. This is good enough for the dotted vendor versions the
     matcher sees; it is not a full PEP 440 / semver implementation.
 
+    **Distro package versions are normalized first** (see
+    :func:`split_distro_version`), because the matcher's two inputs are not the
+    same kind of string: one side is a package version from an agent inventory
+    (``1:2.4.49-1ubuntu1``), the other is a bound NVD published, and NVD only
+    ever speaks upstream. Comparing the extras against something that cannot
+    have them is a category error, and it broke in both directions at once —
+    an epoch produced false positives by dragging the version down, a revision
+    produced false negatives by pushing it past the top of a range.
+
+    Two deliberate asymmetries, both following from that:
+
+    * **Epochs count only when both sides have one.** Between two distro
+      versions the epoch is the most significant component and is honoured.
+      Against an NVD bound, which never carries one, it is dropped from both
+      sides rather than compared against an implicit zero.
+    * **Revisions count only as a tiebreaker, and only when both sides have
+      one.** ``2.4.49-1`` is older than ``2.4.49-2``, which matters when
+      ordering packages among themselves; but ``2.4.49-1ubuntu1`` against the
+      plain ``2.4.49`` compares *equal*, which is what makes a package land
+      inside the range its upstream release belongs to.
+
     Args:
         a: The first version string.
         b: The second version string.
@@ -95,15 +190,54 @@ def version_compare(a: str, b: str) -> int:
         ``-1`` if ``a`` is older than ``b``, ``0`` if they are equal, ``1`` if
         ``a`` is newer.
     """
-    ka, kb = _version_key(a), _version_key(b)
-    for i in range(max(len(ka), len(kb))):
-        token_a = ka[i] if i < len(ka) else (1, 0, "")
-        token_b = kb[i] if i < len(kb) else (1, 0, "")
-        if token_a < token_b:
-            return -1
-        if token_a > token_b:
-            return 1
+    epoch_a, upstream_a, revision_a = split_distro_version(a)
+    epoch_b, upstream_b, revision_b = split_distro_version(b)
+
+    if epoch_a is not None and epoch_b is not None and epoch_a != epoch_b:
+        return -1 if epoch_a < epoch_b else 1
+
+    upstream_order = _compare_keys(_version_key(upstream_a), _version_key(upstream_b))
+    if upstream_order != 0:
+        return upstream_order
+
+    if revision_a is not None and revision_b is not None:
+        return _compare_keys(_version_key(revision_a), _version_key(revision_b))
     return 0
+
+
+def kb_feed_version(state: Dict[str, Optional[datetime]]) -> str:
+    """Build the reproducibility mark for findings resolved against the KB.
+
+    Every version-detection finding used to carry the constant ``"lybra-0"``,
+    which never changed. Two findings emitted six months apart —one against a
+    knowledge base with the full catalogue, another against one half
+    populated— were stamped identically, so a stored finding could not say what
+    it had been compared against. That breaks three things at once: an old
+    report cannot be reproduced, a finding that disappeared cannot be
+    explained (was the host fixed, or did the KB change?), and the lifecycle
+    can mark something ``fixed`` that merely stopped matching because NVD
+    rewrote a range.
+
+    The mark reads ``lybra-kb:nvd=2026-08-29,kev=2026-08-27,epss=2026-08-30``.
+    Spelled out rather than hashed on purpose: the point is that someone
+    reading a finding a year from now can tell what it was resolved against,
+    and a hash only says "not the same as that other one" — it needs a lookup
+    table that does not exist yet (#302). A source with no date reports
+    ``none``, which is honest: an empty knowledge source is exactly the thing
+    this mark exists to make visible.
+
+    Args:
+        state: ``{"nvd": datetime | None, "kev": ..., "epss": ...}``, as
+            :meth:`KbRepository.knowledge_state` returns it.
+
+    Returns:
+        The mark, e.g. ``"lybra-kb:nvd=2026-08-29,kev=none,epss=2026-08-30"``.
+    """
+    parts = []
+    for source in ("nvd", "kev", "epss"):
+        moment = state.get(source)
+        parts.append(f"{source}={moment.date().isoformat() if moment else 'none'}")
+    return "lybra-kb:" + ",".join(parts)
 
 
 def _bound(match, name: str) -> Optional[str]:
@@ -413,8 +547,21 @@ def _pick_cvss(metrics: dict) -> Tuple[Optional[float], Optional[str], Optional[
     """Choose the best available CVSS metric from an NVD ``metrics`` block.
 
     A CVE may carry several CVSS versions at once; we prefer the newest
-    (v3.1 over v3.0 over v2), since that is the most accurate scoring the entry
-    offers.
+    (v4.0 over v3.1 over v3.0 over v2), since that is the most accurate scoring
+    the entry offers.
+
+    **v4.0 goes first, and that is the whole point of the order.** It is the
+    most recent and most precise metric an entry can carry, which is the same
+    rule the rest of the chain already followed — but until it was listed here
+    a CVE whose *only* published metric was v4 came back empty, and empty is
+    not a cosmetic gap downstream: ``_cvss_band`` reads a missing score as
+    ``0.0``, which is INFO. A critical vulnerability published only with v4
+    was landing in reports as informational, and the AI summary described it
+    as such.
+
+    The v4 ``cvssData`` block exposes ``baseScore``, ``vectorString`` and
+    ``baseSeverity`` under the very same names as v3.x, so nothing below this
+    line has to know which version it is reading.
 
     Args:
         metrics: The ``metrics`` object of an NVD CVE record.
@@ -423,7 +570,7 @@ def _pick_cvss(metrics: dict) -> Tuple[Optional[float], Optional[str], Optional[
         A ``(base_score, vector_string, severity)`` tuple. Each element is
         ``None`` if no CVSS metric of any version is present.
     """
-    for key in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+    for key in ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
         entries = metrics.get(key) or []
         if not entries:
             continue
@@ -632,7 +779,16 @@ def parse_epss_rows(csv_text: str) -> Iterator[dict]:
 def _epss_scored_at(csv_text: str) -> Optional[datetime]:
     """Read the scoring date out of the EPSS file's comment header.
 
-    The header looks like ``#model_version:...,score_date=2026-07-01T...``.
+    The header looks like ``#model_version:v2026.06.15,score_date:2026-08-30T...``.
+
+    **Both separators are accepted, and that is not defensive coding.** This
+    used to look for ``score_date=`` only, and the feed publishes
+    ``score_date:`` — so the date came back ``None`` every single time, and the
+    column silently stayed empty: 353.521 EPSS rows in a full mirror, not one
+    of them with a scoring date. Nothing failed, because a missing date is
+    indistinguishable from a feed that does not carry one. Accepting either
+    character costs nothing and removes a whole class of "the header changed a
+    punctuation mark and we lost the field".
 
     Args:
         csv_text: The full decoded text of the EPSS CSV file.
@@ -640,7 +796,7 @@ def _epss_scored_at(csv_text: str) -> Optional[datetime]:
     Returns:
         The parsed scoring date, or ``None`` if the header does not carry one.
     """
-    match = re.search(r"score_date=(\d{4}-\d{2}-\d{2})", csv_text[:512])
+    match = re.search(r"score_date[=:](\d{4}-\d{2}-\d{2})", csv_text[:512])
     return _parse_dt(match.group(1)) if match else None
 
 

@@ -54,9 +54,13 @@ logger = logging.getLogger(__name__)
 # ``type: "network"`` check; checks-3: "redis-unauthenticated-access", the
 # second ``network`` protocol; checks-4: "smb-signing-not-required", the first
 # ``type: "script"`` check; checks-5: "snmp-default-community", the first
-# check over UDP) — never for a fix to an existing check, which bumps that
-# check's own ``version`` instead (see ``Check.check_id``).
-CHECKS_FEED_VERSION = "lybra-checks-5"
+# check over UDP; checks-6: el vocabulario ``read``/``expectBanner``, que es
+# capacidad nueva del esquema y no el arreglo de un check suelto) — nunca por
+# arreglar un check ya existente, que sube su propio ``version`` (ver
+# ``Check.check_id``). Los dos checks ``network`` suben además a ``version: 2``
+# en checks-6: su comportamiento cambia, y un hallazgo guardado tiene que poder
+# decir cuál de las dos formas lo produjo.
+CHECKS_FEED_VERSION = "lybra-checks-6"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -68,11 +72,30 @@ QOD_CONFIRMED = 99
 # detection rules is the difference between being able to explain why a check
 # exists and not.
 _BUNDLED_FEED = Path(__file__).parent / "feeds" / "checks_feed.yaml"
-# Service names and ports that indicate an HTTP-speaking service worth probing.
+# Un mismo conjunto de puertos respondía antes a dos preguntas que no son la
+# misma —"¿esto habla TLS?" y "¿esto merece checks de higiene TLS?"— y las
+# respondía mal a las dos: tenía dos elementos, 443 y 8443. Un panel de
+# administración HTTPS en 9443 se sondeaba en claro y no recibía ningún check
+# de certificado.
+#
+# Ahora cada pregunta se responde por su lado. El **esquema** (http o https) ya
+# no se deduce del puerto: se observa, intentando el handshake (ver
+# :func:`negotiates_tls`). Lo que queda aquí es sólo la **candidatura**: a qué
+# servicios merece la pena acercarse siquiera.
 _HTTP_SERVICE_NAMES = {"http", "https", "http-proxy", "https-alt", "http-alt"}
-_HTTP_PORTS = {80, 443, 8080, 8443, 8000, 8888, 8008}
-# Ports we should reach over TLS.
-_TLS_PORTS = {443, 8443}
+
+# Puertos donde es habitual encontrar TLS. Deciden qué servicios reciben los
+# checks de higiene de certificado, no cómo se habla con ellos. La lista es una
+# red de seguridad barata, no una verdad: un TLS en un puerto que no esté aquí
+# se sondea igual de bien (el esquema se observa), pero no recibe los checks de
+# certificado. Ampliarla es gratis; hacerla innecesaria es #283, que ataca la
+# misma enfermedad —decidir por número de puerto— desde el otro lado.
+_TLS_HYGIENE_PORTS = {443, 8443, 9443, 10443, 4443, 7443, 8834, 9091, 5986}
+
+# Puertos que se consideran servicio HTTP. Incluye los de TLS: un HTTPS en 9443
+# tampoco entraba por esta puerta, así que ampliar sólo la lista de TLS no
+# habría servido de nada.
+_HTTP_PORTS = {80, 8080, 8000, 8888, 8008} | _TLS_HYGIENE_PORTS
 # Service names and ports for FTP — Fase N's first ``type: "network"`` family.
 _FTP_SERVICE_NAMES = {"ftp"}
 _FTP_PORTS = {21}
@@ -193,12 +216,18 @@ class Request:
         send: For ``type: "network"``, the raw payload to write before
             reading a reply (e.g. ``"USER anonymous\\r\\n"``). ``None`` reads
             without writing anything first. Unused by ``type: "http"``.
+        read: For ``type: "network"``, how the reply *ends* — see
+            :data:`NETWORK_READ_MODES`. The transport cannot know this on its
+            own: where a reply stops is a fact about the protocol, so the feed
+            declares it. Defaults to ``"line"``, the original behaviour.
+            Unused by ``type: "http"``.
     """
     method: str = "GET"
     path: str = "/"
     matchers: tuple = ()
     condition: str = "and"
     send: Optional[str] = None
+    read: str = "line"
 
     def evaluate(self, response: Response) -> bool:
         """Return whether this request's matchers are satisfied by a response.
@@ -247,6 +276,14 @@ class Check:
             to fall back to :data:`CHECKS_FEED_VERSION`. A single global
             constant stopped being truthful once checks could come from two
             feeds with independent version lines.
+        expect_banner: For ``type: "network"``, whether the server volunteers a
+            greeting the moment the connection opens (FTP, SMTP, POP3 and IMAP
+            all do; Redis and MySQL do not). When set, the runtime reads and
+            **discards** that greeting before writing the check's first
+            payload. Without it the greeting is still sitting in the socket
+            buffer and every subsequent read comes back one reply out of step
+            — the whole check then matches against the wrong text and silently
+            never fires.
         tags: Free-form labels (Nuclei's ``info.tags``, plus vendor/product
             metadata). Not used by the runtime, which runs whatever it is
             given: they exist so a *selector* can decide which of thousands of
@@ -266,6 +303,7 @@ class Check:
     script: Optional[str] = None
     namespace: str = "lybra"
     feed_version: Optional[str] = None
+    expect_banner: bool = False
     tags: tuple = ()
 
     @property
@@ -326,6 +364,7 @@ def _parse_check(c: dict) -> Check:
             path=request.get("path", "/"),
             condition=request.get("matchers-condition", "and"),
             send=request.get("send"),
+            read=_parse_read_mode(request.get("read"), c.get("id")),
             matchers=tuple(
                 Matcher(
                     type=matcher["type"],
@@ -338,7 +377,7 @@ def _parse_check(c: dict) -> Check:
         )
         for request in c.get("requests", [])
     )
-    return Check(
+    check = Check(
         id=c["id"],
         version=c.get("version", 1),
         type=c.get("type", "http"),
@@ -350,7 +389,68 @@ def _parse_check(c: dict) -> Check:
         finding=c.get("finding", {}),
         tls_rule=c.get("tlsRule"),
         script=c.get("script"),
+        expect_banner=bool(c.get("expectBanner", False)),
     )
+    _assert_service_is_reachable(check)
+    return check
+
+
+def _assert_service_is_reachable(check: Check) -> None:
+    """Fail loudly when a ``network`` check names a protocol nobody can match.
+
+    A check whose ``service`` has no predicate can never apply to anything: it
+    is a bug in the feed, not a runtime case. Left to fall through it looks
+    exactly like "this check simply did not fire against this host", which is
+    normal and unremarkable — so nobody ever finds out. Raising here puts the
+    error where a human is looking, at load time.
+
+    Only ``network`` checks are validated: the other families do not dispatch
+    on this field (``http`` and ``tls`` decide by service shape, ``script``
+    delegates to its plugin), so an odd ``service`` there is a label and not a
+    routing decision.
+
+    Args:
+        check: The freshly parsed check.
+
+    Raises:
+        ValueError: If a ``network`` check names an unknown protocol.
+    """
+    if check.type != "network" or check.service in _NETWORK_SERVICE_MATCHERS:
+        return
+    raise ValueError(
+        f"Check {check.id!r}: el servicio {check.service!r} no tiene predicado "
+        f"(disponibles: {', '.join(sorted(_NETWORK_SERVICE_MATCHERS))})"
+    )
+
+
+def _parse_read_mode(declared: Optional[str], check_id: Optional[str]) -> str:
+    """Validate a request's declared ``read`` mode, defaulting to ``"line"``.
+
+    A mode nobody implements is a feed bug, not a runtime case: left to fall
+    back silently it would read one line where the protocol needs a block and
+    the check would simply never fire — the same class of silent false
+    negative this whole change exists to remove. So it raises at load time,
+    where a human is looking.
+
+    Args:
+        declared: The feed's ``read`` value, or ``None`` when absent.
+        check_id: The check being parsed, for the error message.
+
+    Returns:
+        The validated mode name.
+
+    Raises:
+        ValueError: If ``declared`` names a mode that does not exist.
+    """
+    if declared is None:
+        return "line"
+    mode = str(declared).strip().lower()
+    if mode not in NETWORK_READ_MODES:
+        raise ValueError(
+            f"Check {check_id!r}: modo de lectura {declared!r} desconocido "
+            f"(disponibles: {', '.join(sorted(NETWORK_READ_MODES))})"
+        )
+    return mode
 
 
 # =========================================================================
@@ -370,15 +470,22 @@ def is_http_service(service: Service) -> bool:
 
 
 def is_tls_service(service: Service) -> bool:
-    """Return whether a service should be probed by TLS hygiene checks.
+    """Return whether a service is a candidate for the TLS hygiene checks.
+
+    Candidacy, not identification: this says "merece la pena intentar el
+    handshake aquí", and the checks themselves abandon quietly if there is no
+    TLS on the other side. It is deliberately *not* the function that decides
+    whether to speak HTTPS to a service — that is observed, not guessed (see
+    :func:`negotiates_tls`).
 
     Args:
         service: The service to test.
 
     Returns:
-        ``True`` if the service's port is one we reach over TLS.
+        ``True`` if the service's port is one where TLS is common enough to be
+        worth a handshake.
     """
-    return service.port in _TLS_PORTS
+    return service.port in _TLS_HYGIENE_PORTS
 
 
 def is_ftp_service(service: Service) -> bool:
@@ -445,14 +552,34 @@ def is_snmp_service(service: Service) -> bool:
     return (service.name or "").lower() in _SNMP_SERVICE_NAMES or service.port in _SNMP_PORTS
 
 
-# Maps a ``type: "network"`` check's declared ``service`` (the feed's plain
-# string, e.g. ``"ftp"``) to the predicate that decides whether a discovered
-# Service is that protocol. One entry per protocol Fase N adds — the runtime
-# itself (``CheckRuntime._applies_network``) stays protocol-agnostic.
-_NETWORK_SERVICE_MATCHERS: Dict[str, Callable[[Service], bool]] = {
-    "ftp": is_ftp_service,
-    "redis": is_redis_service,
-}
+def _network_service_matchers() -> Dict[str, Callable[[Service], bool]]:
+    """Derive the ``service`` → predicate map from this module's own predicates.
+
+    A ``type: "network"`` check declares which protocol it targets as a plain
+    string (``service: ftp``), and the runtime needs the predicate that decides
+    whether a discovered service *is* that protocol. That map used to be
+    written out by hand and had **two** entries while the module already
+    defined eleven predicates: a check for SMTP, MySQL or VNC loaded fine,
+    validated fine, and was then dropped without a word.
+
+    Deriving it removes the second edit entirely — defining
+    ``is_mongodb_service`` is all it takes for ``service: mongodb`` to work.
+
+    Introspection rather than the ``@register_dissector`` decorator the
+    fingerprinting package uses, and for a reason: a decorator would have to
+    restate the protocol name (``@service_predicate("ftp")``) that the
+    function name already carries, which is one more place for the two to
+    disagree. Here the naming convention *is* the registration.
+    """
+    suffix = "_service"
+    return {
+        name[len("is_"):-len(suffix)]: predicate
+        for name, predicate in globals().items()
+        if name.startswith("is_") and name.endswith(suffix) and callable(predicate)
+    }
+
+
+_NETWORK_SERVICE_MATCHERS: Dict[str, Callable[[Service], bool]] = _network_service_matchers()
 
 
 # Protocol versions considered deprecated/weak for a service exposed today.
@@ -600,6 +727,10 @@ class CheckRuntime:
         self._tls_fetch = tls_fetch
         self._network_open = network_open
         self._script_plugins = dict(script_plugins or {})
+        # Sondas compartidas dentro de una ejecución; :meth:`run` las vacía al
+        # empezar. Aquí sólo para que el objeto esté completo desde que nace.
+        self._responses: Dict[tuple, Optional[Response]] = {}
+        self._handshakes: Dict[tuple, object] = {}
         self._families: Tuple[_CheckFamily, ...] = (
             _CheckFamily(
                 applies_to_service=is_http_service,
@@ -626,6 +757,11 @@ class CheckRuntime:
     def run(self, host: str, services: Iterable[Service]) -> List[dict]:
         """Run every applicable check against a host's HTTP, TLS and network services.
 
+        Probes are shared within one call: several checks reading the same
+        evidence make one request between them, not one each. See
+        :meth:`_probe_response` for why that is a property of this loop and not
+        a caching layer.
+
         Args:
             host: The target host.
             services: The host's discovered services (non-applicable ones are
@@ -634,6 +770,12 @@ class CheckRuntime:
         Returns:
             A finding dict for each check that fired.
         """
+        # La caché nace y muere con la ejecución: dos escaneos del mismo
+        # objetivo tienen que volver a mirar, porque entre uno y otro el
+        # objetivo ha podido cambiar — que es justo lo que un escáner mide.
+        self._responses: Dict[tuple, Optional[Response]] = {}
+        self._handshakes: Dict[tuple, object] = {}
+
         findings: List[dict] = []
         for service in services:
             for family in self._families:
@@ -666,11 +808,25 @@ class CheckRuntime:
         :data:`_NETWORK_SERVICE_MATCHERS`, so the runtime itself never needs to
         know about a specific protocol — only each protocol's applicability
         predicate does.
+
+        A check the feed loader already rejected cannot reach this point, so an
+        unknown protocol here means a check that never went through it — one
+        translated from a Nuclei template, whose ``service`` is whatever the
+        upstream document said. It is still a check that can never fire, so it
+        is logged rather than silently skipped: the two cases (unknown protocol
+        / protocol that does not apply to this service) are not the same thing
+        and must not look the same.
         """
         if check.type != "network":
             return False
         matches = _NETWORK_SERVICE_MATCHERS.get(check.service)
-        if matches is None or not matches(service):
+        if matches is None:
+            logger.warning(
+                "Check %s declara el servicio %r, que no tiene predicado: no se ejecutará",
+                check.check_id, check.service,
+            )
+            return False
+        if not matches(service):
             return False
         return self._applies_mode(check)
 
@@ -700,12 +856,53 @@ class CheckRuntime:
         nothing.
         """
         for request in check.requests:
-            if self._rl is not None:
-                self._rl.acquire(host)
-            response = self._fetch(host, service.port, request.method, request.path)
+            response = self._probe_response(host, service, request.method, request.path)
             if response is None or not request.evaluate(response):
                 return None
         return self._finding(check, service)
+
+    def _probe_response(self, host: str, service: Service, method: str, path: str) -> Optional[Response]:
+        """Return the response for one request, asking the target only once.
+
+        Every check runs independently, which is what keeps them simple, but
+        the feed has three ``security_header`` checks and all three inspect the
+        headers of the same ``GET /``. Run literally, that is three identical
+        requests, three rate-limiter waits, and three entries in the target's
+        access log for one bit of information.
+
+        Noise on the target is not a side issue for a security scanner: it
+        shows up in the SIEM of whoever hired us. So a response is fetched once
+        per ``(method, path)`` and shared by every check that asks for it,
+        within one :meth:`run`.
+
+        A transport failure is remembered too. Not caching it would mean three
+        attempts against a service that is down — the case where retrying costs
+        the most and informs the least.
+        """
+        key = (host, service.port, method, path)
+        if key in self._responses:
+            return self._responses[key]
+        if self._rl is not None:
+            self._rl.acquire(host)
+        response = self._fetch(host, service.port, method, path)
+        self._responses[key] = response
+        return response
+
+    def _probe_handshake(self, host: str, service: Service):
+        """Return the TLS handshake facts for one service, negotiating once.
+
+        Same reasoning as :meth:`_probe_response`: the three ``tls`` checks in
+        the feed evaluate three different rules over the **same** ``TlsInfo``,
+        so there is no reason to shake hands three times with the same port.
+        """
+        key = (host, service.port)
+        if key in self._handshakes:
+            return self._handshakes[key]
+        if self._rl is not None:
+            self._rl.acquire(host)
+        info = self._tls_fetch(host, service.port)
+        self._handshakes[key] = info
+        return info
 
     def _run_tls_check(self, check: Check, host: str, service: Service) -> Optional[dict]:
         """Run one TLS hygiene check against one service's handshake.
@@ -713,9 +910,7 @@ class CheckRuntime:
         A transport failure (unreachable, handshake error) abandons the check —
         no evidence means no finding, the same rule ``_run_check`` follows.
         """
-        if self._rl is not None:
-            self._rl.acquire(host)
-        info = self._tls_fetch(host, service.port)
+        info = self._probe_handshake(host, service)
         if info is None or not _TLS_RULES[check.tls_rule](info):
             return None
         return self._finding(check, service)
@@ -727,6 +922,12 @@ class CheckRuntime:
         over it in order (combined with AND, same as ``_run_check``) — the
         session, not a fresh connection per request, is what lets a login
         sequence like FTP's ``USER``/``PASS`` see its own prior state.
+
+        When the check declares ``expectBanner``, the server's unprompted
+        greeting is read and thrown away first. It has to be: the greeting is
+        already in the socket buffer at connect time, so leaving it there would
+        put every later read one reply out of step — the check would evaluate
+        ``USER``'s matchers against the greeting and never fire.
         """
         if self._rl is not None:
             self._rl.acquire(host)
@@ -734,8 +935,12 @@ class CheckRuntime:
         if session is None:
             return None
         try:
+            if check.expect_banner:
+                # Read as a block: a greeting may span several continuation
+                # lines, and a single-line one ends the block immediately.
+                session.exchange(None, read="block")
             for request in check.requests:
-                response = session.exchange(request.send)
+                response = session.exchange(request.send, read=request.read)
                 if response is None or not request.evaluate(response):
                     return None
             return self._finding(check, service)
@@ -795,17 +1000,40 @@ class HostRateLimiter:
     """Enforces a minimum interval between requests to the same host.
 
     Thread-safe, so it can be shared across concurrent probes without letting any
-    single host be hit faster than the configured rate.
+    single host be hit faster than the configured rate — and **without holding
+    anyone else up while it waits**. The waiting happens outside the lock: the
+    turn is reserved under it (a few microseconds of bookkeeping), and the
+    sleeping is done after releasing it.
+
+    That distinction is the whole point of this class's shape. With the sleep
+    inside the lock, a probe waiting its turn for host A also blocked every
+    probe heading for host B — a limiter meant to protect *one* host at a time
+    was throttling all of them at once, and the wait bought nobody any
+    protection.
+
+    Reserving the turn before sleeping (writing the *future* timestamp, not the
+    current one) is what makes concurrent callers for the same host stagger
+    instead of all waking up at the same instant and firing together.
 
     Args:
         min_interval: The minimum time, in seconds, between two requests to the
             same host.
+        clock: An injectable monotonic clock, so a test can assert the schedule
+            instead of waiting for it.
+        sleeper: An injectable sleep, same reason.
     """
 
-    def __init__(self, min_interval: float = 0.2) -> None:
+    def __init__(
+        self,
+        min_interval: float = 0.2,
+        clock: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._min = min_interval
         self._last: Dict[str, float] = {}
         self._lock = threading.Lock()
+        self._clock = clock
+        self._sleeper = sleeper
 
     def acquire(self, host: str) -> None:
         """Block, if necessary, until it is safe to hit ``host`` again.
@@ -814,10 +1042,60 @@ class HostRateLimiter:
             host: The host about to be requested.
         """
         with self._lock:
-            wait = self._min - (time.monotonic() - self._last.get(host, 0.0))
-            if wait > 0:
-                time.sleep(wait)
-            self._last[host] = time.monotonic()
+            now = self._clock()
+            # El turno se reserva escribiendo la marca *futura*, no la actual:
+            # así dos hilos que piden el mismo host se escalonan en vez de
+            # despertarse a la vez y disparar juntos.
+            #
+            # Un host que no se ha visto nunca se distingue con None y no con
+            # un 0.0 por defecto: contra un reloj real da igual (0.0 queda
+            # infinitamente atrás), pero contra uno inyectado que empiece en
+            # cero, ese 0.0 haría esperar a la primera petición de cada host.
+            last_turn = self._last.get(host)
+            earliest = now if last_turn is None else max(now, last_turn + self._min)
+            self._last[host] = earliest
+        wait = earliest - now
+        if wait > 0:
+            self._sleeper(wait)
+
+
+def negotiates_tls(host: str, port: int, timeout: float = 5.0, connect: Optional[Callable] = None) -> bool:
+    """Return whether ``host:port`` completes a TLS handshake.
+
+    The question "is this HTTPS?" used to be answered by looking the port up in
+    a set of two. This asks the service instead, which is the only way to be
+    right about a panel someone chose to publish on 9443, or about a plain HTTP
+    server sitting on 8443 — the inverse mistake, and just as real.
+
+    Deliberately implemented here with ``ssl`` rather than by reusing
+    ``fingerprinting.tls.TlsProbe``, which does exactly this handshake plus
+    certificate parsing: this module must not import the fingerprinting
+    package, because the dissectors in it import their applicability predicates
+    from here and the two imports would close a cycle (the same reason
+    ``_TLS_RULES`` is duck-typed). What is shared is the reasoning, not the
+    code — and what this needs is a yes/no, not a certificate.
+
+    Args:
+        host: The target host.
+        port: The target port.
+        timeout: The connection timeout, in seconds.
+        connect: An injectable ``(address, timeout) -> socket`` callable, the
+            same pattern the probes use.
+
+    Returns:
+        ``True`` if the handshake completed, ``False`` on any failure —
+        including a plaintext server, which answers a TLS ``ClientHello`` with
+        something that is not a ``ServerHello`` and fails the handshake.
+    """
+    connect = connect or socket.create_connection
+    context = ssl._create_unverified_context()
+    try:
+        with connect((host, port), timeout) as sock:
+            with context.wrap_socket(sock, server_hostname=host):
+                return True
+    except Exception as err:  # noqa: BLE001 - cualquier fallo significa "no es TLS"
+        logger.debug("Scheme detection: %s:%s does not speak TLS (%s)", host, port, err)
+        return False
 
 
 class HttpProbe:
@@ -832,11 +1110,24 @@ class HttpProbe:
     Args:
         timeout: The per-request timeout, in seconds.
         max_bytes: The maximum number of response body bytes to read.
+        detect_scheme: An injectable ``(host, port) -> bool`` telling whether
+            the service speaks TLS. Defaults to :func:`negotiates_tls`; a test
+            passes a stub instead of opening a socket.
     """
 
-    def __init__(self, timeout: int = 8, max_bytes: int = 131072) -> None:
+    def __init__(
+        self,
+        timeout: int = 8,
+        max_bytes: int = 131072,
+        detect_scheme: Optional[Callable[[str, Optional[int]], bool]] = None,
+    ) -> None:
         self._timeout = timeout
         self._max_bytes = max_bytes
+        self._detect_scheme = detect_scheme or (lambda host, port: negotiates_tls(host, port, timeout))
+        # El esquema se observa una vez por servicio y se recuerda: la pregunta
+        # es sobre el servicio, no sobre la petición, y no cambia entre una y
+        # otra dentro del mismo escaneo.
+        self._schemes: Dict[tuple, str] = {}
         # E7: este probe se queda deliberadamente en ``urllib`` mientras el
         # resto del tráfico HTTP ordinario del proyecto (aegis/pills.py,
         # lybra/kb.py) usa ``requests``. Una sonda de seguridad necesita
@@ -904,7 +1195,7 @@ class HttpProbe:
         HTTPS uses an unverified TLS context, since we are scanning arbitrary
         hosts whose certificates we do not control.
         """
-        scheme = "https" if port in _TLS_PORTS else "http"
+        scheme = self._scheme_for(host, port)
         netloc = f"{host}:{port}" if port else host
         url = f"{scheme}://{netloc}{path}"
         try:
@@ -918,6 +1209,20 @@ class HttpProbe:
             logger.debug("HTTP probe failed for %s: %s", url, err)
             return None
 
+    def _scheme_for(self, host: str, port: Optional[int]) -> str:
+        """Return ``"https"`` or ``"http"`` for a service, observing it once.
+
+        A service with no port at all (an inventory entry, say) is not
+        something to shake hands with, so it keeps the plain default rather
+        than paying for a probe that has nowhere to connect.
+        """
+        if port is None:
+            return "http"
+        key = (host, port)
+        if key not in self._schemes:
+            self._schemes[key] = "https" if self._detect_scheme(host, port) else "http"
+        return self._schemes[key]
+
     @staticmethod
     def _to_response(status: int, body: bytes, headers) -> Response:
         """Assemble a :class:`Response` from raw request parts, lowercasing headers."""
@@ -930,45 +1235,81 @@ class HttpProbe:
 # NETWORK PROBE (the network edge for ``type: "network"`` checks — Fase N)
 # =========================================================================
 
+# How a reply ends, declared per request by the feed (``read:``). The transport
+# cannot infer this: "one line" is a property of some protocols and of no
+# others, and guessing it wrong does not raise — it just reads the wrong bytes
+# and the check never fires.
+#
+#   line       One line, terminated by LF. The original behaviour and the
+#              default: right for a protocol whose every reply is one line.
+#   block      A multi-line status block, the shape FTP/SMTP/POP3 use: lines
+#              whose status code is followed by "-" are continuations, and the
+#              first line *without* that dash closes the block. Degrades to a
+#              single line when the server does not use continuations, which is
+#              what makes it safe as the banner reader for any protocol.
+#   resp-bulk  Redis' RESP bulk string: a "$<n>" header line followed by
+#              exactly n bytes of payload. Any other first line (an error like
+#              "-NOAUTH ...", a simple "+OK") is returned as-is, because that
+#              *is* the whole reply.
+NETWORK_READ_MODES = ("line", "block", "resp-bulk")
+
+# A status line whose code is followed by "-" instead of a space: the reply
+# continues on the next line (RFC 959 §4.2 for FTP, RFC 5321 §4.2 for SMTP).
+_STATUS_CONTINUATION_RE = re.compile(rb"^\d{3}-")
+
+
 class NetworkSession:
     """One TCP connection, shared across every request of a single check run.
 
-    Deliberately protocol-agnostic: it knows nothing about FTP, SMB or any
-    other protocol a future check targets — it only writes a payload (if any)
-    and reads back one line, decoded as text so the existing word/regex
-    matchers can evaluate it exactly like an HTTP response (``status=0`` and
-    empty ``headers``, since neither concept exists here).
+    Deliberately protocol-agnostic: it knows nothing about FTP, Redis or any
+    other protocol a check targets. What it does know is that *where a reply
+    ends* is a protocol decision, so the feed declares it per request (see
+    :data:`NETWORK_READ_MODES`) and this class only implements the mechanics.
+    The reply comes back decoded as text, so the existing word/regex matchers
+    evaluate it exactly like an HTTP response (``status=0`` and empty
+    ``headers``, since neither concept exists here).
+
+    Reads are buffered: whatever a read mode does not consume stays for the
+    next one, which is what lets a bulk-string read hand back the leftovers
+    instead of losing them. It also stops the previous byte-at-a-time
+    ``recv(1)`` loop, one system call per byte received.
 
     Args:
         sock: The connected socket this session wraps.
-        max_bytes: The maximum number of bytes to read per line.
+        max_bytes: The maximum number of bytes to read for a single reply. A
+            hostile or broken server must not be able to make us read forever.
     """
 
-    def __init__(self, sock, max_bytes: int = 4096) -> None:
+    _CHUNK = 4096
+
+    def __init__(self, sock, max_bytes: int = 65536) -> None:
         self._sock = sock
         self._max_bytes = max_bytes
+        self._buffer = b""
 
-    def exchange(self, send: Optional[str]) -> Optional[Response]:
-        """Write ``send`` (if any), then read and return one line of reply.
+    def exchange(self, send: Optional[str], read: str = "line") -> Optional[Response]:
+        """Write ``send`` (if any), then read one reply under the given mode.
 
         Args:
             send: The raw payload to write first, or ``None`` to only read —
-                the shape a banner-only check needs, since some protocols
-                (FTP) volunteer a line unprompted right after connecting.
+                the shape a banner-only read needs, since some protocols (FTP)
+                volunteer a greeting unprompted right after connecting.
+            read: How the reply ends — one of :data:`NETWORK_READ_MODES`.
 
         Returns:
-            A :class:`Response` wrapping the decoded line (``status=0``,
-            empty ``headers``), or ``None`` on any transport failure.
+            A :class:`Response` wrapping the decoded reply (``status=0``,
+            empty ``headers``), or ``None`` on a transport failure or an empty
+            reply.
         """
         try:
             if send is not None:
                 self._sock.sendall(send.encode("utf-8"))
-            data = b""
-            while not data.endswith(b"\n") and len(data) < self._max_bytes:
-                chunk = self._sock.recv(1)
-                if not chunk:
-                    break
-                data += chunk
+            if read == "block":
+                data = self._read_block()
+            elif read == "resp-bulk":
+                data = self._read_resp_bulk()
+            else:
+                data = self._read_line()
         except OSError as err:
             logger.debug("Network check exchange failed: %s", err)
             return None
@@ -983,6 +1324,74 @@ class NetworkSession:
             self._sock.close()
         except OSError:
             pass
+
+    def _fill(self) -> bool:
+        """Pull one more chunk off the socket into the buffer.
+
+        Returns:
+            ``False`` when the peer closed the connection (nothing more will
+            ever arrive), ``True`` otherwise.
+        """
+        chunk = self._sock.recv(self._CHUNK)
+        if not chunk:
+            return False
+        self._buffer += chunk
+        return True
+
+    def _read_line(self) -> bytes:
+        """Read up to and including the next LF, or whatever arrived before EOF."""
+        while b"\n" not in self._buffer and len(self._buffer) < self._max_bytes:
+            if not self._fill():
+                break
+        line, separator, rest = self._buffer.partition(b"\n")
+        self._buffer = rest
+        return line + separator
+
+    def _read_block(self) -> bytes:
+        """Read a status block: continuation lines plus the line that closes it."""
+        block = b""
+        while len(block) < self._max_bytes:
+            line = self._read_line()
+            if not line:
+                break
+            block += line
+            if not _STATUS_CONTINUATION_RE.match(line):
+                break
+        return block
+
+    def _read_resp_bulk(self) -> bytes:
+        """Read a RESP bulk string, or hand back a non-bulk reply untouched.
+
+        A bulk string announces its own length (``$3116``), so unlike every
+        other reply here its end is a byte count and not a delimiter. A reply
+        that is not a bulk string — an error, a simple string — is complete as
+        the single line it already is.
+        """
+        header = self._read_line()
+        if not header.startswith(b"$"):
+            return header
+        try:
+            length = int(header[1:].strip())
+        except ValueError:
+            return header
+        if length < 0:                      # "$-1" is RESP's null bulk string
+            return header
+        length = min(length, self._max_bytes)
+        while len(self._buffer) < length:
+            if not self._fill():
+                break
+        payload, self._buffer = self._buffer[:length], self._buffer[length:]
+        # RESP cierra el bulk con un CRLF que no cuenta en la longitud
+        # anunciada. Se descarta si ya está en el buffer, para que no se cuele
+        # como una línea vacía en la lectura siguiente. Deliberadamente no se
+        # pide más al socket para conseguirlo: el servidor manda ese CRLF
+        # pegado al contenido, y un recv extra sólo podría bloquear hasta el
+        # timeout — perdiendo una respuesta que ya teníamos entera.
+        if self._buffer.startswith(b"\r\n"):
+            self._buffer = self._buffer[2:]
+        elif self._buffer.startswith(b"\n"):
+            self._buffer = self._buffer[1:]
+        return payload
 
 
 class NetworkProbe:

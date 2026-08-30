@@ -33,6 +33,7 @@ from ...lybra import (
     default_dissectors,
     agrees_with_nmap,
     HostRateLimiter,
+    kb_feed_version,
     load_checks,
     CheckRuntime,
     HttpProbe,
@@ -275,6 +276,7 @@ class LybraEngineManager(ScanManager):
                     kev_lookup=lambda cve_id: kb_repo.get_kev(cve_id) is not None,
                     epss_lookup=lambda cve_id: getattr(kb_repo.get_epss(cve_id), "score", None),
                     product_alias_lookup=kb_repo.resolve_product_alias,
+                    feed_version=kb_feed_version(kb_repo.knowledge_state()),
                 )
                 findings_data = engine.analyze(services)
                 findings_data.extend(fingerprint_findings)

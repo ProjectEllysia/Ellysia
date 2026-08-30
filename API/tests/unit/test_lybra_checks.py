@@ -3,7 +3,11 @@
 Pure: an injected ``fetch``/``network_open`` returns crafted responses, so no
 real network. Exercises the bundled feed, the matchers, HTTP-service
 selection, the safe/aggressive gate, and the ``type: "network"`` family Fase N
-adds (a fake, in-memory session standing in for a real TCP connection).
+adds.
+
+Para la familia ``network``, el transporte se sustituye **a nivel de socket**
+(bytes) y no a nivel de sesión: la nota al principio de esa sección explica
+por qué, y es la regla que el resto de la casa ya sigue con los dissectors.
 """
 
 import json
@@ -12,6 +16,7 @@ import yaml
 
 import pytest
 
+from src.modules.features.themis.lybra import checks as checks_mod
 from src.modules.features.themis.lybra import (
     load_checks,
     CheckRuntime,
@@ -130,21 +135,94 @@ def test_safe_mode_skips_aggressive_checks(tmp_path):
 
 
 # --------------------------------------------------- network checks (Fase N)
+#
+# **Dónde se sustituye el transporte, y por qué ahí.** Los tests de
+# comportamiento de protocolo de esta sección inyectan un *socket* falso y
+# dejan que el ``NetworkSession`` real haga su trabajo — la misma regla que ya
+# siguen los dissectors, que se ejercitan con bytes y no con probes falsos.
+#
+# Un doble que sustituya a ``NetworkSession`` entera acaba siendo más capaz que
+# la pieza real: entrega respuestas multilínea completas que ``exchange`` jamás
+# produciría, y con eso documenta lo que el autor creía que pasaba en vez de lo
+# que pasa. Así es como un bug de transporte sobrevivió a una sección entera de
+# tests en verde.
+#
+# ``_FakeNetworkSession`` se queda **sólo** para la orquestación del runtime
+# (que no se sondee un servicio que no aplica, que sin ``network_open`` no se
+# haga nada, que la sesión se cierre siempre): eso no es comportamiento de
+# protocolo y no necesita bytes.
 
 _FTP = Service(21, "tcp", "ftp", "", "", None)
+_REDIS = Service(6379, "tcp", "redis", "", "", None)
+
+# Saludo que un vsftpd real deja en el buffer en el instante de conectar, antes
+# de que el cliente escriba nada.
+_FTP_BANNER = b"220 (vsFTPd 3.0.3)\r\n"
+# El mismo saludo en su forma multilínea, igual de habitual (RFC 959 §4.2).
+_FTP_MULTILINE_BANNER = b"220-Bienvenido a este FTP\r\n220 (vsFTPd 3.0.3)\r\n"
+# Respuesta real de Redis a INFO: un bulk string RESP cuya primera línea es la
+# longitud, no el contenido.
+_REDIS_INFO = b"$3116\r\n# Server\r\nredis_version:7.0.11\r\nredis_mode:standalone\r\n"
+
+
+class _FakeNetSocket:
+    """Un socket falso a nivel de bytes: entrega un flujo y encola respuestas.
+
+    Modela las dos cosas que un doble por encima de la sesión borra: el saludo
+    ya está en el buffer en el instante de conectar, y cada respuesta aparece
+    **después** de que el cliente escriba su comando. Los trozos que devuelve
+    ``recv`` tampoco tienen por qué coincidir con las líneas del protocolo.
+
+    Args:
+        greeting: Los bytes que el servidor ya tiene puestos al conectar.
+        replies: Un flujo de respuesta por cada escritura del cliente, en orden.
+        chunk_size: El máximo de bytes que devuelve un ``recv``, para poder
+            trocear la respuesta de forma arbitraria.
+    """
+
+    def __init__(self, greeting: bytes = b"", replies=(), chunk_size: int = 65536):
+        self._buffer = greeting
+        self._replies = list(replies)
+        self._chunk = chunk_size
+        self.sent = b""
+        self.closed = False
+        self.recv_calls = 0
+
+    def recv(self, size: int) -> bytes:
+        self.recv_calls += 1
+        take = min(size, self._chunk)
+        chunk, self._buffer = self._buffer[:take], self._buffer[take:]
+        return chunk
+
+    def sendall(self, data: bytes) -> None:
+        self.sent += data
+        if self._replies:
+            self._buffer += self._replies.pop(0)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _network_open_over(sock):
+    """Un ``network_open`` que abre el :class:`NetworkSession` **real** sobre ``sock``."""
+    return NetworkProbe(connect=lambda address, timeout: sock).open
 
 
 class _FakeNetworkSession:
-    """A scripted stand-in for a real TCP connection: each ``exchange`` call
-    consumes the next canned reply, in order — exactly what a login sequence
-    like FTP's USER/PASS needs from a single, shared connection."""
+    """Doble de orquestación: apunta lo que se le pidió, sin hablar ningún protocolo.
+
+    Sólo para los tests que verifican *qué* hace el runtime (a qué servicios
+    abre sesión, si la cierra), nunca para los que verifican qué entiende del
+    otro extremo — para eso está :class:`_FakeNetSocket`, que es un nivel más
+    abajo y no puede inventarse capacidades que el transporte real no tiene.
+    """
 
     def __init__(self, replies):
         self._replies = list(replies)
         self.sent: list = []
         self.closed = False
 
-    def exchange(self, send):
+    def exchange(self, send, read="line"):
         self.sent.append(send)
         if not self._replies:
             return None
@@ -156,7 +234,7 @@ class _FakeNetworkSession:
 
 
 def _network_open_for(replies):
-    """A ``network_open`` that hands out one fresh scripted session."""
+    """Un ``network_open`` que reparte una única sesión de orquestación."""
     session = _FakeNetworkSession(replies)
 
     def open_(host, port):
@@ -165,31 +243,77 @@ def _network_open_for(replies):
     return open_
 
 
-def test_ftp_anonymous_login_confirmed_when_both_steps_succeed():
-    open_ = _network_open_for(["331 Please specify the password.", "230 Login successful."])
-    findings = CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_FTP])
+def _findings_for(check_id, sock, service):
+    """Corre el feed sobre ``service`` con el transporte real y filtra por check."""
+    runtime = CheckRuntime(load_checks(), lambda *a: None, network_open=_network_open_over(sock))
+    return [f for f in runtime.run("h", [service]) if f["check_id"] == check_id]
 
-    ftp = [f for f in findings if f["check_id"] == "lybra:ftp-anonymous-login@1"]
+
+# ------------------------------------------ ftp-anonymous-login (comportamiento)
+
+def test_ftp_anonymous_login_confirmed_when_both_steps_succeed():
+    sock = _FakeNetSocket(
+        greeting=_FTP_BANNER,
+        replies=[b"331 Please specify the password.\r\n", b"230 Login successful.\r\n"],
+    )
+
+    ftp = _findings_for("lybra:ftp-anonymous-login@2", sock, _FTP)
+
     assert len(ftp) == 1
     assert ftp[0]["qod"] == 99 and ftp[0]["confirmed"] is True
     assert ftp[0]["category"] == "default_credentials"
     assert ftp[0]["port"] == 21
-    # Both steps of the login sequence went over the same session, in order.
-    assert open_.session.sent == ["USER anonymous\r\n", "PASS anonymous@lybra.local\r\n"]
+    # Los dos pasos de la secuencia de login fueron por la misma sesión, en orden.
+    assert sock.sent == b"USER anonymous\r\nPASS anonymous@lybra.local\r\n"
+
+
+def test_ftp_anonymous_login_confirmed_with_a_multiline_banner():
+    sock = _FakeNetSocket(
+        greeting=_FTP_MULTILINE_BANNER,
+        replies=[b"331 Please specify the password.\r\n", b"230 Login successful.\r\n"],
+    )
+    assert len(_findings_for("lybra:ftp-anonymous-login@2", sock, _FTP)) == 1
 
 
 def test_ftp_anonymous_login_absent_when_credentials_rejected():
-    open_ = _network_open_for(["331 Please specify the password.", "530 Login incorrect."])
-    findings = CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_FTP])
-    assert not any(f["check_id"] == "lybra:ftp-anonymous-login@1" for f in findings)
+    sock = _FakeNetSocket(
+        greeting=_FTP_BANNER,
+        replies=[b"331 Please specify the password.\r\n", b"530 Login incorrect.\r\n"],
+    )
+    assert _findings_for("lybra:ftp-anonymous-login@2", sock, _FTP) == []
+
+
+def test_ftp_anonymous_login_abandoned_when_the_server_says_nothing():
+    sock = _FakeNetSocket(greeting=b"", replies=[])
+    assert _findings_for("lybra:ftp-anonymous-login@2", sock, _FTP) == []
 
 
 def test_ftp_anonymous_login_abandoned_on_connect_failure():
     findings = CheckRuntime(
         load_checks(), lambda *a: None, network_open=lambda host, port: None
     ).run("h", [_FTP])
-    assert not any(f["check_id"] == "lybra:ftp-anonymous-login@1" for f in findings)
+    assert not any(f["check_id"] == "lybra:ftp-anonymous-login@2" for f in findings)
 
+
+# ------------------------------- redis-unauthenticated-access (comportamiento)
+
+def test_redis_unauthenticated_access_confirmed_when_info_succeeds():
+    sock = _FakeNetSocket(replies=[_REDIS_INFO])
+
+    redis_findings = _findings_for("lybra:redis-unauthenticated-access@2", sock, _REDIS)
+
+    assert len(redis_findings) == 1
+    assert redis_findings[0]["qod"] == 99 and redis_findings[0]["confirmed"] is True
+    assert redis_findings[0]["category"] == "default_credentials"
+    assert sock.sent == b"INFO\r\n"
+
+
+def test_redis_unauthenticated_access_absent_when_auth_required():
+    sock = _FakeNetSocket(replies=[b"-NOAUTH Authentication required.\r\n"])
+    assert _findings_for("lybra:redis-unauthenticated-access@2", sock, _REDIS) == []
+
+
+# ------------------------------------------------- selección y orquestación
 
 def test_network_checks_never_run_without_a_network_open_callable():
     # Mirrors test_only_http_services_are_probed: omitting network_open must
@@ -207,29 +331,6 @@ def test_only_ftp_services_are_probed_by_network_checks():
     assert is_ftp_service(_HTTP) is False
 
 
-# ---------------------------------------- redis-unauthenticated-access (Fase N)
-
-_REDIS = Service(6379, "tcp", "redis", "", "", None)
-
-
-def test_redis_unauthenticated_access_confirmed_when_info_succeeds():
-    reply = "$120\r\n# Server\r\nredis_version:7.0.11\r\nredis_mode:standalone\r\n"
-    open_ = _network_open_for([reply])
-    findings = CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_REDIS])
-
-    redis_findings = [f for f in findings if f["check_id"] == "lybra:redis-unauthenticated-access@1"]
-    assert len(redis_findings) == 1
-    assert redis_findings[0]["qod"] == 99 and redis_findings[0]["confirmed"] is True
-    assert redis_findings[0]["category"] == "default_credentials"
-    assert open_.session.sent == ["INFO\r\n"]
-
-
-def test_redis_unauthenticated_access_absent_when_auth_required():
-    open_ = _network_open_for(["-NOAUTH Authentication required.\r\n"])
-    findings = CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_REDIS])
-    assert not any(f["check_id"] == "lybra:redis-unauthenticated-access@1" for f in findings)
-
-
 def test_only_redis_services_are_probed_by_redis_check():
     open_ = _network_open_for(["$40\r\nredis_version:7.0.11\r\n"])
     CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_HTTP])
@@ -239,59 +340,603 @@ def test_only_redis_services_are_probed_by_redis_check():
     assert is_redis_service(_HTTP) is False
 
 
-# --------------------------------------------- NetworkProbe (fake socket)
+def test_the_session_of_a_network_check_is_always_closed():
+    open_ = _network_open_for([None])
+    CheckRuntime(load_checks(), lambda *a: None, network_open=open_).run("h", [_FTP])
+    assert open_.session.closed is True
 
-class _FakeNetSocket:
-    """A byte-stream-backed stand-in for a real network-check socket."""
 
-    def __init__(self, data: bytes):
-        self._buf = data
-        self.sent = b""
-        self.closed = False
-
-    def recv(self, n: int) -> bytes:
-        chunk, self._buf = self._buf[:n], self._buf[n:]
-        return chunk
-
-    def sendall(self, data: bytes) -> None:
-        self.sent += data
-
-    def close(self) -> None:
-        self.closed = True
-
+# ----------------------------------------------- NetworkProbe (socket falso)
 
 def test_network_probe_session_reads_banner_without_sending():
-    fake_sock = _FakeNetSocket(b"220 (vsFTPd 2.3.4)\r\n")
-    session = NetworkProbe(connect=lambda addr, timeout: fake_sock).open("10.0.0.5", 21)
+    sock = _FakeNetSocket(greeting=_FTP_BANNER)
+    session = NetworkProbe(connect=lambda address, timeout: sock).open("10.0.0.5", 21)
 
-    resp = session.exchange(None)
+    response = session.exchange(None)
 
-    assert resp.body == "220 (vsFTPd 2.3.4)"
-    assert fake_sock.sent == b""               # nothing written for a banner-only read
+    assert response.body == "220 (vsFTPd 3.0.3)"
+    assert sock.sent == b""                    # nothing written for a banner-only read
 
 
 def test_network_probe_session_sends_then_reads():
-    fake_sock = _FakeNetSocket(b"331 Please specify the password.\r\n")
-    session = NetworkProbe(connect=lambda addr, timeout: fake_sock).open("10.0.0.5", 21)
+    sock = _FakeNetSocket(replies=[b"331 Please specify the password.\r\n"])
+    session = NetworkProbe(connect=lambda address, timeout: sock).open("10.0.0.5", 21)
 
-    resp = session.exchange("USER anonymous\r\n")
+    response = session.exchange("USER anonymous\r\n")
 
-    assert fake_sock.sent == b"USER anonymous\r\n"
-    assert resp.body == "331 Please specify the password."
+    assert sock.sent == b"USER anonymous\r\n"
+    assert response.body == "331 Please specify the password."
     session.close()
-    assert fake_sock.closed is True
+    assert sock.closed is True
+
+
+def test_network_probe_session_reads_a_line_split_across_recv_chunks():
+    # Un servidor real no entrega la línea entera de una vez: el criterio de
+    # fin de respuesta es del protocolo, no del tamaño del trozo que llegue.
+    sock = _FakeNetSocket(greeting=_FTP_BANNER, chunk_size=1)
+    session = NetworkProbe(connect=lambda address, timeout: sock).open("10.0.0.5", 21)
+    assert session.exchange(None).body == "220 (vsFTPd 3.0.3)"
 
 
 def test_network_probe_returns_none_on_connect_failure():
-    def failing_connect(addr, timeout):
+    def failing_connect(address, timeout):
         raise OSError("connection refused")
     assert NetworkProbe(connect=failing_connect).open("10.0.0.5", 21) is None
 
 
 def test_network_session_exchange_returns_none_on_empty_read():
-    fake_sock = _FakeNetSocket(b"")
-    session = NetworkProbe(connect=lambda addr, timeout: fake_sock).open("10.0.0.5", 21)
+    sock = _FakeNetSocket(greeting=b"")
+    session = NetworkProbe(connect=lambda address, timeout: sock).open("10.0.0.5", 21)
     assert session.exchange(None) is None
+
+
+def test_network_session_no_longer_reads_one_byte_per_syscall():
+    # El lector anterior pedía los bytes de uno en uno: una llamada al sistema
+    # por byte recibido. Una línea corta debe costar un puñado de recv, no uno
+    # por carácter.
+    sock = _FakeNetSocket(greeting=_FTP_BANNER)
+    session = NetworkProbe(connect=lambda address, timeout: sock).open("10.0.0.5", 21)
+
+    session.exchange(None)
+
+    assert sock.recv_calls < len(_FTP_BANNER)
+
+
+# ------------------------------------------- modos de lectura (``read:``)
+#
+# Dónde termina una respuesta es un hecho del protocolo, no del transporte. Un
+# modo mal elegido no da error: lee los bytes equivocados y el check deja de
+# disparar en silencio, que es el fallo que este bloque existe para impedir.
+
+def _session_over(greeting=b"", replies=()):
+    sock = _FakeNetSocket(greeting=greeting, replies=replies)
+    return NetworkProbe(connect=lambda address, timeout: sock).open("10.0.0.5", 21)
+
+
+def test_read_line_stops_at_the_first_newline():
+    session = _session_over(greeting=b"331 Primera\r\n230 Segunda\r\n")
+    assert session.exchange(None, read="line").body == "331 Primera"
+
+
+def test_read_block_joins_the_continuation_lines_of_a_status_reply():
+    # Un código seguido de "-" anuncia que la respuesta sigue; el mismo código
+    # seguido de espacio la cierra.
+    session = _session_over(greeting=b"220-Primera\r\n220-Segunda\r\n220 Ultima\r\n")
+
+    body = session.exchange(None, read="block").body
+
+    assert "Primera" in body and "Segunda" in body and "Ultima" in body
+
+
+def test_read_block_stops_at_a_line_that_is_not_a_continuation():
+    # Con una respuesta de una sola línea, "block" se comporta como "line": no
+    # se queda esperando más datos que no van a llegar.
+    session = _session_over(greeting=b"220 Unica\r\n331 De la siguiente respuesta\r\n")
+    assert session.exchange(None, read="block").body == "220 Unica"
+
+
+def test_read_block_does_not_over_read_a_banner_without_status_codes():
+    # Un saludo que no usa códigos de estado (SSH, por ejemplo) tampoco es una
+    # continuación, así que cierra el bloque en la primera línea. Sin esta
+    # regla, "block" se quedaría leyendo hasta agotar el tiempo de espera.
+    session = _session_over(greeting=b"SSH-2.0-OpenSSH_8.9\r\nmas cosas\r\n")
+    assert session.exchange(None, read="block").body == "SSH-2.0-OpenSSH_8.9"
+
+
+def test_read_resp_bulk_returns_the_announced_payload_and_not_its_header():
+    session = _session_over(replies=[_REDIS_INFO])
+
+    body = session.exchange("INFO\r\n", read="resp-bulk").body
+
+    assert body.startswith("# Server")
+    assert "redis_version:7.0.11" in body
+    assert "$" not in body                 # la línea de longitud no forma parte del contenido
+
+
+def test_read_resp_bulk_returns_a_non_bulk_reply_untouched():
+    # Un error de Redis es una línea suelta que empieza por "-": ya es la
+    # respuesta entera, y es justo la que el matcher negativo tiene que ver.
+    session = _session_over(replies=[b"-NOAUTH Authentication required.\r\n"])
+    assert session.exchange("INFO\r\n", read="resp-bulk").body == "-NOAUTH Authentication required."
+
+
+def test_read_resp_bulk_leaves_the_trailing_bytes_for_the_next_read():
+    # RESP cierra el bulk con un CRLF que no cuenta en la longitud anunciada.
+    # Ese sobrante se queda en el buffer y no puede comerse la respuesta
+    # siguiente.
+    session = _session_over(replies=[b"$2\r\nOK\r\n+PONG\r\n"])
+
+    assert session.exchange("INFO\r\n", read="resp-bulk").body == "OK"
+    assert session.exchange("PING\r\n", read="line").body == "+PONG"
+
+
+def test_a_truncated_bulk_reply_returns_what_arrived_instead_of_hanging():
+    # El servidor anuncia 3116 bytes y cierra la conexión tras unos pocos.
+    session = _session_over(replies=[b"$3116\r\nredis_version:7.0.11\r\n"])
+    assert "redis_version:7.0.11" in session.exchange("INFO\r\n", read="resp-bulk").body
+
+
+# ------------------------------------ el feed declara cómo termina cada respuesta
+
+def test_the_bundled_network_checks_declare_their_read_semantics():
+    checks = {check.id: check for check in load_checks()}
+
+    ftp = checks["ftp-anonymous-login"]
+    assert ftp.expect_banner is True       # FTP saluda al conectar
+    assert [request.read for request in ftp.requests] == ["block", "block"]
+
+    redis_check = checks["redis-unauthenticated-access"]
+    assert redis_check.expect_banner is False   # Redis no saluda
+    assert [request.read for request in redis_check.requests] == ["resp-bulk"]
+
+
+def test_a_request_without_a_declared_read_mode_keeps_the_original_behaviour():
+    git = next(check for check in load_checks() if check.id == "git-config-exposure")
+    assert git.requests[0].read == "line"
+    assert git.expect_banner is False
+
+
+def test_an_unknown_read_mode_fails_at_load_time(tmp_path):
+    # Un modo que nadie implementa es un bug del feed. Si se ignorase en
+    # silencio, el check leería una línea donde el protocolo necesita un
+    # bloque y no dispararía nunca: exactamente el falso negativo silencioso
+    # que este cambio elimina.
+    feed = tmp_path / "feed.json"
+    feed.write_text(json.dumps({"checks": [{
+        "id": "modo-inventado", "version": 1, "type": "network",
+        "category": "network_config", "severity": "HIGH", "service": "ftp",
+        "requests": [{"send": "PING\r\n", "read": "telepatia", "matchers": []}],
+        "finding": {"title": "x"},
+    }]}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="telepatia"):
+        load_checks(str(feed))
+
+
+# ------------------------------------------- esquema observado, no deducido
+#
+# El motor decidía si hablar HTTP o HTTPS mirando si el puerto estaba en un
+# conjunto de dos elementos (443 y 8443). Un panel HTTPS en 9443 se sondeaba en
+# claro: el GET fallaba o devolvía basura, el dissector no identificaba nada y
+# los checks de cabeceras no corrían. Y al revés, un HTTP en claro en 8443 se
+# sondeaba como TLS y no contestaba nada.
+
+class _RespuestaFalsaHttp:
+    """Lo mínimo que `_request` consulta de lo que devuelve el opener."""
+
+    status = 200
+    headers = {"Server": "nginx"}
+
+    def read(self, _n=None):
+        return b"<html>"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+
+class _OpenerFalso:
+    """Apunta la URL que se pidió, que es lo que este bloque comprueba."""
+
+    def __init__(self):
+        self.urls = []
+
+    def open(self, request, timeout=None):
+        self.urls.append(request.full_url)
+        return _RespuestaFalsaHttp()
+
+
+def _probe_con_opener(monkeypatch, detect_scheme):
+    from src.modules.features.themis.lybra import HttpProbe
+
+    probe = HttpProbe(detect_scheme=detect_scheme)
+    opener = _OpenerFalso()
+    monkeypatch.setattr(probe, "_opener", opener)
+    return probe, opener
+
+
+def test_a_tls_service_on_a_non_canonical_port_is_reached_over_https(monkeypatch):
+    probe, opener = _probe_con_opener(monkeypatch, lambda host, port: True)
+
+    probe.fetch("10.0.0.5", 9443, "GET", "/")
+
+    assert opener.urls == ["https://10.0.0.5:9443/"]
+
+
+def test_a_plaintext_service_on_a_tls_port_is_not_forced_into_https(monkeypatch):
+    # El caso inverso, y tan real como el otro: un HTTP en claro en 8443.
+    probe, opener = _probe_con_opener(monkeypatch, lambda host, port: False)
+
+    probe.fetch("10.0.0.5", 8443, "GET", "/")
+
+    assert opener.urls == ["http://10.0.0.5:8443/"]
+
+
+def test_the_scheme_is_observed_once_per_service(monkeypatch):
+    # La pregunta es sobre el servicio, no sobre la petición: no cambia entre
+    # una ruta y otra dentro del mismo escaneo.
+    observaciones = []
+
+    def detectar(host, port):
+        observaciones.append((host, port))
+        return True
+
+    probe, _opener = _probe_con_opener(monkeypatch, detectar)
+
+    probe.fetch("10.0.0.5", 9443, "GET", "/")
+    probe.fetch("10.0.0.5", 9443, "GET", "/.git/config")
+    probe.fetch("10.0.0.5", 4443, "GET", "/")
+
+    assert observaciones == [("10.0.0.5", 9443), ("10.0.0.5", 4443)]
+
+
+def test_a_service_without_a_port_is_never_probed_for_tls(monkeypatch):
+    # Una entrada de inventario no tiene a dónde conectarse: no se paga una
+    # sonda que no puede salir a ninguna parte.
+    probe, opener = _probe_con_opener(monkeypatch, lambda host, port: pytest.fail("no debería sondear"))
+
+    probe.fetch("10.0.0.5", None, "GET", "/")
+
+    assert opener.urls == ["http://10.0.0.5/"]
+
+
+def test_negotiates_tls_is_false_when_the_connection_fails():
+    from src.modules.features.themis.lybra.checks import negotiates_tls
+
+    def connect_que_falla(address, timeout):
+        raise OSError("connection refused")
+
+    assert negotiates_tls("10.0.0.5", 9443, connect=connect_que_falla) is False
+
+
+def test_the_usual_tls_ports_are_candidates_for_hygiene_checks():
+    from src.modules.features.themis.lybra import is_tls_service
+
+    for puerto in (443, 8443, 9443, 10443, 8834):
+        servicio = Service(puerto, "tcp", "", "", "", None)
+        assert is_tls_service(servicio) is True, puerto
+        # Y entran por la puerta de HTTP, que antes tampoco los dejaba pasar.
+        assert is_http_service(servicio) is True, puerto
+
+
+def test_a_tls_service_on_an_arbitrary_port_still_misses_the_hygiene_checks():
+    """El límite que queda, escrito para que no se dé por cerrado.
+
+    El esquema ya se observa, así que un TLS en 7777 se sondea bien y recibe
+    los checks de cabeceras. Lo que no recibe son los de higiene de
+    certificado: su candidatura sigue decidiéndose por número de puerto.
+    Hacerla observada del todo es #283.
+    """
+    from src.modules.features.themis.lybra import is_tls_service
+
+    assert is_tls_service(Service(7777, "tcp", "", "", "", None)) is False
+
+
+# --------------------------------- sondas compartidas dentro de una ejecución
+#
+# Cada check corre por su cuenta, que es lo que los mantiene simples, pero el
+# feed tiene tres checks de cabeceras que miran la misma respuesta a `GET /` y
+# tres de TLS que evalúan reglas distintas sobre el mismo handshake. Ejecutado
+# al pie de la letra, eso son cuatro sondas de más por servicio: tiempo de
+# escaneo, esperas del limitador, y ruido en el registro del objetivo — que en
+# un escáner de seguridad no es un detalle, porque aparece en el SIEM de quien
+# nos contrata.
+
+_TLS_SERVICE = Service(443, "tcp", "https", "", "", None)
+
+
+class _TlsInfoFalso:
+    """Lo mínimo que las reglas TLS del feed consultan de un handshake."""
+
+    def __init__(self, self_signed=True, expired=False, protocol="TLSv1.3"):
+        self.self_signed = self_signed
+        self.expired = expired
+        self.protocol = protocol
+        self.days_until_expiry = 200
+
+
+def _contador_de_handshakes(info=None):
+    llamadas = []
+
+    def tls_fetch(host, port):
+        llamadas.append((host, port))
+        return info
+
+    tls_fetch.llamadas = llamadas
+    return tls_fetch
+
+
+def test_the_three_header_checks_make_one_request_between_them():
+    fetch = _fetcher({"/": Response(200, "<html>", {})})
+
+    findings = CheckRuntime(load_checks(), fetch).run("10.0.0.5", [_HTTP])
+
+    # Los tres checks de cabeceras disparan (el nginx de mentira no manda
+    # ninguna) y aun así "/" se pidió una sola vez.
+    cabeceras = [f for f in findings if f["category"] == "security_header"]
+    assert len(cabeceras) == 3
+    assert [ruta for _h, _p, _m, ruta in fetch.calls].count("/") == 1
+
+
+def test_each_distinct_path_is_still_requested():
+    # Compartir no es dejar de mirar: rutas distintas siguen siendo sondas
+    # distintas, una por ruta.
+    fetch = _fetcher({})
+    CheckRuntime(load_checks(), fetch).run("10.0.0.5", [_HTTP])
+
+    rutas = [ruta for _h, _p, _m, ruta in fetch.calls]
+    assert len(rutas) == len(set(rutas))
+    assert "/.git/config" in rutas and "/" in rutas
+
+
+def test_the_three_tls_checks_share_one_handshake():
+    tls_fetch = _contador_de_handshakes(_TlsInfoFalso(self_signed=True))
+
+    findings = CheckRuntime(
+        load_checks(), _fetcher({}), tls_fetch=tls_fetch
+    ).run("10.0.0.5", [_TLS_SERVICE])
+
+    assert any(f["check_id"] == "lybra:tls-self-signed-cert@1" for f in findings)
+    assert len(tls_fetch.llamadas) == 1
+
+
+def test_a_transport_failure_is_shared_too():
+    # El caso donde reintentar cuesta más y informa menos: un servicio caído.
+    # Sin compartir el fallo, los tres checks de TLS intentarían el handshake
+    # por separado contra algo que ya se sabe que no contesta.
+    tls_fetch = _contador_de_handshakes(None)
+
+    findings = CheckRuntime(
+        load_checks(), _fetcher({}), tls_fetch=tls_fetch
+    ).run("10.0.0.5", [_TLS_SERVICE])
+
+    assert findings == []
+    assert len(tls_fetch.llamadas) == 1
+
+
+def test_two_services_of_the_same_host_are_probed_separately():
+    # La sonda se comparte por (host, puerto, método, ruta): dos servicios
+    # distintos del mismo host son dos objetivos distintos.
+    fetch = _fetcher({"/": Response(200, "<html>", {})})
+    otro_http = Service(8080, "tcp", "http", "", "", None)
+
+    CheckRuntime(load_checks(), fetch).run("10.0.0.5", [_HTTP, otro_http])
+
+    puertos = {puerto for _h, puerto, _m, ruta in fetch.calls if ruta == "/"}
+    assert puertos == {80, 8080}
+
+
+def test_a_second_run_probes_again():
+    """La caché nace y muere con la ejecución, y eso es deliberado.
+
+    Dos escaneos del mismo objetivo tienen que volver a mirar: entre uno y otro
+    el objetivo ha podido cambiar, que es exactamente lo que un escáner mide.
+    Una caché que sobreviviera al escaneo convertiría el segundo informe en una
+    copia del primero.
+    """
+    fetch = _fetcher({"/": Response(200, "<html>", {})})
+    runtime = CheckRuntime(load_checks(), fetch)
+
+    runtime.run("10.0.0.5", [_HTTP])
+    peticiones_tras_la_primera = len(fetch.calls)
+    runtime.run("10.0.0.5", [_HTTP])
+
+    assert len(fetch.calls) == peticiones_tras_la_primera * 2
+
+
+# ------------------------------------------------ limitador de peticiones
+#
+# El limitador existe para no golpear a UN host más rápido de la cuenta. Con el
+# `sleep` dentro del lock limitaba a todos a la vez: mientras una sonda esperaba
+# su turno para el host A, cualquier sonda hacia el host B también estaba
+# bloqueada — una espera que no protegía a nadie.
+#
+# El reloj y el `sleep` se inyectan para poder afirmar el horario en vez de
+# esperarlo: un test que midiera tiempo real sería lento y frágil.
+
+class _RelojFalso:
+    """Un reloj monótono que sólo avanza cuando se le dice, y su `sleep`."""
+
+    def __init__(self, ahora: float = 1000.0):
+        self.ahora = ahora
+        self.esperas: list = []
+
+    def __call__(self) -> float:
+        return self.ahora
+
+    def sleep(self, segundos: float) -> None:
+        self.esperas.append(segundos)
+        self.ahora += segundos
+
+
+def _limiter(reloj, min_interval=0.2):
+    from src.modules.features.themis.lybra import HostRateLimiter
+    return HostRateLimiter(min_interval=min_interval, clock=reloj, sleeper=reloj.sleep)
+
+
+def test_the_first_request_to_a_host_never_waits():
+    reloj = _RelojFalso()
+    _limiter(reloj).acquire("10.0.0.5")
+    assert reloj.esperas == []
+
+
+def test_two_different_hosts_do_not_wait_for_each_other():
+    # El bug: la espera del host A bloqueaba también al host B.
+    reloj = _RelojFalso()
+    limiter = _limiter(reloj)
+
+    limiter.acquire("10.0.0.5")
+    limiter.acquire("10.0.0.6")
+    limiter.acquire("10.0.0.7")
+
+    assert reloj.esperas == []
+
+
+def test_two_requests_to_the_same_host_are_spaced_by_the_interval():
+    reloj = _RelojFalso()
+    limiter = _limiter(reloj, min_interval=0.2)
+
+    limiter.acquire("10.0.0.5")
+    limiter.acquire("10.0.0.5")
+
+    assert reloj.esperas == [pytest.approx(0.2)]
+
+
+def test_a_host_that_had_time_to_cool_down_does_not_wait():
+    reloj = _RelojFalso()
+    limiter = _limiter(reloj, min_interval=0.2)
+
+    limiter.acquire("10.0.0.5")
+    reloj.ahora += 5.0            # la sonda tardó lo suyo; el intervalo ya pasó
+    limiter.acquire("10.0.0.5")
+
+    assert reloj.esperas == []
+
+
+def test_concurrent_requests_to_one_host_get_distinct_increasing_turns():
+    """N hilos sobre el mismo host se reparten N turnos, sin solaparse.
+
+    Es lo que consigue reservar el turno *antes* de dormir: si cada hilo
+    escribiera la marca al despertarse, todos leerían el mismo "último turno",
+    dormirían lo mismo y despertarían juntos — que es exactamente el golpe que
+    el limitador existe para evitar.
+    """
+    import threading
+
+    from src.modules.features.themis.lybra import HostRateLimiter
+
+    esperas: list = []
+    apuntador = threading.Lock()
+
+    def anotar_espera(segundos):
+        with apuntador:
+            esperas.append(segundos)
+
+    # El reloj se queda quieto para que el reparto sea determinista: lo que se
+    # mide es cuánto le toca esperar a cada hilo, no cuánto tarda la máquina.
+    limiter = HostRateLimiter(min_interval=0.2, clock=lambda: 1000.0, sleeper=anotar_espera)
+
+    hilos = [threading.Thread(target=limiter.acquire, args=("10.0.0.5",)) for _ in range(5)]
+    for hilo in hilos:
+        hilo.start()
+    for hilo in hilos:
+        hilo.join()
+
+    # Uno entra sin esperar y los otros cuatro se escalonan de 0,2 en 0,2. Con
+    # el turno reservado al despertar, los cinco habrían esperado lo mismo.
+    assert sorted(esperas) == [pytest.approx(0.2), pytest.approx(0.4),
+                               pytest.approx(0.6), pytest.approx(0.8)]
+
+
+# --------------------------- a qué protocolo aplica un check ``network``
+#
+# Un check `network` dice a qué protocolo va dirigido con una cadena
+# (`service: ftp`), y el runtime necesita el predicado que decide si un
+# servicio descubierto es de ese protocolo. Ese mapa se mantenía a mano y tenía
+# dos entradas cuando el módulo ya definía once predicados: un check de SMTP o
+# de MySQL se cargaba, se validaba, y se descartaba sin decir nada.
+
+_MYSQL = Service(3306, "tcp", "mysql", "", "", None)
+
+_MYSQL_NETWORK_FEED = {
+    "checks": [{
+        "id": "mysql-saluda", "version": 1, "type": "network",
+        "category": "network_config", "severity": "INFO", "service": "mysql",
+        "mode": "safe",
+        "requests": [{"matchers": [{"type": "word", "part": "body", "words": ["mysql_native_password"]}]}],
+        "finding": {"title": "MySQL contesta"},
+    }]
+}
+
+
+def _feed_file(tmp_path, document):
+    feed = tmp_path / "feed.json"
+    feed.write_text(json.dumps(document), encoding="utf-8")
+    return str(feed)
+
+
+def test_every_service_predicate_is_available_to_a_network_check():
+    # Invariante al estilo de test_config_shape: definir un predicado nuevo
+    # basta para poder escribir checks de ese protocolo. Sin esto, cada
+    # protocolo costaba dos ediciones y olvidar la segunda no daba error.
+    predicates = {
+        name for name in dir(checks_mod)
+        if name.startswith("is_") and name.endswith("_service")
+    }
+    esperados = {name[len("is_"):-len("_service")] for name in predicates}
+
+    assert esperados == set(checks_mod._NETWORK_SERVICE_MATCHERS)
+    assert len(esperados) > 2, "el mapa derivado debe cubrir más que ftp y redis"
+
+
+def test_a_network_check_for_a_protocol_that_nobody_wired_by_hand_runs(tmp_path):
+    # MySQL nunca estuvo en la tabla escrita a mano, y su predicado sí existía.
+    checks = load_checks(_feed_file(tmp_path, _MYSQL_NETWORK_FEED))
+    sock = _FakeNetSocket(greeting=b"5.7.42-log\x00mysql_native_password\n")
+
+    findings = CheckRuntime(
+        checks, lambda *a: None, network_open=_network_open_over(sock)
+    ).run("h", [_MYSQL])
+
+    assert [f["check_id"] for f in findings] == ["lybra:mysql-saluda@1"]
+
+
+def test_an_unknown_service_fails_at_load_time(tmp_path):
+    # Un check que no puede aplicar a nada es un bug del feed. Si se ignora,
+    # se confunde con "no ha disparado contra este host", que es normal — y
+    # así nadie se entera nunca.
+    document = {"checks": [dict(_MYSQL_NETWORK_FEED["checks"][0], id="protocolo-inventado",
+                                service="noexiste")]}
+
+    with pytest.raises(ValueError, match="noexiste"):
+        load_checks(_feed_file(tmp_path, document))
+
+
+def test_every_network_service_in_the_bundled_feed_has_a_predicate():
+    network_services = {check.service for check in load_checks() if check.type == "network"}
+    assert network_services <= set(checks_mod._NETWORK_SERVICE_MATCHERS)
+
+
+def test_a_check_that_skipped_the_loader_with_an_unknown_service_is_logged(caplog):
+    # Los checks traducidos de plantillas de Nuclei se construyen directamente,
+    # sin pasar por el cargador, así que su `service` es lo que dijera el
+    # documento de origen. Ahí el aviso lo tiene que dar el runtime.
+    translated = checks_mod.Check(
+        id="traducido", version=1, type="network", category="network_config",
+        severity="INFO", service="protocolo-de-otro-mundo", mode="safe",
+        requests=(), finding={}, namespace="nuclei",
+    )
+    sock = _FakeNetSocket(greeting=b"lo que sea\r\n")
+
+    with caplog.at_level("WARNING"):
+        findings = CheckRuntime(
+            [translated], lambda *a: None, network_open=_network_open_over(sock)
+        ).run("h", [_FTP])
+
+    assert findings == []
+    assert "protocolo-de-otro-mundo" in caplog.text
 
 
 # --------------------------------------------------- ``type: "script"`` (Fase R)
@@ -359,6 +1004,41 @@ def test_smb_script_check_silent_on_unrecognised_dialect():
     probe = _FakeSmbProbe((0xFFFF, _SIGNING_ENABLED_ONLY))
     findings = _script_runtime(probe).run("10.0.0.5", [_SMB])
     assert findings == []
+
+
+def test_the_smb_verdict_survives_renaming_the_fingerprint_label(monkeypatch):
+    """Invariante: la etiqueta legible no es el protocolo entre dos piezas.
+
+    El plugin decidía buscando la subcadena ``"firma no requerida"`` dentro del
+    texto que produce ``fingerprint_smb``. Con eso, traducir esa etiqueta al
+    inglés —o corregirle una tilde— apagaba el check sin que fallara nada: se
+    ejecutaba, devolvía ``False``, y el SMB sin firma dejaba de aparecer.
+
+    Aquí se renombra la etiqueta a propósito, dejando intacto el dato que sí
+    importa (el ``SecurityMode``), y el veredicto tiene que ser el mismo en los
+    dos sentidos.
+    """
+    from src.modules.features.themis.lybra import script_checks as script_module
+
+    original = script_module.fingerprint_smb
+
+    def renamed(dialect_revision, security_mode):
+        fingerprint = original(dialect_revision, security_mode)
+        etiqueta = None if fingerprint.product is None else "SMB2 (unsigned!)"
+        return type(fingerprint)(
+            product=etiqueta, version=fingerprint.version, confidence=fingerprint.confidence,
+        )
+
+    monkeypatch.setattr(script_module, "fingerprint_smb", renamed)
+
+    sin_firma = _FakeSmbProbe((_DIALECT_302, _SIGNING_ENABLED_ONLY))
+    con_firma = _FakeSmbProbe((_DIALECT_302, _SIGNING_REQUIRED))
+
+    dispara = _script_runtime(sin_firma).run("10.0.0.5", [_SMB])
+    calla = _script_runtime(con_firma).run("10.0.0.5", [_SMB])
+
+    assert [f["check_id"] for f in dispara] == ["lybra:smb-signing-not-required@1"]
+    assert calla == []
 
 
 def test_script_checks_never_run_without_plugins_injected():
