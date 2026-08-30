@@ -513,6 +513,127 @@ def test_an_unknown_read_mode_fails_at_load_time(tmp_path):
         load_checks(str(feed))
 
 
+# ------------------------------------------- esquema observado, no deducido
+#
+# El motor decidía si hablar HTTP o HTTPS mirando si el puerto estaba en un
+# conjunto de dos elementos (443 y 8443). Un panel HTTPS en 9443 se sondeaba en
+# claro: el GET fallaba o devolvía basura, el dissector no identificaba nada y
+# los checks de cabeceras no corrían. Y al revés, un HTTP en claro en 8443 se
+# sondeaba como TLS y no contestaba nada.
+
+class _RespuestaFalsaHttp:
+    """Lo mínimo que `_request` consulta de lo que devuelve el opener."""
+
+    status = 200
+    headers = {"Server": "nginx"}
+
+    def read(self, _n=None):
+        return b"<html>"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+
+class _OpenerFalso:
+    """Apunta la URL que se pidió, que es lo que este bloque comprueba."""
+
+    def __init__(self):
+        self.urls = []
+
+    def open(self, request, timeout=None):
+        self.urls.append(request.full_url)
+        return _RespuestaFalsaHttp()
+
+
+def _probe_con_opener(monkeypatch, detect_scheme):
+    from src.modules.features.themis.lybra import HttpProbe
+
+    probe = HttpProbe(detect_scheme=detect_scheme)
+    opener = _OpenerFalso()
+    monkeypatch.setattr(probe, "_opener", opener)
+    return probe, opener
+
+
+def test_a_tls_service_on_a_non_canonical_port_is_reached_over_https(monkeypatch):
+    probe, opener = _probe_con_opener(monkeypatch, lambda host, port: True)
+
+    probe.fetch("10.0.0.5", 9443, "GET", "/")
+
+    assert opener.urls == ["https://10.0.0.5:9443/"]
+
+
+def test_a_plaintext_service_on_a_tls_port_is_not_forced_into_https(monkeypatch):
+    # El caso inverso, y tan real como el otro: un HTTP en claro en 8443.
+    probe, opener = _probe_con_opener(monkeypatch, lambda host, port: False)
+
+    probe.fetch("10.0.0.5", 8443, "GET", "/")
+
+    assert opener.urls == ["http://10.0.0.5:8443/"]
+
+
+def test_the_scheme_is_observed_once_per_service(monkeypatch):
+    # La pregunta es sobre el servicio, no sobre la petición: no cambia entre
+    # una ruta y otra dentro del mismo escaneo.
+    observaciones = []
+
+    def detectar(host, port):
+        observaciones.append((host, port))
+        return True
+
+    probe, _opener = _probe_con_opener(monkeypatch, detectar)
+
+    probe.fetch("10.0.0.5", 9443, "GET", "/")
+    probe.fetch("10.0.0.5", 9443, "GET", "/.git/config")
+    probe.fetch("10.0.0.5", 4443, "GET", "/")
+
+    assert observaciones == [("10.0.0.5", 9443), ("10.0.0.5", 4443)]
+
+
+def test_a_service_without_a_port_is_never_probed_for_tls(monkeypatch):
+    # Una entrada de inventario no tiene a dónde conectarse: no se paga una
+    # sonda que no puede salir a ninguna parte.
+    probe, opener = _probe_con_opener(monkeypatch, lambda host, port: pytest.fail("no debería sondear"))
+
+    probe.fetch("10.0.0.5", None, "GET", "/")
+
+    assert opener.urls == ["http://10.0.0.5/"]
+
+
+def test_negotiates_tls_is_false_when_the_connection_fails():
+    from src.modules.features.themis.lybra.checks import negotiates_tls
+
+    def connect_que_falla(address, timeout):
+        raise OSError("connection refused")
+
+    assert negotiates_tls("10.0.0.5", 9443, connect=connect_que_falla) is False
+
+
+def test_the_usual_tls_ports_are_candidates_for_hygiene_checks():
+    from src.modules.features.themis.lybra import is_tls_service
+
+    for puerto in (443, 8443, 9443, 10443, 8834):
+        servicio = Service(puerto, "tcp", "", "", "", None)
+        assert is_tls_service(servicio) is True, puerto
+        # Y entran por la puerta de HTTP, que antes tampoco los dejaba pasar.
+        assert is_http_service(servicio) is True, puerto
+
+
+def test_a_tls_service_on_an_arbitrary_port_still_misses_the_hygiene_checks():
+    """El límite que queda, escrito para que no se dé por cerrado.
+
+    El esquema ya se observa, así que un TLS en 7777 se sondea bien y recibe
+    los checks de cabeceras. Lo que no recibe son los de higiene de
+    certificado: su candidatura sigue decidiéndose por número de puerto.
+    Hacerla observada del todo es #283.
+    """
+    from src.modules.features.themis.lybra import is_tls_service
+
+    assert is_tls_service(Service(7777, "tcp", "", "", "", None)) is False
+
+
 # --------------------------------- sondas compartidas dentro de una ejecución
 #
 # Cada check corre por su cuenta, que es lo que los mantiene simples, pero el
