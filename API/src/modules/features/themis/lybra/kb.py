@@ -54,6 +54,68 @@ logger = logging.getLogger(__name__)
 # VERSION LOGIC
 # =========================================================================
 
+# Una revisión de distribución empieza por dígito ("1ubuntu1", "2",
+# "1+deb11u1") o es la forma de Alpine ("r0"). Lo que va tras un guion y no
+# encaja aquí —"rc1", "beta", "pre"— es una preversión del fabricante, que
+# significa lo contrario: no acompaña a una versión, la precede. Distinguirlas
+# importa porque se tratan al revés (la revisión no cuenta frente a NVD; la
+# preversión ordena por debajo de su versión final).
+_DISTRO_REVISION_RE = re.compile(r"^(?:\d|r\d+$)")
+
+
+def split_distro_version(version: str) -> Tuple[Optional[int], str, Optional[str]]:
+    """Split a distribution package version into ``(epoch, upstream, revision)``.
+
+    A distro package version is not the vendor's version: Debian and its
+    derivatives write ``1:2.4.49-1ubuntu1``, where ``1:`` is the *epoch* (a
+    counter the distribution bumps when it has to renumber downwards) and
+    ``-1ubuntu1`` is the *revision* (which packaging of that same upstream
+    release this is). Alpine writes ``2.4.49-r0``. Only the middle part —
+    ``2.4.49`` — is the version the vendor released, and the only one NVD ever
+    talks about.
+
+    Both extras break comparison in *opposite* directions, which is why they
+    have to come off before comparing rather than be tolerated:
+
+    * The epoch is read as a leading component, so ``1:2.4.49`` compares as
+      ``[1, 2, 4, 49]`` and lands *below* ``2.4.49``.
+    * The revision is read as a trailing component, so ``2.4.49-1ubuntu1``
+      compares *above* ``2.4.49`` and falls outside a range that ends there.
+
+    Anything after a ``+`` is packaging or build metadata (``2.4.49+dfsg``,
+    ``1.0.0+20130313144700``) and is dropped from the upstream part, following
+    the same rule semver §10 states for build metadata: it never affects
+    precedence.
+
+    Args:
+        version: A raw version string, distro-flavoured or not.
+
+    Returns:
+        ``(epoch, upstream, revision)``. ``epoch`` and ``revision`` are
+        ``None`` when the string does not carry them — which is the normal
+        case for a vendor banner or an NVD bound, and is exactly what tells
+        the comparator it is not looking at a distro version.
+    """
+    remainder = version.strip()
+
+    epoch: Optional[int] = None
+    head, colon, tail = remainder.partition(":")
+    if colon and head.isdigit():
+        epoch = int(head)
+        remainder = tail
+
+    revision: Optional[str] = None
+    if "-" in remainder:
+        # El último guion es el que separa: una versión upstream puede llevar
+        # guiones propios, la revisión de distribución nunca.
+        upstream, _, candidate = remainder.rpartition("-")
+        if _DISTRO_REVISION_RE.match(candidate):
+            revision = candidate
+            remainder = upstream
+
+    return epoch, remainder.split("+", 1)[0], revision
+
+
 def _version_key(version: str) -> List[tuple]:
     """Break a version string into components that sort correctly.
 
@@ -78,6 +140,18 @@ def _version_key(version: str) -> List[tuple]:
     return key
 
 
+def _compare_keys(key_a: List[tuple], key_b: List[tuple]) -> int:
+    """Compare two component lists, padding the shorter one with zeros."""
+    for index in range(max(len(key_a), len(key_b))):
+        token_a = key_a[index] if index < len(key_a) else (1, 0, "")
+        token_b = key_b[index] if index < len(key_b) else (1, 0, "")
+        if token_a < token_b:
+            return -1
+        if token_a > token_b:
+            return 1
+    return 0
+
+
 def version_compare(a: str, b: str) -> int:
     """Compare two version strings component by component.
 
@@ -87,6 +161,27 @@ def version_compare(a: str, b: str) -> int:
     are treated as equal. This is good enough for the dotted vendor versions the
     matcher sees; it is not a full PEP 440 / semver implementation.
 
+    **Distro package versions are normalized first** (see
+    :func:`split_distro_version`), because the matcher's two inputs are not the
+    same kind of string: one side is a package version from an agent inventory
+    (``1:2.4.49-1ubuntu1``), the other is a bound NVD published, and NVD only
+    ever speaks upstream. Comparing the extras against something that cannot
+    have them is a category error, and it broke in both directions at once —
+    an epoch produced false positives by dragging the version down, a revision
+    produced false negatives by pushing it past the top of a range.
+
+    Two deliberate asymmetries, both following from that:
+
+    * **Epochs count only when both sides have one.** Between two distro
+      versions the epoch is the most significant component and is honoured.
+      Against an NVD bound, which never carries one, it is dropped from both
+      sides rather than compared against an implicit zero.
+    * **Revisions count only as a tiebreaker, and only when both sides have
+      one.** ``2.4.49-1`` is older than ``2.4.49-2``, which matters when
+      ordering packages among themselves; but ``2.4.49-1ubuntu1`` against the
+      plain ``2.4.49`` compares *equal*, which is what makes a package land
+      inside the range its upstream release belongs to.
+
     Args:
         a: The first version string.
         b: The second version string.
@@ -95,14 +190,18 @@ def version_compare(a: str, b: str) -> int:
         ``-1`` if ``a`` is older than ``b``, ``0`` if they are equal, ``1`` if
         ``a`` is newer.
     """
-    ka, kb = _version_key(a), _version_key(b)
-    for i in range(max(len(ka), len(kb))):
-        token_a = ka[i] if i < len(ka) else (1, 0, "")
-        token_b = kb[i] if i < len(kb) else (1, 0, "")
-        if token_a < token_b:
-            return -1
-        if token_a > token_b:
-            return 1
+    epoch_a, upstream_a, revision_a = split_distro_version(a)
+    epoch_b, upstream_b, revision_b = split_distro_version(b)
+
+    if epoch_a is not None and epoch_b is not None and epoch_a != epoch_b:
+        return -1 if epoch_a < epoch_b else 1
+
+    upstream_order = _compare_keys(_version_key(upstream_a), _version_key(upstream_b))
+    if upstream_order != 0:
+        return upstream_order
+
+    if revision_a is not None and revision_b is not None:
+        return _compare_keys(_version_key(revision_a), _version_key(revision_b))
     return 0
 
 
