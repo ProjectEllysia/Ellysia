@@ -49,11 +49,74 @@ def _sample_report(**overrides):
 
 
 def test_print_pdf_creates_a_file():
-    creator = IrisPDFCreator(report=_sample_report())
+    creator = IrisPDFCreator(report=_sample_report(), document_id=7)
     path = creator.print_pdf()
     assert os.path.exists(path)
     assert os.path.getsize(path) > 0
-    assert path.endswith("42_Iris.pdf")
+    assert path.endswith("42_7_Iris.pdf")
+
+
+def test_two_documents_of_the_same_analysis_do_not_collide():
+    """B11: el modelo permite N documentos por análisis, pero el nombre del
+    fichero solo dependía del análisis, así que todos escribían el mismo PDF."""
+    first = IrisPDFCreator(report=_sample_report(), document_id=1).print_pdf()
+    second = IrisPDFCreator(report=_sample_report(), document_id=2).print_pdf()
+
+    assert first != second
+    assert os.path.exists(first) and os.path.exists(second)
+
+
+def test_deleting_one_document_leaves_the_other_intact():
+    """El caso que hacía daño de verdad: ``delete_document_with_file`` borra
+    por ``filename``, que era el mismo para los dos documentos."""
+    first = IrisPDFCreator(report=_sample_report(), document_id=1).print_pdf()
+    second = IrisPDFCreator(report=_sample_report(), document_id=2).print_pdf()
+
+    os.remove(first)
+
+    assert not os.path.exists(first)
+    assert os.path.exists(second)
+    assert os.path.getsize(second) > 0
+
+
+def test_without_a_document_id_the_name_is_still_unique():
+    """Ningún camino de la aplicación llega así, pero la clase sigue siendo
+    usable a pelo y no debe reintroducir la colisión por la puerta de atrás."""
+    first = IrisPDFCreator(report=_sample_report()).print_pdf()
+    second = IrisPDFCreator(report=_sample_report()).print_pdf()
+
+    assert first != second
+    assert os.path.exists(first) and os.path.exists(second)
+
+
+def test_no_temporary_file_survives_a_successful_render(tmp_path):
+    """El PDF se escribe en un temporal y se mueve con ``os.replace()``; si el
+    temporal sobreviviera, cada informe dejaría basura en el directorio."""
+    path = IrisPDFCreator(report=_sample_report(), document_id=3).print_pdf()
+
+    leftovers = [name for name in os.listdir(os.path.dirname(path)) if name.endswith(".tmp")]
+    assert leftovers == []
+
+
+def test_a_failed_render_leaves_neither_temporary_nor_output(tmp_path, monkeypatch):
+    """Un fallo a mitad no debe dejar un PDF truncado en la ruta final: el
+    lector que lo descargue recibiría un fichero corrupto sin saberlo."""
+    import src.modules.features.iris.services.reports as reports_mod
+
+    creator = IrisPDFCreator(report=_sample_report(), document_id=4)
+    expected = creator._output_path()
+
+    monkeypatch.setattr(
+        reports_mod.SimpleDocTemplate, "build",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    with pytest.raises(RuntimeError):
+        creator.print_pdf()
+
+    assert not os.path.exists(expected)
+    leftovers = [name for name in os.listdir(str(tmp_path)) if name.endswith(".tmp")]
+    assert leftovers == []
 
 
 def test_print_pdf_without_path_data_does_not_fail():

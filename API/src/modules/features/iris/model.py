@@ -37,10 +37,37 @@ class IrisAnalysis(Base):
         gate_reasons: List of human-readable reasons for the
                  high-confidence gates that fired (empty when the verdict
                  comes purely from the numeric score).
+        analysis_quality: "complete" cuando todas las reglas se ejecutaron,
+                 "degraded" cuando alguna no llegó a hacerlo. Un análisis
+                 degradado no puede presentarse como limpio sin contexto —
+                 ver ``services/quality.py``.
+        failed_rules: Reglas que no se pudieron **ejecutar** (una excepción,
+                 no un hallazgo), con su nombre, familia y categoría. NULL
+                 cuando el análisis fue completo.
+        detector_version: Marca del catálogo de reglas que produjo el
+                 resultado (``iris-rules:<n>:<hash>``). Sin ella, un informe
+                 guardado deja de ser interpretable cuando el catálogo cambia.
+        failure_code: Why a ``failed`` analysis failed — "invalid_input"
+                 (the submitted text is not an analysable message) or
+                 "internal_error" (the pipeline broke). NULL for every
+                 non-failed analysis. See ``services/failures.py``.
+        failure_reason: Human-readable, **non-sensitive** companion to
+                 ``failure_code``. Never contains the raw email: an
+                 internal error collapses to a generic message and only
+                 the server log keeps the traceback.
         ai_summary: AI-generated executive narrative (IA1) — dict with
                  executive_summary/attacker_intent/recommendations/
                  confidence, or None until generated (or if generation
                  failed/was never requested).
+        ai_summary_status: "running" | "done" | "failed", o NULL si nunca se
+                 pidió. Es lo que hace idempotente la generación: el manager
+                 reclama la fila con una transición condicional sobre esta
+                 columna, y quien pierde la carrera no cobra cuota ni encola.
+        ai_summary_job_id: Id del trabajo en la cola que lo está generando.
+        ai_summary_model / ai_summary_prompt_version: Con qué se generó. Un
+                 resumen de hace tres meses lo escribió otro modelo con otro
+                 prompt, y sin esto no hay forma de saber cuál (mismo papel
+                 que ``detector_version`` para las reglas).
         started_at: Timestamp when the analysis was created.
         finished_at: Timestamp when the analysis reached a terminal state.
         user_id: Foreign key to the owning User.
@@ -66,7 +93,16 @@ class IrisAnalysis(Base):
     total_score = Column(Float, nullable=True)
     verdict = Column(String(20), nullable=True)
     gate_reasons = Column(JSONB, nullable=True)
+    analysis_quality = Column(String(16), nullable=True)
+    failed_rules = Column(JSONB, nullable=True)
+    detector_version = Column(String(64), nullable=True)
+    failure_code = Column(String(32), nullable=True)
+    failure_reason = Column(Text, nullable=True)
     ai_summary = Column(JSONB, nullable=True)
+    ai_summary_status = Column(String(16), nullable=True)
+    ai_summary_job_id = Column(String(64), nullable=True)
+    ai_summary_model = Column(String(64), nullable=True)
+    ai_summary_prompt_version = Column(String(32), nullable=True)
     started_at = Column(DateTime, nullable=False, default=utcnow_naive)
     finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
@@ -128,7 +164,10 @@ class IrisMailboxConnection(Base):
                  until the first bootstrap sync runs (see
                  ``services/mailbox`` connectors: the first sync never
                  backfills historical mail, it only captures the starting
-                 cursor).
+                 cursor). Es ``Text`` y no ``String(n)`` a propósito: el
+                 ``@odata.deltaLink`` de Graph es una URL completa con un
+                 token de estado dentro y rebasa los 255 caracteres. Opaco
+                 significa opaco — no se interpreta, no se recorta.
         status: "active" | "reauth_required" | "revoked" | "paused".
         ingested_today / ingested_reset_date: Per-connection daily ingest
                  counter enforcing ``iris.maxIngestedPerDay`` — reset when
@@ -155,7 +194,7 @@ class IrisMailboxConnection(Base):
 
     folder = Column(String(255), nullable=True)
     full_message_mode = Column(Boolean, nullable=False, default=False)
-    sync_cursor = Column(String(255), nullable=True)
+    sync_cursor = Column(Text, nullable=True)
 
     status = Column(String(20), nullable=False, default="active")
     ingested_today = Column(Integer, nullable=False, default=0)

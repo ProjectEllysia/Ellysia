@@ -196,3 +196,49 @@ def test_delete_document(client, app, root_user, root_headers, fake_queue):
 
     after = client.get(f"/iris/document-status?documentId={doc_id}", headers=root_headers)
     assert after.status_code == 404
+
+
+# --------------------------------------------------------------- B11: PDFs independientes
+
+def test_two_documents_of_the_same_analysis_are_independent(client, app, root_user,
+                                                            root_headers, fake_queue):
+    """B11 de punta a punta.
+
+    El modelo permite N ``IrisDocument`` por análisis (relación ``documents``
+    con ``cascade="all, delete-orphan"``), pero el PDF se llamaba
+    ``<analysis_id>_Iris.pdf`` para todos: el segundo informe pisaba el fichero
+    del primero, y borrar cualquiera de los dos dejaba al otro apuntando a una
+    ruta que ya no existía.
+    """
+    import os
+    from src.modules.features.iris.repositories import IrisReportRepository
+    from src.modules.infrastructure import UnitOfWork
+
+    analysis_id = _seed_analysis(app, root_user.id)
+
+    first = client.post(f"/iris/results/{analysis_id}/document", headers=root_headers)
+    second = client.post(f"/iris/results/{analysis_id}/document", headers=root_headers)
+    assert first.status_code == 202 and second.status_code == 202
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            documents = IrisReportRepository(uow).get_documents_by_parent(analysis_id)
+            assert len(documents) == 2
+            paths = {document.filename for document in documents}
+            assert len(paths) == 2, "los dos informes escribieron el mismo fichero"
+            assert all(os.path.exists(path) for path in paths)
+
+    # Ambos se descargan, y cada uno con su propio nombre.
+    ids = sorted(document["documentId"] for document in
+                 client.get(f"/iris/results/{analysis_id}/documents",
+                            headers=root_headers).get_json()["documents"])
+    for document_id in ids:
+        download = client.get(f"/iris/document/{document_id}/download", headers=root_headers)
+        assert download.status_code == 200
+        assert f"_{document_id}.pdf" in download.headers["Content-Disposition"]
+
+    # Y borrar uno no destruye el fichero del otro.
+    assert client.delete(f"/iris/document/{ids[0]}", headers=root_headers).status_code == 200
+    survivor = client.get(f"/iris/document/{ids[1]}/download", headers=root_headers)
+    assert survivor.status_code == 200
+    assert len(survivor.data) > 0

@@ -427,105 +427,142 @@ def _data(key: str) -> Any:
     return value if value is not None else _DEFAULTS[key]
 
 
-@lru_cache(maxsize=None)
-def _cached_set(key: str) -> frozenset[str]:
+# B18: las cachés se indexan por (versión de configuración, nombre del
+# dataset), no solo por el nombre.
+#
+# Antes la clave era el nombre a secas y eran permanentes, así que recargar la
+# configuración —``PUT /system``, o el ``reload_if_changed()`` que el worker
+# hace antes de cada job— sustituía ``_configs`` pero dejaba en pie las marcas,
+# proveedores, keywords y TLDs viejos. Un cambio guardado desde ConfigView no
+# llegaba al siguiente análisis, y el operador no tenía forma de enterarse: no
+# fallaba nada, simplemente se seguía analizando con los datos anteriores.
+#
+# Con la versión dentro de la clave, una configuración nueva no puede acertar
+# con una entrada vieja. No hace falta invalidar nada a mano —que es lo que se
+# olvida— y las entradas de generaciones pasadas quedan inalcanzables; el tope
+# de las cachés hace el resto, expulsándolas por LRU. Es el mismo criterio que
+# ``load_block`` aplica a los bloques de configuración.
+#
+# El tope da holgura para varias generaciones de los ~31 datasets a la vez, y
+# lo que pasa al desbordar es una recarga, no un error.
+_CACHE_SIZE = 256
+
+
+@lru_cache(maxsize=_CACHE_SIZE)
+def _cached_set(config_version: tuple, key: str) -> frozenset[str]:
     return frozenset(_data(key))
 
 
-@lru_cache(maxsize=None)
-def _cached_tuple(key: str) -> tuple[str, ...]:
+@lru_cache(maxsize=_CACHE_SIZE)
+def _cached_tuple(config_version: tuple, key: str) -> tuple[str, ...]:
     return tuple(_data(key))
+
+
+def _set_of(key: str) -> frozenset[str]:
+    return _cached_set(CR.config_version(), key)
+
+
+def _tuple_of(key: str) -> tuple[str, ...]:
+    return _cached_tuple(CR.config_version(), key)
 
 
 # --- Accessors públicos (uno por dataset) ------------------------------------
 
 def multi_level_tlds() -> frozenset[str]:
-    return _cached_set("multi_level_tlds")
+    return _set_of("multi_level_tlds")
 
 def canonical_brands() -> frozenset[str]:
-    return _cached_set("canonical_brands")
+    return _set_of("canonical_brands")
 
 def free_provider_domains() -> tuple[str, ...]:
-    return _cached_tuple("free_provider_domains")
+    return _tuple_of("free_provider_domains")
 
 def shortener_domains() -> frozenset[str]:
-    return _cached_set("shortener_domains")
+    return _set_of("shortener_domains")
 
 def dangerous_extensions() -> frozenset[str]:
-    return _cached_set("dangerous_extensions")
+    return _set_of("dangerous_extensions")
 
 def suspicious_mime_types() -> tuple[str, ...]:
-    return _cached_tuple("suspicious_mime_types")
+    return _tuple_of("suspicious_mime_types")
 
 def macro_extensions() -> frozenset[str]:
-    return _cached_set("macro_extensions")
+    return _set_of("macro_extensions")
 
 def credential_phrases() -> tuple[str, ...]:
-    return _cached_tuple("credential_phrases")
+    return _tuple_of("credential_phrases")
 
 def high_signal_keywords() -> tuple[str, ...]:
-    return _cached_tuple("high_signal_keywords")
+    return _tuple_of("high_signal_keywords")
 
 def low_signal_keywords() -> tuple[str, ...]:
-    return _cached_tuple("low_signal_keywords")
+    return _tuple_of("low_signal_keywords")
 
 def alarming_emojis() -> tuple[str, ...]:
-    return _cached_tuple("alarming_emojis")
+    return _tuple_of("alarming_emojis")
 
 def suspicious_tlds() -> frozenset[str]:
-    return _cached_set("suspicious_tlds")
+    return _set_of("suspicious_tlds")
 
 def generic_greetings() -> tuple[str, ...]:
-    return _cached_tuple("generic_greetings")
+    return _tuple_of("generic_greetings")
 
 def action_verbs() -> tuple[str, ...]:
-    return _cached_tuple("action_verbs")
+    return _tuple_of("action_verbs")
 
 def bec_phrases() -> tuple[str, ...]:
-    return _cached_tuple("bec_phrases")
+    return _tuple_of("bec_phrases")
 
 def toad_phrases() -> tuple[str, ...]:
-    return _cached_tuple("toad_phrases")
+    return _tuple_of("toad_phrases")
 
 def subdomain_action_words() -> frozenset[str]:
-    return _cached_set("subdomain_action_words")
+    return _set_of("subdomain_action_words")
 
 def esp_tracker_domains() -> frozenset[str]:
-    return _cached_set("esp_tracker_domains")
+    return _set_of("esp_tracker_domains")
 
 def esp_msgid_domains() -> frozenset[str]:
-    return _cached_set("esp_msgid_domains")
+    return _set_of("esp_msgid_domains")
 
 def redirect_params() -> frozenset[str]:
-    return _cached_set("redirect_params")
+    return _set_of("redirect_params")
 
 def undisclosed_patterns() -> tuple[str, ...]:
-    return _cached_tuple("undisclosed_patterns")
+    return _tuple_of("undisclosed_patterns")
 
 def url_phishing_keywords() -> tuple[str, ...]:
-    return _cached_tuple("url_phishing_keywords")
+    return _tuple_of("url_phishing_keywords")
 
 def multitenant_hosting_domains() -> frozenset[str]:
-    return _cached_set("multitenant_hosting_domains")
+    return _set_of("multitenant_hosting_domains")
 
 def exotic_charsets() -> tuple[str, ...]:
-    return _cached_tuple("exotic_charsets")
+    return _tuple_of("exotic_charsets")
 
 
-@lru_cache(maxsize=None)
-def homoglyph_table() -> dict[int, str]:
-    """Tabla para ``str.translate`` construida desde ``homoglyph_map``."""
+@lru_cache(maxsize=_CACHE_SIZE)
+def _homoglyph_table(config_version: tuple) -> dict[int, str]:
     mapping = {str(k): str(v) for k, v in dict(_data("homoglyph_map")).items()}
     return str.maketrans(mapping)
 
 
-@lru_cache(maxsize=None)
-def brand_trusted_domains() -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
-    """Pares (keywords, dominios legítimos) por marca, desde ``brand_trusted_domains``."""
+def homoglyph_table() -> dict[int, str]:
+    """Tabla para ``str.translate`` construida desde ``homoglyph_map``."""
+    return _homoglyph_table(CR.config_version())
+
+
+@lru_cache(maxsize=_CACHE_SIZE)
+def _brand_trusted_domains(config_version: tuple) -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
     return tuple(
         (tuple(entry["keywords"]), tuple(entry["domains"]))
         for entry in _data("brand_trusted_domains")
     )
+
+
+def brand_trusted_domains() -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]:
+    """Pares (keywords, dominios legítimos) por marca, desde ``brand_trusted_domains``."""
+    return _brand_trusted_domains(CR.config_version())
 
 
 # =============================================================================
@@ -541,11 +578,15 @@ def brand_trusted_domains() -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ..
 # completa(s), en el mismo orden que el dataset (para no cambiar el
 # comportamiento de "primeros N matches" que ya consumían las reglas).
 
-@lru_cache(maxsize=None)
-def _phrase_pattern(key: str) -> re.Pattern:
+@lru_cache(maxsize=_CACHE_SIZE)
+def _compiled_phrase_pattern(config_version: tuple, key: str) -> re.Pattern:
     phrases = sorted(_data(key), key=len, reverse=True)
     alternation = "|".join(re.escape(phras) for phras in phrases)
     return re.compile(rf"\b(?:{alternation})\b", re.IGNORECASE)
+
+
+def _phrase_pattern(key: str) -> re.Pattern:
+    return _compiled_phrase_pattern(CR.config_version(), key)
 
 
 def phrase_matches(key: str, text: str) -> list[str]:

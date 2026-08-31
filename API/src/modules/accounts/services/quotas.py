@@ -130,6 +130,54 @@ class QuotaManager:
         else:
             self._consume_counter(entitlement, amount)
 
+    def refund(self, user_id: int, key: LimitKey, amount: int = 1) -> None:
+        """Devuelve ``amount`` usos ya apuntados de ``key``.
+
+        Existe porque ``consume()`` ocurre **antes** que el trabajo que se está
+        pagando, y tiene que ser así: cobrar después dejaría la puerta abierta
+        a lanzar N trabajos concurrentes con cupo para uno. El precio de ese
+        orden es que un trabajo que nunca llega a hacerse —el encolado lo
+        rechaza, el worker revienta— deja al usuario pagando por nada.
+
+        No es lo contrario exacto de ``consume()`` y no debe usarse como tal:
+        no resucita una fila de periodo que ya no existe (si el mes cambió
+        entre el cobro y el reembolso, el cargo pertenece al periodo anterior
+        y ya no se puede deshacer ahí), ni baja de cero. Nunca lanza: un
+        reembolso fallido no puede tumbar el camino de error que lo invocó, y
+        cobrar de más una vez es preferible a perder el error original.
+
+        Las claves de nivel (TIER) y de existencias (STOCK) no llevan
+        contador que devolver — su "consumo" es la tabla real — así que
+        reembolsarlas es un no-op.
+        """
+        try:
+            entitlement = resolve_entitlement(user_id, key)
+            if entitlement.period in (LimitPeriod.TIER, LimitPeriod.STOCK):
+                return
+            if entitlement.is_unlimited:
+                return
+
+            period_start = period_start_for(entitlement.period)
+            with UnitOfWork() as uow:
+                # Igual que el cobro: la resta va dentro del UPDATE, con el
+                # suelo en la condición, para no leer-decidir-escribir.
+                uow.session.execute(
+                    update(UsageCounter)
+                    .where(and_(
+                        UsageCounter.holder_kind == entitlement.holder_kind,
+                        UsageCounter.holder_id == entitlement.holder_id,
+                        UsageCounter.limit_key == entitlement.key.db_name,
+                        UsageCounter.period_start == period_start,
+                        UsageCounter.used >= amount,
+                    ))
+                    .values(used=UsageCounter.used - amount)
+                )
+        except Exception as exc:
+            logger.warning(
+                "No se pudo reembolsar cuota | user=%s key=%s: %s",
+                user_id, key.db_name, exc,
+            )
+
     # ------------------------------------------------------------- internos
 
     @staticmethod

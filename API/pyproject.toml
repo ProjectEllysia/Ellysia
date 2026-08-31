@@ -8,6 +8,7 @@ addopts = "-q --strict-markers --cov=src --cov-report=term-missing"
 markers = [
     "unit: tests unitarios rápidos, sin base de datos ni aplicación Flask",
     "integration: tests que arrancan la aplicación y usan el cliente HTTP de pruebas",
+    "postgres: matriz de integración contra motores reales (PostgreSQL + Redis efímeros, ver tests/postgres/). Se salta sola sin POSTGRES_TEST_URL; su job de CI es tests-postgres.yml. La suite rápida no la necesita ni se ralentiza por ella.",
     "oracle: banco de pruebas con oráculo diferencial (roadmap Lybra §7) — levanta contenedores Docker reales y hace red de verdad, nada mockeado. Excluido del run por defecto de CI (ver tests.yml); se salta solo si no hay Docker disponible.",
 ]
 filterwarnings = [

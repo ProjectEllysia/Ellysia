@@ -116,7 +116,8 @@ class IrisReportManager(DocumentManager):
             if analysis is not None:
                 context = parse_raw_message(analysis.raw_headers or "")
                 path = {"analysisId": analysis_id, **build_path(context.received_headers)}
-            return IrisPDFCreator(report=report, path=path).print_pdf()
+            return IrisPDFCreator(report=report, path=path,
+                                  document_id=document_id).print_pdf()
 
         run_report_generation(
             document_id=document_id,

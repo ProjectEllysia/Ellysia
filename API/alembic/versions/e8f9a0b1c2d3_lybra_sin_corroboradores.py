@@ -1,7 +1,7 @@
 """Retirar el acoplamiento de Lybra con escáneres de terceros (#341)
 
 Revision ID: e8f9a0b1c2d3
-Revises: d7e8f9a0b1c2
+Revises: f1e0d1ee8820
 Create Date: 2026-08-30 00:00:00.000000
 
 """
@@ -14,7 +14,17 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic.
 revision: str = 'e8f9a0b1c2d3'
-down_revision: Union[str, Sequence[str], None] = 'd7e8f9a0b1c2'
+# Reencadenada sobre la fase 0 de Iris (#200). Esta revisión se escribió
+# cuando `d7e8f9a0b1c2` era la punta; mientras esta rama avanzaba, esa fase
+# metió cuatro migraciones colgando del mismo padre, así que al juntar las dos
+# líneas el árbol quedaba con dos cabezas y `alembic upgrade head` —que
+# `run.py` ejecuta en cada arranque— se negaba a elegir. La API no arrancaba.
+#
+# Se recoloca esta y no las otras porque es la que aún no se había integrado.
+# No hay dependencia real entre ambas: aquellas tocan `IrisAnalysis` y
+# `IrisMailboxConnection`, esta solo `LybraScan`, así que el orden entre ellas
+# da igual y lo único que importa es que haya uno.
+down_revision: Union[str, Sequence[str], None] = 'f1e0d1ee8820'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

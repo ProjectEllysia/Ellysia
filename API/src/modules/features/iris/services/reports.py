@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import logging
+import uuid
 from datetime import datetime
 from email.utils import parseaddr
 from typing import Any, Dict, Optional
@@ -224,9 +225,11 @@ class IrisPDFCreator:
     direct database access.
     """
 
-    def __init__(self, report: Dict[str, Any], path: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, report: Dict[str, Any], path: Optional[Dict[str, Any]] = None,
+                 document_id: Optional[int] = None) -> None:
         self.report = report
         self.path = path or {}
+        self.document_id = document_id
         self.directory = CR.get_directory_of(CR.DirectoryType.OUTPUT_IRIS)
 
     def _set_pdf_metadata(self, document) -> None:
@@ -450,6 +453,43 @@ class IrisPDFCreator:
             note += "."
             elements.append(Paragraph(note, theme.body))
 
+        elements.append(Spacer(1, 0.22 * inch))
+
+    def append_quality_warning(self, elements: list, theme: IrisReportTheme) -> None:
+        """Aviso de análisis degradado (B05), justo debajo del veredicto.
+
+        Va aquí y no entre las señales de más abajo porque contradice
+        parcialmente lo que el lector acaba de leer: el veredicto grande de la
+        portada se calculó sin una parte del examen, y quien imprima el
+        informe tiene que verlo antes de actuar sobre él.
+        """
+        failed_rules = self.report.get("failedRules") or []
+        if self.report.get("analysisQuality") != "degraded" and not failed_rules:
+            return
+
+        names = ", ".join(rule.get("name", "?") for rule in failed_rules) or "desconocidas"
+        warning_style = ParagraphStyle(
+            "IrisQualityWarning", parent=theme.body,
+            textColor=colors.HexColor("#7a4100"),
+        )
+        text = (
+            f"<b>Análisis incompleto.</b> No se pudieron ejecutar estas reglas: "
+            f"{_esc(names)}. La parte del mensaje que les correspondía no se ha "
+            "inspeccionado, así que este informe describe menos de lo que "
+            "describiría un análisis completo."
+        )
+
+        card = Table([[Paragraph(text, warning_style)]], colWidths=[6.4 * inch])
+        card.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF4E5")),
+            ("LINEBEFORE", (0, 0), (0, -1), 3, colors.HexColor("#f57c00")),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#FFD8A8")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 14),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 14),
+            ("TOPPADDING", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ]))
+        elements.append(card)
         elements.append(Spacer(1, 0.22 * inch))
 
     def append_gate_reasons(self, elements: list, theme: IrisReportTheme) -> None:
@@ -679,15 +719,40 @@ class IrisPDFCreator:
         elements.append(Spacer(1, 0.2 * inch))
         elements.append(Paragraph(f"Informe generado automáticamente | {timestamp}", theme.footer))
 
+    def _output_path(self) -> str:
+        """Ruta del PDF, única por **documento** y no por análisis (B11).
+
+        El modelo permite N ``IrisDocument`` por análisis, pero el nombre solo
+        dependía del ``analysis_id``, así que todos escribían el mismo fichero:
+        dos generaciones a la vez se pisaban, y borrar un documento destruía el
+        PDF del otro (``delete_document_with_file`` borra por ``filename``, que
+        era el mismo para ambos).
+
+        Cuando no hay ``document_id`` —ningún camino de la aplicación llega
+        así hoy; queda para que la clase siga siendo usable a pelo— se cae a un
+        sufijo aleatorio, que no colisiona aunque tampoco sea reproducible.
+        """
+        analysis_id = self.report.get("analysisId")
+        suffix = self.document_id if self.document_id is not None else uuid.uuid4().hex
+        return os.path.join(self.directory, f"{analysis_id}_{suffix}_Iris.pdf")
+
     def print_pdf(self) -> str:
-        """Generate the complete PDF report and return its file path."""
+        """Generate the complete PDF report and return its file path.
+
+        Se escribe en un temporal del mismo directorio y se mueve con
+        ``os.replace()``, que es atómico dentro de un mismo sistema de
+        ficheros. Sin eso, un lector que descargue el informe mientras se
+        regenera recibe un PDF a medio escribir: ``document.status`` pasa a
+        ``done`` una sola vez, pero el fichero al que apunta se reescribe en
+        sitio en cada regeneración.
+        """
         os.makedirs(self.directory, exist_ok=True)
 
-        analysis_id = self.report.get("analysisId")
-        filename = os.path.join(self.directory, f"{analysis_id}_Iris.pdf")
+        filename = self._output_path()
+        temporary = f"{filename}.{uuid.uuid4().hex}.tmp"
 
         document = SimpleDocTemplate(
-            filename, pagesize=A4,
+            temporary, pagesize=A4,
             rightMargin=36, leftMargin=36, topMargin=60, bottomMargin=40,
         )
 
@@ -697,6 +762,7 @@ class IrisPDFCreator:
 
         self.append_cover_page(elements, theme)
         self.append_verdict_hero(elements, theme)
+        self.append_quality_warning(elements, theme)
         self.append_email_preview(elements, theme)
         self.append_gate_reasons(elements, theme)
         self.append_rules(elements, theme)
@@ -707,6 +773,17 @@ class IrisPDFCreator:
         self.append_footer(elements, theme)
 
         self._set_pdf_metadata(document)
-        document.build(elements, onFirstPage=self._on_page, onLaterPages=self._on_page)
+        try:
+            document.build(elements, onFirstPage=self._on_page, onLaterPages=self._on_page)
+            os.replace(temporary, filename)
+        except Exception:
+            # Un temporal huérfano no lo limpia nadie: el nombre lleva un UUID,
+            # así que ni siquiera lo pisaría el siguiente intento.
+            if os.path.exists(temporary):
+                try:
+                    os.remove(temporary)
+                except OSError:
+                    logger.warning("No se pudo borrar el temporal %s", temporary)
+            raise
 
         return filename
