@@ -151,7 +151,10 @@ class IrisMailboxConnection(Base):
                  until the first bootstrap sync runs (see
                  ``services/mailbox`` connectors: the first sync never
                  backfills historical mail, it only captures the starting
-                 cursor).
+                 cursor). Es ``Text`` y no ``String(n)`` a propósito: el
+                 ``@odata.deltaLink`` de Graph es una URL completa con un
+                 token de estado dentro y rebasa los 255 caracteres. Opaco
+                 significa opaco — no se interpreta, no se recorta.
         status: "active" | "reauth_required" | "revoked" | "paused".
         ingested_today / ingested_reset_date: Per-connection daily ingest
                  counter enforcing ``iris.maxIngestedPerDay`` — reset when
@@ -178,7 +181,7 @@ class IrisMailboxConnection(Base):
 
     folder = Column(String(255), nullable=True)
     full_message_mode = Column(Boolean, nullable=False, default=False)
-    sync_cursor = Column(String(255), nullable=True)
+    sync_cursor = Column(Text, nullable=True)
 
     status = Column(String(20), nullable=False, default="active")
     ingested_today = Column(Integer, nullable=False, default=0)
