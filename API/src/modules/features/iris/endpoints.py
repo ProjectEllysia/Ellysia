@@ -488,7 +488,11 @@ def download_document(document_id: int):
         document.filename,
         mimetype="application/pdf",
         as_attachment=True,
-        download_name=f"iris_analysis_{document.analysis_id}.pdf",
+        # B11: el nombre descargable identifica el documento, no solo el
+        # análisis. Dos informes del mismo análisis llegaban al navegador con
+        # el mismo nombre y el segundo sobrescribía al primero en la carpeta
+        # de descargas.
+        download_name=f"iris_analysis_{document.analysis_id}_{document.id}.pdf",
     )
 
 

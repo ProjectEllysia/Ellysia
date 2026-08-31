@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import logging
+import uuid
 from datetime import datetime
 from email.utils import parseaddr
 from typing import Any, Dict, Optional
@@ -224,9 +225,11 @@ class IrisPDFCreator:
     direct database access.
     """
 
-    def __init__(self, report: Dict[str, Any], path: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, report: Dict[str, Any], path: Optional[Dict[str, Any]] = None,
+                 document_id: Optional[int] = None) -> None:
         self.report = report
         self.path = path or {}
+        self.document_id = document_id
         self.directory = CR.get_directory_of(CR.DirectoryType.OUTPUT_IRIS)
 
     def _set_pdf_metadata(self, document) -> None:
@@ -716,15 +719,40 @@ class IrisPDFCreator:
         elements.append(Spacer(1, 0.2 * inch))
         elements.append(Paragraph(f"Informe generado automáticamente | {timestamp}", theme.footer))
 
+    def _output_path(self) -> str:
+        """Ruta del PDF, única por **documento** y no por análisis (B11).
+
+        El modelo permite N ``IrisDocument`` por análisis, pero el nombre solo
+        dependía del ``analysis_id``, así que todos escribían el mismo fichero:
+        dos generaciones a la vez se pisaban, y borrar un documento destruía el
+        PDF del otro (``delete_document_with_file`` borra por ``filename``, que
+        era el mismo para ambos).
+
+        Cuando no hay ``document_id`` —ningún camino de la aplicación llega
+        así hoy; queda para que la clase siga siendo usable a pelo— se cae a un
+        sufijo aleatorio, que no colisiona aunque tampoco sea reproducible.
+        """
+        analysis_id = self.report.get("analysisId")
+        suffix = self.document_id if self.document_id is not None else uuid.uuid4().hex
+        return os.path.join(self.directory, f"{analysis_id}_{suffix}_Iris.pdf")
+
     def print_pdf(self) -> str:
-        """Generate the complete PDF report and return its file path."""
+        """Generate the complete PDF report and return its file path.
+
+        Se escribe en un temporal del mismo directorio y se mueve con
+        ``os.replace()``, que es atómico dentro de un mismo sistema de
+        ficheros. Sin eso, un lector que descargue el informe mientras se
+        regenera recibe un PDF a medio escribir: ``document.status`` pasa a
+        ``done`` una sola vez, pero el fichero al que apunta se reescribe en
+        sitio en cada regeneración.
+        """
         os.makedirs(self.directory, exist_ok=True)
 
-        analysis_id = self.report.get("analysisId")
-        filename = os.path.join(self.directory, f"{analysis_id}_Iris.pdf")
+        filename = self._output_path()
+        temporary = f"{filename}.{uuid.uuid4().hex}.tmp"
 
         document = SimpleDocTemplate(
-            filename, pagesize=A4,
+            temporary, pagesize=A4,
             rightMargin=36, leftMargin=36, topMargin=60, bottomMargin=40,
         )
 
@@ -745,6 +773,17 @@ class IrisPDFCreator:
         self.append_footer(elements, theme)
 
         self._set_pdf_metadata(document)
-        document.build(elements, onFirstPage=self._on_page, onLaterPages=self._on_page)
+        try:
+            document.build(elements, onFirstPage=self._on_page, onLaterPages=self._on_page)
+            os.replace(temporary, filename)
+        except Exception:
+            # Un temporal huérfano no lo limpia nadie: el nombre lleva un UUID,
+            # así que ni siquiera lo pisaría el siguiente intento.
+            if os.path.exists(temporary):
+                try:
+                    os.remove(temporary)
+                except OSError:
+                    logger.warning("No se pudo borrar el temporal %s", temporary)
+            raise
 
         return filename
