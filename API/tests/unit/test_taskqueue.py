@@ -69,6 +69,11 @@ class FakeTaskQueue:
             return None
         return task
 
+    def is_recoverable(self, external_id: str,
+                       category: Optional[str] = None) -> bool:
+        task = self.get_task_by_external_id(external_id, category)
+        return task is not None and task.status in (TaskStatus.PENDING, TaskStatus.RUNNING)
+
     def update_progress(self, task_id: str, progress: int) -> None:
         pass
 

@@ -270,6 +270,20 @@ class ITaskQueue(Protocol):
         """
         ...
 
+    def is_recoverable(self, external_id: str, category: Optional[str] = None) -> bool:
+        """¿Queda alguien que vaya a terminar el trabajo de este external_id?
+
+        La usan las reconciliaciones de arranque para no marcar como huérfano
+        un trabajo que sigue vivo en otro proceso. Un job en cola es
+        recuperable; uno en ejecución lo es solo si su worker sigue vivo; uno
+        terminado o inexistente, no.
+
+        Está en el contrato —y no solo en la implementación— porque un doble de
+        tests que la olvide haría que la reconciliación se comiera trabajo
+        vivo, que es justo el fallo que esta operación existe para evitar.
+        """
+        ...
+
     def update_progress(self, task_id: str, progress: int) -> None:
         """Actualiza el progreso (0-100) de un job en ejecución.
 
@@ -568,6 +582,62 @@ class TaskQueue:
             )
             return None
         return task
+
+    def is_recoverable(self, external_id: str, category: Optional[str] = None) -> bool:
+        """¿Queda alguien que vaya a terminar el trabajo de *external_id*?
+
+        La usa la reconciliación de arranque de cada módulo para decidir si un
+        registro que quedó en pending/running está realmente huérfano. La
+        pregunta no la responde el estado del job por sí solo: un job
+        ``started`` puede estar avanzando en otro proceso ahora mismo, o
+        pertenecer a un worker que murió de un ``kill -9`` y no va a volver.
+
+        Estado por estado:
+
+        - **Sin job** (no hay mapeo, o el historial de RQ ya lo purgó por TTL):
+          no recuperable. Nadie va a tocar ese registro nunca más.
+        - **PENDING** (``queued``/``scheduled``/``deferred``): recuperable. El
+          job sigue en la cola y el primer worker libre lo tomará.
+        - **RUNNING** (``started``): recuperable **solo si su worker sigue
+          vivo**. Se comprueba con la misma verificación de PID que usa
+          ``cancel()``: la clave ``rq:worker:<name>`` sobrevive con TTL
+          completo a una muerte abrupta, así que su mera existencia no prueba
+          nada.
+        - **Terminal** (``finished``/``failed``/``stopped``): no recuperable.
+          El job acabó; si el registro sigue activo es porque el proceso murió
+          entre el trabajo y su escritura final.
+
+        Si Redis no responde se devuelve ``True``. Es deliberado y conservador:
+        sin poder mirar, no hay prueba de que el trabajo esté perdido, y el
+        precio de equivocarse es asimétrico — un huérfano que sobrevive un
+        arranque más se reconcilia en el siguiente, mientras que marcar
+        ``failed`` un trabajo vivo se lo enseña al usuario como fallido justo
+        antes de que el worker escriba su resultado encima.
+        """
+        try:
+            job_id = self._external.get(external_id)
+            if job_id is None:
+                return False
+
+            job = self._try_fetch_job(job_id)
+            if job is None:
+                return False
+
+            task = Task.from_rq_job(job)
+            if category is not None and task.category != category:
+                return False
+
+            if task.status is TaskStatus.PENDING:
+                return True
+            if task.status is TaskStatus.RUNNING:
+                return self._worker_alive(job.worker_name)
+            return False
+        except Exception as exc:
+            logger.warning(
+                "is_recoverable: no se pudo consultar %s (%s); se asume recuperable",
+                external_id, exc,
+            )
+            return True
 
     def get_running(self, category: Optional[str] = None) -> List[dict]:
         all_job_ids = []

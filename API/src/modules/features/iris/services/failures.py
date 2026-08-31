@@ -29,6 +29,19 @@ FAILURE_INVALID_INPUT = "invalid_input"
 #: El pipeline se rompió por dentro (parser, regla, persistencia).
 FAILURE_INTERNAL_ERROR = "internal_error"
 
+#: El proceso que ejecutaba el análisis desapareció sin dejar resultado.
+#: No es un error del motor —nunca llegó a fallar nada— sino la constatación,
+#: al arrancar, de que ya no queda nadie que vaya a terminar ese trabajo.
+FAILURE_WORKER_LOST = "worker_lost"
+
+#: Razón asociada a ``FAILURE_WORKER_LOST``. Vive aquí, y no en el manager,
+#: porque es el mismo tipo de dato que produce ``classify_failure``: texto
+#: legible, no sensible y persistible.
+WORKER_LOST_REASON = (
+    "El proceso que ejecutaba este análisis se detuvo antes de terminarlo. "
+    "Vuelve a lanzarlo para obtener un resultado."
+)
+
 # Tope del mensaje persistido: `failure_reason` es una columna Text, pero un
 # traceback repr-eado de una librería de terceros puede ser enorme y no aporta
 # nada más allá de la primera línea.

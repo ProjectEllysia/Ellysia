@@ -39,7 +39,12 @@ from ..repositories import IrisAnalysisRepository, IrisRuleResultRepository
 from ..services.rules import iris_rules, RuleResult
 from ..services.text import extract_domain, is_free_provider, url_host
 from ..services import parse_raw_message
-from ..services.failures import AnalysisFailure, classify_failure
+from ..services.failures import (
+    FAILURE_WORKER_LOST,
+    WORKER_LOST_REASON,
+    AnalysisFailure,
+    classify_failure,
+)
 from ..services.parsers import build_path, parse_received_line
 from ..services.ai_writer import IrisAIWriter
 from .notifications import IrisPhishingNotifyManager
@@ -1218,19 +1223,35 @@ class IrisManager(TaskTrackingMixin):
         tarea viva en TaskQueue que lo actualice tras reiniciar, y el registro
         se queda así para siempre. Se llama una vez al arrancar la API.
 
+        `B04`: antes se conservaba el análisis **solo** si su tarea estaba
+        exactamente en ``pending``. Un job ``running`` puede estar avanzando en
+        otro proceso —los workers son procesos aparte, y reiniciar la API no
+        los para—, así que ese criterio marcaba como fallidos análisis que
+        estaban perfectamente vivos: el usuario veía `failed` mientras el
+        worker seguía trabajando, y al rato el worker escribía `finished`
+        encima de esa misma fila. La pregunta correcta no es "¿en qué estado
+        está el job?" sino "¿queda alguien que vaya a terminarlo?", y esa la
+        responde ``TaskQueue.is_recoverable()``, que para un job en ejecución
+        comprueba además si su worker sigue vivo de verdad.
+
         Returns:
             Número de análisis marcados como failed.
         """
         task_queue = TaskQueue.get_instance()
+        # Una instancia para componer los external_id con el prefijo canónico
+        # (``EXTERNAL_ID_PREFIX``) en vez de repetir el formato a mano; comparte
+        # la cola que ya se acaba de resolver, así que no cuesta nada.
+        manager = cls(task_queue=task_queue)
         fixed = 0
         with UnitOfWork() as uow:
             repo = IrisAnalysisRepository(uow)
             for analysis in repo.get_active_analyses():
-                external_id = f"{cls.EXTERNAL_ID_PREFIX}{analysis.id}"
-                task = task_queue.get_task_by_external_id(external_id, cls.TASK_CATEGORY)
-                if task is not None and str(task.status) == "pending":
+                external_id = manager.external_id_for(analysis.id)
+                if task_queue.is_recoverable(external_id, cls.TASK_CATEGORY):
                     continue
                 analysis.status = "failed"
+                analysis.failure_code = FAILURE_WORKER_LOST
+                analysis.failure_reason = WORKER_LOST_REASON
                 analysis.finished_at = utcnow_naive()
                 repo.update(analysis)
                 fixed += 1
