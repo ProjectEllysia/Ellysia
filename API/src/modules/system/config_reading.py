@@ -97,11 +97,48 @@ def _lazy_load(func):
 # UTILIDADES
 # =============================================================================
 
+#: Contador que avanza cada vez que la configuración cargada es sustituida.
+#: Ver ``config_version``.
+_configs_generation = 0
+
+
+def config_version() -> tuple[int, int]:
+    """Identifica el árbol de configuración vigente ahora mismo.
+
+    Sirve para cachear cosas **derivadas** de la configuración sin que se
+    queden viejas: se mete como parte de la clave de caché, y al cambiar la
+    configuración las entradas antiguas dejan de ser alcanzables solas. Es lo
+    mismo que ya hacía ``load_block`` comparando la identidad de ``_configs``,
+    expuesto para quien no puede usar ``@config_block`` — el caso son los
+    datasets de Iris, que se cachean por nombre y no por campo.
+
+    Son dos números y no uno a propósito:
+
+    - El **contador** avanza en cada sustitución hecha por este módulo
+      (``reload``, ``reload_if_changed``, ``save_full_config``).
+    - La **identidad** del diccionario cubre lo que el contador no ve: un test
+      que monkeypatchee ``_configs`` directamente, que es como se prueba media
+      suite. Sin ella, un caché seguiría devolviendo los datos de la
+      configuración real bajo una config falsa.
+
+    Ninguno de los dos basta por su cuenta: la identidad se puede reutilizar
+    cuando el recolector libera el diccionario anterior, y el contador no ve
+    las escrituras que no pasan por aquí.
+    """
+    return (_configs_generation, id(_configs))
+
+
+def _bump_config_generation() -> None:
+    global _configs_generation
+    _configs_generation += 1
+
+
 def reload() -> None:
     """Fuerza la recarga de la configuración desde el archivo."""
     global _configs, _configs_path
     _configs = None
     _configs_path = None
+    _bump_config_generation()
 
 
 def _read_mtime(path: Path) -> float:
@@ -148,6 +185,7 @@ def reload_if_changed() -> bool:
 
     _configs = new_configs
     _configs_mtime = mtime
+    _bump_config_generation()
     logger.info("Configuración recargada desde disco (%s)", _configs_path)
     return True
 
@@ -1051,6 +1089,7 @@ def save_full_config(new_config: dict, expected_version: Optional[str] = None) -
         json.dump(new_config, f, indent=2, ensure_ascii=False)
     _configs = new_config
     _configs_mtime = _read_mtime(_configs_path)
+    _bump_config_generation()
     return new_config
 
 

@@ -1,0 +1,88 @@
+name: API Tests (PostgreSQL + Redis)
+
+# La suite normal (tests.yml) corre sobre SQLite con Redis y la red cortados:
+# tarda ~2 minutos y su resultado no depende de lo que tenga levantado la
+# máquina. El precio es que hay invariantes de producción que ese entorno no
+# puede comprobar — longitudes de columna, claves foráneas, JSONB y las
+# carreras entre transacciones reales.
+#
+# Este job las cubre con PostgreSQL y Redis efímeros. Va aparte a propósito:
+# la matriz de servicios no debe ralentizar el ciclo rápido, que es el que se
+# ejecuta en cada push.
+
+on:
+  push:
+    branches: [main, 'v[0-9]+.[0-9]+']
+  pull_request:
+    branches: [main, 'v[0-9]+.[0-9]+']
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: API
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ellysia
+          POSTGRES_PASSWORD: ellysia
+          POSTGRES_DB: ellysia_test
+        ports:
+          - 5432:5432
+        # Sin el health check, el primer test puede llegar antes de que el
+        # servidor acepte conexiones y fallar por una carrera de arranque en
+        # lugar de por el código.
+        options: >-
+          --health-cmd "pg_isready -U ellysia"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      JWT_SECRET_KEY: ci-secret-key-not-for-production
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRY_MINUTES: "30"
+      REFRESH_TOKEN_EXPIRY_DAYS: "7"
+      FLASK_ENV: development
+      CREATE_DATABASE: "false"
+      DEBUG: "false"
+      # Estas dos son las que activan la matriz: sin ellas, tests/postgres se
+      # salta entero (ver su conftest). Así el mismo código corre en un
+      # portátil sin contenedores sin fallar ni pedir nada.
+      POSTGRES_TEST_URL: postgresql+psycopg2://ellysia:ellysia@localhost:5432/ellysia_test
+      REDIS_TEST_URL: redis://localhost:6379/1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            API/requirements.txt
+            API/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run the real-engine matrix
+        # Solo los tests marcados: el resto de la suite ya corrió en tests.yml
+        # sobre SQLite y repetirla aquí no añadiría nada.
+        run: python -m pytest -q -m postgres --no-cov

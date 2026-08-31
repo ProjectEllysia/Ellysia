@@ -50,6 +50,24 @@ class AnalyzeRequestSchema(Schema):
                 )
 
 
+class IrisCapabilitiesResponseSchema(Schema):
+    """Límites y modos que la interfaz necesita para decidir igual que el API.
+
+    Existe para que el frontend no tenga que replicar constantes del backend:
+    una copia en el navegador deriva en cuanto alguien cambia la config del
+    servidor, y el usuario se lleva el rechazo después de haber cargado el
+    fichero entero en memoria.
+
+    ``verdictThresholds`` viaja ya en la respuesta del listado; se repite aquí
+    para que una vista que aún no ha listado nada pueda pintar la escala de
+    riesgo sin pedir primero una página de resultados.
+    """
+    maxMessageBytes = fields.Integer()
+    minHeaders = fields.Integer()
+    analysisModes = fields.List(fields.String())
+    verdictThresholds = fields.Nested(lambda: VerdictThresholdsSchema())
+
+
 class AnalysisIdQuerySchema(Schema):
     """Query parameter for ``GET /iris/status`` — supplied as ``?id=...``."""
     id = fields.Integer(required=True)
@@ -85,12 +103,20 @@ class AnalyzeResponseSchema(Schema):
 
 
 class AnalysisStatusResponseSchema(Schema):
-    """Current lifecycle status and optional progress of an analysis."""
+    """Current lifecycle status and optional progress of an analysis.
+
+    ``failureCode``/``failureReason`` solo viajan cuando ``status`` es
+    ``failed``. Es aquí donde se consultan, y no en el informe completo,
+    porque ``GET /iris/results/<id>`` exige un análisis ``finished``: un
+    análisis que murió no tiene informe que devolver, solo un motivo.
+    """
     analysisId = fields.Integer()
     status = fields.String()
     progress = fields.Integer(load_default=None)
     totalScore = fields.Float(load_default=None)
     verdict = fields.String(load_default=None)
+    failureCode = fields.String(load_default=None, allow_none=True)
+    failureReason = fields.String(load_default=None, allow_none=True)
 
 
 class RuleResultSchema(Schema):
@@ -119,6 +145,18 @@ class AiSummarySchema(Schema):
     confidence = fields.String()
 
 
+class FailedRuleSchema(Schema):
+    """Regla que no se pudo **ejecutar** durante un análisis (B05).
+
+    No confundir con una regla que detectó algo: esas van en ``rules`` con su
+    puntuación negativa. Estas son las que lanzaron una excepción, así que su
+    parte del mensaje se quedó sin inspeccionar.
+    """
+    name = fields.String()
+    family = fields.String(load_default=None, allow_none=True)
+    category = fields.String(load_default=None, allow_none=True)
+
+
 class AnalysisDetailResponseSchema(Schema):
     """Full analysis report: headers, per-rule results, verdict."""
     analysisId = fields.Integer()
@@ -128,13 +166,21 @@ class AnalysisDetailResponseSchema(Schema):
     totalScore = fields.Float(load_default=None)
     verdict = fields.String(load_default=None)
     gateReasons = fields.List(fields.String(), load_default=None)
+    analysisQuality = fields.String(load_default=None, allow_none=True)
+    failedRules = fields.List(fields.Nested(FailedRuleSchema), load_default=None)
+    detectorVersion = fields.String(load_default=None, allow_none=True)
     topSignals = fields.List(fields.Nested(TopSignalSchema), load_default=None)
     aiSummary = fields.Nested(AiSummarySchema, load_default=None, allow_none=True)
+    aiSummaryStatus = fields.String(load_default=None, allow_none=True)
+    aiSummaryModel = fields.String(load_default=None, allow_none=True)
+    aiSummaryPromptVersion = fields.String(load_default=None, allow_none=True)
     unwrappedFromForward = fields.Boolean(load_default=False)
     wrapperFrom = fields.String(load_default=None, allow_none=True)
     wrapperSubject = fields.String(load_default=None, allow_none=True)
     startedAt = fields.String(load_default=None)
     finishedAt = fields.String(load_default=None)
+    failureCode = fields.String(load_default=None, allow_none=True)
+    failureReason = fields.String(load_default=None, allow_none=True)
     user = fields.String()
     rules = fields.List(fields.Nested(RuleResultSchema))
     recommendations = fields.List(fields.String())
@@ -145,6 +191,8 @@ class AnalysisListItemSchema(Schema):
     analysisId = fields.Integer()
     title = fields.String(load_default=None)
     status = fields.String()
+    failureCode = fields.String(load_default=None, allow_none=True)
+    analysisQuality = fields.String(load_default=None, allow_none=True)
     totalScore = fields.Float(load_default=None)
     verdict = fields.String(load_default=None)
     startedAt = fields.String(load_default=None)
@@ -253,12 +301,28 @@ class GenerateDocumentResponseSchema(Schema):
     downloadUrl = fields.String(load_default=None)
 
 
+class GenerateAiSummaryRequestSchema(Schema):
+    """Parámetros de ``POST /iris/results/<id>/ai-summary``.
+
+    ``regenerate`` distingue las dos intenciones que antes eran una sola
+    petición indistinguible: repetirla porque el navegador reintentó o porque
+    el usuario hizo doble clic (y entonces lo correcto es devolver el resumen
+    que ya hay, sin cobrar), o pedir explícitamente otra redacción (y entonces
+    sí se genera de nuevo, y se cobra).
+    """
+    regenerate = fields.Boolean(load_default=False)
+
+
 class GenerateAiSummaryResponseSchema(Schema):
     """Response returned immediately after queuing AI summary generation (IA1).
 
     There is no separate status to poll: the caller re-fetches
     ``GET /iris/results/<id>`` (``aiSummary``) to see the result once the
     background task finishes.
+
+    ``status`` dice qué pasó de verdad con esta llamada: ``running`` si encoló
+    la generación (o si ya había una en curso) y ``done`` si el resumen ya
+    existía y se devolvió sin trabajo ni cobro.
     """
     message = fields.String()
     analysisId = fields.Integer()
