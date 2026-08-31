@@ -3,6 +3,7 @@ Iris REST API endpoints for email header analysis.
 
 Provides:
 - POST /iris/analyze         — submit headers for analysis
+- GET  /iris/capabilities     — server-side limits the UI must honour
 - GET  /iris/status?id=...   — check analysis status/progress
 - GET  /iris/results         — list all analyses for the current user
 - GET  /iris/results/{id}    — full analysis report
@@ -40,6 +41,7 @@ from .exceptions import (
 )
 from .schemas import (
     AnalysisIdQuerySchema,
+    IrisCapabilitiesResponseSchema,
     AnalyzeRequestSchema,
     AnalyzeResponseSchema,
     AnalysisStatusResponseSchema,
@@ -110,6 +112,19 @@ def analyze_headers(data):
         "analysisId": analysis_id,
         "status": "pending",
     }
+
+
+@iris_blp.get("/capabilities")
+@iris_blp.response(200, IrisCapabilitiesResponseSchema, description="Iris limits and analysis modes")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(logger=logger)
+def get_capabilities():
+    """Limites y modos de analisis que aplica el servidor"""
+    return IrisManager.get_capabilities()
 
 
 @iris_blp.get("/status")

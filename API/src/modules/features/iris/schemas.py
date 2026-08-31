@@ -50,6 +50,24 @@ class AnalyzeRequestSchema(Schema):
                 )
 
 
+class IrisCapabilitiesResponseSchema(Schema):
+    """Límites y modos que la interfaz necesita para decidir igual que el API.
+
+    Existe para que el frontend no tenga que replicar constantes del backend:
+    una copia en el navegador deriva en cuanto alguien cambia la config del
+    servidor, y el usuario se lleva el rechazo después de haber cargado el
+    fichero entero en memoria.
+
+    ``verdictThresholds`` viaja ya en la respuesta del listado; se repite aquí
+    para que una vista que aún no ha listado nada pueda pintar la escala de
+    riesgo sin pedir primero una página de resultados.
+    """
+    maxMessageBytes = fields.Integer()
+    minHeaders = fields.Integer()
+    analysisModes = fields.List(fields.String())
+    verdictThresholds = fields.Nested(lambda: VerdictThresholdsSchema())
+
+
 class AnalysisIdQuerySchema(Schema):
     """Query parameter for ``GET /iris/status`` — supplied as ``?id=...``."""
     id = fields.Integer(required=True)
