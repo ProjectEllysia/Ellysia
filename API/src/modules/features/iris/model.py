@@ -37,6 +37,16 @@ class IrisAnalysis(Base):
         gate_reasons: List of human-readable reasons for the
                  high-confidence gates that fired (empty when the verdict
                  comes purely from the numeric score).
+        analysis_quality: "complete" cuando todas las reglas se ejecutaron,
+                 "degraded" cuando alguna no llegó a hacerlo. Un análisis
+                 degradado no puede presentarse como limpio sin contexto —
+                 ver ``services/quality.py``.
+        failed_rules: Reglas que no se pudieron **ejecutar** (una excepción,
+                 no un hallazgo), con su nombre, familia y categoría. NULL
+                 cuando el análisis fue completo.
+        detector_version: Marca del catálogo de reglas que produjo el
+                 resultado (``iris-rules:<n>:<hash>``). Sin ella, un informe
+                 guardado deja de ser interpretable cuando el catálogo cambia.
         failure_code: Why a ``failed`` analysis failed — "invalid_input"
                  (the submitted text is not an analysable message) or
                  "internal_error" (the pipeline broke). NULL for every
@@ -74,6 +84,9 @@ class IrisAnalysis(Base):
     total_score = Column(Float, nullable=True)
     verdict = Column(String(20), nullable=True)
     gate_reasons = Column(JSONB, nullable=True)
+    analysis_quality = Column(String(16), nullable=True)
+    failed_rules = Column(JSONB, nullable=True)
+    detector_version = Column(String(64), nullable=True)
     failure_code = Column(String(32), nullable=True)
     failure_reason = Column(Text, nullable=True)
     ai_summary = Column(JSONB, nullable=True)
