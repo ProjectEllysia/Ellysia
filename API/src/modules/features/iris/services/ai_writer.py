@@ -17,6 +17,7 @@ PDF export.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any, Dict, Optional
@@ -58,6 +59,34 @@ class IrisAIWriter:
 
     def _build_prompts(self) -> dict:
         return CR.iris_config().prompts.get("summary", {})
+
+    @staticmethod
+    def model_name() -> str:
+        """Qué backend de IA produjo el resumen.
+
+        Es el nombre de la estrategia de scribe configurada para Iris
+        (``ollama``/``openai``/``google``), que es la identidad que la
+        aplicación controla de verdad: el modelo concreto lo elige cada
+        estrategia por su cuenta y puede cambiar bajo los pies sin que aquí se
+        note.
+        """
+        return str(CR.scribe_config().strategy_for("iris"))
+
+    @classmethod
+    def prompt_version(cls) -> str:
+        """Marca del prompt con el que se generó un resumen.
+
+        Los prompts viven en ``SecOpsConfig.json`` y se pueden editar en
+        caliente, así que dos resúmenes guardados pueden venir de instrucciones
+        distintas sin que nada lo delate. Se resume el par
+        (system, userTemplate) para que cualquier edición cambie la marca —
+        mismo criterio que ``detector_version`` con el catálogo de reglas:
+        derivado, no escrito a mano, así que no puede quedarse desactualizado.
+        """
+        prompts = CR.iris_config().prompts.get("summary", {})
+        material = f"{prompts.get('system', '')}\n{prompts.get('userTemplate', '')}"
+        digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
+        return f"iris-summary:{digest}"
 
     @staticmethod
     def _degradation_note(report: Dict[str, Any]) -> str:

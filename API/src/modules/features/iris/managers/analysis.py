@@ -21,6 +21,8 @@ from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
 import src.modules.system.config_reading as CR
+from sqlalchemy import and_, or_, update
+
 from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
@@ -311,6 +313,9 @@ class IrisManager(TaskTrackingMixin):
             "gateReasons": analysis.gate_reasons or [],
             "topSignals": self._top_signals(rules_data),
             "aiSummary": analysis.ai_summary,
+            "aiSummaryStatus": analysis.ai_summary_status,
+            "aiSummaryModel": analysis.ai_summary_model,
+            "aiSummaryPromptVersion": analysis.ai_summary_prompt_version,
             "unwrappedFromForward": context.unwrapped_from_forward,
             "wrapperFrom": context.wrapper_from or None,
             "wrapperSubject": context.wrapper_subject or None,
@@ -450,57 +455,171 @@ class IrisManager(TaskTrackingMixin):
             "hashes": sorted(hashes),
         }
 
-    def generate_ai_summary(self, analysis_id: int, user_id: int) -> None:
-        """Trigger async generation of the AI executive narrative (IA1).
+    AI_SUMMARY_EXTERNAL_ID_PREFIX = "iris-ai-summary:"
 
-        Fire-and-forget: submits a TaskQueue job and returns immediately.
-        The caller re-fetches ``get_analysis_results`` (``aiSummary``) to
-        see the result once ``execute_ai_summary_generation`` finishes —
-        there is no separate status to poll, matching how gate reasons
-        and top signals are already just part of the main report.
+    #: Estados desde los que se puede reclamar una generación de resumen.
+    #: ``None`` es "nunca se pidió" y ``failed`` es un reintento legítimo;
+    #: ``running`` no está porque ya hay una en curso, y ``done`` solo se
+    #: reclama con una regeneración explícita.
+    _AI_SUMMARY_CLAIMABLE = (None, "failed")
+
+    def generate_ai_summary(self, analysis_id: int, user_id: int,
+                            regenerate: bool = False) -> str:
+        """Encola la narrativa ejecutiva de IA (IA1), una sola vez.
+
+        Fire-and-forget: encola y vuelve. El llamante relee
+        ``get_analysis_results`` (``aiSummary``) para ver el resultado.
+
+        `B10`: la operación es **idempotente por análisis**. Antes consumía
+        cuota y encolaba sin mirar si ya había un resumen o un trabajo en
+        curso, así que dos peticiones seguidas —dos clics, un reintento del
+        navegador— cobraban dos veces y lanzaban dos generaciones del mismo
+        análisis. El ``external_id`` era determinista pero nadie lo consultaba.
+
+        La exclusión se apoya en una transición condicional sobre
+        ``ai_summary_status``, no en leer-decidir-escribir: bajo dos peticiones
+        simultáneas la base de datos serializa los dos UPDATE y el segundo no
+        afecta a ninguna fila. Quien pierde esa carrera no cobra cuota ni
+        encola nada.
+
+        Args:
+            regenerate: Pedir explícitamente una regeneración de un resumen
+                que ya existe. Sin esto, repetir la petición devuelve el
+                resultado que ya hay — que es lo que quiere quien hace doble
+                clic, y no lo que quiere quien busca otra redacción; el issue
+                pedía decidirlo explícitamente y esta es la decisión.
+
+        Returns:
+            ``"running"`` si esta llamada encoló el trabajo, ``"done"`` si ya
+            había resumen y no se pidió regenerar.
 
         Raises:
-            IrisAnalysisNotFoundError: If *analysis_id* does not exist or
-                does not belong to *user_id*.
-            IrisAnalysisNotReadyError: If the analysis is not ``finished``.
+            IrisAnalysisNotFoundError: si el análisis no existe o no es suyo.
+            IrisAnalysisNotReadyError: si el análisis no está ``finished``.
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
         if analysis.status != "finished":
             raise IrisAnalysisNotReadyError(analysis_id, analysis.status)
 
+        # Un resumen ya generado se devuelve tal cual: no cuesta cuota, no
+        # encola y no sorprende a quien solo hizo doble clic.
+        if analysis.ai_summary is not None and not regenerate:
+            return "done"
+
+        if not self._claim_ai_summary(analysis_id, regenerate=regenerate):
+            # Otra petición se lo llevó (o ya estaba en curso). Sin cobro.
+            return "running"
+
         # La concreta y el techo agregado de IA, en ese orden, para que el 402
         # nombre lo que el usuario estaba pidiendo.
         quota_manager = QuotaManager()
-        quota_manager.consume(user_id, LimitKey.IRIS_AI_SUMMARIES)
-        quota_manager.consume(user_id, LimitKey.AI_REQUESTS)
+        try:
+            quota_manager.consume(user_id, LimitKey.IRIS_AI_SUMMARIES)
+            quota_manager.consume(user_id, LimitKey.AI_REQUESTS)
+        except Exception:
+            # Sin cupo no hay trabajo: se suelta la reserva para que el
+            # análisis no se quede en `running` para siempre y el usuario
+            # pueda reintentar cuando renueve su plan.
+            self._release_ai_summary(analysis_id)
+            raise
 
-        self._task_queue.submit(
-            func=IrisManager.execute_ai_summary_generation,
-            args=(analysis_id,),
-            name=f"AISummary-Analysis-{analysis_id}",
-            category="iris.ai_summary",
-            external_id=f"iris-ai-summary:{analysis_id}",
-        )
+        try:
+            task = self._task_queue.submit(
+                func=IrisManager.execute_ai_summary_generation,
+                args=(analysis_id, user_id),
+                name=f"AISummary-Analysis-{analysis_id}",
+                category="iris.ai_summary",
+                external_id=f"{self.AI_SUMMARY_EXTERNAL_ID_PREFIX}{analysis_id}",
+            )
+        except Exception:
+            # El encolado rechazó el trabajo: nadie lo va a ejecutar, así que
+            # ni la reserva ni el cobro tienen sentido.
+            self._release_ai_summary(analysis_id)
+            self._refund_ai_summary_quota(user_id)
+            raise
+
+        self._update_analysis(analysis_id, ai_summary_job_id=getattr(task, "id", None))
+        return "running"
 
     @staticmethod
-    def execute_ai_summary_generation(analysis_id: int) -> None:
+    def _claim_ai_summary(analysis_id: int, regenerate: bool = False) -> bool:
+        """Reclama la generación con un UPDATE condicional. True si se ganó.
+
+        La condición vive dentro del UPDATE a propósito, igual que en el
+        consumo de cuota: leer el estado, decidir en Python y escribir después
+        regala una segunda generación cada vez que dos peticiones coinciden.
+        """
+        claimable = list(IrisManager._AI_SUMMARY_CLAIMABLE)
+        if regenerate:
+            claimable.append("done")
+
+        with UnitOfWork() as uow:
+            condition = IrisAnalysis.id == analysis_id
+            if None in claimable:
+                states = [state for state in claimable if state is not None]
+                status_matches = or_(
+                    IrisAnalysis.ai_summary_status.is_(None),
+                    IrisAnalysis.ai_summary_status.in_(states),
+                )
+            else:
+                status_matches = IrisAnalysis.ai_summary_status.in_(claimable)
+
+            result = uow.session.execute(
+                update(IrisAnalysis)
+                .where(and_(condition, status_matches))
+                .values(ai_summary_status="running")
+            )
+            return bool(result.rowcount)
+
+    def _release_ai_summary(self, analysis_id: int) -> None:
+        """Deshace la reserva cuando el trabajo no va a llegar a ejecutarse."""
+        self._update_analysis(analysis_id, ai_summary_status=None, ai_summary_job_id=None)
+
+    @staticmethod
+    def _refund_ai_summary_quota(user_id: int) -> None:
+        """Devuelve los dos cargos del resumen (el concreto y el agregado)."""
+        quota_manager = QuotaManager()
+        quota_manager.refund(user_id, LimitKey.IRIS_AI_SUMMARIES)
+        quota_manager.refund(user_id, LimitKey.AI_REQUESTS)
+
+    @staticmethod
+    def execute_ai_summary_generation(analysis_id: int, user_id: Optional[int] = None) -> None:
         """Entry point submitted to the TaskQueue for background AI narrative generation.
 
         Degrades cleanly on any failure (missing/misconfigured AI backend,
         circuit breaker open, malformed model response): logs the error
         and leaves ``ai_summary`` as ``NULL`` rather than failing the
         already-finished analysis it's attached to.
+
+        `B10`: además deja el estado en terminal y, si no hubo resumen,
+        devuelve la cuota. Cobrar antes de trabajar es correcto —cobrar
+        después permitiría lanzar N generaciones concurrentes con cupo para
+        una— pero obliga a devolver el dinero cuando el trabajo no se hace.
+
+        ``user_id`` es opcional para que un trabajo ya encolado con la firma
+        anterior no reviente al ejecutarse tras el despliegue; sin él
+        simplemente no hay a quién reembolsar.
         """
         with job_context():
+            manager = IrisManager()
             try:
-                report = IrisManager().get_analysis_results(analysis_id)
+                report = manager.get_analysis_results(analysis_id)
                 summary = IrisAIWriter().generate(report)
 
-                IrisManager()._update_analysis(analysis_id, ai_summary=summary)
+                manager._update_analysis(
+                    analysis_id,
+                    ai_summary=summary,
+                    ai_summary_status="done",
+                    ai_summary_model=IrisAIWriter.model_name(),
+                    ai_summary_prompt_version=IrisAIWriter.prompt_version(),
+                )
 
                 logger.info(f"AI summary generado para analysis {analysis_id}")
             except Exception as e:
                 logger.error(f"Error generando AI summary para analysis {analysis_id}: {e}", exc_info=True)
+                manager._update_analysis(analysis_id, ai_summary_status="failed")
+                if user_id is not None:
+                    IrisManager._refund_ai_summary_quota(user_id)
 
     def cancel_analysis(self, analysis_id: int, user_id: int) -> bool:
         """Cancel a running or pending analysis.

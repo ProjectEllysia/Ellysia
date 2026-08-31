@@ -59,6 +59,15 @@ class IrisAnalysis(Base):
                  executive_summary/attacker_intent/recommendations/
                  confidence, or None until generated (or if generation
                  failed/was never requested).
+        ai_summary_status: "running" | "done" | "failed", o NULL si nunca se
+                 pidió. Es lo que hace idempotente la generación: el manager
+                 reclama la fila con una transición condicional sobre esta
+                 columna, y quien pierde la carrera no cobra cuota ni encola.
+        ai_summary_job_id: Id del trabajo en la cola que lo está generando.
+        ai_summary_model / ai_summary_prompt_version: Con qué se generó. Un
+                 resumen de hace tres meses lo escribió otro modelo con otro
+                 prompt, y sin esto no hay forma de saber cuál (mismo papel
+                 que ``detector_version`` para las reglas).
         started_at: Timestamp when the analysis was created.
         finished_at: Timestamp when the analysis reached a terminal state.
         user_id: Foreign key to the owning User.
@@ -90,6 +99,10 @@ class IrisAnalysis(Base):
     failure_code = Column(String(32), nullable=True)
     failure_reason = Column(Text, nullable=True)
     ai_summary = Column(JSONB, nullable=True)
+    ai_summary_status = Column(String(16), nullable=True)
+    ai_summary_job_id = Column(String(64), nullable=True)
+    ai_summary_model = Column(String(64), nullable=True)
+    ai_summary_prompt_version = Column(String(32), nullable=True)
     started_at = Column(DateTime, nullable=False, default=utcnow_naive)
     finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)

@@ -53,6 +53,7 @@ from .schemas import (
     AnalysisIocsResponseSchema,
     ResultsQuerySchema,
     GenerateDocumentResponseSchema,
+    GenerateAiSummaryRequestSchema,
     GenerateAiSummaryResponseSchema,
     DocumentStatusQuerySchema,
     IrisDocumentStatusResponseSchema,
@@ -277,6 +278,7 @@ def reanalyze_analysis(analysis_id: int):
 
 
 @iris_blp.post("/results/<int:analysis_id>/ai-summary")
+@iris_blp.arguments(GenerateAiSummaryRequestSchema, location="query")
 @iris_blp.response(202, GenerateAiSummaryResponseSchema, description="AI summary generation started")
 @iris_blp.alt_response(400, schema=ErrorSchema, description="Analysis not finished")
 @iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
@@ -286,18 +288,20 @@ def reanalyze_analysis(analysis_id: int):
 @require_attributes(at_least_one=[AttributeType.IRIS_CREATE])
 @limiter.limit("20 per hour; 100 per day")
 @handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
-def generate_ai_summary(analysis_id: int):
+def generate_ai_summary(args: dict, analysis_id: int):
     """Solicitar la generacion asincrona de la narrativa ejecutiva IA (IrisAIWriter)"""
     user = get_current_user()
 
     manager = IrisManager()
-    manager.generate_ai_summary(analysis_id, user.id)
+    status = manager.generate_ai_summary(analysis_id, user.id,
+                                         regenerate=args["regenerate"])
 
     logger.info(f"AI summary solicitado para analysis {analysis_id} por usuario {user.username}")
     return {
-        "message": "Generacion de resumen ejecutivo IA iniciada",
+        "message": ("Resumen ejecutivo IA ya disponible" if status == "done"
+                    else "Generacion de resumen ejecutivo IA iniciada"),
         "analysisId": analysis_id,
-        "status": "running",
+        "status": status,
     }, 202
 
 

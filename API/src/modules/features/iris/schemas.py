@@ -171,6 +171,9 @@ class AnalysisDetailResponseSchema(Schema):
     detectorVersion = fields.String(load_default=None, allow_none=True)
     topSignals = fields.List(fields.Nested(TopSignalSchema), load_default=None)
     aiSummary = fields.Nested(AiSummarySchema, load_default=None, allow_none=True)
+    aiSummaryStatus = fields.String(load_default=None, allow_none=True)
+    aiSummaryModel = fields.String(load_default=None, allow_none=True)
+    aiSummaryPromptVersion = fields.String(load_default=None, allow_none=True)
     unwrappedFromForward = fields.Boolean(load_default=False)
     wrapperFrom = fields.String(load_default=None, allow_none=True)
     wrapperSubject = fields.String(load_default=None, allow_none=True)
@@ -298,12 +301,28 @@ class GenerateDocumentResponseSchema(Schema):
     downloadUrl = fields.String(load_default=None)
 
 
+class GenerateAiSummaryRequestSchema(Schema):
+    """Parámetros de ``POST /iris/results/<id>/ai-summary``.
+
+    ``regenerate`` distingue las dos intenciones que antes eran una sola
+    petición indistinguible: repetirla porque el navegador reintentó o porque
+    el usuario hizo doble clic (y entonces lo correcto es devolver el resumen
+    que ya hay, sin cobrar), o pedir explícitamente otra redacción (y entonces
+    sí se genera de nuevo, y se cobra).
+    """
+    regenerate = fields.Boolean(load_default=False)
+
+
 class GenerateAiSummaryResponseSchema(Schema):
     """Response returned immediately after queuing AI summary generation (IA1).
 
     There is no separate status to poll: the caller re-fetches
     ``GET /iris/results/<id>`` (``aiSummary``) to see the result once the
     background task finishes.
+
+    ``status`` dice qué pasó de verdad con esta llamada: ``running`` si encoló
+    la generación (o si ya había una en curso) y ``done`` si el resumen ya
+    existía y se devolvió sin trabajo ni cobro.
     """
     message = fields.String()
     analysisId = fields.Integer()
