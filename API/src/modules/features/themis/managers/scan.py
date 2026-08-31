@@ -423,6 +423,24 @@ class ScanManager(TaskTrackingMixin, ABC):
         ``Scheduler`` vuelva a lanzar ese escaneo programado (ver
         ``scheduling.py``). Se llama una vez al arrancar la API.
 
+        Antes se conservaba el escaneo **solo** si su tarea estaba exactamente
+        en ``PENDING``, y ese criterio se comía trabajo vivo. Los workers son
+        procesos aparte y reiniciar la API no los para: un job ``RUNNING``
+        puede estar escaneando ahora mismo en otro proceso. El usuario veía el
+        escaneo como fallido y, minutos después, el worker terminaba y escribía
+        ``finished`` encima de esa misma fila — una contradicción que además
+        deja el informe de un escaneo "fallido".
+
+        La pregunta correcta no es "¿en qué estado está el job?" sino "¿queda
+        alguien que vaya a terminarlo?". La responde
+        ``TaskQueue.is_recoverable()``, que para un job en ejecución comprueba
+        además si el worker que lo tomó sigue vivo de verdad — necesario porque
+        la clave ``rq:worker:<name>`` sobrevive con su TTL completo a una
+        muerte abrupta, así que su mera existencia no prueba nada.
+
+        Mismo arreglo que Iris hizo en su reconciliación (#208); el defecto era
+        literalmente el mismo porque este método fue el espejo del que se copió.
+
         Returns:
             Número de escaneos marcados como FAILED.
         """
@@ -431,10 +449,13 @@ class ScanManager(TaskTrackingMixin, ABC):
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
             for scan in repo.get_active_scans():
+                # El prefijo sale de la clase, no escrito a mano. No se compone
+                # con ``external_id_for`` —que es lo que hace Iris— porque
+                # ``ScanManager`` es abstracta: este método se invoca sobre ella
+                # para barrer los escaneos de los cuatro escáneres a la vez, que
+                # comparten prefijo y categoría.
                 external_id = f"{cls.EXTERNAL_ID_PREFIX}{scan.id}"
-                task = task_queue.get_task_by_external_id(external_id, cls.TASK_CATEGORY)
-
-                if task is not None and task.status == TaskStatus.PENDING:
+                if task_queue.is_recoverable(external_id, cls.TASK_CATEGORY):
                     continue
                 repo.update_status(scan, ScanStatus.FAILED)
                 fixed += 1
