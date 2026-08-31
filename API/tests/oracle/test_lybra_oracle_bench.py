@@ -351,8 +351,8 @@ def _run_self_discovery(app, admin_user, target: str, port: int, monkeypatch):
         except DuplicateAuthorizedTargetError:
             pass
         mgr = LybraEngineManager()
-        scan = mgr._create_scan_record(target=target, user_id=admin_user.id, source_scan_id=None)
-        mgr._run_lybra(scan.id, None, [port], False)
+        scan = mgr._create_scan_record(target=target, user_id=admin_user.id)
+        mgr._run_lybra(scan.id, discover_ports=[port])
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(scan.id)
     return findings
