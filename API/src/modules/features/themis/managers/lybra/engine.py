@@ -31,7 +31,6 @@ from ...lybra import (
     QOD_OPEN_PORT,
     QOD_FINGERPRINT,
     default_dissectors,
-    agrees_with_nmap,
     HostRateLimiter,
     kb_feed_version,
     load_checks,
@@ -40,8 +39,6 @@ from ...lybra import (
     TlsProbe,
     NetworkProbe,
     default_script_plugins,
-    is_http_service,
-    DEFAULT_PORTS,
     scan_ports_sync,
     scan_udp_ports_sync,
 )
@@ -54,9 +51,6 @@ from ...exceptions import (
 )
 
 from ..scan import ScanManager
-from ..nmap import NmapScanManager
-from ..nikto import NiktoScanManager
-from ..nuclei import NucleiScanManager
 from ..authorized_target import AuthorizedTargetManager
 from .sources import ServiceSource, DiscoveryProbes
 
@@ -69,9 +63,9 @@ class LybraEngineManager(ScanManager):
     """
     Manager for Lybra's own vulnerability engine.
 
-    Unlike the other scanners it launches no external subprocess: in the current
-    phase (Fase 0) it takes the services discovered by a previous Nmap scan
-    (``source_scan_id``) and produces normalized :class:`Finding` rows through the
+    Unlike the other scanners it launches no external subprocess: it discovers
+    the target's services itself (Fase T) — or takes a services list the caller
+    already resolved — and produces normalized :class:`Finding` rows through the
     :class:`LybraEngine`. Because that work is a fast, in-memory pass (no
     network), it does not go through the base ``_execute_scan`` (built for
     long-running subprocess tasks); the body lives in ``_run_lybra`` and the
@@ -79,7 +73,7 @@ class LybraEngineManager(ScanManager):
 
     Example:
     >>> manager = LybraEngineManager()
-    >>> scan_id = manager.run_scan(source_scan_id=42, user_id=1)
+    >>> scan_id = manager.run_scan(target="scanme.nmap.org", user_id=1)
     """
 
     SCAN_TYPE = ScanType.LYBRA
@@ -95,33 +89,29 @@ class LybraEngineManager(ScanManager):
 
     @classmethod
     def scheduled_run_kwargs(cls, arguments: dict) -> dict:
-        """target obligatorio + discover_ports/deep opcionales (B1). Un
-        escaneo programado siempre es autodescubrimiento (Fase T) — nunca
-        tiene un source_scan_id ni un payload de services que programar."""
+        """target obligatorio + discover_ports opcional (B1). Un escaneo
+        programado siempre es autodescubrimiento (Fase T) — nunca tiene un
+        payload de services que programar.
+
+        Un ``ProgramedScan`` creado antes de L52 puede llevar todavía una clave
+        ``deep`` en su columna JSON ``arguments``; se ignora sin más, que es lo
+        que hace este método con cualquier argumento que no reconozca."""
         kwargs = super().scheduled_run_kwargs(arguments)
         kwargs["discover_ports"] = arguments.get("discover_ports")
-        # La clave de lectura sigue siendo "deep": ``arguments`` es la columna
-        # JSON de ProgramedScan, es decir dato ya persistido. Renombrarla
-        # dejaría sin efecto el flag de los escaneos Lybra ya programados.
-        kwargs["is_deep_analysis"] = bool(arguments.get("deep", False))
         return kwargs
 
     def run_scan(self,
         user_id: int,
-        source_scan_id: Optional[int] = None,  # pylint: disable=arguments-differ
-        target: Optional[str] = None,
+        target: Optional[str] = None,  # pylint: disable=arguments-differ
         services: Optional[List[Service]] = None,
         discover_ports: Optional[list] = None,
-        is_deep_analysis: bool = False,
         timeout: int = 120,
         programed_scan_id: Optional[int] = None,
         asset_id: Optional[int] = None,
     ) -> int:
         """
-        Start an Lybra engine scan in one of three modes.
+        Start an Lybra engine scan in one of two modes.
 
-        - **Over a prior Nmap scan** (``source_scan_id``): analyse the services
-          that scan already discovered. Ownership/type validated by the caller.
         - **External payload** (``services`` + ``target``): analyse a
           services list the caller already resolved — a Hygeia inventory
           adapter is the motivating case, but any in-process producer of a
@@ -131,17 +121,10 @@ class LybraEngineManager(ScanManager):
           target's network. ``target`` is still required — it is the host
           identity findings get attached to.
         - **Self-discovery** (``target``, optional ``discover_ports``): Lybra
-          discovers the open ports itself with its own connect scan (Fase T),
-          no Nmap needed. The caller validates the target (reject private, etc.).
+          discovers the open ports itself with its own connect scan (Fase T).
+          The caller validates the target (reject private, etc.).
 
         Args:
-            is_deep_analysis: Fase 6 "análisis profundo" — also launch Nmap/Nikto/Nuclei as
-                independent corroborator scans (fire-and-forget; their Finding
-                rows merge in at read time, see ``format_scan``). In the
-                external-payload mode, this additionally requires ``target`` to
-                be in the authorized-targets register, since deep corroborators
-                touch the network and payload targets are otherwise never
-                validated (see ``_run_lybra``).
             programed_scan_id: Set when launched by the scheduler (Themis
                 scheduled scans), same convention as the other scan managers.
             asset_id: Fase I — the Hygeia asset whose inventory produced
@@ -152,7 +135,7 @@ class LybraEngineManager(ScanManager):
         Returns:
             Primary key of the created LybraScan record.
         """
-        source = ServiceSource.build_for_args(source_scan_id, services, discover_ports)
+        source = ServiceSource.build_for_args(services, discover_ports)
         scan_target = source.valid_scan_target(user_id, target)
 
         # La cuota se consume aquí y no en el endpoint: por este método pasan
@@ -168,7 +151,6 @@ class LybraEngineManager(ScanManager):
         scan = self._create_scan_record(
             target=scan_target,
             user_id=user_id,
-            source_scan_id=source_scan_id, # type: ignore
             programed_scan_id=programed_scan_id,
             asset_id=asset_id,
         )
@@ -176,23 +158,20 @@ class LybraEngineManager(ScanManager):
 
         self._task_queue.submit(
             func=LybraEngineManager.execute_lybra_scan, # type: ignore
-            args=(scan_id, source_scan_id, discover_ports, is_deep_analysis, services),
+            args=(scan_id, discover_ports, services),
             name=f"LybraScan-{scan_id}",
             category=self.TASK_CATEGORY, # type: ignore
             external_id=self.external_id_for(scan_id),
             timeout=timeout + self._scan_timeout_margin,
         )
 
-        mode = source.label + (" + análisis profundo" if is_deep_analysis else "")
-        logger.info(f"Escaneo Lybra {scan_id} iniciado ({mode})")
+        logger.info(f"Escaneo Lybra {scan_id} iniciado ({source.label})")
         return scan_id  # type: ignore
 
     @staticmethod
     def execute_lybra_scan(
         scan_id: int,
-        source_scan_id: Optional[int] = None,
         discover_ports: Optional[list] = None,
-        is_deep_analysis: bool = False,
         services: Optional[List[Service]] = None
     ) -> None:
         """Entry point submitted to the TaskQueue. Runs the engine in the worker."""
@@ -200,27 +179,23 @@ class LybraEngineManager(ScanManager):
             manager = LybraEngineManager()
             manager._run_lybra( # type: ignore
                 scan_id,
-                source_scan_id,
                 discover_ports,
-                is_deep_analysis,
                 services,
             )
 
     def _run_lybra(
         self,
         scan_id: int,
-        source_scan_id: Optional[int] = None,
         discover_ports: Optional[list] = None,
-        is_deep_analysis: bool = False,
         services_payload: Optional[List[Service]] = None,
     ) -> None:
-        """Resolve services (from Nmap, own discovery, or a payload), detect, persist.
+        """Resolve services (own discovery or a payload), detect, persist.
 
         This is the testable body of the scan (the ``execute_* seam → _run_*``
         pattern). Runs synchronously; safe to call directly in tests without a
         worker.
         """
-        source = ServiceSource.build_for_args(source_scan_id, services_payload, discover_ports)
+        source = ServiceSource.build_for_args(services_payload, discover_ports)
         probes = DiscoveryProbes(
             is_host_reachable=self.is_host_reachable,
             discover_ports=self._discover_ports,
@@ -285,17 +260,6 @@ class LybraEngineManager(ScanManager):
             if source.probes_target_network and source_target and is_target_authorized and CR.lybra_config().active_checks:
                 findings_data.extend(self._run_active_checks(source_target, services))
 
-            deep_scan_ids: list = []
-            if is_deep_analysis and source_target:
-                if source.deep_requires_authorization and not is_target_authorized:
-                    logger.info(
-                        f"Análisis profundo omitido para el escaneo Lybra {scan_id}: objetivo no autorizado"
-                    )
-                else:
-                    deep_scan_ids = self._launch_deep_corroborators(
-                        user_id, source_target, source, services
-                    )
-
             for finding in findings_data:
                 finding["host_id"] = source_host_id
                 finding["dedup_key"] = compute_dedup_key(finding)
@@ -315,7 +279,6 @@ class LybraEngineManager(ScanManager):
                 scan_repo = ScanRepository(uow)
                 scan = scan_repo.get_by_id(scan_id)
                 scan.host_id = source_host_id
-                scan.deep_scan_ids = deep_scan_ids or None  # type: ignore
                 self._persist_scan_results(uow, scan, findings_data)
                 scan.status = ScanStatus.FINISHED.value  # type: ignore
                 scan.finished_at = utcnow_naive()  # type: ignore
@@ -420,22 +383,20 @@ class LybraEngineManager(ScanManager):
             return []
 
     def _fingerprint_services(self, target: str, services: list) -> tuple:
-        """Run Lybra's own HTTP/SSH/FTP dissectors; fill identification gaps and
-        record agreement with Nmap.
+        """Run Lybra's own HTTP/SSH/FTP dissectors and identify each service.
 
-        Fase F, two jobs at once:
+        Fase F. La identificación que sale de aquí **es** la identificación del
+        servicio: alimenta el matcher de versiones (``LybraEngine._resolve_cpe``)
+        y deja además un hallazgo informativo con lo que se leyó.
 
-        - When a service already has a product/version (Nmap-sourced), our own
-          reading is never used to override it — it only feeds an informational
-          "agrees/disagrees with Nmap" finding, the concordance evidence the
-          roadmap's Definition of Done needs before Nmap `-sV` can be demoted
-          to a fallback for a service family.
-        - When a service has *no* product/version (self-discovered, Fase T, no
-          Nmap involved), our own reading fills that gap so the version matcher
-          (``LybraEngine._resolve_cpe``) has something to work with instead of
-          silently finding nothing. It goes in exactly as low-confidence as an
-          Nmap-sourced reading would (``qod=70`` in the matcher, same as
-          today) — nothing here inflates confidence, it only supplies input.
+        Hasta L52 no era así. Un servicio que ya traía producto y versión de un
+        escaneo Nmap previo era intocable — la lectura propia no podía
+        sobrescribirlo, sólo emitir un veredicto de «concuerda / no concuerda
+        con Nmap». Ese modo de arranque ya no existe, y con él se fue la
+        subordinación: un motor cuyo propio análisis no puede prevalecer sobre
+        el de otra herramienta no es independiente. La comparación con Nmap
+        sigue siendo posible, pero como **medición**, desde el arnés de pruebas
+        (``tests/oracle/_concordance.py``), no dentro del producto.
 
         Best-effort per service; a probe failure just skips that service. The
         dissector selection itself is a registry lookup
@@ -467,7 +428,7 @@ class LybraEngineManager(ScanManager):
                 continue
 
             findings.append(self._fingerprint_finding(service, result.product, result.version, result.label))
-            if not service.product and result.product and result.version:
+            if result.product and result.version:
                 service = replace(service, product=result.product, version=result.version)
             updated.append(service)
 
@@ -475,22 +436,15 @@ class LybraEngineManager(ScanManager):
 
     @staticmethod
     def _fingerprint_finding(service, product: Optional[str], version: Optional[str], label: str) -> dict:
-        """Build an informational Finding comparing our fingerprint to Nmap's.
+        """Build an informational Finding stating what Lybra identified.
 
-        Nmap-sourced services carry a product/version to compare against; a
-        self-discovered service (Fase T, no Nmap involved) has neither, and
-        ``agrees_with_nmap`` would flatly return False for lack of a baseline —
-        which reads as "we disagree with Nmap" even though there is nothing to
-        compare. That case gets its own honest phrasing instead.
+        Es una constatación, no un veredicto: dice qué vio el motor y con qué
+        dissector. Antes de L52 el título comparaba la lectura propia con la de
+        Nmap («concuerda / no concuerda con Nmap»), lo que convertía un dato
+        propio en una nota al pie sobre otra herramienta.
         """
         own = f"{product or '?'} {version or ''}".strip()
-        if service.product:
-            agrees = agrees_with_nmap(product, version, service.product, service.version)
-            nmap = f"{service.product or '?'} {service.version or ''}".strip()
-            verdict = "concuerda con Nmap" if agrees else "no concuerda con Nmap"
-            title = f"Fingerprint propio ({label}): {own} — {verdict} (Nmap: {nmap})"
-        else:
-            title = f"Fingerprint propio ({label}): {own} (sin datos de Nmap para comparar)"
+        title = f"Fingerprint propio ({label}): {own}"
         return {
             "title":        title,
             "category":     "fingerprint",
@@ -602,65 +556,6 @@ class LybraEngineManager(ScanManager):
             return (service_or_row.port, protocol, None)
         return (None, protocol, service_or_row.product or None)
 
-    def _launch_deep_corroborators(
-        self, user_id: int,
-        target: str,
-        source: "ServiceSource",
-        services: list[Service]
-    ) -> list:
-        """Fire off Nmap/Nikto/Nuclei as independent corroborator scans (Fase 6).
-
-        Necessarily non-blocking: Nmap and Nikto against a real network target
-        are not instantaneous either, so this cannot be awaited inside this
-        job. Each corroborator becomes an ordinary, independently-tracked
-        ``Scan`` — visible, cancellable and pollable exactly like a
-        user-launched one. The returned ids are stored on the Lybra scan so
-        ``format_scan`` can later merge in whichever corroborator ``Finding``
-        rows are ready.
-
-        - Nmap only when ``source.launches_nmap_corroborator`` — a fresh Nmap
-          run is redundant when Lybra already has Nmap-sourced ports for this
-          scan (the Nmap-source mode is the only one that says no).
-        - Nikto and Nuclei only if at least one HTTP-like service was found —
-          both are HTTP-only tools (Fase U2: Nuclei gains the exact same
-          condition that already gates Nikto, now that U1 gives it a
-          ``run_scan`` of its own).
-
-        Best-effort per corroborator: a launch failure for one does not affect
-        the others or the Lybra scan itself.
-
-        OpenVAS **used to** launch here unconditionally — the only automatic
-        invocation of it anywhere in the pipeline, and the reason a deep
-        analysis could quietly cost up to four hours. Removed in E0 of the
-        OpenVAS teardown (roadmap §7/§6.3, Ronda 0): with Fase U closed,
-        Nmap + Nikto + Nuclei is the corroborator pool the roadmap targets.
-        """
-        ids: list = []
-
-        if source.launches_nmap_corroborator:
-            try:
-                ports_str = ",".join(str(port) for port in sorted(set(DEFAULT_PORTS)))
-                ids.append(NmapScanManager().run_scan(
-                    target_host=target, target_ports=ports_str, user_id=user_id,
-                ))
-            except Exception:
-                logger.exception("Análisis profundo: fallo al lanzar Nmap corroborador para %s", target)
-
-        if any(is_http_service(service) for service in services):
-            try:
-                ids.append(NiktoScanManager().run_scan(target_domain=target, user_id=user_id))
-            except Exception:
-                logger.exception("Análisis profundo: fallo al lanzar Nikto corroborador para %s", target)
-
-            try:
-                ids.append(NucleiScanManager().run_scan(target=target, user_id=user_id))
-            except Exception:
-                logger.exception("Análisis profundo: fallo al lanzar Nuclei corroborador para %s", target)
-
-        if ids:
-            logger.info("Análisis profundo: lanzados %d escaneos corroboradores para %s", len(ids), target)
-        return ids
-
     # _previous_findings_map: usa el default de ScanManager (A6).
 
     @classmethod
@@ -691,10 +586,10 @@ class LybraEngineManager(ScanManager):
             return finding
 
     def _create_scan_record(
-        self, target: str, user_id: int, source_scan_id: Optional[int] = None,
+        self, target: str, user_id: int,
         programed_scan_id: Optional[int] = None, asset_id: Optional[int] = None,
     ) -> LybraScan:  # pylint: disable=arguments-differ
-        """Create and persist an LybraScan row linked to its source Nmap scan.
+        """Create and persist an LybraScan row.
 
         Delegates to ``ScanManager._create_scan_record`` (A4), passing
         LybraScan's extra columns via ``**extra``. Antes esta clase no
@@ -705,7 +600,7 @@ class LybraEngineManager(ScanManager):
         """
         return super()._create_scan_record(
             target=target, user_id=user_id, programed_scan_id=programed_scan_id,
-            source_scan_id=source_scan_id, asset_id=asset_id,
+            asset_id=asset_id,
         )
 
     def _persist_scan_results(self, uow, scan, domain_data) -> None:
@@ -807,18 +702,10 @@ class LybraEngineManager(ScanManager):
             raise ScanNotFoundError(scan_id)
 
         repo = build_repository(ScanRepository)
-        own_findings = [self._finding_view_dict(finding) for finding in repo.get_findings_by_scan(scan_id)]
-
-        deep_scan_ids = scan.deep_scan_ids or []
-        if deep_scan_ids:
-            corroborator_findings = [
-                self._finding_view_dict(finding)
-                for corroborator_id in deep_scan_ids
-                for finding in repo.get_findings_by_scan(corroborator_id)
-            ]
-            display_findings = merge_findings(own_findings + corroborator_findings)
-        else:
-            display_findings = own_findings
+        # Todos los hallazgos de un escaneo Lybra son de Lybra: hasta L52 aquí
+        # se fundían además los de los escaneos corroboradores (Nmap/Nikto/
+        # Nuclei) que el "análisis profundo" lanzaba, bajo la firma de Lybra.
+        display_findings = [self._finding_view_dict(finding) for finding in repo.get_findings_by_scan(scan_id)]
 
         exposure = self.exposure_for(scan)
         target_authorized = bool(
@@ -831,12 +718,7 @@ class LybraEngineManager(ScanManager):
             "id": scan.id,
             "scanType": "lybra",
             "target": scan.target,
-            "sourceScanId": scan.source_scan_id,
             "assetId": scan.asset_id,
-            # "deep"/"deepScanIds" son claves de respuesta: contrato de la API,
-            # no acompañan al renombrado de ``is_deep_analysis``.
-            "deep": bool(deep_scan_ids),
-            "deepScanIds": deep_scan_ids,
             "exposure": exposure,
             "targetAuthorized": target_authorized,
             "status": getattr(scan, "status", "unknown"),

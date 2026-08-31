@@ -22,11 +22,20 @@ surprise:
   negotiate simply yields no identification here, same as any other
   unrecognised response.
 
-**Unverified against a live server** — this codebase's test environment has
-no Docker-backed SMB target (see the concordance bench's own honesty note for
-FTP's equivalent gap). The parser is exercised only against a hand-built byte
-fixture matching the spec's documented offsets; validate against a real
-Samba/Windows target before relying on this in a real scan.
+**Verificado contra un Samba real** (L49, banco de concordancia): el
+negociado funciona —el dissector habla con un ``dperson/samba`` de verdad y
+lee dialecto ``3.0.2`` y modo de seguridad, exactamente lo que los offsets
+predecían—, así que el parser deja de ser una afirmación apoyada sólo en un
+fixture escrito a mano por quien lo escribió.
+
+Lo que esa verificación sí destapó es otra cosa: **lo que este dissector
+devuelve como ``product`` no es un producto**. Es una descripción del
+protocolo en castellano (``"SMB2 (firma no requerida)"``) y, como ``version``,
+el dialecto negociado. Nmap, sobre el mismo servidor, devuelve ``Samba smbd``
+y ``4``. Las dos lecturas son correctas y ninguna contradice a la otra, pero
+responden a preguntas distintas, y la de aquí no sirve para resolver un CPE
+—que es lo que la detección por versión necesita—. Está medido y documentado
+en ``tests/oracle/test_lybra_concordance_bench.py``.
 """
 
 from __future__ import annotations

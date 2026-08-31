@@ -79,8 +79,7 @@ def _seed_kb_apache_cve(app):
 def _run_pending_scan(app, scan_id, services):
     """Ejecuta el cuerpo del escaneo que la TaskQueue falsa no encoló."""
     with app.app_context():
-        LybraEngineManager()._run_lybra(scan_id, source_scan_id=None, discover_ports=None,
-                                       is_deep_analysis=False, services_payload=services)
+        LybraEngineManager()._run_lybra(scan_id, services_payload=services)
 
 
 def _analyze(app, user, asset_id):

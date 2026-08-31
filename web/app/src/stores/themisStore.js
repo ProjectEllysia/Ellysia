@@ -58,7 +58,6 @@ export const useThemisStore = defineStore('themis', () => {
   })
 
   // Escaneos Nmap terminados, para el modo "analizar un Nmap existente" de Lybra.
-  const sourceNmapScans = reactive({ items: [], loading: false, error: null })
 
   // Registro de objetivos autorizados (roadmap §6): gate legal por-usuario que
   // desbloquea el autodescubrimiento, el fingerprinting propio y las
@@ -302,24 +301,6 @@ export const useThemisStore = defineStore('themis', () => {
     return loadScans('agentLybra')
   }
 
-  /**
-   * Carga los escaneos Nmap TERMINADOS del usuario, para poblar el desplegable
-   * del modo "analizar un Nmap existente". Reutiliza el endpoint de resultados
-   * y filtra por estado finished (solo un Nmap acabado tiene puertos que analizar).
-   */
-  async function loadSourceNmapScans() {
-    sourceNmapScans.loading = true
-    try {
-      const params = new URLSearchParams({ type: 'nmap', page: 1, per_page: 100 })
-      const res = await apiFetch(`/themis/results?${params}`)
-      if (!res?.ok) { sourceNmapScans.items = []; sourceNmapScans.error = 'No se pudieron cargar los escaneos Nmap.'; return }
-      const data = await res.json()
-      sourceNmapScans.items = (data.results ?? []).filter(s => s.status === 'finished')
-      sourceNmapScans.error = null
-    } catch { sourceNmapScans.items = []; sourceNmapScans.error = 'Error de conexión.' }
-    finally { sourceNmapScans.loading = false }
-  }
-
   /** Carga el registro de objetivos autorizados del usuario. */
   async function loadAuthorizedTargets() {
     authorizedTargets.loading = true
@@ -367,10 +348,11 @@ export const useThemisStore = defineStore('themis', () => {
   }
 
   /**
-   * Lanza un escaneo Lybra. El payload lleva UNO de los dos modos:
-   *   - { sourceScanId }         → analizar un Nmap previo
-   *   - { target, ports? }       → autodescubrimiento
-   * más flags comunes: { deep, timeout }.
+   * Lanza un escaneo Lybra: { target, ports?, timeout }.
+   *
+   * Hubo un segundo modo, { sourceScanId }, que analizaba los servicios de un
+   * escaneo Nmap previo, y un flag { deep } que lanzaba Nmap, Nikto y Nuclei
+   * como corroboradores. Ambos se retiraron en L52.
    */
   async function launchLybra(payload) {
     launching.value = true
@@ -808,7 +790,6 @@ export const useThemisStore = defineStore('themis', () => {
       Object.assign(scans[type], { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null })
     }
 
-    Object.assign(sourceNmapScans, { items: [], loading: false, error: null })
     Object.assign(authorizedTargets, { items: [], loading: false, error: null })
 
     Object.assign(preview, { show: false, scanId: null, type: '', scan: null, docs: [], docsLoading: false, traceroute: null, tracerouteLoading: false })
@@ -818,14 +799,14 @@ export const useThemisStore = defineStore('themis', () => {
   }
 
   return {
-    world, setWorld, sourceNmapScans,
+    world, setWorld,
     authorizedTargets, loadAuthorizedTargets, addAuthorizedTarget, removeAuthorizedTarget,
     activeTab, stats, loadingStats, statsError, scans, launching,
     preview, details,
     viewMode,
     loadStats, loadScans, switchTab, refreshCurrent, goToPage, stopScanPolling,
     launchNmap, launchNikto, launchNuclei,
-    launchLybra, loadLybraScans, loadMoreLybraScans, loadSourceNmapScans, deleteLybraScan,
+    launchLybra, loadLybraScans, loadMoreLybraScans, deleteLybraScan,
     selectedAssetId, selectAgentAsset, loadAgentScans,
     lybraDocs, loadLybraDocs, generateLybraPdf, deleteLybraDoc,
     deleteScan, cancelScan,

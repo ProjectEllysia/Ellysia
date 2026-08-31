@@ -38,10 +38,14 @@ Requiere Docker, como el resto del paquete ``oracle``. Se salta entero si falta.
 from __future__ import annotations
 
 import contextlib
+import socket
+import time
 from dataclasses import dataclass, field
 from typing import Iterator, Optional, Set
 
 import pytest
+
+from src.modules.features.themis.lybra.checks import HttpProbe, negotiates_tls
 
 from ._docker_helpers import resolve_docker, docker_run, docker_rm, wait_for_port, port_is_free
 from .test_lybra_oracle_bench import _run_self_discovery, _tls_container_cmd
@@ -86,6 +90,31 @@ def _serve(files: dict) -> str:
     return " && ".join(parts)
 
 
+def _tls_serve(files: dict) -> str:
+    """Como :func:`_serve`, pero sirviendo por HTTPS con un certificado propio.
+
+    El certificado se genera dentro del contenedor al arrancar, igual que en
+    ``_tls_container_cmd``; lo que cambia es que aquí el docroot lleva ficheros
+    en vez de un ``return 200``.
+    """
+    parts = ["apk add --no-cache openssl >/dev/null 2>&1"]
+    parts.append(
+        "openssl req -x509 -nodes -days 365 -newkey rsa:2048 "
+        "-keyout /etc/nginx/tls.key -out /etc/nginx/tls.crt "
+        "-subj /CN=lybra-precision-tls >/dev/null 2>&1"
+    )
+    for path, body in files.items():
+        parts.append(f"mkdir -p /usr/share/nginx/html/$(dirname {path})")
+        parts.append(f"printf '%s' '{body}' > /usr/share/nginx/html/{path}")
+    parts.append(
+        "printf '%s' 'server { listen 443 ssl; ssl_certificate /etc/nginx/tls.crt; "
+        "ssl_certificate_key /etc/nginx/tls.key; root /usr/share/nginx/html; }' "
+        "> /etc/nginx/conf.d/default.conf"
+    )
+    parts.append("nginx -g 'daemon off;'")
+    return " && ".join(parts)
+
+
 _HARDENED_CONF = (
     "printf '%s' 'server { listen 80; "
     'add_header Strict-Transport-Security "max-age=31536000" always; '
@@ -106,6 +135,102 @@ _DECOY_FILES = {
     "backup.sql": "un fichero de texto cualquiera",
     "server-status": "no es mod_status",
 }
+
+
+# Los siete ficheros que los checks de ``exposed_path`` buscan, con el contenido
+# que cada uno pide de verdad. Hasta ahora sólo tres de los siete llegaban a
+# dispararse en el banco (git, dotenv y sql): los otros cuatro se medían
+# únicamente por su ausencia, que no prueba que sepan reconocer lo que buscan.
+_REAL_EXPOSURES = {
+    ".git/config": "[core]\n\trepositoryformatversion = 0\n",
+    ".env": "SECRET_KEY=abc123\nDB_PASSWORD=hunter2\n",
+    "phpinfo.php": "<h1>phpinfo()</h1> PHP Version 8.1.2",
+    "wp-config.php": "define(DB_NAME, wordpress); define(DB_PASSWORD, hunter2);",
+    "id_rsa": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\n",
+    "backup.sql": "-- MySQL dump 10.13\nCREATE TABLE users (id int);\nINSERT INTO users VALUES (1);\n",
+    "server-status": "<h1>Apache Server Status for localhost</h1>",
+}
+
+_ALL_EXPOSURE_CHECKS = {
+    "lybra:git-config-exposure@1",
+    "lybra:dotenv-exposure@1",
+    "lybra:phpinfo-exposure@1",
+    "lybra:wpconfig-source-exposure@1",
+    "lybra:ssh-private-key-exposure@1",
+    "lybra:sql-backup-exposure@1",
+    "lybra:apache-server-status-exposure@1",
+}
+
+
+def _catch_all(body: str, status: int = 200) -> str:
+    """nginx que responde lo mismo a **cualquier** ruta.
+
+    El señuelo más duro que existe para la familia ``exposed_path``: sus siete
+    checks piden un 200 en una ruta concreta, y aquí todas devuelven 200. Lo
+    único que puede salvar al motor de siete falsos positivos de golpe es que
+    mire el cuerpo y no el código de estado.
+    """
+    return (
+        "printf '%s' 'server { listen 80; "
+        f'location / {{ return {status} "{body}"; }} }}\' > /etc/nginx/conf.d/default.conf '
+        "&& nginx -g 'daemon off;'"
+    )
+
+
+# Un WAF delante no devuelve 404 a lo que bloquea: devuelve 200 con su propia
+# página. Es el caso realista del catch-all, y el que más se parece a lo que un
+# escáner encuentra en un despliegue de producción.
+_WAF_BLOCK_PAGE = (
+    "<html><head><title>Access Denied</title></head><body>"
+    "Request blocked by security policy. Reference ID 8f21ac. "
+    "If you believe this is an error, contact your administrator."
+    "</body></html>"
+)
+
+# Un CDN por delante: cabeceras propias del proveedor, ninguna de seguridad.
+_CDN_CONF = (
+    "printf '%s' 'server { listen 80; "
+    'add_header Server cloudflare always; '
+    'add_header CF-RAY 8f21ac0000000000-MAD always; '
+    'location / { return 200 "ok"; } }\' > /etc/nginx/conf.d/default.conf '
+    "&& nginx -g 'daemon off;'"
+)
+
+# Un proxy inverso que reescribe cabeceras y pone **una** de las tres. El caso
+# de despliegue real más frecuente, y el que distingue "el motor mira las
+# cabeceras" de "el motor da por hecho que no hay ninguna".
+_PARTIAL_HEADERS_CONF = (
+    "printf '%s' 'server { listen 80; "
+    'add_header X-Frame-Options SAMEORIGIN always; '
+    'add_header X-Forwarded-Proto https always; '
+    'location / { return 200 "ok"; } }\' > /etc/nginx/conf.d/default.conf '
+    "&& nginx -g 'daemon off;'"
+)
+
+def _redirect_conf() -> str:
+    """nginx que redirige la raíz a una página que sí sirve un 200.
+
+    Sin comillas dentro de la configuración a propósito: van embebidas en una
+    cadena de shell que a su vez va dentro de una cadena de Python, y la primera
+    versión de esto llegaba a nginx con las comillas escapadas, la configuración
+    no parseaba y el contenedor moría al arrancar. El síntoma era el peor
+    posible — "conexión rechazada" en cada sonda, o sea tres falsos negativos
+    que parecían un fallo del motor.
+    """
+    return (
+        "printf '%s' 'server { listen 80; root /usr/share/nginx/html; "
+        "location = / { return 301 /index.html; } }' > /etc/nginx/conf.d/default.conf "
+        "&& nginx -g 'daemon off;'"
+    )
+
+
+# Autenticación delante: todo responde 401. Ni las rutas expuestas ni las
+# cabeceras deben producir nada — el motor no ha llegado a ver ningún recurso.
+_BASIC_AUTH_CONF = (
+    "printf '%s' 'server { listen 80; "
+    'location / { return 401 "authentication required"; } }\' '
+    "> /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
+)
 
 
 @dataclass(frozen=True)
@@ -173,6 +298,83 @@ _CATALOGUE = (
         command=None,
         expected=set(_HEADERS),
     ),
+    Target(
+        name="nginx-todo-expuesto",
+        image="nginx:alpine",
+        command=_serve(_REAL_EXPOSURES),
+        expected=_HEADERS | _ALL_EXPOSURE_CHECKS,
+    ),
+    Target(
+        name="tls-todo-expuesto",
+        image="nginx:alpine",
+        # Las mismas siete rutas, pero servidas por HTTPS. Hasta ahora ningún
+        # check de ``exposed_path`` se ejercitaba nunca sobre TLS, que es como
+        # sirve la mayoría de los sitios reales — y es justo el camino donde la
+        # detección de esquema por observación (#268) decide si la sonda habla
+        # en claro o cifrado.
+        command=_tls_serve(_REAL_EXPOSURES),
+        expected=_HEADERS | _ALL_EXPOSURE_CHECKS | {"lybra:tls-self-signed-cert@1"},
+        tls=True,
+    ),
+    # --- señuelos duros: un 200 en todas las rutas que los checks piden ---
+    Target(
+        name="nginx-catch-all",
+        image="nginx:alpine",
+        command=_catch_all("ok"),
+        expected=set(_HEADERS),
+    ),
+    Target(
+        name="nginx-waf",
+        image="nginx:alpine",
+        command=_catch_all(_WAF_BLOCK_PAGE),
+        expected=set(_HEADERS),
+    ),
+    Target(
+        name="nginx-git-vacio",
+        image="nginx:alpine",
+        command=_serve({".git/config": ""}),
+        expected=set(_HEADERS),
+    ),
+    Target(
+        name="nginx-env-documentado",
+        image="nginx:alpine",
+        # Un .env de ejemplo, con instrucciones en vez de variables: el nombre y
+        # el 200 son idénticos a los del caso real, y sólo el anclaje de la
+        # expresión regular (mayúscula al principio de línea) los separa.
+        command=_serve({".env": "copia este fichero y rellena los valores antes de desplegar"}),
+        expected=set(_HEADERS),
+    ),
+    Target(
+        name="nginx-auth-basica",
+        image="nginx:alpine",
+        command=_BASIC_AUTH_CONF,
+        expected=set(),
+    ),
+    # --- variación de despliegue real ---
+    Target(
+        name="nginx-tras-cdn",
+        image="nginx:alpine",
+        command=_CDN_CONF,
+        expected=set(_HEADERS),
+    ),
+    Target(
+        name="nginx-cabeceras-parciales",
+        image="nginx:alpine",
+        command=_PARTIAL_HEADERS_CONF,
+        expected={
+            "lybra:missing-hsts-header@1",
+            "lybra:missing-x-content-type-options-header@1",
+        },
+    ),
+    Target(
+        name="nginx-redirige",
+        image="nginx:alpine",
+        # HTTP -> otra ruta. La sonda sigue la redirección, así que lo que se
+        # juzga son las cabeceras del destino, no las del 301: el caso realista
+        # de un sitio que redirige a su portada.
+        command=_redirect_conf(),
+        expected=set(_HEADERS),
+    ),
     # --- familia tls ---
     Target(
         name="tls-autofirmado",
@@ -191,6 +393,50 @@ _CATALOGUE = (
 )
 
 
+def _wait_until_serving(port: int, tls: bool, label: str = "", timeout: float = 180.0) -> None:
+    """Esperar a que el servidor conteste **su protocolo**, no a que el puerto acepte.
+
+    El proxy de Docker acepta la conexión TCP en cuanto existe la red del
+    contenedor, mucho antes de que nginx haya terminado de arrancar — y estos
+    objetivos hacen ``apk add`` y generan un certificado antes de servir nada.
+    ``wait_for_port`` da por listo un contenedor que todavía se está instalando.
+
+    Eso no producía un error sino una **medición de menos**, que es peor. El
+    motor recorre las familias en orden: la sonda HTTP salía primero, fallaba
+    contra un servidor que aún no existía y devolvía ``None`` —ningún check de
+    cabeceras podía dispararse—, y cuando un segundo después le tocaba a la
+    sonda TLS, nginx ya estaba en pie y el check de certificado sí funcionaba.
+    El banco reportaba tres falsos negativos por objetivo TLS y ningún fallo.
+
+    Es la tercera vez que esta carrera muerde en este paquete (#265, L49), y
+    siempre con la misma cara: se lee como "el motor no detectó".
+
+    La comprobación es deliberadamente **cruda** —un socket y una línea de
+    estado, o un handshake TLS— y no reutiliza ``HttpProbe``: el arnés no puede
+    decidir si un objetivo está listo usando la misma pieza que está midiendo.
+    Un objetivo que redirige la raíz demostró justo eso, porque ``HttpProbe``
+    no le devuelve nada (ver ``test_a_redirecting_root_still_gets_judged``).
+    """
+    deadline = time.monotonic() + timeout
+    last = "sin intentos"
+    while time.monotonic() < deadline:
+        try:
+            if tls:
+                if negotiates_tls("127.0.0.1", port, timeout=3.0):
+                    return
+                last = "el puerto acepta pero todavía no habla TLS"
+            else:
+                with socket.create_connection(("127.0.0.1", port), timeout=3.0) as sock:
+                    sock.sendall(b"GET / HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+                    if sock.recv(16).startswith(b"HTTP/"):
+                        return
+                last = "responde algo que no es HTTP"
+        except OSError as exc:
+            last = str(exc)
+        time.sleep(1.0)
+    raise TimeoutError(f"[{label}] 127.0.0.1:{port} aceptó pero no sirvió su protocolo en {timeout}s ({last})")
+
+
 @contextlib.contextmanager
 def _running(target: Target) -> Iterator[int]:
     """Levanta el contenedor de ``target``, espera a su puerto y lo tira al salir."""
@@ -206,6 +452,7 @@ def _running(target: Target) -> Iterator[int]:
     docker_run(_DOCKER, *args)
     try:
         wait_for_port("127.0.0.1", port)
+        _wait_until_serving(port, tls=target.tls, label=target.name)
         yield port
     finally:
         docker_rm(_DOCKER, name)
@@ -268,3 +515,39 @@ def test_fase_r_precision_over_labelled_catalogue(app, admin_user, monkeypatch):
     print(report)
 
     assert precision >= _PRECISION_THRESHOLD, report
+
+    # Y, por encima del umbral del roadmap, un guardarraíl contra la deriva.
+    #
+    # El 0,9 se fijó cuando el banco tenía 30 detecciones. Con 68 hacen falta
+    # más de siete falsos positivos para bajar de ahí, así que una regresión
+    # pequeña —un matcher que se relaja, un check nuevo mal escrito— pasaría
+    # inadvertida mientras el número sigue "por encima del umbral". Comprobado
+    # a mano: relajar tres matchers a propósito produjo falsos positivos y el
+    # test seguía en verde.
+    #
+    # El valor medido es 0 desde que existe el banco, así que cualquier falso
+    # positivo es una regresión y no ruido. Un banco que no puede ponerse rojo
+    # no protege de nada.
+    assert false_positives == 0, report
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "HttpProbe.fetch devuelve None contra un servidor cuya raíz redirige, así "
+    "que ninguno de los tres checks de cabeceras llega a evaluarse. Que el feed "
+    "acepte 301 y 302 como estados válidos demuestra que la intención era "
+    "justamente juzgarlos. El efecto es un punto ciego grande y silencioso: un "
+    "sitio que redirige la raíz —HTTP a HTTPS, / a /login, apex a www— no "
+    "recibe ni un hallazgo de esta familia, y el escaneo termina en verde."
+))
+def test_a_redirecting_root_still_gets_judged(app, admin_user, monkeypatch):
+    """El caso de despliegue más común que el catálogo destapó.
+
+    Se prueba aparte y no dentro del agregado porque es un fallo de la **sonda**,
+    no de los checks: los tres se evalúan bien en cuanto reciben una respuesta.
+    Dentro del cómputo sería un falso negativo más entre otros; aquí es una
+    afirmación con nombre que se pondrá en verde el día que se arregle.
+    """
+    target = next(item for item in _CATALOGUE if item.name == "nginx-redirige")
+    with _running(target) as port:
+        findings = _run_self_discovery(app, admin_user, "127.0.0.1", port, monkeypatch)
+    assert _measured_check_ids(findings) >= _HEADERS

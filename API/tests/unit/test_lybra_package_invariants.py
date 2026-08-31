@@ -1,5 +1,9 @@
-"""Invariantes estructurales de ``themis/lybra/`` (D1 en
-plans/deuda-tecnica-y-calidad.md).
+"""Invariantes estructurales del motor Lybra (D1 en
+plans/deuda-tecnica-y-calidad.md, y L52).
+
+Son dos, y protegen cosas distintas: que la capa pura ``themis/lybra/`` no
+toque el ORM, y que la capa con efectos ``themis/managers/lybra/`` no dependa
+de ningún otro escáner.
 
 El propio docstring del paquete lo declara: "Everything here is deliberately
 free of the ORM and of network side effects where it can be". Es la única
@@ -49,4 +53,51 @@ def test_lybra_package_stays_orm_free():
     assert not offenders, (
         "themis/lybra/ debe quedarse libre de ORM (ver su __init__.py) — "
         "el código con acceso a BD va en themis/managers/:\n" + "\n".join(offenders)
+    )
+
+
+# ---------------------------------------------------------------- L52: sin
+# dependencia de otros escáneres
+
+_LYBRA_MANAGERS = (
+    Path(__file__).resolve().parents[2]
+    / "src" / "modules" / "features" / "themis" / "managers" / "lybra"
+)
+
+# Los managers de los otros tres escáneres de Themis. Que Themis orqueste
+# varios escáneres es sano: es su trabajo. Que **el motor** dependa de sus
+# hermanos no lo es — y es exactamente lo que pasaba: el módulo más nuevo
+# importaba los tres más viejos para lanzarlos como "corroboradores" de sus
+# propios hallazgos.
+_SIBLING_SCANNER_MANAGERS = (
+    "NmapScanManager",
+    "NiktoScanManager",
+    "NucleiScanManager",
+)
+
+
+def test_lybra_manager_does_not_depend_on_other_scanners():
+    """L52: un escaneo de Lybra no lanza ningún otro escaneo.
+
+    Esta es la parte del arreglo que sobrevive al tiempo. Retirar el código fue
+    lo fácil; lo que impide que vuelva a entrar dentro de seis meses —que es
+    justo como entró la primera vez, un import cada vez— es que el import
+    falle en CI en lugar de pasar por una revisión distraída.
+    """
+    offenders = []
+    for path in _LYBRA_MANAGERS.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        source = path.read_text(encoding="utf-8")
+        for manager in _SIBLING_SCANNER_MANAGERS:
+            for line in source.splitlines():
+                stripped = line.strip()
+                if manager in stripped and (stripped.startswith("import ")
+                                            or stripped.startswith("from ")):
+                    offenders.append(f"{path.relative_to(_LYBRA_MANAGERS)}: importa {manager}")
+
+    assert not offenders, (
+        "themis/managers/lybra/ no debe importar el manager de otro escáner: "
+        "Lybra es un motor independiente, no un orquestador de herramientas "
+        "ajenas (L52).\n" + "\n".join(offenders)
     )

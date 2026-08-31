@@ -222,8 +222,6 @@ class FindingsPrintingStrategy(PrintingStrategy):
             ["Objetivo:", str(getattr(scan, "target", ""))],
             ["Exposición:", exposure_label],
         ]
-        if getattr(scan, "source_scan_id", None):
-            target_info.append(["Analiza escaneo Nmap:", f"#{scan.source_scan_id}"])
         target_table = theme.kv_table(target_info, col_widths=[2 * inch, 4 * inch])
         elements.append(target_table)
         elements.append(Spacer(1, 0.1 * inch))

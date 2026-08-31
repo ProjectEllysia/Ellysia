@@ -44,11 +44,6 @@ best value-for-effort in the roadmap:
     protocol N+1 means decorating its class, not editing a list here or in
     the manager.
 
-``concordance``
-    The protocol-agnostic "does our fingerprint match Nmap's?" comparison and
-    aggregate metric every dissector above shares — see its own docstring for
-    the governing principle (Nmap stays the oracle until a family's
-    concordance is proven).
 
 That said, a service found by Lybra's own transport (Fase T, no Nmap
 involved) never had a Nmap reading to defer to in the first place — it carries
@@ -72,7 +67,7 @@ banner and are deferred alongside them.
 
 from __future__ import annotations
 
-from .dispatch import Dissector, DissectorResult
+from .dispatch import Dissector, DissectorResult, QOD_FINGERPRINT
 from .registry import register_dissector, default_dissectors
 from .http import (
     HttpFingerprint,
@@ -149,11 +144,6 @@ from .snmp import (
     SnmpProbe,
     SnmpDissector,
 )
-from .concordance import (
-    QOD_FINGERPRINT,
-    agrees_with_nmap,
-    concordance_rate,
-)
 
 __all__ = [
     "Dissector",
@@ -216,6 +206,4 @@ __all__ = [
     "SnmpProbe",
     "SnmpDissector",
     "QOD_FINGERPRINT",
-    "agrees_with_nmap",
-    "concordance_rate",
 ]
