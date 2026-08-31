@@ -821,15 +821,40 @@ def test_generate_ai_summary_rejects_unfinished_analysis(monkeypatch):
 
 
 def test_generate_ai_summary_submits_task_for_finished_analysis(monkeypatch):
+    """B10 añadió dos pasos con estado a esta función —reclamar la fila y
+    cobrar cuota— que un test sin base de datos no puede ejercitar.
+
+    Aquí se sustituyen los dos por dobles para que el test siga siendo lo que
+    era: la comprobación de que el trabajo se encola con los argumentos y la
+    categoría correctos. La idempotencia y el reembolso, que son lo que esos
+    pasos aportan, se prueban contra la base de datos real en
+    ``tests/integration/test_iris_ai_summary.py``.
+    """
     from types import SimpleNamespace
-    fake_analysis = SimpleNamespace(id=10, status="finished")
+    import src.modules.features.iris.managers.analysis as analysis_mod
+
+    fake_analysis = SimpleNamespace(id=10, status="finished", ai_summary=None)
     monkeypatch.setattr(
         IrisManager, "assert_analysis_ownership",
         classmethod(lambda cls, analysis_id, user_id: fake_analysis),
     )
+    monkeypatch.setattr(
+        IrisManager, "_claim_ai_summary",
+        staticmethod(lambda analysis_id, regenerate=False: True),
+    )
+    monkeypatch.setattr(IrisManager, "_update_analysis",
+                        lambda self, analysis_id, **fields: True)
+
+    class _FreeQuota:
+        def consume(self, user_id, key, amount=1): pass
+        def refund(self, user_id, key, amount=1): pass
+
+    monkeypatch.setattr(analysis_mod, "QuotaManager", _FreeQuota)
+
     fake_queue = _FakeTaskQueue()
     IrisManager(task_queue=fake_queue).generate_ai_summary(analysis_id=10, user_id=1)
-    assert fake_queue.submitted["args"] == (10,)
+
+    assert fake_queue.submitted["args"] == (10, 1)
     assert fake_queue.submitted["category"] == "iris.ai_summary"
 
 
