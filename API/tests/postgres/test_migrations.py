@@ -67,25 +67,11 @@ def alembic_config(migrations_url):
     return config
 
 
-def test_the_migration_graph_is_linear_and_has_one_head():
-    """Un segundo head significa dos ramas de esquema sin mezclar: el arranque
-    de la aplicación falla y hay que resolverlo a mano.
-
-    Y los identificadores de este repositorio se han venido escribiendo a mano
-    siguiendo un patrón (``a1b2c3d4e5f6``, ``d7e8f9a0b1c2``…), que es justo el
-    modo de acabar con dos revisiones con el mismo identificador — ha pasado.
-    """
-    from alembic.config import Config
-    from alembic.script import ScriptDirectory
-
-    config = Config(os.path.join(_api_dir(), "alembic.ini"))
-    config.set_main_option("script_location", os.path.join(_api_dir(), "alembic"))
-    script = ScriptDirectory.from_config(config)
-
-    assert len(script.get_heads()) == 1, f"se esperaba un head, hay {script.get_heads()}"
-
-    identifiers = [revision.revision for revision in script.walk_revisions()]
-    assert len(identifiers) == len(set(identifiers)), "hay identificadores repetidos"
+# La forma del grafo (una cabeza, sin identificadores repetidos, sin
+# referencias rotas) se comprueba en ``tests/unit/test_alembic_graph.py``: no
+# necesita motor, y el momento útil para enterarse es al juntar dos ramas, no
+# cuando alguien tiene PostgreSQL levantado. Aquí se queda lo que sí exige un
+# motor real: **ejecutar** las migraciones.
 
 
 @pytest.mark.xfail(
