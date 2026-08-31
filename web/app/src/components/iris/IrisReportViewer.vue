@@ -87,6 +87,25 @@
       <!-- Score + Verdict hero -->
       <IrisVerdictHero :score="reportData.totalScore" :verdict="reportData.verdict" />
 
+      <!-- Análisis degradado (B05): alguna regla no llegó a ejecutarse, así que
+           una parte del mensaje no se ha inspeccionado. Va inmediatamente
+           debajo del veredicto porque lo matiza: quien lea el número grande
+           tiene que saber que se calculó sin parte del examen. -->
+      <div v-if="isDegraded" class="rv-degraded">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="degraded-icon"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <div class="degraded-body">
+          <strong class="degraded-title">Análisis incompleto</strong>
+          <p class="degraded-text">
+            No se pudieron ejecutar {{ failedRuleNames.length }}
+            {{ failedRuleNames.length === 1 ? 'regla' : 'reglas' }}, así que la parte
+            del mensaje que les correspondía no se ha inspeccionado.
+          </p>
+          <p v-if="failedRuleNames.length" class="degraded-rules">
+            {{ failedRuleNames.join(' · ') }}
+          </p>
+        </div>
+      </div>
+
       <!-- Gate reasons: señales de alta confianza que fijaron el veredicto -->
       <div v-if="reportData.gateReasons && reportData.gateReasons.length" class="rv-gates">
         <h3 class="section-title">Por qué este veredicto</h3>
@@ -305,6 +324,17 @@ const rulesWithIndex = computed(() =>
   (props.reportData?.rules ?? []).map((rule, i) => ({ rule, i }))
 )
 const flaggedRules = computed(() => rulesWithIndex.value.filter(entry => entry.rule.verdict !== 'pass'))
+
+// Análisis degradado (B05): alguna regla lanzó una excepción y no llegó a
+// ejecutarse. No es lo mismo que una regla que encontró algo malo —esas
+// aparecen en flaggedRules con su puntuación— sino una parte del mensaje que
+// nadie miró, y por eso el aviso va arriba y no entre los hallazgos.
+const failedRuleNames = computed(() =>
+  (props.reportData?.failedRules ?? []).map(rule => rule.name).filter(Boolean)
+)
+const isDegraded = computed(() =>
+  props.reportData?.analysisQuality === 'degraded' || failedRuleNames.value.length > 0
+)
 const passedRules = computed(() => rulesWithIndex.value.filter(entry => entry.rule.verdict === 'pass'))
 const passedRulesOpen = ref(false)
 
@@ -789,6 +819,48 @@ watch(
 }
 
 /* Gate reasons (por qué este veredicto) */
+.rv-degraded {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+  color: var(--text);
+}
+
+.degraded-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+  color: var(--warn);
+}
+
+.degraded-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.degraded-title {
+  font-size: var(--fs-md);
+}
+
+.degraded-text {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.6;
+}
+
+.degraded-rules {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
 .rv-gates {
   display: flex;
   flex-direction: column;

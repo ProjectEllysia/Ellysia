@@ -46,6 +46,7 @@ from ..services.failures import (
     classify_failure,
 )
 from ..services.parsers import build_path, parse_received_line
+from ..services.quality import AnalysisQuality, assess_quality, cap_verdict, detector_version
 from ..services.ai_writer import IrisAIWriter
 from .notifications import IrisPhishingNotifyManager
 
@@ -288,6 +289,9 @@ class IrisManager(TaskTrackingMixin):
             "wrapperSubject": context.wrapper_subject or None,
             "startedAt": isoformat_utc(analysis.started_at),
             "finishedAt": isoformat_utc(analysis.finished_at),
+            "analysisQuality": analysis.analysis_quality,
+            "failedRules": analysis.failed_rules or [],
+            "detectorVersion": analysis.detector_version,
             "failureCode": analysis.failure_code,
             "failureReason": analysis.failure_reason,
             "user": username,
@@ -575,6 +579,7 @@ class IrisManager(TaskTrackingMixin):
                 "title": analysis_record.title,
                 "status": analysis_record.status,
                 "failureCode": analysis_record.failure_code,
+                "analysisQuality": analysis_record.analysis_quality,
                 "totalScore": analysis_record.total_score,
                 "verdict": analysis_record.verdict,
                 "startedAt": isoformat_utc(analysis_record.started_at), # type: ignore
@@ -706,10 +711,11 @@ class IrisManager(TaskTrackingMixin):
                 chosen = self._evaluate_contexts(analysis_id, context, job, rules_defs)
                 if chosen is None:
                     return  # cancelado: no es un fallo, no hay nada que persistir
-                verdict, total_score, gate_reasons, results = chosen
+                verdict, total_score, gate_reasons, results, quality = chosen
 
                 self._persist_analysis_results(analysis_id, rules_defs, results,
-                                               verdict, total_score, gate_reasons)
+                                               verdict, total_score, gate_reasons,
+                                               quality, detector_version(rules_defs))
             except Exception as e:
                 logger.error(f"Analysis {analysis_id} failed: {e}", exc_info=True)
                 self._fail_analysis(analysis_id, classify_failure(e))
@@ -721,7 +727,7 @@ class IrisManager(TaskTrackingMixin):
             logger.info(f"Analysis {analysis_id} completed: score={total_score}, verdict={verdict}")
 
     def _evaluate_contexts(self, analysis_id: int, context, job, rules_defs: List[dict]
-                           ) -> Optional[tuple[str, float, list[str], List[RuleResult]]]:
+                           ) -> Optional[tuple[str, float, list[str], List[RuleResult], AnalysisQuality]]:
         """Ejecuta el catálogo de reglas y devuelve la evaluación ganadora.
 
         Extraído de :meth:`_run_analysis` al envolver esa función en un único
@@ -730,8 +736,8 @@ class IrisManager(TaskTrackingMixin):
         protegiendo exactamente.
 
         Returns:
-            La tupla ``(verdict, total_score, gate_reasons, results)`` de la
-            evaluación ganadora, o ``None`` si la tarea fue cancelada a mitad
+            La tupla ``(verdict, total_score, gate_reasons, results, quality)``
+            de la evaluación ganadora, o ``None`` si fue cancelada a mitad
             (que no es un fallo: no se persiste nada y la cancelación ya dejó
             su propio estado terminal).
         """
@@ -750,7 +756,7 @@ class IrisManager(TaskTrackingMixin):
         total_steps = len(rules_defs) * len(contexts_to_evaluate)
         completed_steps = 0
 
-        evaluations: List[tuple[str, float, list[str], List[RuleResult]]] = []
+        evaluations: List[tuple[str, float, list[str], List[RuleResult], AnalysisQuality]] = []
         for evaluated_context in contexts_to_evaluate:
             results: List[RuleResult] = []
             named_results: Dict[str, RuleResult] = {}
@@ -788,7 +794,16 @@ class IrisManager(TaskTrackingMixin):
             total_score = self._aggregate_score(rules_defs, results)
             base_verdict = self._determine_verdict(total_score)
             verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
-            evaluations.append((verdict, total_score, gate_reasons, results))
+
+            # B05: una regla que revienta no aborta el análisis, pero tampoco
+            # puede desaparecer sin dejar rastro. La política conservadora se
+            # aplica aquí, junto al resto de gates, para que la degradación se
+            # lea entre los demás motivos del veredicto y no en un rincón
+            # aparte de la interfaz.
+            quality = assess_quality(rules_defs, results)
+            verdict, quality_reasons = cap_verdict(verdict, quality)
+            evaluations.append((verdict, total_score, gate_reasons + quality_reasons,
+                                results, quality))
 
         # Worse verdict wins across contexts; on a tie, keep the first
         # (the unwrapped/inner message — the one ``contexts_to_evaluate``
@@ -802,7 +817,8 @@ class IrisManager(TaskTrackingMixin):
 
     @staticmethod
     def _persist_analysis_results(analysis_id: int, rules_defs: List[dict], results: List[RuleResult],
-                                   verdict: str, total_score: float, gate_reasons: list[str]) -> None:
+                                   verdict: str, total_score: float, gate_reasons: list[str],
+                                   quality: AnalysisQuality, detector: str) -> None:
         """Persist every rule row and the final analysis state in one transaction.
 
         Previously each rule opened (and committed) its own
@@ -834,6 +850,9 @@ class IrisManager(TaskTrackingMixin):
             analysis.total_score = total_score
             analysis.verdict = verdict
             analysis.gate_reasons = gate_reasons
+            analysis.analysis_quality = quality.quality
+            analysis.failed_rules = quality.failed_rules or None
+            analysis.detector_version = detector
             analysis.finished_at = utcnow_naive()
             analysis_repo.update(analysis)
 

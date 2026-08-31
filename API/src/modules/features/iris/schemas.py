@@ -127,6 +127,18 @@ class AiSummarySchema(Schema):
     confidence = fields.String()
 
 
+class FailedRuleSchema(Schema):
+    """Regla que no se pudo **ejecutar** durante un análisis (B05).
+
+    No confundir con una regla que detectó algo: esas van en ``rules`` con su
+    puntuación negativa. Estas son las que lanzaron una excepción, así que su
+    parte del mensaje se quedó sin inspeccionar.
+    """
+    name = fields.String()
+    family = fields.String(load_default=None, allow_none=True)
+    category = fields.String(load_default=None, allow_none=True)
+
+
 class AnalysisDetailResponseSchema(Schema):
     """Full analysis report: headers, per-rule results, verdict."""
     analysisId = fields.Integer()
@@ -136,6 +148,9 @@ class AnalysisDetailResponseSchema(Schema):
     totalScore = fields.Float(load_default=None)
     verdict = fields.String(load_default=None)
     gateReasons = fields.List(fields.String(), load_default=None)
+    analysisQuality = fields.String(load_default=None, allow_none=True)
+    failedRules = fields.List(fields.Nested(FailedRuleSchema), load_default=None)
+    detectorVersion = fields.String(load_default=None, allow_none=True)
     topSignals = fields.List(fields.Nested(TopSignalSchema), load_default=None)
     aiSummary = fields.Nested(AiSummarySchema, load_default=None, allow_none=True)
     unwrappedFromForward = fields.Boolean(load_default=False)
@@ -156,6 +171,7 @@ class AnalysisListItemSchema(Schema):
     title = fields.String(load_default=None)
     status = fields.String()
     failureCode = fields.String(load_default=None, allow_none=True)
+    analysisQuality = fields.String(load_default=None, allow_none=True)
     totalScore = fields.Float(load_default=None)
     verdict = fields.String(load_default=None)
     startedAt = fields.String(load_default=None)

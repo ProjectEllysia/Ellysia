@@ -452,6 +452,43 @@ class IrisPDFCreator:
 
         elements.append(Spacer(1, 0.22 * inch))
 
+    def append_quality_warning(self, elements: list, theme: IrisReportTheme) -> None:
+        """Aviso de análisis degradado (B05), justo debajo del veredicto.
+
+        Va aquí y no entre las señales de más abajo porque contradice
+        parcialmente lo que el lector acaba de leer: el veredicto grande de la
+        portada se calculó sin una parte del examen, y quien imprima el
+        informe tiene que verlo antes de actuar sobre él.
+        """
+        failed_rules = self.report.get("failedRules") or []
+        if self.report.get("analysisQuality") != "degraded" and not failed_rules:
+            return
+
+        names = ", ".join(rule.get("name", "?") for rule in failed_rules) or "desconocidas"
+        warning_style = ParagraphStyle(
+            "IrisQualityWarning", parent=theme.body,
+            textColor=colors.HexColor("#7a4100"),
+        )
+        text = (
+            f"<b>Análisis incompleto.</b> No se pudieron ejecutar estas reglas: "
+            f"{_esc(names)}. La parte del mensaje que les correspondía no se ha "
+            "inspeccionado, así que este informe describe menos de lo que "
+            "describiría un análisis completo."
+        )
+
+        card = Table([[Paragraph(text, warning_style)]], colWidths=[6.4 * inch])
+        card.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF4E5")),
+            ("LINEBEFORE", (0, 0), (0, -1), 3, colors.HexColor("#f57c00")),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#FFD8A8")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 14),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 14),
+            ("TOPPADDING", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ]))
+        elements.append(card)
+        elements.append(Spacer(1, 0.22 * inch))
+
     def append_gate_reasons(self, elements: list, theme: IrisReportTheme) -> None:
         """Señales de alta confianza que fijaron el veredicto (S1).
 
@@ -697,6 +734,7 @@ class IrisPDFCreator:
 
         self.append_cover_page(elements, theme)
         self.append_verdict_hero(elements, theme)
+        self.append_quality_warning(elements, theme)
         self.append_email_preview(elements, theme)
         self.append_gate_reasons(elements, theme)
         self.append_rules(elements, theme)
