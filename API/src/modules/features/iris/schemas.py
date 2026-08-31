@@ -85,12 +85,20 @@ class AnalyzeResponseSchema(Schema):
 
 
 class AnalysisStatusResponseSchema(Schema):
-    """Current lifecycle status and optional progress of an analysis."""
+    """Current lifecycle status and optional progress of an analysis.
+
+    ``failureCode``/``failureReason`` solo viajan cuando ``status`` es
+    ``failed``. Es aquí donde se consultan, y no en el informe completo,
+    porque ``GET /iris/results/<id>`` exige un análisis ``finished``: un
+    análisis que murió no tiene informe que devolver, solo un motivo.
+    """
     analysisId = fields.Integer()
     status = fields.String()
     progress = fields.Integer(load_default=None)
     totalScore = fields.Float(load_default=None)
     verdict = fields.String(load_default=None)
+    failureCode = fields.String(load_default=None, allow_none=True)
+    failureReason = fields.String(load_default=None, allow_none=True)
 
 
 class RuleResultSchema(Schema):
@@ -135,6 +143,8 @@ class AnalysisDetailResponseSchema(Schema):
     wrapperSubject = fields.String(load_default=None, allow_none=True)
     startedAt = fields.String(load_default=None)
     finishedAt = fields.String(load_default=None)
+    failureCode = fields.String(load_default=None, allow_none=True)
+    failureReason = fields.String(load_default=None, allow_none=True)
     user = fields.String()
     rules = fields.List(fields.Nested(RuleResultSchema))
     recommendations = fields.List(fields.String())
@@ -145,6 +155,7 @@ class AnalysisListItemSchema(Schema):
     analysisId = fields.Integer()
     title = fields.String(load_default=None)
     status = fields.String()
+    failureCode = fields.String(load_default=None, allow_none=True)
     totalScore = fields.Float(load_default=None)
     verdict = fields.String(load_default=None)
     startedAt = fields.String(load_default=None)
