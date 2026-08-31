@@ -99,6 +99,7 @@ import IrisForm from '@/components/iris/IrisForm.vue'
 import { useIrisStore } from '@/stores/irisStore'
 import { useToastStore } from '@/stores/toastStore'
 import { parseEml } from '@/composables/useEml'
+import { classifyIntake, formatByteLimit } from '@/components/iris/intake.js'
 
 const store = useIrisStore()
 const toast = useToastStore()
@@ -109,9 +110,13 @@ const archiveOpen = ref(false)
 const prefill = ref(null)
 
 // Fase 2: enviamos el .eml completo (cuerpo, enlaces, adjuntos) para que las
-// reglas de contenido puedan analizarlo. Tope generoso para correos con
-// adjuntos grandes en base64, evitando cargar archivos descomunales.
-const MESSAGE_READ_LIMIT = 20 * 1024 * 1024
+// reglas de contenido puedan analizarlo.
+//
+// B13: el tope ya no se escribe aquí. Era `20 * 1024 * 1024` mientras el
+// backend aplicaba 10 MiB, así que la vista aceptaba ficheros que el API iba
+// a rechazar — después de haberlos leído enteros en memoria. Ahora sale de
+// `GET /iris/capabilities` y la decisión vive en `intake.js`, que es puro y
+// está cubierto por `npm run test:iris`.
 
 // --- Intake por arrastre ---
 // dragDepth cuenta enter/leave para no parpadear sobre los hijos; rejecting
@@ -158,16 +163,17 @@ async function onDrop(e) {
   const file = e.dataTransfer?.files?.[0]
   if (!file) return
 
-  const isEml = /\.eml$/i.test(file.name) || file.type === 'message/rfc822'
-  if (!isEml) {
+  const capabilities = await store.fetchCapabilities()
+  const intake = classifyIntake(file, capabilities)
+  if (!intake.accepted) {
     flashReject()
     toast.show('Solo se aceptan archivos .eml', 'error')
     return
   }
 
   try {
-    const tooBig = file.size > MESSAGE_READ_LIMIT
-    const text = await (tooBig ? file.slice(0, MESSAGE_READ_LIMIT) : file).text()
+    const tooBig = intake.headersOnly
+    const text = await (tooBig ? file.slice(0, intake.limit) : file).text()
     const { rawHeaders, subject } = parseEml(text)
     if (!rawHeaders) {
       flashReject()
@@ -185,7 +191,12 @@ async function onDrop(e) {
     }
     if (store.currentId || store.currentReport.data) store.selectAnalysis(null)
     if (tooBig) {
-      toast.show('Archivo muy grande: solo se cargaron las cabeceras.', 'info')
+      const readable = formatByteLimit(intake.limit)
+      toast.show(
+        `El archivo supera el máximo que admite el servidor${readable ? ` (${readable})` : ''}: `
+        + 'solo se analizarán las cabeceras.',
+        'info',
+      )
     } else {
       toast.show('Correo cargado.', 'success')
     }
@@ -214,6 +225,10 @@ onBeforeUnmount(() => {
 
 onMounted(async () => {
   window.addEventListener('keydown', handleGlobalShortcut)
+  // Los limites del servidor se piden al entrar, no al soltar un fichero: asi
+  // el arrastre decide con el valor real desde el primer intento en vez de
+  // caer al respaldo mientras la peticion esta en vuelo.
+  store.fetchCapabilities()
   await store.fetchResults()
   const last = store.analyses[0]
   if (last && (last.status === 'running' || last.status === 'pending')) {

@@ -17,6 +17,7 @@ PDF export.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from typing import Any, Dict, Optional
@@ -59,6 +60,61 @@ class IrisAIWriter:
     def _build_prompts(self) -> dict:
         return CR.iris_config().prompts.get("summary", {})
 
+    @staticmethod
+    def model_name() -> str:
+        """Qué backend de IA produjo el resumen.
+
+        Es el nombre de la estrategia de scribe configurada para Iris
+        (``ollama``/``openai``/``google``), que es la identidad que la
+        aplicación controla de verdad: el modelo concreto lo elige cada
+        estrategia por su cuenta y puede cambiar bajo los pies sin que aquí se
+        note.
+        """
+        return str(CR.scribe_config().strategy_for("iris"))
+
+    @classmethod
+    def prompt_version(cls) -> str:
+        """Marca del prompt con el que se generó un resumen.
+
+        Los prompts viven en ``SecOpsConfig.json`` y se pueden editar en
+        caliente, así que dos resúmenes guardados pueden venir de instrucciones
+        distintas sin que nada lo delate. Se resume el par
+        (system, userTemplate) para que cualquier edición cambie la marca —
+        mismo criterio que ``detector_version`` con el catálogo de reglas:
+        derivado, no escrito a mano, así que no puede quedarse desactualizado.
+        """
+        prompts = CR.iris_config().prompts.get("summary", {})
+        material = f"{prompts.get('system', '')}\n{prompts.get('userTemplate', '')}"
+        digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
+        return f"iris-summary:{digest}"
+
+    @staticmethod
+    def _degradation_note(report: Dict[str, Any]) -> str:
+        """Aviso que se añade al prompt cuando el análisis fue degradado (B05).
+
+        Va anexado al final del prompt en vez de como marcador de la plantilla
+        porque las plantillas viven en ``SecOpsConfig.json``: un marcador nuevo
+        obligaría a editar la configuración desplegada para que este aviso
+        apareciera, y un despliegue con la plantilla vieja se quedaría
+        silenciosamente sin él — justo el fallo silencioso que B05 corrige.
+
+        Sin esto, el modelo redacta un resumen ejecutivo seguro sobre un
+        análisis que no lo es: no tiene forma de saber que faltan reglas,
+        porque lo único que recibe son las que sí se ejecutaron.
+        """
+        if report.get("analysisQuality") != "degraded":
+            return ""
+        names = ", ".join(
+            rule.get("name", "?") for rule in (report.get("failedRules") or [])
+        ) or "desconocidas"
+        return (
+            "\n\nAVISO IMPORTANTE: este análisis está DEGRADADO. No se pudieron "
+            f"ejecutar estas reglas: {names}. La parte del mensaje que les "
+            "correspondía no se ha inspeccionado. Dilo explícitamente en el "
+            "resumen y no afirmes que el mensaje es seguro basándote en la "
+            "ausencia de hallazgos."
+        )
+
     def _build_user_prompt(self, report: Dict[str, Any]) -> str:
         failed_rules = [
             {
@@ -72,13 +128,14 @@ class IrisAIWriter:
         ]
 
         template = self._build_prompts().get("userTemplate", "")
-        return (
+        prompt = (
             template
             .replace("{{verdict}}", str(report.get("verdict") or "Suspicious"))
             .replace("{{score}}", str(report.get("totalScore")))
             .replace("{{gate_reasons_json}}", json.dumps(report.get("gateReasons") or [], ensure_ascii=False))
             .replace("{{failed_rules_json}}", json.dumps(failed_rules, indent=2, ensure_ascii=False))
         )
+        return prompt + self._degradation_note(report)
 
     def generate(self, report: Dict[str, Any]) -> dict:
         """Generate the AI narrative for a finished analysis report dict.
