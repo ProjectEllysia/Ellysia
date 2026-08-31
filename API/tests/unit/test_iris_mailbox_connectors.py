@@ -225,6 +225,72 @@ def test_graph_list_new_with_cursor_caches_headers_from_delta_response():
     assert raw == "From: a@b.com\r\n"
 
 
+# B12: el deltaLink de Graph es un token opaco que puede rebasar los 255
+# caracteres que la columna `sync_cursor` permitía. Estos tests fijan que el
+# conector lo devuelve intacto — cualquier recorte lo invalida, y un cursor
+# inválido tira la sincronización incremental al bootstrap.
+
+def _long_delta_link(length: int = 900) -> str:
+    """Un deltaLink realista: URL de Graph más un token de estado largo.
+
+    Los deltaLink reales llevan dentro un `$deltatoken` codificado cuyo tamaño
+    depende del estado de la carpeta; 900 caracteres está dentro de lo que
+    devuelve un buzón con actividad, y en todo caso lo que importa aquí es que
+    pase de 255.
+    """
+    return (
+        "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta"
+        "?$deltatoken=" + ("Ag0AAA" + "X" * length)
+    )
+
+
+def test_graph_bootstrap_preserves_a_delta_link_longer_than_255_chars():
+    connector = GraphConnector("https://app.example.com/iris/mailbox/callback")
+    delta_link = _long_delta_link()
+    assert len(delta_link) > 255
+
+    page = _response({"value": [], "@odata.deltaLink": delta_link})
+    with mock.patch("requests.get", return_value=page):
+        _refs, cursor = connector.list_new("access-token", cursor=None)
+
+    assert cursor == delta_link
+
+
+def test_graph_incremental_sync_preserves_a_long_delta_link_exactly():
+    connector = GraphConnector("https://app.example.com/iris/mailbox/callback")
+    previous = _long_delta_link(600)
+    next_link = _long_delta_link(950)
+
+    page = _response({"value": [{"id": "msg-1"}], "@odata.deltaLink": next_link})
+    with mock.patch("requests.get", return_value=page) as get:
+        refs, cursor = connector.list_new("access-token", cursor=previous)
+
+    # El cursor anterior se usa como URL tal cual, sin reconstruirlo.
+    assert get.call_args.args[0] == previous
+    assert len(refs) == 1
+    assert cursor == next_link
+    assert len(cursor) > 255
+
+
+def test_graph_expired_cursor_rebootstraps_instead_of_failing():
+    """410 Gone: el deltaLink cayó fuera de la ventana de retención de Graph.
+
+    La única salida es volver a capturar un cursor desde cero. No se pierde
+    correo local: el bootstrap no hace backfill, solo marca el punto de
+    partida, y los análisis ya ingeridos siguen donde estaban.
+    """
+    connector = GraphConnector("https://app.example.com/iris/mailbox/callback")
+    fresh = _long_delta_link(400)
+
+    gone = _response(status_code=410)
+    bootstrap = _response({"value": [], "@odata.deltaLink": fresh})
+    with mock.patch("requests.get", side_effect=[gone, bootstrap]):
+        refs, cursor = connector.list_new("access-token", cursor=_long_delta_link(300))
+
+    assert refs == []
+    assert cursor == fresh
+
+
 def test_graph_fetch_raw_returns_response_text_directly():
     connector = GraphConnector("https://app.example.com/iris/mailbox/callback")
     resp = _response(text="From: a@b.com\r\nSubject: Hi\r\n\r\nBody")

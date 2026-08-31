@@ -100,3 +100,51 @@ def test_analysis_source_message_uid_unique_per_connection(app, regular_user):
             repo = IrisAnalysisRepository(uow)
             repo.save(IrisAnalysis(raw_headers="From: a@b.com", user_id=regular_user.id))
             repo.save(IrisAnalysis(raw_headers="From: c@d.com", user_id=regular_user.id))
+
+
+# --------------------------------------------------------------- B12: cursor opaco
+
+def test_sync_cursor_column_has_no_length_limit():
+    """B12: la columna era ``String(255)``, pero el ``@odata.deltaLink`` de
+    Microsoft Graph es una URL con un token de estado dentro que la rebasa.
+
+    Esta comprobación mira el **tipo declarado**, no un round-trip, a
+    propósito: la suite corre sobre SQLite, que ignora la longitud de un
+    ``VARCHAR`` y por tanto guardaría feliz un cursor de 900 caracteres
+    incluso con la columna acotada. En PostgreSQL, que es donde corre de
+    verdad, ese INSERT falla. El tipo es lo único que distingue las dos cosas
+    desde aquí.
+    """
+    column_type = IrisMailboxConnection.__table__.c.sync_cursor.type
+
+    assert not getattr(column_type, "length", None), (
+        "sync_cursor volvió a tener un límite de longitud; un deltaLink de "
+        "Graph no cabe y la sincronización incremental se rompe en silencio"
+    )
+
+
+def test_a_long_opaque_cursor_survives_a_round_trip(app, regular_user):
+    """Complemento del anterior: el valor vuelve **exactamente** igual.
+
+    Aunque SQLite no valide la longitud, este test protege contra cualquier
+    recorte o normalización que alguien introdujera en el camino de guardado —
+    el cursor es opaco y un solo carácter de diferencia lo invalida.
+    """
+    cursor = (
+        "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages/delta"
+        "?$deltatoken=" + "Ag0AAA" + "Z" * 1200
+    )
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = IrisMailboxConnectionRepository(uow)
+            connection = _make_connection(regular_user.id, "cursor@outlook.com")
+            connection.provider = "microsoft"
+            connection.sync_cursor = cursor
+            repo.save(connection)
+            connection_id = connection.id
+
+        with UnitOfWork() as uow:
+            fetched = IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
+            assert fetched.sync_cursor == cursor
+            assert len(fetched.sync_cursor) > 255
