@@ -85,6 +85,26 @@ os.environ["REDIS_DB"] = "15"
 os.environ.setdefault("REDIS_HOST", "localhost")
 os.environ.setdefault("OLLAMA_HOST", "http://localhost:11434")
 
+# Credenciales de IA: vacías siempre, en cualquier máquina.
+#
+# ``config_reading`` llama a ``load_dotenv()`` sin ruta, y esa función sube por
+# el árbol de directorios hasta encontrar un ``.env``. En un checkout de
+# desarrollo eso encuentra el ``.env`` de la raíz —el de docker-compose, que
+# CLAUDE.md describe como "la API no lo lee"— y de ahí saca una OPENAI_API_KEY
+# de verdad. En CI no hay ningún ``.env``, porque está en .gitignore.
+#
+# Resultado: un test que construya un writer de IA (``build_generator`` monta
+# la estrategia con credenciales en el constructor) pasaba en local y fallaba en
+# CI, sin que nada en el test dijera que dependía de eso. Es la misma clase de
+# fuga que ya sellan Redis y los sockets salientes: algo del entorno de la
+# máquina decidiendo el resultado.
+#
+# Asignación incondicional, no ``setdefault``: tiene que ganar a lo que traiga
+# el ``.env``. Y basta con dejarlas vacías porque ``load_dotenv`` no sobrescribe
+# una variable que ya existe, aunque su valor sea la cadena vacía.
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["GOOGLE_API_KEY"] = ""
+
 from unittest import mock  # noqa: E402
 
 import pytest  # noqa: E402

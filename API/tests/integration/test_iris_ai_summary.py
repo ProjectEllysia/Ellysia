@@ -18,6 +18,7 @@ from unittest import mock
 import pytest
 
 import src.modules.features.iris.managers.analysis as analysis_mod
+import src.modules.features.iris.services.ai_writer as ai_writer_mod
 from src.modules.features.iris.managers.analysis import IrisManager
 from src.modules.features.iris.model import IrisAnalysis
 from src.modules.features.iris.repositories import IrisAnalysisRepository
@@ -78,6 +79,29 @@ def counting_quota(monkeypatch):
     _CountingQuota.reset()
     monkeypatch.setattr(analysis_mod, "QuotaManager", _CountingQuota)
     return _CountingQuota
+
+
+@pytest.fixture(autouse=True)
+def _inert_ai_backend(monkeypatch):
+    """Construir un ``IrisAIWriter`` no debe necesitar credenciales de OpenAI.
+
+    Los tests de este módulo sustituyen ``IrisAIWriter.generate``, pero eso
+    llega tarde: ``IrisAIWriter.__init__`` llama a ``build_generator("iris")``,
+    que monta la estrategia configurada —OpenAI— y **ésa** sí exige
+    ``OPENAI_API_KEY`` en su constructor. El método sustituido no se alcanzaba
+    nunca.
+
+    En una máquina de desarrollo no se notaba, porque ``load_dotenv()`` sube por
+    el árbol de directorios y encuentra el ``.env`` de la raíz con una clave de
+    verdad. En CI, que no tiene ningún ``.env``, la construcción reventaba, el
+    ``except Exception`` de ``execute_ai_summary_generation`` lo convertía en
+    ``ai_summary_status="failed"``, y el test que esperaba ``"done"`` fallaba.
+
+    Los dos tests que provocan un fallo a propósito también lo agradecen: hasta
+    ahora pasaban en CI por el motivo equivocado —reventaba el constructor, no
+    la generación que decían estar probando—.
+    """
+    monkeypatch.setattr(ai_writer_mod, "build_generator", lambda module=None: object())
 
 
 def _seed_finished_analysis(app, user_id: int, ai_summary=None) -> int:
