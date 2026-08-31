@@ -21,6 +21,7 @@ Not a test module itself (no ``test_`` prefix) — pytest does not collect it.
 
 from __future__ import annotations
 
+import ipaddress
 import shutil
 import subprocess
 import xml.etree.ElementTree as ET
@@ -37,6 +38,27 @@ NMAP_IMAGE = "instrumentisto/nmap"
 # catálogo publican en el host. Docker Desktop resuelve este nombre; en un
 # runner Linux hace falta ``--add-host``, que es lo que añade _docker_args().
 _HOST_FROM_CONTAINER = "host.docker.internal"
+
+
+def _target_from_container(host: str) -> str:
+    """El nombre con el que el contenedor de Nmap alcanza ``host``.
+
+    Un objetivo publicado en el propio host —los contenedores del banco de
+    laboratorio, siempre en 127.0.0.1— no es alcanzable por su IP de loopback
+    desde dentro de otro contenedor: hay que rebotar por ``host.docker.internal``.
+
+    Un objetivo **externo** (el banco de paridad real, L48) se alcanza por su
+    nombre o IP tal cual: sustituirlo por ``host.docker.internal`` haría que el
+    oráculo escaneara la máquina Docker en vez del objetivo, midiendo algo que
+    no tiene nada que ver. Sólo se reescribe loopback.
+    """
+    try:
+        if ipaddress.ip_address(host).is_loopback:
+            return _HOST_FROM_CONTAINER
+    except ValueError:
+        if host in ("localhost", ""):
+            return _HOST_FROM_CONTAINER
+    return host
 
 
 @dataclass(frozen=True)
@@ -79,7 +101,7 @@ def run_nmap_sv(
     else:
         if not docker_path:
             raise RuntimeError("Ni nmap instalado ni Docker disponible para el oráculo")
-        command = [docker_path, "run", "--rm", NMAP_IMAGE, *flags, "-oX", "-", _HOST_FROM_CONTAINER]
+        command = [docker_path, "run", "--rm", NMAP_IMAGE, *flags, "-oX", "-", _target_from_container(host)]
 
     completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=True)
     return parse_nmap_xml(completed.stdout)
