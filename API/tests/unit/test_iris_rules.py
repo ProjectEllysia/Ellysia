@@ -128,27 +128,88 @@ def test_dmarc_missing_is_neutral():
 
 # -------------------------------------------------------------------- ARC (D7)
 
+class _ArcContext:
+    """Contexto mínimo para ``check_arc_chain``.
+
+    B06 pasó la regla a ``needs_context=True``: ya no le basta con las
+    cabeceras, necesita la cadena Received para saber si quien dice haber
+    validado la cadena ARC está por encima de la frontera de confianza.
+    """
+
+    def __init__(self, headers, received_headers=()):
+        self.headers = headers
+        self.received_headers = list(received_headers)
+
+
 def test_arc_missing_is_neutral_missing_verdict():
-    result = check_arc_chain({})
+    result = check_arc_chain(_ArcContext({}))
     assert result.verdict == "missing"
     assert result.score == 0
 
 
 def test_arc_cv_pass_is_positive():
-    result = check_arc_chain({"arc-seal": "i=1; a=rsa-sha256; cv=pass; d=example.com; s=s1; b=xyz"})
+    result = check_arc_chain(_ArcContext(
+        {"arc-seal": "i=1; a=rsa-sha256; cv=pass; d=example.com; s=s1; b=xyz"}))
     assert result.verdict == "pass"
     assert result.score > 0
 
 
+def test_arc_cv_pass_alone_is_not_verified():
+    """B06: `cv=pass` es lo que el mensaje dice de sí mismo.
+
+    Iris no verifica firmas criptográficas, así que esa declaración no puede
+    valer como prueba — cualquiera puede escribirla. La regla sigue
+    reportándola, pero marcada como no verificada.
+    """
+    result = check_arc_chain(_ArcContext(
+        {"arc-seal": "i=1; a=rsa-sha256; cv=pass; d=reenviador.example; s=s1; b=xyz"}))
+    assert result.verdict == "pass"
+    assert result.details["verified"] is False
+    assert result.recommendation  # y se le explica al usuario por qué
+
+
+def test_arc_cv_pass_is_verified_when_a_trusted_hop_confirms_it():
+    """Quien sí valida la cadena es el MTA receptor, que lo apunta como
+    `arc=pass` en su propio Authentication-Results."""
+    result = check_arc_chain(_ArcContext(
+        headers={
+            "arc-seal": "i=1; a=rsa-sha256; cv=pass; d=reenviador.example; s=s1; b=xyz",
+            "authentication-results": "mx.destino.example; arc=pass; spf=fail; dmarc=fail",
+        },
+        received_headers=["from relay.example by mx.destino.example; Mon, 1 Jan 2026 10:00:00 +0000"],
+    ))
+    assert result.verdict == "pass"
+    assert result.details["verified"] is True
+    assert result.recommendation is None
+
+
+def test_arc_confirmation_from_an_untrusted_hop_does_not_count():
+    """Un `arc=pass` firmado por un servidor que solo aparece por debajo de la
+    frontera lo pudo escribir el propio remitente: no verifica nada."""
+    result = check_arc_chain(_ArcContext(
+        headers={
+            "arc-seal": "i=1; a=rsa-sha256; cv=pass; d=malo.example; s=s1; b=xyz",
+            "authentication-results": "mx.malo.example; arc=pass; spf=pass; dmarc=pass",
+        },
+        received_headers=[
+            "from relay.example by mx.destino.example; Mon, 1 Jan 2026 10:00:00 +0000",
+            "from origen.example by mx.malo.example; Mon, 1 Jan 2026 09:59:00 +0000",
+        ],
+    ))
+    assert result.details["verified"] is False
+
+
 def test_arc_cv_fail_is_negative():
-    result = check_arc_chain({"arc-seal": "i=1; a=rsa-sha256; cv=fail; d=example.com; s=s1; b=xyz"})
+    result = check_arc_chain(_ArcContext(
+        {"arc-seal": "i=1; a=rsa-sha256; cv=fail; d=example.com; s=s1; b=xyz"}))
     assert result.verdict == "fail"
     assert result.score < 0
 
 
 def test_arc_cv_none_is_neutral_first_hop():
     # cv=none just means "I'm the first ARC seal in the chain" -- not suspicious.
-    result = check_arc_chain({"arc-seal": "i=1; a=rsa-sha256; cv=none; d=example.com; s=s1; b=xyz"})
+    result = check_arc_chain(_ArcContext(
+        {"arc-seal": "i=1; a=rsa-sha256; cv=none; d=example.com; s=s1; b=xyz"}))
     assert result.verdict == "neutral"
     assert result.score == 0
 
@@ -418,18 +479,38 @@ def test_gating_caps_at_suspicious_on_domain_misalignment():
     assert _gated("Legitimate", named) == "Suspicious"
 
 
-def test_gating_arc_pass_softens_spf_dmarc_alignment_gates():
+def test_gating_verified_arc_pass_softens_spf_dmarc_alignment_gates():
     # D7: a legitimate forward validated by ARC (cv=pass) must not trip
     # the SPF/DMARC/alignment gates that exist to catch spoofing --
     # mailing lists/forwarders routinely break raw SPF/alignment as a
     # side effect of legitimate relaying.
+    #
+    # B06 añade la condición que faltaba: la validación tiene que venir
+    # confirmada por un verificador de confianza (`verified`), no del propio
+    # sello del mensaje.
     named = {
         "SPF": _rr("fail"),
         "DMARC": _rr("fail"),
         "Domain Alignment": _rr("fail"),
-        "ARC Chain": _rr("pass"),
+        "ARC Chain": _rr("pass", verified=True),
     }
     assert _gated("Legitimate", named) == "Legitimate"
+
+
+def test_gating_unverified_arc_pass_no_longer_softens_the_gates():
+    """B06, el bypass que se cierra.
+
+    Antes bastaba con escribir `ARC-Seal: cv=pass` en el propio correo para
+    desactivar de golpe los tres gates que cazan suplantación. Ahora un ARC sin
+    confirmar es contexto: aparece en el informe, pero no da permisos.
+    """
+    named = {
+        "SPF": _rr("fail"),
+        "DMARC": _rr("fail"),
+        "Domain Alignment": _rr("fail"),
+        "ARC Chain": _rr("pass", verified=False),
+    }
+    assert _gated("Legitimate", named) == "Suspicious"
 
 
 def test_gating_arc_fail_escalates_to_suspicious():

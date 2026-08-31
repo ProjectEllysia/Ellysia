@@ -956,8 +956,16 @@ class IrisManager(TaskTrackingMixin):
         # what those three signals are suppressed for below. "cv=fail"
         # (the chain itself declares a prior hop broken) is its own gate,
         # see D7 in ROADMAP.md.
+        #
+        # B06: la supresión exige además que la cadena la haya validado un
+        # verificador de confianza (`details["verified"]`). Un `cv=pass` a
+        # secas es una afirmación del propio mensaje sobre sí mismo, y como
+        # Iris no verifica firmas, bastaba escribirlo para desactivar los tres
+        # gates que cazan suplantación. Un ARC sin confirmar sigue viajando en
+        # el informe como contexto; lo que ya no hace es dar permisos.
         arc = res("ARC Chain")
-        arc_pass = arc is not None and arc.verdict == "pass"
+        arc_pass = (arc is not None and arc.verdict == "pass"
+                    and bool(arc.details.get("verified")))
         arc_fail = arc is not None and arc.verdict == "fail"
 
         spf_fail = verdict_is("SPF", "fail", "hardfail") and not arc_pass
