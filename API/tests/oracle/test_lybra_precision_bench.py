@@ -516,6 +516,20 @@ def test_fase_r_precision_over_labelled_catalogue(app, admin_user, monkeypatch):
 
     assert precision >= _PRECISION_THRESHOLD, report
 
+    # Y, por encima del umbral del roadmap, un guardarraíl contra la deriva.
+    #
+    # El 0,9 se fijó cuando el banco tenía 30 detecciones. Con 68 hacen falta
+    # más de siete falsos positivos para bajar de ahí, así que una regresión
+    # pequeña —un matcher que se relaja, un check nuevo mal escrito— pasaría
+    # inadvertida mientras el número sigue "por encima del umbral". Comprobado
+    # a mano: relajar tres matchers a propósito produjo falsos positivos y el
+    # test seguía en verde.
+    #
+    # El valor medido es 0 desde que existe el banco, así que cualquier falso
+    # positivo es una regresión y no ruido. Un banco que no puede ponerse rojo
+    # no protege de nada.
+    assert false_positives == 0, report
+
 
 @pytest.mark.xfail(strict=True, reason=(
     "HttpProbe.fetch devuelve None contra un servidor cuya raíz redirige, así "
