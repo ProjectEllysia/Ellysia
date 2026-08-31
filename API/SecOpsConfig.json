@@ -1108,6 +1108,7 @@
           "application/java-archive",
           "application/octet-stream"
         ],
+        "trusted_authserv_ids": [],
         "suspicious_tlds": [
           ".tk",
           ".ml",
