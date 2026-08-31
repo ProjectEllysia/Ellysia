@@ -35,6 +35,8 @@ import sqlalchemy as sa
 
 import src.modules.system.config_reading as CR
 from src.modules.infrastructure import UnitOfWork
+from src.modules.features.themis.model import CpeProductAlias
+from src.modules.features.themis.lybra import normalize_product_name
 from src.modules.features.themis.repositories import KbRepository
 
 # (vendor, product) tal y como el backfill de NVD los escribe. Un producto por
@@ -133,3 +135,61 @@ def seed_from_real_backfill(products: Iterable[Tuple[str, str]] = BENCH_PRODUCTS
         uow.commit()
 
     return len(grouped)
+
+
+_ALIAS_QUERY = sa.text(
+    """
+    SELECT normalized_name, vendor, product
+    FROM "CpeProductAlias"
+    WHERE normalized_name IN :names
+    """
+).bindparams(sa.bindparam("names", expanding=True))
+
+
+def seed_for_inventory(package_names: Iterable[str]) -> Optional[Tuple[int, int]]:
+    """Copia a la KB del test lo que hace falta para analizar un inventario.
+
+    Un inventario de paquetes (Fase I) no llega con un CPE puesto, como sí hace
+    un servicio identificado por Nmap: llega con el nombre que le da la
+    distribución —``zlib1g``, ``perl-base``— y hay que resolverlo primero al
+    vocabulario de NVD. Esa resolución la hace ``CpeProductAlias``, un índice
+    derivado del propio ``CpeMatch``, así que el banco necesita **dos** cosas
+    del backfill real y no una: las filas del índice para los nombres que va a
+    ver, y las CVE de los productos a los que esos nombres resuelvan.
+
+    Sin la primera mitad el motor no resuelve nada y el banco mediría cero
+    hallazgos sobre cero productos, que se lee como "no hay falsos positivos".
+
+    Args:
+        package_names: Nombres de paquete tal y como los da la distribución.
+
+    Returns:
+        ``(alias_copiados, cve_copiadas)``, o ``None`` si el Postgres real no
+        está disponible.
+    """
+    engine = _real_engine()
+    if engine is None:
+        return None
+
+    normalized = sorted({normalize_product_name(name) for name in package_names})
+    try:
+        with engine.connect() as conn:
+            alias_rows = conn.execute(_ALIAS_QUERY, {"names": normalized}).mappings().all()
+    finally:
+        engine.dispose()
+
+    if not alias_rows:
+        return (0, 0)
+
+    with UnitOfWork() as uow:
+        for row in alias_rows:
+            uow.session.merge(CpeProductAlias(
+                normalized_name=row["normalized_name"],
+                vendor=row["vendor"],
+                product=row["product"],
+            ))
+        uow.commit()
+
+    products = {(row["vendor"], row["product"]) for row in alias_rows}
+    copied = seed_from_real_backfill(sorted(products))
+    return (len(alias_rows), copied or 0)
