@@ -195,6 +195,33 @@ class IrisManager(TaskTrackingMixin):
         """
         return build_repository(IrisAnalysisRepository).get_by_id(analysis_id)
 
+    @staticmethod
+    def get_capabilities() -> Dict[str, Any]:
+        """Límites y modos de análisis que la interfaz necesita conocer (B13).
+
+        El backend rechazaba mensajes por encima de un tamaño que la UI no
+        tenía forma de saber: el usuario elegía un fichero que la interfaz
+        daba por bueno, esperaba a que se cargara entero en memoria y recibía
+        un rechazo del API al enviarlo. Cualquier constante duplicada en el
+        frontend deriva antes o después —de hecho ya había derivado a 2×—, así
+        que el límite se publica en lugar de replicarse.
+
+        Se lee de la configuración en cada llamada, no se hornea al importar
+        el módulo, para que un cambio vía ``PUT /system`` surta efecto sin
+        reiniciar (mismo patrón que ``AnalyzeRequestSchema.validate_max_size``,
+        que es la validación que este endpoint describe).
+        """
+        config = CR.iris_config()
+        return {
+            "maxMessageBytes": config.max_message_bytes,
+            "minHeaders": config.min_headers,
+            "analysisModes": ["headers", "message"],
+            "verdictThresholds": {
+                "legitimate": config.legitimate_threshold,
+                "suspicious": config.suspicious_threshold,
+            },
+        }
+
     def get_analysis_status(self, analysis_id: int) -> Optional[str]:
         """Return the current lifecycle status string of an analysis.
 
