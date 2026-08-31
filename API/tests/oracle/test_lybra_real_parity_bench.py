@@ -157,16 +157,26 @@ def _by_family(results: List[dict]) -> Dict[str, List[Tuple]]:
     return families
 
 
+def _ascii(value) -> str:
+    """Un banner de un servidor real puede traer cualquier byte, y la consola de
+    Windows (cp1252) no codifica todo Unicode: un solo carácter raro en un
+    producto hacía reventar el ``print`` del informe y con él la medición
+    entera. El informe es el entregable de L48, así que no puede caerse por un
+    acento de más — cualquier carácter fuera de ASCII se sustituye."""
+    return str(value).encode("ascii", "replace").decode("ascii")
+
+
 def _print_report(results: List[dict]) -> None:
     """Imprime la comparativa. El entregable de L48 es el número, no un OK."""
-    print("\n=== Paridad real (L48) — objetivos declarados en LYBRA_REAL_TARGETS ===")
+    print("\n=== Paridad real (L48) - objetivos declarados en LYBRA_REAL_TARGETS ===")
     for result in results:
         print(f"  {result['target']}: puertos propios={result['own_ports']} "
               f"nmap={result['nmap_ports']} concordancia={result['ports_score']:.2f}")
         for product, version, nmap_product, nmap_version, label, port in result["pairs"]:
-            verdict = "=" if agrees_with_nmap(product, version, nmap_product, nmap_version) else "≠"
-            print(f"      {port:>5}/{label:<6} {verdict} propio={product} {version} "
-                  f"| nmap={nmap_product} {nmap_version}")
+            verdict = "==" if agrees_with_nmap(product, version, nmap_product, nmap_version) else "!="
+            print(f"      {port:>5}/{_ascii(label):<6} {verdict} "
+                  f"propio={_ascii(product)} {_ascii(version)} "
+                  f"| nmap={_ascii(nmap_product)} {_ascii(nmap_version)}")
     print("  --- por familia ---")
     for family, pairs in sorted(_by_family(results).items()):
         print(f"      {family:<8} n={len(pairs):<3} concordancia={concordance_rate(pairs):.2f}")
