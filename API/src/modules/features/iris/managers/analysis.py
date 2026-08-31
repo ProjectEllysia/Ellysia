@@ -39,6 +39,7 @@ from ..repositories import IrisAnalysisRepository, IrisRuleResultRepository
 from ..services.rules import iris_rules, RuleResult
 from ..services.text import extract_domain, is_free_provider, url_host
 from ..services import parse_raw_message
+from ..services.failures import AnalysisFailure, classify_failure
 from ..services.parsers import build_path, parse_received_line
 from ..services.ai_writer import IrisAIWriter
 from .notifications import IrisPhishingNotifyManager
@@ -282,6 +283,8 @@ class IrisManager(TaskTrackingMixin):
             "wrapperSubject": context.wrapper_subject or None,
             "startedAt": isoformat_utc(analysis.started_at),
             "finishedAt": isoformat_utc(analysis.finished_at),
+            "failureCode": analysis.failure_code,
+            "failureReason": analysis.failure_reason,
             "user": username,
             "rules": rules_data,
             "recommendations": recommendations,
@@ -566,6 +569,7 @@ class IrisManager(TaskTrackingMixin):
                 "analysisId": analysis_record.id,
                 "title": analysis_record.title,
                 "status": analysis_record.status,
+                "failureCode": analysis_record.failure_code,
                 "totalScore": analysis_record.total_score,
                 "verdict": analysis_record.verdict,
                 "startedAt": isoformat_utc(analysis_record.started_at), # type: ignore
@@ -656,7 +660,7 @@ class IrisManager(TaskTrackingMixin):
         3. Runs every registered rule against the message (N1: against
            *both* the message and its ``message/rfc822`` wrapper when one
            is present, keeping the worse verdict — see
-           ``_evaluate_context``).
+           ``_evaluate_contexts``).
         4. Persists the winning context's rule results and the final
            score/verdict in a single transaction (C2/C3: no partial rows
            survive a mid-run cancellation, and there's one commit per
@@ -669,96 +673,127 @@ class IrisManager(TaskTrackingMixin):
                 self._update_analysis(analysis_id, status="running", started_at=utcnow_naive())
             except Exception as e:
                 logger.error(f"Failed to mark analysis {analysis_id} as running: {e}", exc_info=True)
-                self._fail_analysis(analysis_id)
+                self._fail_analysis(analysis_id, classify_failure(e))
                 return
 
-            # A single parse feeds both header-only and needs_context rules:
-            # when raw_input is a "report phishing" forward (message/rfc822
-            # attachment), context.headers already describes the *unwrapped
-            # original*, not the forwarding envelope — a separate
-            # parse_raw_headers(raw_input) here would silently re-introduce
-            # the envelope's headers and analyze the wrong message.
-            context = parse_raw_message(raw_input)
-            self._validate_headers_parsed(context.headers)
-
-            # N1: a "report phishing" forward is safe to unwrap unconditionally
-            # for a human-submitted analysis, but the same message/rfc822
-            # mechanism lets an attacker send their own phishing as the outer
-            # message and staple a benign .eml on as an attachment — analyzing
-            # only the unwrapped inner message would then score the wrong
-            # mail entirely. Evaluate both when a wrapper exists and keep the
-            # worse verdict; this matters most for unattended ingestion
-            # (Fase 3+), where there is no human eyeballing the wrapper first.
-            contexts_to_evaluate = [context]
-            if context.wrapper_context is not None:
-                contexts_to_evaluate.append(context.wrapper_context)
-
-            rules_defs = iris_rules.get_rules()
-            total_steps = len(rules_defs) * len(contexts_to_evaluate)
-            completed_steps = 0
-
-            evaluations: List[tuple[str, float, list[str], List[RuleResult]]] = []
-            for evaluated_context in contexts_to_evaluate:
-                results: List[RuleResult] = []
-                named_results: Dict[str, RuleResult] = {}
-
-                for rule_def in rules_defs:
-                    if job.cancelled():
-                        logger.info(f"Analysis {analysis_id} was cancelled")
-                        return
-
-                    try:
-                        rule_input = (evaluated_context if rule_def.get("needs_context")
-                                      else evaluated_context.headers)
-                        result = rule_def["func"](rule_input)
-                    except Exception as e:
-                        logger.error(f"Rule '{rule_def['name']}' failed for analysis {analysis_id}: {e}", exc_info=True)
-                        result = RuleResult(
-                            score=0, verdict="error",
-                            details={"error": str(e)},
-                            recommendation=f"La regla '{rule_def['name']}' falló durante la ejecución.",
-                        )
-
-                    # Subtractive contract: a rule can only *subtract*. Whatever a
-                    # rule returns on a pass (historically +5/+3/+1 "credibility"
-                    # bonuses), the score it contributes — and the score shown in
-                    # the UI — is clamped to <= 0. Passing a rule means "no
-                    # deduction", never a bonus. The verdict/details are untouched.
-                    result = replace(result, score=min(0.0, float(result.score)))
-
-                    results.append(result)
-                    named_results[rule_def["name"]] = result
-
-                    completed_steps += 1
-                    job.progress(int((completed_steps / total_steps) * 100))
-
-                total_score = self._aggregate_score(rules_defs, results)
-                base_verdict = self._determine_verdict(total_score)
-                verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
-                evaluations.append((verdict, total_score, gate_reasons, results))
-
-            # Worse verdict wins across contexts; on a tie, keep the first
-            # (the unwrapped/inner message — the one ``contexts_to_evaluate``
-            # is ordered by, and the one every other persisted field
-            # describes) rather than the wrapper.
-            chosen = evaluations[0]
-            for evaluation in evaluations[1:]:
-                if _VERDICT_SEVERITY[evaluation[0]] > _VERDICT_SEVERITY[chosen[0]]:
-                    chosen = evaluation
-            verdict, total_score, gate_reasons, results = chosen
-
+            # B03: parseo, validación y evaluación comparten manejador con la
+            # persistencia. Estaban fuera de todo `try`, así que un parser roto
+            # o un `.eml` que no lo era dejaban la fila en `running` para
+            # siempre: RQ marcaba el job como fallido, pero nadie tocaba la
+            # base de datos y el usuario veía un análisis que no terminaba
+            # nunca. Ahora cualquier excepción de esta ventana acaba en un
+            # estado terminal con motivo consultable.
             try:
+                # A single parse feeds both header-only and needs_context rules:
+                # when raw_input is a "report phishing" forward (message/rfc822
+                # attachment), context.headers already describes the *unwrapped
+                # original*, not the forwarding envelope — a separate
+                # parse_raw_headers(raw_input) here would silently re-introduce
+                # the envelope's headers and analyze the wrong message.
+                context = parse_raw_message(raw_input)
+                self._validate_headers_parsed(context.headers)
+
+                # Un solo `get_rules()` para evaluar y para persistir: son dos
+                # recorridos que se emparejan por posición (`zip` en
+                # `_persist_analysis_results`), y leer el registro dos veces
+                # los desalinearía si alguien registrara una regla entremedias.
+                rules_defs = iris_rules.get_rules()
+                chosen = self._evaluate_contexts(analysis_id, context, job, rules_defs)
+                if chosen is None:
+                    return  # cancelado: no es un fallo, no hay nada que persistir
+                verdict, total_score, gate_reasons, results = chosen
+
                 self._persist_analysis_results(analysis_id, rules_defs, results,
-                                                verdict, total_score, gate_reasons)
+                                               verdict, total_score, gate_reasons)
             except Exception as e:
-                logger.error(f"Failed to finalise analysis {analysis_id}: {e}", exc_info=True)
-                self._fail_analysis(analysis_id)
+                logger.error(f"Analysis {analysis_id} failed: {e}", exc_info=True)
+                self._fail_analysis(analysis_id, classify_failure(e))
                 return
 
             if verdict == "Phishing":
                 self._enqueue_phishing_notification(analysis_id, verdict)
 
             logger.info(f"Analysis {analysis_id} completed: score={total_score}, verdict={verdict}")
+
+    def _evaluate_contexts(self, analysis_id: int, context, job, rules_defs: List[dict]
+                           ) -> Optional[tuple[str, float, list[str], List[RuleResult]]]:
+        """Ejecuta el catálogo de reglas y devuelve la evaluación ganadora.
+
+        Extraído de :meth:`_run_analysis` al envolver esa función en un único
+        manejador de ciclo de vida (`B03`): el bucle es la parte larga, y
+        dejarlo en línea dentro del ``try`` habría escondido qué se está
+        protegiendo exactamente.
+
+        Returns:
+            La tupla ``(verdict, total_score, gate_reasons, results)`` de la
+            evaluación ganadora, o ``None`` si la tarea fue cancelada a mitad
+            (que no es un fallo: no se persiste nada y la cancelación ya dejó
+            su propio estado terminal).
+        """
+        # N1: a "report phishing" forward is safe to unwrap unconditionally
+        # for a human-submitted analysis, but the same message/rfc822
+        # mechanism lets an attacker send their own phishing as the outer
+        # message and staple a benign .eml on as an attachment — analyzing
+        # only the unwrapped inner message would then score the wrong
+        # mail entirely. Evaluate both when a wrapper exists and keep the
+        # worse verdict; this matters most for unattended ingestion
+        # (Fase 3+), where there is no human eyeballing the wrapper first.
+        contexts_to_evaluate = [context]
+        if context.wrapper_context is not None:
+            contexts_to_evaluate.append(context.wrapper_context)
+
+        total_steps = len(rules_defs) * len(contexts_to_evaluate)
+        completed_steps = 0
+
+        evaluations: List[tuple[str, float, list[str], List[RuleResult]]] = []
+        for evaluated_context in contexts_to_evaluate:
+            results: List[RuleResult] = []
+            named_results: Dict[str, RuleResult] = {}
+
+            for rule_def in rules_defs:
+                if job.cancelled():
+                    logger.info(f"Analysis {analysis_id} was cancelled")
+                    return None
+
+                try:
+                    rule_input = (evaluated_context if rule_def.get("needs_context")
+                                  else evaluated_context.headers)
+                    result = rule_def["func"](rule_input)
+                except Exception as e:
+                    logger.error(f"Rule '{rule_def['name']}' failed for analysis {analysis_id}: {e}", exc_info=True)
+                    result = RuleResult(
+                        score=0, verdict="error",
+                        details={"error": str(e)},
+                        recommendation=f"La regla '{rule_def['name']}' falló durante la ejecución.",
+                    )
+
+                # Subtractive contract: a rule can only *subtract*. Whatever a
+                # rule returns on a pass (historically +5/+3/+1 "credibility"
+                # bonuses), the score it contributes — and the score shown in
+                # the UI — is clamped to <= 0. Passing a rule means "no
+                # deduction", never a bonus. The verdict/details are untouched.
+                result = replace(result, score=min(0.0, float(result.score)))
+
+                results.append(result)
+                named_results[rule_def["name"]] = result
+
+                completed_steps += 1
+                job.progress(int((completed_steps / total_steps) * 100))
+
+            total_score = self._aggregate_score(rules_defs, results)
+            base_verdict = self._determine_verdict(total_score)
+            verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
+            evaluations.append((verdict, total_score, gate_reasons, results))
+
+        # Worse verdict wins across contexts; on a tie, keep the first
+        # (the unwrapped/inner message — the one ``contexts_to_evaluate``
+        # is ordered by, and the one every other persisted field
+        # describes) rather than the wrapper.
+        chosen = evaluations[0]
+        for evaluation in evaluations[1:]:
+            if _VERDICT_SEVERITY[evaluation[0]] > _VERDICT_SEVERITY[chosen[0]]:
+                chosen = evaluation
+        return chosen
 
     @staticmethod
     def _persist_analysis_results(analysis_id: int, rules_defs: List[dict], results: List[RuleResult],
@@ -1201,10 +1236,24 @@ class IrisManager(TaskTrackingMixin):
                 fixed += 1
         return fixed
 
-    def _fail_analysis(self, analysis_id: int) -> None:
-        """Mark an analysis as ``failed`` with a finished timestamp."""
+    def _fail_analysis(self, analysis_id: int, failure: Optional[AnalysisFailure] = None) -> None:
+        """Deja el análisis en estado terminal ``failed`` con su motivo.
+
+        ``failure`` es opcional solo para no romper a un llamador que ya no
+        tenga la excepción a mano; en la práctica todos los caminos de
+        ``_run_analysis`` la traen, porque un ``failed`` sin motivo es
+        justamente lo que `B03` venía a quitar de en medio.
+
+        No se propaga ninguna excepción desde aquí: esto es el último
+        recurso de la tarea, y un fallo escribiendo el fallo solo puede
+        empeorar las cosas.
+        """
+        fields: Dict[str, Any] = {"status": "failed", "finished_at": utcnow_naive()}
+        if failure is not None:
+            fields["failure_code"] = failure.code
+            fields["failure_reason"] = failure.reason
         try:
-            self._update_analysis(analysis_id, status="failed", finished_at=utcnow_naive())
+            self._update_analysis(analysis_id, **fields)
         except Exception as e:
             logger.error(f"Failed to mark analysis {analysis_id} as failed: {e}", exc_info=True)
 

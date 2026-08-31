@@ -139,6 +139,11 @@ def get_analysis_status(args: dict):
         "status": status,
         "totalScore": analysis.total_score if analysis else None,
         "verdict": analysis.verdict if analysis else None,
+        # B03: el motivo solo tiene sentido cuando el análisis murió. Enviarlo
+        # siempre dejaría un `failureReason` colgando de un análisis que
+        # terminó bien tras un reintento y confundiría a quien lea el estado.
+        "failureCode": analysis.failure_code if analysis else None,
+        "failureReason": analysis.failure_reason if analysis else None,
     }
     if progress is not None:
         response["progress"] = progress

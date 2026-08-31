@@ -37,6 +37,14 @@ class IrisAnalysis(Base):
         gate_reasons: List of human-readable reasons for the
                  high-confidence gates that fired (empty when the verdict
                  comes purely from the numeric score).
+        failure_code: Why a ``failed`` analysis failed — "invalid_input"
+                 (the submitted text is not an analysable message) or
+                 "internal_error" (the pipeline broke). NULL for every
+                 non-failed analysis. See ``services/failures.py``.
+        failure_reason: Human-readable, **non-sensitive** companion to
+                 ``failure_code``. Never contains the raw email: an
+                 internal error collapses to a generic message and only
+                 the server log keeps the traceback.
         ai_summary: AI-generated executive narrative (IA1) — dict with
                  executive_summary/attacker_intent/recommendations/
                  confidence, or None until generated (or if generation
@@ -66,6 +74,8 @@ class IrisAnalysis(Base):
     total_score = Column(Float, nullable=True)
     verdict = Column(String(20), nullable=True)
     gate_reasons = Column(JSONB, nullable=True)
+    failure_code = Column(String(32), nullable=True)
+    failure_reason = Column(Text, nullable=True)
     ai_summary = Column(JSONB, nullable=True)
     started_at = Column(DateTime, nullable=False, default=utcnow_naive)
     finished_at = Column(DateTime, nullable=True)
