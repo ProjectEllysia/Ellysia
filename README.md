@@ -710,7 +710,7 @@ Ellysia uses a layered configuration system (`API/src/modules/system/config_read
 Config is read through frozen dataclasses bound to a branch of the tree (`@config_block`, e.g. `CR.nuclei_config().rate_limit`), not one getter per value, and cached — changes to `SecOpsConfig.json` require an app restart unless applied via `PUT /system`. Background jobs pick them up too: the worker re-reads the file per job when its mtime changed (`CR.reload_if_changed()`).
 
 > [!WARNING]
-> `features.themis.areLocalIpsAllowed` is set to `true` in the shipped `SecOpsConfig.json` so local development against private IPs works. **Revert it to `false` before any real deployment**, or the anti-SSRF defense stays disabled in production.
+> `features.themis.areLocalIpsAllowed` ships as `false`, and a test pins that value (`test_the_anti_ssrf_defence_ships_enabled`): with `true`, a user can point a scan at the server's internal network or the cloud metadata endpoint. Flip it to `true` in your working copy for local development against private IPs, but do not commit it.
 
 > [!TIP]
 > Use `python -c "from src.modules.system import config_reading as CR; print(CR.get_db_credentials())"` to verify your configuration.
