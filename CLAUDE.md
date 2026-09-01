@@ -383,11 +383,13 @@ que actualizarla en tres sitios — la ruta del `@config_block` (o la llamada a 
 - La versión de la API sale de la config: `create_app()` la lee con `CR.get_app_version()` desde
   `appVersion` en `SecOpsConfig.json` (hoy `0.5.10`). **No está hardcodeada** — y ojo, la rama
   puede ir por delante del `appVersion` del fichero.
-- `features.themis.areLocalIpsAllowed` está a `true` en `SecOpsConfig.json` (intencionado, para
-  desarrollo local contra IPs privadas). **Hay que devolverlo a `false` antes de cualquier
-  despliegue real**, o la defensa anti-SSRF se queda desactivada en producción. La suite **no** te
-  avisa si se te olvida: los tests de SSRF fijan el flag a `false` ellos mismos con una fixture
-  autouse en `test_themis.py`, así que pasan igual y no dicen nada sobre el valor desplegado.
+- `features.themis.areLocalIpsAllowed` viaja en `false`, y hay un test que lo ata
+  (`test_the_anti_ssrf_defence_ships_enabled` en `tests/unit/test_config_shape.py`). Estuvo en
+  `true` hasta 2026-09-01 —y por tanto la defensa anti-SSRF, apagada en producción— sin que la
+  suite dijera nada: los tests de SSRF fuerzan el valor a `false` con una fixture autouse, así que
+  pasaban en verde diga lo que diga el fichero. Comprobar el *comportamiento* y atar el *valor que
+  se despliega* son dos cosas distintas, y hacían falta las dos. Para desarrollo local contra IPs
+  privadas, ponlo a `true` en tu copia sin commitearlo.
 - **SSRF: cada escáner se autovalida.** Nmap, Nikto, Nuclei y Lybra rechazan IPs privadas dentro de
   su propio `run_scan()`, no solo en el endpoint HTTP, así que el flujo programado
   (`scheduling.py` llamando a `run_scan()` directo) también está cubierto. Los cuatro tests
