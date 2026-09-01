@@ -58,3 +58,66 @@ def test_a_target_that_does_not_resolve_does_not_sink_the_rest(monkeypatch):
     donde se ve, en vez de hacer fallar la construcción del sello."""
     monkeypatch.setenv("LYBRA_REAL_TARGETS", "198.51.100.7,no-existe.invalid")
     assert "198.51.100.7" in allowed_outbound_addresses()
+
+
+# --------------------------------------------------------------------------
+# El oráculo alcanza el objetivo correcto (L48, arreglo del banco de paridad)
+# --------------------------------------------------------------------------
+#
+# Estas dos comprueban la traducción de host que el contenedor de Nmap necesita.
+# Son puras (no lanzan Nmap ni Docker), así que corren en CI como el resto de
+# este fichero, sin marcador ``oracle``.
+
+from ._nmap_oracle import _target_from_container
+
+
+def test_loopback_is_reached_through_the_docker_host():
+    """Un puerto publicado en 127.0.0.1 no es alcanzable por su loopback desde
+    dentro de otro contenedor: hay que rebotar por ``host.docker.internal``."""
+    assert _target_from_container("127.0.0.1") == "host.docker.internal"
+    assert _target_from_container("localhost") == "host.docker.internal"
+
+
+def test_an_external_target_is_scanned_directly():
+    """El defecto que tenía el banco de paridad real: el contenedor de Nmap
+    escaneaba ``host.docker.internal`` —la máquina Docker— en vez del objetivo
+    externo, midiendo algo que no tenía nada que ver. Un host o IP que no es
+    loopback se pasa tal cual."""
+    assert _target_from_container("emesa.com") == "emesa.com"
+    assert _target_from_container("203.0.113.9") == "203.0.113.9"
+
+
+# --------------------------------------------------------------------------
+# Un Docker colgado no puede tumbar la suite
+# --------------------------------------------------------------------------
+
+import subprocess
+
+from ._docker_helpers import _working_docker
+
+
+def test_a_hung_docker_daemon_is_reported_as_unavailable(monkeypatch):
+    """Docker Desktop con su distro WSL caída deja ``docker version`` esperando
+    al pipe hasta que alguien lo mata: el binario existe y responde, pero no hay
+    demonio detrás.
+
+    Antes eso subía como ``TimeoutExpired`` desde ``resolve_docker()``, que se
+    llama al **importar** cada módulo del banco. Como los marcadores de pytest
+    se filtran después de importar, un Docker colgado producía cinco errores de
+    colección y tumbaba la suite entera — incluso con ``-m "not oracle"``, en
+    tests que ni siquiera iban a ejecutarse.
+    """
+    def _hangs(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="docker version", timeout=10)
+
+    monkeypatch.setattr(subprocess, "run", _hangs)
+    assert _working_docker("/cualquier/ruta/docker") is False
+
+
+def test_a_missing_docker_binary_is_still_reported_as_unavailable(monkeypatch):
+    """La otra mitad, que ya funcionaba: el binario no existe o no se ejecuta."""
+    def _explodes(*args, **kwargs):
+        raise OSError("no such file")
+
+    monkeypatch.setattr(subprocess, "run", _explodes)
+    assert _working_docker("/cualquier/ruta/docker") is False
