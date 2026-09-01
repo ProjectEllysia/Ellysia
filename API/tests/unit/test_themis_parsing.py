@@ -11,6 +11,7 @@ from src.modules.features.themis.exceptions import (
     PortValidationError,
     PrivateIPRequested,
 )
+from src.modules.features.themis.services import parsing
 from src.modules.features.themis.services.parsing import (
     validate_ip,
     validate_port,
@@ -124,3 +125,60 @@ class TestPrivateIpPolicy:
     def test_reject_private_ip_allows_public(self, monkeypatch):
         monkeypatch.setattr(CR, "themis_config", lambda: CR.ThemisConfig(are_local_ips_allowed=False))
         reject_private_ip("8.8.8.8")  # no debe lanzar
+
+
+class TestHostnameTargetsReachTheSsrfGuard:
+    """El guardia de objetivo único acepta nombres, y los resuelve antes de juzgar.
+
+    Antes hacía ``ipaddress.ip_address(target)`` sin red de seguridad, así que
+    un nombre lo reventaba con un ``ValueError`` sin capturar. El fallo estuvo
+    tapado todo este tiempo porque ``areLocalIpsAllowed`` estaba en ``true`` en
+    el SecOpsConfig.json versionado, y ese flag cortocircuita la comprobación
+    entera **antes** de mirar el valor: con la defensa apagada, el bug no se
+    alcanzaba.
+
+    Resolver no es una comodidad para aceptar nombres: es parte de la defensa.
+    Un nombre que apunta a loopback o al endpoint de metadatos del cloud
+    atraviesa un guardia que sólo mire lo que *parece* una IP.
+    """
+
+    def test_a_hostname_pointing_at_loopback_is_rejected(self, monkeypatch):
+        monkeypatch.setattr(CR, "themis_config", lambda: CR.ThemisConfig(are_local_ips_allowed=False))
+        monkeypatch.setattr(
+            parsing.socket, "getaddrinfo",
+            lambda host, port: [(None, None, None, "", ("127.0.0.1", 0))],
+        )
+        with pytest.raises(PrivateIPRequested):
+            parsing.reject_private_ip("interno.example.com")
+
+    def test_a_hostname_with_one_private_record_is_rejected(self, monkeypatch):
+        """Basta con que una de las direcciones sea privada: comprobar sólo la
+        primera dejaría pasar un nombre con varios registros."""
+        monkeypatch.setattr(CR, "themis_config", lambda: CR.ThemisConfig(are_local_ips_allowed=False))
+        monkeypatch.setattr(
+            parsing.socket, "getaddrinfo",
+            lambda host, port: [
+                (None, None, None, "", ("93.184.216.34", 0)),
+                (None, None, None, "", ("10.0.0.5", 0)),
+            ],
+        )
+        with pytest.raises(PrivateIPRequested):
+            parsing.reject_private_ip("mixto.example.com")
+
+    def test_a_hostname_pointing_at_a_public_address_passes(self, monkeypatch):
+        monkeypatch.setattr(CR, "themis_config", lambda: CR.ThemisConfig(are_local_ips_allowed=False))
+        monkeypatch.setattr(
+            parsing.socket, "getaddrinfo",
+            lambda host, port: [(None, None, None, "", ("93.184.216.34", 0))],
+        )
+        parsing.reject_private_ip("publico.example.com")   # no lanza
+
+    def test_a_hostname_that_does_not_resolve_is_a_validation_error(self, monkeypatch):
+        """Y no un ``ValueError`` que se escape sin capturar, que es lo que
+        pasaba: el llamante no podía distinguirlo de un fallo del programa."""
+        monkeypatch.setattr(CR, "themis_config", lambda: CR.ThemisConfig(are_local_ips_allowed=False))
+        def _nxdomain(host, port):
+            raise OSError("Name or service not known")
+        monkeypatch.setattr(parsing.socket, "getaddrinfo", _nxdomain)
+        with pytest.raises(IPValidationError):
+            parsing.reject_private_ip("no-existe.invalid")

@@ -106,10 +106,23 @@ def test_lybra_self_discovery_requires_authorized_target(client, admin_user, aut
     assert resp.status_code == 403
 
 
-def test_lybra_run_scan_self_discovery_succeeds_once_authorized(app, admin_user):
+def test_lybra_run_scan_self_discovery_succeeds_once_authorized(app, admin_user, monkeypatch):
+    """Lo que se comprueba aquí es el **registro de objetivos autorizados**, no
+    la defensa anti-SSRF, así que el flag se fuerza a permitir IPs privadas.
+
+    Hace falta porque ``203.0.113.9`` es de TEST-NET-3 (RFC 5737, el rango de
+    documentación) y Python lo considera privado desde la 3.12: sin forzar el
+    flag, el escaneo se rechaza por SSRF antes de llegar a la autorización, y el
+    test dejaría de probar lo que dice. Peor aún, lo haría sólo en algunas
+    versiones de Python — pasando en el CI (3.11) y fallando en un portátil con
+    una más nueva.
+    """
     from unittest import mock
+    import src.modules.system.config_reading as CR
     from src.modules.features.themis.managers import AuthorizedTargetManager
     from src.modules.features.themis.exceptions import TargetNotAuthorizedError
+
+    monkeypatch.setattr(CR, "themis_config", lambda: CR.ThemisConfig(are_local_ips_allowed=True))
 
     with app.app_context():
         with pytest.raises(TargetNotAuthorizedError):

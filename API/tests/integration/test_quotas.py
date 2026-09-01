@@ -330,13 +330,21 @@ def test_an_invalid_target_does_not_burn_quota(app, regular_user, set_plan_limit
     from unittest import mock
 
     from src.modules.accounts.services.quotas import QuotaManager
-    from src.modules.features.themis.exceptions import TargetNotAuthorizedError
+    from src.modules.features.themis.exceptions import (
+        IPValidationError,
+        TargetNotAuthorizedError,
+    )
     from src.modules.features.themis.managers.lybra.engine import LybraEngineManager
 
     set_plan_limits({LimitKey.THEMIS_LYBRA_SCANS: 5})
 
+    # Se aceptan las dos formas de rechazo porque el objetivo es inválido por dos
+    # motivos a la vez: no resuelve (IPValidationError, desde que el guardia
+    # anti-SSRF resuelve los nombres antes de juzgarlos) y no está autorizado.
+    # Cuál salta primero es orden interno de validación, y no es lo que este test
+    # afirma: lo que afirma es que **ninguna de las dos cobra cuota**.
     with app.app_context():
-        with pytest.raises(TargetNotAuthorizedError):
+        with pytest.raises((IPValidationError, TargetNotAuthorizedError)):
             LybraEngineManager(task_queue=mock.Mock()).run_scan(
                 user_id=regular_user.id, target="no-autorizado.example.com",
             )
