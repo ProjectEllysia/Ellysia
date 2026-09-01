@@ -21,12 +21,29 @@ from typing import Optional
 
 
 def _working_docker(path: str) -> bool:
+    """¿Es ``path`` un cliente Docker que además tiene demonio detrás?
+
+    Se capturan **dos** formas de no estarlo, y la segunda costó una tarde:
+
+    - ``OSError``: el binario no existe o no se puede ejecutar.
+    - ``subprocess.TimeoutExpired``: el binario responde pero el demonio está
+      **colgado**, no ausente. Es lo que hace Docker Desktop cuando su distro
+      WSL no llega a arrancar: ``docker version`` se queda esperando al pipe
+      hasta que alguien lo mata.
+
+    Sin capturar la segunda, la excepción sube por ``resolve_docker()`` —que se
+    llama al **importar** cada módulo del banco— y revienta la recolección de
+    pytest. Y como los marcadores se filtran *después* de importar, eso tumba
+    la suite entera, incluso corriendo con ``-m "not oracle"``: cinco errores de
+    colección en tests que ni siquiera se iban a ejecutar. Un Docker roto tiene
+    que traducirse en "los bancos se saltan", nunca en "no hay suite".
+    """
     try:
         return subprocess.run(
             [path, "version", "--format", "{{.Server.Version}}"],
             capture_output=True, timeout=10,
         ).returncode == 0
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return False
 
 

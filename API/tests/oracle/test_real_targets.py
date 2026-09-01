@@ -85,3 +85,39 @@ def test_an_external_target_is_scanned_directly():
     loopback se pasa tal cual."""
     assert _target_from_container("emesa.com") == "emesa.com"
     assert _target_from_container("203.0.113.9") == "203.0.113.9"
+
+
+# --------------------------------------------------------------------------
+# Un Docker colgado no puede tumbar la suite
+# --------------------------------------------------------------------------
+
+import subprocess
+
+from ._docker_helpers import _working_docker
+
+
+def test_a_hung_docker_daemon_is_reported_as_unavailable(monkeypatch):
+    """Docker Desktop con su distro WSL caída deja ``docker version`` esperando
+    al pipe hasta que alguien lo mata: el binario existe y responde, pero no hay
+    demonio detrás.
+
+    Antes eso subía como ``TimeoutExpired`` desde ``resolve_docker()``, que se
+    llama al **importar** cada módulo del banco. Como los marcadores de pytest
+    se filtran después de importar, un Docker colgado producía cinco errores de
+    colección y tumbaba la suite entera — incluso con ``-m "not oracle"``, en
+    tests que ni siquiera iban a ejecutarse.
+    """
+    def _hangs(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="docker version", timeout=10)
+
+    monkeypatch.setattr(subprocess, "run", _hangs)
+    assert _working_docker("/cualquier/ruta/docker") is False
+
+
+def test_a_missing_docker_binary_is_still_reported_as_unavailable(monkeypatch):
+    """La otra mitad, que ya funcionaba: el binario no existe o no se ejecuta."""
+    def _explodes(*args, **kwargs):
+        raise OSError("no such file")
+
+    monkeypatch.setattr(subprocess, "run", _explodes)
+    assert _working_docker("/cualquier/ruta/docker") is False
