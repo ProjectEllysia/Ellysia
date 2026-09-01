@@ -18,6 +18,7 @@ Formatos de puertos soportados (``validate_port``):
 
 import ipaddress
 import itertools
+import socket
 from typing import List
 
 import src.modules.system.config_reading as CR
@@ -180,11 +181,61 @@ def _reject_private_ips(lista_ips: List[str]) -> None:
             raise PrivateIPRequested(private_ips)
 
 
-def reject_private_ip(ip: str) -> None:
-    """Single-IP entry point for callers that resolve a hostname/URL
-    themselves (Nikto) instead of expanding a CIDR/range spec via
-    ``validate_ip``."""
-    _reject_private_ips([ip])
+def _resolved_addresses(target: str) -> List[str]:
+    """Las direcciones IP a las que apunta ``target``.
+
+    Si ya es una IP, se devuelve tal cual. Si es un nombre, **se resuelve**, y
+    esa resolución es parte de la defensa y no una comodidad: sin ella, un
+    nombre que apunta a 127.0.0.1 o a 169.254.169.254 atraviesa el guardia
+    anti-SSRF sin que nadie lo mire. Comprobar sólo lo que *parece* una IP deja
+    la puerta abierta al caso más fácil de explotar.
+
+    Se comprueban **todas** las direcciones devueltas, no la primera: un nombre
+    con varios registros basta con que tenga uno privado para ser peligroso.
+
+    Args:
+        target: Una IP o un nombre de host.
+
+    Returns:
+        Las direcciones a comprobar.
+
+    Raises:
+        IPValidationError: Si el nombre no resuelve.
+    """
+    try:
+        return [str(ipaddress.ip_address(target))]
+    except ValueError:
+        pass
+
+    try:
+        infos = socket.getaddrinfo(target, None)
+    except OSError as exc:
+        raise IPValidationError(
+            message=f"No se pudo resolver el objetivo '{target}'",
+            ip_spec=target,
+        ) from exc
+    return sorted({info[4][0] for info in infos})
+
+
+def reject_private_ip(target: str) -> None:
+    """Rechaza un objetivo que apunte a una IP privada o de loopback.
+
+    Punto de entrada de objetivo único, para los llamantes que no expanden una
+    especificación CIDR/rango con ``validate_ip``: Nikto, y el arranque directo
+    de un escaneo Lybra (autodescubrimiento) que no pasa por el endpoint HTTP.
+
+    Acepta un nombre además de una IP, y lo resuelve antes de decidir (ver
+    :func:`_resolved_addresses`). Antes no lo hacía y explotaba con un
+    ``ValueError`` sin capturar en cuanto le llegaba un nombre — un fallo que
+    estuvo tapado mientras ``areLocalIpsAllowed`` estuvo en ``true``, porque ese
+    flag cortocircuita la comprobación entera antes de mirar el valor.
+
+    Lo que esto **no** resuelve es el desfase entre comprobar y escanear: entre
+    la resolución de aquí y la conexión real, el nombre puede cambiar de
+    dirección (DNS rebinding). Cerrar eso exige fijar la IP resuelta y escanear
+    esa, no el nombre, y es un cambio de mayor alcance.
+    """
+    _reject_private_ips(_resolved_addresses(target))
 
 
 def validate_ip(ips_str: str, max_hosts: int = 10) -> List[str]:

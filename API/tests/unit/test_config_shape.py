@@ -398,3 +398,33 @@ def test_every_directory_type_resolves(directory_type, monkeypatch):
         monkeypatch.delenv(env_var, raising=False)
 
     assert CR.get_directory_of(directory_type)
+
+
+# ---------------------------------------------------------------------------
+# Valores que se despliegan tal cual, y que no pueden quedarse en modo desarrollo
+# ---------------------------------------------------------------------------
+
+def test_the_anti_ssrf_defence_ships_enabled(raw_config):
+    """``areLocalIpsAllowed`` tiene que viajar en ``false`` al repositorio.
+
+    Es la defensa anti-SSRF del módulo de escaneo: con ``true``, un usuario
+    puede apuntar un escaneo a la red interna del servidor o al endpoint de
+    metadatos del cloud (``169.254.169.254``). En un producto cuyo trabajo es
+    escanear, eso convierte la propia herramienta en el vector.
+
+    Hacía falta un test **sobre el fichero versionado** porque los que ya
+    existen no cubren este riesgo, y conviene entender por qué: los tests de
+    SSRF fuerzan el valor a ``false`` con ``monkeypatch`` para poder probar la
+    protección en sí, así que pasan en verde diga lo que diga el JSON. Es decir
+    que el flag podía estar en ``true`` en producción con toda la suite
+    contenta — y de hecho lo estuvo, hasta que alguien miró a mano antes de un
+    despliegue.
+
+    Para desarrollo local contra IPs privadas, ponlo a ``true`` en tu copia sin
+    commitearlo, o parchéalo en el test que lo necesite (ver
+    ``TestPrivateIpPolicy`` en ``tests/unit/test_themis_parsing.py``).
+    """
+    assert _value_at(raw_config, "features.themis.areLocalIpsAllowed") is False, (
+        "areLocalIpsAllowed está en true en el SecOpsConfig.json versionado: "
+        "eso despliega el escáner con la defensa anti-SSRF desactivada"
+    )

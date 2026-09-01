@@ -1,19 +1,22 @@
-"""Where a Lybra scan gets its services from — the three modes of roadmap §0.9.
+"""Where a Lybra scan gets its services from — los dos modos del roadmap §0.9.
 
 Extracted out of ``lybra/engine.py`` because the manager kept re-asking the same
-question — "are we over a prior Nmap scan, an external payload, or doing our own
-discovery?" — at every step of the pipeline: resolving the target, resolving the
-services, deciding whether fingerprinting/active checks may touch the network,
-deciding whether deep corroborators need explicit authorization, deciding whether
-a fresh Nmap corroborator would be redundant. Each :class:`ServiceSource`
-implementation answers all of that for its mode in one place instead of a
-condition re-checked at each of those call sites.
+question — "are we analysing an external payload, or doing our own discovery?" —
+at every step of the pipeline: resolving the target, resolving the services,
+deciding whether fingerprinting/active checks may touch the network. Each
+:class:`ServiceSource` implementation answers all of that for its mode in one
+place instead of a condition re-checked at each of those call sites.
 
 ``run_scan`` builds a :class:`ServiceSource` (via :meth:`ServiceSource.build_for_args`)
 purely to resolve and validate the scan's target before the scan record exists;
 the TaskQueue itself keeps serializing the same primitive arguments it always did
-(``source_scan_id`` / ``services`` / ``discover_ports``), and the worker rebuilds
-the same object with the same factory once it is running as ``_run_lybra``.
+(``services`` / ``discover_ports``), and the worker rebuilds the same object with
+the same factory once it is running as ``_run_lybra``.
+
+Hubo un tercer modo, retirado en L52: analizar los servicios que un escaneo
+Nmap previo ya había descubierto. Existía porque el motor no tenía transporte
+propio; desde que la Fase T se lo dio, era la puerta de atrás de una capacidad
+que Lybra ya tiene por sí mismo, y ataba el motor a otro escáner.
 """
 
 from __future__ import annotations
@@ -23,10 +26,9 @@ from dataclasses import dataclass
 from typing import Callable, List, Optional
 
 import src.modules.system.config_reading as CR
-from src.modules.infrastructure import UnitOfWork
 from ...repositories import ScanRepository
-from ...exceptions import ScanNotFoundError, TargetNotAuthorizedError
-from ...lybra import Service, services_from_open_ports, services_from_discovered_ports
+from ...exceptions import TargetNotAuthorizedError
+from ...lybra import Service, services_from_discovered_ports
 from ..authorized_target import AuthorizedTargetManager
 from ..scan import ScanManager
 
@@ -54,19 +56,18 @@ class DiscoveryProbes:
 @dataclass(frozen=True)
 class ResolvedServices:
     """What a source hands back to the engine: services plus the host/target
-    identity they resolved to (a source may correct ``target``, e.g. the Nmap
-    source falling back to the source scan's own target)."""
+    identity they resolved to."""
     services: List[Service]
     host_id: Optional[int]
     target: Optional[str]
 
 
 class ServiceSource:
-    """One of the three ways a Lybra scan obtains the services it analyses.
+    """One of the two ways a Lybra scan obtains the services it analyses.
 
-    A thin base plus three policy flags (Python's idiomatic stand-in for what
-    would be abstract methods in a language that needs them for a fixed,
-    reused decision) and one real polymorphic method, :meth:`resolve`.
+    A thin base plus one policy flag (Python's idiomatic stand-in for what
+    would be an abstract method in a language that needs them for a fixed,
+    reused decision) and one real polymorphic method, :meth:`resolve_services`.
     """
 
     label: str = "desconocido"
@@ -81,37 +82,18 @@ class ServiceSource:
     precisely for hosts it might not even be able to reach.
     """
 
-    deep_requires_authorization: bool = False
-    """
-    Whether the deep corroborators (Fase 6) require an explicit
-    authorized-targets register entry before launching. False for the two
-    modes that already validated the target some other way (Nmap: the prior
-    scan; self-discovery: run_scan's own gate at launch) — True only for the
-    payload mode, whose target nothing else ever validates.
-    """
-
-    launches_nmap_corroborator: bool = True
-    """
-    Whether the deep corroborators should include a fresh Nmap run. False
-    only when the scan is already built over a prior Nmap scan's ports — a
-    second one would be redundant.
-    """
-
     @classmethod
     def build_for_args(
         cls,
-        source_scan_id: Optional[int],
         services: Optional[List[Service]],
         discover_ports: Optional[list],
     ) -> "ServiceSource":
-        """Build the source matching whichever of the three run_scan args was given."""
-        if source_scan_id is not None:
-            return NmapSourceScan(source_scan_id)
+        """Build the source matching whichever of the two run_scan args was given."""
         if services is not None:
             return ExternalPayload(services)
         return SelfDiscovery(discover_ports)
 
-    def scan_target(self, user_id: int, target: Optional[str]) -> str:
+    def valid_scan_target(self, user_id: int, target: Optional[str]) -> str:
         """Resolve and validate this mode's target, before the scan record exists."""
         raise NotImplementedError
 
@@ -124,7 +106,7 @@ class ServiceSource:
         """Obtain this mode's services inside the caller's transaction.
 
         ``probes`` bundles the network-probing capabilities only the
-        self-discovery mode uses (E1) — the other two modes ignore it.
+        self-discovery mode uses (E1) — the payload mode ignores it.
 
         Returns ``None`` for an unrecoverable failure (host unreachable, probe
         blew up) — the caller marks the scan FAILED and stops. This is
@@ -145,44 +127,6 @@ class ServiceSource:
         return host.id if host else None
 
 
-class NmapSourceScan(ServiceSource):
-    """Analyse the services a prior Nmap scan already discovered."""
-
-    deep_requires_authorization = False
-    launches_nmap_corroborator = False   # redundant: Nmap-sourced ports already exist
-
-    def __init__(self, source_scan_id: int) -> None:
-        self.source_scan_id = source_scan_id
-        self.label = f"fuente Nmap {source_scan_id}"
-
-    def scan_target(
-        self,
-        user_id: int,
-        target: Optional[str]
-    ) -> str:
-        with UnitOfWork() as uow:
-            source = ScanRepository(uow).get_by_id(self.source_scan_id)
-            if not source:
-                raise ScanNotFoundError(self.source_scan_id)
-            return source.target
-
-        return ""
-
-    def resolve_services(
-        self,
-        scan_repo: ScanRepository,
-        probes: DiscoveryProbes,
-        target: Optional[str]
-    ) -> ResolvedServices:
-        open_ports = scan_repo.get_open_ports_for_scan(self.source_scan_id)
-        source = scan_repo.get_by_id(self.source_scan_id)
-        return ResolvedServices(
-            services=services_from_open_ports(open_ports),
-            host_id=source.host_id if source else None,
-            target=source.target if source else target,
-        )
-
-
 class ExternalPayload(ServiceSource):
     """Analyse a services list the caller already resolved (Fase 0.9).
 
@@ -193,12 +137,11 @@ class ExternalPayload(ServiceSource):
 
     label = "payload externo"
     probes_target_network = False
-    deep_requires_authorization = True   # nothing else ever validated this target
 
     def __init__(self, services: List[Service]) -> None:
         self.services = services
 
-    def scan_target(self, user_id: int, target: Optional[str]) -> str:
+    def valid_scan_target(self, user_id: int, target: Optional[str]) -> str:
         if not target:
             raise ValueError("run_scan requires a target when services is set")
         return target
@@ -220,16 +163,15 @@ class SelfDiscovery(ServiceSource):
     """Discover the target's open ports with Lybra's own connect scan (Fase T)."""
 
     label = "descubrimiento propio"
-    deep_requires_authorization = False   # run_scan already required this at launch
 
     def __init__(self, discover_ports: Optional[list]) -> None:
         self.discover_ports = discover_ports
 
-    def scan_target(self, user_id: int, target: Optional[str]) -> str:
+    def valid_scan_target(self, user_id: int, target: Optional[str]) -> str:
         if target is None:
-            raise ValueError("run_scan requires source_scan_id, services, or target")
-        # Self-discovery touches the target directly, unlike analysing a prior
-        # Nmap scan's already-collected services (roadmap §6).
+            raise ValueError("run_scan requires services or target")
+        # Self-discovery touches the target directly, unlike analysing a
+        # services payload the caller already resolved (roadmap §6).
         #
         # Rechazo de IP privada aquí (no solo en el endpoint HTTP, ver
         # validate_targets en start_lybra_scan): el flujo programado
@@ -243,10 +185,10 @@ class SelfDiscovery(ServiceSource):
         return target
 
     def resolve_services(
-            self,
-            scan_repo: ScanRepository,
-            probes: DiscoveryProbes,
-            target: Optional[str]
+        self,
+        scan_repo: ScanRepository,
+        probes: DiscoveryProbes,
+        target: Optional[str]
     ) -> Optional[ResolvedServices]:
         discovered_ports: list = []
         udp_ports: list = []

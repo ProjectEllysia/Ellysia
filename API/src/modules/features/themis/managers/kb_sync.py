@@ -143,7 +143,10 @@ class KbSyncManager:
         """Rebuild the CPE product-name index (Fase I-b, paso 2). See
         ``KbRepository.rebuild_cpe_product_index`` for the algorithm."""
         with UnitOfWork() as uow:
-            return KbRepository(uow).rebuild_cpe_product_index()
+            repository = KbRepository(uow)
+            index = repository.rebuild_cpe_product_index()
+
+        return index
 
     def sync_all(self) -> dict:
         """Run every configured source once; return a per-source count summary."""

@@ -30,11 +30,12 @@ import pytest
 
 import src.modules.system.config_reading as CR
 from src.modules.infrastructure import UnitOfWork
-from src.modules.features.themis.lybra import scan_ports_sync, port_concordance
+from src.modules.features.themis.lybra import scan_ports_sync
 from src.modules.features.themis.exceptions import DuplicateAuthorizedTargetError
 from src.modules.features.themis.managers import LybraEngineManager, AuthorizedTargetManager
 from src.modules.features.themis.repositories import ScanRepository, KbRepository
 
+from ._concordance import port_concordance
 from ._docker_helpers import resolve_docker, docker_run, docker_rm, wait_for_port, port_is_free
 
 pytestmark = [pytest.mark.oracle, pytest.mark.integration]
@@ -350,8 +351,8 @@ def _run_self_discovery(app, admin_user, target: str, port: int, monkeypatch):
         except DuplicateAuthorizedTargetError:
             pass
         mgr = LybraEngineManager()
-        scan = mgr._create_scan_record(target=target, user_id=admin_user.id, source_scan_id=None)
-        mgr._run_lybra(scan.id, None, [port], False)
+        scan = mgr._create_scan_record(target=target, user_id=admin_user.id)
+        mgr._run_lybra(scan.id, discover_ports=[port])
         with UnitOfWork() as uow:
             findings = ScanRepository(uow).get_findings_by_scan(scan.id)
     return findings

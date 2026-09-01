@@ -35,7 +35,7 @@
               :title="scan.exposure === 'public' ? 'IP pública — la prioridad se ajusta al alza' : 'LAN privada — la prioridad se modera'">
               {{ scan.exposure === 'public' ? 'Pública' : 'Privada' }}
             </span>
-            <span v-if="scan.deep" class="deep-badge" title="Corroborado con escáneres externos">⚖ Corroborado</span>
+            
 
             <!-- Resumen de prioridades -->
             <span class="prio-summary">
@@ -98,7 +98,7 @@
                           <span v-if="f.epssScore != null" class="f-tag epss" :title="`Probabilidad de explotación en 30 días (EPSS)`">EPSS {{ Math.round(f.epssScore * 100) }}%</span>
                           <span v-if="f.cvssScore != null" class="f-tag cvss">CVSS {{ f.cvssScore }}</span>
                           <span v-if="f.state && f.state !== 'open'" class="f-tag state" :class="f.state">{{ STATE_LABEL[f.state] || f.state }}</span>
-                          <span v-if="f.source && f.source !== 'lybra'" class="f-tag src" :title="`Corroborado por ${f.source}`">+{{ f.source }}</span>
+                          <span v-if="f.source && f.source !== 'lybra'" class="f-tag src" :title="`Origen: ${f.source}`">+{{ f.source }}</span>
                         </div>
                       </div>
                     </li>
@@ -343,7 +343,6 @@ function fmtDate(iso) {
 .exposure { font-size: var(--fs-md); padding: 0.12rem 0.45rem; border-radius: 5px; font-weight: 600; flex-shrink: 0; }
 .exposure.public { color: var(--danger); background: var(--danger-dim); }
 .exposure.private { color: var(--info); background: var(--info-dim); }
-.deep-badge { font-size: var(--fs-md); padding: 0.12rem 0.45rem; border-radius: 5px; color: var(--accent-bright); background: var(--accent-dim); flex-shrink: 0; }
 
 .prio-summary { display: flex; align-items: center; gap: 0.25rem; margin-left: auto; flex-shrink: 0; }
 .prio-pill { min-width: 20px; text-align: center; font-size: var(--fs-md); font-weight: 700; padding: 0.1rem 0.35rem; border-radius: 5px; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }

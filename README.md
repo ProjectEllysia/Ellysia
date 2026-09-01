@@ -188,7 +188,7 @@ The web application checks MFA once when an authenticated session enters the SPA
 | `POST` | `/themis/nmap` | Port scan (supports CIDR ranges) |
 | `POST` | `/themis/nikto` | Web configuration / vulnerability scan |
 | `POST` | `/themis/nuclei` | Template-based scan (single host per scan) |
-| `POST` | `/themis/lybra` | Self-built engine scan (self-discovery or from a prior Nmap scan) |
+| `POST` | `/themis/lybra` | Self-built engine scan (own port discovery — `target` required) |
 | `GET` | `/themis/scan-status?id=` | Scan status / progress: pending · running · done · cancelled |
 | `POST` | `/themis/scans/<id>/cancel` | Cancel a running scan |
 | `GET` | `/themis/results` · `/themis/results/<id>` | List scans (filterable, paginated) / scan detail |
@@ -231,24 +231,35 @@ Content-Type: application/json
 | Method | Endpoint | Permission | Description |
 |---|---|---|---|
 | `POST` | `/iris/analyze` | `IRIS_CREATE` | Submit email headers/content (optional: `title`) |
-| `GET` | `/iris/status?id=` | `IRIS_READ` | Analysis progress and status |
+| `GET` | `/iris/capabilities` | `IRIS_READ` | Server-side limits the UI must honour (max message size, min headers, accepted modes, verdict thresholds) |
+| `GET` | `/iris/status?id=` | `IRIS_READ` | Analysis progress and status; carries `failureCode`/`failureReason` when the analysis failed |
 | `GET` | `/iris/results` | `IRIS_READ` | List analyses (paginated) |
-| `GET` | `/iris/results/<id>` | `IRIS_READ` | Full report with per-rule scores |
+| `GET` | `/iris/results/<id>` | `IRIS_READ` | Full report with per-rule scores, analysis quality and detector version |
 | `GET` | `/iris/results/<id>/path` | `IRIS_READ` | Which rules fired and why |
 | `GET` | `/iris/results/<id>/iocs` | `IRIS_READ` | Extracted indicators of compromise |
-| `POST` | `/iris/results/<id>/reanalyze` | `IRIS_UPDATE` | Re-run the rules engine against a stored analysis |
-| `POST` | `/iris/results/<id>/ai-summary` | `IRIS_UPDATE` | Generate an AI plain-language summary (background task) |
+| `POST` | `/iris/results/<id>/reanalyze` | `IRIS_CREATE` | Re-run the current ruleset as a **new** analysis (returns the new id) |
+| `POST` | `/iris/results/<id>/ai-summary` | `IRIS_CREATE` | Generate an AI plain-language summary (background task); idempotent per analysis, `?regenerate=true` forces a new one |
 | `POST` | `/iris/analyze/<id>/cancel` | `IRIS_UPDATE` | Cancel a running analysis |
 | `DELETE` | `/iris/results/<id>` | `IRIS_DELETE` | Delete an analysis |
-| `POST` | `/iris/results/<id>/document` | `IRIS_UPDATE` | Generate a PDF report for an analysis |
-| `GET/DELETE` | `/iris/document-status` · `/iris/documents` · `/iris/document/<id>/download` · `/iris/document/<id>` | Report status, listing, download, delete |
+| `POST` | `/iris/results/<id>/document` | `IRIS_CREATE` | Generate a PDF report for an analysis |
+| `GET` | `/iris/document-status` · `/iris/documents` · `/iris/results/<id>/documents` · `/iris/document/<id>/download` | `IRIS_READ` | Report status, listing and download |
+| `DELETE` | `/iris/document/<id>` | `IRIS_DELETE` | Delete a generated report |
 | `GET` | `/iris/mailbox/providers` | `IRIS_READ` | Supported mailbox providers (Gmail, Microsoft 365) |
 | `POST` | `/iris/mailbox/connect` | `IRIS_CREATE` | Start OAuth connection to an external mailbox |
 | `GET` | `/iris/mailbox/callback` | — (public) | OAuth redirect target; CSRF-protected by a signed `state` |
-| `GET/PATCH/DELETE` | `/iris/mailbox/connections[/<id>]` | `IRIS_*` | List, pause/resume, or disconnect a monitored mailbox |
+| `GET` | `/iris/mailbox/connections` | `IRIS_READ` | List monitored mailboxes |
+| `PATCH` | `/iris/mailbox/connections/<id>` | `IRIS_UPDATE` | Pause, resume or reconfigure a connection |
+| `DELETE` | `/iris/mailbox/connections/<id>` | `IRIS_DELETE` | Disconnect a monitored mailbox |
 | `POST` | `/iris/mailbox/connections/<id>/sync` | `IRIS_UPDATE` | Trigger an out-of-cycle mailbox poll |
 
+> [!NOTE]
+> **`CREATE` vs `UPDATE` in Iris.** `IRIS_CREATE` guards the operations that bring a *new* entity into existence and consume quota for it — submitting an analysis, re-analysing (which inserts a brand-new analysis and returns its id, leaving the original untouched), generating an AI summary, generating a PDF. `IRIS_UPDATE` guards changes to something that already exists: cancelling a running analysis, pausing a connection, forcing a poll. The full matrix is pinned by `API/tests/integration/test_iris_permissions.py`, which asserts both that the documented attribute opens each endpoint and that every other Iris attribute is refused.
+
 Iris applies rules across authentication (SPF, DKIM, DMARC, ARC), header anomalies, reply-chain/thread attacks, content heuristics (including QR-code/quishing detection), and domain spoofing, producing verdicts `Legitimate` / `Suspicious` / `Phishing`. Connected mailboxes are polled periodically by the scheduler and analyzed automatically; when a monitored mailbox receives mail judged `Phishing`, the user is notified by email (`iris.notify`). Thresholds are configured in `SecOpsConfig.json`.
+
+**Trust boundary.** `Authentication-Results` and `Received` headers are partly written by whoever sent the message: MTAs *prepend* their own `Received`, so the lower hops are supplied by the sender and can be fabricated. Iris only trusts an `Authentication-Results` whose `authserv-id` matches a hop **above** the trust boundary — the contiguous run of hops belonging to the delivering organisation, plus any verifier listed in `features.iris.data.trusted_authserv_ids` (empty by default; without it trust is derived from the chain itself). An `ARC-Seal: cv=pass` is treated as context, never as permission to suppress SPF/DMARC/alignment gates, unless a trusted verifier confirms it with `arc=pass` in its own `Authentication-Results`.
+
+**Analysis quality.** A rule that raises does not abort the analysis, but it is no longer invisible: the report carries `analysisQuality` (`complete`/`degraded`), `failedRules` (the rules that could not *execute* — not the ones that found something) and `detectorVersion` (which rule catalogue produced the result). Losing an authentication or attachment rule prevents a `Legitimate` verdict, because those two families answer questions no other rule answers.
 
 ### Aegis — awareness and alerts
 
@@ -388,9 +399,6 @@ Each entry point is a `@staticmethod` on the owning module's manager class — p
 | `iris.notify` | Iris | `IrisPhishingNotifyManager.execute_notify_phishing` | `iris-phishing-notify:<id>` |
 | `hygeia.notify` | Hygeia | `HygeiaNotifyManager.execute_notify_critical_anomaly` | `hygeia-notify:<id>` |
 
-> [!NOTE]
-> `iris.ai_summary` has no registered queue, so its jobs run on `default` (the TaskQueue logs a warning for it).
-
 - **Progress reporting**: workers update `job.meta["progress"]` via `_Task(progress_callback=...)`.
 - **Cooperative cancellation**: set Redis key `taskqueue:cancel:{job_id}`; workers check via `_Task.wait(cancel_check=...)` and terminate the subprocess tree.
 - The `max_workers` setting is read at worker startup only — changes via `PUT /system/tasks/config` apply on the next worker restart.
@@ -409,15 +417,29 @@ pytest                    # full suite + coverage (SQLite, external services moc
 pytest -m unit            # fast unit tests only (no app, no DB)
 pytest -m integration     # boots create_app() + test HTTP client
 pytest -m oracle          # differential-oracle bench against real Docker containers (skipped in CI by default)
+pytest -m postgres        # real-engine matrix (PostgreSQL + Redis); skipped unless POSTGRES_TEST_URL is set
 ```
 
-CI (`.github/workflows/tests.yml`) runs `python -m pytest -q -m "not oracle"` on push/PR to `main`. Some tests use `xfail(strict=True)` to document real known bugs — when a bug is fixed the test XPASSes and the marker must be removed. A green push to `main` (a merged pull request) additionally triggers the automatic production deploy — see [Continuous deployment](#continuous-deployment-cicd).
+The `postgres` matrix (`API/tests/postgres/`) covers the invariants SQLite cannot express — declared column lengths, foreign-key actions, real `JSONB`, races between concurrent transactions, and the Alembic chain applied to an empty database. It skips itself without the env vars, so it neither slows the fast suite nor requires containers to work on the project:
+
+```bash
+docker run -d --name pg -e POSTGRES_USER=ellysia -e POSTGRES_PASSWORD=ellysia \
+  -e POSTGRES_DB=ellysia_test -p 55432:5432 postgres:15
+docker run -d --name rd -p 56379:6379 redis:7
+POSTGRES_TEST_URL=postgresql+psycopg2://ellysia:ellysia@localhost:55432/ellysia_test \
+  REDIS_TEST_URL=redis://localhost:56379/1 python -m pytest -m postgres
+```
+
+Run it in its **own** pytest invocation. The fast suite's SQLite shim rewrites `JSONB` to generic `JSON` in the shared model metadata, so a mixed run would build the wrong schema; the fixtures detect that and skip with an explanatory message rather than assert against an imitation.
+
+CI runs two workflows on push/PR to `main` and the `vX.Y` release branches: `.github/workflows/tests.yml` (`python -m pytest -q -m "not oracle"`, on SQLite) and `.github/workflows/tests-postgres.yml` (`python -m pytest -q -m postgres`, with ephemeral PostgreSQL and Redis services). They are separate jobs on purpose — the service matrix must not slow down the cycle that runs on every push. Some tests use `xfail(strict=True)` to document real known bugs — when a bug is fixed the test XPASSes and the marker must be removed. A green push to `main` (a merged pull request) additionally triggers the automatic production deploy — see [Continuous deployment](#continuous-deployment-cicd).
 
 ### Web SPA (node, no framework)
 
 ```bash
 cd web/app
 npm run test:acheron      # crypto interop + CRUD + sync tests for the Acheron vault client
+npm run test:iris         # file-intake limits (the size threshold comes from GET /iris/capabilities)
 npm run test:hygeia       # metric-formatting tests for the Hygeia dashboard
 npm run test:polling      # usePolling composable tests
 npm run test:quiz         # aegis quiz-shuffle permutation tests
@@ -688,7 +710,7 @@ Ellysia uses a layered configuration system (`API/src/modules/system/config_read
 Config is read through frozen dataclasses bound to a branch of the tree (`@config_block`, e.g. `CR.nuclei_config().rate_limit`), not one getter per value, and cached — changes to `SecOpsConfig.json` require an app restart unless applied via `PUT /system`. Background jobs pick them up too: the worker re-reads the file per job when its mtime changed (`CR.reload_if_changed()`).
 
 > [!WARNING]
-> `features.themis.areLocalIpsAllowed` is set to `true` in the shipped `SecOpsConfig.json` so local development against private IPs works. **Revert it to `false` before any real deployment**, or the anti-SSRF defense stays disabled in production.
+> `features.themis.areLocalIpsAllowed` ships as `false`, and a test pins that value (`test_the_anti_ssrf_defence_ships_enabled`): with `true`, a user can point a scan at the server's internal network or the cloud metadata endpoint. Flip it to `true` in your working copy for local development against private IPs, but do not commit it.
 
 > [!TIP]
 > Use `python -c "from src.modules.system import config_reading as CR; print(CR.get_db_credentials())"` to verify your configuration.

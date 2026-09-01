@@ -94,11 +94,16 @@ def test_folder_isolation_between_users(client, make_user, auth_headers):
 # explícita, ningún scanner debe poder alcanzar una IP privada/loopback ni la
 # IP de metadata de nube.
 #
-# 'themis.areLocalIpsAllowed' se deja en true en el SecOpsConfig.json
-# versionado a propósito, para desarrollo local (ver CLAUDE.md). Estos tests
-# verifican la protección anti-SSRF en sí, así que fuerzan el valor a false
-# independientemente de esa config ambiente, igual que TestPrivateIpPolicy en
-# tests/unit/test_themis_parsing.py.
+# 'themis.areLocalIpsAllowed' viaja en false en el SecOpsConfig.json
+# versionado, y hay un test que lo ata (test_the_anti_ssrf_defence_ships_enabled
+# en tests/unit/test_config_shape.py): estuvo en true hasta 2026-09-01 y la
+# suite no se enteraba, precisamente porque estos tests fuerzan el valor.
+#
+# Se sigue forzando aquí a propósito: estos casos verifican la protección
+# anti-SSRF *en sí*, y deben hacerlo sin depender de lo que diga la config
+# ambiente — igual que TestPrivateIpPolicy en tests/unit/test_themis_parsing.py.
+# Lo que uno comprueba (el comportamiento) y lo que ata el otro (el valor que se
+# despliega) son cosas distintas, y hacen falta las dos.
 
 
 @pytest.fixture()

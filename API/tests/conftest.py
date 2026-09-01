@@ -85,6 +85,27 @@ os.environ["REDIS_DB"] = "15"
 os.environ.setdefault("REDIS_HOST", "localhost")
 os.environ.setdefault("OLLAMA_HOST", "http://localhost:11434")
 
+# Credenciales de IA: vacías siempre, en cualquier máquina.
+#
+# ``config_reading`` llama a ``load_dotenv()`` sin ruta, y esa función sube por
+# el árbol de directorios hasta encontrar un ``.env``. En un checkout de
+# desarrollo eso encuentra el ``.env`` de la raíz —el de docker-compose, que
+# CLAUDE.md describe como "la API no lo lee"— y de ahí saca una OPENAI_API_KEY
+# de verdad. En CI no hay ningún ``.env``, porque está en .gitignore.
+#
+# Resultado: un test que construya un writer de IA (``build_generator`` monta
+# la estrategia con credenciales en el constructor) pasaba en local y fallaba en
+# CI, sin que nada en el test dijera que dependía de eso. Es la misma clase de
+# fuga que ya sellan Redis y los sockets salientes: algo del entorno de la
+# máquina decidiendo el resultado.
+#
+# Asignación incondicional, no ``setdefault``: tiene que ganar a lo que traiga
+# el ``.env``. Y basta con dejarlas vacías porque ``load_dotenv`` no sobrescribe
+# una variable que ya existe, aunque su valor sea la cadena vacía.
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["GOOGLE_API_KEY"] = ""
+
+from importlib.util import module_from_spec, spec_from_file_location  # noqa: E402
 from unittest import mock  # noqa: E402
 
 import pytest  # noqa: E402
@@ -221,6 +242,17 @@ def _redis_always_unavailable():
 # 3-ter. Ningún socket sale de loopback
 # ---------------------------------------------------------------------------
 
+# Los objetivos reales declarados (L48) los comparten este sello y el banco de
+# paridad. Se cargan por ruta y no por nombre porque ``conftest`` es ambiguo:
+# hay más de uno en el árbol (``tests/postgres/conftest.py``) y cuál gana
+# depende del orden de recolección.
+_REAL_TARGETS_SPEC = spec_from_file_location(
+    "lybra_real_targets", Path(__file__).resolve().parent / "oracle" / "_real_targets.py"
+)
+_real_targets = module_from_spec(_REAL_TARGETS_SPEC)
+_REAL_TARGETS_SPEC.loader.exec_module(_real_targets)
+
+
 def _is_loopback(address) -> bool:
     """¿Apunta ``address`` (el argumento de ``socket.connect``) a loopback?
 
@@ -256,20 +288,32 @@ def _no_outbound_sockets():
 
     Loopback sí se permite: los tests de herald levantan un servidor SMTP real
     (aiosmtpd) en 127.0.0.1 y tienen que poder hablar con él.
+
+    Y, desde L48, también las direcciones que el operador haya declarado en
+    ``LYBRA_REAL_TARGETS`` (ver :func:`declared_real_targets`). Es una lista
+    blanca de direcciones concretas, resueltas antes de instalar el sello, no
+    un interruptor que lo apague: sin esa variable —el caso por defecto, y el
+    de CI— no sale de aquí ni un paquete.
     """
     real_connect = socket.socket.connect
     real_connect_ex = socket.socket.connect_ex
     real_gethostbyaddr = socket.gethostbyaddr
+    allowed = _real_targets.allowed_outbound_addresses()
+
+    def _is_permitted(address) -> bool:
+        return _is_loopback(address) or (
+            isinstance(address, tuple) and bool(address) and address[0] in allowed
+        )
 
     def guarded_connect(self, address):
-        if not _is_loopback(address):
+        if not _is_permitted(address):
             raise ConnectionRefusedError(
                 f"La suite de tests no permite conexiones fuera de loopback: {address!r}"
             )
         return real_connect(self, address)
 
     def guarded_connect_ex(self, address):
-        if not _is_loopback(address):
+        if not _is_permitted(address):
             return 111  # ECONNREFUSED, la convención de connect_ex
         return real_connect_ex(self, address)
 
@@ -277,7 +321,7 @@ def _no_outbound_sockets():
         # El DNS inverso es la otra forma de irse a la red sin abrir un socket
         # propio: resolver 10.0.0.5 colgaba 16 s en un test de Lybra. El único
         # caller (shared._endpoints) ya trata socket.herror como "no resuelve".
-        if not _is_loopback((ip,)):
+        if not _is_permitted((ip,)):
             raise socket.herror(f"DNS inverso bloqueado en tests: {ip!r}")
         return real_gethostbyaddr(ip)
 

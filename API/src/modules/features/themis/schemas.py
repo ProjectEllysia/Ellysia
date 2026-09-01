@@ -37,26 +37,17 @@ class NucleiScanRequestSchema(Schema):
 
 
 class LybraScanRequestSchema(Schema):
-    # Two modes: analyse a prior Nmap scan (sourceScanId) OR self-discover a
-    # target's ports (target [+ optional ports]). Exactly one must be provided.
-    sourceScanId = fields.Integer()
-    target = fields.String()
-    ports = fields.String()
-    # Fase 6 "análisis profundo": also launch Nmap/Nikto/Nuclei as independent
-    # corroborator scans, fused with Lybra's own findings when read.
+    # Un solo modo por HTTP: Lybra descubre los puertos del objetivo con su
+    # propio transporte (Fase T). El modo de payload externo existe en el
+    # manager, pero no se expone aquí — llega en proceso desde Hygeia.
     #
-    # C2: dentro de Python el flag se llama ``is_deep_analysis``, pero esta
-    # clave se queda como "deep" — es el nombre en el cable (lo manda
-    # LybraLaunchPanel.vue) y también el que quedó persistido en la columna
-    # JSON ``arguments`` de los ProgramedScan ya creados. Renombrarla sería un
-    # cambio de ruptura, no un renombrado.
-    deep = fields.Boolean(load_default=False)
+    # Hasta L52 había un segundo modo, ``sourceScanId``: analizar los servicios
+    # que un escaneo Nmap previo ya había descubierto. Retirado con el resto
+    # del acoplamiento con escáneres de terceros, junto al flag ``deep`` que
+    # lanzaba Nmap/Nikto/Nuclei como corroboradores.
+    target = fields.String(required=True)
+    ports = fields.String()
     timeout = fields.Integer(load_default=120, validate=validate.Range(min=1))
-
-    @validates_schema
-    def _require_one_mode(self, data, **kwargs):
-        if not data.get("sourceScanId") and not data.get("target"):
-            raise ValidationError("sourceScanId or target is required")
 
 
 class FindingStateRequestSchema(Schema):

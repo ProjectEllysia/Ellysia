@@ -3,6 +3,7 @@ Iris REST API endpoints for email header analysis.
 
 Provides:
 - POST /iris/analyze         — submit headers for analysis
+- GET  /iris/capabilities     — server-side limits the UI must honour
 - GET  /iris/status?id=...   — check analysis status/progress
 - GET  /iris/results         — list all analyses for the current user
 - GET  /iris/results/{id}    — full analysis report
@@ -40,6 +41,7 @@ from .exceptions import (
 )
 from .schemas import (
     AnalysisIdQuerySchema,
+    IrisCapabilitiesResponseSchema,
     AnalyzeRequestSchema,
     AnalyzeResponseSchema,
     AnalysisStatusResponseSchema,
@@ -51,6 +53,7 @@ from .schemas import (
     AnalysisIocsResponseSchema,
     ResultsQuerySchema,
     GenerateDocumentResponseSchema,
+    GenerateAiSummaryRequestSchema,
     GenerateAiSummaryResponseSchema,
     DocumentStatusQuerySchema,
     IrisDocumentStatusResponseSchema,
@@ -112,6 +115,19 @@ def analyze_headers(data):
     }
 
 
+@iris_blp.get("/capabilities")
+@iris_blp.response(200, IrisCapabilitiesResponseSchema, description="Iris limits and analysis modes")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(logger=logger)
+def get_capabilities():
+    """Limites y modos de analisis que aplica el servidor"""
+    return IrisManager.get_capabilities()
+
+
 @iris_blp.get("/status")
 @iris_blp.arguments(AnalysisIdQuerySchema, location="query")
 @iris_blp.response(200, AnalysisStatusResponseSchema, description="Analysis status")
@@ -139,6 +155,11 @@ def get_analysis_status(args: dict):
         "status": status,
         "totalScore": analysis.total_score if analysis else None,
         "verdict": analysis.verdict if analysis else None,
+        # B03: el motivo solo tiene sentido cuando el análisis murió. Enviarlo
+        # siempre dejaría un `failureReason` colgando de un análisis que
+        # terminó bien tras un reintento y confundiría a quien lea el estado.
+        "failureCode": analysis.failure_code if analysis else None,
+        "failureReason": analysis.failure_reason if analysis else None,
     }
     if progress is not None:
         response["progress"] = progress
@@ -257,6 +278,7 @@ def reanalyze_analysis(analysis_id: int):
 
 
 @iris_blp.post("/results/<int:analysis_id>/ai-summary")
+@iris_blp.arguments(GenerateAiSummaryRequestSchema, location="query")
 @iris_blp.response(202, GenerateAiSummaryResponseSchema, description="AI summary generation started")
 @iris_blp.alt_response(400, schema=ErrorSchema, description="Analysis not finished")
 @iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
@@ -266,18 +288,20 @@ def reanalyze_analysis(analysis_id: int):
 @require_attributes(at_least_one=[AttributeType.IRIS_CREATE])
 @limiter.limit("20 per hour; 100 per day")
 @handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
-def generate_ai_summary(analysis_id: int):
+def generate_ai_summary(args: dict, analysis_id: int):
     """Solicitar la generacion asincrona de la narrativa ejecutiva IA (IrisAIWriter)"""
     user = get_current_user()
 
     manager = IrisManager()
-    manager.generate_ai_summary(analysis_id, user.id)
+    status = manager.generate_ai_summary(analysis_id, user.id,
+                                         regenerate=args["regenerate"])
 
     logger.info(f"AI summary solicitado para analysis {analysis_id} por usuario {user.username}")
     return {
-        "message": "Generacion de resumen ejecutivo IA iniciada",
+        "message": ("Resumen ejecutivo IA ya disponible" if status == "done"
+                    else "Generacion de resumen ejecutivo IA iniciada"),
         "analysisId": analysis_id,
-        "status": "running",
+        "status": status,
     }, 202
 
 
@@ -483,7 +507,11 @@ def download_document(document_id: int):
         document.filename,
         mimetype="application/pdf",
         as_attachment=True,
-        download_name=f"iris_analysis_{document.analysis_id}.pdf",
+        # B11: el nombre descargable identifica el documento, no solo el
+        # análisis. Dos informes del mismo análisis llegaban al navegador con
+        # el mismo nombre y el segundo sobrescribía al primero en la carpeta
+        # de descargas.
+        download_name=f"iris_analysis_{document.analysis_id}_{document.id}.pdf",
     )
 
 

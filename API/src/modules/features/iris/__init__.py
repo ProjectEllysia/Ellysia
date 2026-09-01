@@ -8,6 +8,7 @@ from .endpoints import iris_blp
 
 # Registro de las categorías de cola de este módulo (OCP).
 QueueRegistry.register("iris.analyze")
+QueueRegistry.register("iris.ai_summary")
 QueueRegistry.register("iris.report")
 QueueRegistry.register("iris.ingest")
 QueueRegistry.register("iris.notify")

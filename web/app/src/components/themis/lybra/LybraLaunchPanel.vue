@@ -14,31 +14,15 @@
       <Transition name="pop"><span v-if="props.launched" class="engine-launched">Motor en marcha</span></Transition>
     </div>
 
-    <!-- Selector de modo -->
-    <div class="mode-picker" role="radiogroup" aria-label="Modo de escaneo">
-      <button type="button" class="mode-opt" :class="{ active: mode === 'discover' }"
-        role="radio" :aria-checked="mode === 'discover'" @click="mode = 'discover'">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
-        <span class="mode-label">Que Lybra descubra</span>
-        <span class="mode-hint">Transporte propio: descubre los puertos por su cuenta</span>
-      </button>
-      <button type="button" class="mode-opt" :class="{ active: mode === 'source' }"
-        role="radio" :aria-checked="mode === 'source'" @click="onPickSourceMode">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
-        <span class="mode-label">Analizar un Nmap</span>
-        <span class="mode-hint">Reutiliza los servicios de un escaneo Nmap ya hecho</span>
-      </button>
-    </div>
-
     <!-- Campos según modo -->
     <div class="engine-fields">
-      <div v-if="mode === 'discover'" class="field-row">
+      <div class="field-row">
         <div class="field field-lg"><label>Target (IP única)</label>
           <input v-model="target" placeholder="192.168.1.1" @keyup.enter="handleLaunch" /></div>
         <div class="field"><label>Puertos (opcional)</label>
           <input v-model="ports" placeholder="80,443 o 1-1000" /></div>
       </div>
-      <div v-if="mode === 'discover' && target.trim()" class="auth-status" :class="{ ok: isTargetAuthorized(target) }">
+      <div v-if="target.trim()" class="auth-status" :class="{ ok: isTargetAuthorized(target) }">
         <template v-if="isTargetAuthorized(target)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
           Objetivo autorizado
@@ -49,27 +33,6 @@
             Autorizar '{{ target.trim() }}'
           </button>
         </template>
-      </div>
-
-      <div v-if="mode === 'source'" class="field-row">
-        <div class="field field-lg">
-          <label>Escaneo Nmap de origen</label>
-          <select v-model="sourceScanId">
-            <option value="" disabled>{{ sourceLoading ? 'Cargando…' : (sourceScans.length ? '-- Elige un Nmap terminado --' : 'No hay escaneos Nmap terminados') }}</option>
-            <option v-for="s in sourceScans" :key="s.id" :value="s.id">
-              #{{ s.id }} · {{ s.target }} · {{ s.totalOpenPorts ?? 0 }} puertos
-            </option>
-          </select>
-        </div>
-      </div>
-      <div v-if="mode === 'source' && selectedSourceTarget && !isTargetAuthorized(selectedSourceTarget)" class="auth-status">
-        <span>
-          '{{ selectedSourceTarget }}' no está autorizado: Lybra solo hará detección por versión (Fase 1).
-          Autorízalo para desbloquear fingerprinting propio y comprobaciones activas.
-        </span>
-        <button type="button" class="btn-authorize-inline" @click="$emit('add-authorized-target', { target: selectedSourceTarget })">
-          Autorizar '{{ selectedSourceTarget }}'
-        </button>
       </div>
 
       <!-- Registro de objetivos autorizados -->
@@ -104,17 +67,7 @@
         </div>
       </div>
 
-      <!-- Segunda opinión + profundidad -->
       <div class="engine-row">
-        <label class="deep-toggle" :title="'Lanza Nmap, Nikto y Nuclei en paralelo y funde sus hallazgos con los de Lybra'">
-          <input type="checkbox" v-model="deep" />
-          <span class="deep-track"><span class="deep-thumb"></span></span>
-          <span class="deep-copy">
-            <span class="deep-label">Pedir una segunda opinión</span>
-            <span class="deep-sub">Corrobora con Nmap · Nikto · Nuclei</span>
-          </span>
-        </label>
-
         <div class="field field-sm"><label>Timeout (s)</label>
           <input v-model.number="timeout" type="number" min="1" max="86400" class="no-spin" /></div>
 
@@ -135,27 +88,20 @@ const props = defineProps({
   // Q8: viene del padre (deriva del estado real de los escaneos), no de un
   // flag local que quedaba en true para siempre tras el primer lanzamiento.
   launched: { type: Boolean, default: false },
-  sourceScans: { type: Array, default: () => [] },
-  sourceLoading: { type: Boolean, default: false },
   authorizedTargets: { type: Array, default: () => [] },
   authTargetsLoading: { type: Boolean, default: false },
 })
-const emit = defineEmits(['launch', 'load-sources', 'add-authorized-target', 'remove-authorized-target'])
+const emit = defineEmits(['launch', 'add-authorized-target', 'remove-authorized-target'])
 
-const mode = ref('discover')       // 'discover' | 'source'
+// Un solo modo: Lybra descubre los puertos del objetivo con su propio
+// transporte. Hubo un segundo modo —analizar los servicios de un escaneo Nmap
+// ya hecho— retirado en L52 junto al interruptor de "segunda opinión" que
+// lanzaba Nmap, Nikto y Nuclei como corroboradores.
 const target = ref('')
 const ports = ref('')
-const sourceScanId = ref('')
-const deep = ref(false)
 const timeout = ref(120)
 
-const canLaunch = computed(() =>
-  mode.value === 'discover' ? !!target.value.trim() : !!sourceScanId.value
-)
-
-const selectedSourceTarget = computed(() =>
-  props.sourceScans.find(s => s.id === Number(sourceScanId.value))?.target || ''
-)
+const canLaunch = computed(() => !!target.value.trim())
 
 /**
  * Heurística de coincidencia exacta contra el registro (el backend, que sí
@@ -178,20 +124,10 @@ function submitNewAuthTarget() {
   newAuthLabel.value = ''
 }
 
-function onPickSourceMode() {
-  mode.value = 'source'
-  emit('load-sources')
-}
-
 function handleLaunch() {
   if (!canLaunch.value || props.launching) return
-  const payload = { deep: deep.value, timeout: timeout.value }
-  if (mode.value === 'discover') {
-    payload.target = target.value.trim()
-    if (ports.value.trim()) payload.ports = ports.value.trim()
-  } else {
-    payload.sourceScanId = Number(sourceScanId.value)
-  }
+  const payload = { target: target.value.trim(), timeout: timeout.value }
+  if (ports.value.trim()) payload.ports = ports.value.trim()
   emit('launch', payload)
 }
 </script>
@@ -225,21 +161,6 @@ function handleLaunch() {
 .pop-leave-active { transition: opacity 0.15s ease; }
 .pop-leave-to { opacity: 0; }
 
-/* ── Selector de modo ── */
-.mode-picker { display: grid; grid-template-columns: 1fr 1fr; gap: 0.55rem; margin-bottom: 0.9rem; }
-.mode-opt {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 0.2rem;
-  padding: 0.75rem 0.85rem; text-align: left;
-  background: var(--surface-2); border: 1px solid var(--border-solid); border-radius: 9px;
-  cursor: pointer; transition: all 0.2s ease; position: relative;
-}
-.mode-opt svg { width: 18px; height: 18px; color: var(--text-muted); transition: color 0.2s; }
-.mode-opt:hover { border-color: var(--accent); }
-.mode-opt.active { border-color: var(--accent); background: var(--accent-dim); box-shadow: inset 0 0 0 1px var(--accent); }
-.mode-opt.active svg { color: var(--accent-bright); }
-.mode-label { font-size: var(--fs-lg); font-weight: 600; color: var(--text); }
-.mode-hint { font-size: var(--fs-md); color: var(--text-muted); line-height: 1.25; }
-
 /* ── Campos ── */
 .engine-fields { display: flex; flex-direction: column; gap: 0.8rem; }
 .field-row { display: flex; align-items: flex-end; gap: 0.6rem; flex-wrap: wrap; }
@@ -252,25 +173,9 @@ function handleLaunch() {
 .no-spin::-webkit-outer-spin-button, .no-spin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .no-spin { -moz-appearance: textfield; }
 
-/* ── Fila de segunda opinión ── */
+/* ── Fila de lanzamiento ── */
 .engine-row { display: flex; align-items: flex-end; gap: 0.9rem; flex-wrap: wrap; }
-.deep-toggle { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; margin-right: auto; user-select: none; }
-.deep-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
-.deep-track {
-  position: relative; width: 40px; height: 22px; flex-shrink: 0;
-  background: var(--surface-2); border: 1px solid var(--border-solid); border-radius: 999px;
-  transition: background 0.2s, border-color 0.2s;
-}
-.deep-thumb {
-  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
-  background: var(--text-muted); transition: transform 0.2s, background 0.2s;
-}
-.deep-toggle input:checked + .deep-track { background: var(--accent-dim); border-color: var(--accent); }
-.deep-toggle input:checked + .deep-track .deep-thumb { transform: translateX(18px); background: var(--accent-bright); }
-.deep-toggle input:focus-visible + .deep-track { box-shadow: 0 0 0 3px var(--accent-dim); }
-.deep-copy { display: flex; flex-direction: column; gap: 0.05rem; }
-.deep-label { font-size: var(--fs-lg); font-weight: 600; color: var(--text); }
-.deep-sub { font-size: var(--fs-md); color: var(--text-muted); }
+.engine-row .field-sm { margin-right: auto; }
 
 .btn-launch { height: 36px; padding: 0 1.25rem; background: var(--accent); border: 1px solid var(--accent); color: var(--on-accent); font-weight: 600; font-size: var(--fs-lg); border-radius: 7px; cursor: pointer; display: flex; align-items: center; gap: 0.35rem; transition: all 0.2s; white-space: nowrap; position: relative; }
 .btn-launch:hover:not(:disabled) { background: var(--accent-bright); border-color: var(--accent-bright); }
@@ -337,11 +242,8 @@ function handleLaunch() {
 .btn-add-target:hover:not(:disabled) { background: var(--accent-dim); }
 .btn-add-target:disabled { opacity: 0.4; cursor: not-allowed; }
 
-@media (max-width: 600px) {
-  .mode-picker { grid-template-columns: 1fr; }
-}
 @media (prefers-reduced-motion: reduce) {
-  .pop-enter-active, .pop-leave-active, .deep-thumb, .deep-track, .btn-launch,
+  .pop-enter-active, .pop-leave-active, .btn-launch,
   .auth-register-toggle .chevron, .btn-authorize-inline, .btn-add-target, .auth-chip-remove { transition: none !important; }
 }
 </style>

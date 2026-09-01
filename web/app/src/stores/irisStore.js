@@ -27,6 +27,14 @@ export const useIrisStore = defineStore('iris', () => {
   // hardcodee. Los valores por defecto solo se usan hasta el primer fetch.
   const thresholds = reactive({ legitimate: 80, suspicious: 55 })
 
+  // B13: límites que aplica el servidor (`GET /iris/capabilities`). La vista
+  // los necesita para decidir igual que el API en vez de replicar constantes:
+  // el tope de tamaño estaba escrito a mano allí y había derivado al doble
+  // del real, así que el usuario cargaba en memoria ficheros que el backend
+  // iba a rechazar. Se pide una vez y se cachea; si falla, `intake.js` cae a
+  // su respaldo y la interfaz sigue siendo usable.
+  const capabilities = ref(null)
+
   const currentId = ref(null)
   const currentReport = reactive({ loading: false, data: null })
   const currentStatus = reactive({ polling: false, status: null, progress: null })
@@ -48,6 +56,19 @@ export const useIrisStore = defineStore('iris', () => {
   // "message" para que el backend analice cuerpo, enlaces y adjuntos
   // reales; "headers" se mantiene como respaldo cuando solo se pegaron
   // cabeceras a mano.
+  async function fetchCapabilities() {
+    if (capabilities.value) return capabilities.value
+    try {
+      capabilities.value = await apiFetch('/iris/capabilities')
+    } catch {
+      // Silencioso a propósito: no poder leer los límites no impide analizar
+      // nada, solo hace que la interfaz use su respaldo. Un toast de error
+      // aquí sería ruido por algo que el usuario no puede arreglar.
+      capabilities.value = null
+    }
+    return capabilities.value
+  }
+
   async function submitAnalysis({ headers, message, title } = {}) {
     submitting.value = true
     try {
@@ -553,6 +574,7 @@ export const useIrisStore = defineStore('iris', () => {
     submitting.value = false
     totalCount.value = 0
     Object.assign(thresholds, { legitimate: 80, suspicious: 55 })
+    capabilities.value = null
 
     archive.items = []
     archive.total = 0
@@ -578,6 +600,7 @@ export const useIrisStore = defineStore('iris', () => {
   return {
     BENCH_SIZE,
     analyses, loading, listError, submitting, totalCount, thresholds,
+    capabilities, fetchCapabilities,
     currentId, currentReport, currentStatus, aiSummaryLoading,
     documents, documentsLoading,
     archive, archiveHasFilters,

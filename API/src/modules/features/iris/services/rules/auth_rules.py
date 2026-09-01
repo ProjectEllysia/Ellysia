@@ -36,8 +36,14 @@ import re
 
 import src.modules.system.config_reading as CR
 from ..registry import iris_rules, RuleResult
+from ..auth_trust import (
+    TRUST_ABSENT,
+    TRUST_BELOW_BOUNDARY,
+    TRUST_UNKNOWN,
+    assess_authserv_trust,
+    is_arc_verified_by_trusted_hop,
+)
 from ..text import extract_domain, registrable_domain
-from ..parsers import parse_received_line
 
 
 def _dmarc_is_conclusive(auth_lower: str) -> bool:
@@ -389,9 +395,13 @@ _ARC_CV_RE = re.compile(r"\bcv=(\w+)", re.IGNORECASE)
 
 @iris_rules.register(
     name="ARC Chain", category="authentication",
-    description="Evalúa la validez declarada (cv=) de la cadena ARC (Authenticated Received Chain, RFC 8617)",
+    description=(
+        "Evalúa la validez declarada (cv=) de la cadena ARC (Authenticated "
+        "Received Chain, RFC 8617) y si la validó un verificador de confianza"
+    ),
+    needs_context=True,
 )
-def check_arc_chain(headers: dict) -> RuleResult:
+def check_arc_chain(context) -> RuleResult:
     """Evaluate the ``cv=`` (chain validation) status of an ARC seal.
 
     ARC lets a legitimate intermediary (mailing list, forwarding service)
@@ -400,11 +410,21 @@ def check_arc_chain(headers: dict) -> RuleResult:
     chain *declares* — it does not re-verify the ARC cryptographic
     signatures itself (same accepted limitation as SPF/DKIM/DMARC above).
 
+    `B06`: ``cv=pass`` por sí solo ya **no** ablanda ningún gate. Esa
+    afirmación la hace el propio mensaje sobre sí mismo, y Iris no verifica
+    firmas criptográficas, así que un atacante podía escribir un ``ARC-Seal:
+    cv=pass`` inventado y con eso suprimir los gates de SPF, DMARC y
+    alignment — precisamente los que existen para cazar suplantación. Quien sí
+    valida la cadena es el MTA receptor, que lo apunta como ``arc=pass`` en su
+    propio ``Authentication-Results``; ``details["verified"]`` recoge si esa
+    confirmación existe y viene de un verificador por encima de la frontera de
+    confianza, y es lo único que ``_extract_verdict_signals`` acepta ya como
+    permiso para ablandar.
+
     Returns:
         - ``pass`` (score +2) when ``cv=pass`` — a prior legitimate hop's
-          authentication validated correctly; consumed by
-          ``managers._extract_verdict_signals`` to soften the SPF/DMARC/
-          alignment gates for genuine forwards.
+          authentication validated correctly. Solo ablanda los gates de
+          SPF/DMARC/alignment si ``details["verified"]`` es True.
         - ``fail`` (score -8) when ``cv=fail`` — the chain itself declares
           a previous hop's authentication broken.
         - ``missing`` (score 0) when no ARC headers are present at all
@@ -413,6 +433,7 @@ def check_arc_chain(headers: dict) -> RuleResult:
           chain — genuinely uninformative, not suspicious) or any other
           value.
     """
+    headers = context.headers
     arc_seal = headers.get("arc-seal", "")
     arc_msg_sig = headers.get("arc-message-signature", "")
     arc_auth_results = headers.get("arc-authentication-results", "")
@@ -428,10 +449,16 @@ def check_arc_chain(headers: dict) -> RuleResult:
     chain_validation = match.group(1).lower() if match else None
 
     if chain_validation == "pass":
+        is_verified = is_arc_verified_by_trusted_hop(headers, context.received_headers)
         return RuleResult(
             score=2, verdict="pass",
-            details={"cv": chain_validation},
-            recommendation=None,
+            details={"cv": chain_validation, "verified": is_verified},
+            recommendation=None if is_verified else (
+                "La cadena ARC declara haberse validado correctamente (cv=pass), "
+                "pero ningún servidor de confianza lo confirma en su propia "
+                "cabecera Authentication-Results. Se toma como contexto, no como "
+                "prueba: esa declaración la puede escribir el propio remitente."
+            ),
         )
 
     if chain_validation == "fail":
@@ -492,6 +519,13 @@ def check_auth_results_provenance(context) -> RuleResult:
     hecho que el atacante SÍ controla mucho menos: la cadena Received real
     del mensaje. Si el authserv-id que reclama "pass" no aparece como host
     `by` de ningún salto, la línea es forjada.
+
+    `B06`: aparecer en la cadena tampoco basta. Los saltos de abajo los aporta
+    quien envía el mensaje, así que un atacante podía inyectar a la vez su
+    propio `Received` y su propio `Authentication-Results` y hacer que se
+    corroboraran entre sí — los dos elementos contrastados eran suyos. La
+    comprobación la hace ahora `services/auth_trust.py`, que exige que el
+    salto coincidente esté **por encima de la frontera de confianza**.
     """
     headers = context.headers
     auth_results = headers.get("authentication-results", "")
@@ -508,30 +542,44 @@ def check_auth_results_provenance(context) -> RuleResult:
         # cabecera -- fallar la autenticación no le compra nada al atacante.
         return RuleResult(score=0, verdict="neutral", details={"authserv_id": authserv_id, "statuses": statuses})
 
-    by_domains: set[str] = set()
-    for line in context.received_headers:
-        by_host = (parse_received_line(line).get("by") or "").strip().rstrip(".,;")
-        if by_host:
-            dom = registrable_domain(by_host)
-            if dom:
-                by_domains.add(dom)
+    trust = assess_authserv_trust(authserv_id, context.received_headers)
 
-    if not by_domains:
+    if trust.verdict == TRUST_UNKNOWN:
         # Sin cadena Received que verificar, no hay base para acusar de
         # forjado -- neutral, no "sospechoso por defecto".
-        return RuleResult(score=0, verdict="neutral", details={"reason": "no hay cadena Received que verificar"})
+        return RuleResult(score=0, verdict="neutral",
+                          details={"reason": "no hay cadena Received que verificar"})
 
-    authserv_reg = registrable_domain(authserv_id)
-    if authserv_reg in by_domains:
-        return RuleResult(score=0, verdict="pass", details={"authserv_id": authserv_id})
+    evidence = {
+        "authserv_id": authserv_id,
+        "statuses": statuses,
+        "trust": trust.verdict,
+        "trust_boundary": trust.boundary,
+        "trusted_by_domains": list(trust.trusted_by_domains),
+        "untrusted_by_domains": list(trust.untrusted_by_domains),
+    }
+
+    if trust.is_trusted:
+        return RuleResult(score=0, verdict="pass", details=evidence)
+
+    if trust.verdict == TRUST_BELOW_BOUNDARY:
+        return RuleResult(
+            score=CR.get_iris_scoring_weight("auth_provenance.below_boundary", -12),
+            verdict="fail",
+            details=evidence,
+            recommendation=(
+                f"La cabecera Authentication-Results declara autenticación 'pass' y está "
+                f"estampada por '{authserv_id}', que sí aparece en la cadena Received "
+                "del mensaje -- pero solo por debajo de la frontera de confianza, en la "
+                "parte de la cadena que aporta quien envía. Un remitente puede fabricar "
+                "a la vez el salto y la línea de autenticación para que se respalden "
+                "mutuamente; ninguno de los dos lo escribió un servidor verificable."
+            ),
+        )
 
     return RuleResult(
         score=CR.get_iris_scoring_weight("auth_provenance.forged", -12), verdict="fail",
-        details={
-            "authserv_id": authserv_id,
-            "statuses": statuses,
-            "received_by_domains": sorted(by_domains),
-        },
+        details=evidence,
         recommendation=(
             f"La cabecera Authentication-Results declara autenticación 'pass' pero fue "
             f"estampada por '{authserv_id}', un servidor que no aparece en ningún salto "

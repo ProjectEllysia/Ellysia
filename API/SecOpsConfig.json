@@ -1,5 +1,5 @@
 {
-  "appVersion": "0.5.11",
+  "appVersion": "0.5.12",
   "general": {
     "directories": {
       "logdir": "..",
@@ -97,7 +97,7 @@
   "features": {
     "themis": {
       "enabled": true,
-      "areLocalIpsAllowed": true,
+      "areLocalIpsAllowed": false,
       "directories": {
         "csv": "data/themis/csv",
         "output": "data/themis/output",
@@ -1108,6 +1108,7 @@
           "application/java-archive",
           "application/octet-stream"
         ],
+        "trusted_authserv_ids": [],
         "suspicious_tlds": [
           ".tk",
           ".ml",

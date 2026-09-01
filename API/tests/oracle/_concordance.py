@@ -1,29 +1,34 @@
-"""Oracle / concordance: measuring agreement between our own fingerprints and Nmap.
+"""Concordancia con Nmap: la vara de medir, fuera del producto.
 
-The governing principle of the whole fingerprinting package is that **Nmap
-stays the oracle**: when a service already carries a Nmap-sourced
-product/version, a dissector's own reading never overrides it.
-:func:`agrees_with_nmap` and :func:`concordance_rate` turn "does our
-fingerprint match Nmap's?" into a measurable number — the roadmap's
-Definition of Done requires agreement to reach 0.90 before Nmap could be
-demoted to a *fallback*. Actually running that measurement against a lab of
-real targets is an operational step for the user, much like the knowledge
-base's initial full download.
+Estas tres funciones vivían dentro del paquete que se despliega
+(``lybra/fingerprinting/concordance.py`` y ``lybra/transport.py``). Se mudaron
+aquí en L52, cuando se retiró el acoplamiento de Lybra con escáneres de
+terceros, y la razón de mudarlas en vez de borrarlas merece decirse entera.
 
-This module is deliberately protocol-agnostic: it takes plain
-``(product, version)`` pairs, not an ``HttpFingerprint`` or ``SshFingerprint``,
-so every dissector shares one comparison and one metric instead of each
-re-implementing its own.
+Lo que se retiró del producto es la **subordinación**: que Nmap fuera la
+autoridad en tiempo de ejecución, que un escaneo de Lybra pudiera lanzarse
+desde uno de Nmap, y que pudiera lanzar otros escáneres para que le dieran la
+razón. Un motor cuyo análisis propio no puede prevalecer sobre el de otra
+herramienta no es independiente.
+
+Lo que no se retiró es la **medición**. Comparar el motor contra una referencia
+externa en los tests no es acoplamiento: es la única forma de demostrar que el
+motor es bueno en vez de afirmarlo. La independencia se demuestra midiéndose
+contra el mejor del mercado y empatando o ganando, no negándose a la
+comparación — y el objetivo declarado del roadmap (concordancia ≥ 0,90 en
+fingerprint, ≥ 0,95 en descubrimiento de puertos) es exactamente esa
+demostración. Aquí, en ``tests/``, la vara de medir existe y el producto no
+sabe que existe.
+
+Este módulo es deliberadamente agnóstico del protocolo: recibe pares
+``(producto, versión)`` planos, no un ``HttpFingerprint`` ni un
+``SshFingerprint``, para que todo el banco comparta una sola comparación y una
+sola métrica.
 """
 
 from __future__ import annotations
 
 from typing import Iterable, Optional, Tuple
-
-# Quality of Detection for a fingerprint finding: informational only. It exists
-# to gather calibration evidence and never contributes to a vulnerability's
-# confidence.
-QOD_FINGERPRINT = 20
 
 
 def _versions_agree(version: str, nmap_version: str) -> bool:
@@ -75,12 +80,6 @@ def agrees_with_nmap(
 def concordance_rate(pairs: Iterable[Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]]) -> float:
     """Compute the fraction of fingerprints that agree with Nmap.
 
-    This is the metric the roadmap's Definition of Done thresholds at 0.90 before
-    Nmap could become a fallback for a service family. Collecting real
-    ``(product, version, nmap_product, nmap_version)`` pairs from a lab of known
-    targets is an operational step for the user; this function only does the
-    arithmetic once the pairs exist.
-
     Args:
         pairs: An iterable of ``(product, version, nmap_product, nmap_version)``
             tuples, one per compared service.
@@ -94,3 +93,24 @@ def concordance_rate(pairs: Iterable[Tuple[Optional[str], Optional[str], Optiona
         return 0.0
     hits = sum(1 for pair in pairs if agrees_with_nmap(*pair))
     return hits / len(pairs)
+
+
+def port_concordance(own_ports: Iterable[int], nmap_ports: Iterable[int]) -> float:
+    """Measure how well our discovered ports agree with Nmap's.
+
+    Computes the Jaccard index (size of the intersection over size of the union)
+    between the two port sets. Two empty sets count as full agreement — there is
+    nothing to disagree about.
+
+    Args:
+        own_ports: The ports Lybra's connect scan found.
+        nmap_ports: The ports Nmap found (the reference being measured against).
+
+    Returns:
+        A value in ``[0.0, 1.0]``, where 1.0 is perfect agreement.
+    """
+    own, nmap = set(own_ports), set(nmap_ports)
+    union = own | nmap
+    if not union:
+        return 1.0
+    return len(own & nmap) / len(union)

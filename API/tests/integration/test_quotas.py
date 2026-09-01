@@ -330,13 +330,21 @@ def test_an_invalid_target_does_not_burn_quota(app, regular_user, set_plan_limit
     from unittest import mock
 
     from src.modules.accounts.services.quotas import QuotaManager
-    from src.modules.features.themis.exceptions import TargetNotAuthorizedError
+    from src.modules.features.themis.exceptions import (
+        IPValidationError,
+        TargetNotAuthorizedError,
+    )
     from src.modules.features.themis.managers.lybra.engine import LybraEngineManager
 
     set_plan_limits({LimitKey.THEMIS_LYBRA_SCANS: 5})
 
+    # Se aceptan las dos formas de rechazo porque el objetivo es inválido por dos
+    # motivos a la vez: no resuelve (IPValidationError, desde que el guardia
+    # anti-SSRF resuelve los nombres antes de juzgarlos) y no está autorizado.
+    # Cuál salta primero es orden interno de validación, y no es lo que este test
+    # afirma: lo que afirma es que **ninguna de las dos cobra cuota**.
     with app.app_context():
-        with pytest.raises(TargetNotAuthorizedError):
+        with pytest.raises((IPValidationError, TargetNotAuthorizedError)):
             LybraEngineManager(task_queue=mock.Mock()).run_scan(
                 user_id=regular_user.id, target="no-autorizado.example.com",
             )
@@ -407,3 +415,61 @@ def test_usage_flags_a_key_over_its_limit(
     assert body["usage"]["hygeia.assets"]["used"] == 3
     # Lo ya creado sigue ahí: degradar nunca borra.
     assert len(client.get("/hygeia/assets", headers=headers).get_json()["assets"]) == 3
+
+
+# ------------------------------------------------------------------ reembolso
+
+def test_refund_gives_the_room_back(app, regular_user, set_plan_limits):
+    """B10: `consume()` ocurre antes que el trabajo que se paga, y tiene que
+    ser así — cobrar después dejaría lanzar N trabajos concurrentes con cupo
+    para uno. El precio de ese orden es que un trabajo que nunca llega a
+    hacerse deja al usuario pagando por nada."""
+    set_plan_limits({LimitKey.AI_REQUESTS: 2})
+
+    with app.app_context():
+        manager = QuotaManager()
+        manager.consume(regular_user.id, LimitKey.AI_REQUESTS)
+        manager.consume(regular_user.id, LimitKey.AI_REQUESTS)
+        assert manager.state(regular_user.id, LimitKey.AI_REQUESTS).used == 2
+
+        manager.refund(regular_user.id, LimitKey.AI_REQUESTS)
+
+        assert manager.state(regular_user.id, LimitKey.AI_REQUESTS).used == 1
+        # Y el hueco devuelto se puede volver a gastar de verdad.
+        manager.consume(regular_user.id, LimitKey.AI_REQUESTS)
+
+
+def test_refund_never_goes_below_zero(app, regular_user, set_plan_limits):
+    """Un reembolso de más regalaría cupo. La condición vive dentro del UPDATE,
+    igual que en el cobro, para no leer-decidir-escribir."""
+    set_plan_limits({LimitKey.AI_REQUESTS: 5})
+
+    with app.app_context():
+        manager = QuotaManager()
+        manager.consume(regular_user.id, LimitKey.AI_REQUESTS)
+        manager.refund(regular_user.id, LimitKey.AI_REQUESTS)
+        manager.refund(regular_user.id, LimitKey.AI_REQUESTS)
+
+        assert manager.state(regular_user.id, LimitKey.AI_REQUESTS).used == 0
+
+
+def test_refund_without_a_previous_charge_is_harmless(app, regular_user, set_plan_limits):
+    """No resucita filas ni inventa cupo: si no había contador, no hay nada
+    que devolver."""
+    set_plan_limits({LimitKey.AI_REQUESTS: 3})
+
+    with app.app_context():
+        manager = QuotaManager()
+        manager.refund(regular_user.id, LimitKey.AI_REQUESTS)
+
+        assert manager.state(regular_user.id, LimitKey.AI_REQUESTS).used == 0
+
+
+def test_refund_never_raises(app, regular_user, set_plan_limits):
+    """Se invoca desde caminos de error. Un reembolso que lanzara taparía la
+    excepción original, que es la que el usuario necesita ver."""
+    set_plan_limits({LimitKey.AI_REQUESTS: 1})
+
+    with app.app_context():
+        # Usuario inexistente: resolver el derecho no puede prosperar.
+        QuotaManager().refund(999999, LimitKey.AI_REQUESTS)

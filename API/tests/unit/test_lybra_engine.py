@@ -12,7 +12,6 @@ import pytest
 from src.modules.features.themis.lybra import (
     LybraEngine,
     Service,
-    services_from_open_ports,
     services_from_payload,
     QOD_OPEN_PORT,
     QOD_INVENTORY_MATCH,
@@ -62,36 +61,11 @@ def test_service_label_falls_back_when_product_missing():
     assert Service(port=1, protocol="tcp").label == "servicio desconocido"
 
 
-# ------------------------------------------------- OpenPort -> Service mapping
-
-def _open_port(protocol, product="", version="", given_use="", cpe=None):
-    """A duck-typed OpenPort row (only the attributes the mapper reads)."""
-    return types.SimpleNamespace(
-        port=types.SimpleNamespace(protocol=protocol),
-        product=product, version=version, given_use=given_use, cpe=cpe,
-    )
-
-
-def test_services_from_open_ports_parses_protocol_and_fields():
-    rows = [_open_port("80/tcp", "Apache httpd", "2.4.49", "http",
-                        "cpe:/a:apache:http_server:2.4.49")]
-
-    services = services_from_open_ports(rows)
-
-    assert services == [Service(
-        port=80, protocol="tcp", name="http", product="Apache httpd",
-        version="2.4.49", cpe="cpe:/a:apache:http_server:2.4.49",
-    )]
-
-
-def test_services_from_open_ports_tolerates_malformed_protocol():
-    # A blank or non-numeric protocol must degrade to port=None, never raise.
-    assert services_from_open_ports([_open_port("")])[0].port is None
-    assert services_from_open_ports([_open_port("abc/tcp")])[0].port is None
-    assert services_from_open_ports([_open_port("")])[0].protocol == "tcp"
-
-
-# ------------------------------------------------------- Nmap CPE capture (§2.1)
+# ----------------------------------------------------- Nmap CPE capture (§2.1)
+#
+# El procesador de Nmap sigue capturando el CPE de cada servicio: es de Nmap y
+# alimenta a Nmap. Lo que se retiró en L52 fue el puente por el que ese dato
+# entraba en un escaneo de Lybra.
 
 _NMAP_XML = """<?xml version="1.0"?>
 <nmaprun args="nmap -sV 10.0.0.5" version="7.94">
