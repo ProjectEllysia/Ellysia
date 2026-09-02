@@ -22,8 +22,17 @@ _DissectorT = TypeVar("_DissectorT", bound=Type[Dissector])
 
 # Registration order follows import order (see __init__.py), which follows
 # the roadmap's own cost/value ranking — cheapest and most common protocols
-# first. Order only matters for readability: each dissector's ``applies``
-# predicate is protocol-specific and none overlap.
+# first.
+#
+# Y desde L17 el orden **importa de verdad** para un caso concreto, no sólo
+# para la legibilidad. Los predicados dejaron de ser disjuntos cuando los
+# puertos de las APIs de administración (2375, 9200, 6443...) entraron en la
+# familia HTTP para que los checks de exposición y de higiene TLS los
+# alcanzaran: ahora los reclaman dos dissectors, y
+# ``LybraEngineManager._fingerprint_services`` se queda con el primero que
+# aplique. ``http_apis`` va antes que ``http`` justamente por eso — si no, la
+# sonda genérica se llevaría el 2375 y leería una cabecera ``Server`` en vez de
+# la versión que el JSON publica.
 _REGISTERED_DISSECTORS: List[Type[Dissector]] = []
 
 
