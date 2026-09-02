@@ -184,7 +184,7 @@
           </Transition>
         </article>
 
-        <button v-if="scans.length < totalCount" class="load-more" :disabled="loading" @click="$emit('load-more')">
+        <button v-if="canLoadMore" class="load-more" :disabled="loading" @click="$emit('load-more')">
           {{ loading ? 'Cargando…' : `Ver más (${scans.length} de ${totalCount})` }}
         </button>
       </div>
@@ -193,8 +193,9 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import StatusBadge from '@/components/themis/StatusBadge.vue'
+import { MAX_PER_PAGE } from '@/stores/scanWindow'
 
 const props = defineProps({
   scans: { type: Array, default: () => [] },
@@ -206,6 +207,15 @@ const emit = defineEmits(['refresh', 'delete', 'load-docs', 'generate-pdf', 'dow
 
 /** Veredictos fantasma mientras carga: los que caben sin alargar la caja. */
 const SKELETON_ROWS = 4
+
+/**
+ * "Ver más" desaparece al llegar al tope de la ventana, no sólo al haberlos
+ * cargado todos. El store pide la lista revelada en una sola petición, y
+ * `per_page` está topado en el backend (`ResultsQuerySchema`), así que más allá
+ * de ahí el botón seguiría ahí sin hacer nada — que es peor que no estar.
+ */
+const canLoadMore = computed(
+  () => props.scans.length < props.totalCount && props.scans.length < MAX_PER_PAGE)
 
 const LADDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 const PRIO_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 }
