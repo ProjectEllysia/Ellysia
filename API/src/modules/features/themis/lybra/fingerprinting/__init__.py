@@ -64,9 +64,12 @@ best value-for-effort in the roadmap:
     right after a bare TCP connect, no negotiation needed to read it.
 
 ``smb``
-    Fase N's one negotiated (not volunteered) protocol: a minimal SMB2
-    NEGOTIATE exchange. See its own module docstring for the documented
-    simplifications and the "unverified against a live server" caveat.
+    Tres intercambios sin credenciales: el ``NEGOTIATE`` de SMB2 (dialecto y
+    si exige firma), un ``SESSION_SETUP`` anónimo que se corta en el primer
+    paso de NTLM y del que salen nombre de equipo, dominio y versión de
+    sistema, y una negociación de **SMB1** aparte — el único modo de saber si
+    ese protocolo sigue habilitado, porque el saludo de SMB2 no lo ve. Ver su
+    docstring para las simplificaciones documentadas.
 
 ``snmp``
     Fase N/Ronda 1's first UDP protocol — a ``sysDescr.0`` GetRequest (the
@@ -174,11 +177,20 @@ from .mail import (
     Pop3Dissector,
 )
 from .smb import (
-    SmbFingerprint,
-    parse_negotiate_response,
-    fingerprint_smb,
-    SmbProbe,
+    AV_PAIR_NAMES,
+    SMB1_DIALECT,
+    SIGNING_REQUIRED_BIT,
     SmbDissector,
+    SmbFingerprint,
+    SmbProbe,
+    build_negotiate_request,
+    build_ntlm_negotiate,
+    build_session_setup_request,
+    build_smb1_negotiate,
+    fingerprint_smb,
+    parse_negotiate_response,
+    parse_ntlm_challenge,
+    parse_smb1_negotiate_response,
 )
 from .rdp import (
     FAILURE_CODES,
@@ -268,6 +280,13 @@ __all__ = [
     "default_dissectors",
     "HttpFingerprint",
     "SignatureHit",
+    "AV_PAIR_NAMES",
+    "SMB1_DIALECT",
+    "build_ntlm_negotiate",
+    "build_session_setup_request",
+    "build_smb1_negotiate",
+    "parse_ntlm_challenge",
+    "parse_smb1_negotiate_response",
     "FAILURE_CODES",
     "PROTOCOL_NAMES",
     "RdpDissector",

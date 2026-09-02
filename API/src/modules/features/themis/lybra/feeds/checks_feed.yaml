@@ -8,7 +8,7 @@
 # feedVersion sube cuando el feed gana una familia nueva o un protocolo nuevo
 # bajo una existente; el arreglo de un check ya presente sube el 'version' de
 # ese check, no esta cadena. Ver CHECKS_FEED_VERSION en checks.py.
-feedVersion: lybra-checks-11
+feedVersion: lybra-checks-12
 checks:
   - id: git-config-exposure
     version: 1
@@ -509,6 +509,18 @@ checks:
     mode: safe
     finding:
       title: 'RDP: no exige autenticacion a nivel de red (NLA)'
+      qod: 99
+      confirmed: true
+  - id: smbv1-enabled
+    version: 1
+    type: script
+    script: smbv1-enabled
+    category: network_config
+    severity: HIGH
+    service: smb
+    mode: safe
+    finding:
+      title: 'SMB: SMBv1 habilitado (protocolo retirado, sin firma ni cifrado utilizables)'
       qod: 99
       confirmed: true
   - id: snmp-default-community
