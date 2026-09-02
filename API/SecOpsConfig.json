@@ -199,6 +199,7 @@
             "white": "#f3f8ee"
           },
           "fingerprintingEnabled": true,
+          "hostPoolSize": 8,
           "ingest": {
             "enabled": false,
             "minSeverity": "MEDIUM",

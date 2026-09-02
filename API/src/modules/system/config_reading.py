@@ -833,6 +833,19 @@ class LybraConfig:
     Agotarlo **no** marca nada como cerrado: los puertos que aún no han
     contestado simplemente se dan por no observados, que es lo que ya eran."""
 
+    host_pool_size: int = 8
+
+"""Cuántos servicios del **mismo host** se sondan a la vez.
+
+    El fingerprinting y los checks activos son entrada/salida pura: casi todo
+    su tiempo es esperar a que un servicio conteste o a que se agote su plazo.
+    En fila india, un servicio mudo retrasa a todos los que vienen detrás.
+
+    El pool va acotado **por host** y no es un número grande a propósito: el
+    límite no es la máquina que escanea, es la cortesía con el objetivo. El
+    limitador de ritmo sigue mandando por encima de esto — el pool decide
+    cuántas sondas pueden estar esperando a la vez, no a qué ritmo salen."""
+
 
 @config_block("features.themis.scanners.lybra.ingest")
 @dataclass(frozen=True)
