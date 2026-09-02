@@ -48,6 +48,12 @@ best value-for-effort in the roadmap:
     ella— y ``listDatabases`` para saber si el servidor deja entrar sin
     credenciales. Parseo de BSON mínimo, sin ``pymongo``.
 
+``ldap``
+    El rootDSE, la consulta anónima que la RFC 4512 define para que un cliente
+    sepa con quién habla: vendor, versión y los dominios que el servidor sirve.
+    BER a mano, con lectura de longitudes en forma larga — la mitad que el
+    codificador de SNMP no necesitaba.
+
 ``ftp``, ``mail`` (SMTP/IMAP/POP3), ``mysql``, ``redis_probe``, ``vnc``
     Fase N's non-HTTP protocols — each volunteers its identity unprompted
     right after a bare TCP connect, no negotiation needed to read it.
@@ -88,9 +94,9 @@ confidence beyond what the matcher already assigns any version-based guess.
 Two techniques are deliberately left for later: full JARM fingerprinting (too
 large and risky to ship without a live TLS lab to validate it against) and OS
 fingerprinting (which the roadmap itself rates low value). Both stay
-oracle-only — handled by Nmap — until picked up. RDP, LDAP, VNC's full
-protocol beyond its version banner, and RPC stay oracle-only too, per the
-roadmap's own priority-3 rating for that group.
+oracle-only — handled by Nmap — until picked up. RDP, VNC's full protocol beyond
+its version banner, and RPC stay oracle-only too, per the roadmap's own
+priority-3 rating for that group.
 """
 
 from __future__ import annotations
@@ -169,6 +175,17 @@ from .smb import (
     SmbProbe,
     SmbDissector,
 )
+from .ldap import (
+    ROOTDSE_ATTRIBUTES,
+    LdapDissector,
+    LdapFingerprint,
+    LdapProbe,
+    build_anonymous_bind,
+    build_rootdse_search,
+    fingerprint_ldap,
+    parse_bind_response,
+    parse_search_entry,
+)
 from .mongo import (
     HELLO_COMMAND,
     LIST_DATABASES_COMMAND,
@@ -236,6 +253,15 @@ __all__ = [
     "default_dissectors",
     "HttpFingerprint",
     "SignatureHit",
+    "ROOTDSE_ATTRIBUTES",
+    "LdapDissector",
+    "LdapFingerprint",
+    "LdapProbe",
+    "build_anonymous_bind",
+    "build_rootdse_search",
+    "fingerprint_ldap",
+    "parse_bind_response",
+    "parse_search_entry",
     "HELLO_COMMAND",
     "LIST_DATABASES_COMMAND",
     "MongoDissector",

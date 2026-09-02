@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 # ``Check.check_id``). Los dos checks ``network`` suben además a ``version: 2``
 # en checks-6: su comportamiento cambia, y un hallazgo guardado tiene que poder
 # decir cuál de las dos formas lo produjo.
-CHECKS_FEED_VERSION = "lybra-checks-9"
+CHECKS_FEED_VERSION = "lybra-checks-10"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -91,7 +91,7 @@ _HTTP_SERVICE_NAMES = {"http", "https", "http-proxy", "https-alt", "http-alt"}
 # se sondea igual de bien (el esquema se observa), pero no recibe los checks de
 # certificado. Ampliarla es gratis; hacerla innecesaria es #283, que ataca la
 # misma enfermedad —decidir por número de puerto— desde el otro lado.
-_TLS_HYGIENE_PORTS = {443, 8443, 9443, 10443, 4443, 7443, 8834, 9091, 5986}
+_TLS_HYGIENE_PORTS = {443, 8443, 9443, 10443, 4443, 7443, 8834, 9091, 5986, 636, 3269}
 
 # APIs de administración que hablan HTTP y publican su versión en un JSON sin
 # autenticar (L17). Cada familia tiene su propio predicado —y no uno común—
@@ -146,6 +146,14 @@ _MSSQL_SERVICE_NAMES = {"ms-sql-s", "mssql", "sqlserver"}
 _MSSQL_PORTS = {1433}
 _MONGODB_SERVICE_NAMES = {"mongodb", "mongo"}
 _MONGODB_PORTS = {27017, 27018, 27019}
+# 3268 es el Catálogo Global de Active Directory: mismo protocolo, y sirve el
+# bosque entero en vez de un solo dominio. 636 y 3269 son sus variantes sobre
+# TLS, que hablan LDAP igual una vez levantado el canal.
+_LDAP_SERVICE_NAMES = {"ldap", "ldaps", "ldapssl", "globalcatldap", "globalcatldapssl"}
+_LDAP_PORTS = {389, 636, 3268, 3269}
+# El subconjunto que va cifrado, para la comprobación de "389 en claro
+# conviviendo con un 636".
+LDAPS_PORTS = {636, 3269}
 _REDIS_SERVICE_NAMES = {"redis"}
 _REDIS_PORTS = {6379}
 _VNC_SERVICE_NAMES = {"vnc"}
@@ -721,6 +729,11 @@ def is_mongodb_service(service: Service) -> bool:
             or service.port in _MONGODB_PORTS)
 
 
+def is_ldap_service(service: Service) -> bool:
+    """Return whether a service should be probed by the LDAP dissector."""
+    return (service.name or "").lower() in _LDAP_SERVICE_NAMES or service.port in _LDAP_PORTS
+
+
 def is_redis_service(service: Service) -> bool:
     """Return whether a service should be probed by the Redis dissector or
     ``type: "network"`` checks (Fase N)."""
@@ -856,11 +869,20 @@ class ScriptContext:
             network exchange, exactly as the dissectors do.
         mode: ``"safe"`` or ``"aggressive"`` — the mode the runtime already
             authorised this check under, in case a plugin wants to adapt.
+        sibling_services: Los demás servicios descubiertos en el **mismo host**.
+            Hay hallazgos que no son propiedad de un servicio sino de la
+            relación entre dos: un LDAP en claro en el 389 no dice nada por sí
+            solo, y dice bastante si el mismo host publica además un 636. El
+            runtime ya tiene la lista completa mientras itera, así que dársela
+            al plugin no cuesta ninguna petición de red — y sin ella, el plugin
+            tendría que descubrir puertos por su cuenta, que es justo lo que
+            esta clase existe para impedir.
     """
     target: str
     service: Service
     rate_limiter: Optional["HostRateLimiter"] = None
     mode: str = "safe"
+    sibling_services: tuple = ()
 
     def acquire(self) -> None:
         """Respect the host's rate limit before touching the network."""
@@ -1013,6 +1035,13 @@ class CheckRuntime:
         # objetivo ha podido cambiar — que es justo lo que un escáner mide.
         self._responses: Dict[tuple, Optional[Response]] = {}
         self._handshakes: Dict[tuple, object] = {}
+
+        services = tuple(services)
+        # Los plugins de tipo ``script`` pueden necesitar ver los servicios
+        # hermanos del mismo host (ver ``ScriptContext.sibling_services``). La
+        # lista ya está aquí; guardarla evita que un plugin tenga que
+        # redescubrirla por su cuenta.
+        self._services = services
 
         findings: List[dict] = []
         for service in services:
@@ -1203,6 +1232,7 @@ class CheckRuntime:
             service=service,
             rate_limiter=self._rl,
             mode=self._mode,
+            sibling_services=self._services,
         )
         try:
             fired = plugin.run(context)
