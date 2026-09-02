@@ -40,6 +40,15 @@ lista vacía indistinguible de un host genuinamente limpio. Por eso el barrido
 clasifica cada intento (:class:`PortOutcome`), lo reporta entero
 (:class:`PortSweep`) y ``scan_ports_sync`` devuelve ``None`` cuando nada
 contestó de ninguna forma.
+
+**El barrido tiene presupuesto de reloj propio** (``budget_seconds``). El
+plazo que la cola de tareas le pone a un job no sirve para esto: se inyecta con
+``PyThreadState_SetAsyncExc`` y sólo se materializa cuando el hilo vuelve a
+ejecutar bytecode, así que un hilo parado en la llamada al sistema que espera a
+los sockets lo rebasa sin enterarse — en producción, un plazo de 60 s apareció
+a los 159. Un presupuesto que evalúa el propio código, entre sonda y sonda, sí
+puede ser puntual. El plazo de la cola se queda como lo que debe ser: el último
+recurso si esto falla.
 """
 
 from __future__ import annotations
@@ -147,6 +156,11 @@ class PortSweep:
         was_cancelled: Si el barrido se abandonó por cancelación, en cuyo caso
             los puertos no probados no aparecen en ninguna lista y el barrido
             nunca se considera bloqueado.
+        was_truncated: Si el barrido se quedó sin presupuesto de reloj antes de
+            probarlo todo. Como ``was_cancelled``, deja puertos sin probar que
+            no aparecen en ninguna lista — y por el mismo motivo impide
+            concluir que el objetivo esté bloqueado *o* limpio: de lo que no se
+            miró no se sabe nada.
     """
 
     open_ports: Tuple[int, ...]
@@ -154,6 +168,7 @@ class PortSweep:
     timed_out_ports: Tuple[int, ...]
     unreachable_ports: Tuple[int, ...]
     was_cancelled: bool = False
+    was_truncated: bool = False
 
     @property
     def is_blocked(self) -> bool:
@@ -167,9 +182,11 @@ class PortSweep:
         delante y tiraba.
 
         Un barrido cancelado nunca cuenta como bloqueado: se dejó a medias a
-        propósito.
+        propósito. Tampoco uno truncado por presupuesto, por la misma razón —
+        aunque ése no es un resultado utilizable, y quien lo recibe debe
+        tratarlo como un fallo (ver :func:`scan_ports_sync`).
         """
-        if self.was_cancelled:
+        if self.was_cancelled or self.was_truncated:
             return False
         if self.open_ports or self.refused_ports:
             return False
@@ -206,7 +223,8 @@ class AsyncConnectScanner:
         self,
         host: str,
         ports: Iterable[int],
-        cancel_check: Optional[Callable[[], bool]] = None
+        cancel_check: Optional[Callable[[], bool]] = None,
+        deadline: Optional[float] = None,
     ) -> PortSweep:
         """Barrer los puertos de un host y clasificar cómo terminó cada intento.
 
@@ -215,6 +233,16 @@ class AsyncConnectScanner:
             ports: Los puertos a probar.
             cancel_check: Callable opcional, consultado antes de cada sonda; si
                 devuelve ``True`` se omiten las restantes.
+            deadline: Instante de :func:`time.monotonic` a partir del cual no se
+                inician sondas nuevas. Se comprueba en el mismo sitio que
+                ``cancel_check`` porque es la misma decisión: no empezar algo
+                que ya no vamos a poder terminar.
+
+                No corta una sonda ya en vuelo, así que el barrido puede
+                rebasar el plazo hasta el timeout de un puerto (``timeout``,
+                2 s por defecto). Ese rebase está acotado, que es toda la
+                diferencia con no tener presupuesto: sin él, un barrido ancho
+                contra un objetivo que filtra tráfico dura lo que dure.
 
         Returns:
             El :class:`PortSweep` con cada puerto en la lista de su desenlace.
@@ -222,13 +250,25 @@ class AsyncConnectScanner:
         semaphore = asyncio.Semaphore(self._concurrency)
         outcomes: Dict[int, PortOutcome] = {}
         was_cancelled = False
+        was_truncated = False
 
         async def probe(port: int) -> None:
-            nonlocal was_cancelled
-            if cancel_check and cancel_check():
-                was_cancelled = True
-                return
+            nonlocal was_cancelled, was_truncated
+            # Las dos comprobaciones van **dentro** del semáforo, no antes.
+            # ``asyncio.gather`` arranca las corrutinas de todos los puertos a
+            # la vez y el semáforo es lo único que las escalona: hacer la
+            # comprobación antes de adquirirlo la ejecuta para los mil puertos
+            # en el primer instante del barrido, cuando todavía no hay nada que
+            # decidir, y a partir de ahí ya no se vuelve a mirar. Dentro, cada
+            # sonda la evalúa justo antes de salir a la red, que es cuando la
+            # respuesta puede haber cambiado.
             async with semaphore:
+                if cancel_check and cancel_check():
+                    was_cancelled = True
+                    return
+                if deadline is not None and time.monotonic() >= deadline:
+                    was_truncated = True
+                    return
                 outcomes[port] = await self._probe_outcome(host, port)
 
         await asyncio.gather(*(probe(port) for port in ports))
@@ -242,6 +282,7 @@ class AsyncConnectScanner:
             timed_out_ports=ports_with(PortOutcome.TIMED_OUT),
             unreachable_ports=ports_with(PortOutcome.UNREACHABLE),
             was_cancelled=was_cancelled,
+            was_truncated=was_truncated,
         )
 
     async def scan(
@@ -308,6 +349,7 @@ def sweep_ports_sync(
     timeout: float = 2.0,
     opener: Optional[Callable] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
+    budget_seconds: Optional[float] = None,
 ) -> PortSweep:
     """Ejecutar un barrido completo síncronamente, en un bucle de eventos propio.
 
@@ -321,13 +363,16 @@ def sweep_ports_sync(
         timeout: Plazo por puerto, en segundos.
         opener: Abridor de conexión inyectable (ver :class:`AsyncConnectScanner`).
         cancel_check: Callable de cancelación opcional.
+        budget_seconds: Presupuesto de reloj para el barrido entero. ``None``
+            (por defecto) lo deja sin límite, que es como se comportaba antes.
 
     Returns:
         El :class:`PortSweep` del barrido.
     """
     port_list = list(ports) if ports is not None else list(DEFAULT_PORTS)
     scanner = AsyncConnectScanner(concurrency=concurrency, timeout=timeout, opener=opener)
-    return asyncio.run(scanner.sweep(host, port_list, cancel_check=cancel_check))
+    deadline = time.monotonic() + budget_seconds if budget_seconds is not None else None
+    return asyncio.run(scanner.sweep(host, port_list, cancel_check=cancel_check, deadline=deadline))
 
 
 def scan_ports_sync(
@@ -340,6 +385,7 @@ def scan_ports_sync(
     retries: int = 1,
     retry_delay: float = 2.0,
     sleeper: Callable[[float], None] = time.sleep,
+    budget_seconds: Optional[float] = None,
 ) -> Optional[List[int]]:
     """Run a connect scan synchronously, on a fresh event loop of its own.
 
@@ -358,6 +404,15 @@ def scan_ports_sync(
     segundos, y un reintento espaciado cuesta mucho menos que un escaneo
     perdido.
 
+    **También devuelve ``None`` cuando se agota el presupuesto de reloj.** Un
+    barrido truncado deja puertos sin mirar, y de lo que no se miró no se sabe
+    nada: devolver los que sí dio tiempo a encontrar sería exactamente el fallo
+    que arregló L48-c por otra vía, porque el ciclo de vida marcaría como
+    corregido todo lo que estaba abierto y esta vez no se llegó a comprobar. Un
+    escaneo que no cabe en su presupuesto es un escaneo fallido, y decirlo es
+    más útil que un informe a medias que parece completo. Los puertos que sí se
+    encontraron quedan en el log.
+
     Args:
         host: The target host.
         ports: The ports to probe; defaults to :data:`DEFAULT_PORTS`.
@@ -368,22 +423,44 @@ def scan_ports_sync(
         retries: Reintentos adicionales tras un barrido que parece bloqueado.
         retry_delay: Espera entre reintentos, en segundos.
         sleeper: Espera inyectable, para que un test no tenga que dormirla.
+        budget_seconds: Presupuesto de reloj para el descubrimiento entero,
+            reintentos y esperas incluidos. ``None`` lo deja sin límite.
 
     Returns:
-        Los puertos abiertos, ascendentes, o ``None`` si el barrido parece
-        bloqueado incluso tras los reintentos.
+        Los puertos abiertos, ascendentes; o ``None`` si el barrido parece
+        bloqueado incluso tras los reintentos, o si se agotó el presupuesto.
     """
-    sweep = sweep_ports_sync(host, ports, concurrency, timeout, opener, cancel_check)
+    deadline = time.monotonic() + budget_seconds if budget_seconds is not None else None
+
+    def remaining_budget() -> Optional[float]:
+        return None if deadline is None else deadline - time.monotonic()
+
+    sweep = sweep_ports_sync(
+        host, ports, concurrency, timeout, opener, cancel_check, remaining_budget())
     attempts_left = max(0, retries)
     while sweep.is_blocked and attempts_left > 0:
+        # El reintento sale del mismo presupuesto que el barrido: si no queda
+        # reloj para volver a intentarlo, no se intenta.
+        if deadline is not None and remaining_budget() <= retry_delay:
+            break
         logger.warning(
             "Barrido de %s sin una sola respuesta (%s puertos expirados): reintentando",
             host, len(sweep.timed_out_ports),
         )
         if retry_delay > 0:
             sleeper(retry_delay)
-        sweep = sweep_ports_sync(host, ports, concurrency, timeout, opener, cancel_check)
+        sweep = sweep_ports_sync(
+            host, ports, concurrency, timeout, opener, cancel_check, remaining_budget())
         attempts_left -= 1
+
+    if sweep.was_truncated:
+        logger.error(
+            "Descubrimiento de %s sin terminar: se agotó el presupuesto de %.1f s "
+            "con %s puertos abiertos encontrados (%s). Lo que quedó sin probar es "
+            "desconocido, no limpio, así que el escaneo falla en vez de reportarlo",
+            host, budget_seconds, len(sweep.open_ports), list(sweep.open_ports),
+        )
+        return None
 
     if sweep.is_blocked:
         logger.error(
