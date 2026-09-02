@@ -277,10 +277,38 @@ def test_parse_ftp_banner_filezilla_two_word_product():
     assert (product, version) == ("FileZilla Server", "0.9.60beta")
 
 
-def test_parse_ftp_banner_versionless_pureftpd_yields_nothing():
-    # Pure-FTPd's default banner deliberately omits the version — no CPE
-    # should be invented for what was never actually observed.
+def test_parse_ftp_banner_debian_proftpd_without_version():
+    """L48-a: el saludo por defecto de ProFTPD en Debian nombra el producto y
+    calla la versión. Es el caso que se midió en real y que daba `None`
+    mientras Nmap leía `ProFTPD` del mismo saludo."""
+    banner = "220 ProFTPD Server (Debian) [::ffff:203.0.113.10]"
+    assert parse_ftp_banner(banner) == ("ProFTPD", None)
+
+
+def test_parse_ftp_banner_versionless_pureftpd_names_the_product():
+    # Pure-FTPd suprime su versión por defecto. El producto sí está escrito en
+    # el saludo, así que reconocerlo no es inventarlo; la versión sigue sin
+    # fabricarse, que es lo que la regla del proyecto prohíbe.
     banner = "220---------- Welcome to Pure-FTPd [privsep] [TLS] ----------"
+    assert parse_ftp_banner(banner) == ("Pure-FTPd", None)
+
+
+def test_parse_ftp_banner_versionless_iis_names_the_product():
+    assert parse_ftp_banner("220 Microsoft FTP Service") == ("Microsoft FTP Service", None)
+
+
+def test_parse_ftp_banner_a_version_always_wins_over_the_name_table():
+    # El saludo nombra ProFTPD y además trae la versión: gana el patrón con
+    # versión, no la tabla de nombres.
+    banner = "220 ProFTPD 1.3.5 Server (Debian) [::ffff:10.0.0.1]"
+    assert parse_ftp_banner(banner) == ("ProFTPD", "1.3.5")
+
+
+def test_parse_ftp_banner_unknown_daemon_is_not_guessed():
+    # El caso importante de la tabla: un saludo personalizado que no nombra
+    # ningún demonio conocido no produce producto. Sin esto, la tabla sería
+    # una heurística disfrazada.
+    banner = "220 Bienvenido al servidor de ficheros de la empresa."
     assert parse_ftp_banner(banner) == (None, None)
 
 
@@ -292,6 +320,10 @@ def test_parse_ftp_banner_rejects_non_220_lines():
 def test_fingerprint_ftp_confidence_reflects_whether_a_version_was_found():
     hit = fingerprint_ftp("220 (vsFTPd 2.3.4)")
     assert hit.product == "vsFTPd" and hit.version == "2.3.4" and hit.confidence == 0.9
+
+    named_only = fingerprint_ftp("220 ProFTPD Server (Debian) [::ffff:10.0.0.1]")
+    assert named_only.product == "ProFTPD"
+    assert named_only.version is None and named_only.confidence == 0.6
 
     miss = fingerprint_ftp("220 Service ready.")
     assert miss.product is None and miss.confidence == 0.0
