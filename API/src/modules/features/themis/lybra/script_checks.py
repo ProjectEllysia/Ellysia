@@ -40,7 +40,9 @@ from .checks import (
     ScriptPlugin,
     LDAPS_PORTS,
     is_ldap_service,
+    is_dns_service,
     is_mongodb_service,
+    is_ntp_service,
     is_rdp_service,
     is_postgres_service,
     is_smb_service,
@@ -53,6 +55,12 @@ from .fingerprinting.mongo import MongoProbe, fingerprint_mongo
 from .fingerprinting.postgres import PostgresProbe, fingerprint_postgres
 from .fingerprinting.rdp import RdpProbe, fingerprint_rdp
 from .fingerprinting.snmp import SnmpProbe
+from .fingerprinting.udp_services import (
+    DnsProbe,
+    NtpProbe,
+    monlist_is_answered,
+    parse_dns_version_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -342,6 +350,73 @@ class RdpNlaNotRequiredPlugin(ScriptPlugin):
         return fingerprint_rdp(response).requires_network_level_authentication is False
 
 
+class DnsOpenResolverPlugin(ScriptPlugin):
+    """Detecta un servidor DNS que resuelve nombres para cualquiera.
+
+    Un resolutor abierto no es sólo un problema para su dueño: es un
+    **amplificador a disposición de quien lo quiera usar**. Una consulta
+    pequeña con la dirección de origen falsificada provoca una respuesta mucho
+    mayor dirigida a la víctima, y el host del cliente pasa de tener un
+    servicio mal configurado a ser un arma contra terceros. Ésa es una
+    conversación distinta, y más incómoda, que "tienes un puerto abierto".
+
+    **La evidencia es la bandera que el servidor enciende él solo.** La
+    respuesta a ``version.bind`` trae el bit de "recursión disponible", y con
+    eso basta: la alternativa —lanzar una consulta recursiva de verdad por un
+    nombre externo— haría que el objetivo mandase tráfico a un tercero para
+    responderla, que es exactamente el comportamiento que se está midiendo.
+    Comprobarlo no debería practicarlo.
+
+    Args:
+        probe: Sonda inyectable, para que un test use un emisor falso.
+    """
+
+    plugin_id = "dns-open-resolver"
+
+    def __init__(self, probe: Optional[DnsProbe] = None) -> None:
+        self._probe = probe or DnsProbe()
+
+    def applies(self, service: Service) -> bool:
+        return is_dns_service(service)
+
+    def run(self, context: ScriptContext) -> bool:
+        context.acquire()
+        reply = self._probe.fetch(context.target, context.service.port or 53)
+        if reply is None:
+            return False
+        return parse_dns_version_response(reply).offers_recursion
+
+
+class NtpMonlistPlugin(ScriptPlugin):
+    """Detecta un servidor NTP que sigue aceptando ``monlist``.
+
+    ``monlist`` devuelve los últimos seiscientos clientes que han hablado con
+    el servidor. Es a la vez un problema de privacidad —el inventario de quién
+    usa ese NTP— y el vector de amplificación x500 que llenó internet de
+    ataques en 2014: ocho bytes de petición provocan kilobytes de respuesta.
+
+    Preguntarlo no amplifica nada contra nadie: la respuesta viene **a
+    nosotros**, no a un tercero. Lo que demuestra es que ese servidor serviría
+    para hacerlo.
+
+    Args:
+        probe: Sonda inyectable, para que un test use un emisor falso.
+    """
+
+    plugin_id = "ntp-monlist-enabled"
+
+    def __init__(self, probe: Optional[NtpProbe] = None) -> None:
+        self._probe = probe or NtpProbe()
+
+    def applies(self, service: Service) -> bool:
+        return is_ntp_service(service)
+
+    def run(self, context: ScriptContext) -> bool:
+        context.acquire()
+        return monlist_is_answered(
+            self._probe.fetch_monlist(context.target, context.service.port or 123))
+
+
 def default_script_plugins() -> Dict[str, ScriptPlugin]:
     """Construye el registro de plugins de primera parte, indexado por ``plugin_id``.
 
@@ -353,6 +428,8 @@ def default_script_plugins() -> Dict[str, ScriptPlugin]:
         SmbSigningNotRequiredPlugin(),
         SmbV1EnabledPlugin(),
         SnmpDefaultCommunityPlugin(),
+        DnsOpenResolverPlugin(),
+        NtpMonlistPlugin(),
         PostgresTrustAuthenticationPlugin(),
         MongoUnauthenticatedAccessPlugin(),
         LdapAnonymousBindPlugin(),

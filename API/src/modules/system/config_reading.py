@@ -824,6 +824,15 @@ class LybraConfig:
     en silencio cada escaneo. A cero, la cascada se queda sólo en la lectura
     del saludo."""
 
+    udp_budget_seconds: float = 20.0
+    """Plazo total del barrido de puertos UDP (``transport.scan_udp_ports_sync``).
+
+    En UDP el silencio no significa "cerrado" sino "no lo sabemos", así que
+    cada sonda paga su plazo entero contra un host que no tenga ese servicio.
+    Con siete filas en la tabla eso se acumula, y este presupuesto es el techo.
+    Agotarlo **no** marca nada como cerrado: los puertos que aún no han
+    contestado simplemente se dan por no observados, que es lo que ya eran."""
+
 
 @config_block("features.themis.scanners.lybra.ingest")
 @dataclass(frozen=True)

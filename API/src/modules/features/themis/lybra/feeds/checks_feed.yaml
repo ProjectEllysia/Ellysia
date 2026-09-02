@@ -8,7 +8,7 @@
 # feedVersion sube cuando el feed gana una familia nueva o un protocolo nuevo
 # bajo una existente; el arreglo de un check ya presente sube el 'version' de
 # ese check, no esta cadena. Ver CHECKS_FEED_VERSION en checks.py.
-feedVersion: lybra-checks-12
+feedVersion: lybra-checks-13
 checks:
   - id: git-config-exposure
     version: 1
@@ -521,6 +521,33 @@ checks:
     mode: safe
     finding:
       title: 'SMB: SMBv1 habilitado (protocolo retirado, sin firma ni cifrado utilizables)'
+      qod: 99
+      confirmed: true
+  # ------------------------------------------------------------------
+  # Amplificacion: los dos hallazgos que no son sobre el objetivo, sino sobre
+  # lo que el objetivo permite hacerle a terceros.
+  - id: dns-open-resolver
+    version: 1
+    type: script
+    script: dns-open-resolver
+    category: network_config
+    severity: MEDIUM
+    service: dns
+    mode: safe
+    finding:
+      title: 'DNS: resolutor abierto (utilizable como amplificador contra terceros)'
+      qod: 99
+      confirmed: true
+  - id: ntp-monlist-enabled
+    version: 1
+    type: script
+    script: ntp-monlist-enabled
+    category: network_config
+    severity: HIGH
+    service: ntp
+    mode: safe
+    finding:
+      title: 'NTP: monlist habilitado (amplificacion x500 y fuga del inventario de clientes)'
       qod: 99
       confirmed: true
   - id: snmp-default-community
