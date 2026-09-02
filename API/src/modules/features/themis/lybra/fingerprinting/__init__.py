@@ -54,6 +54,11 @@ best value-for-effort in the roadmap:
     BER a mano, con lectura de longitudes en forma larga — la mitad que el
     codificador de SNMP no necesitaba.
 
+``rdp``
+    La negociación de ``X.224``: qué protocolo de seguridad elige el servidor
+    y, con ello, si exige NLA. Resultado binario y sin ambigüedad, que es lo
+    contrario de un banner de texto libre. No da versión, y no se inventa una.
+
 ``ftp``, ``mail`` (SMTP/IMAP/POP3), ``mysql``, ``redis_probe``, ``vnc``
     Fase N's non-HTTP protocols — each volunteers its identity unprompted
     right after a bare TCP connect, no negotiation needed to read it.
@@ -94,8 +99,8 @@ confidence beyond what the matcher already assigns any version-based guess.
 Two techniques are deliberately left for later: full JARM fingerprinting (too
 large and risky to ship without a live TLS lab to validate it against) and OS
 fingerprinting (which the roadmap itself rates low value). Both stay
-oracle-only — handled by Nmap — until picked up. RDP, VNC's full protocol beyond
-its version banner, and RPC stay oracle-only too, per the roadmap's own
+oracle-only — handled by Nmap — until picked up. VNC's full protocol beyond its
+version banner, and RPC, stay oracle-only too, per the roadmap's own
 priority-3 rating for that group.
 """
 
@@ -175,6 +180,16 @@ from .smb import (
     SmbProbe,
     SmbDissector,
 )
+from .rdp import (
+    FAILURE_CODES,
+    PROTOCOL_NAMES,
+    RdpDissector,
+    RdpFingerprint,
+    RdpProbe,
+    build_connection_request,
+    fingerprint_rdp,
+    parse_connection_confirm,
+)
 from .ldap import (
     ROOTDSE_ATTRIBUTES,
     LdapDissector,
@@ -253,6 +268,14 @@ __all__ = [
     "default_dissectors",
     "HttpFingerprint",
     "SignatureHit",
+    "FAILURE_CODES",
+    "PROTOCOL_NAMES",
+    "RdpDissector",
+    "RdpFingerprint",
+    "RdpProbe",
+    "build_connection_request",
+    "fingerprint_rdp",
+    "parse_connection_confirm",
     "ROOTDSE_ATTRIBUTES",
     "LdapDissector",
     "LdapFingerprint",

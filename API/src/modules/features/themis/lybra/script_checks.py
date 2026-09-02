@@ -41,6 +41,7 @@ from .checks import (
     LDAPS_PORTS,
     is_ldap_service,
     is_mongodb_service,
+    is_rdp_service,
     is_postgres_service,
     is_smb_service,
     is_snmp_service,
@@ -50,6 +51,7 @@ from .fingerprinting.smb import SIGNING_REQUIRED_BIT, SmbProbe, fingerprint_smb
 from .fingerprinting.ldap import LdapProbe, fingerprint_ldap
 from .fingerprinting.mongo import MongoProbe, fingerprint_mongo
 from .fingerprinting.postgres import PostgresProbe, fingerprint_postgres
+from .fingerprinting.rdp import RdpProbe, fingerprint_rdp
 from .fingerprinting.snmp import SnmpProbe
 
 logger = logging.getLogger(__name__)
@@ -262,6 +264,45 @@ class LdapCleartextWithLdapsPlugin(ScriptPlugin):
         )
 
 
+class RdpNlaNotRequiredPlugin(ScriptPlugin):
+    """Detecta un RDP que **no** exige autenticación a nivel de red.
+
+    NLA obliga a autenticarse antes de que exista la sesión gráfica. Sin él,
+    cualquiera que alcance el puerto llega a la pantalla de login — lo que
+    habilita la fuerza bruta y toda la familia de vulnerabilidades
+    pre-autenticación de la que BlueKeep (CVE-2019-0708) es el ejemplo
+    canónico. RDP es, además, el vector de entrada de la mayoría de los
+    incidentes de ransomware que empiezan por acceso remoto.
+
+    El dato no se infiere: es el protocolo de seguridad que el propio servidor
+    **elige** en la negociación de X.224, así que el hallazgo nace
+    ``confirmed``.
+
+    **Un servidor cuyo modo no se ha podido leer no dispara el check.** La
+    propiedad que se consulta distingue "no exige NLA" de "no se sabe"
+    (``None``), y sólo la primera es un hallazgo: afirmar una configuración
+    insegura sin haberla observado sería inventarla.
+
+    Args:
+        probe: Sonda inyectable, para que un test use un socket falso.
+    """
+
+    plugin_id = "rdp-nla-not-required"
+
+    def __init__(self, probe: Optional[RdpProbe] = None) -> None:
+        self._probe = probe or RdpProbe()
+
+    def applies(self, service: Service) -> bool:
+        return is_rdp_service(service)
+
+    def run(self, context: ScriptContext) -> bool:
+        context.acquire()
+        response = self._probe.fetch(context.target, context.service.port or 3389)
+        if response is None:
+            return False
+        return fingerprint_rdp(response).requires_network_level_authentication is False
+
+
 def default_script_plugins() -> Dict[str, ScriptPlugin]:
     """Construye el registro de plugins de primera parte, indexado por ``plugin_id``.
 
@@ -276,5 +317,6 @@ def default_script_plugins() -> Dict[str, ScriptPlugin]:
         MongoUnauthenticatedAccessPlugin(),
         LdapAnonymousBindPlugin(),
         LdapCleartextWithLdapsPlugin(),
+        RdpNlaNotRequiredPlugin(),
     )
     return {plugin.plugin_id: plugin for plugin in plugins}
