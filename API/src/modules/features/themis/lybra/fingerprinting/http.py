@@ -767,7 +767,7 @@ def _resolve_identity(
     return product, None, 0.6, None
 
 
-def fingerprint_http(
+def fingerprint_http(  # pylint: disable=too-many-locals
     response: Response,
     favicon: Optional[bytes] = None,
     error_resp: Optional[Response] = None,
@@ -795,6 +795,11 @@ def fingerprint_http(
     Returns:
         An :class:`HttpFingerprint`.
     """
+    # Muchas variables locales, y a propósito: cada una es una lectura distinta
+    # de la misma respuesta, y sacarlas a funciones aparte obligaría a volver a
+    # pasarles la respuesta entera para no ganar nada. El trabajo pesado —la
+    # cascada y la elección— ya vive fuera, en _version_readings y
+    # _resolve_identity.
     title = _extract_title(response.body)
     evidence = _tech_evidence(response, title, error_resp)
     candidates = (_signature_hit(signature, evidence) for signature in _TECH_SIGNATURES)
@@ -811,7 +816,6 @@ def fingerprint_http(
     )
     layers = _detect_layers(response, readings, edge)
 
-    catalog_hash = favicon_hash_value(favicon) if favicon else None
     if not product:
         # Última red: el icono. Sólo se consulta cuando ninguna otra fuente ha
         # nombrado el producto — un favicon identifica producto y casi nunca
@@ -825,7 +829,8 @@ def fingerprint_http(
         product=product, version=version, title=title,
         favicon_hash=favicon_digest, technologies=technologies,
         confidence=confidence, version_source=version_source,
-        favicon_catalog_hash=catalog_hash, layers=layers,
+        favicon_catalog_hash=favicon_hash_value(favicon) if favicon else None,
+        layers=layers,
     )
 
 
