@@ -17,27 +17,33 @@ import time
 
 import pytest
 
+from src.modules.features.themis.lybra import PortSweep
 from src.modules.features.themis.managers.lybra import engine as engine_module
 from src.modules.features.themis.managers.lybra.engine import LybraEngineManager
 
 pytestmark = pytest.mark.unit
 
 
+def _clean_sweep(open_ports=(80,), truncated=False) -> PortSweep:
+    return PortSweep(open_ports=tuple(open_ports), refused_ports=(), timed_out_ports=(),
+                     unreachable_ports=(), was_truncated=truncated)
+
+
 def test_the_budget_reaches_the_sweep(monkeypatch):
     captured = {}
 
-    def fake_scan_ports_sync(target, ports, budget_seconds=None):
+    def fake_sweep(target, ports, budget_seconds=None):
         captured["target"] = target
         captured["ports"] = ports
         captured["budget"] = budget_seconds
-        return [80]
+        return _clean_sweep()
 
-    monkeypatch.setattr(engine_module, "scan_ports_sync", fake_scan_ports_sync)
+    monkeypatch.setattr(engine_module, "sweep_with_retries", fake_sweep)
 
-    result = LybraEngineManager()._discover_ports(  # pylint: disable=protected-access
+    sweep = LybraEngineManager()._discover_ports(  # pylint: disable=protected-access
         "10.0.0.5", [80, 443], budget_seconds=42.0)
 
-    assert result == [80]
+    assert sweep.open_ports == (80,)
     assert captured["budget"] == 42.0
 
 
@@ -46,11 +52,11 @@ def test_a_scan_without_budget_keeps_the_old_behaviour(monkeypatch):
     encolado antes de este cambio— siguen barriendo sin límite de reloj."""
     captured = {}
 
-    def fake_scan_ports_sync(target, ports, budget_seconds=None):
+    def fake_sweep(target, ports, budget_seconds=None):
         captured["budget"] = budget_seconds
-        return []
+        return _clean_sweep(open_ports=())
 
-    monkeypatch.setattr(engine_module, "scan_ports_sync", fake_scan_ports_sync)
+    monkeypatch.setattr(engine_module, "sweep_with_retries", fake_sweep)
     LybraEngineManager()._discover_ports("10.0.0.5", None)  # pylint: disable=protected-access
 
     assert captured["budget"] is None

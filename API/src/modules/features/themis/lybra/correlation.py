@@ -181,7 +181,8 @@ def merge_findings(findings: List[dict]) -> List[dict]:
 # LIFECYCLE
 # =========================================================================
 
-def apply_lifecycle(current: List[dict], previous: Dict[str, dict]) -> List[dict]:
+def apply_lifecycle(current: List[dict], previous: Dict[str, dict],
+                    close_missing: bool = True) -> List[dict]:
     """Assign each finding a lifecycle state relative to the previous scan.
 
     Each current finding is labelled by comparing it against the previous scan of
@@ -202,10 +203,18 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict]) -> List[dict
         current: This scan's findings. Each must already have a ``dedup_key``.
         previous: A map ``dedup_key -> {"state", "snapshot"}`` describing the
             previous scan's findings.
+        close_missing: Si un hallazgo que ya no aparece debe darse por
+            corregido. ``False`` cuando el escaneo **no vio todo el objetivo**
+            —un barrido que se quedó sin presupuesto de reloj— porque entonces
+            la ausencia no es evidencia de nada: lo que no se miró no se sabe
+            si sigue ahí. Sin esta salida, un escaneo incompleto le diría al
+            usuario que sus vulnerabilidades fueron remediadas, que es el fallo
+            de L48-c por otra puerta.
 
     Returns:
         The ``current`` findings with their ``state`` set, plus one ``fixed``
-        finding for each issue that has just disappeared.
+        finding for each issue that has just disappeared (ninguno si
+        ``close_missing`` es ``False``).
     """
     current_keys = set()
     for finding in current:
@@ -223,6 +232,8 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict]) -> List[dict
 
     carried: List[dict] = []
     for key, prev in previous.items():
+        if not close_missing:
+            break
         if key not in current_keys and prev["state"] in ("open", "regressed", "accepted"):
             ghost = dict(prev["snapshot"])
             ghost["state"] = "fixed"

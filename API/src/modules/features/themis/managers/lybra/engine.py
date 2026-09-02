@@ -42,7 +42,8 @@ from ...lybra import (
     TlsProbe,
     NetworkProbe,
     default_script_plugins,
-    scan_ports_sync,
+    sweep_with_retries,
+    PortSweep,
     scan_udp_ports_sync,
     score_finding,
     build_service_rollup,
@@ -260,6 +261,7 @@ class LybraEngineManager(ScanManager):
                     self.update_scan_status(scan_id, ScanStatus.FAILED)
                     return
                 services, source_host_id, source_target = resolved.services, resolved.host_id, resolved.target
+                is_partial = resolved.is_partial
 
                 fingerprint_findings: list = []
                 if (
@@ -311,17 +313,31 @@ class LybraEngineManager(ScanManager):
                 key: prev for key, prev in previous_map.items()
                 if prev["snapshot"].get("category") not in self._EVENT_CATEGORIES
             }
-            findings_data = apply_lifecycle(trackable, trackable_previous) + events
+            # Un escaneo que no vio todo el objetivo no cierra nada: la
+            # ausencia de un hallazgo que esta vez no se llegó a comprobar no
+            # es evidencia de que se haya corregido. Sin esto, un
+            # descubrimiento truncado le diría al usuario que sus
+            # vulnerabilidades fueron remediadas — el fallo de L48-c por otra
+            # puerta.
+            findings_data = apply_lifecycle(
+                trackable, trackable_previous, close_missing=not is_partial) + events
 
             with UnitOfWork() as uow:
                 scan_repo = ScanRepository(uow)
                 scan = scan_repo.get_by_id(scan_id)
                 scan.host_id = source_host_id
+                scan.is_partial = is_partial  # type: ignore
                 self._persist_scan_results(uow, scan, findings_data)
                 scan.status = ScanStatus.FINISHED.value  # type: ignore
                 scan.finished_at = utcnow_naive()  # type: ignore
 
-            logger.info(f"Escaneo Lybra {scan_id} completado: {len(findings_data)} hallazgos")
+            if is_partial:
+                logger.warning(
+                    "Escaneo Lybra %s completado PARCIALMENTE: %s hallazgos sobre una "
+                    "superficie que no se llegó a recorrer entera",
+                    scan_id, len(findings_data))
+            else:
+                logger.info(f"Escaneo Lybra {scan_id} completado: {len(findings_data)} hallazgos")
 
         except Exception as e:
             logger.error(f"Error en escaneo Lybra {scan_id}: {e}", exc_info=True)
@@ -332,41 +348,44 @@ class LybraEngineManager(ScanManager):
         target: str,
         discover_ports,
         budget_seconds: Optional[float] = None,
-    ) -> Optional[list]:
+    ) -> Optional[PortSweep]:
         """Discover open ports with Lybra's own connect scan (Fase T).
 
-        Returns ``None`` (not ``[]``) when discovery itself failed unexpectedly,
-        as opposed to running cleanly and finding zero open ports. The caller
-        must not conflate the two: treating a failed probe as "everything is
-        closed" would falsely mark previously-open findings as fixed once
-        lifecycle correlation runs.
+        Devuelve el barrido entero y no una lista porque los desenlaces son
+        tres, no dos, y el llamante tiene que distinguirlos:
 
-        Esa defensa estuvo puesta y sin poder dispararse: ``scan_ports_sync``
-        sólo sabía devolver una lista, así que un objetivo que bloqueaba el
-        barrido a mitad de camino llegaba aquí como ``[]`` —un informe
-        tranquilizador sobre un host con servicios abiertos, y peor aún, un
-        ciclo de vida que marcaba como corregidos los hallazgos anteriores—.
-        Desde L48-c el transporte distingue "todo cerrado" de "no me han
-        dejado mirar" y devuelve ``None`` en el segundo caso, que es lo que
-        este método siempre esperó recibir.
-
-        Lo mismo vale para ``budget_seconds``: un barrido que se queda sin
-        reloj también llega como ``None``, porque de los puertos que no dio
-        tiempo a mirar no se sabe nada, y no saber no es estar limpio.
+        - **limpio** — el objetivo contestó; ``open_ports`` es su superficie.
+        - **bloqueado** (``None``) — nada contestó de ninguna forma, así que no
+          se sabe nada. Tratarlo como "todo cerrado" hacía que el ciclo de vida
+          marcara como corregidos hallazgos que seguían abiertos, y le dijera
+          al usuario que sus vulnerabilidades se arreglaron solas (L48-c).
+        - **truncado** (``was_truncated``) — se acabó el reloj a mitad. Lo
+          encontrado es cierto; lo que quedó sin mirar es desconocido. El
+          escaneo sigue adelante con lo que hay y se marca como parcial, en
+          lugar de tirar información verificada.
         """
         try:
-            discovered = scan_ports_sync(target, discover_ports, budget_seconds=budget_seconds)
+            sweep = sweep_with_retries(
+                target, discover_ports, budget_seconds=budget_seconds)
         except Exception:
             logger.exception("Lybra port discovery failed for %s", target)
             return None
-        if discovered is None:
+        if sweep.is_blocked:
             logger.error(
                 "Descubrimiento bloqueado para %s: el host respondió al chequeo de "
                 "alcanzabilidad y después ningún puerto contestó. El escaneo falla "
                 "en vez de reportar un objetivo limpio.",
                 target,
             )
-        return discovered
+            return None
+        if sweep.was_truncated:
+            logger.warning(
+                "Descubrimiento parcial de %s: %s puertos abiertos encontrados (%s) "
+                "antes de agotar el presupuesto. El escaneo continúa marcado como "
+                "incompleto y no cerrará ningún hallazgo anterior.",
+                target, len(sweep.open_ports), list(sweep.open_ports),
+            )
+        return sweep
 
     def _discover_udp_ports(self, target: str) -> list:
         """Discover open UDP ports via the curated probe table (Fase N/Ronda 1).
@@ -984,6 +1003,7 @@ class LybraEngineManager(ScanManager):
             "scanType": "lybra",
             "target": scan.target,
             "assetId": scan.asset_id,
+            "isPartial": bool(scan.is_partial),
             "exposure": exposure,
             "targetAuthorized": target_authorized,
             "status": getattr(scan, "status", "unknown"),

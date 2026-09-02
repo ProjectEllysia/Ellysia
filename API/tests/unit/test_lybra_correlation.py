@@ -133,6 +133,29 @@ def test_lifecycle_does_not_recarry_already_fixed():
     assert all(f["dedup_key"] != "K1" for f in out)
 
 
+def test_a_partial_scan_closes_nothing():
+    """Lo que no se llegó a mirar no se puede dar por corregido.
+
+    Un barrido que se queda sin presupuesto de reloj deja puertos sin probar.
+    Si el ciclo de vida cerrara por ausencia, ese escaneo le diría al usuario
+    que sus vulnerabilidades fueron remediadas cuando lo único cierto es que
+    esta vez no se comprobaron — el fallo de L48-c por otra puerta.
+    """
+    cur = [{"dedup_key": "K2"}]                  # K1 estaba antes y ahora no aparece
+    out = apply_lifecycle(cur, _prev("open", "K1"), close_missing=False)
+
+    assert all(finding["state"] != "fixed" for finding in out)
+    assert [finding["dedup_key"] for finding in out] == ["K2"]
+
+
+def test_a_partial_scan_still_states_what_it_did_see():
+    """No cerrar no es no decir nada: lo encontrado se etiqueta con normalidad,
+    incluida la regresión de algo que constaba como corregido."""
+    cur = [{"dedup_key": "K1"}]
+    out = apply_lifecycle(cur, _prev("fixed", "K1"), close_missing=False)
+    assert out[0]["state"] == "regressed"
+
+
 # ------------------------------------------------------------------ scoring
 
 @pytest.mark.parametrize("finding,exposure,expected", [
