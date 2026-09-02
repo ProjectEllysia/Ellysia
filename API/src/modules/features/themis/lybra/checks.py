@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 # ``Check.check_id``). Los dos checks ``network`` suben además a ``version: 2``
 # en checks-6: su comportamiento cambia, y un hallazgo guardado tiene que poder
 # decir cuál de las dos formas lo produjo.
-CHECKS_FEED_VERSION = "lybra-checks-8"
+CHECKS_FEED_VERSION = "lybra-checks-9"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -144,6 +144,8 @@ _POSTGRES_SERVICE_NAMES = {"postgresql", "postgres"}
 _POSTGRES_PORTS = {5432}
 _MSSQL_SERVICE_NAMES = {"ms-sql-s", "mssql", "sqlserver"}
 _MSSQL_PORTS = {1433}
+_MONGODB_SERVICE_NAMES = {"mongodb", "mongo"}
+_MONGODB_PORTS = {27017, 27018, 27019}
 _REDIS_SERVICE_NAMES = {"redis"}
 _REDIS_PORTS = {6379}
 _VNC_SERVICE_NAMES = {"vnc"}
@@ -706,6 +708,17 @@ def is_mssql_service(service: Service) -> bool:
     """Return whether a service should be probed by the SQL Server dissector."""
     return ((service.name or "").lower() in _MSSQL_SERVICE_NAMES
             or service.port in _MSSQL_PORTS)
+
+
+def is_mongodb_service(service: Service) -> bool:
+    """Return whether a service should be probed by the MongoDB dissector.
+
+    27018 y 27019 entran junto al 27017: son los puertos por defecto de un
+    ``mongos`` y de un servidor de configuración en un despliegue fragmentado,
+    y ahí es donde vive el catálogo entero del clúster.
+    """
+    return ((service.name or "").lower() in _MONGODB_SERVICE_NAMES
+            or service.port in _MONGODB_PORTS)
 
 
 def is_redis_service(service: Service) -> bool:
