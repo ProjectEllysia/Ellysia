@@ -406,35 +406,24 @@ class HygeiaAssetManager:
             return {"scanId": None}
 
         scan = scans[0]
-        findings = scan.get("findings") or []
-        by_priority: dict = {}
-        for finding in findings:
-            level = finding.get("priority") or "INFO"
-            by_priority[level] = by_priority.get(level, 0) + 1
 
-        # Paquetes analizados: el motor emite un "installed_package" por cada
-        # uno, se le haya podido resolver un CPE o no. `unresolvedCount` (Fase
-        # I-b observability, `Finding.cpe_resolved`) es el número real de los
-        # que no se pudieron identificar — antes era una advertencia genérica
-        # cuando `vulnerableCount` daba cero; ahora el frontend puede decir
-        # cuántos, en vez de "puede que alguno".
-        package_count = sum(1 for finding in findings if finding.get("category") == "installed_package")
-        unresolved_count = sum(
-            1 for finding in findings
-            if finding.get("category") == "installed_package" and finding.get("cpeResolved") is False
-        )
-
+        # Los recuentos llegan hechos desde el listado de Themis. Antes se
+        # derivaban aquí recorriendo la lista completa de hallazgos, que era
+        # una de las razones por las que ese listado tenía que mandarla entera;
+        # `unresolvedPackages` (Fase I-b observability, `Finding.cpe_resolved`)
+        # sigue siendo el número real de paquetes que no se pudieron
+        # identificar, no una advertencia genérica de "puede que alguno".
         return {
             "scanId":          scan["id"],
             "status":          scan.get("status"),
             "startedAt":       scan.get("startedAt"),
             "finishedAt":      scan.get("finishedAt"),
-            "totalFindings":   len(findings),
-            "byPriority":      by_priority,
-            "confirmedCount":  sum(1 for finding in findings if finding.get("confirmed")),
-            "vulnerableCount": sum(1 for finding in findings if finding.get("category") == "outdated_software"),
-            "packageCount":    package_count,
-            "unresolvedCount": unresolved_count,
+            "totalFindings":   scan.get("totalFindings", 0),
+            "byPriority":      scan.get("byPriority", {}),
+            "confirmedCount":  scan.get("confirmedFindings", 0),
+            "vulnerableCount": scan.get("vulnerableFindings", 0),
+            "packageCount":    scan.get("installedPackages", 0),
+            "unresolvedCount": scan.get("unresolvedPackages", 0),
         }
 
     def delete_asset(self, asset_id: int) -> None:

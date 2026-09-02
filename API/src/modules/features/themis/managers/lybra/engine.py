@@ -837,7 +837,8 @@ class LybraEngineManager(ScanManager):
         """
         repo = build_repository(ScanRepository)
         items, total_count = repo.get_lybra_scans_paginated(user_id, page, per_page, asset_id)
-        return [self.format_scan(item.id, _scan=item) for item in items], total_count
+        return ([self.format_scan(item.id, _scan=item, include_findings=False)
+                 for item in items], total_count)
 
     def latest_findings_by_asset(self, user_id: int, asset_ids: List[int]) -> dict:
         """Hallazgos del último análisis por activo Hygeia, en un par de queries.
@@ -907,7 +908,19 @@ class LybraEngineManager(ScanManager):
             return "private"
         return classify_exposure(scan.target)
 
-    def format_scan(self, scan_id: int, _scan=None) -> dict:
+    def format_scan(self, scan_id: int, _scan=None, include_findings: bool = True) -> dict:  # pylint: disable=arguments-differ
+        """Un escaneo en la forma de la API.
+
+        Args:
+            include_findings: Si la respuesta lleva dentro los hallazgos uno a
+                uno. El listado pasa ``False``: una página de diez escaneos con
+                150 hallazgos cada uno son 1.500 objetos por respuesta, y la
+                interfaz no usa ninguno hasta que el usuario despliega una
+                tarjeta — momento en el que pide
+                ``GET /themis/lybra/scans/<id>/findings``, que además se los da
+                ya agrupados. Los contadores viajan siempre, porque la cabecera
+                de la tarjeta colapsada los necesita.
+        """
         scan = _scan or self.get_scan_by_id(scan_id)
         if not scan:
             raise ScanNotFoundError(scan_id)
@@ -935,14 +948,44 @@ class LybraEngineManager(ScanManager):
             "status": getattr(scan, "status", "unknown"),
             "startedAt": isoformat_utc(scan.started_at),
             "finishedAt": isoformat_utc(scan.finished_at),  # type: ignore
-            "findings": json_findings,
             "totalFindings": len(json_findings),
             "vulnerableFindings": sum(1 for display_finding in display_findings if display_finding.get("category") == "outdated_software"),
             "openFindings": sum(1 for display_finding in display_findings if display_finding.get("state") == "open"),
             "fixedFindings": sum(1 for display_finding in display_findings if display_finding.get("state") == "fixed"),
+            **self._finding_counters(display_findings, json_findings),
         }
+        if include_findings:
+            result["findings"] = json_findings
         self._append_document_info(scan, result)
         return result
+
+    @staticmethod
+    def _finding_counters(display_findings: list, json_findings: list) -> dict:
+        """Los recuentos que la tarjeta colapsada necesita sin abrir el escaneo.
+
+        Los derivaba la interfaz recorriendo la lista completa de hallazgos, que
+        era la razón de que el listado tuviera que mandarla entera. Calcularlos
+        aquí cuesta un recorrido más sobre filas que ya están leídas.
+
+        ``unresolvedPackages`` cuenta los paquetes de inventario que el matcher
+        no pudo resolver ni a un CPE: es lo que distingue "comprobado y limpio"
+        de "ni siquiera supe qué es esto", que en los datos se leen igual.
+        """
+        by_priority: dict = {}
+        for finding in json_findings:
+            priority = finding.get("priority", "INFO")
+            by_priority[priority] = by_priority.get(priority, 0) + 1
+
+        packages = [finding for finding in display_findings
+                    if finding.get("category") == "installed_package"]
+        return {
+            "byPriority": by_priority,
+            "confirmedFindings": sum(1 for finding in display_findings
+                                     if finding.get("confirmed")),
+            "installedPackages": len(packages),
+            "unresolvedPackages": sum(1 for package in packages
+                                      if package.get("cpe_resolved") is False),
+        }
 
     def append_csv_data(self, data: dict, scan: Scan, task: "_Task") -> None:
         """No-op: Lybra does not use the base CSV-logging execution path."""

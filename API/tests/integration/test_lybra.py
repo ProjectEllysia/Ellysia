@@ -1129,3 +1129,30 @@ def test_the_open_port_findings_form_their_own_non_product_group(
     for group in non_products:
         assert group["fixedVersion"] is None   # no hay versión que recomendar
         assert "(" in group["label"]           # "categoría (servicio)"
+
+
+def test_the_listing_ships_counters_instead_of_every_finding(
+        client, app, admin_user, auth_headers):
+    """Una página de diez escaneos con 150 hallazgos cada uno eran 1.500 objetos
+    por respuesta, y la interfaz no usaba ninguno hasta desplegar una tarjeta.
+
+    Lo que sí necesita la cabecera colapsada —el desglose por prioridad y el
+    aviso de cobertura de inventario— lo derivaba en el cliente recorriendo esa
+    misma lista, que era justo la razón de tener que mandarla. Ahora llega
+    hecho, y el detalle se pide aparte.
+    """
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.7")
+
+    result = client.get("/themis/results?type=lybra&page=1&per_page=10",
+                        headers=auth_headers(admin_user)).get_json()["results"][0]
+
+    assert "findings" not in result
+    assert result["totalFindings"] > 0
+    assert sum(result["byPriority"].values()) == result["totalFindings"]
+    assert "installedPackages" in result
+    assert "unresolvedPackages" in result
+
+    # El detalle sigue completo por su propia ruta.
+    detail = client.get(f"/themis/lybra/scans/{scan_id}/findings",
+                        headers=auth_headers(admin_user)).get_json()
+    assert detail["totalFindings"] == result["totalFindings"]
