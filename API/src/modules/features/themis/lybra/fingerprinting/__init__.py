@@ -75,6 +75,12 @@ from __future__ import annotations
 
 from .dispatch import Dissector, DissectorResult, QOD_FINGERPRINT
 from .registry import register_dissector, default_dissectors
+from .cascade import (
+    banner_readers,
+    blind_probers,
+    identify_unknown_service,
+    read_volunteered_banner,
+)
 from .favicon import (
     FaviconCatalog,
     FaviconEntry,
@@ -171,6 +177,10 @@ __all__ = [
     "default_dissectors",
     "HttpFingerprint",
     "SignatureHit",
+    "banner_readers",
+    "blind_probers",
+    "identify_unknown_service",
+    "read_volunteered_banner",
     "FaviconCatalog",
     "FaviconEntry",
     "favicon_hash",

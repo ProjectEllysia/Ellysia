@@ -859,6 +859,11 @@ class HttpDissector(Dissector):
 
     label = "HTTP"
 
+    # HTTP tampoco saluda, y un ``GET /`` es la sonda a ciegas con más
+    # probabilidad de acertar que existe: un panel publicado en el 8081 o en el
+    # 9000 es el caso más común de "servicio fuera de su puerto canónico".
+    tries_blind = True
+
     def __init__(self, probe: Optional[HttpProbe] = None) -> None:
         self._probe = probe or HttpProbe()
 
