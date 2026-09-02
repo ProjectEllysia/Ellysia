@@ -39,6 +39,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    false as sa_false,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -682,11 +683,22 @@ class LybraScan(Scan):
             is deleted is therefore explicit, in HygeiaAssetManager.delete_asset.
             Non-null also means "keep this out of the ordinary Lybra feed" —
             these scans are browsed per-agent instead.
+        is_partial: Si el descubrimiento no llegó a mirar todo el objetivo — un
+            barrido que se quedó sin presupuesto de reloj. Los puertos que sí
+            encontró son ciertos; de los que no le dio tiempo a probar no se
+            sabe nada, así que un escaneo parcial **no cierra hallazgos**: la
+            ausencia de algo que no se miró no es evidencia de que se haya
+            corregido (ver ``apply_lifecycle(close_missing=...)``).
+
+            Vive aquí y no en ``Scan`` porque sólo Lybra descubre su propia
+            superficie: los otros tres escáneres reciben el objetivo ya
+            resuelto y no tienen un barrido que pueda quedarse a medias.
     """
     __tablename__ = "LybraScan"
 
     id             = Column(Integer, ForeignKey("Scan.id"), primary_key=True)
     asset_id       = Column(Integer, nullable=True, index=True)
+    is_partial     = Column(Boolean, nullable=False, default=False, server_default=sa_false())
 
     # Sin ``inherit_condition``: hacía falta mientras existía ``source_scan_id``,
     # una segunda clave foránea a ``Scan.id`` que dejaba ambigua la unión con la

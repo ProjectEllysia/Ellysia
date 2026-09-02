@@ -44,7 +44,9 @@
                 :title="`${summary(scan)[lvl]} ${PRIO_LABEL[lvl]}`">
                 {{ summary(scan)[lvl] }}
               </span>
-              <span v-if="scan.status === 'finished' && !scan.totalFindings" class="prio-clean">Sin hallazgos</span>
+              <span v-if="scan.status === 'finished' && !scan.totalFindings && !scan.isPartial" class="prio-clean">Sin hallazgos</span>
+              <span v-if="scan.isPartial" class="prio-partial"
+                title="El descubrimiento se quedó sin tiempo: lo que se ve es cierto, pero no es toda la superficie">Parcial</span>
             </span>
 
             <span class="scan-date">{{ fmtDate(scan.finishedAt || scan.startedAt) }}</span>
@@ -60,7 +62,7 @@
               <div v-else-if="scan.status === 'failed'" class="body-failed">
                 El escaneo falló. No se pudo emitir un veredicto.
               </div>
-              <div v-else-if="!scan.totalFindings" class="body-clean">
+              <div v-else-if="!scan.totalFindings && !scan.isPartial" class="body-clean">
                 Ningún hallazgo. La superficie analizada está limpia.
               </div>
 
@@ -143,6 +145,17 @@
                 </div>
                 </Transition>
               </template>
+
+              <!-- El descubrimiento no llegó a recorrer todo el objetivo. Va antes que
+                   cualquier otra nota porque cambia cómo se leen todas las demás: la
+                   ausencia de un hallazgo aquí no significa que no esté. -->
+              <div v-if="scan.isPartial" class="body-partial-hint">
+                Análisis incompleto: el descubrimiento de puertos agotó su tiempo antes de recorrer
+                todo el objetivo. Lo que aparece es cierto, pero <strong>la ausencia de algo no
+                significa que no esté</strong> — por eso este escaneo no ha dado por corregido ningún
+                hallazgo anterior. Sube el tiempo límite o acota la lista de puertos para un análisis
+                completo.
+              </div>
 
               <!-- No se muestra para un escaneo de agente (Fase I, `assetId`): ahí el
                    fingerprinting y las comprobaciones activas están desactivados
@@ -485,6 +498,16 @@ function fmtDate(iso) {
 .f-tag.state.accepted { color: var(--text-muted); }
 .f-tag.src { color: var(--info); background: var(--info-dim); }
 .f-tag.fix { color: var(--success); background: var(--success-dim); font-weight: 600; }
+.prio-partial {
+  font-size: var(--fs-md); font-weight: 700; padding: 0.1rem 0.45rem; border-radius: 999px;
+  color: var(--warn); background: var(--warn-dim); border: 1px solid var(--warn);
+}
+.body-partial-hint {
+  margin-top: 0.6rem; padding: 0.55rem 0.7rem; border-radius: 8px;
+  border: 1px solid var(--warn); background: var(--warn-dim);
+  color: var(--text-dim); font-size: var(--fs-md); line-height: 1.45;
+}
+.body-partial-hint strong { color: var(--text); }
 .f-tag.conf { color: var(--success); background: var(--success-dim); }
 
 /* ── Grupos: la unidad sobre la que se actúa ── */

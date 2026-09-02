@@ -22,7 +22,7 @@ from src.modules.infrastructure import UnitOfWork
 from src.modules.features.themis.model import Finding, ScanStatus
 from src.modules.features.themis.repositories import ScanRepository, KbRepository
 from src.modules.features.themis.managers import LybraEngineManager, ScanManager, AuthorizedTargetManager
-from src.modules.features.themis.lybra import Service
+from src.modules.features.themis.lybra import PortSweep, Service
 
 pytestmark = pytest.mark.integration
 
@@ -43,6 +43,18 @@ def _network_services(apache_version: str = "2.4.49") -> list:
     ]
 
 
+def _sweep(open_ports, truncated: bool = False) -> PortSweep:
+    """El barrido que devuelve un `_discover_ports` sustituido en un test.
+
+    La costura devuelve el :class:`PortSweep` entero y no una lista porque los
+    desenlaces son tres —limpio, bloqueado y truncado— y sólo el objeto
+    completo los distingue. Este ayudante deja los dobles en una línea.
+    """
+    return PortSweep(open_ports=tuple(open_ports), refused_ports=(),
+                     timed_out_ports=(), unreachable_ports=(),
+                     was_truncated=truncated)
+
+
 def _stub_self_discovery(monkeypatch, tcp_ports: list, udp_ports: list | None = None) -> None:
     """Sustituye el descubrimiento de puertos y el chequeo de alcanzabilidad.
 
@@ -51,7 +63,7 @@ def _stub_self_discovery(monkeypatch, tcp_ports: list, udp_ports: list | None = 
     """
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
-                        lambda self, target, ports, **_kwargs: list(tcp_ports))
+                        lambda self, target, ports, **_kwargs: _sweep(tcp_ports))
     monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports",
                         lambda self, target: list(udp_ports or []))
 
@@ -143,7 +155,7 @@ def test_lybra_self_discovery_produces_open_port_findings(app, admin_user, monke
     # self-discovery pipeline runs for real.
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
-                        lambda self, target, ports, **_kwargs: [80, 22])
+                        lambda self, target, ports, **_kwargs: _sweep([80, 22]))
     monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
 
     with app.app_context():
@@ -170,7 +182,7 @@ def test_lybra_self_discovery_disambiguates_the_same_port_over_tcp_and_udp(app, 
     `Finding.protocol` y el arreglo de `compute_dedup_key`."""
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
-                        lambda self, target, ports, **_kwargs: [161])
+                        lambda self, target, ports, **_kwargs: _sweep([161]))
     monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports",
                         lambda self, target: [161])
 
@@ -246,7 +258,7 @@ def test_lybra_blocked_discovery_never_marks_findings_fixed(app, admin_user, mon
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
-                        lambda self, target, ports, **_kwargs: [80, 443])
+                        lambda self, target, ports, **_kwargs: _sweep([80, 443]))
 
     with app.app_context():
         mgr = LybraEngineManager()
@@ -277,7 +289,7 @@ def test_lybra_self_discovery_genuine_zero_ports_still_marks_fixed(app, admin_us
     a previously-open finding on this target should still be marked fixed."""
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
-                        lambda self, target, ports, **_kwargs: [80])
+                        lambda self, target, ports, **_kwargs: _sweep([80]))
     monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
 
     with app.app_context():
@@ -288,7 +300,7 @@ def test_lybra_self_discovery_genuine_zero_ports_still_marks_fixed(app, admin_us
 
     # Second scan: discovery ran cleanly and genuinely found nothing open.
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
-                        lambda self, target, ports, **_kwargs: [])
+                        lambda self, target, ports, **_kwargs: _sweep([]))
     with app.app_context():
         mgr = LybraEngineManager()
         e2 = mgr._create_scan_record(target="10.0.0.7", user_id=admin_user.id)
@@ -912,7 +924,7 @@ def test_lybra_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, mon
     monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(fingerprinting_enabled=True))
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     monkeypatch.setattr(LybraEngineManager, "_discover_ports",
-                        lambda self, target, ports, **_kwargs: [80])
+                        lambda self, target, ports, **_kwargs: _sweep([80]))
     monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
 
     def fake_fetch(self, host, port, method, path):
@@ -949,7 +961,7 @@ def test_lybra_ftp_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user,
     _seed_kb_vsftpd_cve(app)
     monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(fingerprinting_enabled=True))
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
-    monkeypatch.setattr(LybraEngineManager, "_discover_ports", lambda self, target, ports, **_kwargs: [21])
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports", lambda self, target, ports, **_kwargs: _sweep([21]))
     monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
     monkeypatch.setattr(FtpProbe, "fetch", lambda self, host, port: "220 (vsFTPd 2.3.4)")
     _authorize_target(app, admin_user.id)
@@ -981,7 +993,7 @@ def test_lybra_mysql_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_use
     _seed_kb_mysql_cve(app)
     monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(fingerprinting_enabled=True))
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
-    monkeypatch.setattr(LybraEngineManager, "_discover_ports", lambda self, target, ports, **_kwargs: [3306])
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports", lambda self, target, ports, **_kwargs: _sweep([3306]))
     monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
     monkeypatch.setattr(
         MysqlProbe, "fetch",
@@ -1156,3 +1168,134 @@ def test_the_listing_ships_counters_instead_of_every_finding(
     detail = client.get(f"/themis/lybra/scans/{scan_id}/findings",
                         headers=auth_headers(admin_user)).get_json()
     assert detail["totalFindings"] == result["totalFindings"]
+
+
+# ───────────────────────── descubrimiento parcial (presupuesto agotado)
+#
+# Un barrido que se queda sin reloj encuentra puertos ciertos y deja otros sin
+# mirar. La primera versión de esto hacía fallar el escaneo entero, para no
+# arriesgarse a que el ciclo de vida cerrara hallazgos que esta vez no se
+# comprobaron. Era tirar información verificada para protegerse de una
+# inferencia que se puede desactivar: ahora el escaneo termina, se marca
+# incompleto, y no cierra nada.
+
+
+def test_a_truncated_discovery_reports_what_it_found(monkeypatch, app, admin_user):
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
+                        lambda self, target, ports, **_kwargs: _sweep([80, 443], truncated=True))
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
+
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            escan = repo.get_by_id(escan.id)
+            findings = repo.get_findings_by_scan(escan.id)
+
+    # Termina, no falla: los dos puertos son un hecho verificado.
+    assert escan.status == ScanStatus.FINISHED.value
+    assert escan.is_partial is True
+    open_ports = sorted(f.port for f in findings if f.category == "open_port")
+    assert open_ports == [80, 443]
+
+
+def test_a_truncated_discovery_does_not_mark_anything_fixed(monkeypatch, app, admin_user):
+    """El motivo de existir de la marca.
+
+    Primer escaneo completo: 80 y 22 abiertos. Segundo escaneo truncado: sólo
+    da tiempo a ver el 80. El 22 no ha desaparecido — no se ha mirado. Cerrarlo
+    sería decirle al usuario que se arregló solo.
+    """
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+
+        monkeypatch.setattr(LybraEngineManager, "_discover_ports",
+                            lambda self, target, ports, **_kwargs: _sweep([80, 22]))
+        first = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(first.id)
+
+        monkeypatch.setattr(LybraEngineManager, "_discover_ports",
+                            lambda self, target, ports, **_kwargs: _sweep([80], truncated=True))
+        second = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(second.id)
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(second.id)
+
+    assert [f.state for f in findings if f.state == "fixed"] == []
+    assert 22 not in [f.port for f in findings]   # no se inventa lo que no vio
+
+
+def test_a_complete_scan_still_closes_what_disappeared(monkeypatch, app, admin_user):
+    """La contraprueba: sin truncar, el cierre por ausencia sigue funcionando.
+    Si no, la defensa habría desactivado el ciclo de vida entero."""
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+
+        monkeypatch.setattr(LybraEngineManager, "_discover_ports",
+                            lambda self, target, ports, **_kwargs: _sweep([80, 22]))
+        first = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(first.id)
+
+        monkeypatch.setattr(LybraEngineManager, "_discover_ports",
+                            lambda self, target, ports, **_kwargs: _sweep([80]))
+        second = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(second.id)
+
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            findings = repo.get_findings_by_scan(second.id)
+            second_row = repo.get_by_id(second.id)
+
+    assert second_row.is_partial is False
+    fixed = [f for f in findings if f.state == "fixed"]
+    assert [f.port for f in fixed] == [22]
+
+
+def test_a_blocked_discovery_still_fails_the_scan(monkeypatch, app, admin_user):
+    """Truncado y bloqueado siguen siendo cosas distintas. Un barrido en el que
+    *nada* contestó no aporta ni un puerto cierto, así que no hay resultado
+    parcial que reportar: eso sigue siendo un fallo."""
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
+                        lambda self, target, ports, **_kwargs: None)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
+        with UnitOfWork() as uow:
+            escan = ScanRepository(uow).get_by_id(escan.id)
+
+    assert escan.status == ScanStatus.FAILED.value
+
+
+def test_the_partial_flag_reaches_the_api(client, monkeypatch, app, admin_user, auth_headers):
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
+                        lambda self, target, ports, **_kwargs: _sweep([80], truncated=True))
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
+
+    result = client.get("/themis/results?type=lybra&page=1&per_page=10",
+                        headers=auth_headers(admin_user)).get_json()["results"][0]
+    assert result["isPartial"] is True

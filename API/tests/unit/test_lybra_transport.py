@@ -10,6 +10,7 @@ import pytest
 
 from src.modules.features.themis.lybra import (
     PortSweep,
+    sweep_with_retries,
     scan_ports_sync,
     sweep_ports_sync,
     scan_udp_ports_sync,
@@ -341,3 +342,22 @@ def test_the_retry_does_not_outlive_the_budget():
                              budget_seconds=0.05)
     assert result is None
     assert waits == [], "se durmió un reintento que no cabía en el presupuesto"
+
+
+def test_the_two_views_of_a_truncated_sweep_differ():
+    """`scan_ports_sync` y `sweep_with_retries` responden a preguntas distintas.
+
+    La primera es la vista de sólo-la-lista: devuelve `None` si el barrido no
+    sirve, sin distinguir por qué. La segunda devuelve el barrido entero, que
+    es lo que permite al motor reportar los puertos ciertos de un barrido
+    truncado y marcar el escaneo como incompleto en vez de tirar el trabajo.
+    """
+    ports = list(range(1000, 1020))
+    args = dict(concurrency=1, opener=_slow_opener(0.05), budget_seconds=0.15)
+
+    assert scan_ports_sync("10.0.0.5", ports, **args) is None
+
+    sweep = sweep_with_retries("10.0.0.5", ports, **args)
+    assert sweep.was_truncated
+    assert not sweep.is_blocked
+    assert len(sweep.open_ports) > 0, "no encontró ni un puerto antes de truncarse"
