@@ -1,5 +1,5 @@
 {
-  "feedVersion": "lybra-aliases-3",
+  "feedVersion": "lybra-aliases-4",
   "aliases": [
     { "match": "apache httpd",        "vendor": "apache",             "product": "http_server" },
     { "match": "apache",              "vendor": "apache",             "product": "http_server" },
@@ -14,6 +14,8 @@
     { "match": "dovecot imapd",       "vendor": "dovecot",            "product": "dovecot" },
     { "match": "pure ftpd",           "vendor": "pureftpd",           "product": "pure-ftpd" },
     { "match": "exim smtpd",          "vendor": "exim",               "product": "exim" },
+    { "match": "microsoft sql server", "vendor": "microsoft",         "product": "sql_server" },
+    { "match": "postgresql",          "vendor": "postgresql",         "product": "postgresql" },
 
     { "match": "git",                 "vendor": "git-scm",            "product": "git" },
     { "match": "vlc media player",    "vendor": "videolan",           "product": "vlc_media_player" },
