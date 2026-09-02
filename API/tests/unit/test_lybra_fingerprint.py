@@ -24,6 +24,10 @@ from src.modules.features.themis.lybra import (
     fingerprint_ftp,
     FtpProbe,
 )
+from src.modules.features.themis.lybra.fingerprinting.dispatch import (
+    DissectorResult,
+    QOD_FINGERPRINT,
+)
 from src.modules.features.themis.lybra.checks import Response
 from src.modules.features.themis.lybra.fingerprinting.ssh import SSH_MSG_KEXINIT
 from src.modules.features.themis.lybra.engine import Service
@@ -116,9 +120,11 @@ def test_a_signature_captures_the_version_from_the_generator_meta():
     fp = fingerprint_http(Response(200, body, {}))
     assert fp.product == "WordPress"
     assert fp.version == "6.4.2"
-    # Producto **y** versión: el mismo escalón de confianza que una cabecera
-    # Server completa, porque la evidencia es igual de explícita.
-    assert fp.confidence == 0.9
+    # La confianza es la del nivel del que salió (L18): un `<meta generator>`
+    # es evidencia explícita pero la pone la aplicación, no el servidor, así
+    # que va un escalón por debajo de una cabecera `Server` completa.
+    assert fp.confidence == 0.8
+    assert fp.version_source == "meta-generator"
 
 
 def test_a_signature_without_a_captured_version_still_names_the_product():
@@ -197,6 +203,147 @@ def test_the_signature_validator_finds_each_kind_of_breakage():
     assert len(validate_tech_signatures([bad_group])) == 1
     assert len(validate_tech_signatures([no_words])) == 1
     assert len(validate_tech_signatures(duplicated)) == 1
+
+
+# ================================================ cascada de versión (L18)
+#
+# La versión salía de una sola fuente, la cabecera `Server`. Y `server_tokens
+# off` en nginx, `ServerTokens Prod` en Apache y cualquier CDN o WAF la
+# suprimen, así que el caso más común en producción era justo el que dejaba al
+# motor sin versión — luego sin CPE, luego sin un solo CVE.
+#
+# Un test por nivel de la cascada, más los dos que la protegen: que el orden de
+# preferencia se respeta, y que sin ninguna señal no se inventa nada.
+
+
+def test_version_cascade_level_1_server_header():
+    fp = fingerprint_http(Response(200, "<html></html>", {"server": "Apache/2.4.49 (Unix)"}))
+    assert (fp.product, fp.version) == ("Apache", "2.4.49")
+    assert fp.version_source == "server-header"
+    assert fp.confidence == 0.9
+
+
+def test_version_cascade_level_2_powered_by_headers():
+    """El docstring del paquete prometía leer `X-Powered-By` desde el principio;
+    el código sólo miraba `Server`."""
+    php = fingerprint_http(Response(200, "<html></html>", {"x-powered-by": "PHP/8.1.2"}))
+    assert (php.product, php.version) == ("PHP", "8.1.2")
+    assert php.version_source == "powered-by-header"
+    assert php.confidence == 0.85
+
+    # X-AspNet-Version es el caso raro: su valor es la versión desnuda, sin
+    # nombre, así que el producto lo pone la cabecera misma.
+    aspnet = fingerprint_http(Response(200, "<html></html>",
+                                       {"x-aspnet-version": "4.0.30319"}))
+    assert (aspnet.product, aspnet.version) == ("ASP.NET", "4.0.30319")
+
+
+def test_version_cascade_level_3_meta_generator():
+    body = '<html><head><meta content="Joomla! 4.3.1" name="generator" /></head></html>'
+    fp = fingerprint_http(Response(200, body, {}))
+    # El "!" de "Joomla!" se queda fuera: el nombre del producto se recorta a
+    # caracteres de identificador, que es la forma en la que hay que buscarlo
+    # en NVD (`joomla`), no la de su logotipo.
+    assert (fp.product, fp.version) == ("Joomla", "4.3.1")
+    assert fp.version_source == "meta-generator"
+    assert fp.confidence == 0.8
+
+
+def test_version_cascade_level_4_feed_signature_pattern():
+    fp = fingerprint_http(Response(200, "<html>Dashboard [Jenkins]</html>",
+                                   {"x-jenkins": "2.426.3"}))
+    assert (fp.product, fp.version) == ("Jenkins", "2.426.3")
+    assert fp.version_source == "tech-signature"
+    assert fp.confidence == 0.75
+
+
+def test_version_cascade_level_5_default_error_page():
+    """El motor ya se descarga la página de error para las firmas de fabricante
+    y no la miraba para versión. Es la respuesta al punto ciego del banco: un
+    nginx con `server_tokens off` sigue firmando su 404."""
+    home = Response(200, "<html>Bienvenido</html>", {})
+    error = Response(404, "<hr><center>nginx/1.24.0</center></body></html>", {})
+    fp = fingerprint_http(home, error_resp=error)
+    assert (fp.product, fp.version) == ("nginx", "1.24.0")
+    assert fp.version_source == "error-page"
+    assert fp.confidence == 0.6
+
+
+def test_version_cascade_level_6_repeated_asset_version():
+    """El último nivel, y el único que exige una condición extra: la misma
+    versión repetida en varios assets. Sólo completa un producto ya
+    identificado por otra vía — aquí, por la firma de WordPress."""
+    body = (
+        "<html><body>wp-content"
+        "<script src='/wp-includes/js/a.js?ver=6.4.2'></script>"
+        "<script src='/wp-includes/js/b.js?ver=6.4.2'></script>"
+        "</body></html>"
+    )
+    fp = fingerprint_http(Response(200, body, {}))
+    assert (fp.product, fp.version) == ("WordPress", "6.4.2")
+    assert fp.version_source == "asset-path"
+
+
+def test_a_single_asset_version_is_not_taken_for_the_products_version():
+    """La condición que hace utilizable el último nivel.
+
+    Un `?ver=` suelto es casi siempre la versión de *ese* fichero —una librería
+    de terceros, un plugin— y no la de la aplicación. Tomarlo por bueno daría
+    un CPE de WordPress con la versión de jQuery: peor que no dar versión.
+    """
+    body = (
+        "<html><body>wp-content"
+        "<script src='/wp-includes/js/jquery.min.js?ver=3.7.1'></script>"
+        "</body></html>"
+    )
+    fp = fingerprint_http(Response(200, body, {}))
+    assert fp.product == "WordPress"
+    assert fp.version is None
+    assert fp.version_source is None
+
+
+def test_two_different_repeated_asset_versions_are_ambiguous_so_nothing_is_claimed():
+    body = (
+        "<html><body>wp-content"
+        "<script src='/a.js?ver=6.4.2'></script><script src='/b.js?ver=6.4.2'></script>"
+        "<script src='/c.js?ver=3.7.1'></script><script src='/d.js?ver=3.7.1'></script>"
+        "</body></html>"
+    )
+    fp = fingerprint_http(Response(200, body, {}))
+    assert fp.version is None
+
+
+def test_the_cascade_respects_its_order_of_preference():
+    """Con varias señales a la vez gana la más explícita, no la última leída."""
+    body = (
+        '<html><head><meta name="generator" content="WordPress 6.4.2" /></head>'
+        "<body>wp-content</body></html>"
+    )
+    error = Response(404, "<center>nginx/1.24.0</center>", {})
+    fp = fingerprint_http(
+        Response(200, body, {"server": "Apache/2.4.49", "x-powered-by": "PHP/8.1.2"}),
+        error_resp=error,
+    )
+    assert (fp.product, fp.version) == ("Apache", "2.4.49")
+    assert fp.version_source == "server-header"
+
+
+def test_the_cascade_never_invents_a_version_when_no_source_has_one():
+    fp = fingerprint_http(Response(200, "<html>MikroTik RouterOS</html>", {}))
+    assert fp.product == "MikroTik RouterOS"
+    assert fp.version is None
+    assert fp.version_source is None
+
+
+def test_every_declared_version_source_has_a_confidence_and_a_qod():
+    """Añadir un nivel a la cascada obliga a decidir las dos cosas que un nivel
+    significa: cuánta confianza da y qué `qod` produce. Sin este test, un nivel
+    nuevo se colaría con `qod` por defecto y confianza cero."""
+    from src.modules.features.themis.lybra.fingerprinting.http import (
+        VERSION_SOURCES, VERSION_SOURCE_QOD, _SOURCE_CONFIDENCE,
+    )
+    assert set(VERSION_SOURCES) == set(_SOURCE_CONFIDENCE)
+    assert set(VERSION_SOURCES) == set(VERSION_SOURCE_QOD)
 
 
 # ================================================================ SSH banner
@@ -460,14 +607,33 @@ def test_fingerprint_finding_states_what_lybra_read():
     subordinado. Ese modo de arranque ya no existe.
     """
     service = Service(port=80, protocol="tcp", name="http", product="", version="")
-    finding = LybraEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
+    result = DissectorResult("Apache", "2.4.49", "HTTP")
+    finding = LybraEngineManager._fingerprint_finding(service, result)
     assert finding["title"] == "Fingerprint propio (HTTP): Apache 2.4.49"
     assert "Nmap" not in finding["title"]
+
+
+def test_fingerprint_finding_carries_the_qod_the_dissector_assigned():
+    """L18: el `qod` era una constante para todos los fingerprints, así que una
+    versión leída de un `Server` explícito y otra deducida de una página de
+    error valían exactamente lo mismo. Ahora cada lectura dice cuánto se fía de
+    sí misma; un dissector que no distinga sigue con la constante de siempre."""
+    service = Service(port=80, protocol="tcp", name="http", product="", version="")
+    from_header = LybraEngineManager._fingerprint_finding(
+        service, DissectorResult("Apache", "2.4.49", "HTTP", qod=90))
+    from_error_page = LybraEngineManager._fingerprint_finding(
+        service, DissectorResult("Apache", "2.4.49", "HTTP", qod=60))
+    plain = LybraEngineManager._fingerprint_finding(
+        service, DissectorResult("vsFTPd", "3.0.5", "FTP"))
+    assert from_header["qod"] == 90
+    assert from_error_page["qod"] == 60
+    assert plain["qod"] == QOD_FINGERPRINT
 
 
 def test_fingerprint_finding_never_mentions_nmap_even_with_a_prior_reading():
     """Un servicio puede llegar con producto ya puesto (payload externo de
     Hygeia, por ejemplo). Ni siquiera entonces el título compara con nada."""
     service = Service(port=80, protocol="tcp", name="http", product="nginx", version="1.18")
-    finding = LybraEngineManager._fingerprint_finding(service, "Apache", "2.4.49", "HTTP")
+    finding = LybraEngineManager._fingerprint_finding(
+        service, DissectorResult("Apache", "2.4.49", "HTTP"))
     assert finding["title"] == "Fingerprint propio (HTTP): Apache 2.4.49"

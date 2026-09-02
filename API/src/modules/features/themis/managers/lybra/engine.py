@@ -29,7 +29,6 @@ from ...lybra import (
     classify_exposure,
     finding_to_json,
     QOD_OPEN_PORT,
-    QOD_FINGERPRINT,
     default_dissectors,
     HostRateLimiter,
     kb_feed_version,
@@ -444,7 +443,7 @@ class LybraEngineManager(ScanManager):
                 updated.append(service)
                 continue
 
-            findings.append(self._fingerprint_finding(service, result.product, result.version, result.label))
+            findings.append(self._fingerprint_finding(service, result))
             if result.product and result.version:
                 service = replace(service, product=result.product, version=result.version)
             updated.append(service)
@@ -452,16 +451,22 @@ class LybraEngineManager(ScanManager):
         return updated, findings
 
     @staticmethod
-    def _fingerprint_finding(service, product: Optional[str], version: Optional[str], label: str) -> dict:
+    def _fingerprint_finding(service, result) -> dict:
         """Build an informational Finding stating what Lybra identified.
 
         Es una constatación, no un veredicto: dice qué vio el motor y con qué
         dissector. Antes de L52 el título comparaba la lectura propia con la de
         Nmap («concuerda / no concuerda con Nmap»), lo que convertía un dato
         propio en una nota al pie sobre otra herramienta.
+
+        El ``qod`` lo pone el dissector (L18). Era una constante para todos, de
+        modo que una versión leída de una cabecera ``Server`` explícita y otra
+        deducida de una página de error valían lo mismo; ahora cada lectura
+        dice cuánto se fía de sí misma. Sigue sin alimentar la confianza de
+        ninguna vulnerabilidad — ver ``dispatch.QOD_FINGERPRINT``.
         """
-        own = f"{product or '?'} {version or ''}".strip()
-        title = f"Fingerprint propio ({label}): {own}"
+        own = f"{result.product or '?'} {result.version or ''}".strip()
+        title = f"Fingerprint propio ({result.label}): {own}"
         return {
             "title":        title,
             "category":     "fingerprint",
@@ -471,7 +476,7 @@ class LybraEngineManager(ScanManager):
             "source":       "lybra",
             "check_id":     "lybra:fingerprint@1",
             "feed_version": "lybra-fingerprint-1",
-            "qod":          QOD_FINGERPRINT,
+            "qod":          result.qod,
             "confirmed":    False,
             "state":        "open",
         }

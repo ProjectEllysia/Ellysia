@@ -791,7 +791,9 @@ def test_lybra_fingerprinting_identifies_the_service_on_its_own(app, admin_user,
 
     fingerprints = [f for f in findings if f.category == "fingerprint"]
     assert len(fingerprints) == 1
-    assert fingerprints[0].qod == 20
+    # L18: el qod refleja de dónde salió la versión. Una cabecera `Server` con
+    # versión explícita es la fuente más fuerte de la cascada.
+    assert fingerprints[0].qod == 90
     assert fingerprints[0].confirmed is False
     assert fingerprints[0].title == "Fingerprint propio (HTTP): Apache 2.4.49"
     assert "Nmap" not in fingerprints[0].title
