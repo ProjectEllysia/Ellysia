@@ -60,7 +60,7 @@
               <div v-else-if="scan.status === 'failed'" class="body-failed">
                 El escaneo falló. No se pudo emitir un veredicto.
               </div>
-              <div v-else-if="!(scan.findings || []).length" class="body-clean">
+              <div v-else-if="!scan.totalFindings" class="body-clean">
                 Ningún hallazgo. La superficie analizada está limpia.
               </div>
 
@@ -74,39 +74,72 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
                   </span>
                   {{ findingsOpen.has(scan.id) ? 'Ocultar hallazgos' : 'Mostrar hallazgos' }}
-                  <span class="findings-count">{{ sortedFindings(scan).length }}</span>
+                  <span class="findings-count">{{ scan.totalFindings }}</span>
                 </button>
 
                 <Transition name="findings-panel">
                 <div v-if="findingsOpen.has(scan.id)" class="findings-panel">
-                  <TransitionGroup tag="ul" name="finding-item" class="findings">
-                    <li v-for="(f, idx) in visibleFindings(scan)" :key="f.id" class="finding" :class="{ potential: !f.confirmed }"
-                      :style="{ '--enter-delay': (idx % FINDINGS_PAGE) * 22 + 'ms' }">
-                      <span class="f-prio" :class="(f.priority || 'INFO').toLowerCase()">{{ PRIO_LABEL[f.priority] || f.priority }}</span>
-                      <div class="f-main">
-                        <div class="f-title-row">
-                          <span class="f-conf" :class="f.confirmed ? 'confirmed' : 'hypothesis'"
-                            :title="f.confirmed ? `Comprobado activamente (QoD ${f.qod})` : `Deducido por versión (QoD ${f.qod}) — potencial, sin confirmar`">
-                            {{ f.confirmed ? 'Comprobado' : 'Potencial' }}
-                          </span>
-                          <span class="f-title">{{ f.title }}</span>
-                        </div>
-                        <div class="f-meta">
-                          <span v-if="f.port" class="f-tag mono">{{ f.service || 'svc' }}:{{ f.port }}</span>
-                          <span v-for="cve in (f.cveIds || [])" :key="cve" class="f-tag cve">{{ cve }}</span>
-                          <span v-if="f.inKev" class="f-tag kev" title="En la lista CISA de vulnerabilidades explotadas activamente">KEV · explotada</span>
-                          <span v-if="f.epssScore != null" class="f-tag epss" :title="`Probabilidad de explotación en 30 días (EPSS)`">EPSS {{ Math.round(f.epssScore * 100) }}%</span>
-                          <span v-if="f.cvssScore != null" class="f-tag cvss">CVSS {{ f.cvssScore }}</span>
-                          <span v-if="f.state && f.state !== 'open'" class="f-tag state" :class="f.state">{{ STATE_LABEL[f.state] || f.state }}</span>
-                          <span v-if="f.source && f.source !== 'lybra'" class="f-tag src" :title="`Origen: ${f.source}`">+{{ f.source }}</span>
-                        </div>
-                      </div>
-                    </li>
-                  </TransitionGroup>
+                  <div v-if="groupsLoading(scan.id)" class="groups-loading">Cargando hallazgos…</div>
+                  <div v-else-if="groupsError(scan.id)" class="groups-error">{{ groupsError(scan.id) }}</div>
 
-                  <button v-if="visibleFindings(scan).length < sortedFindings(scan).length" type="button" class="load-more-findings" @click="showMoreFindings(scan.id)">
-                    Ver más ({{ visibleFindings(scan).length }} de {{ sortedFindings(scan).length }})
-                  </button>
+                  <template v-else>
+                    <!-- Dos secciones porque son dos clases de trabajo: subir un producto
+                         de versión, y arreglar una configuración. Mezclarlas hacía que un
+                         "falta la cabecera HSTS" pareciera un producto más del inventario. -->
+                    <template v-for="section in sections(scan.id)" :key="section.key">
+                      <p v-if="section.groups.length" class="group-section">{{ section.title }}</p>
+
+                      <div v-for="group in section.groups" :key="section.key + groupKey(group)" class="group">
+                        <div class="group-head">
+                          <span class="f-prio" :class="(group.priority || 'INFO').toLowerCase()">{{ PRIO_LABEL[group.priority] || group.priority }}</span>
+                          <span class="group-label">{{ group.label }}</span>
+                          <span v-if="group.port" class="f-tag mono">{{ group.service || 'svc' }}:{{ group.port }}</span>
+                          <span class="group-count">{{ group.totalFindings }} {{ group.totalFindings === 1 ? 'hallazgo' : 'hallazgos' }}</span>
+                        </div>
+
+                        <div class="group-meta">
+                          <span v-if="group.fixedVersion" class="f-tag fix" title="Actualizar hasta aquí cierra todo el grupo de una vez">
+                            Corregido en {{ group.fixedVersion }} o superior
+                          </span>
+                          <span v-if="group.kevCveIds?.length" class="f-tag kev" title="En la lista CISA de vulnerabilidades explotadas activamente">
+                            KEV · {{ group.kevCveIds.length }}
+                          </span>
+                          <span v-if="group.totalCves" class="f-tag cve">{{ group.totalCves }} CVE{{ group.totalCves === 1 ? '' : 's' }}</span>
+                          <span v-if="group.maxCvss != null" class="f-tag cvss">CVSS máx. {{ group.maxCvss }}</span>
+                          <span v-if="group.confirmedCount" class="f-tag conf">{{ group.confirmedCount }} comprobado{{ group.confirmedCount === 1 ? '' : 's' }}</span>
+                        </div>
+
+                        <TransitionGroup tag="ul" name="finding-item" class="findings">
+                          <li v-for="(f, idx) in visibleGroupFindings(group)" :key="f.id" class="finding" :class="{ potential: !f.confirmed }"
+                            :style="{ '--enter-delay': (idx % FINDINGS_PAGE) * 22 + 'ms' }">
+                            <span class="f-prio" :class="(f.priority || 'INFO').toLowerCase()">{{ PRIO_LABEL[f.priority] || f.priority }}</span>
+                            <div class="f-main">
+                              <div class="f-title-row">
+                                <span class="f-conf" :class="f.confirmed ? 'confirmed' : 'hypothesis'"
+                                  :title="f.confirmed ? `Comprobado activamente (QoD ${f.qod})` : `Deducido por versión (QoD ${f.qod}) — potencial, sin confirmar`">
+                                  {{ f.confirmed ? 'Comprobado' : 'Potencial' }}
+                                </span>
+                                <span class="f-title">{{ f.title }}</span>
+                              </div>
+                              <div class="f-meta">
+                                <span v-for="cve in (f.cveIds || [])" :key="cve" class="f-tag cve">{{ cve }}</span>
+                                <span v-if="f.inKev" class="f-tag kev" title="En la lista CISA de vulnerabilidades explotadas activamente">KEV · explotada</span>
+                                <span v-if="f.epssScore != null" class="f-tag epss" :title="`Probabilidad de explotación en 30 días (EPSS)`">EPSS {{ Math.round(f.epssScore * 100) }}%</span>
+                                <span v-if="f.cvssScore != null" class="f-tag cvss">CVSS {{ f.cvssScore }}</span>
+                                <span v-if="f.state && f.state !== 'open'" class="f-tag state" :class="f.state">{{ STATE_LABEL[f.state] || f.state }}</span>
+                                <span v-if="f.source && f.source !== 'lybra'" class="f-tag src" :title="`Origen: ${f.source}`">+{{ f.source }}</span>
+                              </div>
+                            </div>
+                          </li>
+                        </TransitionGroup>
+
+                        <button v-if="visibleGroupFindings(group).length < group.findings.length" type="button"
+                          class="load-more-findings" @click="showMoreFindings(groupKey(group))">
+                          Ver más ({{ visibleGroupFindings(group).length }} de {{ group.findings.length }})
+                        </button>
+                      </div>
+                    </template>
+                  </template>
                 </div>
                 </Transition>
               </template>
@@ -202,8 +235,9 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   totalCount: { type: Number, default: 0 },
   docsByScan: { type: Object, default: () => ({}) },
+  groupsByScan: { type: Object, default: () => ({}) },
 })
-const emit = defineEmits(['refresh', 'delete', 'load-docs', 'generate-pdf', 'download-doc', 'delete-doc', 'load-more'])
+const emit = defineEmits(['refresh', 'delete', 'load-docs', 'generate-pdf', 'download-doc', 'delete-doc', 'load-more', 'load-groups'])
 
 /** Veredictos fantasma mientras carga: los que caben sin alargar la caja. */
 const SKELETON_ROWS = 4
@@ -218,7 +252,6 @@ const canLoadMore = computed(
   () => props.scans.length < props.totalCount && props.scans.length < MAX_PER_PAGE)
 
 const LADDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
-const PRIO_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 }
 const PRIO_LABEL = { CRITICAL: 'Crítica', HIGH: 'Alta', MEDIUM: 'Media', LOW: 'Baja', INFO: 'Info' }
 const STATE_LABEL = { fixed: 'Corregido', regressed: 'Regresado', accepted: 'Aceptado' }
 
@@ -245,33 +278,61 @@ const FINDINGS_PAGE = 10
 const findingsOpen = ref(new Set())
 const findingsLimit = reactive({})
 
+function groupsFor(scanId) { return props.groupsByScan[scanId]?.groups || [] }
+function groupsLoading(scanId) { return !!props.groupsByScan[scanId]?.loading }
+function groupsError(scanId) { return props.groupsByScan[scanId]?.error || null }
+
+/**
+ * Identidad de un grupo dentro de un escaneo. El backend no le da id porque no
+ * es una fila: es una vista sobre los hallazgos, y su identidad es justo la
+ * clave por la que se agrupó.
+ */
+function groupKey(group) { return `${group.port ?? '-'}|${group.service ?? '-'}|${group.label}` }
+
+/**
+ * Las dos secciones en que se parten los grupos.
+ *
+ * Son dos clases de trabajo distintas: subir un producto de versión, y arreglar
+ * una configuración. Mezclarlas hacía que "falta la cabecera HSTS" pareciera un
+ * producto más del inventario, y que un producto con veinte CVEs pareciera
+ * veinte problemas.
+ */
+function sections(scanId) {
+  const groups = groupsFor(scanId)
+  return [
+    { key: 'prod', title: 'Productos afectados', groups: groups.filter(g => g.isProduct) },
+    { key: 'conf', title: 'Configuración y exposición', groups: groups.filter(g => !g.isProduct) },
+  ]
+}
+
 function toggleFindings(id) {
   const s = new Set(findingsOpen.value)
   if (s.has(id)) {
     s.delete(id)
-    // Al comprimir, olvida cuánto se había revelado con "ver más": la
-    // próxima vez que se abra empieza otra vez por la primera página.
-    findingsLimit[id] = FINDINGS_PAGE
   } else {
     s.add(id)
-    if (!findingsLimit[id]) findingsLimit[id] = FINDINGS_PAGE
+    // Los hallazgos no vienen con el listado: se piden al abrir, igual que los
+    // documentos. Una lista de diez tarjetas colapsadas no debe pagar los
+    // hallazgos de las nueve que nadie va a abrir.
+    if (!props.groupsByScan[id]) emit('load-groups', id)
   }
   findingsOpen.value = s
 }
 
-function visibleFindings(scan) {
-  return sortedFindings(scan).slice(0, findingsLimit[scan.id] || FINDINGS_PAGE)
+function visibleGroupFindings(group) {
+  return group.findings.slice(0, findingsLimit[groupKey(group)] || FINDINGS_PAGE)
 }
 
-function showMoreFindings(id) {
-  findingsLimit[id] = (findingsLimit[id] || FINDINGS_PAGE) + FINDINGS_PAGE
+function showMoreFindings(key) {
+  findingsLimit[key] = (findingsLimit[key] || FINDINGS_PAGE) + FINDINGS_PAGE
 }
 
-/** Cuenta hallazgos por nivel de prioridad para el resumen de la cabecera. */
+/** Recuento por nivel de prioridad para el resumen de la cabecera.
+ *
+ * Lo calculaba aquí recorriendo la lista completa de hallazgos, que era la
+ * razón por la que el listado tenía que mandarla entera. Ahora llega hecho. */
 function summary(scan) {
-  const out = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 }
-  for (const f of scan.findings || []) out[f.priority] = (out[f.priority] || 0) + 1
-  return out
+  return { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0, ...(scan.byPriority || {}) }
 }
 
 /**
@@ -280,26 +341,17 @@ function summary(scan) {
  * `cpeResolved` (Fase I-b, `Finding.cpe_resolved`) da el número exacto de
  * paquetes que el matcher no pudo ni resolver a un CPE — ya no es una
  * heurística sobre ausencia de detecciones, que mezclaba eso con "KB sin
- * sincronizar" o simplemente "comprobado y limpio".
+ * sincronizar" o simplemente "comprobado y limpio". El recuento lo hace ahora
+ * el servidor, que ya tenía las filas delante.
  *
  * Devuelve `null` si no aplica (sin paquetes, o todos resueltos), o
  * `{ packages, unresolved }` cuando el aviso debe mostrarse.
  */
 function coverageGap(scan) {
-  const findings = scan.findings || []
-  const packages = findings.filter(f => f.category === 'installed_package').length
-  const unresolved = findings.filter(f => f.category === 'installed_package' && f.cpeResolved === false).length
+  const packages = scan.installedPackages || 0
+  const unresolved = scan.unresolvedPackages || 0
   if (!packages || !unresolved) return null
   return { packages, unresolved }
-}
-
-/** Ordena los hallazgos por prioridad (crítico primero), luego confirmados antes. */
-function sortedFindings(scan) {
-  return [...(scan.findings || [])].sort((a, b) => {
-    const pa = PRIO_RANK[a.priority] ?? 9, pb = PRIO_RANK[b.priority] ?? 9
-    if (pa !== pb) return pa - pb
-    return (b.confirmed === true) - (a.confirmed === true)
-  })
 }
 
 function fmtDate(iso) {
@@ -432,6 +484,26 @@ function fmtDate(iso) {
 .f-tag.state.regressed { color: var(--warn); background: var(--warn-dim); }
 .f-tag.state.accepted { color: var(--text-muted); }
 .f-tag.src { color: var(--info); background: var(--info-dim); }
+.f-tag.fix { color: var(--success); background: var(--success-dim); font-weight: 600; }
+.f-tag.conf { color: var(--success); background: var(--success-dim); }
+
+/* ── Grupos: la unidad sobre la que se actúa ── */
+.groups-loading, .groups-error { padding: 0.6rem 0.2rem; font-size: var(--fs-md); color: var(--text-muted); }
+.groups-error { color: var(--danger); }
+
+.group-section {
+  margin: 0.9rem 0 0.35rem; font-family: var(--font-display); font-size-adjust: var(--fsa-display);
+  font-size: var(--fs-md); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.group-section:first-child { margin-top: 0.2rem; }
+
+.group { border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem 0.7rem; margin-bottom: 0.5rem; background: var(--surface); }
+.group-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }
+.group-label { font-weight: 600; color: var(--text); font-size: var(--fs-lg); }
+.group-count { margin-left: auto; font-size: var(--fs-md); color: var(--text-muted); }
+.group-meta { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.35rem 0 0.1rem; }
+.group .findings { margin-top: 0.4rem; }
 
 .body-unauth-hint { margin-top: 0.6rem; padding: 0.55rem 0.7rem; font-size: var(--fs-md); line-height: 1.4; color: var(--warn); background: var(--warn-dim); border: 1px dashed var(--warn); border-radius: 7px; }
 .body-coverage-hint { margin-top: 0.6rem; padding: 0.55rem 0.7rem; font-size: var(--fs-md); line-height: 1.4; color: var(--warn); background: var(--warn-dim); border: 1px dashed var(--warn); border-radius: 7px; }

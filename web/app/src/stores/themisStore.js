@@ -727,6 +727,38 @@ export const useThemisStore = defineStore('themis', () => {
    */
   const lybraDocs = reactive({})
 
+  /**
+   * Hallazgos agrupados por escaneo, indexados por id.
+   *
+   * Se piden al desplegar una tarjeta y no con el listado, igual que los
+   * documentos: el listado devuelve los contadores que la cabecera colapsada
+   * necesita, y el detalle —que incluye una consulta a la base de conocimiento
+   * para resolver la versión corregida— sólo se paga por el escaneo que el
+   * usuario abre de verdad.
+   */
+  const lybraGroups = reactive({})
+
+  /** Carga (o refresca) los hallazgos agrupados de un escaneo Lybra. */
+  async function loadLybraGroups(scanId) {
+    if (!lybraGroups[scanId]) lybraGroups[scanId] = reactive({ groups: [], loading: false, error: null })
+    const g = lybraGroups[scanId]
+    g.loading = true
+    try {
+      const res = await apiFetch(`/themis/lybra/scans/${scanId}/findings`)
+      if (!res?.ok) {
+        g.groups = []
+        g.error = await apiError(res, 'No se pudieron cargar los hallazgos.')
+        return
+      }
+      const data = await res.json()
+      g.groups = data.groups ?? []
+      g.error = null
+    } catch {
+      g.groups = []
+      g.error = 'Error de conexión al cargar los hallazgos.'
+    } finally { g.loading = false }
+  }
+
   /** Carga (o refresca) los documentos de un escaneo Lybra concreto. */
   async function loadLybraDocs(scanId) {
     if (!lybraDocs[scanId]) lybraDocs[scanId] = reactive({ items: [], loading: false })
@@ -810,6 +842,7 @@ export const useThemisStore = defineStore('themis', () => {
     Object.assign(details, { show: false, scanId: null, type: '', scan: null, docs: [], docsLoading: false })
 
     for (const key of Object.keys(lybraDocs)) delete lybraDocs[key]
+    for (const key of Object.keys(lybraGroups)) delete lybraGroups[key]
   }
 
   return {
@@ -823,6 +856,7 @@ export const useThemisStore = defineStore('themis', () => {
     launchLybra, loadLybraScans, loadMoreLybraScans, deleteLybraScan,
     selectedAssetId, selectAgentAsset, loadAgentScans,
     lybraDocs, loadLybraDocs, generateLybraPdf, deleteLybraDoc,
+    lybraGroups, loadLybraGroups,
     deleteScan, cancelScan,
     openPreview, closePreview, refreshPreviewDocs, loadPreviewTraceroute,
     openDetails, closeDetails, refreshDetailsDocs,

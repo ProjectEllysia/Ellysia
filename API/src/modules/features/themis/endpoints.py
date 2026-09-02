@@ -468,6 +468,33 @@ def delete_authorized_target(target_id: int):
     }
 
 
+@themis_blp.get("/lybra/scans/<int:scan_id>/findings")
+@themis_blp.response(200, description="Lybra findings grouped by remediable unit")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Scan not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=ScanNotFoundError, logger=logger)
+def get_lybra_grouped_findings(scan_id: int):
+    """Hallazgos de un escaneo Lybra, agrupados por la unidad que se remedia.
+
+    El listado (`GET /themis/results`) devuelve los contadores de cada escaneo;
+    el detalle está aquí, y se pide al desplegar una tarjeta. Son dos peticiones
+    en vez de una porque el detalle no es barato —incluye una consulta a la base
+    de conocimiento para resolver la versión corregida— y de los diez escaneos
+    de una página el usuario abre uno.
+    """
+    user = get_current_user()
+    result = LybraEngineManager().grouped_findings(scan_id, user.id)
+    return {
+        "message": "Hallazgos agrupados obtenidos correctamente",
+        **result,
+        "user": user.username,
+    }
+
+
 @themis_blp.patch("/findings/<int:finding_id>")
 @themis_blp.arguments(FindingStateRequestSchema)
 @themis_blp.response(200, FindingStateResponseSchema, description="Finding state updated")

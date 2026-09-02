@@ -66,8 +66,10 @@
         :loading="loading"
         :total-count="totalCount"
         :docs-by-scan="docsByScan"
+        :groups-by-scan="groupsByScan"
         @refresh="$emit('refresh-scans')"
         @load-more="$emit('load-more')"
+        @load-groups="id => $emit('load-groups', id)"
         @delete="id => $emit('delete', id)"
         @load-docs="id => $emit('load-docs', id)"
         @generate-pdf="(id, ai) => $emit('generate-pdf', id, ai)"
@@ -94,10 +96,11 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   totalCount: { type: Number, default: 0 },
   docsByScan: { type: Object, default: () => ({}) },
+  groupsByScan: { type: Object, default: () => ({}) },
 })
 defineEmits([
   'select', 'refresh-assets', 'refresh-scans', 'load-more',
-  'delete', 'load-docs', 'generate-pdf', 'download-doc', 'delete-doc',
+  'delete', 'load-docs', 'load-groups', 'generate-pdf', 'download-doc', 'delete-doc',
 ])
 
 const STATUS_LABEL = { pending: 'Sin reportar', online: 'En línea', stale: 'Con retraso', offline: 'Caído' }
