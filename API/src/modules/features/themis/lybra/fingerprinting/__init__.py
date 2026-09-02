@@ -28,8 +28,8 @@ best value-for-effort in the roadmap:
 
 ``tls``
     A single-handshake hygiene check — negotiated protocol version, self-signed
-    and expiry status of the certificate. Not JARM (full bit-exact
-    *identification*, a separate and larger effort left for later).
+    and expiry status of the certificate. **No JARM: archivado**, con la razón
+    escrita en el docstring del módulo y en la Fase F del roadmap.
 
 ``postgres``
     La primera base de datos que **negocia** en vez de ofrecer un banner: un
@@ -108,12 +108,16 @@ result still goes in at the same low-confidence, unconfirmed tier a Nmap CPE
 match would (``qod=70``) — this closes a blind spot, it does not raise
 confidence beyond what the matcher already assigns any version-based guess.
 
-Two techniques are deliberately left for later: full JARM fingerprinting (too
-large and risky to ship without a live TLS lab to validate it against) and OS
-fingerprinting (which the roadmap itself rates low value). Both stay
-oracle-only — handled by Nmap — until picked up. VNC's full protocol beyond its
-version banner, and RPC, stay oracle-only too, per the roadmap's own
-priority-3 rating for that group.
+**JARM está archivado, no pendiente** (L24): su valor es comparativo, y un
+hash que no coincida bit a bit con el de la implementación de referencia no es
+una identificación peor sino ninguna — comprobar esa coincidencia exige un
+laboratorio con varias pilas TLS que no existe aquí. La decisión, con qué haría
+falta para reabrirla, está en ``tls.py`` y en la Fase F del roadmap.
+
+El fingerprinting de sistema operativo (que el roadmap valora bajo) sigue
+aplazado, y con VNC más allá de su banner de versión y RPC sigue siendo
+territorio del oráculo —Nmap— por la valoración de prioridad-3 del propio
+roadmap.
 """
 
 from __future__ import annotations
