@@ -8,7 +8,7 @@
 # feedVersion sube cuando el feed gana una familia nueva o un protocolo nuevo
 # bajo una existente; el arreglo de un check ya presente sube el 'version' de
 # ese check, no esta cadena. Ver CHECKS_FEED_VERSION en checks.py.
-feedVersion: lybra-checks-6
+feedVersion: lybra-checks-13
 checks:
   - id: git-config-exposure
     version: 1
@@ -367,6 +367,187 @@ checks:
     mode: safe
     finding:
       title: 'SMB: firma de mensajes no requerida'
+      qod: 99
+      confirmed: true
+  # ------------------------------------------------------------------
+  # APIs de administracion expuestas sin autenticar (L17).
+  #
+  # Los tres checks de aqui abajo comparten una forma y una razon. La forma:
+  # un GET sin credenciales que exige un 200 con contenido reconocible del
+  # producto. La razon: en estos tres servicios, que la peticion conteste
+  # **es** el hallazgo, y de los graves.
+  #
+  # El 200 no es un adorno del matcher, es la mitad del check. Un 401 o un 403
+  # significan que el servicio esta ahi y pide credenciales — que es como debe
+  # estar — y por eso no producen hallazgo ninguno.
+  - id: docker-api-unauthenticated
+    version: 1
+    type: http
+    category: exposed_service
+    severity: CRITICAL
+    service: docker
+    mode: safe
+    requests:
+      - method: GET
+        path: /version
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - ApiVersion
+              - GoVersion
+    finding:
+      title: API de Docker expuesta sin autenticacion (ejecucion remota de codigo como root)
+      qod: 99
+      confirmed: true
+  - id: elasticsearch-unauthenticated
+    version: 1
+    type: http
+    category: exposed_service
+    severity: CRITICAL
+    service: elasticsearch
+    mode: safe
+    requests:
+      - method: GET
+        path: /_cluster/health
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - cluster_name
+              - number_of_nodes
+    finding:
+      title: Cluster de Elasticsearch accesible sin autenticacion (lectura y borrado de todos los indices)
+      qod: 99
+      confirmed: true
+  - id: kubernetes-anonymous-api
+    version: 1
+    type: http
+    category: exposed_service
+    severity: CRITICAL
+    service: kubernetes
+    mode: safe
+    requests:
+      - method: GET
+        path: /api/v1/namespaces
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - NamespaceList
+    finding:
+      title: API de Kubernetes accesible de forma anonima (inventario y control del cluster)
+      qod: 99
+      confirmed: true
+  - id: postgres-trust-authentication
+    version: 1
+    type: script
+    script: postgres-trust-authentication
+    category: default_credentials
+    severity: CRITICAL
+    service: postgres
+    mode: safe
+    finding:
+      title: 'PostgreSQL: acepta conexiones de red sin contrasena (modo trust)'
+      qod: 99
+      confirmed: true
+  - id: mongodb-unauthenticated-access
+    version: 1
+    type: script
+    script: mongodb-unauthenticated-access
+    category: exposed_service
+    severity: CRITICAL
+    service: mongodb
+    mode: safe
+    finding:
+      title: 'MongoDB: catalogo accesible sin autenticacion'
+      qod: 99
+      confirmed: true
+  - id: ldap-anonymous-bind
+    version: 1
+    type: script
+    script: ldap-anonymous-bind
+    category: network_config
+    severity: MEDIUM
+    service: ldap
+    mode: safe
+    finding:
+      title: 'LDAP: bind anonimo permitido (el directorio es publico)'
+      qod: 99
+      confirmed: true
+  - id: ldap-cleartext-with-ldaps
+    version: 1
+    type: script
+    script: ldap-cleartext-with-ldaps
+    category: network_config
+    severity: MEDIUM
+    service: ldap
+    mode: safe
+    finding:
+      title: 'LDAP: puerto en claro abierto habiendo LDAPS en el mismo host'
+      qod: 99
+      confirmed: true
+  - id: rdp-nla-not-required
+    version: 1
+    type: script
+    script: rdp-nla-not-required
+    category: network_config
+    severity: HIGH
+    service: rdp
+    mode: safe
+    finding:
+      title: 'RDP: no exige autenticacion a nivel de red (NLA)'
+      qod: 99
+      confirmed: true
+  - id: smbv1-enabled
+    version: 1
+    type: script
+    script: smbv1-enabled
+    category: network_config
+    severity: HIGH
+    service: smb
+    mode: safe
+    finding:
+      title: 'SMB: SMBv1 habilitado (protocolo retirado, sin firma ni cifrado utilizables)'
+      qod: 99
+      confirmed: true
+  # ------------------------------------------------------------------
+  # Amplificacion: los dos hallazgos que no son sobre el objetivo, sino sobre
+  # lo que el objetivo permite hacerle a terceros.
+  - id: dns-open-resolver
+    version: 1
+    type: script
+    script: dns-open-resolver
+    category: network_config
+    severity: MEDIUM
+    service: dns
+    mode: safe
+    finding:
+      title: 'DNS: resolutor abierto (utilizable como amplificador contra terceros)'
+      qod: 99
+      confirmed: true
+  - id: ntp-monlist-enabled
+    version: 1
+    type: script
+    script: ntp-monlist-enabled
+    category: network_config
+    severity: HIGH
+    service: ntp
+    mode: safe
+    finding:
+      title: 'NTP: monlist habilitado (amplificacion x500 y fuga del inventario de clientes)'
       qod: 99
       confirmed: true
   - id: snmp-default-community

@@ -3,99 +3,850 @@
     {
       "name": "WordPress",
       "matchers": [
-        { "part": "body", "words": ["wp-content", "wp-includes"] }
+        {
+          "part": "body",
+          "words": [
+            "wp-content",
+            "wp-includes"
+          ],
+          "versionPattern": "content=\"WordPress\\s+(?P<version>\\d+(?:\\.\\d+)+)"
+        },
+        {
+          "part": "header:x-generator",
+          "words": [
+            "wordpress"
+          ],
+          "versionPattern": "WordPress\\s+(?P<version>\\d+(?:\\.\\d+)+)"
+        }
       ]
     },
     {
       "name": "Drupal",
       "matchers": [
-        { "part": "body", "words": ["drupal.settings"] },
-        { "part": "header:x-generator", "words": ["drupal"] }
+        {
+          "part": "body",
+          "words": [
+            "drupal.settings",
+            "sites/all/",
+            "/sites/default/files"
+          ],
+          "versionPattern": "content=\"Drupal\\s+(?P<version>\\d+(?:\\.\\d+)*)"
+        },
+        {
+          "part": "header:x-generator",
+          "words": [
+            "drupal"
+          ],
+          "versionPattern": "Drupal\\s+(?P<version>\\d+(?:\\.\\d+)*)"
+        }
       ]
     },
     {
       "name": "Joomla",
       "matchers": [
-        { "part": "body", "words": ["joomla"] }
+        {
+          "part": "body",
+          "words": [
+            "joomla",
+            "/media/jui/"
+          ],
+          "versionPattern": "content=\"Joomla!?\\s*-?\\s*(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "TYPO3",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "typo3"
+          ],
+          "versionPattern": "content=\"TYPO3\\s+(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "Moodle",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "moodle"
+          ],
+          "versionPattern": "content=\"Moodle\\s+(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "Magento",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "magento",
+            "mage/cookies.js"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "PrestaShop",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "prestashop"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Ghost",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "ghost"
+          ],
+          "versionPattern": "content=\"Ghost\\s+(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "Odoo",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "odoo",
+            "openerp"
+          ]
+        }
       ]
     },
     {
       "name": "Apache Tomcat",
       "matchers": [
-        { "part": "header:server", "words": ["coyote"] },
-        { "part": "body", "words": ["apache tomcat"] }
+        {
+          "part": "header:server",
+          "words": [
+            "coyote"
+          ],
+          "versionPattern": "Coyote/(?P<version>\\d+(?:\\.\\d+)+)"
+        },
+        {
+          "part": "error_body",
+          "words": [
+            "apache tomcat"
+          ],
+          "versionPattern": "Apache Tomcat/(?P<version>\\d+(?:\\.\\d+)+)"
+        },
+        {
+          "part": "body",
+          "words": [
+            "apache tomcat"
+          ],
+          "versionPattern": "Apache Tomcat/(?P<version>\\d+(?:\\.\\d+)+)"
+        }
       ]
     },
     {
       "name": "phpMyAdmin",
       "matchers": [
-        { "part": "title", "words": ["phpmyadmin"] }
+        {
+          "part": "title",
+          "words": [
+            "phpmyadmin"
+          ]
+        },
+        {
+          "part": "body",
+          "words": [
+            "phpmyadmin"
+          ],
+          "versionPattern": "phpMyAdmin\\s+(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "Jenkins",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "jenkins"
+          ]
+        },
+        {
+          "part": "header:x-jenkins",
+          "words": [
+            "."
+          ],
+          "versionPattern": "^(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "GitLab",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "gitlab"
+          ]
+        },
+        {
+          "part": "header:x-gitlab-feature-category",
+          "words": [
+            "a",
+            "e",
+            "i",
+            "o",
+            "u",
+            "_"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Grafana",
+      "matchers": [
+        {
+          "part": "title",
+          "words": [
+            "grafana"
+          ]
+        },
+        {
+          "part": "body",
+          "words": [
+            "grafana-app",
+            "grafanabootdata"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Kibana",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "kibana"
+          ]
+        },
+        {
+          "part": "header:kbn-version",
+          "words": [
+            "."
+          ],
+          "versionPattern": "^(?P<version>\\d+(?:\\.\\d+)+)"
+        },
+        {
+          "part": "header:kbn-name",
+          "words": [
+            "kibana"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Portainer",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "portainer"
+          ]
+        },
+        {
+          "part": "title",
+          "words": [
+            "portainer"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Nextcloud",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "nextcloud"
+          ],
+          "versionPattern": "content=\"Nextcloud\\s+(?P<version>\\d+(?:\\.\\d+)+)"
+        },
+        {
+          "part": "header:x-nextcloud-version",
+          "words": [
+            "."
+          ],
+          "versionPattern": "^(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "Zabbix",
+      "matchers": [
+        {
+          "part": "title",
+          "words": [
+            "zabbix"
+          ]
+        },
+        {
+          "part": "body",
+          "words": [
+            "zabbix"
+          ],
+          "versionPattern": "Zabbix\\s+(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "Cacti",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "cacti"
+          ],
+          "versionPattern": "Version\\s+(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "Nagios",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "nagios"
+          ],
+          "versionPattern": "Nagios(?:\\s+Core)?\\s+(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "PRTG Network Monitor",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "prtg"
+          ],
+          "versionPattern": "PRTG\\s+Network\\s+Monitor\\s+(?P<version>[\\d.]+)"
+        }
+      ]
+    },
+    {
+      "name": "Webmin",
+      "matchers": [
+        {
+          "part": "title",
+          "words": [
+            "webmin"
+          ]
+        },
+        {
+          "part": "body",
+          "words": [
+            "webmin"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Proxmox VE",
+      "matchers": [
+        {
+          "part": "title",
+          "words": [
+            "proxmox"
+          ]
+        },
+        {
+          "part": "body",
+          "words": [
+            "pve-manager",
+            "proxmox"
+          ],
+          "versionPattern": "pve-manager/(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "Atlassian Confluence",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "confluence"
+          ],
+          "versionPattern": "ajs-version-number\"\\s+content=\"(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "Atlassian Jira",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "jira",
+            "atlassian jira"
+          ],
+          "versionPattern": "ajs-version-number\"\\s+content=\"(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "Microsoft Exchange OWA",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "outlook web app",
+            "owa/auth",
+            "/owa/"
+          ]
+        },
+        {
+          "part": "header:x-owa-version",
+          "words": [
+            "."
+          ],
+          "versionPattern": "^(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "Zimbra",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "zimbra"
+          ]
+        },
+        {
+          "part": "title",
+          "words": [
+            "zimbra"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Roundcube",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "roundcube"
+          ],
+          "versionPattern": "content=\"Roundcube\\s+Webmail\\s+(?P<version>\\d+(?:\\.\\d+)+)"
+        },
+        {
+          "part": "title",
+          "words": [
+            "roundcube"
+          ]
+        }
       ]
     },
     {
       "name": "SonicWall",
       "matchers": [
-        { "part": "body", "words": ["sonicwall", "sonicui"] },
-        { "part": "error_body", "words": ["sonicwall"] }
+        {
+          "part": "body",
+          "words": [
+            "sonicwall",
+            "sonicui"
+          ]
+        },
+        {
+          "part": "error_body",
+          "words": [
+            "sonicwall"
+          ]
+        }
       ]
     },
     {
       "name": "pfSense",
       "matchers": [
-        { "part": "body", "words": ["pfsense"] },
-        { "part": "error_body", "words": ["pfsense"] }
+        {
+          "part": "body",
+          "words": [
+            "pfsense"
+          ]
+        },
+        {
+          "part": "error_body",
+          "words": [
+            "pfsense"
+          ]
+        }
       ]
     },
     {
       "name": "MikroTik RouterOS",
       "matchers": [
-        { "part": "body", "words": ["mikrotik", "routeros"] },
-        { "part": "header:server", "words": ["mikrotik"] }
+        {
+          "part": "body",
+          "words": [
+            "mikrotik",
+            "routeros"
+          ]
+        },
+        {
+          "part": "header:server",
+          "words": [
+            "mikrotik"
+          ],
+          "versionPattern": "MikroTik\\s+HttpProxy/?(?P<version>\\d+(?:\\.\\d+)+)?"
+        }
       ]
     },
     {
       "name": "Fortinet FortiGate",
       "matchers": [
-        { "part": "body", "words": ["fortinet", "fortigate"] },
-        { "part": "error_body", "words": ["fortinet", "fortigate"] }
+        {
+          "part": "body",
+          "words": [
+            "fortinet",
+            "fortigate"
+          ]
+        },
+        {
+          "part": "error_body",
+          "words": [
+            "fortinet",
+            "fortigate"
+          ]
+        }
       ]
     },
     {
       "name": "Cisco IOS/ASA",
       "matchers": [
-        { "part": "body", "words": ["cisco systems", "cisco ios", "cisco adaptive security"] }
+        {
+          "part": "body",
+          "words": [
+            "cisco systems",
+            "cisco ios",
+            "cisco adaptive security"
+          ]
+        }
       ]
     },
     {
       "name": "Ubiquiti UniFi",
       "matchers": [
-        { "part": "body", "words": ["ubiquiti", "unifi"] },
-        { "part": "header:server", "words": ["ubnt"] }
+        {
+          "part": "body",
+          "words": [
+            "ubiquiti",
+            "unifi"
+          ]
+        },
+        {
+          "part": "header:server",
+          "words": [
+            "ubnt"
+          ]
+        }
       ]
     },
     {
       "name": "Palo Alto Networks",
       "matchers": [
-        { "part": "body", "words": ["palo alto networks", "pan-os"] }
+        {
+          "part": "body",
+          "words": [
+            "palo alto networks",
+            "pan-os"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Citrix Gateway",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "citrix",
+            "netscaler"
+          ]
+        },
+        {
+          "part": "header:via",
+          "words": [
+            "ns-cache"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "VMware vCenter",
+      "matchers": [
+        {
+          "part": "title",
+          "words": [
+            "vsphere",
+            "vmware"
+          ]
+        },
+        {
+          "part": "body",
+          "words": [
+            "vmware",
+            "vsphere client"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sophos",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "sophos"
+          ]
+        },
+        {
+          "part": "error_body",
+          "words": [
+            "sophos"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "WatchGuard",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "watchguard",
+            "fireware"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Zyxel",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "zyxel"
+          ]
+        }
       ]
     },
     {
       "name": "Netgear",
       "matchers": [
-        { "part": "body", "words": ["netgear"] }
+        {
+          "part": "body",
+          "words": [
+            "netgear"
+          ]
+        }
       ]
     },
     {
       "name": "TP-Link",
       "matchers": [
-        { "part": "body", "words": ["tp-link"] }
+        {
+          "part": "body",
+          "words": [
+            "tp-link"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "D-Link",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "d-link",
+            "dlink"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Huawei",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "huawei"
+          ]
+        }
       ]
     },
     {
       "name": "Synology DiskStation",
       "matchers": [
-        { "part": "body", "words": ["synology", "diskstation"] },
-        { "part": "title", "words": ["diskstation"] }
+        {
+          "part": "body",
+          "words": [
+            "synology",
+            "diskstation"
+          ]
+        },
+        {
+          "part": "title",
+          "words": [
+            "diskstation"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Dell iDRAC",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "idrac",
+            "integrated dell remote access"
+          ]
+        },
+        {
+          "part": "title",
+          "words": [
+            "idrac"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "HP iLO",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "integrated lights-out",
+            "hp ilo",
+            "hpe ilo"
+          ]
+        },
+        {
+          "part": "header:server",
+          "words": [
+            "hp-ilo"
+          ],
+          "versionPattern": "HP-iLO-Server/(?P<version>\\d+(?:\\.\\d+)+)"
+        }
+      ]
+    },
+    {
+      "name": "Jellyfin",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "jellyfin"
+          ]
+        },
+        {
+          "part": "title",
+          "words": [
+            "jellyfin"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Plex",
+      "matchers": [
+        {
+          "part": "header:x-plex-protocol",
+          "words": [
+            "."
+          ]
+        },
+        {
+          "part": "body",
+          "words": [
+            "plex media server"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Home Assistant",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "home assistant",
+            "hass"
+          ]
+        },
+        {
+          "part": "title",
+          "words": [
+            "home assistant"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Hikvision",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "hikvision",
+            "webcomponents"
+          ]
+        },
+        {
+          "part": "title",
+          "words": [
+            "hikvision"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Dahua",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "dahua"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Axis Communications",
+      "matchers": [
+        {
+          "part": "body",
+          "words": [
+            "axis communications"
+          ]
+        },
+        {
+          "part": "header:server",
+          "words": [
+            "axis"
+          ]
+        }
       ]
     }
   ]

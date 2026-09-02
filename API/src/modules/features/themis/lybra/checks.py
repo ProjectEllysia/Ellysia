@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 # ``Check.check_id``). Los dos checks ``network`` suben además a ``version: 2``
 # en checks-6: su comportamiento cambia, y un hallazgo guardado tiene que poder
 # decir cuál de las dos formas lo produjo.
-CHECKS_FEED_VERSION = "lybra-checks-6"
+CHECKS_FEED_VERSION = "lybra-checks-13"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -91,12 +91,40 @@ _HTTP_SERVICE_NAMES = {"http", "https", "http-proxy", "https-alt", "http-alt"}
 # se sondea igual de bien (el esquema se observa), pero no recibe los checks de
 # certificado. Ampliarla es gratis; hacerla innecesaria es #283, que ataca la
 # misma enfermedad —decidir por número de puerto— desde el otro lado.
-_TLS_HYGIENE_PORTS = {443, 8443, 9443, 10443, 4443, 7443, 8834, 9091, 5986}
+_TLS_HYGIENE_PORTS = {443, 8443, 9443, 10443, 4443, 7443, 8834, 9091, 5986, 636, 3269}
+
+# APIs de administración que hablan HTTP y publican su versión en un JSON sin
+# autenticar (L17). Cada familia tiene su propio predicado —y no uno común—
+# porque el runtime de checks selecciona los servicios por ese nombre: con un
+# único ``admin_api``, el check de Docker se ejecutaría también contra el 9200
+# de Elasticsearch, seis peticiones donde basta una.
+_DOCKER_SERVICE_NAMES = {"docker"}
+_DOCKER_PORTS = {2375, 2376}
+_ELASTICSEARCH_SERVICE_NAMES = {"elasticsearch"}
+_ELASTICSEARCH_PORTS = {9200}
+_KIBANA_SERVICE_NAMES = {"kibana"}
+_KIBANA_PORTS = {5601}
+_KUBERNETES_SERVICE_NAMES = {"kubernetes", "kube-apiserver"}
+_KUBERNETES_PORTS = {6443}
+_ETCD_SERVICE_NAMES = {"etcd"}
+_ETCD_PORTS = {2379}
+_CONSUL_SERVICE_NAMES = {"consul"}
+_CONSUL_PORTS = {8500}
+
+# La unión, para lo que sí es común: decidir si un puerto pertenece a esta
+# familia y, con ello, que entre en el conjunto HTTP.
+_ADMIN_API_PORTS = (
+    _DOCKER_PORTS | _ELASTICSEARCH_PORTS | _KIBANA_PORTS
+    | _KUBERNETES_PORTS | _ETCD_PORTS | _CONSUL_PORTS
+)
 
 # Puertos que se consideran servicio HTTP. Incluye los de TLS: un HTTPS en 9443
 # tampoco entraba por esta puerta, así que ampliar sólo la lista de TLS no
-# habría servido de nada.
-_HTTP_PORTS = {80, 8080, 8000, 8888, 8008} | _TLS_HYGIENE_PORTS
+# habría servido de nada. Y los de las APIs de administración: hablan HTTP, y
+# excluirlos dejaba fuera tanto los checks de exposición como los de higiene de
+# certificado sobre servicios que son de los más graves que se pueden encontrar
+# expuestos (L17).
+_HTTP_PORTS = {80, 8080, 8000, 8888, 8008} | _TLS_HYGIENE_PORTS | _ADMIN_API_PORTS
 # Service names and ports for FTP — Fase N's first ``type: "network"`` family.
 _FTP_SERVICE_NAMES = {"ftp"}
 _FTP_PORTS = {21}
@@ -112,6 +140,22 @@ _SMB_SERVICE_NAMES = {"microsoft-ds", "netbios-ssn"}
 _SMB_PORTS = {139, 445}
 _MYSQL_SERVICE_NAMES = {"mysql"}
 _MYSQL_PORTS = {3306}
+_POSTGRES_SERVICE_NAMES = {"postgresql", "postgres"}
+_POSTGRES_PORTS = {5432}
+_MSSQL_SERVICE_NAMES = {"ms-sql-s", "mssql", "sqlserver"}
+_MSSQL_PORTS = {1433}
+_MONGODB_SERVICE_NAMES = {"mongodb", "mongo"}
+_MONGODB_PORTS = {27017, 27018, 27019}
+# 3268 es el Catálogo Global de Active Directory: mismo protocolo, y sirve el
+# bosque entero en vez de un solo dominio. 636 y 3269 son sus variantes sobre
+# TLS, que hablan LDAP igual una vez levantado el canal.
+_RDP_SERVICE_NAMES = {"ms-wbt-server", "rdp", "msrdp", "terminal-server"}
+_RDP_PORTS = {3389}
+_LDAP_SERVICE_NAMES = {"ldap", "ldaps", "ldapssl", "globalcatldap", "globalcatldapssl"}
+_LDAP_PORTS = {389, 636, 3268, 3269}
+# El subconjunto que va cifrado, para la comprobación de "389 en claro
+# conviviendo con un 636".
+LDAPS_PORTS = {636, 3269}
 _REDIS_SERVICE_NAMES = {"redis"}
 _REDIS_PORTS = {6379}
 _VNC_SERVICE_NAMES = {"vnc"}
@@ -123,6 +167,23 @@ _VNC_PORTS = {5900}
 # dissector y al check a un datagrama que ese servicio nunca contestará.
 _SNMP_SERVICE_NAMES = {"snmp"}
 _SNMP_PORTS = {161}
+
+# El resto de la superficie UDP (L22). Todos comparten con SNMP la guarda de
+# protocolo por el mismo motivo: 53, 123, 137 y 1434 existen también como
+# puertos TCP, y mandarle un datagrama a un servicio TCP es tiempo perdido y
+# un hallazgo duplicado con la misma ``dedup_key``.
+_DNS_SERVICE_NAMES = {"domain", "dns"}
+_DNS_PORTS = {53}
+_NTP_SERVICE_NAMES = {"ntp"}
+_NTP_PORTS = {123}
+_NETBIOS_SERVICE_NAMES = {"netbios-ns", "netbios"}
+_NETBIOS_PORTS = {137}
+_MDNS_SERVICE_NAMES = {"mdns", "zeroconf"}
+_MDNS_PORTS = {5353}
+_IKE_SERVICE_NAMES = {"isakmp", "ike"}
+_IKE_PORTS = {500}
+_MSSQL_BROWSER_SERVICE_NAMES = {"ms-sql-m", "sqlbrowser"}
+_MSSQL_BROWSER_PORTS = {1434}
 
 
 # =========================================================================
@@ -476,6 +537,12 @@ CHECK_MODES = ("safe", "aggressive")
 # conoce.
 CHECK_CATEGORIES = (
     "exposed_path",
+    # Un servicio entero alcanzable sin credenciales, no un fichero suelto que
+    # se coló bajo la raíz web (L17). La distinción no es cosmética: un
+    # `exposed_path` es un descuido del despliegue, y un `exposed_service` es
+    # el propio servicio ofreciéndose sin puerta — una API de Docker en claro
+    # es ejecución remota de código como root sin exploit ninguno.
+    "exposed_service",
     "default_credentials",
     "security_header",
     "network_config",
@@ -658,6 +725,39 @@ def is_mysql_service(service: Service) -> bool:
     return (service.name or "").lower() in _MYSQL_SERVICE_NAMES or service.port in _MYSQL_PORTS
 
 
+def is_postgres_service(service: Service) -> bool:
+    """Return whether a service should be probed by the PostgreSQL dissector."""
+    return ((service.name or "").lower() in _POSTGRES_SERVICE_NAMES
+            or service.port in _POSTGRES_PORTS)
+
+
+def is_mssql_service(service: Service) -> bool:
+    """Return whether a service should be probed by the SQL Server dissector."""
+    return ((service.name or "").lower() in _MSSQL_SERVICE_NAMES
+            or service.port in _MSSQL_PORTS)
+
+
+def is_mongodb_service(service: Service) -> bool:
+    """Return whether a service should be probed by the MongoDB dissector.
+
+    27018 y 27019 entran junto al 27017: son los puertos por defecto de un
+    ``mongos`` y de un servidor de configuración en un despliegue fragmentado,
+    y ahí es donde vive el catálogo entero del clúster.
+    """
+    return ((service.name or "").lower() in _MONGODB_SERVICE_NAMES
+            or service.port in _MONGODB_PORTS)
+
+
+def is_ldap_service(service: Service) -> bool:
+    """Return whether a service should be probed by the LDAP dissector."""
+    return (service.name or "").lower() in _LDAP_SERVICE_NAMES or service.port in _LDAP_PORTS
+
+
+def is_rdp_service(service: Service) -> bool:
+    """Return whether a service should be probed by the RDP dissector."""
+    return (service.name or "").lower() in _RDP_SERVICE_NAMES or service.port in _RDP_PORTS
+
+
 def is_redis_service(service: Service) -> bool:
     """Return whether a service should be probed by the Redis dissector or
     ``type: "network"`` checks (Fase N)."""
@@ -683,6 +783,99 @@ def is_snmp_service(service: Service) -> bool:
     if (service.protocol or "tcp").lower() != "udp":
         return False
     return (service.name or "").lower() in _SNMP_SERVICE_NAMES or service.port in _SNMP_PORTS
+
+
+def is_admin_api_service(service: Service) -> bool:
+    """Si el servicio es una de las APIs de administración de :mod:`http_apis`.
+
+    Decide qué puertos reclama ``AdminApiDissector``. No es un predicado de
+    check —para eso están los seis de abajo, uno por producto— sino el que
+    separa esta familia de la sonda HTTP genérica.
+    """
+    return service.port in _ADMIN_API_PORTS
+
+
+def is_docker_service(service: Service) -> bool:
+    """Si el servicio es la API de Docker (2375 en claro, 2376 con TLS)."""
+    return (service.name or "").lower() in _DOCKER_SERVICE_NAMES or service.port in _DOCKER_PORTS
+
+
+def is_elasticsearch_service(service: Service) -> bool:
+    """Si el servicio es la API REST de Elasticsearch."""
+    return ((service.name or "").lower() in _ELASTICSEARCH_SERVICE_NAMES
+            or service.port in _ELASTICSEARCH_PORTS)
+
+
+def is_kibana_service(service: Service) -> bool:
+    """Si el servicio es Kibana."""
+    return (service.name or "").lower() in _KIBANA_SERVICE_NAMES or service.port in _KIBANA_PORTS
+
+
+def is_kubernetes_service(service: Service) -> bool:
+    """Si el servicio es el servidor de API de Kubernetes."""
+    return ((service.name or "").lower() in _KUBERNETES_SERVICE_NAMES
+            or service.port in _KUBERNETES_PORTS)
+
+
+def is_etcd_service(service: Service) -> bool:
+    """Si el servicio es etcd."""
+    return (service.name or "").lower() in _ETCD_SERVICE_NAMES or service.port in _ETCD_PORTS
+
+
+def is_consul_service(service: Service) -> bool:
+    """Si el servicio es el agente de Consul."""
+    return (service.name or "").lower() in _CONSUL_SERVICE_NAMES or service.port in _CONSUL_PORTS
+
+
+def _is_udp(service: Service) -> bool:
+    """Si el servicio se descubrió por UDP.
+
+    ``protocol or "tcp"`` da por no-UDP a un servicio de origen inventario, que
+    llega con el protocolo vacío.
+    """
+    return (service.protocol or "tcp").lower() == "udp"
+
+
+def is_dns_service(service: Service) -> bool:
+    """Return whether a service should be probed by the DNS dissector."""
+    return _is_udp(service) and (
+        (service.name or "").lower() in _DNS_SERVICE_NAMES or service.port in _DNS_PORTS)
+
+
+def is_ntp_service(service: Service) -> bool:
+    """Return whether a service should be probed by the NTP dissector."""
+    return _is_udp(service) and (
+        (service.name or "").lower() in _NTP_SERVICE_NAMES or service.port in _NTP_PORTS)
+
+
+def is_netbios_service(service: Service) -> bool:
+    """Return whether a service should be probed by the NetBIOS-NS dissector."""
+    return _is_udp(service) and (
+        (service.name or "").lower() in _NETBIOS_SERVICE_NAMES
+        or service.port in _NETBIOS_PORTS)
+
+
+def is_mdns_service(service: Service) -> bool:
+    """Return whether a service should be probed by the mDNS dissector."""
+    return _is_udp(service) and (
+        (service.name or "").lower() in _MDNS_SERVICE_NAMES or service.port in _MDNS_PORTS)
+
+
+def is_ike_service(service: Service) -> bool:
+    """Return whether a service should be probed by the IKE dissector."""
+    return _is_udp(service) and (
+        (service.name or "").lower() in _IKE_SERVICE_NAMES or service.port in _IKE_PORTS)
+
+
+def is_mssql_browser_service(service: Service) -> bool:
+    """Return whether a service is the UDP SQL Server Browser.
+
+    Distinto de :func:`is_mssql_service`, que reclama el 1433/tcp: son dos
+    servicios del mismo producto con dos protocolos y dos sondas.
+    """
+    return _is_udp(service) and (
+        (service.name or "").lower() in _MSSQL_BROWSER_SERVICE_NAMES
+        or service.port in _MSSQL_BROWSER_PORTS)
 
 
 def _network_service_matchers() -> Dict[str, Callable[[Service], bool]]:
@@ -751,11 +944,20 @@ class ScriptContext:
             network exchange, exactly as the dissectors do.
         mode: ``"safe"`` or ``"aggressive"`` — the mode the runtime already
             authorised this check under, in case a plugin wants to adapt.
+        sibling_services: Los demás servicios descubiertos en el **mismo host**.
+            Hay hallazgos que no son propiedad de un servicio sino de la
+            relación entre dos: un LDAP en claro en el 389 no dice nada por sí
+            solo, y dice bastante si el mismo host publica además un 636. El
+            runtime ya tiene la lista completa mientras itera, así que dársela
+            al plugin no cuesta ninguna petición de red — y sin ella, el plugin
+            tendría que descubrir puertos por su cuenta, que es justo lo que
+            esta clase existe para impedir.
     """
     target: str
     service: Service
     rate_limiter: Optional["HostRateLimiter"] = None
     mode: str = "safe"
+    sibling_services: tuple = ()
 
     def acquire(self) -> None:
         """Respect the host's rate limit before touching the network."""
@@ -852,6 +1054,7 @@ class CheckRuntime:
         tls_fetch: Optional[Callable[[str, int], object]] = None,
         network_open: Optional[Callable[[str, int], Optional["NetworkSession"]]] = None,
         script_plugins: Optional[Dict[str, object]] = None,
+        mapper: Optional[Callable] = None,
     ) -> None:
         self._checks = list(checks)
         self._fetch = fetch
@@ -860,6 +1063,16 @@ class CheckRuntime:
         self._tls_fetch = tls_fetch
         self._network_open = network_open
         self._script_plugins = dict(script_plugins or {})
+        # Cómo se recorren los servicios. Por defecto, el ``map`` de siempre:
+        # uno detrás de otro. El manager inyecta aquí un pool acotado por host
+        # (L23), igual que ya inyecta las sondas — este módulo no conoce la
+        # configuración ni monta hilos por su cuenta.
+        self._mapper: Callable = mapper or map
+        # El host y sus servicios de la ejecución en curso: los rellena
+        # :meth:`run`, y viven aquí para que un plugin de tipo ``script``
+        # pueda ver los servicios hermanos sin descubrirlos por su cuenta.
+        self._host = ''
+        self._services: Tuple[Service, ...] = ()
         # Sondas compartidas dentro de una ejecución; :meth:`run` las vacía al
         # empezar. Aquí sólo para que el objeto esté completo desde que nace.
         self._responses: Dict[tuple, Optional[Response]] = {}
@@ -895,6 +1108,14 @@ class CheckRuntime:
         :meth:`_probe_response` for why that is a property of this loop and not
         a caching layer.
 
+        Los servicios se evalúan **a la vez** dentro de un pool acotado (L23),
+        no en fila india: estos checks son espera de red casi entera, y un
+        servicio que no contesta retrasaba a todos los que venían detrás. El
+        ritmo por host lo sigue marcando el limitador, que es seguro entre
+        hilos; el pool sólo decide cuántas sondas pueden estar esperando a la
+        vez. El orden de los hallazgos no cambia — ver
+        :meth:`_run_for_service`.
+
         Args:
             host: The target host.
             services: The host's discovered services (non-applicable ones are
@@ -909,17 +1130,43 @@ class CheckRuntime:
         self._responses: Dict[tuple, Optional[Response]] = {}
         self._handshakes: Dict[tuple, object] = {}
 
+        services = tuple(services)
+        # Los plugins de tipo ``script`` pueden necesitar ver los servicios
+        # hermanos del mismo host (ver ``ScriptContext.sibling_services``). La
+        # lista ya está aquí; guardarla evita que un plugin tenga que
+        # redescubrirla por su cuenta.
+        self._services = services
+        self._host = host
+
+        per_service = self._mapper(self._run_for_service, services)
+        return [finding for group in per_service for finding in group]
+
+    def _run_for_service(self, service: Service) -> List[dict]:
+        """Ejecuta todos los checks aplicables a **un** servicio.
+
+        Es la unidad de trabajo del pool (L23), y la razón de que el pool sea
+        seguro sin candados: las cachés de respuesta y de handshake se indexan
+        por ``(host, puerto, ...)``, así que **cada hilo toca sólo las claves de
+        su propio servicio**. Dos checks del mismo servicio siguen compartiendo
+        una petición, que es para lo que la caché existe; dos servicios distintos
+        no compiten por ninguna entrada.
+
+        Args:
+            service: El servicio a evaluar.
+
+        Returns:
+            Los hallazgos de ese servicio, en el orden del feed.
+        """
         findings: List[dict] = []
-        for service in services:
-            for family in self._families:
-                if not family.applies_to_service(service):
+        for family in self._families:
+            if not family.applies_to_service(service):
+                continue
+            for check in self._checks:
+                if not family.check_matches(check, service):
                     continue
-                for check in self._checks:
-                    if not family.check_matches(check, service):
-                        continue
-                    finding = family.run_check(check, host, service)
-                    if finding is not None:
-                        findings.append(finding)
+                finding = family.run_check(check, self._host, service)
+                if finding is not None:
+                    findings.append(finding)
         return findings
 
     def _applies(self, check: Check) -> bool:
@@ -1098,6 +1345,7 @@ class CheckRuntime:
             service=service,
             rate_limiter=self._rl,
             mode=self._mode,
+            sibling_services=self._services,
         )
         try:
             fired = plugin.run(context)

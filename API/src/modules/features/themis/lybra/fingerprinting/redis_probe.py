@@ -131,6 +131,11 @@ class RedisProbe:
 class RedisDissector(Dissector):
     label = "Redis"
 
+    # Redis no saluda: hay que preguntarle. Pero ``INFO server`` es una lectura
+    # sin efectos y de una sola ida y vuelta, así que merece la pena intentarlo
+    # contra un puerto que no ha dicho nada (ver ``cascade``).
+    tries_blind = True
+
     def __init__(self, probe: Optional[RedisProbe] = None) -> None:
         self._probe = probe or RedisProbe()
 

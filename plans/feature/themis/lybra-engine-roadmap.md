@@ -274,7 +274,7 @@ La pista de **correlación** está completa; la de **bajo nivel** está a medias
 | **6** — Pipeline orquestado | Convergencia | ✓ implementada |
 | **U** — Nuclei: herramienta, corroborador y oráculo | Bajo nivel | ✓ implementada — U1, U2 y U3 hechas; **U4 medido el 2026-07-31: 23,37 % de plantillas HTTP ingeribles frente al umbral de 25 % ⇒ no se ingiere**. Detalle en la sección Fase U más abajo |
 | **R** — Runtime de checks propio | Bajo nivel | ✓ implementada — 16 checks; los cuatro tipos activos (`http`/`tls`/`network`/`script`) existen, el feed vive en YAML, la ingesta está construida y apagada por decisión, y la **precisión está medida: 1,000 (TP=30/FP=0) sobre 9 objetivos etiquetados con señuelos**. Detalle en la sección Fase R más abajo |
-| **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS, y (Fase N) FTP, SMTP/IMAP/POP3, SMB, MySQL/MariaDB, Redis, VNC, **SNMP (Ronda 1, ✓)**; falta JARM, PostgreSQL/MSSQL/MongoDB, RDP, LDAP, Telnet, RPC. Detalle actualizado en la sección Fase N más abajo |
+| **F** — Fingerprinting propio | Bajo nivel | ◐ parcial — HTTP, SSH, TLS, y (Fase N) FTP, SMTP/IMAP/POP3, SMB, MySQL/MariaDB, Redis, VNC, **SNMP (Ronda 1, ✓)**; la Fase 2 añade PostgreSQL, MSSQL, MongoDB, LDAP, RDP, las APIs de administración HTTP y la superficie UDP. **JARM archivado** (ver Fase F); quedan Telnet y RPC. Detalle actualizado en la sección Fase N más abajo |
 | **T** — Transporte propio | Bajo nivel | ◐ parcial — `AsyncConnectScanner` sobre asyncio; **sonda UDP acotada (SNMP) implementada en la Ronda 1** (`scan_udp_ports_sync`, `UDP_PROBES`); faltan SYN sin estado y control de tasa AIMD |
 | **4**, DAST y Etapa 2 (P, E, C, O, A, B, D, G, S, X) | Ambas | ○ planificadas |
 
@@ -299,7 +299,7 @@ El resultado es esta reordenación, que es el cambio de fondo de esta revisión:
 | **4.º** | ~~**R (cierre)**~~ — ✓ cerrada el 2026-07-31 | G1, G4 | `script`, YAML e ingesta construidos; precisión 1,000 medida. La ingesta queda apagada por el veredicto del censo de U4 |
 | **5.º** | **O — Backports por feed de distribución** | **G3** | Ataca la causa nº 1 de falsos positivos sin tocar el host ni pedir credenciales |
 | **6.º** | **D — Credenciales por defecto** | **G4** | Cobertura clásica de OpenVAS, con guardas propias (lockout, tasa, evidencia sin plaintext) |
-| **7.º** | **F y T (cierre) — JARM, SYN sin estado, UDP, AIMD** | — | Independiza de Nmap, no de OpenVAS. Trabajo de identidad y disfrute, no de necesidad |
+| **7.º** | **F y T (cierre) — ~~JARM~~ (archivado), SYN sin estado, UDP, AIMD** | — | Independiza de Nmap, no de OpenVAS. Trabajo de identidad y disfrute, no de necesidad. UDP entregado en la Fase 2 |
 | resto | Etapa 2 (P, E, C, A, B, G, S, X) | — | Capacidades nuevas, ninguna condicionada por la salida de OpenVAS |
 
 Las fases **4** (escaneo autenticado por SSH) y **DAST** bajan de prioridad de forma explícita: la
@@ -346,7 +346,7 @@ sigue gastando un corroborador de cuatro horas en cada `deep=True`.
 | **2** | **E1 + E2** — retirar OpenVAS del producto y del código | Ya sin nada que dependa de él. Diff grande pero mecánico. **E3 se deja aparte**: es el único paso irreversible y no bloquea nada | ✓ hecha, **ampliada a E1+E2+E3+E4** (BD de dev sin filas OpenVAS, no hacía falta backfill) — `9b55cf00`, `d517c821`, `d0fbaf3f`, `1c2d7a97`, `0a351c1f` |
 | **3** | **Baseline de FP por versión → Fase O** | Primero la dimensión `outdated_software` en el banco de precisión sobre la KB real; solo entonces la ingesta OVAL/CSAF. Ataca la causa nº 1 de falsos positivos (G3) | ○ no empezada |
 | **4** | **N (resto) + D** — PostgreSQL/MSSQL/MongoDB, RDP, LDAP; encima, credenciales por defecto | D va detrás de N porque reutiliza sus dissectors, y al final del todo porque es la única fase que **escribe** en el objetivo (G4) | ○ no empezada |
-| **5** | **F + T (cierre)** — JARM, SYN sin estado, AIMD | Solo si aparece evidencia del techo de Python. Si no aparece, archivarlo explícitamente en vez de arrastrarlo como deuda perpetua | ○ no empezada |
+| **5** | **F + T (cierre)** — ~~JARM~~, SYN sin estado, AIMD | JARM **archivado** el 2026-09-02 (ver Fase F): su valor es comparativo y validarlo exige un laboratorio TLS con varias pilas que no existe aquí. Lo demás, solo si aparece evidencia del techo de Python | ◐ JARM cerrado por decisión; el resto sin empezar |
 
 **I-b queda fuera de las rondas a propósito.** Su siguiente paso —el ranking de nombres sin resolver
 más frecuentes para dirigir el feed curado— no es trabajo de ingeniería sino de datos: necesita el
@@ -1761,11 +1761,53 @@ la base de datos ni en la evidencia.
 `nmap -sV`, y con una confianza medible. Es el ojo del motor. La Fase N es, en rigor, su extensión a
 protocolos no-web; esta fase cubre lo que queda del lado web y de calibración.
 
-Lo pendiente aquí es **JARM** —un fingerprint del lado del servidor que envía diez ClientHello
+Lo pendiente aquí era **JARM** —un fingerprint del lado del servidor que envía diez ClientHello
 deliberadamente distintos y hashea el conjunto de respuestas— y, con mucho menos peso porque su
 retorno es bajo, un fingerprint de sistema operativo basado en detalles del stack TCP/IP (TTL inicial,
 tamaño de ventana, orden de las opciones TCP). El principio que gobierna esta capa es la calibración
 por oráculo: Nmap `-sV` es la verdad de referencia en el laboratorio.
+
+#### JARM: archivado (2026-09-02, L24)
+
+**JARM no se va a construir, y esto es la decisión escrita que el §6.3 pedía** en vez de arrastrarlo
+como deuda perpetua. La recomendación de ese apartado era explícita: *"Sólo si aparece evidencia del
+techo de Python. Si no aparece, archivarlo explícitamente en vez de arrastrarlo como deuda
+perpetua"*. No ha aparecido.
+
+Las cuatro razones, de la más decisiva a la menos:
+
+1. **El valor de JARM es comparativo, y sin validar contra la implementación de referencia no vale
+   nada.** JARM no identifica un producto: identifica una **pila TLS**, y sólo sirve porque el hash
+   que produce es el mismo que produce el resto del mundo — así se puede decir "este hash es el de un
+   Cobalt Strike" mirando un catálogo público. Un JARM que no case bit a bit con la implementación de
+   referencia no es una identificación peor, es **ninguna identificación**: un número que no se puede
+   comparar con nada.
+
+   Y validar esa coincidencia exige un laboratorio TLS con varias pilas distintas (OpenSSL,
+   BoringSSL, Schannel, JSSE), porque el hash depende de cómo cada una responde a diez saludos
+   deliberadamente raros. Ese laboratorio no existe aquí y montarlo es un proyecto por sí mismo.
+
+2. **No es requisito de ninguna definición de hecho.** La Fase F se da por cerrada con concordancia
+   ≥ 0,90 por familia frente a Nmap, en laboratorio y en objetivos reales — y eso lo cierra la
+   medición de paridad (#277), no JARM. Está en la fase por herencia de un plan, no porque nada
+   dependa de ello.
+
+3. **Su prioridad medida es la más baja de todo el backlog.** Impacto 2, facilidad 2. El §11 ya lo
+   ponía entre lo primero que se sacrifica si hay que recortar.
+
+4. **Diez ClientHello por servicio TLS no son gratis.** Es la sonda más cara del catálogo, contra el
+   objetivo del cliente, a cambio de un hash que —sin catálogo con el que compararlo— no se usaría
+   para nada.
+
+**Qué haría falta para reabrirlo**, dicho para que la decisión sea revisable y no un cierre en falso:
+un laboratorio con al menos cuatro pilas TLS distintas contra el que comprobar la coincidencia con la
+implementación de referencia, y un consumidor concreto del hash — un catálogo de JARMs conocidos, o
+la necesidad declarada de reconocer infraestructura que no dice nada de sí misma. Con esas dos cosas,
+el ítem vuelve; sin ellas, construirlo sería escribir código que nadie puede comprobar y nadie va a
+consultar.
+
+**Lo que sí queda**, y no es poco: el dissector de TLS sigue leyendo versión de protocolo negociada,
+certificado autofirmado y caducidad, que es lo que alimenta los checks de higiene de certificado.
 
 **Damos la fase por hecha cuando** para los servicios comunes la concordancia con Nmap alcanza 0,90
 por familia, medido en el banco de laboratorio **y** en objetivos reales autorizados (paridad
@@ -2287,7 +2329,7 @@ banco, reusando el traductor) → U4 (el histograma y su recomendación).
 | R | Bajo nivel | L2 | Runtime de checks; faltan `script` y el YAML (`network` ya hecho) — **su cierre requiere U** | G1, G4 — **Nikto** |
 | O | Correlación | L3 | Backports por feeds OVAL/CSAF de distribución | **G3 — el Notus propio** |
 | D | Bajo nivel | L2 | Credenciales por defecto, lockout-safe, sin plaintext | **G4** |
-| F | Bajo nivel | L1 | Fingerprint propio; falta JARM | `nmap -sV`, que pasa a oráculo |
+| F | Bajo nivel | L1 | Fingerprint propio; JARM archivado | `nmap -sV`, que pasa a oráculo |
 | T | Bajo nivel | L0 | Transporte propio; faltan SYN sin estado, UDP, AIMD | El descubrimiento de Nmap |
 | 4 | Correlación | L2 | Escaneo autenticado por SSH — **degradado a nicho** | Cubierto mejor por la Fase I |
 | DAST | Bajo nivel | L2 | Análisis web activo y acotado — opcional | ZAP/Nikto para webapp |
@@ -2421,7 +2463,7 @@ red. La capa L1 del motor.
 **Dissector** — El componente que analiza un protocolo concreto (TLS, HTTP, SSH, SMB, FTP…) para
 producir ese fingerprint. La Fase N es, esencialmente, escribir siete dissectors más.
 
-**JARM** — Técnica de fingerprinting del lado del servidor para TLS: envía diez saludos distintos y
+**JARM** — *(Archivado en este proyecto — ver Fase F.)* Técnica de fingerprinting del lado del servidor para TLS: envía diez saludos distintos y
 hashea el conjunto de respuestas. (No confundir con JA3/JA4, que fingerprintean al cliente.)
 
 **HASSH** — El equivalente de JARM para SSH: fingerprintea el servidor por su lista de algoritmos de
