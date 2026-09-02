@@ -4,10 +4,14 @@ The connect scanner runs on a real (test-thread) event loop but against an
 injected ``opener``, so no real sockets or privileges are involved.
 """
 
+import asyncio
+
 import pytest
 
 from src.modules.features.themis.lybra import (
+    PortSweep,
     scan_ports_sync,
+    sweep_ports_sync,
     scan_udp_ports_sync,
     services_from_discovered_ports,
     DEFAULT_PORTS,
@@ -69,6 +73,90 @@ def test_scan_defaults_to_curated_port_set():
     opener = _opener_for({80})
     assert scan_ports_sync("10.0.0.5", opener=opener) == [80]
     assert {22, 80, 443} <= set(DEFAULT_PORTS)
+
+
+# --------------------------------------------- barrido bloqueado vs vacío
+#
+# L48-c: un objetivo que bloquea el barrido a mitad de camino devolvía una
+# lista vacía, indistinguible de un host limpio — y el ciclo de vida marcaba
+# entonces como corregidos hallazgos que seguían abiertos.
+
+
+def _timing_out_opener():
+    """Abridor que nunca completa: toda sonda agota su plazo."""
+    async def opener(host, port):
+        await asyncio.sleep(3600)
+    return opener
+
+
+def test_sweep_classifies_each_outcome_apart():
+    async def opener(host, port):
+        if port == 80:
+            return None, _FakeWriter()
+        if port == 22:
+            raise ConnectionRefusedError("closed")
+        raise OSError("network unreachable")
+
+    sweep = sweep_ports_sync("10.0.0.5", [80, 22, 443], opener=opener)
+    assert sweep.open_ports == (80,)
+    assert sweep.refused_ports == (22,)
+    assert sweep.unreachable_ports == (443,)
+    assert sweep.timed_out_ports == ()
+    assert not sweep.is_blocked
+
+
+def test_sweep_where_every_port_times_out_is_blocked():
+    ports = list(range(1000, 1000 + 16))
+    sweep = sweep_ports_sync("10.0.0.5", ports, timeout=0.01,
+                             opener=_timing_out_opener())
+    assert sweep.timed_out_ports == tuple(ports)
+    assert sweep.is_blocked
+
+
+def test_scan_returns_none_when_the_sweep_looks_blocked():
+    # La distinción entera del issue: esto NO puede ser [], porque [] significa
+    # "objetivo limpio" y el ciclo de vida actuaría en consecuencia.
+    ports = list(range(1000, 1000 + 16))
+    waits = []
+    result = scan_ports_sync("10.0.0.5", ports, timeout=0.01,
+                             opener=_timing_out_opener(),
+                             retry_delay=0.5, sleeper=waits.append)
+    assert result is None
+    assert waits == [0.5]          # se reintentó una vez antes de rendirse
+
+
+def test_scan_recovers_when_the_retry_answers():
+    ports = list(range(1000, 1000 + 16))
+    attempts = {"count": 0}
+
+    async def opener(host, port):
+        if attempts["count"] == 0:
+            await asyncio.sleep(3600)
+        if port == 1000:
+            return None, _FakeWriter()
+        raise ConnectionRefusedError("closed")
+
+    def sleeper(_seconds):
+        attempts["count"] += 1
+
+    result = scan_ports_sync("10.0.0.5", ports, timeout=0.01, opener=opener,
+                             retry_delay=0.1, sleeper=sleeper)
+    assert result == [1000]
+
+
+def test_a_short_muted_sweep_is_not_called_blocked():
+    # Con tres puertos, que los tres expiren es plausible en una red lenta:
+    # preferimos callar antes que inventar un fallo que no está.
+    result = scan_ports_sync("10.0.0.5", [1, 2, 3], timeout=0.01,
+                             opener=_timing_out_opener(), retry_delay=0)
+    assert result == []
+
+
+def test_a_cancelled_sweep_is_never_blocked():
+    sweep = PortSweep(open_ports=(), refused_ports=(),
+                      timed_out_ports=tuple(range(20)), unreachable_ports=(),
+                      was_cancelled=True)
+    assert not sweep.is_blocked
 
 
 # ------------------------------------------------------- services + oracle

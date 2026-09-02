@@ -175,7 +175,10 @@ from .adapters import (
 )
 from .transport import (
     AsyncConnectScanner,
+    PortOutcome,
+    PortSweep,
     scan_ports_sync,
+    sweep_ports_sync,
     scan_udp_ports_sync,
     services_from_discovered_ports,
     DEFAULT_PORTS,
@@ -299,7 +302,10 @@ __all__ = [
     "finding_to_json",
     "QOD_NUCLEI_MATCH",
     "AsyncConnectScanner",
+    "PortOutcome",
+    "PortSweep",
     "scan_ports_sync",
+    "sweep_ports_sync",
     "scan_udp_ports_sync",
     "services_from_discovered_ports",
     "DEFAULT_PORTS",

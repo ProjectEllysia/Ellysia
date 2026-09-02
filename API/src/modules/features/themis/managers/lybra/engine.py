@@ -297,12 +297,29 @@ class LybraEngineManager(ScanManager):
         must not conflate the two: treating a failed probe as "everything is
         closed" would falsely mark previously-open findings as fixed once
         lifecycle correlation runs.
+
+        Esa defensa estuvo puesta y sin poder dispararse: ``scan_ports_sync``
+        sólo sabía devolver una lista, así que un objetivo que bloqueaba el
+        barrido a mitad de camino llegaba aquí como ``[]`` —un informe
+        tranquilizador sobre un host con servicios abiertos, y peor aún, un
+        ciclo de vida que marcaba como corregidos los hallazgos anteriores—.
+        Desde L48-c el transporte distingue "todo cerrado" de "no me han
+        dejado mirar" y devuelve ``None`` en el segundo caso, que es lo que
+        este método siempre esperó recibir.
         """
         try:
-            return scan_ports_sync(target, discover_ports)
+            discovered = scan_ports_sync(target, discover_ports)
         except Exception:
             logger.exception("Lybra port discovery failed for %s", target)
             return None
+        if discovered is None:
+            logger.error(
+                "Descubrimiento bloqueado para %s: el host respondió al chequeo de "
+                "alcanzabilidad y después ningún puerto contestó. El escaneo falla "
+                "en vez de reportar un objetivo limpio.",
+                target,
+            )
+        return discovered
 
     def _discover_udp_ports(self, target: str) -> list:
         """Discover open UDP ports via the curated probe table (Fase N/Ronda 1).
