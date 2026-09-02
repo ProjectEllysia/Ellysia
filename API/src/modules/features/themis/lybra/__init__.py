@@ -53,6 +53,11 @@ from .engine import (
     QOD_INVENTORY_MATCH,
     CPE_PRODUCT_OVERRIDES,
 )
+from .grouping import (
+    ServiceGroup,
+    build_service_rollup,
+    group_label,
+)
 from .kb import (
     version_compare,
     split_distro_version,
@@ -216,6 +221,9 @@ __all__ = [
     "extract_trailing_version",
     "load_product_aliases",
     "parse_cpe23",
+    "ServiceGroup",
+    "build_service_rollup",
+    "group_label",
     "CPE_PRODUCT_OVERRIDES",
     "ingest_nvd_cve",
     "ingest_kev",
