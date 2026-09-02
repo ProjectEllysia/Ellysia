@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 # ``Check.check_id``). Los dos checks ``network`` suben además a ``version: 2``
 # en checks-6: su comportamiento cambia, y un hallazgo guardado tiene que poder
 # decir cuál de las dos formas lo produjo.
-CHECKS_FEED_VERSION = "lybra-checks-6"
+CHECKS_FEED_VERSION = "lybra-checks-7"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -93,10 +93,38 @@ _HTTP_SERVICE_NAMES = {"http", "https", "http-proxy", "https-alt", "http-alt"}
 # misma enfermedad —decidir por número de puerto— desde el otro lado.
 _TLS_HYGIENE_PORTS = {443, 8443, 9443, 10443, 4443, 7443, 8834, 9091, 5986}
 
+# APIs de administración que hablan HTTP y publican su versión en un JSON sin
+# autenticar (L17). Cada familia tiene su propio predicado —y no uno común—
+# porque el runtime de checks selecciona los servicios por ese nombre: con un
+# único ``admin_api``, el check de Docker se ejecutaría también contra el 9200
+# de Elasticsearch, seis peticiones donde basta una.
+_DOCKER_SERVICE_NAMES = {"docker"}
+_DOCKER_PORTS = {2375, 2376}
+_ELASTICSEARCH_SERVICE_NAMES = {"elasticsearch"}
+_ELASTICSEARCH_PORTS = {9200}
+_KIBANA_SERVICE_NAMES = {"kibana"}
+_KIBANA_PORTS = {5601}
+_KUBERNETES_SERVICE_NAMES = {"kubernetes", "kube-apiserver"}
+_KUBERNETES_PORTS = {6443}
+_ETCD_SERVICE_NAMES = {"etcd"}
+_ETCD_PORTS = {2379}
+_CONSUL_SERVICE_NAMES = {"consul"}
+_CONSUL_PORTS = {8500}
+
+# La unión, para lo que sí es común: decidir si un puerto pertenece a esta
+# familia y, con ello, que entre en el conjunto HTTP.
+_ADMIN_API_PORTS = (
+    _DOCKER_PORTS | _ELASTICSEARCH_PORTS | _KIBANA_PORTS
+    | _KUBERNETES_PORTS | _ETCD_PORTS | _CONSUL_PORTS
+)
+
 # Puertos que se consideran servicio HTTP. Incluye los de TLS: un HTTPS en 9443
 # tampoco entraba por esta puerta, así que ampliar sólo la lista de TLS no
-# habría servido de nada.
-_HTTP_PORTS = {80, 8080, 8000, 8888, 8008} | _TLS_HYGIENE_PORTS
+# habría servido de nada. Y los de las APIs de administración: hablan HTTP, y
+# excluirlos dejaba fuera tanto los checks de exposición como los de higiene de
+# certificado sobre servicios que son de los más graves que se pueden encontrar
+# expuestos (L17).
+_HTTP_PORTS = {80, 8080, 8000, 8888, 8008} | _TLS_HYGIENE_PORTS | _ADMIN_API_PORTS
 # Service names and ports for FTP — Fase N's first ``type: "network"`` family.
 _FTP_SERVICE_NAMES = {"ftp"}
 _FTP_PORTS = {21}
@@ -476,6 +504,12 @@ CHECK_MODES = ("safe", "aggressive")
 # conoce.
 CHECK_CATEGORIES = (
     "exposed_path",
+    # Un servicio entero alcanzable sin credenciales, no un fichero suelto que
+    # se coló bajo la raíz web (L17). La distinción no es cosmética: un
+    # `exposed_path` es un descuido del despliegue, y un `exposed_service` es
+    # el propio servicio ofreciéndose sin puerta — una API de Docker en claro
+    # es ejecución remota de código como root sin exploit ninguno.
+    "exposed_service",
     "default_credentials",
     "security_header",
     "network_config",
@@ -683,6 +717,48 @@ def is_snmp_service(service: Service) -> bool:
     if (service.protocol or "tcp").lower() != "udp":
         return False
     return (service.name or "").lower() in _SNMP_SERVICE_NAMES or service.port in _SNMP_PORTS
+
+
+def is_admin_api_service(service: Service) -> bool:
+    """Si el servicio es una de las APIs de administración de :mod:`http_apis`.
+
+    Decide qué puertos reclama ``AdminApiDissector``. No es un predicado de
+    check —para eso están los seis de abajo, uno por producto— sino el que
+    separa esta familia de la sonda HTTP genérica.
+    """
+    return service.port in _ADMIN_API_PORTS
+
+
+def is_docker_service(service: Service) -> bool:
+    """Si el servicio es la API de Docker (2375 en claro, 2376 con TLS)."""
+    return (service.name or "").lower() in _DOCKER_SERVICE_NAMES or service.port in _DOCKER_PORTS
+
+
+def is_elasticsearch_service(service: Service) -> bool:
+    """Si el servicio es la API REST de Elasticsearch."""
+    return ((service.name or "").lower() in _ELASTICSEARCH_SERVICE_NAMES
+            or service.port in _ELASTICSEARCH_PORTS)
+
+
+def is_kibana_service(service: Service) -> bool:
+    """Si el servicio es Kibana."""
+    return (service.name or "").lower() in _KIBANA_SERVICE_NAMES or service.port in _KIBANA_PORTS
+
+
+def is_kubernetes_service(service: Service) -> bool:
+    """Si el servicio es el servidor de API de Kubernetes."""
+    return ((service.name or "").lower() in _KUBERNETES_SERVICE_NAMES
+            or service.port in _KUBERNETES_PORTS)
+
+
+def is_etcd_service(service: Service) -> bool:
+    """Si el servicio es etcd."""
+    return (service.name or "").lower() in _ETCD_SERVICE_NAMES or service.port in _ETCD_PORTS
+
+
+def is_consul_service(service: Service) -> bool:
+    """Si el servicio es el agente de Consul."""
+    return (service.name or "").lower() in _CONSUL_SERVICE_NAMES or service.port in _CONSUL_PORTS
 
 
 def _network_service_matchers() -> Dict[str, Callable[[Service], bool]]:

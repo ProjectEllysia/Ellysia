@@ -4,6 +4,13 @@ Instead of trusting ``nmap -sV`` blindly, this package identifies a service's
 product and version on its own terms. One module per protocol, chosen for the
 best value-for-effort in the roadmap:
 
+``http_apis``
+    Las APIs de administración que hablan HTTP y publican su versión en un
+    JSON sin autenticar: Docker, Elasticsearch, Kibana, Kubernetes, etcd y
+    Consul. Se importa **antes** que ``http`` porque sus puertos entran ahora
+    en la familia HTTP y el motor se queda con el primer dissector que
+    reclame el servicio (ver ``registry``).
+
 ``http``
     Una cascada de seis fuentes para producto y versión —cabecera ``Server``,
     cabeceras ``X-Powered-By``/``X-AspNet-Version``, ``<meta generator>``,
@@ -88,6 +95,12 @@ from .favicon import (
     load_favicon_hashes,
     murmurhash3_x86_32,
     validate_favicon_hashes,
+)
+from .http_apis import (
+    ADMIN_APIS,
+    AdminApi,
+    AdminApiDissector,
+    fingerprint_admin_api,
 )
 from .http import (
     HttpFingerprint,
@@ -177,6 +190,10 @@ __all__ = [
     "default_dissectors",
     "HttpFingerprint",
     "SignatureHit",
+    "ADMIN_APIS",
+    "AdminApi",
+    "AdminApiDissector",
+    "fingerprint_admin_api",
     "banner_readers",
     "blind_probers",
     "identify_unknown_service",
