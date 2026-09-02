@@ -1023,3 +1023,109 @@ def test_lybra_scan_surfaces_in_results_endpoint(client, app, admin_user, auth_h
     # L52: la respuesta ya no lleva ``sourceScanId`` ni ``deep``/``deepScanIds``.
     assert "sourceScanId" not in result
     assert "deep" not in result
+
+
+# ───────────────────────────── hallazgos agrupados por unidad remediable
+#
+# El listado devolvía todos los hallazgos de todos los escaneos de la página, y
+# la interfaz los pintaba como una lista plana ordenada por prioridad. Pero un
+# host con dos productos desactualizados no da 150 trabajos: da dos —subir dos
+# productos— más las cosas de configuración que no pertenecen a ningún producto
+# y se arreglan de otra manera.
+
+
+def _seed_kb_apache_cve_with_a_fix(app):
+    """Como ``_seed_kb_apache_cve`` pero con la cota "corregido en" que la NVD
+    declara: es lo que permite recomendar una versión de destino concreta."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            repo.upsert_cve(
+                {"cve_id": "CVE-2021-41773", "cvss_score": 7.5,
+                 "cvss_vector": "CVSS:3.1/AV:N", "severity": "HIGH",
+                 "description": "Path traversal", "cwe_ids": ["CWE-22"], "source": "nvd"},
+                [{"vendor": "apache", "product": "http_server", "exact_version": None,
+                  "version_start_including": "2.4.0", "version_start_excluding": None,
+                  "version_end_including": None, "version_end_excluding": "2.4.51"}],
+            )
+
+
+def _run_payload_scan(app, user_id: int, target: str = "10.9.9.9") -> int:
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target=target, user_id=user_id)
+        mgr._run_lybra(escan.id, services_payload=_network_services())
+        return escan.id
+
+
+def test_grouped_findings_require_authentication(client):
+    assert client.get("/themis/lybra/scans/1/findings").status_code == 401
+
+
+def test_grouped_findings_of_another_users_scan_are_not_found(
+        client, app, admin_user, regular_user, auth_headers):
+    """La propiedad se verifica sobre el escaneo, y un escaneo ajeno se reporta
+    como inexistente en vez de como prohibido: responder 403 confirmaría que
+    ese id existe."""
+    scan_id = _run_payload_scan(app, admin_user.id)
+    resp = client.get(f"/themis/lybra/scans/{scan_id}/findings",
+                      headers=auth_headers(regular_user))
+    assert resp.status_code == 404
+
+
+def test_findings_of_one_product_arrive_as_a_single_group(client, app, admin_user, auth_headers):
+    _seed_kb_apache_cve_with_a_fix(app)
+    scan_id = _run_payload_scan(app, admin_user.id)
+
+    resp = client.get(f"/themis/lybra/scans/{scan_id}/findings", headers=auth_headers(admin_user))
+    assert resp.status_code == 200
+    body = resp.get_json()
+
+    # Ningún hallazgo se pierde por el camino: agrupar es reordenar, no filtrar.
+    assert body["totalFindings"] == sum(g["totalFindings"] for g in body["groups"])
+    assert body["totalFindings"] > 0
+
+    apache = next(g for g in body["groups"] if "http server" in g["label"])
+    assert apache["isProduct"] is True
+    assert apache["port"] == 80
+    assert "CVE-2021-41773" in apache["cveIds"]
+    assert len(apache["findings"]) == apache["totalFindings"]
+
+    # La versión de destino, que hasta ahora sólo veía el PDF.
+    assert apache["fixedVersion"] == "2.4.51"
+
+
+def test_groups_come_ordered_by_severity_and_carry_their_worst_priority(
+        client, app, admin_user, auth_headers):
+    """Un grupo se atiende por su peor hallazgo, no por su media: doce avisos
+    informativos junto a un CRITICAL siguen siendo un CRITICAL."""
+    _seed_kb_apache_cve_with_a_fix(app)
+    scan_id = _run_payload_scan(app, admin_user.id)
+
+    body = client.get(f"/themis/lybra/scans/{scan_id}/findings",
+                      headers=auth_headers(admin_user)).get_json()
+    groups = body["groups"]
+
+    scores = [g["maxCvss"] or 0 for g in groups]
+    assert scores == sorted(scores, reverse=True)
+
+    ladder = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    for group in groups:
+        present = [level for level in group["byPriority"] if group["byPriority"][level]]
+        assert group["priority"] == max(present, key=ladder.index)
+
+
+def test_the_open_port_findings_form_their_own_non_product_group(
+        client, app, admin_user, auth_headers):
+    """Lo que no tiene producto no se cuela en el inventario de productos: se
+    remedia de otra manera y se presenta aparte."""
+    scan_id = _run_payload_scan(app, admin_user.id)
+
+    body = client.get(f"/themis/lybra/scans/{scan_id}/findings",
+                      headers=auth_headers(admin_user)).get_json()
+
+    non_products = [g for g in body["groups"] if not g["isProduct"]]
+    assert non_products, "todo acabó en grupos de producto"
+    for group in non_products:
+        assert group["fixedVersion"] is None   # no hay versión que recomendar
+        assert "(" in group["label"]           # "categoría (servicio)"

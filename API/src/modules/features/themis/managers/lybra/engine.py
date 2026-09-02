@@ -43,9 +43,13 @@ from ...lybra import (
     default_script_plugins,
     scan_ports_sync,
     scan_udp_ports_sync,
+    score_finding,
+    build_service_rollup,
+    PRIORITY_LADDER,
 )
 from ...lybra.ingest import select_for_services, translate_all
 from ...services import _Task
+from ...services.cve_context import enrich_with_cve_context
 from ...services.nuclei_templates import NucleiTemplateStore
 from ...exceptions import (
     ScanNotFoundError,
@@ -690,6 +694,87 @@ class LybraEngineManager(ScanManager):
         view["id"] = finding.id
         view["state"] = finding.state
         return view
+
+    def grouped_findings(self, scan_id: int, user_id: int) -> dict:
+        """Los hallazgos de un escaneo, agrupados por unidad remediable.
+
+        Es lo que la interfaz pide al desplegar la tarjeta de un escaneo, y lo
+        que sustituye a la lista plana de 150 filas que devolvía el listado. Un
+        host con dos productos desactualizados no da 150 trabajos: da dos
+        —subir dos productos— más las cosas de configuración que no pertenecen
+        a ningún producto y se arreglan de otra manera. Esa separación es
+        ``is_product``.
+
+        El enriquecimiento con la KB se hace **aquí y no en el listado** por lo
+        que cuesta: una consulta en bloque por escaneo es barata cuando se
+        pide un escaneo, y son diez consultas por página cuando se pintan diez
+        tarjetas colapsadas de las que el usuario abrirá una.
+
+        Args:
+            scan_id: El escaneo.
+            user_id: Dueño; un escaneo ajeno se reporta como inexistente.
+
+        Returns:
+            Los grupos ya en la forma de la API (camelCase), de más grave a
+            menos, con sus hallazgos dentro.
+        """
+        with UnitOfWork() as uow:
+            assert_owned(ScanRepository, scan_id, user_id, ScanNotFoundError, uow=uow)
+            repo = ScanRepository(uow)
+            scan = repo.get_by_id(scan_id)
+            exposure = self.exposure_for(scan)
+            findings = [self._finding_view_dict(finding)
+                        for finding in repo.get_findings_by_scan(scan_id)]
+
+        for finding in findings:
+            finding["priority"] = score_finding(finding, exposure)
+        enrich_with_cve_context(findings)
+
+        groups = build_service_rollup(findings)
+        return {
+            "scanId": scan_id,
+            "exposure": exposure,
+            "totalFindings": len(findings),
+            "groups": [self._group_to_json(group, exposure) for group in groups],
+        }
+
+    @classmethod
+    def _group_to_json(cls, group, exposure: str) -> dict:
+        """Un :class:`ServiceGroup` en la forma de la API.
+
+        La traducción vive aquí y no en la capa pura porque el prompt del
+        informe necesita otras claves —las suyas, en castellano, que su texto
+        de sistema documenta una por una—. Que cada consumidor traduzca evita
+        que uno le imponga su vocabulario al otro.
+        """
+        return {
+            "label": group.label,
+            "isProduct": group.is_product,
+            "port": group.port,
+            "service": group.service,
+            "totalFindings": group.total_findings,
+            "totalCves": group.total_cves,
+            "cveIds": group.cve_ids,
+            "kevCveIds": group.kev_cve_ids,
+            "maxCvss": group.max_cvss,
+            "maxEpss": group.max_epss,
+            "fixedVersion": group.fixed_version,
+            "confirmedCount": group.confirmed_count,
+            "byPriority": group.by_priority,
+            "priority": cls._worst_priority(group.by_priority),
+            "findings": [finding_to_json(finding, exposure) for finding in group.findings],
+        }
+
+    @staticmethod
+    def _worst_priority(by_priority: dict) -> str:
+        """La prioridad que representa al grupo: la peor que contiene.
+
+        Un grupo se atiende por su peor hallazgo, no por su media: doce avisos
+        informativos junto a un CRITICAL siguen siendo un CRITICAL que hay que
+        mirar hoy.
+        """
+        present = [level for level in reversed(PRIORITY_LADDER) if by_priority.get(level)]
+        return present[0] if present else "INFO"
 
     def set_finding_state(self, finding_id: int, user_id: int, state: str):
         """Set a finding's lifecycle state (e.g. mark a risk as ``accepted``).
