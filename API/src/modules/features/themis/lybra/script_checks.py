@@ -38,6 +38,8 @@ from typing import Dict, Optional
 from .checks import (
     ScriptContext,
     ScriptPlugin,
+    LDAPS_PORTS,
+    is_ldap_service,
     is_mongodb_service,
     is_postgres_service,
     is_smb_service,
@@ -45,6 +47,7 @@ from .checks import (
 )
 from .engine import Service
 from .fingerprinting.smb import SIGNING_REQUIRED_BIT, SmbProbe, fingerprint_smb
+from .fingerprinting.ldap import LdapProbe, fingerprint_ldap
 from .fingerprinting.mongo import MongoProbe, fingerprint_mongo
 from .fingerprinting.postgres import PostgresProbe, fingerprint_postgres
 from .fingerprinting.snmp import SnmpProbe
@@ -200,6 +203,65 @@ class MongoUnauthenticatedAccessPlugin(ScriptPlugin):
         return fingerprint_mongo(*replies).allows_unauthenticated_access
 
 
+class LdapAnonymousBindPlugin(ScriptPlugin):
+    """Detecta un servidor de directorio que acepta un bind **anónimo**.
+
+    Si el rootDSE contesta sin credenciales, la información del directorio es
+    pública: quién sirve qué dominio, qué mecanismos de autenticación admite y,
+    en muchos despliegues, bastante más si la consulta se amplía.
+
+    Un bind anónimo no es un intento de adivinar credenciales: es la forma que
+    el propio protocolo define para preguntar sin identificarse (RFC 4511
+    §4.2), y lo que se observa es si el servidor **la acepta**. No se prueba
+    ninguna contraseña.
+
+    Args:
+        probe: Sonda inyectable, para que un test use un socket falso.
+    """
+
+    plugin_id = "ldap-anonymous-bind"
+
+    def __init__(self, probe: Optional[LdapProbe] = None) -> None:
+        self._probe = probe or LdapProbe()
+
+    def applies(self, service: Service) -> bool:
+        return is_ldap_service(service)
+
+    def run(self, context: ScriptContext) -> bool:
+        context.acquire()
+        replies = self._probe.fetch(context.target, context.service.port or 389)
+        if replies is None:
+            return False
+        return fingerprint_ldap(*replies).allows_anonymous_bind
+
+
+class LdapCleartextWithLdapsPlugin(ScriptPlugin):
+    """Detecta un LDAP en claro conviviendo con un LDAPS en el mismo host.
+
+    Éste es el primer check del motor que **no es propiedad de un servicio sino
+    de la relación entre dos**. Un 389 abierto no dice gran cosa por sí solo:
+    hay despliegues donde es la única opción y el cifrado se resuelve con
+    STARTTLS. Pero un 389 en un host que además publica el 636 significa que la
+    versión cifrada existe, funciona, y aun así el puerto en claro sigue
+    aceptando binds — así que basta con que un cliente esté mal configurado
+    para que unas credenciales de directorio viajen legibles por la red.
+
+    No hace ninguna petición: la evidencia son dos puertos que el
+    descubrimiento ya encontró (ver ``ScriptContext.sibling_services``).
+    """
+
+    plugin_id = "ldap-cleartext-with-ldaps"
+
+    def applies(self, service: Service) -> bool:
+        return is_ldap_service(service) and service.port not in LDAPS_PORTS
+
+    def run(self, context: ScriptContext) -> bool:
+        return any(
+            sibling.port in LDAPS_PORTS
+            for sibling in context.sibling_services
+        )
+
+
 def default_script_plugins() -> Dict[str, ScriptPlugin]:
     """Construye el registro de plugins de primera parte, indexado por ``plugin_id``.
 
@@ -212,5 +274,7 @@ def default_script_plugins() -> Dict[str, ScriptPlugin]:
         SnmpDefaultCommunityPlugin(),
         PostgresTrustAuthenticationPlugin(),
         MongoUnauthenticatedAccessPlugin(),
+        LdapAnonymousBindPlugin(),
+        LdapCleartextWithLdapsPlugin(),
     )
     return {plugin.plugin_id: plugin for plugin in plugins}

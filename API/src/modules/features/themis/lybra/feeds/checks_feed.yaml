@@ -8,7 +8,7 @@
 # feedVersion sube cuando el feed gana una familia nueva o un protocolo nuevo
 # bajo una existente; el arreglo de un check ya presente sube el 'version' de
 # ese check, no esta cadena. Ver CHECKS_FEED_VERSION en checks.py.
-feedVersion: lybra-checks-9
+feedVersion: lybra-checks-10
 checks:
   - id: git-config-exposure
     version: 1
@@ -473,6 +473,30 @@ checks:
     mode: safe
     finding:
       title: 'MongoDB: catalogo accesible sin autenticacion'
+      qod: 99
+      confirmed: true
+  - id: ldap-anonymous-bind
+    version: 1
+    type: script
+    script: ldap-anonymous-bind
+    category: network_config
+    severity: MEDIUM
+    service: ldap
+    mode: safe
+    finding:
+      title: 'LDAP: bind anonimo permitido (el directorio es publico)'
+      qod: 99
+      confirmed: true
+  - id: ldap-cleartext-with-ldaps
+    version: 1
+    type: script
+    script: ldap-cleartext-with-ldaps
+    category: network_config
+    severity: MEDIUM
+    service: ldap
+    mode: safe
+    finding:
+      title: 'LDAP: puerto en claro abierto habiendo LDAPS en el mismo host'
       qod: 99
       confirmed: true
   - id: snmp-default-community
