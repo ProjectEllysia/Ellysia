@@ -27,10 +27,22 @@ QOD_FINGERPRINT = 20
 
 @dataclass(frozen=True)
 class DissectorResult:
-    """One protocol's identification of a service, ready for a fingerprint finding."""
+    """One protocol's identification of a service, ready for a fingerprint finding.
+
+    Attributes:
+        product: El producto identificado, o ``None``.
+        version: La versión identificada, o ``None``.
+        label: La etiqueta del dissector que lo leyó (``"HTTP"``, ``"FTP"``...).
+        qod: Cuánto se fía el dissector de esta lectura concreta, si sabe
+            distinguirlo. Por defecto :data:`QOD_FINGERPRINT`, que es lo que
+            todos los dissectors usaban y lo que sigue valiendo para los que
+            leen una sola fuente. El de HTTP sí distingue —su versión puede
+            venir de seis sitios de calidad muy distinta— y lo aprovecha (L18).
+    """
     product: Optional[str]
     version: Optional[str]
     label: str
+    qod: int = QOD_FINGERPRINT
 
 
 class Dissector:

@@ -5,8 +5,14 @@ product and version on its own terms. One module per protocol, chosen for the
 best value-for-effort in the roadmap:
 
 ``http``
-    The ``Server``/``X-Powered-By`` headers, the page ``<title>``, a favicon
-    hash, and a data-driven, Wappalyzer-style technology signature feed.
+    Una cascada de seis fuentes para producto y versión —cabecera ``Server``,
+    cabeceras ``X-Powered-By``/``X-AspNet-Version``, ``<meta generator>``,
+    firmas del feed con patrón de versión, página de error por defecto y
+    versión repetida en rutas de assets—, más el ``<title>``, un hash del
+    favicon y el feed de firmas de tecnología al estilo Wappalyzer. Cada
+    lectura registra de qué nivel salió, y ese nivel decide el ``qod`` del
+    hallazgo. Hasta L18 la única fuente era ``Server``, que es justo la que
+    cualquier despliegue fortificado suprime.
 
 ``ssh``
     The identification banner plus **HASSH** — a fingerprint of the algorithm
@@ -72,6 +78,9 @@ from .registry import register_dissector, default_dissectors
 from .http import (
     HttpFingerprint,
     SignatureHit,
+    VersionReading,
+    VERSION_SOURCES,
+    VERSION_SOURCE_QOD,
     TechMatcher,
     TechSignature,
     load_tech_signatures,
@@ -154,6 +163,9 @@ __all__ = [
     "default_dissectors",
     "HttpFingerprint",
     "SignatureHit",
+    "VersionReading",
+    "VERSION_SOURCES",
+    "VERSION_SOURCE_QOD",
     "TechMatcher",
     "TechSignature",
     "validate_tech_signatures",
