@@ -107,7 +107,11 @@ def test_a_network_service_without_predicate_is_reported(feed):
     """El caso de #272: un check ``network`` para un protocolo que ningún
     predicado reconoce. Aquel arreglo lo hizo fallar al cargar; esta validación
     lo encuentra además sobre un feed externo, que no pasa por ese camino."""
-    broken = replace(_first_of_type(feed, "network"), service="postgres")
+    # El nombre tiene que ser uno que ningún `is_*_service` reconozca. Aquí
+    # estuvo "postgres" hasta que L12 le dio su predicado, que es justo la
+    # forma en la que este test se mantiene honesto: el día que el protocolo
+    # inventado deja de estar inventado, hay que inventar otro.
+    broken = replace(_first_of_type(feed, "network"), service="protocolo-inventado")
     assert any("predicado" in problem for problem in validate_checks([broken]))
 
 

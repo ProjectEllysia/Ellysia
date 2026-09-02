@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 # ``Check.check_id``). Los dos checks ``network`` suben además a ``version: 2``
 # en checks-6: su comportamiento cambia, y un hallazgo guardado tiene que poder
 # decir cuál de las dos formas lo produjo.
-CHECKS_FEED_VERSION = "lybra-checks-7"
+CHECKS_FEED_VERSION = "lybra-checks-8"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -140,6 +140,8 @@ _SMB_SERVICE_NAMES = {"microsoft-ds", "netbios-ssn"}
 _SMB_PORTS = {139, 445}
 _MYSQL_SERVICE_NAMES = {"mysql"}
 _MYSQL_PORTS = {3306}
+_POSTGRES_SERVICE_NAMES = {"postgresql", "postgres"}
+_POSTGRES_PORTS = {5432}
 _REDIS_SERVICE_NAMES = {"redis"}
 _REDIS_PORTS = {6379}
 _VNC_SERVICE_NAMES = {"vnc"}
@@ -690,6 +692,12 @@ def is_smb_service(service: Service) -> bool:
 def is_mysql_service(service: Service) -> bool:
     """Return whether a service should be probed by the MySQL dissector."""
     return (service.name or "").lower() in _MYSQL_SERVICE_NAMES or service.port in _MYSQL_PORTS
+
+
+def is_postgres_service(service: Service) -> bool:
+    """Return whether a service should be probed by the PostgreSQL dissector."""
+    return ((service.name or "").lower() in _POSTGRES_SERVICE_NAMES
+            or service.port in _POSTGRES_PORTS)
 
 
 def is_redis_service(service: Service) -> bool:

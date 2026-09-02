@@ -8,7 +8,7 @@
 # feedVersion sube cuando el feed gana una familia nueva o un protocolo nuevo
 # bajo una existente; el arreglo de un check ya presente sube el 'version' de
 # ese check, no esta cadena. Ver CHECKS_FEED_VERSION en checks.py.
-feedVersion: lybra-checks-7
+feedVersion: lybra-checks-8
 checks:
   - id: git-config-exposure
     version: 1
@@ -449,6 +449,18 @@ checks:
               - NamespaceList
     finding:
       title: API de Kubernetes accesible de forma anonima (inventario y control del cluster)
+      qod: 99
+      confirmed: true
+  - id: postgres-trust-authentication
+    version: 1
+    type: script
+    script: postgres-trust-authentication
+    category: default_credentials
+    severity: CRITICAL
+    service: postgres
+    mode: safe
+    finding:
+      title: 'PostgreSQL: acepta conexiones de red sin contrasena (modo trust)'
       qod: 99
       confirmed: true
   - id: snmp-default-community
