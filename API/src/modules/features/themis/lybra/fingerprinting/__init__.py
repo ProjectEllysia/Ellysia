@@ -74,8 +74,10 @@ best value-for-effort in the roadmap:
 ``snmp``
     Fase N/Ronda 1's first UDP protocol — a ``sysDescr.0`` GetRequest (the
     encoder lives in ``transport.py``, imported back here; see the module's
-    own docstring for why). Deliberately never yields a version, only a
-    product string — see ``fingerprint_snmp``.
+    own docstring for why). La versión sale de un feed de patrones **por
+    fabricante** (``feeds/sysdescr_patterns.json``) y nunca de una regex
+    genérica sobre texto libre; un ``sysDescr`` que ningún patrón reconoce
+    aporta el texto crudo como producto y ninguna versión.
 
 ``dispatch``
     The :class:`Dissector` base every protocol module above implements.
@@ -266,11 +268,17 @@ from .vnc import (
     VncDissector,
 )
 from .snmp import (
-    SnmpFingerprint,
-    parse_snmp_sysdescr,
-    fingerprint_snmp,
-    SnmpProbe,
+    QOD_VENDOR_PATTERN,
     SnmpDissector,
+    SnmpFingerprint,
+    SnmpProbe,
+    SysDescrMatch,
+    SysDescrPattern,
+    fingerprint_snmp,
+    load_sysdescr_patterns,
+    match_sysdescr,
+    parse_snmp_sysdescr,
+    validate_sysdescr_patterns,
 )
 
 __all__ = [
@@ -280,6 +288,12 @@ __all__ = [
     "default_dissectors",
     "HttpFingerprint",
     "SignatureHit",
+    "QOD_VENDOR_PATTERN",
+    "SysDescrMatch",
+    "SysDescrPattern",
+    "load_sysdescr_patterns",
+    "match_sysdescr",
+    "validate_sysdescr_patterns",
     "AV_PAIR_NAMES",
     "SMB1_DIALECT",
     "build_ntlm_negotiate",
