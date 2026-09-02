@@ -71,6 +71,13 @@ best value-for-effort in the roadmap:
     ese protocolo sigue habilitado, porque el saludo de SMB2 no lo ve. Ver su
     docstring para las simplificaciones documentadas.
 
+``udp_services``
+    El resto de la superficie UDP (L22): DNS, NTP, NetBIOS-NS, mDNS, IKE y el
+    SQL Server Browser. Cada uno llega con el consumidor de su fila de
+    ``UDP_PROBES``, que es la regla con la que esa tabla nació. Ahí viven los
+    servicios que no aparecen en ningún escaneo TCP y los que se usan para
+    amplificar ataques contra terceros.
+
 ``snmp``
     Fase N/Ronda 1's first UDP protocol — a ``sysDescr.0`` GetRequest (the
     encoder lives in ``transport.py``, imported back here; see the module's
@@ -267,6 +274,31 @@ from .vnc import (
     VncProbe,
     VncDissector,
 )
+from .udp_services import (
+    DnsDissector,
+    DnsFingerprint,
+    DnsProbe,
+    IkeDissector,
+    IkeFingerprint,
+    IkeProbe,
+    MdnsDissector,
+    MdnsProbe,
+    MssqlBrowserDissector,
+    MssqlBrowserProbe,
+    NetbiosDissector,
+    NetbiosFingerprint,
+    NetbiosProbe,
+    NtpDissector,
+    NtpFingerprint,
+    NtpProbe,
+    monlist_is_answered,
+    parse_dns_version_response,
+    parse_ike_response,
+    parse_mdns_response,
+    parse_mssql_browser_response,
+    parse_netbios_response,
+    parse_ntp_readvar_response,
+)
 from .snmp import (
     QOD_VENDOR_PATTERN,
     SnmpDissector,
@@ -288,6 +320,29 @@ __all__ = [
     "default_dissectors",
     "HttpFingerprint",
     "SignatureHit",
+    "DnsDissector",
+    "DnsFingerprint",
+    "DnsProbe",
+    "IkeDissector",
+    "IkeFingerprint",
+    "IkeProbe",
+    "MdnsDissector",
+    "MdnsProbe",
+    "MssqlBrowserDissector",
+    "MssqlBrowserProbe",
+    "NetbiosDissector",
+    "NetbiosFingerprint",
+    "NetbiosProbe",
+    "NtpDissector",
+    "NtpFingerprint",
+    "NtpProbe",
+    "monlist_is_answered",
+    "parse_dns_version_response",
+    "parse_ike_response",
+    "parse_mdns_response",
+    "parse_mssql_browser_response",
+    "parse_netbios_response",
+    "parse_ntp_readvar_response",
     "QOD_VENDOR_PATTERN",
     "SysDescrMatch",
     "SysDescrPattern",

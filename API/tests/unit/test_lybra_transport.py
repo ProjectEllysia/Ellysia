@@ -268,5 +268,8 @@ def test_udp_scan_defaults_to_udp_probes_table():
         return None
 
     scan_udp_ports_sync("10.0.0.5", sender=sender)
-    # retries=1 por defecto -> cada puerto de la tabla se intenta dos veces.
-    assert calls == list(UDP_PROBES) * 2
+    # retries=1 por defecto -> cada puerto de la tabla se intenta dos veces. Se
+    # compara el recuento y no la secuencia: desde L22 el barrido es
+    # concurrente, así que el orden en que llegan los intentos es cosa del
+    # planificador y no del escáner.
+    assert sorted(calls) == sorted(list(UDP_PROBES) * 2)

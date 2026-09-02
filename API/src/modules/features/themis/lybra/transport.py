@@ -20,10 +20,13 @@ against.
 available without raw sockets is a curated payload/expected-reply pair per
 port — and *that* needs no ``CAP_NET_RAW`` at all, an unprivileged
 ``sendto``/``recvfrom`` (or a connected UDP socket, which is what this module
-uses) suffices. :data:`UDP_PROBES` starts with a single row (SNMP,
-port 161 — the highest-value non-HTTP dissector still missing per the
-roadmap) and grows one row per protocol a check or dissector actually
-consumes, not ahead of need.
+uses) suffices. :data:`UDP_PROBES` nació con una sola fila (SNMP en el
+161) y una regla: crece una fila por protocolo que un check o un dissector
+consuma de verdad, no antes de necesitarlo. L22 la cumple — siete filas, cada
+una con su consumidor en ``fingerprinting/udp_services.py``— y con siete el
+barrido pasa a ser concurrente, porque siete plazos de dos segundos en fila
+india son medio minuto de espera contra un host que seguramente no tenga
+ninguno de esos servicios.
 
 The event loop is created and torn down entirely inside :func:`scan_ports_sync`
 — the "asyncio island". It lives within a single synchronous worker call and
@@ -45,11 +48,20 @@ import asyncio
 import logging
 import socket
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from .engine import Service
+from .udp_payloads import (
+    build_dns_version_query,
+    build_ike_main_mode,
+    build_mdns_services_query,
+    build_mssql_browser_query,
+    build_netbios_name_query,
+    build_ntp_readvar,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,14 +71,16 @@ logger = logging.getLogger(__name__)
 # refines the label when it is enabled.
 WELL_KNOWN_PORTS = {
     21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "domain", 80: "http",
-    110: "pop3", 111: "rpcbind", 135: "msrpc", 139: "netbios-ssn", 143: "imap",
+    110: "pop3", 111: "rpcbind", 123: "ntp", 135: "msrpc", 137: "netbios-ns",
+    139: "netbios-ssn", 143: "imap",
     161: "snmp", 389: "ldap", 443: "https", 445: "microsoft-ds", 465: "smtps",
     636: "ldaps",
-    587: "submission", 631: "ipp", 993: "imaps", 995: "pop3s", 1433: "ms-sql-s",
+    500: "isakmp", 587: "submission", 631: "ipp", 993: "imaps", 995: "pop3s",
+    1433: "ms-sql-s", 1434: "ms-sql-m",
     1521: "oracle", 2049: "nfs", 2375: "docker", 2376: "docker-tls",
     2379: "etcd", 3306: "mysql", 3389: "ms-wbt-server",
     3268: "globalcatldap", 3269: "globalcatldapssl",
-    5432: "postgresql", 5601: "kibana", 5900: "vnc", 5985: "wsman",
+    5353: "mdns", 5432: "postgresql", 5601: "kibana", 5900: "vnc", 5985: "wsman",
     6379: "redis", 6443: "kubernetes", 8080: "http-proxy", 8443: "https-alt",
     8500: "consul", 8888: "http-alt", 9200: "elasticsearch", 27017: "mongodb",
 }
@@ -76,7 +90,7 @@ WELL_KNOWN_PORTS = {
 # full 1-65535 range — sweeping everything belongs to the raw fast-path, which
 # this module does not implement.
 DEFAULT_PORTS: tuple = tuple(sorted(WELL_KNOWN_PORTS)) + (
-    20, 69, 123, 137, 138, 512, 513, 514, 873, 1080, 1723, 2181, 3000,
+    20, 69, 138, 512, 513, 514, 873, 1080, 1723, 2181, 3000,
     4444, 5000, 5060, 6667, 7001, 8000, 8008, 8081, 8088, 8181, 9000,
     9090, 9300, 11211,
 )
@@ -408,7 +422,7 @@ def services_from_discovered_ports(
             protocol=protocol,
             name=WELL_KNOWN_PORTS.get(port, ""),
             product="",
-            version="", 
+            version="",
             cpe=None
         )
         for port in open_ports
@@ -480,11 +494,25 @@ def build_snmp_get_request(community: str = "public") -> bytes:
 
 
 # Tabla payload→puerto para el descubrimiento UDP. Una fila por protocolo que
-# de verdad tiene un dissector o un check consumiéndolo — DNS (53) y NTP (123)
-# se evaluaron y se descartaron a propósito (roadmap §6.3): nada los consume
-# todavía, así que solo producirían un open_port informativo a cambio de
-# construir y validar dos consultas más. Añadir una fila es una línea.
-UDP_PROBES: Dict[int, bytes] = {161: build_snmp_get_request()}
+# de verdad tiene un dissector o un check consumiéndolo, que es la regla con la
+# que nació con una sola fila: DNS y NTP se evaluaron y se descartaron entonces
+# porque nada los consumía, no porque no valieran.
+#
+# L22 cumple esa regla en vez de cambiarla: cada fila nueva llega **con su
+# consumidor**, todos en ``fingerprinting/udp_services.py``. Ahí vive la
+# superficie que no aparece en ningún escaneo TCP y que se usa a diario en
+# ataques de amplificación — servicios que convierten al host del cliente en
+# arma contra terceros, que es una conversación distinta y más incómoda que
+# "tienes un puerto abierto".
+UDP_PROBES: Dict[int, bytes] = {
+    53: build_dns_version_query(),
+    123: build_ntp_readvar(),
+    137: build_netbios_name_query(),
+    161: build_snmp_get_request(),
+    500: build_ike_main_mode(),
+    1434: build_mssql_browser_query(),
+    5353: build_mdns_services_query(),
+}
 
 
 def udp_send_recv(host: str, port: int, payload: bytes, timeout: float) -> Optional[bytes]:
@@ -517,21 +545,33 @@ def udp_send_recv(host: str, port: int, payload: bytes, timeout: float) -> Optio
         return None
 
 
-def scan_udp_ports_sync(
+def scan_udp_ports_sync(  # pylint: disable=too-many-arguments
     host: str,
     ports: Optional[Iterable[int]] = None,
+    *,
     timeout: float = 2.0,
     retries: int = 1,
     sender: Optional[Callable] = None,
+    budget_seconds: float = 20.0,
+    clock: Callable[[], float] = time.monotonic,
 ) -> List[int]:
     """Descubre puertos UDP abiertos mediante sondas payload/respuesta curadas.
 
     A diferencia del connect scan de TCP, el silencio en UDP no significa
     "cerrado" — significa "no lo sabemos", así que aquí solo se reportan
-    puertos que de verdad contestaron algo. Sin concurrencia ni asyncio a
-    propósito: con una tabla de un puerto, un escáner paralelo sería
-    andamiaje; se añade si la tabla crece lo bastante como para que
-    importe.
+    puertos que de verdad contestaron algo.
+
+    **Concurrente desde L22, y por aritmética.** Con una tabla de un puerto un
+    escáner paralelo era andamiaje, y así se dijo. Con siete filas, un
+    reintento y dos segundos de plazo, el peor caso secuencial son veintiocho
+    segundos de espera contra un host que probablemente no tenga ninguno de
+    esos servicios. Un hilo por sonda —son siete, no doscientos— lo deja en el
+    plazo de la más lenta.
+
+    El presupuesto de tiempo es el otro medio freno: pasado el plazo total, los
+    puertos que aún no han contestado se dan por no observados. **No es lo
+    mismo que darlos por cerrados** —en UDP nunca lo es— y por eso no cambia
+    nada de lo que se reporta: los que contestaron, contestaron.
 
     Args:
         host: El host destino.
@@ -547,23 +587,32 @@ def scan_udp_ports_sync(
         sender: Callable inyectable ``(host, port, payload, timeout) ->
             Optional[bytes]``, espejo del ``opener`` del escáner TCP. Por
             defecto, :func:`udp_send_recv`.
+        budget_seconds: Plazo total del barrido. A cero o menos, sin límite.
+        clock: Reloj monótono inyectable, para que un test pueda comprobar el
+            presupuesto sin esperarlo.
 
     Returns:
-        Los puertos que contestaron, sorted ascendente. Nunca ``None``: un
-        fallo de sonda para un puerto simplemente no lo añade a la lista.
+        Los puertos que contestaron, ordenados ascendentemente. Nunca ``None``:
+        un fallo de sonda para un puerto simplemente no lo añade a la lista.
     """
     send = sender or udp_send_recv
-    port_list = list(ports) if ports is not None else list(UDP_PROBES)
-    open_ports: List[int] = []
-    for port in port_list:
-        payload = UDP_PROBES.get(port)
-        if payload is None:
-            continue
-        reply = None
+    port_list = [port for port in (ports if ports is not None else UDP_PROBES)
+                 if port in UDP_PROBES]
+    if not port_list:
+        return []
+
+    deadline = clock() + budget_seconds if budget_seconds > 0 else None
+
+    def probe(port: int) -> Optional[int]:
         for _ in range(retries + 1):
-            reply = send(host, port, payload, timeout)
-            if reply is not None:
-                break
-        if reply is not None:
-            open_ports.append(port)
-    return sorted(open_ports)
+            if deadline is not None and clock() >= deadline:
+                logger.debug("Barrido UDP de %s: presupuesto agotado en el puerto %s",
+                             host, port)
+                return None
+            if send(host, port, UDP_PROBES[port], timeout) is not None:
+                return port
+        return None
+
+    with ThreadPoolExecutor(max_workers=len(port_list)) as pool:
+        answered = [port for port in pool.map(probe, port_list) if port is not None]
+    return sorted(answered)

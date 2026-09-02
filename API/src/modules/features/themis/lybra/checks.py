@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 # ``Check.check_id``). Los dos checks ``network`` suben además a ``version: 2``
 # en checks-6: su comportamiento cambia, y un hallazgo guardado tiene que poder
 # decir cuál de las dos formas lo produjo.
-CHECKS_FEED_VERSION = "lybra-checks-12"
+CHECKS_FEED_VERSION = "lybra-checks-13"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -167,6 +167,23 @@ _VNC_PORTS = {5900}
 # dissector y al check a un datagrama que ese servicio nunca contestará.
 _SNMP_SERVICE_NAMES = {"snmp"}
 _SNMP_PORTS = {161}
+
+# El resto de la superficie UDP (L22). Todos comparten con SNMP la guarda de
+# protocolo por el mismo motivo: 53, 123, 137 y 1434 existen también como
+# puertos TCP, y mandarle un datagrama a un servicio TCP es tiempo perdido y
+# un hallazgo duplicado con la misma ``dedup_key``.
+_DNS_SERVICE_NAMES = {"domain", "dns"}
+_DNS_PORTS = {53}
+_NTP_SERVICE_NAMES = {"ntp"}
+_NTP_PORTS = {123}
+_NETBIOS_SERVICE_NAMES = {"netbios-ns", "netbios"}
+_NETBIOS_PORTS = {137}
+_MDNS_SERVICE_NAMES = {"mdns", "zeroconf"}
+_MDNS_PORTS = {5353}
+_IKE_SERVICE_NAMES = {"isakmp", "ike"}
+_IKE_PORTS = {500}
+_MSSQL_BROWSER_SERVICE_NAMES = {"ms-sql-m", "sqlbrowser"}
+_MSSQL_BROWSER_PORTS = {1434}
 
 
 # =========================================================================
@@ -808,6 +825,57 @@ def is_etcd_service(service: Service) -> bool:
 def is_consul_service(service: Service) -> bool:
     """Si el servicio es el agente de Consul."""
     return (service.name or "").lower() in _CONSUL_SERVICE_NAMES or service.port in _CONSUL_PORTS
+
+
+def _is_udp(service: Service) -> bool:
+    """Si el servicio se descubrió por UDP.
+
+    ``protocol or "tcp"`` da por no-UDP a un servicio de origen inventario, que
+    llega con el protocolo vacío.
+    """
+    return (service.protocol or "tcp").lower() == "udp"
+
+
+def is_dns_service(service: Service) -> bool:
+    """Return whether a service should be probed by the DNS dissector."""
+    return _is_udp(service) and (
+        (service.name or "").lower() in _DNS_SERVICE_NAMES or service.port in _DNS_PORTS)
+
+
+def is_ntp_service(service: Service) -> bool:
+    """Return whether a service should be probed by the NTP dissector."""
+    return _is_udp(service) and (
+        (service.name or "").lower() in _NTP_SERVICE_NAMES or service.port in _NTP_PORTS)
+
+
+def is_netbios_service(service: Service) -> bool:
+    """Return whether a service should be probed by the NetBIOS-NS dissector."""
+    return _is_udp(service) and (
+        (service.name or "").lower() in _NETBIOS_SERVICE_NAMES
+        or service.port in _NETBIOS_PORTS)
+
+
+def is_mdns_service(service: Service) -> bool:
+    """Return whether a service should be probed by the mDNS dissector."""
+    return _is_udp(service) and (
+        (service.name or "").lower() in _MDNS_SERVICE_NAMES or service.port in _MDNS_PORTS)
+
+
+def is_ike_service(service: Service) -> bool:
+    """Return whether a service should be probed by the IKE dissector."""
+    return _is_udp(service) and (
+        (service.name or "").lower() in _IKE_SERVICE_NAMES or service.port in _IKE_PORTS)
+
+
+def is_mssql_browser_service(service: Service) -> bool:
+    """Return whether a service is the UDP SQL Server Browser.
+
+    Distinto de :func:`is_mssql_service`, que reclama el 1433/tcp: son dos
+    servicios del mismo producto con dos protocolos y dos sondas.
+    """
+    return _is_udp(service) and (
+        (service.name or "").lower() in _MSSQL_BROWSER_SERVICE_NAMES
+        or service.port in _MSSQL_BROWSER_PORTS)
 
 
 def _network_service_matchers() -> Dict[str, Callable[[Service], bool]]:

@@ -333,7 +333,8 @@ class LybraEngineManager(ScanManager):
         list): a user-supplied ``discover_ports`` is a TCP list.
         """
         try:
-            return scan_udp_ports_sync(target)
+            return scan_udp_ports_sync(
+                target, budget_seconds=CR.lybra_config().udp_budget_seconds)
         except Exception:
             logger.exception("Lybra UDP port discovery failed for %s", target)
             return []
