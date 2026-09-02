@@ -79,7 +79,7 @@ _HOST = "127.0.0.1"
 # mapa de puertos conocidos haría en producción— el número de puerto no cambia
 # qué dissector se elige ni qué lee.
 _PORTS = {
-    "ftp": 12121, "smtp": 12525, "mysql": 13306, "smb": 14445,
+    "ftp": 12121, "proftpd": 12122, "smtp": 12525, "mysql": 13306, "smb": 14445,
     "vnc": 15900, "snmp": 16161, "redis": 16379,
 }
 
@@ -156,6 +156,35 @@ def ftp_target():
     try:
         _wait_for_greeting(port, b"220")
         yield Target("ftp", port, "ftp")
+    finally:
+        docker_rm(_DOCKER, name)
+
+
+@pytest.fixture(scope="module")
+def proftpd_target():
+    """El segundo servidor FTP del catálogo, y la razón de que exista (L48-a).
+
+    La familia FTP daba concordancia 1,00 en laboratorio y 0,00 contra
+    objetivos reales. La explicación no era la red: el banco tenía **un solo**
+    servidor FTP, un vsftpd cuyo saludo (``220 (vsFTPd 3.0.5)``) es justo el
+    formato que el parser sabía leer. Ese 1,00 no medía la calidad del
+    dissector, medía la coincidencia entre el dissector y el contenedor
+    elegido — la misma trampa que la Fase 0 documentó en #269 y #270.
+
+    ProFTPD es el otro servidor FTP extendido y saluda de otra forma; en su
+    configuración por defecto de Debian, además, **omite la versión**. Con él
+    en el catálogo, la familia deja de medirse contra sí misma.
+    """
+    port, name = _PORTS["proftpd"], "lybra-concordance-proftpd"
+    _start(name, port, 21, "alpine:latest", "sh", "-c",
+           "apk add --no-cache proftpd >/dev/null 2>&1 && "
+           "printf '%s\n' 'ServerName \"lybra\"' 'ServerType standalone' "
+           "'Port 21' 'User proftpd' 'Group proftpd' "
+           "> /etc/proftpd/proftpd.conf && "
+           "proftpd --nodaemon --config /etc/proftpd/proftpd.conf")
+    try:
+        _wait_for_greeting(port, b"220")
+        yield Target("proftpd", port, "ftp")
     finally:
         docker_rm(_DOCKER, name)
 
@@ -284,6 +313,13 @@ def _assert_agrees(target: Target) -> None:
 
 def test_ftp_fingerprint_agrees_with_nmap(ftp_target):
     _assert_agrees(ftp_target)
+
+
+def test_proftpd_fingerprint_agrees_with_nmap(proftpd_target):
+    """El caso que la medición real destapó: un ProFTPD sin versión en el
+    saludo. Lybra y Nmap deben coincidir en el producto; que ninguno dé
+    versión no es un desacuerdo (ver ``agrees_with_nmap``)."""
+    _assert_agrees(proftpd_target)
 
 
 def test_redis_fingerprint_agrees_with_nmap(redis_target):
