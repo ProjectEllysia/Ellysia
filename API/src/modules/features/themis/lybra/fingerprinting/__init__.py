@@ -43,6 +43,11 @@ best value-for-effort in the roadmap:
     y build en un campo binario de tamaño fijo, sin autenticar, más el modo de
     cifrado que el servidor exige.
 
+``mongo``
+    ``hello`` para la versión —que contesta siempre, con autenticación y sin
+    ella— y ``listDatabases`` para saber si el servidor deja entrar sin
+    credenciales. Parseo de BSON mínimo, sin ``pymongo``.
+
 ``ftp``, ``mail`` (SMTP/IMAP/POP3), ``mysql``, ``redis_probe``, ``vnc``
     Fase N's non-HTTP protocols — each volunteers its identity unprompted
     right after a bare TCP connect, no negotiation needed to read it.
@@ -164,6 +169,17 @@ from .smb import (
     SmbProbe,
     SmbDissector,
 )
+from .mongo import (
+    HELLO_COMMAND,
+    LIST_DATABASES_COMMAND,
+    MongoDissector,
+    MongoFingerprint,
+    MongoProbe,
+    build_op_msg,
+    fingerprint_mongo,
+    parse_bson_document,
+    parse_op_msg,
+)
 from .mssql import (
     ENCRYPTION_MODES,
     MssqlDissector,
@@ -220,6 +236,15 @@ __all__ = [
     "default_dissectors",
     "HttpFingerprint",
     "SignatureHit",
+    "HELLO_COMMAND",
+    "LIST_DATABASES_COMMAND",
+    "MongoDissector",
+    "MongoFingerprint",
+    "MongoProbe",
+    "build_op_msg",
+    "fingerprint_mongo",
+    "parse_bson_document",
+    "parse_op_msg",
     "ENCRYPTION_MODES",
     "MssqlDissector",
     "MssqlFingerprint",

@@ -38,12 +38,14 @@ from typing import Dict, Optional
 from .checks import (
     ScriptContext,
     ScriptPlugin,
+    is_mongodb_service,
     is_postgres_service,
     is_smb_service,
     is_snmp_service,
 )
 from .engine import Service
 from .fingerprinting.smb import SIGNING_REQUIRED_BIT, SmbProbe, fingerprint_smb
+from .fingerprinting.mongo import MongoProbe, fingerprint_mongo
 from .fingerprinting.postgres import PostgresProbe, fingerprint_postgres
 from .fingerprinting.snmp import SnmpProbe
 
@@ -163,6 +165,41 @@ class PostgresTrustAuthenticationPlugin(ScriptPlugin):
         return fingerprint_postgres(*replies).is_unauthenticated
 
 
+class MongoUnauthenticatedAccessPlugin(ScriptPlugin):
+    """Detecta un MongoDB que sirve su catálogo **sin credenciales**.
+
+    Es el hallazgo clásico del producto: durante años las instalaciones por
+    defecto escuchaban en todas las interfaces sin autenticación, y de ahí
+    salió una de las mayores oleadas de fuga de datos y de ransomware de bases
+    de datos que se recuerdan.
+
+    **La evidencia no es que el servidor conteste.** El comando ``hello``
+    responde siempre, con ``--auth`` y sin él —es el handshake del protocolo, y
+    tiene que hacerlo para que el cliente sepa con quién habla—, así que un
+    check construido sobre "ha contestado" marcaría como expuesto todo MongoDB
+    alcanzable. La evidencia es que ``listDatabases``, que sí exige permisos,
+    devuelva la lista: un servidor cerrado responde ``ok: 0`` con el código 13.
+
+    Args:
+        probe: Sonda inyectable, para que un test use un socket falso.
+    """
+
+    plugin_id = "mongodb-unauthenticated-access"
+
+    def __init__(self, probe: Optional[MongoProbe] = None) -> None:
+        self._probe = probe or MongoProbe()
+
+    def applies(self, service: Service) -> bool:
+        return is_mongodb_service(service)
+
+    def run(self, context: ScriptContext) -> bool:
+        context.acquire()
+        replies = self._probe.fetch(context.target, context.service.port or 27017)
+        if replies is None:
+            return False
+        return fingerprint_mongo(*replies).allows_unauthenticated_access
+
+
 def default_script_plugins() -> Dict[str, ScriptPlugin]:
     """Construye el registro de plugins de primera parte, indexado por ``plugin_id``.
 
@@ -174,5 +211,6 @@ def default_script_plugins() -> Dict[str, ScriptPlugin]:
         SmbSigningNotRequiredPlugin(),
         SnmpDefaultCommunityPlugin(),
         PostgresTrustAuthenticationPlugin(),
+        MongoUnauthenticatedAccessPlugin(),
     )
     return {plugin.plugin_id: plugin for plugin in plugins}
