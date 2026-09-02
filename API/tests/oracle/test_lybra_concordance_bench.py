@@ -80,7 +80,7 @@ _HOST = "127.0.0.1"
 # qué dissector se elige ni qué lee.
 _PORTS = {
     "ftp": 12121, "proftpd": 12122, "smtp": 12525, "mysql": 13306, "smb": 14445,
-    "vnc": 15900, "snmp": 16161, "redis": 16379,
+    "vnc": 15900, "snmp": 16161, "redis": 16379, "reverse-proxy": 18080,
 }
 
 
@@ -95,6 +95,32 @@ class Target:
 
 def _docker(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run([_DOCKER, *args], capture_output=True, text=True, timeout=120, check=True)
+
+
+CRLF = bytes((13, 10))
+
+
+def _wait_for_http(port: int, timeout: float = 240.0) -> None:
+    """Esperar a que un puerto conteste a un ``GET /`` con una línea de estado.
+
+    HTTP no manda saludo: hay que preguntar. Por lo demás, el mismo cuidado que
+    :func:`_wait_for_greeting` — el proxy de Docker acepta la conexión mucho
+    antes de que el servidor de dentro exista.
+    """
+    deadline = time.monotonic() + timeout
+    last = "sin intentos"
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((_HOST, port), timeout=3.0) as sock:
+                sock.settimeout(3.0)
+                sock.sendall(b"GET / HTTP/1.0" + CRLF + b"Host: localhost" + CRLF + CRLF)
+                if sock.recv(64).startswith(b"HTTP/"):
+                    return
+            last = "respuesta que no es HTTP"
+        except OSError as exc:
+            last = str(exc)
+        time.sleep(1.0)
+    raise TimeoutError(f"{_HOST}:{port} no contestó HTTP en {timeout}s ({last})")
 
 
 def _wait_for_greeting(port: int, expect: bytes, timeout: float = 240.0) -> None:
@@ -178,13 +204,46 @@ def proftpd_target():
     port, name = _PORTS["proftpd"], "lybra-concordance-proftpd"
     _start(name, port, 21, "alpine:latest", "sh", "-c",
            "apk add --no-cache proftpd >/dev/null 2>&1 && "
-           "printf '%s\n' 'ServerName \"lybra\"' 'ServerType standalone' "
+           "printf '%s\\n' 'ServerName \"lybra\"' 'ServerType standalone' "
            "'Port 21' 'User proftpd' 'Group proftpd' "
            "> /etc/proftpd/proftpd.conf && "
            "proftpd --nodaemon --config /etc/proftpd/proftpd.conf")
     try:
         _wait_for_greeting(port, b"220")
         yield Target("proftpd", port, "ftp")
+    finally:
+        docker_rm(_DOCKER, name)
+
+
+@pytest.fixture(scope="module")
+def reverse_proxy_target():
+    """Un nginx de proxy inverso por delante de un Apache (L48-b).
+
+    Todos los demás objetivos HTTP del catálogo son **servidores pelados**: la
+    cabecera ``Server`` y el servidor real son la misma cosa, así que leerla
+    acierta siempre y la familia HTTP concordaba 1,00. En producción casi nada
+    está pelado, y contra objetivos reales la misma familia bajó a 0,08.
+
+    Este objetivo es esa brecha metida en el banco: nginx contesta en el puerto
+    y firma la respuesta, Apache atiende por detrás y firma su página de error.
+    Un fingerprint correcto tiene que ver **las dos** capas.
+
+    Se levanta con una sola imagen de Alpine que arranca los dos servidores
+    para no depender de una red de contenedores: el Apache escucha en el 8081
+    interno y el nginx en el 80, pasándole todo.
+    """
+    port, name = _PORTS["reverse-proxy"], "lybra-concordance-reverse-proxy"
+    _start(name, port, 80, "alpine:latest", "sh", "-c",
+           "apk add --no-cache apache2 nginx >/dev/null 2>&1 && "
+           "sed -i 's/^Listen 80$/Listen 8081/' /etc/apache2/httpd.conf && "
+           "httpd && "
+           "printf '%s\\n' 'events {}' 'http { server { listen 80; "
+           "location / { proxy_pass http://127.0.0.1:8081; } } }' "
+           "> /etc/nginx/nginx.conf && "
+           "nginx -g 'daemon off;'")
+    try:
+        _wait_for_http(port)
+        yield Target("http-proxied", port, "http")
     finally:
         docker_rm(_DOCKER, name)
 

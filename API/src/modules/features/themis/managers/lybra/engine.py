@@ -30,6 +30,7 @@ from ...lybra import (
     finding_to_json,
     QOD_OPEN_PORT,
     default_dissectors,
+    DissectorResult,
     HostRateLimiter,
     kb_feed_version,
     load_checks,
@@ -444,11 +445,35 @@ class LybraEngineManager(ScanManager):
                 continue
 
             findings.append(self._fingerprint_finding(service, result))
+            findings.extend(self._layer_findings(service, result))
             if result.product and result.version:
                 service = replace(service, product=result.product, version=result.version)
             updated.append(service)
 
         return updated, findings
+
+    @classmethod
+    def _layer_findings(cls, service, result) -> list:
+        """Un hallazgo informativo por cada capa de servidor adicional (L48-b).
+
+        Un puerto HTTP no siempre lo atiende **un** programa: la topología más
+        corriente que existe —un nginx de proxy inverso por delante de un
+        Apache— son dos, y hasta ahora el motor sólo podía reportar uno. La
+        medición real lo destapó: cinco servicios en tres hosts donde Lybra
+        decía ``nginx`` y Nmap decía ``Apache httpd``, sin que ninguno de los
+        dos estuviera equivocado.
+
+        Reportar las dos capas es la respuesta honesta. Las dos están expuestas
+        y las dos tienen CVEs; elegir una en silencio produce falsos negativos
+        por un lado y falsos positivos por el otro.
+        """
+        return [
+            cls._fingerprint_finding(
+                service,
+                DissectorResult(product, version, f"{result.label} {role}", qod=result.qod),
+            )
+            for product, version, role in getattr(result, "extra_layers", ())
+        ]
 
     @staticmethod
     def _fingerprint_finding(service, result) -> dict:
