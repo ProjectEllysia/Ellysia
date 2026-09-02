@@ -81,6 +81,7 @@ _HOST = "127.0.0.1"
 _PORTS = {
     "ftp": 12121, "proftpd": 12122, "smtp": 12525, "mysql": 13306, "smb": 14445,
     "vnc": 15900, "snmp": 16161, "redis": 16379, "reverse-proxy": 18080,
+    "smb1": 14446,
 }
 
 
@@ -298,6 +299,34 @@ def smb_target():
 
 
 @pytest.fixture(scope="module")
+def smb1_target():
+    """Un Samba con **SMBv1 habilitado**, que es lo que el otro no puede probar.
+
+    El saludo de SMB2 no ve si SMB1 está activo: son dos protocolos distintos
+    con dos saludos distintos, así que un servidor con SMB1 encendido contesta
+    con toda normalidad al SMB2 y no dice ni una palabra sobre el otro. Sin un
+    objetivo que lo tenga encendido, la sonda de SMB1 sólo podría comprobarse
+    contra el caso negativo — y un detector que nunca ha visto un positivo no
+    está comprobado, está sin usar.
+
+    ``dperson/samba`` desactiva SMB1 por defecto desde hace años; ``-w`` fija
+    el grupo de trabajo y las opciones ``server min protocol`` lo vuelven a
+    permitir explícitamente.
+    """
+    port, name = _PORTS["smb1"], "lybra-concordance-smb1"
+    _start(name, port, 445, "dperson/samba", "-p", "-w", "LYBRA",
+           "-g", "server min protocol = NT1",
+           "-g", "client min protocol = NT1",
+           "-s", "public;/tmp;yes;no;yes")
+    try:
+        wait_for_port(_HOST, port, 240)
+        time.sleep(10)
+        yield Target("smb1", port, "microsoft-ds")
+    finally:
+        docker_rm(_DOCKER, name)
+
+
+@pytest.fixture(scope="module")
 def redis_target():
     port, name = _PORTS["redis"], "lybra-concordance-redis"
     _start(name, port, 6379, "redis:7")
@@ -366,6 +395,36 @@ def _pair(target: Target) -> Tuple:
 def _assert_agrees(target: Target) -> None:
     pair = _pair(target)
     assert agrees_with_nmap(*pair), f"{target.protocol}: propio vs nmap = {pair}"
+
+
+# ==================================================== SMBv1, los dos lados
+
+
+def test_smb1_is_detected_where_it_is_enabled_and_not_where_it_is_not(
+    smb_target, smb1_target,
+):
+    """Los dos lados de la misma sonda, en la misma ejecución.
+
+    Un detector que sólo se ha visto contra el caso negativo no está
+    comprobado: `False` es también lo que devuelve una sonda rota, un puerto
+    que no contesta o un parser con un desplazamiento mal. Sólo el positivo
+    distingue "sabe mirar" de "siempre dice que no".
+    """
+    from src.modules.features.themis.lybra.fingerprinting.smb import SmbProbe
+
+    probe = SmbProbe(timeout=10.0)
+    assert probe.speaks_smb1(_HOST, smb1_target.port) is True
+    assert probe.speaks_smb1(_HOST, smb_target.port) is False
+
+
+def test_smb_reports_the_hostname_the_server_declares(smb_target):
+    """El nombre de equipo sale del SESSION_SETUP anónimo, y es el mejor
+    identificador de activo que existe en una red Windows."""
+    from src.modules.features.themis.lybra.fingerprinting.smb import SmbProbe
+
+    identity = SmbProbe(timeout=10.0).fetch_identity(_HOST, smb_target.port)
+    assert identity.get("netbios_computer_name"), (
+        f"el servidor no declaró nombre de equipo: {identity}")
 
 
 # ============================================== los que concuerdan hoy

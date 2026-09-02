@@ -104,6 +104,45 @@ class SmbSigningNotRequiredPlugin(ScriptPlugin):
         return not security_mode & SIGNING_REQUIRED_BIT
 
 
+class SmbV1EnabledPlugin(ScriptPlugin):
+    """Detecta un servidor que todavía acepta negociar **SMBv1**.
+
+    Es el hallazgo clásico del protocolo, el que WannaCry convirtió en
+    historia: SMB1 no tiene firma obligatoria utilizable, no cifra, y arrastra
+    una familia de vulnerabilidades pre-autenticación (EternalBlue y sus
+    parientes) que no se han corregido porque el protocolo entero está
+    retirado desde 2014. Microsoft lo desactiva por defecto desde Windows 10
+    1709; encontrarlo activo significa o bien un sistema viejo o bien alguien
+    que lo reactivó a mano por un dispositivo heredado.
+
+    **El NEGOTIATE de SMB2 no puede verlo**, y por eso este check tiene su
+    propia sonda: son dos protocolos distintos con dos saludos distintos, así
+    que un servidor con SMB1 activo contesta con toda normalidad al SMB2 y no
+    dice ni una palabra sobre el otro. Ésta es la comprobación que la tabla de
+    la Fase N pedía y que no se pudo construir entonces.
+
+    La evidencia es una aceptación explícita: el servidor contesta un
+    ``NEGOTIATE`` de SMB1 con estado correcto y eligiendo un dialecto. El
+    silencio, un error o una respuesta de SMB2 **no** cuentan — un servidor
+    que no habla SMB1 no tiene por qué contestar de ninguna forma concreta.
+
+    Args:
+        probe: Sonda inyectable, para que un test use un socket falso.
+    """
+
+    plugin_id = "smbv1-enabled"
+
+    def __init__(self, probe: Optional[SmbProbe] = None) -> None:
+        self._probe = probe or SmbProbe()
+
+    def applies(self, service: Service) -> bool:
+        return is_smb_service(service)
+
+    def run(self, context: ScriptContext) -> bool:
+        context.acquire()
+        return self._probe.speaks_smb1(context.target, context.service.port or 445)
+
+
 class SnmpDefaultCommunityPlugin(ScriptPlugin):
     """Detecta un servicio SNMP que acepta la comunidad por defecto ``public``.
 
@@ -312,6 +351,7 @@ def default_script_plugins() -> Dict[str, ScriptPlugin]:
     """
     plugins = (
         SmbSigningNotRequiredPlugin(),
+        SmbV1EnabledPlugin(),
         SnmpDefaultCommunityPlugin(),
         PostgresTrustAuthenticationPlugin(),
         MongoUnauthenticatedAccessPlugin(),
