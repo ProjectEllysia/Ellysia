@@ -191,7 +191,7 @@ The web application checks MFA once when an authenticated session enters the SPA
 | `POST` | `/themis/lybra` | Self-built engine scan (own port discovery — `target` required) |
 | `GET` | `/themis/scan-status?id=` | Scan status / progress: pending · running · done · cancelled |
 | `POST` | `/themis/scans/<id>/cancel` | Cancel a running scan |
-| `GET` | `/themis/results` · `/themis/results/<id>` | List scans (filterable, paginated) / scan detail. The Lybra listing carries per-scan counters, not every finding |
+| `GET` | `/themis/results` · `/themis/results/<id>` | List scans (filterable, paginated) / scan detail. The Lybra listing carries per-scan counters, not every finding, and flags with `isPartial` a scan whose port discovery ran out of time before covering the whole target |
 | `GET` | `/themis/lybra/scans/<id>/findings` | Lybra findings grouped by remediable unit (product + port), each group with its CVEs, KEV membership, worst priority and the version that closes it |
 | `PATCH` | `/themis/findings/<id>` | Mark a finding's triage state (e.g. accept a risk) |
 | `DELETE` | `/themis/<id>` · `/themis/scans` | Delete a scan / bulk delete |
