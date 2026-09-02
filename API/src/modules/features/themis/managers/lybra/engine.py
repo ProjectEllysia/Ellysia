@@ -1,6 +1,7 @@
 """LybraEngineManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import List, Optional
@@ -43,9 +44,13 @@ from ...lybra import (
     default_script_plugins,
     scan_ports_sync,
     scan_udp_ports_sync,
+    score_finding,
+    build_service_rollup,
+    PRIORITY_LADDER,
 )
 from ...lybra.ingest import select_for_services, translate_all
 from ...services import _Task
+from ...services.cve_context import enrich_with_cve_context
 from ...services.nuclei_templates import NucleiTemplateStore
 from ...exceptions import (
     ScanNotFoundError,
@@ -160,7 +165,7 @@ class LybraEngineManager(ScanManager):
 
         self._task_queue.submit(
             func=LybraEngineManager.execute_lybra_scan, # type: ignore
-            args=(scan_id, discover_ports, services),
+            args=(scan_id, discover_ports, services, timeout),
             name=f"LybraScan-{scan_id}",
             category=self.TASK_CATEGORY, # type: ignore
             external_id=self.external_id_for(scan_id),
@@ -174,33 +179,64 @@ class LybraEngineManager(ScanManager):
     def execute_lybra_scan(
         scan_id: int,
         discover_ports: Optional[list] = None,
-        services: Optional[List[Service]] = None
+        services: Optional[List[Service]] = None,
+        timeout: Optional[int] = None,
     ) -> None:
-        """Entry point submitted to the TaskQueue. Runs the engine in the worker."""
+        """Entry point submitted to the TaskQueue. Runs the engine in the worker.
+
+        ``timeout`` es opcional para que un job encolado antes de este cambio
+        —que viaja con una tupla de tres argumentos— siga ejecutándose tras el
+        despliegue en vez de fallar al deserializarse.
+        """
         with job_context():
             manager = LybraEngineManager()
             manager._run_lybra( # type: ignore
                 scan_id,
                 discover_ports,
                 services,
+                timeout,
             )
+
+    @staticmethod
+    def _remaining_budget(deadline: Optional[float]) -> Optional[float]:
+        """Segundos que quedan hasta ``deadline``, o ``None`` si no hay plazo."""
+        return None if deadline is None else max(0.0, deadline - time.monotonic())
 
     def _run_lybra(
         self,
         scan_id: int,
         discover_ports: Optional[list] = None,
         services_payload: Optional[List[Service]] = None,
+        timeout: Optional[int] = None,
     ) -> None:
         """Resolve services (own discovery or a payload), detect, persist.
 
         This is the testable body of the scan (the ``execute_* seam → _run_*``
         pattern). Runs synchronously; safe to call directly in tests without a
         worker.
+
+        ``timeout`` es el que el usuario escribió en el panel de lanzamiento.
+        Hasta ahora sólo alimentaba el plazo de la cola —un plazo que, por cómo
+        se inyecta, un hilo bloqueado en una llamada al sistema rebasa sin
+        enterarse— y por tanto no limitaba el escaneo de verdad. Ahora abre
+        además un plazo de reloj propio del que come el descubrimiento de
+        puertos.
+
+        ponytail: sólo el descubrimiento TCP consume el presupuesto. Es la fase
+        que puede correr sin cota (barrido ancho contra un objetivo que filtra
+        tráfico) y la que aparecía en el incidente; el fingerprinting y los
+        checks tienen plazo por operación. Si algún día hace falta acotarlos
+        también, el plazo ya está aquí: basta pasarles ``_remaining_budget``.
         """
+        deadline = time.monotonic() + timeout if timeout else None
         source = ServiceSource.build_for_args(services_payload, discover_ports)
         probes = DiscoveryProbes(
             is_host_reachable=self.is_host_reachable,
-            discover_ports=self._discover_ports,
+            # El presupuesto se calcula al llamar, no aquí: para cuando el
+            # descubrimiento arranca ya se han gastado la comprobación de
+            # alcanzabilidad y las consultas de apertura del escaneo.
+            discover_ports=lambda target, ports: self._discover_ports(
+                target, ports, budget_seconds=self._remaining_budget(deadline)),
             discover_udp_ports=self._discover_udp_ports,
         )
         try:
@@ -291,7 +327,12 @@ class LybraEngineManager(ScanManager):
             logger.error(f"Error en escaneo Lybra {scan_id}: {e}", exc_info=True)
             self.update_scan_status(scan_id, ScanStatus.FAILED)
 
-    def _discover_ports(self, target: str, discover_ports) -> Optional[list]:
+    def _discover_ports(
+        self,
+        target: str,
+        discover_ports,
+        budget_seconds: Optional[float] = None,
+    ) -> Optional[list]:
         """Discover open ports with Lybra's own connect scan (Fase T).
 
         Returns ``None`` (not ``[]``) when discovery itself failed unexpectedly,
@@ -308,9 +349,13 @@ class LybraEngineManager(ScanManager):
         Desde L48-c el transporte distingue "todo cerrado" de "no me han
         dejado mirar" y devuelve ``None`` en el segundo caso, que es lo que
         este método siempre esperó recibir.
+
+        Lo mismo vale para ``budget_seconds``: un barrido que se queda sin
+        reloj también llega como ``None``, porque de los puertos que no dio
+        tiempo a mirar no se sabe nada, y no saber no es estar limpio.
         """
         try:
-            discovered = scan_ports_sync(target, discover_ports)
+            discovered = scan_ports_sync(target, discover_ports, budget_seconds=budget_seconds)
         except Exception:
             logger.exception("Lybra port discovery failed for %s", target)
             return None
@@ -691,6 +736,87 @@ class LybraEngineManager(ScanManager):
         view["state"] = finding.state
         return view
 
+    def grouped_findings(self, scan_id: int, user_id: int) -> dict:
+        """Los hallazgos de un escaneo, agrupados por unidad remediable.
+
+        Es lo que la interfaz pide al desplegar la tarjeta de un escaneo, y lo
+        que sustituye a la lista plana de 150 filas que devolvía el listado. Un
+        host con dos productos desactualizados no da 150 trabajos: da dos
+        —subir dos productos— más las cosas de configuración que no pertenecen
+        a ningún producto y se arreglan de otra manera. Esa separación es
+        ``is_product``.
+
+        El enriquecimiento con la KB se hace **aquí y no en el listado** por lo
+        que cuesta: una consulta en bloque por escaneo es barata cuando se
+        pide un escaneo, y son diez consultas por página cuando se pintan diez
+        tarjetas colapsadas de las que el usuario abrirá una.
+
+        Args:
+            scan_id: El escaneo.
+            user_id: Dueño; un escaneo ajeno se reporta como inexistente.
+
+        Returns:
+            Los grupos ya en la forma de la API (camelCase), de más grave a
+            menos, con sus hallazgos dentro.
+        """
+        with UnitOfWork() as uow:
+            assert_owned(ScanRepository, scan_id, user_id, ScanNotFoundError, uow=uow)
+            repo = ScanRepository(uow)
+            scan = repo.get_by_id(scan_id)
+            exposure = self.exposure_for(scan)
+            findings = [self._finding_view_dict(finding)
+                        for finding in repo.get_findings_by_scan(scan_id)]
+
+        for finding in findings:
+            finding["priority"] = score_finding(finding, exposure)
+        enrich_with_cve_context(findings)
+
+        groups = build_service_rollup(findings)
+        return {
+            "scanId": scan_id,
+            "exposure": exposure,
+            "totalFindings": len(findings),
+            "groups": [self._group_to_json(group, exposure) for group in groups],
+        }
+
+    @classmethod
+    def _group_to_json(cls, group, exposure: str) -> dict:
+        """Un :class:`ServiceGroup` en la forma de la API.
+
+        La traducción vive aquí y no en la capa pura porque el prompt del
+        informe necesita otras claves —las suyas, en castellano, que su texto
+        de sistema documenta una por una—. Que cada consumidor traduzca evita
+        que uno le imponga su vocabulario al otro.
+        """
+        return {
+            "label": group.label,
+            "isProduct": group.is_product,
+            "port": group.port,
+            "service": group.service,
+            "totalFindings": group.total_findings,
+            "totalCves": group.total_cves,
+            "cveIds": group.cve_ids,
+            "kevCveIds": group.kev_cve_ids,
+            "maxCvss": group.max_cvss,
+            "maxEpss": group.max_epss,
+            "fixedVersion": group.fixed_version,
+            "confirmedCount": group.confirmed_count,
+            "byPriority": group.by_priority,
+            "priority": cls._worst_priority(group.by_priority),
+            "findings": [finding_to_json(finding, exposure) for finding in group.findings],
+        }
+
+    @staticmethod
+    def _worst_priority(by_priority: dict) -> str:
+        """La prioridad que representa al grupo: la peor que contiene.
+
+        Un grupo se atiende por su peor hallazgo, no por su media: doce avisos
+        informativos junto a un CRITICAL siguen siendo un CRITICAL que hay que
+        mirar hoy.
+        """
+        present = [level for level in reversed(PRIORITY_LADDER) if by_priority.get(level)]
+        return present[0] if present else "INFO"
+
     def set_finding_state(self, finding_id: int, user_id: int, state: str):
         """Set a finding's lifecycle state (e.g. mark a risk as ``accepted``).
 
@@ -752,7 +878,8 @@ class LybraEngineManager(ScanManager):
         """
         repo = build_repository(ScanRepository)
         items, total_count = repo.get_lybra_scans_paginated(user_id, page, per_page, asset_id)
-        return [self.format_scan(item.id, _scan=item) for item in items], total_count
+        return ([self.format_scan(item.id, _scan=item, include_findings=False)
+                 for item in items], total_count)
 
     def latest_findings_by_asset(self, user_id: int, asset_ids: List[int]) -> dict:
         """Hallazgos del último análisis por activo Hygeia, en un par de queries.
@@ -822,7 +949,19 @@ class LybraEngineManager(ScanManager):
             return "private"
         return classify_exposure(scan.target)
 
-    def format_scan(self, scan_id: int, _scan=None) -> dict:
+    def format_scan(self, scan_id: int, _scan=None, include_findings: bool = True) -> dict:  # pylint: disable=arguments-differ
+        """Un escaneo en la forma de la API.
+
+        Args:
+            include_findings: Si la respuesta lleva dentro los hallazgos uno a
+                uno. El listado pasa ``False``: una página de diez escaneos con
+                150 hallazgos cada uno son 1.500 objetos por respuesta, y la
+                interfaz no usa ninguno hasta que el usuario despliega una
+                tarjeta — momento en el que pide
+                ``GET /themis/lybra/scans/<id>/findings``, que además se los da
+                ya agrupados. Los contadores viajan siempre, porque la cabecera
+                de la tarjeta colapsada los necesita.
+        """
         scan = _scan or self.get_scan_by_id(scan_id)
         if not scan:
             raise ScanNotFoundError(scan_id)
@@ -850,14 +989,44 @@ class LybraEngineManager(ScanManager):
             "status": getattr(scan, "status", "unknown"),
             "startedAt": isoformat_utc(scan.started_at),
             "finishedAt": isoformat_utc(scan.finished_at),  # type: ignore
-            "findings": json_findings,
             "totalFindings": len(json_findings),
             "vulnerableFindings": sum(1 for display_finding in display_findings if display_finding.get("category") == "outdated_software"),
             "openFindings": sum(1 for display_finding in display_findings if display_finding.get("state") == "open"),
             "fixedFindings": sum(1 for display_finding in display_findings if display_finding.get("state") == "fixed"),
+            **self._finding_counters(display_findings, json_findings),
         }
+        if include_findings:
+            result["findings"] = json_findings
         self._append_document_info(scan, result)
         return result
+
+    @staticmethod
+    def _finding_counters(display_findings: list, json_findings: list) -> dict:
+        """Los recuentos que la tarjeta colapsada necesita sin abrir el escaneo.
+
+        Los derivaba la interfaz recorriendo la lista completa de hallazgos, que
+        era la razón de que el listado tuviera que mandarla entera. Calcularlos
+        aquí cuesta un recorrido más sobre filas que ya están leídas.
+
+        ``unresolvedPackages`` cuenta los paquetes de inventario que el matcher
+        no pudo resolver ni a un CPE: es lo que distingue "comprobado y limpio"
+        de "ni siquiera supe qué es esto", que en los datos se leen igual.
+        """
+        by_priority: dict = {}
+        for finding in json_findings:
+            priority = finding.get("priority", "INFO")
+            by_priority[priority] = by_priority.get(priority, 0) + 1
+
+        packages = [finding for finding in display_findings
+                    if finding.get("category") == "installed_package"]
+        return {
+            "byPriority": by_priority,
+            "confirmedFindings": sum(1 for finding in display_findings
+                                     if finding.get("confirmed")),
+            "installedPackages": len(packages),
+            "unresolvedPackages": sum(1 for package in packages
+                                      if package.get("cpe_resolved") is False),
+        }
 
     def append_csv_data(self, data: dict, scan: Scan, task: "_Task") -> None:
         """No-op: Lybra does not use the base CSV-logging execution path."""

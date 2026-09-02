@@ -23,6 +23,7 @@ from typing import Dict, Optional
 import src.modules.system.config_reading as CR
 from src.modules.tools.scribe import AIInput, AIGenerator, build_generator, WEB_SEARCH_TOOL
 
+from ..lybra.grouping import build_service_rollup
 from ..model import NmapScan, NiktoScan, LybraScan
 
 
@@ -559,95 +560,31 @@ class LybraAIWriter:
         prompts_config = CR.get_prompts_config()
         return prompts_config.get(self._prompt_key, {}).get("system", "")
 
-    @staticmethod
-    def _group_label(finding: dict) -> str:
-        """Etiqueta de la unidad remediable a la que pertenece el hallazgo.
-
-        Con CPE resuelto la unidad es el producto y su versión ("http server
-        2.4.7"): actualizarlo cierra todos sus CVEs de golpe. Sin CPE —
-        cabeceras ausentes, puertos abiertos, fingerprints— la unidad es la
-        categoría sobre ese servicio, no el hallazgo suelto: las tres cabeceras
-        que faltan en http:80 se arreglan de una sola pasada por la
-        configuración del servidor, así que agruparlas por título produciría
-        tres "productos" de un elemento y desdibujaría el inventario.
-        """
-        from src.modules.features.themis.lybra import parse_cpe23
-
-        parsed = parse_cpe23(finding["cpe"]) if finding.get("cpe") else None
-        if parsed and parsed.get("product"):
-            product = parsed["product"].replace("_", " ")
-            version = parsed.get("version") or ""
-            return f"{product} {version}".strip() if version not in ("*", "-", "") else product
-
-        category = finding.get("category") or "hallazgo"
-        service = finding.get("service") or "servicio"
-        return f"{category} ({service})"
-
     def _build_service_rollup(self, findings: list) -> list:
-        """Resume los hallazgos por servicio afectado.
+        """Resume los hallazgos por servicio afectado, en la forma que el prompt
+        documenta.
 
-        Un host con 151 hallazgos suele ser en realidad dos o tres productos
-        desactualizados. Mandar la lista plana desperdicia el contexto y hace
-        imposible escribir una recomendación concreta; el rollup le da al modelo
-        la unidad sobre la que se actúa de verdad (producto + puerto) junto con
-        la versión a la que hay que subir para cerrar todo el grupo de golpe.
+        La agrupación en sí vive en la capa pura (``lybra/grouping.py``), donde
+        la comparte con la respuesta de la API: estaba aquí dentro, así que el
+        modelo de lenguaje recibía los hallazgos bien organizados y el usuario
+        los recibía en una lista plana. Lo que queda aquí es sólo la traducción
+        a las claves en castellano que el texto de sistema del prompt describe
+        una por una — cambiarlas rompería el contrato con el prompt, y por eso
+        no viajan desde la capa pura.
         """
-        groups: Dict[tuple, dict] = {}
-
-        for finding in findings:
-            key = (finding.get("port"), finding.get("service"), self._group_label(finding))
-            group = groups.setdefault(key, {
-                "producto": key[2],
-                "puerto": finding.get("port"),
-                "servicio": finding.get("service"),
-                "total_hallazgos": 0,
-                "cves": set(),
-                "cves_en_kev": set(),
-                "max_cvss": None,
-                "max_epss": None,
-                "corregido_en": None,
-                "confirmados": 0,
-                "por_prioridad": {},
-            })
-
-            group["total_hallazgos"] += 1
-            group["cves"].update(finding.get("cve_ids") or [])
-            if finding.get("in_kev"):
-                group["cves_en_kev"].update(finding.get("cve_ids") or [])
-            if finding.get("confirmed"):
-                group["confirmados"] += 1
-
-            priority = finding.get("priority", "INFO")
-            group["por_prioridad"][priority] = group["por_prioridad"].get(priority, 0) + 1
-
-            for field, value in (("max_cvss", finding.get("cvss_score")), ("max_epss", finding.get("epss_score"))):
-                if value is not None and (group[field] is None or value > group[field]):
-                    group[field] = value
-
-            # La cota más alta cierra también todas las inferiores del grupo, así
-            # que es la única versión destino que tiene sentido recomendar.
-            fixed = finding.get("fixed_version")
-            if fixed and (group["corregido_en"] is None or self._version_key(fixed) > self._version_key(group["corregido_en"])):
-                group["corregido_en"] = fixed
-
-        rollup = []
-        for group in groups.values():
-            group["total_cves"] = len(group["cves"])
-            group["cves_en_kev"] = sorted(group["cves_en_kev"])
-            del group["cves"]
-            rollup.append(group)
-
-        rollup.sort(key=lambda group: -(group["max_cvss"] or 0))
-        return rollup[:self._MAX_SERVICE_GROUPS]
-
-    @staticmethod
-    def _version_key(version: str) -> tuple:
-        """Ordena versiones tipo '2.4.52' numéricamente, no lexicográficamente.
-
-        Sin esto '2.4.9' saldría por encima de '2.4.52'. Los segmentos no
-        numéricos (p.ej. '1p1') caen a 0: basta para elegir la cota más alta.
-        """
-        return tuple(int(part) if part.isdigit() else 0 for part in str(version).split("."))
+        return [{
+            "producto": group.label,
+            "puerto": group.port,
+            "servicio": group.service,
+            "total_hallazgos": group.total_findings,
+            "cves_en_kev": group.kev_cve_ids,
+            "max_cvss": group.max_cvss,
+            "max_epss": group.max_epss,
+            "corregido_en": group.fixed_version,
+            "confirmados": group.confirmed_count,
+            "por_prioridad": group.by_priority,
+            "total_cves": group.total_cves,
+        } for group in build_service_rollup(findings, max_groups=self._MAX_SERVICE_GROUPS)]
 
     def _sort_key(self, finding: dict) -> tuple:
         """Mismo criterio de orden que las fichas del PDF (findings.py)."""
