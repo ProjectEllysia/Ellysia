@@ -13,7 +13,8 @@
     "test:toast": "node test/toastStore.test.mjs",
     "test:quiz": "node test/aegis.quizShuffle.test.mjs",
     "test:logs": "node test/logTransport.test.mjs",
-    "test:iris": "node test/iris.intake.test.mjs"
+    "test:iris": "node test/iris.intake.test.mjs",
+    "test:themis": "node test/themis.scanWindow.test.mjs"
   },
   "dependencies": {
     "hash-wasm": "^4.12.0",

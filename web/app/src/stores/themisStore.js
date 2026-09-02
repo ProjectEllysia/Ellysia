@@ -7,6 +7,7 @@ import { useUtils } from '@/composables/useUtils'
 import { useToastStore } from '@/stores/toastStore'
 import { useThemisFoldersStore } from '@/stores/themisFoldersStore'
 import { useThemisHistoryStore } from '@/stores/themisHistoryStore'
+import { scanWindow, canRevealMore } from '@/stores/scanWindow'
 
 /**
  * Store de Themis — gestiona escaneos, estadísticas, modales y documentos.
@@ -46,15 +47,15 @@ export const useThemisStore = defineStore('themis', () => {
 
   /* ════════════════════════════════ SCANS POR TIPO ═════════════════════ */
   const scans = reactive({
-    nmap:    { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
-    nikto:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
-    lybra:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
-    nuclei:  { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
+    nmap:    { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, loadedPages: 1, error: null },
+    nikto:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, loadedPages: 1, error: null },
+    lybra:   { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, loadedPages: 1, error: null },
+    nuclei:  { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, loadedPages: 1, error: null },
     // Fase I: los escaneos del activo Hygeia seleccionado. Mismo tipo de
     // escaneo que `lybra` y misma forma de estado —por eso `LybraResults` se
     // reutiliza tal cual—, pero su propia lista: el backend los sirve por
     // separado (`assetId`) y jamás los mezcla con los del panel.
-    agentLybra: { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null },
+    agentLybra: { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, loadedPages: 1, error: null },
   })
 
   // Escaneos Nmap terminados, para el modo "analizar un Nmap existente" de Lybra.
@@ -194,7 +195,13 @@ export const useThemisStore = defineStore('themis', () => {
     }
     d.loading = true
     try {
-      const params = _scanQuery(type, d.page, d.perPage)
+      // La ventana, no la página suelta: si el usuario ha revelado tres
+      // páginas con "ver más", refrescar tiene que devolverle las tres. Antes
+      // se pedía `d.page` —que "ver más" había dejado en 3— y se reemplazaba
+      // la lista con ella, así que un sondeo automático le dejaba en pantalla
+      // diez escaneos donde tenía treinta, y encima los más antiguos.
+      const window = scanWindow(d)
+      const params = _scanQuery(type, window.page, window.perPage)
       const res = await apiFetch(`/themis/results?${params}`)
       if (!res?.ok) {
         d.results = []
@@ -219,6 +226,7 @@ export const useThemisStore = defineStore('themis', () => {
     activeTab.value = type
     const d = _scandata(type)
     d.page = 1
+    d.loadedPages = 1
     loadScans(type)
   }
 
@@ -232,6 +240,10 @@ export const useThemisStore = defineStore('themis', () => {
   function goToPage(type, page) {
     const d = _scandata(type)
     d.page = page
+    // Navegar a una página concreta y revelar páginas con "ver más" son dos
+    // formas de recorrer la lista que no se mezclan: entrar por aquí vuelve a
+    // la ventana de una página.
+    d.loadedPages = 1
     loadScans(type)
   }
 
@@ -257,26 +269,24 @@ export const useThemisStore = defineStore('themis', () => {
   }
 
   /**
-   * "Ver más": añade la siguiente página de escaneos Lybra a la lista ya
-   * cargada (en vez de reemplazarla, como hace loadScans/goToPage) — el
-   * listado de veredictos crece hacia abajo sin perder el scroll ni el
-   * estado expandido de las tarjetas ya visibles.
+   * "Ver más": revela una página más de escaneos Lybra — el listado de
+   * veredictos crece hacia abajo sin perder el estado expandido de las
+   * tarjetas ya visibles (que vive en `LybraResults`, indexado por id de
+   * escaneo, y por tanto sobrevive a que la lista se vuelva a pintar).
+   *
+   * Antes esto pedía la página siguiente y la concatenaba, avanzando `d.page`.
+   * Ese avance era el fallo: `loadScans` lee el mismo campo entendiendo que es
+   * la única página a mostrar, así que el siguiente refresco reemplazaba los
+   * treinta escaneos en pantalla por los diez de la tercera página. Ahora sólo
+   * se agranda la ventana y se recarga con la ruta normal — una petición, sin
+   * dos caminos que puedan divergir, y sin el duplicado que aparecía cuando
+   * entraba un escaneo nuevo entre una página y la siguiente.
    */
   async function loadMoreLybraScans(type = 'lybra') {
     const d = _scandata(type)
-    if (d.loading || d.results.length >= d.totalCount) return
-    d.loading = true
-    try {
-      const nextPage = d.page + 1
-      const res = await apiFetch(`/themis/results?${_scanQuery(type, nextPage, d.perPage)}`)
-      if (!res?.ok) return
-      const data = await res.json()
-      d.results = [...d.results, ...(data.results ?? [])]
-      d.totalCount = data.totalCount ?? d.totalCount
-      d.page = nextPage
-    } finally {
-      d.loading = false
-    }
+    if (d.loading || !canRevealMore(d)) return
+    d.loadedPages += 1
+    await loadScans(type)
   }
 
   /* ── AGENTES (Fase I: escaneos nacidos del inventario de Hygeia) ── */
@@ -290,6 +300,7 @@ export const useThemisStore = defineStore('themis', () => {
     selectedAssetId.value = assetId
     const d = scans.agentLybra
     d.page = 1
+    d.loadedPages = 1
     d.results = []
     d.totalCount = 0
     if (assetId) loadScans('agentLybra')
@@ -414,7 +425,10 @@ export const useThemisStore = defineStore('themis', () => {
       if (d.results.length === 0 && d.totalCount > 0 && d.page > 1) {
         d.page--
         await loadScans(activeTab.value)
-      } else if (d.results.length < d.perPage && d.totalCount > d.page * d.perPage) {
+      } else if (d.results.length < scanWindow(d).perPage
+                 && d.totalCount > d.page * scanWindow(d).perPage) {
+        // Contra el tamaño de la ventana revelada, no contra el de una página:
+        // borrar un escaneo de una lista de treinta debe rellenar el hueco.
         await loadScans(activeTab.value)
       }
     }
@@ -787,7 +801,7 @@ export const useThemisStore = defineStore('themis', () => {
     statsError.value = null
 
     for (const type of ['nmap', 'nikto', 'lybra', 'nuclei', 'agentLybra']) {
-      Object.assign(scans[type], { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, error: null })
+      Object.assign(scans[type], { results: [], loading: false, page: 1, totalCount: 0, perPage: 10, loadedPages: 1, error: null })
     }
 
     Object.assign(authorizedTargets, { items: [], loading: false, error: null })
