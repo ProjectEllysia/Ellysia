@@ -346,6 +346,112 @@ def test_every_declared_version_source_has_a_confidence_and_a_qod():
     assert set(VERSION_SOURCES) == set(VERSION_SOURCE_QOD)
 
 
+# ============================ capas de servidor: proxy y origen (L48-b)
+#
+# Contra objetivos reales, cinco servicios en tres hosts daban siempre el mismo
+# patrón: Lybra decía `nginx`, Nmap decía `Apache httpd`. Ninguno de los dos
+# estaba equivocado — describían capas distintas de la misma pila, y el modelo
+# de un solo `product` no podía expresarlo.
+
+_APACHE_ERROR_PAGE = "<address>Apache/2.4.57 (Debian) Server at x Port 80</address>"
+
+
+def test_a_plain_server_reports_a_single_layer():
+    """El caso normal no cambia: un servidor pelado es una sola capa."""
+    fp = fingerprint_http(Response(200, "<html></html>", {"server": "Apache/2.4.57"}))
+    assert len(fp.layers) == 1
+    assert (fp.layers[0].product, fp.layers[0].role) == ("Apache", "edge")
+
+
+def test_a_reverse_proxy_in_front_of_a_different_server_reports_two_layers():
+    home = Response(200, "<html>Hola</html>", {"server": "nginx"})
+    error = Response(404, _APACHE_ERROR_PAGE, {})
+    fp = fingerprint_http(home, error_resp=error)
+    assert [(layer.product, layer.role) for layer in fp.layers] == [
+        ("nginx", "edge"), ("Apache", "origin"),
+    ]
+
+
+def test_the_edge_is_whoever_wrote_the_server_header_not_whoever_had_a_version():
+    """El error que este modelo podría cometer y no comete.
+
+    En la topología medida, es el **origen** quien trae versión (la firma de su
+    página de error) y el proxy quien no. Si el rol se decidiera por quién gana
+    la cascada de versión, el diagnóstico saldría del revés: diría que el
+    Apache está delante porque su versión se leyó mejor.
+    """
+    home = Response(200, "<html>Hola</html>", {"server": "nginx"})
+    error = Response(404, _APACHE_ERROR_PAGE, {})
+    fp = fingerprint_http(home, error_resp=error)
+    assert fp.layers[0].product == "nginx" and fp.layers[0].version is None
+    assert fp.layers[1].product == "Apache" and fp.layers[1].version == "2.4.57"
+
+
+def test_a_proxy_header_is_enough_evidence_even_without_a_known_proxy_name():
+    home = Response(200, "<html>Hola</html>",
+                    {"server": "Bespoke-Server", "via": "1.1 varnish"})
+    error = Response(404, _APACHE_ERROR_PAGE, {})
+    fp = fingerprint_http(home, error_resp=error)
+    assert [layer.role for layer in fp.layers] == ["edge", "origin"]
+
+
+def test_an_application_behind_a_server_is_not_a_second_server_layer():
+    """La condición que evita el ruido: un WordPress detrás de un nginx no son
+    dos capas de servidor, son el servidor y lo que sirve."""
+    body = ('<html><head><meta name="generator" content="WordPress 6.4.2" /></head>'
+            "<body>wp-content</body></html>")
+    fp = fingerprint_http(Response(200, body, {"server": "nginx/1.24.0"}))
+    assert len(fp.layers) == 1
+    assert fp.layers[0].product == "nginx"
+    assert "WordPress" in fp.technologies
+
+
+def test_two_readings_of_the_same_server_are_one_layer():
+    home = Response(200, "<html></html>", {"server": "nginx/1.24.0"})
+    error = Response(404, "<center>nginx/1.24.0</center>", {})
+    fp = fingerprint_http(home, error_resp=error)
+    assert len(fp.layers) == 1
+
+
+def test_the_dissector_reports_the_layer_that_product_is_not_carrying():
+    """`product`/`version` sólo tiene sitio para una capa; la otra viaja aparte
+    para que el hallazgo la muestre y sus CVEs se busquen."""
+    class _Probe:
+        def fetch(self, host, port, method, path):
+            if "nonexistent" in path:
+                return Response(404, _APACHE_ERROR_PAGE, {})
+            return Response(200, "<html>Hola</html>", {"server": "nginx", "via": "1.1 v"})
+
+        def fetch_bytes(self, host, port, path):
+            return None
+
+    class _NullLimiter:
+        def acquire(self, host):
+            pass
+
+    from src.modules.features.themis.lybra.fingerprinting.http import HttpDissector
+
+    result = HttpDissector(probe=_Probe()).probe(
+        "10.0.0.5", Service(80, "tcp", "http"), _NullLimiter())
+    assert (result.product, result.version) == ("Apache", "2.4.57")
+    assert result.extra_layers == (("nginx", None, "edge"),)
+
+
+def test_the_manager_emits_one_finding_per_extra_layer():
+    service = Service(port=80, protocol="tcp", name="http", product="", version="")
+    result = DissectorResult("Apache", "2.4.57", "HTTP", qod=60,
+                             extra_layers=(("nginx", None, "edge"),))
+    findings = LybraEngineManager._layer_findings(service, result)
+    assert len(findings) == 1
+    assert findings[0]["title"] == "Fingerprint propio (HTTP edge): nginx"
+
+
+def test_a_single_layer_result_emits_no_extra_findings():
+    service = Service(port=80, protocol="tcp", name="http", product="", version="")
+    result = DissectorResult("Apache", "2.4.57", "HTTP")
+    assert LybraEngineManager._layer_findings(service, result) == []
+
+
 # ================================================================ SSH banner
 
 @pytest.mark.parametrize("banner,product,version", [

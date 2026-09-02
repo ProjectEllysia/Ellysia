@@ -69,12 +69,56 @@ def agrees_with_nmap(
     """
     if not product or not nmap_product:
         return False
-    p, np = product.lower(), nmap_product.lower()
-    if p not in np and np not in p:
+    if not _products_agree(product, nmap_product):
         return False
     if version and nmap_version and not _versions_agree(version, nmap_version):
         return False
     return True
+
+
+def _products_agree(product: str, nmap_product: str) -> bool:
+    """Return whether two product names refer to the same software."""
+    product, nmap_product = product.lower(), nmap_product.lower()
+    return product in nmap_product or nmap_product in product
+
+
+def agrees_with_nmap_across_layers(
+    layers: Iterable[Tuple[Optional[str], Optional[str]]],
+    nmap_product: Optional[str], nmap_version: Optional[str],
+) -> bool:
+    """Decide whether **any** layer of our reading agrees with Nmap's.
+
+    Esta variante existe por un desacuerdo que resultó no serlo (L48-b). Contra
+    objetivos reales, cinco servicios en tres hosts daban siempre el mismo
+    patrón: Lybra decía ``nginx``, Nmap decía ``Apache httpd``. La lectura más
+    probable —y la que el catálogo de laboratorio ahora reproduce— es un nginx
+    haciendo de proxy inverso por delante de un Apache.
+
+    **Ninguna de las dos herramientas estaba equivocada.** Describían capas
+    distintas de la misma pila: Lybra leía la cabecera ``Server``, que la pone
+    el de delante; Nmap, con sus sondas adicionales, llegaba al de detrás.
+    Contarlo como fallo medía qué capa mira cada herramienta, no si el motor
+    identifica bien.
+
+    Ésta es la justificación escrita que el criterio de cierre del issue pide
+    para ajustar la métrica. Y el ajuste es acotado a propósito: **no** basta
+    con que una capa coincida en nombre si su versión contradice a la de Nmap,
+    porque entonces sí hay un desacuerdo real; y una capa sólo cuenta si Lybra
+    la observó de verdad, no si la lista se rellena por si acaso.
+
+    Args:
+        layers: Los pares ``(producto, versión)`` de cada capa que Lybra
+            identificó en el servicio, de borde a origen.
+        nmap_product: El producto que Nmap reporta para el mismo servicio.
+        nmap_version: Su versión.
+
+    Returns:
+        ``True`` si alguna capa concuerda con la lectura de Nmap.
+    """
+    return any(
+        agrees_with_nmap(product, version, nmap_product, nmap_version)
+        for product, version in layers
+    )
 
 
 def concordance_rate(pairs: Iterable[Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]]) -> float:

@@ -69,6 +69,10 @@ class HttpFingerprint:  # pylint: disable=too-many-instance-attributes
             la convención pública), o ``None``. Es el que se busca en
             ``feeds/favicon_hashes.json``; ver ``fingerprinting/favicon.py``
             para por qué se guardan los dos.
+        layers: Todas las capas de servidor observadas en el puerto, no sólo la
+            que ``product`` reporta (ver :class:`ServiceLayer`). Tiene una sola
+            entrada en el caso normal y dos cuando hay un proxy inverso
+            delante de un servidor distinto.
         technologies: A tuple of technology names matched by signature.
         confidence: A 0.0-1.0 self-assessed confidence in the identification.
         version_source: De qué nivel de la cascada salió la versión (uno de
@@ -86,6 +90,40 @@ class HttpFingerprint:  # pylint: disable=too-many-instance-attributes
     confidence: float
     version_source: Optional[str] = None
     favicon_catalog_hash: Optional[int] = None
+    layers: Tuple[ServiceLayer, ...] = ()
+
+
+@dataclass(frozen=True)
+class ServiceLayer:
+    """Una de las capas de software que atienden un mismo puerto.
+
+    Un servicio HTTP no es siempre **un** programa. La topología más corriente
+    que existe —un nginx haciendo de proxy inverso por delante de un Apache— son
+    dos, y el modelo anterior (``product`` + ``version``, uno y sólo uno) no
+    podía expresarlo: se quedaba con lo que dijera la cabecera ``Server``, que
+    la pone el de delante.
+
+    Eso salió caro en la medición real (L48-b): cinco servicios en tres hosts,
+    siempre el mismo patrón — Lybra decía ``nginx``, Nmap decía ``Apache
+    httpd``. **Ninguno de los dos estaba equivocado**; describían capas
+    distintas de la misma pila. Pero para resolver un CPE y correlacionar CVEs
+    la diferencia es enorme: buscar vulnerabilidades de nginx en un host cuyo
+    servidor real es Apache produce falsos negativos por un lado y falsos
+    positivos por el otro.
+
+    Attributes:
+        product: El producto de esta capa.
+        version: Su versión, si se leyó.
+        role: ``"edge"`` para lo que contesta en el puerto (lo que la cabecera
+            ``Server`` nombra) y ``"origin"`` para lo que se deduce que hay
+            detrás. Es una descripción de dónde se observó, no una jerarquía de
+            importancia: las dos capas están expuestas y las dos tienen CVEs.
+        source: El nivel de la cascada del que salió (:data:`VERSION_SOURCES`).
+    """
+    product: str
+    version: Optional[str]
+    role: str
+    source: str
 
 
 @dataclass(frozen=True)
@@ -576,6 +614,125 @@ def _version_readings(
     return [reading for reading in readings if reading is not None]
 
 
+# Productos que son servidores HTTP, no aplicaciones. Sólo entre dos de éstos
+# tiene sentido hablar de "proxy delante de un origen": un WordPress detectado
+# junto a un nginx no son dos capas de servidor, son el servidor y lo que sirve.
+_SERVER_PRODUCTS = (
+    "nginx", "apache", "apache tomcat", "tomcat", "microsoft-iis", "iis",
+    "lighttpd", "openresty", "caddy", "jetty", "gunicorn", "cherokee",
+    "litespeed", "haproxy", "varnish", "envoy", "traefik", "squid",
+)
+
+# Cabeceras cuya sola presencia delata que hay un intermediario. No identifican
+# el origen —para eso hace falta una lectura de producto— pero sí confirman que
+# la respuesta ha pasado por más de una mano, y eso decide si dos lecturas
+# distintas son "dos capas" o "una lectura equivocada".
+_PROXY_EVIDENCE_HEADERS = (
+    "via", "x-cache", "x-cache-hits", "x-varnish", "x-proxy-cache",
+    "cf-ray", "x-served-by", "x-forwarded-server", "x-backend-server",
+)
+
+
+# Los productos de la lista anterior que además se despliegan habitualmente
+# **por delante** de otro servidor. Que el borde sea uno de éstos es, por sí
+# solo, evidencia de que puede haber algo detrás.
+_PROXY_PRODUCTS = ("nginx", "haproxy", "varnish", "envoy", "traefik",
+                   "squid", "openresty", "caddy")
+
+
+def _is_known_proxy(product: Optional[str]) -> bool:
+    """Si un producto se despliega habitualmente como proxy inverso."""
+    lowered = (product or "").lower()
+    return any(proxy in lowered for proxy in _PROXY_PRODUCTS)
+
+
+def _is_server_product(product: Optional[str]) -> bool:
+    """Si un nombre de producto es un servidor HTTP y no una aplicación."""
+    lowered = (product or "").lower()
+    return any(server in lowered for server in _SERVER_PRODUCTS)
+
+
+def _same_product(first: Optional[str], second: Optional[str]) -> bool:
+    """Si dos nombres se refieren al mismo producto.
+
+    Comparación por solapamiento de subcadena, igual que hace el arnés de
+    concordancia: "Apache" y "Apache Tomcat" no son lo mismo, pero "nginx" y
+    "nginx" escritos con distinta caja sí.
+    """
+    if not first or not second:
+        return False
+    first, second = first.lower(), second.lower()
+    return first in second or second in first
+
+
+def _detect_layers(
+    response: Response,
+    readings: List[VersionReading],
+    chosen: Optional[ServiceLayer],
+) -> Tuple[ServiceLayer, ...]:
+    """Reconoce las capas de servidor que atienden el puerto.
+
+    **El rol de una capa lo decide dónde se observó, no cuál gana la versión.**
+    La capa de borde es siempre la que nombra la cabecera ``Server``: es
+    literalmente quien ha escrito la respuesta. Lo que se deduce por cualquier
+    otra vía —una página de error sin personalizar, una cabecera de plataforma—
+    es el origen, aunque su lectura sea la más completa de las dos. Confundir
+    esto daría exactamente la vuelta al diagnóstico: diría que el Apache está
+    delante porque su versión se leyó mejor.
+
+    Una segunda capa se declara sólo cuando se cumplen las dos condiciones:
+
+    1. Alguna otra fuente nombra un **servidor** distinto. Una aplicación
+       identificada por firma no cuenta: un WordPress detrás de un nginx no son
+       dos capas de servidor, son el servidor y lo que sirve.
+    2. Hay evidencia de intermediario — o la cabecera ``Server`` nombra un
+       proxy conocido, o la respuesta trae alguna cabecera que sólo pone un
+       intermediario.
+
+    Sin la segunda condición esto degeneraría en declarar una capa nueva cada
+    vez que dos fuentes discrepan, que es justo el ruido que se quiere evitar.
+
+    Args:
+        response: La respuesta a ``GET /``.
+        readings: Las lecturas de la cascada.
+        chosen: La capa que ``_resolve_identity`` eligió reportar, si hay.
+
+    Returns:
+        Las capas observadas, la de borde primero. Vacía si no se identificó
+        ningún producto.
+    """
+    if chosen is None:
+        return ()
+
+    # Quien escribe la cabecera ``Server`` **es** el borde, se reconozca su
+    # nombre o no: un producto a medida sigue siendo lo que contesta en el
+    # puerto. La lista de servidores conocidos sólo filtra al candidato a
+    # origen, más abajo, donde sí hace falta distinguir un servidor de una
+    # aplicación.
+    edge = next(
+        (reading for reading in readings if reading.source == "server-header"),
+        None,
+    )
+    if edge is None:
+        return (chosen,)
+
+    origin = next(
+        (reading for reading in readings
+         if reading.source != "server-header"
+         and _is_server_product(reading.product)
+         and not _same_product(reading.product, edge.product)),
+        None,
+    )
+    has_proxy_header = any(response.headers.get(name) for name in _PROXY_EVIDENCE_HEADERS)
+    if origin is None or not (has_proxy_header or _is_known_proxy(edge.product)):
+        return (chosen,)
+
+    return (
+        ServiceLayer(edge.product, edge.version, "edge", edge.source),
+        ServiceLayer(origin.product, origin.version, "origin", origin.source),
+    )
+
+
 def _resolve_identity(
     readings: List[VersionReading],
     body: str,
@@ -610,7 +767,7 @@ def _resolve_identity(
     return product, None, 0.6, None
 
 
-def fingerprint_http(
+def fingerprint_http(  # pylint: disable=too-many-locals
     response: Response,
     favicon: Optional[bytes] = None,
     error_resp: Optional[Response] = None,
@@ -638,6 +795,11 @@ def fingerprint_http(
     Returns:
         An :class:`HttpFingerprint`.
     """
+    # Muchas variables locales, y a propósito: cada una es una lectura distinta
+    # de la misma respuesta, y sacarlas a funciones aparte obligaría a volver a
+    # pasarles la respuesta entera para no ganar nada. El trabajo pesado —la
+    # cascada y la elección— ya vive fuera, en _version_readings y
+    # _resolve_identity.
     title = _extract_title(response.body)
     evidence = _tech_evidence(response, title, error_resp)
     candidates = (_signature_hit(signature, evidence) for signature in _TECH_SIGNATURES)
@@ -645,11 +807,15 @@ def fingerprint_http(
     technologies = tuple(hit.name for hit in hits)
     favicon_digest = hashlib.sha256(favicon).hexdigest() if favicon else None
 
-    product, version, confidence, version_source = _resolve_identity(
-        _version_readings(response, hits, error_resp), response.body,
-    )
+    readings = _version_readings(response, hits, error_resp)
+    product, version, confidence, version_source = _resolve_identity(readings, response.body)
 
-    catalog_hash = favicon_hash_value(favicon) if favicon else None
+    edge = (
+        ServiceLayer(product, version, "edge", version_source or "server-header")
+        if product else None
+    )
+    layers = _detect_layers(response, readings, edge)
+
     if not product:
         # Última red: el icono. Sólo se consulta cuando ninguna otra fuente ha
         # nombrado el producto — un favicon identifica producto y casi nunca
@@ -663,7 +829,8 @@ def fingerprint_http(
         product=product, version=version, title=title,
         favicon_hash=favicon_digest, technologies=technologies,
         confidence=confidence, version_source=version_source,
-        favicon_catalog_hash=catalog_hash,
+        favicon_catalog_hash=favicon_hash_value(favicon) if favicon else None,
+        layers=layers,
     )
 
 
@@ -721,4 +888,14 @@ class HttpDissector(Dissector):
             fingerprint.version,
             self.label,
             qod=VERSION_SOURCE_QOD.get(fingerprint.version_source or "", QOD_FINGERPRINT),
+            # Sólo las capas que product/version no está ya reportando. Cuál
+            # de las dos gana ese sitio lo decide la cascada de versión, no el
+            # rol: en la topología medida en real es el origen quien trae
+            # versión y el proxy quien no, así que la capa "sobrante" puede ser
+            # cualquiera de las dos.
+            extra_layers=tuple(
+                (layer.product, layer.version, layer.role)
+                for layer in fingerprint.layers
+                if not _same_product(layer.product, fingerprint.product)
+            ),
         )

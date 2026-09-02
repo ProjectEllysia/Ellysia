@@ -38,11 +38,17 @@ class DissectorResult:
             todos los dissectors usaban y lo que sigue valiendo para los que
             leen una sola fuente. El de HTTP sí distingue —su versión puede
             venir de seis sitios de calidad muy distinta— y lo aprovecha (L18).
+        extra_layers: Las capas de servidor **adicionales** observadas en el
+            mismo puerto, como tuplas ``(producto, versión, rol)``. Vacía en el
+            caso normal, un elemento cuando hay un proxy inverso por delante de
+            un servidor distinto (L48-b). La primera capa no aparece aquí: ya
+            viaja en ``product``/``version``.
     """
     product: Optional[str]
     version: Optional[str]
     label: str
     qod: int = QOD_FINGERPRINT
+    extra_layers: tuple = ()
 
 
 class Dissector:
