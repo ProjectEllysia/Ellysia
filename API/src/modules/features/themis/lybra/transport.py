@@ -29,6 +29,14 @@ The event loop is created and torn down entirely inside :func:`scan_ports_sync`
 — the "asyncio island". It lives within a single synchronous worker call and
 never touches the Flask process or an ORM session. The connection opener is
 injectable, so the scanner can be tested without opening real sockets.
+
+**Un barrido vacío y un barrido bloqueado no son lo mismo** (L48-c). Un
+objetivo que deja de contestar a mitad de camino —él mismo, o un cortafuegos
+por delante— produce un plazo agotado en cada puerto, y sumarlos daba una
+lista vacía indistinguible de un host genuinamente limpio. Por eso el barrido
+clasifica cada intento (:class:`PortOutcome`), lo reporta entero
+(:class:`PortSweep`) y ``scan_ports_sync`` devuelve ``None`` cuando nada
+contestó de ninguna forma.
 """
 
 from __future__ import annotations
@@ -36,7 +44,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
-from typing import Callable, Dict, Iterable, List, Optional
+import time
+from dataclasses import dataclass
+from enum import Enum
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from .engine import Service
 
@@ -67,6 +78,86 @@ DEFAULT_PORTS: tuple = tuple(sorted(WELL_KNOWN_PORTS)) + (
 )
 
 
+# Número mínimo de puertos que hace falta barrer para que "todos expiraron"
+# signifique algo. Con una lista de tres puertos, que los tres agoten el plazo
+# es perfectamente posible en una red lenta; con sesenta y cuatro, no lo es.
+# Por debajo de este umbral, un barrido mudo se reporta como vacío y no como
+# fallo — preferimos callar antes que inventar un fallo que no está.
+BLOCKED_SWEEP_MIN_PORTS = 8
+
+
+class PortOutcome(Enum):
+    """En qué terminó el intento de conexión a un puerto.
+
+    El escáner tenía un solo bit —abierto o no— y esa era exactamente la
+    información que le faltaba al motor. Un puerto *rechazado* (RST) y un
+    puerto que *no contesta* se cuentan igual de cerrados en el resultado
+    final, pero significan cosas opuestas sobre el objetivo: el primero
+    demuestra que el host está vivo y contestando, el segundo no demuestra
+    nada. Distinguirlos es lo que permite reconocer un barrido bloqueado (ver
+    :class:`PortSweep`).
+    """
+
+    OPEN = "open"
+    REFUSED = "refused"
+    TIMED_OUT = "timed_out"
+    UNREACHABLE = "unreachable"
+
+
+@dataclass(frozen=True)
+class PortSweep:
+    """El resultado completo de un barrido, no sólo los puertos abiertos.
+
+    ``scan_ports_sync`` devolvía una lista, y una lista vacía es una respuesta
+    legítima: "aquí no hay nada expuesto". El problema es que también es lo que
+    devuelve un barrido que el objetivo bloqueó a mitad de camino, y las dos
+    cosas llegan al motor indistinguibles. La consecuencia no es sólo un
+    informe incompleto: el ciclo de vida compara con el escaneo anterior y pasa
+    a ``fixed`` todo lo que estaba abierto y ya no aparece, así que un barrido
+    bloqueado le dice al usuario que sus vulnerabilidades fueron remediadas.
+
+    Este objeto lleva el detalle que permite hacer la distinción; quien la usa
+    es :attr:`is_blocked`.
+
+    Attributes:
+        open_ports: Los puertos que aceptaron la conexión.
+        refused_ports: Los que la rechazaron activamente (RST) — prueba de que
+            el host está vivo.
+        timed_out_ports: Los que agotaron el plazo sin contestar nada.
+        unreachable_ports: Los que fallaron por un error de red distinto de
+            los dos anteriores (host inalcanzable, red caída).
+        was_cancelled: Si el barrido se abandonó por cancelación, en cuyo caso
+            los puertos no probados no aparecen en ninguna lista y el barrido
+            nunca se considera bloqueado.
+    """
+
+    open_ports: Tuple[int, ...]
+    refused_ports: Tuple[int, ...]
+    timed_out_ports: Tuple[int, ...]
+    unreachable_ports: Tuple[int, ...]
+    was_cancelled: bool = False
+
+    @property
+    def is_blocked(self) -> bool:
+        """Si el barrido parece bloqueado en vez de limpio.
+
+        La firma de un bloqueo transitorio —el objetivo, o un dispositivo
+        intermedio, deja de contestar tras una ráfaga de conexiones— es que
+        **nada** contestó de ninguna forma: ni un puerto abierto, ni un solo
+        RST, sólo plazos agotados. Contra un host con latencia normal eso no
+        es un resultado plausible, y es justo la señal que el escáner tenía
+        delante y tiraba.
+
+        Un barrido cancelado nunca cuenta como bloqueado: se dejó a medias a
+        propósito.
+        """
+        if self.was_cancelled:
+            return False
+        if self.open_ports or self.refused_ports:
+            return False
+        return len(self.timed_out_ports) >= BLOCKED_SWEEP_MIN_PORTS
+
+
 class AsyncConnectScanner:
     """A concurrent, unprivileged TCP connect scanner.
 
@@ -93,6 +184,48 @@ class AsyncConnectScanner:
         self._timeout = timeout
         self._opener = opener or asyncio.open_connection
 
+    async def sweep(
+        self,
+        host: str,
+        ports: Iterable[int],
+        cancel_check: Optional[Callable[[], bool]] = None
+    ) -> PortSweep:
+        """Barrer los puertos de un host y clasificar cómo terminó cada intento.
+
+        Args:
+            host: El objetivo (IP o nombre).
+            ports: Los puertos a probar.
+            cancel_check: Callable opcional, consultado antes de cada sonda; si
+                devuelve ``True`` se omiten las restantes.
+
+        Returns:
+            El :class:`PortSweep` con cada puerto en la lista de su desenlace.
+        """
+        semaphore = asyncio.Semaphore(self._concurrency)
+        outcomes: Dict[int, PortOutcome] = {}
+        was_cancelled = False
+
+        async def probe(port: int) -> None:
+            nonlocal was_cancelled
+            if cancel_check and cancel_check():
+                was_cancelled = True
+                return
+            async with semaphore:
+                outcomes[port] = await self._probe_outcome(host, port)
+
+        await asyncio.gather(*(probe(port) for port in ports))
+
+        def ports_with(outcome: PortOutcome) -> Tuple[int, ...]:
+            return tuple(sorted(port for port, result in outcomes.items() if result is outcome))
+
+        return PortSweep(
+            open_ports=ports_with(PortOutcome.OPEN),
+            refused_ports=ports_with(PortOutcome.REFUSED),
+            timed_out_ports=ports_with(PortOutcome.TIMED_OUT),
+            unreachable_ports=ports_with(PortOutcome.UNREACHABLE),
+            was_cancelled=was_cancelled,
+        )
+
     async def scan(
         self,
         host: str,
@@ -100,6 +233,9 @@ class AsyncConnectScanner:
         cancel_check: Optional[Callable[[], bool]] = None
     ) -> List[int]:
         """Scan a host's ports and return which ones are open.
+
+        The thin view over :meth:`sweep` for callers that only want the open
+        ports and have no use for how the rest failed.
 
         Args:
             host: The target host (IP or hostname).
@@ -110,39 +246,70 @@ class AsyncConnectScanner:
         Returns:
             The open ports, sorted ascending.
         """
-        semaphore = asyncio.Semaphore(self._concurrency)
-        open_ports: List[int] = []
+        sweep = await self.sweep(host, ports, cancel_check=cancel_check)
+        return list(sweep.open_ports)
 
-        async def probe(port: int) -> None:
-            if cancel_check and cancel_check():
-                return
-            async with semaphore:
-                if await self._is_open(host, port):
-                    open_ports.append(port)
+    async def _probe_outcome(self, host: str, port: int) -> PortOutcome:
+        """Intentar una conexión y decir en qué terminó, cerrándola limpiamente.
 
-        await asyncio.gather(*(probe(port) for port in ports))
-        return sorted(open_ports)
-
-    async def _is_open(self, host: str, port: int) -> bool:
-        """Return whether a single port accepts a connection, closing it cleanly.
-
-        Any connection error or timeout is taken to mean "closed"; the socket is
-        always closed afterwards on a best-effort basis.
+        Los tres desenlaces se distinguen porque significan cosas distintas
+        sobre el objetivo, no sobre el puerto: ver :class:`PortOutcome`.
         """
         try:
             _, writer = await asyncio.wait_for(self._opener(host, port), self._timeout)
-        except (OSError, asyncio.TimeoutError):
-            return False
+        except asyncio.TimeoutError:
+            return PortOutcome.TIMED_OUT
+        except ConnectionRefusedError:
+            return PortOutcome.REFUSED
+        except OSError:
+            return PortOutcome.UNREACHABLE
         except Exception as err:  # noqa: BLE001 - unexpected opener error: treat as closed
             logger.debug("connect probe error for %s:%s: %s", host, port, err)
-            return False
+            return PortOutcome.UNREACHABLE
         finally:
             try:
                 writer.close()
                 await writer.wait_closed()
             except Exception:  # noqa: BLE001 - close is best-effort
                 pass
-        return True
+        return PortOutcome.OPEN
+
+    async def _is_open(self, host: str, port: int) -> bool:
+        """Return whether a single port accepts a connection.
+
+        Kept as the boolean view over :meth:`_probe_outcome` — any connection
+        error or timeout means "not open".
+        """
+        return await self._probe_outcome(host, port) is PortOutcome.OPEN
+
+
+def sweep_ports_sync(
+    host: str,
+    ports: Optional[Iterable[int]] = None,
+    concurrency: int = 200,
+    timeout: float = 2.0,
+    opener: Optional[Callable] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> PortSweep:
+    """Ejecutar un barrido completo síncronamente, en un bucle de eventos propio.
+
+    La frontera de la "isla asyncio", en su forma detallada: devuelve el
+    :class:`PortSweep` entero en vez de sólo los puertos abiertos.
+
+    Args:
+        host: El objetivo.
+        ports: Los puertos a probar; por defecto :data:`DEFAULT_PORTS`.
+        concurrency: Máximo de intentos de conexión simultáneos.
+        timeout: Plazo por puerto, en segundos.
+        opener: Abridor de conexión inyectable (ver :class:`AsyncConnectScanner`).
+        cancel_check: Callable de cancelación opcional.
+
+    Returns:
+        El :class:`PortSweep` del barrido.
+    """
+    port_list = list(ports) if ports is not None else list(DEFAULT_PORTS)
+    scanner = AsyncConnectScanner(concurrency=concurrency, timeout=timeout, opener=opener)
+    return asyncio.run(scanner.sweep(host, port_list, cancel_check=cancel_check))
 
 
 def scan_ports_sync(
@@ -151,12 +318,27 @@ def scan_ports_sync(
     concurrency: int = 200,
     timeout: float = 2.0,
     opener: Optional[Callable] = None,
-    cancel_check: Optional[Callable[[], bool]] = None
-) -> List[int]:
+    cancel_check: Optional[Callable[[], bool]] = None,
+    retries: int = 1,
+    retry_delay: float = 2.0,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> Optional[List[int]]:
     """Run a connect scan synchronously, on a fresh event loop of its own.
 
     This is the boundary of the "asyncio island": it wraps the async scanner in
     ``asyncio.run``, so it is safe to call from an ordinary synchronous worker.
+
+    Devuelve ``None`` —no ``[]``— cuando el barrido parece bloqueado en vez de
+    limpio (ver :attr:`PortSweep.is_blocked`). Esa distinción es la razón de
+    ser de esta firma: el llamante ya tenía puesta la defensa de tratar
+    ``None`` como fallo, pero nunca podía dispararla porque la única respuesta
+    posible era una lista. Una lista vacía significa ahora, y sólo ahora,
+    "el objetivo contestó y no tiene nada abierto".
+
+    Antes de concluir que hay bloqueo se reintenta el barrido entero: un
+    objetivo que deja de contestar a mitad de camino suele recuperarse en
+    segundos, y un reintento espaciado cuesta mucho menos que un escaneo
+    perdido.
 
     Args:
         host: The target host.
@@ -165,13 +347,34 @@ def scan_ports_sync(
         timeout: The per-port connect timeout, in seconds.
         opener: An injectable connection opener (see :class:`AsyncConnectScanner`).
         cancel_check: An optional cancellation callable.
+        retries: Reintentos adicionales tras un barrido que parece bloqueado.
+        retry_delay: Espera entre reintentos, en segundos.
+        sleeper: Espera inyectable, para que un test no tenga que dormirla.
 
     Returns:
-        The open ports, sorted ascending.
+        Los puertos abiertos, ascendentes, o ``None`` si el barrido parece
+        bloqueado incluso tras los reintentos.
     """
-    port_list = list(ports) if ports is not None else list(DEFAULT_PORTS)
-    scanner = AsyncConnectScanner(concurrency=concurrency, timeout=timeout, opener=opener)
-    return asyncio.run(scanner.scan(host, port_list, cancel_check=cancel_check))
+    sweep = sweep_ports_sync(host, ports, concurrency, timeout, opener, cancel_check)
+    attempts_left = max(0, retries)
+    while sweep.is_blocked and attempts_left > 0:
+        logger.warning(
+            "Barrido de %s sin una sola respuesta (%s puertos expirados): reintentando",
+            host, len(sweep.timed_out_ports),
+        )
+        if retry_delay > 0:
+            sleeper(retry_delay)
+        sweep = sweep_ports_sync(host, ports, concurrency, timeout, opener, cancel_check)
+        attempts_left -= 1
+
+    if sweep.is_blocked:
+        logger.error(
+            "Descubrimiento de %s bloqueado: los %s puertos expiraron y ninguno "
+            "rechazó la conexión; no es un objetivo limpio",
+            host, len(sweep.timed_out_ports),
+        )
+        return None
+    return list(sweep.open_ports)
 
 
 def services_from_discovered_ports(

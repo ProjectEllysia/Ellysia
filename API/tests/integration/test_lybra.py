@@ -229,6 +229,49 @@ def test_lybra_self_discovery_probe_failure_fails_without_false_fixed(app, admin
     assert escan.status == ScanStatus.FAILED.value
 
 
+def test_lybra_blocked_discovery_never_marks_findings_fixed(app, admin_user, monkeypatch):
+    """L48-c, la mitad que de verdad duele.
+
+    Un objetivo que bloquea el barrido a mitad de camino producía una lista
+    vacía indistinguible de un host limpio, y el ciclo de vida pasaba entonces
+    a ``fixed`` todo lo que el escaneo anterior había encontrado abierto: no
+    sólo se ocultaba lo que hay, se le decía al usuario que sus
+    vulnerabilidades estaban remediadas.
+
+    El transporte ya distingue los dos casos (ver
+    ``tests/unit/test_lybra_transport.py``); aquí se comprueba la consecuencia
+    aguas abajo: con un descubrimiento bloqueado, el escaneo falla y ningún
+    hallazgo previo cambia de estado.
+    """
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
+                        lambda self, target, ports: [80, 443])
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        first = mgr._create_scan_record(target="10.0.0.31", user_id=admin_user.id)
+        mgr._run_lybra(first.id)
+
+    # Segundo escaneo: el objetivo bloquea el barrido — el transporte lo
+    # reconoce y devuelve None en vez de una lista vacía.
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
+                        lambda self, target, ports: None)
+    with app.app_context():
+        mgr = LybraEngineManager()
+        second = mgr._create_scan_record(target="10.0.0.31", user_id=admin_user.id)
+        mgr._run_lybra(second.id)
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            second_findings = repo.get_findings_by_scan(second.id)
+            first_findings = repo.get_findings_by_scan(first.id)
+            second = repo.get_by_id(second.id)
+
+    assert second.status == ScanStatus.FAILED.value
+    assert second_findings == []
+    assert not any(finding.state == "fixed" for finding in first_findings)
+
+
 def test_lybra_self_discovery_genuine_zero_ports_still_marks_fixed(app, admin_user, monkeypatch):
     """Discovery running cleanly and finding nothing IS legitimate evidence:
     a previously-open finding on this target should still be marked fixed."""
