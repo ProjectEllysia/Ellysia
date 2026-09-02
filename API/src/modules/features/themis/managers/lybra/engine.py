@@ -1,6 +1,7 @@
 """LybraEngineManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import List, Optional
 import src.modules.system.config_reading as CR
@@ -355,6 +356,11 @@ class LybraEngineManager(ScanManager):
                 tls_fetch=TlsProbe().fetch,
                 network_open=NetworkProbe().open,
                 script_plugins=default_script_plugins(),
+                # El mismo pool acotado por host que usa el fingerprinting: los
+                # checks activos tienen exactamente la misma forma —espera de
+                # red servicio a servicio— y el mismo motivo para no hacerla en
+                # fila india.
+                mapper=self._in_host_pool,
             )
             return runtime.run(target, services)
         except Exception:
@@ -430,11 +436,15 @@ class LybraEngineManager(ScanManager):
         """
         dissectors = default_dissectors()
         rate_limiter = HostRateLimiter()
-        findings = []
-        updated: list = []
-
         cascade_config = CR.lybra_config()
-        for service in services:
+
+        def identify(service):
+            """Sonda un servicio y devuelve ``(servicio, resultado)``.
+
+            Se define dentro para que cada llamada comparta los ``dissectors`` y
+            el ``rate_limiter`` de **esta** ejecución: el limitador es lo que
+            mantiene el ritmo por host cuando varias sondas van a la vez, así que
+            compartirlo es justo el punto."""
             dissector = next((dissector for dissector in dissectors if dissector.applies(service)), None)
             result = None
             if dissector is not None:
@@ -460,7 +470,16 @@ class LybraEngineManager(ScanManager):
                     )
                 except Exception:
                     logger.debug("Cascade failed for %s:%s", target, service.port, exc_info=True)
+            return service, result
 
+        findings: list = []
+        updated: list = []
+        # El orden de ``services`` se conserva —``map`` devuelve en el orden de
+        # entrada, no en el de terminación—, así que el resultado de un escaneo no
+        # depende de cuál de los servicios contestó antes. Un escáner cuyos
+        # hallazgos cambian de orden entre ejecuciones hace ruido en cualquier
+        # comparación posterior, empezando por el ciclo de vida.
+        for service, result in self._in_host_pool(identify, services):
             if result is None:
                 updated.append(service)
                 continue
@@ -472,6 +491,45 @@ class LybraEngineManager(ScanManager):
             updated.append(service)
 
         return updated, findings
+
+    @staticmethod
+    def _in_host_pool(work, items):
+        """Ejecuta ``work`` sobre cada elemento con un pool acotado por host.
+
+        El fingerprinting y los checks activos son entrada/salida pura: casi todo
+        su tiempo es esperar a que un servicio conteste o a que se agote su plazo.
+        En fila india, **un servicio mudo retrasa a todos los que vienen detrás**,
+        y la fase más lenta de un escaneo acababa siendo la que menos trabajo hace.
+
+        Tres cosas que este pool **no** cambia, y que son las condiciones que lo
+        hacen aceptable:
+
+        - Los dissectors siguen siendo síncronos y sin estado compartido. El
+          paralelismo vive aquí, en el manager, y no dentro de cada protocolo:
+          migrar ocho módulos a asyncio costaría mucho más y daría lo mismo,
+          porque el trabajo es espera de red.
+        - El ritmo por host lo sigue marcando ``HostRateLimiter``, que es seguro
+          entre hilos y reserva el turno antes de dormir. El pool decide cuántas
+          sondas pueden estar **esperando** a la vez, no a qué ritmo salen.
+        - El aislamiento de fallos se mantiene: cada unidad de trabajo captura lo
+          suyo, así que un protocolo que revienta sigue costando su servicio y
+          nada más.
+
+        Args:
+            work: La función a aplicar a cada elemento.
+            items: Los elementos.
+
+        Returns:
+            Los resultados, **en el orden de entrada**.
+        """
+        items = list(items)
+        if not items:
+            return []
+        workers = max(1, min(CR.lybra_config().host_pool_size, len(items)))
+        if workers == 1:
+            return [work(item) for item in items]
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return list(pool.map(work, items))
 
     @classmethod
     def _layer_findings(cls, service, result) -> list:

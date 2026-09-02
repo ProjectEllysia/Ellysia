@@ -1054,6 +1054,7 @@ class CheckRuntime:
         tls_fetch: Optional[Callable[[str, int], object]] = None,
         network_open: Optional[Callable[[str, int], Optional["NetworkSession"]]] = None,
         script_plugins: Optional[Dict[str, object]] = None,
+        mapper: Optional[Callable] = None,
     ) -> None:
         self._checks = list(checks)
         self._fetch = fetch
@@ -1062,6 +1063,16 @@ class CheckRuntime:
         self._tls_fetch = tls_fetch
         self._network_open = network_open
         self._script_plugins = dict(script_plugins or {})
+        # Cómo se recorren los servicios. Por defecto, el ``map`` de siempre:
+        # uno detrás de otro. El manager inyecta aquí un pool acotado por host
+        # (L23), igual que ya inyecta las sondas — este módulo no conoce la
+        # configuración ni monta hilos por su cuenta.
+        self._mapper: Callable = mapper or map
+        # El host y sus servicios de la ejecución en curso: los rellena
+        # :meth:`run`, y viven aquí para que un plugin de tipo ``script``
+        # pueda ver los servicios hermanos sin descubrirlos por su cuenta.
+        self._host = ''
+        self._services: Tuple[Service, ...] = ()
         # Sondas compartidas dentro de una ejecución; :meth:`run` las vacía al
         # empezar. Aquí sólo para que el objeto esté completo desde que nace.
         self._responses: Dict[tuple, Optional[Response]] = {}
@@ -1097,6 +1108,14 @@ class CheckRuntime:
         :meth:`_probe_response` for why that is a property of this loop and not
         a caching layer.
 
+        Los servicios se evalúan **a la vez** dentro de un pool acotado (L23),
+        no en fila india: estos checks son espera de red casi entera, y un
+        servicio que no contesta retrasaba a todos los que venían detrás. El
+        ritmo por host lo sigue marcando el limitador, que es seguro entre
+        hilos; el pool sólo decide cuántas sondas pueden estar esperando a la
+        vez. El orden de los hallazgos no cambia — ver
+        :meth:`_run_for_service`.
+
         Args:
             host: The target host.
             services: The host's discovered services (non-applicable ones are
@@ -1117,18 +1136,37 @@ class CheckRuntime:
         # lista ya está aquí; guardarla evita que un plugin tenga que
         # redescubrirla por su cuenta.
         self._services = services
+        self._host = host
 
+        per_service = self._mapper(self._run_for_service, services)
+        return [finding for group in per_service for finding in group]
+
+    def _run_for_service(self, service: Service) -> List[dict]:
+        """Ejecuta todos los checks aplicables a **un** servicio.
+
+        Es la unidad de trabajo del pool (L23), y la razón de que el pool sea
+        seguro sin candados: las cachés de respuesta y de handshake se indexan
+        por ``(host, puerto, ...)``, así que **cada hilo toca sólo las claves de
+        su propio servicio**. Dos checks del mismo servicio siguen compartiendo
+        una petición, que es para lo que la caché existe; dos servicios distintos
+        no compiten por ninguna entrada.
+
+        Args:
+            service: El servicio a evaluar.
+
+        Returns:
+            Los hallazgos de ese servicio, en el orden del feed.
+        """
         findings: List[dict] = []
-        for service in services:
-            for family in self._families:
-                if not family.applies_to_service(service):
+        for family in self._families:
+            if not family.applies_to_service(service):
+                continue
+            for check in self._checks:
+                if not family.check_matches(check, service):
                     continue
-                for check in self._checks:
-                    if not family.check_matches(check, service):
-                        continue
-                    finding = family.run_check(check, host, service)
-                    if finding is not None:
-                        findings.append(finding)
+                finding = family.run_check(check, self._host, service)
+                if finding is not None:
+                    findings.append(finding)
         return findings
 
     def _applies(self, check: Check) -> bool:
