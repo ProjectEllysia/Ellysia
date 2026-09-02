@@ -273,3 +273,71 @@ def test_udp_scan_defaults_to_udp_probes_table():
     # concurrente, así que el orden en que llegan los intentos es cosa del
     # planificador y no del escáner.
     assert sorted(calls) == sorted(list(UDP_PROBES) * 2)
+
+
+# ─────────────────────────────────────────────────── presupuesto de reloj
+#
+# El plazo que la cola de tareas le pone a un job no puede acotar el barrido:
+# se inyecta con ``PyThreadState_SetAsyncExc``, que sólo se materializa cuando
+# el hilo vuelve a ejecutar bytecode, y un hilo parado en la llamada al sistema
+# que espera a los sockets lo rebasa sin enterarse (en producción, un plazo de
+# 60 s apareció a los 159). Estas pruebas fijan el presupuesto que sí evalúa el
+# propio barrido.
+
+
+def _slow_opener(seconds):
+    """Abridor que tarda ``seconds`` y luego acepta la conexión."""
+    async def opener(host, port):
+        await asyncio.sleep(seconds)
+        return None, _FakeWriter()
+    return opener
+
+
+def test_the_sweep_stops_starting_probes_once_the_budget_is_spent():
+    # Concurrencia 1 para que las sondas vayan en fila y el reloj avance de
+    # forma predecible: con 0,05 s cada una, en 0,15 s no caben veinte.
+    ports = list(range(1000, 1020))
+    sweep = sweep_ports_sync("10.0.0.5", ports, concurrency=1,
+                             opener=_slow_opener(0.05), budget_seconds=0.15)
+
+    assert sweep.was_truncated
+    probed = (len(sweep.open_ports) + len(sweep.refused_ports)
+              + len(sweep.timed_out_ports) + len(sweep.unreachable_ports))
+    assert 0 < probed < len(ports), f"se probaron {probed} de {len(ports)}"
+
+
+def test_a_truncated_sweep_is_neither_blocked_nor_clean():
+    """Un barrido truncado no es evidencia de nada sobre lo que no se miró.
+
+    Y en particular no puede llegar al motor como lista de puertos: el ciclo de
+    vida marcaría como corregido todo lo que estaba abierto y esta vez no dio
+    tiempo a comprobar, que es el fallo de L48-c por otra puerta.
+    """
+    ports = list(range(1000, 1020))
+    sweep = sweep_ports_sync("10.0.0.5", ports, concurrency=1,
+                             opener=_slow_opener(0.05), budget_seconds=0.15)
+    assert not sweep.is_blocked
+
+    result = scan_ports_sync("10.0.0.5", ports, concurrency=1,
+                             opener=_slow_opener(0.05), budget_seconds=0.15)
+    assert result is None
+
+
+def test_a_sweep_that_fits_its_budget_is_unaffected():
+    opener = _opener_for({22, 80, 443})
+    result = scan_ports_sync("10.0.0.5", [443, 22, 81, 80, 8080],
+                             opener=opener, budget_seconds=30)
+    assert result == [22, 80, 443]
+
+
+def test_the_retry_does_not_outlive_the_budget():
+    """Reintentar un barrido bloqueado cuesta ``retry_delay`` más otro barrido
+    entero. Si no queda presupuesto para eso, no se intenta."""
+    ports = list(range(1000, 1000 + 16))
+    waits = []
+    result = scan_ports_sync("10.0.0.5", ports, timeout=0.01,
+                             opener=_timing_out_opener(),
+                             retry_delay=0.5, sleeper=waits.append,
+                             budget_seconds=0.05)
+    assert result is None
+    assert waits == [], "se durmió un reintento que no cabía en el presupuesto"

@@ -39,7 +39,51 @@ from rq import Queue, SimpleWorker
 from rq.registry import BaseRegistry
 from rq.timeouts import TimerDeathPenalty
 
-BaseRegistry.death_penalty_class = TimerDeathPenalty
+
+class JobDeadlineExceeded(BaseException):
+    """El plazo de un job se agotó y RQ está terminándolo.
+
+    Hereda de ``BaseException``, **no** de ``Exception``, y esa es toda su
+    razón de ser.
+
+    RQ interrumpe un job que se pasa de tiempo lanzándole una excepción desde
+    fuera. La suya, ``rq.timeouts.JobTimeoutException``, hereda de
+    ``Exception``, así que es indistinguible de un error corriente para
+    cualquier ``except Exception``. Y el código de negocio está lleno de ellos
+    por buenas razones: un escaneo no debe hundirse porque un objetivo cierre
+    la conexión. El resultado era que la sentencia de muerte se registraba
+    como «fallo de red», el job seguía corriendo —el temporizador dispara una
+    sola vez, así que a partir de ahí ya no tiene ningún límite— y al terminar
+    RQ escribía ``Successfully completed`` sobre un trabajo que había
+    sobrepasado su plazo.
+
+    Cambiar la clase de excepción lo arregla en los diez módulos a la vez y
+    sin tocar ninguno, que es la razón de hacerlo aquí y no persiguiendo
+    ``except`` uno a uno. Es seguro porque el manejador de RQ en
+    ``Worker.perform_job`` es un ``except:`` pelado, sin tipo: sigue
+    capturándola y marcando el job como fallido exactamente igual que antes.
+    """
+
+
+class _UnswallowableTimerDeathPenalty(TimerDeathPenalty):
+    """``TimerDeathPenalty`` que lanza :class:`JobDeadlineExceeded`.
+
+    RQ codifica ``JobTimeoutException`` en la llamada de ``perform_job`` que
+    construye la penalización, así que la sustitución tiene que hacerse aquí,
+    ignorando la excepción que nos pasan.
+
+    Aviso sobre la clase base: ``TimerDeathPenalty.__init__`` parchea el
+    ``__init__`` de la excepción que reciba para incrustarle el mensaje del
+    plazo (``PyThreadState_SetAsyncExc`` solo admite una *clase*, no una
+    instancia). Es un efecto global sobre la clase, y es otro motivo para
+    darle una nuestra en vez de dejar que lo haga sobre la de RQ.
+    """
+
+    def __init__(self, timeout, exception=None, **kwargs):  # pylint: disable=unused-argument
+        super().__init__(timeout, JobDeadlineExceeded, **kwargs)
+
+
+BaseRegistry.death_penalty_class = _UnswallowableTimerDeathPenalty
 
 import src.modules.system.config_reading as CR
 from src.modules.system.logging import configure_logging
@@ -71,9 +115,13 @@ class _ThreadSafeWorker(SimpleWorker):
     propio ``threading.Thread``, así que forzamos ``TimerDeathPenalty``
     (basado en ``threading.Timer``), que es thread-safe en cualquier
     plataforma.
+
+    Se usa la subclase :class:`_UnswallowableTimerDeathPenalty` para que la
+    excepción de plazo no la pueda capturar un ``except Exception`` del código
+    de negocio; el porqué está en :class:`JobDeadlineExceeded`.
     """
 
-    death_penalty_class = TimerDeathPenalty
+    death_penalty_class = _UnswallowableTimerDeathPenalty
 
     def _install_signal_handlers(self):
         pass

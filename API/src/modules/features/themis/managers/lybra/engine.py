@@ -1,6 +1,7 @@
 """LybraEngineManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import List, Optional
@@ -160,7 +161,7 @@ class LybraEngineManager(ScanManager):
 
         self._task_queue.submit(
             func=LybraEngineManager.execute_lybra_scan, # type: ignore
-            args=(scan_id, discover_ports, services),
+            args=(scan_id, discover_ports, services, timeout),
             name=f"LybraScan-{scan_id}",
             category=self.TASK_CATEGORY, # type: ignore
             external_id=self.external_id_for(scan_id),
@@ -174,33 +175,64 @@ class LybraEngineManager(ScanManager):
     def execute_lybra_scan(
         scan_id: int,
         discover_ports: Optional[list] = None,
-        services: Optional[List[Service]] = None
+        services: Optional[List[Service]] = None,
+        timeout: Optional[int] = None,
     ) -> None:
-        """Entry point submitted to the TaskQueue. Runs the engine in the worker."""
+        """Entry point submitted to the TaskQueue. Runs the engine in the worker.
+
+        ``timeout`` es opcional para que un job encolado antes de este cambio
+        —que viaja con una tupla de tres argumentos— siga ejecutándose tras el
+        despliegue en vez de fallar al deserializarse.
+        """
         with job_context():
             manager = LybraEngineManager()
             manager._run_lybra( # type: ignore
                 scan_id,
                 discover_ports,
                 services,
+                timeout,
             )
+
+    @staticmethod
+    def _remaining_budget(deadline: Optional[float]) -> Optional[float]:
+        """Segundos que quedan hasta ``deadline``, o ``None`` si no hay plazo."""
+        return None if deadline is None else max(0.0, deadline - time.monotonic())
 
     def _run_lybra(
         self,
         scan_id: int,
         discover_ports: Optional[list] = None,
         services_payload: Optional[List[Service]] = None,
+        timeout: Optional[int] = None,
     ) -> None:
         """Resolve services (own discovery or a payload), detect, persist.
 
         This is the testable body of the scan (the ``execute_* seam → _run_*``
         pattern). Runs synchronously; safe to call directly in tests without a
         worker.
+
+        ``timeout`` es el que el usuario escribió en el panel de lanzamiento.
+        Hasta ahora sólo alimentaba el plazo de la cola —un plazo que, por cómo
+        se inyecta, un hilo bloqueado en una llamada al sistema rebasa sin
+        enterarse— y por tanto no limitaba el escaneo de verdad. Ahora abre
+        además un plazo de reloj propio del que come el descubrimiento de
+        puertos.
+
+        ponytail: sólo el descubrimiento TCP consume el presupuesto. Es la fase
+        que puede correr sin cota (barrido ancho contra un objetivo que filtra
+        tráfico) y la que aparecía en el incidente; el fingerprinting y los
+        checks tienen plazo por operación. Si algún día hace falta acotarlos
+        también, el plazo ya está aquí: basta pasarles ``_remaining_budget``.
         """
+        deadline = time.monotonic() + timeout if timeout else None
         source = ServiceSource.build_for_args(services_payload, discover_ports)
         probes = DiscoveryProbes(
             is_host_reachable=self.is_host_reachable,
-            discover_ports=self._discover_ports,
+            # El presupuesto se calcula al llamar, no aquí: para cuando el
+            # descubrimiento arranca ya se han gastado la comprobación de
+            # alcanzabilidad y las consultas de apertura del escaneo.
+            discover_ports=lambda target, ports: self._discover_ports(
+                target, ports, budget_seconds=self._remaining_budget(deadline)),
             discover_udp_ports=self._discover_udp_ports,
         )
         try:
@@ -291,7 +323,12 @@ class LybraEngineManager(ScanManager):
             logger.error(f"Error en escaneo Lybra {scan_id}: {e}", exc_info=True)
             self.update_scan_status(scan_id, ScanStatus.FAILED)
 
-    def _discover_ports(self, target: str, discover_ports) -> Optional[list]:
+    def _discover_ports(
+        self,
+        target: str,
+        discover_ports,
+        budget_seconds: Optional[float] = None,
+    ) -> Optional[list]:
         """Discover open ports with Lybra's own connect scan (Fase T).
 
         Returns ``None`` (not ``[]``) when discovery itself failed unexpectedly,
@@ -308,9 +345,13 @@ class LybraEngineManager(ScanManager):
         Desde L48-c el transporte distingue "todo cerrado" de "no me han
         dejado mirar" y devuelve ``None`` en el segundo caso, que es lo que
         este método siempre esperó recibir.
+
+        Lo mismo vale para ``budget_seconds``: un barrido que se queda sin
+        reloj también llega como ``None``, porque de los puertos que no dio
+        tiempo a mirar no se sabe nada, y no saber no es estar limpio.
         """
         try:
-            discovered = scan_ports_sync(target, discover_ports)
+            discovered = scan_ports_sync(target, discover_ports, budget_seconds=budget_seconds)
         except Exception:
             logger.exception("Lybra port discovery failed for %s", target)
             return None
