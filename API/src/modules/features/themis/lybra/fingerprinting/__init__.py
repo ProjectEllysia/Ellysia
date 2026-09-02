@@ -75,6 +75,14 @@ from __future__ import annotations
 
 from .dispatch import Dissector, DissectorResult, QOD_FINGERPRINT
 from .registry import register_dissector, default_dissectors
+from .favicon import (
+    FaviconCatalog,
+    FaviconEntry,
+    favicon_hash,
+    load_favicon_hashes,
+    murmurhash3_x86_32,
+    validate_favicon_hashes,
+)
 from .http import (
     HttpFingerprint,
     SignatureHit,
@@ -163,6 +171,12 @@ __all__ = [
     "default_dissectors",
     "HttpFingerprint",
     "SignatureHit",
+    "FaviconCatalog",
+    "FaviconEntry",
+    "favicon_hash",
+    "load_favicon_hashes",
+    "murmurhash3_x86_32",
+    "validate_favicon_hashes",
     "VersionReading",
     "VERSION_SOURCES",
     "VERSION_SOURCE_QOD",

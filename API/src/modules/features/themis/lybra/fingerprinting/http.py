@@ -47,20 +47,28 @@ from typing import Dict, List, Optional, Pattern, Tuple
 
 from ..checks import HttpProbe, Response, is_http_service
 from .dispatch import Dissector, DissectorResult, QOD_FINGERPRINT
+from .favicon import FaviconCatalog, favicon_hash as favicon_hash_value
 from .registry import register_dissector
 
 
 @dataclass(frozen=True)
-class HttpFingerprint:
+class HttpFingerprint:  # pylint: disable=too-many-instance-attributes
     """The result of fingerprinting an HTTP service.
+
+    Es un objeto de valor: cada atributo es una lectura distinta de la misma
+    respuesta, y agruparlos en sub-objetos sólo añadiría un nivel de acceso sin
+    quitar ningún dato.
 
     Attributes:
         product: The identified product name, or ``None``.
         version: The identified version, or ``None``.
         title: The page ``<title>``, or ``None``.
-        favicon_hash: A SHA-256 hex digest of the favicon, or ``None``. This is
-            deliberately *not* the Shodan-compatible mmh3 hash — see the module
-            docstring.
+        favicon_hash: A SHA-256 hex digest of the favicon, or ``None`` — la
+            identidad exacta del fichero.
+        favicon_catalog_hash: El hash de catálogo del favicon (MurmurHash3 en
+            la convención pública), o ``None``. Es el que se busca en
+            ``feeds/favicon_hashes.json``; ver ``fingerprinting/favicon.py``
+            para por qué se guardan los dos.
         technologies: A tuple of technology names matched by signature.
         confidence: A 0.0-1.0 self-assessed confidence in the identification.
         version_source: De qué nivel de la cascada salió la versión (uno de
@@ -77,6 +85,7 @@ class HttpFingerprint:
     technologies: tuple
     confidence: float
     version_source: Optional[str] = None
+    favicon_catalog_hash: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -269,6 +278,11 @@ def validate_tech_signatures(signatures: List[TechSignature]) -> List[str]:
 
 
 _TECH_SIGNATURES: List[TechSignature] = load_tech_signatures()
+
+# El catálogo de favicons, cargado una vez al importar igual que el feed de
+# firmas. ``HttpDissector`` consulta ``is_empty`` para decidir si merece la
+# pena pedir ``/favicon.ico`` siquiera.
+_FAVICON_CATALOG = FaviconCatalog()
 
 
 def _tech_evidence(
@@ -629,16 +643,27 @@ def fingerprint_http(
     candidates = (_signature_hit(signature, evidence) for signature in _TECH_SIGNATURES)
     hits = [hit for hit in candidates if hit]
     technologies = tuple(hit.name for hit in hits)
-    favicon_hash = hashlib.sha256(favicon).hexdigest() if favicon else None
+    favicon_digest = hashlib.sha256(favicon).hexdigest() if favicon else None
 
     product, version, confidence, version_source = _resolve_identity(
         _version_readings(response, hits, error_resp), response.body,
     )
 
+    catalog_hash = favicon_hash_value(favicon) if favicon else None
+    if not product:
+        # Última red: el icono. Sólo se consulta cuando ninguna otra fuente ha
+        # nombrado el producto — un favicon identifica producto y casi nunca
+        # versión, así que nunca debe desplazar a una lectura que sí la trae.
+        catalogued = _FAVICON_CATALOG.identify(favicon)
+        if catalogued is not None:
+            product = catalogued.product
+            confidence = 0.5
+
     return HttpFingerprint(
         product=product, version=version, title=title,
-        favicon_hash=favicon_hash, technologies=technologies,
+        favicon_hash=favicon_digest, technologies=technologies,
         confidence=confidence, version_source=version_source,
+        favicon_catalog_hash=catalog_hash,
     )
 
 
@@ -678,8 +703,14 @@ class HttpDissector(Dissector):
         response = self._probe.fetch(target, service.port, "GET", "/")
         if response is None:
             return None
-        rate_limiter.acquire(target)
-        favicon = self._probe.fetch_bytes(target, service.port, "/favicon.ico")
+        # L20: la petición del favicon sólo se paga cuando puede pagarse a sí
+        # misma. Con el catálogo vacío no hay nada con lo que comparar el icono,
+        # así que pedirlo sería una petición de red por servicio HTTP —con su
+        # turno de limitador— a cambio de un dato que nadie consulta.
+        favicon = None
+        if not _FAVICON_CATALOG.is_empty:
+            rate_limiter.acquire(target)
+            favicon = self._probe.fetch_bytes(target, service.port, "/favicon.ico")
         rate_limiter.acquire(target)
         # Some vendors brand their error page more than their homepage (a
         # SonicWall's 404 body says so, its "/" doesn't) — see fingerprint_http.
