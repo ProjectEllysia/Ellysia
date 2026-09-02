@@ -8,7 +8,7 @@
 # feedVersion sube cuando el feed gana una familia nueva o un protocolo nuevo
 # bajo una existente; el arreglo de un check ya presente sube el 'version' de
 # ese check, no esta cadena. Ver CHECKS_FEED_VERSION en checks.py.
-feedVersion: lybra-checks-10
+feedVersion: lybra-checks-11
 checks:
   - id: git-config-exposure
     version: 1
@@ -497,6 +497,18 @@ checks:
     mode: safe
     finding:
       title: 'LDAP: puerto en claro abierto habiendo LDAPS en el mismo host'
+      qod: 99
+      confirmed: true
+  - id: rdp-nla-not-required
+    version: 1
+    type: script
+    script: rdp-nla-not-required
+    category: network_config
+    severity: HIGH
+    service: rdp
+    mode: safe
+    finding:
+      title: 'RDP: no exige autenticacion a nivel de red (NLA)'
       qod: 99
       confirmed: true
   - id: snmp-default-community

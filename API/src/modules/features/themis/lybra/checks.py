@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 # ``Check.check_id``). Los dos checks ``network`` suben además a ``version: 2``
 # en checks-6: su comportamiento cambia, y un hallazgo guardado tiene que poder
 # decir cuál de las dos formas lo produjo.
-CHECKS_FEED_VERSION = "lybra-checks-10"
+CHECKS_FEED_VERSION = "lybra-checks-11"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -149,6 +149,8 @@ _MONGODB_PORTS = {27017, 27018, 27019}
 # 3268 es el Catálogo Global de Active Directory: mismo protocolo, y sirve el
 # bosque entero en vez de un solo dominio. 636 y 3269 son sus variantes sobre
 # TLS, que hablan LDAP igual una vez levantado el canal.
+_RDP_SERVICE_NAMES = {"ms-wbt-server", "rdp", "msrdp", "terminal-server"}
+_RDP_PORTS = {3389}
 _LDAP_SERVICE_NAMES = {"ldap", "ldaps", "ldapssl", "globalcatldap", "globalcatldapssl"}
 _LDAP_PORTS = {389, 636, 3268, 3269}
 # El subconjunto que va cifrado, para la comprobación de "389 en claro
@@ -732,6 +734,11 @@ def is_mongodb_service(service: Service) -> bool:
 def is_ldap_service(service: Service) -> bool:
     """Return whether a service should be probed by the LDAP dissector."""
     return (service.name or "").lower() in _LDAP_SERVICE_NAMES or service.port in _LDAP_PORTS
+
+
+def is_rdp_service(service: Service) -> bool:
+    """Return whether a service should be probed by the RDP dissector."""
+    return (service.name or "").lower() in _RDP_SERVICE_NAMES or service.port in _RDP_PORTS
 
 
 def is_redis_service(service: Service) -> bool:
