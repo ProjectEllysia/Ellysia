@@ -35,9 +35,16 @@ from __future__ import annotations
 import logging
 from typing import Dict, Optional
 
-from .checks import ScriptContext, ScriptPlugin, is_smb_service, is_snmp_service
+from .checks import (
+    ScriptContext,
+    ScriptPlugin,
+    is_postgres_service,
+    is_smb_service,
+    is_snmp_service,
+)
 from .engine import Service
 from .fingerprinting.smb import SIGNING_REQUIRED_BIT, SmbProbe, fingerprint_smb
+from .fingerprinting.postgres import PostgresProbe, fingerprint_postgres
 from .fingerprinting.snmp import SnmpProbe
 
 logger = logging.getLogger(__name__)
@@ -117,6 +124,45 @@ class SnmpDefaultCommunityPlugin(ScriptPlugin):
         return sysdescr is not None
 
 
+class PostgresTrustAuthenticationPlugin(ScriptPlugin):
+    """Detecta un PostgreSQL que acepta conexiones de red **sin contraseña**.
+
+    El modo ``trust`` de PostgreSQL no es una autenticación débil: es la
+    ausencia completa de autenticación. Un servidor con ``trust`` en su
+    ``pg_hba.conf`` para direcciones de red da acceso total a cualquiera que
+    alcance el puerto — sin exploit, sin fuerza bruta y sin credenciales.
+
+    La evidencia no se infiere: es el propio servidor contestando
+    ``AuthenticationOk`` a un ``StartupMessage`` con un usuario que **no
+    existe**. Por eso el hallazgo nace ``confirmed``, y por eso el plugin no
+    intenta autenticarse en ningún momento: no manda contraseña ninguna, sólo
+    lee la política que el servidor anuncia.
+
+    Comparte sonda con el dissector por el mismo criterio que el de SNMP: el
+    dato que responde a la pregunta es el mismo, y mandar dos veces el mismo
+    intercambio no lo haría más cierto.
+
+    Args:
+        probe: Sonda inyectable, para que un test use un socket falso.
+    """
+
+    plugin_id = "postgres-trust-authentication"
+
+    def __init__(self, probe: Optional[PostgresProbe] = None) -> None:
+        self._probe = probe or PostgresProbe()
+
+    def applies(self, service: Service) -> bool:
+        return is_postgres_service(service)
+
+    def run(self, context: ScriptContext) -> bool:
+        context.acquire()
+        replies = self._probe.fetch(context.target, context.service.port or 5432)
+        if replies is None:
+            # Sin intercambio no hay evidencia, y sin evidencia no hay hallazgo.
+            return False
+        return fingerprint_postgres(*replies).is_unauthenticated
+
+
 def default_script_plugins() -> Dict[str, ScriptPlugin]:
     """Construye el registro de plugins de primera parte, indexado por ``plugin_id``.
 
@@ -124,5 +170,9 @@ def default_script_plugins() -> Dict[str, ScriptPlugin]:
         Un mapa ``plugin_id -> plugin``, que es lo que ``CheckRuntime`` espera
         recibir por inyección. Añadir un plugin es añadir una entrada aquí.
     """
-    plugins = (SmbSigningNotRequiredPlugin(), SnmpDefaultCommunityPlugin())
+    plugins = (
+        SmbSigningNotRequiredPlugin(),
+        SnmpDefaultCommunityPlugin(),
+        PostgresTrustAuthenticationPlugin(),
+    )
     return {plugin.plugin_id: plugin for plugin in plugins}

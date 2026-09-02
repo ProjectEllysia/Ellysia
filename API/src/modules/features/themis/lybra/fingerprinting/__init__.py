@@ -31,6 +31,13 @@ best value-for-effort in the roadmap:
     and expiry status of the certificate. Not JARM (full bit-exact
     *identification*, a separate and larger effort left for later).
 
+``postgres``
+    La primera base de datos que **negocia** en vez de ofrecer un banner: un
+    ``SSLRequest`` de ocho bytes y un ``StartupMessage`` con un usuario que no
+    existe, para leer si el servidor exige TLS y qué autenticación anuncia.
+    Ningún intento de login. PostgreSQL no regala su versión antes de
+    autenticar, y el módulo no la inventa.
+
 ``ftp``, ``mail`` (SMTP/IMAP/POP3), ``mysql``, ``redis_probe``, ``vnc``
     Fase N's non-HTTP protocols — each volunteers its identity unprompted
     right after a bare TCP connect, no negotiation needed to read it.
@@ -73,9 +80,7 @@ large and risky to ship without a live TLS lab to validate it against) and OS
 fingerprinting (which the roadmap itself rates low value). Both stay
 oracle-only — handled by Nmap — until picked up. RDP, LDAP, VNC's full
 protocol beyond its version banner, and RPC stay oracle-only too, per the
-roadmap's own priority-3 rating for that group; PostgreSQL/MSSQL/MongoDB
-(unlike MySQL/Redis) need a negotiated handshake rather than a volunteered
-banner and are deferred alongside them.
+roadmap's own priority-3 rating for that group.
 """
 
 from __future__ import annotations
@@ -154,6 +159,17 @@ from .smb import (
     SmbProbe,
     SmbDissector,
 )
+from .postgres import (
+    AUTH_METHODS,
+    PostgresDissector,
+    PostgresFingerprint,
+    PostgresProbe,
+    build_ssl_request,
+    build_startup_message,
+    fingerprint_postgres,
+    parse_ssl_response,
+    parse_startup_response,
+)
 from .mysql import (
     MysqlFingerprint,
     parse_mysql_handshake,
@@ -190,6 +206,15 @@ __all__ = [
     "default_dissectors",
     "HttpFingerprint",
     "SignatureHit",
+    "AUTH_METHODS",
+    "PostgresDissector",
+    "PostgresFingerprint",
+    "PostgresProbe",
+    "build_ssl_request",
+    "build_startup_message",
+    "fingerprint_postgres",
+    "parse_ssl_response",
+    "parse_startup_response",
     "ADMIN_APIS",
     "AdminApi",
     "AdminApiDissector",
