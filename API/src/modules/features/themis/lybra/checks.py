@@ -142,6 +142,8 @@ _MYSQL_SERVICE_NAMES = {"mysql"}
 _MYSQL_PORTS = {3306}
 _POSTGRES_SERVICE_NAMES = {"postgresql", "postgres"}
 _POSTGRES_PORTS = {5432}
+_MSSQL_SERVICE_NAMES = {"ms-sql-s", "mssql", "sqlserver"}
+_MSSQL_PORTS = {1433}
 _REDIS_SERVICE_NAMES = {"redis"}
 _REDIS_PORTS = {6379}
 _VNC_SERVICE_NAMES = {"vnc"}
@@ -698,6 +700,12 @@ def is_postgres_service(service: Service) -> bool:
     """Return whether a service should be probed by the PostgreSQL dissector."""
     return ((service.name or "").lower() in _POSTGRES_SERVICE_NAMES
             or service.port in _POSTGRES_PORTS)
+
+
+def is_mssql_service(service: Service) -> bool:
+    """Return whether a service should be probed by the SQL Server dissector."""
+    return ((service.name or "").lower() in _MSSQL_SERVICE_NAMES
+            or service.port in _MSSQL_PORTS)
 
 
 def is_redis_service(service: Service) -> bool:

@@ -38,6 +38,11 @@ best value-for-effort in the roadmap:
     Ningún intento de login. PostgreSQL no regala su versión antes de
     autenticar, y el módulo no la inventa.
 
+``mssql``
+    El más generoso de los tres: un ``PRELOGIN`` de TDS devuelve major, minor
+    y build en un campo binario de tamaño fijo, sin autenticar, más el modo de
+    cifrado que el servidor exige.
+
 ``ftp``, ``mail`` (SMTP/IMAP/POP3), ``mysql``, ``redis_probe``, ``vnc``
     Fase N's non-HTTP protocols — each volunteers its identity unprompted
     right after a bare TCP connect, no negotiation needed to read it.
@@ -159,6 +164,15 @@ from .smb import (
     SmbProbe,
     SmbDissector,
 )
+from .mssql import (
+    ENCRYPTION_MODES,
+    MssqlDissector,
+    MssqlFingerprint,
+    MssqlProbe,
+    build_prelogin_request,
+    fingerprint_mssql,
+    parse_prelogin_response,
+)
 from .postgres import (
     AUTH_METHODS,
     PostgresDissector,
@@ -206,6 +220,13 @@ __all__ = [
     "default_dissectors",
     "HttpFingerprint",
     "SignatureHit",
+    "ENCRYPTION_MODES",
+    "MssqlDissector",
+    "MssqlFingerprint",
+    "MssqlProbe",
+    "build_prelogin_request",
+    "fingerprint_mssql",
+    "parse_prelogin_response",
     "AUTH_METHODS",
     "PostgresDissector",
     "PostgresFingerprint",
