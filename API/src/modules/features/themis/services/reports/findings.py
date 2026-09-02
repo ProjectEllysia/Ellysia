@@ -14,6 +14,7 @@ from reportlab.platypus import CondPageBreak, Paragraph, Spacer, Table, TableSty
 import src.modules.system.config_reading as CR
 
 from src.modules.shared.report_theme import ColorType, safe_markup
+from ..cve_context import enrich_with_cve_context
 from .base import PrintingStrategy
 
 
@@ -122,7 +123,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
         } for row in rows]
         for finding in findings:
             finding["priority"] = score_finding(finding, exposure)
-        self._enrich_with_cve_context(findings)
+        enrich_with_cve_context(findings)
 
         self._append_finding_header(theme, elements, findings, exposure)
 
@@ -161,54 +162,6 @@ class FindingsPrintingStrategy(PrintingStrategy):
         # tool_map only knows the Nmap/Nikto scan classes, since it relies on
         # a MetricExtractor for each; a Finding-based one is separate scope
         # from wiring the PDF itself. Add it when that's needed.
-
-    def _enrich_with_cve_context(self, findings: list) -> None:
-        """Attach CVE description/CWE/fixed-version context from the local KB.
-
-        One bulk query for every CVE referenced by this scan's findings — never
-        one query per finding. Nothing here is invented: `description`/`cwe_ids`
-        come straight from the mirrored NVD record, and `fixed_version` is only
-        set when NVD's own applicability data (the CpeMatch that matched this
-        finding's product) actually states an upper bound.
-        """
-        from src.modules.infrastructure.session import build_repository
-        from src.modules.features.themis.repositories import KbRepository
-        from src.modules.features.themis.lybra import parse_cpe23
-
-        cve_ids = sorted({cve for finding in findings for cve in (finding.get("cve_ids") or [])})
-        if not cve_ids:
-            return
-
-        entries = {cve_entry.cve_id: cve_entry for cve_entry in build_repository(KbRepository).get_cves_with_matches(cve_ids)}
-
-        for finding in findings:
-            ids = finding.get("cve_ids") or []
-            if not ids:
-                continue
-            entry = entries.get(ids[0])
-            if entry is None:
-                continue
-            finding["description"] = entry.description
-            finding["cwe_ids"] = entry.cwe_ids or []
-            finding["fixed_version"] = self._find_fixed_version(entry, finding.get("cpe"), parse_cpe23)
-
-    @staticmethod
-    def _find_fixed_version(entry, cpe, parse_cpe23) -> Optional[str]:
-        """Read the 'fixed in' version bound off the CpeMatch row for this
-        finding's own product, when NVD states one. Returns None rather than
-        guessing when no matching row has an upper bound."""
-        if not cpe:
-            return None
-        parsed = parse_cpe23(cpe)
-        if not parsed:
-            return None
-        for cpe_match in entry.cpe_matches:
-            if cpe_match.vendor == parsed["vendor"] and cpe_match.product == parsed["product"]:
-                if cpe_match.version_end_excluding:
-                    return cpe_match.version_end_excluding
-                if cpe_match.version_end_including:
-                    return cpe_match.version_end_including
-        return None
 
     def _append_finding_header(self, theme: "ReportTheme", elements: list, findings: list, exposure: str) -> None:
         """Cabecera del informe: título y tablas de objetivo/escaneo."""
