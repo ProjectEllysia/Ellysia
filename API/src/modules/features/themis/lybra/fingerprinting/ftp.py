@@ -235,6 +235,17 @@ class FtpDissector(Dissector):
     def applies(self, service) -> bool:
         return is_ftp_service(service)
 
+    def identify_from_banner(self, banner):
+        # "220" lo dicen también SMTP y NNTP, así que hace falta descartarlos:
+        # un saludo que se anuncia como (E)SMTP no es de este protocolo.
+        text = banner.decode("utf-8", "ignore").strip()
+        if not text.startswith("220") or "smtp" in text.lower():
+            return None
+        fingerprint = fingerprint_ftp(text)
+        if not fingerprint.product:
+            return None
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)
+
     def probe(self, target, service, rate_limiter):
         rate_limiter.acquire(target)
         banner = self._probe.fetch(target, service.port or 21)

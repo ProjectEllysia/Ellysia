@@ -31,6 +31,7 @@ from ...lybra import (
     QOD_OPEN_PORT,
     default_dissectors,
     DissectorResult,
+    identify_unknown_service,
     HostRateLimiter,
     kb_feed_version,
     load_checks,
@@ -431,6 +432,7 @@ class LybraEngineManager(ScanManager):
         findings = []
         updated: list = []
 
+        cascade_config = CR.lybra_config()
         for service in services:
             dissector = next((dissector for dissector in dissectors if dissector.applies(service)), None)
             result = None
@@ -439,6 +441,24 @@ class LybraEngineManager(ScanManager):
                     result = dissector.probe(target, service, rate_limiter)
                 except Exception:
                     logger.debug("Fingerprinting failed for %s:%s", target, service.port, exc_info=True)
+            elif (service.protocol or "tcp").lower() != "udp":
+                # Ningún dissector reclama este servicio, que hasta L10 quería
+                # decir "se acabó": la aplicabilidad se decide por nombre o por
+                # número de puerto, y en el camino de autodescubrimiento el
+                # nombre sale a su vez de una tabla de puertos. Un MySQL en el
+                # 33060 o un SSH en el 2222 quedaban completamente ciegos.
+                #
+                # La cascada pregunta en vez de suponer (ver
+                # ``fingerprinting/cascade.py``). Sólo TCP: leer un saludo
+                # ofrecido no significa nada sobre un datagrama.
+                try:
+                    result = identify_unknown_service(
+                        target, service, dissectors, rate_limiter,
+                        banner_timeout=cascade_config.banner_timeout,
+                        max_blind_probes=cascade_config.max_blind_probes,
+                    )
+                except Exception:
+                    logger.debug("Cascade failed for %s:%s", target, service.port, exc_info=True)
 
             if result is None:
                 updated.append(service)

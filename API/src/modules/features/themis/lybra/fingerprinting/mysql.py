@@ -148,6 +148,18 @@ class MysqlDissector(Dissector):
     def applies(self, service) -> bool:
         return is_mysql_service(service)
 
+    def identify_from_banner(self, banner):
+        # El paquete inicial de MySQL/MariaDB no es texto: son cuatro bytes de
+        # cabecera (longitud + secuencia) y después la versión de protocolo,
+        # que en todo servidor real es 10 (``HandshakeV10``). Ese 0x0A en la
+        # quinta posición es el marcador.
+        if len(banner) < 6 or banner[4] != 0x0A:
+            return None
+        fingerprint = fingerprint_mysql(banner[4:])
+        if not fingerprint.product:
+            return None
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)
+
     def probe(self, target, service, rate_limiter):
         rate_limiter.acquire(target)
         payload = self._probe.fetch(target, service.port or 3306)

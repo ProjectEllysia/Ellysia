@@ -156,6 +156,17 @@ class SmtpDissector(Dissector):
     def applies(self, service) -> bool:
         return is_smtp_service(service)
 
+    def identify_from_banner(self, banner):
+        # "220" lo comparte con FTP: hace falta que el saludo se anuncie como
+        # (E)SMTP para reclamarlo.
+        text = banner.decode("utf-8", "ignore").strip()
+        if not text.startswith("220") or "smtp" not in text.lower():
+            return None
+        fingerprint = fingerprint_smtp(text)
+        if not fingerprint.product:
+            return None
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)
+
     def probe(self, target, service, rate_limiter):
         rate_limiter.acquire(target)
         banner = self._probe.fetch(target, service.port or 25)
@@ -175,6 +186,17 @@ class ImapDissector(Dissector):
     def applies(self, service) -> bool:
         return is_imap_service(service)
 
+    def identify_from_banner(self, banner):
+        # La RFC 3501 §7.1.1 exige que el saludo sea una respuesta sin etiqueta:
+        # "* OK", "* PREAUTH" o "* BYE".
+        text = banner.decode("utf-8", "ignore").strip()
+        if not text.startswith(("* OK", "* PREAUTH", "* BYE")):
+            return None
+        fingerprint = fingerprint_imap(text)
+        if not fingerprint.product:
+            return None
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)
+
     def probe(self, target, service, rate_limiter):
         rate_limiter.acquire(target)
         banner = self._probe.fetch(target, service.port or 143)
@@ -193,6 +215,16 @@ class Pop3Dissector(Dissector):
 
     def applies(self, service) -> bool:
         return is_pop3_service(service)
+
+    def identify_from_banner(self, banner):
+        # La RFC 1939 §3 exige que el saludo empiece por "+OK".
+        text = banner.decode("utf-8", "ignore").strip()
+        if not text.startswith("+OK"):
+            return None
+        fingerprint = fingerprint_pop3(text)
+        if not fingerprint.product:
+            return None
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)
 
     def probe(self, target, service, rate_limiter):
         rate_limiter.acquire(target)

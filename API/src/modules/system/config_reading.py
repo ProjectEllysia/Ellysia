@@ -809,6 +809,21 @@ class LybraConfig:
     active_checks: bool = True
     fingerprinting_enabled: bool = True
 
+    banner_timeout: float = 2.0
+    """Plazo, en segundos, de la lectura del saludo que la cascada de
+    identificación hace contra un servicio que ningún dissector reclama
+    (``fingerprinting/cascade.py``). Es corto a propósito: un servicio que no
+    saluda lo agota entero, y ese coste se paga una vez por cada puerto
+    desconocido del objetivo."""
+
+    max_blind_probes: int = 2
+    """Cuántas sondas activas se permiten contra un servicio que no ha dicho
+    nada. El presupuesto que separa "prueba lo que ya sabes leer" de un escaneo
+    de servicios completo: hoy hay dos protocolos que se pueden intentar a
+    ciegas (Redis y HTTP), y este tope impide que añadir un tercero encarezca
+    en silencio cada escaneo. A cero, la cascada se queda sólo en la lectura
+    del saludo."""
+
 
 @config_block("features.themis.scanners.lybra.ingest")
 @dataclass(frozen=True)

@@ -799,6 +799,73 @@ def test_lybra_fingerprinting_identifies_the_service_on_its_own(app, admin_user,
     assert "Nmap" not in fingerprints[0].title
 
 
+def test_lybra_identifies_a_service_on_a_non_canonical_port(app, admin_user, monkeypatch):
+    """L10: el punto ciego que multiplicaba a todos los demás.
+
+    Los predicados de aplicabilidad deciden por nombre o por número de puerto,
+    y en el autodescubrimiento el nombre sale a su vez de una tabla de puertos.
+    Un SSH en el 2222 no recibía dissector, así que producía un `open_port` con
+    `qod=30` y nada más: sin producto no hay CPE, y sin CPE no hay ni un CVE.
+
+    Aquí el motor no sabe qué hay en el 2222 — pero lo pregunta, y el servicio
+    se lo dice.
+    """
+    from src.modules.features.themis.lybra.fingerprinting import cascade
+
+    class _GreetingSocket:
+        def settimeout(self, _timeout):
+            pass
+
+        def recv(self, _size):
+            return b"SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1\r\n"
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(cascade, "socket",
+                        type("_S", (), {"create_connection": staticmethod(
+                            lambda address, timeout: _GreetingSocket())}))
+
+    _stub_self_discovery(monkeypatch, [2222])
+    _authorize_target(app, admin_user.id)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    fingerprints = [f for f in findings if f.category == "fingerprint"]
+    assert len(fingerprints) == 1
+    assert fingerprints[0].title == "Fingerprint propio (SSH): OpenSSH 8.9p1"
+
+
+def test_lybra_leaves_a_mute_unknown_port_exactly_as_it_was(app, admin_user, monkeypatch):
+    """La otra mitad: un puerto que acepta la conexión y no contesta a nada
+    sigue siendo un `open_port` informativo. La cascada añade identificaciones,
+    no las inventa."""
+    from src.modules.features.themis.lybra.fingerprinting import cascade
+
+    def _refuse(_address, _timeout):
+        raise ConnectionRefusedError("cerrado")
+
+    monkeypatch.setattr(cascade, "socket",
+                        type("_S", (), {"create_connection": staticmethod(_refuse)}))
+
+    _stub_self_discovery(monkeypatch, [45678])
+    _authorize_target(app, admin_user.id)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    assert [f.category for f in findings] == ["open_port"]
+
+
 def test_lybra_fingerprinting_skipped_for_unauthorized_target(app, admin_user, monkeypatch):
     # activeChecks/fingerprintingEnabled default to True (roadmap §6): the real
     # gate is per-target authorization, not the config flag. No _authorize_target
