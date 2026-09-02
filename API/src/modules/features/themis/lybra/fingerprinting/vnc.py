@@ -130,6 +130,14 @@ class VncDissector(Dissector):
     def applies(self, service) -> bool:
         return is_vnc_service(service)
 
+    def identify_from_banner(self, banner):
+        # La RFC 6143 §7.1.1 fija el saludo en doce bytes exactos con la forma
+        # "RFB 003.008\n": marcador y versión en la misma línea.
+        fingerprint = fingerprint_vnc(banner[:12])
+        if not fingerprint.product:
+            return None
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)
+
     def probe(self, target, service, rate_limiter):
         rate_limiter.acquire(target)
         banner = self._probe.fetch(target, service.port or 5900)

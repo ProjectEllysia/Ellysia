@@ -79,8 +79,9 @@ _HOST = "127.0.0.1"
 # mapa de puertos conocidos haría en producción— el número de puerto no cambia
 # qué dissector se elige ni qué lee.
 _PORTS = {
-    "ftp": 12121, "smtp": 12525, "mysql": 13306, "smb": 14445,
-    "vnc": 15900, "snmp": 16161, "redis": 16379,
+    "ftp": 12121, "proftpd": 12122, "smtp": 12525, "mysql": 13306, "smb": 14445,
+    "vnc": 15900, "snmp": 16161, "redis": 16379, "reverse-proxy": 18080,
+    "smb1": 14446,
 }
 
 
@@ -95,6 +96,32 @@ class Target:
 
 def _docker(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run([_DOCKER, *args], capture_output=True, text=True, timeout=120, check=True)
+
+
+CRLF = bytes((13, 10))
+
+
+def _wait_for_http(port: int, timeout: float = 240.0) -> None:
+    """Esperar a que un puerto conteste a un ``GET /`` con una línea de estado.
+
+    HTTP no manda saludo: hay que preguntar. Por lo demás, el mismo cuidado que
+    :func:`_wait_for_greeting` — el proxy de Docker acepta la conexión mucho
+    antes de que el servidor de dentro exista.
+    """
+    deadline = time.monotonic() + timeout
+    last = "sin intentos"
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((_HOST, port), timeout=3.0) as sock:
+                sock.settimeout(3.0)
+                sock.sendall(b"GET / HTTP/1.0" + CRLF + b"Host: localhost" + CRLF + CRLF)
+                if sock.recv(64).startswith(b"HTTP/"):
+                    return
+            last = "respuesta que no es HTTP"
+        except OSError as exc:
+            last = str(exc)
+        time.sleep(1.0)
+    raise TimeoutError(f"{_HOST}:{port} no contestó HTTP en {timeout}s ({last})")
 
 
 def _wait_for_greeting(port: int, expect: bytes, timeout: float = 240.0) -> None:
@@ -161,6 +188,68 @@ def ftp_target():
 
 
 @pytest.fixture(scope="module")
+def proftpd_target():
+    """El segundo servidor FTP del catálogo, y la razón de que exista (L48-a).
+
+    La familia FTP daba concordancia 1,00 en laboratorio y 0,00 contra
+    objetivos reales. La explicación no era la red: el banco tenía **un solo**
+    servidor FTP, un vsftpd cuyo saludo (``220 (vsFTPd 3.0.5)``) es justo el
+    formato que el parser sabía leer. Ese 1,00 no medía la calidad del
+    dissector, medía la coincidencia entre el dissector y el contenedor
+    elegido — la misma trampa que la Fase 0 documentó en #269 y #270.
+
+    ProFTPD es el otro servidor FTP extendido y saluda de otra forma; en su
+    configuración por defecto de Debian, además, **omite la versión**. Con él
+    en el catálogo, la familia deja de medirse contra sí misma.
+    """
+    port, name = _PORTS["proftpd"], "lybra-concordance-proftpd"
+    _start(name, port, 21, "alpine:latest", "sh", "-c",
+           "apk add --no-cache proftpd >/dev/null 2>&1 && "
+           "printf '%s\\n' 'ServerName \"lybra\"' 'ServerType standalone' "
+           "'Port 21' 'User proftpd' 'Group proftpd' "
+           "> /etc/proftpd/proftpd.conf && "
+           "proftpd --nodaemon --config /etc/proftpd/proftpd.conf")
+    try:
+        _wait_for_greeting(port, b"220")
+        yield Target("proftpd", port, "ftp")
+    finally:
+        docker_rm(_DOCKER, name)
+
+
+@pytest.fixture(scope="module")
+def reverse_proxy_target():
+    """Un nginx de proxy inverso por delante de un Apache (L48-b).
+
+    Todos los demás objetivos HTTP del catálogo son **servidores pelados**: la
+    cabecera ``Server`` y el servidor real son la misma cosa, así que leerla
+    acierta siempre y la familia HTTP concordaba 1,00. En producción casi nada
+    está pelado, y contra objetivos reales la misma familia bajó a 0,08.
+
+    Este objetivo es esa brecha metida en el banco: nginx contesta en el puerto
+    y firma la respuesta, Apache atiende por detrás y firma su página de error.
+    Un fingerprint correcto tiene que ver **las dos** capas.
+
+    Se levanta con una sola imagen de Alpine que arranca los dos servidores
+    para no depender de una red de contenedores: el Apache escucha en el 8081
+    interno y el nginx en el 80, pasándole todo.
+    """
+    port, name = _PORTS["reverse-proxy"], "lybra-concordance-reverse-proxy"
+    _start(name, port, 80, "alpine:latest", "sh", "-c",
+           "apk add --no-cache apache2 nginx >/dev/null 2>&1 && "
+           "sed -i 's/^Listen 80$/Listen 8081/' /etc/apache2/httpd.conf && "
+           "httpd && "
+           "printf '%s\\n' 'events {}' 'http { server { listen 80; "
+           "location / { proxy_pass http://127.0.0.1:8081; } } }' "
+           "> /etc/nginx/nginx.conf && "
+           "nginx -g 'daemon off;'")
+    try:
+        _wait_for_http(port)
+        yield Target("http-proxied", port, "http")
+    finally:
+        docker_rm(_DOCKER, name)
+
+
+@pytest.fixture(scope="module")
 def smtp_target():
     """Postfix, que da producto pero **no** versión: el caso que el roadmap
     llama "no inventar CPE". Nmap sí extrae el producto de ese mismo saludo."""
@@ -205,6 +294,34 @@ def smb_target():
         wait_for_port(_HOST, port, 240)
         time.sleep(10)
         yield Target("smb", port, "microsoft-ds")
+    finally:
+        docker_rm(_DOCKER, name)
+
+
+@pytest.fixture(scope="module")
+def smb1_target():
+    """Un Samba con **SMBv1 habilitado**, que es lo que el otro no puede probar.
+
+    El saludo de SMB2 no ve si SMB1 está activo: son dos protocolos distintos
+    con dos saludos distintos, así que un servidor con SMB1 encendido contesta
+    con toda normalidad al SMB2 y no dice ni una palabra sobre el otro. Sin un
+    objetivo que lo tenga encendido, la sonda de SMB1 sólo podría comprobarse
+    contra el caso negativo — y un detector que nunca ha visto un positivo no
+    está comprobado, está sin usar.
+
+    ``dperson/samba`` desactiva SMB1 por defecto desde hace años; ``-w`` fija
+    el grupo de trabajo y las opciones ``server min protocol`` lo vuelven a
+    permitir explícitamente.
+    """
+    port, name = _PORTS["smb1"], "lybra-concordance-smb1"
+    _start(name, port, 445, "dperson/samba", "-p", "-w", "LYBRA",
+           "-g", "server min protocol = NT1",
+           "-g", "client min protocol = NT1",
+           "-s", "public;/tmp;yes;no;yes")
+    try:
+        wait_for_port(_HOST, port, 240)
+        time.sleep(10)
+        yield Target("smb1", port, "microsoft-ds")
     finally:
         docker_rm(_DOCKER, name)
 
@@ -280,10 +397,47 @@ def _assert_agrees(target: Target) -> None:
     assert agrees_with_nmap(*pair), f"{target.protocol}: propio vs nmap = {pair}"
 
 
+# ==================================================== SMBv1, los dos lados
+
+
+def test_smb1_is_detected_where_it_is_enabled_and_not_where_it_is_not(
+    smb_target, smb1_target,
+):
+    """Los dos lados de la misma sonda, en la misma ejecución.
+
+    Un detector que sólo se ha visto contra el caso negativo no está
+    comprobado: `False` es también lo que devuelve una sonda rota, un puerto
+    que no contesta o un parser con un desplazamiento mal. Sólo el positivo
+    distingue "sabe mirar" de "siempre dice que no".
+    """
+    from src.modules.features.themis.lybra.fingerprinting.smb import SmbProbe
+
+    probe = SmbProbe(timeout=10.0)
+    assert probe.speaks_smb1(_HOST, smb1_target.port) is True
+    assert probe.speaks_smb1(_HOST, smb_target.port) is False
+
+
+def test_smb_reports_the_hostname_the_server_declares(smb_target):
+    """El nombre de equipo sale del SESSION_SETUP anónimo, y es el mejor
+    identificador de activo que existe en una red Windows."""
+    from src.modules.features.themis.lybra.fingerprinting.smb import SmbProbe
+
+    identity = SmbProbe(timeout=10.0).fetch_identity(_HOST, smb_target.port)
+    assert identity.get("netbios_computer_name"), (
+        f"el servidor no declaró nombre de equipo: {identity}")
+
+
 # ============================================== los que concuerdan hoy
 
 def test_ftp_fingerprint_agrees_with_nmap(ftp_target):
     _assert_agrees(ftp_target)
+
+
+def test_proftpd_fingerprint_agrees_with_nmap(proftpd_target):
+    """El caso que la medición real destapó: un ProFTPD sin versión en el
+    saludo. Lybra y Nmap deben coincidir en el producto; que ninguno dé
+    versión no es un desacuerdo (ver ``agrees_with_nmap``)."""
+    _assert_agrees(proftpd_target)
 
 
 def test_redis_fingerprint_agrees_with_nmap(redis_target):

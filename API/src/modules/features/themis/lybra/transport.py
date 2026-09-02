@@ -20,15 +20,26 @@ against.
 available without raw sockets is a curated payload/expected-reply pair per
 port — and *that* needs no ``CAP_NET_RAW`` at all, an unprivileged
 ``sendto``/``recvfrom`` (or a connected UDP socket, which is what this module
-uses) suffices. :data:`UDP_PROBES` starts with a single row (SNMP,
-port 161 — the highest-value non-HTTP dissector still missing per the
-roadmap) and grows one row per protocol a check or dissector actually
-consumes, not ahead of need.
+uses) suffices. :data:`UDP_PROBES` nació con una sola fila (SNMP en el
+161) y una regla: crece una fila por protocolo que un check o un dissector
+consuma de verdad, no antes de necesitarlo. L22 la cumple — siete filas, cada
+una con su consumidor en ``fingerprinting/udp_services.py``— y con siete el
+barrido pasa a ser concurrente, porque siete plazos de dos segundos en fila
+india son medio minuto de espera contra un host que seguramente no tenga
+ninguno de esos servicios.
 
 The event loop is created and torn down entirely inside :func:`scan_ports_sync`
 — the "asyncio island". It lives within a single synchronous worker call and
 never touches the Flask process or an ORM session. The connection opener is
 injectable, so the scanner can be tested without opening real sockets.
+
+**Un barrido vacío y un barrido bloqueado no son lo mismo** (L48-c). Un
+objetivo que deja de contestar a mitad de camino —él mismo, o un cortafuegos
+por delante— produce un plazo agotado en cada puerto, y sumarlos daba una
+lista vacía indistinguible de un host genuinamente limpio. Por eso el barrido
+clasifica cada intento (:class:`PortOutcome`), lo reporta entero
+(:class:`PortSweep`) y ``scan_ports_sync`` devuelve ``None`` cuando nada
+contestó de ninguna forma.
 """
 
 from __future__ import annotations
@@ -36,9 +47,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import socket
-from typing import Callable, Dict, Iterable, List, Optional
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from enum import Enum
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from .engine import Service
+from .udp_payloads import (
+    build_dns_version_query,
+    build_ike_main_mode,
+    build_mdns_services_query,
+    build_mssql_browser_query,
+    build_netbios_name_query,
+    build_ntp_readvar,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +71,18 @@ logger = logging.getLogger(__name__)
 # refines the label when it is enabled.
 WELL_KNOWN_PORTS = {
     21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "domain", 80: "http",
-    110: "pop3", 111: "rpcbind", 135: "msrpc", 139: "netbios-ssn", 143: "imap",
+    110: "pop3", 111: "rpcbind", 123: "ntp", 135: "msrpc", 137: "netbios-ns",
+    139: "netbios-ssn", 143: "imap",
     161: "snmp", 389: "ldap", 443: "https", 445: "microsoft-ds", 465: "smtps",
-    587: "submission", 631: "ipp", 993: "imaps", 995: "pop3s", 1433: "ms-sql-s",
-    1521: "oracle", 2049: "nfs", 2375: "docker", 3306: "mysql", 3389: "ms-wbt-server",
-    5432: "postgresql", 5900: "vnc", 5985: "wsman", 6379: "redis", 8080: "http-proxy",
-    8443: "https-alt", 8888: "http-alt", 9200: "elasticsearch", 27017: "mongodb",
+    636: "ldaps",
+    500: "isakmp", 587: "submission", 631: "ipp", 993: "imaps", 995: "pop3s",
+    1433: "ms-sql-s", 1434: "ms-sql-m",
+    1521: "oracle", 2049: "nfs", 2375: "docker", 2376: "docker-tls",
+    2379: "etcd", 3306: "mysql", 3389: "ms-wbt-server",
+    3268: "globalcatldap", 3269: "globalcatldapssl",
+    5353: "mdns", 5432: "postgresql", 5601: "kibana", 5900: "vnc", 5985: "wsman",
+    6379: "redis", 6443: "kubernetes", 8080: "http-proxy", 8443: "https-alt",
+    8500: "consul", 8888: "http-alt", 9200: "elasticsearch", 27017: "mongodb",
 }
 
 # The ports swept when the caller does not specify a list: the common,
@@ -61,10 +90,90 @@ WELL_KNOWN_PORTS = {
 # full 1-65535 range — sweeping everything belongs to the raw fast-path, which
 # this module does not implement.
 DEFAULT_PORTS: tuple = tuple(sorted(WELL_KNOWN_PORTS)) + (
-    20, 69, 123, 137, 138, 512, 513, 514, 873, 1080, 1723, 2181, 3000, 3268,
-    4444, 5000, 5060, 5601, 6667, 7001, 8000, 8008, 8081, 8088, 8181, 9000,
+    20, 69, 138, 512, 513, 514, 873, 1080, 1723, 2181, 3000,
+    4444, 5000, 5060, 6667, 7001, 8000, 8008, 8081, 8088, 8181, 9000,
     9090, 9300, 11211,
 )
+
+
+# Número mínimo de puertos que hace falta barrer para que "todos expiraron"
+# signifique algo. Con una lista de tres puertos, que los tres agoten el plazo
+# es perfectamente posible en una red lenta; con sesenta y cuatro, no lo es.
+# Por debajo de este umbral, un barrido mudo se reporta como vacío y no como
+# fallo — preferimos callar antes que inventar un fallo que no está.
+BLOCKED_SWEEP_MIN_PORTS = 8
+
+
+class PortOutcome(Enum):
+    """En qué terminó el intento de conexión a un puerto.
+
+    El escáner tenía un solo bit —abierto o no— y esa era exactamente la
+    información que le faltaba al motor. Un puerto *rechazado* (RST) y un
+    puerto que *no contesta* se cuentan igual de cerrados en el resultado
+    final, pero significan cosas opuestas sobre el objetivo: el primero
+    demuestra que el host está vivo y contestando, el segundo no demuestra
+    nada. Distinguirlos es lo que permite reconocer un barrido bloqueado (ver
+    :class:`PortSweep`).
+    """
+
+    OPEN = "open"
+    REFUSED = "refused"
+    TIMED_OUT = "timed_out"
+    UNREACHABLE = "unreachable"
+
+
+@dataclass(frozen=True)
+class PortSweep:
+    """El resultado completo de un barrido, no sólo los puertos abiertos.
+
+    ``scan_ports_sync`` devolvía una lista, y una lista vacía es una respuesta
+    legítima: "aquí no hay nada expuesto". El problema es que también es lo que
+    devuelve un barrido que el objetivo bloqueó a mitad de camino, y las dos
+    cosas llegan al motor indistinguibles. La consecuencia no es sólo un
+    informe incompleto: el ciclo de vida compara con el escaneo anterior y pasa
+    a ``fixed`` todo lo que estaba abierto y ya no aparece, así que un barrido
+    bloqueado le dice al usuario que sus vulnerabilidades fueron remediadas.
+
+    Este objeto lleva el detalle que permite hacer la distinción; quien la usa
+    es :attr:`is_blocked`.
+
+    Attributes:
+        open_ports: Los puertos que aceptaron la conexión.
+        refused_ports: Los que la rechazaron activamente (RST) — prueba de que
+            el host está vivo.
+        timed_out_ports: Los que agotaron el plazo sin contestar nada.
+        unreachable_ports: Los que fallaron por un error de red distinto de
+            los dos anteriores (host inalcanzable, red caída).
+        was_cancelled: Si el barrido se abandonó por cancelación, en cuyo caso
+            los puertos no probados no aparecen en ninguna lista y el barrido
+            nunca se considera bloqueado.
+    """
+
+    open_ports: Tuple[int, ...]
+    refused_ports: Tuple[int, ...]
+    timed_out_ports: Tuple[int, ...]
+    unreachable_ports: Tuple[int, ...]
+    was_cancelled: bool = False
+
+    @property
+    def is_blocked(self) -> bool:
+        """Si el barrido parece bloqueado en vez de limpio.
+
+        La firma de un bloqueo transitorio —el objetivo, o un dispositivo
+        intermedio, deja de contestar tras una ráfaga de conexiones— es que
+        **nada** contestó de ninguna forma: ni un puerto abierto, ni un solo
+        RST, sólo plazos agotados. Contra un host con latencia normal eso no
+        es un resultado plausible, y es justo la señal que el escáner tenía
+        delante y tiraba.
+
+        Un barrido cancelado nunca cuenta como bloqueado: se dejó a medias a
+        propósito.
+        """
+        if self.was_cancelled:
+            return False
+        if self.open_ports or self.refused_ports:
+            return False
+        return len(self.timed_out_ports) >= BLOCKED_SWEEP_MIN_PORTS
 
 
 class AsyncConnectScanner:
@@ -93,6 +202,48 @@ class AsyncConnectScanner:
         self._timeout = timeout
         self._opener = opener or asyncio.open_connection
 
+    async def sweep(
+        self,
+        host: str,
+        ports: Iterable[int],
+        cancel_check: Optional[Callable[[], bool]] = None
+    ) -> PortSweep:
+        """Barrer los puertos de un host y clasificar cómo terminó cada intento.
+
+        Args:
+            host: El objetivo (IP o nombre).
+            ports: Los puertos a probar.
+            cancel_check: Callable opcional, consultado antes de cada sonda; si
+                devuelve ``True`` se omiten las restantes.
+
+        Returns:
+            El :class:`PortSweep` con cada puerto en la lista de su desenlace.
+        """
+        semaphore = asyncio.Semaphore(self._concurrency)
+        outcomes: Dict[int, PortOutcome] = {}
+        was_cancelled = False
+
+        async def probe(port: int) -> None:
+            nonlocal was_cancelled
+            if cancel_check and cancel_check():
+                was_cancelled = True
+                return
+            async with semaphore:
+                outcomes[port] = await self._probe_outcome(host, port)
+
+        await asyncio.gather(*(probe(port) for port in ports))
+
+        def ports_with(outcome: PortOutcome) -> Tuple[int, ...]:
+            return tuple(sorted(port for port, result in outcomes.items() if result is outcome))
+
+        return PortSweep(
+            open_ports=ports_with(PortOutcome.OPEN),
+            refused_ports=ports_with(PortOutcome.REFUSED),
+            timed_out_ports=ports_with(PortOutcome.TIMED_OUT),
+            unreachable_ports=ports_with(PortOutcome.UNREACHABLE),
+            was_cancelled=was_cancelled,
+        )
+
     async def scan(
         self,
         host: str,
@@ -100,6 +251,9 @@ class AsyncConnectScanner:
         cancel_check: Optional[Callable[[], bool]] = None
     ) -> List[int]:
         """Scan a host's ports and return which ones are open.
+
+        The thin view over :meth:`sweep` for callers that only want the open
+        ports and have no use for how the rest failed.
 
         Args:
             host: The target host (IP or hostname).
@@ -110,39 +264,70 @@ class AsyncConnectScanner:
         Returns:
             The open ports, sorted ascending.
         """
-        semaphore = asyncio.Semaphore(self._concurrency)
-        open_ports: List[int] = []
+        sweep = await self.sweep(host, ports, cancel_check=cancel_check)
+        return list(sweep.open_ports)
 
-        async def probe(port: int) -> None:
-            if cancel_check and cancel_check():
-                return
-            async with semaphore:
-                if await self._is_open(host, port):
-                    open_ports.append(port)
+    async def _probe_outcome(self, host: str, port: int) -> PortOutcome:
+        """Intentar una conexión y decir en qué terminó, cerrándola limpiamente.
 
-        await asyncio.gather(*(probe(port) for port in ports))
-        return sorted(open_ports)
-
-    async def _is_open(self, host: str, port: int) -> bool:
-        """Return whether a single port accepts a connection, closing it cleanly.
-
-        Any connection error or timeout is taken to mean "closed"; the socket is
-        always closed afterwards on a best-effort basis.
+        Los tres desenlaces se distinguen porque significan cosas distintas
+        sobre el objetivo, no sobre el puerto: ver :class:`PortOutcome`.
         """
         try:
             _, writer = await asyncio.wait_for(self._opener(host, port), self._timeout)
-        except (OSError, asyncio.TimeoutError):
-            return False
+        except asyncio.TimeoutError:
+            return PortOutcome.TIMED_OUT
+        except ConnectionRefusedError:
+            return PortOutcome.REFUSED
+        except OSError:
+            return PortOutcome.UNREACHABLE
         except Exception as err:  # noqa: BLE001 - unexpected opener error: treat as closed
             logger.debug("connect probe error for %s:%s: %s", host, port, err)
-            return False
+            return PortOutcome.UNREACHABLE
         finally:
             try:
                 writer.close()
                 await writer.wait_closed()
             except Exception:  # noqa: BLE001 - close is best-effort
                 pass
-        return True
+        return PortOutcome.OPEN
+
+    async def _is_open(self, host: str, port: int) -> bool:
+        """Return whether a single port accepts a connection.
+
+        Kept as the boolean view over :meth:`_probe_outcome` — any connection
+        error or timeout means "not open".
+        """
+        return await self._probe_outcome(host, port) is PortOutcome.OPEN
+
+
+def sweep_ports_sync(
+    host: str,
+    ports: Optional[Iterable[int]] = None,
+    concurrency: int = 200,
+    timeout: float = 2.0,
+    opener: Optional[Callable] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> PortSweep:
+    """Ejecutar un barrido completo síncronamente, en un bucle de eventos propio.
+
+    La frontera de la "isla asyncio", en su forma detallada: devuelve el
+    :class:`PortSweep` entero en vez de sólo los puertos abiertos.
+
+    Args:
+        host: El objetivo.
+        ports: Los puertos a probar; por defecto :data:`DEFAULT_PORTS`.
+        concurrency: Máximo de intentos de conexión simultáneos.
+        timeout: Plazo por puerto, en segundos.
+        opener: Abridor de conexión inyectable (ver :class:`AsyncConnectScanner`).
+        cancel_check: Callable de cancelación opcional.
+
+    Returns:
+        El :class:`PortSweep` del barrido.
+    """
+    port_list = list(ports) if ports is not None else list(DEFAULT_PORTS)
+    scanner = AsyncConnectScanner(concurrency=concurrency, timeout=timeout, opener=opener)
+    return asyncio.run(scanner.sweep(host, port_list, cancel_check=cancel_check))
 
 
 def scan_ports_sync(
@@ -151,12 +336,27 @@ def scan_ports_sync(
     concurrency: int = 200,
     timeout: float = 2.0,
     opener: Optional[Callable] = None,
-    cancel_check: Optional[Callable[[], bool]] = None
-) -> List[int]:
+    cancel_check: Optional[Callable[[], bool]] = None,
+    retries: int = 1,
+    retry_delay: float = 2.0,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> Optional[List[int]]:
     """Run a connect scan synchronously, on a fresh event loop of its own.
 
     This is the boundary of the "asyncio island": it wraps the async scanner in
     ``asyncio.run``, so it is safe to call from an ordinary synchronous worker.
+
+    Devuelve ``None`` —no ``[]``— cuando el barrido parece bloqueado en vez de
+    limpio (ver :attr:`PortSweep.is_blocked`). Esa distinción es la razón de
+    ser de esta firma: el llamante ya tenía puesta la defensa de tratar
+    ``None`` como fallo, pero nunca podía dispararla porque la única respuesta
+    posible era una lista. Una lista vacía significa ahora, y sólo ahora,
+    "el objetivo contestó y no tiene nada abierto".
+
+    Antes de concluir que hay bloqueo se reintenta el barrido entero: un
+    objetivo que deja de contestar a mitad de camino suele recuperarse en
+    segundos, y un reintento espaciado cuesta mucho menos que un escaneo
+    perdido.
 
     Args:
         host: The target host.
@@ -165,13 +365,34 @@ def scan_ports_sync(
         timeout: The per-port connect timeout, in seconds.
         opener: An injectable connection opener (see :class:`AsyncConnectScanner`).
         cancel_check: An optional cancellation callable.
+        retries: Reintentos adicionales tras un barrido que parece bloqueado.
+        retry_delay: Espera entre reintentos, en segundos.
+        sleeper: Espera inyectable, para que un test no tenga que dormirla.
 
     Returns:
-        The open ports, sorted ascending.
+        Los puertos abiertos, ascendentes, o ``None`` si el barrido parece
+        bloqueado incluso tras los reintentos.
     """
-    port_list = list(ports) if ports is not None else list(DEFAULT_PORTS)
-    scanner = AsyncConnectScanner(concurrency=concurrency, timeout=timeout, opener=opener)
-    return asyncio.run(scanner.scan(host, port_list, cancel_check=cancel_check))
+    sweep = sweep_ports_sync(host, ports, concurrency, timeout, opener, cancel_check)
+    attempts_left = max(0, retries)
+    while sweep.is_blocked and attempts_left > 0:
+        logger.warning(
+            "Barrido de %s sin una sola respuesta (%s puertos expirados): reintentando",
+            host, len(sweep.timed_out_ports),
+        )
+        if retry_delay > 0:
+            sleeper(retry_delay)
+        sweep = sweep_ports_sync(host, ports, concurrency, timeout, opener, cancel_check)
+        attempts_left -= 1
+
+    if sweep.is_blocked:
+        logger.error(
+            "Descubrimiento de %s bloqueado: los %s puertos expiraron y ninguno "
+            "rechazó la conexión; no es un objetivo limpio",
+            host, len(sweep.timed_out_ports),
+        )
+        return None
+    return list(sweep.open_ports)
 
 
 def services_from_discovered_ports(
@@ -201,7 +422,7 @@ def services_from_discovered_ports(
             protocol=protocol,
             name=WELL_KNOWN_PORTS.get(port, ""),
             product="",
-            version="", 
+            version="",
             cpe=None
         )
         for port in open_ports
@@ -273,11 +494,25 @@ def build_snmp_get_request(community: str = "public") -> bytes:
 
 
 # Tabla payload→puerto para el descubrimiento UDP. Una fila por protocolo que
-# de verdad tiene un dissector o un check consumiéndolo — DNS (53) y NTP (123)
-# se evaluaron y se descartaron a propósito (roadmap §6.3): nada los consume
-# todavía, así que solo producirían un open_port informativo a cambio de
-# construir y validar dos consultas más. Añadir una fila es una línea.
-UDP_PROBES: Dict[int, bytes] = {161: build_snmp_get_request()}
+# de verdad tiene un dissector o un check consumiéndolo, que es la regla con la
+# que nació con una sola fila: DNS y NTP se evaluaron y se descartaron entonces
+# porque nada los consumía, no porque no valieran.
+#
+# L22 cumple esa regla en vez de cambiarla: cada fila nueva llega **con su
+# consumidor**, todos en ``fingerprinting/udp_services.py``. Ahí vive la
+# superficie que no aparece en ningún escaneo TCP y que se usa a diario en
+# ataques de amplificación — servicios que convierten al host del cliente en
+# arma contra terceros, que es una conversación distinta y más incómoda que
+# "tienes un puerto abierto".
+UDP_PROBES: Dict[int, bytes] = {
+    53: build_dns_version_query(),
+    123: build_ntp_readvar(),
+    137: build_netbios_name_query(),
+    161: build_snmp_get_request(),
+    500: build_ike_main_mode(),
+    1434: build_mssql_browser_query(),
+    5353: build_mdns_services_query(),
+}
 
 
 def udp_send_recv(host: str, port: int, payload: bytes, timeout: float) -> Optional[bytes]:
@@ -310,21 +545,33 @@ def udp_send_recv(host: str, port: int, payload: bytes, timeout: float) -> Optio
         return None
 
 
-def scan_udp_ports_sync(
+def scan_udp_ports_sync(  # pylint: disable=too-many-arguments
     host: str,
     ports: Optional[Iterable[int]] = None,
+    *,
     timeout: float = 2.0,
     retries: int = 1,
     sender: Optional[Callable] = None,
+    budget_seconds: float = 20.0,
+    clock: Callable[[], float] = time.monotonic,
 ) -> List[int]:
     """Descubre puertos UDP abiertos mediante sondas payload/respuesta curadas.
 
     A diferencia del connect scan de TCP, el silencio en UDP no significa
     "cerrado" — significa "no lo sabemos", así que aquí solo se reportan
-    puertos que de verdad contestaron algo. Sin concurrencia ni asyncio a
-    propósito: con una tabla de un puerto, un escáner paralelo sería
-    andamiaje; se añade si la tabla crece lo bastante como para que
-    importe.
+    puertos que de verdad contestaron algo.
+
+    **Concurrente desde L22, y por aritmética.** Con una tabla de un puerto un
+    escáner paralelo era andamiaje, y así se dijo. Con siete filas, un
+    reintento y dos segundos de plazo, el peor caso secuencial son veintiocho
+    segundos de espera contra un host que probablemente no tenga ninguno de
+    esos servicios. Un hilo por sonda —son siete, no doscientos— lo deja en el
+    plazo de la más lenta.
+
+    El presupuesto de tiempo es el otro medio freno: pasado el plazo total, los
+    puertos que aún no han contestado se dan por no observados. **No es lo
+    mismo que darlos por cerrados** —en UDP nunca lo es— y por eso no cambia
+    nada de lo que se reporta: los que contestaron, contestaron.
 
     Args:
         host: El host destino.
@@ -340,23 +587,32 @@ def scan_udp_ports_sync(
         sender: Callable inyectable ``(host, port, payload, timeout) ->
             Optional[bytes]``, espejo del ``opener`` del escáner TCP. Por
             defecto, :func:`udp_send_recv`.
+        budget_seconds: Plazo total del barrido. A cero o menos, sin límite.
+        clock: Reloj monótono inyectable, para que un test pueda comprobar el
+            presupuesto sin esperarlo.
 
     Returns:
-        Los puertos que contestaron, sorted ascendente. Nunca ``None``: un
-        fallo de sonda para un puerto simplemente no lo añade a la lista.
+        Los puertos que contestaron, ordenados ascendentemente. Nunca ``None``:
+        un fallo de sonda para un puerto simplemente no lo añade a la lista.
     """
     send = sender or udp_send_recv
-    port_list = list(ports) if ports is not None else list(UDP_PROBES)
-    open_ports: List[int] = []
-    for port in port_list:
-        payload = UDP_PROBES.get(port)
-        if payload is None:
-            continue
-        reply = None
+    port_list = [port for port in (ports if ports is not None else UDP_PROBES)
+                 if port in UDP_PROBES]
+    if not port_list:
+        return []
+
+    deadline = clock() + budget_seconds if budget_seconds > 0 else None
+
+    def probe(port: int) -> Optional[int]:
         for _ in range(retries + 1):
-            reply = send(host, port, payload, timeout)
-            if reply is not None:
-                break
-        if reply is not None:
-            open_ports.append(port)
-    return sorted(open_ports)
+            if deadline is not None and clock() >= deadline:
+                logger.debug("Barrido UDP de %s: presupuesto agotado en el puerto %s",
+                             host, port)
+                return None
+            if send(host, port, UDP_PROBES[port], timeout) is not None:
+                return port
+        return None
+
+    with ThreadPoolExecutor(max_workers=len(port_list)) as pool:
+        answered = [port for port in pool.map(probe, port_list) if port is not None]
+    return sorted(answered)

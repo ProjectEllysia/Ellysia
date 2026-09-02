@@ -229,6 +229,49 @@ def test_lybra_self_discovery_probe_failure_fails_without_false_fixed(app, admin
     assert escan.status == ScanStatus.FAILED.value
 
 
+def test_lybra_blocked_discovery_never_marks_findings_fixed(app, admin_user, monkeypatch):
+    """L48-c, la mitad que de verdad duele.
+
+    Un objetivo que bloquea el barrido a mitad de camino producía una lista
+    vacía indistinguible de un host limpio, y el ciclo de vida pasaba entonces
+    a ``fixed`` todo lo que el escaneo anterior había encontrado abierto: no
+    sólo se ocultaba lo que hay, se le decía al usuario que sus
+    vulnerabilidades estaban remediadas.
+
+    El transporte ya distingue los dos casos (ver
+    ``tests/unit/test_lybra_transport.py``); aquí se comprueba la consecuencia
+    aguas abajo: con un descubrimiento bloqueado, el escaneo falla y ningún
+    hallazgo previo cambia de estado.
+    """
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
+                        lambda self, target, ports: [80, 443])
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        first = mgr._create_scan_record(target="10.0.0.31", user_id=admin_user.id)
+        mgr._run_lybra(first.id)
+
+    # Segundo escaneo: el objetivo bloquea el barrido — el transporte lo
+    # reconoce y devuelve None en vez de una lista vacía.
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports",
+                        lambda self, target, ports: None)
+    with app.app_context():
+        mgr = LybraEngineManager()
+        second = mgr._create_scan_record(target="10.0.0.31", user_id=admin_user.id)
+        mgr._run_lybra(second.id)
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            second_findings = repo.get_findings_by_scan(second.id)
+            first_findings = repo.get_findings_by_scan(first.id)
+            second = repo.get_by_id(second.id)
+
+    assert second.status == ScanStatus.FAILED.value
+    assert second_findings == []
+    assert not any(finding.state == "fixed" for finding in first_findings)
+
+
 def test_lybra_self_discovery_genuine_zero_ports_still_marks_fixed(app, admin_user, monkeypatch):
     """Discovery running cleanly and finding nothing IS legitimate evidence:
     a previously-open finding on this target should still be marked fixed."""
@@ -748,10 +791,79 @@ def test_lybra_fingerprinting_identifies_the_service_on_its_own(app, admin_user,
 
     fingerprints = [f for f in findings if f.category == "fingerprint"]
     assert len(fingerprints) == 1
-    assert fingerprints[0].qod == 20
+    # L18: el qod refleja de dónde salió la versión. Una cabecera `Server` con
+    # versión explícita es la fuente más fuerte de la cascada.
+    assert fingerprints[0].qod == 90
     assert fingerprints[0].confirmed is False
     assert fingerprints[0].title == "Fingerprint propio (HTTP): Apache 2.4.49"
     assert "Nmap" not in fingerprints[0].title
+
+
+def test_lybra_identifies_a_service_on_a_non_canonical_port(app, admin_user, monkeypatch):
+    """L10: el punto ciego que multiplicaba a todos los demás.
+
+    Los predicados de aplicabilidad deciden por nombre o por número de puerto,
+    y en el autodescubrimiento el nombre sale a su vez de una tabla de puertos.
+    Un SSH en el 2222 no recibía dissector, así que producía un `open_port` con
+    `qod=30` y nada más: sin producto no hay CPE, y sin CPE no hay ni un CVE.
+
+    Aquí el motor no sabe qué hay en el 2222 — pero lo pregunta, y el servicio
+    se lo dice.
+    """
+    from src.modules.features.themis.lybra.fingerprinting import cascade
+
+    class _GreetingSocket:
+        def settimeout(self, _timeout):
+            pass
+
+        def recv(self, _size):
+            return b"SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.1\r\n"
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(cascade, "socket",
+                        type("_S", (), {"create_connection": staticmethod(
+                            lambda address, timeout: _GreetingSocket())}))
+
+    _stub_self_discovery(monkeypatch, [2222])
+    _authorize_target(app, admin_user.id)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    fingerprints = [f for f in findings if f.category == "fingerprint"]
+    assert len(fingerprints) == 1
+    assert fingerprints[0].title == "Fingerprint propio (SSH): OpenSSH 8.9p1"
+
+
+def test_lybra_leaves_a_mute_unknown_port_exactly_as_it_was(app, admin_user, monkeypatch):
+    """La otra mitad: un puerto que acepta la conexión y no contesta a nada
+    sigue siendo un `open_port` informativo. La cascada añade identificaciones,
+    no las inventa."""
+    from src.modules.features.themis.lybra.fingerprinting import cascade
+
+    def _refuse(_address, _timeout):
+        raise ConnectionRefusedError("cerrado")
+
+    monkeypatch.setattr(cascade, "socket",
+                        type("_S", (), {"create_connection": staticmethod(_refuse)}))
+
+    _stub_self_discovery(monkeypatch, [45678])
+    _authorize_target(app, admin_user.id)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    assert [f.category for f in findings] == ["open_port"]
 
 
 def test_lybra_fingerprinting_skipped_for_unauthorized_target(app, admin_user, monkeypatch):

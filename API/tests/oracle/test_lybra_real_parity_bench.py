@@ -286,9 +286,11 @@ def test_fingerprinting_matches_nmap_on_real_targets(measurements):
 
 @pytest.mark.xfail(strict=True, reason=(
     "Medido el 2026-09-01: FTP 0,00 y HTTP entre 0,07 y 0,25 quedan por debajo del "
-    "umbral; SSH aguanta en 0,75. Cada familia tiene su issue de Fase 2 (L48-a "
-    "para FTP, L48-b para HTTP). Este test pasara a XPASS cuando la ultima se "
-    "cierre."
+    "umbral; SSH aguanta en 0,75. La causa de FTP (L48-a) ya esta corregida —el "
+    "parser reconocia un solo formato de saludo, el de vsftpd, y los dos hosts "
+    "medidos servian ProFTPD sin version— pero el numero solo cambia cuando el "
+    "banco se vuelva a ejecutar contra objetivos reales. Queda HTTP (L48-b). Este "
+    "test pasara a XPASS cuando la ultima familia se cierre."
 ))
 def test_no_family_is_left_behind(measurements):
     """La paridad se cierra por familia, no en promedio.

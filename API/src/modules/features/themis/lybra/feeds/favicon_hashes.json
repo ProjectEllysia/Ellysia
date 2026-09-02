@@ -1,0 +1,21 @@
+{
+  "_comment": [
+    "Catálogo de favicons: hash -> producto. Ver fingerprinting/favicon.py.",
+    "El hash es MurmurHash3 x86 de 32 bits CON SIGNO sobre el favicon codificado",
+    "en base64 (saltos cada 76 caracteres, salto final) — la convención pública",
+    "de Shodan, adoptada para poder reutilizar catálogos existentes en vez de",
+    "construir el nuestro desde cero.",
+    "",
+    "Cada entrada exige 'source': un hash es un número de diez dígitos que nadie",
+    "puede revisar de memoria, así que sin decir de dónde salió no hay forma de",
+    "comprobarlo ni de corregirlo cuando el producto cambie de icono. Un hash",
+    "escrito de oídas no es un dato, es una conjetura con formato de dato — y",
+    "por eso este fichero se entrega vacío: el mecanismo está construido y",
+    "probado, y las entradas se añaden calculando el hash contra el favicon real",
+    "de cada producto o importándolas de un catálogo público citado.",
+    "",
+    "Mientras la lista esté vacía, HttpDissector.probe NO pide /favicon.ico: la",
+    "petición sólo se paga cuando hay con qué compararla."
+  ],
+  "favicons": []
+}

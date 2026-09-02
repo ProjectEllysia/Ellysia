@@ -8,16 +8,26 @@ negotiation, no framing, just a banner ending in ``\\r\\n``. The well-known
 most recognisable "verified by an intentionally-vulnerable lab image" targets
 that exists, which makes this dissector unusually easy to validate.
 
-Two banner shapes cover the common daemons:
+Two banner shapes carry a version outright:
 
 - ``220 (vsFTPd 2.3.4)`` — product and version in parentheses (vsftpd).
 - ``220 ProFTPD 1.3.5 Server (Debian) [...]`` — bare ``Product Version``
   tokens before any parenthetical comment (ProFTPD, and similar daemons).
 
-A banner that carries no version at all — Pure-FTPd's default is the classic
-example, which suppresses its version for exactly the reason this dissector
-exists — yields no identification rather than a guess. That mirrors the
-project's rule everywhere else: no CPE that was not actually observed.
+**Y muchos despliegues reales no llevan ninguna de las dos** (L48-a). El
+saludo por defecto de ProFTPD en Debian es ``220 ProFTPD Server (Debian)
+[::ffff:...]``: nombra el producto y calla la versión, que es justo lo que
+recomienda cualquier guía de fortificación. Pure-FTPd hace lo mismo. Contra
+esos servidores el dissector no devolvía nada mientras Nmap leía el producto
+del mismo saludo — medido en dos hosts reales, concordancia 0,00 para la
+familia FTP frente al 1,00 de laboratorio, donde el único contenedor del
+banco era un vsftpd cuyo formato el parser sí conocía.
+
+De ahí :data:`KNOWN_DAEMONS`: una tabla de nombres de demonio conocidos que se
+buscan en el saludo cuando ningún patrón con versión ha casado. **Reconocer un
+producto nombrado no es inventarlo** — el nombre está literalmente en el
+banner—; lo que sigue prohibido es fabricar la versión que no se observó, y
+por eso este camino devuelve siempre ``(producto, None)``.
 """
 
 from __future__ import annotations
@@ -41,6 +51,49 @@ _PAREN_RE = re.compile(r"\(([A-Za-z][\w.\-]*)\s+([0-9][\w.\-]*)\)")
 # a version token, before any parenthetical comment.
 _BARE_RE = re.compile(r"^220[- ]+([A-Za-z][A-Za-z0-9_\-]*(?:\s[A-Za-z]+)?)\s+([0-9][\w.\-]*)")
 
+# Demonios FTP cuyo nombre basta para identificar el producto cuando el saludo
+# no trae versión. La clave es la aguja que se busca en el banner (en
+# minúsculas); el valor, el nombre canónico del producto tal y como debe
+# aparecer en el hallazgo y en la consulta de CPE.
+#
+# Es una tabla y no una heurística a propósito: un `split()` esperanzado sobre
+# la primera palabra del saludo convertiría cualquier mensaje de bienvenida
+# personalizado en un producto inventado. Aquí, si el nombre no está escrito,
+# no hay identificación.
+#
+# El orden importa donde un nombre contiene a otro: "Microsoft FTP Service" se
+# comprueba antes que "FTP", y "FileZilla Server" antes que "FileZilla".
+KNOWN_DAEMONS: Tuple[Tuple[str, str], ...] = (
+    ("microsoft ftp service", "Microsoft FTP Service"),
+    ("filezilla server", "FileZilla Server"),
+    ("pure-ftpd", "Pure-FTPd"),
+    ("proftpd", "ProFTPD"),
+    ("vsftpd", "vsFTPd"),
+    ("wu-ftpd", "WU-FTPD"),
+    ("serv-u", "Serv-U"),
+    ("crushftp", "CrushFTP"),
+    ("glftpd", "glFTPd"),
+    ("bftpd", "bftpd"),
+    ("titan ftp", "Titan FTP Server"),
+)
+
+
+def _named_daemon(banner: str) -> Optional[str]:
+    """Devuelve el producto nombrado en ``banner``, si es uno conocido.
+
+    Args:
+        banner: La línea de saludo completa.
+
+    Returns:
+        El nombre canónico del demonio, o ``None`` si el saludo no nombra
+        ninguno de los conocidos.
+    """
+    lowered = banner.lower()
+    for needle, product in KNOWN_DAEMONS:
+        if needle in lowered:
+            return product
+    return None
+
 
 @dataclass(frozen=True)
 class FtpFingerprint:
@@ -63,10 +116,11 @@ def parse_ftp_banner(banner: str) -> Tuple[Optional[str], Optional[str]]:
         banner: The banner line, e.g. ``"220 (vsFTPd 2.3.4)"``.
 
     Returns:
-        A ``(product, version)`` tuple. Both are ``None`` when the banner does
-        not carry a recognisable product/version pair — deliberately not a
-        guess, since a fabricated identification would go on to look up a
-        CPE that does not exist.
+        A ``(product, version)`` tuple. La versión es ``None`` cuando el saludo
+        nombra un demonio conocido pero suprime su versión —el caso por defecto
+        de ProFTPD y de Pure-FTPd—; ambos son ``None`` cuando no se reconoce
+        nada. Nunca se fabrica una versión que no se leyó: sin ella no hay CPE,
+        y un CPE inventado buscaría CVEs de un producto que no está ahí.
     """
     banner = (banner or "").strip()
     if not banner.startswith("220"):
@@ -77,7 +131,7 @@ def parse_ftp_banner(banner: str) -> Tuple[Optional[str], Optional[str]]:
     match = _BARE_RE.match(banner)
     if match:
         return match.group(1), match.group(2)
-    return None, None
+    return _named_daemon(banner), None
 
 
 def fingerprint_ftp(banner: str) -> FtpFingerprint:
@@ -90,7 +144,14 @@ def fingerprint_ftp(banner: str) -> FtpFingerprint:
         An :class:`FtpFingerprint`.
     """
     product, version = parse_ftp_banner(banner)
-    confidence = 0.9 if product and version else 0.0
+    if product and version:
+        confidence = 0.9
+    elif product:
+        # El producto se leyó del saludo; sólo falta la versión. Mismo escalón
+        # que usa fingerprint_http para un `Server` sin versión.
+        confidence = 0.6
+    else:
+        confidence = 0.0
     return FtpFingerprint(product=product, version=version, confidence=confidence)
 
 
@@ -173,6 +234,17 @@ class FtpDissector(Dissector):
 
     def applies(self, service) -> bool:
         return is_ftp_service(service)
+
+    def identify_from_banner(self, banner):
+        # "220" lo dicen también SMTP y NNTP, así que hace falta descartarlos:
+        # un saludo que se anuncia como (E)SMTP no es de este protocolo.
+        text = banner.decode("utf-8", "ignore").strip()
+        if not text.startswith("220") or "smtp" in text.lower():
+            return None
+        fingerprint = fingerprint_ftp(text)
+        if not fingerprint.product:
+            return None
+        return DissectorResult(fingerprint.product, fingerprint.version, self.label)
 
     def probe(self, target, service, rate_limiter):
         rate_limiter.acquire(target)

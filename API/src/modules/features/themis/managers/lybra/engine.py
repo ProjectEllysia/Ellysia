@@ -1,6 +1,7 @@
 """LybraEngineManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import List, Optional
 import src.modules.system.config_reading as CR
@@ -29,8 +30,9 @@ from ...lybra import (
     classify_exposure,
     finding_to_json,
     QOD_OPEN_PORT,
-    QOD_FINGERPRINT,
     default_dissectors,
+    DissectorResult,
+    identify_unknown_service,
     HostRateLimiter,
     kb_feed_version,
     load_checks,
@@ -297,12 +299,29 @@ class LybraEngineManager(ScanManager):
         must not conflate the two: treating a failed probe as "everything is
         closed" would falsely mark previously-open findings as fixed once
         lifecycle correlation runs.
+
+        Esa defensa estuvo puesta y sin poder dispararse: ``scan_ports_sync``
+        sólo sabía devolver una lista, así que un objetivo que bloqueaba el
+        barrido a mitad de camino llegaba aquí como ``[]`` —un informe
+        tranquilizador sobre un host con servicios abiertos, y peor aún, un
+        ciclo de vida que marcaba como corregidos los hallazgos anteriores—.
+        Desde L48-c el transporte distingue "todo cerrado" de "no me han
+        dejado mirar" y devuelve ``None`` en el segundo caso, que es lo que
+        este método siempre esperó recibir.
         """
         try:
-            return scan_ports_sync(target, discover_ports)
+            discovered = scan_ports_sync(target, discover_ports)
         except Exception:
             logger.exception("Lybra port discovery failed for %s", target)
             return None
+        if discovered is None:
+            logger.error(
+                "Descubrimiento bloqueado para %s: el host respondió al chequeo de "
+                "alcanzabilidad y después ningún puerto contestó. El escaneo falla "
+                "en vez de reportar un objetivo limpio.",
+                target,
+            )
+        return discovered
 
     def _discover_udp_ports(self, target: str) -> list:
         """Discover open UDP ports via the curated probe table (Fase N/Ronda 1).
@@ -315,7 +334,8 @@ class LybraEngineManager(ScanManager):
         list): a user-supplied ``discover_ports`` is a TCP list.
         """
         try:
-            return scan_udp_ports_sync(target)
+            return scan_udp_ports_sync(
+                target, budget_seconds=CR.lybra_config().udp_budget_seconds)
         except Exception:
             logger.exception("Lybra UDP port discovery failed for %s", target)
             return []
@@ -336,6 +356,11 @@ class LybraEngineManager(ScanManager):
                 tls_fetch=TlsProbe().fetch,
                 network_open=NetworkProbe().open,
                 script_plugins=default_script_plugins(),
+                # El mismo pool acotado por host que usa el fingerprinting: los
+                # checks activos tienen exactamente la misma forma —espera de
+                # red servicio a servicio— y el mismo motivo para no hacerla en
+                # fila india.
+                mapper=self._in_host_pool,
             )
             return runtime.run(target, services)
         except Exception:
@@ -411,10 +436,15 @@ class LybraEngineManager(ScanManager):
         """
         dissectors = default_dissectors()
         rate_limiter = HostRateLimiter()
-        findings = []
-        updated: list = []
+        cascade_config = CR.lybra_config()
 
-        for service in services:
+        def identify(service):
+            """Sonda un servicio y devuelve ``(servicio, resultado)``.
+
+            Se define dentro para que cada llamada comparta los ``dissectors`` y
+            el ``rate_limiter`` de **esta** ejecución: el limitador es lo que
+            mantiene el ritmo por host cuando varias sondas van a la vez, así que
+            compartirlo es justo el punto."""
             dissector = next((dissector for dissector in dissectors if dissector.applies(service)), None)
             result = None
             if dissector is not None:
@@ -422,12 +452,40 @@ class LybraEngineManager(ScanManager):
                     result = dissector.probe(target, service, rate_limiter)
                 except Exception:
                     logger.debug("Fingerprinting failed for %s:%s", target, service.port, exc_info=True)
+            elif (service.protocol or "tcp").lower() != "udp":
+                # Ningún dissector reclama este servicio, que hasta L10 quería
+                # decir "se acabó": la aplicabilidad se decide por nombre o por
+                # número de puerto, y en el camino de autodescubrimiento el
+                # nombre sale a su vez de una tabla de puertos. Un MySQL en el
+                # 33060 o un SSH en el 2222 quedaban completamente ciegos.
+                #
+                # La cascada pregunta en vez de suponer (ver
+                # ``fingerprinting/cascade.py``). Sólo TCP: leer un saludo
+                # ofrecido no significa nada sobre un datagrama.
+                try:
+                    result = identify_unknown_service(
+                        target, service, dissectors, rate_limiter,
+                        banner_timeout=cascade_config.banner_timeout,
+                        max_blind_probes=cascade_config.max_blind_probes,
+                    )
+                except Exception:
+                    logger.debug("Cascade failed for %s:%s", target, service.port, exc_info=True)
+            return service, result
 
+        findings: list = []
+        updated: list = []
+        # El orden de ``services`` se conserva —``map`` devuelve en el orden de
+        # entrada, no en el de terminación—, así que el resultado de un escaneo no
+        # depende de cuál de los servicios contestó antes. Un escáner cuyos
+        # hallazgos cambian de orden entre ejecuciones hace ruido en cualquier
+        # comparación posterior, empezando por el ciclo de vida.
+        for service, result in self._in_host_pool(identify, services):
             if result is None:
                 updated.append(service)
                 continue
 
-            findings.append(self._fingerprint_finding(service, result.product, result.version, result.label))
+            findings.append(self._fingerprint_finding(service, result))
+            findings.extend(self._layer_findings(service, result))
             if result.product and result.version:
                 service = replace(service, product=result.product, version=result.version)
             updated.append(service)
@@ -435,16 +493,84 @@ class LybraEngineManager(ScanManager):
         return updated, findings
 
     @staticmethod
-    def _fingerprint_finding(service, product: Optional[str], version: Optional[str], label: str) -> dict:
+    def _in_host_pool(work, items):
+        """Ejecuta ``work`` sobre cada elemento con un pool acotado por host.
+
+        El fingerprinting y los checks activos son entrada/salida pura: casi todo
+        su tiempo es esperar a que un servicio conteste o a que se agote su plazo.
+        En fila india, **un servicio mudo retrasa a todos los que vienen detrás**,
+        y la fase más lenta de un escaneo acababa siendo la que menos trabajo hace.
+
+        Tres cosas que este pool **no** cambia, y que son las condiciones que lo
+        hacen aceptable:
+
+        - Los dissectors siguen siendo síncronos y sin estado compartido. El
+          paralelismo vive aquí, en el manager, y no dentro de cada protocolo:
+          migrar ocho módulos a asyncio costaría mucho más y daría lo mismo,
+          porque el trabajo es espera de red.
+        - El ritmo por host lo sigue marcando ``HostRateLimiter``, que es seguro
+          entre hilos y reserva el turno antes de dormir. El pool decide cuántas
+          sondas pueden estar **esperando** a la vez, no a qué ritmo salen.
+        - El aislamiento de fallos se mantiene: cada unidad de trabajo captura lo
+          suyo, así que un protocolo que revienta sigue costando su servicio y
+          nada más.
+
+        Args:
+            work: La función a aplicar a cada elemento.
+            items: Los elementos.
+
+        Returns:
+            Los resultados, **en el orden de entrada**.
+        """
+        items = list(items)
+        if not items:
+            return []
+        workers = max(1, min(CR.lybra_config().host_pool_size, len(items)))
+        if workers == 1:
+            return [work(item) for item in items]
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return list(pool.map(work, items))
+
+    @classmethod
+    def _layer_findings(cls, service, result) -> list:
+        """Un hallazgo informativo por cada capa de servidor adicional (L48-b).
+
+        Un puerto HTTP no siempre lo atiende **un** programa: la topología más
+        corriente que existe —un nginx de proxy inverso por delante de un
+        Apache— son dos, y hasta ahora el motor sólo podía reportar uno. La
+        medición real lo destapó: cinco servicios en tres hosts donde Lybra
+        decía ``nginx`` y Nmap decía ``Apache httpd``, sin que ninguno de los
+        dos estuviera equivocado.
+
+        Reportar las dos capas es la respuesta honesta. Las dos están expuestas
+        y las dos tienen CVEs; elegir una en silencio produce falsos negativos
+        por un lado y falsos positivos por el otro.
+        """
+        return [
+            cls._fingerprint_finding(
+                service,
+                DissectorResult(product, version, f"{result.label} {role}", qod=result.qod),
+            )
+            for product, version, role in getattr(result, "extra_layers", ())
+        ]
+
+    @staticmethod
+    def _fingerprint_finding(service, result) -> dict:
         """Build an informational Finding stating what Lybra identified.
 
         Es una constatación, no un veredicto: dice qué vio el motor y con qué
         dissector. Antes de L52 el título comparaba la lectura propia con la de
         Nmap («concuerda / no concuerda con Nmap»), lo que convertía un dato
         propio en una nota al pie sobre otra herramienta.
+
+        El ``qod`` lo pone el dissector (L18). Era una constante para todos, de
+        modo que una versión leída de una cabecera ``Server`` explícita y otra
+        deducida de una página de error valían lo mismo; ahora cada lectura
+        dice cuánto se fía de sí misma. Sigue sin alimentar la confianza de
+        ninguna vulnerabilidad — ver ``dispatch.QOD_FINGERPRINT``.
         """
-        own = f"{product or '?'} {version or ''}".strip()
-        title = f"Fingerprint propio ({label}): {own}"
+        own = f"{result.product or '?'} {result.version or ''}".strip()
+        title = f"Fingerprint propio ({result.label}): {own}"
         return {
             "title":        title,
             "category":     "fingerprint",
@@ -454,7 +580,7 @@ class LybraEngineManager(ScanManager):
             "source":       "lybra",
             "check_id":     "lybra:fingerprint@1",
             "feed_version": "lybra-fingerprint-1",
-            "qod":          QOD_FINGERPRINT,
+            "qod":          result.qod,
             "confirmed":    False,
             "state":        "open",
         }

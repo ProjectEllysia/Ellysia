@@ -315,6 +315,17 @@ class SshDissector(Dissector):
     def applies(self, service) -> bool:
         return (service.name or "").lower() == "ssh" or service.port == 22
 
+    def identify_from_banner(self, banner):
+        # El banner de SSH es inconfundible: la RFC 4253 §4.2 exige que la
+        # primera línea empiece por "SSH-".
+        text = banner.decode("utf-8", "ignore").strip()
+        if not text.startswith("SSH-"):
+            return None
+        product, version = parse_ssh_banner(text)
+        if not product:
+            return None
+        return DissectorResult(product, version, self.label)
+
     def probe(self, target, service, rate_limiter):
         rate_limiter.acquire(target)
         probed = self._probe.fetch(target, service.port or 22)
