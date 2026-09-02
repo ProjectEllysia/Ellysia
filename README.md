@@ -33,7 +33,7 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
 
 ## Features
 
-- **Vulnerability scanning** — Nmap (port/OS detection), Nikto (web vulns), Nuclei (template-based), and **Lybra**, a self-built detection engine with banner fingerprinting, active checks, and CPE→CVE matching against a local NVD/CISA-KEV/FIRST-EPSS knowledge base — with scheduled execution via APScheduler and an authorized-targets registry for scan governance.
+- **Vulnerability scanning** — Nmap (port/OS detection), Nikto (web vulns), Nuclei (template-based), and **Lybra**, a self-built detection engine: its own TCP and UDP discovery, protocol dissectors for HTTP, SSH, FTP, SMTP/IMAP/POP3, SMB, TLS, MySQL, PostgreSQL, SQL Server, MongoDB, Redis, LDAP, RDP, VNC, SNMP, DNS, NTP, NetBIOS, mDNS, IKE and unauthenticated admin APIs (Docker, Elasticsearch, Kubernetes, etcd, Consul, Kibana), declarative and script checks, and CPE→CVE matching against a local NVD/CISA-KEV/FIRST-EPSS knowledge base — with scheduled execution via APScheduler and an authorized-targets registry for scan governance.
 - **AI-powered PDF reports** — Scan results enriched by a pluggable LLM backend with "Controls, Not Counts" calibrated risk assessment, plus per-host traceroute.
 - **Anti-phishing analysis** — 46 atomic rules across 10 rule families evaluate email headers and content (SPF, DKIM, DMARC, ARC, QR-code/quishing detection, domain impersonation, IOC extraction), producing a calibrated `Legitimate` / `Suspicious` / `Phishing` verdict with optional AI summaries.
 - **Automated mailbox monitoring** — Connect Gmail or Microsoft 365 via OAuth; Iris periodically pulls new mail and analyzes it automatically, and emails the user when a connected mailbox receives phishing.
@@ -96,7 +96,7 @@ Ellysia/
 
 | Module | Description | Status |
 |---|---|---|
-| **Themis** | Nmap, Nikto, Nuclei and Lybra (self-built engine) scans with PDF reports, traceroute, scheduled execution, AI enrichment, finding triage, folders, and an authorized-targets registry. | Operational |
+| **Themis** | Nmap, Nikto, Nuclei and Lybra (self-built engine: TCP/UDP discovery, 20+ protocol dissectors, declarative and script checks) scans with PDF reports, traceroute, scheduled execution, AI enrichment, finding triage, folders, and an authorized-targets registry. | Operational |
 | **Iris** | Phishing detection via a 46-rule engine across 10 families, IOC extraction, AI summaries, PDF reports, and automated Gmail/Microsoft 365 mailbox monitoring with phishing email notifications. | Operational |
 | **Acheron** | Client-encrypted credential vault with granular sync, optimistic-concurrency updates and a password generator, consumed by the web client and [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile). | Operational |
 | **Aegis** | AI-generated security awareness pills with current alerts from INCIBE-CERT and the Lybra knowledge base, quizzes, multi-format export (Markdown/HTML/JSON), and campaign delivery with per-recipient tracking. | Operational |
