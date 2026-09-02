@@ -101,6 +101,104 @@ def test_load_tech_signatures_covers_known_vendors():
     assert {"WordPress", "SonicWall", "pfSense", "Fortinet FortiGate", "Cisco IOS/ASA"} <= names
 
 
+# =============================================== versión capturada por firma
+#
+# L19: una firma identificaba **nombres** y ahí se paraba. Sin versión no hay
+# CPE, y sin CPE no hay ni un CVE — así que un WordPress reconocido sin
+# versión era un dato de inventario, no una detección.
+
+
+def test_a_signature_captures_the_version_from_the_generator_meta():
+    body = (
+        '<html><head><meta name="generator" content="WordPress 6.4.2" />'
+        "<title>Blog</title></head><body>wp-content</body></html>"
+    )
+    fp = fingerprint_http(Response(200, body, {}))
+    assert fp.product == "WordPress"
+    assert fp.version == "6.4.2"
+    # Producto **y** versión: el mismo escalón de confianza que una cabecera
+    # Server completa, porque la evidencia es igual de explícita.
+    assert fp.confidence == 0.9
+
+
+def test_a_signature_without_a_captured_version_still_names_the_product():
+    # La regla que separa esto de inventar CPEs: reconocer el producto no
+    # autoriza a fabricar una versión.
+    fp = fingerprint_http(Response(200, "<html>MikroTik RouterOS</html>", {}))
+    assert fp.product == "MikroTik RouterOS"
+    assert fp.version is None
+    assert fp.confidence == 0.6
+
+
+def test_a_signature_version_never_lands_on_another_products_name():
+    """El error que este mecanismo podría introducir, y que no introduce.
+
+    Un WordPress servido detrás de un nginx tiene dos identidades: la cabecera
+    `Server` habla del proxy, el `<meta generator>` habla de la aplicación.
+    Pegar la versión de uno al nombre del otro produciría `nginx 6.4.2` — un
+    CPE que no existe, y una búsqueda de CVEs de un producto que no está ahí.
+    """
+    body = '<html><head><meta name="generator" content="WordPress 6.4.2" /></head>'            "<body>wp-content</body></html>"
+    fp = fingerprint_http(Response(200, body, {"server": "nginx/1.24.0"}))
+    assert (fp.product, fp.version) == ("nginx", "1.24.0")
+    assert "WordPress" in fp.technologies
+
+
+def test_a_signature_captures_the_version_from_a_header():
+    fp = fingerprint_http(Response(200, "<html>Dashboard [Jenkins]</html>",
+                                   {"x-jenkins": "2.426.3"}))
+    assert fp.product == "Jenkins"
+    assert fp.version == "2.426.3"
+
+
+def test_a_version_pattern_that_does_not_capture_leaves_the_version_alone():
+    # La firma casa por su matcher de palabras, pero el patrón de versión no
+    # encuentra nada en esa parte: producto sí, versión no.
+    body = "<html><head><title>Blog</title></head><body>wp-content</body></html>"
+    fp = fingerprint_http(Response(200, body, {}))
+    assert fp.product == "WordPress"
+    assert fp.version is None
+
+
+def test_the_bundled_signature_feed_is_well_formed():
+    """Mismo criterio que ``test_lybra_feed_shape`` aplica al feed de checks: el
+    modo de fallo de un feed de datos es el silencio. Una firma sin matchers no
+    casa nunca y un ``versionPattern`` sin grupo ``version`` casa sin aportar
+    nada; en los dos casos el escaneo termina en verde con un producto menos."""
+    from src.modules.features.themis.lybra import (
+        load_tech_signatures, validate_tech_signatures,
+    )
+    signatures = load_tech_signatures()
+    assert validate_tech_signatures(signatures) == []
+    # El criterio de cierre del issue: al menos 30 productos cubiertos.
+    assert len(signatures) >= 30
+
+
+def test_the_signature_validator_finds_each_kind_of_breakage():
+    """Sin este bloque, un validador que devolviera siempre `[]` dejaría el
+    test de arriba en verde para siempre."""
+    import re
+
+    from src.modules.features.themis.lybra import (
+        TechMatcher, TechSignature, validate_tech_signatures,
+    )
+
+    no_matchers = TechSignature(name="Vacía", matchers=())
+    no_name = TechSignature(name="", matchers=(TechMatcher("body", ("x",)),))
+    bad_group = TechSignature(
+        name="SinGrupo",
+        matchers=(TechMatcher("body", ("x",), re.compile(r"v([\d.]+)")),),
+    )
+    no_words = TechSignature(name="SinPalabras", matchers=(TechMatcher("body", ()),))
+    duplicated = [TechSignature(name="Doble", matchers=(TechMatcher("body", ("x",)),))] * 2
+
+    assert len(validate_tech_signatures([no_matchers])) == 1
+    assert len(validate_tech_signatures([no_name])) == 1
+    assert len(validate_tech_signatures([bad_group])) == 1
+    assert len(validate_tech_signatures([no_words])) == 1
+    assert len(validate_tech_signatures(duplicated)) == 1
+
+
 # ================================================================ SSH banner
 
 @pytest.mark.parametrize("banner,product,version", [

@@ -71,9 +71,11 @@ from .dispatch import Dissector, DissectorResult, QOD_FINGERPRINT
 from .registry import register_dissector, default_dissectors
 from .http import (
     HttpFingerprint,
+    SignatureHit,
     TechMatcher,
     TechSignature,
     load_tech_signatures,
+    validate_tech_signatures,
     fingerprint_http,
     HttpDissector,
 )
@@ -151,8 +153,10 @@ __all__ = [
     "register_dissector",
     "default_dissectors",
     "HttpFingerprint",
+    "SignatureHit",
     "TechMatcher",
     "TechSignature",
+    "validate_tech_signatures",
     "load_tech_signatures",
     "fingerprint_http",
     "HttpDissector",

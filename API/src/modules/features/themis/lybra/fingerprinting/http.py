@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Pattern, Tuple
 
 from ..checks import HttpProbe, Response, is_http_service
 from .dispatch import Dissector, DissectorResult
@@ -60,9 +61,18 @@ class TechMatcher:
             fetched), ``"title"``, or ``"header:<name>"`` for a specific
             response header.
         words: Case-insensitive substrings; any one present is a match.
+        version_pattern: Expresión regular opcional con un grupo llamado
+            ``version``, evaluada sobre **la misma parte** que ``words``. Vive
+            en el matcher y no en la firma porque el sitio donde está la
+            versión depende del sitio donde se detectó el producto: WordPress
+            se reconoce por ``wp-content`` en el cuerpo y publica su versión en
+            un ``<meta name="generator">`` del mismo cuerpo, mientras que un
+            ``X-Generator`` la trae en la cabecera. Un patrón por firma
+            obligaría a elegir una de las dos.
     """
     part: str
     words: tuple
+    version_pattern: Optional[Pattern] = None
 
 
 @dataclass(frozen=True)
@@ -71,10 +81,23 @@ class TechSignature:
 
     Matchers within a signature are OR'd — any single one firing identifies
     the technology, the same "one piece of evidence is enough" model
-    Wappalyzer itself uses. Never claims a version, only a name.
+    Wappalyzer itself uses.
+
+    Una firma **puede** aportar versión, si alguno de sus matchers trae
+    ``version_pattern`` y ese patrón captura. Si no, aporta sólo el nombre: la
+    regla que separa esto de inventar CPEs es que un producto reconocido sin
+    versión capturada se emite sin versión, nunca con una adivinada. El motor
+    ya sigue ese criterio con Postfix y con Pure-FTPd.
     """
     name: str
     matchers: tuple
+
+
+@dataclass(frozen=True)
+class SignatureHit:
+    """Lo que una firma aporta cuando casa: siempre el nombre, a veces la versión."""
+    name: str
+    version: Optional[str]
 
 
 def load_tech_signatures(path: Optional[str] = None) -> List[TechSignature]:
@@ -97,19 +120,81 @@ def load_tech_signatures(path: Optional[str] = None) -> List[TechSignature]:
     return [
         TechSignature(
             name=signature["name"],
-            matchers=tuple(
-                TechMatcher(part=matcher["part"], words=tuple(matcher["words"]))
-                for matcher in signature["matchers"]
-            ),
+            matchers=tuple(_load_matcher(matcher) for matcher in signature["matchers"]),
         )
         for signature in data.get("signatures", [])
     ]
 
 
+def _load_matcher(matcher: dict) -> TechMatcher:
+    """Construye un :class:`TechMatcher` desde su entrada JSON.
+
+    El ``versionPattern`` se compila al cargar y no en cada evaluación: es una
+    vez por arranque en vez de una por servicio sondado, y además un patrón
+    inválido revienta aquí —donde se ve— en vez de fallar en silencio contra
+    un objetivo real.
+    """
+    pattern = matcher.get("versionPattern")
+    return TechMatcher(
+        part=matcher["part"],
+        words=tuple(matcher["words"]),
+        version_pattern=re.compile(pattern, re.IGNORECASE) if pattern else None,
+    )
+
+
+def validate_tech_signatures(signatures: List[TechSignature]) -> List[str]:
+    """Comprueba que cada firma pueda llegar a casar, y describe las que no.
+
+    Mismo criterio que ``checks.validate_checks`` (L27): el feed son datos que
+    deciden si un producto se identifica, y su modo de fallo es el silencio —
+    una firma sin matchers no casa nunca, un ``versionPattern`` sin grupo
+    ``version`` casa y no aporta nada, y en los dos casos el escaneo termina en
+    verde con un producto menos identificado. Convertirlo en fallo de CI es lo
+    que impide que el catálogo crezca rompiéndose por el camino.
+
+    ``load_tech_signatures`` ya rechaza un patrón que no compile (revienta al
+    compilarlo), así que aquí no hace falta comprobarlo otra vez.
+
+    Args:
+        signatures: Las firmas cargadas.
+
+    Returns:
+        Una lista de problemas legibles, vacía si el feed está bien formado.
+    """
+    problems: List[str] = []
+    seen: set = set()
+    for signature in signatures:
+        if not signature.name:
+            problems.append("Una firma no tiene nombre")
+            continue
+        if signature.name in seen:
+            problems.append(f"Firma duplicada: {signature.name}")
+        seen.add(signature.name)
+        if not signature.matchers:
+            problems.append(f"{signature.name}: sin matchers, no casará nunca")
+        for matcher in signature.matchers:
+            if not matcher.part:
+                problems.append(f"{signature.name}: un matcher no declara 'part'")
+            if not matcher.words:
+                problems.append(f"{signature.name}: un matcher no declara 'words'")
+            if matcher.version_pattern is None:
+                continue
+            if "version" not in matcher.version_pattern.groupindex:
+                problems.append(
+                    f"{signature.name}: versionPattern sin grupo llamado 'version' "
+                    f"({matcher.version_pattern.pattern})"
+                )
+    return problems
+
+
 _TECH_SIGNATURES: List[TechSignature] = load_tech_signatures()
 
 
-def _tech_evidence(response: Response, title: Optional[str], error_resp: Optional[Response]) -> Dict[str, str]:
+def _tech_evidence(
+    response: Response,
+    title: Optional[str],
+    error_resp: Optional[Response],
+) -> Dict[str, str]:
     """Assemble the named evidence parts a :class:`TechMatcher` can target."""
     evidence = {
         "body": response.body,
@@ -121,13 +206,35 @@ def _tech_evidence(response: Response, title: Optional[str], error_resp: Optiona
     return evidence
 
 
-def _signature_matches(signature: TechSignature, evidence: Dict[str, str]) -> bool:
-    """Return whether any of a signature's matchers fires against ``evidence``."""
+def _signature_hit(signature: TechSignature, evidence: Dict[str, str]) -> Optional[SignatureHit]:
+    """Evalúa una firma contra la evidencia y devuelve lo que aporta.
+
+    Se recorren **todos** los matchers aunque el primero ya haya casado: el que
+    identifica el producto y el que captura la versión pueden ser distintos
+    (``wp-content`` en el cuerpo detecta WordPress; el ``<meta generator>``,
+    también en el cuerpo, es el que trae el número). Se para en cuanto hay
+    versión, que es lo máximo que una firma puede aportar.
+
+    Args:
+        signature: La firma a evaluar.
+        evidence: Las partes nombradas que un matcher puede inspeccionar.
+
+    Returns:
+        Un :class:`SignatureHit`, o ``None`` si ningún matcher casó.
+    """
+    did_match = False
     for matcher in signature.matchers:
-        text = evidence.get(matcher.part, "").lower()
-        if any(word.lower() in text for word in matcher.words):
-            return True
-    return False
+        raw = evidence.get(matcher.part, "")
+        text = raw.lower()
+        if not any(word.lower() in text for word in matcher.words):
+            continue
+        did_match = True
+        if matcher.version_pattern is None:
+            continue
+        found = matcher.version_pattern.search(raw)
+        if found:
+            return SignatureHit(name=signature.name, version=found.group("version"))
+    return SignatureHit(name=signature.name, version=None) if did_match else None
 
 
 def _extract_title(body: str) -> Optional[str]:
@@ -201,11 +308,18 @@ def fingerprint_http(
     product, version = _parse_server_header(server)
     title = _extract_title(response.body)
     evidence = _tech_evidence(response, title, error_resp)
-    technologies = tuple(signature.name for signature in _TECH_SIGNATURES if _signature_matches(signature, evidence))
+    candidates = (_signature_hit(signature, evidence) for signature in _TECH_SIGNATURES)
+    hits = [hit for hit in candidates if hit]
+    technologies = tuple(hit.name for hit in hits)
     favicon_hash = hashlib.sha256(favicon).hexdigest() if favicon else None
 
-    if not product and technologies:
-        product = technologies[0]
+    if not product and hits:
+        # La versión de la firma sólo se acepta junto al producto de esa misma
+        # firma. Un WordPress 6.4.2 detrás de un `Server: nginx` daría, si no,
+        # "nginx 6.4.2": un CPE que no existe y una búsqueda de CVEs de otro
+        # producto — exactamente el error que la regla de "no inventar CPE"
+        # existe para evitar.
+        product, version = hits[0].name, hits[0].version
 
     if product and version:
         confidence = 0.9
