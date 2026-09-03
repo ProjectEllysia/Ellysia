@@ -579,3 +579,49 @@ def test_the_ranking_endpoint_filters_by_origin(client, app, admin_user, auth_he
 
 def test_the_ranking_endpoint_requires_authentication(client):
     assert client.get("/themis/lybra/unresolved-products").status_code == 401
+
+
+def test_a_source_with_content_but_no_sync_record_is_not_stale(app):
+    """El falso positivo del día del despliegue.
+
+    `KbSyncStatus` nace vacía en cada instalación, así que "nunca sincronizada"
+    es cierto para todas las fuentes aunque el espejo tenga cientos de miles de
+    CVEs dentro. Decir "desactualizada" sobre eso es gritar sobre un catálogo
+    que puede estar perfectamente al día — y un aviso que sale mal el primer
+    día enseña a ignorar los avisos.
+    """
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).upsert_cve(_cve_row(), [])
+
+        by_source = {e["source"]: e for e in KbSyncManager().status()["sources"]}
+
+        assert by_source["nvd"]["neverSynced"] is True
+        assert by_source["nvd"]["hasContent"] is True
+        assert by_source["nvd"]["isStale"] is False, "hay contenido: no se puede afirmar que esté vieja"
+        assert by_source["nvd"]["isUnverified"] is True
+
+
+def test_a_source_that_is_empty_and_unsynced_is_stale(app):
+    """Lo que sí se puede afirmar: una fuente sin registro **y** sin contenido
+    no tiene nada que ofrecer, y eso el operador tiene que saberlo."""
+    with app.app_context():
+        by_source = {e["source"]: e for e in KbSyncManager().status()["sources"]}
+
+        assert by_source["oval"]["hasContent"] is False
+        assert by_source["oval"]["isStale"] is True
+        assert by_source["oval"]["isUnverified"] is False
+
+
+def test_the_alarm_separates_what_it_can_prove_from_what_it_cannot(app):
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).upsert_cve(_cve_row(), [])
+
+        status = KbSyncManager().status()
+
+    # `oval` sigue vacía, así que hay alarma; pero `nvd` no la provoca.
+    assert status["isStale"] is True
+    assert status["isUnverified"] is True
+    stale = [e["source"] for e in status["sources"] if e["isStale"]]
+    assert "nvd" not in stale

@@ -1407,6 +1407,33 @@ class KbRepository(BaseRepository[CveEntry]):
             "cpeMatches": self._session.query(CpeMatch).count(),
             "kev": self._session.query(KevEntry).count(),
             "epss": self._session.query(EpssScore).count(),
+            "distroPkgStatus": self._session.query(DistroPkgStatus).count(),
+        }
+
+    def has_content(self) -> dict:
+        """Si cada fuente de la KB tiene algo dentro, por nombre de fuente.
+
+        Responde a una pregunta distinta de :meth:`knowledge_state` y de
+        :meth:`sync_status`, y las tres hacen falta para no confundir tres
+        situaciones que se parecen: *cuán reciente es lo que sabemos*, *cuándo
+        lo preguntamos y funcionó*, y *si sabemos algo en absoluto*.
+
+        La tercera es la que evita el falso positivo del día del despliegue:
+        ``KbSyncStatus`` nace vacía en cada instalación, así que "nunca
+        sincronizada" es cierto para todas las fuentes aunque el espejo tenga
+        350.000 CVEs dentro. Sin este recuento, el aviso de frescura le grita a
+        todo el mundo la primera semana — y un aviso que sale mal el primer día
+        enseña a ignorar los avisos.
+
+        Las claves son las de ``features.themis.kb.sources``, no las de las
+        tablas, porque quien pregunta razona en fuentes.
+        """
+        totals = self.counts()
+        return {
+            "nvd": totals["cves"] > 0,
+            "kev": totals["kev"] > 0,
+            "epss": totals["epss"] > 0,
+            "oval": totals["distroPkgStatus"] > 0,
         }
 
     # =========================================================================

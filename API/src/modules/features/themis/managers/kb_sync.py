@@ -259,11 +259,21 @@ class KbSyncManager:
 
         Se recorren las fuentes **configuradas**, no las filas de la tabla: una
         fuente que no se ha sincronizado nunca no tiene fila, y es justo la que
-        más importa reportar. Aparece con ``neverSynced`` y cuenta como vieja.
+        más importa reportar.
+
+        **Nunca sincronizada no es lo mismo que desactualizada**, y confundirlas
+        costaba un falso positivo el día del despliegue: ``KbSyncStatus`` nace
+        vacía en cada instalación, así que sin esta distinción el aviso saltaba
+        para todo el mundo hasta la primera sincronización nocturna, sobre un
+        espejo que podía tener 350.000 CVEs dentro. Sólo se afirma que una
+        fuente está vieja cuando se puede establecer: hay registro y está
+        pasado de plazo, o no hay registro **y** la fuente está vacía. Lo de en
+        medio —contenido sin registro— es ``isUnverified``, que es información
+        y no una alarma.
 
         Returns:
-            ``{"sources": [...], "isStale": bool, "feedVersion": str}``, con
-            una entrada por fuente configurada.
+            ``{"sources": [...], "isStale": bool, "isUnverified": bool,
+            "feedVersion": str}``, con una entrada por fuente configurada.
         """
         from ..lybra import kb_feed_version
 
@@ -275,18 +285,37 @@ class KbSyncManager:
             repo = KbRepository(uow)
             rows = {row.source: row for row in repo.sync_status()}
             content_state = repo.knowledge_state()
+            filled = repo.has_content()
             feed_version = kb_feed_version(content_state)
 
         sources = []
         for name in sorted(config.sources):
             row = rows.get(name)
             limit_days = max_age.get(name)
+            has_content = filled.get(name, False)
+
             age_days = None
             if row is not None and row.last_success_at is not None:
                 age_days = round((now - row.last_success_at).total_seconds() / 86400, 2)
-            # Nunca sincronizada cuenta como vieja: no saber nada de una fuente
-            # es peor que saber que lleva días parada, no mejor.
-            is_stale = age_days is None or (limit_days is not None and age_days > limit_days)
+
+            if age_days is not None:
+                is_stale = limit_days is not None and age_days > limit_days
+                is_unverified = False
+            else:
+                # Sin registro de sincronización sólo se puede afirmar que la
+                # fuente está vieja **si además está vacía**. Si tiene
+                # contenido, lo único cierto es que no sabemos cuándo entró: es
+                # una fuente sin verificar, no una fuente caducada, y decir lo
+                # segundo sería gritar sobre un catálogo que puede estar
+                # perfectamente al día.
+                #
+                # No se usa la fecha del contenido para inventarle una edad,
+                # que era la salida tentadora: sirve para NVD y EPSS, que se
+                # publican a diario, y miente para KEV, cuyo `date_added` más
+                # nuevo puede llevar semanas quieto con un espejo impecable.
+                is_stale = not has_content
+                is_unverified = has_content
+
             newest = content_state.get(name)
             sources.append({
                 "source": name,
@@ -295,15 +324,18 @@ class KbSyncManager:
                 "rowsUpserted": row.rows_upserted if row else None,
                 "error": row.error if row else None,
                 "neverSynced": row is None or row.last_success_at is None,
+                "hasContent": has_content,
                 "ageDays": age_days,
                 "maxAgeDays": limit_days,
                 "isStale": is_stale,
+                "isUnverified": is_unverified,
                 "newestContentAt": isoformat_utc(newest) if newest else None,
             })
 
         return {
             "sources": sources,
             "isStale": any(entry["isStale"] for entry in sources),
+            "isUnverified": any(entry["isUnverified"] for entry in sources),
             "feedVersion": feed_version,
         }
 
@@ -322,10 +354,16 @@ class KbSyncManager:
                     logger.warning(
                         "KB: la fuente '%s' está desactualizada (%s, límite %s días)%s",
                         entry["source"],
-                        "nunca sincronizada" if entry["neverSynced"]
+                        "vacía y nunca sincronizada" if entry["neverSynced"]
                         else f"{entry['ageDays']} días",
                         entry["maxAgeDays"],
                         f" — último error: {entry['error']}" if entry["error"] else "",
+                    )
+                elif entry["isUnverified"]:
+                    logger.info(
+                        "KB: la fuente '%s' tiene contenido pero ninguna sincronización "
+                        "registrada todavía; no se puede afirmar su frescura",
+                        entry["source"],
                     )
         except Exception:
             logger.exception("KB sync failed")
