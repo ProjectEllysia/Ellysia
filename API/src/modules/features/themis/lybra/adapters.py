@@ -237,6 +237,7 @@ def finding_to_json(f: dict, exposure: str) -> dict:
         "cvssScore":   f.get("cvss_score"),
         "epssScore":   f.get("epss_score"),
         "inKev":       f.get("in_kev"),
+        "exploitMaturity": f.get("exploit_maturity"),
         "qod":         f.get("qod"),
         "confirmed":   f.get("confirmed"),
         "cpeResolved": f.get("cpe_resolved"),

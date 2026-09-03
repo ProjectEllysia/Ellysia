@@ -1288,6 +1288,23 @@ class KbRepository(BaseRepository[CveEntry]):
         """El estado de sincronización de todas las fuentes registradas."""
         return self._session.query(KbSyncStatus).order_by(KbSyncStatus.source).all()
 
+    def exploit_evidence(self, cve_id: str) -> Optional[str]:
+        """Qué madurez de explotación consta para una CVE, sin contar KEV (L34).
+
+        Hoy sólo puede decir ``"poc"``: la señal disponible es la referencia
+        que la propia NVD etiqueta como exploit, y esa etiqueta afirma que
+        alguien publicó algo que demuestra el fallo, no cuán usable es. Subirla
+        a ``functional`` sería inventar precisión que el dato no tiene.
+
+        KEV no se mira aquí a propósito: el motor ya lo consulta por su cuenta
+        y es la evidencia más fuerte, así que la combinación de ambas vive en
+        :func:`~lybra.correlation.exploit_maturity` y no repartida entre dos
+        capas.
+        """
+        entry = (self._session.query(CveEntry)
+                 .filter(CveEntry.cve_id == cve_id).one_or_none())
+        return "poc" if entry is not None and entry.has_exploit_reference else None
+
     def record_resolution(self, normalized_name: str, origin: str, was_resolved: bool) -> None:
         """Llevar la cuenta de un nombre de producto que no resuelve a un CPE.
 

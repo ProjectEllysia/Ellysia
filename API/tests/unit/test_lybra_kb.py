@@ -557,3 +557,38 @@ def test_desktop_aliases_added_from_real_inventory(raw_name, expected):
 ])
 def test_version_scheme_mismatches_are_deliberately_not_aliased(raw_name):
     assert normalize_product_name(raw_name) not in load_product_aliases()
+
+
+# ───────────── la referencia de exploit que NVD ya etiquetaba (L34)
+
+
+def test_an_exploit_tagged_reference_is_picked_up():
+    """El dato ya viajaba en cada registro que se ingiere: sólo se estaba
+    tirando."""
+    from src.modules.features.themis.lybra.kb import ingest_nvd_cve
+
+    row, _matches = ingest_nvd_cve({"cve": {
+        "id": "CVE-2021-41773",
+        "references": [
+            {"url": "https://example/advisory", "tags": ["Third Party Advisory"]},
+            {"url": "https://example/poc", "tags": ["Exploit", "Third Party Advisory"]},
+        ],
+    }})
+    assert row["has_exploit_reference"] is True
+
+
+def test_a_cve_without_exploit_references_says_so():
+    from src.modules.features.themis.lybra.kb import ingest_nvd_cve
+
+    row, _matches = ingest_nvd_cve({"cve": {
+        "id": "CVE-2021-0000",
+        "references": [{"url": "https://example/advisory", "tags": ["Vendor Advisory"]}],
+    }})
+    assert row["has_exploit_reference"] is False
+
+
+def test_a_cve_with_no_references_at_all_does_not_blow_up():
+    from src.modules.features.themis.lybra.kb import ingest_nvd_cve
+
+    row, _matches = ingest_nvd_cve({"cve": {"id": "CVE-2021-0001"}})
+    assert row["has_exploit_reference"] is False

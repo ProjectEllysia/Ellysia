@@ -335,6 +335,52 @@ def _cvss_band(cvss: float) -> int:
     return 0      # INFO
 
 
+# Escalera de madurez de explotación, de menos a más grave. El orden importa:
+# `exploit_maturity` se queda con la evidencia más fuerte que haya, y "más
+# fuerte" es una posición en esta lista.
+EXPLOIT_MATURITY_LADDER = ["none", "poc", "functional", "weaponized", "in_the_wild"]
+
+# De los cinco niveles, hoy se producen tres: ``in_the_wild`` desde KEV,
+# ``poc`` desde las referencias que la propia NVD etiqueta como exploit, y
+# ``none`` cuando no consta ninguno. ``functional`` y ``weaponized`` necesitan
+# un catálogo de exploits (Exploit-DB, Metasploit) que es un feed externo
+# nuevo, con su sincronización y sus modos de fallo; se dejan declarados
+# porque la escalera es la del sector y recortarla obligaría a renumerar
+# después, pero **nada los escribe todavía** y este comentario existe para que
+# eso no se lea como un descuido.
+
+
+def exploit_maturity(in_kev: bool, evidence: Optional[str] = None) -> str:
+    """Cuánto de real es la explotación de una vulnerabilidad.
+
+    El scoring tenía dos señales de explotabilidad: KEV (booleano: se explota
+    en el mundo real) y EPSS (probabilidad a 30 días). Faltaba la de en medio,
+    que es la que más ayuda a decidir qué se arregla el lunes: **¿existe un
+    exploit público y qué tan usable es?** Un CVE con módulo de Metasploit es
+    una urgencia distinta de uno con una prueba de concepto en un gist, y los
+    dos lo son de uno sin nada público.
+
+    La columna ``Finding.exploit_maturity`` existía desde el principio,
+    documentada como "rellenada desde la Fase 1", y nadie la escribía nunca:
+    ``NULL`` en todas las filas. Una columna que promete un dato y siempre está
+    vacía es peor que no tenerla, porque quien lee el modelo cree que existe.
+
+    Args:
+        in_kev: Si la CVE está en el catálogo CISA KEV. Es la evidencia más
+            fuerte que hay —explotación activa confirmada— y gana siempre.
+        evidence: La madurez deducida de otras fuentes, o ``None`` si no hay
+            ninguna.
+
+    Returns:
+        Uno de :data:`EXPLOIT_MATURITY_LADDER`.
+    """
+    if in_kev:
+        return "in_the_wild"
+    if evidence in EXPLOIT_MATURITY_LADDER:
+        return evidence
+    return "none"
+
+
 def score_finding(finding: dict, exposure: str) -> str:
     """Assign a finding a contextual priority label.
 
@@ -342,6 +388,14 @@ def score_finding(finding: dict, exposure: str) -> str:
 
     * A real exploitation signal — the CVE is in KEV, or its EPSS score is at
       least 0.5 — pushes the priority up one band.
+
+      ``exploit_maturity`` **no** entra aquí todavía, y es deliberado: los dos
+      niveles que justificarían subir una banda por sí solos —``weaponized`` y
+      ``functional``— no tienen hoy ninguna fuente que los produzca (harían
+      falta Metasploit o Exploit-DB, que son feeds externos nuevos), y el que
+      sí se produce, ``in_the_wild``, sale de KEV, que ya sube la banda por su
+      cuenta. Añadir la condición ahora sería una rama que no puede
+      dispararse, que es exactamente el pecado que L34 vino a corregir.
     * An actively-confirmed finding with no CVSS (e.g. an exposed path) is floored
       at MEDIUM, so a confirmed issue never reads as merely informational.
     * An unconfirmed match whose CVE only applies on a specific platform

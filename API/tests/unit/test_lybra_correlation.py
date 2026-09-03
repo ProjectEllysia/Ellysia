@@ -293,3 +293,44 @@ def test_a_false_positive_never_expires_by_time():
         now=datetime(2030, 1, 1),
     )
     assert out[0]["state"] == "false_positive"
+
+
+# ───────────────────── madurez de explotación (L34)
+#
+# `Finding.exploit_maturity` se declaraba en el modelo, se documentaba como
+# "rellenada desde la Fase 1" y estaba NULL en todas las filas. Una columna que
+# promete un dato y siempre está vacía es peor que no tenerla, porque quien lee
+# el modelo cree que existe.
+
+from src.modules.features.themis.lybra.correlation import (   # noqa: E402
+    exploit_maturity, EXPLOIT_MATURITY_LADDER,
+)
+
+
+def test_kev_is_the_strongest_evidence_and_wins():
+    """Estar en KEV es explotación activa confirmada: no hay evidencia mejor,
+    así que no la puede rebajar una señal más débil."""
+    assert exploit_maturity(in_kev=True) == "in_the_wild"
+    assert exploit_maturity(in_kev=True, evidence="poc") == "in_the_wild"
+
+
+def test_an_nvd_exploit_reference_reads_as_a_proof_of_concept():
+    assert exploit_maturity(in_kev=False, evidence="poc") == "poc"
+
+
+def test_no_evidence_is_none_and_never_null():
+    """`none` es una afirmación —no consta nada público— y `NULL` era la
+    ausencia de afirmación. La columna existe para decir algo."""
+    assert exploit_maturity(in_kev=False) == "none"
+    assert exploit_maturity(in_kev=False, evidence=None) == "none"
+
+
+def test_an_unknown_evidence_level_falls_back_to_none():
+    """Una fuente futura que devuelva algo fuera de la escalera no puede
+    colarlo en la columna."""
+    assert exploit_maturity(in_kev=False, evidence="carísimo") == "none"
+
+
+def test_the_ladder_runs_from_least_to_most_serious():
+    assert EXPLOIT_MATURITY_LADDER.index("poc") < EXPLOIT_MATURITY_LADDER.index("functional")
+    assert EXPLOIT_MATURITY_LADDER.index("weaponized") < EXPLOIT_MATURITY_LADDER.index("in_the_wild")

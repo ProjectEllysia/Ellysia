@@ -580,6 +580,23 @@ def _pick_cvss(metrics: dict) -> Tuple[Optional[float], Optional[str], Optional[
     return None, None, None
 
 
+def _has_exploit_reference(cve: dict) -> bool:
+    """Si NVD enlaza al menos una referencia etiquetada como exploit.
+
+    Es la señal más barata de madurez de explotación que hay (L34): la propia
+    NVD etiqueta sus referencias, y una marcada ``Exploit`` significa que
+    alguien ha publicado algo que demuestra el fallo. No dice cuán usable es
+    —puede ser una prueba de concepto en un gist o un exploit completo— así
+    que se traduce a ``poc`` y nunca a nada más fuerte. Inventar precisión que
+    el dato no tiene sería peor que no tenerlo.
+    """
+    return any(
+        "exploit" in (tag or "").lower()
+        for reference in cve.get("references", [])
+        for tag in reference.get("tags", [])
+    )
+
+
 def ingest_nvd_cve(item: dict) -> Optional[Tuple[dict, List[dict]]]:
     """Turn one NVD 2.0 CVE record into rows ready to persist.
 
@@ -623,6 +640,7 @@ def ingest_nvd_cve(item: dict) -> Optional[Tuple[dict, List[dict]]]:
         "severity":      (severity or "").upper() or None,
         "description":   description,
         "cwe_ids":       cwe_ids or None,
+        "has_exploit_reference": _has_exploit_reference(cve),
         "source":        "nvd",
     }
 
