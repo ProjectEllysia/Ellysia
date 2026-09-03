@@ -29,42 +29,30 @@ Contextual scoring
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 from datetime import datetime
 from typing import Dict, List, Optional
+
+from src.modules.shared import classify_exposure
 
 # The severity ladder, kept in one place so scoring and any future consumer agree
 # on the ordering.
 PRIORITY_LADDER = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
-
-_PRIVATE_SUFFIXES = (".local", ".lan", ".internal", ".intranet", ".corp", ".home")
 
 
 # =========================================================================
 # EXPOSURE
 # =========================================================================
 
-def classify_exposure(target: str) -> str:
-    """Classify a target as internal (LAN) or internet-facing.
-
-    Mirrors the private-address detection in
-    ``analyzers._classify_network_context``; it is duplicated here as a handful of
-    lines to avoid pulling in that module's much heavier AI-writer dependency.
-
-    Args:
-        target: An IP address or hostname.
-
-    Returns:
-        ``"private"`` for a LAN/loopback/link-local address or an internal-looking
-        hostname, otherwise ``"public"``.
-    """
-    try:
-        addr = ipaddress.ip_address(target.strip())
-        private = addr.is_private or addr.is_loopback or addr.is_link_local
-    except ValueError:
-        low = target.strip().lower()
-        private = low == "localhost" or any(low.endswith(private_suffix) for private_suffix in _PRIVATE_SUFFIXES)
-    return "private" if private else "public"
+# ``classify_exposure`` se reexporta desde ``shared/`` y no se implementa aquí.
+# Estuvo duplicada con ``analyzers._classify_network_context`` por una razón
+# buena —esta capa no puede importar el módulo del escritor de IA, que arrastra
+# dependencias pesadas— con una consecuencia mala: una regla que acota la
+# prioridad de todo hallazgo en red privada **y** entra en el prompt del
+# informe, escrita dos veces. Si divergían, el scoring y el informe decían
+# cosas distintas del mismo host y nada lo detectaba.
+#
+# Importar de ``shared/`` no rompe la invariante del paquete: la restricción es
+# no tocar el ORM ni la red, no no importar nada.
 
 
 # =========================================================================

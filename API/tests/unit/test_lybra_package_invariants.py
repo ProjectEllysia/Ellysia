@@ -101,3 +101,37 @@ def test_lybra_manager_does_not_depend_on_other_scanners():
         "Lybra es un motor independiente, no un orquestador de herramientas "
         "ajenas (L52).\n" + "\n".join(offenders)
     )
+
+
+# --------------------------------------------------- L38: una sola verdad
+# sobre la exposición de un objetivo
+
+
+def test_nobody_reimplements_the_private_address_check():
+    """«Este objetivo es privado o público» se decide en un solo sitio.
+
+    Estuvo escrita dos veces —``lybra.correlation`` y
+    ``analyzers._classify_network_context``— por una razón buena: la capa pura
+    no puede importar el módulo del escritor de IA. La consecuencia era mala:
+    una regla que acota la prioridad de todo hallazgo en red privada **y**
+    entra en el prompt del informe, con dos implementaciones que podían
+    divergir sin que nada fallara.
+
+    Este test busca la firma de una tercera copia: la comprobación de
+    ``ipaddress`` sobre las tres propiedades a la vez. Que ``shared/_exposure``
+    quede fuera es justamente el punto — es el sitio donde debe estar.
+    """
+    themis = Path(__file__).resolve().parents[2] / "src" / "modules" / "features" / "themis"
+    offenders = []
+    for path in themis.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        source = path.read_text(encoding="utf-8")
+        if "is_private" in source and "is_link_local" in source:
+            offenders.append(str(path.relative_to(themis)))
+
+    assert not offenders, (
+        "la clasificación de exposición vive en shared/_exposure.py; "
+        "reimplementarla deja dos verdades que pueden divergir en silencio: "
+        + ", ".join(offenders)
+    )
