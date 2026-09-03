@@ -1466,3 +1466,51 @@ def test_the_evidence_endpoint_returns_own_findings_and_404s_for_others(
     forbidden = client.get(f"/themis/findings/{finding_id}/evidence",
                            headers=auth_headers(regular_user))
     assert forbidden.status_code == 404
+
+
+# =============================================== confirmadores (L29)
+
+
+def test_a_confirmer_promotes_a_hypothesis_end_to_end(monkeypatch, app, admin_user):
+    """El encadenamiento versión→confirmador en el flujo real: el motor propone
+    una CVE por versión (hipótesis) y el confirmador la asciende a hecho, dando
+    un único hallazgo confirmado en vez de dos sueltos."""
+    from src.modules.features.themis.lybra.checks import Response
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+    # Fingerprint: el servicio es un Apache 2.4.49 (identificado).
+    monkeypatch.setattr(
+        LybraEngineManager, "_fingerprint_services",
+        lambda self, target, services, **kw: (
+            [Service(s.port, s.protocol, s.name, "apache", "2.4.49", None)
+             for s in services], []))
+    # El motor propone CVE-2021-41773 como hipótesis (confirmed=false, qod=70).
+    cve = "CVE-2021-41773"
+    monkeypatch.setattr(
+        "src.modules.features.themis.lybra.engine.LybraEngine.analyze",
+        lambda self, services: [
+            {"host_id": None, "port": 80, "service": "http", "protocol": "tcp",
+             "cve_ids": [cve], "confirmed": False, "qod": 70, "source": "lybra",
+             "check_id": "lybra:outdated@1", "category": "outdated_software",
+             "title": "Apache 2.4.49 con CVE conocida", "state": "open"}])
+    # El objetivo es de verdad vulnerable: sirve /etc/passwd por la ruta.
+    traversal = "/cgi-bin/.%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd"
+    monkeypatch.setattr(
+        "src.modules.features.themis.lybra.checks.HttpProbe.fetch",
+        lambda self, host, port, method, path:
+            Response(200, "root:x:0:0:root:/root:/bin/bash\n", {})
+            if path == traversal else Response(404, "", {}))
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    # Un solo hallazgo para esa CVE, ascendido a confirmado con qod 99.
+    for_cve = [f for f in findings if f.cve_ids and cve in f.cve_ids]
+    assert len(for_cve) == 1
+    assert for_cve[0].confirmed is True
+    assert for_cve[0].qod == 99
