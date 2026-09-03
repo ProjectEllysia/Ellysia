@@ -58,9 +58,10 @@ def _run_fingerprint(monkeypatch, dissector, services, pool_size=8):
 
     monkeypatch.setattr(engine_module, "default_dissectors", lambda: [dissector])
     monkeypatch.setattr(
-        engine_module.CR, "lybra_config",
+        engine_module.CR, "lybra_engine_config",
         lambda: type("_Config", (), {
             "host_pool_size": pool_size, "banner_timeout": 0.1, "max_blind_probes": 0,
+            "rate_limit_interval": 0.0,
         })(),
     )
     return LybraEngineManager()._fingerprint_services("10.0.0.5", services)

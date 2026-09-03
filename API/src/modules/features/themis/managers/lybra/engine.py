@@ -364,9 +364,15 @@ class LybraEngineManager(ScanManager):
           escaneo sigue adelante con lo que hay y se marca como parcial, en
           lugar de tirar información verificada.
         """
+        engine = CR.lybra_engine_config()
         try:
             sweep = sweep_with_retries(
-                target, discover_ports, budget_seconds=budget_seconds)
+                target, discover_ports,
+                concurrency=engine.tcp_concurrency,
+                timeout=engine.tcp_timeout,
+                retries=engine.udp_retries,
+                budget_seconds=budget_seconds,
+            )
         except Exception:
             logger.exception("Lybra port discovery failed for %s", target)
             return None
@@ -398,8 +404,13 @@ class LybraEngineManager(ScanManager):
         list): a user-supplied ``discover_ports`` is a TCP list.
         """
         try:
+            engine = CR.lybra_engine_config()
             return scan_udp_ports_sync(
-                target, budget_seconds=CR.lybra_config().udp_budget_seconds)
+                target,
+                timeout=engine.udp_timeout,
+                retries=engine.udp_retries,
+                budget_seconds=engine.udp_budget_seconds,
+            )
         except Exception:
             logger.exception("Lybra UDP port discovery failed for %s", target)
             return []
@@ -412,13 +423,18 @@ class LybraEngineManager(ScanManager):
         findings rather than failing the whole scan. Safe mode only.
         """
         try:
+            engine = CR.lybra_engine_config()
             runtime = CheckRuntime(
                 load_checks() + self._ingested_checks(services),
-                HttpProbe().fetch,
+                HttpProbe(
+                    timeout=engine.http_timeout,
+                    max_bytes=engine.http_max_body_bytes,
+                    user_agent=engine.http_user_agent,
+                ).fetch,
                 mode="safe",
-                rate_limiter=HostRateLimiter(),
+                rate_limiter=HostRateLimiter(min_interval=engine.rate_limit_interval),
                 tls_fetch=TlsProbe().fetch,
-                network_open=NetworkProbe().open,
+                network_open=NetworkProbe(timeout=engine.network_timeout).open,
                 script_plugins=default_script_plugins(),
                 # El mismo pool acotado por host que usa el fingerprinting: los
                 # checks activos tienen exactamente la misma forma —espera de
@@ -499,8 +515,8 @@ class LybraEngineManager(ScanManager):
             fingerprint findings.
         """
         dissectors = default_dissectors()
-        rate_limiter = HostRateLimiter()
-        cascade_config = CR.lybra_config()
+        cascade_config = CR.lybra_engine_config()
+        rate_limiter = HostRateLimiter(min_interval=cascade_config.rate_limit_interval)
 
         def identify(service):
             """Sonda un servicio y devuelve ``(servicio, resultado)``.
@@ -589,7 +605,7 @@ class LybraEngineManager(ScanManager):
         items = list(items)
         if not items:
             return []
-        workers = max(1, min(CR.lybra_config().host_pool_size, len(items)))
+        workers = max(1, min(CR.lybra_engine_config().host_pool_size, len(items)))
         if workers == 1:
             return [work(item) for item in items]
         with ThreadPoolExecutor(max_workers=workers) as pool:

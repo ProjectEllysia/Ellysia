@@ -804,47 +804,99 @@ class LybraConfig:
     Lybra solo toca un objetivo que el llamante haya autorizado explícitamente,
     valga lo que valga este flag. Existen como interruptor de emergencia para
     desactivar la funcionalidad en todo el despliegue.
+
+    Los **parámetros de red** —timeouts, concurrencia, ritmo, presupuestos—
+    viven aparte, en :class:`LybraEngineConfig` (L39): un interruptor de
+    despliegue y un dial de afinado son cosas distintas, y mezclarlos haría el
+    bloque ilegible en cuanto pasara de dos campos.
     """
 
     active_checks: bool = True
     fingerprinting_enabled: bool = True
 
-    banner_timeout: float = 2.0
-    """Plazo, en segundos, de la lectura del saludo que la cascada de
-    identificación hace contra un servicio que ningún dissector reclama
-    (``fingerprinting/cascade.py``). Es corto a propósito: un servicio que no
-    saluda lo agota entero, y ese coste se paga una vez por cada puerto
-    desconocido del objetivo."""
 
-    max_blind_probes: int = 2
-    """Cuántas sondas activas se permiten contra un servicio que no ha dicho
-    nada. El presupuesto que separa "prueba lo que ya sabes leer" de un escaneo
-    de servicios completo: hoy hay dos protocolos que se pueden intentar a
-    ciegas (Redis y HTTP), y este tope impide que añadir un tercero encarezca
-    en silencio cada escaneo. A cero, la cascada se queda sólo en la lectura
-    del saludo."""
+@config_block("features.themis.scanners.lybra.engine")
+@dataclass(frozen=True)
+class LybraEngineConfig:  # pylint: disable=too-many-instance-attributes
+    """Los diales de red del motor: cuánto tarda, cuánta carga mete y qué mira.
+
+    Hasta L39 cada uno de estos valores era un literal en la firma de un
+    constructor —``concurrency=200``, ``timeout=2.0``, ``min_interval=0.2``— y
+    el manager instanciaba las sondas sin argumentos, así que no había forma de
+    tocarlos sin editar código. OpenVAS lleva veinte años teniendo *scan
+    configs* por una razón: un escaneo contra un enlace lento, contra un
+    appliance frágil o contra un rango grande necesita otros números, y quien
+    opera el escáner es quien sabe cuáles.
+
+    **Los valores por defecto son exactamente los que estaban a fuego**, así
+    que el cambio es invisible hasta que alguien mueve un dial. Cada campo tiene
+    un consumidor real en ``managers/lybra/engine.py`` — no hay ningún dial que
+    no llegue a una sonda, porque un parámetro que nadie lee es peor que uno a
+    fuego: parece configurable y no lo es.
+    """
+
+    # --- Descubrimiento TCP (transport.AsyncConnectScanner / scan_ports_sync)
+    tcp_concurrency: int = 200
+    """Conexiones TCP en vuelo a la vez durante el barrido de puertos."""
+
+    tcp_timeout: float = 2.0
+    """Plazo por puerto TCP, en segundos."""
+
+    # --- Descubrimiento UDP (transport.scan_udp_ports_sync)
+    udp_timeout: float = 2.0
+    """Plazo por sonda UDP, en segundos."""
+
+    udp_retries: int = 1
+    """Reintentos tras un primer silencio UDP. No es 0 a propósito: un
+    datagrama perdido (no un puerto cerrado) haría oscilar el puerto entre
+    abierto y cerrado entre escaneos, y el ciclo de vida lo leería como
+    ``fixed``/``regressed`` falsos."""
 
     udp_budget_seconds: float = 20.0
-    """Plazo total del barrido de puertos UDP (``transport.scan_udp_ports_sync``).
+    """Plazo total del barrido UDP. En UDP el silencio no significa
+    "cerrado" sino "no lo sabemos", así que cada sonda paga su plazo entero
+    contra un host que no tenga ese servicio; con siete filas eso se acumula.
+    Agotarlo **no** marca nada como cerrado: los puertos que no han contestado
+    se dan por no observados, que es lo que ya eran."""
 
-    En UDP el silencio no significa "cerrado" sino "no lo sabemos", así que
-    cada sonda paga su plazo entero contra un host que no tenga ese servicio.
-    Con siete filas en la tabla eso se acumula, y este presupuesto es el techo.
-    Agotarlo **no** marca nada como cerrado: los puertos que aún no han
-    contestado simplemente se dan por no observados, que es lo que ya eran."""
+    # --- Ritmo por host (checks.HostRateLimiter) y paralelismo (L23)
+    rate_limit_interval: float = 0.2
+    """Intervalo mínimo, en segundos, entre dos peticiones al mismo
+    host. Es la cortesía con el objetivo, y manda por encima del pool."""
 
     host_pool_size: int = 8
+    """Cuántos servicios del **mismo host** se sondan a la vez. El
+    fingerprinting y los checks activos son espera de red casi entera, y en fila
+    india un servicio mudo retrasa a los que vienen detrás. Va acotado por host
+    y no es grande a propósito: el límite es la cortesía con el objetivo, no la
+    máquina que escanea."""
 
-"""Cuántos servicios del **mismo host** se sondan a la vez.
+    # --- Sondas HTTP (checks.HttpProbe)
+    http_timeout: int = 8
+    """Plazo por petición HTTP, en segundos."""
 
-    El fingerprinting y los checks activos son entrada/salida pura: casi todo
-    su tiempo es esperar a que un servicio conteste o a que se agote su plazo.
-    En fila india, un servicio mudo retrasa a todos los que vienen detrás.
+    http_max_body_bytes: int = 131072
+    """Cuerpo máximo de respuesta que una sonda HTTP lee (128 KiB)."""
 
-    El pool va acotado **por host** y no es un número grande a propósito: el
-    límite no es la máquina que escanea, es la cortesía con el objetivo. El
-    limitador de ritmo sigue mandando por encima de esto — el pool decide
-    cuántas sondas pueden estar esperando a la vez, no a qué ritmo salen."""
+    http_user_agent: str = "Lybra/1.0"
+    """El ``User-Agent`` con el que el motor se presenta. Configurable
+    porque a veces hay que declararse ante un WAF, y a veces conviene no
+    hacerlo."""
+
+    # --- Sondas de red cruda (checks.NetworkProbe)
+    network_timeout: float = 5.0
+    """Plazo de conexión de una sesión de red cruda, en segundos."""
+
+    # --- Cascada de identificación (fingerprinting/cascade.py)
+    banner_timeout: float = 2.0
+    """Plazo de la lectura del saludo que la cascada hace contra un
+    servicio que ningún dissector reclama. Corto a propósito: un servicio que no
+    saluda lo agota entero, una vez por puerto desconocido."""
+
+    max_blind_probes: int = 2
+    """Sondas activas máximas contra un servicio que no dijo nada. El
+    presupuesto que separa "prueba lo que ya sabes leer" de un escaneo de
+    servicios completo. A cero, la cascada se queda sólo en el saludo."""
 
 
 @config_block("features.themis.scanners.lybra.ingest")
@@ -1014,6 +1066,10 @@ def knowledge_base_config() -> KnowledgeBaseConfig:
 
 def lybra_config() -> LybraConfig:
     return load_block(LybraConfig)
+
+
+def lybra_engine_config() -> LybraEngineConfig:
+    return load_block(LybraEngineConfig)
 
 
 def lybra_ingest_config() -> LybraIngestConfig:
