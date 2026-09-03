@@ -8,7 +8,7 @@
 # feedVersion sube cuando el feed gana una familia nueva o un protocolo nuevo
 # bajo una existente; el arreglo de un check ya presente sube el 'version' de
 # ese check, no esta cadena. Ver CHECKS_FEED_VERSION en checks.py.
-feedVersion: lybra-checks-13
+feedVersion: lybra-checks-16
 checks:
   - id: git-config-exposure
     version: 1
@@ -560,5 +560,880 @@ checks:
     mode: safe
     finding:
       title: 'SNMP: comunidad por defecto "public" aceptada'
+      qod: 99
+      confirmed: true
+  # ===================================================================
+  # Paneles y consolas de administración expuestos (L25). Cada uno mira
+  # status + una cadena propia del panel, nunca sólo el código: un 200
+  # genérico (el señuelo del banco) no debe disparar.
+  # ===================================================================
+  - id: tomcat-manager-exposed
+    version: 1
+    type: http
+    category: web_finding
+    severity: HIGH
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /manager/html
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+              - 401
+              - 403
+          - type: word
+            part: body
+            words:
+              - 'Tomcat Web Application Manager'
+              - 'Apache Tomcat'
+    finding:
+      title: Consola de gestión de Tomcat accesible (/manager/html)
+      qod: 99
+      confirmed: true
+  - id: jenkins-exposed
+    version: 1
+    type: http
+    category: web_finding
+    severity: MEDIUM
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /
+        matchers-condition: or
+        matchers:
+          - type: word
+            part: header
+            words:
+              - x-jenkins
+          - type: word
+            part: body
+            words:
+              - 'Dashboard [Jenkins]'
+    finding:
+      title: Panel de Jenkins accesible
+      qod: 99
+      confirmed: true
+  - id: spring-actuator-health
+    version: 1
+    type: http
+    category: exposed_path
+    severity: MEDIUM
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /actuator/health
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - '"status":"UP"'
+              - '"status": "UP"'
+    finding:
+      title: Spring Boot Actuator expuesto (/actuator/health)
+      qod: 99
+      confirmed: true
+  - id: spring-actuator-env
+    version: 1
+    type: http
+    category: exposed_service
+    severity: HIGH
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /actuator/env
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - 'activeProfiles'
+              - 'propertySources'
+    finding:
+      title: Spring Boot Actuator /env expuesto (variables de entorno accesibles)
+      qod: 99
+      confirmed: true
+  - id: symfony-profiler-exposed
+    version: 1
+    type: http
+    category: exposed_path
+    severity: HIGH
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /_profiler
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - 'Symfony Profiler'
+              - 'sf-toolbar'
+    finding:
+      title: Symfony Profiler accesible en producción
+      qod: 99
+      confirmed: true
+  - id: laravel-telescope-exposed
+    version: 1
+    type: http
+    category: exposed_path
+    severity: HIGH
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /telescope/requests
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - 'Telescope'
+              - 'laravel_telescope'
+    finding:
+      title: Laravel Telescope accesible en producción
+      qod: 99
+      confirmed: true
+  - id: solr-admin-exposed
+    version: 1
+    type: http
+    category: web_finding
+    severity: HIGH
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /solr/admin/info/system
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - 'lucene'
+              - 'solr_home'
+    finding:
+      title: Consola de administración de Apache Solr accesible
+      qod: 99
+      confirmed: true
+  - id: rabbitmq-management-exposed
+    version: 1
+    type: http
+    category: web_finding
+    severity: MEDIUM
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /api/overview
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+              - 401
+          - type: word
+            part: body
+            words:
+              - 'rabbitmq_version'
+              - 'management_version'
+    finding:
+      title: API de gestión de RabbitMQ accesible
+      qod: 99
+      confirmed: true
+  # ---- Depuración activa en producción --------------------------------
+  - id: django-debug-enabled
+    version: 1
+    type: http
+    category: web_finding
+    severity: HIGH
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /lybra-nonexistent-debug-probe
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 404
+              - 500
+          - type: word
+            part: body
+            words:
+              - 'Django Version'
+              - 'seeing this error because you have DEBUG'
+    finding:
+      title: Django con DEBUG=True (página de error revela configuración interna)
+      qod: 99
+      confirmed: true
+  - id: flask-werkzeug-debugger
+    version: 1
+    type: http
+    category: web_finding
+    severity: CRITICAL
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /lybra-nonexistent-debug-probe
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 500
+          - type: word
+            part: body
+            words:
+              - 'Werkzeug Debugger'
+              - 'Traceback (most recent call last)'
+    finding:
+      title: Depurador interactivo de Werkzeug/Flask expuesto (ejecución de código)
+      qod: 99
+      confirmed: true
+  - id: debug-token-header
+    version: 1
+    type: http
+    category: web_finding
+    severity: LOW
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: header
+            words:
+              - 'x-debug-token'
+    finding:
+      title: Cabecera X-Debug-Token presente (perfilador activo)
+      qod: 99
+      confirmed: true
+  # ---- Configuración y control de versiones expuestos -----------------
+  - id: svn-entries-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: MEDIUM
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /.svn/entries
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - 'dir'
+              - 'svn:'
+    finding:
+      title: Metadatos de Subversion expuestos (/.svn/entries)
+      qod: 99
+      confirmed: true
+  - id: ds-store-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: LOW
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /.DS_Store
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - 'Bud1'
+    finding:
+      title: Fichero .DS_Store expuesto (revela estructura de directorios)
+      qod: 99
+      confirmed: true
+  - id: web-config-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: HIGH
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /web.config
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - '<configuration>'
+              - 'system.webServer'
+    finding:
+      title: web.config servido como texto plano (configuración de IIS expuesta)
+      qod: 99
+      confirmed: true
+  - id: composer-lock-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: LOW
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /composer.lock
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - '"packages"'
+              - '"_readme"'
+    finding:
+      title: composer.lock expuesto (inventario exacto de dependencias PHP)
+      qod: 99
+      confirmed: true
+  - id: package-lock-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: LOW
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /package-lock.json
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - '"lockfileVersion"'
+              - '"dependencies"'
+    finding:
+      title: package-lock.json expuesto (inventario exacto de dependencias npm)
+      qod: 99
+      confirmed: true
+  - id: htpasswd-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: HIGH
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /.htpasswd
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - ':$apr1$'
+              - ':$2y$'
+              - ':{SHA}'
+    finding:
+      title: Fichero .htpasswd expuesto (hashes de credenciales accesibles)
+      qod: 99
+      confirmed: true
+  - id: docker-compose-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: MEDIUM
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /docker-compose.yml
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - 'services:'
+              - 'image:'
+    finding:
+      title: docker-compose.yml expuesto (topología y posibles secretos de despliegue)
+      qod: 99
+      confirmed: true
+  # ---- Documentación de API expuesta (puerta a la Fase A) -------------
+  - id: swagger-json-exposure
+    version: 1
+    type: http
+    category: web_finding
+    severity: LOW
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /swagger.json
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - '"swagger"'
+              - '"openapi"'
+    finding:
+      title: Especificación Swagger expuesta (/swagger.json)
+      qod: 99
+      confirmed: true
+  - id: openapi-json-exposure
+    version: 1
+    type: http
+    category: web_finding
+    severity: LOW
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /openapi.json
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - '"openapi"'
+              - '"paths"'
+    finding:
+      title: Especificación OpenAPI expuesta (/openapi.json)
+      qod: 99
+      confirmed: true
+  - id: api-docs-exposure
+    version: 1
+    type: http
+    category: web_finding
+    severity: LOW
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /api-docs
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - 'swagger-ui'
+              - 'openapi'
+    finding:
+      title: Documentación de API interactiva expuesta (/api-docs)
+      qod: 99
+      confirmed: true
+  # ---- Listado de directorios activo ----------------------------------
+  - id: directory-listing-enabled
+    version: 1
+    type: http
+    category: web_finding
+    severity: LOW
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - 'Index of /'
+              - '<title>Directory listing for'
+    finding:
+      title: Listado de directorios activo (el servidor enumera ficheros)
+      qod: 99
+      confirmed: true
+  # ---- Cabeceras de seguridad ausentes (las que hoy no se miran) ------
+  - id: missing-csp-header
+    version: 1
+    type: http
+    category: security_header
+    severity: MEDIUM
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+              - 301
+              - 302
+          - type: word
+            part: header
+            words:
+              - content-security-policy
+            negative: true
+    finding:
+      title: Falta la cabecera Content-Security-Policy
+      qod: 99
+      confirmed: true
+  - id: missing-referrer-policy-header
+    version: 1
+    type: http
+    category: security_header
+    severity: LOW
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+              - 301
+              - 302
+          - type: word
+            part: header
+            words:
+              - referrer-policy
+            negative: true
+    finding:
+      title: Falta la cabecera Referrer-Policy
+      qod: 99
+      confirmed: true
+  - id: missing-permissions-policy-header
+    version: 1
+    type: http
+    category: security_header
+    severity: LOW
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+              - 301
+              - 302
+          - type: word
+            part: header
+            words:
+              - permissions-policy
+            negative: true
+    finding:
+      title: Falta la cabecera Permissions-Policy
+      qod: 99
+      confirmed: true
+  # ---- Cookies de sesión sin atributos de seguridad -------------------
+  # ---- Higiene TLS: cifrado débil negociado ---------------------------
+  - id: tls-weak-cipher
+    version: 1
+    type: tls
+    category: tls
+    severity: MEDIUM
+    service: tls
+    mode: safe
+    tlsRule: weak_cipher
+    finding:
+      title: El servidor negocia un cifrado débil (NULL/EXPORT/DES/RC4/MD5)
+      qod: 99
+      confirmed: true
+  # ---- Cookies de sesión sin atributos de seguridad -------------------
+  # La regex mira una línea de cabecera que empieza por set-cookie, nombra una
+  # cookie de sesión típica, y NO contiene "secure" — las tres condiciones en un
+  # solo patrón para no depender del orden ni de matchers negativos separados.
+  - id: session-cookie-without-secure
+    version: 1
+    type: http
+    category: security_header
+    severity: MEDIUM
+    service: http
+    mode: safe
+    requests:
+      - method: GET
+        path: /
+        matchers-condition: and
+        matchers:
+          - type: regex
+            part: header
+            regex:
+              - '(?im)^set-cookie:\s*(?:PHPSESSID|JSESSIONID|ASP\.NET_SessionId|laravel_session|session|sessionid|connect\.sid)=(?:(?!;\s*secure).)*$'
+    finding:
+      title: Cookie de sesion sin el atributo Secure
+      qod: 99
+      confirmed: true
+  # ===================================================================
+  # Checks de configuración de red que la Fase N prometió (L26). Cierran
+  # la parte de la brecha G1 que no se resuelve escribiendo ojos: una
+  # configuración insegura no tiene CVE y no aparece por la vía de la
+  # versión. Alguien tiene que ir y preguntarla.
+  # ===================================================================
+  - id: telnet-enabled
+    version: 1
+    type: script
+    script: telnet-enabled
+    category: network_config
+    severity: HIGH
+    service: telnet
+    mode: safe
+    finding:
+      title: 'Telnet: servicio activo (credenciales en claro por diseño)'
+      qod: 99
+      confirmed: true
+  - id: vnc-no-authentication
+    version: 1
+    type: script
+    script: vnc-no-authentication
+    category: default_credentials
+    severity: CRITICAL
+    service: vnc
+    mode: safe
+    finding:
+      title: 'VNC: acceso sin autenticación (tipo de seguridad None ofrecido)'
+      qod: 99
+      confirmed: true
+  # SMTP relay abierto: el servidor acepta un RCPT a un dominio externo desde un
+  # remitente externo. No se llega a DATA — no se envía correo, sólo se observa
+  # que aceptaría enrutarlo. Un servidor bien configurado responde 550/554.
+  - id: smtp-open-relay
+    version: 1
+    type: network
+    category: network_config
+    severity: HIGH
+    service: smtp
+    mode: safe
+    expectBanner: true
+    requests:
+      - send: "EHLO lybra.local\r\n"
+        read: block
+        matchers:
+          - type: word
+            part: body
+            words:
+              - '250'
+      - send: "MAIL FROM:<probe@lybra-external.example>\r\n"
+        read: block
+        matchers:
+          - type: word
+            part: body
+            words:
+              - '250'
+      - send: "RCPT TO:<relay-test@lybra-nonexistent-external.example>\r\n"
+        read: block
+        matchers:
+          - type: word
+            part: body
+            words:
+              - '250'
+    finding:
+      title: 'SMTP: relay abierto (acepta enrutar correo de terceros)'
+      qod: 99
+      confirmed: true
+  # SMTP sin STARTTLS: el EHLO no anuncia STARTTLS entre sus capacidades, así
+  # que las credenciales de autenticación viajarían en claro.
+  - id: smtp-no-starttls
+    version: 1
+    type: network
+    category: network_config
+    severity: MEDIUM
+    service: smtp
+    mode: safe
+    expectBanner: true
+    requests:
+      - send: "EHLO lybra.local\r\n"
+        read: block
+        matchers-condition: and
+        matchers:
+          - type: word
+            part: body
+            words:
+              - '250'
+          - type: word
+            part: body
+            words:
+              - STARTTLS
+            negative: true
+    finding:
+      title: 'SMTP: sin STARTTLS anunciado (autenticación en claro posible)'
+      qod: 99
+      confirmed: true
+  # FTP sin cifrado: el servidor rechaza AUTH TLS, así que credenciales y datos
+  # viajan en claro. Un servidor que soporta FTPS responde 234.
+  - id: ftp-no-tls
+    version: 1
+    type: network
+    category: network_config
+    severity: MEDIUM
+    service: ftp
+    mode: safe
+    expectBanner: true
+    requests:
+      - send: "AUTH TLS\r\n"
+        read: block
+        matchers:
+          - type: regex
+            part: body
+            regex:
+              - '^(?:500|502|504|530|534|431)'
+    finding:
+      title: 'FTP: sin cifrado disponible (AUTH TLS no soportado)'
+      qod: 99
+      confirmed: true
+  # ===================================================================
+  # Confirmadores (L29): ascienden una hipótesis por versión de
+  # confirmed=false/qod=70 a confirmed=true/qod=99. Sólo corren si el
+  # matcher de versiones ya propuso su CVE, y NUNCA explotan — comprueban
+  # la condición sin ejecutar nada en el objetivo.
+  # ===================================================================
+  # CVE-2021-41773: path traversal de Apache 2.4.49. La prueba lee
+  # /etc/passwd por la ruta vulnerable — una lectura, no una ejecución. Si
+  # el cuerpo trae la línea de root, el fichero se sirvió: confirmado.
+  - id: apache-cve-2021-41773-path-traversal
+    version: 1
+    type: http
+    category: vulnerability
+    severity: CRITICAL
+    service: http
+    mode: safe
+    confirms: CVE-2021-41773
+    requests:
+      - method: GET
+        path: /cgi-bin/.%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: regex
+            part: body
+            regex:
+              - 'root:.*:0:0:'
+    finding:
+      title: 'Apache path traversal confirmado (CVE-2021-41773): /etc/passwd legible'
+      qod: 99
+      confirmed: true
+  # CVE-2021-42013: el bypass del arreglo incompleto de 41773 en Apache
+  # 2.4.50, con doble codificación de los puntos.
+  - id: apache-cve-2021-42013-path-traversal
+    version: 1
+    type: http
+    category: vulnerability
+    severity: CRITICAL
+    service: http
+    mode: safe
+    confirms: CVE-2021-42013
+    requests:
+      - method: GET
+        path: /cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/etc/passwd
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: regex
+            part: body
+            regex:
+              - 'root:.*:0:0:'
+    finding:
+      title: 'Apache path traversal confirmado (CVE-2021-42013): /etc/passwd legible'
+      qod: 99
+      confirmed: true
+  # ---------------------------------------------------------------------------
+  # PAYLOADS (L30) — una lista de valores sustituidos en la ruta, en vez de un
+  # check por variación. Este busca un volcado de base de datos olvidado bajo
+  # la raíz web: los nombres de fichero de copia de seguridad más habituales,
+  # probados con una sola entrada de feed. El motor expande ``{{name}}`` una
+  # vez por valor y corta en ``maxPayloadExpansions``, así que la lista puede
+  # crecer sin volverse un barrido. Cualquiera que devuelva 200 con pinta de
+  # volcado SQL dispara; un solo hallazgo, sea cual sea el que picó.
+  - id: sql-dump-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: HIGH
+    service: http
+    mode: safe
+    payloads:
+      name:
+        - backup.sql
+        - dump.sql
+        - database.sql
+        - db.sql
+        - backup.sql.gz
+        - www.sql
+        - site.sql
+    requests:
+      - method: GET
+        path: /{{name}}
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - 'CREATE TABLE'
+              - 'INSERT INTO'
+              - 'DROP TABLE'
+    finding:
+      title: Volcado de base de datos SQL expuesto bajo la raíz web
       qod: 99
       confirmed: true

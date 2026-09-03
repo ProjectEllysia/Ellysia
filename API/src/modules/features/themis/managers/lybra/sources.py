@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from abc import ABC, abstractmethod
 from typing import Callable, List, Optional
 
 import src.modules.system.config_reading as CR
@@ -70,7 +71,7 @@ class ResolvedServices:
     is_partial: bool = False
 
 
-class ServiceSource:
+class ServiceSource(ABC):
     """One of the two ways a Lybra scan obtains the services it analyses.
 
     A thin base plus one policy flag (Python's idiomatic stand-in for what
@@ -94,17 +95,19 @@ class ServiceSource:
     def build_for_args(
         cls,
         services: Optional[List[Service]],
-        discover_ports: Optional[list],
+        ports_to_discover: Optional[list],
     ) -> "ServiceSource":
         """Build the source matching whichever of the two run_scan args was given."""
         if services is not None:
             return ExternalPayload(services)
-        return SelfDiscovery(discover_ports)
+        return SelfDiscovery(ports_to_discover)
 
+    @abstractmethod
     def valid_scan_target(self, user_id: int, target: Optional[str]) -> str:
         """Resolve and validate this mode's target, before the scan record exists."""
-        raise NotImplementedError
+        ...
 
+    @abstractmethod
     def resolve_services(
         self,
         scan_repo: ScanRepository,
@@ -126,7 +129,7 @@ class ServiceSource:
         no vio todo el objetivo: ésa no es un fallo, es un resultado con una
         advertencia pegada.
         """
-        raise NotImplementedError
+        ...
 
     @staticmethod
     def _resolve_host(scan_repo: ScanRepository, target: Optional[str]) -> Optional[int]:
@@ -177,8 +180,8 @@ class SelfDiscovery(ServiceSource):
 
     label = "descubrimiento propio"
 
-    def __init__(self, discover_ports: Optional[list]) -> None:
-        self.discover_ports = discover_ports
+    def __init__(self, ports_to_discover: Optional[list]) -> None:
+        self.ports_to_discover = ports_to_discover
 
     def valid_scan_target(self, user_id: int, target: Optional[str]) -> str:
         if target is None:
@@ -215,14 +218,14 @@ class SelfDiscovery(ServiceSource):
                 logger.warning(f"Host '{target}' inalcanzable.")
                 return None
 
-            sweep = probes.discover_ports(target, self.discover_ports)
+            sweep = probes.discover_ports(target, self.ports_to_discover)
             if sweep is None:
                 logger.error("Descubrimiento de puertos fallido para %s", target)
                 return None
             discovered_ports = list(sweep.open_ports)
             is_partial = sweep.was_truncated
             # UDP (Fase N/Ronda 1, roadmap §6.3): sonda curada aparte, nunca a
-            # partir de la lista TCP del usuario — self.discover_ports es una
+            # partir de la lista TCP del usuario — self.ports_to_discover es una
             # lista de puertos TCP. Best-effort por diseño de
             # _discover_udp_ports: nunca aborta el descubrimiento TCP.
             udp_ports = probes.discover_udp_ports(target)

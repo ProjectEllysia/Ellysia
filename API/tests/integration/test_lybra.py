@@ -150,6 +150,41 @@ def test_lybra_run_scan_self_discovery_succeeds_once_authorized(app, admin_user,
         assert scan_id is not None
 
 
+def test_lybra_endpoint_threads_the_aggressive_flag_to_run_scan(
+        client, admin_user, auth_headers, monkeypatch):
+    """El schema declara ``aggressive`` con ``load_default=False`` (L40): sin
+    el campo, una petición de siempre no cambia de comportamiento, y con él,
+    el valor llega íntegro al manager — la mitad de la doble puerta que
+    depende del usuario."""
+    captured = {}
+
+    def fake_run_scan(self, **kwargs):
+        captured.update(kwargs)
+        return 1
+
+    monkeypatch.setattr(LybraEngineManager, "run_scan", fake_run_scan)
+
+    resp = client.post("/themis/lybra", headers=auth_headers(admin_user),
+                       json={"target": "8.8.8.8", "aggressive": True})
+    assert resp.status_code == 201
+    assert captured["aggressive"] is True
+
+
+def test_lybra_endpoint_defaults_to_non_aggressive(client, admin_user, auth_headers, monkeypatch):
+    captured = {}
+
+    def fake_run_scan(self, **kwargs):
+        captured.update(kwargs)
+        return 1
+
+    monkeypatch.setattr(LybraEngineManager, "run_scan", fake_run_scan)
+
+    resp = client.post("/themis/lybra", headers=auth_headers(admin_user),
+                       json={"target": "8.8.8.8"})
+    assert resp.status_code == 201
+    assert captured["aggressive"] is False
+
+
 def test_lybra_self_discovery_produces_open_port_findings(app, admin_user, monkeypatch):
     # Stub reachability (no real socket) and the connect scan; the rest of the
     # self-discovery pipeline runs for real.
@@ -1299,3 +1334,324 @@ def test_the_partial_flag_reaches_the_api(client, monkeypatch, app, admin_user, 
     result = client.get("/themis/results?type=lybra&page=1&per_page=10",
                         headers=auth_headers(admin_user)).get_json()["results"][0]
     assert result["isPartial"] is True
+
+
+# ============================================ progreso y cancelación (L41)
+
+
+def test_a_scan_reports_progress_by_phase(monkeypatch, app, admin_user):
+    """El escaneo publica progreso por fase con pesos honestos: descubrimiento
+    40, fingerprint 70, checks 90, persistencia 100 (§3 del issue)."""
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+
+    reported = []
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, progress=reported.append)
+
+    # Monótono, empieza por debajo de 100 y llega a 100.
+    assert reported == sorted(reported)
+    assert reported[-1] == 100
+    assert 40 in reported
+
+
+def test_a_cancelled_scan_stops_persists_and_is_marked_partial(monkeypatch, app, admin_user):
+    """Cancelado tras el descubrimiento: no corre fingerprint ni checks, pero
+    persiste lo hallado y queda marcado como parcial — nunca tira lo verificado."""
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80, 443])
+
+    fingerprinted = []
+    original_fp = LybraEngineManager._fingerprint_services
+    monkeypatch.setattr(
+        LybraEngineManager, "_fingerprint_services",
+        lambda self, target, services, **kw: (fingerprinted.append(True)
+                                              or original_fp(self, target, services, **kw)))
+
+    # Cancelado desde el primer chequeo: el descubrimiento ya devolvió, pero
+    # fingerprint y checks no deben arrancar.
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, cancel_check=lambda: True)
+
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            escan = repo.get_by_id(escan.id)
+            findings = repo.get_findings_by_scan(escan.id)
+
+    assert escan.status == ScanStatus.FINISHED.value
+    assert escan.is_partial is True
+    assert fingerprinted == []          # no se llegó a fingerprintear
+    # Lo descubierto se persiste: los puertos son un hecho verificado.
+    assert sorted(f.port for f in findings if f.category == "open_port") == [80, 443]
+
+
+def test_a_cancelled_scan_does_not_close_findings_by_omission(monkeypatch, app, admin_user):
+    """La interacción crítica con el ciclo de vida: un escaneo cancelado a mitad
+    no vio todo el objetivo, así que la ausencia de un hallazgo anterior no es
+    evidencia de que se haya corregido (el fallo de L48-c por otra puerta)."""
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+
+    # Primer escaneo completo: 80 y 443 abiertos.
+    _stub_self_discovery(monkeypatch, [80, 443])
+    with app.app_context():
+        mgr = LybraEngineManager()
+        first = mgr._create_scan_record(target="10.0.0.9", user_id=admin_user.id)
+        mgr._run_lybra(first.id)
+
+    # Segundo escaneo cancelado a mitad: sólo llega a ver el 80.
+    _stub_self_discovery(monkeypatch, [80])
+    with app.app_context():
+        mgr = LybraEngineManager()
+        second = mgr._create_scan_record(target="10.0.0.9", user_id=admin_user.id)
+        mgr._run_lybra(second.id, cancel_check=lambda: True)
+
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            findings = repo.get_findings_by_scan(second.id)
+
+    # El 443, que no se llegó a recorrer, no se cierra como corregido.
+    fixed = [f for f in findings if f.state == "fixed"]
+    assert fixed == []
+
+
+# ================================================= evidencia cruda (L44)
+
+
+def test_a_confirmed_http_finding_stores_its_redacted_evidence(monkeypatch, app, admin_user):
+    """Un hallazgo http confirmado guarda la respuesta que lo provocó, con las
+    cabeceras sensibles redactadas y su hash."""
+    from src.modules.features.themis.lybra.checks import Response
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+    # El objetivo expone /.git/config y manda una cookie de sesión.
+    monkeypatch.setattr(
+        "src.modules.features.themis.lybra.checks.HttpProbe.fetch",
+        lambda self, host, port, method, path:
+            Response(200, "[core]\n\trepositoryformatversion = 0\n",
+                     {"Server": "nginx", "Set-Cookie": "PHPSESSID=secret; HttpOnly"})
+            if path == "/.git/config" else Response(404, "", {}))
+    # Sin fingerprint ni TLS que enturbien.
+    monkeypatch.setattr(LybraEngineManager, "_fingerprint_services",
+                        lambda self, target, services, **kw: (services, []))
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
+
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            findings = repo.get_findings_by_scan(escan.id)
+            git = next(f for f in findings if f.check_id == "lybra:git-config-exposure@1")
+            evidence = repo.get_evidence_for_finding(git.id)
+
+    assert len(evidence) == 1
+    row = evidence[0]
+    assert row.kind == "http_response"
+    assert row.payload["status"] == 200
+    assert "[core]" in row.payload["body"]
+    # El secreto no está: la cookie se redactó antes de persistir.
+    assert row.payload["headers"]["Set-Cookie"] == "[redacted]"
+    assert row.payload["headers"]["Server"] == "nginx"
+    assert len(row.content_hash) == 64
+
+
+def test_the_evidence_endpoint_returns_own_findings_and_404s_for_others(
+        client, monkeypatch, app, admin_user, regular_user, auth_headers):
+    from src.modules.features.themis.lybra.checks import Response
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+    monkeypatch.setattr(
+        "src.modules.features.themis.lybra.checks.HttpProbe.fetch",
+        lambda self, host, port, method, path:
+            Response(200, "[core]\n\trepositoryformatversion = 0\n", {"Server": "nginx"})
+            if path == "/.git/config" else Response(404, "", {}))
+    monkeypatch.setattr(LybraEngineManager, "_fingerprint_services",
+                        lambda self, target, services, **kw: (services, []))
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            git = next(f for f in repo.get_findings_by_scan(escan.id)
+                       if f.check_id == "lybra:git-config-exposure@1")
+            finding_id = git.id
+
+    # El dueño ve su evidencia.
+    ok = client.get(f"/themis/findings/{finding_id}/evidence",
+                    headers=auth_headers(admin_user))
+    assert ok.status_code == 200
+    body = ok.get_json()
+    assert body["evidence"][0]["kind"] == "http_response"
+    assert body["evidence"][0]["contentHash"]
+
+    # Otro usuario recibe 404 (mismo criterio de propiedad que set_finding_state).
+    forbidden = client.get(f"/themis/findings/{finding_id}/evidence",
+                           headers=auth_headers(regular_user))
+    assert forbidden.status_code == 404
+
+
+# =============================================== confirmadores (L29)
+
+
+def test_a_confirmer_promotes_a_hypothesis_end_to_end(monkeypatch, app, admin_user):
+    """El encadenamiento versión→confirmador en el flujo real: el motor propone
+    una CVE por versión (hipótesis) y el confirmador la asciende a hecho, dando
+    un único hallazgo confirmado en vez de dos sueltos."""
+    from src.modules.features.themis.lybra.checks import Response
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+    # Fingerprint: el servicio es un Apache 2.4.49 (identificado).
+    monkeypatch.setattr(
+        LybraEngineManager, "_fingerprint_services",
+        lambda self, target, services, **kw: (
+            [Service(s.port, s.protocol, s.name, "apache", "2.4.49", None)
+             for s in services], []))
+    # El motor propone CVE-2021-41773 como hipótesis (confirmed=false, qod=70).
+    cve = "CVE-2021-41773"
+    monkeypatch.setattr(
+        "src.modules.features.themis.lybra.engine.LybraEngine.analyze",
+        lambda self, services: [
+            {"host_id": None, "port": 80, "service": "http", "protocol": "tcp",
+             "cve_ids": [cve], "confirmed": False, "qod": 70, "source": "lybra",
+             "check_id": "lybra:outdated@1", "category": "outdated_software",
+             "title": "Apache 2.4.49 con CVE conocida", "state": "open"}])
+    # El objetivo es de verdad vulnerable: sirve /etc/passwd por la ruta.
+    traversal = "/cgi-bin/.%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd"
+    monkeypatch.setattr(
+        "src.modules.features.themis.lybra.checks.HttpProbe.fetch",
+        lambda self, host, port, method, path:
+            Response(200, "root:x:0:0:root:/root:/bin/bash\n", {})
+            if path == traversal else Response(404, "", {}))
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    # Un solo hallazgo para esa CVE, ascendido a confirmado con qod 99.
+    for_cve = [f for f in findings if f.cve_ids and cve in f.cve_ids]
+    assert len(for_cve) == 1
+    assert for_cve[0].confirmed is True
+    assert for_cve[0].qod == 99
+
+
+# =============================================== modo agresivo + credenciales (L40/L31)
+
+
+def _stub_tomcat_manager(monkeypatch) -> None:
+    """Un panel de Tomcat Manager con la tercera credencial de fábrica del feed
+    (``tomcat/s3cret``) — deliberadamente no la primera que se prueba, para
+    que el runtime tenga que agotar un intento fallido antes de acertar, y
+    con usuario y contraseña distintos, para poder afirmar sin ambigüedad que
+    la contraseña que funcionó no aparece en ningún sitio.
+
+    Sirve tanto a los checks activos declarativos como al motor de
+    credenciales: cualquier ruta que no sea ``/manager/html`` con la cabecera
+    correcta responde 404/401, así que el resto del feed no dispara ruido.
+    """
+    from src.modules.features.themis.lybra.checks import Response
+    import base64
+    valid_auth = "Basic " + base64.b64encode(b"tomcat:s3cret").decode("ascii")
+
+    def fetch(self, host, port, method, path, body=None, headers=None):
+        if path == "/manager/html" and (headers or {}).get("Authorization") == valid_auth:
+            return Response(200, "Tomcat Web Application Manager", {})
+        if path == "/manager/html":
+            return Response(401, "", {})
+        return Response(404, "", {})
+
+    monkeypatch.setattr("src.modules.features.themis.lybra.checks.HttpProbe.fetch", fetch)
+    monkeypatch.setattr(LybraEngineManager, "_fingerprint_services",
+                        lambda self, target, services, **kw: (services, []))
+
+
+def test_aggressive_checks_do_not_run_without_an_explicit_request(monkeypatch, app, admin_user):
+    """Objetivo autorizado, pero nadie pidió el modo agresivo: la mitad de la
+    puerta que falta. Ni un check ``aggressive`` ni el motor de credenciales
+    corren, así que un panel con credenciales de fábrica de verdad expuestas
+    no produce ningún hallazgo de ``default_credentials``."""
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+    _stub_tomcat_manager(monkeypatch)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)  # aggressive=False por defecto
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    assert not [f for f in findings if f.category == "default_credentials"]
+
+
+def test_aggressive_checks_do_not_run_on_an_unauthorized_target(monkeypatch, app, admin_user):
+    """Petición explícita de modo agresivo, pero el objetivo NO está en el
+    registro de autorización: la otra mitad de la puerta. Autorizar un
+    objetivo para el escaneo pasivo no autoriza escribir en él."""
+    # Deliberadamente sin `_authorize_target`: el objetivo no está autorizado.
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+    _stub_tomcat_manager(monkeypatch)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, aggressive=True)
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    assert not [f for f in findings if f.category == "default_credentials"]
+
+
+def test_an_authorized_and_explicit_aggressive_scan_finds_default_credentials(
+        monkeypatch, app, admin_user):
+    """Las dos mitades de la puerta juntas: objetivo autorizado y modo
+    agresivo pedido explícitamente. El motor de credenciales prueba el panel
+    de Tomcat Manager, encuentra la credencial de fábrica que funciona y
+    produce un hallazgo confirmado — sin que la contraseña aparezca en
+    ningún campo."""
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+    _stub_tomcat_manager(monkeypatch)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, aggressive=True)
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    credential_findings = [f for f in findings if f.category == "default_credentials"]
+    assert len(credential_findings) == 1
+    finding = credential_findings[0]
+    assert finding.confirmed is True
+    assert finding.qod == 99
+    assert finding.check_id == "lybra-credentials:tomcat-manager-default@1"
+
+    assert "s3cret" not in str(finding.title)
+
+    with UnitOfWork() as uow:
+        evidence = ScanRepository(uow).get_evidence_for_finding(finding.id)
+    # La contraseña que funcionó no aparece en el hallazgo ni en su evidencia
+    # — es justo lo que el motor de credenciales existe para garantizar. El
+    # usuario ("tomcat") sí puede aparecer; es información útil y no secreta.
+    assert len(evidence) == 1
+    assert "s3cret" not in str(evidence[0].payload)

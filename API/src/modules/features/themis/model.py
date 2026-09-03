@@ -882,6 +882,44 @@ class Finding(Base):
         return f"<Finding(id={self.id}, scan_id={self.scan_id}, category='{self.category}', title='{self.title[:40]}')>"
 
 
+class FindingEvidence(Base):
+    """La respuesta cruda que provocó un hallazgo (Fase E).
+
+    Un hallazgo dice **qué** encontró y **con qué regla**, pero ``feed_version``
+    + ``check_id`` dan reproducibilidad lógica, no guardan lo que el objetivo
+    respondió. Cuando un cliente dice «eso no es verdad, ese fichero no está
+    expuesto», la respuesta útil es la respuesta HTTP con su cuerpo y su fecha,
+    no «nuestro check dice que sí». Sin evidencia, cada discusión se resuelve
+    repitiendo el escaneo a mano.
+
+    Attributes:
+        id: Clave primaria.
+        finding_id: El hallazgo que esta evidencia respalda.
+        kind: Qué clase de evidencia es (``http_response`` | ``ssh_banner`` |
+            ``tls_cert`` | ``probe_output``).
+        payload: El contenido observado, ya **redactado** (ver
+            ``lybra.evidence.redact_evidence``): cabeceras sensibles fuera,
+            cuerpo truncado. Guardar una respuesta cruda sin redactar
+            convertiría la base de datos en un depósito de secretos ajenos.
+        content_hash: SHA-256 del payload redactado. No es decorativo: es lo
+            que permite decir «esta evidencia no se ha tocado desde que se
+            capturó», la mitad del valor en un contexto de auditoría.
+        captured_at: Cuándo se observó (cadena de custodia).
+    """
+    __tablename__ = "FindingEvidence"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    finding_id   = Column(Integer, ForeignKey("Finding.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    kind         = Column(String(32), nullable=False)
+    payload      = Column(JSONB, nullable=False)
+    content_hash = Column(String(64), nullable=False)
+    captured_at  = Column(DateTime, default=utcnow_naive, nullable=False, index=True)
+
+    def __repr__(self):
+        return f"<FindingEvidence(id={self.id}, finding_id={self.finding_id}, kind='{self.kind}')>"
+
+
 # =========================================================================
 # KNOWLEDGE BASE (the "Lybra Feed": local mirror of NVD/KEV/EPSS)
 # =========================================================================

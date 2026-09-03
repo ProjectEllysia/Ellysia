@@ -48,6 +48,11 @@ class LybraScanRequestSchema(Schema):
     target = fields.String(required=True)
     ports = fields.String()
     timeout = fields.Integer(load_default=120, validate=validate.Range(min=1))
+    # La doble puerta del modo agresivo (L40): esta petición explícita del
+    # usuario es sólo la mitad. El manager sólo la honra cuando el objetivo
+    # está además en el registro de autorización — un registro no autoriza
+    # cualquier cosa contra el objetivo, sólo el escaneo pasivo.
+    aggressive = fields.Boolean(load_default=False)
 
 
 class FindingStateRequestSchema(Schema):
