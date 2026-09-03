@@ -36,6 +36,16 @@
         </button>
         <HistoryPanel v-if="store.viewMode === 'history'" />
         <template v-else>
+          <!-- La detección por versión vale lo que valga la frescura del espejo
+               local de NVD/KEV/EPSS. Si deja de refrescarse, los escaneos siguen
+               saliendo en verde contra un catálogo congelado: el aviso existe
+               para que eso deje de ser invisible. -->
+          <div v-if="store.kbStatus.loaded && store.kbStatus.isStale" class="kb-stale">
+            <strong>Base de conocimiento desactualizada.</strong>
+            {{ staleSourcesLabel }} Los hallazgos por versión se resuelven contra ese catálogo,
+            así que un CVE publicado después no aparecerá y la ausencia de hallazgos no es
+            concluyente.
+          </div>
           <LybraLaunchPanel
             :launching="store.launching"
             :launched="hasActiveLybraScan"
@@ -248,6 +258,15 @@ const currentData = computed(() => store.scans[store.activeTab])
 const hasActiveScan = computed(() =>
   currentData.value.results.some(s => s.status === 'pending' || s.status === 'running')
 )
+/** Las fuentes viejas, en una frase legible para el aviso. */
+const staleSourcesLabel = computed(() => {
+  const stale = store.kbStatus.sources.filter(s => s.isStale)
+  const parts = stale.map(s => s.neverSynced
+    ? `${s.source.toUpperCase()} nunca se ha sincronizado`
+    : `${s.source.toUpperCase()} lleva ${s.ageDays} días sin actualizarse`)
+  return parts.length ? `${parts.join('; ')}.` : ''
+})
+
 const hasActiveLybraScan = computed(() =>
   store.scans.lybra.results.some(s => s.status === 'pending' || s.status === 'running')
 )
@@ -287,6 +306,7 @@ let lybraLoaded = false
 watch(() => store.world, (w) => {
   if (w === 'lybra' && !lybraLoaded) {
     lybraLoaded = true
+    store.loadKbStatus()
     store.loadLybraScans()
     store.loadAuthorizedTargets()
   }
@@ -384,6 +404,13 @@ async function handleDeleteScheduled(id) { await scheduledStore.deleteScheduledS
 .world-opt:hover { color: var(--text-dim); }
 .world-opt.active { background: var(--accent-dim); color: var(--accent-bright); font-weight: 600; box-shadow: inset 0 0 0 1px var(--accent); }
 .world-block { display: block; }
+
+.kb-stale {
+  margin-bottom: 0.8rem; padding: 0.6rem 0.8rem; border-radius: 8px;
+  border: 1px solid var(--warn); background: var(--warn-dim);
+  color: var(--text-dim); font-size: var(--fs-md); line-height: 1.45;
+}
+.kb-stale strong { color: var(--text); }
 
 .lybra-history-toggle {
   display: block; margin: 0 0 0.85rem auto; padding: 0.45rem 0.8rem;
