@@ -37,9 +37,14 @@
         <HistoryPanel v-if="store.viewMode === 'history'" />
         <template v-else>
           <!-- La detección por versión vale lo que valga la frescura del espejo
-               local de NVD/KEV/EPSS. Si deja de refrescarse, los escaneos siguen
-               saliendo en verde contra un catálogo congelado: el aviso existe
-               para que eso deje de ser invisible. -->
+               local de NVD/KEV/EPSS/OVAL. Si deja de refrescarse, los escaneos
+               siguen saliendo en verde contra un catálogo congelado: el aviso
+               existe para que eso deje de ser invisible.
+
+               Sólo se avisa de lo que se puede afirmar. Una fuente con
+               contenido pero sin sincronización registrada no está caducada —y
+               eso le pasa a toda instalación recién desplegada, porque la tabla
+               de estado nace vacía—, así que ésa no dispara la alarma. -->
           <div v-if="store.kbStatus.loaded && store.kbStatus.isStale" class="kb-stale">
             <strong>Base de conocimiento desactualizada.</strong>
             {{ staleSourcesLabel }} Los hallazgos por versión se resuelven contra ese catálogo,
@@ -260,11 +265,18 @@ const currentData = computed(() => store.scans[store.activeTab])
 const hasActiveScan = computed(() =>
   currentData.value.results.some(s => s.status === 'pending' || s.status === 'running')
 )
-/** Las fuentes viejas, en una frase legible para el aviso. */
+/**
+ * Las fuentes de las que sí se puede afirmar que están viejas, en una frase.
+ *
+ * Una fuente sin registro de sincronización sólo entra aquí si además está
+ * vacía — y entonces lo que se dice es que no hay datos, no que hayan
+ * caducado. Decir «nunca se ha sincronizado» sobre un espejo con 350.000 CVEs
+ * dentro era el falso positivo que este aviso traía de fábrica.
+ */
 const staleSourcesLabel = computed(() => {
   const stale = store.kbStatus.sources.filter(s => s.isStale)
   const parts = stale.map(s => s.neverSynced
-    ? `${s.source.toUpperCase()} nunca se ha sincronizado`
+    ? `${s.source.toUpperCase()} está vacía y nunca se ha sincronizado`
     : `${s.source.toUpperCase()} lleva ${s.ageDays} días sin actualizarse`)
   return parts.length ? `${parts.join('; ')}.` : ''
 })
