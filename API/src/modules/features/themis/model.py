@@ -970,6 +970,24 @@ class CveEntry(Base):
     severity      = Column(String(16))   # CRITICAL | HIGH | MEDIUM | LOW | NONE
     description   = Column(Text)
     cwe_ids       = Column(JSONB)
+    has_exploit_reference = Column(Boolean, nullable=False, default=False,
+                                   server_default=sa_false())
+    """Si NVD enlaza al menos una referencia etiquetada como exploit (L34).
+
+    Es la señal de madurez de explotación más barata que hay: la propia NVD
+    etiqueta sus referencias, y ese dato ya viaja en cada registro que se
+    ingiere — sólo había que dejar de tirarlo.
+
+    Se traduce a ``poc`` y nunca a nada más fuerte. La etiqueta dice que
+    alguien publicó algo que demuestra el fallo, no cuán usable es: puede ser
+    una prueba de concepto en un gist o un exploit completo. Inventar una
+    precisión que el dato no tiene sería peor que no tenerlo.
+
+    Sólo se rellena al (re)sincronizar un CVE, así que los ya mirroreados
+    quedan en ``False`` hasta que la sincronización nocturna vuelva a tocarlos.
+    Es un falso negativo temporal y conservador: se dirá "no consta exploit",
+    nunca "hay exploit" de más.
+    """
     source        = Column(String(16), default="nvd")
 
     cpe_matches = relationship("CpeMatch", back_populates="cve", cascade="all, delete-orphan")

@@ -1813,3 +1813,72 @@ def test_false_positives_are_scoped_to_their_owner(
     body = client.get("/themis/findings/false-positives",
                       headers=auth_headers(regular_user)).get_json()
     assert body["count"] == 0
+
+
+def test_a_finding_carries_its_exploit_maturity(app, admin_user):
+    """`exploit_maturity` se declaraba en el modelo desde el principio,
+    documentada como "rellenada desde la Fase 1", y estaba NULL en todas las
+    filas. Ahora dice algo en cada hallazgo con CVE."""
+    _seed_kb_apache_cve(app)   # siembra también KEV para esta CVE
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.31", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_network_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    # En KEV: la evidencia más fuerte que hay, y gana a cualquier otra.
+    assert vuln.exploit_maturity == "in_the_wild"
+
+
+def test_a_cve_outside_kev_with_an_exploit_reference_reads_as_poc(app, admin_user):
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            repo.upsert_cve(
+                {"cve_id": "CVE-2021-41773", "cvss_score": 7.5,
+                 "cvss_vector": "CVSS:3.1/AV:N", "severity": "HIGH",
+                 "description": "Path traversal", "cwe_ids": ["CWE-22"],
+                 "has_exploit_reference": True, "source": "nvd"},
+                [{"vendor": "apache", "product": "http_server", "exact_version": "2.4.49",
+                  "version_start_including": None, "version_start_excluding": None,
+                  "version_end_including": None, "version_end_excluding": None}],
+            )
+
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.32", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_network_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    assert vuln.exploit_maturity == "poc"
+
+
+def test_a_cve_with_nothing_public_says_none_not_null(app, admin_user):
+    """`none` es una afirmación —no consta nada público—; `NULL` era la
+    ausencia de afirmación, que es lo que hacía inútil la columna."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).upsert_cve(
+                {"cve_id": "CVE-2021-41773", "cvss_score": 7.5,
+                 "cvss_vector": "CVSS:3.1/AV:N", "severity": "HIGH",
+                 "description": "Path traversal", "cwe_ids": ["CWE-22"], "source": "nvd"},
+                [{"vendor": "apache", "product": "http_server", "exact_version": "2.4.49",
+                  "version_start_including": None, "version_start_excluding": None,
+                  "version_end_including": None, "version_end_excluding": None}],
+            )
+
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.33", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_network_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    assert vuln.exploit_maturity == "none"

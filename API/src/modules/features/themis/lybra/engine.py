@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional, Tuple
 
+from .correlation import exploit_maturity
 from .kb import (
     load_product_aliases,
     normalize_cpe_to_23,
@@ -160,6 +161,7 @@ class LybraEngine:
         product_alias_lookup: Optional[Callable[[str], Optional[Tuple[str, str]]]] = None,
         feed_version: Optional[str] = None,
         record_resolution: Optional[Callable[[str, str, bool], None]] = None,
+        exploit_evidence_lookup: Optional[Callable[[str], Optional[str]]] = None,
     ) -> None:
         self._cve_lookup = cve_lookup
         self._kev_lookup = kev_lookup
@@ -167,6 +169,7 @@ class LybraEngine:
         self._product_alias_lookup = product_alias_lookup
         self._feed_version = feed_version or self.FEED_VERSION
         self._record_resolution = record_resolution
+        self._exploit_evidence_lookup = exploit_evidence_lookup
 
     def analyze(self, services: Iterable[Service]) -> List[dict]:
         """Produce the findings for a set of services.
@@ -224,6 +227,7 @@ class LybraEngine:
         """
         cve_id = cve.cve_id
         is_verified = service.origin == "inventory"
+        in_kev = self._kev_lookup(cve_id) if self._kev_lookup else False
         return {
             "title":        f"{self._version_label(service)} — {cve_id}",
             "category":     "outdated_software",
@@ -235,7 +239,15 @@ class LybraEngine:
             "cvss_score":   cve.cvss_score,
             "cvss_vector":  cve.cvss_vector,
             "epss_score":   self._epss_lookup(cve_id) if self._epss_lookup else None,
-            "in_kev":       self._kev_lookup(cve_id) if self._kev_lookup else False,
+            "in_kev":       in_kev,
+            # L34: la tercera dimensión de explotabilidad, que el modelo
+            # prometía y nadie escribía. KEV dice "se explota ahora mismo" y
+            # EPSS da una probabilidad; ésta dice si existe un exploit y cuán
+            # usable es, que es lo que separa una urgencia de un deber.
+            "exploit_maturity": exploit_maturity(
+                in_kev,
+                self._exploit_evidence_lookup(cve_id) if self._exploit_evidence_lookup else None,
+            ),
             "required_os":  getattr(cve, "required_os", None),
             "source":       "lybra",
             "check_id":     "lybra:version-match@1",

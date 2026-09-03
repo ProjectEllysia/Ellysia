@@ -360,6 +360,10 @@ class LybraEngineManager(ScanManager):
                     # libre de ORM y lo sigue siendo porque esto entra
                     # inyectado, como los demás lookups.
                     record_resolution=kb_repo.record_resolution,
+                    # L34: la madurez de explotación. Sale de lo que ya está en
+                    # casa —la referencia que la propia NVD etiqueta como
+                    # exploit— y se combina con KEV dentro del motor.
+                    exploit_evidence_lookup=kb_repo.exploit_evidence,
                 )
                 findings_data = engine.analyze(services)
                 findings_data.extend(fingerprint_findings)

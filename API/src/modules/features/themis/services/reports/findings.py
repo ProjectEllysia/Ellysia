@@ -121,6 +121,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
             "title": row.title, "category": row.category, "port": row.port, "service": row.service,
             "cpe": row.cpe, "cve_ids": row.cve_ids or [], "cvss_score": row.cvss_score,
             "epss_score": row.epss_score, "in_kev": row.in_kev, "qod": row.qod, "confirmed": row.confirmed,
+            "exploit_maturity": row.exploit_maturity, "state": row.state,
             "source": row.source, "state": row.state, "cpe_resolved": row.cpe_resolved,
             "required_os": row.required_os,
         } for row in rows]
@@ -232,6 +233,16 @@ class FindingsPrintingStrategy(PrintingStrategy):
             parts.append(f"{entry['source'].upper()} {when}"
                          + (" (desactualizada)" if entry["isStale"] else ""))
         return " · ".join(parts) if parts else "Sin fuentes configuradas"
+
+    #: Cómo se lee cada nivel de ``Finding.exploit_maturity`` en el informe.
+    #: ``none`` no aparece: decir "no consta exploit" en cada ficha sería ruido
+    #: en la inmensa mayoría de los hallazgos, y su ausencia ya lo dice.
+    _EXPLOIT_MATURITY_LABEL = {
+        "poc": "Existe una prueba de concepto pública",
+        "functional": "Existe un exploit funcional público",
+        "weaponized": "Existe un exploit integrado en herramientas de ataque",
+        "in_the_wild": "Se explota activamente en el mundo real",
+    }
 
     def _append_finding_summary(self, theme: "ReportTheme", elements: list, findings: list) -> None:
         """Tabla resumen: cantidad de hallazgos por prioridad."""
@@ -371,6 +382,12 @@ class FindingsPrintingStrategy(PrintingStrategy):
             details.append(["EPSS (30 días):", f"{finding['epss_score'] * 100:.1f}%"])
         if finding.get("in_kev"):
             details.append(["CISA KEV:", "Sí — explotada activamente"])
+        # La tercera dimensión de explotabilidad, junto a KEV y EPSS: si existe
+        # algo público que demuestre el fallo. Es lo que separa una urgencia de
+        # un deber cuando el lector decide qué arregla el lunes.
+        maturity_label = self._EXPLOIT_MATURITY_LABEL.get(finding.get("exploit_maturity"))
+        if maturity_label:
+            details.append(["Explotación:", maturity_label])
         if finding.get("required_os") and not finding.get("confirmed"):
             details.append(["Requiere SO:", f"{finding['required_os']} (no verificado en este escaneo)"])
         if finding.get("fixed_version"):
