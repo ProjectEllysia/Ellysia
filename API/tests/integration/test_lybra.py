@@ -1655,3 +1655,322 @@ def test_an_authorized_and_explicit_aggressive_scan_finds_default_credentials(
     # usuario ("tomcat") sí puede aparecer; es información útil y no secreta.
     assert len(evidence) == 1
     assert "s3cret" not in str(evidence[0].payload)
+
+
+# ─────────────── desmentir un hallazgo no es aceptar un riesgo (L35)
+#
+# Hasta ahora el esquema sólo admitía `accepted` y `open`, así que un usuario
+# que sabía que un hallazgo era falso —Debian parcheó por backport y la versión
+# no subió— sólo podía marcarlo como "riesgo aceptado". Un informe que dice
+# "3 riesgos aceptados" cuando son 3 errores del escáner miente sobre la
+# postura de seguridad, y de paso tira la única muestra etiquetada gratis que
+# hay para calibrar el motor.
+
+
+def _first_finding_id(app, scan_id: int) -> int:
+    with app.app_context():
+        with UnitOfWork() as uow:
+            return ScanRepository(uow).get_findings_by_scan(scan_id)[0].id
+
+
+def test_a_finding_can_be_refuted_without_accepting_the_risk(
+        client, app, admin_user, auth_headers):
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.21")
+    finding_id = _first_finding_id(app, scan_id)
+
+    resp = client.patch(f"/themis/findings/{finding_id}",
+                        headers=auth_headers(admin_user),
+                        json={"state": "false_positive",
+                              "reason": "backport de Debian, la versión no sube"})
+    assert resp.status_code == 200
+    assert resp.get_json()["state"] == "false_positive"
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            finding = ScanRepository(uow).get_finding(finding_id)
+            assert finding.state == "false_positive"
+            assert finding.state_reason.startswith("backport de Debian")
+            assert finding.state_set_by == admin_user.id
+            assert finding.state_set_at is not None
+            # Un desmentido no caduca: el motor no se equivoca más por ser
+            # más tarde.
+            assert finding.state_expires_at is None
+
+
+def test_accepting_a_risk_sets_an_expiry(client, app, admin_user, auth_headers):
+    """La diferencia con el desmentido, en una línea: un riesgo asumido vuelve
+    a revisión, uno desmentido no."""
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.22")
+    finding_id = _first_finding_id(app, scan_id)
+
+    client.patch(f"/themis/findings/{finding_id}", headers=auth_headers(admin_user),
+                 json={"state": "accepted", "reason": "mitigado por el WAF"})
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            finding = ScanRepository(uow).get_finding(finding_id)
+            assert finding.state == "accepted"
+            assert finding.state_expires_at is not None
+            assert finding.state_expires_at > finding.state_set_at
+
+
+def test_reopening_a_finding_clears_the_previous_decision(
+        client, app, admin_user, auth_headers):
+    """Volver a `open` no es una decisión nueva: es retirar la anterior, así que
+    su motivo y su autor dejan de tener sentido."""
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.23")
+    finding_id = _first_finding_id(app, scan_id)
+    headers = auth_headers(admin_user)
+
+    client.patch(f"/themis/findings/{finding_id}", headers=headers,
+                 json={"state": "false_positive", "reason": "no aplica"})
+    client.patch(f"/themis/findings/{finding_id}", headers=headers,
+                 json={"state": "open"})
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            finding = ScanRepository(uow).get_finding(finding_id)
+            assert finding.state == "open"
+            assert finding.state_reason is None
+            assert finding.state_set_by is None
+            assert finding.state_expires_at is None
+
+
+def test_a_state_the_lifecycle_owns_cannot_be_set_by_hand(
+        client, app, admin_user, auth_headers):
+    """`fixed` y `regressed` los pone el ciclo de vida al comparar escaneos.
+    Dejarlos escribir desde fuera permitiría falsear el historial."""
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.24")
+    finding_id = _first_finding_id(app, scan_id)
+
+    resp = client.patch(f"/themis/findings/{finding_id}",
+                        headers=auth_headers(admin_user), json={"state": "fixed"})
+    assert resp.status_code == 422
+
+
+def test_the_manager_validates_the_state_on_its_own(app, admin_user):
+    """La validación del schema protege el endpoint; el manager es la frontera
+    de verdad, y hasta L35 aceptaba cualquier cadena."""
+    from src.modules.shared._exceptions import ValidationError
+
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.25")
+    finding_id = _first_finding_id(app, scan_id)
+
+    with app.app_context():
+        with pytest.raises(ValidationError):
+            LybraEngineManager().set_finding_state(finding_id, admin_user.id, "inventado")
+
+
+def test_a_refuted_finding_stops_counting_as_a_risk(
+        client, app, admin_user, auth_headers):
+    """El coste de producto de confundir los dos estados: el recuento."""
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.26")
+    headers = auth_headers(admin_user)
+
+    before = client.get("/themis/results?type=lybra&page=1&per_page=10",
+                        headers=headers).get_json()["results"][0]
+    assert before["falsePositiveFindings"] == 0
+    priorities_before = sum(before["byPriority"].values())
+
+    finding_id = _first_finding_id(app, scan_id)
+    client.patch(f"/themis/findings/{finding_id}", headers=headers,
+                 json={"state": "false_positive", "reason": "no aplica"})
+
+    after = client.get("/themis/results?type=lybra&page=1&per_page=10",
+                       headers=headers).get_json()["results"][0]
+    assert after["falsePositiveFindings"] == 1
+    assert sum(after["byPriority"].values()) == priorities_before - 1
+    assert after["totalFindings"] == before["totalFindings"]   # sigue estando, no se borra
+
+
+def test_refuted_findings_are_available_as_labelled_samples(
+        client, app, admin_user, auth_headers):
+    """Lo que convierte esto de una casilla de interfaz en un bucle de mejora:
+    cada desmentido dice contra qué check y contra qué producto se equivoca el
+    motor."""
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.27")
+    finding_id = _first_finding_id(app, scan_id)
+    headers = auth_headers(admin_user)
+
+    client.patch(f"/themis/findings/{finding_id}", headers=headers,
+                 json={"state": "false_positive", "reason": "backport"})
+
+    body = client.get("/themis/findings/false-positives", headers=headers).get_json()
+    assert body["count"] == 1
+    sample = body["falsePositives"][0]
+    assert sample["findingId"] == finding_id
+    assert sample["reason"] == "backport"
+    assert "feedVersion" in sample and "checkId" in sample and "cpe" in sample
+
+
+def test_false_positives_are_scoped_to_their_owner(
+        client, app, admin_user, regular_user, auth_headers):
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.28")
+    finding_id = _first_finding_id(app, scan_id)
+    client.patch(f"/themis/findings/{finding_id}", headers=auth_headers(admin_user),
+                 json={"state": "false_positive", "reason": "mío"})
+
+    body = client.get("/themis/findings/false-positives",
+                      headers=auth_headers(regular_user)).get_json()
+    assert body["count"] == 0
+
+
+def test_a_finding_carries_its_exploit_maturity(app, admin_user):
+    """`exploit_maturity` se declaraba en el modelo desde el principio,
+    documentada como "rellenada desde la Fase 1", y estaba NULL en todas las
+    filas. Ahora dice algo en cada hallazgo con CVE."""
+    _seed_kb_apache_cve(app)   # siembra también KEV para esta CVE
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.31", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_network_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    # En KEV: la evidencia más fuerte que hay, y gana a cualquier otra.
+    assert vuln.exploit_maturity == "in_the_wild"
+
+
+def test_a_cve_outside_kev_with_an_exploit_reference_reads_as_poc(app, admin_user):
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            repo.upsert_cve(
+                {"cve_id": "CVE-2021-41773", "cvss_score": 7.5,
+                 "cvss_vector": "CVSS:3.1/AV:N", "severity": "HIGH",
+                 "description": "Path traversal", "cwe_ids": ["CWE-22"],
+                 "has_exploit_reference": True, "source": "nvd"},
+                [{"vendor": "apache", "product": "http_server", "exact_version": "2.4.49",
+                  "version_start_including": None, "version_start_excluding": None,
+                  "version_end_including": None, "version_end_excluding": None}],
+            )
+
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.32", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_network_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    assert vuln.exploit_maturity == "poc"
+
+
+def test_a_cve_with_nothing_public_says_none_not_null(app, admin_user):
+    """`none` es una afirmación —no consta nada público—; `NULL` era la
+    ausencia de afirmación, que es lo que hacía inútil la columna."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).upsert_cve(
+                {"cve_id": "CVE-2021-41773", "cvss_score": 7.5,
+                 "cvss_vector": "CVSS:3.1/AV:N", "severity": "HIGH",
+                 "description": "Path traversal", "cwe_ids": ["CWE-22"], "source": "nvd"},
+                [{"vendor": "apache", "product": "http_server", "exact_version": "2.4.49",
+                  "version_start_including": None, "version_start_excluding": None,
+                  "version_end_including": None, "version_end_excluding": None}],
+            )
+
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.33", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_network_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    assert vuln.exploit_maturity == "none"
+
+
+# ─────────────── verificación de backports de extremo a extremo (Fase O)
+
+
+def _debian_services() -> list:
+    """Apache empaquetado por Debian 11: la versión trae su revisión, que es lo
+    que nombra al proveedor sin necesidad de entrar en el host."""
+    from src.modules.features.themis.lybra import Service
+    return [Service(port=80, protocol="tcp", name="http", product="apache2",
+                    version="2.4.49-1~deb11u1",
+                    cpe="cpe:/a:apache:http_server:2.4.49", origin="inventory")]
+
+
+def test_a_backported_finding_is_closed_without_touching_the_host(app, admin_user):
+    """El corazón de la Fase O: Debian ya lo parcheó sin subir el número
+    visible, así que el hallazgo por versión nunca fue real."""
+    _seed_kb_apache_cve(app)
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).upsert_distro_pkg_status({
+                "vendor": "debian", "release": "11", "package": "apache2",
+                "cve_id": "CVE-2021-41773", "fixed_in": "2.4.49-1~deb11u1",
+                "status": "fixed",
+            })
+
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.41", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_debian_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    assert vuln.state == "fixed"
+    assert vuln.confirmed is False
+    assert vuln.check_id == "lybra:oval-backport@1"
+
+
+def test_a_vendor_confirming_the_flaw_raises_the_confidence(app, admin_user):
+    _seed_kb_apache_cve(app)
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).upsert_distro_pkg_status({
+                "vendor": "debian", "release": "11", "package": "apache2",
+                "cve_id": "CVE-2021-41773", "fixed_in": None, "status": "vulnerable",
+            })
+
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.42", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_debian_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    assert vuln.confirmed is True
+    assert vuln.qod == 90
+
+
+def test_without_a_distro_advisory_the_finding_stays_a_hypothesis(app, admin_user):
+    """El comportamiento de antes de la Fase O, que es el correcto cuando no
+    hay a quién preguntar."""
+    _seed_kb_apache_cve(app)
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.43", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_debian_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    assert vuln.state == "open"
+    assert vuln.check_id == "lybra:version-match@1"
+
+
+def test_the_working_keys_never_reach_the_database(app, admin_user):
+    """`_installed_version` y `_package_name` son datos de trabajo entre etapas
+    de la tubería, no columnas."""
+    _seed_kb_apache_cve(app)
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.44", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_debian_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    assert findings, "el escaneo no llegó a persistir nada"
+    for finding in findings:
+        assert not hasattr(finding, "_installed_version")

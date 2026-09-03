@@ -40,13 +40,17 @@ from .model import (
     CpeMatch,
     CpeProductAlias,
     CveEntry,
+    DistroAdvisory,
+    DistroPkgStatus,
     LybraScan,
     EpssScore,
     Finding,
     FindingEvidence,
     Host,
     HostService,
+    KbSyncStatus,
     KevEntry,
+    UnresolvedProduct,
     NiktoIncident,
     NiktoScan,
     NmapScan,
@@ -687,6 +691,11 @@ class ScanRepository(BaseRepository[Scan]):
         """
         for data in findings_data:
             evidence = data.pop("_evidence", None)
+            # Las claves con guion bajo son de trabajo, no columnas: las etapas
+            # de la tubería se pasan datos por ahí (la evidencia cruda, la
+            # versión instalada que necesita la verificación de backports) y
+            # ninguna sobrevive a la fila.
+            data = {key: value for key, value in data.items() if not key.startswith("_")}
             finding = Finding(scan_id=scan.id, **data)
             self._session.add(finding)
             if evidence:
@@ -699,6 +708,20 @@ class ScanRepository(BaseRepository[Scan]):
                     content_hash=prepared["content_hash"],
                     captured_at=utcnow_naive(),
                 ))
+
+    def get_findings_by_state(self, user_id: int, state: str) -> List[Finding]:
+        """Los hallazgos de un usuario en un estado concreto, el más nuevo primero.
+
+        Se une contra ``Scan`` porque la propiedad vive ahí: un ``Finding`` no
+        tiene dueño propio, lo hereda del escaneo que lo produjo.
+        """
+        return (
+            self._session.query(Finding)
+            .join(Scan, Finding.scan_id == Scan.id)
+            .filter(Scan.user_id == user_id, Finding.state == state)
+            .order_by(Finding.state_set_at.desc().nullslast())
+            .all()
+        )
 
     def get_evidence_for_finding(self, finding_id: int) -> List[FindingEvidence]:
         """Return the evidence rows backing a finding, newest first."""
@@ -1231,6 +1254,151 @@ class KbRepository(BaseRepository[CveEntry]):
             "kev":  self._session.query(func.max(KevEntry.date_added)).scalar(),
             "epss": self._session.query(func.max(EpssScore.scored_at)).scalar(),
         }
+
+    def record_sync(self, source: str, rows_upserted: Optional[int] = None,
+                    error: Optional[str] = None) -> None:
+        """Anotar el desenlace de un intento de sincronización de una fuente.
+
+        Se llama **siempre**, salga bien o mal: el caso que importa es el malo,
+        porque una sincronización rota no deja ningún otro rastro consultable y
+        los escaneos siguen saliendo en verde contra un catálogo congelado.
+
+        ``last_success_at`` se conserva cuando el intento falla — la distancia
+        entre él y ``last_attempt_at`` es exactamente "cuánto lleva roto", y
+        pisarlo destruiría el único dato que responde a esa pregunta. Al revés,
+        ``error`` sí se limpia al tener éxito: la tabla dice si está bien
+        *ahora*, no lo que pasó alguna vez.
+
+        Args:
+            source: ``"nvd"``, ``"kev"`` o ``"epss"``.
+            rows_upserted: Filas escritas, en un intento con éxito.
+            error: El mensaje del fallo. Su presencia es lo que distingue un
+                intento fallido de uno correcto.
+        """
+        now = utcnow_naive()
+        row = self._session.query(KbSyncStatus).filter_by(source=source).one_or_none()
+        if row is None:
+            row = KbSyncStatus(source=source)
+            self._session.add(row)
+        row.last_attempt_at = now
+        if error is None:
+            row.last_success_at = now
+            row.rows_upserted = rows_upserted
+            row.error = None
+        else:
+            # El mensaje se acota: un traceback entero o el cuerpo de una
+            # respuesta HTTP no aportan más que su primera línea en una tabla
+            # de estado, y el detalle completo ya está en el log.
+            row.error = error[:500]
+
+    def sync_status(self) -> List[KbSyncStatus]:
+        """El estado de sincronización de todas las fuentes registradas."""
+        return self._session.query(KbSyncStatus).order_by(KbSyncStatus.source).all()
+
+    def upsert_distro_pkg_status(self, row: dict) -> None:
+        """Guardar lo que un proveedor dice de un paquete frente a una CVE."""
+        if not row.get("package") or not row.get("cve_id"):
+            return
+        existing = (self._session.query(DistroPkgStatus).filter_by(
+            vendor=row["vendor"], release=row.get("release"),
+            package=row["package"], cve_id=row["cve_id"]).one_or_none())
+        if existing is None:
+            self._session.add(DistroPkgStatus(**row))
+            return
+        existing.fixed_in = row.get("fixed_in")
+        existing.status = row.get("status", "unknown")
+
+    def upsert_distro_advisory(self, row: dict) -> None:
+        """Guardar la cabecera de un aviso de distribución (DSA, USN, RHSA…)."""
+        existing = (self._session.query(DistroAdvisory)
+                    .filter_by(advisory_id=row["advisory_id"]).one_or_none())
+        if existing is None:
+            self._session.add(DistroAdvisory(**row))
+            return
+        for field_name, value in row.items():
+            setattr(existing, field_name, value)
+
+    def distro_package_status(self, vendor: str, release: Optional[str],
+                              package: str, cve_id: str) -> Optional[tuple]:
+        """Qué dice el proveedor sobre este paquete y esta CVE.
+
+        Un aviso sin ``release`` aplica a todas las versiones de la
+        distribución, así que sirve también cuando se pregunta por una
+        concreta; el que sí la nombra manda sobre él. De ahí el orden: primero
+        se busca la respuesta específica y sólo después la genérica.
+
+        Returns:
+            ``(status, fixed_in)``, o ``None`` si el proveedor no se ha
+            pronunciado — que no es lo mismo que decir que está a salvo, y por
+            eso el llamante no toca el hallazgo en ese caso.
+        """
+        query = (self._session.query(DistroPkgStatus)
+                 .filter(DistroPkgStatus.vendor == vendor,
+                         DistroPkgStatus.package == package,
+                         DistroPkgStatus.cve_id == cve_id))
+        rows = query.all()
+        if not rows:
+            return None
+        specific = [row for row in rows if release and row.release == release]
+        generic = [row for row in rows if row.release is None]
+        chosen = (specific or generic or None)
+        if not chosen:
+            return None
+        return chosen[0].status, chosen[0].fixed_in
+
+    def exploit_evidence(self, cve_id: str) -> Optional[str]:
+        """Qué madurez de explotación consta para una CVE, sin contar KEV (L34).
+
+        Hoy sólo puede decir ``"poc"``: la señal disponible es la referencia
+        que la propia NVD etiqueta como exploit, y esa etiqueta afirma que
+        alguien publicó algo que demuestra el fallo, no cuán usable es. Subirla
+        a ``functional`` sería inventar precisión que el dato no tiene.
+
+        KEV no se mira aquí a propósito: el motor ya lo consulta por su cuenta
+        y es la evidencia más fuerte, así que la combinación de ambas vive en
+        :func:`~lybra.correlation.exploit_maturity` y no repartida entre dos
+        capas.
+        """
+        entry = (self._session.query(CveEntry)
+                 .filter(CveEntry.cve_id == cve_id).one_or_none())
+        return "poc" if entry is not None and entry.has_exploit_reference else None
+
+    def record_resolution(self, normalized_name: str, origin: str, was_resolved: bool) -> None:
+        """Llevar la cuenta de un nombre de producto que no resuelve a un CPE.
+
+        Cuando falla, suma uno a su contador; **cuando resuelve, borra la fila**.
+        Esa segunda mitad es la que cierra el bucle que pedía L37: al escribir
+        el alias que faltaba, el nombre desaparece del ranking en el siguiente
+        escaneo. Sin ella el ranking mediría el trabajo que hubo, no el que
+        queda, y no habría forma de saber si el feed está mejorando.
+        """
+        row = (self._session.query(UnresolvedProduct)
+               .filter_by(normalized_name=normalized_name, origin=origin)
+               .one_or_none())
+        if was_resolved:
+            if row is not None:
+                self._session.delete(row)
+            return
+
+        now = utcnow_naive()
+        if row is None:
+            self._session.add(UnresolvedProduct(
+                normalized_name=normalized_name, origin=origin,
+                occurrences=1, first_seen_at=now, last_seen_at=now,
+            ))
+        else:
+            row.occurrences = (row.occurrences or 0) + 1
+            row.last_seen_at = now
+
+    def top_unresolved_products(self, limit: int = 50,
+                                origin: Optional[str] = None) -> List[UnresolvedProduct]:
+        """Los nombres que más veces han quedado sin resolver, el peor primero."""
+        query = self._session.query(UnresolvedProduct)
+        if origin:
+            query = query.filter(UnresolvedProduct.origin == origin)
+        return (query.order_by(UnresolvedProduct.occurrences.desc(),
+                               UnresolvedProduct.normalized_name.asc())
+                .limit(limit).all())
 
     def counts(self) -> dict:
         """Row counts per KB table (for the sync summary / health checks)."""

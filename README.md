@@ -194,7 +194,10 @@ The web application checks MFA once when an authenticated session enters the SPA
 | `GET` | `/themis/results` · `/themis/results/<id>` | List scans (filterable, paginated) / scan detail. The Lybra listing carries per-scan counters, not every finding, and flags with `isPartial` a scan whose port discovery ran out of time before covering the whole target |
 | `GET` | `/themis/lybra/scans/<id>/findings` | Lybra findings grouped by remediable unit (product + port), each group with its CVEs, KEV membership, worst priority and the version that closes it |
 | `GET` | `/themis/findings/<id>/evidence` | The raw (redacted, hashed) response that produced a confirmed finding — 404 for a finding owned by another user |
-| `PATCH` | `/themis/findings/<id>` | Mark a finding's triage state (e.g. accept a risk) |
+| `PATCH` | `/themis/findings/<id>` | Set a finding's triage state with a reason: `accepted` (the risk is real and assumed — expires for review), `false_positive` (the engine was wrong — never counts as risk) or `open` |
+| `GET` | `/themis/findings/false-positives` | Findings the user refuted, with the check, CPE and feed version that produced each — labelled samples for calibrating the engine |
+| `GET` | `/themis/kb/status` | Per-source freshness of the NVD/KEV/EPSS/OVAL mirror: last attempt, last success, staleness and the `feedVersion` findings are stamped with |
+| `GET` | `/themis/lybra/unresolved-products` | Product names the CPE matcher could not resolve, ranked by frequency and split by origin — the working document for the alias feed |
 | `DELETE` | `/themis/<id>` · `/themis/scans` | Delete a scan / bulk delete |
 | `GET` | `/themis/stats` · `/themis/history/hosts` · `/themis/history/stats` | Scan counters and per-host historical trends |
 | `POST/GET/DELETE` | `/themis/authorized-targets[/<id>]` | Registry of IP/CIDR targets a user has authorized for deeper checks |
@@ -687,7 +690,7 @@ IRIS_MAILBOX_ENCRYPTION_KEY=... # Fernet key that encrypts stored OAuth refresh 
 | Authentication | OAuth 2.0 + JWT (PyJWT), TOTP MFA (pyotp) + recovery codes |
 | Password hashing | Argon2id (argon2-cffi) |
 | Scanning | Nmap + python-nmap, Nikto, Nuclei, Lybra (self-built engine), traceroute |
-| Vulnerability data | Local Lybra KB: NVD API 2.0 · CISA KEV · FIRST EPSS (daily sync); INCIBE-CERT RSS for Aegis alerts |
+| Vulnerability data | Local Lybra KB: NVD API 2.0 · CISA KEV · FIRST EPSS · distribution advisories in OVAL/CSAF for backport verification (daily sync); INCIBE-CERT RSS for Aegis alerts |
 | PDF reports | ReportLab + Pillow |
 | AI / LLM | Ollama (local) / OpenAI / Google Gemini (swappable via `scribe`) |
 | Mailbox connectors | Gmail API, Microsoft Graph (OAuth 2.0) |

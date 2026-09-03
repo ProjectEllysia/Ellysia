@@ -557,3 +557,111 @@ def test_desktop_aliases_added_from_real_inventory(raw_name, expected):
 ])
 def test_version_scheme_mismatches_are_deliberately_not_aliased(raw_name):
     assert normalize_product_name(raw_name) not in load_product_aliases()
+
+
+# ───────────── la referencia de exploit que NVD ya etiquetaba (L34)
+
+
+def test_an_exploit_tagged_reference_is_picked_up():
+    """El dato ya viajaba en cada registro que se ingiere: sólo se estaba
+    tirando."""
+    from src.modules.features.themis.lybra.kb import ingest_nvd_cve
+
+    row, _matches = ingest_nvd_cve({"cve": {
+        "id": "CVE-2021-41773",
+        "references": [
+            {"url": "https://example/advisory", "tags": ["Third Party Advisory"]},
+            {"url": "https://example/poc", "tags": ["Exploit", "Third Party Advisory"]},
+        ],
+    }})
+    assert row["has_exploit_reference"] is True
+
+
+def test_a_cve_without_exploit_references_says_so():
+    from src.modules.features.themis.lybra.kb import ingest_nvd_cve
+
+    row, _matches = ingest_nvd_cve({"cve": {
+        "id": "CVE-2021-0000",
+        "references": [{"url": "https://example/advisory", "tags": ["Vendor Advisory"]}],
+    }})
+    assert row["has_exploit_reference"] is False
+
+
+def test_a_cve_with_no_references_at_all_does_not_blow_up():
+    from src.modules.features.themis.lybra.kb import ingest_nvd_cve
+
+    row, _matches = ingest_nvd_cve({"cve": {"id": "CVE-2021-0001"}})
+    assert row["has_exploit_reference"] is False
+
+
+# ─────────────── avisos de distribución: OVAL y CSAF (Fase O, L32)
+
+
+_OVAL_DOC = """<?xml version="1.0"?>
+<oval_definitions>
+  <definitions>
+    <definition id="oval:org.debian:def:1" class="vulnerability">
+      <metadata>
+        <title>DSA-5432-1 apache2 -- security update</title>
+        <description>apache2 was fixed in 2.4.49-1~deb11u1</description>
+        <reference source="CVE" ref_id="CVE-2021-41773"/>
+      </metadata>
+    </definition>
+    <definition id="oval:org.debian:def:2" class="vulnerability">
+      <metadata>
+        <title>nginx</title>
+        <description>Se conoce el problema pero no hay versión corregida.</description>
+        <reference source="CVE" ref_id="CVE-2022-00001"/>
+      </metadata>
+    </definition>
+  </definitions>
+</oval_definitions>"""
+
+
+def test_oval_yields_the_fixed_version_per_package():
+    from src.modules.features.themis.lybra.kb import parse_oval_definitions
+
+    rows = list(parse_oval_definitions(_OVAL_DOC, "debian", "11"))
+    fixed = next(r for r in rows if r["cve_id"] == "CVE-2021-41773")
+    assert fixed == {"vendor": "debian", "release": "11", "package": "apache2",
+                     "cve_id": "CVE-2021-41773", "fixed_in": "2.4.49-1~deb11u1",
+                     "status": "fixed"}
+
+
+def test_oval_without_a_fixed_version_is_unknown_not_vulnerable():
+    """El proveedor conoce el paquete y no se pronuncia. Traducirlo a
+    "vulnerable" o a "corregido" sería inventar."""
+    from src.modules.features.themis.lybra.kb import parse_oval_definitions
+
+    rows = list(parse_oval_definitions(_OVAL_DOC, "debian", "11"))
+    silent = next(r for r in rows if r["cve_id"] == "CVE-2022-00001")
+    assert silent["status"] == "unknown"
+    assert silent["fixed_in"] is None
+
+
+def test_an_unreadable_oval_document_yields_nothing_instead_of_raising():
+    """Un feed corrupto no puede tumbar la sincronización de los demás."""
+    from src.modules.features.themis.lybra.kb import parse_oval_definitions
+
+    assert list(parse_oval_definitions("<no cierra", "debian", "11")) == []
+
+
+def test_csaf_reads_both_verdicts_explicitly():
+    """CSAF es más explícito que OVAL: dice qué está corregido y qué sigue
+    afectado, así que se traduce tal cual."""
+    from src.modules.features.themis.lybra.kb import parse_csaf_advisory
+
+    rows = list(parse_csaf_advisory({"vulnerabilities": [{
+        "cve": "CVE-2021-41773",
+        "product_status": {
+            "fixed": ["AppStream-8.6.0:httpd-0:2.4.37-43.el8"],
+            "known_affected": ["AppStream-9.0:nginx-1.20.1-1.el9"],
+        },
+    }]}))
+
+    assert {"vendor": "rhel", "release": "8", "package": "httpd",
+            "cve_id": "CVE-2021-41773", "fixed_in": "2.4.37-43.el8",
+            "status": "fixed"} in rows
+    affected = next(r for r in rows if r["status"] == "vulnerable")
+    assert affected["package"] == "nginx"
+    assert affected["fixed_in"] is None

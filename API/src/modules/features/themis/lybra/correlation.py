@@ -29,41 +29,30 @@ Contextual scoring
 from __future__ import annotations
 
 import hashlib
-import ipaddress
+from datetime import datetime
 from typing import Dict, List, Optional
+
+from src.modules.shared import classify_exposure
 
 # The severity ladder, kept in one place so scoring and any future consumer agree
 # on the ordering.
 PRIORITY_LADDER = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
-
-_PRIVATE_SUFFIXES = (".local", ".lan", ".internal", ".intranet", ".corp", ".home")
 
 
 # =========================================================================
 # EXPOSURE
 # =========================================================================
 
-def classify_exposure(target: str) -> str:
-    """Classify a target as internal (LAN) or internet-facing.
-
-    Mirrors the private-address detection in
-    ``analyzers._classify_network_context``; it is duplicated here as a handful of
-    lines to avoid pulling in that module's much heavier AI-writer dependency.
-
-    Args:
-        target: An IP address or hostname.
-
-    Returns:
-        ``"private"`` for a LAN/loopback/link-local address or an internal-looking
-        hostname, otherwise ``"public"``.
-    """
-    try:
-        addr = ipaddress.ip_address(target.strip())
-        private = addr.is_private or addr.is_loopback or addr.is_link_local
-    except ValueError:
-        low = target.strip().lower()
-        private = low == "localhost" or any(low.endswith(private_suffix) for private_suffix in _PRIVATE_SUFFIXES)
-    return "private" if private else "public"
+# ``classify_exposure`` se reexporta desde ``shared/`` y no se implementa aquí.
+# Estuvo duplicada con ``analyzers._classify_network_context`` por una razón
+# buena —esta capa no puede importar el módulo del escritor de IA, que arrastra
+# dependencias pesadas— con una consecuencia mala: una regla que acota la
+# prioridad de todo hallazgo en red privada **y** entra en el prompt del
+# informe, escrita dos veces. Si divergían, el scoring y el informe decían
+# cosas distintas del mismo host y nada lo detectaba.
+#
+# Importar de ``shared/`` no rompe la invariante del paquete: la restricción es
+# no tocar el ORM ni la red, no no importar nada.
 
 
 # =========================================================================
@@ -181,18 +170,73 @@ def merge_findings(findings: List[dict]) -> List[dict]:
 # LIFECYCLE
 # =========================================================================
 
+def _carry_decision(finding: dict, prev: dict) -> None:
+    """Arrastrar el motivo, el autor y la caducidad al hallazgo de este escaneo.
+
+    Sin esto, la decisión sobreviviría como estado pero perdería su
+    justificación en el siguiente escaneo: un ``accepted`` sin motivo ni autor
+    es exactamente la deuda que L35 viene a quitar de en medio.
+    """
+    for field_name in ("state_reason", "state_set_by", "state_set_at", "state_expires_at"):
+        if prev.get(field_name) is not None:
+            finding[field_name] = prev[field_name]
+
+
+def _decision_expired(prev: dict, moment: datetime) -> bool:
+    """Si un riesgo aceptado ya ha cumplido su plazo de revisión.
+
+    Sin ``state_expires_at`` la decisión no caduca — es el caso de los
+    ``accepted`` anteriores a L35, que no tienen plazo porque nadie se lo puso.
+    Inventarles uno los reabriría todos de golpe el día del despliegue.
+    """
+    expires = prev.get("state_expires_at")
+    return expires is not None and expires <= moment
+
+
+def _engine_changed_its_mind(finding: dict, snapshot: dict) -> bool:
+    """Si lo que se enseña ahora ya no es lo que el usuario desmintió.
+
+    Un falso positivo se desmiente contra una detección concreta: este check,
+    resuelto contra este estado de la base de conocimiento. Si cambia
+    cualquiera de los dos, la detección de hoy no es la misma que se desmintió
+    —puede ser mejor, o simplemente otra— y mantener el desmentido escondería
+    un hallazgo que nadie ha revisado.
+
+    El ``dedup_key`` no basta para notarlo: se construye a partir del host, el
+    puerto y la identidad de la vulnerabilidad, y ninguno de los tres cambia
+    porque el motor aprenda algo nuevo.
+    """
+    for field_name in ("check_id", "feed_version"):
+        if finding.get(field_name) != snapshot.get(field_name):
+            return True
+    return False
+
+
 def apply_lifecycle(current: List[dict], previous: Dict[str, dict],
-                    close_missing: bool = True) -> List[dict]:
+                    close_missing: bool = True,
+                    now: Optional[datetime] = None) -> List[dict]:
     """Assign each finding a lifecycle state relative to the previous scan.
 
     Each current finding is labelled by comparing it against the previous scan of
     the same target:
 
     * Not seen before → ``open`` (a new finding).
-    * Seen before and marked ``accepted`` → stays ``accepted`` (the user's
-      decision is sticky).
+    * Seen before and marked ``false_positive`` → stays ``false_positive``,
+      salvo que el motor haya cambiado de opinión por su cuenta (ver abajo).
+    * Seen before and marked ``accepted`` → stays ``accepted`` hasta que caduca.
     * Seen before as ``fixed`` and back now → ``regressed``.
     * Otherwise (still present since last time) → ``open``.
+
+    **Las dos decisiones del usuario caducan de formas distintas, y a
+    propósito.** Aceptar un riesgo es decir "esto es real, lo asumo": tiene
+    sentido revisarlo pasado un tiempo, así que un ``accepted`` con
+    ``state_expires_at`` vencido vuelve a ``open``. Marcar un falso positivo es
+    decir "esto no es real, el motor se equivocó": el tiempo no lo invalida
+    —el motor no se equivoca más por ser más tarde— pero **el motor cambiando
+    sí**. Por eso un ``false_positive`` se reabre cuando cambia el ``check_id``
+    que lo produjo o el ``feed_version`` contra el que se resolvió: lo que el
+    usuario desmintió ya no es lo mismo que se le está enseñando ahora, y
+    arrastrar el desmentido escondería una detección nueva.
 
     In addition, any issue that *was* present last time but is absent now is
     carried forward once as a ``fixed`` finding, so the timeline records the
@@ -201,8 +245,15 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict],
 
     Args:
         current: This scan's findings. Each must already have a ``dedup_key``.
-        previous: A map ``dedup_key -> {"state", "snapshot"}`` describing the
-            previous scan's findings.
+        previous: A map ``dedup_key -> {"state", "snapshot", ...}`` describing
+            the previous scan's findings. Las claves opcionales
+            ``state_reason``, ``state_set_by``, ``state_set_at`` y
+            ``state_expires_at`` llevan la decisión del usuario, que viaja con
+            el hallazgo al escaneo nuevo: si no se arrastrara, el motivo y el
+            autor se perderían en el siguiente escaneo y la decisión quedaría
+            sin justificación al día siguiente de tomarla.
+        now: El instante contra el que se juzga la caducidad de un
+            ``accepted``. Inyectable para que un test no dependa del reloj.
         close_missing: Si un hallazgo que ya no aparece debe darse por
             corregido. ``False`` cuando el escaneo **no vio todo el objetivo**
             —un barrido que se quedó sin presupuesto de reloj— porque entonces
@@ -216,6 +267,7 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict],
         finding for each issue that has just disappeared (ninguno si
         ``close_missing`` es ``False``).
     """
+    moment = now or datetime.utcnow()
     current_keys = set()
     for finding in current:
         key = finding["dedup_key"]
@@ -223,8 +275,18 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict],
         prev = previous.get(key)
         if prev is None:
             finding["state"] = "open"
+        elif prev["state"] == "false_positive":
+            if _engine_changed_its_mind(finding, prev["snapshot"]):
+                finding["state"] = "open"            # ya no es el mismo hallazgo desmentido
+            else:
+                finding["state"] = "false_positive"
+                _carry_decision(finding, prev)
         elif prev["state"] == "accepted":
-            finding["state"] = "accepted"            # the user's decision is sticky
+            if _decision_expired(prev, moment):
+                finding["state"] = "open"            # toca volver a mirarlo
+            else:
+                finding["state"] = "accepted"
+                _carry_decision(finding, prev)
         elif prev["state"] == "fixed":
             finding["state"] = "regressed"           # was gone, has come back
         else:
@@ -234,6 +296,9 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict],
     for key, prev in previous.items():
         if not close_missing:
             break
+        # ``false_positive`` no aparece en esta lista a propósito: un hallazgo
+        # que el usuario desmintió no puede "corregirse" al desaparecer,
+        # porque nunca fue un problema que arreglar.
         if key not in current_keys and prev["state"] in ("open", "regressed", "accepted"):
             ghost = dict(prev["snapshot"])
             ghost["state"] = "fixed"
@@ -258,6 +323,52 @@ def _cvss_band(cvss: float) -> int:
     return 0      # INFO
 
 
+# Escalera de madurez de explotación, de menos a más grave. El orden importa:
+# `exploit_maturity` se queda con la evidencia más fuerte que haya, y "más
+# fuerte" es una posición en esta lista.
+EXPLOIT_MATURITY_LADDER = ["none", "poc", "functional", "weaponized", "in_the_wild"]
+
+# De los cinco niveles, hoy se producen tres: ``in_the_wild`` desde KEV,
+# ``poc`` desde las referencias que la propia NVD etiqueta como exploit, y
+# ``none`` cuando no consta ninguno. ``functional`` y ``weaponized`` necesitan
+# un catálogo de exploits (Exploit-DB, Metasploit) que es un feed externo
+# nuevo, con su sincronización y sus modos de fallo; se dejan declarados
+# porque la escalera es la del sector y recortarla obligaría a renumerar
+# después, pero **nada los escribe todavía** y este comentario existe para que
+# eso no se lea como un descuido.
+
+
+def exploit_maturity(in_kev: bool, evidence: Optional[str] = None) -> str:
+    """Cuánto de real es la explotación de una vulnerabilidad.
+
+    El scoring tenía dos señales de explotabilidad: KEV (booleano: se explota
+    en el mundo real) y EPSS (probabilidad a 30 días). Faltaba la de en medio,
+    que es la que más ayuda a decidir qué se arregla el lunes: **¿existe un
+    exploit público y qué tan usable es?** Un CVE con módulo de Metasploit es
+    una urgencia distinta de uno con una prueba de concepto en un gist, y los
+    dos lo son de uno sin nada público.
+
+    La columna ``Finding.exploit_maturity`` existía desde el principio,
+    documentada como "rellenada desde la Fase 1", y nadie la escribía nunca:
+    ``NULL`` en todas las filas. Una columna que promete un dato y siempre está
+    vacía es peor que no tenerla, porque quien lee el modelo cree que existe.
+
+    Args:
+        in_kev: Si la CVE está en el catálogo CISA KEV. Es la evidencia más
+            fuerte que hay —explotación activa confirmada— y gana siempre.
+        evidence: La madurez deducida de otras fuentes, o ``None`` si no hay
+            ninguna.
+
+    Returns:
+        Uno de :data:`EXPLOIT_MATURITY_LADDER`.
+    """
+    if in_kev:
+        return "in_the_wild"
+    if evidence in EXPLOIT_MATURITY_LADDER:
+        return evidence
+    return "none"
+
+
 def score_finding(finding: dict, exposure: str) -> str:
     """Assign a finding a contextual priority label.
 
@@ -265,6 +376,14 @@ def score_finding(finding: dict, exposure: str) -> str:
 
     * A real exploitation signal — the CVE is in KEV, or its EPSS score is at
       least 0.5 — pushes the priority up one band.
+
+      ``exploit_maturity`` **no** entra aquí todavía, y es deliberado: los dos
+      niveles que justificarían subir una banda por sí solos —``weaponized`` y
+      ``functional``— no tienen hoy ninguna fuente que los produzca (harían
+      falta Metasploit o Exploit-DB, que son feeds externos nuevos), y el que
+      sí se produce, ``in_the_wild``, sale de KEV, que ya sube la banda por su
+      cuenta. Añadir la condición ahora sería una rama que no puede
+      dispararse, que es exactamente el pecado que L34 vino a corregir.
     * An actively-confirmed finding with no CVSS (e.g. an exposed path) is floored
       at MEDIUM, so a confirmed issue never reads as merely informational.
     * An unconfirmed match whose CVE only applies on a specific platform

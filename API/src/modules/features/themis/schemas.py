@@ -55,8 +55,29 @@ class LybraScanRequestSchema(Schema):
     aggressive = fields.Boolean(load_default=False)
 
 
+class UnresolvedProductsQuerySchema(Schema):
+    limit = fields.Integer(load_default=50, validate=validate.Range(min=1, max=500))
+    # El origen separa dos frentes de trabajo distintos: los banners de red
+    # aportan muestras desde el primer escaneo, mientras que el inventario
+    # necesita agentes desplegados.
+    origin = fields.String(load_default=None, allow_none=True,
+                           validate=validate.OneOf(["network", "inventory"]))
+
+
 class FindingStateRequestSchema(Schema):
-    state = fields.String(required=True, validate=validate.OneOf(["accepted", "open"]))
+    # ``accepted`` y ``false_positive`` dicen cosas opuestas y hasta L35
+    # compartían casilla: aceptar un riesgo es "esto es real, lo asumo";
+    # desmentirlo es "esto no es real, el motor se equivocó". Un informe que
+    # cuenta los segundos como riesgos aceptados miente sobre la postura de
+    # seguridad. ``fixed`` y ``regressed`` no están porque los pone el ciclo de
+    # vida al comparar escaneos: dejarlos escribir aquí permitiría falsear el
+    # historial.
+    state = fields.String(
+        required=True,
+        validate=validate.OneOf(["accepted", "false_positive", "open"]),
+    )
+    reason = fields.String(load_default=None, allow_none=True,
+                           validate=validate.Length(max=500))
 
 
 class FindingStateResponseSchema(Schema):

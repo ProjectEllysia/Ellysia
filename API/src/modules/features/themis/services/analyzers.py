@@ -21,6 +21,7 @@ import re
 from typing import Dict, Optional
 
 import src.modules.system.config_reading as CR
+from src.modules.shared import is_private_target
 from src.modules.tools.scribe import AIInput, AIGenerator, build_generator, WEB_SEARCH_TOOL
 
 from ..lybra.grouping import build_service_rollup
@@ -68,6 +69,16 @@ class NmapAIWriter:
     def _classify_network_context(self, target: str) -> dict:
         """Classify target as private LAN or public network deterministically.
 
+        La decisión "privado o público" **no se toma aquí**: vive en
+        ``shared._exposure`` y la comparte con el scoring del motor. Estuvo
+        escrita dos veces, y la regla acota la prioridad de todo hallazgo en red
+        privada además de entrar en este prompt — si las dos copias divergían,
+        el informe y el scoring decían cosas distintas del mismo host y nada lo
+        detectaba.
+
+        Lo que queda aquí es lo único que de verdad es de este módulo: cómo se
+        le cuenta esa clasificación al modelo.
+
         Args:
             target: IP address or hostname string.
 
@@ -78,17 +89,7 @@ class NmapAIWriter:
                 - max_risk_level (str): Hard ceiling for risk_level ("MEDIO" | "CRÍTICO").
                 - context_note (str): One-line explanation to inject into the prompt.
         """
-        import ipaddress
-        try:
-            addr = ipaddress.ip_address(target.strip())
-            is_private = addr.is_private or addr.is_loopback or addr.is_link_local
-        except ValueError:
-            lower = target.lower()
-            is_private = any(lower.endswith(suffix) for suffix in (
-                ".local", ".lan", ".internal", ".intranet", ".corp", ".home"
-            )) or lower in ("localhost",)
-
-        if is_private:
+        if is_private_target(target):
             return {
                 "is_private":    True,
                 "network_type":  "LAN privada",
@@ -104,7 +105,10 @@ class NmapAIWriter:
             "is_private":    False,
             "network_type":  "Red pública",
             "max_risk_level": "CRÍTICO",
-            "context_note":  "CONTEXTO DE RED CONFIRMADO: El target es una IP o dominio público.",
+            "context_note":  (
+                "CONTEXTO DE RED: El target es una IP pública, expuesta a internet. "
+                "Evalúa el riesgo sin techo artificial."
+            ),
         }
 
     def _build_system_prompt(self) -> str:

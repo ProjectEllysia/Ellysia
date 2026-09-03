@@ -715,6 +715,20 @@ class ThemisConfig:
     Se pone a ``True`` solo para desarrollo local contra IPs privadas.
     """
 
+    accepted_risk_days: int = 365
+    """Cuántos días vale un "acepto este riesgo" antes de volver a revisión.
+
+    Vive aquí y no en el bloque del motor porque ``Finding`` es la tabla
+    compartida —Lybra y Nuclei escriben en ella— y esto es política sobre
+    hallazgos, no un dial de red del motor propio.
+
+    Un riesgo asumido hace un año se asumió en unas circunstancias que quizá ya
+    no son las mismas, así que caduca y el hallazgo vuelve a ``open``. Un falso
+    positivo **no** usa este plazo: el motor no se equivoca más por ser más
+    tarde, y lo que sí invalida un desmentido es que el motor cambie —
+    ``apply_lifecycle`` lo detecta comparando ``check_id`` y ``feed_version``.
+    """
+
 
 @config_block("features.themis.folders")
 @dataclass(frozen=True)
@@ -777,6 +791,18 @@ class KnowledgeBaseConfig:
     sources: dict = field(default_factory=dict)
     sync_cron: str = "0 3 * * *"
     nvd_window_days: int = 8
+
+    max_age_days: dict = field(
+        default_factory=lambda: {"nvd": 3, "kev": 7, "epss": 7}
+    )
+    """A partir de cuántos días sin sincronizar con éxito se considera vieja
+    cada fuente.
+
+    Los tres números no son el mismo por una razón: NVD publica CVEs a diario y
+    tres días de retraso ya son detección que falta; KEV y EPSS cambian más
+    despacio y una semana es tolerable. Son de operador porque dependen de la
+    red y de la cuota de API de cada despliegue, no de la lógica del motor.
+    """
 
     configured_nvd_api_key: str = field(
         default="", metadata={"key": "nvdApiKey", "optional": True}

@@ -35,6 +35,7 @@ from .managers import (
     ScanHistoryManager,
     TracerouteManager,
     AuthorizedTargetManager,
+    KbSyncManager,
 )
 from .model import ScanType
 from .exceptions import (
@@ -64,6 +65,7 @@ from .schemas import (
     AuthorizedTargetListResponseSchema,
     AuthorizedTargetActionResponseSchema,
     ResultsQuerySchema,
+    UnresolvedProductsQuerySchema,
     GeneratePdfRequestSchema,
     DocumentStatusQuerySchema,
     DocumentsQuerySchema,
@@ -469,6 +471,92 @@ def delete_authorized_target(target_id: int):
     }
 
 
+@themis_blp.get("/findings/false-positives")
+@themis_blp.response(200, description="Findings the user has refuted")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
+@limiter.limit("120 per hour; 400 per day")
+@handle_exceptions(default_exception=ScanError, logger=logger)
+def get_false_positives():
+    """Los hallazgos que el usuario ha desmentido.
+
+    Cada uno es una muestra etiquetada gratis: dice contra qué check y contra
+    qué producto se equivoca el motor. Es la entrada que convierte el marcado
+    de falsos positivos en un bucle de mejora en vez de una casilla de
+    interfaz — el banco de medición (#278) y el ranking de qué familias fallan
+    más se alimentan de aquí.
+    """
+    user = get_current_user()
+    items = LybraEngineManager().false_positives(user.id)
+    return {
+        "message": "Falsos positivos obtenidos correctamente",
+        "count": len(items),
+        "falsePositives": items,
+        "user": user.username,
+    }
+
+
+@themis_blp.get("/lybra/unresolved-products")
+@themis_blp.arguments(UnresolvedProductsQuerySchema, location="query")
+@themis_blp.response(200, description="Product names the matcher could not resolve")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
+@limiter.limit("120 per hour; 400 per day")
+@handle_exceptions(default_exception=ScanError, logger=logger)
+def get_unresolved_products(args):
+    """Los nombres de producto que el motor no consigue convertir en un CPE.
+
+    Cuando ninguna de las tres estrategias de resolución acierta, el motor no
+    inventa un CPE —uno fabricado no casaría con nada, en silencio— pero sí
+    apunta el nombre. Cada línea de esta lista es un alias que merece la pena
+    escribir, ordenado por cuántas veces ha hecho falta.
+
+    En cuanto el alias existe, el nombre resuelve y desaparece de aquí en el
+    siguiente escaneo: la lista mide el trabajo que queda, no el que hubo.
+    """
+    user = get_current_user()
+    items = LybraEngineManager.unresolved_products(args["limit"], args["origin"])
+    return {
+        "message": "Nombres sin resolver obtenidos correctamente",
+        "count": len(items),
+        "unresolvedProducts": items,
+        "user": user.username,
+    }
+
+
+@themis_blp.get("/kb/status")
+@themis_blp.response(200, description="Knowledge-base freshness per source")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=ScanError, logger=logger)
+def get_kb_status():
+    """Cuándo se sincronizó por última vez cada fuente de la base de conocimiento.
+
+    Toda la detección por versión depende de un espejo local de NVD, KEV y
+    EPSS. Si ese espejo deja de refrescarse, los escaneos siguen saliendo en
+    verde contra un catálogo congelado y nada lo dice: un CVE publicado ayer no
+    existe para el motor, y el informe afirma que el host está limpio.
+
+    Responde a las dos preguntas por separado, porque son distintas: cuándo se
+    intentó sincronizar cada fuente y si funcionó, y cuán reciente es lo que
+    de hecho sabemos.
+    """
+    user = get_current_user()
+    status = KbSyncManager().status()
+    return {
+        "message": "Estado de la base de conocimiento obtenido correctamente",
+        **status,
+        "user": user.username,
+    }
+
+
 @themis_blp.get("/lybra/scans/<int:scan_id>/findings")
 @themis_blp.response(200, description="Lybra findings grouped by remediable unit")
 @themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
@@ -510,7 +598,8 @@ def get_lybra_grouped_findings(scan_id: int):
 def update_finding_state(data, finding_id: int):
     """Marcar el estado de un hallazgo (p. ej. aceptar un riesgo)."""
     user = get_current_user()
-    finding = LybraEngineManager().set_finding_state(finding_id, user.id, data["state"])
+    finding = LybraEngineManager().set_finding_state(
+        finding_id, user.id, data["state"], reason=data.get("reason"))
     logger.info(f"Hallazgo {finding_id} marcado como '{data['state']}' por {user.username}")
     return {
         "message": "Estado del hallazgo actualizado correctamente",

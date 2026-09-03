@@ -97,6 +97,7 @@
   "features": {
     "themis": {
       "enabled": true,
+      "acceptedRiskDays": 365,
       "areLocalIpsAllowed": false,
       "directories": {
         "csv": "data/themis/csv",
@@ -129,9 +130,19 @@
         "sources": {
           "epss": "https://epss.cyentia.com/epss_scores-current.csv.gz",
           "kev": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
-          "nvd": "https://services.nvd.nist.gov/rest/json/cves/2.0"
+          "nvd": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+          "oval": {
+            "debian:11": "https://www.debian.org/security/oval/oval-definitions-bullseye.xml",
+            "debian:12": "https://www.debian.org/security/oval/oval-definitions-bookworm.xml"
+          }
         },
-        "syncCron": "0 3 * * *"
+        "syncCron": "0 3 * * *",
+        "maxAgeDays": {
+          "nvd": 3,
+          "kev": 7,
+          "epss": 7,
+          "oval": 7
+        }
       },
       "scanners": {
         "nmap": {

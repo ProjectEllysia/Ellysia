@@ -70,6 +70,7 @@
         @refresh="$emit('refresh-scans')"
         @load-more="$emit('load-more')"
         @load-groups="id => $emit('load-groups', id)"
+        @set-finding-state="(...a) => $emit('set-finding-state', ...a)"
         @delete="id => $emit('delete', id)"
         @load-docs="id => $emit('load-docs', id)"
         @generate-pdf="(id, ai) => $emit('generate-pdf', id, ai)"
@@ -100,7 +101,7 @@ const props = defineProps({
 })
 defineEmits([
   'select', 'refresh-assets', 'refresh-scans', 'load-more',
-  'delete', 'load-docs', 'load-groups', 'generate-pdf', 'download-doc', 'delete-doc',
+  'delete', 'load-docs', 'load-groups', 'set-finding-state', 'generate-pdf', 'download-doc', 'delete-doc',
 ])
 
 const STATUS_LABEL = { pending: 'Sin reportar', online: 'En línea', stale: 'Con retraso', offline: 'Caído' }
