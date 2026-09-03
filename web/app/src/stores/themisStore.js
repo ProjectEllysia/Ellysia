@@ -335,8 +335,14 @@ export const useThemisStore = defineStore('themis', () => {
    * congelado — un CVE publicado ayer no existe para el motor, y el informe
    * afirma que el host está limpio. El aviso existe para que eso deje de ser
    * invisible.
+   *
+   * `isStale` y `isUnverified` no son lo mismo, y sólo el primero es una
+   * alarma: una fuente con contenido pero sin sincronización registrada no
+   * está caducada, simplemente no se puede afirmar su frescura. Confundirlas
+   * hacía saltar el aviso en toda instalación recién desplegada, porque la
+   * tabla de estado nace vacía.
    */
-  const kbStatus = reactive({ sources: [], isStale: false, feedVersion: null, loaded: false })
+  const kbStatus = reactive({ sources: [], isStale: false, isUnverified: false, feedVersion: null, loaded: false })
 
   async function loadKbStatus() {
     try {
@@ -345,6 +351,7 @@ export const useThemisStore = defineStore('themis', () => {
       const data = await res.json()
       kbStatus.sources = data.sources ?? []
       kbStatus.isStale = !!data.isStale
+      kbStatus.isUnverified = !!data.isUnverified
       kbStatus.feedVersion = data.feedVersion ?? null
       kbStatus.loaded = true
     } catch { /* el aviso es informativo: si no se puede leer, no se muestra */ }
