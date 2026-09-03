@@ -194,7 +194,9 @@ The web application checks MFA once when an authenticated session enters the SPA
 | `GET` | `/themis/results` · `/themis/results/<id>` | List scans (filterable, paginated) / scan detail. The Lybra listing carries per-scan counters, not every finding, and flags with `isPartial` a scan whose port discovery ran out of time before covering the whole target |
 | `GET` | `/themis/lybra/scans/<id>/findings` | Lybra findings grouped by remediable unit (product + port), each group with its CVEs, KEV membership, worst priority and the version that closes it |
 | `GET` | `/themis/findings/<id>/evidence` | The raw (redacted, hashed) response that produced a confirmed finding — 404 for a finding owned by another user |
-| `PATCH` | `/themis/findings/<id>` | Mark a finding's triage state (e.g. accept a risk) |
+| `PATCH` | `/themis/findings/<id>` | Set a finding's triage state with a reason: `accepted` (the risk is real and assumed — expires for review), `false_positive` (the engine was wrong — never counts as risk) or `open` |
+| `GET` | `/themis/findings/false-positives` | Findings the user refuted, with the check, CPE and feed version that produced each — labelled samples for calibrating the engine |
+| `GET` | `/themis/kb/status` | Per-source freshness of the NVD/KEV/EPSS mirror: last attempt, last success, staleness and the `feedVersion` findings are stamped with |
 | `DELETE` | `/themis/<id>` · `/themis/scans` | Delete a scan / bulk delete |
 | `GET` | `/themis/stats` · `/themis/history/hosts` · `/themis/history/stats` | Scan counters and per-host historical trends |
 | `POST/GET/DELETE` | `/themis/authorized-targets[/<id>]` | Registry of IP/CIDR targets a user has authorized for deeper checks |

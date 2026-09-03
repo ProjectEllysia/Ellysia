@@ -881,7 +881,19 @@ class ScanManager(TaskTrackingMixin, ABC):
             snapshot = previous_finding.snapshot
             key = previous_finding.dedup_key or compute_dedup_key(snapshot)
             snapshot["dedup_key"] = key
-            result[key] = {"state": previous_finding.state or "open", "snapshot": snapshot}
+            result[key] = {
+                "state": previous_finding.state or "open",
+                "snapshot": snapshot,
+                # La decisión del usuario viaja aparte del snapshot porque no
+                # describe el hallazgo sino lo que alguien dijo sobre él (L35).
+                # Sin esto sobreviviría el estado pero no su justificación, y
+                # un `accepted` sin motivo ni autor vuelve a ser deuda al día
+                # siguiente de haberlo razonado.
+                "state_reason": previous_finding.state_reason,
+                "state_set_by": previous_finding.state_set_by,
+                "state_set_at": previous_finding.state_set_at,
+                "state_expires_at": previous_finding.state_expires_at,
+            }
         return result
 
     @abstractmethod

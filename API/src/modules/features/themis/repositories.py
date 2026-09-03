@@ -701,6 +701,20 @@ class ScanRepository(BaseRepository[Scan]):
                     captured_at=utcnow_naive(),
                 ))
 
+    def get_findings_by_state(self, user_id: int, state: str) -> List[Finding]:
+        """Los hallazgos de un usuario en un estado concreto, el más nuevo primero.
+
+        Se une contra ``Scan`` porque la propiedad vive ahí: un ``Finding`` no
+        tiene dueño propio, lo hereda del escaneo que lo produjo.
+        """
+        return (
+            self._session.query(Finding)
+            .join(Scan, Finding.scan_id == Scan.id)
+            .filter(Scan.user_id == user_id, Finding.state == state)
+            .order_by(Finding.state_set_at.desc().nullslast())
+            .all()
+        )
+
     def get_evidence_for_finding(self, finding_id: int) -> List[FindingEvidence]:
         """Return the evidence rows backing a finding, newest first."""
         return (

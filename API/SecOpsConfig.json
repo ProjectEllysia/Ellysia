@@ -97,6 +97,7 @@
   "features": {
     "themis": {
       "enabled": true,
+      "acceptedRiskDays": 365,
       "areLocalIpsAllowed": false,
       "directories": {
         "csv": "data/themis/csv",

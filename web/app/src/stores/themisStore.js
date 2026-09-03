@@ -763,6 +763,34 @@ export const useThemisStore = defineStore('themis', () => {
    */
   const lybraGroups = reactive({})
 
+  /**
+   * Fija el estado de un hallazgo: asumir el riesgo, desmentirlo o reabrirlo.
+   *
+   * `accepted` y `false_positive` dicen cosas opuestas. Asumir un riesgo es
+   * "esto es real, lo asumo" y caduca para volver a revisión; desmentirlo es
+   * "esto no es real, el motor se equivocó", no cuenta como riesgo en ningún
+   * recuento, y alimenta la calibración del propio motor.
+   *
+   * Recarga los grupos del escaneo porque el cambio mueve los contadores de
+   * la cabecera, no sólo la etiqueta del hallazgo.
+   */
+  async function setFindingState(scanId, findingId, state, reason = null) {
+    const res = await apiFetch(`/themis/findings/${findingId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state, reason }),
+    })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo cambiar el estado del hallazgo.'), 'error')
+      return false
+    }
+    await loadLybraGroups(scanId)
+    await loadLybraScans()
+    toast.show(state === 'false_positive' ? 'Hallazgo desmentido.'
+      : state === 'accepted' ? 'Riesgo aceptado.' : 'Hallazgo reabierto.', 'success')
+    return true
+  }
+
   /** Carga (o refresca) los hallazgos agrupados de un escaneo Lybra. */
   async function loadLybraGroups(scanId) {
     if (!lybraGroups[scanId]) lybraGroups[scanId] = reactive({ groups: [], loading: false, error: null })
@@ -882,7 +910,7 @@ export const useThemisStore = defineStore('themis', () => {
     launchLybra, loadLybraScans, loadMoreLybraScans, deleteLybraScan,
     selectedAssetId, selectAgentAsset, loadAgentScans,
     lybraDocs, loadLybraDocs, generateLybraPdf, deleteLybraDoc,
-    lybraGroups, loadLybraGroups,
+    lybraGroups, loadLybraGroups, setFindingState,
     deleteScan, cancelScan,
     openPreview, closePreview, refreshPreviewDocs, loadPreviewTraceroute,
     openDetails, closeDetails, refreshDetailsDocs,

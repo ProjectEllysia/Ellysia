@@ -1655,3 +1655,161 @@ def test_an_authorized_and_explicit_aggressive_scan_finds_default_credentials(
     # usuario ("tomcat") sí puede aparecer; es información útil y no secreta.
     assert len(evidence) == 1
     assert "s3cret" not in str(evidence[0].payload)
+
+
+# ─────────────── desmentir un hallazgo no es aceptar un riesgo (L35)
+#
+# Hasta ahora el esquema sólo admitía `accepted` y `open`, así que un usuario
+# que sabía que un hallazgo era falso —Debian parcheó por backport y la versión
+# no subió— sólo podía marcarlo como "riesgo aceptado". Un informe que dice
+# "3 riesgos aceptados" cuando son 3 errores del escáner miente sobre la
+# postura de seguridad, y de paso tira la única muestra etiquetada gratis que
+# hay para calibrar el motor.
+
+
+def _first_finding_id(app, scan_id: int) -> int:
+    with app.app_context():
+        with UnitOfWork() as uow:
+            return ScanRepository(uow).get_findings_by_scan(scan_id)[0].id
+
+
+def test_a_finding_can_be_refuted_without_accepting_the_risk(
+        client, app, admin_user, auth_headers):
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.21")
+    finding_id = _first_finding_id(app, scan_id)
+
+    resp = client.patch(f"/themis/findings/{finding_id}",
+                        headers=auth_headers(admin_user),
+                        json={"state": "false_positive",
+                              "reason": "backport de Debian, la versión no sube"})
+    assert resp.status_code == 200
+    assert resp.get_json()["state"] == "false_positive"
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            finding = ScanRepository(uow).get_finding(finding_id)
+            assert finding.state == "false_positive"
+            assert finding.state_reason.startswith("backport de Debian")
+            assert finding.state_set_by == admin_user.id
+            assert finding.state_set_at is not None
+            # Un desmentido no caduca: el motor no se equivoca más por ser
+            # más tarde.
+            assert finding.state_expires_at is None
+
+
+def test_accepting_a_risk_sets_an_expiry(client, app, admin_user, auth_headers):
+    """La diferencia con el desmentido, en una línea: un riesgo asumido vuelve
+    a revisión, uno desmentido no."""
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.22")
+    finding_id = _first_finding_id(app, scan_id)
+
+    client.patch(f"/themis/findings/{finding_id}", headers=auth_headers(admin_user),
+                 json={"state": "accepted", "reason": "mitigado por el WAF"})
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            finding = ScanRepository(uow).get_finding(finding_id)
+            assert finding.state == "accepted"
+            assert finding.state_expires_at is not None
+            assert finding.state_expires_at > finding.state_set_at
+
+
+def test_reopening_a_finding_clears_the_previous_decision(
+        client, app, admin_user, auth_headers):
+    """Volver a `open` no es una decisión nueva: es retirar la anterior, así que
+    su motivo y su autor dejan de tener sentido."""
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.23")
+    finding_id = _first_finding_id(app, scan_id)
+    headers = auth_headers(admin_user)
+
+    client.patch(f"/themis/findings/{finding_id}", headers=headers,
+                 json={"state": "false_positive", "reason": "no aplica"})
+    client.patch(f"/themis/findings/{finding_id}", headers=headers,
+                 json={"state": "open"})
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            finding = ScanRepository(uow).get_finding(finding_id)
+            assert finding.state == "open"
+            assert finding.state_reason is None
+            assert finding.state_set_by is None
+            assert finding.state_expires_at is None
+
+
+def test_a_state_the_lifecycle_owns_cannot_be_set_by_hand(
+        client, app, admin_user, auth_headers):
+    """`fixed` y `regressed` los pone el ciclo de vida al comparar escaneos.
+    Dejarlos escribir desde fuera permitiría falsear el historial."""
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.24")
+    finding_id = _first_finding_id(app, scan_id)
+
+    resp = client.patch(f"/themis/findings/{finding_id}",
+                        headers=auth_headers(admin_user), json={"state": "fixed"})
+    assert resp.status_code == 422
+
+
+def test_the_manager_validates_the_state_on_its_own(app, admin_user):
+    """La validación del schema protege el endpoint; el manager es la frontera
+    de verdad, y hasta L35 aceptaba cualquier cadena."""
+    from src.modules.shared._exceptions import ValidationError
+
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.25")
+    finding_id = _first_finding_id(app, scan_id)
+
+    with app.app_context():
+        with pytest.raises(ValidationError):
+            LybraEngineManager().set_finding_state(finding_id, admin_user.id, "inventado")
+
+
+def test_a_refuted_finding_stops_counting_as_a_risk(
+        client, app, admin_user, auth_headers):
+    """El coste de producto de confundir los dos estados: el recuento."""
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.26")
+    headers = auth_headers(admin_user)
+
+    before = client.get("/themis/results?type=lybra&page=1&per_page=10",
+                        headers=headers).get_json()["results"][0]
+    assert before["falsePositiveFindings"] == 0
+    priorities_before = sum(before["byPriority"].values())
+
+    finding_id = _first_finding_id(app, scan_id)
+    client.patch(f"/themis/findings/{finding_id}", headers=headers,
+                 json={"state": "false_positive", "reason": "no aplica"})
+
+    after = client.get("/themis/results?type=lybra&page=1&per_page=10",
+                       headers=headers).get_json()["results"][0]
+    assert after["falsePositiveFindings"] == 1
+    assert sum(after["byPriority"].values()) == priorities_before - 1
+    assert after["totalFindings"] == before["totalFindings"]   # sigue estando, no se borra
+
+
+def test_refuted_findings_are_available_as_labelled_samples(
+        client, app, admin_user, auth_headers):
+    """Lo que convierte esto de una casilla de interfaz en un bucle de mejora:
+    cada desmentido dice contra qué check y contra qué producto se equivoca el
+    motor."""
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.27")
+    finding_id = _first_finding_id(app, scan_id)
+    headers = auth_headers(admin_user)
+
+    client.patch(f"/themis/findings/{finding_id}", headers=headers,
+                 json={"state": "false_positive", "reason": "backport"})
+
+    body = client.get("/themis/findings/false-positives", headers=headers).get_json()
+    assert body["count"] == 1
+    sample = body["falsePositives"][0]
+    assert sample["findingId"] == finding_id
+    assert sample["reason"] == "backport"
+    assert "feedVersion" in sample and "checkId" in sample and "cpe" in sample
+
+
+def test_false_positives_are_scoped_to_their_owner(
+        client, app, admin_user, regular_user, auth_headers):
+    scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.28")
+    finding_id = _first_finding_id(app, scan_id)
+    client.patch(f"/themis/findings/{finding_id}", headers=auth_headers(admin_user),
+                 json={"state": "false_positive", "reason": "mío"})
+
+    body = client.get("/themis/findings/false-positives",
+                      headers=auth_headers(regular_user)).get_json()
+    assert body["count"] == 0

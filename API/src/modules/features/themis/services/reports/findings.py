@@ -184,7 +184,10 @@ class FindingsPrintingStrategy(PrintingStrategy):
 
         started = getattr(scan, "started_at", None)
         started_str = started.strftime("%d/%m/%Y %H:%M:%S") if started else "N/A"
-        confirmed_count = sum(1 for finding in findings if finding["confirmed"])
+        confirmed_count = sum(1 for finding in findings if finding["confirmed"]
+                              and finding.get("state") != "false_positive")
+        refuted_count = sum(1 for finding in findings
+                            if finding.get("state") == "false_positive")
 
         scan_info = [
             ["ID del escaneo:", str(getattr(scan, "id", ""))],
@@ -193,6 +196,11 @@ class FindingsPrintingStrategy(PrintingStrategy):
             ["Confirmados activamente:", str(confirmed_count)],
             ["Base de conocimiento:", self._knowledge_base_line()],
         ]
+        if refuted_count:
+            # Se dice, no se esconde: que el informe no los cuente como riesgo
+            # es correcto, pero callar cuántos hay ocultaría que alguien
+            # intervino sobre lo que el motor detectó.
+            scan_info.append(["Desmentidos por el usuario:", str(refuted_count)])
         info_table = theme.kv_table(scan_info, col_widths=[2 * inch, 4 * inch])
         elements.append(info_table)
         elements.append(Spacer(1, 0.3 * inch))
@@ -236,6 +244,11 @@ class FindingsPrintingStrategy(PrintingStrategy):
 
         counts: Dict[str, int] = {}
         for finding in findings:
+            if finding.get("state") == "false_positive":
+                # El usuario ha desmentido este hallazgo: no es un riesgo, y un
+                # resumen que lo cuente afirma una postura de seguridad peor
+                # que la real (L35).
+                continue
             counts[finding["priority"]] = counts.get(finding["priority"], 0) + 1
 
         data = [["Prioridad", "Cantidad"]]

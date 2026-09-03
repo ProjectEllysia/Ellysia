@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+from datetime import datetime
 from typing import Dict, List, Optional
 
 # The severity ladder, kept in one place so scoring and any future consumer agree
@@ -181,18 +182,73 @@ def merge_findings(findings: List[dict]) -> List[dict]:
 # LIFECYCLE
 # =========================================================================
 
+def _carry_decision(finding: dict, prev: dict) -> None:
+    """Arrastrar el motivo, el autor y la caducidad al hallazgo de este escaneo.
+
+    Sin esto, la decisión sobreviviría como estado pero perdería su
+    justificación en el siguiente escaneo: un ``accepted`` sin motivo ni autor
+    es exactamente la deuda que L35 viene a quitar de en medio.
+    """
+    for field_name in ("state_reason", "state_set_by", "state_set_at", "state_expires_at"):
+        if prev.get(field_name) is not None:
+            finding[field_name] = prev[field_name]
+
+
+def _decision_expired(prev: dict, moment: datetime) -> bool:
+    """Si un riesgo aceptado ya ha cumplido su plazo de revisión.
+
+    Sin ``state_expires_at`` la decisión no caduca — es el caso de los
+    ``accepted`` anteriores a L35, que no tienen plazo porque nadie se lo puso.
+    Inventarles uno los reabriría todos de golpe el día del despliegue.
+    """
+    expires = prev.get("state_expires_at")
+    return expires is not None and expires <= moment
+
+
+def _engine_changed_its_mind(finding: dict, snapshot: dict) -> bool:
+    """Si lo que se enseña ahora ya no es lo que el usuario desmintió.
+
+    Un falso positivo se desmiente contra una detección concreta: este check,
+    resuelto contra este estado de la base de conocimiento. Si cambia
+    cualquiera de los dos, la detección de hoy no es la misma que se desmintió
+    —puede ser mejor, o simplemente otra— y mantener el desmentido escondería
+    un hallazgo que nadie ha revisado.
+
+    El ``dedup_key`` no basta para notarlo: se construye a partir del host, el
+    puerto y la identidad de la vulnerabilidad, y ninguno de los tres cambia
+    porque el motor aprenda algo nuevo.
+    """
+    for field_name in ("check_id", "feed_version"):
+        if finding.get(field_name) != snapshot.get(field_name):
+            return True
+    return False
+
+
 def apply_lifecycle(current: List[dict], previous: Dict[str, dict],
-                    close_missing: bool = True) -> List[dict]:
+                    close_missing: bool = True,
+                    now: Optional[datetime] = None) -> List[dict]:
     """Assign each finding a lifecycle state relative to the previous scan.
 
     Each current finding is labelled by comparing it against the previous scan of
     the same target:
 
     * Not seen before → ``open`` (a new finding).
-    * Seen before and marked ``accepted`` → stays ``accepted`` (the user's
-      decision is sticky).
+    * Seen before and marked ``false_positive`` → stays ``false_positive``,
+      salvo que el motor haya cambiado de opinión por su cuenta (ver abajo).
+    * Seen before and marked ``accepted`` → stays ``accepted`` hasta que caduca.
     * Seen before as ``fixed`` and back now → ``regressed``.
     * Otherwise (still present since last time) → ``open``.
+
+    **Las dos decisiones del usuario caducan de formas distintas, y a
+    propósito.** Aceptar un riesgo es decir "esto es real, lo asumo": tiene
+    sentido revisarlo pasado un tiempo, así que un ``accepted`` con
+    ``state_expires_at`` vencido vuelve a ``open``. Marcar un falso positivo es
+    decir "esto no es real, el motor se equivocó": el tiempo no lo invalida
+    —el motor no se equivoca más por ser más tarde— pero **el motor cambiando
+    sí**. Por eso un ``false_positive`` se reabre cuando cambia el ``check_id``
+    que lo produjo o el ``feed_version`` contra el que se resolvió: lo que el
+    usuario desmintió ya no es lo mismo que se le está enseñando ahora, y
+    arrastrar el desmentido escondería una detección nueva.
 
     In addition, any issue that *was* present last time but is absent now is
     carried forward once as a ``fixed`` finding, so the timeline records the
@@ -201,8 +257,15 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict],
 
     Args:
         current: This scan's findings. Each must already have a ``dedup_key``.
-        previous: A map ``dedup_key -> {"state", "snapshot"}`` describing the
-            previous scan's findings.
+        previous: A map ``dedup_key -> {"state", "snapshot", ...}`` describing
+            the previous scan's findings. Las claves opcionales
+            ``state_reason``, ``state_set_by``, ``state_set_at`` y
+            ``state_expires_at`` llevan la decisión del usuario, que viaja con
+            el hallazgo al escaneo nuevo: si no se arrastrara, el motivo y el
+            autor se perderían en el siguiente escaneo y la decisión quedaría
+            sin justificación al día siguiente de tomarla.
+        now: El instante contra el que se juzga la caducidad de un
+            ``accepted``. Inyectable para que un test no dependa del reloj.
         close_missing: Si un hallazgo que ya no aparece debe darse por
             corregido. ``False`` cuando el escaneo **no vio todo el objetivo**
             —un barrido que se quedó sin presupuesto de reloj— porque entonces
@@ -216,6 +279,7 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict],
         finding for each issue that has just disappeared (ninguno si
         ``close_missing`` es ``False``).
     """
+    moment = now or datetime.utcnow()
     current_keys = set()
     for finding in current:
         key = finding["dedup_key"]
@@ -223,8 +287,18 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict],
         prev = previous.get(key)
         if prev is None:
             finding["state"] = "open"
+        elif prev["state"] == "false_positive":
+            if _engine_changed_its_mind(finding, prev["snapshot"]):
+                finding["state"] = "open"            # ya no es el mismo hallazgo desmentido
+            else:
+                finding["state"] = "false_positive"
+                _carry_decision(finding, prev)
         elif prev["state"] == "accepted":
-            finding["state"] = "accepted"            # the user's decision is sticky
+            if _decision_expired(prev, moment):
+                finding["state"] = "open"            # toca volver a mirarlo
+            else:
+                finding["state"] = "accepted"
+                _carry_decision(finding, prev)
         elif prev["state"] == "fixed":
             finding["state"] = "regressed"           # was gone, has come back
         else:
@@ -234,6 +308,9 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict],
     for key, prev in previous.items():
         if not close_missing:
             break
+        # ``false_positive`` no aparece en esta lista a propósito: un hallazgo
+        # que el usuario desmintió no puede "corregirse" al desaparecer,
+        # porque nunca fue un problema que arreglar.
         if key not in current_keys and prev["state"] in ("open", "regressed", "accepted"):
             ghost = dict(prev["snapshot"])
             ghost["state"] = "fixed"

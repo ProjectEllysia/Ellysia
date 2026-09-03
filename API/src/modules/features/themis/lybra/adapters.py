@@ -242,6 +242,7 @@ def finding_to_json(f: dict, exposure: str) -> dict:
         "cpeResolved": f.get("cpe_resolved"),
         "source":      f.get("source"),
         "state":       f.get("state"),
+        "stateReason": f.get("state_reason"),
         "dedupKey":    f.get("dedup_key"),
         "priority":    priority,
         "requiredOs":  f.get("required_os"),

@@ -715,6 +715,20 @@ class ThemisConfig:
     Se pone a ``True`` solo para desarrollo local contra IPs privadas.
     """
 
+    accepted_risk_days: int = 365
+    """Cuántos días vale un "acepto este riesgo" antes de volver a revisión.
+
+    Vive aquí y no en el bloque del motor porque ``Finding`` es la tabla
+    compartida —Lybra y Nuclei escriben en ella— y esto es política sobre
+    hallazgos, no un dial de red del motor propio.
+
+    Un riesgo asumido hace un año se asumió en unas circunstancias que quizá ya
+    no son las mismas, así que caduca y el hallazgo vuelve a ``open``. Un falso
+    positivo **no** usa este plazo: el motor no se equivoca más por ser más
+    tarde, y lo que sí invalida un desmentido es que el motor cambie —
+    ``apply_lifecycle`` lo detecta comparando ``check_id`` y ``feed_version``.
+    """
+
 
 @config_block("features.themis.folders")
 @dataclass(frozen=True)
