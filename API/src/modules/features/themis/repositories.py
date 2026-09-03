@@ -48,6 +48,7 @@ from .model import (
     HostService,
     KbSyncStatus,
     KevEntry,
+    UnresolvedProduct,
     NiktoIncident,
     NiktoScan,
     NmapScan,
@@ -1286,6 +1287,43 @@ class KbRepository(BaseRepository[CveEntry]):
     def sync_status(self) -> List[KbSyncStatus]:
         """El estado de sincronización de todas las fuentes registradas."""
         return self._session.query(KbSyncStatus).order_by(KbSyncStatus.source).all()
+
+    def record_resolution(self, normalized_name: str, origin: str, was_resolved: bool) -> None:
+        """Llevar la cuenta de un nombre de producto que no resuelve a un CPE.
+
+        Cuando falla, suma uno a su contador; **cuando resuelve, borra la fila**.
+        Esa segunda mitad es la que cierra el bucle que pedía L37: al escribir
+        el alias que faltaba, el nombre desaparece del ranking en el siguiente
+        escaneo. Sin ella el ranking mediría el trabajo que hubo, no el que
+        queda, y no habría forma de saber si el feed está mejorando.
+        """
+        row = (self._session.query(UnresolvedProduct)
+               .filter_by(normalized_name=normalized_name, origin=origin)
+               .one_or_none())
+        if was_resolved:
+            if row is not None:
+                self._session.delete(row)
+            return
+
+        now = utcnow_naive()
+        if row is None:
+            self._session.add(UnresolvedProduct(
+                normalized_name=normalized_name, origin=origin,
+                occurrences=1, first_seen_at=now, last_seen_at=now,
+            ))
+        else:
+            row.occurrences = (row.occurrences or 0) + 1
+            row.last_seen_at = now
+
+    def top_unresolved_products(self, limit: int = 50,
+                                origin: Optional[str] = None) -> List[UnresolvedProduct]:
+        """Los nombres que más veces han quedado sin resolver, el peor primero."""
+        query = self._session.query(UnresolvedProduct)
+        if origin:
+            query = query.filter(UnresolvedProduct.origin == origin)
+        return (query.order_by(UnresolvedProduct.occurrences.desc(),
+                               UnresolvedProduct.normalized_name.asc())
+                .limit(limit).all())
 
     def counts(self) -> dict:
         """Row counts per KB table (for the sync summary / health checks)."""

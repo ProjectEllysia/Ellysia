@@ -55,6 +55,15 @@ class LybraScanRequestSchema(Schema):
     aggressive = fields.Boolean(load_default=False)
 
 
+class UnresolvedProductsQuerySchema(Schema):
+    limit = fields.Integer(load_default=50, validate=validate.Range(min=1, max=500))
+    # El origen separa dos frentes de trabajo distintos: los banners de red
+    # aportan muestras desde el primer escaneo, mientras que el inventario
+    # necesita agentes desplegados.
+    origin = fields.String(load_default=None, allow_none=True,
+                           validate=validate.OneOf(["network", "inventory"]))
+
+
 class FindingStateRequestSchema(Schema):
     # ``accepted`` y ``false_positive`` dicen cosas opuestas y hasta L35
     # compartían casilla: aceptar un riesgo es "esto es real, lo asumo";

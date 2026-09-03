@@ -1074,6 +1074,56 @@ class EpssScore(Base):
         return f"<EpssScore(cve_id='{self.cve_id}', score={self.score})>"
 
 
+class UnresolvedProduct(Base):
+    """Un nombre de producto que el matcher no consiguió convertir en un CPE.
+
+    ``_resolve_cpe`` prueba tres estrategias —el CPE que dio Nmap, el feed
+    curado de alias y el índice automático derivado de la KB— y, si ninguna
+    funciona, devuelve ``None`` sin inventar nada. Esa decisión es correcta: un
+    CPE fabricado que NVD no conoce no casaría con nada, en silencio.
+
+    Pero el fallo tampoco se contaba. Existía ``Finding.cpe_resolved``, que
+    distingue "no hay CVEs" de "ni siquiera supe qué es esto", y ahí se
+    quedaba: un booleano por hallazgo, no un agregado consultable. Sin
+    agregado, la pregunta que dirige todo el trabajo del feed de alias —**qué
+    nombres estamos fallando en resolver, y cuáles con más frecuencia**— no
+    tiene respuesta.
+
+    Cada fila es un alias que merece la pena escribir, y ``occurrences`` dice
+    cuánto duele no tenerlo. Al añadir el alias, el nombre resuelve en el
+    siguiente escaneo y su fila se borra: el ranking mide el trabajo que queda,
+    no el que hubo.
+
+    Attributes:
+        normalized_name: El nombre ya normalizado
+            (:func:`~lybra.kb.normalize_product_name`), que es la clave con la
+            que se busca el alias. El crudo no serviría: un inventario de
+            escritorio mete la versión en el propio nombre ("7-Zip 25.01").
+        origin: ``"network"`` (un banner) o ``"inventory"`` (un paquete que
+            leyó un agente). Se separan porque son dos frentes distintos de
+            trabajo, y porque el de red aporta muestras desde el primer
+            escaneo, sin necesidad de tener agentes desplegados.
+        occurrences: Cuántas veces se ha visto sin resolver.
+        first_seen_at / last_seen_at: Desde cuándo, y la última vez.
+    """
+    __tablename__ = "UnresolvedProduct"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    normalized_name = Column(String(255), nullable=False, index=True)
+    origin          = Column(String(32), nullable=False, default="network")
+    occurrences     = Column(Integer, nullable=False, default=1)
+    first_seen_at   = Column(DateTime, default=utcnow_naive)
+    last_seen_at    = Column(DateTime, default=utcnow_naive)
+
+    __table_args__ = (
+        UniqueConstraint("normalized_name", "origin", name="unique_unresolved_product"),
+    )
+
+    def __repr__(self):
+        return (f"<UnresolvedProduct(name='{self.normalized_name}', "
+                f"origin='{self.origin}', occurrences={self.occurrences})>")
+
+
 class KbSyncStatus(Base):
     """Cuándo se intentó sincronizar cada fuente de la KB, y cómo salió.
 

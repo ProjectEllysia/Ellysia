@@ -504,3 +504,75 @@ def test_the_kb_status_endpoint_reports_every_source(client, app, admin_user, au
 
 def test_the_kb_status_endpoint_requires_authentication(client):
     assert client.get("/themis/kb/status").status_code == 401
+
+
+# ───────────────────────── ranking de nombres sin resolver (L37)
+
+
+def test_the_ranking_counts_by_name_and_origin(app):
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            for _ in range(3):
+                repo.record_resolution("chachiservidor", "network", False)
+            repo.record_resolution("otracosa", "network", False)
+            repo.record_resolution("chachiservidor", "inventory", False)
+
+        with UnitOfWork() as uow:
+            rows = KbRepository(uow).top_unresolved_products()
+            top = [(r.normalized_name, r.origin, r.occurrences) for r in rows]
+
+    # El peor primero: es el alias que más duele no tener.
+    assert top[0] == ("chachiservidor", "network", 3)
+    # Mismo nombre por dos vías = dos frentes de trabajo, dos filas.
+    assert ("chachiservidor", "inventory", 1) in top
+    assert ("otracosa", "network", 1) in top
+
+
+def test_resolving_a_name_removes_it_from_the_ranking(app):
+    """El bucle cerrado: al escribir el alias que faltaba, el nombre resuelve
+    en el siguiente escaneo y sale de la lista. Sin esto el ranking mediría el
+    trabajo que hubo, no el que queda."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            repo.record_resolution("chachiservidor", "network", False)
+            repo.record_resolution("chachiservidor", "network", False)
+
+        with UnitOfWork() as uow:
+            assert KbRepository(uow).top_unresolved_products()
+
+        with UnitOfWork() as uow:
+            KbRepository(uow).record_resolution("chachiservidor", "network", True)
+
+        with UnitOfWork() as uow:
+            assert KbRepository(uow).top_unresolved_products() == []
+
+
+def test_resolving_a_name_never_seen_before_is_a_no_op(app):
+    """El caso normal: casi todo resuelve, y no debe crear filas."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).record_resolution("apache http server", "network", True)
+        with UnitOfWork() as uow:
+            assert KbRepository(uow).top_unresolved_products() == []
+
+
+def test_the_ranking_endpoint_filters_by_origin(client, app, admin_user, auth_headers):
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            repo.record_resolution("de-red", "network", False)
+            repo.record_resolution("de-agente", "inventory", False)
+
+    headers = auth_headers(admin_user)
+    everything = client.get("/themis/lybra/unresolved-products", headers=headers).get_json()
+    assert everything["count"] == 2
+
+    only_network = client.get("/themis/lybra/unresolved-products?origin=network",
+                              headers=headers).get_json()
+    assert [item["name"] for item in only_network["unresolvedProducts"]] == ["de-red"]
+
+
+def test_the_ranking_endpoint_requires_authentication(client):
+    assert client.get("/themis/lybra/unresolved-products").status_code == 401

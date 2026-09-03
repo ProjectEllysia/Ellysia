@@ -355,6 +355,11 @@ class LybraEngineManager(ScanManager):
                     epss_lookup=lambda cve_id: getattr(kb_repo.get_epss(cve_id), "score", None),
                     product_alias_lookup=kb_repo.resolve_product_alias,
                     feed_version=kb_feed_version(kb_repo.knowledge_state()),
+                    # L37: qué nombres de producto no logramos identificar. El
+                    # motor los cuenta, no los escribe — el paquete `lybra/` es
+                    # libre de ORM y lo sigue siendo porque esto entra
+                    # inyectado, como los demás lookups.
+                    record_resolution=kb_repo.record_resolution,
                 )
                 findings_data = engine.analyze(services)
                 findings_data.extend(fingerprint_findings)
@@ -1065,6 +1070,30 @@ class LybraEngineManager(ScanManager):
                 )
             repo.update(finding)
             return finding
+
+    @staticmethod
+    def unresolved_products(limit: int = 50, origin: Optional[str] = None) -> list:
+        """Los nombres de producto que el matcher no consigue identificar.
+
+        Es el documento de trabajo del feed curado de alias: cada línea es un
+        alias que merece la pena escribir, ordenado por cuánto duele no
+        tenerlo. El roadmap aparcaba este ranking por falta de datos —hacía
+        falta el agente de Hygeia en más de un equipo—, pero eso vale para el
+        volumen y no para la herramienta: hay que construirlo **antes** de que
+        lleguen los datos, o cuando lleguen no habrá dónde mirarlos. Y la vía
+        de red aporta muestras desde el primer escaneo, sin agente ninguno.
+
+        No se acota por usuario: el feed de alias es del producto, no de quien
+        escanea, y un nombre que falla lo hace para todos.
+        """
+        repo = build_repository(KbRepository)
+        return [{
+            "name": row.normalized_name,
+            "origin": row.origin,
+            "occurrences": row.occurrences,
+            "firstSeenAt": isoformat_utc(row.first_seen_at),
+            "lastSeenAt": isoformat_utc(row.last_seen_at),
+        } for row in repo.top_unresolved_products(limit, origin)]
 
     def false_positives(self, user_id: int) -> list:
         """Los hallazgos que este usuario ha desmentido.
