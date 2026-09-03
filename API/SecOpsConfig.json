@@ -218,6 +218,9 @@
             "maxBodyBytes": 8192,
             "retentionDays": 90
           },
+          "credentials": {
+            "maxAttempts": 3
+          },
           "fingerprintingEnabled": true,
           "ingest": {
             "enabled": false,

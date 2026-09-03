@@ -200,6 +200,7 @@ CONFIG_BLOCKS = [
     (CR.LybraEngineConfig, CR.lybra_engine_config),
     (CR.LybraEvidenceConfig, CR.lybra_evidence_config),
     (CR.LybraIngestConfig, CR.lybra_ingest_config),
+    (CR.LybraCredentialsConfig, CR.lybra_credentials_config),
     (CR.NucleiConfig, CR.nuclei_config),
     (CR.AegisConfig, CR.aegis_config),
     (CR.IrisConfig, CR.iris_config),

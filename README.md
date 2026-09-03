@@ -33,7 +33,7 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
 
 ## Features
 
-- **Vulnerability scanning** — Nmap (port/OS detection), Nikto (web vulns), Nuclei (template-based), and **Lybra**, a self-built detection engine: its own TCP and UDP discovery, protocol dissectors for HTTP, SSH, FTP, SMTP/IMAP/POP3, SMB, TLS, MySQL, PostgreSQL, SQL Server, MongoDB, Redis, LDAP, RDP, VNC, SNMP, DNS, NTP, NetBIOS, mDNS, IKE and unauthenticated admin APIs (Docker, Elasticsearch, Kubernetes, etcd, Consul, Kibana), declarative and script checks, and CPE→CVE matching against a local NVD/CISA-KEV/FIRST-EPSS knowledge base — with scheduled execution via APScheduler and an authorized-targets registry for scan governance.
+- **Vulnerability scanning** — Nmap (port/OS detection), Nikto (web vulns), Nuclei (template-based), and **Lybra**, a self-built detection engine: its own TCP and UDP discovery, protocol dissectors for HTTP, SSH, FTP, SMTP/IMAP/POP3, SMB, TLS, MySQL, PostgreSQL, SQL Server, MongoDB, Redis, LDAP, RDP, VNC, SNMP, DNS, NTP, NetBIOS, mDNS, IKE and unauthenticated admin APIs (Docker, Elasticsearch, Kubernetes, etcd, Consul, Kibana); declarative checks with request chaining (extracted variables reused across requests), payload expansion (capped), and script plugins; version→confirmer promotion for high-profile CVEs; a default-credentials engine (Tomcat/Jenkins-style panels, gated behind an explicit aggressive-mode request *and* the authorized-targets registry); redacted raw-evidence capture per confirmed finding; and CPE→CVE matching against a local NVD/CISA-KEV/FIRST-EPSS knowledge base — with scheduled execution via APScheduler.
 - **AI-powered PDF reports** — Scan results enriched by a pluggable LLM backend with "Controls, Not Counts" calibrated risk assessment, plus per-host traceroute.
 - **Anti-phishing analysis** — 46 atomic rules across 10 rule families evaluate email headers and content (SPF, DKIM, DMARC, ARC, QR-code/quishing detection, domain impersonation, IOC extraction), producing a calibrated `Legitimate` / `Suspicious` / `Phishing` verdict with optional AI summaries.
 - **Automated mailbox monitoring** — Connect Gmail or Microsoft 365 via OAuth; Iris periodically pulls new mail and analyzes it automatically, and emails the user when a connected mailbox receives phishing.
@@ -188,11 +188,12 @@ The web application checks MFA once when an authenticated session enters the SPA
 | `POST` | `/themis/nmap` | Port scan (supports CIDR ranges) |
 | `POST` | `/themis/nikto` | Web configuration / vulnerability scan |
 | `POST` | `/themis/nuclei` | Template-based scan (single host per scan) |
-| `POST` | `/themis/lybra` | Self-built engine scan (own port discovery — `target` required) |
+| `POST` | `/themis/lybra` | Self-built engine scan (own port discovery — `target` required). `aggressive: true` requests the aggressive mode (active-check families marked `mode: aggressive` in the feed, plus the default-credentials engine); it only takes effect when the target is *also* in the caller's authorized-targets registry — a double gate, since a registered target is only pre-authorized for passive scanning |
 | `GET` | `/themis/scan-status?id=` | Scan status / progress: pending · running · done · cancelled |
 | `POST` | `/themis/scans/<id>/cancel` | Cancel a running scan |
 | `GET` | `/themis/results` · `/themis/results/<id>` | List scans (filterable, paginated) / scan detail. The Lybra listing carries per-scan counters, not every finding, and flags with `isPartial` a scan whose port discovery ran out of time before covering the whole target |
 | `GET` | `/themis/lybra/scans/<id>/findings` | Lybra findings grouped by remediable unit (product + port), each group with its CVEs, KEV membership, worst priority and the version that closes it |
+| `GET` | `/themis/findings/<id>/evidence` | The raw (redacted, hashed) response that produced a confirmed finding — 404 for a finding owned by another user |
 | `PATCH` | `/themis/findings/<id>` | Mark a finding's triage state (e.g. accept a risk) |
 | `DELETE` | `/themis/<id>` · `/themis/scans` | Delete a scan / bulk delete |
 | `GET` | `/themis/stats` · `/themis/history/hosts` · `/themis/history/stats` | Scan counters and per-host historical trends |

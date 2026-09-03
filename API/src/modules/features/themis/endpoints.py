@@ -388,7 +388,8 @@ def start_lybra_scan(data):
         user_id=user.id,
         target=target,
         discover_ports=discover_ports,
-        timeout=timeout
+        timeout=timeout,
+        aggressive=data.get("aggressive", False),
     )
     logger.info(f"Lybra lanzado: ID={scan_id} autodescubrimiento target={target} user={user.username}")
 

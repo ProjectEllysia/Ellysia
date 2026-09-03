@@ -1116,6 +1116,31 @@ def lybra_ingest_config() -> LybraIngestConfig:
     return load_block(LybraIngestConfig)
 
 
+@config_block("features.themis.scanners.lybra.credentials")
+@dataclass(frozen=True)
+class LybraCredentialsConfig:
+    """El presupuesto del motor de credenciales por defecto (Fase D, L31).
+
+    Es la única fase del motor que **escribe** en el objetivo — cada intento es
+    un login real —, así que el único dial que expone es el que evita que se
+    convierta en un ataque de fuerza bruta: cuántas contraseñas se prueban
+    contra una misma cuenta antes de rendirse con ella. No hay ``enabled``:
+    el motor entero está detrás de la doble puerta de :func:`aggressive
+    mode <>` — objetivo autorizado y petición explícita del usuario (L40) —,
+    así que un interruptor aparte sería una tercera puerta redundante.
+    """
+
+    max_attempts: int = 3
+    """Intentos máximos **por cuenta** (no por servicio): tres contraseñas
+    distintas contra ``admin`` cuentan tres, no las que además se prueben
+    contra ``root`` en el mismo servicio. Es la cuenta, no el servicio, la que
+    un proveedor bloquea tras demasiados fallos."""
+
+
+def lybra_credentials_config() -> LybraCredentialsConfig:
+    return load_block(LybraCredentialsConfig)
+
+
 def nuclei_config() -> NucleiConfig:
     return load_block(NucleiConfig)
 
