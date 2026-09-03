@@ -1299,3 +1299,89 @@ def test_the_partial_flag_reaches_the_api(client, monkeypatch, app, admin_user, 
     result = client.get("/themis/results?type=lybra&page=1&per_page=10",
                         headers=auth_headers(admin_user)).get_json()["results"][0]
     assert result["isPartial"] is True
+
+
+# ============================================ progreso y cancelación (L41)
+
+
+def test_a_scan_reports_progress_by_phase(monkeypatch, app, admin_user):
+    """El escaneo publica progreso por fase con pesos honestos: descubrimiento
+    40, fingerprint 70, checks 90, persistencia 100 (§3 del issue)."""
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+
+    reported = []
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, progress=reported.append)
+
+    # Monótono, empieza por debajo de 100 y llega a 100.
+    assert reported == sorted(reported)
+    assert reported[-1] == 100
+    assert 40 in reported
+
+
+def test_a_cancelled_scan_stops_persists_and_is_marked_partial(monkeypatch, app, admin_user):
+    """Cancelado tras el descubrimiento: no corre fingerprint ni checks, pero
+    persiste lo hallado y queda marcado como parcial — nunca tira lo verificado."""
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80, 443])
+
+    fingerprinted = []
+    original_fp = LybraEngineManager._fingerprint_services
+    monkeypatch.setattr(
+        LybraEngineManager, "_fingerprint_services",
+        lambda self, target, services, **kw: (fingerprinted.append(True)
+                                              or original_fp(self, target, services, **kw)))
+
+    # Cancelado desde el primer chequeo: el descubrimiento ya devolvió, pero
+    # fingerprint y checks no deben arrancar.
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, cancel_check=lambda: True)
+
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            escan = repo.get_by_id(escan.id)
+            findings = repo.get_findings_by_scan(escan.id)
+
+    assert escan.status == ScanStatus.FINISHED.value
+    assert escan.is_partial is True
+    assert fingerprinted == []          # no se llegó a fingerprintear
+    # Lo descubierto se persiste: los puertos son un hecho verificado.
+    assert sorted(f.port for f in findings if f.category == "open_port") == [80, 443]
+
+
+def test_a_cancelled_scan_does_not_close_findings_by_omission(monkeypatch, app, admin_user):
+    """La interacción crítica con el ciclo de vida: un escaneo cancelado a mitad
+    no vio todo el objetivo, así que la ausencia de un hallazgo anterior no es
+    evidencia de que se haya corregido (el fallo de L48-c por otra puerta)."""
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+
+    # Primer escaneo completo: 80 y 443 abiertos.
+    _stub_self_discovery(monkeypatch, [80, 443])
+    with app.app_context():
+        mgr = LybraEngineManager()
+        first = mgr._create_scan_record(target="10.0.0.9", user_id=admin_user.id)
+        mgr._run_lybra(first.id)
+
+    # Segundo escaneo cancelado a mitad: sólo llega a ver el 80.
+    _stub_self_discovery(monkeypatch, [80])
+    with app.app_context():
+        mgr = LybraEngineManager()
+        second = mgr._create_scan_record(target="10.0.0.9", user_id=admin_user.id)
+        mgr._run_lybra(second.id, cancel_check=lambda: True)
+
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            findings = repo.get_findings_by_scan(second.id)
+
+    # El 443, que no se llegó a recorrer, no se cierra como corregido.
+    fixed = [f for f in findings if f.state == "fixed"]
+    assert fixed == []
