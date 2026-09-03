@@ -470,6 +470,33 @@ def delete_authorized_target(target_id: int):
     }
 
 
+@themis_blp.get("/findings/false-positives")
+@themis_blp.response(200, description="Findings the user has refuted")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
+@limiter.limit("120 per hour; 400 per day")
+@handle_exceptions(default_exception=ScanError, logger=logger)
+def get_false_positives():
+    """Los hallazgos que el usuario ha desmentido.
+
+    Cada uno es una muestra etiquetada gratis: dice contra qué check y contra
+    qué producto se equivoca el motor. Es la entrada que convierte el marcado
+    de falsos positivos en un bucle de mejora en vez de una casilla de
+    interfaz — el banco de medición (#278) y el ranking de qué familias fallan
+    más se alimentan de aquí.
+    """
+    user = get_current_user()
+    items = LybraEngineManager().false_positives(user.id)
+    return {
+        "message": "Falsos positivos obtenidos correctamente",
+        "count": len(items),
+        "falsePositives": items,
+        "user": user.username,
+    }
+
+
 @themis_blp.get("/kb/status")
 @themis_blp.response(200, description="Knowledge-base freshness per source")
 @themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
@@ -540,7 +567,8 @@ def get_lybra_grouped_findings(scan_id: int):
 def update_finding_state(data, finding_id: int):
     """Marcar el estado de un hallazgo (p. ej. aceptar un riesgo)."""
     user = get_current_user()
-    finding = LybraEngineManager().set_finding_state(finding_id, user.id, data["state"])
+    finding = LybraEngineManager().set_finding_state(
+        finding_id, user.id, data["state"], reason=data.get("reason"))
     logger.info(f"Hallazgo {finding_id} marcado como '{data['state']}' por {user.username}")
     return {
         "message": "Estado del hallazgo actualizado correctamente",

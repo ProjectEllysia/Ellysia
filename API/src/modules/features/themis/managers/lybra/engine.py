@@ -2,6 +2,7 @@
 
 import logging
 import time
+from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from typing import Callable, List, Optional
@@ -55,6 +56,7 @@ from ...lybra.ingest import select_for_services, translate_all
 from ...services import _Task
 from ...services.cve_context import enrich_with_cve_context
 from ...services.nuclei_templates import NucleiTemplateStore
+from src.modules.shared._exceptions import ValidationError
 from ...exceptions import (
     ScanNotFoundError,
     FindingNotFoundError,
@@ -911,6 +913,12 @@ class LybraEngineManager(ScanManager):
         view = finding.snapshot
         view["id"] = finding.id
         view["state"] = finding.state
+        # La decisión del usuario no está en el snapshot porque el snapshot
+        # describe el hallazgo, no lo que alguien dijo sobre él. La interfaz
+        # necesita el motivo: un estado sin su porqué obliga a preguntar a
+        # quien lo puso.
+        view["state_reason"] = finding.state_reason
+        view["state_expires_at"] = finding.state_expires_at
         return view
 
     def grouped_findings(self, scan_id: int, user_id: int) -> dict:
@@ -994,12 +1002,41 @@ class LybraEngineManager(ScanManager):
         present = [level for level in reversed(PRIORITY_LADDER) if by_priority.get(level)]
         return present[0] if present else "INFO"
 
-    def set_finding_state(self, finding_id: int, user_id: int, state: str):
-        """Set a finding's lifecycle state (e.g. mark a risk as ``accepted``).
+    #: Los estados que un usuario puede fijar a mano. El resto —``fixed``,
+    #: ``regressed``— los pone el ciclo de vida al comparar escaneos, y
+    #: dejarlos escribir desde fuera permitiría falsear el historial.
+    USER_SETTABLE_STATES = ("open", "accepted", "false_positive")
+
+    def set_finding_state(self, finding_id: int, user_id: int, state: str,
+                          reason: Optional[str] = None):
+        """Fijar el estado de un hallazgo: asumir el riesgo, o desmentirlo.
+
+        ``accepted`` y ``false_positive`` dicen cosas opuestas y hasta L35
+        compartían casilla. Aceptar un riesgo es "esto es real, lo asumo": se
+        anota con su motivo y su autor, y **caduca**, porque un riesgo asumido
+        hace un año merece volver a mirarse. Marcar un falso positivo es "esto
+        no es real, el motor se equivocó": no caduca por tiempo —el motor no se
+        equivoca más por ser más tarde— sino cuando el motor cambia, y de eso
+        se encarga ``apply_lifecycle``.
+
+        Volver a ``open`` deshace la decisión y limpia sus anotaciones: no es
+        una decisión nueva, es retirar la anterior.
+
+        La validación se repite aquí aunque el schema del endpoint ya la haga,
+        porque el manager es la frontera de verdad: hasta ahora aceptaba
+        cualquier cadena, así que un segundo llamante —otro módulo, un script—
+        podía escribir un estado que el ciclo de vida no sabe interpretar.
 
         Scoped to the owner: a finding of another user's scan is reported as not
         found. Returns the updated finding.
         """
+        if state not in self.USER_SETTABLE_STATES:
+            raise ValidationError(
+                field="state", value=state,
+                message=f"Estado no asignable a mano: {state}. "
+                        f"Válidos: {', '.join(self.USER_SETTABLE_STATES)}",
+            )
+
         with UnitOfWork() as uow:
             repo = ScanRepository(uow)
             finding = repo.get_finding(finding_id)
@@ -1010,9 +1047,51 @@ class LybraEngineManager(ScanManager):
             # se lanza con finding_id para no revelar el scan_id ajeno.
             assert_owned(ScanRepository, finding.scan_id, user_id,
                          lambda _scan_id: FindingNotFoundError(finding_id), uow=uow)
+
             finding.state = state  # type: ignore
+            if state == "open":
+                finding.state_reason = None      # type: ignore
+                finding.state_set_by = None      # type: ignore
+                finding.state_set_at = None      # type: ignore
+                finding.state_expires_at = None  # type: ignore
+            else:
+                now = utcnow_naive()
+                finding.state_reason = reason        # type: ignore
+                finding.state_set_by = user_id       # type: ignore
+                finding.state_set_at = now           # type: ignore
+                finding.state_expires_at = (         # type: ignore
+                    now + timedelta(days=CR.themis_config().accepted_risk_days)
+                    if state == "accepted" else None
+                )
             repo.update(finding)
             return finding
+
+    def false_positives(self, user_id: int) -> list:
+        """Los hallazgos que este usuario ha desmentido.
+
+        Cada uno es **una muestra etiquetada gratis**, que es lo que convierte
+        esta necesidad de una casilla de interfaz en un bucle de mejora: dicen
+        contra qué check y contra qué producto se equivoca el motor, que es
+        exactamente la entrada que el banco de falsos positivos (#278) tiene
+        que aprender a consumir y lo que permite rankear qué familia falla más.
+
+        Hasta L35 esa señal no existía: el usuario sólo podía decir "acepto el
+        riesgo", que es una afirmación sobre el negocio y no sobre el motor.
+        """
+        repo = build_repository(ScanRepository)
+        return [{
+            "findingId": finding.id,
+            "title": finding.title,
+            "category": finding.category,
+            "checkId": finding.check_id,
+            "cpe": finding.cpe,
+            "cveIds": finding.cve_ids or [],
+            "feedVersion": finding.feed_version,
+            "confirmed": bool(finding.confirmed),
+            "qod": finding.qod,
+            "reason": finding.state_reason,
+            "markedAt": isoformat_utc(finding.state_set_at),
+        } for finding in repo.get_findings_by_state(user_id, "false_positive")]
 
     def get_finding_evidence(self, finding_id: int, user_id: int) -> list:
         """Devuelve la evidencia cruda de un hallazgo propio (Fase E).
@@ -1206,9 +1285,19 @@ class LybraEngineManager(ScanManager):
             "startedAt": isoformat_utc(scan.started_at),
             "finishedAt": isoformat_utc(scan.finished_at),  # type: ignore
             "totalFindings": len(json_findings),
-            "vulnerableFindings": sum(1 for display_finding in display_findings if display_finding.get("category") == "outdated_software"),
+            # Un falso positivo no es un riesgo: el usuario ha dicho que el
+            # motor se equivocó, así que no cuenta como vulnerabilidad ni
+            # engorda el resumen de prioridades. Contarlo sería exactamente el
+            # informe que miente sobre la postura de seguridad (L35).
+            "vulnerableFindings": sum(
+                1 for display_finding in display_findings
+                if display_finding.get("category") == "outdated_software"
+                and display_finding.get("state") != "false_positive"),
             "openFindings": sum(1 for display_finding in display_findings if display_finding.get("state") == "open"),
             "fixedFindings": sum(1 for display_finding in display_findings if display_finding.get("state") == "fixed"),
+            "falsePositiveFindings": sum(
+                1 for display_finding in display_findings
+                if display_finding.get("state") == "false_positive"),
             **self._finding_counters(display_findings, json_findings),
         }
         if include_findings:
@@ -1230,6 +1319,8 @@ class LybraEngineManager(ScanManager):
         """
         by_priority: dict = {}
         for finding in json_findings:
+            if finding.get("state") == "false_positive":
+                continue          # desmentido por el usuario: no es riesgo
             priority = finding.get("priority", "INFO")
             by_priority[priority] = by_priority.get(priority, 0) + 1
 
