@@ -25,7 +25,7 @@ Usage:
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import func, or_
@@ -33,6 +33,7 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.orm import joinedload
 from src.modules.infrastructure import BaseRepository, DocumentRepository
 from src.modules.shared import utcnow_naive
+from .lybra.evidence import prepare_evidence
 
 from .model import (
     AuthorizedTarget,
@@ -42,6 +43,7 @@ from .model import (
     LybraScan,
     EpssScore,
     Finding,
+    FindingEvidence,
     Host,
     HostService,
     KevEntry,
@@ -668,15 +670,68 @@ class ScanRepository(BaseRepository[Scan]):
             .all()
         )
 
-    def persist_findings(self, scan: Scan, findings_data: List[dict]) -> None:
+    def persist_findings(self, scan: Scan, findings_data: List[dict],
+                         evidence_max_body: int = 8192) -> None:
         """Persist a batch of normalized Finding rows for a scan.
+
+        Un finding puede traer una clave ``_evidence`` —la respuesta cruda que
+        lo provocó, que el runtime de checks adjuntó (Fase E)—. No es una
+        columna, así que se extrae antes de construir el ``Finding``, y se
+        persiste como una fila ``FindingEvidence`` aparte, ya redactada y
+        hasheada, una vez que el ``Finding`` tiene id.
 
         Args:
             scan: The scan that produced the findings (its id is used as scan_id).
             findings_data: List of dicts with Finding column values.
+            evidence_max_body: Tope del cuerpo de la evidencia, en bytes.
         """
         for data in findings_data:
-            self._session.add(Finding(scan_id=scan.id, **data))
+            evidence = data.pop("_evidence", None)
+            finding = Finding(scan_id=scan.id, **data)
+            self._session.add(finding)
+            if evidence:
+                self._session.flush()          # necesita el id del finding
+                prepared = prepare_evidence(evidence["payload"], evidence_max_body)
+                self._session.add(FindingEvidence(
+                    finding_id=finding.id,
+                    kind=evidence["kind"],
+                    payload=prepared["payload"],
+                    content_hash=prepared["content_hash"],
+                    captured_at=utcnow_naive(),
+                ))
+
+    def get_evidence_for_finding(self, finding_id: int) -> List[FindingEvidence]:
+        """Return the evidence rows backing a finding, newest first."""
+        return (
+            self._session.query(FindingEvidence)
+            .filter(FindingEvidence.finding_id == finding_id)
+            .order_by(FindingEvidence.captured_at.desc())
+            .all()
+        )
+
+    def delete_expired_evidence(self, retention_days: int) -> int:
+        """Borra la evidencia más vieja que ``retention_days``.
+
+        La evidencia crece rápido —hasta varios KiB por hallazgo confirmado, por
+        escaneo, por activo— y necesita caducidad desde el primer día, no cuando
+        la tabla ocupe gigas. Un valor 0 o negativo desactiva la purga (retención
+        indefinida), para el caso de auditoría que exige conservarlo todo.
+
+        Args:
+            retention_days: Días que se conserva la evidencia.
+
+        Returns:
+            El número de filas borradas.
+        """
+        if retention_days <= 0:
+            return 0
+        cutoff = utcnow_naive() - timedelta(days=retention_days)
+        deleted = (
+            self._session.query(FindingEvidence)
+            .filter(FindingEvidence.captured_at < cutoff)
+            .delete(synchronize_session=False)
+        )
+        return deleted
 
     def get_findings_by_scan(self, scan_id: int) -> List[Finding]:
         """Return all findings of a scan, newest first."""

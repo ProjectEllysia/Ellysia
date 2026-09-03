@@ -1385,3 +1385,84 @@ def test_a_cancelled_scan_does_not_close_findings_by_omission(monkeypatch, app, 
     # El 443, que no se llegó a recorrer, no se cierra como corregido.
     fixed = [f for f in findings if f.state == "fixed"]
     assert fixed == []
+
+
+# ================================================= evidencia cruda (L44)
+
+
+def test_a_confirmed_http_finding_stores_its_redacted_evidence(monkeypatch, app, admin_user):
+    """Un hallazgo http confirmado guarda la respuesta que lo provocó, con las
+    cabeceras sensibles redactadas y su hash."""
+    from src.modules.features.themis.lybra.checks import Response
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+    # El objetivo expone /.git/config y manda una cookie de sesión.
+    monkeypatch.setattr(
+        "src.modules.features.themis.lybra.checks.HttpProbe.fetch",
+        lambda self, host, port, method, path:
+            Response(200, "[core]\n\trepositoryformatversion = 0\n",
+                     {"Server": "nginx", "Set-Cookie": "PHPSESSID=secret; HttpOnly"})
+            if path == "/.git/config" else Response(404, "", {}))
+    # Sin fingerprint ni TLS que enturbien.
+    monkeypatch.setattr(LybraEngineManager, "_fingerprint_services",
+                        lambda self, target, services, **kw: (services, []))
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
+
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            findings = repo.get_findings_by_scan(escan.id)
+            git = next(f for f in findings if f.check_id == "lybra:git-config-exposure@1")
+            evidence = repo.get_evidence_for_finding(git.id)
+
+    assert len(evidence) == 1
+    row = evidence[0]
+    assert row.kind == "http_response"
+    assert row.payload["status"] == 200
+    assert "[core]" in row.payload["body"]
+    # El secreto no está: la cookie se redactó antes de persistir.
+    assert row.payload["headers"]["Set-Cookie"] == "[redacted]"
+    assert row.payload["headers"]["Server"] == "nginx"
+    assert len(row.content_hash) == 64
+
+
+def test_the_evidence_endpoint_returns_own_findings_and_404s_for_others(
+        client, monkeypatch, app, admin_user, regular_user, auth_headers):
+    from src.modules.features.themis.lybra.checks import Response
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+    monkeypatch.setattr(
+        "src.modules.features.themis.lybra.checks.HttpProbe.fetch",
+        lambda self, host, port, method, path:
+            Response(200, "[core]\n\trepositoryformatversion = 0\n", {"Server": "nginx"})
+            if path == "/.git/config" else Response(404, "", {}))
+    monkeypatch.setattr(LybraEngineManager, "_fingerprint_services",
+                        lambda self, target, services, **kw: (services, []))
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            git = next(f for f in repo.get_findings_by_scan(escan.id)
+                       if f.check_id == "lybra:git-config-exposure@1")
+            finding_id = git.id
+
+    # El dueño ve su evidencia.
+    ok = client.get(f"/themis/findings/{finding_id}/evidence",
+                    headers=auth_headers(admin_user))
+    assert ok.status_code == 200
+    body = ok.get_json()
+    assert body["evidence"][0]["kind"] == "http_response"
+    assert body["evidence"][0]["contentHash"]
+
+    # Otro usuario recibe 404 (mismo criterio de propiedad que set_finding_state).
+    forbidden = client.get(f"/themis/findings/{finding_id}/evidence",
+                           headers=auth_headers(regular_user))
+    assert forbidden.status_code == 404

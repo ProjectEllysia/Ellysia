@@ -519,6 +519,27 @@ def update_finding_state(data, finding_id: int):
     }
 
 
+@themis_blp.get("/findings/<int:finding_id>/evidence")
+@themis_blp.response(200, description="Raw evidence for a finding")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@themis_blp.alt_response(404, schema=ErrorSchema, description="Finding not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
+@limiter.limit("120 per hour; 400 per day")
+@handle_exceptions(default_exception=FindingNotFoundError, logger=logger)
+def get_finding_evidence(finding_id: int):
+    """Devolver la evidencia cruda que respalda un hallazgo (Fase E).
+
+    La respuesta que el objetivo dio y que provocó el hallazgo, redactada, con
+    su hash y su fecha — lo que convierte «te lo digo yo» en «míralo». Sólo
+    sobre hallazgos propios: uno ajeno se reporta como no encontrado.
+    """
+    user = get_current_user()
+    evidence = LybraEngineManager().get_finding_evidence(finding_id, user.id)
+    return {"findingId": finding_id, "evidence": evidence}
+
+
 @themis_blp.get("/results")
 @themis_blp.arguments(ResultsQuerySchema, location="query")
 @themis_blp.response(200, ResultsResponseSchema, description="Scan results")

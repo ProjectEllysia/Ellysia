@@ -469,6 +469,7 @@ class LybraEngineManager(ScanManager):
                 tls_fetch=TlsProbe().fetch,
                 network_open=NetworkProbe(timeout=engine.network_timeout).open,
                 script_plugins=default_script_plugins(),
+                capture_evidence=CR.lybra_evidence_config().enabled,
                 # El mismo pool acotado por host que usa el fingerprinting: los
                 # checks activos tienen exactamente la misma forma —espera de
                 # red servicio a servicio— y el mismo motivo para no hacerla en
@@ -912,6 +913,34 @@ class LybraEngineManager(ScanManager):
             repo.update(finding)
             return finding
 
+    def get_finding_evidence(self, finding_id: int, user_id: int) -> list:
+        """Devuelve la evidencia cruda de un hallazgo propio (Fase E).
+
+        Mismo criterio de propiedad que :meth:`set_finding_state`: la evidencia
+        de un hallazgo de otro usuario se reporta como no encontrada, sin
+        revelar el ``scan_id`` ajeno.
+
+        Returns:
+            Una lista de dicts con ``kind``, ``payload``, ``contentHash`` y
+            ``capturedAt`` de cada evidencia, la más reciente primero.
+        """
+        with UnitOfWork() as uow:
+            repo = ScanRepository(uow)
+            finding = repo.get_finding(finding_id)
+            if finding is None:
+                raise FindingNotFoundError(finding_id)
+            assert_owned(ScanRepository, finding.scan_id, user_id,
+                         lambda _scan_id: FindingNotFoundError(finding_id), uow=uow)
+            return [
+                {
+                    "kind": evidence.kind,
+                    "payload": evidence.payload,
+                    "contentHash": evidence.content_hash,
+                    "capturedAt": evidence.captured_at.isoformat() if evidence.captured_at else None,
+                }
+                for evidence in repo.get_evidence_for_finding(finding_id)
+            ]
+
     def _create_scan_record(
         self, target: str, user_id: int,
         programed_scan_id: Optional[int] = None, asset_id: Optional[int] = None,
@@ -931,8 +960,18 @@ class LybraEngineManager(ScanManager):
         )
 
     def _persist_scan_results(self, uow, scan, domain_data) -> None:
-        """Persist the engine's findings (``domain_data`` is a list of dicts)."""
-        ScanRepository(uow).persist_findings(scan, domain_data)
+        """Persist the engine's findings (``domain_data`` is a list of dicts).
+
+        Aprovecha la escritura para purgar la evidencia caducada (Fase E): cada
+        escaneo que graba evidencia se lleva de paso la que ha pasado su
+        retención, así la tabla no crece sin fin sin necesidad de un barredor
+        aparte.
+        """
+        evidence_config = CR.lybra_evidence_config()
+        repo = ScanRepository(uow)
+        repo.persist_findings(scan, domain_data,
+                              evidence_max_body=evidence_config.max_body_bytes)
+        repo.delete_expired_evidence(evidence_config.retention_days)
 
     def get_scans_paginated(  # pylint: disable=arguments-differ
         self, user_id: int, page: int = 1, per_page: int = 10,
