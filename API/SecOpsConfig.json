@@ -210,7 +210,8 @@
             "httpUserAgent": "Lybra/1.0",
             "networkTimeout": 5.0,
             "bannerTimeout": 2.0,
-            "maxBlindProbes": 2
+            "maxBlindProbes": 2,
+            "maxPayloadExpansions": 25
           },
           "evidence": {
             "enabled": true,

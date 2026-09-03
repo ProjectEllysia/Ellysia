@@ -898,6 +898,16 @@ class LybraEngineConfig:  # pylint: disable=too-many-instance-attributes
     presupuesto que separa "prueba lo que ya sabes leer" de un escaneo de
     servicios completo. A cero, la cascada se queda sólo en el saludo."""
 
+    # --- DSL de checks: payloads/fuzzing (checks.CheckRuntime)
+    max_payload_expansions: int = 25
+    """Tope duro de peticiones que un check con ``payloads`` puede expandir
+    (L30). Un payload es una lista de valores —veinte nombres de fichero de
+    copia de seguridad, pongamos— que se sustituyen en la petición, y sin un
+    tope el producto cartesiano de varias listas convierte un check en un
+    barrido de fuerza bruta de horas. El motor corta en cuanto alcanza este
+    número, así que es la diferencia entre "prueba unas cuantas variaciones" y
+    "prueba el diccionario entero"."""
+
 
 @config_block("features.themis.scanners.lybra.ingest")
 @dataclass(frozen=True)

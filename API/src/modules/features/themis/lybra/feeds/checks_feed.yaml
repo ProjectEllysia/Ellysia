@@ -1395,3 +1395,45 @@ checks:
       title: 'Apache path traversal confirmado (CVE-2021-42013): /etc/passwd legible'
       qod: 99
       confirmed: true
+  # ---------------------------------------------------------------------------
+  # PAYLOADS (L30) — una lista de valores sustituidos en la ruta, en vez de un
+  # check por variación. Este busca un volcado de base de datos olvidado bajo
+  # la raíz web: los nombres de fichero de copia de seguridad más habituales,
+  # probados con una sola entrada de feed. El motor expande ``{{name}}`` una
+  # vez por valor y corta en ``maxPayloadExpansions``, así que la lista puede
+  # crecer sin volverse un barrido. Cualquiera que devuelva 200 con pinta de
+  # volcado SQL dispara; un solo hallazgo, sea cual sea el que picó.
+  - id: sql-dump-exposure
+    version: 1
+    type: http
+    category: exposed_path
+    severity: HIGH
+    service: http
+    mode: safe
+    payloads:
+      name:
+        - backup.sql
+        - dump.sql
+        - database.sql
+        - db.sql
+        - backup.sql.gz
+        - www.sql
+        - site.sql
+    requests:
+      - method: GET
+        path: /{{name}}
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: word
+            part: body
+            words:
+              - 'CREATE TABLE'
+              - 'INSERT INTO'
+              - 'DROP TABLE'
+    finding:
+      title: Volcado de base de datos SQL expuesto bajo la raíz web
+      qod: 99
+      confirmed: true

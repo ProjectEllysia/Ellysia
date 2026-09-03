@@ -17,8 +17,14 @@ headers, and TLS/certificate hygiene (self-signed, expired, deprecated
 protocol — a ``type: "tls"`` check, evaluated against a handshake instead of an
 HTTP request/response), plus the raw protocol probes of ``type: "network"``
 (Fase N) and the first-party plugins of ``type: "script"`` (Fase R) for what no
-text matcher can express — a binary protocol, a multi-step negotiation. Request
-chaining and payloads/fuzzing are deliberate follow-ups.
+text matcher can express — a binary protocol, a multi-step negotiation. An
+``http`` check can also **chain** requests (L30): an ``extractors`` block pulls
+a variable out of one response — a session cookie, a CSRF token, a version
+string — and later requests in the same check reference it as ``{{name}}`` in
+their path, body or headers. **Payloads** (``payloads: {name: [v1, v2, ...]}``)
+expand a single check into several attempts, one per value substituted the
+same way, capped hard by ``lybra.engine.maxPayloadExpansions`` so a payload
+list never turns a check into a brute-force sweep.
 
 The runtime is pure given an injected ``fetch`` callable, so it can be
 unit-tested with hand-crafted responses and never touches the network in tests.
@@ -29,6 +35,7 @@ must wait on the authorized-targets register the roadmap calls for.
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import re
@@ -61,7 +68,7 @@ logger = logging.getLogger(__name__)
 # ``Check.check_id``). Los dos checks ``network`` suben además a ``version: 2``
 # en checks-6: su comportamiento cambia, y un hallazgo guardado tiene que poder
 # decir cuál de las dos formas lo produjo.
-CHECKS_FEED_VERSION = "lybra-checks-16"
+CHECKS_FEED_VERSION = "lybra-checks-17"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -253,11 +260,103 @@ class Matcher:
 
     def _part_text(self, response: Response) -> str:
         """Return the response text this matcher's ``part`` refers to."""
-        if self.part == "header":
-            return "\n".join(f"{k}: {v}" for k, v in response.headers.items())
-        if self.part == "status":
-            return str(response.status)
-        return response.body
+        return _part_text(response, self.part)
+
+
+def _part_text(response: Response, part: str) -> str:
+    """Return the text of a response ``part`` — ``body``, ``header`` or ``status``.
+
+    Shared by :class:`Matcher` and :class:`Extractor` so both name the same
+    three parts the same way; an unknown part falls back to the body.
+    """
+    if part == "header":
+        return "\n".join(f"{name}: {value}" for name, value in response.headers.items())
+    if part == "status":
+        return str(response.status)
+    return response.body
+
+
+# Un marcador de variable en el DSL: ``{{name}}``, la misma sintaxis que Nuclei,
+# con la que se aspira a mantener compatibilidad. El nombre admite letras,
+# dígitos, guion y guion bajo — lo justo para un identificador, sin abrir la
+# puerta a interpolar expresiones.
+_VARIABLE_RE = re.compile(r"\{\{\s*([A-Za-z0-9_-]+)\s*\}\}")
+
+
+def _substitute(text: str, variables: Dict[str, str]) -> str:
+    """Replace every ``{{name}}`` in ``text`` with its bound value.
+
+    A marker whose variable is not bound is left **verbatim**, not blanked: a
+    payload check with a typo'd ``{{fil}}`` should fail loudly by requesting a
+    literal ``{{fil}}`` path (a 404 that shows up), not silently probe ``/`` and
+    look like it ran. Substitution is single-pass, so a value that itself
+    contains ``{{...}}`` is not re-expanded — variables carry data from the
+    target, and re-expanding it would let a response steer later requests.
+
+    Args:
+        text: The template text (a path, body or header value).
+        variables: The bound variables.
+
+    Returns:
+        The rendered text.
+    """
+    return _VARIABLE_RE.sub(
+        lambda match: variables.get(match.group(1), match.group(0)), text)
+
+
+@dataclass(frozen=True)
+class Extractor:
+    """Pulls a named value out of a response, for the next request to reuse.
+
+    This is the piece that turns a check's requests from independent probes
+    into a *chain*: an extractor names a fragment of one response —a CSRF
+    token, a session id, a version string— and the runtime makes it available
+    as ``{{name}}`` in the ``path``, ``body`` and ``headers`` of every later
+    request in the **same** check. Without it there is no way to do
+    login → protected resource, because the second request cannot know what the
+    first one answered.
+
+    A single regular expression, matched against a chosen part of the response.
+    ``group`` selects which capture group is the value (``1`` by default, the
+    first parenthesised group; ``0`` is the whole match). When the pattern does
+    not match, the extractor yields nothing and the check is abandoned — a
+    chain whose link is missing cannot honestly claim to have fired.
+
+    Attributes:
+        name: The variable name the value is bound to (used as ``{{name}}``).
+        type: The extractor kind. Only ``"regex"`` exists today; the field is
+            here so the feed is explicit and a second kind is an added value,
+            not a reinterpretation.
+        part: Which part of the response to search — ``"body"``, ``"header"``
+            or ``"status"`` (same vocabulary as :class:`Matcher`).
+        pattern: The regular expression to search for.
+        group: Which capture group is the extracted value.
+    """
+    name: str
+    pattern: str
+    type: str = "regex"
+    part: str = "body"
+    group: int = 1
+
+    def extract(self, response: Response) -> Optional[str]:
+        """Return the value this extractor pulls from ``response``, or ``None``.
+
+        Args:
+            response: The response to search.
+
+        Returns:
+            The captured text, or ``None`` when the pattern does not match (or
+            names a group the pattern does not have) — the signal the runtime
+            reads as "this chain cannot continue".
+        """
+        text = _part_text(response, self.part)
+        match = re.search(self.pattern, text)
+        if match is None:
+            return None
+        try:
+            return match.group(self.group)
+        except IndexError:  # el patrón no tiene ese grupo — se trata como no-match
+            return None
 
 
 @dataclass(frozen=True)
@@ -285,6 +384,19 @@ class Request:
             own: where a reply stops is a fact about the protocol, so the feed
             declares it. Defaults to ``"line"``, the original behaviour.
             Unused by ``type: "http"``.
+        body: For ``type: "http"``, the request body — needed for anything
+            past a bare GET, a login POST above all. ``{{name}}`` placeholders
+            in it are substituted with variables the check has extracted or a
+            payload has bound. ``None`` sends no body.
+        headers: For ``type: "http"``, extra request headers as ``(name,
+            value)`` pairs (a tuple, not a dict, so the request stays a frozen
+            value). Their values also take ``{{name}}`` — the usual way a check
+            replays an extracted token is an ``Authorization`` or ``Cookie``
+            header on the next request.
+        extractors: The :class:`Extractor` s run against this request's
+            response, binding named values for the check's later requests. This
+            is what makes a check a chain rather than a set of independent
+            probes.
     """
     method: str = "GET"
     path: str = "/"
@@ -292,6 +404,9 @@ class Request:
     condition: str = "and"
     send: Optional[str] = None
     read: str = "line"
+    body: Optional[str] = None
+    headers: tuple = ()
+    extractors: tuple = ()
 
     def evaluate(self, response: Response) -> bool:
         """Return whether this request's matchers are satisfied by a response.
@@ -363,6 +478,15 @@ class Check:  # pylint: disable=too-many-instance-attributes
             given: they exist so a *selector* can decide which of thousands of
             ingested checks are worth running against a given service before
             the runtime ever sees them (see ``ingest.selector``).
+        payloads: Named lists of values the check fuzzes over, as ``(name,
+            values)`` pairs (a tuple of tuples, so the check stays a frozen
+            value). The runtime runs the whole request sequence once per
+            combination of payload values, substituting ``{{name}}`` in
+            ``path``/``body``/``headers`` each time — twenty backup-file names
+            probed by one check instead of twenty near-identical checks. The
+            cartesian product is **hard-capped** by the runtime
+            (``max_payload_expansions``) so a payload can never turn into an
+            hours-long brute force. Empty for a check that does not fuzz.
     """
     id: str
     version: int
@@ -380,6 +504,7 @@ class Check:  # pylint: disable=too-many-instance-attributes
     expect_banner: bool = False
     confirms: Optional[str] = None
     tags: tuple = ()
+    payloads: tuple = ()
 
     @property
     def check_id(self) -> str:
@@ -440,6 +565,18 @@ def _parse_check(c: dict) -> Check:
             condition=request.get("matchers-condition", "and"),
             send=request.get("send"),
             read=_parse_read_mode(request.get("read"), c.get("id")),
+            body=request.get("body"),
+            headers=tuple((str(name), str(value)) for name, value in (request.get("headers") or {}).items()),
+            extractors=tuple(
+                Extractor(
+                    name=extractor["name"],
+                    pattern=extractor.get("pattern") or extractor.get("regex") or "",
+                    type=extractor.get("type", "regex"),
+                    part=extractor.get("part", "body"),
+                    group=int(extractor.get("group", 1)),
+                )
+                for extractor in request.get("extractors", [])
+            ),
             matchers=tuple(
                 Matcher(
                     type=matcher["type"],
@@ -466,6 +603,10 @@ def _parse_check(c: dict) -> Check:
         script=c.get("script"),
         expect_banner=bool(c.get("expectBanner", False)),
         confirms=c.get("confirms"),
+        payloads=tuple(
+            (str(name), tuple(str(value) for value in values))
+            for name, values in (c.get("payloads") or {}).items()
+        ),
     )
     _assert_service_is_reachable(check)
     return check
@@ -579,6 +720,12 @@ MATCHER_PARTS = ("body", "header", "status")
 # Forma de un identificador CVE, para validar el campo ``confirms``.
 _CVE_ID_RE = re.compile(r"^CVE-[0-9]{4}-[0-9]{4,}$")
 
+# Los tipos de extractor que :meth:`Extractor.extract` implementa. Sólo hay uno
+# hoy; validarlo evita que un ``type: xpath`` copiado de una plantilla de
+# Nuclei se cargue en silencio y no extraiga nunca nada — con lo que el
+# encadenamiento que dependa de esa variable se rompería sin decir por qué.
+EXTRACTOR_TYPES = ("regex",)
+
 
 def validate_checks(checks: Iterable[Check]) -> List[str]:  # pylint: disable=too-many-branches
     """Comprobar que ningún check está muerto por construcción.
@@ -659,6 +806,13 @@ def validate_checks(checks: Iterable[Check]) -> List[str]:  # pylint: disable=to
         if check.type in ("http", "network") and not check.requests:
             problems.append(f"Check {name!r}: de tipo {check.type!r} y sin ninguna petición")
 
+        # Un payload sin valores nunca expande nada, así que su ``{{name}}`` se
+        # queda literal en la petición: un check muerto que parece vivo.
+        for payload_name, values in check.payloads:
+            if not values:
+                problems.append(
+                    f"Check {name!r}: el payload {payload_name!r} no tiene ningún valor")
+
         for position, request in enumerate(check.requests):
             where = f"Check {name!r}, petición {position}"
             if request.read not in NETWORK_READ_MODES:
@@ -672,6 +826,25 @@ def validate_checks(checks: Iterable[Check]) -> List[str]:  # pylint: disable=to
                     problems.append(f"{where}: matcher sobre la parte {matcher.part!r}, que no existe")
                 if not matcher.values:
                     problems.append(f"{where}: matcher {matcher.type!r} sin valores que buscar")
+            for extractor in request.extractors:
+                if not extractor.name:
+                    problems.append(f"{where}: un extractor no declara 'name'")
+                if extractor.type not in EXTRACTOR_TYPES:
+                    problems.append(
+                        f"{where}: extractor de tipo {extractor.type!r} desconocido "
+                        f"(disponibles: {', '.join(EXTRACTOR_TYPES)})")
+                if extractor.part not in MATCHER_PARTS:
+                    problems.append(
+                        f"{where}: extractor sobre la parte {extractor.part!r}, que no existe")
+                if not extractor.pattern:
+                    problems.append(f"{where}: extractor {extractor.name!r} sin patrón")
+                else:
+                    try:
+                        re.compile(extractor.pattern)
+                    except re.error as compile_error:
+                        problems.append(
+                            f"{where}: extractor {extractor.name!r} con patrón inválido "
+                            f"({compile_error})")
 
     return problems
 
@@ -1098,6 +1271,7 @@ class CheckRuntime:
         script_plugins: Optional[Dict[str, object]] = None,
         mapper: Optional[Callable] = None,
         capture_evidence: bool = False,
+        max_payload_expansions: int = 25,
     ) -> None:
         self._checks = list(checks)
         self._fetch = fetch
@@ -1106,6 +1280,11 @@ class CheckRuntime:
         self._tls_fetch = tls_fetch
         self._network_open = network_open
         self._script_plugins = dict(script_plugins or {})
+        # El tope de expansiones de un payload (L30): un check que fuzzea corta
+        # aquí, pase lo que pase, para que no se vuelva un barrido de fuerza
+        # bruta. El manager lo inyecta desde la config; el default de 25 es el
+        # que un check declarativo espera si nadie lo toca.
+        self._max_payload_expansions = max(1, int(max_payload_expansions))
         # Cómo se recorren los servicios. Por defecto, el ``map`` de siempre:
         # uno detrás de otro. El manager inyecta aquí un pool acotado por host
         # (L23), igual que ya inyecta las sondas — este módulo no conoce la
@@ -1292,35 +1471,113 @@ class CheckRuntime:
     def _run_check(self, check: Check, host: str, service: Service) -> Optional[dict]:
         """Run one check against one service, returning a finding if it fired.
 
-        Every request in the check must fire (they are combined with AND). If any
-        request fails to reach the target or does not match, the check produces
-        nothing.
+        The check's requests run in sequence and are combined with AND: every
+        one must reach the target and match, or the check produces nothing. A
+        request can carry a ``body`` and ``headers``, and each request's
+        ``extractors`` bind ``{{name}}`` variables that later requests in the
+        same sequence substitute — that is the login → protected-resource chain.
+
+        When the check declares ``payloads``, the whole sequence runs once per
+        combination of payload values (``{{name}}`` substituted each time),
+        capped at ``max_payload_expansions``. The **first** combination that
+        fires wins: a check that probes twenty backup-file names is asking "is
+        *any* of these exposed?", and one hit answers it. Every finding still
+        carries a single ``check_id``, so twenty probes collapse to one finding.
         """
-        last_response = None
-        for request in check.requests:
-            response = self._probe_response(host, service, request.method, request.path)
-            if response is None or not request.evaluate(response):
-                return None
-            last_response = response
+        fired = None
+        for variables in self._payload_combinations(check):
+            fired = self._run_request_sequence(check, host, service, variables)
+            if fired is not None:
+                break
+        if fired is None:
+            return None
+        last_response, last_path = fired
         finding = self._finding(check, service)
         # Evidencia (Fase E): la respuesta que provocó el hallazgo. Sólo para
         # los confirmados —los que van a un informe— y sólo si la captura está
         # activada. El payload viaja en ``_evidence`` hasta la persistencia, que
-        # lo redacta y lo separa en su propia fila.
-        if (self._capture_evidence and last_response is not None
-                and finding.get("confirmed")):
+        # lo redacta y lo separa en su propia fila. La ruta es la ya sustituida
+        # (el payload o la variable que de verdad disparó), no la plantilla.
+        if self._capture_evidence and finding.get("confirmed"):
             finding["_evidence"] = {
                 "kind": "http_response",
                 "payload": {
                     "status": last_response.status,
                     "headers": dict(last_response.headers),
                     "body": last_response.body,
-                    "path": check.requests[-1].path,
+                    "path": last_path,
                 },
             }
         return finding
 
-    def _probe_response(self, host: str, service: Service, method: str, path: str) -> Optional[Response]:
+    def _payload_combinations(self, check: Check) -> List[Dict[str, str]]:
+        """Return the variable bindings to run the check's sequence under.
+
+        A check with no ``payloads`` runs once, with no bindings (``[{}]``): the
+        old behaviour, unchanged. A check *with* payloads runs once per element
+        of the cartesian product of its payload lists — ``{file: [a, b], ext:
+        [x, y]}`` yields four bindings — but never more than
+        ``max_payload_expansions`` of them. The cap is applied while the product
+        is generated (it is lazy), so a payload whose product is astronomically
+        large still costs only the capped number of iterations, not the full
+        expansion followed by a slice.
+        """
+        if not check.payloads:
+            return [{}]
+        names = [name for name, _ in check.payloads]
+        value_lists = [values for _, values in check.payloads]
+        combinations: List[Dict[str, str]] = []
+        for combination in itertools.product(*value_lists):
+            combinations.append(dict(zip(names, combination)))
+            if len(combinations) >= self._max_payload_expansions:
+                break
+        return combinations
+
+    def _run_request_sequence(
+        self, check: Check, host: str, service: Service, variables: Dict[str, str],
+    ) -> Optional[Tuple[Response, str]]:
+        """Run a check's requests once, threading extracted variables through.
+
+        Each request's ``path``/``body``/``headers`` are rendered with the
+        variables gathered so far (the payload binding this call started with,
+        plus whatever earlier requests extracted). Every request must match; a
+        request that fails to reach the target, does not match, **or whose
+        extractor finds nothing** abandons the whole sequence — a chain with a
+        missing link never fired.
+
+        Args:
+            check: The check being run.
+            host: The target host.
+            service: The service being probed.
+            variables: The initial variable bindings (a payload combination, or
+                empty).
+
+        Returns:
+            ``(last_response, last_path)`` if every request matched, else
+            ``None``. The path comes back rendered so the caller can record the
+            request that actually fired as evidence.
+        """
+        variables = dict(variables)
+        last: Optional[Tuple[Response, str]] = None
+        for request in check.requests:
+            path = _substitute(request.path, variables)
+            body = _substitute(request.body, variables) if request.body else None
+            headers = {name: _substitute(value, variables) for name, value in request.headers} or None
+            response = self._probe_response(host, service, request.method, path, body, headers)
+            if response is None or not request.evaluate(response):
+                return None
+            for extractor in request.extractors:
+                value = extractor.extract(response)
+                if value is None:
+                    return None
+                variables[extractor.name] = value
+            last = (response, path)
+        return last
+
+    def _probe_response(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self, host: str, service: Service, method: str, path: str,
+        body: Optional[str] = None, headers: Optional[Dict[str, str]] = None,
+    ) -> Optional[Response]:
         """Return the response for one request, asking the target only once.
 
         Every check runs independently, which is what keeps them simple, but
@@ -1331,19 +1588,29 @@ class CheckRuntime:
 
         Noise on the target is not a side issue for a security scanner: it
         shows up in the SIEM of whoever hired us. So a response is fetched once
-        per ``(method, path)`` and shared by every check that asks for it,
-        within one :meth:`run`.
+        per ``(method, path, body, headers)`` and shared by every check that
+        asks for it, within one :meth:`run`.
+
+        The ``body``/``headers`` are optional so the vast majority of checks —
+        bare GETs — call the injected ``fetch`` with the same four positional
+        arguments it always took: a test ``fetch`` written as ``(host, port,
+        method, path)`` keeps working, and only a check that actually sends a
+        body or headers requires a ``fetch`` that accepts them.
 
         A transport failure is remembered too. Not caching it would mean three
         attempts against a service that is down — the case where retrying costs
         the most and informs the least.
         """
-        key = (host, service.port, method, path)
+        header_key = tuple(sorted(headers.items())) if headers else None
+        key = (host, service.port, method, path, body, header_key)
         if key in self._responses:
             return self._responses[key]
         if self._rl is not None:
             self._rl.acquire(host)
-        response = self._fetch(host, service.port, method, path)
+        if body is None and headers is None:
+            response = self._fetch(host, service.port, method, path)
+        else:
+            response = self._fetch(host, service.port, method, path, body, headers)
         self._responses[key] = response
         return response
 
@@ -1613,7 +1880,10 @@ class HttpProbe:
             urllib.request.HTTPSHandler(context=ssl._create_unverified_context())
         )
 
-    def fetch(self, host: str, port: Optional[int], method: str, path: str) -> Optional[Response]:
+    def fetch(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self, host: str, port: Optional[int], method: str, path: str,
+        body: Optional[str] = None, headers: Optional[Dict[str, str]] = None,
+    ) -> Optional[Response]:
         """Make a request and return it as a :class:`Response`.
 
         Args:
@@ -1621,15 +1891,20 @@ class HttpProbe:
             port: The target port (decides http vs https).
             method: The HTTP method.
             path: The request path.
+            body: The request body (L30), or ``None`` for none. A non-GET check
+                — a login POST above all — needs this.
+            headers: Extra request headers (L30), or ``None``. The way a chained
+                check replays an extracted token: an ``Authorization`` or
+                ``Cookie`` header on the follow-up request.
 
         Returns:
             The response, or ``None`` on a transport failure.
         """
-        result = self._request(host, port, method, path)
+        result = self._request(host, port, method, path, body, headers)
         if result is None:
             return None
-        status, body, headers = result
-        return self._to_response(status, body, headers)
+        status, response_body, response_headers = result
+        return self._to_response(status, response_body, response_headers)
 
     def fetch_bytes(self, host: str, port: Optional[int], path: str) -> Optional[bytes]:
         """Fetch raw bytes for binary content such as a favicon.
@@ -1652,18 +1927,29 @@ class HttpProbe:
         status, body, _headers = result
         return body if status == 200 else None
 
-    def _request(self, host: str, port: Optional[int], method: str, path: str) -> Optional[tuple]:
+    def _request(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self, host: str, port: Optional[int], method: str, path: str,
+        body: Optional[str] = None, headers: Optional[Dict[str, str]] = None,
+    ) -> Optional[tuple]:
         """Perform the raw HTTP request, returning ``(status, body, headers)``.
 
         A 4xx/5xx is returned normally; only a transport failure returns ``None``.
         HTTPS uses an unverified TLS context, since we are scanning arbitrary
         hosts whose certificates we do not control.
+
+        The check-supplied ``headers`` are layered over the probe's own
+        ``User-Agent`` (a check may deliberately override it), and ``body`` is
+        sent UTF-8 encoded. Both are absent for the common read-only GET.
         """
         scheme = self._scheme_for(host, port)
         netloc = f"{host}:{port}" if port else host
         url = f"{scheme}://{netloc}{path}"
+        request_headers = {"User-Agent": self._user_agent}
+        if headers:
+            request_headers.update({str(name): str(value) for name, value in headers.items()})
+        data = body.encode("utf-8") if body is not None else None
         try:
-            request = urllib.request.Request(url, method=method, headers={"User-Agent": self._user_agent})
+            request = urllib.request.Request(url, method=method, headers=request_headers, data=data)
             with self._opener.open(request, timeout=self._timeout) as response:
                 return response.status, response.read(self._max_bytes), dict(response.headers)
         except urllib.error.HTTPError as err:

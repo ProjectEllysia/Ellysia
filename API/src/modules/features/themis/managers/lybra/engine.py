@@ -484,6 +484,7 @@ class LybraEngineManager(ScanManager):
                 network_open=NetworkProbe(timeout=engine.network_timeout).open,
                 script_plugins=default_script_plugins(),
                 capture_evidence=CR.lybra_evidence_config().enabled,
+                max_payload_expansions=engine.max_payload_expansions,
                 # El mismo pool acotado por host que usa el fingerprinting: los
                 # checks activos tienen exactamente la misma forma —espera de
                 # red servicio a servicio— y el mismo motivo para no hacerla en
