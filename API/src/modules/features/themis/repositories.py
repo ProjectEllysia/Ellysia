@@ -40,6 +40,8 @@ from .model import (
     CpeMatch,
     CpeProductAlias,
     CveEntry,
+    DistroAdvisory,
+    DistroPkgStatus,
     LybraScan,
     EpssScore,
     Finding,
@@ -689,6 +691,11 @@ class ScanRepository(BaseRepository[Scan]):
         """
         for data in findings_data:
             evidence = data.pop("_evidence", None)
+            # Las claves con guion bajo son de trabajo, no columnas: las etapas
+            # de la tubería se pasan datos por ahí (la evidencia cruda, la
+            # versión instalada que necesita la verificación de backports) y
+            # ninguna sobrevive a la fila.
+            data = {key: value for key, value in data.items() if not key.startswith("_")}
             finding = Finding(scan_id=scan.id, **data)
             self._session.add(finding)
             if evidence:
@@ -1287,6 +1294,57 @@ class KbRepository(BaseRepository[CveEntry]):
     def sync_status(self) -> List[KbSyncStatus]:
         """El estado de sincronización de todas las fuentes registradas."""
         return self._session.query(KbSyncStatus).order_by(KbSyncStatus.source).all()
+
+    def upsert_distro_pkg_status(self, row: dict) -> None:
+        """Guardar lo que un proveedor dice de un paquete frente a una CVE."""
+        if not row.get("package") or not row.get("cve_id"):
+            return
+        existing = (self._session.query(DistroPkgStatus).filter_by(
+            vendor=row["vendor"], release=row.get("release"),
+            package=row["package"], cve_id=row["cve_id"]).one_or_none())
+        if existing is None:
+            self._session.add(DistroPkgStatus(**row))
+            return
+        existing.fixed_in = row.get("fixed_in")
+        existing.status = row.get("status", "unknown")
+
+    def upsert_distro_advisory(self, row: dict) -> None:
+        """Guardar la cabecera de un aviso de distribución (DSA, USN, RHSA…)."""
+        existing = (self._session.query(DistroAdvisory)
+                    .filter_by(advisory_id=row["advisory_id"]).one_or_none())
+        if existing is None:
+            self._session.add(DistroAdvisory(**row))
+            return
+        for field_name, value in row.items():
+            setattr(existing, field_name, value)
+
+    def distro_package_status(self, vendor: str, release: Optional[str],
+                              package: str, cve_id: str) -> Optional[tuple]:
+        """Qué dice el proveedor sobre este paquete y esta CVE.
+
+        Un aviso sin ``release`` aplica a todas las versiones de la
+        distribución, así que sirve también cuando se pregunta por una
+        concreta; el que sí la nombra manda sobre él. De ahí el orden: primero
+        se busca la respuesta específica y sólo después la genérica.
+
+        Returns:
+            ``(status, fixed_in)``, o ``None`` si el proveedor no se ha
+            pronunciado — que no es lo mismo que decir que está a salvo, y por
+            eso el llamante no toca el hallazgo en ese caso.
+        """
+        query = (self._session.query(DistroPkgStatus)
+                 .filter(DistroPkgStatus.vendor == vendor,
+                         DistroPkgStatus.package == package,
+                         DistroPkgStatus.cve_id == cve_id))
+        rows = query.all()
+        if not rows:
+            return None
+        specific = [row for row in rows if release and row.release == release]
+        generic = [row for row in rows if row.release is None]
+        chosen = (specific or generic or None)
+        if not chosen:
+            return None
+        return chosen[0].status, chosen[0].fixed_in
 
     def exploit_evidence(self, cve_id: str) -> Optional[str]:
         """Qué madurez de explotación consta para una CVE, sin contar KEV (L34).

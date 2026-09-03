@@ -1882,3 +1882,95 @@ def test_a_cve_with_nothing_public_says_none_not_null(app, admin_user):
 
     vuln = next(f for f in findings if f.category == "outdated_software")
     assert vuln.exploit_maturity == "none"
+
+
+# ─────────────── verificación de backports de extremo a extremo (Fase O)
+
+
+def _debian_services() -> list:
+    """Apache empaquetado por Debian 11: la versión trae su revisión, que es lo
+    que nombra al proveedor sin necesidad de entrar en el host."""
+    from src.modules.features.themis.lybra import Service
+    return [Service(port=80, protocol="tcp", name="http", product="apache2",
+                    version="2.4.49-1~deb11u1",
+                    cpe="cpe:/a:apache:http_server:2.4.49", origin="inventory")]
+
+
+def test_a_backported_finding_is_closed_without_touching_the_host(app, admin_user):
+    """El corazón de la Fase O: Debian ya lo parcheó sin subir el número
+    visible, así que el hallazgo por versión nunca fue real."""
+    _seed_kb_apache_cve(app)
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).upsert_distro_pkg_status({
+                "vendor": "debian", "release": "11", "package": "apache2",
+                "cve_id": "CVE-2021-41773", "fixed_in": "2.4.49-1~deb11u1",
+                "status": "fixed",
+            })
+
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.41", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_debian_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    assert vuln.state == "fixed"
+    assert vuln.confirmed is False
+    assert vuln.check_id == "lybra:oval-backport@1"
+
+
+def test_a_vendor_confirming_the_flaw_raises_the_confidence(app, admin_user):
+    _seed_kb_apache_cve(app)
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).upsert_distro_pkg_status({
+                "vendor": "debian", "release": "11", "package": "apache2",
+                "cve_id": "CVE-2021-41773", "fixed_in": None, "status": "vulnerable",
+            })
+
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.42", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_debian_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    assert vuln.confirmed is True
+    assert vuln.qod == 90
+
+
+def test_without_a_distro_advisory_the_finding_stays_a_hypothesis(app, admin_user):
+    """El comportamiento de antes de la Fase O, que es el correcto cuando no
+    hay a quién preguntar."""
+    _seed_kb_apache_cve(app)
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.43", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_debian_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    vuln = next(f for f in findings if f.category == "outdated_software")
+    assert vuln.state == "open"
+    assert vuln.check_id == "lybra:version-match@1"
+
+
+def test_the_working_keys_never_reach_the_database(app, admin_user):
+    """`_installed_version` y `_package_name` son datos de trabajo entre etapas
+    de la tubería, no columnas."""
+    _seed_kb_apache_cve(app)
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.44", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, services_payload=_debian_services())
+
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    assert findings, "el escaneo no llegó a persistir nada"
+    for finding in findings:
+        assert not hasattr(finding, "_installed_version")

@@ -256,6 +256,13 @@ class LybraEngine:
             "confirmed":    is_verified,   # a network-inferred match stays a hypothesis; Fase R confirms it actively
             "cpe_resolved": True,   # this finding only exists because resolution succeeded
             "state":        "open",
+            # Claves de trabajo, no columnas: la verificación de backports
+            # (Fase O) necesita la versión **cruda** del paquete —con su
+            # revisión de distribución, que es lo que nombra al proveedor— y el
+            # nombre con el que esa distribución lo llama. El repositorio las
+            # descarta al persistir.
+            "_installed_version": service.version,
+            "_package_name":      service.product or service.name or "",
         }
 
     @staticmethod

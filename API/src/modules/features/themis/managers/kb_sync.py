@@ -5,6 +5,7 @@ estructura). ``KbQueryManager`` es posterior y es el contrato de lectura que
 consumen otros módulos.
 """
 
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -57,6 +58,36 @@ class KbSyncManager:
         with UnitOfWork() as uow:
             count = KbRepository(uow).bulk_upsert_epss(list(parse_epss_rows(csv_text)))
         logger.info("KB: EPSS sync upserted %d rows", count)
+        return count
+
+    def sync_oval(self, sources: dict) -> int:
+        """Espejar los avisos de las distribuciones (Fase O).
+
+        ``sources`` mapea ``"<vendor>[:<release>]"`` a la URL de su feed, para
+        que añadir Debian 12 o Rocky 9 sea una línea de configuración y no de
+        código. El formato se deduce del contenido: JSON es CSAF (Red Hat y
+        derivadas), lo demás es OVAL (Debian, Ubuntu).
+
+        Returns:
+            Cuántos pronunciamientos se escribieron.
+        """
+        from ..lybra import fetch_oval, parse_csaf_advisory, parse_oval_definitions
+
+        count = 0
+        for key, url in sources.items():
+            vendor, _, release = key.partition(":")
+            document = fetch_oval(url)
+            stripped = document.lstrip()
+            if stripped.startswith("{"):
+                rows = parse_csaf_advisory(json.loads(document), vendor=vendor)
+            else:
+                rows = parse_oval_definitions(document, vendor, release or None)
+            with UnitOfWork() as uow:
+                repo = KbRepository(uow)
+                for row in rows:
+                    repo.upsert_distro_pkg_status(row)
+                    count += 1
+        logger.info("KB: OVAL/CSAF sync upserted %d package statuses", count)
         return count
 
     def sync_nvd(self, base_url: str, window_days: int = 8, api_key: Optional[str] = None) -> int:
@@ -197,6 +228,8 @@ class KbSyncManager:
             summary["kev"] = self._sync_source("kev", lambda: self.sync_kev(sources["kev"]))
         if sources.get("epss"):
             summary["epss"] = self._sync_source("epss", lambda: self.sync_epss(sources["epss"]))
+        if sources.get("oval"):
+            summary["oval"] = self._sync_source("oval", lambda: self.sync_oval(sources["oval"]))
         if sources.get("nvd"):
             summary["nvd"] = self._sync_source("nvd", lambda: self.sync_nvd(
                 sources["nvd"],
