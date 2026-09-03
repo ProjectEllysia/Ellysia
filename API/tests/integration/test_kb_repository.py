@@ -393,3 +393,114 @@ def test_query_manager_enriches_with_kev_and_epss(app):
     assert exploited.vendor == "microsoft" and exploited.product == "windows"
     assert exploited.url == "https://nvd.nist.gov/vuln/detail/CVE-2026-0401"
     assert quiet.kev is False and quiet.epss is None
+
+
+# ───────────────────────────── estado de sincronización (L36)
+#
+# Una sincronización que funciona ya se nota: aparecen datos. Una que falla no
+# dejaba más rastro que una línea de log, así que el job podía llevar semanas
+# roto mientras los escaneos seguían saliendo en verde contra un catálogo
+# congelado. Esta es la tabla que hace esa avería consultable.
+
+from datetime import timedelta                                    # noqa: E402
+
+from src.modules.shared import utcnow_naive                       # noqa: E402
+from src.modules.features.themis.managers import KbSyncManager    # noqa: E402
+
+
+def test_a_failed_sync_keeps_the_last_success(app):
+    """La distancia entre «último intento» y «último éxito» es exactamente
+    cuánto lleva roto. Pisar la fecha de éxito al fallar destruiría el único
+    dato que responde a esa pregunta."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).record_sync("nvd", rows_upserted=120)
+        with UnitOfWork() as uow:
+            KbRepository(uow).record_sync("nvd", error="503 desde el feed")
+
+        with UnitOfWork() as uow:
+            row = {r.source: r for r in KbRepository(uow).sync_status()}["nvd"]
+            assert row.last_success_at is not None
+            assert row.last_attempt_at >= row.last_success_at
+            assert row.error == "503 desde el feed"
+            assert row.rows_upserted == 120    # el del último éxito, no None
+
+
+def test_a_successful_sync_clears_the_previous_error(app):
+    """La tabla dice si está bien *ahora*; el historial vive en los logs."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).record_sync("kev", error="se cayó")
+        with UnitOfWork() as uow:
+            KbRepository(uow).record_sync("kev", rows_upserted=9)
+
+        with UnitOfWork() as uow:
+            row = {r.source: r for r in KbRepository(uow).sync_status()}["kev"]
+            assert row.error is None
+            assert row.rows_upserted == 9
+
+
+def test_a_source_never_synced_counts_as_stale(app):
+    """No saber nada de una fuente es peor que saber que lleva días parada, no
+    mejor: se recorren las fuentes configuradas, no las filas de la tabla."""
+    with app.app_context():
+        status = KbSyncManager().status()
+        by_source = {entry["source"]: entry for entry in status["sources"]}
+
+        assert set(by_source) == {"nvd", "kev", "epss"}
+        assert all(entry["neverSynced"] for entry in by_source.values())
+        assert all(entry["isStale"] for entry in by_source.values())
+        assert status["isStale"] is True
+
+
+def test_a_recent_sync_is_not_stale(app):
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            for source in ("nvd", "kev", "epss"):
+                repo.record_sync(source, rows_upserted=1)
+
+        status = KbSyncManager().status()
+        assert status["isStale"] is False
+        assert all(not entry["isStale"] for entry in status["sources"])
+        assert all(entry["ageDays"] == 0 for entry in status["sources"])
+
+
+def test_an_aged_source_is_reported_stale(app):
+    """NVD publica a diario, así que su umbral es más corto que el de KEV y
+    EPSS: cuatro días de retraso ya son detección que falta."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            for source in ("nvd", "kev", "epss"):
+                repo.record_sync(source, rows_upserted=1)
+
+        with UnitOfWork() as uow:
+            rows = {r.source: r for r in KbRepository(uow).sync_status()}
+            rows["nvd"].last_success_at = utcnow_naive() - timedelta(days=4)
+
+        by_source = {e["source"]: e for e in KbSyncManager().status()["sources"]}
+        assert by_source["nvd"]["isStale"] is True
+        assert by_source["kev"]["isStale"] is False   # 4 días < umbral de 7
+
+
+def test_the_kb_status_endpoint_reports_every_source(client, app, admin_user, auth_headers):
+    with app.app_context():
+        with UnitOfWork() as uow:
+            KbRepository(uow).record_sync("kev", rows_upserted=5)
+
+    resp = client.get("/themis/kb/status", headers=auth_headers(admin_user))
+    assert resp.status_code == 200
+    body = resp.get_json()
+
+    by_source = {entry["source"]: entry for entry in body["sources"]}
+    assert set(by_source) == {"nvd", "kev", "epss"}
+    assert by_source["kev"]["rowsUpserted"] == 5
+    assert by_source["kev"]["neverSynced"] is False
+    assert by_source["nvd"]["neverSynced"] is True
+    assert body["isStale"] is True                     # nvd y epss nunca sincronizadas
+    assert body["feedVersion"].startswith("lybra-kb:")
+
+
+def test_the_kb_status_endpoint_requires_authentication(client):
+    assert client.get("/themis/kb/status").status_code == 401

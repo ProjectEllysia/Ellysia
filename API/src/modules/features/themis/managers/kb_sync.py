@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 import src.modules.system.config_reading as CR
 from src.modules.infrastructure import UnitOfWork
-from src.modules.shared import utcnow_naive
+from src.modules.shared import isoformat_utc, utcnow_naive
 from ..repositories import KbRepository
 
 
@@ -148,32 +148,152 @@ class KbSyncManager:
 
         return index
 
+    def _record(self, source: str, rows_upserted: Optional[int] = None,
+                error: Optional[str] = None) -> None:
+        """Dejar constancia del intento en su propia transacción.
+
+        Aparte de la de la sincronización a propósito: si la escritura de datos
+        falló y su transacción se deshizo, el registro del fallo tiene que
+        sobrevivir — es lo único que va a quedar de ese intento.
+        """
+        try:
+            with UnitOfWork() as uow:
+                KbRepository(uow).record_sync(source, rows_upserted, error)
+        except Exception:  # noqa: BLE001
+            # Observabilidad que no puede tumbar aquello que observa.
+            logger.exception("KB: no se pudo registrar el estado de '%s'", source)
+
+    def _sync_source(self, source: str, run) -> Optional[int]:
+        """Ejecutar la sincronización de una fuente y anotar cómo salió.
+
+        Devuelve las filas escritas, o ``None`` si falló. **La excepción no se
+        propaga**, y ésa es la razón de que este método exista: ``sync_all``
+        encadenaba las tres fuentes en línea recta, así que un fallo de KEV
+        —una URL caída, un formato cambiado— se llevaba por delante a EPSS y a
+        NVD, que no tienen nada que ver. Una fuente rota debe costar una
+        fuente, no tres.
+        """
+        try:
+            rows = run()
+        except Exception as e:  # noqa: BLE001
+            logger.exception("KB: la sincronización de '%s' falló", source)
+            self._record(source, error=f"{type(e).__name__}: {e}")
+            return None
+        self._record(source, rows_upserted=rows)
+        return rows
+
     def sync_all(self) -> dict:
-        """Run every configured source once; return a per-source count summary."""
-        sources = CR.knowledge_base_config().sources
+        """Run every configured source once; return a per-source count summary.
+
+        Cada fuente se sincroniza y se anota por separado: una que falle deja su
+        error registrado y las demás siguen. El resumen trae ``None`` en la
+        fuente que falló, que es distinto de un 0 (sincronizó bien y no había
+        nada nuevo).
+        """
+        config = CR.knowledge_base_config()
+        sources = config.sources
         summary: dict = {}
         if sources.get("kev"):
-            summary["kev"] = self.sync_kev(sources["kev"])
+            summary["kev"] = self._sync_source("kev", lambda: self.sync_kev(sources["kev"]))
         if sources.get("epss"):
-            summary["epss"] = self.sync_epss(sources["epss"])
+            summary["epss"] = self._sync_source("epss", lambda: self.sync_epss(sources["epss"]))
         if sources.get("nvd"):
-            summary["nvd"] = self.sync_nvd(
+            summary["nvd"] = self._sync_source("nvd", lambda: self.sync_nvd(
                 sources["nvd"],
-                window_days=CR.knowledge_base_config().nvd_window_days,
-                api_key=CR.knowledge_base_config().nvd_api_key,
-            )
-            # Only worth rebuilding when NVD's CpeMatch rows might have
-            # changed — the index is entirely derived from that table.
-            summary["cpeProductAliases"] = self.rebuild_cpe_product_index()
+                window_days=config.nvd_window_days,
+                api_key=config.nvd_api_key,
+            ))
+            if summary["nvd"] is not None:
+                # Only worth rebuilding when NVD's CpeMatch rows might have
+                # changed — the index is entirely derived from that table.
+                summary["cpeProductAliases"] = self.rebuild_cpe_product_index()
         logger.info("KB sync complete: %s", summary)
         return summary
+
+    def status(self) -> dict:
+        """Qué sabe la KB y cuándo lo aprendió, en una sola respuesta.
+
+        Junta las dos preguntas que hay que hacerse sobre un espejo local y que
+        no son la misma:
+
+        - **¿cuándo preguntamos, y funcionó?** — de ``KbSyncStatus``. Es lo que
+          detecta un job roto: sin esto, tres semanas de sincronizaciones
+          fallidas no dejan más rastro que unas líneas de log que nadie lee, y
+          los escaneos siguen saliendo en verde contra un catálogo congelado.
+        - **¿cuán reciente es lo que sabemos?** — de
+          :meth:`KbRepository.knowledge_state`, leyendo la fecha más nueva de
+          los propios datos.
+
+        Se recorren las fuentes **configuradas**, no las filas de la tabla: una
+        fuente que no se ha sincronizado nunca no tiene fila, y es justo la que
+        más importa reportar. Aparece con ``neverSynced`` y cuenta como vieja.
+
+        Returns:
+            ``{"sources": [...], "isStale": bool, "feedVersion": str}``, con
+            una entrada por fuente configurada.
+        """
+        from ..lybra import kb_feed_version
+
+        config = CR.knowledge_base_config()
+        max_age = config.max_age_days
+        now = utcnow_naive()
+
+        with UnitOfWork() as uow:
+            repo = KbRepository(uow)
+            rows = {row.source: row for row in repo.sync_status()}
+            content_state = repo.knowledge_state()
+            feed_version = kb_feed_version(content_state)
+
+        sources = []
+        for name in sorted(config.sources):
+            row = rows.get(name)
+            limit_days = max_age.get(name)
+            age_days = None
+            if row is not None and row.last_success_at is not None:
+                age_days = round((now - row.last_success_at).total_seconds() / 86400, 2)
+            # Nunca sincronizada cuenta como vieja: no saber nada de una fuente
+            # es peor que saber que lleva días parada, no mejor.
+            is_stale = age_days is None or (limit_days is not None and age_days > limit_days)
+            newest = content_state.get(name)
+            sources.append({
+                "source": name,
+                "lastAttemptAt": isoformat_utc(row.last_attempt_at) if row else None,
+                "lastSuccessAt": isoformat_utc(row.last_success_at) if row else None,
+                "rowsUpserted": row.rows_upserted if row else None,
+                "error": row.error if row else None,
+                "neverSynced": row is None or row.last_success_at is None,
+                "ageDays": age_days,
+                "maxAgeDays": limit_days,
+                "isStale": is_stale,
+                "newestContentAt": isoformat_utc(newest) if newest else None,
+            })
+
+        return {
+            "sources": sources,
+            "isStale": any(entry["isStale"] for entry in sources),
+            "feedVersion": feed_version,
+        }
 
     @staticmethod
     def execute_kb_sync() -> None:
         """Scheduled entry point (APScheduler). Runs the full sync, best-effort."""
         from src.modules.infrastructure.unit_of_work import close_all
         try:
-            KbSyncManager().sync_all()
+            manager = KbSyncManager()
+            manager.sync_all()
+            # El aviso se emite justo después de sincronizar porque es cuando
+            # de verdad significa algo: si tras un intento la fuente sigue
+            # vieja, es que no se ha podido arreglar sola.
+            for entry in manager.status()["sources"]:
+                if entry["isStale"]:
+                    logger.warning(
+                        "KB: la fuente '%s' está desactualizada (%s, límite %s días)%s",
+                        entry["source"],
+                        "nunca sincronizada" if entry["neverSynced"]
+                        else f"{entry['ageDays']} días",
+                        entry["maxAgeDays"],
+                        f" — último error: {entry['error']}" if entry["error"] else "",
+                    )
         except Exception:
             logger.exception("KB sync failed")
         finally:

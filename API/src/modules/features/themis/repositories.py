@@ -46,6 +46,7 @@ from .model import (
     FindingEvidence,
     Host,
     HostService,
+    KbSyncStatus,
     KevEntry,
     NiktoIncident,
     NiktoScan,
@@ -1231,6 +1232,46 @@ class KbRepository(BaseRepository[CveEntry]):
             "kev":  self._session.query(func.max(KevEntry.date_added)).scalar(),
             "epss": self._session.query(func.max(EpssScore.scored_at)).scalar(),
         }
+
+    def record_sync(self, source: str, rows_upserted: Optional[int] = None,
+                    error: Optional[str] = None) -> None:
+        """Anotar el desenlace de un intento de sincronización de una fuente.
+
+        Se llama **siempre**, salga bien o mal: el caso que importa es el malo,
+        porque una sincronización rota no deja ningún otro rastro consultable y
+        los escaneos siguen saliendo en verde contra un catálogo congelado.
+
+        ``last_success_at`` se conserva cuando el intento falla — la distancia
+        entre él y ``last_attempt_at`` es exactamente "cuánto lleva roto", y
+        pisarlo destruiría el único dato que responde a esa pregunta. Al revés,
+        ``error`` sí se limpia al tener éxito: la tabla dice si está bien
+        *ahora*, no lo que pasó alguna vez.
+
+        Args:
+            source: ``"nvd"``, ``"kev"`` o ``"epss"``.
+            rows_upserted: Filas escritas, en un intento con éxito.
+            error: El mensaje del fallo. Su presencia es lo que distingue un
+                intento fallido de uno correcto.
+        """
+        now = utcnow_naive()
+        row = self._session.query(KbSyncStatus).filter_by(source=source).one_or_none()
+        if row is None:
+            row = KbSyncStatus(source=source)
+            self._session.add(row)
+        row.last_attempt_at = now
+        if error is None:
+            row.last_success_at = now
+            row.rows_upserted = rows_upserted
+            row.error = None
+        else:
+            # El mensaje se acota: un traceback entero o el cuerpo de una
+            # respuesta HTTP no aportan más que su primera línea en una tabla
+            # de estado, y el detalle completo ya está en el log.
+            row.error = error[:500]
+
+    def sync_status(self) -> List[KbSyncStatus]:
+        """El estado de sincronización de todas las fuentes registradas."""
+        return self._session.query(KbSyncStatus).order_by(KbSyncStatus.source).all()
 
     def counts(self) -> dict:
         """Row counts per KB table (for the sync summary / health checks)."""

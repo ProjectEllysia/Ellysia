@@ -5,6 +5,7 @@ viven enteramente en ``Finding`` (Lybra y Nuclei).
 D5 en ``plans/deuda-tecnica-y-calidad.md``.
 """
 
+import logging
 from typing import Dict, Optional
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
@@ -16,6 +17,8 @@ import src.modules.system.config_reading as CR
 from src.modules.shared.report_theme import ColorType, safe_markup
 from ..cve_context import enrich_with_cve_context
 from .base import PrintingStrategy
+
+logger = logging.getLogger(__name__)
 
 
 class FindingsPrintingStrategy(PrintingStrategy):
@@ -188,10 +191,39 @@ class FindingsPrintingStrategy(PrintingStrategy):
             ["Fecha de inicio:", started_str],
             ["Total de hallazgos:", str(len(findings))],
             ["Confirmados activamente:", str(confirmed_count)],
+            ["Base de conocimiento:", self._knowledge_base_line()],
         ]
         info_table = theme.kv_table(scan_info, col_widths=[2 * inch, 4 * inch])
         elements.append(info_table)
         elements.append(Spacer(1, 0.3 * inch))
+
+    @staticmethod
+    def _knowledge_base_line() -> str:
+        """Contra qué catálogo se resolvieron estos hallazgos, y de cuándo es.
+
+        Un informe que dice "sincronizada el 29/08/2026" es honesto; uno que
+        calla hace una afirmación sin fecha, y la detección por versión —que es
+        la que produce la mayoría de los hallazgos con CVE— vale exactamente lo
+        que valga la frescura de ese espejo.
+
+        Si alguna fuente está vieja, el informe lo dice: es preferible a que el
+        lector suponga que el catálogo estaba al día. Best-effort — un fallo
+        consultando el estado no puede impedir que se emita el informe.
+        """
+        from src.modules.features.themis.managers.kb_sync import KbSyncManager
+
+        try:
+            status = KbSyncManager().status()
+        except Exception:  # noqa: BLE001
+            logger.exception("No se pudo leer el estado de la base de conocimiento")
+            return "No disponible"
+
+        parts = []
+        for entry in status["sources"]:
+            when = (entry["lastSuccessAt"] or "")[:10] or "nunca"
+            parts.append(f"{entry['source'].upper()} {when}"
+                         + (" (desactualizada)" if entry["isStale"] else ""))
+        return " · ".join(parts) if parts else "Sin fuentes configuradas"
 
     def _append_finding_summary(self, theme: "ReportTheme", elements: list, findings: list) -> None:
         """Tabla resumen: cantidad de hallazgos por prioridad."""

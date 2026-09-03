@@ -325,6 +325,31 @@ export const useThemisStore = defineStore('themis', () => {
     finally { authorizedTargets.loading = false }
   }
 
+  /* ── FRESCURA DE LA BASE DE CONOCIMIENTO (L36) ── */
+
+  /**
+   * Estado de sincronización de NVD, KEV y EPSS.
+   *
+   * Toda la detección por versión depende de ese espejo local. Si deja de
+   * refrescarse, los escaneos siguen saliendo en verde contra un catálogo
+   * congelado — un CVE publicado ayer no existe para el motor, y el informe
+   * afirma que el host está limpio. El aviso existe para que eso deje de ser
+   * invisible.
+   */
+  const kbStatus = reactive({ sources: [], isStale: false, feedVersion: null, loaded: false })
+
+  async function loadKbStatus() {
+    try {
+      const res = await apiFetch('/themis/kb/status')
+      if (!res?.ok) return
+      const data = await res.json()
+      kbStatus.sources = data.sources ?? []
+      kbStatus.isStale = !!data.isStale
+      kbStatus.feedVersion = data.feedVersion ?? null
+      kbStatus.loaded = true
+    } catch { /* el aviso es informativo: si no se puede leer, no se muestra */ }
+  }
+
   /** Añade un objetivo (IP o CIDR) al registro de objetivos autorizados. */
   async function addAuthorizedTarget(target, label = '') {
     try {
@@ -848,6 +873,7 @@ export const useThemisStore = defineStore('themis', () => {
   return {
     world, setWorld,
     authorizedTargets, loadAuthorizedTargets, addAuthorizedTarget, removeAuthorizedTarget,
+    kbStatus, loadKbStatus,
     activeTab, stats, loadingStats, statsError, scans, launching,
     preview, details,
     viewMode,

@@ -131,7 +131,12 @@
           "kev": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
           "nvd": "https://services.nvd.nist.gov/rest/json/cves/2.0"
         },
-        "syncCron": "0 3 * * *"
+        "syncCron": "0 3 * * *",
+        "maxAgeDays": {
+          "nvd": 3,
+          "kev": 7,
+          "epss": 7
+        }
       },
       "scanners": {
         "nmap": {

@@ -35,6 +35,7 @@ from .managers import (
     ScanHistoryManager,
     TracerouteManager,
     AuthorizedTargetManager,
+    KbSyncManager,
 )
 from .model import ScanType
 from .exceptions import (
@@ -465,6 +466,35 @@ def delete_authorized_target(target_id: int):
         "message": "Objetivo autorizado eliminado correctamente",
         "targetId": target_id,
         "target": target,
+        "user": user.username,
+    }
+
+
+@themis_blp.get("/kb/status")
+@themis_blp.response(200, description="Knowledge-base freshness per source")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
+@limiter.limit("300 per hour; 2000 per day")
+@handle_exceptions(default_exception=ScanError, logger=logger)
+def get_kb_status():
+    """Cuándo se sincronizó por última vez cada fuente de la base de conocimiento.
+
+    Toda la detección por versión depende de un espejo local de NVD, KEV y
+    EPSS. Si ese espejo deja de refrescarse, los escaneos siguen saliendo en
+    verde contra un catálogo congelado y nada lo dice: un CVE publicado ayer no
+    existe para el motor, y el informe afirma que el host está limpio.
+
+    Responde a las dos preguntas por separado, porque son distintas: cuándo se
+    intentó sincronizar cada fuente y si funcionó, y cuán reciente es lo que
+    de hecho sabemos.
+    """
+    user = get_current_user()
+    status = KbSyncManager().status()
+    return {
+        "message": "Estado de la base de conocimiento obtenido correctamente",
+        **status,
         "user": user.username,
     }
 
