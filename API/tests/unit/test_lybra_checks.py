@@ -263,8 +263,10 @@ def test_ftp_anonymous_login_confirmed_when_both_steps_succeed():
     assert ftp[0]["qod"] == 99 and ftp[0]["confirmed"] is True
     assert ftp[0]["category"] == "default_credentials"
     assert ftp[0]["port"] == 21
-    # Los dos pasos de la secuencia de login fueron por la misma sesión, en orden.
-    assert sock.sent == b"USER anonymous\r\nPASS anonymous@lybra.local\r\n"
+    # Los dos pasos de la secuencia de login fueron por la misma sesión, en
+    # orden. Se comprueba con startswith y no con igualdad porque otros checks
+    # de FTP (ftp-no-tls) comparten esa sesión y escriben detrás.
+    assert sock.sent.startswith(b"USER anonymous\r\nPASS anonymous@lybra.local\r\n")
 
 
 def test_ftp_anonymous_login_confirmed_with_a_multiline_banner():

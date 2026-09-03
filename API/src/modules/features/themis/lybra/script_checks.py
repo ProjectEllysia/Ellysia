@@ -47,6 +47,8 @@ from .checks import (
     is_postgres_service,
     is_smb_service,
     is_snmp_service,
+    is_telnet_service,
+    is_vnc_service,
 )
 from .engine import Service
 from .fingerprinting.smb import SIGNING_REQUIRED_BIT, SmbProbe, fingerprint_smb
@@ -55,6 +57,8 @@ from .fingerprinting.mongo import MongoProbe, fingerprint_mongo
 from .fingerprinting.postgres import PostgresProbe, fingerprint_postgres
 from .fingerprinting.rdp import RdpProbe, fingerprint_rdp
 from .fingerprinting.snmp import SnmpProbe
+from .fingerprinting.telnet import TelnetProbe
+from .fingerprinting.vnc import VncProbe
 from .fingerprinting.udp_services import (
     DnsProbe,
     NtpProbe,
@@ -417,6 +421,73 @@ class NtpMonlistPlugin(ScriptPlugin):
             self._probe.fetch_monlist(context.target, context.service.port or 123))
 
 
+class TelnetEnabledPlugin(ScriptPlugin):
+    """Detecta un servicio Telnet activo.
+
+    Telnet manda credenciales en claro por diseño: usuario y contraseña viajan
+    sin cifrar por la red, legibles para cualquiera que escuche. No hay una
+    "mala configuración" que arreglar — el hallazgo es que el protocolo esté en
+    uso. Por eso este check no identifica producto ni versión: le basta con
+    confirmar que al otro lado hay algo que **habla Telnet**, cosa que un
+    servidor delata abriendo su negociación de opciones con el byte IAC (ver
+    :class:`~.fingerprinting.telnet.TelnetProbe`).
+
+    Un puerto 23 abierto no basta como evidencia: podría ser cualquier servicio
+    mudo en un puerto reutilizado. Lo que dispara es la firma del protocolo, no
+    la apertura del puerto.
+
+    Args:
+        probe: Sonda inyectable, para que un test use un socket falso.
+    """
+
+    plugin_id = "telnet-enabled"
+
+    def __init__(self, probe: Optional[TelnetProbe] = None) -> None:
+        self._probe = probe or TelnetProbe()
+
+    def applies(self, service: Service) -> bool:
+        return is_telnet_service(service)
+
+    def run(self, context: ScriptContext) -> bool:
+        context.acquire()
+        return self._probe.speaks_telnet(context.target, context.service.port or 23)
+
+
+class VncNoAuthenticationPlugin(ScriptPlugin):
+    """Detecta un servidor VNC que ofrece acceso **sin autenticación**.
+
+    El protocolo RFB negocia, tras el saludo de versión, qué tipos de seguridad
+    admite el servidor. El tipo 1 es ``None`` (RFC 6143 §7.1.2): entrar sin
+    contraseña. Un VNC que lo ofrece deja el escritorio del objetivo a
+    disposición de cualquiera que alcance el puerto.
+
+    La evidencia es un hecho observado —el servidor **anuncia** ese tipo en su
+    lista—, no una inferencia, así que el hallazgo nace ``confirmed``. Y no se
+    cruza la línea: se lee la lista de tipos ofrecidos y ahí acaba, sin
+    responder a la negociación y sin abrir sesión (ver
+    :meth:`~.fingerprinting.vnc.VncProbe.security_types`).
+
+    Args:
+        probe: Sonda inyectable, para que un test use un socket falso.
+    """
+
+    plugin_id = "vnc-no-authentication"
+    _SECURITY_NONE = 1
+
+    def __init__(self, probe: Optional[VncProbe] = None) -> None:
+        self._probe = probe or VncProbe()
+
+    def applies(self, service: Service) -> bool:
+        return is_vnc_service(service)
+
+    def run(self, context: ScriptContext) -> bool:
+        context.acquire()
+        types = self._probe.security_types(context.target, context.service.port or 5900)
+        if types is None:
+            return False
+        return self._SECURITY_NONE in types
+
+
 def default_script_plugins() -> Dict[str, ScriptPlugin]:
     """Construye el registro de plugins de primera parte, indexado por ``plugin_id``.
 
@@ -435,5 +506,7 @@ def default_script_plugins() -> Dict[str, ScriptPlugin]:
         LdapAnonymousBindPlugin(),
         LdapCleartextWithLdapsPlugin(),
         RdpNlaNotRequiredPlugin(),
+        TelnetEnabledPlugin(),
+        VncNoAuthenticationPlugin(),
     )
     return {plugin.plugin_id: plugin for plugin in plugins}
