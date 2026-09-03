@@ -4,7 +4,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from typing import List, Optional
+from typing import Callable, List, Optional
 import src.modules.system.config_reading as CR
 from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.system.taskqueue import ITaskQueue, job_context
@@ -189,13 +189,15 @@ class LybraEngineManager(ScanManager):
         —que viaja con una tupla de tres argumentos— siga ejecutándose tras el
         despliegue en vez de fallar al deserializarse.
         """
-        with job_context():
+        with job_context() as job:
             manager = LybraEngineManager()
             manager._run_lybra( # type: ignore
                 scan_id,
                 discover_ports,
                 services,
                 timeout,
+                cancel_check=job.cancelled,
+                progress=job.progress,
             )
 
     @staticmethod
@@ -203,12 +205,14 @@ class LybraEngineManager(ScanManager):
         """Segundos que quedan hasta ``deadline``, o ``None`` si no hay plazo."""
         return None if deadline is None else max(0.0, deadline - time.monotonic())
 
-    def _run_lybra(
+    def _run_lybra(  # pylint: disable=too-many-arguments
         self,
         scan_id: int,
         discover_ports: Optional[list] = None,
         services_payload: Optional[List[Service]] = None,
         timeout: Optional[int] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        progress: Optional[Callable[[int], None]] = None,
     ) -> None:
         """Resolve services (own discovery or a payload), detect, persist.
 
@@ -230,14 +234,24 @@ class LybraEngineManager(ScanManager):
         también, el plazo ya está aquí: basta pasarles ``_remaining_budget``.
         """
         deadline = time.monotonic() + timeout if timeout else None
+        is_cancelled = cancel_check or (lambda: False)
+
+        def report(pct: int) -> None:
+            if progress is not None:
+                progress(pct)
+
         source = ServiceSource.build_for_args(services_payload, discover_ports)
         probes = DiscoveryProbes(
             is_host_reachable=self.is_host_reachable,
             # El presupuesto se calcula al llamar, no aquí: para cuando el
             # descubrimiento arranca ya se han gastado la comprobación de
-            # alcanzabilidad y las consultas de apertura del escaneo.
+            # alcanzabilidad y las consultas de apertura del escaneo. El
+            # cancel_check baja hasta el barrido de puertos —la fase más larga—
+            # para que un escaneo grande se pueda parar a mitad.
             discover_ports=lambda target, ports: self._discover_ports(
-                target, ports, budget_seconds=self._remaining_budget(deadline)),
+                target, ports,
+                budget_seconds=self._remaining_budget(deadline),
+                cancel_check=cancel_check),
             discover_udp_ports=self._discover_udp_ports,
         )
         try:
@@ -261,7 +275,15 @@ class LybraEngineManager(ScanManager):
                     self.update_scan_status(scan_id, ScanStatus.FAILED)
                     return
                 services, source_host_id, source_target = resolved.services, resolved.host_id, resolved.target
-                is_partial = resolved.is_partial
+                # Un escaneo cancelado a mitad es, a efectos del ciclo de vida,
+                # lo mismo que uno truncado por reloj: vio parte del objetivo,
+                # no todo. Comparte la bandera ``is_partial`` para no cerrar por
+                # omisión lo que no llegó a comprobar (el fallo de L48-c).
+                is_partial = resolved.is_partial or is_cancelled()
+                # Descubrimiento hecho: 40 % del trabajo (pesos honestos del §3
+                # del issue — descubrimiento 40, fingerprint 30, checks 20,
+                # correlación y persistencia 10).
+                report(40)
 
                 fingerprint_findings: list = []
                 if (
@@ -269,11 +291,15 @@ class LybraEngineManager(ScanManager):
                     and source_target
                     and is_target_authorized
                     and CR.lybra_config().fingerprinting_enabled
+                    and not is_cancelled()
                 ):
                     services, fingerprint_findings = self._fingerprint_services(
                         source_target,
-                        services
+                        services,
+                        cancel_check=cancel_check,
                     )
+                    is_partial = is_partial or is_cancelled()
+                report(70)
 
                 previous_map = self._previous_findings_map(
                     scan_repo,
@@ -297,8 +323,12 @@ class LybraEngineManager(ScanManager):
                 findings_data.extend(fingerprint_findings)
                 findings_data.extend(surface_findings)
 
-            if source.probes_target_network and source_target and is_target_authorized and CR.lybra_config().active_checks:
-                findings_data.extend(self._run_active_checks(source_target, services))
+            if (source.probes_target_network and source_target and is_target_authorized
+                    and CR.lybra_config().active_checks and not is_cancelled()):
+                findings_data.extend(
+                    self._run_active_checks(source_target, services, cancel_check=cancel_check))
+                is_partial = is_partial or is_cancelled()
+            report(90)
 
             for finding in findings_data:
                 finding["host_id"] = source_host_id
@@ -331,6 +361,7 @@ class LybraEngineManager(ScanManager):
                 scan.status = ScanStatus.FINISHED.value  # type: ignore
                 scan.finished_at = utcnow_naive()  # type: ignore
 
+            report(100)
             if is_partial:
                 logger.warning(
                     "Escaneo Lybra %s completado PARCIALMENTE: %s hallazgos sobre una "
@@ -348,6 +379,7 @@ class LybraEngineManager(ScanManager):
         target: str,
         discover_ports,
         budget_seconds: Optional[float] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Optional[PortSweep]:
         """Discover open ports with Lybra's own connect scan (Fase T).
 
@@ -372,6 +404,7 @@ class LybraEngineManager(ScanManager):
                 timeout=engine.tcp_timeout,
                 retries=engine.udp_retries,
                 budget_seconds=budget_seconds,
+                cancel_check=cancel_check,
             )
         except Exception:
             logger.exception("Lybra port discovery failed for %s", target)
@@ -415,7 +448,7 @@ class LybraEngineManager(ScanManager):
             logger.exception("Lybra UDP port discovery failed for %s", target)
             return []
 
-    def _run_active_checks(self, target: str, services) -> list:
+    def _run_active_checks(self, target: str, services, cancel_check=None) -> list:
         """Run the check runtime against the target's HTTP, TLS, network (Fase N)
         and script (Fase R) services.
 
@@ -442,7 +475,7 @@ class LybraEngineManager(ScanManager):
                 # fila india.
                 mapper=self._in_host_pool,
             )
-            return runtime.run(target, services)
+            return runtime.run(target, services, cancel_check=cancel_check)
         except Exception:
             logger.exception("Lybra active checks failed for %s", target)
             return []
@@ -487,7 +520,7 @@ class LybraEngineManager(ScanManager):
             logger.exception("Fallo ingiriendo plantillas de Nuclei; se sigue con el feed propio")
             return []
 
-    def _fingerprint_services(self, target: str, services: list) -> tuple:
+    def _fingerprint_services(self, target: str, services: list, cancel_check=None) -> tuple:
         """Run Lybra's own HTTP/SSH/FTP dissectors and identify each service.
 
         Fase F. La identificación que sale de aquí **es** la identificación del
@@ -524,7 +557,14 @@ class LybraEngineManager(ScanManager):
             Se define dentro para que cada llamada comparta los ``dissectors`` y
             el ``rate_limiter`` de **esta** ejecución: el limitador es lo que
             mantiene el ritmo por host cuando varias sondas van a la vez, así que
-            compartirlo es justo el punto."""
+            compartirlo es justo el punto.
+
+            Comprueba la cancelación al entrar: con el pool concurrente, las
+            unidades ya lanzadas terminan, pero las que aún no han arrancado
+            devuelven de inmediato — que es lo que hace que un fingerprint de
+            veinte servicios se corte pronto y no al final."""
+            if cancel_check is not None and cancel_check():
+                return service, None
             dissector = next((dissector for dissector in dissectors if dissector.applies(service)), None)
             result = None
             if dissector is not None:

@@ -1089,6 +1089,7 @@ class CheckRuntime:
         # (L23), igual que ya inyecta las sondas — este módulo no conoce la
         # configuración ni monta hilos por su cuenta.
         self._mapper: Callable = mapper or map
+        self._cancel_check: Optional[Callable[[], bool]] = None
         # El host y sus servicios de la ejecución en curso: los rellena
         # :meth:`run`, y viven aquí para que un plugin de tipo ``script``
         # pueda ver los servicios hermanos sin descubrirlos por su cuenta.
@@ -1121,7 +1122,8 @@ class CheckRuntime:
             ),
         )
 
-    def run(self, host: str, services: Iterable[Service]) -> List[dict]:
+    def run(self, host: str, services: Iterable[Service],
+            cancel_check: Optional[Callable[[], bool]] = None) -> List[dict]:
         """Run every applicable check against a host's HTTP, TLS and network services.
 
         Probes are shared within one call: several checks reading the same
@@ -1158,6 +1160,7 @@ class CheckRuntime:
         # redescubrirla por su cuenta.
         self._services = services
         self._host = host
+        self._cancel_check = cancel_check
 
         per_service = self._mapper(self._run_for_service, services)
         return [finding for group in per_service for finding in group]
@@ -1176,8 +1179,13 @@ class CheckRuntime:
             service: El servicio a evaluar.
 
         Returns:
-            Los hallazgos de ese servicio, en el orden del feed.
+            Los hallazgos de ese servicio, en el orden del feed. Vacíos si la
+            cancelación llegó antes de tocar este servicio: como en el
+            fingerprinting, las unidades ya lanzadas terminan pero las que aún
+            no han arrancado devuelven de inmediato.
         """
+        if getattr(self, "_cancel_check", None) is not None and self._cancel_check():
+            return []
         findings: List[dict] = []
         for family in self._families:
             if not family.applies_to_service(service):

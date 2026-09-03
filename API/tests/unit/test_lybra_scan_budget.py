@@ -94,13 +94,21 @@ def test_the_worker_entry_point_carries_the_timeout(monkeypatch):
         def __exit__(self, *exc):
             return False
 
+        def cancelled(self):
+            return False
+
+        def progress(self, _pct):
+            pass
+
     monkeypatch.setattr(engine_module, "job_context", lambda: _NullContext())
     monkeypatch.setattr(
         LybraEngineManager, "_run_lybra",
-        lambda self, *args: seen.append(args),
+        lambda self, *args, **kwargs: seen.append(args),
     )
 
     LybraEngineManager.execute_lybra_scan(7, [80], None, 90)
     LybraEngineManager.execute_lybra_scan(8, [80])
 
+    # El timeout sigue viajando como cuarto posicional; cancel_check y progress
+    # van como kwargs (el JobHandle del worker), fuera de esta comprobación.
     assert seen == [(7, [80], None, 90), (8, [80], None, None)]
