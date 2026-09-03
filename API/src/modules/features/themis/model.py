@@ -39,6 +39,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    false as sa_false,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -682,11 +683,22 @@ class LybraScan(Scan):
             is deleted is therefore explicit, in HygeiaAssetManager.delete_asset.
             Non-null also means "keep this out of the ordinary Lybra feed" —
             these scans are browsed per-agent instead.
+        is_partial: Si el descubrimiento no llegó a mirar todo el objetivo — un
+            barrido que se quedó sin presupuesto de reloj. Los puertos que sí
+            encontró son ciertos; de los que no le dio tiempo a probar no se
+            sabe nada, así que un escaneo parcial **no cierra hallazgos**: la
+            ausencia de algo que no se miró no es evidencia de que se haya
+            corregido (ver ``apply_lifecycle(close_missing=...)``).
+
+            Vive aquí y no en ``Scan`` porque sólo Lybra descubre su propia
+            superficie: los otros tres escáneres reciben el objetivo ya
+            resuelto y no tienen un barrido que pueda quedarse a medias.
     """
     __tablename__ = "LybraScan"
 
     id             = Column(Integer, ForeignKey("Scan.id"), primary_key=True)
     asset_id       = Column(Integer, nullable=True, index=True)
+    is_partial     = Column(Boolean, nullable=False, default=False, server_default=sa_false())
 
     # Sin ``inherit_condition``: hacía falta mientras existía ``source_scan_id``,
     # una segunda clave foránea a ``Scan.id`` que dejaba ambigua la unión con la
@@ -796,7 +808,28 @@ class Finding(Base):
             ``False`` for Lybra findings — distinguishes "checked, no CVEs"
             from "could not even identify the package" in the same data that
             otherwise reads identically as an ``installed_package`` row.
-        first_seen_at / last_seen_at / state: Lifecycle (open|fixed|regressed|accepted).
+        first_seen_at / last_seen_at / state: Lifecycle
+            (open|fixed|regressed|accepted|false_positive).
+
+            ``accepted`` y ``false_positive`` dicen cosas **opuestas** y
+            durante mucho tiempo compartieron casilla, que es lo que L35 viene
+            a arreglar. Aceptar un riesgo es "esto es real, lo asumo": tiene
+            dueño, debería caducar y volver a revisión. Marcar un falso
+            positivo es "esto no es real, el motor se equivocó": no caduca,
+            porque no hay nada que aceptar, y no cuenta como riesgo abierto en
+            ningún recuento ni en ningún informe. Confundirlos hace que un
+            informe diga "3 riesgos aceptados" cuando son 3 errores del
+            escáner, que es mentir sobre la postura de seguridad.
+        state_reason: Por qué se tomó la decisión. Un ``accepted`` sin
+            justificación es deuda; con justificación es una decisión.
+        state_set_by: Quién la tomó.
+        state_set_at: Cuándo.
+        state_expires_at: Cuándo vuelve el hallazgo a ``open`` por su cuenta.
+            Se rellena sólo para ``accepted`` — un riesgo asumido hace un año
+            merece revisarse otra vez, mientras que un falso positivo no
+            caduca: el motor no se vuelve a equivocar con el paso del tiempo,
+            sino cuando *cambia*, y eso lo detecta ``apply_lifecycle``
+            comparando ``check_id`` y ``feed_version``.
     """
     __tablename__ = "Finding"
 
@@ -836,6 +869,13 @@ class Finding(Base):
     cpe_resolved = Column(Boolean, nullable=True)
 
     # Lifecycle
+    # Decisión del usuario sobre el estado (L35). Nulos mientras nadie haya
+    # tocado el hallazgo, que es el caso normal.
+    state_reason     = Column(Text)
+    state_set_by     = Column(Integer, ForeignKey("User.id"), nullable=True)
+    state_set_at     = Column(DateTime)
+    state_expires_at = Column(DateTime)
+
     first_seen_at = Column(DateTime, default=utcnow_naive)
     last_seen_at  = Column(DateTime, default=utcnow_naive)
     state         = Column(String(20), default="open")
@@ -870,6 +910,44 @@ class Finding(Base):
         return f"<Finding(id={self.id}, scan_id={self.scan_id}, category='{self.category}', title='{self.title[:40]}')>"
 
 
+class FindingEvidence(Base):
+    """La respuesta cruda que provocó un hallazgo (Fase E).
+
+    Un hallazgo dice **qué** encontró y **con qué regla**, pero ``feed_version``
+    + ``check_id`` dan reproducibilidad lógica, no guardan lo que el objetivo
+    respondió. Cuando un cliente dice «eso no es verdad, ese fichero no está
+    expuesto», la respuesta útil es la respuesta HTTP con su cuerpo y su fecha,
+    no «nuestro check dice que sí». Sin evidencia, cada discusión se resuelve
+    repitiendo el escaneo a mano.
+
+    Attributes:
+        id: Clave primaria.
+        finding_id: El hallazgo que esta evidencia respalda.
+        kind: Qué clase de evidencia es (``http_response`` | ``ssh_banner`` |
+            ``tls_cert`` | ``probe_output``).
+        payload: El contenido observado, ya **redactado** (ver
+            ``lybra.evidence.redact_evidence``): cabeceras sensibles fuera,
+            cuerpo truncado. Guardar una respuesta cruda sin redactar
+            convertiría la base de datos en un depósito de secretos ajenos.
+        content_hash: SHA-256 del payload redactado. No es decorativo: es lo
+            que permite decir «esta evidencia no se ha tocado desde que se
+            capturó», la mitad del valor en un contexto de auditoría.
+        captured_at: Cuándo se observó (cadena de custodia).
+    """
+    __tablename__ = "FindingEvidence"
+
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    finding_id   = Column(Integer, ForeignKey("Finding.id", ondelete="CASCADE"),
+                          nullable=False, index=True)
+    kind         = Column(String(32), nullable=False)
+    payload      = Column(JSONB, nullable=False)
+    content_hash = Column(String(64), nullable=False)
+    captured_at  = Column(DateTime, default=utcnow_naive, nullable=False, index=True)
+
+    def __repr__(self):
+        return f"<FindingEvidence(id={self.id}, finding_id={self.finding_id}, kind='{self.kind}')>"
+
+
 # =========================================================================
 # KNOWLEDGE BASE (the "Lybra Feed": local mirror of NVD/KEV/EPSS)
 # =========================================================================
@@ -892,6 +970,24 @@ class CveEntry(Base):
     severity      = Column(String(16))   # CRITICAL | HIGH | MEDIUM | LOW | NONE
     description   = Column(Text)
     cwe_ids       = Column(JSONB)
+    has_exploit_reference = Column(Boolean, nullable=False, default=False,
+                                   server_default=sa_false())
+    """Si NVD enlaza al menos una referencia etiquetada como exploit (L34).
+
+    Es la señal de madurez de explotación más barata que hay: la propia NVD
+    etiqueta sus referencias, y ese dato ya viaja en cada registro que se
+    ingiere — sólo había que dejar de tirarlo.
+
+    Se traduce a ``poc`` y nunca a nada más fuerte. La etiqueta dice que
+    alguien publicó algo que demuestra el fallo, no cuán usable es: puede ser
+    una prueba de concepto en un gist o un exploit completo. Inventar una
+    precisión que el dato no tiene sería peor que no tenerlo.
+
+    Sólo se rellena al (re)sincronizar un CVE, así que los ya mirroreados
+    quedan en ``False`` hasta que la sincronización nocturna vuelva a tocarlos.
+    Es un falso negativo temporal y conservador: se dirá "no consta exploit",
+    nunca "hay exploit" de más.
+    """
     source        = Column(String(16), default="nvd")
 
     cpe_matches = relationship("CpeMatch", back_populates="cve", cascade="all, delete-orphan")
@@ -994,6 +1090,173 @@ class EpssScore(Base):
 
     def __repr__(self):
         return f"<EpssScore(cve_id='{self.cve_id}', score={self.score})>"
+
+
+class DistroAdvisory(Base):
+    """Un aviso de seguridad de una distribución (DSA, USN, RHSA…).
+
+    Es la mitad de la respuesta a los *backports*, que son la causa número uno
+    de falsos positivos de la detección por versión: Debian parchea una
+    vulnerabilidad sin subir el número visible, el banner sigue diciendo
+    ``2.4.49`` y el motor emite una CVE que ya está corregida.
+
+    Hasta ahora la mitigación era un paliativo declarado —``qod=70``,
+    ``confirmed=false``— que informa al lector de que puede ser falso pero no
+    le dice **cuál** lo es, que es justo lo que quería saber. Y la verdad no
+    hay que ir a buscarla dentro del host: los propios proveedores la publican.
+
+    Attributes:
+        advisory_id: ``DSA-5432-1``, ``USN-6789-1``, ``RHSA-2024:1234``.
+        vendor: ``debian`` | ``ubuntu`` | ``rhel`` | ``alpine``.
+        cve_ids: Las CVEs que el aviso dice haber corregido.
+        published: Cuándo lo publicó el proveedor.
+    """
+    __tablename__ = "DistroAdvisory"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    advisory_id = Column(String(64), unique=True, nullable=False, index=True)
+    vendor      = Column(String(32), nullable=False, index=True)
+    title       = Column(Text)
+    cve_ids     = Column(JSONB)
+    published   = Column(DateTime)
+
+    def __repr__(self):
+        return f"<DistroAdvisory(advisory_id='{self.advisory_id}', vendor='{self.vendor}')>"
+
+
+class DistroPkgStatus(Base):
+    """Qué dice un proveedor sobre un paquete concreto y una CVE concreta.
+
+    Es la fila que se consulta al verificar un hallazgo: *¿ha corregido Debian
+    11 el ``apache2`` para esta CVE, y en qué versión?*
+
+    Attributes:
+        vendor / release: La distribución. ``release`` puede ser ``None``
+            cuando el aviso aplica a todas las versiones del proveedor;
+            inventarle una sería peor que no tenerla.
+        package: El nombre del paquete tal y como lo llama la distribución, que
+            no tiene por qué ser el del producto en NVD (``apache2`` frente a
+            ``http_server``).
+        cve_id: La vulnerabilidad de la que se habla.
+        fixed_in: La versión del paquete en la que quedó corregida, o ``None``
+            si el proveedor dice que sigue vulnerable.
+        status: ``fixed`` | ``vulnerable`` | ``unknown``. El tercero existe
+            porque un feed puede nombrar un paquete sin pronunciarse, y
+            tratarlo como cualquiera de los otros dos sería inventar.
+    """
+    __tablename__ = "DistroPkgStatus"
+
+    id       = Column(Integer, primary_key=True, autoincrement=True)
+    vendor   = Column(String(32), nullable=False, index=True)
+    release  = Column(String(32), nullable=True)
+    package  = Column(String(128), nullable=False, index=True)
+    cve_id   = Column(String(32), nullable=False, index=True)
+    fixed_in = Column(String(64))
+    status   = Column(String(16), nullable=False, default="unknown")
+
+    __table_args__ = (
+        UniqueConstraint("vendor", "release", "package", "cve_id",
+                         name="unique_distro_pkg_status"),
+    )
+
+    def __repr__(self):
+        return (f"<DistroPkgStatus({self.vendor}/{self.release} {self.package} "
+                f"{self.cve_id}: {self.status})>")
+
+
+class UnresolvedProduct(Base):
+    """Un nombre de producto que el matcher no consiguió convertir en un CPE.
+
+    ``_resolve_cpe`` prueba tres estrategias —el CPE que dio Nmap, el feed
+    curado de alias y el índice automático derivado de la KB— y, si ninguna
+    funciona, devuelve ``None`` sin inventar nada. Esa decisión es correcta: un
+    CPE fabricado que NVD no conoce no casaría con nada, en silencio.
+
+    Pero el fallo tampoco se contaba. Existía ``Finding.cpe_resolved``, que
+    distingue "no hay CVEs" de "ni siquiera supe qué es esto", y ahí se
+    quedaba: un booleano por hallazgo, no un agregado consultable. Sin
+    agregado, la pregunta que dirige todo el trabajo del feed de alias —**qué
+    nombres estamos fallando en resolver, y cuáles con más frecuencia**— no
+    tiene respuesta.
+
+    Cada fila es un alias que merece la pena escribir, y ``occurrences`` dice
+    cuánto duele no tenerlo. Al añadir el alias, el nombre resuelve en el
+    siguiente escaneo y su fila se borra: el ranking mide el trabajo que queda,
+    no el que hubo.
+
+    Attributes:
+        normalized_name: El nombre ya normalizado
+            (:func:`~lybra.kb.normalize_product_name`), que es la clave con la
+            que se busca el alias. El crudo no serviría: un inventario de
+            escritorio mete la versión en el propio nombre ("7-Zip 25.01").
+        origin: ``"network"`` (un banner) o ``"inventory"`` (un paquete que
+            leyó un agente). Se separan porque son dos frentes distintos de
+            trabajo, y porque el de red aporta muestras desde el primer
+            escaneo, sin necesidad de tener agentes desplegados.
+        occurrences: Cuántas veces se ha visto sin resolver.
+        first_seen_at / last_seen_at: Desde cuándo, y la última vez.
+    """
+    __tablename__ = "UnresolvedProduct"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    normalized_name = Column(String(255), nullable=False, index=True)
+    origin          = Column(String(32), nullable=False, default="network")
+    occurrences     = Column(Integer, nullable=False, default=1)
+    first_seen_at   = Column(DateTime, default=utcnow_naive)
+    last_seen_at    = Column(DateTime, default=utcnow_naive)
+
+    __table_args__ = (
+        UniqueConstraint("normalized_name", "origin", name="unique_unresolved_product"),
+    )
+
+    def __repr__(self):
+        return (f"<UnresolvedProduct(name='{self.normalized_name}', "
+                f"origin='{self.origin}', occurrences={self.occurrences})>")
+
+
+class KbSyncStatus(Base):
+    """Cuándo se intentó sincronizar cada fuente de la KB, y cómo salió.
+
+    Toda la detección por versión depende de este espejo local de NVD, KEV y
+    EPSS, y hasta ahora no había **nada** que registrara cuándo se refrescó. Los
+    modos de fallo eran todos silenciosos y todos igual de malos: el job lleva
+    tres semanas fallando y los escaneos siguen saliendo en verde contra un
+    catálogo congelado; un CVE crítico publicado ayer no está, así que para el
+    motor no existe; KEV lleva un mes parado justo en la señal que más pesa al
+    priorizar. Un log de `INFO` no es un estado consultable.
+
+    No sustituye a :meth:`KbRepository.knowledge_state`, que responde a otra
+    pregunta. Aquella dice **cuán reciente es lo que sabemos**, leyendo la fecha
+    más nueva de los propios datos; ésta dice **cuándo lo preguntamos y si
+    funcionó**. Hacen falta las dos, y la diferencia entre ambas es
+    precisamente el síntoma que hay que poder ver: un contenido que no avanza
+    mientras las sincronizaciones fallan.
+
+    Attributes:
+        source: La fuente (``"nvd"``, ``"kev"``, ``"epss"``). Única: una fila
+            por fuente, sobrescrita en cada intento. No es un historial —para
+            eso están los logs— sino el estado actual, que es lo que se
+            consulta.
+        last_attempt_at: Cuándo se intentó por última vez, salga como salga.
+        last_success_at: Cuándo terminó bien por última vez. Se conserva aunque
+            el último intento fallara: la distancia entre ambas fechas es
+            exactamente "cuánto lleva roto".
+        rows_upserted: Filas escritas en el último intento con éxito.
+        error: El mensaje del último intento fallido, o ``None`` si el último
+            fue bien. Que se limpie al tener éxito es deliberado: la pregunta
+            que responde esta tabla es "¿está bien ahora?".
+    """
+    __tablename__ = "KbSyncStatus"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    source          = Column(String(32), unique=True, nullable=False, index=True)
+    last_attempt_at = Column(DateTime)
+    last_success_at = Column(DateTime)
+    rows_upserted   = Column(Integer)
+    error           = Column(Text)
+
+    def __repr__(self):
+        return f"<KbSyncStatus(source='{self.source}', last_success_at={self.last_success_at})>"
 
 
 # =========================================================================

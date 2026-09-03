@@ -5,6 +5,7 @@ viven enteramente en ``Finding`` (Lybra y Nuclei).
 D5 en ``plans/deuda-tecnica-y-calidad.md``.
 """
 
+import logging
 from typing import Dict, Optional
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
@@ -16,6 +17,8 @@ import src.modules.system.config_reading as CR
 from src.modules.shared.report_theme import ColorType, safe_markup
 from ..cve_context import enrich_with_cve_context
 from .base import PrintingStrategy
+
+logger = logging.getLogger(__name__)
 
 
 class FindingsPrintingStrategy(PrintingStrategy):
@@ -118,6 +121,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
             "title": row.title, "category": row.category, "port": row.port, "service": row.service,
             "cpe": row.cpe, "cve_ids": row.cve_ids or [], "cvss_score": row.cvss_score,
             "epss_score": row.epss_score, "in_kev": row.in_kev, "qod": row.qod, "confirmed": row.confirmed,
+            "exploit_maturity": row.exploit_maturity, "state": row.state,
             "source": row.source, "state": row.state, "cpe_resolved": row.cpe_resolved,
             "required_os": row.required_os,
         } for row in rows]
@@ -181,17 +185,64 @@ class FindingsPrintingStrategy(PrintingStrategy):
 
         started = getattr(scan, "started_at", None)
         started_str = started.strftime("%d/%m/%Y %H:%M:%S") if started else "N/A"
-        confirmed_count = sum(1 for finding in findings if finding["confirmed"])
+        confirmed_count = sum(1 for finding in findings if finding["confirmed"]
+                              and finding.get("state") != "false_positive")
+        refuted_count = sum(1 for finding in findings
+                            if finding.get("state") == "false_positive")
 
         scan_info = [
             ["ID del escaneo:", str(getattr(scan, "id", ""))],
             ["Fecha de inicio:", started_str],
             ["Total de hallazgos:", str(len(findings))],
             ["Confirmados activamente:", str(confirmed_count)],
+            ["Base de conocimiento:", self._knowledge_base_line()],
         ]
+        if refuted_count:
+            # Se dice, no se esconde: que el informe no los cuente como riesgo
+            # es correcto, pero callar cuántos hay ocultaría que alguien
+            # intervino sobre lo que el motor detectó.
+            scan_info.append(["Desmentidos por el usuario:", str(refuted_count)])
         info_table = theme.kv_table(scan_info, col_widths=[2 * inch, 4 * inch])
         elements.append(info_table)
         elements.append(Spacer(1, 0.3 * inch))
+
+    @staticmethod
+    def _knowledge_base_line() -> str:
+        """Contra qué catálogo se resolvieron estos hallazgos, y de cuándo es.
+
+        Un informe que dice "sincronizada el 29/08/2026" es honesto; uno que
+        calla hace una afirmación sin fecha, y la detección por versión —que es
+        la que produce la mayoría de los hallazgos con CVE— vale exactamente lo
+        que valga la frescura de ese espejo.
+
+        Si alguna fuente está vieja, el informe lo dice: es preferible a que el
+        lector suponga que el catálogo estaba al día. Best-effort — un fallo
+        consultando el estado no puede impedir que se emita el informe.
+        """
+        from src.modules.features.themis.managers.kb_sync import KbSyncManager
+
+        try:
+            status = KbSyncManager().status()
+        except Exception:  # noqa: BLE001
+            logger.exception("No se pudo leer el estado de la base de conocimiento")
+            return "No disponible"
+
+        parts = []
+        for entry in status["sources"]:
+            when = (entry["lastSuccessAt"] or "")[:10] or "nunca"
+            parts.append(f"{entry['source'].upper()} {when}"
+                         + (" (desactualizada)" if entry["isStale"] else ""))
+        return " · ".join(parts) if parts else "Sin fuentes configuradas"
+
+    #: Cómo se lee cada nivel de ``Finding.exploit_maturity`` en el informe.
+    #: ``none`` no aparece: decir "no consta exploit" en cada ficha sería ruido
+    #: en la inmensa mayoría de los hallazgos, y su ausencia ya lo dice.
+    _EXPLOIT_MATURITY_LABEL = {
+        "poc": "Existe una prueba de concepto pública",
+        "functional": "Existe un exploit funcional público",
+        "weaponized": "Existe un exploit integrado en herramientas de ataque",
+        "in_the_wild": "Se explota activamente en el mundo real",
+    }
 
     def _append_finding_summary(self, theme: "ReportTheme", elements: list, findings: list) -> None:
         """Tabla resumen: cantidad de hallazgos por prioridad."""
@@ -204,6 +255,11 @@ class FindingsPrintingStrategy(PrintingStrategy):
 
         counts: Dict[str, int] = {}
         for finding in findings:
+            if finding.get("state") == "false_positive":
+                # El usuario ha desmentido este hallazgo: no es un riesgo, y un
+                # resumen que lo cuente afirma una postura de seguridad peor
+                # que la real (L35).
+                continue
             counts[finding["priority"]] = counts.get(finding["priority"], 0) + 1
 
         data = [["Prioridad", "Cantidad"]]
@@ -326,6 +382,12 @@ class FindingsPrintingStrategy(PrintingStrategy):
             details.append(["EPSS (30 días):", f"{finding['epss_score'] * 100:.1f}%"])
         if finding.get("in_kev"):
             details.append(["CISA KEV:", "Sí — explotada activamente"])
+        # La tercera dimensión de explotabilidad, junto a KEV y EPSS: si existe
+        # algo público que demuestre el fallo. Es lo que separa una urgencia de
+        # un deber cuando el lector decide qué arregla el lunes.
+        maturity_label = self._EXPLOIT_MATURITY_LABEL.get(finding.get("exploit_maturity"))
+        if maturity_label:
+            details.append(["Explotación:", maturity_label])
         if finding.get("required_os") and not finding.get("confirmed"):
             details.append(["Requiere SO:", f"{finding['required_os']} (no verificado en este escaneo)"])
         if finding.get("fixed_version"):

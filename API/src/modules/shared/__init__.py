@@ -21,6 +21,11 @@ from ._endpoints    import (
 )
 from ._ownership import assert_owned
 from ._time import utcnow_naive, isoformat_utc
+from ._exposure import (
+    classify_exposure,
+    is_private_target,
+    PRIVATE_HOST_SUFFIXES,
+)
 from ._task_states import CANCELLABLE_STATES
 from ._crypto import encrypt_at_rest, decrypt_at_rest
 from ._white_label import (
@@ -40,6 +45,9 @@ from .schemas import (
 
 __all__ = [
     "Base",
+    "classify_exposure",
+    "is_private_target",
+    "PRIVATE_HOST_SUFFIXES",
     "Document",
     "handle_exceptions",
     "ExceptionHandler",

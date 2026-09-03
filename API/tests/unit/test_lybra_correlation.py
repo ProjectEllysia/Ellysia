@@ -133,6 +133,29 @@ def test_lifecycle_does_not_recarry_already_fixed():
     assert all(f["dedup_key"] != "K1" for f in out)
 
 
+def test_a_partial_scan_closes_nothing():
+    """Lo que no se llegó a mirar no se puede dar por corregido.
+
+    Un barrido que se queda sin presupuesto de reloj deja puertos sin probar.
+    Si el ciclo de vida cerrara por ausencia, ese escaneo le diría al usuario
+    que sus vulnerabilidades fueron remediadas cuando lo único cierto es que
+    esta vez no se comprobaron — el fallo de L48-c por otra puerta.
+    """
+    cur = [{"dedup_key": "K2"}]                  # K1 estaba antes y ahora no aparece
+    out = apply_lifecycle(cur, _prev("open", "K1"), close_missing=False)
+
+    assert all(finding["state"] != "fixed" for finding in out)
+    assert [finding["dedup_key"] for finding in out] == ["K2"]
+
+
+def test_a_partial_scan_still_states_what_it_did_see():
+    """No cerrar no es no decir nada: lo encontrado se etiqueta con normalidad,
+    incluida la regresión de algo que constaba como corregido."""
+    cur = [{"dedup_key": "K1"}]
+    out = apply_lifecycle(cur, _prev("fixed", "K1"), close_missing=False)
+    assert out[0]["state"] == "regressed"
+
+
 # ------------------------------------------------------------------ scoring
 
 @pytest.mark.parametrize("finding,exposure,expected", [
@@ -157,3 +180,157 @@ def test_lifecycle_does_not_recarry_already_fixed():
 ])
 def test_score_finding(finding, exposure, expected):
     assert score_finding(finding, exposure) == expected
+
+
+# ───────────────────────── falso positivo vs riesgo aceptado (L35)
+#
+# Dicen cosas opuestas y hasta ahora compartían casilla. "Acepto el riesgo" es
+# una afirmación sobre el negocio: esto es real y lo asumo. "Falso positivo" es
+# una afirmación sobre el motor: esto no es real, te has equivocado. Un informe
+# que cuenta los segundos como los primeros miente sobre la postura de
+# seguridad, y tira además la única muestra etiquetada gratis que hay.
+
+from datetime import datetime, timedelta   # noqa: E402
+
+
+def _prev_decided(state, key, *, expires=None, check_id=None, feed_version=None):
+    return {key: {
+        "state": state,
+        "snapshot": {"dedup_key": key, "title": "old", "category": "x",
+                     "check_id": check_id, "feed_version": feed_version},
+        "state_reason": "backport de Debian",
+        "state_set_by": 7,
+        "state_set_at": datetime(2026, 1, 1),
+        "state_expires_at": expires,
+    }}
+
+
+def test_a_false_positive_stays_refuted():
+    cur = [{"dedup_key": "K1", "check_id": "c@1", "feed_version": "f1"}]
+    out = apply_lifecycle(cur, _prev_decided("false_positive", "K1",
+                                             check_id="c@1", feed_version="f1"))
+    assert out[0]["state"] == "false_positive"
+
+
+def test_a_refuted_finding_carries_its_reason_and_author():
+    """Sin esto la decisión sobreviviría como estado pero perdería su
+    justificación en el escaneo siguiente, que es volver a la deuda que L35
+    quita de en medio."""
+    cur = [{"dedup_key": "K1", "check_id": "c@1", "feed_version": "f1"}]
+    out = apply_lifecycle(cur, _prev_decided("false_positive", "K1",
+                                             check_id="c@1", feed_version="f1"))
+    assert out[0]["state_reason"] == "backport de Debian"
+    assert out[0]["state_set_by"] == 7
+    assert out[0]["state_set_at"] == datetime(2026, 1, 1)
+
+
+def test_a_new_check_version_reopens_a_refuted_finding():
+    """El desmentido es contra una detección concreta. Si el check que la
+    produce cambia de versión, lo que se enseña hoy no es lo que el usuario
+    desmintió, y arrastrar el desmentido escondería una detección nueva."""
+    cur = [{"dedup_key": "K1", "check_id": "c@2", "feed_version": "f1"}]
+    out = apply_lifecycle(cur, _prev_decided("false_positive", "K1",
+                                             check_id="c@1", feed_version="f1"))
+    assert out[0]["state"] == "open"
+
+
+def test_a_new_feed_version_reopens_a_refuted_finding():
+    """Lo mismo por la otra vía: la KB ha aprendido algo desde el desmentido."""
+    cur = [{"dedup_key": "K1", "check_id": "c@1", "feed_version": "f2"}]
+    out = apply_lifecycle(cur, _prev_decided("false_positive", "K1",
+                                             check_id="c@1", feed_version="f1"))
+    assert out[0]["state"] == "open"
+
+
+def test_a_refuted_finding_that_disappears_is_not_carried_as_fixed():
+    """No se puede "corregir" algo que el usuario dijo que nunca fue un
+    problema. `false_positive` queda fuera del arrastre por construcción."""
+    cur = [{"dedup_key": "K2", "check_id": None, "feed_version": None}]
+    out = apply_lifecycle(cur, _prev_decided("false_positive", "K1"))
+    assert all(finding["state"] != "fixed" for finding in out)
+    assert [finding["dedup_key"] for finding in out] == ["K2"]
+
+
+def test_an_accepted_risk_expires_back_to_open():
+    """Un riesgo asumido hace un año se asumió en unas circunstancias que quizá
+    ya no son las mismas."""
+    cur = [{"dedup_key": "K1"}]
+    out = apply_lifecycle(
+        cur,
+        _prev_decided("accepted", "K1", expires=datetime(2026, 1, 1)),
+        now=datetime(2026, 1, 2),
+    )
+    assert out[0]["state"] == "open"
+
+
+def test_an_accepted_risk_holds_until_it_expires():
+    cur = [{"dedup_key": "K1"}]
+    out = apply_lifecycle(
+        cur,
+        _prev_decided("accepted", "K1", expires=datetime(2026, 6, 1)),
+        now=datetime(2026, 1, 2),
+    )
+    assert out[0]["state"] == "accepted"
+    assert out[0]["state_expires_at"] == datetime(2026, 6, 1)
+
+
+def test_an_accepted_risk_without_an_expiry_does_not_expire():
+    """Los `accepted` anteriores a L35 no tienen plazo porque nadie se lo puso.
+    Inventarles uno los reabriría todos de golpe el día del despliegue."""
+    cur = [{"dedup_key": "K1"}]
+    out = apply_lifecycle(cur, _prev_decided("accepted", "K1", expires=None),
+                          now=datetime(2030, 1, 1))
+    assert out[0]["state"] == "accepted"
+
+
+def test_a_false_positive_never_expires_by_time():
+    """El motor no se equivoca más por ser más tarde."""
+    cur = [{"dedup_key": "K1", "check_id": "c@1", "feed_version": "f1"}]
+    out = apply_lifecycle(
+        cur,
+        _prev_decided("false_positive", "K1", expires=datetime(2026, 1, 1),
+                      check_id="c@1", feed_version="f1"),
+        now=datetime(2030, 1, 1),
+    )
+    assert out[0]["state"] == "false_positive"
+
+
+# ───────────────────── madurez de explotación (L34)
+#
+# `Finding.exploit_maturity` se declaraba en el modelo, se documentaba como
+# "rellenada desde la Fase 1" y estaba NULL en todas las filas. Una columna que
+# promete un dato y siempre está vacía es peor que no tenerla, porque quien lee
+# el modelo cree que existe.
+
+from src.modules.features.themis.lybra.correlation import (   # noqa: E402
+    exploit_maturity, EXPLOIT_MATURITY_LADDER,
+)
+
+
+def test_kev_is_the_strongest_evidence_and_wins():
+    """Estar en KEV es explotación activa confirmada: no hay evidencia mejor,
+    así que no la puede rebajar una señal más débil."""
+    assert exploit_maturity(in_kev=True) == "in_the_wild"
+    assert exploit_maturity(in_kev=True, evidence="poc") == "in_the_wild"
+
+
+def test_an_nvd_exploit_reference_reads_as_a_proof_of_concept():
+    assert exploit_maturity(in_kev=False, evidence="poc") == "poc"
+
+
+def test_no_evidence_is_none_and_never_null():
+    """`none` es una afirmación —no consta nada público— y `NULL` era la
+    ausencia de afirmación. La columna existe para decir algo."""
+    assert exploit_maturity(in_kev=False) == "none"
+    assert exploit_maturity(in_kev=False, evidence=None) == "none"
+
+
+def test_an_unknown_evidence_level_falls_back_to_none():
+    """Una fuente futura que devuelva algo fuera de la escalera no puede
+    colarlo en la columna."""
+    assert exploit_maturity(in_kev=False, evidence="carísimo") == "none"
+
+
+def test_the_ladder_runs_from_least_to_most_serious():
+    assert EXPLOIT_MATURITY_LADDER.index("poc") < EXPLOIT_MATURITY_LADDER.index("functional")
+    assert EXPLOIT_MATURITY_LADDER.index("weaponized") < EXPLOIT_MATURITY_LADDER.index("in_the_wild")

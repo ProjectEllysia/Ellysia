@@ -44,7 +44,9 @@
                 :title="`${summary(scan)[lvl]} ${PRIO_LABEL[lvl]}`">
                 {{ summary(scan)[lvl] }}
               </span>
-              <span v-if="scan.status === 'finished' && !scan.totalFindings" class="prio-clean">Sin hallazgos</span>
+              <span v-if="scan.status === 'finished' && !scan.totalFindings && !scan.isPartial" class="prio-clean">Sin hallazgos</span>
+              <span v-if="scan.isPartial" class="prio-partial"
+                title="El descubrimiento se quedó sin tiempo: lo que se ve es cierto, pero no es toda la superficie">Parcial</span>
             </span>
 
             <span class="scan-date">{{ fmtDate(scan.finishedAt || scan.startedAt) }}</span>
@@ -60,7 +62,7 @@
               <div v-else-if="scan.status === 'failed'" class="body-failed">
                 El escaneo falló. No se pudo emitir un veredicto.
               </div>
-              <div v-else-if="!scan.totalFindings" class="body-clean">
+              <div v-else-if="!scan.totalFindings && !scan.isPartial" class="body-clean">
                 Ningún hallazgo. La superficie analizada está limpia.
               </div>
 
@@ -129,6 +131,30 @@
                                 <span v-if="f.state && f.state !== 'open'" class="f-tag state" :class="f.state">{{ STATE_LABEL[f.state] || f.state }}</span>
                                 <span v-if="f.source && f.source !== 'lybra'" class="f-tag src" :title="`Origen: ${f.source}`">+{{ f.source }}</span>
                               </div>
+
+                              <!-- Desmentir un hallazgo y aceptar su riesgo son
+                                   decisiones opuestas: la primera dice que el motor
+                                   se equivocó, la segunda que el problema es real y
+                                   se asume. Hasta L35 compartían casilla. -->
+                              <div class="f-actions">
+                                <template v-if="deciding === f.id">
+                                  <input v-model="decisionReason" class="f-reason" type="text"
+                                    :placeholder="decisionState === 'false_positive'
+                                      ? '¿Por qué no es real? (p. ej. backport de Debian)'
+                                      : '¿Por qué se asume? (p. ej. mitigado por el WAF)'"
+                                    @keyup.enter="confirmDecision(scan.id)" />
+                                  <button type="button" class="f-act primary" @click="confirmDecision(scan.id)">Confirmar</button>
+                                  <button type="button" class="f-act" @click="cancelDecision">Cancelar</button>
+                                </template>
+                                <template v-else-if="f.state === 'accepted' || f.state === 'false_positive'">
+                                  <span class="f-decided">{{ STATE_LABEL[f.state] }}<template v-if="f.stateReason">: {{ f.stateReason }}</template></span>
+                                  <button type="button" class="f-act" @click="$emit('set-finding-state', scan.id, f.id, 'open', null)">Reabrir</button>
+                                </template>
+                                <template v-else>
+                                  <button type="button" class="f-act" @click="startDecision(f.id, 'false_positive')">Desmentir</button>
+                                  <button type="button" class="f-act" @click="startDecision(f.id, 'accepted')">Aceptar riesgo</button>
+                                </template>
+                              </div>
                             </div>
                           </li>
                         </TransitionGroup>
@@ -143,6 +169,17 @@
                 </div>
                 </Transition>
               </template>
+
+              <!-- El descubrimiento no llegó a recorrer todo el objetivo. Va antes que
+                   cualquier otra nota porque cambia cómo se leen todas las demás: la
+                   ausencia de un hallazgo aquí no significa que no esté. -->
+              <div v-if="scan.isPartial" class="body-partial-hint">
+                Análisis incompleto: el descubrimiento de puertos agotó su tiempo antes de recorrer
+                todo el objetivo. Lo que aparece es cierto, pero <strong>la ausencia de algo no
+                significa que no esté</strong> — por eso este escaneo no ha dado por corregido ningún
+                hallazgo anterior. Sube el tiempo límite o acota la lista de puertos para un análisis
+                completo.
+              </div>
 
               <!-- No se muestra para un escaneo de agente (Fase I, `assetId`): ahí el
                    fingerprinting y las comprobaciones activas están desactivados
@@ -237,7 +274,7 @@ const props = defineProps({
   docsByScan: { type: Object, default: () => ({}) },
   groupsByScan: { type: Object, default: () => ({}) },
 })
-const emit = defineEmits(['refresh', 'delete', 'load-docs', 'generate-pdf', 'download-doc', 'delete-doc', 'load-more', 'load-groups'])
+const emit = defineEmits(['refresh', 'delete', 'load-docs', 'generate-pdf', 'download-doc', 'delete-doc', 'load-more', 'load-groups', 'set-finding-state'])
 
 /** Veredictos fantasma mientras carga: los que caben sin alargar la caja. */
 const SKELETON_ROWS = 4
@@ -253,7 +290,7 @@ const canLoadMore = computed(
 
 const LADDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 const PRIO_LABEL = { CRITICAL: 'Crítica', HIGH: 'Alta', MEDIUM: 'Media', LOW: 'Baja', INFO: 'Info' }
-const STATE_LABEL = { fixed: 'Corregido', regressed: 'Regresado', accepted: 'Aceptado' }
+const STATE_LABEL = { fixed: 'Corregido', regressed: 'Regresado', accepted: 'Aceptado', false_positive: 'Falso positivo' }
 
 /** Casilla "Análisis IA" del generador de PDF, por escaneo. */
 const aiFlags = reactive({})
@@ -277,6 +314,35 @@ function toggle(id) {
 const FINDINGS_PAGE = 10
 const findingsOpen = ref(new Set())
 const findingsLimit = reactive({})
+
+/**
+ * Hallazgo cuyo motivo se está escribiendo, y qué decisión.
+ *
+ * El motivo se pide siempre: un `accepted` sin justificación es deuda; con
+ * justificación es una decisión. Y un desmentido sin motivo no sirve para
+ * calibrar el motor, que es la mitad de su valor.
+ */
+const deciding = ref(null)
+const decisionState = ref(null)
+const decisionReason = ref('')
+
+function startDecision(findingId, state) {
+  deciding.value = findingId
+  decisionState.value = state
+  decisionReason.value = ''
+}
+
+function cancelDecision() {
+  deciding.value = null
+  decisionState.value = null
+  decisionReason.value = ''
+}
+
+function confirmDecision(scanId) {
+  emit('set-finding-state', scanId, deciding.value, decisionState.value,
+       decisionReason.value.trim() || null)
+  cancelDecision()
+}
 
 function groupsFor(scanId) { return props.groupsByScan[scanId]?.groups || [] }
 function groupsLoading(scanId) { return !!props.groupsByScan[scanId]?.loading }
@@ -483,8 +549,34 @@ function fmtDate(iso) {
 .f-tag.state.fixed { color: var(--success); background: var(--success-dim); }
 .f-tag.state.regressed { color: var(--warn); background: var(--warn-dim); }
 .f-tag.state.accepted { color: var(--text-muted); }
+.f-tag.state.false_positive { color: var(--text-muted); text-decoration: line-through; }
+
+.f-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; }
+.f-act {
+  padding: 0.15rem 0.5rem; border-radius: 5px; cursor: pointer;
+  border: 1px solid var(--border-solid); background: var(--surface-2);
+  color: var(--text-dim); font-size: var(--fs-md);
+}
+.f-act:hover { border-color: var(--accent); color: var(--text); }
+.f-act.primary { border-color: var(--accent); color: var(--text); }
+.f-reason {
+  flex: 1 1 16rem; min-width: 0; padding: 0.15rem 0.4rem; border-radius: 5px;
+  border: 1px solid var(--border-solid); background: var(--surface);
+  color: var(--text); font-size: var(--fs-md);
+}
+.f-decided { font-size: var(--fs-md); color: var(--text-muted); }
 .f-tag.src { color: var(--info); background: var(--info-dim); }
 .f-tag.fix { color: var(--success); background: var(--success-dim); font-weight: 600; }
+.prio-partial {
+  font-size: var(--fs-md); font-weight: 700; padding: 0.1rem 0.45rem; border-radius: 999px;
+  color: var(--warn); background: var(--warn-dim); border: 1px solid var(--warn);
+}
+.body-partial-hint {
+  margin-top: 0.6rem; padding: 0.55rem 0.7rem; border-radius: 8px;
+  border: 1px solid var(--warn); background: var(--warn-dim);
+  color: var(--text-dim); font-size: var(--fs-md); line-height: 1.45;
+}
+.body-partial-hint strong { color: var(--text); }
 .f-tag.conf { color: var(--success); background: var(--success-dim); }
 
 /* ── Grupos: la unidad sobre la que se actúa ── */

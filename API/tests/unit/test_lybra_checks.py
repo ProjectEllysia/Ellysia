@@ -263,8 +263,10 @@ def test_ftp_anonymous_login_confirmed_when_both_steps_succeed():
     assert ftp[0]["qod"] == 99 and ftp[0]["confirmed"] is True
     assert ftp[0]["category"] == "default_credentials"
     assert ftp[0]["port"] == 21
-    # Los dos pasos de la secuencia de login fueron por la misma sesión, en orden.
-    assert sock.sent == b"USER anonymous\r\nPASS anonymous@lybra.local\r\n"
+    # Los dos pasos de la secuencia de login fueron por la misma sesión, en
+    # orden. Se comprueba con startswith y no con igualdad porque otros checks
+    # de FTP (ftp-no-tls) comparten esa sesión y escriben detrás.
+    assert sock.sent.startswith(b"USER anonymous\r\nPASS anonymous@lybra.local\r\n")
 
 
 def test_ftp_anonymous_login_confirmed_with_a_multiline_banner():
@@ -650,10 +652,12 @@ _TLS_SERVICE = Service(443, "tcp", "https", "", "", None)
 class _TlsInfoFalso:
     """Lo mínimo que las reglas TLS del feed consultan de un handshake."""
 
-    def __init__(self, self_signed=True, expired=False, protocol="TLSv1.3"):
+    def __init__(self, self_signed=True, expired=False, protocol="TLSv1.3",
+                 cipher="TLS_AES_256_GCM_SHA384"):
         self.self_signed = self_signed
         self.expired = expired
         self.protocol = protocol
+        self.cipher = cipher
         self.days_until_expiry = 200
 
 
@@ -673,10 +677,13 @@ def test_the_three_header_checks_make_one_request_between_them():
 
     findings = CheckRuntime(load_checks(), fetch).run("10.0.0.5", [_HTTP])
 
-    # Los tres checks de cabeceras disparan (el nginx de mentira no manda
-    # ninguna) y aun así "/" se pidió una sola vez.
-    cabeceras = [f for f in findings if f["category"] == "security_header"]
-    assert len(cabeceras) == 3
+    # Los checks de cabeceras faltantes disparan (el nginx de mentira no manda
+    # ninguna: HSTS, X-Frame-Options, X-Content-Type-Options, CSP,
+    # Referrer-Policy y Permissions-Policy) y aun así "/" se pidió una sola vez.
+    # La cookie insegura no cuenta: no hay Set-Cookie que mirar.
+    cabeceras = [f for f in findings if f["category"] == "security_header"
+                 and f["check_id"] != "lybra:session-cookie-without-secure@1"]
+    assert len(cabeceras) == 6
     assert [ruta for _h, _p, _m, ruta in fetch.calls].count("/") == 1
 
 

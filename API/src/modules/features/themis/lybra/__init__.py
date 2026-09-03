@@ -58,6 +58,8 @@ from .grouping import (
     build_service_rollup,
     group_label,
 )
+from .backports import apply_backport_verdicts, BACKPORT_CHECK_ID
+from .distro import infer_distro_release, DistroRelease
 from .kb import (
     version_compare,
     split_distro_version,
@@ -71,6 +73,9 @@ from .kb import (
     ingest_nvd_cve,
     ingest_kev,
     parse_epss_rows,
+    parse_oval_definitions,
+    parse_csaf_advisory,
+    fetch_oval,
     fetch_kev,
     fetch_epss,
     iter_nvd_pages,
@@ -103,6 +108,14 @@ from .script_checks import (
     SmbSigningNotRequiredPlugin,
     SnmpDefaultCommunityPlugin,
     default_script_plugins,
+)
+from .credentials import (
+    load_credentials,
+    validate_credentials,
+    CredentialRuntime,
+    CredentialEntry,
+    CredentialPair,
+    CREDENTIALS_FEED_VERSION,
 )
 from .correlation import (
     classify_exposure,
@@ -198,6 +211,7 @@ from .transport import (
     PortOutcome,
     PortSweep,
     scan_ports_sync,
+    sweep_with_retries,
     sweep_ports_sync,
     scan_udp_ports_sync,
     services_from_discovered_ports,
@@ -221,6 +235,10 @@ __all__ = [
     "extract_trailing_version",
     "load_product_aliases",
     "parse_cpe23",
+    "apply_backport_verdicts",
+    "BACKPORT_CHECK_ID",
+    "infer_distro_release",
+    "DistroRelease",
     "ServiceGroup",
     "build_service_rollup",
     "group_label",
@@ -228,6 +246,9 @@ __all__ = [
     "ingest_nvd_cve",
     "ingest_kev",
     "parse_epss_rows",
+    "parse_oval_definitions",
+    "parse_csaf_advisory",
+    "fetch_oval",
     "fetch_kev",
     "fetch_epss",
     "iter_nvd_pages",
@@ -256,6 +277,12 @@ __all__ = [
     "SmbSigningNotRequiredPlugin",
     "SnmpDefaultCommunityPlugin",
     "default_script_plugins",
+    "load_credentials",
+    "validate_credentials",
+    "CredentialRuntime",
+    "CredentialEntry",
+    "CredentialPair",
+    "CREDENTIALS_FEED_VERSION",
     "classify_exposure",
     "compute_dedup_key",
     "merge_findings",
@@ -343,6 +370,7 @@ __all__ = [
     "PortOutcome",
     "PortSweep",
     "scan_ports_sync",
+    "sweep_with_retries",
     "sweep_ports_sync",
     "scan_udp_ports_sync",
     "services_from_discovered_ports",

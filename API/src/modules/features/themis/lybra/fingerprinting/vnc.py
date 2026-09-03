@@ -119,6 +119,63 @@ class VncProbe:
             except OSError:
                 pass
 
+    def security_types(self, host: str, port: int = 5900) -> Optional[list]:
+        """Completa el handshake RFB y devuelve los tipos de seguridad ofrecidos.
+
+        Tras enviar su versión, el servidor RFB (3.7/3.8) responde con un byte
+        de recuento y esa lista de tipos de seguridad. El tipo **1 es ``None``**
+        (RFC 6143 §7.1.2): acceso sin autenticación, que es el hallazgo. Un
+        recuento 0 significa que el servidor rechazó, y sigue un motivo de error.
+
+        No se avanza más allá de leer la lista: **no se intenta autenticar** ni
+        se envía ninguna respuesta de seguridad, así que no se establece sesión.
+
+        Args:
+            host: El objetivo.
+            port: El puerto.
+
+        Returns:
+            La lista de tipos como enteros, ``[]`` si el servidor rechazó con
+            recuento 0, o ``None`` si al otro lado no había un RFB legible.
+        """
+        try:
+            sock = self._connect((host, port), self._timeout)
+        except OSError as err:
+            logger.debug("VNC security probe connect failed for %s:%s: %s", host, port, err)
+            return None
+        try:
+            sock.settimeout(self._timeout)
+            banner = b""
+            while not banner.endswith(b"\n") and len(banner) < 12:
+                chunk = sock.recv(1)
+                if not chunk:
+                    break
+                banner += chunk
+            if not _RFB_RE.match(banner):
+                return None
+            sock.sendall(b"RFB 003.008\n")
+            count_byte = sock.recv(1)
+            if not count_byte:
+                return None
+            count = count_byte[0]
+            if count == 0:
+                return []
+            types = b""
+            while len(types) < count:
+                chunk = sock.recv(count - len(types))
+                if not chunk:
+                    break
+                types += chunk
+            return list(types)
+        except OSError as err:
+            logger.debug("VNC security probe failed for %s:%s: %s", host, port, err)
+            return None
+        finally:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
 
 @register_dissector
 class VncDissector(Dissector):

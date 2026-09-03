@@ -41,6 +41,12 @@ clasifica cada intento (:class:`PortOutcome`), lo reporta entero
 (:class:`PortSweep`) y ``scan_ports_sync`` devuelve ``None`` cuando nada
 contestó de ninguna forma.
 
+**Un barrido truncado es una tercera cosa**, ni limpia ni bloqueada: lo que se
+encontró es cierto, y de lo que quedó sin mirar no se sabe nada. Por eso
+``sweep_with_retries`` devuelve el barrido entero en vez de una lista — el
+motor reporta esos puertos y marca el escaneo como incompleto, en lugar de
+tirar el trabajo.
+
 **El barrido tiene presupuesto de reloj propio** (``budget_seconds``). El
 plazo que la cola de tareas le pone a un job no sirve para esto: se inyecta con
 ``PyThreadState_SetAsyncExc`` y sólo se materializa cuando el hilo vuelve a
@@ -375,7 +381,7 @@ def sweep_ports_sync(
     return asyncio.run(scanner.sweep(host, port_list, cancel_check=cancel_check, deadline=deadline))
 
 
-def scan_ports_sync(
+def sweep_with_retries(
     host: str,
     ports: Optional[Iterable[int]] = None,
     concurrency: int = 200,
@@ -386,32 +392,23 @@ def scan_ports_sync(
     retry_delay: float = 2.0,
     sleeper: Callable[[float], None] = time.sleep,
     budget_seconds: Optional[float] = None,
-) -> Optional[List[int]]:
-    """Run a connect scan synchronously, on a fresh event loop of its own.
+) -> PortSweep:
+    """Barrer los puertos de un host, reintentando si el barrido sale mudo.
 
-    This is the boundary of the "asyncio island": it wraps the async scanner in
-    ``asyncio.run``, so it is safe to call from an ordinary synchronous worker.
+    Devuelve el :class:`PortSweep` entero, que es lo que permite al llamante
+    distinguir los tres desenlaces que importan y que una lista de puertos no
+    puede expresar:
 
-    Devuelve ``None`` —no ``[]``— cuando el barrido parece bloqueado en vez de
-    limpio (ver :attr:`PortSweep.is_blocked`). Esa distinción es la razón de
-    ser de esta firma: el llamante ya tenía puesta la defensa de tratar
-    ``None`` como fallo, pero nunca podía dispararla porque la única respuesta
-    posible era una lista. Una lista vacía significa ahora, y sólo ahora,
-    "el objetivo contestó y no tiene nada abierto".
+    - **limpio** — el objetivo contestó y estos son sus puertos abiertos;
+    - **bloqueado** (:attr:`PortSweep.is_blocked`) — nada contestó de ninguna
+      forma, así que no se sabe nada del objetivo;
+    - **truncado** (:attr:`PortSweep.was_truncated`) — se acabó el reloj a
+      mitad, así que lo encontrado es cierto pero incompleto.
 
     Antes de concluir que hay bloqueo se reintenta el barrido entero: un
     objetivo que deja de contestar a mitad de camino suele recuperarse en
     segundos, y un reintento espaciado cuesta mucho menos que un escaneo
-    perdido.
-
-    **También devuelve ``None`` cuando se agota el presupuesto de reloj.** Un
-    barrido truncado deja puertos sin mirar, y de lo que no se miró no se sabe
-    nada: devolver los que sí dio tiempo a encontrar sería exactamente el fallo
-    que arregló L48-c por otra vía, porque el ciclo de vida marcaría como
-    corregido todo lo que estaba abierto y esta vez no se llegó a comprobar. Un
-    escaneo que no cabe en su presupuesto es un escaneo fallido, y decirlo es
-    más útil que un informe a medias que parece completo. Los puertos que sí se
-    encontraron quedan en el log.
+    perdido. El reintento sale del mismo presupuesto que el barrido.
 
     Args:
         host: The target host.
@@ -427,8 +424,7 @@ def scan_ports_sync(
             reintentos y esperas incluidos. ``None`` lo deja sin límite.
 
     Returns:
-        Los puertos abiertos, ascendentes; o ``None`` si el barrido parece
-        bloqueado incluso tras los reintentos, o si se agotó el presupuesto.
+        El :class:`PortSweep` del último intento.
     """
     deadline = time.monotonic() + budget_seconds if budget_seconds is not None else None
 
@@ -454,20 +450,53 @@ def scan_ports_sync(
         attempts_left -= 1
 
     if sweep.was_truncated:
-        logger.error(
-            "Descubrimiento de %s sin terminar: se agotó el presupuesto de %.1f s "
-            "con %s puertos abiertos encontrados (%s). Lo que quedó sin probar es "
-            "desconocido, no limpio, así que el escaneo falla en vez de reportarlo",
+        logger.warning(
+            "Barrido de %s sin terminar: se agotó el presupuesto de %.1f s con %s "
+            "puertos abiertos encontrados (%s). El resultado es cierto pero "
+            "incompleto: de lo que quedó sin probar no se sabe nada",
             host, budget_seconds, len(sweep.open_ports), list(sweep.open_ports),
         )
-        return None
-
-    if sweep.is_blocked:
+    elif sweep.is_blocked:
         logger.error(
             "Descubrimiento de %s bloqueado: los %s puertos expiraron y ninguno "
             "rechazó la conexión; no es un objetivo limpio",
             host, len(sweep.timed_out_ports),
         )
+    return sweep
+
+
+def scan_ports_sync(
+    host: str,
+    ports: Optional[Iterable[int]] = None,
+    concurrency: int = 200,
+    timeout: float = 2.0,
+    opener: Optional[Callable] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+    retries: int = 1,
+    retry_delay: float = 2.0,
+    sleeper: Callable[[float], None] = time.sleep,
+    budget_seconds: Optional[float] = None,
+) -> Optional[List[int]]:
+    """Los puertos abiertos de un host, o ``None`` si el barrido no sirve.
+
+    La vista de sólo-la-lista sobre :func:`sweep_with_retries`, para quien no
+    tiene nada que hacer con el detalle: los bancos de pruebas, y cualquier
+    llamante al que le baste "dame los puertos o dime que no pudo ser".
+
+    Devuelve ``None`` —no ``[]``— cuando el barrido salió bloqueado o truncado.
+    Una lista vacía significa, y sólo significa, "el objetivo contestó y no
+    tiene nada abierto"; confundir las dos cosas es lo que hacía que un barrido
+    bloqueado le dijera al usuario que sus vulnerabilidades fueron remediadas
+    (L48-c).
+
+    Quien sí necesite los resultados parciales de un barrido truncado —el
+    motor, que puede reportarlos marcando el escaneo como incompleto— debe
+    llamar a :func:`sweep_with_retries` y mirar
+    :attr:`PortSweep.was_truncated`.
+    """
+    sweep = sweep_with_retries(host, ports, concurrency, timeout, opener,
+                               cancel_check, retries, retry_delay, sleeper, budget_seconds)
+    if sweep.is_blocked or sweep.was_truncated:
         return None
     return list(sweep.open_ports)
 
