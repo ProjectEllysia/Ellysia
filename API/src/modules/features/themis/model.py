@@ -1046,6 +1046,51 @@ class EpssScore(Base):
         return f"<EpssScore(cve_id='{self.cve_id}', score={self.score})>"
 
 
+class KbSyncStatus(Base):
+    """Cuándo se intentó sincronizar cada fuente de la KB, y cómo salió.
+
+    Toda la detección por versión depende de este espejo local de NVD, KEV y
+    EPSS, y hasta ahora no había **nada** que registrara cuándo se refrescó. Los
+    modos de fallo eran todos silenciosos y todos igual de malos: el job lleva
+    tres semanas fallando y los escaneos siguen saliendo en verde contra un
+    catálogo congelado; un CVE crítico publicado ayer no está, así que para el
+    motor no existe; KEV lleva un mes parado justo en la señal que más pesa al
+    priorizar. Un log de `INFO` no es un estado consultable.
+
+    No sustituye a :meth:`KbRepository.knowledge_state`, que responde a otra
+    pregunta. Aquella dice **cuán reciente es lo que sabemos**, leyendo la fecha
+    más nueva de los propios datos; ésta dice **cuándo lo preguntamos y si
+    funcionó**. Hacen falta las dos, y la diferencia entre ambas es
+    precisamente el síntoma que hay que poder ver: un contenido que no avanza
+    mientras las sincronizaciones fallan.
+
+    Attributes:
+        source: La fuente (``"nvd"``, ``"kev"``, ``"epss"``). Única: una fila
+            por fuente, sobrescrita en cada intento. No es un historial —para
+            eso están los logs— sino el estado actual, que es lo que se
+            consulta.
+        last_attempt_at: Cuándo se intentó por última vez, salga como salga.
+        last_success_at: Cuándo terminó bien por última vez. Se conserva aunque
+            el último intento fallara: la distancia entre ambas fechas es
+            exactamente "cuánto lleva roto".
+        rows_upserted: Filas escritas en el último intento con éxito.
+        error: El mensaje del último intento fallido, o ``None`` si el último
+            fue bien. Que se limpie al tener éxito es deliberado: la pregunta
+            que responde esta tabla es "¿está bien ahora?".
+    """
+    __tablename__ = "KbSyncStatus"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    source          = Column(String(32), unique=True, nullable=False, index=True)
+    last_attempt_at = Column(DateTime)
+    last_success_at = Column(DateTime)
+    rows_upserted   = Column(Integer)
+    error           = Column(Text)
+
+    def __repr__(self):
+        return f"<KbSyncStatus(source='{self.source}', last_success_at={self.last_success_at})>"
+
+
 # =========================================================================
 # DOCUMENT MODEL
 # =========================================================================
