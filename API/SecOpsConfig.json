@@ -212,6 +212,11 @@
             "bannerTimeout": 2.0,
             "maxBlindProbes": 2
           },
+          "evidence": {
+            "enabled": true,
+            "maxBodyBytes": 8192,
+            "retentionDays": 90
+          },
           "fingerprintingEnabled": true,
           "ingest": {
             "enabled": false,

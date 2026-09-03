@@ -1072,6 +1072,36 @@ def lybra_engine_config() -> LybraEngineConfig:
     return load_block(LybraEngineConfig)
 
 
+@config_block("features.themis.scanners.lybra.evidence")
+@dataclass(frozen=True)
+class LybraEvidenceConfig:
+    """La captura de evidencia cruda por hallazgo (Fase E, L44).
+
+    Un hallazgo dice qué encontró y con qué regla, pero ``feed_version`` +
+    ``check_id`` dan reproducibilidad lógica, no guardan lo que el objetivo
+    respondió. Esta captura sí: la respuesta HTTP que provocó el hallazgo,
+    redactada, con su hash y su fecha, para poder defenderla ante un cliente.
+    """
+
+    enabled: bool = True
+    """Si se guarda la evidencia de los hallazgos confirmados."""
+
+    max_body_bytes: int = 8192
+    """Tope del cuerpo de respuesta que se guarda como evidencia (8
+    KiB). Una respuesta más larga se trunca, dejando constancia de cuántos
+    bytes se recortaron."""
+
+    retention_days: int = 90
+    """Días que se conserva la evidencia antes de purgarla. La
+    evidencia crece rápido —KiB por hallazgo, por escaneo, por activo— y necesita
+    caducidad desde el primer día. A 0 o menos, retención indefinida (el caso de
+    auditoría que exige conservarlo todo)."""
+
+
+def lybra_evidence_config() -> LybraEvidenceConfig:
+    return load_block(LybraEvidenceConfig)
+
+
 def lybra_ingest_config() -> LybraIngestConfig:
     return load_block(LybraIngestConfig)
 

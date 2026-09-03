@@ -1066,7 +1066,7 @@ class CheckRuntime:
             above are.
     """
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         checks: Iterable[Check],
         fetch: Callable[[str, Optional[int], str, str], Optional[Response]],
@@ -1076,6 +1076,7 @@ class CheckRuntime:
         network_open: Optional[Callable[[str, int], Optional["NetworkSession"]]] = None,
         script_plugins: Optional[Dict[str, object]] = None,
         mapper: Optional[Callable] = None,
+        capture_evidence: bool = False,
     ) -> None:
         self._checks = list(checks)
         self._fetch = fetch
@@ -1090,6 +1091,7 @@ class CheckRuntime:
         # configuración ni monta hilos por su cuenta.
         self._mapper: Callable = mapper or map
         self._cancel_check: Optional[Callable[[], bool]] = None
+        self._capture_evidence = capture_evidence
         # El host y sus servicios de la ejecución en curso: los rellena
         # :meth:`run`, y viven aquí para que un plugin de tipo ``script``
         # pueda ver los servicios hermanos sin descubrirlos por su cuenta.
@@ -1264,11 +1266,29 @@ class CheckRuntime:
         request fails to reach the target or does not match, the check produces
         nothing.
         """
+        last_response = None
         for request in check.requests:
             response = self._probe_response(host, service, request.method, request.path)
             if response is None or not request.evaluate(response):
                 return None
-        return self._finding(check, service)
+            last_response = response
+        finding = self._finding(check, service)
+        # Evidencia (Fase E): la respuesta que provocó el hallazgo. Sólo para
+        # los confirmados —los que van a un informe— y sólo si la captura está
+        # activada. El payload viaja en ``_evidence`` hasta la persistencia, que
+        # lo redacta y lo separa en su propia fila.
+        if (self._capture_evidence and last_response is not None
+                and finding.get("confirmed")):
+            finding["_evidence"] = {
+                "kind": "http_response",
+                "payload": {
+                    "status": last_response.status,
+                    "headers": dict(last_response.headers),
+                    "body": last_response.body,
+                    "path": check.requests[-1].path,
+                },
+            }
+        return finding
 
     def _probe_response(self, host: str, service: Service, method: str, path: str) -> Optional[Response]:
         """Return the response for one request, asking the target only once.
