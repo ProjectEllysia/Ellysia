@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 # ``Check.check_id``). Los dos checks ``network`` suben además a ``version: 2``
 # en checks-6: su comportamiento cambia, y un hallazgo guardado tiene que poder
 # decir cuál de las dos formas lo produjo.
-CHECKS_FEED_VERSION = "lybra-checks-13"
+CHECKS_FEED_VERSION = "lybra-checks-14"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -911,6 +911,13 @@ _NETWORK_SERVICE_MATCHERS: Dict[str, Callable[[Service], bool]] = _network_servi
 # Protocol versions considered deprecated/weak for a service exposed today.
 _WEAK_TLS_PROTOCOLS = {"SSLv2", "SSLv3", "TLSv1", "TLSv1.1"}
 
+# Familias de cifrado que hoy se consideran débiles: sin autenticación (aNULL),
+# sin cifrado (eNULL), exportación, DES/3DES, RC4 y MD5. El nombre del suite
+# negociado los delata como subcadena — "ECDHE-RSA-DES-CBC3-SHA" trae "DES", y
+# "TLS_RSA_WITH_RC4_128_SHA" trae "RC4". Se compara en mayúsculas porque OpenSSL
+# y la RFC nombran los suites en formatos distintos.
+_WEAK_TLS_CIPHER_TOKENS = ("NULL", "EXPORT", "DES", "RC4", "MD5", "_CBC3_", "3DES")
+
 # TLS hygiene rules a ``type: "tls"`` check can reference via ``tlsRule`` in the
 # feed. Each takes the ``TlsInfo`` a probe returned (duck-typed — this module
 # never imports the fingerprint module, to avoid a checks<->fingerprint
@@ -920,6 +927,8 @@ _TLS_RULES: Dict[str, Callable] = {
     "expired": lambda info: info.expired,
     "expiring_soon": lambda info: not info.expired and info.days_until_expiry is not None and info.days_until_expiry <= 30,
     "deprecated_protocol": lambda info: info.protocol in _WEAK_TLS_PROTOCOLS,
+    "weak_cipher": lambda info: bool(info.cipher) and any(
+        token in info.cipher.upper() for token in _WEAK_TLS_CIPHER_TOKENS),
 }
 
 
