@@ -65,6 +65,7 @@ from .schemas import (
     AuthorizedTargetListResponseSchema,
     AuthorizedTargetActionResponseSchema,
     ResultsQuerySchema,
+    UnresolvedProductsQuerySchema,
     GeneratePdfRequestSchema,
     DocumentStatusQuerySchema,
     DocumentsQuerySchema,
@@ -493,6 +494,36 @@ def get_false_positives():
         "message": "Falsos positivos obtenidos correctamente",
         "count": len(items),
         "falsePositives": items,
+        "user": user.username,
+    }
+
+
+@themis_blp.get("/lybra/unresolved-products")
+@themis_blp.arguments(UnresolvedProductsQuerySchema, location="query")
+@themis_blp.response(200, description="Product names the matcher could not resolve")
+@themis_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@themis_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.THEMIS_READ])
+@limiter.limit("120 per hour; 400 per day")
+@handle_exceptions(default_exception=ScanError, logger=logger)
+def get_unresolved_products(args):
+    """Los nombres de producto que el motor no consigue convertir en un CPE.
+
+    Cuando ninguna de las tres estrategias de resolución acierta, el motor no
+    inventa un CPE —uno fabricado no casaría con nada, en silencio— pero sí
+    apunta el nombre. Cada línea de esta lista es un alias que merece la pena
+    escribir, ordenado por cuántas veces ha hecho falta.
+
+    En cuanto el alias existe, el nombre resuelve y desaparece de aquí en el
+    siguiente escaneo: la lista mide el trabajo que queda, no el que hubo.
+    """
+    user = get_current_user()
+    items = LybraEngineManager.unresolved_products(args["limit"], args["origin"])
+    return {
+        "message": "Nombres sin resolver obtenidos correctamente",
+        "count": len(items),
+        "unresolvedProducts": items,
         "user": user.username,
     }
 

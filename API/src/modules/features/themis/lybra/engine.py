@@ -159,12 +159,14 @@ class LybraEngine:
         epss_lookup: Optional[Callable[[str], Optional[float]]] = None,
         product_alias_lookup: Optional[Callable[[str], Optional[Tuple[str, str]]]] = None,
         feed_version: Optional[str] = None,
+        record_resolution: Optional[Callable[[str, str, bool], None]] = None,
     ) -> None:
         self._cve_lookup = cve_lookup
         self._kev_lookup = kev_lookup
         self._epss_lookup = epss_lookup
         self._product_alias_lookup = product_alias_lookup
         self._feed_version = feed_version or self.FEED_VERSION
+        self._record_resolution = record_resolution
 
     def analyze(self, services: Iterable[Service]) -> List[dict]:
         """Produce the findings for a set of services.
@@ -182,7 +184,8 @@ class LybraEngine:
             # whether resolution succeeded (Fase I-b observability), and the
             # version-match path reuses the same result instead of resolving
             # the CPE twice.
-            resolved = _resolve_cpe(service, self._product_alias_lookup)
+            resolved = _resolve_cpe(service, self._product_alias_lookup,
+                                    self._record_resolution)
             findings.append(self._informational_finding(service, resolved))
             if self._cve_lookup is not None:
                 findings.extend(self._version_findings(service, resolved))
@@ -355,6 +358,7 @@ def _concrete_version(version: str) -> Optional[str]:
 def _resolve_cpe(
     service: Service,
     product_alias_lookup: Optional[Callable[[str], Optional[Tuple[str, str]]]] = None,
+    record_resolution: Optional[Callable[[str, str, bool], None]] = None,
 ) -> Optional[tuple[str, str, str, str]]:
     """Resolve a service to a ``(vendor, product, version, cpe_2_3)`` for matching.
 
@@ -391,6 +395,17 @@ def _resolve_cpe(
             (``None``) by any caller that has not wired the KB-backed index —
             strategy 3 is simply skipped, same as ``cve_lookup=None`` skips
             detection entirely.
+        record_resolution: Callback ``(nombre_normalizado, origen, resuelto)``
+            para llevar la cuenta de qué nombres de producto no se consiguen
+            resolver (L37). Se invoca **sólo** cuando el nombre y la versión
+            existen y aun así ninguna estrategia dio con el CPE: eso es
+            exactamente "falta un alias", que es lo que el ranking tiene que
+            saber. Un servicio sin versión concreta o sin nombre no falla por
+            falta de alias, así que contarlo ensuciaría la lista con trabajo
+            que no existe.
+
+            Inyectado en vez de escrito aquí porque este paquete es libre de
+            ORM y debe seguir siéndolo (``test_lybra_package_invariants``).
 
     Returns:
         A ``(vendor, product, version, cpe_2_3)`` tuple, or ``None`` if the
@@ -413,9 +428,14 @@ def _resolve_cpe(
     if not normalized:
         return None
 
+    def _note(was_resolved: bool) -> None:
+        if record_resolution is not None:
+            record_resolution(normalized, service.origin, was_resolved)
+
     # 2) The curated alias feed.
     if normalized in CPE_PRODUCT_OVERRIDES:
         vendor, product = CPE_PRODUCT_OVERRIDES[normalized]
+        _note(True)
         return vendor, product, version, f"cpe:2.3:a:{vendor}:{product}:{version}:*:*:*:*:*:*:*"
 
     # 3) The automated index.
@@ -423,6 +443,10 @@ def _resolve_cpe(
         resolved = product_alias_lookup(normalized)
         if resolved:
             vendor, product = resolved
+            _note(True)
             return vendor, product, version, f"cpe:2.3:a:{vendor}:{product}:{version}:*:*:*:*:*:*:*"
 
+    # Nombre y versión había; alias no. Es la muestra que dirige el trabajo del
+    # feed curado: qué producto concreto estamos fallando en identificar.
+    _note(False)
     return None

@@ -509,3 +509,72 @@ def test_services_from_payload_respects_explicit_origin_and_missing_port():
 
 def test_services_from_payload_empty_returns_empty():
     assert services_from_payload([]) == []
+
+
+# ─────────────── qué nombres no se consiguen resolver (L37)
+#
+# `_resolve_cpe` devuelve None sin inventar un CPE cuando ninguna estrategia
+# acierta, y esa decisión es correcta: uno fabricado que NVD no conozca no
+# casaría con nada, en silencio. Pero el fallo tampoco se contaba, así que la
+# pregunta que dirige todo el trabajo del feed de alias —qué nombres fallamos
+# en resolver, y cuáles más— no tenía respuesta.
+
+from src.modules.features.themis.lybra.engine import _resolve_cpe   # noqa: E402
+
+
+def _recorder():
+    calls = []
+    return calls, lambda name, origin, resolved: calls.append((name, origin, resolved))
+
+
+def test_an_unresolvable_name_is_recorded():
+    calls, record = _recorder()
+    service = Service(port=443, protocol="tcp", name="https",
+                      product="Chachiservidor Ultra", version="3.1")
+
+    assert _resolve_cpe(service, None, record) is None
+    assert calls == [("chachiservidor ultra", "network", False)]
+
+
+def test_a_name_the_curated_feed_knows_is_recorded_as_resolved():
+    """El registro del acierto es lo que cierra el bucle: al escribir el alias
+    que faltaba, la fila del ranking se borra y el nombre desaparece."""
+    calls, record = _recorder()
+    service = Service(port=80, protocol="tcp", name="http",
+                      product="Apache httpd", version="2.4.49")
+
+    assert _resolve_cpe(service, None, record) is not None
+    assert calls and calls[0][2] is True
+
+
+def test_a_service_without_a_version_is_not_recorded():
+    """No falla por falta de alias, sino por falta de versión. Contarlo
+    ensuciaría el ranking con trabajo que no existe."""
+    calls, record = _recorder()
+    service = Service(port=443, protocol="tcp", name="https",
+                      product="Chachiservidor Ultra", version=None)
+
+    assert _resolve_cpe(service, None, record) is None
+    assert calls == []
+
+
+def test_a_service_resolved_from_its_own_cpe_is_not_recorded():
+    """La primera estrategia no pasa por el nombre normalizado: si Nmap ya dio
+    un CPE, no hay ningún alias que escribir."""
+    calls, record = _recorder()
+    service = Service(port=80, protocol="tcp", name="http", product="Apache httpd",
+                      version="2.4.49", cpe="cpe:/a:apache:http_server:2.4.49")
+
+    assert _resolve_cpe(service, None, record) is not None
+    assert calls == []
+
+
+def test_the_inventory_origin_travels_with_the_name():
+    """Red e inventario son dos frentes de trabajo distintos, y el ranking los
+    separa: el de red aporta muestras sin necesidad de agentes desplegados."""
+    calls, record = _recorder()
+    service = Service(port=None, protocol="", name="", product="Chachiapp",
+                      version="1.0", origin="inventory")
+
+    _resolve_cpe(service, None, record)
+    assert calls == [("chachiapp", "inventory", False)]
