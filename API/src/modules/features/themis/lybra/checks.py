@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 # ``Check.check_id``). Los dos checks ``network`` suben además a ``version: 2``
 # en checks-6: su comportamiento cambia, y un hallazgo guardado tiene que poder
 # decir cuál de las dos formas lo produjo.
-CHECKS_FEED_VERSION = "lybra-checks-15"
+CHECKS_FEED_VERSION = "lybra-checks-16"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -310,7 +310,7 @@ class Request:
 
 
 @dataclass(frozen=True)
-class Check:
+class Check:  # pylint: disable=too-many-instance-attributes
     """A declarative detection check (``type: "http"`` or ``type: "tls"``).
 
     Attributes:
@@ -348,6 +348,16 @@ class Check:
             buffer and every subsequent read comes back one reply out of step
             — the whole check then matches against the wrong text and silently
             never fires.
+        confirms: For a **confirmer** check, the CVE it verifies (e.g.
+            ``"CVE-2021-41773"``). A confirmer runs only when the version matcher
+            has already *proposed* that CVE for the service — never "just in
+            case" — and, when it fires, promotes that hypothesis from
+            ``confirmed=false, qod=70`` to ``confirmed=true, qod=99`` by merging
+            on the shared ``dedup_key`` (both carry the same ``cve_ids``). It is
+            the encadenamiento versión→confirmador the roadmap names as the
+            runtime's reason to exist. A confirmer never exploits: it checks the
+            condition without running anything on the target, or it is not
+            written.
         tags: Free-form labels (Nuclei's ``info.tags``, plus vendor/product
             metadata). Not used by the runtime, which runs whatever it is
             given: they exist so a *selector* can decide which of thousands of
@@ -368,6 +378,7 @@ class Check:
     namespace: str = "lybra"
     feed_version: Optional[str] = None
     expect_banner: bool = False
+    confirms: Optional[str] = None
     tags: tuple = ()
 
     @property
@@ -454,6 +465,7 @@ def _parse_check(c: dict) -> Check:
         tls_rule=c.get("tlsRule"),
         script=c.get("script"),
         expect_banner=bool(c.get("expectBanner", False)),
+        confirms=c.get("confirms"),
     )
     _assert_service_is_reachable(check)
     return check
@@ -564,7 +576,11 @@ MATCHER_TYPES = ("status", "word", "regex")
 MATCHER_PARTS = ("body", "header", "status")
 
 
-def validate_checks(checks: Iterable[Check]) -> List[str]:
+# Forma de un identificador CVE, para validar el campo ``confirms``.
+_CVE_ID_RE = re.compile(r"^CVE-[0-9]{4}-[0-9]{4,}$")
+
+
+def validate_checks(checks: Iterable[Check]) -> List[str]:  # pylint: disable=too-many-branches
     """Comprobar que ningún check está muerto por construcción.
 
     El feed son **datos que se ejecutan**: reglas que deciden si un hallazgo de
@@ -614,6 +630,11 @@ def validate_checks(checks: Iterable[Check]) -> List[str]:
             problems.append(f"Check {name!r}: severidad {check.severity!r} fuera de la escalera ({', '.join(PRIORITY_LADDER)})")
         if check.category not in CHECK_CATEGORIES:
             problems.append(f"Check {name!r}: categoría {check.category!r} desconocida (disponibles: {', '.join(CHECK_CATEGORIES)})")
+
+        if check.confirms and not _CVE_ID_RE.match(check.confirms):
+            problems.append(
+                f"Check {name!r}: 'confirms' debe ser un identificador CVE "
+                f"(CVE-AAAA-NNNN), no {check.confirms!r}")
 
         if check.type == "tls" and check.tls_rule not in _TLS_RULES:
             problems.append(
@@ -1091,6 +1112,7 @@ class CheckRuntime:
         # configuración ni monta hilos por su cuenta.
         self._mapper: Callable = mapper or map
         self._cancel_check: Optional[Callable[[], bool]] = None
+        self._proposed_cves: frozenset = frozenset()
         self._capture_evidence = capture_evidence
         # El host y sus servicios de la ejecución en curso: los rellena
         # :meth:`run`, y viven aquí para que un plugin de tipo ``script``
@@ -1124,8 +1146,10 @@ class CheckRuntime:
             ),
         )
 
-    def run(self, host: str, services: Iterable[Service],
-            cancel_check: Optional[Callable[[], bool]] = None) -> List[dict]:
+    def run(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+            self, host: str, services: Iterable[Service],
+            cancel_check: Optional[Callable[[], bool]] = None,
+            proposed_cves: Optional[frozenset] = None) -> List[dict]:
         """Run every applicable check against a host's HTTP, TLS and network services.
 
         Probes are shared within one call: several checks reading the same
@@ -1163,6 +1187,7 @@ class CheckRuntime:
         self._services = services
         self._host = host
         self._cancel_check = cancel_check
+        self._proposed_cves = proposed_cves or frozenset()
 
         per_service = self._mapper(self._run_for_service, services)
         return [finding for group in per_service for finding in group]
@@ -1194,6 +1219,11 @@ class CheckRuntime:
                 continue
             for check in self._checks:
                 if not family.check_matches(check, service):
+                    continue
+                # Un confirmador nunca corre "por si acaso": sólo si el matcher
+                # de versiones ya propuso su CVE para este escaneo. Es lo que lo
+                # distingue de un check normal — corre porque la KB dijo algo.
+                if check.confirms and check.confirms not in self._proposed_cves:
                     continue
                 finding = family.run_check(check, self._host, service)
                 if finding is not None:
@@ -1412,7 +1442,8 @@ class CheckRuntime:
             "port":         service.port,
             "service":      service.name or check.service,
             "protocol":     service.protocol,
-            "cve_ids":      finding_template.get("cve_ids"),
+            "cve_ids":      finding_template.get("cve_ids") or (
+                                [check.confirms] if check.confirms else None),
             "source":       "lybra",
             "check_id":     check.check_id,
             "feed_version": check.feed_version or CHECKS_FEED_VERSION,

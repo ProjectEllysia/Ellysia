@@ -205,7 +205,7 @@ class LybraEngineManager(ScanManager):
         """Segundos que quedan hasta ``deadline``, o ``None`` si no hay plazo."""
         return None if deadline is None else max(0.0, deadline - time.monotonic())
 
-    def _run_lybra(  # pylint: disable=too-many-arguments
+    def _run_lybra(  # pylint: disable=too-many-arguments,too-many-locals,too-many-statements,too-many-positional-arguments
         self,
         scan_id: int,
         discover_ports: Optional[list] = None,
@@ -249,9 +249,11 @@ class LybraEngineManager(ScanManager):
             # cancel_check baja hasta el barrido de puertos —la fase más larga—
             # para que un escaneo grande se pueda parar a mitad.
             discover_ports=lambda target, ports: self._discover_ports(
-                target, ports,
+                target=target,
+                ports=ports,
                 budget_seconds=self._remaining_budget(deadline),
-                cancel_check=cancel_check),
+                cancel_check=cancel_check
+            ),
             discover_udp_ports=self._discover_udp_ports,
         )
         try:
@@ -266,7 +268,8 @@ class LybraEngineManager(ScanManager):
                 user_id = lybra_scan.user_id if lybra_scan else None
 
                 is_target_authorized = bool(
-                    user_id and source_target
+                    user_id 
+                    and source_target
                     and AuthorizedTargetManager.is_authorized(user_id, source_target)
                 )
 
@@ -294,8 +297,8 @@ class LybraEngineManager(ScanManager):
                     and not is_cancelled()
                 ):
                     services, fingerprint_findings = self._fingerprint_services(
-                        source_target,
-                        services,
+                        target=source_target,
+                        services=services,
                         cancel_check=cancel_check,
                     )
                     is_partial = is_partial or is_cancelled()
@@ -323,10 +326,20 @@ class LybraEngineManager(ScanManager):
                 findings_data.extend(fingerprint_findings)
                 findings_data.extend(surface_findings)
 
+            # Las CVEs que la detección por versión acaba de proponer. Son las
+            # hipótesis (confirmed=false, qod=70) que un confirmador puede
+            # ascender a hecho: el runtime sólo corre un confirmador cuya CVE
+            # esté aquí — nunca "por si acaso" (L29).
+            proposed_cves = frozenset(
+                cve for finding in findings_data
+                for cve in (finding.get("cve_ids") or ()))
+
             if (source.probes_target_network and source_target and is_target_authorized
                     and CR.lybra_config().active_checks and not is_cancelled()):
                 findings_data.extend(
-                    self._run_active_checks(source_target, services, cancel_check=cancel_check))
+                    self._run_active_checks(source_target, services,
+                                            cancel_check=cancel_check,
+                                            proposed_cves=proposed_cves))
                 is_partial = is_partial or is_cancelled()
             report(90)
 
@@ -448,7 +461,8 @@ class LybraEngineManager(ScanManager):
             logger.exception("Lybra UDP port discovery failed for %s", target)
             return []
 
-    def _run_active_checks(self, target: str, services, cancel_check=None) -> list:
+    def _run_active_checks(self, target: str, services, cancel_check=None,
+                           proposed_cves=None) -> list:
         """Run the check runtime against the target's HTTP, TLS, network (Fase N)
         and script (Fase R) services.
 
@@ -476,7 +490,8 @@ class LybraEngineManager(ScanManager):
                 # fila india.
                 mapper=self._in_host_pool,
             )
-            return runtime.run(target, services, cancel_check=cancel_check)
+            return runtime.run(target, services, cancel_check=cancel_check,
+                               proposed_cves=proposed_cves)
         except Exception:
             logger.exception("Lybra active checks failed for %s", target)
             return []

