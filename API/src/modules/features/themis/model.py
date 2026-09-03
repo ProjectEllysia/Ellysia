@@ -808,7 +808,28 @@ class Finding(Base):
             ``False`` for Lybra findings — distinguishes "checked, no CVEs"
             from "could not even identify the package" in the same data that
             otherwise reads identically as an ``installed_package`` row.
-        first_seen_at / last_seen_at / state: Lifecycle (open|fixed|regressed|accepted).
+        first_seen_at / last_seen_at / state: Lifecycle
+            (open|fixed|regressed|accepted|false_positive).
+
+            ``accepted`` y ``false_positive`` dicen cosas **opuestas** y
+            durante mucho tiempo compartieron casilla, que es lo que L35 viene
+            a arreglar. Aceptar un riesgo es "esto es real, lo asumo": tiene
+            dueño, debería caducar y volver a revisión. Marcar un falso
+            positivo es "esto no es real, el motor se equivocó": no caduca,
+            porque no hay nada que aceptar, y no cuenta como riesgo abierto en
+            ningún recuento ni en ningún informe. Confundirlos hace que un
+            informe diga "3 riesgos aceptados" cuando son 3 errores del
+            escáner, que es mentir sobre la postura de seguridad.
+        state_reason: Por qué se tomó la decisión. Un ``accepted`` sin
+            justificación es deuda; con justificación es una decisión.
+        state_set_by: Quién la tomó.
+        state_set_at: Cuándo.
+        state_expires_at: Cuándo vuelve el hallazgo a ``open`` por su cuenta.
+            Se rellena sólo para ``accepted`` — un riesgo asumido hace un año
+            merece revisarse otra vez, mientras que un falso positivo no
+            caduca: el motor no se vuelve a equivocar con el paso del tiempo,
+            sino cuando *cambia*, y eso lo detecta ``apply_lifecycle``
+            comparando ``check_id`` y ``feed_version``.
     """
     __tablename__ = "Finding"
 
@@ -848,6 +869,13 @@ class Finding(Base):
     cpe_resolved = Column(Boolean, nullable=True)
 
     # Lifecycle
+    # Decisión del usuario sobre el estado (L35). Nulos mientras nadie haya
+    # tocado el hallazgo, que es el caso normal.
+    state_reason     = Column(Text)
+    state_set_by     = Column(Integer, ForeignKey("User.id"), nullable=True)
+    state_set_at     = Column(DateTime)
+    state_expires_at = Column(DateTime)
+
     first_seen_at = Column(DateTime, default=utcnow_naive)
     last_seen_at  = Column(DateTime, default=utcnow_naive)
     state         = Column(String(20), default="open")
