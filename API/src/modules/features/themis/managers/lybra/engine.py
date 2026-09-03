@@ -42,6 +42,8 @@ from ...lybra import (
     TlsProbe,
     NetworkProbe,
     default_script_plugins,
+    load_credentials,
+    CredentialRuntime,
     sweep_with_retries,
     PortSweep,
     scan_udp_ports_sync,
@@ -108,7 +110,7 @@ class LybraEngineManager(ScanManager):
         kwargs["discover_ports"] = arguments.get("discover_ports")
         return kwargs
 
-    def run_scan(self,
+    def run_scan(self,  # pylint: disable=too-many-arguments,too-many-positional-arguments
         user_id: int,
         target: Optional[str] = None,  # pylint: disable=arguments-differ
         services: Optional[List[Service]] = None,
@@ -116,6 +118,7 @@ class LybraEngineManager(ScanManager):
         timeout: int = 120,
         programed_scan_id: Optional[int] = None,
         asset_id: Optional[int] = None,
+        aggressive: bool = False,
     ) -> int:
         """
         Start an Lybra engine scan in one of two modes.
@@ -139,6 +142,15 @@ class LybraEngineManager(ScanManager):
                 ``services``. Recorded on the scan row for provenance and
                 grouping; it is never an input to the analysis itself, which
                 is why it does not travel in the TaskQueue args.
+            aggressive: Explicit request for the aggressive mode (L40).
+                Deliberately **not** enough on its own — ``_run_lybra`` only
+                honours it when the target is *also* in the authorized-target
+                register. A registered target does not pre-authorize
+                everything that could ever be done to it; this is the second
+                half of that double gate, and it is what unblocks the
+                default-credentials engine (Fase D, L31), the only family that
+                writes to the target. Never set from a scheduled scan — see
+                ``scheduled_run_kwargs``, which does not forward it.
 
         Returns:
             Primary key of the created LybraScan record.
@@ -166,7 +178,7 @@ class LybraEngineManager(ScanManager):
 
         self._task_queue.submit(
             func=LybraEngineManager.execute_lybra_scan, # type: ignore
-            args=(scan_id, discover_ports, services, timeout),
+            args=(scan_id, discover_ports, services, timeout, aggressive),
             name=f"LybraScan-{scan_id}",
             category=self.TASK_CATEGORY, # type: ignore
             external_id=self.external_id_for(scan_id),
@@ -182,12 +194,16 @@ class LybraEngineManager(ScanManager):
         discover_ports: Optional[list] = None,
         services: Optional[List[Service]] = None,
         timeout: Optional[int] = None,
+        aggressive: bool = False,
     ) -> None:
         """Entry point submitted to the TaskQueue. Runs the engine in the worker.
 
-        ``timeout`` es opcional para que un job encolado antes de este cambio
+        ``timeout`` es opcional para que un job encolado antes de ese cambio
         —que viaja con una tupla de tres argumentos— siga ejecutándose tras el
-        despliegue en vez de fallar al deserializarse.
+        despliegue en vez de fallar al deserializarse. ``aggressive`` (L40) es
+        opcional por el mismo motivo, con el mismo default seguro: un job
+        encolado antes de este cambio se ejecuta en modo ``safe``, nunca en
+        agresivo por sorpresa.
         """
         with job_context() as job:
             manager = LybraEngineManager()
@@ -198,6 +214,7 @@ class LybraEngineManager(ScanManager):
                 timeout,
                 cancel_check=job.cancelled,
                 progress=job.progress,
+                aggressive=aggressive,
             )
 
     @staticmethod
@@ -213,6 +230,7 @@ class LybraEngineManager(ScanManager):
         timeout: Optional[int] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
         progress: Optional[Callable[[int], None]] = None,
+        aggressive: bool = False,
     ) -> None:
         """Resolve services (own discovery or a payload), detect, persist.
 
@@ -232,6 +250,14 @@ class LybraEngineManager(ScanManager):
         tráfico) y la que aparecía en el incidente; el fingerprinting y los
         checks tienen plazo por operación. Si algún día hace falta acotarlos
         también, el plazo ya está aquí: basta pasarles ``_remaining_budget``.
+
+        ``aggressive`` (L40) es la petición explícita del usuario; por sí sola
+        no basta. El modo efectivo con el que corren los checks activos y el
+        motor de credenciales (Fase D, L31) sólo sube a ``"aggressive"``
+        cuando además ``is_target_authorized`` es verdadero — la doble puerta
+        que el roadmap exige para cualquier cosa que escriba en el objetivo.
+        Un objetivo autorizado sin petición explícita se queda en ``safe``;
+        una petición explícita sobre un objetivo no autorizado, también.
         """
         deadline = time.monotonic() + timeout if timeout else None
         is_cancelled = cancel_check or (lambda: False)
@@ -272,6 +298,12 @@ class LybraEngineManager(ScanManager):
                     and source_target
                     and AuthorizedTargetManager.is_authorized(user_id, source_target)
                 )
+                # La doble puerta del modo agresivo (L40): la petición
+                # explícita del usuario por sí sola no basta, y el registro de
+                # autorización por sí solo tampoco — autorizar un objetivo no
+                # es autorizar cualquier cosa contra él. Sólo con las dos a la
+                # vez sube el modo; en cualquier otro caso, ``safe``.
+                mode = "aggressive" if (aggressive and is_target_authorized) else "safe"
 
                 resolved = source.resolve_services(scan_repo, probes, source_target)
                 if resolved is None:
@@ -339,8 +371,17 @@ class LybraEngineManager(ScanManager):
                 findings_data.extend(
                     self._run_active_checks(source_target, services,
                                             cancel_check=cancel_check,
-                                            proposed_cves=proposed_cves))
+                                            proposed_cves=proposed_cves,
+                                            mode=mode))
                 is_partial = is_partial or is_cancelled()
+
+            # Motor de credenciales por defecto (Fase D, L31) — la única
+            # familia que escribe en el objetivo. ``_run_credential_checks``
+            # repite por su cuenta la comprobación de ``mode`` antes de probar
+            # nada; esta condición sólo evita el trabajo de construir el
+            # runtime cuando ya se sabe que no va a correr.
+            if source.probes_target_network and source_target and mode == "aggressive" and not is_cancelled():
+                findings_data.extend(self._run_credential_checks(source_target, services, mode))
             report(90)
 
             for finding in findings_data:
@@ -461,13 +502,19 @@ class LybraEngineManager(ScanManager):
             logger.exception("Lybra UDP port discovery failed for %s", target)
             return []
 
-    def _run_active_checks(self, target: str, services, cancel_check=None,
-                           proposed_cves=None) -> list:
+    def _run_active_checks(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        self, target: str, services, cancel_check=None,
+        proposed_cves=None, mode: str = "safe") -> list:
         """Run the check runtime against the target's HTTP, TLS, network (Fase N)
         and script (Fase R) services.
 
         Best-effort: a runtime failure (unreachable host, etc.) yields no active
-        findings rather than failing the whole scan. Safe mode only.
+        findings rather than failing the whole scan.
+
+        ``mode`` llega ya resuelto por :meth:`_run_lybra` — esta capa no decide
+        si el agresivo procede, sólo lo aplica (L40): un ``check`` marcado
+        ``mode: aggressive`` en el feed sigue sin correr en modo ``safe``, y
+        eso lo sigue decidiendo ``CheckRuntime._applies_mode`` como siempre.
         """
         try:
             engine = CR.lybra_engine_config()
@@ -478,7 +525,7 @@ class LybraEngineManager(ScanManager):
                     max_bytes=engine.http_max_body_bytes,
                     user_agent=engine.http_user_agent,
                 ).fetch,
-                mode="safe",
+                mode=mode,
                 rate_limiter=HostRateLimiter(min_interval=engine.rate_limit_interval),
                 tls_fetch=TlsProbe().fetch,
                 network_open=NetworkProbe(timeout=engine.network_timeout).open,
@@ -495,6 +542,44 @@ class LybraEngineManager(ScanManager):
                                proposed_cves=proposed_cves)
         except Exception:
             logger.exception("Lybra active checks failed for %s", target)
+            return []
+
+    def _run_credential_checks(self, target: str, services, mode: str) -> list:
+        """Probar credenciales por defecto contra los servicios del objetivo (Fase D, L31).
+
+        Es la única familia de detección que escribe en el objetivo, así que
+        no basta con la doble puerta de quien llama (autorizado + agresivo
+        pedido explícitamente): esta función además **repite** la comprobación
+        de modo antes de construir nada. Dos guardas para la única capacidad
+        que de verdad puede bloquear una cuenta real es defensa en profundidad
+        barata, no paranoia.
+
+        Best-effort igual que ``_run_active_checks``: un fallo de red no debe
+        hundir un escaneo que ya tenía hallazgos de las demás familias.
+        """
+        if mode != "aggressive":
+            return []
+        try:
+            engine = CR.lybra_engine_config()
+            credentials = CR.lybra_credentials_config()
+            runtime = CredentialRuntime(
+                load_credentials(),
+                HttpProbe(
+                    timeout=engine.http_timeout,
+                    max_bytes=engine.http_max_body_bytes,
+                    user_agent=engine.http_user_agent,
+                ).fetch,
+                # Intervalo mayor que el de los checks de lectura: cada
+                # intento aquí es un login real, y el roadmap pide
+                # explícitamente un ritmo distinto al de un GET de
+                # ``.git/config`` para no parecer un ataque de fuerza bruta.
+                rate_limiter=HostRateLimiter(min_interval=engine.rate_limit_interval * 5),
+                max_attempts_per_account=credentials.max_attempts,
+                capture_evidence=CR.lybra_evidence_config().enabled,
+            )
+            return runtime.run(target, services)
+        except Exception:
+            logger.exception("Lybra credential checks failed for %s", target)
             return []
 
     def _ingested_checks(self, services) -> list:

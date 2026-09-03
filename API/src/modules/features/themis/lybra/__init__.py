@@ -104,6 +104,14 @@ from .script_checks import (
     SnmpDefaultCommunityPlugin,
     default_script_plugins,
 )
+from .credentials import (
+    load_credentials,
+    validate_credentials,
+    CredentialRuntime,
+    CredentialEntry,
+    CredentialPair,
+    CREDENTIALS_FEED_VERSION,
+)
 from .correlation import (
     classify_exposure,
     compute_dedup_key,
@@ -257,6 +265,12 @@ __all__ = [
     "SmbSigningNotRequiredPlugin",
     "SnmpDefaultCommunityPlugin",
     "default_script_plugins",
+    "load_credentials",
+    "validate_credentials",
+    "CredentialRuntime",
+    "CredentialEntry",
+    "CredentialPair",
+    "CREDENTIALS_FEED_VERSION",
     "classify_exposure",
     "compute_dedup_key",
     "merge_findings",

@@ -150,6 +150,41 @@ def test_lybra_run_scan_self_discovery_succeeds_once_authorized(app, admin_user,
         assert scan_id is not None
 
 
+def test_lybra_endpoint_threads_the_aggressive_flag_to_run_scan(
+        client, admin_user, auth_headers, monkeypatch):
+    """El schema declara ``aggressive`` con ``load_default=False`` (L40): sin
+    el campo, una petición de siempre no cambia de comportamiento, y con él,
+    el valor llega íntegro al manager — la mitad de la doble puerta que
+    depende del usuario."""
+    captured = {}
+
+    def fake_run_scan(self, **kwargs):
+        captured.update(kwargs)
+        return 1
+
+    monkeypatch.setattr(LybraEngineManager, "run_scan", fake_run_scan)
+
+    resp = client.post("/themis/lybra", headers=auth_headers(admin_user),
+                       json={"target": "8.8.8.8", "aggressive": True})
+    assert resp.status_code == 201
+    assert captured["aggressive"] is True
+
+
+def test_lybra_endpoint_defaults_to_non_aggressive(client, admin_user, auth_headers, monkeypatch):
+    captured = {}
+
+    def fake_run_scan(self, **kwargs):
+        captured.update(kwargs)
+        return 1
+
+    monkeypatch.setattr(LybraEngineManager, "run_scan", fake_run_scan)
+
+    resp = client.post("/themis/lybra", headers=auth_headers(admin_user),
+                       json={"target": "8.8.8.8"})
+    assert resp.status_code == 201
+    assert captured["aggressive"] is False
+
+
 def test_lybra_self_discovery_produces_open_port_findings(app, admin_user, monkeypatch):
     # Stub reachability (no real socket) and the connect scan; the rest of the
     # self-discovery pipeline runs for real.
@@ -1514,3 +1549,109 @@ def test_a_confirmer_promotes_a_hypothesis_end_to_end(monkeypatch, app, admin_us
     assert len(for_cve) == 1
     assert for_cve[0].confirmed is True
     assert for_cve[0].qod == 99
+
+
+# =============================================== modo agresivo + credenciales (L40/L31)
+
+
+def _stub_tomcat_manager(monkeypatch) -> None:
+    """Un panel de Tomcat Manager con la tercera credencial de fábrica del feed
+    (``tomcat/s3cret``) — deliberadamente no la primera que se prueba, para
+    que el runtime tenga que agotar un intento fallido antes de acertar, y
+    con usuario y contraseña distintos, para poder afirmar sin ambigüedad que
+    la contraseña que funcionó no aparece en ningún sitio.
+
+    Sirve tanto a los checks activos declarativos como al motor de
+    credenciales: cualquier ruta que no sea ``/manager/html`` con la cabecera
+    correcta responde 404/401, así que el resto del feed no dispara ruido.
+    """
+    from src.modules.features.themis.lybra.checks import Response
+    import base64
+    valid_auth = "Basic " + base64.b64encode(b"tomcat:s3cret").decode("ascii")
+
+    def fetch(self, host, port, method, path, body=None, headers=None):
+        if path == "/manager/html" and (headers or {}).get("Authorization") == valid_auth:
+            return Response(200, "Tomcat Web Application Manager", {})
+        if path == "/manager/html":
+            return Response(401, "", {})
+        return Response(404, "", {})
+
+    monkeypatch.setattr("src.modules.features.themis.lybra.checks.HttpProbe.fetch", fetch)
+    monkeypatch.setattr(LybraEngineManager, "_fingerprint_services",
+                        lambda self, target, services, **kw: (services, []))
+
+
+def test_aggressive_checks_do_not_run_without_an_explicit_request(monkeypatch, app, admin_user):
+    """Objetivo autorizado, pero nadie pidió el modo agresivo: la mitad de la
+    puerta que falta. Ni un check ``aggressive`` ni el motor de credenciales
+    corren, así que un panel con credenciales de fábrica de verdad expuestas
+    no produce ningún hallazgo de ``default_credentials``."""
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+    _stub_tomcat_manager(monkeypatch)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id)  # aggressive=False por defecto
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    assert not [f for f in findings if f.category == "default_credentials"]
+
+
+def test_aggressive_checks_do_not_run_on_an_unauthorized_target(monkeypatch, app, admin_user):
+    """Petición explícita de modo agresivo, pero el objetivo NO está en el
+    registro de autorización: la otra mitad de la puerta. Autorizar un
+    objetivo para el escaneo pasivo no autoriza escribir en él."""
+    # Deliberadamente sin `_authorize_target`: el objetivo no está autorizado.
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+    _stub_tomcat_manager(monkeypatch)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, aggressive=True)
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    assert not [f for f in findings if f.category == "default_credentials"]
+
+
+def test_an_authorized_and_explicit_aggressive_scan_finds_default_credentials(
+        monkeypatch, app, admin_user):
+    """Las dos mitades de la puerta juntas: objetivo autorizado y modo
+    agresivo pedido explícitamente. El motor de credenciales prueba el panel
+    de Tomcat Manager, encuentra la credencial de fábrica que funciona y
+    produce un hallazgo confirmado — sin que la contraseña aparezca en
+    ningún campo."""
+    _authorize_target(app, admin_user.id)
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    _stub_self_discovery(monkeypatch, [80])
+    _stub_tomcat_manager(monkeypatch)
+
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, aggressive=True)
+        with UnitOfWork() as uow:
+            findings = ScanRepository(uow).get_findings_by_scan(escan.id)
+
+    credential_findings = [f for f in findings if f.category == "default_credentials"]
+    assert len(credential_findings) == 1
+    finding = credential_findings[0]
+    assert finding.confirmed is True
+    assert finding.qod == 99
+    assert finding.check_id == "lybra-credentials:tomcat-manager-default@1"
+
+    assert "s3cret" not in str(finding.title)
+
+    with UnitOfWork() as uow:
+        evidence = ScanRepository(uow).get_evidence_for_finding(finding.id)
+    # La contraseña que funcionó no aparece en el hallazgo ni en su evidencia
+    # — es justo lo que el motor de credenciales existe para garantizar. El
+    # usuario ("tomcat") sí puede aparecer; es información útil y no secreta.
+    assert len(evidence) == 1
+    assert "s3cret" not in str(evidence[0].payload)
