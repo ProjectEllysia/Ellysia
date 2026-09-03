@@ -50,6 +50,7 @@ from ...lybra import (
     scan_udp_ports_sync,
     score_finding,
     build_service_rollup,
+    apply_backport_verdicts,
     PRIORITY_LADDER,
 )
 from ...lybra.ingest import select_for_services, translate_all
@@ -416,6 +417,17 @@ class LybraEngineManager(ScanManager):
             # puerta.
             findings_data = apply_lifecycle(
                 trackable, trackable_previous, close_missing=not is_partial) + events
+
+            # Fase O, y **después** del ciclo de vida a propósito. Un backport
+            # de la distribución corrige el fallo sin subir el número de
+            # versión visible, que es la causa número uno de falsos positivos
+            # del motor —medida en 0,42 por el banco de la Fase 1—, así que la
+            # palabra del proveedor es la última sobre si el hallazgo es real.
+            # Antes del ciclo de vida el veredicto se perdía: `apply_lifecycle`
+            # reasigna el estado de todo hallazgo presente, y un `fixed` recién
+            # puesto volvía a `open` en la misma pasada.
+            with UnitOfWork() as uow:
+                apply_backport_verdicts(findings_data, KbRepository(uow).distro_package_status)
 
             with UnitOfWork() as uow:
                 scan_repo = ScanRepository(uow)

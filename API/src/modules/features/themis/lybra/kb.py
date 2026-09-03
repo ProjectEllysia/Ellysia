@@ -40,6 +40,7 @@ import re
 import socket
 import time
 import urllib.parse
+from xml.etree import ElementTree
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -578,6 +579,157 @@ def _pick_cvss(metrics: dict) -> Tuple[Optional[float], Optional[str], Optional[
         severity = data.get("baseSeverity") or entries[0].get("baseSeverity")
         return data.get("baseScore"), data.get("vectorString"), severity
     return None, None, None
+
+
+# =========================================================================
+# AVISOS DE DISTRIBUCIÓN (Fase O — verificación de backports)
+# =========================================================================
+#
+# Un backport es una distribución arreglando una vulnerabilidad sin subir el
+# número de versión visible: el banner sigue diciendo "2.4.49" y el fallo ya no
+# está. Es la causa número uno de falsos positivos de la detección por versión,
+# y la verdad la publican los propios proveedores — no hace falta entrar en el
+# host ni pedir credenciales.
+#
+# Los dos formatos que cubren el grueso del parque Linux:
+#
+# - **OVAL** (Debian, Ubuntu): XML de definiciones, cada una con sus CVEs y los
+#   paquetes que arregla, en qué versión.
+# - **CSAF/VEX** (Red Hat y derivadas): JSON, con el estado de cada producto
+#   frente a cada CVE dicho de forma explícita.
+#
+# Los dos parsers son puros —reciben un documento ya decodificado y devuelven
+# dicts— como el resto de ingestores de este módulo, para poder probarlos con
+# fixtures pequeñas.
+
+_OVAL_NS = {"oval": "http://oval.mitre.org/XMLSchema/oval-definitions-5"}
+
+# "apache2 was fixed in 2.4.49-1~deb11u1" y variantes: lo que las definiciones
+# de OVAL escriben en su texto cuando nombran la versión corregida.
+_OVAL_FIXED_RE = re.compile(
+    r"([A-Za-z0-9][A-Za-z0-9._+-]*)\s+(?:was\s+)?fixed\s+in\s+(?:version\s+)?([0-9][^\s,;]*)",
+    re.IGNORECASE,
+)
+
+
+def parse_oval_definitions(document: str, vendor: str,
+                           release: Optional[str] = None) -> Iterator[dict]:
+    """Extraer el estado por paquete de un documento OVAL de distribución.
+
+    Debian y Ubuntu publican sus avisos en OVAL: un XML de definiciones donde
+    cada una referencia las CVEs que cierra y describe en qué versión del
+    paquete quedaron cerradas.
+
+    Se lee la *referencia* para las CVEs y el texto de la descripción para la
+    versión corregida, porque el criterio estructurado de OVAL vive en objetos y
+    estados separados que sólo cobran sentido resolviendo el árbol entero —
+    trabajo que un espejo local no necesita hacer para responder a la única
+    pregunta que le importa: *¿en qué versión lo arreglaron?*
+
+    Args:
+        document: El XML del feed.
+        vendor: ``"debian"``, ``"ubuntu"``…
+        release: La versión de la distribución si el feed es de una sola.
+
+    Yields:
+        Dicts listos para ``DistroPkgStatus``, uno por paquete y CVE. Una
+        definición que no nombre versión corregida se emite como
+        ``status="unknown"``: el proveedor la conoce pero no se ha
+        pronunciado, y traducir eso a "vulnerable" o a "corregida" sería
+        inventar.
+    """
+    try:
+        root = ElementTree.fromstring(document)
+    except ElementTree.ParseError as exc:
+        logger.error("OVAL: documento ilegible (%s)", exc)
+        return
+
+    for definition in root.iter():
+        if not definition.tag.endswith("}definition") and definition.tag != "definition":
+            continue
+        cve_ids = sorted({
+            reference.get("ref_id", "")
+            for reference in definition.iter()
+            if reference.tag.endswith("reference")
+            and (reference.get("ref_id") or "").upper().startswith("CVE-")
+        })
+        if not cve_ids:
+            continue
+
+        text = " ".join(
+            element.text or ""
+            for element in definition.iter()
+            if element.tag.endswith("description") or element.tag.endswith("title")
+        )
+        fixes = _OVAL_FIXED_RE.findall(text)
+        for cve_id in cve_ids:
+            if not fixes:
+                yield {"vendor": vendor, "release": release, "package": None,
+                       "cve_id": cve_id, "fixed_in": None, "status": "unknown"}
+                continue
+            for package, fixed_in in fixes:
+                yield {"vendor": vendor, "release": release, "package": package.lower(),
+                       "cve_id": cve_id, "fixed_in": fixed_in, "status": "fixed"}
+
+
+def parse_csaf_advisory(document: dict, vendor: str = "rhel") -> Iterator[dict]:
+    """Extraer el estado por paquete de un documento CSAF/VEX.
+
+    Red Hat y sus derivadas publican en CSAF, que es más explícito que OVAL: el
+    documento dice, para cada CVE, qué productos están ``fixed`` y cuáles
+    ``known_affected``. Se traduce tal cual, sin interpretar — el valor de este
+    feed es precisamente que el proveedor ya se ha pronunciado.
+
+    Args:
+        document: El JSON del aviso, ya decodificado.
+        vendor: Bajo qué proveedor archivarlo.
+
+    Yields:
+        Dicts listos para ``DistroPkgStatus``.
+    """
+    for vulnerability in document.get("vulnerabilities", []):
+        cve_id = vulnerability.get("cve")
+        if not cve_id:
+            continue
+        statuses = vulnerability.get("product_status", {})
+        for product in statuses.get("fixed", []):
+            package, release, fixed_in = _split_csaf_product(product)
+            yield {"vendor": vendor, "release": release, "package": package,
+                   "cve_id": cve_id, "fixed_in": fixed_in, "status": "fixed"}
+        for product in statuses.get("known_affected", []):
+            package, release, _fixed = _split_csaf_product(product)
+            yield {"vendor": vendor, "release": release, "package": package,
+                   "cve_id": cve_id, "fixed_in": None, "status": "vulnerable"}
+
+
+def _split_csaf_product(product_id: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Partir un identificador de producto CSAF en ``(paquete, release, versión)``.
+
+    Red Hat los escribe como ``AppStream-8.6.0:httpd-0:2.4.37-43.el8``. Ni el
+    formato está garantizado ni hace falta que lo esté: lo que no se pueda leer
+    se devuelve como ``None`` y el llamante lo archiva con lo que tenga, en vez
+    de descartar el pronunciamiento entero por no entender su nombre.
+    """
+    release = None
+    remainder = product_id
+    if ":" in product_id:
+        head, _, remainder = product_id.partition(":")
+        match = re.search(r"(\d+(?:\.\d+)*)", head)
+        release = match.group(1).split(".")[0] if match else None
+
+    match = re.match(r"([A-Za-z0-9][A-Za-z0-9._+-]*?)-(?:\d+:)?(\d[^\s]*)$", remainder)
+    if not match:
+        return remainder.lower() or None, release, None
+    return match.group(1).lower(), release, match.group(2)
+
+
+def fetch_oval(url: str, timeout: int = 60) -> str:
+    """Descargar un feed de avisos de distribución.
+
+    El borde de red, igual de fino que ``fetch_kev``: descarga y devuelve el
+    texto. El parseo vive en las funciones puras de arriba.
+    """
+    return _http_get(url, timeout).decode("utf-8", errors="replace")
 
 
 def _has_exploit_reference(cve: dict) -> bool:

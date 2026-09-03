@@ -447,7 +447,10 @@ def test_a_source_never_synced_counts_as_stale(app):
         status = KbSyncManager().status()
         by_source = {entry["source"]: entry for entry in status["sources"]}
 
-        assert set(by_source) == {"nvd", "kev", "epss"}
+        # Las cuatro fuentes configuradas, `oval` incluida: al añadir el feed
+        # de avisos de distribución (Fase O) heredó este registro sin tocar
+        # nada, que era medio motivo para hacer L36 antes que L32.
+        assert set(by_source) == {"nvd", "kev", "epss", "oval"}
         assert all(entry["neverSynced"] for entry in by_source.values())
         assert all(entry["isStale"] for entry in by_source.values())
         assert status["isStale"] is True
@@ -457,7 +460,7 @@ def test_a_recent_sync_is_not_stale(app):
     with app.app_context():
         with UnitOfWork() as uow:
             repo = KbRepository(uow)
-            for source in ("nvd", "kev", "epss"):
+            for source in ("nvd", "kev", "epss", "oval"):
                 repo.record_sync(source, rows_upserted=1)
 
         status = KbSyncManager().status()
@@ -472,7 +475,7 @@ def test_an_aged_source_is_reported_stale(app):
     with app.app_context():
         with UnitOfWork() as uow:
             repo = KbRepository(uow)
-            for source in ("nvd", "kev", "epss"):
+            for source in ("nvd", "kev", "epss", "oval"):
                 repo.record_sync(source, rows_upserted=1)
 
         with UnitOfWork() as uow:
@@ -494,11 +497,11 @@ def test_the_kb_status_endpoint_reports_every_source(client, app, admin_user, au
     body = resp.get_json()
 
     by_source = {entry["source"]: entry for entry in body["sources"]}
-    assert set(by_source) == {"nvd", "kev", "epss"}
+    assert set(by_source) == {"nvd", "kev", "epss", "oval"}
     assert by_source["kev"]["rowsUpserted"] == 5
     assert by_source["kev"]["neverSynced"] is False
     assert by_source["nvd"]["neverSynced"] is True
-    assert body["isStale"] is True                     # nvd y epss nunca sincronizadas
+    assert body["isStale"] is True            # nvd, epss y oval nunca sincronizadas
     assert body["feedVersion"].startswith("lybra-kb:")
 
 

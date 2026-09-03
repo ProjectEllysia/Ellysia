@@ -1092,6 +1092,78 @@ class EpssScore(Base):
         return f"<EpssScore(cve_id='{self.cve_id}', score={self.score})>"
 
 
+class DistroAdvisory(Base):
+    """Un aviso de seguridad de una distribución (DSA, USN, RHSA…).
+
+    Es la mitad de la respuesta a los *backports*, que son la causa número uno
+    de falsos positivos de la detección por versión: Debian parchea una
+    vulnerabilidad sin subir el número visible, el banner sigue diciendo
+    ``2.4.49`` y el motor emite una CVE que ya está corregida.
+
+    Hasta ahora la mitigación era un paliativo declarado —``qod=70``,
+    ``confirmed=false``— que informa al lector de que puede ser falso pero no
+    le dice **cuál** lo es, que es justo lo que quería saber. Y la verdad no
+    hay que ir a buscarla dentro del host: los propios proveedores la publican.
+
+    Attributes:
+        advisory_id: ``DSA-5432-1``, ``USN-6789-1``, ``RHSA-2024:1234``.
+        vendor: ``debian`` | ``ubuntu`` | ``rhel`` | ``alpine``.
+        cve_ids: Las CVEs que el aviso dice haber corregido.
+        published: Cuándo lo publicó el proveedor.
+    """
+    __tablename__ = "DistroAdvisory"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    advisory_id = Column(String(64), unique=True, nullable=False, index=True)
+    vendor      = Column(String(32), nullable=False, index=True)
+    title       = Column(Text)
+    cve_ids     = Column(JSONB)
+    published   = Column(DateTime)
+
+    def __repr__(self):
+        return f"<DistroAdvisory(advisory_id='{self.advisory_id}', vendor='{self.vendor}')>"
+
+
+class DistroPkgStatus(Base):
+    """Qué dice un proveedor sobre un paquete concreto y una CVE concreta.
+
+    Es la fila que se consulta al verificar un hallazgo: *¿ha corregido Debian
+    11 el ``apache2`` para esta CVE, y en qué versión?*
+
+    Attributes:
+        vendor / release: La distribución. ``release`` puede ser ``None``
+            cuando el aviso aplica a todas las versiones del proveedor;
+            inventarle una sería peor que no tenerla.
+        package: El nombre del paquete tal y como lo llama la distribución, que
+            no tiene por qué ser el del producto en NVD (``apache2`` frente a
+            ``http_server``).
+        cve_id: La vulnerabilidad de la que se habla.
+        fixed_in: La versión del paquete en la que quedó corregida, o ``None``
+            si el proveedor dice que sigue vulnerable.
+        status: ``fixed`` | ``vulnerable`` | ``unknown``. El tercero existe
+            porque un feed puede nombrar un paquete sin pronunciarse, y
+            tratarlo como cualquiera de los otros dos sería inventar.
+    """
+    __tablename__ = "DistroPkgStatus"
+
+    id       = Column(Integer, primary_key=True, autoincrement=True)
+    vendor   = Column(String(32), nullable=False, index=True)
+    release  = Column(String(32), nullable=True)
+    package  = Column(String(128), nullable=False, index=True)
+    cve_id   = Column(String(32), nullable=False, index=True)
+    fixed_in = Column(String(64))
+    status   = Column(String(16), nullable=False, default="unknown")
+
+    __table_args__ = (
+        UniqueConstraint("vendor", "release", "package", "cve_id",
+                         name="unique_distro_pkg_status"),
+    )
+
+    def __repr__(self):
+        return (f"<DistroPkgStatus({self.vendor}/{self.release} {self.package} "
+                f"{self.cve_id}: {self.status})>")
+
+
 class UnresolvedProduct(Base):
     """Un nombre de producto que el matcher no consiguió convertir en un CPE.
 
