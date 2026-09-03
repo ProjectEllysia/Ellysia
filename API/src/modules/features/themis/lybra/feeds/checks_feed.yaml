@@ -8,7 +8,7 @@
 # feedVersion sube cuando el feed gana una familia nueva o un protocolo nuevo
 # bajo una existente; el arreglo de un check ya presente sube el 'version' de
 # ese check, no esta cadena. Ver CHECKS_FEED_VERSION en checks.py.
-feedVersion: lybra-checks-14
+feedVersion: lybra-checks-15
 checks:
   - id: git-config-exposure
     version: 1
@@ -1217,5 +1217,122 @@ checks:
               - '(?im)^set-cookie:\s*(?:PHPSESSID|JSESSIONID|ASP\.NET_SessionId|laravel_session|session|sessionid|connect\.sid)=(?:(?!;\s*secure).)*$'
     finding:
       title: Cookie de sesion sin el atributo Secure
+      qod: 99
+      confirmed: true
+  # ===================================================================
+  # Checks de configuración de red que la Fase N prometió (L26). Cierran
+  # la parte de la brecha G1 que no se resuelve escribiendo ojos: una
+  # configuración insegura no tiene CVE y no aparece por la vía de la
+  # versión. Alguien tiene que ir y preguntarla.
+  # ===================================================================
+  - id: telnet-enabled
+    version: 1
+    type: script
+    script: telnet-enabled
+    category: network_config
+    severity: HIGH
+    service: telnet
+    mode: safe
+    finding:
+      title: 'Telnet: servicio activo (credenciales en claro por diseño)'
+      qod: 99
+      confirmed: true
+  - id: vnc-no-authentication
+    version: 1
+    type: script
+    script: vnc-no-authentication
+    category: default_credentials
+    severity: CRITICAL
+    service: vnc
+    mode: safe
+    finding:
+      title: 'VNC: acceso sin autenticación (tipo de seguridad None ofrecido)'
+      qod: 99
+      confirmed: true
+  # SMTP relay abierto: el servidor acepta un RCPT a un dominio externo desde un
+  # remitente externo. No se llega a DATA — no se envía correo, sólo se observa
+  # que aceptaría enrutarlo. Un servidor bien configurado responde 550/554.
+  - id: smtp-open-relay
+    version: 1
+    type: network
+    category: network_config
+    severity: HIGH
+    service: smtp
+    mode: safe
+    expectBanner: true
+    requests:
+      - send: "EHLO lybra.local\r\n"
+        read: block
+        matchers:
+          - type: word
+            part: body
+            words:
+              - '250'
+      - send: "MAIL FROM:<probe@lybra-external.example>\r\n"
+        read: block
+        matchers:
+          - type: word
+            part: body
+            words:
+              - '250'
+      - send: "RCPT TO:<relay-test@lybra-nonexistent-external.example>\r\n"
+        read: block
+        matchers:
+          - type: word
+            part: body
+            words:
+              - '250'
+    finding:
+      title: 'SMTP: relay abierto (acepta enrutar correo de terceros)'
+      qod: 99
+      confirmed: true
+  # SMTP sin STARTTLS: el EHLO no anuncia STARTTLS entre sus capacidades, así
+  # que las credenciales de autenticación viajarían en claro.
+  - id: smtp-no-starttls
+    version: 1
+    type: network
+    category: network_config
+    severity: MEDIUM
+    service: smtp
+    mode: safe
+    expectBanner: true
+    requests:
+      - send: "EHLO lybra.local\r\n"
+        read: block
+        matchers-condition: and
+        matchers:
+          - type: word
+            part: body
+            words:
+              - '250'
+          - type: word
+            part: body
+            words:
+              - STARTTLS
+            negative: true
+    finding:
+      title: 'SMTP: sin STARTTLS anunciado (autenticación en claro posible)'
+      qod: 99
+      confirmed: true
+  # FTP sin cifrado: el servidor rechaza AUTH TLS, así que credenciales y datos
+  # viajan en claro. Un servidor que soporta FTPS responde 234.
+  - id: ftp-no-tls
+    version: 1
+    type: network
+    category: network_config
+    severity: MEDIUM
+    service: ftp
+    mode: safe
+    expectBanner: true
+    requests:
+      - send: "AUTH TLS\r\n"
+        read: block
+        matchers:
+          - type: regex
+            part: body
+            regex:
+              - '^(?:500|502|504|530|534|431)'
+    finding:
+      title: 'FTP: sin cifrado disponible (AUTH TLS no soportado)'
       qod: 99
       confirmed: true

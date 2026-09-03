@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 # ``Check.check_id``). Los dos checks ``network`` suben además a ``version: 2``
 # en checks-6: su comportamiento cambia, y un hallazgo guardado tiene que poder
 # decir cuál de las dos formas lo produjo.
-CHECKS_FEED_VERSION = "lybra-checks-14"
+CHECKS_FEED_VERSION = "lybra-checks-15"
 # Quality of Detection for a finding a check actively confirmed, as opposed to
 # one merely inferred from a version.
 QOD_CONFIRMED = 99
@@ -160,6 +160,8 @@ _REDIS_SERVICE_NAMES = {"redis"}
 _REDIS_PORTS = {6379}
 _VNC_SERVICE_NAMES = {"vnc"}
 _VNC_PORTS = {5900}
+_TELNET_SERVICE_NAMES = {"telnet"}
+_TELNET_PORTS = {23}
 # SNMP — el primer protocolo de esta tabla que habla UDP (Fase N/Ronda 1,
 # roadmap §6.3). 161 también aparece en WELL_KNOWN_PORTS como TCP, así que
 # is_snmp_service (más abajo) es el único predicado de este módulo que mira
@@ -762,6 +764,16 @@ def is_redis_service(service: Service) -> bool:
     """Return whether a service should be probed by the Redis dissector or
     ``type: "network"`` checks (Fase N)."""
     return (service.name or "").lower() in _REDIS_SERVICE_NAMES or service.port in _REDIS_PORTS
+
+
+def is_telnet_service(service: Service) -> bool:
+    """Return whether a service is a Telnet endpoint.
+
+    Que exista un Telnet respondiendo **es** el hallazgo —credenciales en claro
+    por diseño—, así que este predicado no necesita distinguir producto ni
+    versión: sólo a qué servicios acercarse.
+    """
+    return (service.name or "").lower() in _TELNET_SERVICE_NAMES or service.port in _TELNET_PORTS
 
 
 def is_vnc_service(service: Service) -> bool:
