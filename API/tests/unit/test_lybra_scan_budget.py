@@ -112,3 +112,61 @@ def test_the_worker_entry_point_carries_the_timeout(monkeypatch):
     # El timeout sigue viajando como cuarto posicional; cancel_check y progress
     # van como kwargs (el JobHandle del worker), fuera de esta comprobación.
     assert seen == [(7, [80], None, 90), (8, [80], None, None)]
+
+
+# ─────────────── el cableado entre el motor y sus sondas
+#
+# Todo escaneo de autodescubrimiento falló en producción por un nombre de
+# parámetro: la lambda que construye `DiscoveryProbes` llamaba a
+# `_discover_ports(ports=...)` y el método lo declaraba como `discover_ports`.
+# `TypeError`, capturado por el `except Exception` de `_run_lybra`, escaneo en
+# `failed`.
+#
+# La suite entera pasó en verde. El motivo es que **todos** los tests de
+# integración que ejercitan el autodescubrimiento sustituyen `_discover_ports`
+# por un doble, así que la lambda nunca llega a llamar al método de verdad: la
+# costura que falló era justo la que ningún test recorría. Estos dos la
+# recorren.
+
+
+def _probes_of(manager, **kwargs):
+    """Los `DiscoveryProbes` que `_run_lybra` construye, sin correr el escaneo.
+
+    Se llama al constructor real y se le pasa lo mismo que le pasaría el
+    escaneo, para que el contrato entre la lambda y el método quede ejercitado.
+    """
+    from src.modules.features.themis.managers.lybra.sources import DiscoveryProbes
+
+    return DiscoveryProbes(
+        is_host_reachable=manager.is_host_reachable,
+        discover_ports=lambda target, ports: manager._discover_ports(  # noqa: SLF001
+            target=target, ports=ports, budget_seconds=None, cancel_check=None),
+        discover_udp_ports=manager._discover_udp_ports,  # noqa: SLF001
+    )
+
+
+def test_the_probe_wiring_reaches_the_real_method(monkeypatch):
+    """La llamada que hace `sources.resolve_services`, contra el método real."""
+    captured = {}
+
+    def fake_sweep(target, ports, **kwargs):
+        captured["target"] = target
+        captured["ports"] = ports
+        return _clean_sweep()
+
+    monkeypatch.setattr(engine_module, "sweep_with_retries", fake_sweep)
+
+    probes = _probes_of(LybraEngineManager())
+    sweep = probes.discover_ports("10.0.0.5", [80, 443])
+
+    assert sweep.open_ports == (80,)
+    assert captured == {"target": "10.0.0.5", "ports": [80, 443]}
+
+
+def test_the_udp_probe_wiring_reaches_the_real_method(monkeypatch):
+    """La misma comprobación para la otra sonda: `sources` la llama con un solo
+    argumento posicional, y el método tiene que aceptarlo tal cual."""
+    monkeypatch.setattr(engine_module, "scan_udp_ports_sync", lambda target, **kw: [161])
+
+    probes = _probes_of(LybraEngineManager())
+    assert probes.discover_udp_ports("10.0.0.5") == [161]

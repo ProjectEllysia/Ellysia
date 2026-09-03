@@ -277,6 +277,12 @@ class LybraEngineManager(ScanManager):
             # alcanzabilidad y las consultas de apertura del escaneo. El
             # cancel_check baja hasta el barrido de puertos —la fase más larga—
             # para que un escaneo grande se pueda parar a mitad.
+            # Los nombres de los argumentos son parte del contrato con
+            # ``_discover_ports``, y esta llamada es la única que lo ejercita en
+            # producción: un desajuste aquí no lo ve ningún test que sustituya
+            # el método por un doble, que es lo que hacen todos los de
+            # integración. `test_the_probe_wiring_reaches_the_real_method` lo
+            # recorre de verdad.
             discover_ports=lambda target, ports: self._discover_ports(
                 target=target,
                 ports=ports,
@@ -454,7 +460,7 @@ class LybraEngineManager(ScanManager):
     def _discover_ports(
         self,
         target: str,
-        discover_ports,
+        ports=None,
         budget_seconds: Optional[float] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Optional[PortSweep]:
@@ -476,7 +482,7 @@ class LybraEngineManager(ScanManager):
         engine = CR.lybra_engine_config()
         try:
             sweep = sweep_with_retries(
-                target, discover_ports,
+                target, ports,
                 concurrency=engine.tcp_concurrency,
                 timeout=engine.tcp_timeout,
                 retries=engine.udp_retries,
