@@ -778,6 +778,18 @@ class KnowledgeBaseConfig:
     sync_cron: str = "0 3 * * *"
     nvd_window_days: int = 8
 
+    max_age_days: dict = field(
+        default_factory=lambda: {"nvd": 3, "kev": 7, "epss": 7}
+    )
+    """A partir de cuántos días sin sincronizar con éxito se considera vieja
+    cada fuente.
+
+    Los tres números no son el mismo por una razón: NVD publica CVEs a diario y
+    tres días de retraso ya son detección que falta; KEV y EPSS cambian más
+    despacio y una semana es tolerable. Son de operador porque dependen de la
+    red y de la cuota de API de cada despliegue, no de la lógica del motor.
+    """
+
     configured_nvd_api_key: str = field(
         default="", metadata={"key": "nvdApiKey", "optional": True}
     )
