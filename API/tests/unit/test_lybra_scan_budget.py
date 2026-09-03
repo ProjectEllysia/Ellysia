@@ -32,7 +32,7 @@ def _clean_sweep(open_ports=(80,), truncated=False) -> PortSweep:
 def test_the_budget_reaches_the_sweep(monkeypatch):
     captured = {}
 
-    def fake_sweep(target, ports, budget_seconds=None):
+    def fake_sweep(target, ports, budget_seconds=None, **kwargs):
         captured["target"] = target
         captured["ports"] = ports
         captured["budget"] = budget_seconds
@@ -52,7 +52,7 @@ def test_a_scan_without_budget_keeps_the_old_behaviour(monkeypatch):
     encolado antes de este cambio— siguen barriendo sin límite de reloj."""
     captured = {}
 
-    def fake_sweep(target, ports, budget_seconds=None):
+    def fake_sweep(target, ports, budget_seconds=None, **kwargs):
         captured["budget"] = budget_seconds
         return _clean_sweep(open_ports=())
 

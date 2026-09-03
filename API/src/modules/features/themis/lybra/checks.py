@@ -1494,6 +1494,7 @@ class HttpProbe:
         detect_scheme: An injectable ``(host, port) -> bool`` telling whether
             the service speaks TLS. Defaults to :func:`negotiates_tls`; a test
             passes a stub instead of opening a socket.
+        user_agent: The ``User-Agent`` header the probe presents (L39).
     """
 
     def __init__(
@@ -1501,9 +1502,11 @@ class HttpProbe:
         timeout: int = 8,
         max_bytes: int = 131072,
         detect_scheme: Optional[Callable[[str, Optional[int]], bool]] = None,
+        user_agent: str = "Lybra/1.0",
     ) -> None:
         self._timeout = timeout
         self._max_bytes = max_bytes
+        self._user_agent = user_agent
         self._detect_scheme = detect_scheme or (lambda host, port: negotiates_tls(host, port, timeout))
         # El esquema se observa una vez por servicio y se recuerda: la pregunta
         # es sobre el servicio, no sobre la petición, y no cambia entre una y
@@ -1580,7 +1583,7 @@ class HttpProbe:
         netloc = f"{host}:{port}" if port else host
         url = f"{scheme}://{netloc}{path}"
         try:
-            request = urllib.request.Request(url, method=method, headers={"User-Agent": "Lybra/1.0"})
+            request = urllib.request.Request(url, method=method, headers={"User-Agent": self._user_agent})
             with self._opener.open(request, timeout=self._timeout) as response:
                 return response.status, response.read(self._max_bytes), dict(response.headers)
         except urllib.error.HTTPError as err:

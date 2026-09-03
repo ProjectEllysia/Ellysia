@@ -197,6 +197,7 @@ CONFIG_BLOCKS = [
     (CR.TracerouteConfig, CR.traceroute_config),
     (CR.KnowledgeBaseConfig, CR.knowledge_base_config),
     (CR.LybraConfig, CR.lybra_config),
+    (CR.LybraEngineConfig, CR.lybra_engine_config),
     (CR.LybraIngestConfig, CR.lybra_ingest_config),
     (CR.NucleiConfig, CR.nuclei_config),
     (CR.AegisConfig, CR.aegis_config),
