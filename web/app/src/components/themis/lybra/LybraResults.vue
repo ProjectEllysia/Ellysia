@@ -55,9 +55,20 @@
           <!-- Cuerpo expandible -->
           <Transition name="expand">
             <div v-if="expanded.has(scan.id)" class="scan-body">
-              <div v-if="scan.status === 'running' || scan.status === 'pending'" class="body-pending">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="spin"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-                <span>El motor está pesando las pruebas…</span>
+              <!-- Un escaneo puede tardar minutos, y lo único que se veía en
+                   todo ese rato era una frase con un reloj al lado. La barra no
+                   finge saber cuánto queda —el porcentaje real vive en la cola y
+                   no está expuesto por HTTP—: es indeterminada a propósito, y
+                   dice lo único que aquí se puede afirmar, que sigue trabajando. -->
+              <div v-if="scan.status === 'running' || scan.status === 'pending'"
+                   class="state-panel state-panel--pending" aria-live="polite">
+                <svg class="state-icon spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+                </svg>
+                <div class="state-text">
+                  <p class="state-title">{{ scan.status === 'pending' ? 'En cola, a punto de empezar.' : 'El motor está pesando las pruebas…' }}</p>
+                  <div class="state-progress" aria-hidden="true"><span></span></div>
+                </div>
               </div>
               <!-- El fallo era una línea de texto suelta con la misma frase para
                    los cinco motivos posibles. Ahora ocupa el mismo recuadro que
@@ -586,9 +597,7 @@ function fmtDate(iso) {
 .expand-enter-active, .expand-leave-active { transition: opacity 0.2s ease; overflow: hidden; }
 .expand-enter-from, .expand-leave-to { opacity: 0; }
 .scan-body { padding: 0.3rem 1rem 0.9rem 2.4rem; }
-.body-pending, .body-clean { display: flex; align-items: center; gap: 0.5rem; padding: 0.7rem 0; font-size: var(--fs-lg); }
-.body-pending { color: var(--text-dim); }
-.body-clean { color: var(--success); }
+.body-clean { display: flex; align-items: center; gap: 0.5rem; padding: 0.7rem 0; font-size: var(--fs-lg); color: var(--success); }
 
 /* Recuadro de estado: el mismo molde que `.body-partial-hint` —borde, fondo
    tenue del color del estado, texto explicativo— porque son mensajes de la
@@ -599,6 +608,28 @@ function fmtDate(iso) {
   border: 1px solid var(--state-color); background: var(--state-bg);
 }
 .state-panel--failed { --state-color: var(--danger); --state-bg: var(--danger-dim); }
+.state-panel--pending { --state-color: var(--accent); --state-bg: var(--accent-dim); }
+.state-panel--pending .state-title { color: var(--text-dim); }
+
+/* Barra indeterminada: un tramo corto que recorre el carril de lado a lado.
+   No representa progreso —el porcentaje real no llega hasta aquí—, sólo que el
+   trabajo sigue vivo, que es justo lo que el usuario no podía saber. */
+.state-progress {
+  /* El carril lleva `--border-med` y no `--state-bg`: éste es el mismo color
+     que el fondo del recuadro, así que la barra recorría un carril invisible y
+     el movimiento se leía como un guion suelto. */
+  position: relative; height: 3px; margin-top: 0.35rem; border-radius: 2px;
+  background: var(--border-med); overflow: hidden;
+}
+.state-progress span {
+  position: absolute; inset: 0 auto 0 0; width: 38%; border-radius: 2px;
+  background: var(--state-color); opacity: 0.75;
+  animation: state-progress-sweep 1.5s ease-in-out infinite;
+}
+@keyframes state-progress-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(265%); }
+}
 .state-icon { width: 20px; height: 20px; flex: none; margin-top: 0.1rem; color: var(--state-color); }
 .state-text { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
 .state-title { margin: 0; font-size: var(--fs-lg); color: var(--state-color); }
@@ -799,6 +830,9 @@ function fmtDate(iso) {
 }
 @media (prefers-reduced-motion: reduce) {
   .spin { animation: none !important; }
+  /* La barra se queda quieta y llena: sin movimiento sigue diciendo «esto está
+     en curso», que es lo único que representa. */
+  .state-progress span { animation: none !important; width: 100%; }
   .chevron, .expand-enter-active, .expand-leave-active, .fade-swap-enter-active, .fade-swap-leave-active,
   .findings-panel-enter-active, .findings-panel-leave-active,
   .finding-item-enter-active, .finding-item-leave-active, .finding-item-move,
