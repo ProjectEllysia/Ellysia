@@ -119,7 +119,12 @@ def status():
 @system_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
 @system_blp.alt_response(404, schema=ErrorSchema, description="Log file not found")
 @system_blp.alt_response(409, schema=ErrorSchema, description="Log changed during pagination")
-@limiter.limit("30 per hour; 100 per day")
+# Leer el log no es una operación puntual: una sesión de investigación prueba
+# varias ventanas, pagina y refresca, y con el refresco automático del panel
+# son cuatro peticiones por minuto. Las 30/hora anteriores se agotaban en
+# minutos y dejaban el panel inservible justo cuando hacía falta. El tope
+# diario sigue acotando el abuso.
+@limiter.limit("240 per hour; 2000 per day")
 @require_oauth_token
 @require_role(minimum_role=Role.ADMIN)
 def system_logs(query_args):

@@ -4,6 +4,7 @@ import copy
 import base64
 import gzip
 import json
+from datetime import datetime, timedelta
 from unittest import mock
 
 import pytest
@@ -142,6 +143,155 @@ def test_root_reads_log_and_head_pagination_filters(
     assert payload["totalLines"] == 1
     assert payload["firstLine"] == 3
     assert payload["lastLine"] == 3
+
+
+def test_log_minimum_level_returns_every_severity_above_it(
+    client, admin_user, auth_headers, _isolated_log_file
+):
+    """`minLevel` evita tener que consultar un nivel cada vez.
+
+    El log de la fixture tiene un WARNING y un ERROR entre dos INFO. Pedir
+    `minLevel=WARNING` debe traer los dos en una sola respuesta.
+    """
+    response = client.get(
+        "/system/logs",
+        query_string={"position": "head", "minLevel": "WARNING"},
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 200
+    payload, content = _decode_log_content(response)
+    assert content.splitlines() == [
+        "[+] [WARNING] (2026-08-18 10:01:00,000) test.two: aviso",
+        "[+] [ERROR] (2026-08-18 10:02:00,000) test.three: fallo",
+    ]
+    assert payload["totalLines"] == 2
+
+
+def test_log_level_counts_ignore_the_level_filter(
+    client, admin_user, auth_headers, _isolated_log_file
+):
+    """Los contadores describen la ventana, no la página filtrada.
+
+    Quien está mirando solo los errores tiene que poder ver que al lado hay
+    avisos; si los contadores se calcularan después del filtro de nivel,
+    marcarían cero en todo lo demás y no servirían para nada.
+    """
+    response = client.get(
+        "/system/logs",
+        query_string={"position": "head", "level": "ERROR"},
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 200
+    payload, content = _decode_log_content(response)
+    assert content.splitlines() == [
+        "[+] [ERROR] (2026-08-18 10:02:00,000) test.three: fallo",
+    ]
+    assert payload["totalLines"] == 1
+    assert payload["levelCounts"] == {
+        "DEBUG": 0,
+        "INFO": 2,
+        "WARNING": 1,
+        "ERROR": 1,
+        "CRITICAL": 0,
+    }
+
+
+def test_log_level_counts_respect_the_time_window(
+    client, admin_user, auth_headers, _isolated_log_file
+):
+    """Acotar por fecha sí cambia los contadores: son de la ventana pedida."""
+    response = client.get(
+        "/system/logs",
+        query_string={
+            "position": "head",
+            "from": "2026-08-18T10:01:00",
+            "to": "2026-08-18T10:02:00",
+        },
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 200
+    payload, _content = _decode_log_content(response)
+    assert payload["levelCounts"] == {
+        "DEBUG": 0,
+        "INFO": 0,
+        "WARNING": 1,
+        "ERROR": 1,
+        "CRITICAL": 0,
+    }
+
+
+def test_log_rejects_an_unknown_minimum_level(
+    client, admin_user, auth_headers, _isolated_log_file
+):
+    response = client.get(
+        "/system/logs",
+        query_string={"minLevel": "TRACE"},
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 422
+
+
+def test_log_last_minutes_uses_the_server_clock(
+    client, admin_user, auth_headers, tmp_path, monkeypatch
+):
+    """La ventana relativa la resuelve el servidor, no el navegador.
+
+    Las marcas del log son hora local de la API y no llevan zona horaria, así
+    que "los últimos diez minutos" solo significa lo mismo para todos si lo
+    calcula quien escribe el log. El test escribe entradas relativas a la hora
+    real de la máquina para que el cálculo sea comprobable.
+    """
+    now = datetime.now()
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+
+    def _entry(minutes_ago, level, message):
+        stamp = now - timedelta(minutes=minutes_ago)
+        printed = stamp.strftime("%Y-%m-%d %H:%M:%S,") + f"{stamp.microsecond // 1000:03d}"
+        return f"[+] [{level}] ({printed}) test: {message}"
+
+    (log_dir / "secops.log").write_text(
+        "\n".join([
+            _entry(120, "ERROR", "hace dos horas"),
+            _entry(45, "WARNING", "hace tres cuartos de hora"),
+            _entry(5, "ERROR", "hace cinco minutos"),
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(CR, "get_directory_of", lambda _directory: str(log_dir))
+
+    response = client.get(
+        "/system/logs",
+        query_string={"position": "head", "lastMinutes": 60},
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 200
+    payload, content = _decode_log_content(response)
+    assert [line.split(": ", 1)[1] for line in content.splitlines()] == [
+        "hace tres cuartos de hora",
+        "hace cinco minutos",
+    ]
+    assert payload["windowStart"]
+    assert payload["levelCounts"]["ERROR"] == 1
+
+
+def test_log_rejects_a_relative_and_an_absolute_window_together(
+    client, admin_user, auth_headers, _isolated_log_file
+):
+    """Pedir las dos cosas es ambiguo, y se rechaza en vez de elegir una."""
+    response = client.get(
+        "/system/logs",
+        query_string={"lastMinutes": 30, "from": "2026-08-18T10:00:00"},
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_log_query"
 
 
 def test_log_snapshot_survives_appends(client, admin_user, auth_headers, _isolated_log_file):

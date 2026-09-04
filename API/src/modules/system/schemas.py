@@ -96,11 +96,35 @@ class LogQuerySchema(Schema):
     )
     from_ = fields.DateTime(data_key="from", load_default=None, allow_none=True)
     to = fields.DateTime(load_default=None, allow_none=True)
+    last_minutes = fields.Integer(
+        data_key="lastMinutes",
+        load_default=None,
+        allow_none=True,
+        validate=validate.Range(min=1, max=525_600),
+    )
+    """Ventana relativa al reloj del servidor: ``lastMinutes=30`` es la media
+    hora anterior. Es incompatible con ``from``, y existe porque las marcas del
+    log son hora local de la API: si la calculara el navegador, un
+    administrador conectado desde otro huso pediría una ventana desplazada.
+    """
+
     level = fields.String(
         load_default=None,
         allow_none=True,
         validate=validate.OneOf(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
     )
+    min_level = fields.String(
+        data_key="minLevel",
+        load_default=None,
+        allow_none=True,
+        validate=validate.OneOf(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
+    )
+    """Severidad mínima: ``minLevel=WARNING`` trae WARNING, ERROR y CRITICAL.
+
+    Complementa a ``level``, que sigue siendo de valor exacto. Si se envían
+    los dos, se aplican ambos.
+    """
+
     contains = fields.String(
         load_default=None,
         allow_none=True,
@@ -123,6 +147,11 @@ class SystemLogsResponseSchema(Schema):
     truncated = fields.Boolean(required=True)
     totalLines = fields.Integer(required=True)
     returnedLines = fields.Integer(required=True)
+    levelCounts = fields.Dict(
+        keys=fields.String(),
+        values=fields.Integer(),
+        required=True,
+    )
     page = fields.Integer(required=True)
     perPage = fields.Integer(required=True)
     totalPages = fields.Integer(required=True)
@@ -133,6 +162,7 @@ class SystemLogsResponseSchema(Schema):
     snapshotBytes = fields.Integer(required=True)
     currentBytes = fields.Integer(required=True)
     lastModified = fields.String(required=True)
+    windowStart = fields.String(required=True)
     timeZone = fields.String(required=True)
     firstLine = fields.Integer(allow_none=True)
     lastLine = fields.Integer(allow_none=True)
