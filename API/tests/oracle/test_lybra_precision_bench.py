@@ -50,7 +50,9 @@ import pytest
 from src.modules.features.themis.lybra.checks import HttpProbe, negotiates_tls
 
 from ._security_headers import always_missing_header_checks
-from ._docker_helpers import resolve_docker, docker_run, docker_rm, wait_for_port, port_is_free
+from ._docker_helpers import (resolve_docker, docker_run, docker_rm, wait_for_port,
+                              port_is_free, container_died, diagnose_port,
+                              remember_container)
 from .test_lybra_oracle_bench import _run_self_discovery, _tls_container_cmd
 
 pytestmark = [pytest.mark.oracle, pytest.mark.integration]
@@ -468,8 +470,17 @@ def _wait_until_serving(port: int, tls: bool, label: str = "", timeout: float = 
                 last = "responde algo que no es HTTP"
         except OSError as exc:
             last = str(exc)
+        if container_died(_DOCKER, port):
+            raise TimeoutError(
+                f"[{label}] 127.0.0.1:{port} no sirvió su protocolo: su "
+                f"contenedor no sigue en marcha ({last})."
+                f"{diagnose_port(_DOCKER, port)}"
+            )
         time.sleep(1.0)
-    raise TimeoutError(f"[{label}] 127.0.0.1:{port} aceptó pero no sirvió su protocolo en {timeout}s ({last})")
+    raise TimeoutError(
+        f"[{label}] 127.0.0.1:{port} aceptó pero no sirvió su protocolo en "
+        f"{timeout}s ({last}){diagnose_port(_DOCKER, port)}"
+    )
 
 
 @contextlib.contextmanager
@@ -485,8 +496,13 @@ def _running(target: Target) -> Iterator[int]:
     if target.command:
         args += ["sh", "-c", target.command]
     docker_run(_DOCKER, *args)
+    # Un contenedor que muere al arrancar —una configuración de nginx que no
+    # parsea, sin ir más lejos— produce cero hallazgos, y cero hallazgos es
+    # indistinguible de "el motor no detectó nada" en el agregado. Registrarlo
+    # es lo que hace que el log diga cuál de las dos cosas pasó (#455).
+    remember_container(port, name)
     try:
-        wait_for_port("127.0.0.1", port)
+        wait_for_port("127.0.0.1", port, docker_path=_DOCKER)
         _wait_until_serving(port, tls=target.tls, label=target.name)
         yield port
     finally:
