@@ -9,7 +9,7 @@
 
 import {
   SERIES, niceCeil, yRange, yTicks, timeTicks, formatTimeTick, fmtDuration,
-  medianDeltaMs, gapThresholdMs, detectGaps, splitAtRanges, formatValue, bucketForWindow,
+  medianDeltaMs, gapThresholdMs, detectGaps, totalGapMs, splitAtRanges, formatValue, bucketForWindow,
   plotWidthForAxis, WINDOW_PRESETS, DEFAULT_WINDOW_MS,
 } from '../src/components/hygeia/chartMath.js'
 
@@ -75,6 +75,9 @@ eq('segundos', fmtDuration(45e3), '45 s')
 eq('minutos', fmtDuration(12 * 60e3), '12 min')
 eq('horas y minutos', fmtDuration((3 * 3600 + 12 * 60) * 1000), '3 h 12 min')
 eq('días y horas', fmtDuration((2 * 86400 + 4 * 3600) * 1000), '2 d 4 h')
+eq('horas redondas sin el cero de los minutos', fmtDuration(6 * 3600e3), '6 h')
+eq('un dia redondo sin el cero de las horas', fmtDuration(24 * 3600e3), '1 d')
+eq('una semana redonda', fmtDuration(7 * 86400e3), '7 d')
 
 console.log('\nmedianDeltaMs')
 eq('mediana impar (3 deltas)', medianDeltaMs([0, 1000, 4000, 5000]), 1000)
@@ -114,6 +117,17 @@ eq('un tramo parcial tras el cubo no es una caida',
 eq('el hueco inicial de cubos empieza en el borde de ventana',
   detectGaps([150000], thr, 0, 180000, 60000),
   [{ start: 0, end: 150000 }])
+
+console.log('\ntiempo total sin senal')
+eq('sin huecos no hay ausencia', totalGapMs([]), 0)
+eq('suma los huecos sueltos',
+  totalGapMs([{ start: 0, end: 60000 }, { start: 120000, end: 300000 }]), 240000)
+eq('una ventana entera sin datos suma la ventana entera',
+  totalGapMs(detectGaps([], thr, 0, 24 * 3600e3)), 24 * 3600e3)
+eq('un pico aislado deja el resto de la ventana sin senal',
+  totalGapMs(detectGaps([3600e3], thr, 0, 24 * 3600e3)), 24 * 3600e3)
+eq('ignora franjas invertidas en vez de restar tiempo',
+  totalGapMs([{ start: 300000, end: 120000 }]), 0)
 
 console.log('\ntramos del trazado')
 const trace = [{ t: 0 }, { t: 60000 }, { t: 120000 }, { t: 180000 }]
