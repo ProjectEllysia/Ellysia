@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 # Ejecutor de herramientas: recibe (nombre, argumentos) y devuelve texto.
 ToolExecutor = Callable[[str, dict], str]
 
+# Prefijos de los modelos de chat de OpenAI. ``models.list()`` devuelve el
+# catálogo entero de la cuenta —embeddings, whisper, dall-e, moderación—, y
+# ninguno de esos sirve para generar texto con scribe.
+_OPENAI_CHAT_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
+
 
 class ModelStrategy(ABC):
     """Contrato de una estrategia de llamada al modelo.
@@ -53,12 +58,34 @@ class ModelStrategy(ABC):
         return decorator
 
     @classmethod
-    def resolve(cls, name: str, overrides: dict) -> "ModelStrategy":
-        """Instancia la estrategia ``name`` con credenciales de entorno/config."""
+    def registered_names(cls) -> list[str]:
+        """Nombres de las estrategias dadas de alta, ordenados.
+
+        El registro es privado a propósito —nadie de fuera debe poder
+        manipularlo—, pero saber *qué proveedores existen* sí es información
+        pública: es lo que el catálogo de modelos recorre para preguntarle a
+        cada uno qué sirve.
+        """
+        return sorted(cls._registry)
+
+    @classmethod
+    def resolve_class(cls, name: str) -> type["ModelStrategy"]:
+        """La clase dada de alta con ``name``, sin construirla.
+
+        Separada de ``resolve`` porque el catálogo de modelos pregunta al
+        proveedor sin necesitar una instancia: construir una exigiría las
+        credenciales completas, y el catálogo tiene que poder responder
+        aunque a un proveedor le falte alguna.
+        """
         strategy_cls = cls._registry.get(name)
         if strategy_cls is None:
             raise AIStrategyConfigurationError(f"estrategia desconocida: '{name}'")
-        return strategy_cls.from_config(overrides)
+        return strategy_cls
+
+    @classmethod
+    def resolve(cls, name: str, overrides: dict) -> "ModelStrategy":
+        """Instancia la estrategia ``name`` con credenciales de entorno/config."""
+        return cls.resolve_class(name).from_config(overrides)
 
     @classmethod
     def from_config(cls, overrides: dict) -> "ModelStrategy":
@@ -70,6 +97,28 @@ class ModelStrategy(ABC):
         estrategia directamente (sin pasar por ``resolve``/config real) no
         tiene por qué implementarlo — solo lo necesitan las estrategias
         registradas de verdad."""
+        raise NotImplementedError
+
+    @classmethod
+    def available_models(cls) -> list[str]:
+        """Modelos que este proveedor sirve ahora mismo, ordenados.
+
+        Es lo que permite que el panel ofrezca un desplegable en vez de un
+        campo de texto en el que hay que escribir de memoria
+        ``gpt-4.1-2025-04-14``. Un identificador mal escrito no falla al
+        guardar: falla mucho después, dentro de un job de fondo, y el usuario
+        solo ve que el informe no se generó.
+
+        No es ``@abstractmethod`` por el mismo motivo que ``from_config``: un
+        doble de test no tiene por qué implementarlo.
+
+        Raises:
+            Exception: Lo que lance el cliente del proveedor. Quien pregunta
+                decide qué hacer con un proveedor inalcanzable — el endpoint
+                lo reporta por estrategia en vez de romper la respuesta
+                entera, porque tener OpenAI caído no es motivo para no poder
+                elegir modelo de Ollama.
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -100,6 +149,25 @@ class OllamaStrategy(ModelStrategy):
             model=overrides.get("model") or model,
             timeout=CR.scribe_config().timeout_for("ollama", 300),
         )
+
+    @classmethod
+    def available_models(cls) -> list[str]:
+        """Lo que el servidor de Ollama tiene descargado (``/api/tags``)."""
+        import ollama
+        import src.modules.system.config_reading as CR
+
+        host, _ = CR.get_ollama_environment()
+        listing = ollama.Client(host=host, timeout=10).list()
+        # La librería devolvió durante un tiempo diccionarios planos y ahora
+        # devuelve objetos; se acepta cualquiera de las dos formas para no
+        # atar el catálogo a la versión instalada.
+        entries = listing.get("models", []) if isinstance(listing, dict) else listing.models
+        names = [
+            entry.get("model") or entry.get("name") if isinstance(entry, dict)
+            else getattr(entry, "model", None) or getattr(entry, "name", None)
+            for entry in entries
+        ]
+        return sorted(name for name in names if name)
 
     def __init__(self, host: str, model: str, timeout: int = 300) -> None:
         import ollama
@@ -173,6 +241,24 @@ class OpenAIStrategy(ModelStrategy):
             model=overrides.get("model") or env["model"],
             base_url=env.get("base_url"),
             timeout=CR.scribe_config().timeout_for("openai", 120),
+        )
+
+    @classmethod
+    def available_models(cls) -> list[str]:
+        """El catálogo que la cuenta de OpenAI tiene habilitado.
+
+        Se filtra a los modelos de chat: la lista cruda trae también
+        *embeddings*, transcripción de audio e imagen, que no sirven para
+        nada en scribe y solo estorban en el desplegable.
+        """
+        from openai import OpenAI
+        import src.modules.system.config_reading as CR
+
+        env = CR.get_openai_environment()
+        client = OpenAI(api_key=env["api_key"], base_url=env.get("base_url") or None, timeout=10)
+        return sorted(
+            model.id for model in client.models.list()
+            if any(model.id.startswith(prefix) for prefix in _OPENAI_CHAT_PREFIXES)
         )
 
     def __init__(
@@ -263,6 +349,24 @@ class GoogleStrategy(ModelStrategy):
             api_key=env["api_key"],
             model=overrides.get("model") or env["model"],
             timeout=CR.scribe_config().timeout_for("google", 120),
+        )
+
+    @classmethod
+    def available_models(cls) -> list[str]:
+        """Los modelos de Gemini que aceptan ``generateContent``.
+
+        Los identificadores llegan con el prefijo ``models/``, que la API
+        acepta pero que en el desplegable solo es ruido: se recorta para que
+        lo que se guarde sea el mismo nombre que uno escribiría a mano.
+        """
+        import google.generativeai as genai
+        import src.modules.system.config_reading as CR
+
+        genai.configure(api_key=CR.get_google_environment()["api_key"])
+        return sorted(
+            entry.name.removeprefix("models/")
+            for entry in genai.list_models()
+            if "generateContent" in getattr(entry, "supported_generation_methods", [])
         )
 
     def __init__(self, api_key: str, model: str, timeout: int = 120) -> None:

@@ -481,3 +481,58 @@ def test_status_filter_by_concrete_state_still_works(client, admin_user, auth_he
         resp = client.get("/system/tasks?status=failed", headers=auth_headers(admin_user))
     data = resp.get_json()
     assert [t["id"] for t in data["tasks"]] == ["b"]
+
+
+# =============================================================================
+# CATÁLOGO DE MODELOS DE IA
+# =============================================================================
+
+
+def test_ai_models_requires_root(client, admin_user, auth_headers):
+    """Como el resto de /system: la respuesta describe el despliegue (qué
+    proveedores hay y cuáles responden), no un recurso del usuario."""
+    assert client.get("/system/ai/models", headers=auth_headers(admin_user)).status_code == 403
+
+
+def test_ai_models_lists_every_registered_strategy(client, root_user, auth_headers):
+    """Aunque ninguno responda: el panel necesita saber que la estrategia
+    existe para poder ofrecerla, y el error explica por qué está vacía."""
+    response = client.get("/system/ai/models", headers=auth_headers(root_user))
+
+    assert response.status_code == 200
+    strategies = response.get_json()["strategies"]
+    assert {row["strategy"] for row in strategies} == {"ollama", "openai", "google"}
+
+
+def test_ai_models_reports_the_configured_model_per_strategy(client, root_user, auth_headers):
+    response = client.get("/system/ai/models", headers=auth_headers(root_user))
+
+    openai_row = next(r for r in response.get_json()["strategies"] if r["strategy"] == "openai")
+    assert openai_row["configuredModel"] == CR.scribe_config().options_for("openai")["model"]
+
+
+def test_ai_models_survives_a_provider_that_cannot_be_reached(client, root_user, auth_headers):
+    """La suite está sellada contra la red, así que preguntarle de verdad a
+    Ollama falla — que es justo el caso que hay que cubrir: la fila trae el
+    error y la respuesta sigue siendo un 200 con el resto de proveedores."""
+    response = client.get("/system/ai/models", headers=auth_headers(root_user))
+
+    assert response.status_code == 200
+    ollama_row = next(r for r in response.get_json()["strategies"] if r["strategy"] == "ollama")
+    assert ollama_row["isReachable"] is False
+    assert ollama_row["error"]
+    assert ollama_row["models"] == []
+
+
+def test_ai_models_returns_what_a_reachable_provider_serves(client, root_user, auth_headers):
+    from src.modules.tools.scribe.strategies import OllamaStrategy
+
+    with mock.patch.object(
+        OllamaStrategy, "available_models", classmethod(lambda cls: ["qwen2.5:14b", "llama3.2"])
+    ):
+        response = client.get("/system/ai/models", headers=auth_headers(root_user))
+
+    ollama_row = next(r for r in response.get_json()["strategies"] if r["strategy"] == "ollama")
+    assert ollama_row["isReachable"] is True
+    assert ollama_row["models"] == ["qwen2.5:14b", "llama3.2"]
+    assert ollama_row["error"] == ""

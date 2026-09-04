@@ -113,7 +113,7 @@ def test_the_shipped_config_declares_a_block_for_every_registered_strategy():
     from src.modules.tools.scribe.strategies import ModelStrategy
 
     declared = set(CR.scribe_config().strategies)
-    registered = set(ModelStrategy._registry)
+    registered = set(ModelStrategy.registered_names())
     assert registered <= declared, (
         f"estrategias registradas sin bloque en SecOpsConfig.json: {sorted(registered - declared)}"
     )
