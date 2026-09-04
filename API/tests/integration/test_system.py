@@ -144,6 +144,96 @@ def test_root_reads_log_and_head_pagination_filters(
     assert payload["lastLine"] == 3
 
 
+def test_log_minimum_level_returns_every_severity_above_it(
+    client, admin_user, auth_headers, _isolated_log_file
+):
+    """`minLevel` evita tener que consultar un nivel cada vez.
+
+    El log de la fixture tiene un WARNING y un ERROR entre dos INFO. Pedir
+    `minLevel=WARNING` debe traer los dos en una sola respuesta.
+    """
+    response = client.get(
+        "/system/logs",
+        query_string={"position": "head", "minLevel": "WARNING"},
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 200
+    payload, content = _decode_log_content(response)
+    assert content.splitlines() == [
+        "[+] [WARNING] (2026-08-18 10:01:00,000) test.two: aviso",
+        "[+] [ERROR] (2026-08-18 10:02:00,000) test.three: fallo",
+    ]
+    assert payload["totalLines"] == 2
+
+
+def test_log_level_counts_ignore_the_level_filter(
+    client, admin_user, auth_headers, _isolated_log_file
+):
+    """Los contadores describen la ventana, no la página filtrada.
+
+    Quien está mirando solo los errores tiene que poder ver que al lado hay
+    avisos; si los contadores se calcularan después del filtro de nivel,
+    marcarían cero en todo lo demás y no servirían para nada.
+    """
+    response = client.get(
+        "/system/logs",
+        query_string={"position": "head", "level": "ERROR"},
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 200
+    payload, content = _decode_log_content(response)
+    assert content.splitlines() == [
+        "[+] [ERROR] (2026-08-18 10:02:00,000) test.three: fallo",
+    ]
+    assert payload["totalLines"] == 1
+    assert payload["levelCounts"] == {
+        "DEBUG": 0,
+        "INFO": 2,
+        "WARNING": 1,
+        "ERROR": 1,
+        "CRITICAL": 0,
+    }
+
+
+def test_log_level_counts_respect_the_time_window(
+    client, admin_user, auth_headers, _isolated_log_file
+):
+    """Acotar por fecha sí cambia los contadores: son de la ventana pedida."""
+    response = client.get(
+        "/system/logs",
+        query_string={
+            "position": "head",
+            "from": "2026-08-18T10:01:00",
+            "to": "2026-08-18T10:02:00",
+        },
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 200
+    payload, _content = _decode_log_content(response)
+    assert payload["levelCounts"] == {
+        "DEBUG": 0,
+        "INFO": 0,
+        "WARNING": 1,
+        "ERROR": 1,
+        "CRITICAL": 0,
+    }
+
+
+def test_log_rejects_an_unknown_minimum_level(
+    client, admin_user, auth_headers, _isolated_log_file
+):
+    response = client.get(
+        "/system/logs",
+        query_string={"minLevel": "TRACE"},
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 422
+
+
 def test_log_snapshot_survives_appends(client, admin_user, auth_headers, _isolated_log_file):
     first = client.get(
         "/system/logs?position=tail&per_page=1",

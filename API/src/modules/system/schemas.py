@@ -101,6 +101,18 @@ class LogQuerySchema(Schema):
         allow_none=True,
         validate=validate.OneOf(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
     )
+    min_level = fields.String(
+        data_key="minLevel",
+        load_default=None,
+        allow_none=True,
+        validate=validate.OneOf(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
+    )
+    """Severidad mínima: ``minLevel=WARNING`` trae WARNING, ERROR y CRITICAL.
+
+    Complementa a ``level``, que sigue siendo de valor exacto. Si se envían
+    los dos, se aplican ambos.
+    """
+
     contains = fields.String(
         load_default=None,
         allow_none=True,
@@ -123,6 +135,11 @@ class SystemLogsResponseSchema(Schema):
     truncated = fields.Boolean(required=True)
     totalLines = fields.Integer(required=True)
     returnedLines = fields.Integer(required=True)
+    levelCounts = fields.Dict(
+        keys=fields.String(),
+        values=fields.Integer(),
+        required=True,
+    )
     page = fields.Integer(required=True)
     perPage = fields.Integer(required=True)
     totalPages = fields.Integer(required=True)

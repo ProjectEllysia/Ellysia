@@ -23,6 +23,16 @@ from ..exceptions import LogNotFoundError, LogQueryError, LogSnapshotChangedErro
 
 DEFAULT_PAGE_SIZE = 100
 MAX_PAGE_SIZE = 500
+
+# Orden de severidad de los niveles de logging. Es lo que permite pedir
+# "WARNING y por encima" en una sola consulta en vez de una consulta por nivel.
+_LEVEL_SEVERITY = {
+    "DEBUG": 10,
+    "INFO": 20,
+    "WARNING": 30,
+    "ERROR": 40,
+    "CRITICAL": 50,
+}
 _SNAPSHOT_PREFIX_BYTES = 64 * 1024
 _SNAPSHOT_TOKEN_MAX_LENGTH = 512
 
@@ -45,10 +55,21 @@ class _Snapshot:
 
 @dataclass(frozen=True)
 class _LogFilters:
+    """Filtros de una consulta, separados en dos grupos a propósito.
+
+    ``start``/``end``/``contains`` delimitan la **ventana**: el conjunto de
+    líneas sobre el que se cuenta cuántas hay de cada nivel. ``level`` y
+    ``minimum_severity`` filtran *dentro* de esa ventana. Contar antes de
+    aplicarlos es lo que hace útiles los contadores: quien está mirando solo
+    los errores sigue viendo cuántos avisos hay al lado, y sabe si vale la
+    pena ampliar la consulta.
+    """
+
     start: datetime | None
     end: datetime | None
-    level: str | None
     contains: str | None
+    level: str | None
+    minimum_severity: int | None
 
 
 @dataclass(frozen=True)
@@ -82,7 +103,7 @@ def read_logs(query: dict) -> dict:
     log_path = _log_path()
     snapshot = _resolve_snapshot(log_path, query.get("snapshot"))
 
-    total_lines, selected = _select_page(
+    total_lines, selected, level_counts = _select_page(
         log_path, snapshot.size, filters, page, per_page, position
     )
 
@@ -104,6 +125,10 @@ def read_logs(query: dict) -> dict:
         "truncated": total_lines > len(selected),
         "totalLines": total_lines,
         "returnedLines": len(selected),
+        # Cuenta por nivel de la ventana (fechas + texto), *antes* de aplicar
+        # el filtro de nivel: así el panel puede decir "aquí hay 3 errores"
+        # aunque en ese momento se estén mirando solo los avisos.
+        "levelCounts": level_counts,
         "page": page,
         "perPage": per_page,
         "totalPages": total_pages,
@@ -128,11 +153,20 @@ def _build_filters(query: dict) -> _LogFilters:
 
     level = query.get("level")
     contains = query.get("contains")
+    minimum_level = query.get("min_level")
+
+    minimum_severity = None
+    if minimum_level:
+        minimum_severity = _LEVEL_SEVERITY.get(minimum_level.upper())
+        if minimum_severity is None:
+            raise LogQueryError("min_level no es un nivel de logging conocido")
+
     return _LogFilters(
         start=start,
         end=end,
-        level=level.upper() if level else None,
         contains=contains.casefold() if contains else None,
+        level=level.upper() if level else None,
+        minimum_severity=minimum_severity,
     )
 
 
@@ -262,9 +296,8 @@ def _parse_line_prefix(text: str) -> tuple[datetime | None, str | None]:
     return timestamp, match.group("level")
 
 
-def _matches(line: _ParsedLine, filters: _LogFilters) -> bool:
-    if filters.level and line.level != filters.level:
-        return False
+def _is_in_window(line: _ParsedLine, filters: _LogFilters) -> bool:
+    """Comprueba los filtros que delimitan la ventana, sin mirar el nivel."""
     if filters.contains and filters.contains not in line.text.casefold():
         return False
     if filters.start and (line.timestamp is None or line.timestamp < filters.start):
@@ -274,22 +307,46 @@ def _matches(line: _ParsedLine, filters: _LogFilters) -> bool:
     return True
 
 
+def _has_requested_level(line: _ParsedLine, filters: _LogFilters) -> bool:
+    """Comprueba los filtros de nivel: valor exacto y/o severidad mínima."""
+    if filters.level and line.level != filters.level:
+        return False
+    if filters.minimum_severity is not None:
+        severity = _LEVEL_SEVERITY.get(line.level or "")
+        if severity is None or severity < filters.minimum_severity:
+            return False
+    return True
+
+
+def _matches(line: _ParsedLine, filters: _LogFilters) -> bool:
+    return _is_in_window(line, filters) and _has_requested_level(line, filters)
+
+
+def _empty_level_counts() -> dict[str, int]:
+    return {level: 0 for level in _LEVEL_SEVERITY}
+
+
 def _scan_head(
     path: Path,
     snapshot_size: int,
     filters: _LogFilters,
     start_index: int,
     end_index: int,
-) -> tuple[int, list[_ParsedLine]]:
+) -> tuple[int, list[_ParsedLine], dict[str, int]]:
     total = 0
     selected = []
+    level_counts = _empty_level_counts()
     for line in _iter_lines(path, snapshot_size):
-        if not _matches(line, filters):
+        if not _is_in_window(line, filters):
+            continue
+        if line.level in level_counts:
+            level_counts[line.level] += 1
+        if not _has_requested_level(line, filters):
             continue
         if start_index <= total < end_index:
             selected.append(line)
         total += 1
-    return total, selected
+    return total, selected, level_counts
 
 
 def _select_page(
@@ -299,12 +356,12 @@ def _select_page(
     page: int,
     per_page: int,
     position: str,
-) -> tuple[int, list[_ParsedLine]]:
+) -> tuple[int, list[_ParsedLine], dict[str, int]]:
     if position == "head":
         page_start = (page - 1) * per_page
         return _scan_head(path, snapshot_size, filters, page_start, page_start + per_page)
 
-    total_lines = _count_matches(path, snapshot_size, filters)
+    total_lines, level_counts = _count_matches(path, snapshot_size, filters)
     end_index = total_lines - (page - 1) * per_page
     start_index = max(0, end_index - per_page)
     selected = (
@@ -312,11 +369,23 @@ def _select_page(
         if end_index > 0
         else []
     )
-    return total_lines, selected
+    return total_lines, selected, level_counts
 
 
-def _count_matches(path: Path, snapshot_size: int, filters: _LogFilters) -> int:
-    return sum(1 for line in _iter_lines(path, snapshot_size) if _matches(line, filters))
+def _count_matches(
+    path: Path, snapshot_size: int, filters: _LogFilters
+) -> tuple[int, dict[str, int]]:
+    """Cuenta coincidencias y, de paso, cuántas líneas hay de cada nivel."""
+    total = 0
+    level_counts = _empty_level_counts()
+    for line in _iter_lines(path, snapshot_size):
+        if not _is_in_window(line, filters):
+            continue
+        if line.level in level_counts:
+            level_counts[line.level] += 1
+        if _has_requested_level(line, filters):
+            total += 1
+    return total, level_counts
 
 
 def _collect_range(
