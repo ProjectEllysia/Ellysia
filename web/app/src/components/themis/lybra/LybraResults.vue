@@ -59,8 +59,19 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" class="spin"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
                 <span>El motor está pesando las pruebas…</span>
               </div>
-              <div v-else-if="scan.status === 'failed'" class="body-failed">
-                El escaneo falló. No se pudo emitir un veredicto.
+              <!-- El fallo era una línea de texto suelta con la misma frase para
+                   los cinco motivos posibles. Ahora ocupa el mismo recuadro que
+                   el aviso de escaneo parcial de más abajo: son la misma clase
+                   de mensaje —«esto no salió como debía, y esto es lo que pasa»—
+                   y leerlos igual ahorra al usuario descifrar dos formatos. -->
+              <div v-else-if="scan.status === 'failed'" class="state-panel state-panel--failed">
+                <svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="7" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <div class="state-text">
+                  <p class="state-title">{{ failureOf(scan).title }}</p>
+                  <p class="state-hint">{{ failureOf(scan).hint }}</p>
+                </div>
               </div>
               <div v-else-if="!scan.totalFindings && !scan.isPartial" class="body-clean">
                 Ningún hallazgo. La superficie analizada está limpia.
@@ -305,6 +316,54 @@ const LADDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 const PRIO_LABEL = { CRITICAL: 'Crítica', HIGH: 'Alta', MEDIUM: 'Media', LOW: 'Baja', INFO: 'Info' }
 const STATE_LABEL = { fixed: 'Corregido', regressed: 'Regresado', accepted: 'Aceptado', false_positive: 'Falso positivo' }
 
+/**
+ * Por qué falló un escaneo, en prosa. El backend manda un código corto
+ * (`failureReason`) y la redacción vive aquí, que es donde vive el resto del
+ * castellano de cara al usuario.
+ *
+ * Cada entrada trae además un consejo, porque la diferencia que importa no es
+ * cuál de los cinco motivos fue: es si el usuario puede hacer algo al respecto.
+ * En «el host no respondía» —el caso más frecuente con diferencia— sí puede, y
+ * el consejo enumera qué comprobar. En un error interno no puede hacer nada, y
+ * decírselo evita que pierda el tiempo revisando su red.
+ */
+const FAILURE = {
+  host_unreachable: {
+    title: 'El objetivo no respondió.',
+    hint: 'El motor no llegó a abrir ninguna conexión, así que no hay nada que analizar. '
+        + 'Comprueba que la máquina esté encendida, que la dirección sea la correcta y que '
+        + 'no haya un cortafuegos descartando el tráfico.',
+  },
+  port_discovery_failed: {
+    title: 'El descubrimiento de puertos no pudo completarse.',
+    hint: 'El objetivo respondía, pero el barrido no llegó a terminar. Suele ser un '
+        + 'cortafuegos que corta el sondeo a mitad; prueba a acotar la lista de puertos.',
+  },
+  no_results: {
+    title: 'El escáner terminó sin devolver resultados.',
+    hint: 'La herramienta se ejecutó pero no produjo nada que procesar. Vuelve a lanzarlo; '
+        + 'si se repite, el objetivo puede estar filtrando el escaneo.',
+  },
+  orphaned: {
+    title: 'El escaneo se interrumpió al reiniciarse el servicio.',
+    hint: 'No es un problema del objetivo: el trabajo se perdió a mitad y se cerró al '
+        + 'arrancar de nuevo. Lánzalo otra vez.',
+  },
+  internal_error: {
+    title: 'El motor encontró un error inesperado.',
+    hint: 'El fallo es del producto, no de tu red. El detalle queda en el registro del '
+        + 'servidor; si se repite con el mismo objetivo, merece un aviso.',
+  },
+}
+// Los escaneos que fallaron antes de que existiera la columna no traen código,
+// y decir «no se registró» es más honesto que elegir un motivo por ellos.
+const FAILURE_UNKNOWN = {
+  title: 'El escaneo falló.',
+  hint: 'No se registró el motivo — es un escaneo anterior a que el motor empezara a '
+      + 'guardarlo.',
+}
+function failureOf(scan) { return FAILURE[scan.failureReason] || FAILURE_UNKNOWN }
+
 /** Casilla "Análisis IA" del generador de PDF, por escaneo. */
 const aiFlags = reactive({})
 
@@ -527,10 +586,23 @@ function fmtDate(iso) {
 .expand-enter-active, .expand-leave-active { transition: opacity 0.2s ease; overflow: hidden; }
 .expand-enter-from, .expand-leave-to { opacity: 0; }
 .scan-body { padding: 0.3rem 1rem 0.9rem 2.4rem; }
-.body-pending, .body-failed, .body-clean { display: flex; align-items: center; gap: 0.5rem; padding: 0.7rem 0; font-size: var(--fs-lg); }
+.body-pending, .body-clean { display: flex; align-items: center; gap: 0.5rem; padding: 0.7rem 0; font-size: var(--fs-lg); }
 .body-pending { color: var(--text-dim); }
-.body-failed { color: var(--danger); }
 .body-clean { color: var(--success); }
+
+/* Recuadro de estado: el mismo molde que `.body-partial-hint` —borde, fondo
+   tenue del color del estado, texto explicativo— porque son mensajes de la
+   misma clase. Lo que cambia entre variantes es sólo el color. */
+.state-panel {
+  display: flex; align-items: flex-start; gap: 0.65rem;
+  margin: 0.4rem 0; padding: 0.7rem 0.8rem; border-radius: 8px;
+  border: 1px solid var(--state-color); background: var(--state-bg);
+}
+.state-panel--failed { --state-color: var(--danger); --state-bg: var(--danger-dim); }
+.state-icon { width: 20px; height: 20px; flex: none; margin-top: 0.1rem; color: var(--state-color); }
+.state-text { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+.state-title { margin: 0; font-size: var(--fs-lg); color: var(--state-color); }
+.state-hint { margin: 0; font-size: var(--fs-md); line-height: 1.45; color: var(--text-dim); }
 
 /* Acordeón anidado de hallazgos: la sección entera se desliza al abrir/
    cerrar, y cada fila entra con un ligero cascadeo (retardo creciente por
