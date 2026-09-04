@@ -51,7 +51,6 @@ from ...lybra import (
     score_finding,
     build_service_rollup,
     apply_backport_verdicts,
-    PRIORITY_LADDER,
 )
 from ...lybra.ingest import select_for_services, translate_all
 from ...services import _Task
@@ -991,8 +990,8 @@ class LybraEngineManager(ScanManager):
             "groups": [self._group_to_json(group, exposure) for group in groups],
         }
 
-    @classmethod
-    def _group_to_json(cls, group, exposure: str) -> dict:
+    @staticmethod
+    def _group_to_json(group, exposure: str) -> dict:
         """Un :class:`ServiceGroup` en la forma de la API.
 
         La traducción vive aquí y no en la capa pura porque el prompt del
@@ -1014,20 +1013,9 @@ class LybraEngineManager(ScanManager):
             "fixedVersion": group.fixed_version,
             "confirmedCount": group.confirmed_count,
             "byPriority": group.by_priority,
-            "priority": cls._worst_priority(group.by_priority),
+            "priority": group.worst_priority,
             "findings": [finding_to_json(finding, exposure) for finding in group.findings],
         }
-
-    @staticmethod
-    def _worst_priority(by_priority: dict) -> str:
-        """La prioridad que representa al grupo: la peor que contiene.
-
-        Un grupo se atiende por su peor hallazgo, no por su media: doce avisos
-        informativos junto a un CRITICAL siguen siendo un CRITICAL que hay que
-        mirar hoy.
-        """
-        present = [level for level in reversed(PRIORITY_LADDER) if by_priority.get(level)]
-        return present[0] if present else "INFO"
 
     #: Los estados que un usuario puede fijar a mano. El resto —``fixed``,
     #: ``regressed``— los pone el ciclo de vida al comparar escaneos, y

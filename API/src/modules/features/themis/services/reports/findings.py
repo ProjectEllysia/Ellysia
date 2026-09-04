@@ -15,8 +15,10 @@ from reportlab.platypus import CondPageBreak, Paragraph, Spacer, Table, TableSty
 import src.modules.system.config_reading as CR
 
 from src.modules.shared.report_theme import ColorType, safe_markup
+from ...lybra.grouping import build_service_rollup
 from ..cve_context import enrich_with_cve_context
 from .base import PrintingStrategy
+from .outline import OutlineEntry
 
 logger = logging.getLogger(__name__)
 
@@ -135,25 +137,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
             self._append_finding_summary(theme, elements, findings)
         self._append_cpe_coverage_note(theme, elements, findings)
 
-        elements.append(Paragraph("Hallazgos", theme.subtitle))
-        elements.append(Spacer(1, 0.1 * inch))
-
-        if not findings:
-            elements.append(Paragraph("El motor no detectó ningún hallazgo para este objetivo.", theme.info))
-        else:
-            # Priority first (the contextual CVSS+EPSS+KEV+exposure synthesis that is
-            # Lybra's whole value proposition — see roadmap §1); raw CVSS only breaks
-            # ties *within* the same priority band, confirmed findings before hypotheses.
-            sorted_findings = sorted(
-                findings,
-                key=lambda finding: (
-                    self._PRIORITY_ORDER.get(finding["priority"], 5),
-                    not finding["confirmed"],
-                    -(finding["cvss_score"] or 0),
-                ),
-            )
-            for idx, finding in enumerate(sorted_findings, start=1):
-                self._append_finding_card(theme, elements, finding, idx)
+        self._append_findings_section(theme, elements, findings)
 
         if ai_report:
             # La misma lista que imprime las fichas: ya priorizada por
@@ -325,7 +309,245 @@ class FindingsPrintingStrategy(PrintingStrategy):
         ))
         elements.append(Spacer(1, 0.25 * inch))
 
-    def _append_finding_card(self, theme: "ReportTheme", elements: list, finding: dict, idx: int) -> None:
+    # Las dos clases de trabajo en que se parten los grupos, en el orden en
+    # que se imprimen. Son los mismos títulos que usa la interfaz web
+    # (`LybraResults.vue`), a propósito: quien mira la pantalla y quien lee el
+    # PDF tienen que estar hablando del mismo sitio.
+    _GROUP_SECTIONS = (
+        ("prod", "Productos afectados", True),
+        ("conf", "Configuración y exposición", False),
+    )
+
+    def _outline_key(self, suffix: str) -> str:
+        """Clave de un marcador, única dentro del documento.
+
+        Lleva el escaneo delante porque un mismo informe podría llegar a
+        arrastrar bloques de más de un origen; sin eso, dos grupos homónimos
+        anclarían al mismo destino y el índice mandaría al sitio equivocado.
+        """
+        return f"scan{getattr(self.scan, 'id', 0)}-{suffix}"
+
+    def _append_findings_section(self, theme: "ReportTheme", elements: list, findings: list) -> None:
+        """El bloque «Hallazgos» completo: su rama del índice, su título y su cuerpo.
+
+        Los tres niveles del árbol de marcadores —«Hallazgos», la sección y el
+        grupo— los emite este método y no dos repartidos, porque ReportLab
+        rechaza un nivel que salte más de uno respecto al anterior: si la raíz
+        la pusiera el llamante, el subárbol sólo sería válido cuando alguien se
+        acordara de emitirla antes, y el precio de olvidarlo no es un índice
+        raro sino un informe que no se genera.
+        """
+        elements.append(OutlineEntry("Hallazgos", key=self._outline_key("findings"), level=0))
+        elements.append(Paragraph("Hallazgos", theme.subtitle))
+        elements.append(Spacer(1, 0.1 * inch))
+
+        if not findings:
+            elements.append(Paragraph(
+                "El motor no detectó ningún hallazgo para este objetivo.", theme.info))
+            return
+
+        self._append_grouped_findings(theme, elements, findings)
+
+    def _append_grouped_findings(self, theme: "ReportTheme", elements: list, findings: list) -> None:
+        """Imprimir los hallazgos por unidad remediable, no en lista plana.
+
+        Un escaneo contra un host con dos productos desactualizados puede dar
+        150 hallazgos, y ciento cincuenta fichas seguidas confunden la cantidad
+        de *evidencia* con la cantidad de *trabajo*: son dos acciones —subir
+        dos productos de versión— más un puñado de cosas de configuración que
+        se arreglan de otra manera.
+
+        La agrupación no se calcula aquí: `build_service_rollup` ya existía en
+        la capa pura y la interfaz web ya la pintaba. Lo llamativo es que el
+        informe la tenía delante —la usa desde hace tiempo para armar el
+        prompt del análisis de IA— y aun así imprimía plano. El resultado era
+        un informe donde la IA recomendaba «actualiza Apache y cierras 12
+        CVEs» y tres páginas más abajo esos 12 CVEs aparecían como fichas
+        inconexas.
+        """
+        sections = self._split_into_sections(build_service_rollup(findings))
+
+        self._append_group_index(theme, elements, sections)
+
+        position = 0
+        for section_key, section_title, groups in sections:
+            elements.append(CondPageBreak(2 * inch))
+            elements.append(OutlineEntry(
+                section_title, key=self._outline_key(f"section-{section_key}"), level=1))
+            elements.append(Paragraph(section_title, theme.subtitle))
+            elements.append(Spacer(1, 0.12 * inch))
+
+            for group in groups:
+                position += 1
+                elements.append(OutlineEntry(
+                    f"{group.label} ({group.total_findings})",
+                    key=self._outline_key(f"group-{position}"),
+                    level=2,
+                ))
+                self._append_group_header(theme, elements, group, position)
+
+                for idx, finding in enumerate(self._sorted_findings(group.findings), start=1):
+                    self._append_finding_card(theme, elements, finding, f"{position}.{idx}")
+
+    def _split_into_sections(self, groups: list) -> list:
+        """Repartir los grupos entre producto y configuración, sin los vacíos.
+
+        Un objetivo puede no tener ningún producto identificado (o ninguna
+        configuración señalada), y en ese caso imprimir el título de una
+        sección para no colgarle nada debajo se lee como si faltara algo.
+
+        Returns:
+            Tuplas ``(clave, título, grupos)`` de las secciones con contenido.
+        """
+        sections = []
+        for key, title, wants_products in self._GROUP_SECTIONS:
+            matching = [group for group in groups if group.is_product is wants_products]
+            if matching:
+                sections.append((key, title, matching))
+        return sections
+
+    def _sorted_findings(self, findings: list) -> list:
+        """Priority first (the contextual CVSS+EPSS+KEV+exposure synthesis that
+        is Lybra's whole value proposition — see roadmap §1); raw CVSS
+        only breaks ties *within* the same priority band, confirmed findings
+        before hypotheses. Es el mismo orden de antes, aplicado ahora dentro de
+        cada grupo en vez de sobre la lista entera."""
+        return sorted(
+            findings,
+            key=lambda finding: (
+                self._PRIORITY_ORDER.get(finding["priority"], 5),
+                not finding["confirmed"],
+                -(finding["cvss_score"] or 0),
+            ),
+        )
+
+    def _append_group_index(self, theme: "ReportTheme", elements: list, sections: list) -> None:
+        """Tabla-índice: todo el trabajo pendiente junto, antes del detalle.
+
+        Es la mitad de la respuesta a «que se pueda plegar para leer mejor»
+        que sí cabe dentro de la página (la otra mitad es el árbol de
+        marcadores del visor). Quien recibe el informe ve de un vistazo
+        cuántas acciones hay y cuáles son, y sólo baja al detalle de las que
+        le interesan.
+        """
+        palette = self.color_palette
+        dark = colors.HexColor(palette[ColorType.DARK])
+        white = colors.HexColor(palette[ColorType.WHITE])
+
+        elements.append(Paragraph("Índice de grupos", theme.subtitle))
+        elements.append(Spacer(1, 0.1 * inch))
+
+        cell = ParagraphStyle("GroupIndexCell", parent=theme.body, fontSize=8,
+                              leading=10, alignment=TA_LEFT, spaceAfter=0)
+        data = [["#", "Unidad a remediar", "Prioridad", "Hallazgos", "CVEs", "Acción"]]
+        position = 0
+        for _, _, groups in sections:
+            for group in groups:
+                position += 1
+                action = (f"Actualizar a {group.fixed_version} o superior"
+                          if group.fixed_version else "Revisar configuración")
+                data.append([
+                    str(position),
+                    Paragraph(safe_markup(group.label), cell),
+                    self._PRIORITY_LABEL.get(group.worst_priority, group.worst_priority),
+                    str(group.total_findings),
+                    str(group.total_cves),
+                    Paragraph(safe_markup(action), cell),
+                ])
+
+        table = Table(data, colWidths=[0.3 * inch, 2.1 * inch, 0.75 * inch,
+                                       0.75 * inch, 0.5 * inch, 1.6 * inch], repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(palette[ColorType.SECONDARY])),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 8.5),
+            ("BACKGROUND", (0, 1), (-1, -1), white),
+            ("TEXTCOLOR", (0, 1), (-1, -1), dark),
+            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 1), (-1, -1), 8),
+            ("ALIGN", (0, 0), (0, -1), "CENTER"),
+            ("ALIGN", (2, 0), (4, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("GRID", (0, 0), (-1, -1), 0.4, dark),
+        ]))
+        elements.append(table)
+        elements.append(Spacer(1, 0.25 * inch))
+
+    def _append_group_header(self, theme: "ReportTheme", elements: list, group, position: int) -> None:
+        """Cabecera de un grupo: qué es, cuánto pesa y qué hay que hacer con él.
+
+        La línea que de verdad importa es `fixed_version`: es la cota más alta
+        del grupo, así que actualizar hasta ahí cierra también todas las
+        inferiores — un solo movimiento para todos los hallazgos de debajo.
+        """
+        palette = self.color_palette
+        dark = colors.HexColor(palette[ColorType.DARK])
+        light = colors.HexColor(palette[ColorType.LIGHT])
+
+        elements.append(CondPageBreak(2.2 * inch))
+
+        where = f"{group.service or 'svc'}:{group.port}" if group.port else "—"
+        title = Paragraph(
+            f"Grupo #{position} · {safe_markup(group.label)}",
+            ParagraphStyle("GroupTitle", parent=theme.styles["Normal"], fontName="Helvetica-Bold",
+                           fontSize=9.5, textColor=dark, alignment=TA_LEFT),
+        )
+        heading = Table([[title, where]], colWidths=[4.6 * inch, 1.4 * inch])
+        heading.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), light),
+            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
+            ("FONTSIZE", (1, 0), (1, -1), 8.5),
+            ("TEXTCOLOR", (1, 0), (1, -1), dark),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("BOX", (0, 0), (-1, -1), 0.6, dark),
+        ]))
+        elements.append(heading)
+
+        confirmed_plural = "" if group.confirmed_count == 1 else "s"
+        rows = [
+            ["Prioridad del grupo:",
+             self._PRIORITY_LABEL.get(group.worst_priority, group.worst_priority)],
+            ["Hallazgos:",
+             f"{group.total_findings} ({group.confirmed_count} comprobado{confirmed_plural})"],
+        ]
+        if group.total_cves:
+            rows.append(["CVEs distintos:", str(group.total_cves)])
+        if group.kev_cve_ids:
+            rows.append(["En CISA KEV:",
+                         f"{len(group.kev_cve_ids)} — explotación activa confirmada"])
+        if group.max_cvss is not None:
+            rows.append(["CVSS máximo:", str(group.max_cvss)])
+        if group.max_epss is not None:
+            rows.append(["EPSS máximo (30 días):", f"{group.max_epss * 100:.1f}%"])
+        if group.fixed_version:
+            rows.append(["Cierra el grupo:",
+                         f"actualizar a {group.fixed_version} o superior"])
+
+        summary = Table(rows, colWidths=[1.7 * inch, 4.3 * inch])
+        summary.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f9f9f9")),
+            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+            ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor(palette[ColorType.BLACK])),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
+        ]))
+        elements.append(summary)
+        elements.append(Spacer(1, 0.12 * inch))
+
+    def _append_finding_card(self, theme: "ReportTheme", elements: list, finding: dict, label: str) -> None:
         """Tarjeta de un hallazgo: cabecera de prioridad, nombre, detalles,
         descripción y referencias (mismo lenguaje visual que Nmap/Nikto:
         cada bloque lleva su propio borde, no solo la cabecera)."""
@@ -347,7 +569,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
 
         confirmed_text = "Comprobado" if finding["confirmed"] else "Potencial"
         header = theme.severity_header_table(
-            left_text=f"Hallazgo #{idx}: {self._PRIORITY_LABEL.get(prio, prio)}",
+            left_text=f"Hallazgo #{label}: {self._PRIORITY_LABEL.get(prio, prio)}",
             right_text=confirmed_text,
             bg_color=bgcolor,
         )
