@@ -371,7 +371,7 @@ A subscription with no explicit plan falls back to the default plan (seeded by m
 | `DELETE` | `/users/<id>` | (admin/root) Delete another user's account; same purge as self-deletion, hierarchy enforced (an admin cannot delete an admin or the root), own account excluded |
 | `GET` | `/system/say-hello` | **Public** health check, reports the API version |
 | `GET` | `/system/info` · `/system/status` | (admin) App metadata / CPU-mem-disk status |
-| `GET` | `/system/logs` | (admin) Paginated central log viewer |
+| `GET` | `/system/logs` | (admin) Paginated central log viewer — gzip+base64 page, snapshot-anchored. Windowing with `lastMinutes` (relative, resolved against the **server** clock; mutually exclusive with `from`) or `from`/`to`; severity with `level` (exact) or `minLevel` (that level and above). The response carries `levelCounts` for the window, computed *before* the level filter, plus `windowStart` |
 | `GET/PUT` | `/system` | (root) Read / save `SecOpsConfig.json` (`PUT` requires `If-Match` ETag) |
 | `GET` | `/system/tasks` · `/system/tasks/status` · `/system/tasks/<id>` | (admin) List tasks, queue status, task detail |
 | `POST` | `/system/tasks/<id>/cancel` | (admin) Cancel a queued/running task |
