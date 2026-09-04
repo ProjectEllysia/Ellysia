@@ -91,13 +91,22 @@
                     <template v-for="section in sections(scan.id)" :key="section.key">
                       <p v-if="section.groups.length" class="group-section">{{ section.title }}</p>
 
-                      <div v-for="group in section.groups" :key="section.key + groupKey(group)" class="group">
-                        <div class="group-head">
+                      <div v-for="group in section.groups" :key="section.key + groupKey(scan.id, group)" class="group">
+                        <!-- La cabecera es el interruptor del grupo, y sigue visible al
+                             plegarlo: lo que se esconde es la evidencia (los hallazgos
+                             uno a uno), no la acción a tomar ni cuánto pesa. Así, con
+                             todo plegado, el panel es un índice de trabajo pendiente. -->
+                        <button type="button" class="group-head"
+                          :aria-expanded="isGroupOpen(scan.id, group)"
+                          @click="toggleGroup(scan.id, group)">
+                          <span class="chevron group-chevron" :class="{ rot: isGroupOpen(scan.id, group) }" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                          </span>
                           <span class="f-prio" :class="(group.priority || 'INFO').toLowerCase()">{{ PRIO_LABEL[group.priority] || group.priority }}</span>
                           <span class="group-label">{{ group.label }}</span>
                           <span v-if="group.port" class="f-tag mono">{{ group.service || 'svc' }}:{{ group.port }}</span>
                           <span class="group-count">{{ group.totalFindings }} {{ group.totalFindings === 1 ? 'hallazgo' : 'hallazgos' }}</span>
-                        </div>
+                        </button>
 
                         <div class="group-meta">
                           <span v-if="group.fixedVersion" class="f-tag fix" title="Actualizar hasta aquí cierra todo el grupo de una vez">
@@ -111,8 +120,10 @@
                           <span v-if="group.confirmedCount" class="f-tag conf">{{ group.confirmedCount }} comprobado{{ group.confirmedCount === 1 ? '' : 's' }}</span>
                         </div>
 
+                        <Transition name="findings-panel">
+                        <div v-if="isGroupOpen(scan.id, group)" class="group-body">
                         <TransitionGroup tag="ul" name="finding-item" class="findings">
-                          <li v-for="(f, idx) in visibleGroupFindings(group)" :key="f.id" class="finding" :class="{ potential: !f.confirmed }"
+                          <li v-for="(f, idx) in visibleGroupFindings(scan.id, group)" :key="f.id" class="finding" :class="{ potential: !f.confirmed }"
                             :style="{ '--enter-delay': (idx % FINDINGS_PAGE) * 22 + 'ms' }">
                             <span class="f-prio" :class="(f.priority || 'INFO').toLowerCase()">{{ PRIO_LABEL[f.priority] || f.priority }}</span>
                             <div class="f-main">
@@ -159,10 +170,12 @@
                           </li>
                         </TransitionGroup>
 
-                        <button v-if="visibleGroupFindings(group).length < group.findings.length" type="button"
-                          class="load-more-findings" @click="showMoreFindings(groupKey(group))">
-                          Ver más ({{ visibleGroupFindings(group).length }} de {{ group.findings.length }})
+                        <button v-if="visibleGroupFindings(scan.id, group).length < group.findings.length" type="button"
+                          class="load-more-findings" @click="showMoreFindings(groupKey(scan.id, group))">
+                          Ver más ({{ visibleGroupFindings(scan.id, group).length }} de {{ group.findings.length }})
                         </button>
+                        </div>
+                        </Transition>
                       </div>
                     </template>
                   </template>
@@ -352,8 +365,14 @@ function groupsError(scanId) { return props.groupsByScan[scanId]?.error || null 
  * Identidad de un grupo dentro de un escaneo. El backend no le da id porque no
  * es una fila: es una vista sobre los hallazgos, y su identidad es justo la
  * clave por la que se agrupó.
+ *
+ * El escaneo va delante porque la lista puede tener varias tarjetas abiertas a
+ * la vez, y dos escaneos del mismo objetivo producen grupos con la misma
+ * etiqueta, puerto y servicio. Sin él, ambos compartirían estado de plegado y
+ * de "ver más": abrir uno abriría también a su homónimo de la tarjeta de al
+ * lado.
  */
-function groupKey(group) { return `${group.port ?? '-'}|${group.service ?? '-'}|${group.label}` }
+function groupKey(scanId, group) { return `${scanId}|${group.port ?? '-'}|${group.service ?? '-'}|${group.label}` }
 
 /**
  * Las dos secciones en que se parten los grupos.
@@ -385,8 +404,28 @@ function toggleFindings(id) {
   findingsOpen.value = s
 }
 
-function visibleGroupFindings(group) {
-  return group.findings.slice(0, findingsLimit[groupKey(group)] || FINDINGS_PAGE)
+function visibleGroupFindings(scanId, group) {
+  return group.findings.slice(0, findingsLimit[groupKey(scanId, group)] || FINDINGS_PAGE)
+}
+
+/**
+ * Plegado por grupo, independiente del bloque general y cerrado de entrada.
+ *
+ * Antes el único plegado era el de "Mostrar hallazgos", que abre los doce
+ * grupos de golpe: para llegar al último había que atravesar los once
+ * anteriores con toda su evidencia desplegada. El "ver más" incremental alivia
+ * la lista *dentro* de un grupo, pero no ayuda a saltar de uno a otro.
+ */
+const groupsOpen = ref(new Set())
+
+function isGroupOpen(scanId, group) { return groupsOpen.value.has(groupKey(scanId, group)) }
+
+function toggleGroup(scanId, group) {
+  const key = groupKey(scanId, group)
+  const s = new Set(groupsOpen.value)
+  if (s.has(key)) s.delete(key)
+  else s.add(key)
+  groupsOpen.value = s
 }
 
 function showMoreFindings(key) {
@@ -591,7 +630,15 @@ function fmtDate(iso) {
 .group-section:first-child { margin-top: 0.2rem; }
 
 .group { border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem 0.7rem; margin-bottom: 0.5rem; background: var(--surface); }
-.group-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; }
+.group-head {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem;
+  width: 100%; padding: 0; background: none; border: none;
+  text-align: left; cursor: pointer; color: inherit; font: inherit;
+}
+.group-head:hover .group-label { color: var(--accent-bright); }
+.group-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.group-chevron svg { width: 12px; height: 12px; }
+.group-body { margin-top: 0.1rem; }
 .group-label { font-weight: 600; color: var(--text); font-size: var(--fs-lg); }
 .group-count { margin-left: auto; font-size: var(--fs-md); color: var(--text-muted); }
 .group-meta { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.35rem 0 0.1rem; }
