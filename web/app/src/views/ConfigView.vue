@@ -117,22 +117,46 @@
           <section id="section-ai" class="section">
             <div class="section-head"><h2>IA</h2><p class="section-desc">Estrategia de los modelos de lenguaje por módulo</p></div>
             <div class="section-body">
-              <p class="field-hint">Elige qué proveedor genera el contenido de cada módulo. Las credenciales y los modelos se configuran en <code>.env</code> (<code>OLLAMA_*</code>, <code>OPENAI_*</code>).</p>
+              <p class="field-hint">Elige qué proveedor genera el contenido de cada módulo. Las credenciales siguen en <code>.env</code>; el modelo se elige aquí y se aplica al siguiente trabajo en segundo plano, sin reiniciar nada.</p>
               <div class="cfg-grid">
                 <div class="form-group"><label>Estrategia por defecto</label>
                   <select v-model="store.configFlat['tools.scribe.defaultStrategy']" class="inp sel">
                     <option v-for="s in aiStrategies" :key="s.value" :value="s.value">{{ s.label }}</option>
                   </select>
                 </div>
-                <div class="form-group"><label>Themis</label>
-                  <select v-model="store.configFlat['tools.scribe.modules.themis']" class="inp sel">
+                <div v-for="m in aiModules" :key="m.key" class="form-group"><label>{{ m.label }}</label>
+                  <select v-model="store.configFlat[`tools.scribe.modules.${m.key}`]" class="inp sel">
                     <option v-for="s in aiStrategies" :key="s.value" :value="s.value">{{ s.label }}</option>
                   </select>
                 </div>
-                <div class="form-group"><label>Aegis</label>
-                  <select v-model="store.configFlat['tools.scribe.modules.aegis']" class="inp sel">
-                    <option v-for="s in aiStrategies" :key="s.value" :value="s.value">{{ s.label }}</option>
-                  </select>
+              </div>
+
+              <h3 class="subsection-title">Modelo de cada proveedor</h3>
+              <p class="field-hint">La lista sale de preguntarle al proveedor qué sirve ahora mismo. Dejar el campo vacío significa usar la variable de entorno, que es como funcionaba antes de que el modelo se pudiera elegir desde aquí.</p>
+              <div class="cfg-grid">
+                <ModelPicker
+                  v-for="s in aiStrategies" :key="s.value"
+                  v-model="store.configFlat[`tools.scribe.strategies.${s.value}.model`]"
+                  :label="s.label" :env-hint="s.envVar"
+                  :catalog="store.aiModels[s.value]" :loading="store.aiModelsLoading" />
+              </div>
+
+              <h3 class="subsection-title">Límites y reintentos</h3>
+              <p class="field-hint">El tope de tokens rechaza un prompt desproporcionado antes de gastar la llamada. El corte automático deja de llamar al proveedor tras los fallos seguidos indicados, para no encadenar esperas contra un backend que ya se sabe caído.</p>
+              <div class="cfg-grid">
+                <div class="form-group"><label>Tokens máximos del prompt</label><input v-model.number="store.configFlat['tools.scribe.maxInputTokens']" type="number" min="1000" max="200000" step="1000" class="inp" /></div>
+                <div class="form-group"><label>Intentos por generación</label><input v-model.number="store.configFlat['tools.scribe.resilience.maxRetries']" type="number" min="1" max="10" class="inp" /></div>
+                <div class="form-group"><label>Base de la espera entre intentos (s)</label><input v-model.number="store.configFlat['tools.scribe.resilience.retryBaseSeconds']" type="number" min="1" max="10" step="0.1" class="inp" /></div>
+                <div class="form-group"><label>Fallos que abren el corte</label><input v-model.number="store.configFlat['tools.scribe.resilience.breakerThreshold']" type="number" min="1" max="20" class="inp" /></div>
+                <div class="form-group"><label>Duración del corte (s)</label><input v-model.number="store.configFlat['tools.scribe.resilience.breakerTimeoutSeconds']" type="number" min="5" max="3600" class="inp" /></div>
+              </div>
+
+              <h3 class="subsection-title">Timeout de cada proveedor (s)</h3>
+              <p class="field-hint">Un modelo local tarda mucho más que una API en la nube, así que cada proveedor lleva el suyo.</p>
+              <div class="cfg-grid">
+                <div v-for="s in aiStrategies" :key="s.value" class="form-group">
+                  <label>{{ s.label }}</label>
+                  <input v-model.number="store.configFlat[`tools.scribe.strategies.${s.value}.timeout`]" type="number" min="10" max="1800" class="inp" />
                 </div>
               </div>
             </div>
@@ -284,6 +308,7 @@ import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
 import { useConfigStore } from '@/stores/configStore'
 import ScannerCard from '@/components/config/ScannerCard.vue'
+import ModelPicker from '@/components/config/ModelPicker.vue'
 import PromptField from '@/components/shared/PromptField.vue'
 
 const store = useConfigStore()
@@ -320,9 +345,21 @@ const navGroups = [
 const navSections = navGroups.flatMap((g) => g.items)
 
 const isolationLevels = ['READ UNCOMMITTED', 'READ COMMITTED', 'REPEATABLE READ', 'SERIALIZABLE']
+// `envVar` es la variable que se usa cuando el campo de modelo queda vacío, y
+// se enseña como pista dentro del propio control: sin ella, un campo vacío se
+// lee como «sin modelo» en vez de como «el que diga el entorno».
 const aiStrategies = [
-  { value: 'ollama', label: 'Ollama (local)' },
-  { value: 'openai', label: 'OpenAI' },
+  { value: 'ollama', label: 'Ollama (local)', envVar: 'OLLAMA_MODEL' },
+  { value: 'openai', label: 'OpenAI',        envVar: 'OPENAI_MODEL' },
+  { value: 'google', label: 'Google Gemini', envVar: 'GOOGLE_MODEL' },
+]
+// Los módulos que generan contenido con IA. Iris faltaba: llama a
+// `build_generator("iris")` desde su redactor de resúmenes, pero su estrategia
+// no estaba declarada, así que caía en la de por defecto sin que se viera.
+const aiModules = [
+  { key: 'themis', label: 'Themis' },
+  { key: 'aegis',  label: 'Aegis' },
+  { key: 'iris',   label: 'Iris' },
 ]
 const severities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
 
@@ -356,6 +393,9 @@ onMounted(async () => {
   // no está en el DOM (v-else), así que registrar el observer antes dejaba el
   // resaltado del nav sin observar nada — no fallaba, simplemente no hacía nada.
   await store.loadConfig()
+  // Sin `await`: son llamadas a proveedores externos que pueden tardar, y el
+  // formulario no debe esperarlas para pintarse.
+  store.loadAiModels()
   await nextTick()
   observer = new IntersectionObserver((entries) => {
     // Con este rootMargin varias secciones intersecan a la vez; la activa es la
