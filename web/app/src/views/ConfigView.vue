@@ -162,6 +162,45 @@
             </div>
           </section>
 
+          <section id="section-herald" class="section">
+            <div class="section-head"><h2>Correo</h2><p class="section-desc">Relay de salida y marca de los mensajes</p></div>
+            <div class="section-body">
+              <p class="field-hint">Por aquí salen las campañas de Aegis, los avisos de Hygeia e Iris y los correos de cuenta (verificación, invitaciones, recuperación). El usuario y la contraseña del relay viven en <code>SMTP_USERNAME</code> y <code>SMTP_PASSWORD</code> del <code>.env</code>; lo de aquí no es secreto.</p>
+              <div class="cfg-grid">
+                <div class="form-group"><label>Estrategia por defecto</label>
+                  <select v-model="store.configFlat['tools.herald.defaultStrategy']" class="inp sel">
+                    <option v-for="s in mailStrategies" :key="s.value" :value="s.value">{{ s.label }}</option>
+                  </select>
+                </div>
+                <div v-for="m in mailModules" :key="m.key" class="form-group"><label>{{ m.label }}</label>
+                  <select v-model="store.configFlat[`tools.herald.modules.${m.key}`]" class="inp sel">
+                    <option v-for="s in mailStrategies" :key="s.value" :value="s.value">{{ s.label }}</option>
+                  </select>
+                </div>
+              </div>
+
+              <h3 class="subsection-title">Relay SMTP</h3>
+              <div class="cfg-grid">
+                <div class="form-group"><label>Host</label><input v-model="store.configFlat['tools.herald.strategies.smtp.host']" type="text" class="inp mono" /></div>
+                <div class="form-group"><label>Puerto</label><input v-model.number="store.configFlat['tools.herald.strategies.smtp.port']" type="number" min="1" max="65535" class="inp" /></div>
+                <div class="form-group"><label>Dirección del remitente</label><input v-model="store.configFlat['tools.herald.strategies.smtp.fromAddress']" type="text" class="inp mono" /></div>
+                <div class="form-group"><label>Nombre del remitente</label><input v-model="store.configFlat['tools.herald.strategies.smtp.fromName']" type="text" class="inp" /></div>
+              </div>
+              <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['tools.herald.strategies.smtp.useTls']" type="checkbox" class="toggle" /><span>Cifrar con STARTTLS</span></label></div>
+
+              <h3 class="subsection-title">Marca de los correos</h3>
+              <p class="field-hint">Lo que pintan las plantillas. Es la marca base del producto: el white-label por organización se configura en cada organización y se aplica encima de esta.</p>
+              <div class="cfg-grid">
+                <div class="form-group"><label>Nombre del producto</label><input v-model="store.configFlat['tools.herald.branding.productName']" type="text" class="inp" /></div>
+                <div class="form-group"><label>Color de acento</label><input v-model="store.configFlat['tools.herald.branding.accentColor']" type="color" class="inp color-inp" /></div>
+                <div class="form-group"><label>URL del logotipo</label><input v-model="store.configFlat['tools.herald.branding.logoUrl']" type="text" class="inp mono" /><span class="field-hint">Vacío = sin logotipo</span></div>
+                <div class="form-group"><label>Correo de soporte</label><input v-model="store.configFlat['tools.herald.branding.supportEmail']" type="text" class="inp mono" /></div>
+              </div>
+              <div class="form-group"><label>Nota del pie</label><input v-model="store.configFlat['tools.herald.branding.footerNote']" type="text" class="inp" /></div>
+              <div class="form-group"><label>Directorio de plantillas</label><input v-model="store.configFlat['tools.herald.templatesDir']" type="text" class="inp mono" /><span class="field-hint">Vacío = las plantillas que trae la aplicación</span></div>
+            </div>
+          </section>
+
           <section id="section-iris" class="section">
             <div class="section-head"><h2>Iris</h2><p class="section-desc">Umbrales de análisis de cabeceras de correo</p></div>
             <div class="section-body">
@@ -320,6 +359,7 @@ const ICON = {
   redis:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
   taskqueue: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>',
   ai:        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="6" height="6" rx="1"/><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 15h3M1 9h3M1 15h3"/></svg>',
+  herald:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="m4 7 8 6 8-6"/><path d="M2 20h6"/></svg>',
   iris:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>',
   themis:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
   aegis:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
@@ -336,6 +376,7 @@ const navGroups = [
   ]},
   { label: 'Módulos', items: [
     { id: 'ai',       label: 'IA',       icon: ICON.ai },
+    { id: 'herald',   label: 'Correo',   icon: ICON.herald },
     { id: 'iris',     label: 'Iris',     icon: ICON.iris },
     { id: 'themis', label: 'Themis', icon: ICON.themis },
     { id: 'aegis',    label: 'Aegis',    icon: ICON.aegis },
@@ -360,6 +401,19 @@ const aiModules = [
   { key: 'themis', label: 'Themis' },
   { key: 'aegis',  label: 'Aegis' },
   { key: 'iris',   label: 'Iris' },
+]
+
+// Herald solo tiene una estrategia registrada hoy (relay SMTP). El selector se
+// mantiene porque la capa es enchufable por diseño y la alternativa —esconder
+// el control— haría invisible qué está eligiendo el sistema.
+const mailStrategies = [
+  { value: 'smtp', label: 'Relay SMTP' },
+]
+const mailModules = [
+  { key: 'aegis',    label: 'Aegis (campañas)' },
+  { key: 'iris',     label: 'Iris (avisos)' },
+  { key: 'hygeia',   label: 'Hygeia (avisos)' },
+  { key: 'accounts', label: 'Cuentas (verificación, invitaciones)' },
 ]
 const severities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
 
@@ -455,6 +509,9 @@ function handleSave() { store.saveConfig() }
 .sel { cursor: pointer; appearance: none; -webkit-appearance: none; padding-right: 1.8rem; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2382829a' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.55rem center; background-size: 0.85rem; }
 .sel option { background: var(--surface-2); color: var(--text); }
 .mono { font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
+/* Un `input[type=color]` con el relleno de `.inp` deja la muestra reducida a
+   una línea: aquí el control ES la muestra, así que se le quita el relleno. */
+.color-inp { padding: 0.15rem; height: 2.1rem; cursor: pointer; }
 .toggle-row { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: var(--fs-lg); font-weight: 500; color: var(--text); }
 .toggle { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 .field-hint { font-size: var(--fs-md); color: var(--text-muted); line-height: 1.5; }
