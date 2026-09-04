@@ -26,7 +26,7 @@ import shutil
 import subprocess
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, List, Optional
 
 # La imagen del oráculo. Se fija por nombre y no por digest a propósito: lo que
 # se mide es la concordancia con *Nmap*, no con una versión congelada suya, y
@@ -35,8 +35,9 @@ from typing import Dict, Iterable, Optional
 NMAP_IMAGE = "instrumentisto/nmap"
 
 # Cómo alcanza el contenedor de Nmap los puertos que los contenedores del
-# catálogo publican en el host. Docker Desktop resuelve este nombre; en un
-# runner Linux hace falta ``--add-host``, que es lo que añade _docker_args().
+# catálogo publican en el host. Docker Desktop resuelve este nombre por su
+# cuenta; Docker sobre Linux no, y hay que pedirlo con ``--add-host``. Lo añade
+# _docker_args(), que existe justamente para eso.
 _HOST_FROM_CONTAINER = "host.docker.internal"
 
 
@@ -59,6 +60,35 @@ def _target_from_container(host: str) -> str:
         if host in ("localhost", ""):
             return _HOST_FROM_CONTAINER
     return host
+
+
+def _docker_args(docker_path: str) -> List[str]:
+    """El ``docker run`` con el que se lanza el oráculo, hasta la imagen.
+
+    Todo lo interesante está en ``--add-host``. Un contenedor no alcanza por
+    ``127.0.0.1`` los puertos que otro publica en la máquina anfitriona —ese
+    loopback es el suyo propio—, así que hay que rebotar por el nombre
+    ``host.docker.internal``. Docker Desktop lo inyecta él solo en todos los
+    contenedores; **Docker sobre Linux no**, y ahí el nombre simplemente no
+    resuelve salvo que se mapee a mano contra la puerta de enlace del host,
+    que es lo que significa el valor mágico ``host-gateway``.
+
+    Sin esta bandera, en un runner Linux el oráculo se quedaba sin objetivo, y
+    el modo de fallo era el peor posible: Nmap, ante un nombre que no resuelve,
+    avisa por la salida de error, escribe un XML perfectamente válido sin ni un
+    host dentro y **termina con código 0**. Nada lanzaba, el banco leía «Nmap
+    no identificó nada» y lo apuntaba como desacuerdo de fingerprint. Tres
+    tests de concordancia fallaban cada noche por una discrepancia que no
+    existía (#455).
+
+    En Docker Desktop la bandera es redundante pero inocua: mapea a la misma
+    puerta de enlace que ya estaba puesta.
+    """
+    return [
+        docker_path, "run", "--rm",
+        "--add-host", f"{_HOST_FROM_CONTAINER}:host-gateway",
+        NMAP_IMAGE,
+    ]
 
 
 @dataclass(frozen=True)
@@ -92,19 +122,62 @@ def run_nmap_sv(
         Un puerto cerrado o filtrado simplemente no aparece.
     """
     port_list = ",".join(str(port) for port in sorted(set(ports)))
-    scan_flag = "-sU" if protocol == "udp" else "-sV"
     flags = ["-sV", "-Pn", "-p", port_list] if protocol == "tcp" else ["-sU", "-sV", "-Pn", "-p", port_list]
 
     local_nmap = shutil.which("nmap")
     if local_nmap:
         command = [local_nmap, *flags, "-oX", "-", host]
+        target = host
     else:
         if not docker_path:
             raise RuntimeError("Ni nmap instalado ni Docker disponible para el oráculo")
-        command = [docker_path, "run", "--rm", NMAP_IMAGE, *flags, "-oX", "-", _target_from_container(host)]
+        target = _target_from_container(host)
+        command = [*_docker_args(docker_path), *flags, "-oX", "-", target]
 
     completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=True)
+    assert_target_was_scanned(completed.stdout, completed.stderr, target)
     return parse_nmap_xml(completed.stdout)
+
+
+def assert_target_was_scanned(document: str, error_output: str, target: str) -> None:
+    """Comprobar que el oráculo llegó a mirar el objetivo, y no a otra cosa.
+
+    Hay dos formas muy distintas de que ``run_nmap_sv`` devuelva un mapa vacío,
+    y confundirlas es lo que tuvo el banco nocturno en rojo tres noches (#455):
+
+    - **El puerto no está abierto.** Es un resultado legítimo, y el que la
+      documentación de :func:`parse_nmap_xml` describe: Nmap habló con el
+      objetivo y no encontró nada escuchando.
+    - **Nmap no llegó al objetivo.** El nombre no resolvió, o la red del
+      contenedor no alcanza al host. Aquí no hay medición ninguna, pero el
+      resultado es indistinguible del anterior si sólo se miran los puertos: un
+      diccionario vacío que el banco interpreta como «Nmap no supo identificar
+      el servicio» y anota como desacuerdo con el motor.
+
+    Lo que separa un caso del otro es el elemento ``<host>``. Como el oráculo
+    escanea siempre con ``-Pn``, Nmap da el objetivo por vivo sin comprobarlo y
+    emite su ``<host>`` incluso cuando todos los puertos salen cerrados o
+    filtrados; que **no haya ni uno** sólo puede significar que no hubo objetivo
+    que escanear. Esto se convierte en una excepción a propósito: un oráculo que
+    no midió tiene que interrumpir el banco, nunca aportar un cero a la cifra.
+
+    Args:
+        document: El XML que escribió Nmap.
+        error_output: Su salida de error, que es donde explica por qué no
+            resolvió el nombre. Se adjunta al mensaje porque sin ella el fallo
+            obliga a reproducirlo a mano.
+        target: El objetivo tal y como se le pasó a Nmap.
+
+    Raises:
+        RuntimeError: Si Nmap no escaneó ningún host.
+    """
+    if next(ET.fromstring(document).iter("host"), None) is not None:
+        return
+    raise RuntimeError(
+        f"El oráculo de Nmap no escaneó ningún host para {target!r}: no llegó a "
+        f"medir nada, así que su silencio no es un desacuerdo de fingerprint. "
+        f"Salida de error de Nmap: {error_output.strip() or '(vacía)'}"
+    )
 
 
 def parse_nmap_xml(document: str) -> Dict[int, NmapService]:

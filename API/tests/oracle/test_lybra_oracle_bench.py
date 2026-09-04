@@ -36,7 +36,10 @@ from src.modules.features.themis.managers import LybraEngineManager, AuthorizedT
 from src.modules.features.themis.repositories import ScanRepository, KbRepository
 
 from ._concordance import port_concordance
-from ._docker_helpers import resolve_docker, docker_run, docker_rm, wait_for_port, port_is_free
+from ._security_headers import always_missing_header_checks
+from ._docker_helpers import (resolve_docker, docker_run, docker_rm, wait_for_port,
+                              port_is_free, container_died, diagnose_port,
+                              remember_container)
 
 pytestmark = [pytest.mark.oracle, pytest.mark.integration]
 
@@ -50,7 +53,13 @@ def _docker(*args: str) -> subprocess.CompletedProcess:
     return docker_run(_DOCKER, *args)
 
 
-_wait_for_port = wait_for_port
+def _wait_for_port(host: str, port: int, timeout: float = 30.0) -> None:
+    """``wait_for_port`` con el cliente Docker ya puesto.
+
+    Sin él, un contenedor que muere al arrancar se comunica como un puerto
+    que no contestó, que es el síntoma y nunca la causa (#455).
+    """
+    wait_for_port(host, port, timeout, docker_path=_DOCKER)
 
 
 # is_http_service() (checks.py) only recognises a fixed port set for HTTP
@@ -139,9 +148,16 @@ def _wait_until_answering(port: int, expect: bytes, send: bytes = None, timeout:
                     return
         except OSError:
             pass
+        if container_died(_DOCKER, port):
+            raise TimeoutError(
+                f"127.0.0.1:{port} no contestó {expect!r}: su contenedor no sigue "
+                f"en marcha (última respuesta: {seen!r})."
+                f"{diagnose_port(_DOCKER, port)}"
+            )
         time.sleep(0.3)
     raise TimeoutError(
         f"127.0.0.1:{port} no contestó {expect!r} en {timeout}s (última respuesta: {seen!r})"
+        f"{diagnose_port(_DOCKER, port)}"
     )
 
 
@@ -206,6 +222,7 @@ def httpd_2449_port():
     port = _free_http_port()
     name = f"lybra-oracle-httpd-{port}"
     _docker("run", "-d", "--name", name, "-p", f"{port}:80", "httpd:2.4.49")
+    remember_container(port, name)
     try:
         _wait_for_port("127.0.0.1", port)
         yield port
@@ -229,6 +246,7 @@ def git_exposed_port():
         "> /usr/share/nginx/html/.git/config && nginx -g 'daemon off;'"
     )
     _docker("run", "-d", "--name", name, "-p", f"{port}:80", "nginx:alpine", "sh", "-c", write_config)
+    remember_container(port, name)
     try:
         _wait_for_port("127.0.0.1", port)
         yield port
@@ -253,6 +271,7 @@ def tls_healthy_port():
     name = f"lybra-oracle-tls-healthy-{port}"
     _docker("run", "-d", "--name", name, "-p", f"{port}:443", "nginx:alpine",
             "sh", "-c", _tls_container_cmd(days=365, expired=False))
+    remember_container(port, name)
     try:
         _wait_for_port("127.0.0.1", port)
         yield port
@@ -269,6 +288,7 @@ def tls_expired_port():
     name = f"lybra-oracle-tls-expired-{port}"
     _docker("run", "-d", "--name", name, "-p", f"{port}:443", "nginx:alpine",
             "sh", "-c", _tls_container_cmd(days=30, expired=True))
+    remember_container(port, name)
     try:
         _wait_for_port("127.0.0.1", port)
         yield port
@@ -283,6 +303,7 @@ def ftp_anonymous_port():
     name = f"lybra-oracle-ftp-anon-{_FTP_PORT}"
     _docker("run", "-d", "--name", name, "-p", f"{_FTP_PORT}:21", "alpine:3.19",
             "sh", "-c", _vsftpd_container_cmd(anonymous=True))
+    remember_container(_FTP_PORT, name)
     try:
         _wait_until_answering(_FTP_PORT, expect=b"220")
         yield _FTP_PORT
@@ -301,6 +322,7 @@ def ftp_no_anonymous_port():
     name = f"lybra-oracle-ftp-noanon-{_FTP_PORT}"
     _docker("run", "-d", "--name", name, "-p", f"{_FTP_PORT}:21", "alpine:3.19",
             "sh", "-c", _vsftpd_container_cmd(anonymous=False))
+    remember_container(_FTP_PORT, name)
     try:
         _wait_until_answering(_FTP_PORT, expect=b"220")
         yield _FTP_PORT
@@ -314,6 +336,7 @@ def redis_open_port():
     _require_free_port(_REDIS_PORT, "Redis")
     name = f"lybra-oracle-redis-open-{_REDIS_PORT}"
     _docker("run", "-d", "--name", name, "-p", f"{_REDIS_PORT}:6379", "redis:7")
+    remember_container(_REDIS_PORT, name)
     try:
         _wait_until_answering(_REDIS_PORT, expect=b"+PONG", send=b"PING\r\n")
         yield _REDIS_PORT
@@ -328,6 +351,7 @@ def redis_password_port():
     name = f"lybra-oracle-redis-auth-{_REDIS_PORT}"
     _docker("run", "-d", "--name", name, "-p", f"{_REDIS_PORT}:6379", "redis:7",
             "redis-server", "--requirepass", "lybra-oracle")
+    remember_container(_REDIS_PORT, name)
     try:
         _wait_until_answering(_REDIS_PORT, expect=b"-NOAUTH", send=b"PING\r\n")
         yield _REDIS_PORT
@@ -400,11 +424,10 @@ def test_missing_security_headers_detected_against_real_container(app, admin_use
     findings = _run_self_discovery(app, admin_user, "127.0.0.1", git_exposed_port, monkeypatch)
 
     headers = {f.check_id for f in findings if f.category == "security_header"}
-    assert headers == {
-        "lybra:missing-hsts-header@1",
-        "lybra:missing-x-frame-options-header@1",
-        "lybra:missing-x-content-type-options-header@1",
-    }
+    # La familia esperada sale del feed, no de una lista escrita aquí. La lista
+    # estuvo escrita, con tres identificadores, y se quedó atrás en cuanto el
+    # feed creció (#455).
+    assert headers == always_missing_header_checks()
     assert all(f.confirmed and f.qod == 99 for f in findings if f.category == "security_header")
 
 
