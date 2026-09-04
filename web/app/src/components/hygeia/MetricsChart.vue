@@ -166,7 +166,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useElementWidth } from '@/composables/useElementWidth'
 import { timeAgo } from './format'
 import {
   DEFAULT_WINDOW_MS, detectGaps, fmtDuration, formatTimeTick, formatValue,
@@ -216,17 +217,11 @@ const t0 = computed(() => Date.now() - (props.windowMs || DEFAULT_WINDOW_MS))
 const t1 = computed(() => Date.now())
 
 const plotEl = ref(null)
-const plotW = ref(600)
+// El gráfico vive bajo el `v-if` de la tarjeta, así que `plotEl` está vacío
+// siempre que se pinte el estado vacío: la medida tiene que engancharse al
+// ref, no al elemento, o el montaje sin datos acaba observando un `null`.
+const plotW = useElementWidth(plotEl, 600)
 const plotDataW = computed(() => plotWidthForAxis(plotW.value))
-let resizeObserver = null
-
-onMounted(() => {
-  resizeObserver = new ResizeObserver(() => {
-    plotW.value = plotEl.value?.clientWidth || 0
-  })
-  resizeObserver.observe(plotEl.value)
-})
-onUnmounted(() => resizeObserver?.disconnect())
 
 const clampTime = (t) => Math.min(Math.max(t, t0.value), t1.value)
 const xFor = (t) => ((clampTime(t) - t0.value) / Math.max(1, t1.value - t0.value)) * plotDataW.value
