@@ -323,6 +323,11 @@ export function formatValue(formatted) {
 /**
  * Duración en lenguaje natural ("45 min", "3 h 12 min", "2 d 4 h").
  *
+ * La unidad menor se omite cuando es cero: los presets de ventana son
+ * duraciones redondas, así que la variante con resto convertía "6 h" en
+ * "6 h 0 min" y las 24 h en "1 d 0 h" justo en los rótulos más visibles de
+ * la tarjeta. El cero no aporta precisión, solo estorba.
+ *
  * @param {number} ms - Milisegundos.
  * @returns {string}
  */
@@ -332,9 +337,9 @@ export function fmtDuration(ms) {
   const mins = Math.floor(secs / 60)
   if (mins < 60) return `${mins} min`
   const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours} h ${mins % 60} min`
+  if (hours < 24) return mins % 60 ? `${hours} h ${mins % 60} min` : `${hours} h`
   const days = Math.floor(hours / 24)
-  return `${days} d ${hours % 24} h`
+  return hours % 24 ? `${days} d ${hours % 24} h` : `${days} d`
 }
 
 /* ── Ventanas temporales ───────────────────────────────────────────────── */
