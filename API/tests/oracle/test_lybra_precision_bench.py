@@ -170,15 +170,31 @@ _REAL_EXPOSURES = {
     "server-status": "<h1>Apache Server Status for localhost</h1>",
 }
 
+# Un volcado de base de datos expuesto dispara **dos** checks del feed, no uno.
+# ``sql-backup-exposure`` (CRITICAL) pide /backup.sql con un cuerpo que contenga
+# INSERT INTO o CREATE TABLE; ``sql-dump-exposure`` (HIGH), añadido cuando el
+# feed creció (#296), pide una lista de nombres en la que /backup.sql también
+# está. El mismo fichero satisface a los dos.
+#
+# El catálogo los etiqueta como pareja porque, tal y como está hoy el feed, los
+# dos hallazgos son ciertos: contarlos como uno solo haría del segundo un falso
+# positivo que no lo es. Pero el solapamiento **sí es un defecto del feed**, no
+# del banco —en producción produce dos hallazgos con severidades distintas para
+# el mismo fichero— y se sigue en #456. Cuando ahí se decida deduplicarlos, esta
+# pareja vuelve a ser un solo identificador.
+_SQL_DUMP_CHECKS = {
+    "lybra:sql-backup-exposure@1",
+    "lybra:sql-dump-exposure@1",
+}
+
 _ALL_EXPOSURE_CHECKS = {
     "lybra:git-config-exposure@1",
     "lybra:dotenv-exposure@1",
     "lybra:phpinfo-exposure@1",
     "lybra:wpconfig-source-exposure@1",
     "lybra:ssh-private-key-exposure@1",
-    "lybra:sql-backup-exposure@1",
     "lybra:apache-server-status-exposure@1",
-}
+} | _SQL_DUMP_CHECKS
 
 
 def _catch_all(body: str, status: int = 200) -> str:
@@ -296,7 +312,7 @@ _CATALOGUE = (
             "backup.sql": "-- MySQL dump 10.13\\nCREATE TABLE users (id int);\\n"
                           "INSERT INTO users VALUES (1);\\n",
         }),
-        expected=_HEADERS | {"lybra:sql-backup-exposure@1"},
+        expected=_HEADERS | _SQL_DUMP_CHECKS,
     ),
     # --- señuelos: aquí no debe disparar nada de exposed_path/security_header ---
     Target(
