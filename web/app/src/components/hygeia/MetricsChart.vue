@@ -137,6 +137,9 @@
     <p v-if="gaps.length || anomalyBands.length" class="plot-legend">
       <span v-if="gaps.length" class="legend-item"><i class="swatch swatch--gap"></i>sin señal</span>
       <span v-if="anomalyBands.length" class="legend-item"><i class="swatch swatch--hostdown"></i>incidente host_down</span>
+      <!-- Al final y empujada con margin-left:auto, para que quede al borde
+           derecho por muchas entradas que tenga la leyenda. -->
+      <span v-if="gapSummary" class="legend-total">{{ gapSummary }}</span>
     </p>
 
     <footer class="metric-foot">
@@ -168,6 +171,7 @@ import { timeAgo } from './format'
 import {
   DEFAULT_WINDOW_MS, detectGaps, fmtDuration, formatTimeTick, formatValue,
   gapThresholdMs, medianDeltaMs, plotWidthForAxis, seriesOf, splitAtRanges, timeTicks,
+  totalGapMs,
   yRange, yTicks,
 } from './chartMath'
 
@@ -285,6 +289,24 @@ const gaps = computed(() =>
     : []
 )
 
+/**
+ * Cuánto de la ventana se fue en silencio. Con un pico aislado en 24 h el
+ * trazo es correcto pero engañoso: la banda sola no dice si el hueco son
+ * diez minutos o veintitrés horas, y sin esa cifra el gráfico se lee como
+ * si se hubiera quedado a medias.
+ *
+ * Solo se anuncia a partir de un 5 % de la ventana: por debajo es el hueco
+ * normal de un agente que se saltó un par de latidos, y decirlo sería ruido.
+ */
+const GAP_NOTICE_RATIO = 0.05
+
+const gapSummary = computed(() => {
+  const missing = totalGapMs(gaps.value)
+  const span = props.windowMs || DEFAULT_WINDOW_MS
+  if (!missing || missing < span * GAP_NOTICE_RATIO) return ''
+  return `sin señal ${fmtDuration(missing)} de ${fmtDuration(span)}`
+})
+
 /* ── Incidencias ── */
 
 const anomalyBands = computed(() =>
@@ -357,7 +379,9 @@ const windowNote = computed(() => {
 
 const srText = computed(() => {
   if (!metric.value || !points.value.length) return ''
-  const gapsText = gaps.value.length ? `; ${gaps.value.length} tramo${gaps.value.length === 1 ? '' : 's'} sin señal` : ''
+  const gapsText = gaps.value.length
+    ? `; ${gaps.value.length} tramo${gaps.value.length === 1 ? '' : 's'} sin señal${gapSummary.value ? `, ${gapSummary.value}` : ''}`
+    : ''
   return `${metric.value.name}: ${formatValue(current.value)} ahora, ${maxLabel.value} máximo, ${avgLabel.value} de media, ${minLabel.value} mínimo, sobre ${points.value.length} ${props.bucketSec ? 'cubos' : 'lecturas'}${gapsText}.`
 })
 
@@ -474,9 +498,17 @@ function formatTooltipTime(ts) {
 }
 .grid-line--x { opacity: 0.6; }
 
-/* Banda de ausencia: el silencio también es dato. Tono suave para no
-   competir con el trazo; el rojo lo hereda de --danger translúcido. */
-.gap-band { fill: color-mix(in srgb, var(--danger) 10%, transparent); }
+/* Banda de ausencia: el silencio también es dato, y al 10 % de opacidad no
+   se veía — una ventana de 24 h con un pico y el resto vacío parecía un
+   gráfico a medio pintar. Sube a un 18 % y se recorta con un borde tenue
+   para que la franja tenga principio y fin visibles, sin llegar a competir
+   con la banda de host_down (22 % y borde marcado), que es un hecho que el
+   servidor declara y no un hueco inferido. */
+.gap-band {
+  fill: color-mix(in srgb, var(--danger) 18%, transparent);
+  stroke: color-mix(in srgb, var(--danger) 30%, transparent);
+  stroke-width: 1;
+}
 
 /* Incidente host_down: más intenso que la ausencia (es un hecho declarado
    por el servidor, no un hueco inferido), con borde para que se recorte. */
@@ -571,6 +603,12 @@ function formatTooltipTime(ts) {
   font-size: var(--fs-sm); color: var(--text-muted);
 }
 .legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
+/* La cifra se empuja al extremo opuesto, alineada con «N lecturas» del pie. */
+.legend-total {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
+  color: var(--text-dim); font-variant-numeric: tabular-nums;
+}
 .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
 .swatch--gap { background: color-mix(in srgb, var(--danger) 35%, transparent); }
 .swatch--hostdown {
