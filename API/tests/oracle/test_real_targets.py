@@ -136,6 +136,45 @@ def test_an_unreachable_target_stops_the_bench_instead_of_scoring_zero():
 
 
 # --------------------------------------------------------------------------
+# Un contenedor caído no puede leerse como un fallo del motor (#455)
+# --------------------------------------------------------------------------
+#
+# Puras también: sólo comprueban qué hace el registro cuando no sabe nada del
+# puerto, que es la mitad de la que depende que este cambio no rompa nada.
+
+from ._docker_helpers import container_died, diagnose_port, remember_container
+
+
+def test_an_unknown_port_is_never_declared_dead():
+    """El comportamiento por defecto tiene que seguir siendo «sigue esperando».
+
+    Los esperadores del banco preguntan por todos los puertos, también por los
+    que nadie registró. Si un puerto desconocido se diera por muerto, el
+    diagnóstico nuevo convertiría cualquier arranque lento en un fallo
+    inmediato — justo la carrera que estos plazos largos existen para evitar."""
+    assert container_died("/usr/bin/docker", 65_432) is False
+    assert diagnose_port("/usr/bin/docker", 65_432) == ""
+
+
+def test_without_a_docker_client_nothing_is_diagnosed():
+    """En una máquina sin Docker los bancos se saltan enteros, pero los
+    esperadores siguen siendo importables y no deben intentar inspeccionar
+    nada con un cliente que no existe."""
+    remember_container(65_433, "lybra-inexistente")
+    try:
+        assert container_died(None, 65_433) is False
+        assert diagnose_port(None, 65_433) == ""
+    finally:
+        _forget_container(65_433)
+
+
+def _forget_container(port: int) -> None:
+    """Sacar un puerto del registro para no filtrarlo a otros tests."""
+    from ._docker_helpers import _CONTAINERS_BY_PORT
+    _CONTAINERS_BY_PORT.pop(port, None)
+
+
+# --------------------------------------------------------------------------
 # Un Docker colgado no puede tumbar la suite
 # --------------------------------------------------------------------------
 
