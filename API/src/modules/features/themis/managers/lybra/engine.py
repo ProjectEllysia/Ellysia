@@ -20,6 +20,7 @@ from ...model import (
     Finding,
     LybraScan,
     Scan,
+    ScanFailureReason,
     ScanStatus,
     ScanType,
 )
@@ -58,6 +59,7 @@ from ...services.cve_context import enrich_with_cve_context
 from ...services.nuclei_templates import NucleiTemplateStore
 from src.modules.shared._exceptions import ValidationError
 from ...exceptions import (
+    ScanFailedError,
     ScanNotFoundError,
     FindingNotFoundError,
 )
@@ -314,9 +316,6 @@ class LybraEngineManager(ScanManager):
                 mode = "aggressive" if (aggressive and is_target_authorized) else "safe"
 
                 resolved = source.resolve_services(scan_repo, probes, source_target)
-                if resolved is None:
-                    self.update_scan_status(scan_id, ScanStatus.FAILED)
-                    return
                 services, source_host_id, source_target = resolved.services, resolved.host_id, resolved.target
                 # Un escaneo cancelado a mitad es, a efectos del ciclo de vida,
                 # lo mismo que uno truncado por reloj: vio parte del objetivo,
@@ -452,9 +451,15 @@ class LybraEngineManager(ScanManager):
             else:
                 logger.info(f"Escaneo Lybra {scan_id} completado: {len(findings_data)} hallazgos")
 
+        # Va antes del handler general a propósito: éste es el fallo que sí
+        # sabe de qué murió, y quien lo lanzó ya lo registró en el log con su
+        # detalle. Caer en el ``except Exception`` de abajo lo convertiría en
+        # "error interno", que es justo la etiqueta que no le corresponde.
+        except ScanFailedError as scan_failure:
+            self.update_scan_status(scan_id, ScanStatus.FAILED, scan_failure.reason)
         except Exception as e:
             logger.error(f"Error en escaneo Lybra {scan_id}: {e}", exc_info=True)
-            self.update_scan_status(scan_id, ScanStatus.FAILED)
+            self.update_scan_status(scan_id, ScanStatus.FAILED, ScanFailureReason.INTERNAL_ERROR)
 
     def _discover_ports(
         self,
@@ -1321,6 +1326,10 @@ class LybraEngineManager(ScanManager):
             "exposure": exposure,
             "targetAuthorized": target_authorized,
             "status": getattr(scan, "status", "unknown"),
+            # Un código, no una frase: la prosa de cara al usuario vive en el
+            # SPA. Viaja siempre (``None`` cuando el escaneo no falló, y también
+            # en los que fallaron antes de que existiera la columna).
+            "failureReason": scan.failure_reason,
             "startedAt": isoformat_utc(scan.started_at),
             "finishedAt": isoformat_utc(scan.finished_at),  # type: ignore
             "totalFindings": len(json_findings),

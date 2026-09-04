@@ -266,6 +266,34 @@ class HostUnreachableError(ScanError):
         )
 
 
+class ScanFailedError(ScanError):
+    """Un escaneo no puede continuar, y se sabe por qué.
+
+    Existe para que el motivo llegue hasta la fila del escaneo. Antes, las dos
+    formas en que el descubrimiento de Lybra puede fracasar —el host no
+    responde, o el barrido de puertos no llega a completarse— se colapsaban en
+    un mismo ``None`` de vuelta, así que quien lo recibía sólo podía marcar
+    FAILED y escribir la misma frase para las dos. El código viaja con la
+    excepción y acaba en ``Scan.failure_reason``.
+
+    Args:
+        reason: Miembro de ``ScanFailureReason``. Se guarda como cadena para
+            que este módulo no tenga que importar ``model``.
+        message: Qué pasó, para el log.
+    """
+
+    default_code = ErrorCode.SCAN_EXECUTION_ERROR
+    default_severity = ErrorSeverity.MEDIUM
+
+    def __init__(self, reason, message: str):
+        self.reason = reason
+        super().__init__(
+            message=message,
+            details={"reason": getattr(reason, "value", reason)},
+            user_message="El escaneo no pudo completarse.",
+        )
+
+
 class PDFGenerationError(ReportError):
     """Error al generar un PDF de reporte de escaneo."""
 

@@ -86,6 +86,38 @@ class ScanStatus(Enum):
     FAILED    = "failed"
     CANCELLED = "cancelled"
 
+
+class ScanFailureReason(str, Enum):
+    """Por qué un escaneo acabó en FAILED.
+
+    Un código corto y estable, no una frase: toda la prosa de cara al usuario
+    vive en el SPA y en castellano, así que si el backend enviara el texto
+    hecho, la redacción quedaría partida entre dos sitios y cualquier retoque
+    obligaría a tocar Python. El código es además lo que permite pintar cada
+    causa con su propio color e icono.
+
+    Attributes:
+        HOST_UNREACHABLE: La comprobación de alcanzabilidad no obtuvo
+            respuesta del objetivo. Es el caso más frecuente con diferencia, y
+            el único que el usuario puede arreglar por su cuenta.
+        PORT_DISCOVERY_FAILED: El objetivo respondía, pero el barrido de
+            puertos no llegó a completarse (bloqueo por un cortafuegos, sonda
+            que revienta). Distinto de un barrido *truncado* por reloj, que no
+            es un fallo sino un resultado parcial (``is_partial``).
+        NO_RESULTS: El escáner externo terminó sin devolver nada que procesar.
+        ORPHANED: El escaneo se quedó sin trabajo en la cola —el proceso murió
+            a mitad— y la reconciliación de arranque lo cerró. No es un fallo
+            del objetivo ni del escáner.
+        INTERNAL_ERROR: Cualquier otra excepción. El usuario no puede hacer
+            nada; el detalle está en el log.
+    """
+    HOST_UNREACHABLE      = "host_unreachable"
+    PORT_DISCOVERY_FAILED = "port_discovery_failed"
+    NO_RESULTS            = "no_results"
+    ORPHANED              = "orphaned"
+    INTERNAL_ERROR        = "internal_error"
+
+
 class ScanType(str, Enum):
     """
     Enumeration of supported scan tool types.
@@ -332,6 +364,10 @@ class Scan(Base):
     frequent    = Column("frecuent", Boolean, nullable=False, default=True)
     host_id     = Column(Integer,    ForeignKey("Host.id"))
     finished_at = Column(DateTime,   nullable=True)
+    # Nullable y sin server_default a propósito: sólo tiene sentido en un
+    # escaneo FAILED, y los que ya fallaron antes de esta columna no tienen
+    # motivo que registrar. Un valor por defecto les inventaría uno.
+    failure_reason = Column(String(40), nullable=True)
 
     user = relationship("User", back_populates="scans")
     host = relationship("Host", back_populates="scans")
