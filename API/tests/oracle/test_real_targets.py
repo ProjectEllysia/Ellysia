@@ -68,7 +68,7 @@ def test_a_target_that_does_not_resolve_does_not_sink_the_rest(monkeypatch):
 # Son puras (no lanzan Nmap ni Docker), así que corren en CI como el resto de
 # este fichero, sin marcador ``oracle``.
 
-from ._nmap_oracle import _target_from_container
+from ._nmap_oracle import _docker_args, _target_from_container, assert_target_was_scanned
 
 
 def test_loopback_is_reached_through_the_docker_host():
@@ -85,6 +85,54 @@ def test_an_external_target_is_scanned_directly():
     loopback se pasa tal cual."""
     assert _target_from_container("emesa.com") == "emesa.com"
     assert _target_from_container("203.0.113.9") == "203.0.113.9"
+
+
+def test_the_oracle_container_is_told_how_to_reach_the_host():
+    """Traducir el objetivo a ``host.docker.internal`` no sirve de nada si el
+    contenedor no sabe resolver ese nombre, que es lo que pasa en Docker sobre
+    Linux — y por tanto en el runner del banco nocturno (#455). La bandera que
+    lo mapea contra la puerta de enlace del host tiene que ir en el ``docker
+    run``, y antes de la imagen: lo que va después son argumentos de Nmap."""
+    arguments = _docker_args("/usr/bin/docker")
+
+    assert "--add-host" in arguments
+    assert arguments[arguments.index("--add-host") + 1] == "host.docker.internal:host-gateway"
+    assert arguments.index("--add-host") < arguments.index("instrumentisto/nmap")
+    assert arguments[-1] == "instrumentisto/nmap"
+
+
+_XML_WITH_A_CLOSED_PORT = """<?xml version="1.0"?>
+<nmaprun><host><address addr="192.168.65.2" addrtype="ipv4"/>
+<ports><port protocol="tcp" portid="12121"><state state="closed"/></port></ports>
+</host></nmaprun>"""
+
+_XML_WITHOUT_A_HOST = """<?xml version="1.0"?>
+<nmaprun><runstats><hosts up="0" down="0" total="0"/></runstats></nmaprun>"""
+
+
+def test_a_closed_port_is_a_measurement_and_not_an_error():
+    """Nmap habló con el objetivo y no encontró nada escuchando. Es un
+    resultado legítimo del banco y no debe interrumpir nada."""
+    assert_target_was_scanned(_XML_WITH_A_CLOSED_PORT, "", "host.docker.internal")
+
+
+def test_an_unreachable_target_stops_the_bench_instead_of_scoring_zero():
+    """El fallo que estuvo tres noches disfrazado de desacuerdo de fingerprint.
+
+    Cuando el nombre no resuelve, Nmap emite este XML —válido, sin ni un
+    ``<host>`` dentro— y sale con código 0. Antes eso se colaba como «Nmap no
+    identificó el servicio» y restaba en la cifra de concordancia; ahora lanza,
+    y el mensaje lleva la salida de error de Nmap para que el log de CI diga
+    por sí solo qué pasó."""
+    with pytest.raises(RuntimeError) as failure:
+        assert_target_was_scanned(
+            _XML_WITHOUT_A_HOST,
+            'Failed to resolve "host.docker.internal".',
+            "host.docker.internal",
+        )
+
+    assert "no escaneó ningún host" in str(failure.value)
+    assert "Failed to resolve" in str(failure.value)
 
 
 # --------------------------------------------------------------------------
