@@ -4,7 +4,12 @@
 ``web/app/src/views/ConfigView.vue`` enlaza cada control del formulario con
 ``store.configFlat['ruta.con.puntos']``. Ese ``configFlat`` es el aplanado de
 lo que devuelve ``GET /system``, es decir de ``SecOpsConfig.json`` entero, así
-que cada una de esas ~45 rutas literales es una ruta real dentro del JSON.
+que cada una de esas rutas literales es una ruta real dentro del JSON.
+
+Los controles pintados con ``v-for`` no escriben la ruta entera, la componen
+—``configFlat[`features.hygeia.limits.${limit.key}`]``—, así que el recorrido
+de rutas literales no los ve. De esos se verifica el tramo fijo: que apunte a
+una rama que existe de verdad, que es lo que se rompe al mover una clave.
 
 El modo de fallo que esto cierra es silencioso en las dos direcciones:
 
@@ -37,10 +42,26 @@ _SECOPS_CONFIG = _REPO_ROOT / "API" / "SecOpsConfig.json"
 # store.configFlat['features.themis.enabled'] -> features.themis.enabled
 _CONFIG_FLAT_PATH_RE = re.compile(r"configFlat\[\s*'([^']+)'\s*\]")
 
+# Los controles que se pintan con v-for no escriben la ruta entera, la
+# componen: configFlat[`features.hygeia.limits.${limit.key}`]. La parte
+# variable no se puede resolver sin ejecutar el .vue, pero el tramo literal
+# de delante sí, y es el que se rompe cuando alguien mueve una rama del JSON.
+_CONFIG_FLAT_TEMPLATE_RE = re.compile(r"configFlat\[\s*`([^`]*?)\$\{")
+
 
 def _config_view_paths() -> list[str]:
     source = _CONFIG_VIEW.read_text(encoding="utf-8")
     return sorted(set(_CONFIG_FLAT_PATH_RE.findall(source)))
+
+
+def _config_view_branch_prefixes() -> list[str]:
+    """Los tramos literales de las rutas compuestas, sin el punto final."""
+    source = _CONFIG_VIEW.read_text(encoding="utf-8")
+    return sorted({
+        prefix.rstrip(".")
+        for prefix in _CONFIG_FLAT_TEMPLATE_RE.findall(source)
+        if prefix.strip(".")
+    })
 
 
 def _resolve(config: dict, dotted_path: str):
@@ -109,4 +130,43 @@ def test_every_config_view_path_points_at_a_leaf(secops_config):
         "ConfigView.vue enlaza rutas que apuntan a una rama del JSON.\n"
         "`flatten` solo produce claves para hojas, así que ese control no se "
         "enlaza con nada:\n" + "\n".join(branches)
+    )
+
+
+def test_config_view_binds_some_composed_paths():
+    """Red de seguridad del test de abajo, igual que la del de rutas literales:
+    si el .vue dejara de componer rutas con plantillas, esto caería en vez de
+    dar por buenos cero prefijos."""
+    prefixes = _config_view_branch_prefixes()
+    assert len(prefixes) > 5, f"solo se extrajeron {len(prefixes)} prefijos de ConfigView.vue"
+
+
+def test_every_composed_path_prefix_is_a_real_branch(secops_config):
+    """El tramo fijo de una ruta compuesta apunta a una rama que existe.
+
+    Los controles que se pintan con ``v-for`` —los umbrales y los límites de
+    Hygeia, los diales del motor de Lybra, el modelo de cada proveedor de IA—
+    no llevan la ruta escrita entera, así que el test de rutas literales no
+    los ve: son decenas de campos sin ninguna red debajo.
+
+    Resolver la parte variable exigiría ejecutar el ``.vue``, pero no hace
+    falta para cubrir el fallo que de verdad ocurre: mover o renombrar una
+    rama del JSON. Si ``features.hygeia.limits`` pasara a llamarse de otra
+    forma, el prefijo dejaría de resolver aquí — y en el panel, esos diez
+    controles se pintarían igual sin estar enlazados a nada.
+    """
+    broken = []
+    for prefix in _config_view_branch_prefixes():
+        try:
+            node = _resolve(secops_config, prefix)
+        except KeyError as exc:
+            broken.append(f"  {prefix}: {exc.args[0]}")
+            continue
+        if not isinstance(node, dict):
+            broken.append(f"  {prefix}: existe pero es un valor, no una rama")
+
+    assert not broken, (
+        "ConfigView.vue compone rutas sobre prefijos que no son ramas del JSON.\n"
+        "Los controles pintados con v-for se dibujan igual pero no guardan nada:\n"
+        + "\n".join(broken)
     )

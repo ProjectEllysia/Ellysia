@@ -83,6 +83,7 @@
               :bucket-sec="bucketForWindow(metricsWindow)"
               :truncated="metricsTruncated"
               :anomalies="anomalies"
+              :last-seen-at="latest?.receivedAt ?? null"
             />
           </Transition>
         </template>

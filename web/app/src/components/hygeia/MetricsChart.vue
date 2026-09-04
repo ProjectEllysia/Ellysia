@@ -1,5 +1,11 @@
 <template>
-  <article v-if="metric" class="metric-card" :class="`metric--${metric.key}`"
+  <!-- `hasPlottableData` y no `metric`: `metric` es el DESCRIPTOR de la serie
+       (nombre, color, unidad), que existe siempre que la clave sea válida, o
+       sea, siempre. Con esa condición la tarjeta se pintaba también sin un
+       solo dato, y `Math.max(...[])` acababa escribiendo «-Infinity%» en el
+       pie. Exigiendo puntos, los infinitos no pueden llegar al DOM por
+       construcción, y el estado vacío de abajo deja de ser código muerto. -->
+  <article v-if="hasPlottableData" class="metric-card" :class="`metric--${metric.key}`"
            :style="{ '--metric-color': metric.color }">
     <header class="metric-head">
       <h5 class="metric-name">{{ metric.name }}</h5>
@@ -131,6 +137,9 @@
     <p v-if="gaps.length || anomalyBands.length" class="plot-legend">
       <span v-if="gaps.length" class="legend-item"><i class="swatch swatch--gap"></i>sin señal</span>
       <span v-if="anomalyBands.length" class="legend-item"><i class="swatch swatch--hostdown"></i>incidente host_down</span>
+      <!-- Al final y empujada con margin-left:auto, para que quede al borde
+           derecho por muchas entradas que tenga la leyenda. -->
+      <span v-if="gapSummary" class="legend-total">{{ gapSummary }}</span>
     </p>
 
     <footer class="metric-foot">
@@ -145,16 +154,24 @@
   </article>
 
   <div v-else class="metric-empty" role="status">
+    <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="1.5" aria-hidden="true">
+      <path d="M3 15l4-5 3 3 4-6 3 4" stroke-dasharray="3 3" />
+      <path d="M3 20h18" />
+    </svg>
     <p class="empty-title">{{ emptyTitle }}</p>
     <p class="empty-sub">{{ emptySub }}</p>
+    <p v-if="lastSeenNote" class="empty-hint">{{ lastSeenNote }}</p>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { timeAgo } from './format'
 import {
-  DEFAULT_WINDOW_MS, SERIES, detectGaps, fmtDuration, formatTimeTick, formatValue,
+  DEFAULT_WINDOW_MS, detectGaps, fmtDuration, formatTimeTick, formatValue,
   gapThresholdMs, medianDeltaMs, plotWidthForAxis, seriesOf, splitAtRanges, timeTicks,
+  totalGapMs,
   yRange, yTicks,
 } from './chartMath'
 
@@ -170,6 +187,10 @@ const props = defineProps({
   // Anomalías del activo (ya filtradas por asset en la vista): host_down se
   // pinta como banda de incidente; el resto, como marca de apertura.
   anomalies: { type: Array, default: () => [] },
+  // Instante del último heartbeat recibido, mire donde mire la ventana. Solo
+  // lo usa el estado vacío: saber que la última señal fue hace tres días es
+  // justo lo que distingue "no hay datos aquí" de "el panel está roto".
+  lastSeenAt: { type: String, default: null },
 })
 
 const PLOT_H = 190
@@ -268,6 +289,24 @@ const gaps = computed(() =>
     : []
 )
 
+/**
+ * Cuánto de la ventana se fue en silencio. Con un pico aislado en 24 h el
+ * trazo es correcto pero engañoso: la banda sola no dice si el hueco son
+ * diez minutos o veintitrés horas, y sin esa cifra el gráfico se lee como
+ * si se hubiera quedado a medias.
+ *
+ * Solo se anuncia a partir de un 5 % de la ventana: por debajo es el hueco
+ * normal de un agente que se saltó un par de latidos, y decirlo sería ruido.
+ */
+const GAP_NOTICE_RATIO = 0.05
+
+const gapSummary = computed(() => {
+  const missing = totalGapMs(gaps.value)
+  const span = props.windowMs || DEFAULT_WINDOW_MS
+  if (!missing || missing < span * GAP_NOTICE_RATIO) return ''
+  return `sin señal ${fmtDuration(missing)} de ${fmtDuration(span)}`
+})
+
 /* ── Incidencias ── */
 
 const anomalyBands = computed(() =>
@@ -340,21 +379,41 @@ const windowNote = computed(() => {
 
 const srText = computed(() => {
   if (!metric.value || !points.value.length) return ''
-  const gapsText = gaps.value.length ? `; ${gaps.value.length} tramo${gaps.value.length === 1 ? '' : 's'} sin señal` : ''
+  const gapsText = gaps.value.length
+    ? `; ${gaps.value.length} tramo${gaps.value.length === 1 ? '' : 's'} sin señal${gapSummary.value ? `, ${gapSummary.value}` : ''}`
+    : ''
   return `${metric.value.name}: ${formatValue(current.value)} ahora, ${maxLabel.value} máximo, ${avgLabel.value} de media, ${minLabel.value} mínimo, sobre ${points.value.length} ${props.bucketSec ? 'cubos' : 'lecturas'}${gapsText}.`
 })
 
 /* ── Estados vacíos ── */
 
+/**
+ * Si hay algo que trazar. Es la condición de render de la tarjeta, y por
+ * tanto la que impide que las agregadas del pie se calculen sobre un array
+ * vacío: `Math.max(...[])` es `-Infinity`, y `fmtPct` lo imprimía tal cual.
+ */
+const hasPlottableData = computed(() => !!metric.value && points.value.length > 0)
+
 const emptyTitle = computed(() =>
-  props.snapshots.length ? `Sin datos de ${metric.value?.name ?? 'esta métrica'}` : 'Sin señal en este tramo'
+  props.snapshots.length ? `Sin datos de ${metric.value?.name ?? 'esta métrica'}` : 'Sin actividad en este tramo'
 )
 
 const emptySub = computed(() => {
   if (!props.snapshots.length) {
-    return 'El agente no ha reportado ningún heartbeat en esta ventana.'
+    const span = fmtDuration(props.windowMs || DEFAULT_WINDOW_MS)
+    return `El agente no ha reportado ningún heartbeat en las últimas ${span}. No es un fallo del panel: en esta ventana no hay nada que medir.`
   }
   return `La métrica «${metric.value?.name ?? ''}» no aparece aquí — algunos agentes no la reportan (p. ej. la carga en Windows).`
+})
+
+/**
+ * Pista de salida. Con una última señal conocida, dice cuándo fue; sin ella,
+ * el activo nunca ha latido y ampliar la ventana no serviría de nada.
+ */
+const lastSeenNote = computed(() => {
+  if (props.snapshots.length) return ''
+  if (!props.lastSeenAt) return 'Este activo todavía no ha enviado ningún heartbeat.'
+  return `Última señal ${timeAgo(props.lastSeenAt)}. Prueba con una ventana más amplia.`
 })
 
 /* ── Crosshair ── */
@@ -439,9 +498,17 @@ function formatTooltipTime(ts) {
 }
 .grid-line--x { opacity: 0.6; }
 
-/* Banda de ausencia: el silencio también es dato. Tono suave para no
-   competir con el trazo; el rojo lo hereda de --danger translúcido. */
-.gap-band { fill: color-mix(in srgb, var(--danger) 10%, transparent); }
+/* Banda de ausencia: el silencio también es dato, y al 10 % de opacidad no
+   se veía — una ventana de 24 h con un pico y el resto vacío parecía un
+   gráfico a medio pintar. Sube a un 18 % y se recorta con un borde tenue
+   para que la franja tenga principio y fin visibles, sin llegar a competir
+   con la banda de host_down (22 % y borde marcado), que es un hecho que el
+   servidor declara y no un hueco inferido. */
+.gap-band {
+  fill: color-mix(in srgb, var(--danger) 18%, transparent);
+  stroke: color-mix(in srgb, var(--danger) 30%, transparent);
+  stroke-width: 1;
+}
 
 /* Incidente host_down: más intenso que la ausencia (es un hecho declarado
    por el servidor, no un hueco inferido), con borde para que se recorte. */
@@ -536,6 +603,12 @@ function formatTooltipTime(ts) {
   font-size: var(--fs-sm); color: var(--text-muted);
 }
 .legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
+/* La cifra se empuja al extremo opuesto, alineada con «N lecturas» del pie. */
+.legend-total {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
+  color: var(--text-dim); font-variant-numeric: tabular-nums;
+}
 .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
 .swatch--gap { background: color-mix(in srgb, var(--danger) 35%, transparent); }
 .swatch--hostdown {
@@ -557,12 +630,22 @@ function formatTooltipTime(ts) {
 .metric-window-note { margin: 0.3rem 0 0; text-align: right; font-size: var(--fs-sm); color: var(--text-muted); }
 
 /* ── Estados vacíos ── */
+/* El borde discontinuo y el gráfico "roto" del icono son la señal: dicen a
+   simple vista que el hueco es la ausencia de datos y no un panel colgado. */
 .metric-empty {
-  padding: 2rem 1rem; text-align: center;
+  padding: 2.25rem 1rem 2rem; text-align: center;
   border: 1px dashed var(--border-med); border-radius: 8px;
+}
+.empty-icon {
+  width: 34px; height: 34px; margin-bottom: 0.6rem;
+  color: var(--text-muted); opacity: 0.55;
 }
 .empty-title { margin: 0 0 0.25rem; font-size: var(--fs-lg); color: var(--text-dim); }
 .empty-sub { margin: 0 auto; max-width: 44ch; font-size: var(--fs-sm); color: var(--text-muted); }
+.empty-hint {
+  margin: 0.55rem auto 0; max-width: 44ch;
+  font-size: var(--fs-sm); color: var(--text-dim);
+}
 
 .sr-only {
   position: absolute; width: 1px; height: 1px;

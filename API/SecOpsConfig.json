@@ -1,5 +1,5 @@
 {
-  "appVersion": "0.5.12",
+  "appVersion": "0.5.13",
   "general": {
     "directories": {
       "logdir": "..",
@@ -56,14 +56,27 @@
       "maxInputTokens": 24000,
       "modules": {
         "aegis": "openai",
-        "themis": "openai"
+        "themis": "openai",
+        "iris": "openai"
+      },
+      "resilience": {
+        "maxRetries": 3,
+        "retryBaseSeconds": 1.5,
+        "breakerThreshold": 3,
+        "breakerTimeoutSeconds": 60
       },
       "strategies": {
+        "ollama": {
+          "model": "",
+          "timeout": 300
+        },
         "google": {
-          "model": ""
+          "model": "",
+          "timeout": 120
         },
         "openai": {
-          "model": "gpt-4.1-2025-04-14"
+          "model": "gpt-4.1-2025-04-14",
+          "timeout": 120
         }
       }
     },
