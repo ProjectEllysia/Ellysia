@@ -161,6 +161,9 @@ def read_logs(query: dict) -> dict:
         "snapshotBytes": snapshot.size,
         "currentBytes": snapshot.current_size,
         "lastModified": snapshot.modified_at,
+        # Hora de servidor desde la que se ha leído, para que el panel pueda
+        # decir qué ventana está enseñando sin recalcularla por su cuenta.
+        "windowStart": filters.start.isoformat(timespec="seconds") if filters.start else "",
         "timeZone": _local_timezone_name(),
         "firstLine": selected[0].number if selected else None,
         "lastLine": selected[-1].number if selected else None,
@@ -170,6 +173,17 @@ def read_logs(query: dict) -> dict:
 def _build_filters(query: dict) -> _LogFilters:
     start = _normalise_datetime(query.get("from_"))
     end = _normalise_datetime(query.get("to"))
+    last_minutes = query.get("last_minutes")
+
+    if last_minutes:
+        if start is not None:
+            raise LogQueryError("lastMinutes y from son excluyentes")
+        # La ventana se resuelve con el reloj del servidor a propósito. Las
+        # marcas del log no llevan zona horaria: son la hora local de la API.
+        # Si el navegador calculara el "hace diez minutos", un administrador
+        # conectado desde otro huso pediría una ventana desplazada.
+        start = datetime.now() - timedelta(minutes=last_minutes)
+
     if start is not None and end is not None and start > end:
         raise LogQueryError("from no puede ser posterior a to")
 

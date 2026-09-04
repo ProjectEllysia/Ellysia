@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { useApi } from '@/composables/useApi'
 import { decodeLogPayload } from '@/composables/logTransport'
+import { buildLogQuery } from '@/composables/logWindows'
 
 /**
  * Store de lectura del log del sistema.
@@ -25,15 +26,7 @@ export const useLogsStore = defineStore('logs', () => {
 
   /** Carga una página aplicando los filtros recibidos desde la vista. */
   async function loadLogs(filters) {
-    const params = new URLSearchParams({
-      page: String(filters.page || 1),
-      per_page: String(filters.perPage || 100),
-      position: filters.position || 'tail',
-    })
-    if (filters.from) params.set('from', filters.from)
-    if (filters.to) params.set('to', filters.to)
-    if (filters.level) params.set('level', filters.level)
-    if (filters.contains) params.set('contains', filters.contains)
+    const params = buildLogQuery(filters)
     if (snapshot.value) params.set('snapshot', snapshot.value)
 
     const requestKey = params.toString()
@@ -118,6 +111,8 @@ function emptyMeta() {
     page: 1,
     perPage: 100,
     totalPages: 0,
+    levelCounts: {},
+    windowStart: '',
     position: 'tail',
     hasPrevious: false,
     hasNext: false,

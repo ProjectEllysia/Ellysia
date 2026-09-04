@@ -4,6 +4,7 @@ import copy
 import base64
 import gzip
 import json
+from datetime import datetime, timedelta
 from unittest import mock
 
 import pytest
@@ -232,6 +233,65 @@ def test_log_rejects_an_unknown_minimum_level(
     )
 
     assert response.status_code == 422
+
+
+def test_log_last_minutes_uses_the_server_clock(
+    client, admin_user, auth_headers, tmp_path, monkeypatch
+):
+    """La ventana relativa la resuelve el servidor, no el navegador.
+
+    Las marcas del log son hora local de la API y no llevan zona horaria, así
+    que "los últimos diez minutos" solo significa lo mismo para todos si lo
+    calcula quien escribe el log. El test escribe entradas relativas a la hora
+    real de la máquina para que el cálculo sea comprobable.
+    """
+    now = datetime.now()
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+
+    def _entry(minutes_ago, level, message):
+        stamp = now - timedelta(minutes=minutes_ago)
+        printed = stamp.strftime("%Y-%m-%d %H:%M:%S,") + f"{stamp.microsecond // 1000:03d}"
+        return f"[+] [{level}] ({printed}) test: {message}"
+
+    (log_dir / "secops.log").write_text(
+        "\n".join([
+            _entry(120, "ERROR", "hace dos horas"),
+            _entry(45, "WARNING", "hace tres cuartos de hora"),
+            _entry(5, "ERROR", "hace cinco minutos"),
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(CR, "get_directory_of", lambda _directory: str(log_dir))
+
+    response = client.get(
+        "/system/logs",
+        query_string={"position": "head", "lastMinutes": 60},
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 200
+    payload, content = _decode_log_content(response)
+    assert [line.split(": ", 1)[1] for line in content.splitlines()] == [
+        "hace tres cuartos de hora",
+        "hace cinco minutos",
+    ]
+    assert payload["windowStart"]
+    assert payload["levelCounts"]["ERROR"] == 1
+
+
+def test_log_rejects_a_relative_and_an_absolute_window_together(
+    client, admin_user, auth_headers, _isolated_log_file
+):
+    """Pedir las dos cosas es ambiguo, y se rechaza en vez de elegir una."""
+    response = client.get(
+        "/system/logs",
+        query_string={"lastMinutes": 30, "from": "2026-08-18T10:00:00"},
+        headers=auth_headers(admin_user),
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_log_query"
 
 
 def test_log_snapshot_survives_appends(client, admin_user, auth_headers, _isolated_log_file):
