@@ -440,6 +440,8 @@ Run it in its **own** pytest invocation. The fast suite's SQLite shim rewrites `
 
 CI runs two workflows on push/PR to `main` and the `vX.Y` release branches: `.github/workflows/tests.yml` (`python -m pytest -q -m "not oracle"`, on SQLite) and `.github/workflows/tests-postgres.yml` (`python -m pytest -q -m postgres`, with ephemeral PostgreSQL and Redis services). They are separate jobs on purpose — the service matrix must not slow down the cycle that runs on every push. Some tests use `xfail(strict=True)` to document real known bugs — when a bug is fixed the test XPASSes and the marker must be removed. A green push to `main` (a merged pull request) additionally triggers the automatic production deploy — see [Continuous deployment](#continuous-deployment-cicd).
 
+A third workflow, `.github/workflows/lybra-bench.yml`, runs the `oracle` bench on a schedule (03:15 UTC) and on demand. It is separate because it brings up around twenty Docker containers and takes tens of minutes, which no per-push job can afford. Its deliverable is the numbers, not the green tick: it publishes the Lybra engine's Phase R precision, its agreement with Nmap and its false-positive rate to the run summary, and uploads the full log as an artifact.
+
 ### Web SPA (node, no framework)
 
 ```bash
