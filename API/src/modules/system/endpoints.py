@@ -27,6 +27,7 @@ from .schemas import (
     TaskPaginationQuerySchema,
     LogQuerySchema,
     SystemLogsResponseSchema,
+    AIModelsResponseSchema,
 )
 from .exceptions import (
     LogNotFoundError,
@@ -36,6 +37,7 @@ from .exceptions import (
 from .services import (
     read_logs,
 )
+from src.modules.tools.scribe import strategy_catalog
 
 import src.modules.system.config_reading as CR
 
@@ -198,6 +200,26 @@ def update_config():
     config = CR.save_full_config(new_config, expected_version=if_match)
     logger.info("Configuracion actualizada correctamente | user=%s", current_actor())
     return config, 200, {"ETag": CR.get_config_version()}
+
+
+@system_blp.get("/ai/models")
+@system_blp.response(200, AIModelsResponseSchema, description="Models each AI provider serves")
+@system_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@system_blp.alt_response(403, schema=ErrorSchema, description="Insufficient role")
+@limiter.limit("30 per hour")
+@require_oauth_token
+# Root, como el resto de /system: la respuesta dice qué proveedores de IA hay
+# configurados y cuáles responden, que es información del despliegue.
+@require_role(minimum_role=Role.ROOT)
+@handle_exceptions(default_exception=IllegalStateError, logger=logger)
+def get_ai_models():
+    """Modelos disponibles en cada proveedor de IA configurado.
+
+    Alimenta el desplegable de modelo del panel de configuración: sin esto,
+    elegir modelo es escribir un identificador de memoria, y equivocarse no
+    se nota hasta que falla un job de fondo.
+    """
+    return {"strategies": strategy_catalog()}
 
 
 # =============================================================================

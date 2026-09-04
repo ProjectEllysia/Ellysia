@@ -18,6 +18,7 @@ from .inputs import AIInput, AIResult, Example, estimate_tokens
 from .strategies import ModelStrategy, OllamaStrategy, OpenAIStrategy, GoogleStrategy, ToolExecutor
 from .generator import AIGenerator
 from .factory import build_generator
+from .catalog import strategy_catalog
 from .tools import web_search, WEB_SEARCH_TOOL
 from .exceptions import (
     AIConnectionError,
@@ -40,6 +41,7 @@ __all__ = [
     "ToolExecutor",
     "AIGenerator",
     "build_generator",
+    "strategy_catalog",
     "web_search",
     "WEB_SEARCH_TOOL",
     "AIConnectionError",

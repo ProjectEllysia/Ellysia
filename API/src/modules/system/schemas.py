@@ -166,3 +166,24 @@ class SystemLogsResponseSchema(Schema):
     timeZone = fields.String(required=True)
     firstLine = fields.Integer(allow_none=True)
     lastLine = fields.Integer(allow_none=True)
+
+
+class AIStrategyModelsSchema(Schema):
+    """Una estrategia de scribe y los modelos que su proveedor sirve ahora.
+
+    ``isReachable`` en false no es un error de la petición: significa que a
+    ese proveedor concreto no se le pudo preguntar (sin credenciales, servidor
+    apagado, red cortada) y que ``error`` dice por qué. El resto de filas
+    siguen siendo válidas — tener OpenAI caído no impide elegir modelo de
+    Ollama.
+    """
+
+    strategy = fields.String(required=True)
+    configuredModel = fields.String(required=True)
+    models = fields.List(fields.String(), required=True)
+    isReachable = fields.Boolean(required=True)
+    error = fields.String(required=True)
+
+
+class AIModelsResponseSchema(Schema):
+    strategies = fields.List(fields.Nested(AIStrategyModelsSchema), required=True)

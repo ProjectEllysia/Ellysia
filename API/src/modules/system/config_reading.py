@@ -627,6 +627,46 @@ class ScribeConfig(_StrategySelection):
     total estimado (no solo al último mensaje) e independientemente del
     backend, ya que un contexto local también tiene un tope real."""
 
+    def timeout_for(self, strategy_name: str, default: int) -> int:
+        """Timeout de cliente declarado para ``strategy_name``, o ``default``.
+
+        Vive aquí y no en cada estrategia porque el valor está en la misma
+        rama que el modelo (``strategies.<proveedor>.timeout``) y se resuelve
+        igual: lo que diga el fichero gana, y si no dice nada se usa el que la
+        estrategia considere razonable para su backend — un modelo local tarda
+        mucho más que una API en la nube, así que no hay un único default
+        sensato para los tres."""
+        configured = self.options_for(strategy_name).get("timeout")
+        return int(configured) if configured else default
+
+
+@config_block("tools.scribe.resilience")
+@dataclass(frozen=True)
+class ScribeResilienceConfig:
+    """Lo que ``AIGenerator`` hace cuando el proveedor de IA falla.
+
+    Eran cuatro constantes en la firma de ``AIGenerator.__init__`` que la
+    factory nunca sobreescribía, así que los valores del código eran los
+    únicos que existían: ajustar la tolerancia a un proveedor lento o
+    inestable obligaba a tocar el código y redesplegar.
+    """
+
+    max_retries: int = 3
+    """Intentos totales de una misma generación antes de rendirse."""
+
+    retry_base_seconds: float = 1.5
+    """Base de la espera exponencial entre intentos: el intento ``n`` espera
+    ``base ** n`` segundos. Con 1.5 son 1 s y 1,5 s antes del tercero."""
+
+    breaker_threshold: int = 3
+    """Fallos seguidos que abren el *circuit breaker*. Abierto, las llamadas
+    se rechazan al instante en vez de encadenar timeouts contra un backend
+    que ya se sabe caído."""
+
+    breaker_timeout_seconds: int = 60
+    """Segundos que el breaker permanece abierto antes de dejar pasar una
+    llamada de prueba."""
+
 
 @config_block("tools.herald")
 @dataclass(frozen=True)
@@ -647,6 +687,10 @@ class HeraldConfig(_StrategySelection):
 
 def scribe_config() -> ScribeConfig: # type: ignore
     return load_block(ScribeConfig) # type: ignore
+
+
+def scribe_resilience_config() -> ScribeResilienceConfig: # type: ignore
+    return load_block(ScribeResilienceConfig) # type: ignore
 
 
 def herald_config() -> HeraldConfig: # type: ignore

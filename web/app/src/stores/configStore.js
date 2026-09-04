@@ -31,6 +31,12 @@ export const useConfigStore = defineStore('config', () => {
   const loading = ref(false)
   /** Guardado en curso */
   const saving = ref(false)
+  /** Catálogo de modelos por proveedor de IA, indexado por nombre de estrategia.
+   *  Cada entrada es { models, isReachable, error } tal cual la devuelve
+   *  GET /system/ai/models. */
+  const aiModels = reactive({})
+  /** Consulta del catálogo en curso */
+  const aiModelsLoading = ref(false)
 
   /**
    * Carga la configuración desde GET /system y la aplana.
@@ -46,6 +52,24 @@ export const useConfigStore = defineStore('config', () => {
       Object.assign(configFlat, flat)
       originalFlat = { ...flat }
     } finally { loading.value = false }
+  }
+
+  /**
+   * Pregunta a cada proveedor de IA qué modelos sirve ahora mismo.
+   *
+   * Va aparte de `loadConfig` y no bloquea el formulario: son llamadas de red
+   * a terceros (OpenAI, Google) que pueden tardar o no responder, y el panel
+   * tiene que poder pintarse igual. Mientras no llegue —o si nunca llega— el
+   * selector de modelo cae a campo de texto libre.
+   */
+  async function loadAiModels() {
+    aiModelsLoading.value = true
+    try {
+      const res = await apiFetch('/system/ai/models')
+      if (!res?.ok) return
+      const data = await res.json()
+      for (const row of data.strategies || []) aiModels[row.strategy] = row
+    } finally { aiModelsLoading.value = false }
   }
 
   /** Restaura los valores del formulario a la última configuración guardada */
@@ -88,11 +112,15 @@ export const useConfigStore = defineStore('config', () => {
    * toda la config global (root-only), no debe sobrevivir a la sesión. */
   function $reset() {
     for (const key of Object.keys(configFlat)) delete configFlat[key]
+    for (const key of Object.keys(aiModels)) delete aiModels[key]
     originalFlat = {}
     etag = null
     loading.value = false
     saving.value = false
   }
 
-  return { configFlat, loading, saving, loadConfig, resetForm, saveConfig, $reset }
+  return {
+    configFlat, loading, saving, aiModels, aiModelsLoading,
+    loadConfig, loadAiModels, resetForm, saveConfig, $reset,
+  }
 })
