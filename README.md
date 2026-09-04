@@ -373,6 +373,7 @@ A subscription with no explicit plan falls back to the default plan (seeded by m
 | `GET` | `/system/info` · `/system/status` | (admin) App metadata / CPU-mem-disk status |
 | `GET` | `/system/logs` | (admin) Paginated central log viewer — gzip+base64 page, snapshot-anchored. Windowing with `lastMinutes` (relative, resolved against the **server** clock; mutually exclusive with `from`) or `from`/`to`; severity with `level` (exact) or `minLevel` (that level and above). The response carries `levelCounts` for the window, computed *before* the level filter, plus `windowStart` |
 | `GET/PUT` | `/system` | (root) Read / save `SecOpsConfig.json` (`PUT` requires `If-Match` ETag) |
+| `GET` | `/system/ai/models` | (root) Models each configured AI provider currently serves — feeds the model dropdown in the config panel. Providers are queried independently: one that cannot be reached reports its error in its own row instead of failing the response |
 | `GET` | `/system/tasks` · `/system/tasks/status` · `/system/tasks/<id>` | (admin) List tasks, queue status, task detail |
 | `POST` | `/system/tasks/<id>/cancel` | (admin) Cancel a queued/running task |
 | `PUT` | `/system/tasks/config` | (admin) Change `max_workers` (applies on worker restart) |
@@ -612,29 +613,48 @@ AI generation uses an injectable strategy chosen in `API/SecOpsConfig.json` unde
 ```json
 "scribe": {
   "defaultStrategy": "openai",
-  "modules": { "themis": "openai", "aegis": "openai" },
+  "maxInputTokens": 24000,
+  "modules": { "themis": "openai", "aegis": "openai", "iris": "openai" },
+  "resilience": { "maxRetries": 3, "retryBaseSeconds": 1.5, "breakerThreshold": 3, "breakerTimeoutSeconds": 60 },
   "strategies": {
-    "google": { "model": "" },
-    "openai": { "model": "gpt-4.1-2025-04-14" }
+    "ollama": { "model": "", "timeout": 300 },
+    "google": { "model": "", "timeout": 120 },
+    "openai": { "model": "gpt-4.1-2025-04-14", "timeout": 120 }
   }
 }
 ```
 
 | Strategy | Model | Use case |
 |---|---|---|
-| `ollama` | `llama3.2` (env default) | Local, GPU-friendly, no API cost |
-| `openai` | `gpt-4.1-2025-04-14` (JSON default; env `OPENAI_MODEL` overrides, default `gpt-4o-mini`) | Cloud, for VPS without GPU |
-| `google` | `gemini-2.0-flash` (env default) | Cloud alternative to OpenAI |
+| `ollama` | JSON, else env `OLLAMA_MODEL` | Local, GPU-friendly, no API cost |
+| `openai` | `gpt-4.1-2025-04-14` (JSON), else env `OPENAI_MODEL` (default `gpt-4o-mini`) | Cloud, for VPS without GPU |
+| `google` | JSON, else env `GOOGLE_MODEL` (default `gemini-2.0-flash`) | Cloud alternative to OpenAI |
 
-Environment variables (in `API/.env`):
+**Changing the model does not need a redeploy.** `strategies.<provider>.model` wins over the
+environment variable, and the JSON is hot-reloadable: `PUT /system` (what the config panel does)
+refreshes the API process in place, the RQ worker re-reads the file per job when its mtime changed,
+and the generator is built inside the job — so the next background job uses the new model. An
+empty `model` means "use this provider's environment variable", which is how it behaved before the
+model became configurable from the panel.
+
+`GET /system/ai/models` asks each registered provider what it serves so the panel can offer a
+dropdown instead of a free-text field; a provider that cannot be reached (missing credentials,
+server down) reports its error in its own row and the field falls back to free text.
+
+`resilience` holds what the generator does when a provider fails: retries with exponential backoff,
+and the circuit breaker that stops calling a backend already known to be down. `timeout` is
+per-provider because a local model is far slower than a cloud API.
+
+Environment variables (in `API/.env` — credentials, plus the model fallbacks):
 
 ```
 OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=llama3.2
+OLLAMA_MODEL=llama3.2        # fallback when the panel leaves the model empty
 OPENAI_API_KEY=sk-...        # only needed if a module uses "openai"
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-4o-mini     # fallback
+OPENAI_BASE_URL=             # optional: an OpenAI-compatible endpoint (vLLM, LM Studio, a gateway)
 GOOGLE_API_KEY=...           # only needed if a module/strategy uses "google"
-GOOGLE_MODEL=gemini-2.0-flash
+GOOGLE_MODEL=gemini-2.0-flash  # fallback
 ```
 
 ### Email sending (herald module)
@@ -714,6 +734,8 @@ Ellysia uses a layered configuration system (`API/src/modules/system/config_read
 
 Config is read through frozen dataclasses bound to a branch of the tree (`@config_block`, e.g. `CR.nuclei_config().rate_limit`), not one getter per value, and cached — changes to `SecOpsConfig.json` require an app restart unless applied via `PUT /system`. Background jobs pick them up too: the worker re-reads the file per job when its mtime changed (`CR.reload_if_changed()`).
 
+The config panel (`web/app/src/views/ConfigView.vue`) exposes every settable key of the tree — the AI and email layers, the Themis knowledge base and Lybra engine dials, JWT and MFA policy, Hygeia thresholds, limits and report palette. The one branch deliberately left out is `features.iris.data.*`: those are the anti-phishing heuristic corpora (word lists, homoglyph maps, suspicious TLDs), detection content rather than deployment settings. `API/tests/unit/test_config_view_paths.py` pins the panel's paths against the JSON — the literal ones by full path, the ones composed in a `v-for` by their fixed prefix.
+
 > [!WARNING]
 > `features.themis.areLocalIpsAllowed` ships as `false`, and a test pins that value (`test_the_anti_ssrf_defence_ships_enabled`): with `true`, a user can point a scan at the server's internal network or the cloud metadata endpoint. Flip it to `true` in your working copy for local development against private IPs, but do not commit it.
 
@@ -726,4 +748,4 @@ Config is read through frozen dataclasses bound to a branch of the tree (`@confi
 - `API/src/data/` and `docs/` are gitignored (scan outputs, generated PDFs).
 - PostgreSQL uses port **15432** locally (not standard 5432).
 - There is a single `TaskStatus` enum, in `system/taskqueue/task.py`; `themis/services/tasks.py` imports it rather than defining its own.
-- The API version is declared as `appVersion` in `SecOpsConfig.json` (currently `0.5.10`, read by `CR.get_app_version()`).
+- The API version is declared as `appVersion` in `SecOpsConfig.json` (currently `0.5.13`, read by `CR.get_app_version()`).
