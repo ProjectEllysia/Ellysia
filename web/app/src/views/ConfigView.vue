@@ -237,6 +237,8 @@
               <div class="cfg-grid">
                 <div class="form-group"><label>Carpeta por defecto</label><input v-model="store.configFlat['features.themis.folders.defaultFolderName']" type="text" class="inp" /><span class="field-hint">Nombre de la carpeta virtual para escaneos sin agrupar</span></div>
                 <div class="form-group"><label>Escaneos en estadísticas</label><input v-model.number="store.configFlat['features.themis.history.maxScans']" type="number" min="1" max="100" class="inp" /><span class="field-hint">Escaneos recientes que se promedian en el histórico</span></div>
+                <div class="form-group"><label>Vigencia del riesgo aceptado (días)</label><input v-model.number="store.configFlat['features.themis.acceptedRiskDays']" type="number" min="1" max="3650" class="inp" /><span class="field-hint">Pasado ese plazo, un hallazgo aceptado vuelve a contar</span></div>
+                <div class="form-group"><label>Plazo por defecto de un trabajo (s)</label><input v-model.number="store.configFlat['features.themis.taskDefaults.timeout']" type="number" min="60" max="604800" class="inp" /><span class="field-hint">Lo que espera la cola antes de dar por muerto un escaneo</span></div>
               </div>
               <h3 class="subsection-title">Verificación de accesibilidad del host</h3>
               <div class="cfg-grid">
@@ -251,6 +253,23 @@
                 <div class="form-group"><label>Timeout (s)</label><input v-model.number="store.configFlat['features.themis.traceroute.timeout']" type="number" min="1" max="600" class="inp" /></div>
                 <div class="form-group"><label>Reintento si falla (min)</label><input v-model.number="store.configFlat['features.themis.traceroute.retryFailedMinutes']" type="number" min="1" max="1440" class="inp" /></div>
               </div>
+              <h3 class="subsection-title">Base de conocimiento</h3>
+              <p class="field-hint">El espejo local de NVD, KEV, EPSS y OVAL con el que Lybra decide si un servicio detectado es vulnerable. «Antigüedad máxima» es lo que se tolera desde la última sincronización de cada fuente antes de avisar de que está rancia; no borra nada.</p>
+              <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.themis.kb.enabled']" type="checkbox" class="toggle" /><span>Sincronización activa</span></label></div>
+              <div class="cfg-grid">
+                <div class="form-group"><label>Cron de sincronización</label><input v-model="store.configFlat['features.themis.kb.syncCron']" type="text" class="inp mono" /><span class="field-hint">Formato cron de cinco campos</span></div>
+                <div class="form-group"><label>Ventana pedida a NVD (días)</label><input v-model.number="store.configFlat['features.themis.kb.nvdWindowDays']" type="number" min="1" max="120" class="inp" /><span class="field-hint">Cuánto histórico se pide en cada pasada</span></div>
+                <div v-for="feed in kbFeeds" :key="feed.key" class="form-group">
+                  <label>Antigüedad máxima — {{ feed.label }} (días)</label>
+                  <input v-model.number="store.configFlat[`features.themis.kb.maxAgeDays.${feed.key}`]" type="number" min="1" max="365" class="inp" />
+                </div>
+              </div>
+              <div class="cfg-grid">
+                <div v-for="source in kbSourcePaths" :key="source.path" class="form-group">
+                  <label>Origen — {{ source.label }}</label>
+                  <input v-model="store.configFlat[source.path]" type="text" class="inp mono" />
+                </div>
+              </div>
             </div>
             <div class="scanner-grid">
               <ScannerCard name="Nmap" icon="scan" :flat="store.configFlat" prefix="features.themis.scanners.nmap" />
@@ -264,6 +283,16 @@
                   <div class="form-group"><label>Timeout por petición (s)</label><input v-model.number="store.configFlat['features.themis.scanners.nuclei.requestTimeout']" type="number" min="1" max="120" class="inp" /></div>
                   <div class="form-group"><label>Timeout del escaneo (s)</label><input v-model.number="store.configFlat['features.themis.scanners.nuclei.timeout']" type="number" min="60" max="14400" class="inp" /></div>
                 </div>
+                <div class="form-group">
+                  <label>Severidades por defecto</label>
+                  <div class="chip-row">
+                    <label v-for="sev in nucleiSeverities" :key="sev" class="chip">
+                      <input v-model="store.configFlat['features.themis.scanners.nuclei.defaultSeverities']" type="checkbox" :value="sev" />
+                      <span>{{ sev }}</span>
+                    </label>
+                  </div>
+                  <span class="field-hint">Lo que se escanea si el usuario no elige otra cosa</span>
+                </div>
               </ScannerCard>
               <ScannerCard name="Lybra" icon="scan" :flat="store.configFlat" prefix="features.themis.scanners.lybra">
                 <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.themis.scanners.lybra.activeChecks']" type="checkbox" class="toggle" /><span>Comprobaciones activas</span></label></div>
@@ -276,6 +305,32 @@
                     </select>
                   </div>
                   <div class="form-group"><label>Máx. comprobaciones</label><input v-model.number="store.configFlat['features.themis.scanners.lybra.ingest.maxChecks']" type="number" min="1" max="5000" class="inp" /></div>
+                </div>
+
+                <h4 class="card-subtitle">Motor</h4>
+                <p class="field-hint">Cuánto empuja el motor contra el objetivo. Subir la concurrencia o bajar el intervalo acelera el escaneo y aumenta el riesgo de que el objetivo lo trate como un ataque.</p>
+                <div class="cfg-grid cfg-grid--tight">
+                  <div v-for="dial in lybraEngineDials" :key="dial.key" class="form-group">
+                    <label>{{ dial.label }}</label>
+                    <input
+                      v-model.number="store.configFlat[`features.themis.scanners.lybra.engine.${dial.key}`]"
+                      type="number" :min="dial.min" :max="dial.max" :step="dial.step || 1" class="inp" />
+                  </div>
+                  <div class="form-group"><label>User-Agent</label><input v-model="store.configFlat['features.themis.scanners.lybra.engine.httpUserAgent']" type="text" class="inp mono" /></div>
+                </div>
+
+                <h4 class="card-subtitle">Evidencia</h4>
+                <p class="field-hint">El trozo de respuesta cruda que se guarda junto a cada hallazgo para poder revisarlo después.</p>
+                <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.themis.scanners.lybra.evidence.enabled']" type="checkbox" class="toggle" /><span>Guardar evidencia</span></label></div>
+                <div class="cfg-grid cfg-grid--tight">
+                  <div class="form-group"><label>Tamaño máx. (bytes)</label><input v-model.number="store.configFlat['features.themis.scanners.lybra.evidence.maxBodyBytes']" type="number" min="256" step="256" class="inp" /></div>
+                  <div class="form-group"><label>Retención (días)</label><input v-model.number="store.configFlat['features.themis.scanners.lybra.evidence.retentionDays']" type="number" min="1" max="3650" class="inp" /></div>
+                </div>
+
+                <h4 class="card-subtitle">Credenciales por defecto</h4>
+                <p class="field-hint">Es la única fase que escribe en el objetivo: cada intento es un inicio de sesión real. El tope es por cuenta, no por servicio, y evita que la comprobación se convierta en fuerza bruta.</p>
+                <div class="cfg-grid cfg-grid--tight">
+                  <div class="form-group"><label>Intentos por cuenta</label><input v-model.number="store.configFlat['features.themis.scanners.lybra.credentials.maxAttempts']" type="number" min="1" max="20" class="inp" /></div>
                 </div>
               </ScannerCard>
             </div>
@@ -342,7 +397,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
 import { useConfigStore } from '@/stores/configStore'
@@ -416,6 +471,35 @@ const mailModules = [
   { key: 'accounts', label: 'Cuentas (verificación, invitaciones)' },
 ]
 const severities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+// Nuclei etiqueta sus plantillas en minúsculas; el valor que se guarda tiene
+// que coincidir exactamente con lo que espera el binario.
+const nucleiSeverities = ['critical', 'high', 'medium', 'low', 'info']
+
+const kbFeeds = [
+  { key: 'nvd',  label: 'NVD' },
+  { key: 'kev',  label: 'KEV' },
+  { key: 'epss', label: 'EPSS' },
+  { key: 'oval', label: 'OVAL' },
+]
+
+// Los diales del motor de Lybra son quince campos numéricos con la misma
+// forma: se describen aquí y se pintan con v-for, como ya se hace con los
+// umbrales y los límites de Hygeia.
+const lybraEngineDials = [
+  { key: 'tcpConcurrency',       label: 'Concurrencia TCP',        min: 1,   max: 2000 },
+  { key: 'tcpTimeout',           label: 'Timeout TCP (s)',         min: 0.1, max: 60, step: 0.1 },
+  { key: 'udpTimeout',           label: 'Timeout UDP (s)',         min: 0.1, max: 60, step: 0.1 },
+  { key: 'udpRetries',           label: 'Reintentos UDP',          min: 0,   max: 10 },
+  { key: 'udpBudgetSeconds',     label: 'Presupuesto UDP (s)',     min: 1,   max: 600, step: 0.5 },
+  { key: 'rateLimitInterval',    label: 'Intervalo entre envíos (s)', min: 0, max: 10, step: 0.05 },
+  { key: 'hostPoolSize',         label: 'Hosts en paralelo',       min: 1,   max: 64 },
+  { key: 'httpTimeout',          label: 'Timeout HTTP (s)',        min: 1,   max: 120 },
+  { key: 'httpMaxBodyBytes',     label: 'Cuerpo HTTP máx. (bytes)', min: 1024, max: 8388608, step: 1024 },
+  { key: 'networkTimeout',       label: 'Timeout de red (s)',      min: 0.5, max: 120, step: 0.5 },
+  { key: 'bannerTimeout',        label: 'Timeout de banner (s)',   min: 0.5, max: 60, step: 0.5 },
+  { key: 'maxBlindProbes',       label: 'Sondeos a ciegas máx.',   min: 0,   max: 20 },
+  { key: 'maxPayloadExpansions', label: 'Expansiones de payload máx.', min: 1, max: 500 },
+]
 
 // Los umbrales y los límites de Hygeia son 22 campos con la misma forma: se
 // describen aquí y se pintan con v-for en vez de a mano uno por uno.
@@ -437,6 +521,14 @@ const hygeiaLimits = [
   { key: 'maxAssetsPerUser',     label: 'Activos por usuario' },
   { key: 'maxInventoryItems',    label: 'Elementos de inventario' },
 ]
+
+const kbSourcePaths = computed(() => {
+  const prefix = 'features.themis.kb.sources.'
+  return Object.keys(store.configFlat)
+    .filter((key) => key.startsWith(prefix))
+    .sort()
+    .map((path) => ({ path, label: path.slice(prefix.length).replace('oval.', 'OVAL ').toUpperCase() }))
+})
 
 const activeSection = ref('general')
 let observer = null
@@ -501,6 +593,10 @@ function handleSave() { store.saveConfig() }
 .cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.85rem; }
 .cfg-grid--tight { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.5rem; }
 .cfg-row { display: flex; align-items: center; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.chip { display: flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.5rem; background: var(--bg); border: 1px solid var(--border-solid); border-radius: 999px; font-size: var(--fs-md); color: var(--text-dim); cursor: pointer; }
+.chip input { accent-color: var(--accent); cursor: pointer; }
+.card-subtitle { font-size: var(--fs-md); font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0.4rem 0 0; }
 .scanner-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.85rem; margin-top: 0.85rem; }
 .form-group { display: flex; flex-direction: column; gap: 0.25rem; }
 .form-group label { font-size: var(--fs-md); font-weight: 600; color: var(--text-dim); }
