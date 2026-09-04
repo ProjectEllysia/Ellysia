@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from .correlation import PRIORITY_LADDER
 from .kb import parse_cpe23
 
 # Valores que un CPE usa para decir "cualquier versión" o "ninguna". No son una
@@ -74,6 +75,24 @@ class ServiceGroup:
     @property
     def total_cves(self) -> int:
         return len(self.cve_ids)
+
+    @property
+    def worst_priority(self) -> str:
+        """La prioridad que representa al grupo: la peor que contiene.
+
+        Un grupo se atiende por su peor hallazgo, no por su media: doce avisos
+        informativos junto a un CRITICAL siguen siendo un CRITICAL que hay que
+        mirar hoy.
+
+        Vivía en ``LybraEngineManager._worst_priority``, es decir en la capa
+        que toca ORM, cuando el dato sale entero de ``by_priority`` y no
+        necesita nada de infraestructura. Estaba bien mientras el único
+        consumidor era la API; con el informe PDF agrupando también, dejarlo
+        allí obligaba al generador del informe a importar un manager para
+        calcular una propiedad de un dato que ya tiene en la mano.
+        """
+        present = [level for level in reversed(PRIORITY_LADDER) if self.by_priority.get(level)]
+        return present[0] if present else "INFO"
 
 
 def group_label(finding: dict) -> Tuple[str, bool]:

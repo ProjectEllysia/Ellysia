@@ -144,6 +144,44 @@ def test_products_and_non_products_stay_distinguishable():
     assert by_label == {"http server 2.4.52": True, "security_header (http)": False}
 
 
+# ------------------------------------------------- prioridad representativa
+
+def test_a_group_is_represented_by_the_worst_priority_it_contains():
+    """Un grupo se atiende por su peor hallazgo, no por su media: doce avisos
+    informativos junto a un CRITICAL siguen siendo un CRITICAL de hoy."""
+    groups = build_service_rollup([
+        _finding(cpe="cpe:2.3:a:apache:http_server:2.4.52:*:*:*:*:*:*:*", priority="INFO"),
+        _finding(cpe="cpe:2.3:a:apache:http_server:2.4.52:*:*:*:*:*:*:*", priority="CRITICAL"),
+        _finding(cpe="cpe:2.3:a:apache:http_server:2.4.52:*:*:*:*:*:*:*", priority="MEDIUM"),
+    ])
+
+    assert len(groups) == 1
+    assert groups[0].worst_priority == "CRITICAL"
+
+
+def test_a_group_without_any_counted_priority_falls_back_to_info():
+    """El recuento puede llegar vacío (un grupo sin hallazgos que lo alimenten
+    no se construye hoy, pero la propiedad no debe reventar por ello)."""
+    groups = build_service_rollup([_finding(priority="LOW")])
+    groups[0].by_priority = {}
+
+    assert groups[0].worst_priority == "INFO"
+
+
+def test_the_api_group_view_reports_the_same_worst_priority():
+    """La vista de la API dejó de calcularlo por su cuenta y delega en el
+    grupo. Este test ata que el traslado no cambió lo que se sirve."""
+    from src.modules.features.themis.managers.lybra.engine import LybraEngineManager
+
+    groups = build_service_rollup([
+        _finding(cpe="cpe:2.3:a:apache:http_server:2.4.52:*:*:*:*:*:*:*", priority="LOW"),
+        _finding(cpe="cpe:2.3:a:apache:http_server:2.4.52:*:*:*:*:*:*:*", priority="HIGH"),
+    ])
+    view = LybraEngineManager._group_to_json(groups[0], "public")  # pylint: disable=protected-access
+
+    assert view["priority"] == "HIGH" == groups[0].worst_priority
+
+
 # ---------------------------------------------------- contrato con el prompt
 
 def test_the_ai_prompt_still_gets_the_keys_its_system_text_describes():
