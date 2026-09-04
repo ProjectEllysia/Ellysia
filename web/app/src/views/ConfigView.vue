@@ -62,13 +62,36 @@
           </section>
 
           <section id="section-security" class="section">
-            <div class="section-head"><h2>Seguridad</h2><p class="section-desc">Hashing de contraseñas (Argon2id)</p></div>
+            <div class="section-head"><h2>Seguridad</h2><p class="section-desc">Contraseñas, sesión y segundo factor</p></div>
             <div class="section-body">
               <p class="field-hint">Parámetros de coste de Argon2id. Subirlos endurece los hashes pero ralentiza el inicio de sesión. Solo afectan a contraseñas creadas o cambiadas tras guardar.</p>
               <div class="cfg-grid">
                 <div class="form-group"><label>Iteraciones (time cost)</label><input v-model.number="store.configFlat['general.security.argon2.time_cost']" type="number" min="1" max="20" class="inp" /></div>
                 <div class="form-group"><label>Memoria (KiB)</label><input v-model.number="store.configFlat['general.security.argon2.memory_cost']" type="number" min="8192" step="1024" class="inp" /><span class="field-hint">65536 KiB = 64 MiB por hash</span></div>
                 <div class="form-group"><label>Paralelismo (hilos)</label><input v-model.number="store.configFlat['general.security.argon2.parallelism']" type="number" min="1" max="16" class="inp" /></div>
+              </div>
+
+              <h3 class="subsection-title">Sesión (JWT)</h3>
+              <p class="field-hint">Cuánto vive una sesión. El token de acceso es el que acompaña a cada petición; el de refresco es el que permite renovarlo sin volver a pedir la contraseña, así que su vigencia es la duración real de la sesión. El secreto de firma vive en <code>JWT_SECRET_KEY</code> y no está aquí. En contenedores, <code>JWT_ALGORITHM</code>, <code>ACCESS_TOKEN_EXPIRY_MINUTES</code> y <code>REFRESH_TOKEN_EXPIRY_DAYS</code> tienen prioridad sobre estos valores.</p>
+              <div class="cfg-grid">
+                <div class="form-group"><label>Algoritmo de firma</label>
+                  <select v-model="store.configFlat['general.security.jwt.algorithm']" class="inp sel">
+                    <option v-for="alg in jwtAlgorithms" :key="alg" :value="alg">{{ alg }}</option>
+                  </select>
+                  <span class="field-hint">Solo la familia HS*: la firma usa un secreto simétrico</span>
+                </div>
+                <div class="form-group"><label>Vigencia del token de acceso (min)</label><input v-model.number="store.configFlat['general.security.jwt.access_token_expiry_minutes']" type="number" min="1" max="1440" class="inp" /></div>
+                <div class="form-group"><label>Vigencia del token de refresco (días)</label><input v-model.number="store.configFlat['general.security.jwt.refresh_token_expiry_days']" type="number" min="1" max="365" class="inp" /></div>
+              </div>
+
+              <h3 class="subsection-title">Segundo factor (TOTP)</h3>
+              <p class="field-hint">El emisor es el nombre que la aplicación autenticadora enseña junto al código. Los códigos de recuperación se generan una sola vez al activar el segundo factor: cambiar aquí su número no afecta a quien ya lo tenga activado.</p>
+              <div class="cfg-grid">
+                <div class="form-group"><label>Emisor</label><input v-model="store.configFlat['general.security.mfa.issuer']" type="text" class="inp" /></div>
+                <div class="form-group"><label>Vigencia del reto (min)</label><input v-model.number="store.configFlat['general.security.mfa.challenge_expiry_minutes']" type="number" min="1" max="60" class="inp" /></div>
+                <div class="form-group"><label>Intentos por reto</label><input v-model.number="store.configFlat['general.security.mfa.max_challenge_attempts']" type="number" min="1" max="20" class="inp" /></div>
+                <div class="form-group"><label>Códigos de recuperación</label><input v-model.number="store.configFlat['general.security.mfa.recovery_codes_count']" type="number" min="1" max="50" class="inp" /></div>
+                <div class="form-group"><label>Recordatorio de activación (días)</label><input v-model.number="store.configFlat['general.security.mfa.notice_interval_days']" type="number" min="1" max="365" class="inp" /><span class="field-hint">Cada cuánto se le recuerda a quien no lo tiene activado</span></div>
               </div>
             </div>
           </section>
@@ -374,6 +397,16 @@
                   <div v-if="metric.sustained" class="form-group"><label>{{ metric.label }} — latidos sostenidos</label><input v-model.number="store.configFlat[`features.hygeia.thresholds.${metric.key}.sustainedHeartbeats`]" type="number" min="1" max="60" class="inp" /></div>
                 </template>
               </div>
+              <h3 class="subsection-title">Colores del informe</h3>
+              <p class="field-hint">La paleta con la que se genera el PDF de Hygeia, igual que la de cada escáner de Themis.</p>
+              <div class="color-grid">
+                <div v-for="color in reportColors" :key="color.key" class="color-pick">
+                  <input v-model="store.configFlat[`features.hygeia.colorPalette.${color.key}`]" type="color" class="color-input" />
+                  <span class="color-label">{{ color.label }}</span>
+                  <span class="color-hex">{{ store.configFlat[`features.hygeia.colorPalette.${color.key}`] }}</span>
+                </div>
+              </div>
+
               <h3 class="subsection-title">Límites</h3>
               <p class="field-hint">Topes de lo que el agente puede enviar y de lo que la API acepta. Recortarlos protege a la API de un agente comprometido o mal configurado.</p>
               <div class="cfg-grid">
@@ -441,6 +474,9 @@ const navGroups = [
 const navSections = navGroups.flatMap((g) => g.items)
 
 const isolationLevels = ['READ UNCOMMITTED', 'READ COMMITTED', 'REPEATABLE READ', 'SERIALIZABLE']
+// Solo la familia HS*: la firma usa un secreto simétrico, y el backend
+// rechaza cualquier otra cosa (S8).
+const jwtAlgorithms = ['HS256', 'HS384', 'HS512']
 // `envVar` es la variable que se usa cuando el campo de modelo queda vacío, y
 // se enseña como pista dentro del propio control: sin ella, un campo vacío se
 // lee como «sin modelo» en vez de como «el que diga el entorno».
@@ -509,6 +545,18 @@ const hygeiaMetrics = [
   { key: 'diskPct', label: 'Disco (%)',  sustained: false },
   { key: 'swapPct', label: 'Swap (%)',   sustained: false },
 ]
+// Las seis tintas de una paleta de informe. Mismo juego que usa ScannerCard
+// para los escáneres de Themis; aquí se repite la lista porque Hygeia no pasa
+// por ese componente (no es un escáner, no tiene prompts ni tarjeta propia).
+const reportColors = [
+  { key: 'black',     label: 'Negro' },
+  { key: 'dark',      label: 'Oscuro' },
+  { key: 'main',      label: 'Principal' },
+  { key: 'secondary', label: 'Secundario' },
+  { key: 'light',     label: 'Claro' },
+  { key: 'white',     label: 'Blanco' },
+]
+
 const hygeiaLimits = [
   { key: 'maxBodyBytes',         label: 'Tamaño máx. del cuerpo (bytes)', hint: '1048576 = 1 MiB' },
   { key: 'maxDecompressedBytes', label: 'Tamaño máx. descomprimido (bytes)', hint: '4194304 = 4 MiB' },
@@ -517,7 +565,8 @@ const hygeiaLimits = [
   { key: 'maxNetInterfaces',     label: 'Interfaces de red' },
   { key: 'maxSeriesPoints',      label: 'Puntos por serie temporal' },
   { key: 'minIntervalSec',       label: 'Intervalo mínimo entre latidos (s)' },
-  { key: 'clockSkewSec',         label: 'Desfase de reloj tolerado (s)' },
+  { key: 'clockSkewSec',         label: 'Desfase de reloj tolerado (s)', hint: 'Cuánto se acepta que el reloj del agente vaya adelantado' },
+  { key: 'maxBackfillSec',       label: 'Antigüedad máx. de un latido (s)', hint: '86400 = un día; más viejo que eso se rechaza' },
   { key: 'maxAssetsPerUser',     label: 'Activos por usuario' },
   { key: 'maxInventoryItems',    label: 'Elementos de inventario' },
 ]
@@ -593,6 +642,11 @@ function handleSave() { store.saveConfig() }
 .cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.85rem; }
 .cfg-grid--tight { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.5rem; }
 .cfg-row { display: flex; align-items: center; }
+.color-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 0.35rem; max-width: 560px; }
+.color-pick { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; padding: 0.4rem 0.2rem; background: var(--bg); border-radius: 5px; border: 1px solid var(--border); }
+.color-input { width: 30px; height: 22px; border: none; border-radius: 3px; cursor: pointer; background: transparent; padding: 0; }
+.color-label { font-size: var(--fs-body); font-weight: 600; color: var(--text-dim); }
+.color-hex { font-size: var(--fs-body); color: var(--text-muted); font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); }
 .chip-row { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .chip { display: flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.5rem; background: var(--bg); border: 1px solid var(--border-solid); border-radius: 999px; font-size: var(--fs-md); color: var(--text-dim); cursor: pointer; }
 .chip input { accent-color: var(--accent); cursor: pointer; }
