@@ -25,7 +25,7 @@ verlo.
 la familia entera de cabeceras —la que declare el feed en cada momento, no una
 lista fija: se quedó en tres cuando el feed pasó a seis y dejó de ser un control
 negativo (#455)— y no debe producir ni un hallazgo de esa familia;
-``nginx-decoys`` sirve un 200 en las seis rutas que los checks de ``exposed_path``
+``nginx-senuelos`` sirve un 200 en las rutas que los checks de ``exposed_path``
 piden, pero con un cuerpo que no es lo que el check busca — un ``.git/config``
 que no es un config de Git, un ``backup.sql`` que no es un volcado. Un check que
 mirase solo el código de estado sacaría aquí seis falsos positivos de golpe.
