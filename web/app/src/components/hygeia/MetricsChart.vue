@@ -1,5 +1,11 @@
 <template>
-  <article v-if="metric" class="metric-card" :class="`metric--${metric.key}`"
+  <!-- `hasPlottableData` y no `metric`: `metric` es el DESCRIPTOR de la serie
+       (nombre, color, unidad), que existe siempre que la clave sea válida, o
+       sea, siempre. Con esa condición la tarjeta se pintaba también sin un
+       solo dato, y `Math.max(...[])` acababa escribiendo «-Infinity%» en el
+       pie. Exigiendo puntos, los infinitos no pueden llegar al DOM por
+       construcción, y el estado vacío de abajo deja de ser código muerto. -->
+  <article v-if="hasPlottableData" class="metric-card" :class="`metric--${metric.key}`"
            :style="{ '--metric-color': metric.color }">
     <header class="metric-head">
       <h5 class="metric-name">{{ metric.name }}</h5>
@@ -145,15 +151,22 @@
   </article>
 
   <div v-else class="metric-empty" role="status">
+    <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="1.5" aria-hidden="true">
+      <path d="M3 15l4-5 3 3 4-6 3 4" stroke-dasharray="3 3" />
+      <path d="M3 20h18" />
+    </svg>
     <p class="empty-title">{{ emptyTitle }}</p>
     <p class="empty-sub">{{ emptySub }}</p>
+    <p v-if="lastSeenNote" class="empty-hint">{{ lastSeenNote }}</p>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { timeAgo } from './format'
 import {
-  DEFAULT_WINDOW_MS, SERIES, detectGaps, fmtDuration, formatTimeTick, formatValue,
+  DEFAULT_WINDOW_MS, detectGaps, fmtDuration, formatTimeTick, formatValue,
   gapThresholdMs, medianDeltaMs, plotWidthForAxis, seriesOf, splitAtRanges, timeTicks,
   yRange, yTicks,
 } from './chartMath'
@@ -170,6 +183,10 @@ const props = defineProps({
   // Anomalías del activo (ya filtradas por asset en la vista): host_down se
   // pinta como banda de incidente; el resto, como marca de apertura.
   anomalies: { type: Array, default: () => [] },
+  // Instante del último heartbeat recibido, mire donde mire la ventana. Solo
+  // lo usa el estado vacío: saber que la última señal fue hace tres días es
+  // justo lo que distingue "no hay datos aquí" de "el panel está roto".
+  lastSeenAt: { type: String, default: null },
 })
 
 const PLOT_H = 190
@@ -346,15 +363,33 @@ const srText = computed(() => {
 
 /* ── Estados vacíos ── */
 
+/**
+ * Si hay algo que trazar. Es la condición de render de la tarjeta, y por
+ * tanto la que impide que las agregadas del pie se calculen sobre un array
+ * vacío: `Math.max(...[])` es `-Infinity`, y `fmtPct` lo imprimía tal cual.
+ */
+const hasPlottableData = computed(() => !!metric.value && points.value.length > 0)
+
 const emptyTitle = computed(() =>
-  props.snapshots.length ? `Sin datos de ${metric.value?.name ?? 'esta métrica'}` : 'Sin señal en este tramo'
+  props.snapshots.length ? `Sin datos de ${metric.value?.name ?? 'esta métrica'}` : 'Sin actividad en este tramo'
 )
 
 const emptySub = computed(() => {
   if (!props.snapshots.length) {
-    return 'El agente no ha reportado ningún heartbeat en esta ventana.'
+    const span = fmtDuration(props.windowMs || DEFAULT_WINDOW_MS)
+    return `El agente no ha reportado ningún heartbeat en las últimas ${span}. No es un fallo del panel: en esta ventana no hay nada que medir.`
   }
   return `La métrica «${metric.value?.name ?? ''}» no aparece aquí — algunos agentes no la reportan (p. ej. la carga en Windows).`
+})
+
+/**
+ * Pista de salida. Con una última señal conocida, dice cuándo fue; sin ella,
+ * el activo nunca ha latido y ampliar la ventana no serviría de nada.
+ */
+const lastSeenNote = computed(() => {
+  if (props.snapshots.length) return ''
+  if (!props.lastSeenAt) return 'Este activo todavía no ha enviado ningún heartbeat.'
+  return `Última señal ${timeAgo(props.lastSeenAt)}. Prueba con una ventana más amplia.`
 })
 
 /* ── Crosshair ── */
@@ -557,12 +592,22 @@ function formatTooltipTime(ts) {
 .metric-window-note { margin: 0.3rem 0 0; text-align: right; font-size: var(--fs-sm); color: var(--text-muted); }
 
 /* ── Estados vacíos ── */
+/* El borde discontinuo y el gráfico "roto" del icono son la señal: dicen a
+   simple vista que el hueco es la ausencia de datos y no un panel colgado. */
 .metric-empty {
-  padding: 2rem 1rem; text-align: center;
+  padding: 2.25rem 1rem 2rem; text-align: center;
   border: 1px dashed var(--border-med); border-radius: 8px;
+}
+.empty-icon {
+  width: 34px; height: 34px; margin-bottom: 0.6rem;
+  color: var(--text-muted); opacity: 0.55;
 }
 .empty-title { margin: 0 0 0.25rem; font-size: var(--fs-lg); color: var(--text-dim); }
 .empty-sub { margin: 0 auto; max-width: 44ch; font-size: var(--fs-sm); color: var(--text-muted); }
+.empty-hint {
+  margin: 0.55rem auto 0; max-width: 44ch;
+  font-size: var(--fs-sm); color: var(--text-dim);
+}
 
 .sr-only {
   position: absolute; width: 1px; height: 1px;
