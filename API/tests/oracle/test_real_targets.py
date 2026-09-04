@@ -68,7 +68,7 @@ def test_a_target_that_does_not_resolve_does_not_sink_the_rest(monkeypatch):
 # Son puras (no lanzan Nmap ni Docker), así que corren en CI como el resto de
 # este fichero, sin marcador ``oracle``.
 
-from ._nmap_oracle import _target_from_container
+from ._nmap_oracle import _docker_args, _target_from_container, assert_target_was_scanned
 
 
 def test_loopback_is_reached_through_the_docker_host():
@@ -85,6 +85,151 @@ def test_an_external_target_is_scanned_directly():
     loopback se pasa tal cual."""
     assert _target_from_container("emesa.com") == "emesa.com"
     assert _target_from_container("203.0.113.9") == "203.0.113.9"
+
+
+def test_the_oracle_container_is_told_how_to_reach_the_host():
+    """Traducir el objetivo a ``host.docker.internal`` no sirve de nada si el
+    contenedor no sabe resolver ese nombre, que es lo que pasa en Docker sobre
+    Linux — y por tanto en el runner del banco nocturno (#455). La bandera que
+    lo mapea contra la puerta de enlace del host tiene que ir en el ``docker
+    run``, y antes de la imagen: lo que va después son argumentos de Nmap."""
+    arguments = _docker_args("/usr/bin/docker")
+
+    assert "--add-host" in arguments
+    assert arguments[arguments.index("--add-host") + 1] == "host.docker.internal:host-gateway"
+    assert arguments.index("--add-host") < arguments.index("instrumentisto/nmap")
+    assert arguments[-1] == "instrumentisto/nmap"
+
+
+_XML_WITH_A_CLOSED_PORT = """<?xml version="1.0"?>
+<nmaprun><host><address addr="192.168.65.2" addrtype="ipv4"/>
+<ports><port protocol="tcp" portid="12121"><state state="closed"/></port></ports>
+</host></nmaprun>"""
+
+_XML_WITHOUT_A_HOST = """<?xml version="1.0"?>
+<nmaprun><runstats><hosts up="0" down="0" total="0"/></runstats></nmaprun>"""
+
+
+def test_a_closed_port_is_a_measurement_and_not_an_error():
+    """Nmap habló con el objetivo y no encontró nada escuchando. Es un
+    resultado legítimo del banco y no debe interrumpir nada."""
+    assert_target_was_scanned(_XML_WITH_A_CLOSED_PORT, "", "host.docker.internal")
+
+
+def test_an_unreachable_target_stops_the_bench_instead_of_scoring_zero():
+    """El fallo que estuvo tres noches disfrazado de desacuerdo de fingerprint.
+
+    Cuando el nombre no resuelve, Nmap emite este XML —válido, sin ni un
+    ``<host>`` dentro— y sale con código 0. Antes eso se colaba como «Nmap no
+    identificó el servicio» y restaba en la cifra de concordancia; ahora lanza,
+    y el mensaje lleva la salida de error de Nmap para que el log de CI diga
+    por sí solo qué pasó."""
+    with pytest.raises(RuntimeError) as failure:
+        assert_target_was_scanned(
+            _XML_WITHOUT_A_HOST,
+            'Failed to resolve "host.docker.internal".',
+            "host.docker.internal",
+        )
+
+    assert "no escaneó ningún host" in str(failure.value)
+    assert "Failed to resolve" in str(failure.value)
+
+
+# --------------------------------------------------------------------------
+# Un contenedor caído no puede leerse como un fallo del motor (#455)
+# --------------------------------------------------------------------------
+#
+# Puras también: sólo comprueban qué hace el registro cuando no sabe nada del
+# puerto, que es la mitad de la que depende que este cambio no rompa nada.
+
+from ._docker_helpers import container_died, diagnose_port, remember_container
+
+
+def test_an_unknown_port_is_never_declared_dead():
+    """El comportamiento por defecto tiene que seguir siendo «sigue esperando».
+
+    Los esperadores del banco preguntan por todos los puertos, también por los
+    que nadie registró. Si un puerto desconocido se diera por muerto, el
+    diagnóstico nuevo convertiría cualquier arranque lento en un fallo
+    inmediato — justo la carrera que estos plazos largos existen para evitar."""
+    assert container_died("/usr/bin/docker", 65_432) is False
+    assert diagnose_port("/usr/bin/docker", 65_432) == ""
+
+
+def test_without_a_docker_client_nothing_is_diagnosed():
+    """En una máquina sin Docker los bancos se saltan enteros, pero los
+    esperadores siguen siendo importables y no deben intentar inspeccionar
+    nada con un cliente que no existe."""
+    remember_container(65_433, "lybra-inexistente")
+    try:
+        assert container_died(None, 65_433) is False
+        assert diagnose_port(None, 65_433) == ""
+    finally:
+        _forget_container(65_433)
+
+
+def _forget_container(port: int) -> None:
+    """Sacar un puerto del registro para no filtrarlo a otros tests."""
+    from ._docker_helpers import _CONTAINERS_BY_PORT
+    _CONTAINERS_BY_PORT.pop(port, None)
+
+
+# --------------------------------------------------------------------------
+# La familia de cabeceras del banco no puede quedarse atrás del feed (#455)
+# --------------------------------------------------------------------------
+#
+# Éste es el test que faltaba. Los bancos que miden la familia necesitan Docker
+# y corren de noche, así que un feed que crece y un catálogo que no se entera
+# tardaban semanas en encontrarse — y se encontraron en forma de precisión 0,557
+# a las tres de la mañana. Esta comprobación es pura, corre en el CI por defecto,
+# y falla en el mismo PR que añade el check.
+
+from ._security_headers import (CONDITIONAL_HEADER_CHECKS, always_missing_header_checks,
+                                header_family_from_feed)
+
+
+def test_every_security_header_check_is_classified():
+    """Cada check de la familia está o entre los que faltan siempre o entre las
+    excepciones declaradas, y nunca en ninguno de los dos sitios a la vez.
+
+    Es una tautología dada la implementación de hoy —una resta de conjuntos— y
+    ésa es justamente la garantía que se quiere fijar: que la clasificación se
+    derive del feed y no se pueda escribir a mano una lista que se quede corta.
+    """
+    family = header_family_from_feed()
+    always_missing = always_missing_header_checks()
+    conditional = set(CONDITIONAL_HEADER_CHECKS)
+
+    assert always_missing | conditional == family
+    assert not (always_missing & conditional)
+
+
+def test_the_declared_exceptions_still_exist_in_the_feed():
+    """Una excepción que ya no corresponde a ningún check del feed es una
+    excepción caducada: dejaría de excluir nada y nadie se enteraría. Si un
+    check desaparece o se le sube la versión, esto lo dice."""
+    missing = set(CONDITIONAL_HEADER_CHECKS) - header_family_from_feed()
+    assert not missing, f"excepciones que ya no están en el feed: {sorted(missing)}"
+
+
+def test_the_header_family_covers_what_the_bench_measured():
+    """Los seis checks que un servidor sin endurecer debe disparar hoy.
+
+    Enumerarlos aquí puede parecer contradictorio con derivarlos del feed, pero
+    hace un trabajo distinto: el resto del fichero comprueba que la derivación
+    es coherente consigo misma, y esto ata **qué se despliega de verdad**. Sin
+    ello, un feed que perdiera los tres checks nuevos volvería a dejar la
+    familia en tres y todo seguiría en verde — la misma distinción entre
+    comprobar el comportamiento y atar el valor desplegado que documenta
+    `test_the_anti_ssrf_defence_ships_enabled`."""
+    assert always_missing_header_checks() == {
+        "lybra:missing-hsts-header@1",
+        "lybra:missing-x-frame-options-header@1",
+        "lybra:missing-x-content-type-options-header@1",
+        "lybra:missing-csp-header@1",
+        "lybra:missing-referrer-policy-header@1",
+        "lybra:missing-permissions-policy-header@1",
+    }
 
 
 # --------------------------------------------------------------------------

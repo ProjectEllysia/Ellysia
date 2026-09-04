@@ -21,9 +21,11 @@ umbral; el recall se mide y se imprime porque un banco con precisión perfecta y
 recall ruinoso sería trivial de conseguir (no disparar nunca) y hay que poder
 verlo.
 
-**Los señuelos son la mitad del banco a propósito.** ``nginx-hardened`` manda
-las tres cabeceras y no debe producir ni un hallazgo de esa familia;
-``nginx-decoys`` sirve un 200 en las seis rutas que los checks de ``exposed_path``
+**Los señuelos son la mitad del banco a propósito.** ``nginx-endurecido`` manda
+la familia entera de cabeceras —la que declare el feed en cada momento, no una
+lista fija: se quedó en tres cuando el feed pasó a seis y dejó de ser un control
+negativo (#455)— y no debe producir ni un hallazgo de esa familia;
+``nginx-senuelos`` sirve un 200 en las rutas que los checks de ``exposed_path``
 piden, pero con un cuerpo que no es lo que el check busca — un ``.git/config``
 que no es un config de Git, un ``backup.sql`` que no es un volcado. Un check que
 mirase solo el código de estado sacaría aquí seis falsos positivos de golpe.
@@ -47,7 +49,10 @@ import pytest
 
 from src.modules.features.themis.lybra.checks import HttpProbe, negotiates_tls
 
-from ._docker_helpers import resolve_docker, docker_run, docker_rm, wait_for_port, port_is_free
+from ._security_headers import always_missing_header_checks
+from ._docker_helpers import (resolve_docker, docker_run, docker_rm, wait_for_port,
+                              port_is_free, container_died, diagnose_port,
+                              remember_container)
 from .test_lybra_oracle_bench import _run_self_discovery, _tls_container_cmd
 
 pytestmark = [pytest.mark.oracle, pytest.mark.integration]
@@ -68,11 +73,13 @@ _PRECISION_THRESHOLD = 0.9
 _HTTP_PORT = 8080
 _TLS_PORT = 8443
 
-_HEADERS = {
-    "lybra:missing-hsts-header@1",
-    "lybra:missing-x-frame-options-header@1",
-    "lybra:missing-x-content-type-options-header@1",
-}
+# La familia de cabeceras se **deriva del feed**, no se escribe aquí. Estuvo
+# escrita a mano, con tres identificadores, y cuando el feed creció (#296) nadie
+# la actualizó: los tres checks nuevos —CSP, Referrer-Policy y
+# Permissions-Policy— pasaron a contarse como falsos positivos en los diecisiete
+# objetivos HTTP del catálogo y tumbaron la precisión de la Fase R a 0,557
+# (#455). Ver ``_security_headers.py`` para la derivación y su única excepción.
+_HEADERS = always_missing_header_checks()
 
 
 def _serve(files: dict) -> str:
@@ -115,11 +122,25 @@ def _tls_serve(files: dict) -> str:
     return " && ".join(parts)
 
 
+# El control negativo del catálogo: un nginx que no debe producir ni un
+# hallazgo. Manda la familia **entera** de cabeceras, no sólo las tres con
+# las que se escribió: en cuanto el feed creció, un «endurecido» al que le
+# faltaban tres cabeceras dejó de ser un control negativo y pasó a aportar
+# tres falsos positivos él solo (#455).
 _HARDENED_CONF = (
     "printf '%s' 'server { listen 80; "
     'add_header Strict-Transport-Security "max-age=31536000" always; '
     "add_header X-Frame-Options DENY always; "
     "add_header X-Content-Type-Options nosniff always; "
+    # Los valores van sin comilla simple a propósito: toda la configuración
+    # viaja dentro de una cadena de shell entrecomillada con comillas simples,
+    # y una sola dentro la cerraría — el contenedor moriría al arrancar y sus
+    # tres cabeceras que faltan parecerían un fallo del motor. La misma cautela
+    # que ya documenta _redirect_conf(). Qué valor lleve la cabecera da igual:
+    # estos checks juzgan que esté, no lo que dice.
+    'add_header Content-Security-Policy "default-src https:" always; '
+    "add_header Referrer-Policy no-referrer always; "
+    'add_header Permissions-Policy "geolocation=(), camera=()" always; '
     'location / { return 200 "ok"; } }\' > /etc/nginx/conf.d/default.conf '
     "&& nginx -g 'daemon off;'"
 )
@@ -151,15 +172,31 @@ _REAL_EXPOSURES = {
     "server-status": "<h1>Apache Server Status for localhost</h1>",
 }
 
+# Un volcado de base de datos expuesto dispara **dos** checks del feed, no uno.
+# ``sql-backup-exposure`` (CRITICAL) pide /backup.sql con un cuerpo que contenga
+# INSERT INTO o CREATE TABLE; ``sql-dump-exposure`` (HIGH), añadido cuando el
+# feed creció (#296), pide una lista de nombres en la que /backup.sql también
+# está. El mismo fichero satisface a los dos.
+#
+# El catálogo los etiqueta como pareja porque, tal y como está hoy el feed, los
+# dos hallazgos son ciertos: contarlos como uno solo haría del segundo un falso
+# positivo que no lo es. Pero el solapamiento **sí es un defecto del feed**, no
+# del banco —en producción produce dos hallazgos con severidades distintas para
+# el mismo fichero— y se sigue en #456. Cuando ahí se decida deduplicarlos, esta
+# pareja vuelve a ser un solo identificador.
+_SQL_DUMP_CHECKS = {
+    "lybra:sql-backup-exposure@1",
+    "lybra:sql-dump-exposure@1",
+}
+
 _ALL_EXPOSURE_CHECKS = {
     "lybra:git-config-exposure@1",
     "lybra:dotenv-exposure@1",
     "lybra:phpinfo-exposure@1",
     "lybra:wpconfig-source-exposure@1",
     "lybra:ssh-private-key-exposure@1",
-    "lybra:sql-backup-exposure@1",
     "lybra:apache-server-status-exposure@1",
-}
+} | _SQL_DUMP_CHECKS
 
 
 def _catch_all(body: str, status: int = 200) -> str:
@@ -277,7 +314,7 @@ _CATALOGUE = (
             "backup.sql": "-- MySQL dump 10.13\\nCREATE TABLE users (id int);\\n"
                           "INSERT INTO users VALUES (1);\\n",
         }),
-        expected=_HEADERS | {"lybra:sql-backup-exposure@1"},
+        expected=_HEADERS | _SQL_DUMP_CHECKS,
     ),
     # --- señuelos: aquí no debe disparar nada de exposed_path/security_header ---
     Target(
@@ -361,10 +398,10 @@ _CATALOGUE = (
         name="nginx-cabeceras-parciales",
         image="nginx:alpine",
         command=_PARTIAL_HEADERS_CONF,
-        expected={
-            "lybra:missing-hsts-header@1",
-            "lybra:missing-x-content-type-options-header@1",
-        },
+        # Manda X-Frame-Options y nada más, así que espera todo el resto de
+        # la familia. Se calcula restando en vez de enumerarse, para que crezca
+        # sola con el feed.
+        expected=_HEADERS - {"lybra:missing-x-frame-options-header@1"},
     ),
     Target(
         name="nginx-redirige",
@@ -433,8 +470,17 @@ def _wait_until_serving(port: int, tls: bool, label: str = "", timeout: float = 
                 last = "responde algo que no es HTTP"
         except OSError as exc:
             last = str(exc)
+        if container_died(_DOCKER, port):
+            raise TimeoutError(
+                f"[{label}] 127.0.0.1:{port} no sirvió su protocolo: su "
+                f"contenedor no sigue en marcha ({last})."
+                f"{diagnose_port(_DOCKER, port)}"
+            )
         time.sleep(1.0)
-    raise TimeoutError(f"[{label}] 127.0.0.1:{port} aceptó pero no sirvió su protocolo en {timeout}s ({last})")
+    raise TimeoutError(
+        f"[{label}] 127.0.0.1:{port} aceptó pero no sirvió su protocolo en "
+        f"{timeout}s ({last}){diagnose_port(_DOCKER, port)}"
+    )
 
 
 @contextlib.contextmanager
@@ -450,8 +496,13 @@ def _running(target: Target) -> Iterator[int]:
     if target.command:
         args += ["sh", "-c", target.command]
     docker_run(_DOCKER, *args)
+    # Un contenedor que muere al arrancar —una configuración de nginx que no
+    # parsea, sin ir más lejos— produce cero hallazgos, y cero hallazgos es
+    # indistinguible de "el motor no detectó nada" en el agregado. Registrarlo
+    # es lo que hace que el log diga cuál de las dos cosas pasó (#455).
+    remember_container(port, name)
     try:
-        wait_for_port("127.0.0.1", port)
+        wait_for_port("127.0.0.1", port, docker_path=_DOCKER)
         _wait_until_serving(port, tls=target.tls, label=target.name)
         yield port
     finally:

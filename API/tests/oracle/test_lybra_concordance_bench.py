@@ -59,7 +59,8 @@ from src.modules.features.themis.lybra import (
 )
 
 from ._concordance import agrees_with_nmap, concordance_rate
-from ._docker_helpers import resolve_docker, docker_rm, port_is_free, wait_for_port
+from ._docker_helpers import (resolve_docker, docker_rm, port_is_free, wait_for_port,
+                              container_died, diagnose_port, remember_container)
 from ._nmap_oracle import run_nmap_sv
 
 pytestmark = [pytest.mark.oracle, pytest.mark.integration]
@@ -120,8 +121,16 @@ def _wait_for_http(port: int, timeout: float = 240.0) -> None:
             last = "respuesta que no es HTTP"
         except OSError as exc:
             last = str(exc)
+        if container_died(_DOCKER, port):
+            raise TimeoutError(
+                f"{_HOST}:{port} no contestó HTTP: su contenedor no sigue en "
+                f"marcha ({last}).{diagnose_port(_DOCKER, port)}"
+            )
         time.sleep(1.0)
-    raise TimeoutError(f"{_HOST}:{port} no contestó HTTP en {timeout}s ({last})")
+    raise TimeoutError(
+        f"{_HOST}:{port} no contestó HTTP en {timeout}s ({last})"
+        f"{diagnose_port(_DOCKER, port)}"
+    )
 
 
 def _wait_for_greeting(port: int, expect: bytes, timeout: float = 240.0) -> None:
@@ -146,8 +155,16 @@ def _wait_for_greeting(port: int, expect: bytes, timeout: float = 240.0) -> None
             last = f"saludo inesperado: {banner!r}"
         except OSError as exc:
             last = str(exc)
+        if container_died(_DOCKER, port):
+            raise TimeoutError(
+                f"{_HOST}:{port} no emitió {expect!r}: su contenedor no sigue "
+                f"en marcha ({last}).{diagnose_port(_DOCKER, port)}"
+            )
         time.sleep(1.0)
-    raise TimeoutError(f"{_HOST}:{port} no emitió {expect!r} en {timeout}s ({last})")
+    raise TimeoutError(
+        f"{_HOST}:{port} no emitió {expect!r} en {timeout}s ({last})"
+        f"{diagnose_port(_DOCKER, port)}"
+    )
 
 
 def _start(name: str, port: int, inner: int, image: str, *command: str,
@@ -165,6 +182,9 @@ def _start(name: str, port: int, inner: int, image: str, *command: str,
     for variable in env:
         arguments += ["-e", variable]
     _docker(*arguments, image, *command)
+    # A partir de aquí, cualquier espera contra este puerto puede mirar el
+    # contenedor en vez de limitarse a informar de que nadie contestó.
+    remember_container(port, name)
 
 
 # ================================================================== catálogo
@@ -174,7 +194,7 @@ def ftp_target():
     """vsftpd, que anuncia producto y versión en su saludo — el caso fácil."""
     port, name = _PORTS["ftp"], "lybra-concordance-ftp"
     _start(name, port, 21, "alpine:latest", "sh", "-c",
-           "apk add --no-cache vsftpd >/dev/null 2>&1 && "
+           "apk add --no-cache vsftpd && "
            "mkdir -p /var/lib/ftp && chmod 555 /var/lib/ftp && "
            "printf '%s\\n' 'listen=YES' 'listen_ipv6=NO' 'anonymous_enable=YES' "
            "'local_enable=NO' 'no_anon_password=NO' 'seccomp_sandbox=NO' "
@@ -203,8 +223,23 @@ def proftpd_target():
     en el catálogo, la familia deja de medirse contra sí misma.
     """
     port, name = _PORTS["proftpd"], "lybra-concordance-proftpd"
+    # La cuenta de servicio se crea aquí y no se da por hecha. La receta
+    # original venía de Debian, cuyo paquete la crea en su postinstalación, y
+    # se ejecutaba sobre Alpine, donde no tiene por qué existir: ProFTPD aborta
+    # con un fatal si el usuario que nombra su configuración no está, y el
+    # contenedor moría en el segundo uno (#455). Los dos ``||`` la hacen
+    # idempotente, para que la receta siga valiendo el día que el paquete sí
+    # traiga la cuenta.
+    #
+    # La salida de ``apk add`` **no** se tira a /dev/null. Tirarla es lo que
+    # hizo que tres noches de CI no dijeran ni una palabra sobre la causa: lo
+    # único que llegaba al log era un timeout de cuatro minutos contra un
+    # puerto en el que nunca hubo nadie.
     _start(name, port, 21, "alpine:latest", "sh", "-c",
-           "apk add --no-cache proftpd >/dev/null 2>&1 && "
+           "apk add --no-cache proftpd && "
+           "(getent group proftpd || addgroup -S proftpd) && "
+           "(id -u proftpd >/dev/null 2>&1 || adduser -S -D -H -G proftpd proftpd) && "
+           "mkdir -p /var/run/proftpd && "
            "printf '%s\\n' 'ServerName \"lybra\"' 'ServerType standalone' "
            "'Port 21' 'User proftpd' 'Group proftpd' "
            "> /etc/proftpd/proftpd.conf && "
@@ -235,7 +270,7 @@ def reverse_proxy_target():
     """
     port, name = _PORTS["reverse-proxy"], "lybra-concordance-reverse-proxy"
     _start(name, port, 80, "alpine:latest", "sh", "-c",
-           "apk add --no-cache apache2 nginx >/dev/null 2>&1 && "
+           "apk add --no-cache apache2 nginx && "
            "sed -i 's/^Listen 80$/Listen 8081/' /etc/apache2/httpd.conf && "
            "httpd && "
            "printf '%s\\n' 'events {}' 'http { server { listen 80; "
@@ -255,7 +290,7 @@ def smtp_target():
     llama "no inventar CPE". Nmap sí extrae el producto de ese mismo saludo."""
     port, name = _PORTS["smtp"], "lybra-concordance-smtp"
     _start(name, port, 25, "alpine:latest", "sh", "-c",
-           "apk add --no-cache postfix >/dev/null 2>&1 && "
+           "apk add --no-cache postfix && "
            "postconf -e 'inet_interfaces=all' 'mynetworks=0.0.0.0/0' "
            "'smtpd_client_restrictions=' && newaliases; postfix start-fg")
     try:
@@ -272,7 +307,7 @@ def mysql_target():
     port, name = _PORTS["mysql"], "lybra-concordance-mysql"
     _start(name, port, 3306, "mariadb:11", env=("MARIADB_ROOT_PASSWORD=bench",))
     try:
-        wait_for_port(_HOST, port, 240)
+        wait_for_port(_HOST, port, 240, docker_path=_DOCKER)
         # MariaDB no saluda hasta que ha terminado de inicializar el datadir, y
         # su saludo es binario: no hay prefijo estable que esperar, así que aquí
         # sí toca dar tiempo en vez de esperar una cadena.
@@ -291,7 +326,7 @@ def smb_target():
     port, name = _PORTS["smb"], "lybra-concordance-smb"
     _start(name, port, 445, "dperson/samba", "-p", "-s", "public;/tmp;yes;no;yes")
     try:
-        wait_for_port(_HOST, port, 240)
+        wait_for_port(_HOST, port, 240, docker_path=_DOCKER)
         time.sleep(10)
         yield Target("smb", port, "microsoft-ds")
     finally:
@@ -319,7 +354,7 @@ def smb1_target():
            "-g", "client min protocol = NT1",
            "-s", "public;/tmp;yes;no;yes")
     try:
-        wait_for_port(_HOST, port, 240)
+        wait_for_port(_HOST, port, 240, docker_path=_DOCKER)
         time.sleep(10)
         yield Target("smb1", port, "microsoft-ds")
     finally:
@@ -331,7 +366,7 @@ def redis_target():
     port, name = _PORTS["redis"], "lybra-concordance-redis"
     _start(name, port, 6379, "redis:7")
     try:
-        wait_for_port(_HOST, port, 240)
+        wait_for_port(_HOST, port, 240, docker_path=_DOCKER)
         time.sleep(3)
         yield Target("redis", port, "redis")
     finally:
@@ -345,7 +380,7 @@ def vnc_target():
     antes de que exista el display."""
     port, name = _PORTS["vnc"], "lybra-concordance-vnc"
     _start(name, port, 5900, "alpine:latest", "sh", "-c",
-           "apk add --no-cache x11vnc xvfb >/dev/null 2>&1 && "
+           "apk add --no-cache x11vnc xvfb && "
            "(Xvfb :1 -screen 0 800x600x16 &) && sleep 3 && "
            "x11vnc -display :1 -nopw -forever -rfbport 5900")
     try:
