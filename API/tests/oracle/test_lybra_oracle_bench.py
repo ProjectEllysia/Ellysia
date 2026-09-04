@@ -36,6 +36,7 @@ from src.modules.features.themis.managers import LybraEngineManager, AuthorizedT
 from src.modules.features.themis.repositories import ScanRepository, KbRepository
 
 from ._concordance import port_concordance
+from ._security_headers import always_missing_header_checks
 from ._docker_helpers import (resolve_docker, docker_run, docker_rm, wait_for_port,
                               port_is_free, container_died, diagnose_port,
                               remember_container)
@@ -423,11 +424,10 @@ def test_missing_security_headers_detected_against_real_container(app, admin_use
     findings = _run_self_discovery(app, admin_user, "127.0.0.1", git_exposed_port, monkeypatch)
 
     headers = {f.check_id for f in findings if f.category == "security_header"}
-    assert headers == {
-        "lybra:missing-hsts-header@1",
-        "lybra:missing-x-frame-options-header@1",
-        "lybra:missing-x-content-type-options-header@1",
-    }
+    # La familia esperada sale del feed, no de una lista escrita aquí. La lista
+    # estuvo escrita, con tres identificadores, y se quedó atrás en cuanto el
+    # feed creció (#455).
+    assert headers == always_missing_header_checks()
     assert all(f.confirmed and f.qod == 99 for f in findings if f.category == "security_header")
 
 

@@ -175,6 +175,64 @@ def _forget_container(port: int) -> None:
 
 
 # --------------------------------------------------------------------------
+# La familia de cabeceras del banco no puede quedarse atrás del feed (#455)
+# --------------------------------------------------------------------------
+#
+# Éste es el test que faltaba. Los bancos que miden la familia necesitan Docker
+# y corren de noche, así que un feed que crece y un catálogo que no se entera
+# tardaban semanas en encontrarse — y se encontraron en forma de precisión 0,557
+# a las tres de la mañana. Esta comprobación es pura, corre en el CI por defecto,
+# y falla en el mismo PR que añade el check.
+
+from ._security_headers import (CONDITIONAL_HEADER_CHECKS, always_missing_header_checks,
+                                header_family_from_feed)
+
+
+def test_every_security_header_check_is_classified():
+    """Cada check de la familia está o entre los que faltan siempre o entre las
+    excepciones declaradas, y nunca en ninguno de los dos sitios a la vez.
+
+    Es una tautología dada la implementación de hoy —una resta de conjuntos— y
+    ésa es justamente la garantía que se quiere fijar: que la clasificación se
+    derive del feed y no se pueda escribir a mano una lista que se quede corta.
+    """
+    family = header_family_from_feed()
+    always_missing = always_missing_header_checks()
+    conditional = set(CONDITIONAL_HEADER_CHECKS)
+
+    assert always_missing | conditional == family
+    assert not (always_missing & conditional)
+
+
+def test_the_declared_exceptions_still_exist_in_the_feed():
+    """Una excepción que ya no corresponde a ningún check del feed es una
+    excepción caducada: dejaría de excluir nada y nadie se enteraría. Si un
+    check desaparece o se le sube la versión, esto lo dice."""
+    missing = set(CONDITIONAL_HEADER_CHECKS) - header_family_from_feed()
+    assert not missing, f"excepciones que ya no están en el feed: {sorted(missing)}"
+
+
+def test_the_header_family_covers_what_the_bench_measured():
+    """Los seis checks que un servidor sin endurecer debe disparar hoy.
+
+    Enumerarlos aquí puede parecer contradictorio con derivarlos del feed, pero
+    hace un trabajo distinto: el resto del fichero comprueba que la derivación
+    es coherente consigo misma, y esto ata **qué se despliega de verdad**. Sin
+    ello, un feed que perdiera los tres checks nuevos volvería a dejar la
+    familia en tres y todo seguiría en verde — la misma distinción entre
+    comprobar el comportamiento y atar el valor desplegado que documenta
+    `test_the_anti_ssrf_defence_ships_enabled`."""
+    assert always_missing_header_checks() == {
+        "lybra:missing-hsts-header@1",
+        "lybra:missing-x-frame-options-header@1",
+        "lybra:missing-x-content-type-options-header@1",
+        "lybra:missing-csp-header@1",
+        "lybra:missing-referrer-policy-header@1",
+        "lybra:missing-permissions-policy-header@1",
+    }
+
+
+# --------------------------------------------------------------------------
 # Un Docker colgado no puede tumbar la suite
 # --------------------------------------------------------------------------
 
