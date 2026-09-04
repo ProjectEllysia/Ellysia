@@ -95,7 +95,11 @@ class OllamaStrategy(ModelStrategy):
     def from_config(cls, overrides: dict) -> "OllamaStrategy":
         import src.modules.system.config_reading as CR
         host, model = CR.get_ollama_environment()
-        return cls(host=host, model=overrides.get("model") or model)
+        return cls(
+            host=host,
+            model=overrides.get("model") or model,
+            timeout=CR.scribe_config().timeout_for("ollama", 300),
+        )
 
     def __init__(self, host: str, model: str, timeout: int = 300) -> None:
         import ollama
@@ -168,6 +172,7 @@ class OpenAIStrategy(ModelStrategy):
             api_key=env["api_key"],
             model=overrides.get("model") or env["model"],
             base_url=env.get("base_url"),
+            timeout=CR.scribe_config().timeout_for("openai", 120),
         )
 
     def __init__(
@@ -257,6 +262,7 @@ class GoogleStrategy(ModelStrategy):
         return cls(
             api_key=env["api_key"],
             model=overrides.get("model") or env["model"],
+            timeout=CR.scribe_config().timeout_for("google", 120),
         )
 
     def __init__(self, api_key: str, model: str, timeout: int = 120) -> None:
@@ -266,6 +272,10 @@ class GoogleStrategy(ModelStrategy):
         logger.info("[scribe/google] cliente model=%s", model)
         genai.configure(api_key=api_key)
         self._genai = genai
+        # Gemini no ata el timeout al cliente como Ollama y OpenAI: va por
+        # llamada, en ``request_options``. De ahí que se guarde en vez de
+        # consumirse en el constructor.
+        self._request_options = {"timeout": timeout}
 
     @staticmethod
     def _build_tool_declarations(tools: list[dict]) -> list[dict]:
@@ -355,6 +365,7 @@ class GoogleStrategy(ModelStrategy):
                 contents=contents,
                 generation_config=generation_config,
                 tools=tools,
+                request_options=self._request_options,
             )
 
             if tool_executor and tools:
@@ -380,6 +391,7 @@ class GoogleStrategy(ModelStrategy):
                         contents=contents,
                         generation_config=generation_config,
                         tools=tools,
+                        request_options=self._request_options,
                     )
 
             try:
