@@ -252,6 +252,24 @@ export function detectGaps(timesMs, thresholdMs, t0Ms, t1Ms, coveredMs = 0) {
 }
 
 /**
+ * Tiempo total sin señal dentro de la ventana.
+ *
+ * `detectGaps` ya dice DÓNDE están los huecos; esto dice CUÁNTO suman, que es
+ * lo que permite escribir "sin señal 23 h 40 min de 24 h" en el pie. Sin esa
+ * cifra, una ventana con un único pico y el resto vacío se lee como un
+ * gráfico roto en lugar de como un equipo que estuvo apagado.
+ *
+ * Los huecos vienen de `detectGaps`, que los emite ordenados y disjuntos, así
+ * que basta con sumarlos: no hay solapes que descontar.
+ *
+ * @param {Array<{start: number, end: number}>} gaps - Huecos de `detectGaps`.
+ * @returns {number} Milisegundos sin señal (0 si no hay huecos).
+ */
+export function totalGapMs(gaps) {
+  return gaps.reduce((total, gap) => total + Math.max(0, gap.end - gap.start), 0)
+}
+
+/**
  * Divide los puntos en tramos cuando el segmento entre dos de ellos cruza
  * una franja que no debe llevar trazado.
  *
