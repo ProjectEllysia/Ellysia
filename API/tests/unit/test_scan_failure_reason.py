@@ -120,6 +120,28 @@ def test_an_unreachable_host_is_told_apart_from_a_broken_sweep(monkeypatch):
 # El catálogo entero llega hasta la interfaz
 # =============================================================================
 
+def test_every_reason_has_its_prose_in_the_spa():
+    """El SPA traduce cada código a una frase y un consejo, y esa redacción es
+    lo único que el usuario llega a leer.
+
+    Añadir un motivo en Python sin añadirlo allí no rompe nada visible: la
+    tarjeta cae en el texto de reserva —«no se registró el motivo»— que existe
+    para los escaneos anteriores a la columna, y el usuario recibe una
+    explicación falsa en lugar de la suya. El fallo es silencioso por diseño,
+    así que hace falta atarlo aquí.
+    """
+    from pathlib import Path
+    import re
+
+    repo_root = Path(__file__).resolve().parents[3]
+    source = (repo_root / "web" / "app" / "src" / "components" / "themis" / "lybra"
+              / "LybraResults.vue").read_text(encoding="utf-8")
+    catalogue = source[source.index("const FAILURE = {"):source.index("const FAILURE_UNKNOWN")]
+    documented = set(re.findall(r"^  ([a-z_]+): \{", catalogue, re.MULTILINE))
+
+    assert {reason.value for reason in ScanFailureReason} == documented
+
+
 def test_every_reason_is_a_plain_string_code():
     """El SPA traduce estos códigos a prosa: si alguno dejara de ser una cadena
     estable, la tarjeta del escaneo se quedaría sin texto que enseñar."""

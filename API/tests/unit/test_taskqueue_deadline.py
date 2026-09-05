@@ -23,7 +23,7 @@ import time
 import pytest
 from rq.timeouts import JobTimeoutException
 
-from src.modules.system.taskqueue.worker import (
+from src.modules.system.taskqueue.deadline import (
     JobDeadlineExceeded,
     _UnswallowableTimerDeathPenalty,
 )
@@ -45,7 +45,25 @@ def test_the_penalty_substitutes_rqs_own_exception():
     """RQ codifica ``JobTimeoutException`` en la llamada que construye la
     penalización, así que la sustitución tiene que ignorar lo que nos pasan."""
     penalty = _UnswallowableTimerDeathPenalty(30, JobTimeoutException, job_id="x")
-    assert penalty._exception is JobDeadlineExceeded  # pylint: disable=protected-access
+    assert issubclass(penalty._exception, JobDeadlineExceeded)  # pylint: disable=protected-access
+
+
+def test_each_deadline_reports_its_own_timeout():
+    """Dos plazos vivos a la vez, dos mensajes distintos.
+
+    ``TimerDeathPenalty`` no puede pasarle un mensaje a la excepción que
+    inyecta —``PyThreadState_SetAsyncExc`` sólo admite una clase—, así que
+    parchea el ``__init__`` de esa clase con el texto ya formateado. Con una
+    sola clase compartida por todo el proceso, el último job en construir su
+    penalización le pisaba el mensaje a los demás: el 2026-09-05 tres escaneos
+    con plazo de 10 030 s murieron diciendo «(60 seconds)», un número de otro
+    job, y el diagnóstico se fue detrás de él.
+    """
+    short = _UnswallowableTimerDeathPenalty(60, JobTimeoutException, job_id="short")
+    long_running = _UnswallowableTimerDeathPenalty(10030, JobTimeoutException, job_id="long")
+
+    assert "60 seconds" in str(short._exception())          # pylint: disable=protected-access
+    assert "10030 seconds" in str(long_running._exception())  # pylint: disable=protected-access
 
 
 def test_a_broad_except_does_not_swallow_the_deadline():

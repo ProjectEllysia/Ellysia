@@ -360,6 +360,13 @@ const FAILURE = {
     hint: 'No es un problema del objetivo: el trabajo se perdió a mitad y se cerró al '
         + 'arrancar de nuevo. Lánzalo otra vez.',
   },
+  timeout: {
+    title: 'Se acabó el tiempo antes de terminar.',
+    hint: 'El trabajo pedido no cabía en el plazo pedido. Es lo que pasa al cruzar un '
+        + 'rango de puertos muy ancho con un objetivo que tiene muchos abiertos: cada '
+        + 'servicio encontrado se analiza después, y eso también cuesta tiempo. Acota '
+        + 'los puertos o sube el plazo del panel de lanzamiento.',
+  },
   internal_error: {
     title: 'El motor encontró un error inesperado.',
     hint: 'El fallo es del producto, no de tu red. El detalle queda en el registro del '

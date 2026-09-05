@@ -108,6 +108,13 @@ class ScanFailureReason(str, Enum):
         ORPHANED: El escaneo se quedó sin trabajo en la cola —el proceso murió
             a mitad— y la reconciliación de arranque lo cerró. No es un fallo
             del objetivo ni del escáner.
+        TIMEOUT: El escaneo agotó el plazo que el usuario le dio en el panel y
+            la cola lo mató. A diferencia de ``ORPHANED``, aquí no se murió
+            nada: sencillamente el trabajo pedido no cabía en el tiempo
+            pedido, y el usuario puede arreglarlo por su cuenta (acotar los
+            puertos o subir el plazo). Es la red de seguridad, no el camino
+            normal: un escaneo que se queda sin reloj debería cortarse solo y
+            terminar como parcial antes de llegar aquí.
         INTERNAL_ERROR: Cualquier otra excepción. El usuario no puede hacer
             nada; el detalle está en el log.
     """
@@ -115,6 +122,7 @@ class ScanFailureReason(str, Enum):
     PORT_DISCOVERY_FAILED = "port_discovery_failed"
     NO_RESULTS            = "no_results"
     ORPHANED              = "orphaned"
+    TIMEOUT               = "timeout"
     INTERNAL_ERROR        = "internal_error"
 
 
