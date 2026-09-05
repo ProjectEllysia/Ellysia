@@ -13,8 +13,17 @@
  *
  * Sin este test la separación sería un riesgo neto en lugar de una mejora.
  *
+ * Comprueba además que el esquema local no diverge de `AcheronSchema`, el
+ * repositorio donde vive el catálogo como contrato compartido con la API, la
+ * app Android y AcheronCore. La copia versionada de ese contrato está en
+ * `acheron-schema.json`; su procedencia, en el README de esta carpeta.
+ *
  *   node web/app/test/acheron.schema.test.mjs
  */
+
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 
 import { STORABLE_SCHEMA } from '../src/acheron/storableSchema.js'
 import { STORABLE_LABELS } from '../src/acheron/storableLabels.js'
@@ -115,7 +124,32 @@ for (const type of STORABLE_SCHEMA) {
   }
 }
 
-/* ── 4) La vista compuesta sirve lo que el formulario espera ── */
+/* ── 4) El esquema local no diverge de AcheronSchema ── */
+
+// El catalogo vive tambien en la API (`storable_specs.py`), en la app Android
+// y en AcheronCore. AcheronSchema es la fuente de verdad comun; esta seccion
+// comprueba que la copia de la SPA no se ha ido por su cuenta.
+//
+// Se compara contra una copia versionada, no contra el repositorio remoto: la
+// suite esta sellada contra la red, y una comprobacion que necesite internet
+// no es una comprobacion, es una fuente de fallos intermitentes.
+const schemaPath = resolve(dirname(fileURLToPath(import.meta.url)), 'acheron-schema.json')
+const shared = JSON.parse(readFileSync(schemaPath, 'utf8'))
+
+const simplify = (types) =>
+  types.map((t) => ({
+    kind: t.kind,
+    category: t.category,
+    fields: t.fields.map((f) => (f.secret ? { key: f.key, secret: true } : { key: f.key })),
+  }))
+
+check(
+  'el esquema de la SPA coincide con AcheronSchema',
+  JSON.stringify(simplify(STORABLE_SCHEMA)) === JSON.stringify(simplify(shared.types)),
+  'diverge del contrato compartido; ver web/app/test/README.md',
+)
+
+/* ── 5) La vista compuesta sirve lo que el formulario espera ── */
 
 for (const type of STORABLE_TYPES) {
   const sinLabel = type.fields.filter((f) => !f.label).map((f) => f.key)
