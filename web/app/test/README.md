@@ -31,4 +31,8 @@ código muerto.
 
 El esquema llega del paquete, que a su vez lo copia de
 [`AcheronSchema`](https://github.com/ProjectEllysia/AcheronSchema) y lo verifica en su propia
-suite. Por eso ya no hay copia del contrato en este repositorio: había cuatro y ahora hay una menos.
+suite. Por eso ya no hay copia del contrato en esta carpeta.
+
+La API sí conserva la suya, en `API/tests/unit/acheron-schema.json`: es un consumidor
+independiente que no pasa por el paquete de JavaScript, así que necesita verificar su propio
+registro contra el contrato por su cuenta.

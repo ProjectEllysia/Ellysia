@@ -44,20 +44,22 @@ from src.modules.features.acheron.storable_specs import STORABLE_SPECS
 
 pytestmark = pytest.mark.unit
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-
-# La copia versionada del contrato vive con la suite del SPA, que es su otro
-# consumidor; su procedencia está anotada en web/app/test/README.md. Se lee de
-# ahí en vez de duplicarla: una segunda copia sería un quinto sitio donde el
-# catálogo puede divergir, que es justo lo que este test existe para evitar.
-_SCHEMA = _REPO_ROOT / "web" / "app" / "test" / "acheron-schema.json"
+# Copia versionada del contrato, de AcheronSchema @ v1.1.0. Al actualizarla hay
+# que anotar aquí de qué tag salió: sin esa anotación, una divergencia no se
+# puede atribuir a un cambio concreto del catálogo.
+#
+# Vivió un tiempo en la suite del SPA y se leía de allí, para no duplicarla.
+# Dejó de valer cuando la SPA pasó a consumir el catálogo desde
+# ``@projectellysia/acheron-core-web`` y borró su copia: la API es un consumidor
+# independiente y necesita la suya. Se compara contra un fichero y no contra el
+# repositorio remoto porque la suite está sellada contra la red.
+_SCHEMA = Path(__file__).with_name("acheron-schema.json")
 
 
 def _shared_schema() -> dict:
     assert _SCHEMA.is_file(), (
         f"No está la copia de AcheronSchema en {_SCHEMA}. "
-        "Se copia del repositorio AcheronSchema a un tag concreto; "
-        "ver web/app/test/README.md."
+        "Se copia del repositorio AcheronSchema a un tag concreto."
     )
     return json.loads(_SCHEMA.read_text(encoding="utf-8"))
 
