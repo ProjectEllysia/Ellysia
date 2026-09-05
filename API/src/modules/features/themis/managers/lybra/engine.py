@@ -246,14 +246,17 @@ class LybraEngineManager(ScanManager):
         Hasta ahora sólo alimentaba el plazo de la cola —un plazo que, por cómo
         se inyecta, un hilo bloqueado en una llamada al sistema rebasa sin
         enterarse— y por tanto no limitaba el escaneo de verdad. Ahora abre
-        además un plazo de reloj propio del que come el descubrimiento de
-        puertos.
+        además un plazo de reloj propio, y ese plazo acota **el escaneo
+        entero**: el descubrimiento come de él como presupuesto, y las fases de
+        después lo consultan por ``should_stop`` y se cortan solas.
 
-        ponytail: sólo el descubrimiento TCP consume el presupuesto. Es la fase
-        que puede correr sin cota (barrido ancho contra un objetivo que filtra
-        tráfico) y la que aparecía en el incidente; el fingerprinting y los
-        checks tienen plazo por operación. Si algún día hace falta acotarlos
-        también, el plazo ya está aquí: basta pasarles ``_remaining_budget``.
+        Acotar sólo el descubrimiento no bastaba, aunque lo pareciera. Un
+        «plazo por operación» —2 s por puerto, 8 s por petición HTTP— limita
+        cuánto tarda cada sonda, no cuántas se hacen, y cuántas se hacen no lo
+        decide el motor: lo decide cuántos puertos abiertos tenga el objetivo.
+        Con un rango ancho, el fingerprinting corría horas contra el ritmo
+        deliberadamente lento del ``HostRateLimiter``, y su único límite acababa
+        siendo la sentencia de muerte de la cola.
 
         ``aggressive`` (L40) es la petición explícita del usuario; por sí sola
         no basta. El modo efectivo con el que corren los checks activos y el
@@ -265,6 +268,22 @@ class LybraEngineManager(ScanManager):
         """
         deadline = time.monotonic() + timeout if timeout else None
         is_cancelled = cancel_check or (lambda: False)
+
+        def should_stop() -> bool:
+            """El escaneo tiene que dejar de mirar el objetivo: o se lo han
+            cancelado, o se le acabó el reloj que pidió el usuario.
+
+            Las dos cosas significan lo mismo para todo lo que viene detrás —
+            vio parte del objetivo, no todo— y por eso comparten predicado: cada
+            fase lo consulta y se corta sola, el escaneo se marca ``is_partial``
+            y termina bien. Antes sólo el descubrimiento TCP consumía el plazo y
+            las fases siguientes corrían sin cota ninguna, así que el único
+            límite real del fingerprinting era la sentencia de muerte de la
+            cola: un escaneo con muchos puertos abiertos la alcanzaba siempre,
+            porque cuántos servicios hay que sondear no lo decide el motor sino
+            el objetivo.
+            """
+            return is_cancelled() or (deadline is not None and time.monotonic() >= deadline)
 
         def report(pct: int) -> None:
             if progress is not None:
@@ -288,7 +307,7 @@ class LybraEngineManager(ScanManager):
                 target=target,
                 ports=ports,
                 budget_seconds=self._remaining_budget(deadline),
-                cancel_check=cancel_check
+                cancel_check=should_stop
             ),
             discover_udp_ports=self._discover_udp_ports,
         )
@@ -321,7 +340,7 @@ class LybraEngineManager(ScanManager):
                 # lo mismo que uno truncado por reloj: vio parte del objetivo,
                 # no todo. Comparte la bandera ``is_partial`` para no cerrar por
                 # omisión lo que no llegó a comprobar (el fallo de L48-c).
-                is_partial = resolved.is_partial or is_cancelled()
+                is_partial = resolved.is_partial or should_stop()
                 # Descubrimiento hecho: 40 % del trabajo (pesos honestos del §3
                 # del issue — descubrimiento 40, fingerprint 30, checks 20,
                 # correlación y persistencia 10).
@@ -333,14 +352,14 @@ class LybraEngineManager(ScanManager):
                     and source_target
                     and is_target_authorized
                     and CR.lybra_config().fingerprinting_enabled
-                    and not is_cancelled()
+                    and not should_stop()
                 ):
                     services, fingerprint_findings = self._fingerprint_services(
                         target=source_target,
                         services=services,
-                        cancel_check=cancel_check,
+                        cancel_check=should_stop,
                     )
-                    is_partial = is_partial or is_cancelled()
+                    is_partial = is_partial or should_stop()
                 report(70)
 
                 previous_map = self._previous_findings_map(
@@ -383,20 +402,20 @@ class LybraEngineManager(ScanManager):
                 for cve in (finding.get("cve_ids") or ()))
 
             if (source.probes_target_network and source_target and is_target_authorized
-                    and CR.lybra_config().active_checks and not is_cancelled()):
+                    and CR.lybra_config().active_checks and not should_stop()):
                 findings_data.extend(
                     self._run_active_checks(source_target, services,
-                                            cancel_check=cancel_check,
+                                            cancel_check=should_stop,
                                             proposed_cves=proposed_cves,
                                             mode=mode))
-                is_partial = is_partial or is_cancelled()
+                is_partial = is_partial or should_stop()
 
             # Motor de credenciales por defecto (Fase D, L31) — la única
             # familia que escribe en el objetivo. ``_run_credential_checks``
             # repite por su cuenta la comprobación de ``mode`` antes de probar
             # nada; esta condición sólo evita el trabajo de construir el
             # runtime cuando ya se sabe que no va a correr.
-            if source.probes_target_network and source_target and mode == "aggressive" and not is_cancelled():
+            if source.probes_target_network and source_target and mode == "aggressive" and not should_stop():
                 findings_data.extend(self._run_credential_checks(source_target, services, mode))
             report(90)
 

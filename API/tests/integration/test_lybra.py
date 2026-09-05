@@ -805,6 +805,100 @@ def test_accept_nonexistent_finding_is_404(client, admin_user, auth_headers):
     assert resp.status_code == 404
 
 
+class _FrozenClock:
+    """Un reloj que sólo avanza cuando el test lo dice.
+
+    ``_run_lybra`` mide su plazo con ``time.monotonic``; sustituir el módulo
+    entero dentro del motor —y no el ``time`` global— deja intacto el reloj que
+    usan SQLAlchemy, Redis y todo lo demás mientras corre el test.
+    """
+
+    def __init__(self, start: float = 1000.0):
+        self.now = start
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+def test_a_scan_that_runs_out_of_clock_stops_probing_and_finishes_partial(app, admin_user, monkeypatch):
+    """El plazo del panel acota el escaneo entero, no sólo su primera fase.
+
+    El descubrimiento de puertos tenía presupuesto de reloj desde #395, pero las
+    fases siguientes no tenían ninguno: un «plazo por operación» limita lo que
+    tarda cada sonda, no cuántas sondas se hacen, y cuántas se hacen lo decide
+    cuántos puertos abiertos tenga el objetivo. Con un rango ancho el
+    fingerprinting corría durante horas y su único límite acababa siendo la
+    sentencia de muerte de la cola, que mataba el escaneo dejando su fila en
+    `running` para siempre (el incidente del 2026-09-05).
+
+    Aquí el descubrimiento se come el plazo entero. Lo que se comprueba es que
+    el fingerprinting ni siquiera empieza, y que el escaneo **termina bien**
+    marcado como parcial — que es lo que impide, además, que cierre por
+    omisión hallazgos que esta vez no llegó a comprobar (L48-c).
+    """
+    import src.modules.system.config_reading as CR
+    from src.modules.features.themis.managers.lybra import engine as engine_module
+
+    clock = _FrozenClock()
+    monkeypatch.setattr(engine_module, "time", clock)
+    monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(fingerprinting_enabled=True))
+
+    def clock_eating_discovery(self, target, ports, **_kwargs):
+        clock.now += 999  # el plazo eran 60 segundos
+        return _sweep([80], truncated=True)
+
+    monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
+    monkeypatch.setattr(LybraEngineManager, "_discover_ports", clock_eating_discovery)
+    monkeypatch.setattr(LybraEngineManager, "_discover_udp_ports", lambda self, target: [])
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("un escaneo sin reloj no debe empezar a hacer fingerprinting")
+    monkeypatch.setattr(LybraEngineManager, "_fingerprint_services", _boom)
+    monkeypatch.setattr(LybraEngineManager, "_run_active_checks", _boom)
+
+    _authorize_target(app, admin_user.id)
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, discover_ports=[80], timeout=60)
+
+        with UnitOfWork() as uow:
+            escan = ScanRepository(uow).get_by_id(escan.id)
+            assert escan.status == ScanStatus.FINISHED.value
+            assert escan.is_partial is True
+
+
+def test_a_scan_with_clock_to_spare_still_fingerprints(app, admin_user, monkeypatch):
+    """La otra mitad del contrato: el corte lo dispara el reloj agotado, no el
+    mero hecho de haber pedido un plazo. Sin esto, la parada podría estar
+    siempre activa y el test de arriba pasaría por el motivo equivocado."""
+    import src.modules.system.config_reading as CR
+    from src.modules.features.themis.managers.lybra import engine as engine_module
+
+    monkeypatch.setattr(engine_module, "time", _FrozenClock())
+    monkeypatch.setattr(CR, "lybra_config", lambda: CR.LybraConfig(fingerprinting_enabled=True))
+
+    fingerprinted = []
+    monkeypatch.setattr(
+        LybraEngineManager, "_fingerprint_services",
+        lambda self, target, services, cancel_check=None: (fingerprinted.append(target), (services, []))[1],
+    )
+
+    _stub_self_discovery(monkeypatch, [80])
+    _authorize_target(app, admin_user.id)
+    with app.app_context():
+        mgr = LybraEngineManager()
+        escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
+        mgr._run_lybra(escan.id, discover_ports=[80], timeout=60)
+
+        with UnitOfWork() as uow:
+            escan = ScanRepository(uow).get_by_id(escan.id)
+            assert escan.status == ScanStatus.FINISHED.value
+            assert escan.is_partial is False
+
+    assert fingerprinted == ["10.0.0.5"]
+
+
 def test_lybra_fingerprinting_identifies_the_service_on_its_own(app, admin_user, monkeypatch):
     """L52: el hallazgo de fingerprint constata qué identificó Lybra.
 
