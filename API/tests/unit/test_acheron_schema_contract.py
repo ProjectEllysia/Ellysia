@@ -19,10 +19,15 @@ monorepo leyendo un fichero que vive lejos y comparando.
 
 El ORDEN de los campos no se comprueba, y merece decirse por qué: el JSON del
 vault es un objeto con los campos por nombre, no una tupla, así que ningún
-cliente depende de él para leer un storable. Hoy hay una divergencia real
-—``creditcard`` lleva ``postalCode`` antes que ``cvv`` aquí, y al revés en el
-esquema, en el motor Java y en la app— y no rompe nada. Si algún día el orden
-pasa a importar, el sitio donde decidirlo es ``AcheronSchema``, no este test.
+cliente depende de él para leer un storable. Hoy hay una divergencia real en
+``creditcard``, y el reparto es dos y dos:
+
+- ``… postalCode, cvv`` — esta API y el motor Java de ``AcheronCore``.
+- ``… cvv, postalCode`` — la SPA y la app Android.
+
+No rompe nada, y por eso se comparan conjuntos y no listas en los cuatro
+clientes. Si algún día el orden pasa a importar, el sitio donde decidirlo es
+``AcheronSchema``, no este test.
 
 Deliberadamente NO se genera ``storable_specs.py`` desde el esquema. Ese
 registro ata además cada tipo a su modelo SQLAlchemy y a los nombres de
