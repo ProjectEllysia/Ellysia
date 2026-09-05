@@ -448,7 +448,7 @@ A third workflow, `.github/workflows/lybra-bench.yml`, runs the `oracle` bench o
 cd web/app
 npm test                  # all nine suites — this is what CI runs
 
-npm run test:acheron      # crypto interop + CRUD + sync tests for the Acheron vault client
+npm run test:acheron      # schema/label correspondence + crypto interop + CRUD + sync for the Acheron vault client
 npm run test:iris         # file-intake limits (the size threshold comes from GET /iris/capabilities)
 npm run test:hygeia       # metric-formatting tests for the Hygeia dashboard
 npm run test:polling      # usePolling composable tests
@@ -462,6 +462,8 @@ npm run test:themis       # scan-window tests
 The suites run on plain `node` — no framework, no browser — and exit non-zero on failure. They run in CI as the `SPA suites` job of `tests.yml`. That job installs with `npm install` rather than `npm ci` because `package-lock.json` is gitignored.
 
 `test:acheron` deserves a note: it is the only thing that verifies that the vault's **two independent crypto implementations still agree**. The Java engine ([AcheronCore](https://github.com/ProjectEllysia/AcheronCore), used by the Android app) and the JavaScript one in `web/app/src/acheron/` share no code — each implements the same wire format on its own — yet both write to the same user's vault. Interop is checked with test vectors: each side encrypts sample vaults with known passwords and salts and dumps the JSON plus the expected plaintext; the other side opens them and checks it decrypts exactly that. Byte comparison is impossible, since AES-GCM uses a random IV per operation.
+
+The vault's type catalogue is split in two on purpose. `web/app/src/acheron/storableSchema.js` holds the data contract — which categories exist, which field keys each has, which are `secret` — and carries no user-visible text, because it is the file that will move to a shared package consumed by the SPA and the browser extension. `storableLabels.js` keeps the Spanish labels and form hints, and `storableTypes.js` composes both for the UI. `test:acheron` checks the two halves still describe the same fields in both directions, and that no visible text leaks back into the schema.
 
 Both directions are covered. `web/app/test/acheron-vectors.json` comes from AcheronCore's `VectorGenerator`; `acheron-vectors-js.json` is produced here by `node test/acheron.vectorgen.mjs` and consumed by AcheronCore's own suite. `web/app/test/README.md` records which engine version each file came from — without that, an interop failure cannot be traced to a specific change.
 
