@@ -8,7 +8,7 @@ from dataclasses import replace
 from typing import Callable, List, Optional
 import src.modules.system.config_reading as CR
 from src.modules.accounts import LimitKey, QuotaManager
-from src.modules.system.taskqueue import ITaskQueue, job_context
+from src.modules.system.taskqueue import ITaskQueue, JobDeadlineExceeded, job_context
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc
@@ -457,6 +457,21 @@ class LybraEngineManager(ScanManager):
         # "error interno", que es justo la etiqueta que no le corresponde.
         except ScanFailedError as scan_failure:
             self.update_scan_status(scan_id, ScanStatus.FAILED, scan_failure.reason)
+        # La sentencia de muerte de la cola. Hereda de ``BaseException`` para
+        # que ningún ``except Exception`` la confunda con un fallo de red
+        # (#395), y el efecto colateral era que tampoco la veía el único sitio
+        # que sabe qué fila hay que cerrar: la fila se quedaba en `running`
+        # para siempre y el panel decía «escaneando» un día después. Se captura
+        # explícitamente, se cierra la fila y **se vuelve a lanzar**, para que
+        # RQ siga marcando el trabajo como fallido — cerrar el escaneo es
+        # legítimo, tragarse el plazo no.
+        except JobDeadlineExceeded:
+            logger.error(
+                "Escaneo Lybra %s agotó su plazo y la cola lo terminó. El trabajo "
+                "pedido no cabía en el tiempo pedido: acota los puertos o sube el "
+                "plazo del panel.", scan_id)
+            self.update_scan_status(scan_id, ScanStatus.FAILED, ScanFailureReason.TIMEOUT)
+            raise
         except Exception as e:
             logger.error(f"Error en escaneo Lybra {scan_id}: {e}", exc_info=True)
             self.update_scan_status(scan_id, ScanStatus.FAILED, ScanFailureReason.INTERNAL_ERROR)

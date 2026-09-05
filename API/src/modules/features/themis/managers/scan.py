@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 import src.modules.system.config_reading as CR
 
 from src.modules.shared._exceptions import EllysiaException, ValidationError
-from src.modules.system.taskqueue import TaskQueue, TaskTrackingMixin
+from src.modules.system.taskqueue import JobDeadlineExceeded, TaskQueue, TaskTrackingMixin
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive
@@ -558,6 +558,20 @@ class ScanManager(TaskTrackingMixin, ABC):
                 )
             thread_manager._log_to_csv(scan_id, fresh_scan, task)
 
+        # El mismo plazo agotado que recoge ``LybraEngineManager._run_lybra``,
+        # aquí para los tres escáneres que sí lanzan un subproceso. Hereda de
+        # ``BaseException`` (#395) para que no lo capture ningún ``except
+        # Exception``, y el precio era que la fila se quedaba en `running`
+        # eternamente cuando la cola mataba el trabajo. Se cierra la fila y se
+        # vuelve a lanzar, para que RQ siga viendo un trabajo fallido.
+        except JobDeadlineExceeded:
+            logger.error(
+                "Escaneo %s agotó su plazo y la cola lo terminó. El trabajo pedido "
+                "no cabía en el tiempo pedido: acota el objetivo o sube el plazo.",
+                scan_id)
+            thread_manager.update_scan_status(
+                scan_id, ScanStatus.FAILED, ScanFailureReason.TIMEOUT)
+            raise
         except Exception as e:
             if task.status == TaskStatus.CANCELLED:
                 logger.info(f"Escaneo {scan_id} cancelado por el usuario")
