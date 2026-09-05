@@ -17,7 +17,7 @@ RUN --mount=type=secret,id=node_auth_token \
     npm install -g pnpm@11.10.0 \
  && pnpm config set '//npm.pkg.github.com/:_authToken' \
       "$(cat /run/secrets/node_auth_token)" \
- && pnpm install --frozen-lockfile \
+ && pnpm install --frozen-lockfile --trust-lockfile \
  && pnpm config delete '//npm.pkg.github.com/:_authToken'
 
 COPY app/ .
