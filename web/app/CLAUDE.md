@@ -17,5 +17,5 @@ npm run test:acheron   # crypto interop + CRUD + sync for the Acheron vault clie
 - `stores/` — Pinia stores, one per domain (`authStore`, `themisStore`, `mfaStore`, ...).
 - `components/` — grouped by feature (`themis/`, `aegis/`, `iris/`, `acheron/`, `shared/`, ...).
 - `composables/` — `useApi.js` is the authed fetch wrapper: injects the JWT, refreshes on 401 and retries once, redirects to login on failure. **Use `apiFetch` for all API calls**, don't call `fetch` directly.
-- `acheron/` — client-side vault crypto (`crypto.js`, `vault.js`, password tools). Encryption is client-side; the server only ever sees ciphertext.
+- `acheron/` — only the vault UI catalogue now: `storableLabels.js` (Spanish labels, form hints) and `storableTypes.js` (composes them with the schema). The crypto itself lives in `@projectellysia/acheron-core-web`; encryption is client-side and the server only ever sees ciphertext.
 - `@` alias → `src/` (configured in `vite.config.js`).
