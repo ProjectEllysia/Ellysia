@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "npm run test:acheron && npm run test:hygeia && npm run test:polling && npm run test:element-width && npm run test:toast && npm run test:quiz && npm run test:logs && npm run test:iris && npm run test:themis",
-    "test:acheron": "node test/acheron.interop.test.mjs && node test/acheron.crud.test.mjs && node test/acheron.sync.test.mjs",
+    "test:acheron": "node test/acheron.schema.test.mjs && node test/acheron.interop.test.mjs && node test/acheron.crud.test.mjs && node test/acheron.sync.test.mjs",
     "test:hygeia": "node test/hygeia.format.test.mjs && node test/hygeia.chartMath.test.mjs",
     "test:polling": "node test/usePolling.test.mjs",
     "test:element-width": "node test/useElementWidth.test.mjs",
