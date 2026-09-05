@@ -26,7 +26,7 @@
 The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Redis** queues, while pluggable AI backends (Ollama / OpenAI / Google Gemini) generate reports, awareness pills, and contextual verdicts. All modules share an OAuth 2.0 + JWT authentication layer with TOTP MFA, recovery codes, and fine-grained attribute-based access control.
 
 > [!NOTE]
-> The Android companion app lives in a separate repository: [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) (Kotlin/Jetpack Compose, with the AcheronCore Java crypto engine). It consumes the `/acheron` endpoints documented below.
+> **Acheron spans four sibling repositories.** The vault's crypto engine is implemented twice — [AcheronCore](https://github.com/ProjectEllysia/AcheronCore) in Java and [AcheronCoreWeb](https://github.com/ProjectEllysia/AcheronCoreWeb) in TypeScript — sharing no code, only a wire format that interop test vectors pin in both directions. [AcheronSchema](https://github.com/ProjectEllysia/AcheronSchema) holds the storable catalogue as a language-neutral contract every client verifies against. The Android app is [AcheronMobile](https://github.com/ProjectEllysia/AcheronMobile) (Kotlin/Jetpack Compose); it consumes the `/acheron` endpoints documented below, like any other client.
 
 > [!IMPORTANT]
 > The API assumes a **Linux** environment. Scan tools (Nmap, Nikto, Nuclei, traceroute) are Linux-native. On Windows, use WSL (`wsl` → `cd API && python run.py`) or `docker compose`.
@@ -37,7 +37,7 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
 - **AI-powered PDF reports** — Scan results enriched by a pluggable LLM backend with "Controls, Not Counts" calibrated risk assessment, plus per-host traceroute. Lybra and Nuclei reports group findings by *remediable unit* rather than listing them flat — one block per affected product, carrying the single version upgrade that closes the whole block, with configuration findings kept in their own section — preceded by an index table of every group and navigable through a collapsed-by-default PDF bookmark tree.
 - **Anti-phishing analysis** — 46 atomic rules across 10 rule families evaluate email headers and content (SPF, DKIM, DMARC, ARC, QR-code/quishing detection, domain impersonation, IOC extraction), producing a calibrated `Legitimate` / `Suspicious` / `Phishing` verdict with optional AI summaries.
 - **Automated mailbox monitoring** — Connect Gmail or Microsoft 365 via OAuth; Iris periodically pulls new mail and analyzes it automatically, and emails the user when a connected mailbox receives phishing.
-- **Encrypted credential vault** — AES-256-GCM client-side encryption (AcheronCore) with optimistic-concurrency sync, consumed by the web client and the [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) Android app.
+- **Encrypted credential vault** — AES-256-GCM client-side encryption with optimistic-concurrency sync. The SPA consumes the engine as `@projectellysia/acheron-core-web`; the [AcheronMobile](https://github.com/ProjectEllysia/AcheronMobile) Android app uses the Java twin, [AcheronCore](https://github.com/ProjectEllysia/AcheronCore).
 - **Security awareness training** — AI generates awareness pills across dozens of topics, enriched with current alerts from INCIBE-CERT and the local vulnerability knowledge base, each with an attached quiz; campaigns deliver them to distribution lists with per-recipient tracking.
 - **Infrastructure monitoring** — Lightweight agent heartbeats (CPU/memory/disk/network/processes) feed presence detection, software inventory (tagged), Lybra-powered inventory analysis, threshold-based anomaly alerting, and email notification on critical events.
 - **Plans, usage limits & organizations** — A commercial layer meters usage per plan (scans, pills, campaigns, mailbox connections, assets, ...) and lets a subscriber invite members into a shared-billing organization.
@@ -98,14 +98,14 @@ Ellysia/
 |---|---|---|
 | **Themis** | Nmap, Nikto, Nuclei and Lybra (self-built engine: TCP/UDP discovery, 20+ protocol dissectors, declarative and script checks) scans with PDF reports grouped by remediable unit, traceroute, scheduled execution, AI enrichment, finding triage, folders, and an authorized-targets registry. | Operational |
 | **Iris** | Phishing detection via a 46-rule engine across 10 families, IOC extraction, AI summaries, PDF reports, and automated Gmail/Microsoft 365 mailbox monitoring with phishing email notifications. | Operational |
-| **Acheron** | Client-encrypted credential vault with granular sync, optimistic-concurrency updates and a password generator, consumed by the web client and [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile). | Operational |
+| **Acheron** | Client-encrypted credential vault with granular sync, optimistic-concurrency updates and a password generator, consumed by the web client and [AcheronMobile](https://github.com/ProjectEllysia/AcheronMobile). The API only ever stores ciphertext. | Operational |
 | **Aegis** | AI-generated security awareness pills with current alerts from INCIBE-CERT and the Lybra knowledge base, quizzes, multi-format export (Markdown/HTML/JSON), and campaign delivery with per-recipient tracking. | Operational |
 | **Hygeia** | Lightweight agent-based monitoring: heartbeat ingestion, presence detection, software inventory with tags, Lybra-powered inventory analysis, and threshold anomaly alerting. | Operational |
 | **Accounts** | Commercial layer: plan catalog, per-key usage limits/metering, subscription lifecycle, and shared-billing organizations with invitations. | Operational |
 | **Scribe** | Abstraction layer for AI generation — pluggable strategies (Ollama, OpenAI, Google Gemini) per module. | Operational |
 | **Herald** | Abstraction layer for email sending — pluggable strategies (SMTP relay) per module, transversal like Scribe. | Operational |
 | **Ellysia Web** | Vue 3 SPA with module hubs (Themis, Iris, Aegis, Acheron, Hygeia), scan/analysis workspaces, vault client, asset dashboard, plans & organization management, public quiz, an admin area (config, logs, queue, plans, users), and a single catalog-driven error view for HTTP failures (404 / 403 / 409 / 500 + generic codes, wired into the router, the app error handlers and Caddy's `handle_errors`). | Operational |
-| **AcheronMobile** ↗ | Android app with Jetpack Compose UI, Material 3 design, and Java crypto core for offline vault operations. Lives in [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile), not in this repository — it consumes `/acheron` over HTTP like any other client. | Operational |
+| **AcheronMobile** ↗ | Android app with Jetpack Compose UI, Material 3 design, and the [AcheronCore](https://github.com/ProjectEllysia/AcheronCore) Java engine for offline vault operations. Lives in [AcheronMobile](https://github.com/ProjectEllysia/AcheronMobile), not in this repository — it consumes `/acheron` over HTTP like any other client. | Operational |
 
 ## Quick start
 
@@ -302,7 +302,7 @@ Aegis combines AI-generated awareness content with current alerts from the **INC
 | `DELETE` | `/acheron/storables` | Delete a Storable by `internalId` |
 
 > [!NOTE]
-> Encryption happens **client-side** (AcheronCore — see [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) for the Android implementation). The server stores only ciphertext. Internal IDs are deterministic SHA-256 hex hashes of encrypted content — collision-free across offline devices.
+> Encryption happens **client-side**, in [AcheronCoreWeb](https://github.com/ProjectEllysia/AcheronCoreWeb) for the browser and [AcheronCore](https://github.com/ProjectEllysia/AcheronCore) for Android. The server stores only ciphertext. Internal IDs are deterministic SHA-256 hex hashes of encrypted content — collision-free across offline devices.
 
 > [!IMPORTANT]
 > **Optimistic concurrency.** `Vault.revision` is bumped on every content mutation and exposed as `ETag` / `revision`. Send it back as `If-Match: "N"` on writes: if it no longer matches, the write is rejected with `409 vault_revision_mismatch` (body carries `currentRevision`) and **nothing is mutated** — a client holding a stale snapshot can no longer wipe another device's edits. `If-Match` is mandatory on the destructive `POST /acheron/vault` replace; on the granular endpoints it is optional for now (transition window for already-deployed apps). Distinct from `metadataVersion`, which only tracks master-password rotation.
@@ -461,13 +461,23 @@ npm run test:themis       # scan-window tests
 
 The suites run on plain `node` — no framework, no browser — and exit non-zero on failure. They run in CI as the `SPA suites` job of `tests.yml`. That job installs with `npm install` rather than `npm ci` because `package-lock.json` is gitignored.
 
-`test:acheron` deserves a note: it is the only thing that verifies that the vault's **two independent crypto implementations still agree**. The Java engine ([AcheronCore](https://github.com/ProjectEllysia/AcheronCore), used by the Android app) and the JavaScript one in `web/app/src/acheron/` share no code — each implements the same wire format on its own — yet both write to the same user's vault. Interop is checked with test vectors: each side encrypts sample vaults with known passwords and salts and dumps the JSON plus the expected plaintext; the other side opens them and checks it decrypts exactly that. Byte comparison is impossible, since AES-GCM uses a random IV per operation.
+`test:acheron` no longer covers the crypto: that engine left this repository. It now lives in
+[AcheronCoreWeb](https://github.com/ProjectEllysia/AcheronCoreWeb), which the SPA consumes as `@projectellysia/acheron-core-web` at an exact
+pinned version, and its own CI runs the interop suites against the Java implementation in both
+directions. Installing it needs a token with `read:packages` in `NODE_AUTH_TOKEN`; CI uses the
+workflow's own `GITHUB_TOKEN`, which works because the package grants this repository read access.
 
-The vault's type catalogue is split in two on purpose. `web/app/src/acheron/storableSchema.js` holds the data contract — which categories exist, which field keys each has, which are `secret` — and carries no user-visible text, because it is the file that will move to a shared package consumed by the SPA and the browser extension. `storableLabels.js` keeps the Spanish labels and form hints, and `storableTypes.js` composes both for the UI. `test:acheron` checks the two halves still describe the same fields in both directions, and that no visible text leaks back into the schema.
+What stays here is the half only the SPA owns: `src/acheron/storableLabels.js` holds the Spanish
+labels and form hints, `storableTypes.js` composes them with the schema the package provides, and
+`test:acheron` checks the two describe the same fields in both directions.
 
-That contract is not only the SPA's. The same catalogue is implemented four times in four languages — here, in the API's `storable_specs.py`, in the Android app's `StorableSchema.kt`, and in AcheronCore's storable classes — and the four must agree on the exact field keys, because those keys *are* the vault JSON. [AcheronSchema](https://github.com/ProjectEllysia/AcheronSchema) holds that catalogue as a language-neutral `schema.json`, and each client verifies its own copy against it in its own suite: `test:acheron` on the SPA side and `API/tests/unit/test_acheron_schema_contract.py` on the API side. The field *order* is deliberately not part of the contract — the vault JSON is an object keyed by field name, not a tuple — so every client compares sets.
-
-Both directions are covered. `web/app/test/acheron-vectors.json` comes from AcheronCore's `VectorGenerator`; `acheron-vectors-js.json` is produced here by `node test/acheron.vectorgen.mjs` and consumed by AcheronCore's own suite. `web/app/test/README.md` records which engine version each file came from — without that, an interop failure cannot be traced to a specific change.
+The storable catalogue itself is a contract shared by four implementations in four languages — this
+API's `storable_specs.py`, the package, the Android app and the Java engine — and the exact field
+keys *are* the vault JSON. [AcheronSchema](https://github.com/ProjectEllysia/AcheronSchema) holds it as a language-neutral `schema.json`, and
+each client verifies its own copy against it; on the API side that is
+`API/tests/unit/test_acheron_schema_contract.py`. The field *order* is deliberately not part of the
+contract — the vault JSON is an object keyed by field name, not a tuple — so every client compares
+sets.
 
 ## Continuous deployment (CI/CD)
 
@@ -739,7 +749,7 @@ IRIS_MAILBOX_ENCRYPTION_KEY=... # Fernet key that encrypts stored OAuth refresh 
 | Containerization | Docker + Docker Compose |
 
 > [!NOTE]
-> The Android client (Kotlin + Jetpack Compose, Retrofit + OkHttp) and the AcheronCore engine it embeds now live in [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile).
+> The Android client (Kotlin + Jetpack Compose, Retrofit + OkHttp) lives in [AcheronMobile](https://github.com/ProjectEllysia/AcheronMobile), and the crypto engine it embeds in [AcheronCore](https://github.com/ProjectEllysia/AcheronCore).
 
 ## Configuration
 
