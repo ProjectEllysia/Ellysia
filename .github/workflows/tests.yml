@@ -1,10 +1,10 @@
-name: API Tests
+name: Tests
 
 on:
   push:
-    branches: [main, 'v[0-9]+.[0-9]+']
+    branches: [main, 'v[0-9]+.[0-9]+', 'proyecto/**']
   pull_request:
-    branches: [main, 'v[0-9]+.[0-9]+']
+    branches: [main, 'v[0-9]+.[0-9]+', 'proyecto/**']
 
 jobs:
   tests:
@@ -42,3 +42,30 @@ jobs:
 
       - name: Run test suite
         run: python -m pytest -q -m "not oracle"
+
+  spa:
+    name: SPA suites
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # package-lock.json esta en .gitignore, asi que no hay lockfile que
+      # cachear ni con el que hacer `npm ci`.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # Las nueve suites del SPA corren con node a secas y salen con codigo
+      # distinto de cero al fallar. Entre ellas va test:acheron, que verifica
+      # que la criptografia de la boveda sigue siendo interoperable con la
+      # implementacion Java de AcheronCore.
+      - name: Run SPA suites
+        run: npm test
