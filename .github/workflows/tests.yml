@@ -58,28 +58,29 @@ jobs:
         with:
           node-version: "22"
 
-      # package-lock.json esta en .gitignore, asi que no hay lockfile que
-      # cachear ni con el que hacer `npm ci`.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.10.0
+
+      # Se instala con pnpm y el lockfile CONGELADO porque es exactamente lo
+      # que hace el build de produccion (web/Dockerfile). Antes la CI usaba
+      # `npm install` sin lockfile: dos resolutores distintos, dos arboles de
+      # dependencias posibles, y una CI en verde que no garantizaba que la
+      # imagen se construyera. De hecho no la garantizo -- el lockfile se
+      # quedo desincronizado al cambiar una dependencia y solo se descubrio
+      # mirando el Dockerfile a mano.
       #
-      # @projectellysia/acheron-core-web vive en GitHub Packages y el
-      # repositorio es privado, asi que npm necesita credencial. El
-      # GITHUB_TOKEN del propio workflow sirve porque el paquete concede
-      # acceso de lectura a este repositorio; sin esa concesion la instalacion
-      # falla con un 403 permission_denied.
+      # @projectellysia/acheron-core-web es privado, asi que la instalacion
+      # necesita credencial; el GITHUB_TOKEN del workflow sirve porque el
+      # paquete concede acceso de lectura a este repositorio.
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: pnpm install --frozen-lockfile
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Las nueve suites del SPA corren con node a secas y salen con codigo
-      # distinto de cero al fallar. Entre ellas va test:acheron, que verifica
-      # que la criptografia de la boveda sigue siendo interoperable con la
-      # implementacion Java de AcheronCore.
       - name: Run SPA suites
-        run: npm test
+        run: pnpm test
 
-      # Las suites corren con node y no cargan ni un .vue, asi que un import
-      # roto en un componente no lo detecta ninguna. El build de Vite si: es
-      # lo unico que resuelve el grafo de modulos entero.
       - name: Build the SPA
-        run: npm run build
+        run: pnpm build

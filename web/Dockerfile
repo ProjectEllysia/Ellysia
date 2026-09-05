@@ -1,8 +1,19 @@
 # Stage 1: Build the Vue SPA
 FROM node:22-slim AS builder
 WORKDIR /app
-COPY app/package.json app/pnpm-lock.yaml ./
-RUN npm install -g pnpm@11.10.0 && pnpm install --frozen-lockfile
+COPY app/package.json app/pnpm-lock.yaml app/.npmrc ./
+
+# El SPA depende de @projectellysia/acheron-core-web, que vive en GitHub
+# Packages y es PRIVADO, asi que la instalacion necesita credencial.
+#
+# Va como secreto de BuildKit y no como ARG ni ENV a proposito: un ARG queda
+# grabado en los metadatos de la imagen y `docker history` lo enseña. Con
+# --mount=type=secret el token solo existe durante ese RUN y no deja capa.
+RUN --mount=type=secret,id=node_auth_token \
+    npm install -g pnpm@11.10.0 \
+ && NODE_AUTH_TOKEN="$(cat /run/secrets/node_auth_token)" \
+    pnpm install --frozen-lockfile
+
 COPY app/ .
 RUN pnpm build
 
