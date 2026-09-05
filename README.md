@@ -438,7 +438,7 @@ POSTGRES_TEST_URL=postgresql+psycopg2://ellysia:ellysia@localhost:55432/ellysia_
 
 Run it in its **own** pytest invocation. The fast suite's SQLite shim rewrites `JSONB` to generic `JSON` in the shared model metadata, so a mixed run would build the wrong schema; the fixtures detect that and skip with an explanatory message rather than assert against an imitation.
 
-CI runs two workflows on push/PR to `main` and the `vX.Y` release branches: `.github/workflows/tests.yml` (`python -m pytest -q -m "not oracle"`, on SQLite) and `.github/workflows/tests-postgres.yml` (`python -m pytest -q -m postgres`, with ephemeral PostgreSQL and Redis services). They are separate jobs on purpose — the service matrix must not slow down the cycle that runs on every push. Some tests use `xfail(strict=True)` to document real known bugs — when a bug is fixed the test XPASSes and the marker must be removed. A green push to `main` (a merged pull request) additionally triggers the automatic production deploy — see [Continuous deployment](#continuous-deployment-cicd).
+CI runs two workflows on push/PR to `main`, the `vX.Y` release branches and the `proyecto/**` integration branches: `.github/workflows/tests.yml` (two jobs — `tests`, running `python -m pytest -q -m "not oracle"` on SQLite, and `SPA suites`, running the SPA's node suites) and `.github/workflows/tests-postgres.yml` (`python -m pytest -q -m postgres`, with ephemeral PostgreSQL and Redis services). They are separate jobs on purpose — the service matrix must not slow down the cycle that runs on every push. Some tests use `xfail(strict=True)` to document real known bugs — when a bug is fixed the test XPASSes and the marker must be removed. A green push to `main` (a merged pull request) additionally triggers the automatic production deploy — see [Continuous deployment](#continuous-deployment-cicd).
 
 A third workflow, `.github/workflows/lybra-bench.yml`, runs the `oracle` bench on a schedule (03:15 UTC) and on demand. It is separate because it brings up around twenty Docker containers and takes tens of minutes, which no per-push job can afford. Its deliverable is the numbers, not the green tick: it publishes the Lybra engine's Phase R precision, its agreement with Nmap and its false-positive rate to the run summary, and uploads the full log as an artifact.
 
@@ -446,17 +446,28 @@ A third workflow, `.github/workflows/lybra-bench.yml`, runs the `oracle` bench o
 
 ```bash
 cd web/app
+npm test                  # all nine suites — this is what CI runs
+
 npm run test:acheron      # crypto interop + CRUD + sync tests for the Acheron vault client
 npm run test:iris         # file-intake limits (the size threshold comes from GET /iris/capabilities)
 npm run test:hygeia       # metric-formatting tests for the Hygeia dashboard
 npm run test:polling      # usePolling composable tests
+npm run test:element-width # useElementWidth composable tests
+npm run test:toast        # toast-store tests
 npm run test:quiz         # aegis quiz-shuffle permutation tests
 npm run test:logs         # gzip log-payload decoding tests
+npm run test:themis       # scan-window tests
 ```
+
+The suites run on plain `node` — no framework, no browser — and exit non-zero on failure. They run in CI as the `SPA suites` job of `tests.yml`. That job installs with `npm install` rather than `npm ci` because `package-lock.json` is gitignored.
+
+`test:acheron` deserves a note: it is the only thing that verifies that the vault's **two independent crypto implementations still agree**. The Java engine ([AcheronCore](https://github.com/ProjectEllysia/AcheronCore), used by the Android app) and the JavaScript one in `web/app/src/acheron/` share no code — each implements the same wire format on its own — yet both write to the same user's vault. Interop is checked with test vectors: each side encrypts sample vaults with known passwords and salts and dumps the JSON plus the expected plaintext; the other side opens them and checks it decrypts exactly that. Byte comparison is impossible, since AES-GCM uses a random IV per operation.
+
+Both directions are covered. `web/app/test/acheron-vectors.json` comes from AcheronCore's `VectorGenerator`; `acheron-vectors-js.json` is produced here by `node test/acheron.vectorgen.mjs` and consumed by AcheronCore's own suite. `web/app/test/README.md` records which engine version each file came from — without that, an interop failure cannot be traced to a specific change.
 
 ## Continuous deployment (CI/CD)
 
-Every merge to `main` is deployed automatically to the production machine, **after** the CI tests of the merged commit pass. The pipeline lives in `.github/workflows/deploy.yml` and chains to `.github/workflows/tests.yml` via the `workflow_run` trigger: when the "API Tests" workflow completes with `success` on a push to `main`, the deploy job connects by SSH to the target host and runs:
+Every merge to `main` is deployed automatically to the production machine, **after** the CI tests of the merged commit pass. The pipeline lives in `.github/workflows/deploy.yml` and chains to `.github/workflows/tests.yml` via the `workflow_run` trigger: when the "Tests" workflow completes with `success` on a push to `main`, the deploy job connects by SSH to the target host and runs:
 
 ```bash
 cd <checkout> && \
@@ -468,7 +479,7 @@ docker image prune -f
 
 Then it polls the public health endpoint `https://<host>/system/say-hello` as a smoke test and fails the run if the API does not answer within a few minutes.
 
-> The deploy is strictly *after* the tests: the `workflow_run` trigger fires on the `main`-push run of "API Tests", and its `branches: [main]` filter excludes the PR-triggered runs (there `head_branch` is the source branch). If the tests fail, the deploy is skipped. To deploy without waiting for CI, change the trigger to `push: branches: [main]`; nothing else needs to change.
+> The deploy is strictly *after* the tests: the `workflow_run` trigger fires on the `main`-push run of "Tests", and its `branches: [main]` filter excludes the PR-triggered runs (there `head_branch` is the source branch). If the tests fail, the deploy is skipped. To deploy without waiting for CI, change the trigger to `push: branches: [main]`; nothing else needs to change.
 
 ### One-time setup
 
@@ -506,7 +517,7 @@ Before the first automatic deploy works:
 - **`git reset --hard origin/main`** makes the tracked files of the checkout exactly match `main`; any local modification to tracked files is discarded. The `.env` is gitignored and never touched.
 - **Rollback:** push a revert to `main` (or restore a previous commit) and the next green push deploys it. Data lives in the volumes, only the images are rebuilt.
 - **Manual deploy:** the workflow also has a manual trigger (Actions → "Deploy to production" → Run workflow) that deploys `main` on demand without waiting for a push — useful for a rollback or to re-run after fixing the server.
-- **Renaming the "API Tests" workflow breaks the trigger:** `deploy.yml` references it by name (`workflows: ["API Tests"]`).
+- **Renaming the "Tests" workflow breaks the trigger:** `deploy.yml` references it by name (`workflows: ["Tests"]`), and a mismatch fails silently — the tests go green and no deploy happens. The trigger line carries the same warning inline.
 
 ## Database Migrations
 
