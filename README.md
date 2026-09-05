@@ -459,7 +459,9 @@ npm run test:logs         # gzip log-payload decoding tests
 npm run test:themis       # scan-window tests
 ```
 
-The suites run on plain `node` — no framework, no browser — and exit non-zero on failure. They run in CI as the `SPA suites` job of `tests.yml`. That job installs with `npm install` rather than `npm ci` because `package-lock.json` is gitignored.
+The suites run on plain `node` — no framework, no browser — and exit non-zero on failure. They run in CI as the `SPA suites` job of `tests.yml`, which installs with **`pnpm install --frozen-lockfile`, exactly as `web/Dockerfile` does in production**, and then builds with Vite.
+
+That match is deliberate and was learnt the hard way. CI used to install with `npm install` and no lockfile while production built with pnpm and a frozen one: two resolvers, two possible dependency trees, and a green CI that did not mean the image would build. It did not — a dependency change left `pnpm-lock.yaml` stale and the production build would have aborted with `ERR_PNPM_OUTDATED_LOCKFILE`. Now a `package.json` that moves without its lockfile turns CI red instead of surfacing at deploy time.
 
 `test:acheron` no longer covers the crypto: that engine left this repository. It now lives in
 [AcheronCoreWeb](https://github.com/ProjectEllysia/AcheronCoreWeb), which the SPA consumes as `@projectellysia/acheron-core-web` at an exact
@@ -500,8 +502,9 @@ Then it polls the public health endpoint `https://<host>/system/say-hello` as a 
 Before the first automatic deploy works:
 
 1. **On the server** — a checkout of this repo in a fixed path (e.g. `~/ellysia`), a root `.env` with the real credentials (start from `.env.example`), and a SSH user that can run Docker without `sudo` (`usermod -aG docker <user>`). The API applies Alembic migrations automatically on startup, and the existing volumes (`ellysia_caddy_data` included) are reused, so a redeploy never re-issues certificates or drops data.
-2. **First boot is manual** — a fresh server needs `CREATE_DATABASE=True` in the server's `.env` for the *very first* `docker compose --profile container up -d --build` (it seeds the root user, its ABAC attributes and the awareness topics — it is **destructive**, set it back to `False` afterwards). From then on, deploys are fully automatic.
-3. **The checkout that deploy targets** — pin `DEPLOY_PATH` to the checkout the running containers came from:
+2. **A `NODE_AUTH_TOKEN` in the server's root `.env`** — the SPA image installs `@projectellysia/acheron-core-web` from GitHub Packages at build time, and that package is private. Use a token with `read:packages`. Without it, `pnpm install` fails with a 403 and the web image never builds, so the deploy dies before the containers start. Docker receives it as a **BuildKit secret**, never as an `ARG`: an `ARG` is baked into the image metadata and `docker history` shows it.
+3. **First boot is manual** — a fresh server needs `CREATE_DATABASE=True` in the server's `.env` for the *very first* `docker compose --profile container up -d --build` (it seeds the root user, its ABAC attributes and the awareness topics — it is **destructive**, set it back to `False` afterwards). From then on, deploys are fully automatic.
+4. **The checkout that deploy targets** — pin `DEPLOY_PATH` to the checkout the running containers came from:
    ```bash
    docker inspect Ellysia-Web --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
    ```
