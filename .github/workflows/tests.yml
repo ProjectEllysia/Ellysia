@@ -77,3 +77,9 @@ jobs:
       # implementacion Java de AcheronCore.
       - name: Run SPA suites
         run: npm test
+
+      # Las suites corren con node y no cargan ni un .vue, asi que un import
+      # roto en un componente no lo detecta ninguna. El build de Vite si: es
+      # lo unico que resuelve el grafo de modulos entero.
+      - name: Build the SPA
+        run: npm run build
