@@ -3,20 +3,21 @@
  * de datos (`storableSchema.js`) con su presentación (`storableLabels.js`).
  *
  * Antes las dos cosas vivían en el mismo literal. Se separaron porque el
- * esquema tiene que viajar a un paquete compartido con la extensión de
- * navegador y con la API, y no se podía publicar sin arrastrar las etiquetas
- * en castellano: cambiar el texto de un botón habría obligado a publicar una
- * versión nueva del paquete de criptografía.
+ * esquema tenía que viajar a un paquete compartido, y no se podía publicar sin
+ * arrastrar las etiquetas en castellano: cambiar el texto de un botón habría
+ * obligado a publicar una versión nueva del paquete de criptografía.
+ *
+ * Ya ha viajado: el esquema llega de `@projectellysia/acheron-core-web`, que a
+ * su vez lo copia de `AcheronSchema`. Aquí solo quedan las etiquetas.
  *
  * La forma que exporta este fichero es la misma de antes, así que los
- * componentes no notan la separación. La capa cripto NO pasa por aquí: lee
- * directamente el esquema a través de `storableFields.js`, y por eso nunca ve
- * una etiqueta.
+ * componentes no notan nada. La capa cripto NO pasa por aquí: vive en el
+ * paquete y lee el esquema directamente, y por eso nunca ve una etiqueta.
  *
  * `acheron.schema.test.mjs` verifica que las dos mitades siguen hablando de
  * los mismos campos.
  */
-import { STORABLE_SCHEMA } from './storableSchema.js'
+import { STORABLE_SCHEMA } from '@projectellysia/acheron-core-web'
 import { STORABLE_LABELS } from './storableLabels.js'
 
 /**

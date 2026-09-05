@@ -1,7 +1,7 @@
 /**
  * Correspondencia entre el esquema de storables y sus etiquetas.
  *
- * `storableSchema.js` (el contrato de datos) y `storableLabels.js` (lo que se
+ * El contrato de datos y `storableLabels.js` (lo que se
  * ve en pantalla) vivían en el mismo literal y era imposible desincronizarlos.
  * Al separarlos, esa imposibilidad desapareció: si el esquema añade un campo y
  * las etiquetas no, el formulario pinta un `undefined` donde iba un nombre; si
@@ -13,19 +13,15 @@
  *
  * Sin este test la separación sería un riesgo neto en lugar de una mejora.
  *
- * Comprueba además que el esquema local no diverge de `AcheronSchema`, el
- * repositorio donde vive el catálogo como contrato compartido con la API, la
- * app Android y AcheronCore. La copia versionada de ese contrato está en
- * `acheron-schema.json`; su procedencia, en el README de esta carpeta.
+ * El esquema ya no vive aquí: llega de `@projectellysia/acheron-core-web`, que
+ * a su vez lo copia de `AcheronSchema` y lo verifica en su propia suite. Lo que
+ * queda por comprobar en la SPA es lo que solo la SPA tiene: que sus etiquetas
+ * sigan describiendo los campos que el paquete declara.
  *
  *   node web/app/test/acheron.schema.test.mjs
  */
 
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, resolve } from 'node:path'
-
-import { STORABLE_SCHEMA } from '../src/acheron/storableSchema.js'
+import { STORABLE_SCHEMA } from '@projectellysia/acheron-core-web'
 import { STORABLE_LABELS } from '../src/acheron/storableLabels.js'
 import { STORABLE_TYPES } from '../src/acheron/storableTypes.js'
 
@@ -101,11 +97,11 @@ for (const type of STORABLE_SCHEMA) {
   }
 }
 
-/* ── 3) El esquema no debe llevar texto visible ── */
+/* ── 3) El esquema que sirve el paquete no lleva texto visible ── */
 
-// Es la invariante que hace publicable el esquema: si alguien vuelve a meter
-// una etiqueta ahí, el fichero deja de poder viajar al paquete compartido sin
-// arrastrar castellano, que es justo lo que la separación vino a evitar.
+// El paquete ya lo valida en su suite, pero comprobarlo aquí cuesta nada y
+// cubre el caso de que alguien "arregle" un undefined en el formulario
+// parcheando el esquema en node_modules en vez de las etiquetas.
 const TEXTO_VISIBLE = ['label', 'plural', 'newLabel', 'subtitleKey']
 for (const type of STORABLE_SCHEMA) {
   const enTipo = TEXTO_VISIBLE.filter((k) => k in type)
@@ -124,32 +120,7 @@ for (const type of STORABLE_SCHEMA) {
   }
 }
 
-/* ── 4) El esquema local no diverge de AcheronSchema ── */
-
-// El catalogo vive tambien en la API (`storable_specs.py`), en la app Android
-// y en AcheronCore. AcheronSchema es la fuente de verdad comun; esta seccion
-// comprueba que la copia de la SPA no se ha ido por su cuenta.
-//
-// Se compara contra una copia versionada, no contra el repositorio remoto: la
-// suite esta sellada contra la red, y una comprobacion que necesite internet
-// no es una comprobacion, es una fuente de fallos intermitentes.
-const schemaPath = resolve(dirname(fileURLToPath(import.meta.url)), 'acheron-schema.json')
-const shared = JSON.parse(readFileSync(schemaPath, 'utf8'))
-
-const simplify = (types) =>
-  types.map((t) => ({
-    kind: t.kind,
-    category: t.category,
-    fields: t.fields.map((f) => (f.secret ? { key: f.key, secret: true } : { key: f.key })),
-  }))
-
-check(
-  'el esquema de la SPA coincide con AcheronSchema',
-  JSON.stringify(simplify(STORABLE_SCHEMA)) === JSON.stringify(simplify(shared.types)),
-  'diverge del contrato compartido; ver web/app/test/README.md',
-)
-
-/* ── 5) La vista compuesta sirve lo que el formulario espera ── */
+/* ── 4) La vista compuesta sirve lo que el formulario espera ── */
 
 for (const type of STORABLE_TYPES) {
   const sinLabel = type.fields.filter((f) => !f.label).map((f) => f.key)

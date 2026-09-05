@@ -60,8 +60,16 @@ jobs:
 
       # package-lock.json esta en .gitignore, asi que no hay lockfile que
       # cachear ni con el que hacer `npm ci`.
+      #
+      # @projectellysia/acheron-core-web vive en GitHub Packages y el
+      # repositorio es privado, asi que npm necesita credencial. El
+      # GITHUB_TOKEN del propio workflow sirve porque el paquete concede
+      # acceso de lectura a este repositorio; sin esa concesion la instalacion
+      # falla con un 403 permission_denied.
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Las nueve suites del SPA corren con node a secas y salen con codigo
       # distinto de cero al fallar. Entre ellas va test:acheron, que verifica
