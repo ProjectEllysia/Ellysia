@@ -1,7 +1,8 @@
 /**
  * Test de interoperabilidad Java → JS para el cliente cripto de Acheron.
  *
- * Carga los vectores generados por AcheronCore (tests/acheron-vectors.json),
+ * Carga los vectores generados por AcheronCore (acheron-vectors.json, en este
+ * mismo directorio; ver el README de la suite para saber de qué versión salen),
  * abre cada vault con su master password y comprueba que el módulo JS descifra
  * EXACTAMENTE los valores en texto plano esperados. Verifica además el
  * round-trip (cifrar → descifrar) y que un master password incorrecto falla.
@@ -20,7 +21,7 @@ import { openVault, WrongPasswordError } from '../src/acheron/vault.js'
 import { STORABLE_CATEGORIES } from '../src/acheron/storableFields.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const vectorsPath = resolve(here, '../../../tests/acheron-vectors.json')
+const vectorsPath = resolve(here, 'acheron-vectors.json')
 
 let passed = 0
 let failed = 0

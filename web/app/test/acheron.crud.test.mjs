@@ -16,7 +16,7 @@ import { dirname, resolve } from 'node:path'
 import { openVault, WrongPasswordError } from '../src/acheron/vault.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const vectorsPath = resolve(here, '../../../tests/acheron-vectors.json')
+const vectorsPath = resolve(here, 'acheron-vectors.json')
 
 let passed = 0
 let failed = 0
