@@ -230,6 +230,12 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+      # El SPA instala un paquete privado de GitHub Packages en tiempo de
+      # build. El token sale del .env de la raiz (NODE_AUTH_TOKEN) y necesita
+      # el permiso read:packages. Sin el, `pnpm install` falla con un 403 y la
+      # imagen no se construye.
+      secrets:
+        - node_auth_token
     container_name: Ellysia-Web
     restart: unless-stopped
     ports:
@@ -260,6 +266,13 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+secrets:
+  # Credencial de solo lectura para GitHub Packages, usada unicamente durante
+  # el build del SPA. Se define por entorno para que no toque el disco del
+  # servidor ni quede en ninguna capa de la imagen.
+  node_auth_token:
+    environment: NODE_AUTH_TOKEN
 
 volumes:
   postgres_data:

@@ -8,9 +8,9 @@ importers:
 
   .:
     dependencies:
-      hash-wasm:
-        specifier: ^4.12.0
-        version: 4.12.0
+      '@projectellysia/acheron-core-web':
+        specifier: 2.0.0
+        version: 2.0.0
       pinia:
         specifier: ^3.0.4
         version: 3.0.4(vue@3.5.40)
@@ -104,6 +104,9 @@ packages:
 
   '@oxc-project/types@0.139.0':
     resolution: {integrity: sha512-r9gHphtCs+1M7J0pw6Sn/hh/Wpa/iQrOOkrNAlVLF/gHq+/CJmHIWKKUUhdWjcD6CIa8idarspCsASiXCXvFUw==}
+
+  '@projectellysia/acheron-core-web@2.0.0':
+    resolution: {integrity: sha512-xwoD8VAArJWFtojrRuiBq6ONxHtgx7DYosVeyg4B59+jLp6MA0b/E304i4oLTygrv4V8tppJJnd3TZXzrfTDag==, tarball: https://npm.pkg.github.com/download/@projectellysia/acheron-core-web/2.0.0/3651c388fec0125ba0753fa2a906567492cb1db5}
 
   '@rolldown/binding-android-arm64@1.1.5':
     resolution: {integrity: sha512-lZg8fqIv2v7FF237bwMgzGZEJvGL79/s5knJ/i6FmsGF4XXlzccZ4jb+TrFIxtSSxFtIpdsgrPZeMk1I9AFcyQ==}
@@ -831,6 +834,10 @@ snapshots:
     optional: true
 
   '@oxc-project/types@0.139.0': {}
+
+  '@projectellysia/acheron-core-web@2.0.0':
+    dependencies:
+      hash-wasm: 4.12.0
 
   '@rolldown/binding-android-arm64@1.1.5':
     optional: true
