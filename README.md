@@ -26,7 +26,7 @@
 The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Redis** queues, while pluggable AI backends (Ollama / OpenAI / Google Gemini) generate reports, awareness pills, and contextual verdicts. All modules share an OAuth 2.0 + JWT authentication layer with TOTP MFA, recovery codes, and fine-grained attribute-based access control.
 
 > [!NOTE]
-> The Android companion app lives in a separate repository: [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) (Kotlin/Jetpack Compose, with the AcheronCore Java crypto engine). It consumes the `/acheron` endpoints documented below.
+> **Acheron spans four sibling repositories.** The vault's crypto engine is implemented twice — [AcheronCore](https://github.com/ProjectEllysia/AcheronCore) in Java and [AcheronCoreWeb](https://github.com/ProjectEllysia/AcheronCoreWeb) in TypeScript — sharing no code, only a wire format that interop test vectors pin in both directions. [AcheronSchema](https://github.com/ProjectEllysia/AcheronSchema) holds the storable catalogue as a language-neutral contract every client verifies against. The Android app is [AcheronMobile](https://github.com/ProjectEllysia/AcheronMobile) (Kotlin/Jetpack Compose); it consumes the `/acheron` endpoints documented below, like any other client.
 
 > [!IMPORTANT]
 > The API assumes a **Linux** environment. Scan tools (Nmap, Nikto, Nuclei, traceroute) are Linux-native. On Windows, use WSL (`wsl` → `cd API && python run.py`) or `docker compose`.
@@ -37,7 +37,7 @@ The REST API (Flask) orchestrates asynchronous scans and analysis over **RQ + Re
 - **AI-powered PDF reports** — Scan results enriched by a pluggable LLM backend with "Controls, Not Counts" calibrated risk assessment, plus per-host traceroute. Lybra and Nuclei reports group findings by *remediable unit* rather than listing them flat — one block per affected product, carrying the single version upgrade that closes the whole block, with configuration findings kept in their own section — preceded by an index table of every group and navigable through a collapsed-by-default PDF bookmark tree.
 - **Anti-phishing analysis** — 46 atomic rules across 10 rule families evaluate email headers and content (SPF, DKIM, DMARC, ARC, QR-code/quishing detection, domain impersonation, IOC extraction), producing a calibrated `Legitimate` / `Suspicious` / `Phishing` verdict with optional AI summaries.
 - **Automated mailbox monitoring** — Connect Gmail or Microsoft 365 via OAuth; Iris periodically pulls new mail and analyzes it automatically, and emails the user when a connected mailbox receives phishing.
-- **Encrypted credential vault** — AES-256-GCM client-side encryption (AcheronCore) with optimistic-concurrency sync, consumed by the web client and the [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) Android app.
+- **Encrypted credential vault** — AES-256-GCM client-side encryption with optimistic-concurrency sync. The SPA consumes the engine as `@projectellysia/acheron-core-web`; the [AcheronMobile](https://github.com/ProjectEllysia/AcheronMobile) Android app uses the Java twin, [AcheronCore](https://github.com/ProjectEllysia/AcheronCore).
 - **Security awareness training** — AI generates awareness pills across dozens of topics, enriched with current alerts from INCIBE-CERT and the local vulnerability knowledge base, each with an attached quiz; campaigns deliver them to distribution lists with per-recipient tracking.
 - **Infrastructure monitoring** — Lightweight agent heartbeats (CPU/memory/disk/network/processes) feed presence detection, software inventory (tagged), Lybra-powered inventory analysis, threshold-based anomaly alerting, and email notification on critical events.
 - **Plans, usage limits & organizations** — A commercial layer meters usage per plan (scans, pills, campaigns, mailbox connections, assets, ...) and lets a subscriber invite members into a shared-billing organization.
@@ -98,14 +98,14 @@ Ellysia/
 |---|---|---|
 | **Themis** | Nmap, Nikto, Nuclei and Lybra (self-built engine: TCP/UDP discovery, 20+ protocol dissectors, declarative and script checks) scans with PDF reports grouped by remediable unit, traceroute, scheduled execution, AI enrichment, finding triage, folders, and an authorized-targets registry. | Operational |
 | **Iris** | Phishing detection via a 46-rule engine across 10 families, IOC extraction, AI summaries, PDF reports, and automated Gmail/Microsoft 365 mailbox monitoring with phishing email notifications. | Operational |
-| **Acheron** | Client-encrypted credential vault with granular sync, optimistic-concurrency updates and a password generator, consumed by the web client and [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile). | Operational |
+| **Acheron** | Client-encrypted credential vault with granular sync, optimistic-concurrency updates and a password generator, consumed by the web client and [AcheronMobile](https://github.com/ProjectEllysia/AcheronMobile). The API only ever stores ciphertext. | Operational |
 | **Aegis** | AI-generated security awareness pills with current alerts from INCIBE-CERT and the Lybra knowledge base, quizzes, multi-format export (Markdown/HTML/JSON), and campaign delivery with per-recipient tracking. | Operational |
 | **Hygeia** | Lightweight agent-based monitoring: heartbeat ingestion, presence detection, software inventory with tags, Lybra-powered inventory analysis, and threshold anomaly alerting. | Operational |
 | **Accounts** | Commercial layer: plan catalog, per-key usage limits/metering, subscription lifecycle, and shared-billing organizations with invitations. | Operational |
 | **Scribe** | Abstraction layer for AI generation — pluggable strategies (Ollama, OpenAI, Google Gemini) per module. | Operational |
 | **Herald** | Abstraction layer for email sending — pluggable strategies (SMTP relay) per module, transversal like Scribe. | Operational |
 | **Ellysia Web** | Vue 3 SPA with module hubs (Themis, Iris, Aegis, Acheron, Hygeia), scan/analysis workspaces, vault client, asset dashboard, plans & organization management, public quiz, an admin area (config, logs, queue, plans, users), and a single catalog-driven error view for HTTP failures (404 / 403 / 409 / 500 + generic codes, wired into the router, the app error handlers and Caddy's `handle_errors`). | Operational |
-| **AcheronMobile** ↗ | Android app with Jetpack Compose UI, Material 3 design, and Java crypto core for offline vault operations. Lives in [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile), not in this repository — it consumes `/acheron` over HTTP like any other client. | Operational |
+| **AcheronMobile** ↗ | Android app with Jetpack Compose UI, Material 3 design, and the [AcheronCore](https://github.com/ProjectEllysia/AcheronCore) Java engine for offline vault operations. Lives in [AcheronMobile](https://github.com/ProjectEllysia/AcheronMobile), not in this repository — it consumes `/acheron` over HTTP like any other client. | Operational |
 
 ## Quick start
 
@@ -302,7 +302,7 @@ Aegis combines AI-generated awareness content with current alerts from the **INC
 | `DELETE` | `/acheron/storables` | Delete a Storable by `internalId` |
 
 > [!NOTE]
-> Encryption happens **client-side** (AcheronCore — see [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile) for the Android implementation). The server stores only ciphertext. Internal IDs are deterministic SHA-256 hex hashes of encrypted content — collision-free across offline devices.
+> Encryption happens **client-side**, in [AcheronCoreWeb](https://github.com/ProjectEllysia/AcheronCoreWeb) for the browser and [AcheronCore](https://github.com/ProjectEllysia/AcheronCore) for Android. The server stores only ciphertext. Internal IDs are deterministic SHA-256 hex hashes of encrypted content — collision-free across offline devices.
 
 > [!IMPORTANT]
 > **Optimistic concurrency.** `Vault.revision` is bumped on every content mutation and exposed as `ETag` / `revision`. Send it back as `If-Match: "N"` on writes: if it no longer matches, the write is rejected with `409 vault_revision_mismatch` (body carries `currentRevision`) and **nothing is mutated** — a client holding a stale snapshot can no longer wipe another device's edits. `If-Match` is mandatory on the destructive `POST /acheron/vault` replace; on the granular endpoints it is optional for now (transition window for already-deployed apps). Distinct from `metadataVersion`, which only tracks master-password rotation.
@@ -438,7 +438,7 @@ POSTGRES_TEST_URL=postgresql+psycopg2://ellysia:ellysia@localhost:55432/ellysia_
 
 Run it in its **own** pytest invocation. The fast suite's SQLite shim rewrites `JSONB` to generic `JSON` in the shared model metadata, so a mixed run would build the wrong schema; the fixtures detect that and skip with an explanatory message rather than assert against an imitation.
 
-CI runs two workflows on push/PR to `main` and the `vX.Y` release branches: `.github/workflows/tests.yml` (`python -m pytest -q -m "not oracle"`, on SQLite) and `.github/workflows/tests-postgres.yml` (`python -m pytest -q -m postgres`, with ephemeral PostgreSQL and Redis services). They are separate jobs on purpose — the service matrix must not slow down the cycle that runs on every push. Some tests use `xfail(strict=True)` to document real known bugs — when a bug is fixed the test XPASSes and the marker must be removed. A green push to `main` (a merged pull request) additionally triggers the automatic production deploy — see [Continuous deployment](#continuous-deployment-cicd).
+CI runs two workflows on push/PR to `main`, the `vX.Y` release branches and the `proyecto/**` integration branches: `.github/workflows/tests.yml` (two jobs — `tests`, running `python -m pytest -q -m "not oracle"` on SQLite, and `SPA suites`, running the SPA's node suites) and `.github/workflows/tests-postgres.yml` (`python -m pytest -q -m postgres`, with ephemeral PostgreSQL and Redis services). They are separate jobs on purpose — the service matrix must not slow down the cycle that runs on every push. Some tests use `xfail(strict=True)` to document real known bugs — when a bug is fixed the test XPASSes and the marker must be removed. A green push to `main` (a merged pull request) additionally triggers the automatic production deploy — see [Continuous deployment](#continuous-deployment-cicd).
 
 A third workflow, `.github/workflows/lybra-bench.yml`, runs the `oracle` bench on a schedule (03:15 UTC) and on demand. It is separate because it brings up around twenty Docker containers and takes tens of minutes, which no per-push job can afford. Its deliverable is the numbers, not the green tick: it publishes the Lybra engine's Phase R precision, its agreement with Nmap and its false-positive rate to the run summary, and uploads the full log as an artifact.
 
@@ -446,17 +446,44 @@ A third workflow, `.github/workflows/lybra-bench.yml`, runs the `oracle` bench o
 
 ```bash
 cd web/app
-npm run test:acheron      # crypto interop + CRUD + sync tests for the Acheron vault client
+npm test                  # all nine suites — this is what CI runs
+
+npm run test:acheron      # schema/label correspondence + crypto interop + CRUD + sync for the Acheron vault client
 npm run test:iris         # file-intake limits (the size threshold comes from GET /iris/capabilities)
 npm run test:hygeia       # metric-formatting tests for the Hygeia dashboard
 npm run test:polling      # usePolling composable tests
+npm run test:element-width # useElementWidth composable tests
+npm run test:toast        # toast-store tests
 npm run test:quiz         # aegis quiz-shuffle permutation tests
 npm run test:logs         # gzip log-payload decoding tests
+npm run test:themis       # scan-window tests
 ```
+
+The suites run on plain `node` — no framework, no browser — and exit non-zero on failure. They run in CI as the `SPA suites` job of `tests.yml`, which installs with **`pnpm install --frozen-lockfile`, exactly as `web/Dockerfile` does in production**, and then builds with Vite.
+
+That match is deliberate and was learnt the hard way. CI used to install with `npm install` and no lockfile while production built with pnpm and a frozen one: two resolvers, two possible dependency trees, and a green CI that did not mean the image would build. It did not — a dependency change left `pnpm-lock.yaml` stale and the production build would have aborted with `ERR_PNPM_OUTDATED_LOCKFILE`. Now a `package.json` that moves without its lockfile turns CI red instead of surfacing at deploy time.
+
+`test:acheron` no longer covers the crypto: that engine left this repository. It now lives in
+[AcheronCoreWeb](https://github.com/ProjectEllysia/AcheronCoreWeb), which the SPA consumes as `@projectellysia/acheron-core-web` at an exact
+pinned version, and its own CI runs the interop suites against the Java implementation in both
+directions. Installing it needs a token with `read:packages` in `NODE_AUTH_TOKEN`; CI uses the
+workflow's own `GITHUB_TOKEN`, which works because the package grants this repository read access.
+
+What stays here is the half only the SPA owns: `src/acheron/storableLabels.js` holds the Spanish
+labels and form hints, `storableTypes.js` composes them with the schema the package provides, and
+`test:acheron` checks the two describe the same fields in both directions.
+
+The storable catalogue itself is a contract shared by four implementations in four languages — this
+API's `storable_specs.py`, the package, the Android app and the Java engine — and the exact field
+keys *are* the vault JSON. [AcheronSchema](https://github.com/ProjectEllysia/AcheronSchema) holds it as a language-neutral `schema.json`, and
+each client verifies its own copy against it; on the API side that is
+`API/tests/unit/test_acheron_schema_contract.py`. The field *order* is deliberately not part of the
+contract — the vault JSON is an object keyed by field name, not a tuple — so every client compares
+sets.
 
 ## Continuous deployment (CI/CD)
 
-Every merge to `main` is deployed automatically to the production machine, **after** the CI tests of the merged commit pass. The pipeline lives in `.github/workflows/deploy.yml` and chains to `.github/workflows/tests.yml` via the `workflow_run` trigger: when the "API Tests" workflow completes with `success` on a push to `main`, the deploy job connects by SSH to the target host and runs:
+Every merge to `main` is deployed automatically to the production machine, **after** the CI tests of the merged commit pass. The pipeline lives in `.github/workflows/deploy.yml` and chains to `.github/workflows/tests.yml` via the `workflow_run` trigger: when the "Tests" workflow completes with `success` on a push to `main`, the deploy job connects by SSH to the target host and runs:
 
 ```bash
 cd <checkout> && \
@@ -468,15 +495,16 @@ docker image prune -f
 
 Then it polls the public health endpoint `https://<host>/system/say-hello` as a smoke test and fails the run if the API does not answer within a few minutes.
 
-> The deploy is strictly *after* the tests: the `workflow_run` trigger fires on the `main`-push run of "API Tests", and its `branches: [main]` filter excludes the PR-triggered runs (there `head_branch` is the source branch). If the tests fail, the deploy is skipped. To deploy without waiting for CI, change the trigger to `push: branches: [main]`; nothing else needs to change.
+> The deploy is strictly *after* the tests: the `workflow_run` trigger fires on the `main`-push run of "Tests", and its `branches: [main]` filter excludes the PR-triggered runs (there `head_branch` is the source branch). If the tests fail, the deploy is skipped. To deploy without waiting for CI, change the trigger to `push: branches: [main]`; nothing else needs to change.
 
 ### One-time setup
 
 Before the first automatic deploy works:
 
 1. **On the server** — a checkout of this repo in a fixed path (e.g. `~/ellysia`), a root `.env` with the real credentials (start from `.env.example`), and a SSH user that can run Docker without `sudo` (`usermod -aG docker <user>`). The API applies Alembic migrations automatically on startup, and the existing volumes (`ellysia_caddy_data` included) are reused, so a redeploy never re-issues certificates or drops data.
-2. **First boot is manual** — a fresh server needs `CREATE_DATABASE=True` in the server's `.env` for the *very first* `docker compose --profile container up -d --build` (it seeds the root user, its ABAC attributes and the awareness topics — it is **destructive**, set it back to `False` afterwards). From then on, deploys are fully automatic.
-3. **The checkout that deploy targets** — pin `DEPLOY_PATH` to the checkout the running containers came from:
+2. **A `NODE_AUTH_TOKEN` in the server's root `.env`** — the SPA image installs `@projectellysia/acheron-core-web` from GitHub Packages at build time, and that package is private. Use a token with `read:packages`. Without it, `pnpm install` fails with a 403 and the web image never builds, so the deploy dies before the containers start. Docker receives it as a **BuildKit secret**, never as an `ARG`: an `ARG` is baked into the image metadata and `docker history` shows it.
+3. **First boot is manual** — a fresh server needs `CREATE_DATABASE=True` in the server's `.env` for the *very first* `docker compose --profile container up -d --build` (it seeds the root user, its ABAC attributes and the awareness topics — it is **destructive**, set it back to `False` afterwards). From then on, deploys are fully automatic.
+4. **The checkout that deploy targets** — pin `DEPLOY_PATH` to the checkout the running containers came from:
    ```bash
    docker inspect Ellysia-Web --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
    ```
@@ -506,7 +534,7 @@ Before the first automatic deploy works:
 - **`git reset --hard origin/main`** makes the tracked files of the checkout exactly match `main`; any local modification to tracked files is discarded. The `.env` is gitignored and never touched.
 - **Rollback:** push a revert to `main` (or restore a previous commit) and the next green push deploys it. Data lives in the volumes, only the images are rebuilt.
 - **Manual deploy:** the workflow also has a manual trigger (Actions → "Deploy to production" → Run workflow) that deploys `main` on demand without waiting for a push — useful for a rollback or to re-run after fixing the server.
-- **Renaming the "API Tests" workflow breaks the trigger:** `deploy.yml` references it by name (`workflows: ["API Tests"]`).
+- **Renaming the "Tests" workflow breaks the trigger:** `deploy.yml` references it by name (`workflows: ["Tests"]`), and a mismatch fails silently — the tests go green and no deploy happens. The trigger line carries the same warning inline.
 
 ## Database Migrations
 
@@ -724,7 +752,7 @@ IRIS_MAILBOX_ENCRYPTION_KEY=... # Fernet key that encrypts stored OAuth refresh 
 | Containerization | Docker + Docker Compose |
 
 > [!NOTE]
-> The Android client (Kotlin + Jetpack Compose, Retrofit + OkHttp) and the AcheronCore engine it embeds now live in [SeQ-AcheronMobile](https://github.com/gamustea/SeQ-AcheronMobile).
+> The Android client (Kotlin + Jetpack Compose, Retrofit + OkHttp) lives in [AcheronMobile](https://github.com/ProjectEllysia/AcheronMobile), and the crypto engine it embeds in [AcheronCore](https://github.com/ProjectEllysia/AcheronCore).
 
 ## Configuration
 

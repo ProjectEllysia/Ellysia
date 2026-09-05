@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:acheron": "node test/acheron.interop.test.mjs && node test/acheron.crud.test.mjs && node test/acheron.sync.test.mjs",
+    "test": "npm run test:acheron && npm run test:hygeia && npm run test:polling && npm run test:element-width && npm run test:toast && npm run test:quiz && npm run test:logs && npm run test:iris && npm run test:themis",
+    "test:acheron": "node test/acheron.schema.test.mjs",
     "test:hygeia": "node test/hygeia.format.test.mjs && node test/hygeia.chartMath.test.mjs",
     "test:polling": "node test/usePolling.test.mjs",
     "test:element-width": "node test/useElementWidth.test.mjs",
@@ -18,7 +19,7 @@
     "test:themis": "node test/themis.scanWindow.test.mjs"
   },
   "dependencies": {
-    "hash-wasm": "^4.12.0",
+    "@projectellysia/acheron-core-web": "2.0.0",
     "pinia": "^3.0.4",
     "qrcode": "^1.5.4",
     "vue": "^3.5.34",
