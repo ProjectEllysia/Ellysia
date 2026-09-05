@@ -7,7 +7,9 @@ Vue 3 + Vite single-page app (Pinia + Vue Router). See the root [`../../CLAUDE.m
 npm install
 npm run dev            # dev server on :80; proxies /oauth,/users,/system,/plans,/organizations,/themis,/aegis,/iris,/acheron,/hygeia → Flask :5000 (see vite.config.js)
 npm run build
-npm run test:acheron   # crypto interop + CRUD tests for the Acheron vault client (node, in test/)
+
+npm test               # all nine SPA suites; this is what CI runs
+npm run test:acheron   # crypto interop + CRUD + sync for the Acheron vault client (node, in test/)
 ```
 
 ## Layout (`src/`)
