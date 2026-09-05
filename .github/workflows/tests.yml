@@ -57,11 +57,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: web/app/package-lock.json
 
+      # package-lock.json esta en .gitignore, asi que no hay lockfile que
+      # cachear ni con el que hacer `npm ci`.
       - name: Install dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       # Las nueve suites del SPA corren con node a secas y salen con codigo
       # distinto de cero al fallar. Entre ellas va test:acheron, que verifica
