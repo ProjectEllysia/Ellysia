@@ -15,7 +15,12 @@ const MAP = {
   done: ['done', 'Completado'],
   finished: ['done', 'Completado'],
   pending: ['pending', 'Pendiente'],
-  error: ['error', 'Error'],
+  // El backend escribe "failed" (ScanStatus.FAILED), nunca "error": la entrada
+  // que había aquí no la alcanzaba ningún escaneo, y la que hacía falta no
+  // estaba. Sin ella el fallback pintaba el peor estado posible en gris —el
+  // color de "aún no ha pasado nada"— y con la cadena cruda del backend, que
+  // el estilo pone en mayúsculas: de ahí el "FAILED" gris.
+  failed: ['error', 'Fallido'],
   cancelled: ['cancelled', 'Cancelado'],
 }
 const classMap = computed(() => (MAP[(props.status ?? '').toLowerCase()] ?? ['pending'])[0])

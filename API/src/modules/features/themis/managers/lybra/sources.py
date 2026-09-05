@@ -28,7 +28,8 @@ from typing import Callable, List, Optional
 
 import src.modules.system.config_reading as CR
 from ...repositories import ScanRepository
-from ...exceptions import TargetNotAuthorizedError
+from ...exceptions import ScanFailedError, TargetNotAuthorizedError
+from ...model import ScanFailureReason
 from ...lybra import PortSweep, Service, services_from_discovered_ports
 from ..authorized_target import AuthorizedTargetManager
 from ..scan import ScanManager
@@ -113,16 +114,19 @@ class ServiceSource(ABC):
         scan_repo: ScanRepository,
         probes: DiscoveryProbes,
         target: Optional[str]
-    ) -> Optional[ResolvedServices]:
+    ) -> ResolvedServices:
         """Obtain this mode's services inside the caller's transaction.
 
         ``probes`` bundles the network-probing capabilities only the
         self-discovery mode uses (E1) — the payload mode ignores it.
 
-        Returns ``None`` for an unrecoverable failure (host unreachable, probe
-        blew up) — the caller marks the scan FAILED and stops. This is
-        distinct from a resolution that succeeds with zero services, which is
-        genuine evidence, not a failure (see ``SelfDiscovery.resolve``).
+        Raises ``ScanFailedError`` para un fallo irrecuperable (host
+        inalcanzable, sonda reventada), con el código que dice cuál de los dos
+        fue: el llamante marca el escaneo FAILED y lo guarda. Hasta ahora esto
+        era un ``None`` de vuelta, el mismo para ambos casos, y por eso la
+        interfaz no podía decir más que «falló». Un fallo es además distinto de
+        una resolución que sale con cero servicios, que es evidencia legítima y
+        no un error (ver ``SelfDiscovery.resolve_services``).
 
         Y distinto también de una resolución **parcial**
         (``ResolvedServices.is_partial``), que sí trae servicios ciertos pero
@@ -205,7 +209,7 @@ class SelfDiscovery(ServiceSource):
         scan_repo: ScanRepository,
         probes: DiscoveryProbes,
         target: Optional[str]
-    ) -> Optional[ResolvedServices]:
+    ) -> ResolvedServices:
         discovered_ports: list = []
         udp_ports: list = []
         is_partial = False
@@ -216,12 +220,18 @@ class SelfDiscovery(ServiceSource):
                 timeout=CR.host_reachability_check().timeout,
             ):
                 logger.warning(f"Host '{target}' inalcanzable.")
-                return None
+                raise ScanFailedError(
+                    ScanFailureReason.HOST_UNREACHABLE,
+                    f"Host '{target}' inalcanzable.",
+                )
 
             sweep = probes.discover_ports(target, self.ports_to_discover)
             if sweep is None:
                 logger.error("Descubrimiento de puertos fallido para %s", target)
-                return None
+                raise ScanFailedError(
+                    ScanFailureReason.PORT_DISCOVERY_FAILED,
+                    f"Descubrimiento de puertos fallido para {target}",
+                )
             discovered_ports = list(sweep.open_ports)
             is_partial = sweep.was_truncated
             # UDP (Fase N/Ronda 1, roadmap §6.3): sonda curada aparte, nunca a

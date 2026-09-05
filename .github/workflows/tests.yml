@@ -1,10 +1,10 @@
-name: API Tests
+name: Tests
 
 on:
   push:
-    branches: [main, 'v[0-9]+.[0-9]+']
+    branches: [main, 'v[0-9]+.[0-9]+', 'proyecto/**']
   pull_request:
-    branches: [main, 'v[0-9]+.[0-9]+']
+    branches: [main, 'v[0-9]+.[0-9]+', 'proyecto/**']
 
 jobs:
   tests:
@@ -42,3 +42,56 @@ jobs:
 
       - name: Run test suite
         run: python -m pytest -q -m "not oracle"
+
+  spa:
+    name: SPA suites
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://npm.pkg.github.com
+          scope: '@projectellysia'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.10.0
+
+      # Se instala con pnpm y el lockfile CONGELADO porque es exactamente lo
+      # que hace el build de produccion (web/Dockerfile). Antes la CI usaba
+      # `npm install` sin lockfile: dos resolutores distintos, dos arboles de
+      # dependencias posibles, y una CI en verde que no garantizaba que la
+      # imagen se construyera. De hecho no la garantizo -- el lockfile se
+      # quedo desincronizado al cambiar una dependencia y solo se descubrio
+      # mirando el Dockerfile a mano.
+      #
+      # @projectellysia/acheron-core-web es privado, asi que la instalacion
+      # necesita credencial; el GITHUB_TOKEN del workflow sirve porque el
+      # paquete concede acceso de lectura a este repositorio.
+      #
+      # --trust-lockfile ancla la verificacion de cadena de suministro en el
+      # lockfile en vez de re-aplicarla entrada por entrada. pnpm rechaza por
+      # defecto los paquetes publicados en las ultimas 24 horas --defensa real:
+      # si roban la cuenta de un mantenedor, esa ventana da tiempo a retirar la
+      # version maliciosa-- y eso choca con consumir un paquete propio recien
+      # publicado. La politica NO se desactiva: sigue aplicandose al resolver
+      # dependencias nuevas, que es cuando entran. Aqui el lockfile ya esta
+      # commiteado y revisado, que es el caso que la propia opcion documenta.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --trust-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run SPA suites
+        run: pnpm test
+
+      - name: Build the SPA
+        run: pnpm build

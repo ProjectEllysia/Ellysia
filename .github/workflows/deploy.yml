@@ -1,6 +1,6 @@
 # Despliegue automático a producción.
 #
-# Se dispara cuando el workflow "API Tests" (tests.yml) termina con éxito tras
+# Se dispara cuando el workflow "Tests" (tests.yml) termina con éxito tras
 # un push a `main` — es decir, cuando un pull request se ha aceptado y los
 # tests del commit mergeado han pasado. Decisiones de diseño, con su porqué:
 #
@@ -42,7 +42,10 @@ name: Deploy to production
 
 on:
   workflow_run:
-    workflows: ["API Tests"]
+    # OJO: se referencia por NOMBRE exacto, el del `name:` de tests.yml.
+    # Renombrar aquel workflow sin tocar esta linea deja el despliegue
+    # automatico sin disparador, en silencio y sin ningun rojo en CI.
+    workflows: ["Tests"]
     types: [completed]
     branches: [main]
   workflow_dispatch:

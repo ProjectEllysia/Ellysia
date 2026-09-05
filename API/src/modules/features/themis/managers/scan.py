@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 import src.modules.system.config_reading as CR
 
 from src.modules.shared._exceptions import EllysiaException, ValidationError
-from src.modules.system.taskqueue import TaskQueue, TaskTrackingMixin
+from src.modules.system.taskqueue import JobDeadlineExceeded, TaskQueue, TaskTrackingMixin
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive
@@ -19,6 +19,7 @@ from ..repositories import (
 )
 from ..model import (
     Scan,
+    ScanFailureReason,
     ScanStatus,
     ScanType,
 )
@@ -457,7 +458,7 @@ class ScanManager(TaskTrackingMixin, ABC):
                 external_id = f"{cls.EXTERNAL_ID_PREFIX}{scan.id}"
                 if task_queue.is_recoverable(external_id, cls.TASK_CATEGORY):
                     continue
-                repo.update_status(scan, ScanStatus.FAILED)
+                repo.update_status(scan, ScanStatus.FAILED, ScanFailureReason.ORPHANED)
                 fixed += 1
         return fixed
 
@@ -510,7 +511,8 @@ class ScanManager(TaskTrackingMixin, ABC):
                         f"Host '{host}' inalcanzable en puerto {reachable_port}. "
                         f"Marcando escaneo {scan_id} como FAILED"
                     )
-                    thread_manager.update_scan_status(scan_id, ScanStatus.FAILED)
+                    thread_manager.update_scan_status(
+                        scan_id, ScanStatus.FAILED, ScanFailureReason.HOST_UNREACHABLE)
                     return
 
             task.scan()
@@ -526,7 +528,8 @@ class ScanManager(TaskTrackingMixin, ABC):
                     thread_manager.update_scan_status(scan_id, ScanStatus.CANCELLED)
                 else:
                     logger.error(f"Escaneo {scan_id} falló. Estado: {task.status}")
-                    thread_manager.update_scan_status(scan_id, ScanStatus.FAILED)
+                    thread_manager.update_scan_status(
+                        scan_id, ScanStatus.FAILED, ScanFailureReason.NO_RESULTS)
                 return
 
             logger.info(f"Procesando resultados de escaneo {scan_id}")
@@ -555,13 +558,28 @@ class ScanManager(TaskTrackingMixin, ABC):
                 )
             thread_manager._log_to_csv(scan_id, fresh_scan, task)
 
+        # El mismo plazo agotado que recoge ``LybraEngineManager._run_lybra``,
+        # aquí para los tres escáneres que sí lanzan un subproceso. Hereda de
+        # ``BaseException`` (#395) para que no lo capture ningún ``except
+        # Exception``, y el precio era que la fila se quedaba en `running`
+        # eternamente cuando la cola mataba el trabajo. Se cierra la fila y se
+        # vuelve a lanzar, para que RQ siga viendo un trabajo fallido.
+        except JobDeadlineExceeded:
+            logger.error(
+                "Escaneo %s agotó su plazo y la cola lo terminó. El trabajo pedido "
+                "no cabía en el tiempo pedido: acota el objetivo o sube el plazo.",
+                scan_id)
+            thread_manager.update_scan_status(
+                scan_id, ScanStatus.FAILED, ScanFailureReason.TIMEOUT)
+            raise
         except Exception as e:
             if task.status == TaskStatus.CANCELLED:
                 logger.info(f"Escaneo {scan_id} cancelado por el usuario")
                 thread_manager.update_scan_status(scan_id, ScanStatus.CANCELLED)
             else:
                 logger.error(f"Error en escaneo {scan_id}: {e}", exc_info=True)
-                thread_manager.update_scan_status(scan_id, ScanStatus.FAILED)
+                thread_manager.update_scan_status(
+                    scan_id, ScanStatus.FAILED, ScanFailureReason.INTERNAL_ERROR)
             thread_manager._log_to_csv(scan_id, fresh_scan, task)
 
     def _process_results(self, processor, results, target: str):
@@ -577,20 +595,29 @@ class ScanManager(TaskTrackingMixin, ABC):
         """
         return processor.process(results)
 
-    def update_scan_status(self, scan_id: int, status: ScanStatus) -> None:
+    def update_scan_status(
+        self,
+        scan_id: int,
+        status: ScanStatus,
+        failure_reason: Optional[ScanFailureReason] = None,
+    ) -> None:
         """
         Persist a status change for a scan, ignoring errors (best-effort).
 
         Args:
             scan_id: Primary key of the scan.
             status:  New ScanStatus value.
+            failure_reason: Por qué falló, cuando ``status`` es FAILED. Sin él,
+                la interfaz sólo puede decir «falló» — que es la misma frase
+                para un host apagado y para un error del motor, y el usuario no
+                sabe si el problema es suyo o del producto.
         """
         try:
             with UnitOfWork() as uow:
                 repo = ScanRepository(uow)
                 scan = repo.get_by_id(scan_id)
                 if scan:
-                    repo.update_status(scan, status)
+                    repo.update_status(scan, status, failure_reason)
         except (OSError, RuntimeError) as update_err:
             logger.error(f"Error actualizando estado de escaneo {scan_id}: {update_err}", exc_info=True)
 

@@ -60,6 +60,7 @@ from .model import (
     ProgramedScan,
     Scan,
     ScanFolder,
+    ScanFailureReason,
     ScanStatus,
     ScanType,
     ThemisDocument,
@@ -502,8 +503,24 @@ class ScanRepository(BaseRepository[Scan]):
     # STATUS TRANSITIONS
     # =========================================================================
 
-    def update_status(self, scan: Scan, status: ScanStatus) -> Scan:
+    def update_status(
+        self,
+        scan: Scan,
+        status: ScanStatus,
+        failure_reason: Optional[ScanFailureReason] = None,
+    ) -> Scan:
+        """Persiste el estado y, cuando es un fallo, por qué falló.
+
+        El motivo sólo se escribe con ``status`` FAILED: en cualquier otra
+        transición sería un dato que contradice al estado. Y se limpia al salir
+        de FAILED —un escaneo relanzado no arrastra el motivo del intento
+        anterior— porque la única lectura del campo es «por qué falló este
+        escaneo», y un residuo la respondería con una mentira.
+        """
         scan.status = status.value # type: ignore
+        scan.failure_reason = (  # type: ignore
+            failure_reason.value if status is ScanStatus.FAILED and failure_reason else None
+        )
 
         terminal = {ScanStatus.FINISHED, ScanStatus.FAILED, ScanStatus.CANCELLED}
         if status in terminal and scan.finished_at is None:
