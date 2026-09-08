@@ -100,6 +100,10 @@ class AssetSchema(Schema):
     lastSeenAt = UTCDateTime(allow_none=True)
     uptimeSec = fields.Integer(allow_none=True)
     agentVersion = fields.String(allow_none=True)
+    # Aviso, no validación: null significa "no se puede saber" (nunca ha
+    # reportado versión, o su versión / el suelo configurado no encajan en
+    # el formato X.Y.Z...), y no se pinta como si fuera un "no" (services/agent_freshness.py).
+    agentOutdated = fields.Boolean(allow_none=True, load_default=None)
     createdAt = UTCDateTime()
 
 

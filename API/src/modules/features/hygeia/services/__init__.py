@@ -9,6 +9,7 @@ necesitan tocar ``flask.request`` — mismo precedente que
 """
 
 from .aggregation import denormalize
+from .agent_freshness import is_agent_outdated
 from .detection import AnomalyChange, DetectionOutcome, evaluate
 from .enrollment import agent_key_id_from_request, generate_agent_key, require_agent_key
 from .ingest_guard import (
@@ -44,6 +45,7 @@ __all__ = [
     "AnomalyChange",
     "DetectionOutcome",
     "denormalize",
+    "is_agent_outdated",
     "PowerAverage",
     "EnergyCost",
     "PeriodClassification",
