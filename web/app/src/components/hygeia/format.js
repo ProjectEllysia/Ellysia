@@ -136,27 +136,46 @@ export function fmtWatts(watts) {
 }
 
 /**
- * Clasifica una lectura de potencia en sus tres estados posibles (P20).
+ * Clasifica una lectura de potencia en sus cuatro estados posibles (P20, P29).
  *
- * La distinción se hace siempre sobre `estimated`, nunca sobre el contenido
- * de `source`: el servidor acepta cualquier cadena ahí para que el agente
- * pueda añadir fuentes nuevas sin coordinación, así que ramificar por su
- * valor se rompería con la primera fuente nueva.
+ * La distinción entre medición y estimación se hace siempre sobre
+ * `estimated`, nunca sobre el contenido de `source`: el servidor acepta
+ * cualquier cadena ahí para que el agente pueda añadir fuentes nuevas sin
+ * coordinación, así que ramificar por su valor se rompería con la primera
+ * fuente nueva.
+ *
+ * Sin potencia, el cuarto estado (`'virtual'`) distingue "esta máquina es
+ * un invitado, la mide su host" de "este equipo no tiene sensores": el
+ * registro de energía del procesador no se virtualiza, así que la ausencia
+ * de dato en un invitado no es un defecto de hardware, es la única
+ * respuesta posible. Se ramifica exactamente igual que `source`: solo el
+ * literal `"guest"` activa el mensaje, cualquier otro valor (`"host"`,
+ * ausente, o una cadena que el servidor no reconozca) cae en el genérico
+ * `'unavailable'` — nunca se le exige a `virtualizationRole` encajar en una
+ * lista cerrada.
  *
  * @param {{watts: number|null, estimated: boolean|null, source: string|null}|null} power
  *   Bloque de potencia tal como lo sirve `metrics.power` del último heartbeat.
- * @returns {{state: 'measured'|'estimated'|'unavailable', watts: number|null,
- *   estimated: boolean|null, source: string|null}}
+ * @param {{role: string|null, system: string|null}} [virtualization] - Identidad
+ *   de virtualización del activo (`asset.virtualizationRole`/`virtualizationSystem`).
+ * @returns {{state: 'measured'|'estimated'|'unavailable'|'virtual', watts: number|null,
+ *   estimated: boolean|null, source: string|null, virtualizationSystem: string|null}}
  */
-export function classifyPower(power) {
+export function classifyPower(power, virtualization = null) {
   if (!power || power.watts === null || power.watts === undefined) {
-    return { state: 'unavailable', watts: null, estimated: null, source: null }
+    const isGuest = virtualization?.role === 'guest'
+    return {
+      state: isGuest ? 'virtual' : 'unavailable',
+      watts: null, estimated: null, source: null,
+      virtualizationSystem: isGuest ? (virtualization?.system ?? null) : null,
+    }
   }
   return {
     state: power.estimated ? 'estimated' : 'measured',
     watts: power.watts,
     estimated: power.estimated ?? null,
     source: power.source ?? null,
+    virtualizationSystem: null,
   }
 }
 

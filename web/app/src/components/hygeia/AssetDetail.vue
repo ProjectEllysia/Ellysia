@@ -110,6 +110,14 @@
             Consumo no disponible — este equipo no expone sensores de potencia compatibles.
           </p>
 
+          <!-- Un invitado no tiene registro de energía del procesador que
+               leer: no es un defecto de su hardware, así que el mensaje no
+               es el genérico de "sin sensores" (§P29). -->
+          <p v-else-if="powerState.state === 'virtual'" class="state-msg">
+            Consumo no disponible — esta es una máquina virtual{{ powerState.virtualizationSystem ? ` (${powerState.virtualizationSystem})` : '' }}.
+            El consumo eléctrico lo mide el equipo físico que la hospeda.
+          </p>
+
           <template v-else>
             <div class="power-reading">
               <span
@@ -538,7 +546,10 @@ const disks = computed(() =>
 const nets = computed(() => m.value?.network ?? [])
 
 /* ── Consumo eléctrico (Fase 3, P20/P25/P26) ── */
-const powerState = computed(() => classifyPower(m.value?.power ?? null))
+const powerState = computed(() => classifyPower(m.value?.power ?? null, {
+  role: props.asset?.virtualizationRole ?? null,
+  system: props.asset?.virtualizationSystem ?? null,
+}))
 const powerReading = computed(() => fmtWatts(powerState.value.watts))
 
 /** Etiquetas de cada bloque del resumen, en el orden en que se presentan. */
