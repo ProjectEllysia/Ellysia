@@ -114,23 +114,30 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
         )
         return items, total
 
-    def exists_by_source(self, connection_id: int, source_message_uid: str) -> bool:
-        """Si ya existe un análisis para este (connection_id, source_message_uid).
+    def get_by_source(self, connection_id: int, source_message_uid: str) -> Optional[IrisAnalysis]:
+        """El análisis ya aceptado para este (connection_id, source_message_uid),
+        si existe.
 
-        Usado por la cola de checkpoint del sync de buzón (B01) para
-        reconocer un mensaje ya aceptado en un intento anterior -- p.ej. tras
-        un fallo entre el commit de ``IrisAnalysis`` y el borrado de su
-        entrada en ``IrisMailboxInbox`` -- de forma que un reintento nunca
+        Usado tanto por la cola de checkpoint del sync de buzón (B01, que
+        solo necesita saber si existe) como por ``IrisManager.analyze()``
+        (B09, que necesita el id para devolverlo sin cobrar cuota de nuevo)
+        -- reconocer un mensaje ya aceptado en un intento anterior, p.ej.
+        tras un fallo entre el commit de ``IrisAnalysis`` y el borrado de su
+        entrada en ``IrisMailboxInbox``, de forma que un reintento nunca
         confunda la ``UniqueConstraint`` de idempotencia con un fallo real.
         """
         return (
-            self._session.query(IrisAnalysis.id)
+            self._session.query(IrisAnalysis)
             .filter(
                 IrisAnalysis.connection_id == connection_id,
                 IrisAnalysis.source_message_uid == source_message_uid,
             )
             .first()
-        ) is not None
+        )
+
+    def exists_by_source(self, connection_id: int, source_message_uid: str) -> bool:
+        """Si ya existe un análisis para este (connection_id, source_message_uid)."""
+        return self.get_by_source(connection_id, source_message_uid) is not None
 
 
 class IrisMailboxConnectionRepository(BaseRepository[IrisMailboxConnection]):
