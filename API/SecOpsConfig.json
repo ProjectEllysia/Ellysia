@@ -283,6 +283,7 @@
       "maxMessageBytes": 10485760,
       "maxConnectionsPerUser": 5,
       "maxIngestedPerDay": 200,
+      "maxInboxAttempts": 5,
       "pollIntervalMinutes": 5,
       "prompts": {
         "summary": {

@@ -16,7 +16,9 @@ from sqlalchemy.orm import joinedload
 from src.modules.infrastructure import BaseRepository, DocumentRepository
 from src.modules.shared import utcnow_naive
 
-from .model import IrisAnalysis, IrisMailboxConnection, IrisRuleResult, IrisDocument
+from .model import (
+    IrisAnalysis, IrisMailboxConnection, IrisMailboxInbox, IrisRuleResult, IrisDocument,
+)
 
 
 class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
@@ -112,6 +114,24 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
         )
         return items, total
 
+    def exists_by_source(self, connection_id: int, source_message_uid: str) -> bool:
+        """Si ya existe un análisis para este (connection_id, source_message_uid).
+
+        Usado por la cola de checkpoint del sync de buzón (B01) para
+        reconocer un mensaje ya aceptado en un intento anterior -- p.ej. tras
+        un fallo entre el commit de ``IrisAnalysis`` y el borrado de su
+        entrada en ``IrisMailboxInbox`` -- de forma que un reintento nunca
+        confunda la ``UniqueConstraint`` de idempotencia con un fallo real.
+        """
+        return (
+            self._session.query(IrisAnalysis.id)
+            .filter(
+                IrisAnalysis.connection_id == connection_id,
+                IrisAnalysis.source_message_uid == source_message_uid,
+            )
+            .first()
+        ) is not None
+
 
 class IrisMailboxConnectionRepository(BaseRepository[IrisMailboxConnection]):
     """Data-access layer for IrisMailboxConnection records."""
@@ -166,6 +186,59 @@ class IrisMailboxConnectionRepository(BaseRepository[IrisMailboxConnection]):
             )
             .all()
         )
+
+
+class IrisMailboxInboxRepository(BaseRepository[IrisMailboxInbox]):
+    """Data-access layer for IrisMailboxInbox -- la cola de checkpoint por
+    mensaje que B01 introduce delante del cursor del proveedor."""
+
+    _MODEL = IrisMailboxInbox
+
+    def get_pending(self, connection_id: int) -> List[IrisMailboxInbox]:
+        """Referencias sin resolver de una conexión, en orden de llegada
+        (FIFO) -- el orden importa porque es el mismo en que el proveedor
+        las devolvió."""
+        return (
+            self._session.query(IrisMailboxInbox)
+            .filter(
+                IrisMailboxInbox.connection_id == connection_id,
+                IrisMailboxInbox.status == "pending",
+            )
+            .order_by(IrisMailboxInbox.id.asc())
+            .all()
+        )
+
+    def has_pending(self, connection_id: int) -> bool:
+        """Si quedan referencias sin resolver.
+
+        Mientras esto sea True, ``_finish_sync`` no puede confirmar el
+        cursor del proveedor (B01) -- avanzarlo perdería esas referencias
+        para siempre, porque el proveedor no las vuelve a listar.
+        """
+        return (
+            self._session.query(IrisMailboxInbox.id)
+            .filter(
+                IrisMailboxInbox.connection_id == connection_id,
+                IrisMailboxInbox.status == "pending",
+            )
+            .first()
+        ) is not None
+
+    def get_existing_provider_ids(self, connection_id: int, provider_message_ids: List[str]) -> set:
+        """De una lista de ids candidatos, cuáles ya están en la cola
+        (pendientes o ya marcados ``dead``) -- evita volver a encolar una
+        fila que un sync anterior ya conoce."""
+        if not provider_message_ids:
+            return set()
+        rows = (
+            self._session.query(IrisMailboxInbox.provider_message_id)
+            .filter(
+                IrisMailboxInbox.connection_id == connection_id,
+                IrisMailboxInbox.provider_message_id.in_(provider_message_ids),
+            )
+            .all()
+        )
+        return {row[0] for row in rows}
 
 
 class IrisRuleResultRepository(BaseRepository[IrisRuleResult]):

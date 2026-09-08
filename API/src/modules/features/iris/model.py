@@ -179,6 +179,8 @@ class IrisMailboxConnection(Base):
         created_at: When the connection was established.
         user: SQLAlchemy relationship to User.
         analyses: Analyses ingested through this connection.
+        inbox_entries: Cola de checkpoint de mensajes descubiertos y aún no
+                 resueltos (ver ``IrisMailboxInbox`` / B01).
     """
     __tablename__ = "IrisMailboxConnection"
 
@@ -205,10 +207,65 @@ class IrisMailboxConnection(Base):
 
     user = relationship("User")
     analyses = relationship("IrisAnalysis", back_populates="connection")
+    inbox_entries = relationship(
+        "IrisMailboxInbox", back_populates="connection",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         UniqueConstraint("user_id", "provider", "account_email",
                           name="uq_iris_mailbox_connection_user_provider_email"),
+    )
+
+
+class IrisMailboxInbox(Base):
+    """Cola de checkpoint por mensaje entre el listado del proveedor y su ingesta.
+
+    ``IrisMailboxManager._sync_connection`` confirmaba el cursor del
+    proveedor tanto si el lote se ingería entero como si no: una cuota
+    agotada o un fallo a mitad de lote perdían en silencio los mensajes que
+    quedaban sin procesar, porque el proveedor nunca los vuelve a devolver
+    una vez el cursor avanza (B01). Cada mensaje que devuelve ``list_new``
+    se encola aquí antes de intentar ingerirlo, y el cursor del proveedor
+    solo avanza cuando la cola de la conexión queda vacía.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        connection_id: FK a la IrisMailboxConnection que descubrió el
+                 mensaje. ``ondelete="CASCADE"``: la cola de una conexión
+                 borrada no tiene sentido sin ella.
+        provider_message_id: Id opaco del proveedor -- mismo valor que
+                 ``IrisAnalysis.source_message_uid`` una vez ingerido.
+        raw_ref: Datos crudos que ``list_new`` ya trajo sin round-trip extra
+                 (``MessageRef.raw``) -- necesarios para reintentar sin
+                 volver a listar (p.ej. Graph guarda aquí las cabeceras).
+        status: "pending" (reintentable) | "dead" (agotó los reintentos de
+                 ``iris.maxInboxAttempts``; queda visible pero ya no
+                 bloquea el avance del cursor -- una única referencia rota
+                 no puede detener la ingesta del resto para siempre).
+        attempts: Intentos de ingesta fallidos.
+        last_error: Motivo del último fallo, si alguno.
+        created_at: Cuándo se encoló.
+        updated_at: Cuándo se tocó por última vez (reintento o dead-letter).
+    """
+    __tablename__ = "IrisMailboxInbox"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    connection_id = Column(Integer, ForeignKey("IrisMailboxConnection.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    provider_message_id = Column(String(255), nullable=False)
+    raw_ref = Column(JSONB, nullable=True)
+    status = Column(String(20), nullable=False, default="pending")
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    updated_at = Column(DateTime, nullable=False, default=utcnow_naive, onupdate=utcnow_naive)
+
+    connection = relationship("IrisMailboxConnection", back_populates="inbox_entries")
+
+    __table_args__ = (
+        UniqueConstraint("connection_id", "provider_message_id",
+                          name="uq_iris_mailbox_inbox_connection_message"),
     )
 
 

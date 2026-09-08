@@ -1805,6 +1805,15 @@ class IrisConfig:  # pylint: disable=too-many-instance-attributes
     poder generar análisis sin límite — ver roadmap-ellysia.md §8.1.
     """
 
+    max_inbox_attempts: int = 5
+    """Reintentos de ingesta antes de marcar una referencia de
+    ``IrisMailboxInbox`` como ``dead`` (B01).
+
+    Sin tope, un mensaje irrecuperablemente roto (parseo, permisos) bloquea
+    para siempre el avance del cursor del proveedor de esa conexión — el
+    checkpoint no confirma el cursor mientras queden referencias pendientes.
+    """
+
     prompts: dict = field(default_factory=dict)
     """Prompts de ``IrisAIWriter`` (IA1): ``summary.{system,userTemplate}``."""
 
