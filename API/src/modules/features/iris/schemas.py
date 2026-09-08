@@ -401,7 +401,12 @@ class IrisMailboxConnectRequestSchema(Schema):
     """Request body for ``POST /iris/mailbox/connect``."""
     provider = fields.String(required=True)
     fullMessageMode = fields.Boolean(load_default=False)
-    folder = fields.String(load_default=None, allow_none=True)
+    # B16: la validación real (existe, pertenece a esta cuenta/proveedor) es
+    # de red y solo se puede hacer con un access_token en la mano -- ver
+    # IrisMailboxManager._validate_folder(), llamada desde handle_callback().
+    # Aquí solo se descarta lo evidentemente inválido antes de firmar el
+    # state y mandar al usuario al proveedor.
+    folder = fields.String(load_default=None, allow_none=True, validate=validate.Length(max=255))
 
 
 class IrisMailboxConnectResponseSchema(Schema):
@@ -415,6 +420,8 @@ class IrisMailboxConnectionItemSchema(Schema):
     provider = fields.String()
     accountEmail = fields.String()
     folder = fields.String(allow_none=True)
+    folderDisplayName = fields.String(allow_none=True)
+    folderType = fields.String(allow_none=True)
     fullMessageMode = fields.Boolean()
     status = fields.String()
     lastSyncAt = UTCDateTime(allow_none=True)
@@ -431,9 +438,22 @@ class IrisMailboxConnectionListResponseSchema(Schema):
 
 class IrisMailboxUpdateConnectionRequestSchema(Schema):
     """Request body for ``PATCH /iris/mailbox/connections/<id>``."""
-    folder = fields.String(load_default=None, allow_none=True)
+    folder = fields.String(load_default=None, allow_none=True, validate=validate.Length(max=255))
     status = fields.String(load_default=None, allow_none=True,
                             validate=validate.OneOf(["active", "paused"]))
+
+
+class IrisMailboxFolderSchema(Schema):
+    """One real folder/label the connected account has (B16)."""
+    providerId = fields.String()
+    displayName = fields.String()
+    folderType = fields.String()
+
+
+class IrisMailboxFoldersResponseSchema(Schema):
+    """Folders a connection's account exposes -- the only valid values for
+    ``PATCH /iris/mailbox/connections/<id>``'s ``folder``."""
+    folders = fields.List(fields.Nested(IrisMailboxFolderSchema))
 
 
 class IrisMailboxConnectionDeleteResponseSchema(Schema):

@@ -152,8 +152,18 @@ class IrisMailboxConnection(Base):
                  not cached or expired. Optional — the connector can always
                  fall back to ``refresh()``.
         access_token_expires_at: Expiry of the cached access token.
-        folder: Provider-specific folder/label to watch; NULL = default
-                 inbox.
+        folder: Provider-specific folder/label id to watch; NULL = default
+                 inbox. Es el ``provider_id`` opaco que ``MailboxConnector``
+                 usa para filtrar ``list_new`` -- nunca texto libre: solo se
+                 guarda tras validarse contra ``MailboxConnector.list_folders()``
+                 (B16), así que un valor no vacío siempre corresponde a una
+                 carpeta real de esta cuenta en el momento en que se guardó.
+        folder_display_name: Nombre legible de ``folder`` (p.ej. "Facturas",
+                 "Trabajo/Clientes"); NULL junto con ``folder`` cuando se
+                 vigila la bandeja de entrada por defecto (B16).
+        folder_type: "system" (Inbox, Sent, Trash... del propio proveedor) |
+                 "user" (etiqueta/carpeta creada por la cuenta); NULL junto
+                 con ``folder`` (B16).
         full_message_mode: If True, fetch the complete raw message
                  (attachments/body included) instead of headers only. Off
                  by default — the user must opt in explicitly per
@@ -202,6 +212,8 @@ class IrisMailboxConnection(Base):
     access_token_expires_at = Column(DateTime, nullable=True)
 
     folder = Column(String(255), nullable=True)
+    folder_display_name = Column(String(255), nullable=True)
+    folder_type = Column(String(20), nullable=True)
     full_message_mode = Column(Boolean, nullable=False, default=False)
     sync_cursor = Column(Text, nullable=True)
 

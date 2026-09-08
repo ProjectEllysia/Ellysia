@@ -16,6 +16,7 @@ import src.modules.features.iris.managers.mailbox as mailbox_managers_mod
 import src.modules.features.iris.services.mailbox.locks as mailbox_locks_mod
 from src.modules.features.iris.exceptions import (
     IrisMailboxConnectionNotFoundError,
+    IrisMailboxInvalidFolderError,
     IrisMailboxInvalidProviderError,
     IrisMailboxOAuthStateError,
     IrisMailboxQuotaExceededError,
@@ -26,7 +27,7 @@ from src.modules.features.iris.model import IrisAnalysis, IrisMailboxConnection,
 from src.modules.features.iris.repositories import (
     IrisAnalysisRepository, IrisMailboxConnectionRepository, IrisMailboxInboxRepository,
 )
-from src.modules.features.iris.services.mailbox.base import MessageRef, TokenSet
+from src.modules.features.iris.services.mailbox.base import MailboxFolder, MessageRef, TokenSet
 from src.modules.infrastructure import UnitOfWork
 from src.modules.shared import decrypt_at_rest, encrypt_at_rest, utcnow_naive
 
@@ -124,10 +125,16 @@ class _FakeTaskQueue:
 class _FakeConnector:
     """Doble de MailboxConnector totalmente controlado por el test."""
 
-    def __init__(self, revoke_raises=False, refresh_raises_reauth=False):
+    def __init__(self, revoke_raises=False, refresh_raises_reauth=False, folders=None):
         self.revoked_tokens = []
         self._revoke_raises = revoke_raises
         self._refresh_raises_reauth = refresh_raises_reauth
+        # B16: por defecto expone "INBOX" -- suficiente para los tests que
+        # no ejercitan folder explícitamente pero sí pasan por
+        # _ensure_access_token en algún camino que valide.
+        self._folders = folders if folders is not None else [
+            MailboxFolder(provider_id="INBOX", display_name="Inbox", folder_type="system"),
+        ]
 
     def authorize_url(self, state, full_message_mode):
         return f"https://provider.example/authorize?state={state}"
@@ -166,6 +173,9 @@ class _FakeConnector:
         self.revoked_tokens.append(refresh_token)
         if self._revoke_raises:
             raise RuntimeError("provider is down")
+
+    def list_folders(self, access_token):
+        return self._folders
 
 
 class _QueueTestConnector(_FakeConnector):
@@ -329,6 +339,43 @@ def test_handle_callback_rejects_replayed_state(app, regular_user):
                 IrisMailboxManager().handle_callback(state, "auth-code")
 
 
+# --------------------------------------------------------------- B16: folder
+
+def test_handle_callback_validates_folder_against_the_provider(app, regular_user):
+    with app.app_context():
+        state = IrisMailboxManager._sign_state(
+            user_id=regular_user.id, provider="gmail", full_message_mode=False, folder="Label_1",
+        )
+        fake_connector = _FakeConnector(folders=[
+            MailboxFolder(provider_id="Label_1", display_name="Facturas", folder_type="user"),
+        ])
+        with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=fake_connector):
+            connection_id = IrisMailboxManager().handle_callback(state, "auth-code")
+
+        with UnitOfWork() as uow:
+            conn = IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
+            assert conn.folder == "Label_1"
+            assert conn.folder_display_name == "Facturas"
+            assert conn.folder_type == "user"
+
+
+def test_handle_callback_rejects_a_folder_the_account_does_not_have(app, regular_user):
+    with app.app_context():
+        state = IrisMailboxManager._sign_state(
+            user_id=regular_user.id, provider="gmail", full_message_mode=False, folder="does-not-exist",
+        )
+        fake_connector = _FakeConnector(folders=[
+            MailboxFolder(provider_id="INBOX", display_name="Inbox", folder_type="system"),
+        ])
+        with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=fake_connector):
+            with pytest.raises(IrisMailboxInvalidFolderError):
+                IrisMailboxManager().handle_callback(state, "auth-code")
+
+        # La conexión nunca se crea si el folder reclamado no es válido.
+        with UnitOfWork() as uow:
+            assert IrisMailboxConnectionRepository(uow).get_by_user(regular_user.id) == []
+
+
 # ------------------------------------------------------------------- CRUD
 
 def test_list_connections_only_returns_own(app, regular_user, admin_user):
@@ -352,6 +399,70 @@ def test_update_connection_rejects_invalid_status(app, regular_user):
         connection_id = _save(app, _connection(regular_user.id))
         with pytest.raises(ValueError):
             IrisMailboxManager().update_connection(connection_id, regular_user.id, status="not-a-real-status")
+
+
+def test_update_connection_persists_a_validated_folder(app, regular_user):
+    with app.app_context():
+        connection_id = _save(app, _connection(regular_user.id))
+        fake_connector = _FakeConnector(folders=[
+            MailboxFolder(provider_id="Label_1", display_name="Facturas", folder_type="user"),
+        ])
+        with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=fake_connector):
+            updated = IrisMailboxManager().update_connection(connection_id, regular_user.id, folder="Label_1")
+
+        assert updated.folder == "Label_1"
+        assert updated.folder_display_name == "Facturas"
+        assert updated.folder_type == "user"
+
+
+def test_update_connection_rejects_a_folder_the_account_does_not_have(app, regular_user):
+    with app.app_context():
+        connection_id = _save(app, _connection(regular_user.id))
+        fake_connector = _FakeConnector(folders=[
+            MailboxFolder(provider_id="INBOX", display_name="Inbox", folder_type="system"),
+        ])
+        with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=fake_connector):
+            with pytest.raises(IrisMailboxInvalidFolderError):
+                IrisMailboxManager().update_connection(connection_id, regular_user.id, folder="not-real")
+
+        with UnitOfWork() as uow:
+            conn = IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
+            assert conn.folder is None
+
+
+def test_update_connection_folder_requires_reauth_when_token_refresh_fails(app, regular_user):
+    with app.app_context():
+        connection_id = _save(app, _connection(
+            regular_user.id, access_token_enc=None, access_token_expires_at=None,
+        ))
+        fake_connector = _FakeConnector(refresh_raises_reauth=True)
+        with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=fake_connector):
+            with pytest.raises(ValueError):
+                IrisMailboxManager().update_connection(connection_id, regular_user.id, folder="Label_1")
+
+        with UnitOfWork() as uow:
+            conn = IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
+            assert conn.status == "reauth_required"
+
+
+def test_list_folders_returns_the_connectors_folders(app, regular_user):
+    with app.app_context():
+        connection_id = _save(app, _connection(regular_user.id))
+        fake_connector = _FakeConnector(folders=[
+            MailboxFolder(provider_id="Label_1", display_name="Facturas", folder_type="user"),
+            MailboxFolder(provider_id="INBOX", display_name="Inbox", folder_type="system"),
+        ])
+        with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=fake_connector):
+            folders = IrisMailboxManager().list_folders(connection_id, regular_user.id)
+
+        assert [f.provider_id for f in folders] == ["Label_1", "INBOX"]
+
+
+def test_list_folders_requires_ownership(app, regular_user, admin_user):
+    with app.app_context():
+        connection_id = _save(app, _connection(admin_user.id))
+        with pytest.raises(IrisMailboxConnectionNotFoundError):
+            IrisMailboxManager().list_folders(connection_id, regular_user.id)
 
 
 def test_delete_connection_revokes_then_deletes_even_if_revoke_fails(app, regular_user):

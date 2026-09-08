@@ -89,3 +89,17 @@ class IrisMailboxOAuthStateError(IrisError):
     tampered, or never issued by start_connect (CSRF protection)."""
     default_code = ErrorCode.AUTHENTICATION_ERROR
     default_status_code = 400
+
+
+class IrisMailboxInvalidFolderError(IrisError):
+    """Raised when ``folder`` doesn't match any real folder/label the
+    provider returns for this account (B16) — wrong id, typo, or a value
+    that belongs to another provider."""
+    default_code = ErrorCode.VALIDATION_ERROR
+    default_status_code = 400
+
+    def __init__(self, folder: str) -> None:
+        super().__init__(
+            f"'{folder}' no es una carpeta válida para esta cuenta.",
+            user_message=f"'{folder}' no es una carpeta válida para esta cuenta.",
+        )
