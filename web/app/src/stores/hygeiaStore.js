@@ -28,6 +28,10 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     // nulo = nunca analizado, que es el estado inicial de todo activo, no un
     // error. El desglose completo vive en Themis; aquí solo los recuentos.
     analysis: null, analysisLoading: false, analyzing: false, analysisError: null,
+    // Resumen de consumo eléctrico (Fase 3): lectura actual más energía y
+    // coste de 24h/7d/30d y proyección mensual. `null` mientras no ha
+    // llegado la primera respuesta — la ficha lo trata igual que `latest`.
+    powerSummary: null, powerSummaryError: null,
     lastAgentKey: null,
   })
 
@@ -164,11 +168,14 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     state.inventoryError = null
     state.analysis = null
     state.analysisError = null
+    state.powerSummary = null
+    state.powerSummaryError = null
     if (id) {
       fetchMetrics(id, { windowMs })
       fetchLatest(id)
       fetchInventory(id)
       fetchAnalysis(id)
+      fetchPowerSummary(id)
     }
   }
 
@@ -296,6 +303,27 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     finally { state.analyzing = false }
   }
 
+  /**
+   * Carga el resumen de consumo eléctrico del activo (Fase 3, P25): lectura
+   * actual más energía y coste de 24h/7d/30d y proyección mensual.
+   *
+   * Sin variante `silent` propia porque nunca lo pide el sondeo de 15 s
+   * (ver `POLL_MS`/`SLOW_EVERY` en `HygeiaView.vue`): energía y coste no
+   * cambian de un heartbeat a otro, así que re-pedirlos a ese ritmo sería
+   * gastar cupo de tasa por un número que no se ha movido.
+   *
+   * @param {number} id - Id del activo.
+   */
+  async function fetchPowerSummary(id) {
+    try {
+      const res = await apiFetch(`/hygeia/assets/${id}/power-summary`)
+      if (state.selectedId !== id) return
+      if (!res?.ok) { state.powerSummaryError = await apiError(res, 'No se pudo cargar el consumo.'); return }
+      state.powerSummary = await res.json()
+      state.powerSummaryError = null
+    } catch { if (state.selectedId === id) state.powerSummaryError = 'No se pudo conectar con la API.' }
+  }
+
   /** Descarta la clave de agente mostrada — llamar al cerrar el modal de una sola vez. */
   function clearAgentKey() { state.lastAgentKey = null }
 
@@ -309,6 +337,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
       latest: null, latestError: null,
       inventory: [], inventoryCollectedAt: null, inventoryLoading: false, inventoryError: null,
       analysis: null, analysisLoading: false, analyzing: false, analysisError: null,
+      powerSummary: null, powerSummaryError: null,
       lastAgentKey: null,
     })
   }
@@ -318,7 +347,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     fetchAssets, createAsset, deleteAsset, rotateKey, setPersistence,
     setAssetTags, dropTagFromAssets,
     selectAsset, fetchMetrics, fetchLatest, fetchInventory, clearAgentKey,
-    fetchAnalysis, analyzeInventory,
+    fetchAnalysis, analyzeInventory, fetchPowerSummary,
     $reset,
   }
 })

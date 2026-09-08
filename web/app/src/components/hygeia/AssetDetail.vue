@@ -98,6 +98,58 @@
       <p v-if="latestError" class="state-msg state-msg--error">{{ latestError }}</p>
 
       <template v-if="m">
+        <section class="section section--power">
+          <h4 class="section-title">Consumo eléctrico</h4>
+
+          <p v-if="powerState.state === 'unavailable'" class="state-msg">
+            Consumo no disponible — este equipo no expone sensores de potencia compatibles.
+          </p>
+
+          <template v-else>
+            <div class="power-reading">
+              <span
+                class="power-value"
+                :class="{ 'power-value--estimated': powerState.state === 'estimated' }"
+                :title="powerState.source ? `Fuente: ${powerState.source}` : null"
+              >
+                {{ powerReading.text }}<small class="unit--wide">{{ powerReading.unit }}</small>
+              </span>
+              <span class="power-badge" :class="`power-badge--${powerState.state}`">
+                {{ powerState.state === 'measured' ? 'Medición de sensor' : 'Estimación · precisión no garantizada' }}
+              </span>
+            </div>
+
+            <p class="power-warning" :class="{ 'power-warning--attenuated': powerState.state === 'measured' }">
+              <template v-if="powerState.state === 'estimated'">
+                Consumo estimado a partir de los sensores disponibles del equipo: puede no
+                coincidir con la medición real, su precisión varía según el hardware, y no
+                equivale necesariamente al consumo medido en el enchufe.
+              </template>
+              <template v-else>
+                Lectura de un sensor del equipo: puede no cubrir el consumo completo de la máquina
+                (fuente de alimentación, discos, ventiladores…) y no equivale necesariamente al
+                consumo medido en el enchufe.
+              </template>
+            </p>
+          </template>
+
+          <ul v-if="powerPeriods.length" class="power-periods">
+            <li v-for="period in powerPeriods" :key="period.key" class="power-period">
+              <span class="power-period-label">{{ period.label }}</span>
+              <span class="power-period-value">
+                {{ period.kwh.text }}<small>{{ period.kwh.unit }}</small>
+                · {{ period.cost.text }}<small>{{ period.cost.unit }}</small>
+              </span>
+              <span class="power-period-tag" :class="`power-period-tag--${period.classification}`">
+                {{ period.classificationLabel }}
+                <template v-if="period.classification === 'observed_partial' && period.coverageFraction !== null">
+                  ({{ Math.round(period.coverageFraction * 100) }}%)
+                </template>
+              </span>
+            </li>
+          </ul>
+        </section>
+
         <section v-if="memory" class="section">
           <h4 class="section-title">Memoria</h4>
           <dl class="readout">
@@ -329,7 +381,9 @@ import MetricNav from '@/components/hygeia/MetricNav.vue'
 import AssetTabs from '@/components/hygeia/AssetTabs.vue'
 import { WINDOW_PRESETS, bucketForWindow } from '@/components/hygeia/chartMath'
 import { useUtils } from '@/composables/useUtils'
-import { fmtBytes, fmtPct, fmtRate, timeAgo } from './format'
+import {
+  classifyPower, describePowerPeriod, fmtBytes, fmtPct, fmtRate, fmtWatts, timeAgo,
+} from './format'
 
 const props = defineProps({
   asset: { type: Object, default: null },
@@ -355,6 +409,10 @@ const props = defineProps({
   // `scanId` nulo = nunca analizado.
   analysis: { type: Object, default: null },
   analyzing: { type: Boolean, default: false },
+  // Resumen de consumo eléctrico (Fase 3, P25): lectura actual más energía
+  // y coste de 24h/7d/30d y proyección mensual. `null` mientras no ha
+  // llegado la primera respuesta.
+  powerSummary: { type: Object, default: null },
   anomalies: { type: Array, default: () => [] },
 })
 defineEmits(['ack', 'resolve', 'delete', 'analyze', 'reanalyze', 'view-analysis', 'window-change'])
@@ -384,7 +442,7 @@ watch(activeTab, (tab) => {
    Igual que la pestaña: se recuerda por activo, y al cambiar de host se
    recupera la que se miraba en ESE host. La lista de claves válidas es la de
    `SERIES` (chartMath), no un inventario local. */
-const SERIES_KEYS = ['cpu', 'mem', 'swap', 'disk', 'net-rx', 'net-tx', 'load1']
+const SERIES_KEYS = ['cpu', 'mem', 'swap', 'disk', 'net-rx', 'net-tx', 'load1', 'power']
 const activeMetric = ref('cpu')
 
 watch(() => props.asset?.id, (id) => {
@@ -473,6 +531,26 @@ const disks = computed(() =>
  * ver el desglose completo es justamente para lo que sirve esta tabla.
  */
 const nets = computed(() => m.value?.network ?? [])
+
+/* ── Consumo eléctrico (Fase 3, P20/P25/P26) ── */
+const powerState = computed(() => classifyPower(m.value?.power ?? null))
+const powerReading = computed(() => fmtWatts(powerState.value.watts))
+
+/** Etiquetas de cada bloque del resumen, en el orden en que se presentan. */
+const POWER_PERIODS = [
+  { key: 'day', label: '24 h' },
+  { key: 'week', label: '7 días' },
+  { key: 'month', label: '30 días' },
+  { key: 'monthProjected', label: 'Proyección mensual' },
+]
+
+const powerPeriods = computed(() => {
+  if (!props.powerSummary) return []
+  return POWER_PERIODS.map(({ key, label }) => {
+    const described = describePowerPeriod(props.powerSummary[key])
+    return described && { key, label, ...described }
+  }).filter(Boolean)
+})
 
 const cores = computed(() => (m.value?.cpu?.perCorePct ?? []).slice(0, MAX_CORES))
 const coreCount = computed(() => (m.value?.cpu?.perCorePct ?? []).length)
@@ -645,6 +723,51 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 
 .hint { font-size: var(--fs-xs); font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
 .hint--block { margin: 0.5rem 0 0; }
+
+/* ── Consumo eléctrico (Fase 3) ── */
+.power-reading { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
+.power-value {
+  font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-lg); font-weight: 500;
+  color: var(--text); font-variant-numeric: tabular-nums;
+}
+.power-value small { margin-left: 0.35em; font-size: 0.7em; color: var(--text-muted); }
+/* Una estimación se presenta con menos confianza visual que una medición de
+   sensor: mismo tamaño, color atenuado — el dato sigue siendo legible, pero
+   no compite en autoridad con una lectura real (P20). */
+.power-value--estimated { color: var(--text-dim); }
+.power-badge {
+  padding: 0.15rem 0.55rem; border-radius: 999px;
+  font-size: var(--fs-sm); font-weight: 600;
+}
+.power-badge--measured { background: var(--success-dim); color: var(--success); }
+.power-badge--estimated { background: var(--warn-dim); color: var(--warn); }
+
+.power-warning {
+  margin: 0.6rem 0 0; padding: 0.5rem 0.7rem;
+  background: var(--warn-dim); border: 1px solid var(--warn);
+  border-radius: 6px; font-size: var(--fs-sm); color: var(--text-dim);
+}
+/* Una lectura medida sigue mereciendo el aviso de procedencia, pero no la
+   misma alarma que una estimación: se atenúa, no desaparece. */
+.power-warning--attenuated {
+  background: var(--surface-2); border-color: var(--border); color: var(--text-muted);
+}
+
+.power-periods { list-style: none; margin: 0.8rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.power-period {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  padding: 0.4rem 0.5rem; border-radius: 6px; background: var(--surface-2);
+  font-size: var(--fs-sm);
+}
+.power-period-label { flex: 0 0 6rem; color: var(--text-muted); font-weight: 600; }
+.power-period-value {
+  flex: 1 1 auto; font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
+  color: var(--text); font-variant-numeric: tabular-nums;
+}
+.power-period-value small { margin: 0 0.2em 0 0.1em; color: var(--text-muted); }
+.power-period-tag { flex-shrink: 0; font-size: var(--fs-xs); color: var(--text-muted); }
+.power-period-tag--projected { color: var(--warn); }
+.power-period-tag--observed_partial { color: var(--warn); }
 
 /* ── Lecturas puntuales (memoria) ── */
 .readout { display: flex; flex-wrap: wrap; gap: 0 1.8rem; margin: 0; }

@@ -116,6 +116,111 @@ export function fmtLoad1(value) {
 }
 
 /**
+ * Potencia eléctrica en vatios, escalada a kW cuando el valor lo pide.
+ *
+ * A diferencia de bytes/tasas (base 1024), la escala aquí es base 1000: un
+ * portátil son decenas de vatios y un servidor con GPU centenares, así que
+ * kW solo entra en juego muy por encima de eso (equipos de sala de
+ * servidores agregados, no un único host).
+ *
+ * @param {number|null} watts
+ * @returns {{text: string, unit: string}} p. ej. `{ text: '187', unit: 'W' }`.
+ */
+export function fmtWatts(watts) {
+  if (isMissing(watts)) return NO_DATA
+  if (Math.abs(watts) >= 1000) {
+    const kw = watts / 1000
+    return { text: kw >= 10 ? kw.toFixed(0) : kw.toFixed(1), unit: 'kW' }
+  }
+  return { text: watts >= 10 ? watts.toFixed(0) : watts.toFixed(1), unit: 'W' }
+}
+
+/**
+ * Clasifica una lectura de potencia en sus tres estados posibles (P20).
+ *
+ * La distinción se hace siempre sobre `estimated`, nunca sobre el contenido
+ * de `source`: el servidor acepta cualquier cadena ahí para que el agente
+ * pueda añadir fuentes nuevas sin coordinación, así que ramificar por su
+ * valor se rompería con la primera fuente nueva.
+ *
+ * @param {{watts: number|null, estimated: boolean|null, source: string|null}|null} power
+ *   Bloque de potencia tal como lo sirve `metrics.power` del último heartbeat.
+ * @returns {{state: 'measured'|'estimated'|'unavailable', watts: number|null,
+ *   estimated: boolean|null, source: string|null}}
+ */
+export function classifyPower(power) {
+  if (!power || power.watts === null || power.watts === undefined) {
+    return { state: 'unavailable', watts: null, estimated: null, source: null }
+  }
+  return {
+    state: power.estimated ? 'estimated' : 'measured',
+    watts: power.watts,
+    estimated: power.estimated ?? null,
+    source: power.source ?? null,
+  }
+}
+
+/**
+ * Energía en kWh, con la precisión que pide su magnitud.
+ *
+ * @param {number|null} kwh
+ * @returns {{text: string, unit: string}}
+ */
+export function fmtEnergy(kwh) {
+  if (isMissing(kwh)) return NO_DATA
+  return { text: kwh >= 10 ? kwh.toFixed(1) : kwh.toFixed(2), unit: 'kWh' }
+}
+
+const CURRENCY_SYMBOLS = { EUR: '€', USD: '$', GBP: '£' }
+
+/**
+ * Coste monetario, con el símbolo de la moneda configurada cuando se
+ * reconoce (o el propio código ISO como último recurso).
+ *
+ * @param {number|null} cost
+ * @param {string} [currency='EUR'] - Código ISO 4217.
+ * @returns {{text: string, unit: string}}
+ */
+export function fmtCost(cost, currency = 'EUR') {
+  if (isMissing(cost)) return NO_DATA
+  return { text: cost.toFixed(2), unit: CURRENCY_SYMBOLS[currency] || currency }
+}
+
+const CLASSIFICATION_LABELS = {
+  observed: 'Observado',
+  observed_partial: 'Datos parciales',
+  projected: 'Proyección',
+}
+
+/** Rótulo en castellano de una clasificación de procedencia (P24). */
+export function powerPeriodLabel(classification) {
+  return CLASSIFICATION_LABELS[classification] || classification
+}
+
+/**
+ * Compone los textos de un periodo de consumo (P25) a partir de la
+ * respuesta de ``GET /hygeia/assets/<id>/power-summary``.
+ *
+ * Función pura y testeable aparte del componente: formatea energía y coste,
+ * y traduce la clasificación de procedencia (P24) a lo que se pinta en la
+ * ficha, sin decidir dónde ni cómo se muestra.
+ *
+ * @param {object|null} period - Un bloque ``day``/``week``/``month``/``monthProjected``.
+ * @returns {{kwh: {text,unit}, cost: {text,unit}, classification: string,
+ *   classificationLabel: string, coverageFraction: number|null}|null}
+ */
+export function describePowerPeriod(period) {
+  if (!period) return null
+  return {
+    kwh: fmtEnergy(period.kwh),
+    cost: fmtCost(period.cost, period.currency),
+    classification: period.classification,
+    classificationLabel: powerPeriodLabel(period.classification),
+    coverageFraction: period.coverageFraction ?? null,
+  }
+}
+
+/**
  * Tiempo encendido en lenguaje natural, con dos unidades de precisión.
  *
  * Se usa sobre el instante de arranque derivado, no sobre el uptime crudo:

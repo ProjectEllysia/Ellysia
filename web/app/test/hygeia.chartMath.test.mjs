@@ -8,7 +8,7 @@
  */
 
 import {
-  SERIES, niceCeil, yRange, yTicks, timeTicks, formatTimeTick, fmtDuration,
+  SERIES, seriesOf, niceCeil, yRange, yTicks, timeTicks, formatTimeTick, fmtDuration,
   medianDeltaMs, gapThresholdMs, detectGaps, totalGapMs, splitAtRanges, formatValue, bucketForWindow,
   plotWidthForAxis, WINDOW_PRESETS, DEFAULT_WINDOW_MS,
 } from '../src/components/hygeia/chartMath.js'
@@ -27,12 +27,20 @@ function eq(name, actual, expected) {
 }
 
 console.log('\ncatálogo de series')
-check('las siete métricas registrables', SERIES.length === 7)
+check('las ocho métricas registrables', SERIES.length === 8)
 check('claves únicas', new Set(SERIES.map((s) => s.key)).size === SERIES.length)
 eq('porcentajes con techo natural 100', SERIES.filter((s) => s.fixedMax === 100).map((s) => s.key),
   ['cpu', 'mem', 'swap', 'disk'])
 check('carga (load1) existe y es la séptima', SERIES[6].key === 'load1' && SERIES[6].fixedMax === null)
 check('red y carga sin techo', ['net-rx', 'net-tx', 'load1'].every((k) => SERIES.find((s) => s.key === k).fixedMax === null))
+
+console.log('\nserie de potencia (P19)')
+check('seriesOf resuelve power', seriesOf('power')?.key === 'power')
+check('potencia sin techo natural: se escala al dato', seriesOf('power').fixedMax === null)
+check('potencia usa powerWatts como campo', seriesOf('power').field === 'powerWatts')
+check('clave desconocida no resuelve', seriesOf('no-existe') === null)
+const powerRange = yRange(seriesOf('power'), [45, 187, 30])
+check('el eje de potencia se escala al dato, no se fija en 100', powerRange.hi !== 100 && powerRange.hi >= 187)
 
 console.log('\nniceCeil')
 eq('redondea a paso bonito', niceCeil(245760), 250000)

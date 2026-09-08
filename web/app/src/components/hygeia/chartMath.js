@@ -18,7 +18,7 @@
  *     de la serie, no se inventa.
  */
 
-import { fmtLoad1, fmtPct, fmtRate } from './format.js'
+import { fmtLoad1, fmtPct, fmtRate, fmtWatts } from './format.js'
 
 const PCT = (v) => ({ text: fmtPct(v), unit: '%' })
 
@@ -52,6 +52,12 @@ export const SERIES = [
     fixedMax: null, minSpan: 8192, fmt: fmtRate },
   { key: 'load1',  name: 'Carga',     field: 'load1',     color: 'var(--accent)',
     fixedMax: null, minSpan: 1,    fmt: (v) => ({ text: fmtLoad1(v), unit: '' }) },
+  // Sin techo natural: un portátil son decenas de vatios y un servidor con
+  // GPU centenares, así que el eje se escala al dato con `niceCeil`, como
+  // las series de red. `minSpan: 20` evita que un equipo estable en 45 W
+  // parezca oscilar salvajemente por decenas de vatios de ruido.
+  { key: 'power',  name: 'Potencia',  field: 'powerWatts', color: 'var(--warn)',
+    fixedMax: null, minSpan: 20,   fmt: fmtWatts },
 ]
 
 export function seriesOf(key) {
