@@ -20,9 +20,10 @@ import logging
 from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
-import src.modules.system.config_reading as CR
 from sqlalchemy import and_, or_, update
+from sqlalchemy.exc import SQLAlchemyError
 
+import src.modules.system.config_reading as CR
 from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
@@ -141,13 +142,17 @@ class IrisManager(TaskTrackingMixin):
                          the original, still-default flow.
             source_message_uid: Provider-specific message id, set only
                          together with connection_id. The (connection_id,
-                         source_message_uid) pair is UNIQUE at the DB level,
-                         so a mailbox sync retry that resubmits the same
-                         message raises instead of duplicating the analysis.
+                         source_message_uid) pair is UNIQUE at the DB level.
+                         A mailbox sync retry that resubmits the same
+                         message never duplicates the analysis nor pays
+                         quota for it twice (B09) — see the idempotency
+                         check below.
 
         Returns:
-            The new IrisAnalysis primary key (``analysis_id``).  The
-            caller should store this to later poll status or fetch the
+            The IrisAnalysis primary key (``analysis_id``) — either the one
+            just created, or the existing one when ``(connection_id,
+            source_message_uid)`` was already accepted by a previous call.
+            The caller should store this to later poll status or fetch the
             full report.
 
         Raises:
@@ -164,15 +169,36 @@ class IrisManager(TaskTrackingMixin):
 
         self._validate_headers_pre(raw_input)
 
+        # B09: comprobar idempotencia ANTES de cobrar cuota -- un reintento
+        # de sync de buzón (Gmail/Graph pueden repetir un mensaje) para algo
+        # ya aceptado no debe volver a cobrar ni crear un segundo análisis.
+        # El propio checkpoint de mailbox (B01) ya evita llegar hasta aquí
+        # en el caso común; esto cubre además la llamada directa.
+        if connection_id is not None and source_message_uid is not None:
+            existing = build_repository(IrisAnalysisRepository).get_by_source(
+                connection_id, source_message_uid,
+            )
+            if existing is not None:
+                return existing.id
+
         # Después de validar la entrada: un correo mal pegado no gasta cuota.
         # Aquí y no en el endpoint, porque por este método entra también la
         # ingesta desde un buzón conectado (mailbox sync), que no pasa por HTTP.
         QuotaManager().consume(user_id, LimitKey.IRIS_ANALYSES)
 
-        analysis_id = self._create_analysis_record(
-            raw_input, user_id, title=title,
-            connection_id=connection_id, source_message_uid=source_message_uid,
-        )
+        try:
+            analysis_id = self._create_analysis_record(
+                raw_input, user_id, title=title,
+                connection_id=connection_id, source_message_uid=source_message_uid,
+            )
+        except SQLAlchemyError:
+            # Carrera perdida contra otra llamada para el mismo mensaje: la
+            # comprobación de arriba y este insert no son atómicos entre sí,
+            # así que la UniqueConstraint sigue siendo la defensa final. Se
+            # reembolsa la cuota que se acaba de cobrar por un análisis que
+            # nunca llegó a crearse -- nunca se cobra por un duplicado.
+            QuotaManager().refund(user_id, LimitKey.IRIS_ANALYSES)
+            raise
         logger.info(f"Iris analysis {analysis_id} created for user {user_id}")
 
         if self.TASK_CATEGORY is None:
@@ -511,11 +537,12 @@ class IrisManager(TaskTrackingMixin):
             return "running"
 
         # La concreta y el techo agregado de IA, en ese orden, para que el 402
-        # nombre lo que el usuario estaba pidiendo.
-        quota_manager = QuotaManager()
+        # nombre lo que el usuario estaba pidiendo. consume_many() (B09) las
+        # cobra como una sola operación: si AI_REQUESTS no tiene cupo tras
+        # haber cobrado IRIS_AI_SUMMARIES, la reembolsa antes de relanzar --
+        # antes se quedaba cobrada sin nada que la explicara.
         try:
-            quota_manager.consume(user_id, LimitKey.IRIS_AI_SUMMARIES)
-            quota_manager.consume(user_id, LimitKey.AI_REQUESTS)
+            QuotaManager().consume_many(user_id, [LimitKey.IRIS_AI_SUMMARIES, LimitKey.AI_REQUESTS])
         except Exception:
             # Sin cupo no hay trabajo: se suelta la reserva para que el
             # análisis no se quede en `running` para siempre y el usuario

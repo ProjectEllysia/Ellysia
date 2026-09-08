@@ -847,6 +847,7 @@ def test_generate_ai_summary_submits_task_for_finished_analysis(monkeypatch):
 
     class _FreeQuota:
         def consume(self, user_id, key, amount=1): pass
+        def consume_many(self, user_id, keys, amount=1): pass
         def refund(self, user_id, key, amount=1): pass
 
     monkeypatch.setattr(analysis_mod, "QuotaManager", _FreeQuota)

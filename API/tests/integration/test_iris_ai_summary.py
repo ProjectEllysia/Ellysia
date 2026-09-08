@@ -70,6 +70,19 @@ class _CountingQuota:
     def consume(self, user_id, key, amount=1):
         type(self).consumed.append(key.db_name)
 
+    def consume_many(self, user_id, keys, amount=1):
+        # Mismo comportamiento que el QuotaManager real (B09): si alguna
+        # clave falla, reembolsa las que esta llamada ya cobró.
+        consumed = []
+        try:
+            for key in keys:
+                self.consume(user_id, key, amount)
+                consumed.append(key)
+        except Exception:
+            for key in reversed(consumed):
+                self.refund(user_id, key, amount)
+            raise
+
     def refund(self, user_id, key, amount=1):
         type(self).refunded.append(key.db_name)
 
