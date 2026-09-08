@@ -1736,6 +1736,23 @@ class HygeiaConfig:
     euro.
     """
 
+    min_agent_version: str = "0.0.0"
+    """Versión mínima de agente que no se marca como desactualizada en la SPA.
+
+    Es un aviso, no una política de compatibilidad: un agente por debajo de
+    este suelo sigue latiendo con normalidad, solo se marca en la lista de
+    activos. El formato exigido es estrictamente ``X.Y.Z...`` (enteros
+    separados por puntos, ver ``services/agent_freshness.py``); tanto este
+    valor como el ``agent_version`` de cada activo que no encajen en ese
+    formato se resuelven a "no se sabe" y no producen ningún aviso, nunca un
+    falso "desactualizado".
+
+    El valor por defecto (``"0.0.0"``) no marca ningún agente real: la
+    funcionalidad no tiene efecto hasta que un operador fija un suelo de
+    verdad, igual que el resto de umbrales de Hygeia no sorprenden a un
+    despliegue nuevo con avisos que nadie pidió.
+    """
+
 
 def hygeia_config() -> HygeiaConfig:
     return load_block(HygeiaConfig)

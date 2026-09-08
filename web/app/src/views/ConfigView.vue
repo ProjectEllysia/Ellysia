@@ -389,6 +389,7 @@
                 <div class="form-group"><label>Cron de purga</label><input v-model="store.configFlat['features.hygeia.retentionCron']" type="text" class="inp mono" /><span class="field-hint">Formato cron de cinco campos</span></div>
                 <div class="form-group"><label>Precio de la electricidad (por kWh)</label><input v-model.number="store.configFlat['features.hygeia.energyPricePerKwh']" type="number" min="0" step="0.01" class="inp" /></div>
                 <div class="form-group"><label>Moneda</label><input v-model="store.configFlat['features.hygeia.energyPriceCurrency']" type="text" maxlength="3" class="inp mono" /><span class="field-hint">Código ISO 4217 (EUR, USD...)</span></div>
+                <div class="form-group"><label>Versión mínima de agente</label><input v-model="store.configFlat['features.hygeia.minAgentVersion']" type="text" class="inp mono" placeholder="0.0.0" /><span class="field-hint">Formato X.Y.Z. Un activo con una versión anterior se marca como desactualizado en la lista; "0.0.0" no marca ninguno.</span></div>
               </div>
               <h3 class="subsection-title">Umbrales</h3>
               <p class="field-hint">«Latidos sostenidos» evita las alertas por un pico puntual: la métrica tiene que seguir alta ese número de latidos seguidos. Disco y swap avisan al primero.</p>

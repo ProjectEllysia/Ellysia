@@ -46,7 +46,7 @@ from .repositories import (
 )
 from .services import (
     build_inventory_report, check_clock_skew, denormalize, evaluate, generate_agent_key,
-    project_month, services_from_inventory, summarize_power_period,
+    is_agent_outdated, project_month, services_from_inventory, summarize_power_period,
 )
 
 # ---------------------------------------------------------------------------
@@ -195,14 +195,28 @@ class HygeiaAssetManager:
         sin un request por activo (una query agrupada para todos); el
         detalle completo de Hygeia sigue viniendo de
         ``get_analysis_summary``.
+
+        También trae ``agentOutdated``: si la versión de agente reportada
+        está por debajo de ``features.hygeia.minAgentVersion``, calculado
+        aquí (no en ``MonitoredAsset.to_dict()``, que es serialización pura
+        sin acceso a configuración) para que la SPA pueda avisar en la
+        lista sin comparar versiones por su cuenta. ``None`` cuando no se
+        puede afirmar nada (el activo nunca ha reportado, o la versión no
+        encaja en el formato esperado) — nunca se presenta como un "no hay
+        problema" ni como un aviso falso.
         """
         repo = build_repository(MonitoredAssetRepository)
         assets = repo.get_by_user(self.user.id)
         counts = LybraEngineManager().latest_findings_by_asset(
             self.user.id, [asset.id for asset in assets],
         )
+        min_agent_version = CR.hygeia_config().min_agent_version
         return [
-            {**asset.to_dict(), "totalFindings": counts.get(asset.id)}
+            {
+                **asset.to_dict(),
+                "totalFindings": counts.get(asset.id),
+                "agentOutdated": is_agent_outdated(asset.agent_version, min_agent_version),
+            }
             for asset in assets
         ]
 
