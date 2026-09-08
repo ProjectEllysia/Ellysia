@@ -70,19 +70,37 @@ eq('sin dato', fmtWatts(null), NO_DATA)
 
 console.log('\nclassifyPower (P20)')
 eq('sin bloque de potencia: no disponible',
-  classifyPower(null), { state: 'unavailable', watts: null, estimated: null, source: null })
+  classifyPower(null),
+  { state: 'unavailable', watts: null, estimated: null, source: null, virtualizationSystem: null })
 eq('watts null: no disponible aunque el bloque exista',
   classifyPower({ watts: null, estimated: false, source: 'rapl' }),
-  { state: 'unavailable', watts: null, estimated: null, source: null })
+  { state: 'unavailable', watts: null, estimated: null, source: null, virtualizationSystem: null })
 eq('estimated false: medición',
   classifyPower({ watts: 187.5, estimated: false, source: 'rapl' }),
-  { state: 'measured', watts: 187.5, estimated: false, source: 'rapl' })
+  { state: 'measured', watts: 187.5, estimated: false, source: 'rapl', virtualizationSystem: null })
 eq('estimated true: estimación',
   classifyPower({ watts: 60, estimated: true, source: 'windows-model' }),
-  { state: 'estimated', watts: 60, estimated: true, source: 'windows-model' })
+  { state: 'estimated', watts: 60, estimated: true, source: 'windows-model', virtualizationSystem: null })
 eq('watts=0 es una medición, no una ausencia (el borde que sostiene la Fase 3)',
   classifyPower({ watts: 0, estimated: false, source: 'smart-plug' }),
-  { state: 'measured', watts: 0, estimated: false, source: 'smart-plug' })
+  { state: 'measured', watts: 0, estimated: false, source: 'smart-plug', virtualizationSystem: null })
+
+console.log('\nclassifyPower — virtualización (P29)')
+eq('invitado sin potencia: estado "virtual" con el hipervisor',
+  classifyPower(null, { role: 'guest', system: 'kvm' }),
+  { state: 'virtual', watts: null, estimated: null, source: null, virtualizationSystem: 'kvm' })
+eq('host sin potencia: sigue siendo el genérico "no disponible"',
+  classifyPower(null, { role: 'host', system: null }),
+  { state: 'unavailable', watts: null, estimated: null, source: null, virtualizationSystem: null })
+eq('rol desconocido (o ausente) sin potencia: genérico, nunca se exige una lista cerrada',
+  classifyPower(null, { role: null, system: null }),
+  { state: 'unavailable', watts: null, estimated: null, source: null, virtualizationSystem: null })
+eq('sin el segundo argumento: se comporta igual que antes de P29',
+  classifyPower(null),
+  { state: 'unavailable', watts: null, estimated: null, source: null, virtualizationSystem: null })
+eq('invitado CON potencia: la lectura manda, no es "virtual"',
+  classifyPower({ watts: 5.0, estimated: true, source: 'guest-model' }, { role: 'guest', system: 'kvm' }),
+  { state: 'estimated', watts: 5.0, estimated: true, source: 'guest-model', virtualizationSystem: null })
 
 console.log('\nfmtEnergy / fmtCost')
 eq('energía con dos decimales por debajo de 10', fmtEnergy(1.234), { text: '1.23', unit: 'kWh' })
