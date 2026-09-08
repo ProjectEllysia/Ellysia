@@ -13,6 +13,7 @@ from itsdangerous import BadSignature
 
 import src.modules.system.config_reading as CR
 import src.modules.features.iris.managers.mailbox as mailbox_managers_mod
+import src.modules.features.iris.services.mailbox.locks as mailbox_locks_mod
 from src.modules.features.iris.exceptions import (
     IrisMailboxConnectionNotFoundError,
     IrisMailboxInvalidProviderError,
@@ -66,6 +67,50 @@ def _fake_state_redis():
     así que se dobla aquí -- misma idea que _FakeTaskQueue de abajo."""
     with mock.patch.object(mailbox_managers_mod, "RedisConnectionFactory", _FakeStateRedisFactory()):
         yield
+
+
+class _FakeLockRedis:
+    """Doble en memoria de RedisConnectionFactory.decoded() para
+    MailboxSyncLock (B02): SET NX EX más los dos scripts Lua de
+    renovación/liberación condicionados al token del titular."""
+
+    def __init__(self):
+        self._values: dict[str, str] = {}
+
+    def set(self, key, value, nx=False, ex=None):
+        if nx and key in self._values:
+            return None
+        self._values[key] = value
+        return True
+
+    def eval(self, script, numkeys, key, token, *rest):
+        if self._values.get(key) != token:
+            return 0
+        if "del(" in script or "\"del\"" in script:
+            self._values.pop(key, None)
+        return 1
+
+    def expire_orphan(self, key):
+        """Ayuda de test: simula que Redis expiró el lock por su cuenta."""
+        self._values.pop(key, None)
+
+
+class _FakeLockRedisFactory:
+    def __init__(self):
+        self.redis = _FakeLockRedis()
+
+    def decoded(self):
+        return self.redis
+
+
+@pytest.fixture(autouse=True)
+def _fake_lock_redis():
+    """``MailboxSyncLock`` (B02) importa su propio ``RedisConnectionFactory``
+    en el namespace de ``locks.py`` -- se dobla aquí para todos los tests de
+    este fichero, ya que ``_sync_connection`` adquiere el lock siempre."""
+    factory = _FakeLockRedisFactory()
+    with mock.patch.object(mailbox_locks_mod, "RedisConnectionFactory", factory):
+        yield factory
 
 
 class _FakeTaskQueue:
@@ -608,3 +653,96 @@ def test_trigger_sync_submits_task_with_correct_category(app, regular_user):
     assert len(fake_queue.submitted) == 1
     assert fake_queue.submitted[0]["category"] == "iris.ingest"
     assert fake_queue.submitted[0]["args"] == (connection_id,)
+
+
+# --------------------------------------------------------- B02: lock de sync
+
+def test_sync_connection_is_a_no_op_when_lock_already_held(app, regular_user, _fake_lock_redis):
+    with app.app_context():
+        connection_id = _save(app, _connection(regular_user.id, sync_cursor="cursor-0"))
+        # Simula que otro worker ya sostiene el lock de esta conexión.
+        _fake_lock_redis.redis.set(f"iris:mailbox-sync:{connection_id}", "other-token", nx=True, ex=900)
+
+        with mock.patch.object(mailbox_managers_mod, "get_connector") as get_connector:
+            IrisMailboxManager()._sync_connection(connection_id)
+        get_connector.assert_not_called()
+
+        with UnitOfWork() as uow:
+            conn = IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
+            assert conn.sync_cursor == "cursor-0"
+            assert conn.sync_started_at is None
+
+
+def test_sync_connection_recovers_from_an_orphaned_lock(app, regular_user, _fake_lock_redis):
+    """Un lock huérfano (worker muerto a mitad de sync, sin liberar) se
+    autorrecupera por TTL en vez de bloquear la conexión para siempre."""
+    with app.app_context():
+        connection_id = _save(app, _connection(regular_user.id, sync_cursor="cursor-0"))
+        key = f"iris:mailbox-sync:{connection_id}"
+        _fake_lock_redis.redis.set(key, "stale-token", nx=True, ex=900)
+        _fake_lock_redis.redis.expire_orphan(key)  # Redis ya lo habría expirado solo
+
+        fake_queue = _FakeTaskQueue()
+        with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=_FakeConnector()), \
+             mock.patch.object(analysis_managers_mod.TaskQueue, "get_instance", return_value=fake_queue):
+            IrisMailboxManager()._sync_connection(connection_id)
+
+        with UnitOfWork() as uow:
+            conn = IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
+            assert conn.sync_cursor == "cursor-2"
+
+
+def test_sync_connection_releases_lock_even_when_token_refresh_fails(app, regular_user, _fake_lock_redis):
+    with app.app_context():
+        connection_id = _save(app, _connection(
+            regular_user.id, access_token_enc=None, access_token_expires_at=None,
+        ))
+        fake_connector = _FakeConnector(refresh_raises_reauth=True)
+        with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=fake_connector):
+            IrisMailboxManager()._sync_connection(connection_id)
+
+        key = f"iris:mailbox-sync:{connection_id}"
+        assert key not in _fake_lock_redis.redis._values
+
+        with UnitOfWork() as uow:
+            conn = IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
+            assert conn.sync_started_at is None
+
+
+def test_sync_connection_marks_sync_started_during_and_clears_after(app, regular_user):
+    with app.app_context():
+        connection_id = _save(app, _connection(regular_user.id, sync_cursor="cursor-0"))
+        captured = {}
+
+        class _CapturingConnector(_FakeConnector):
+            def fetch_headers(self, access_token, message_ref):
+                with UnitOfWork() as uow:
+                    conn = IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
+                    captured["sync_started_at"] = conn.sync_started_at
+                    captured["sync_job_id"] = conn.sync_job_id
+                return super().fetch_headers(access_token, message_ref)
+
+        fake_queue = _FakeTaskQueue()
+        with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=_CapturingConnector()), \
+             mock.patch.object(analysis_managers_mod.TaskQueue, "get_instance", return_value=fake_queue):
+            IrisMailboxManager()._sync_connection(connection_id, job_id="job-123")
+
+        assert captured["sync_started_at"] is not None
+        assert captured["sync_job_id"] == "job-123"
+
+        with UnitOfWork() as uow:
+            conn = IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
+            assert conn.sync_started_at is None
+            assert conn.sync_job_id is None
+
+
+def test_execute_sync_connection_passes_the_current_job_id(app, regular_user):
+    """``execute_sync_connection`` es el entry point real de TaskQueue --
+    fuera de un worker RQ, ``job_context()`` no-opea y ``job.id`` es None."""
+    with app.app_context():
+        connection_id = _save(app, _connection(regular_user.id))
+        with mock.patch.object(
+            mailbox_managers_mod.IrisMailboxManager, "_sync_connection",
+        ) as sync_connection:
+            IrisMailboxManager.execute_sync_connection(connection_id)
+        sync_connection.assert_called_once_with(connection_id, job_id=None)

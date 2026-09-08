@@ -43,6 +43,7 @@ from ..repositories import (
     IrisAnalysisRepository, IrisMailboxConnectionRepository, IrisMailboxInboxRepository,
 )
 from ..services.mailbox import MAILBOX_CONNECTORS, MailboxConnector, MessageRef, get_connector
+from ..services.mailbox.locks import MailboxSyncLock
 from ..services.parsers import build_subject_title
 
 logger = logging.getLogger(__name__)
@@ -315,48 +316,87 @@ class IrisMailboxManager(TaskTrackingMixin):
     @staticmethod
     def execute_sync_connection(connection_id: int) -> None:
         """Entry point submitted to the TaskQueue for a background sync."""
-        with job_context():
-            IrisMailboxManager()._sync_connection(connection_id)
+        with job_context() as job:
+            IrisMailboxManager()._sync_connection(connection_id, job_id=job.id)
 
-    def _sync_connection(self, connection_id: int) -> None:
+    def _sync_connection(self, connection_id: int, job_id: Optional[str] = None) -> None:
         connection = build_repository(IrisMailboxConnectionRepository).get_by_id(connection_id)
         if connection is None or connection.status != "active":
             return
 
+        # B02: serializa los syncs de una misma conexión. El job_id
+        # determinista de TaskQueue ya evita reencolar mientras el anterior
+        # sigue "started", pero ese estado no se autorrecupera si el worker
+        # muere a mitad de sync -- este lock sí, por TTL.
+        lock = MailboxSyncLock(connection_id, CR.iris_config().mailbox_sync_lock_ttl_seconds)
+        if not lock.acquire():
+            logger.info(f"Sync de la conexión {connection_id} ya en curso; se omite este sondeo.")
+            return
+
         try:
-            access_token, connector = self._ensure_access_token(connection)
-        except _ReauthRequiredError as e:
-            self._mark_reauth_required(connection_id, str(e))
-            return
-        except Exception as e:
-            logger.error(f"Fallo refrescando token de la conexión {connection_id}: {e}", exc_info=True)
-            self._record_sync_error(connection_id, str(e))
-            return
+            self._mark_sync_started(connection_id, job_id)
 
-        try:
-            refs, new_cursor = connector.list_new(access_token, connection.sync_cursor)
-        except Exception as e:
-            logger.error(f"Fallo listando mensajes nuevos de la conexión {connection_id}: {e}", exc_info=True)
-            self._record_sync_error(connection_id, str(e))
-            return
+            try:
+                access_token, connector = self._ensure_access_token(connection)
+            except _ReauthRequiredError as e:
+                self._mark_reauth_required(connection_id, str(e))
+                return
+            except Exception as e:
+                logger.error(
+                    f"Fallo refrescando token de la conexión {connection_id}: {e}", exc_info=True,
+                )
+                self._record_sync_error(connection_id, str(e))
+                return
 
-        # B01: el mensaje entra en la cola de checkpoint antes de intentar
-        # ingerirlo -- así una cuota agotada o un fallo a mitad de lote no lo
-        # pierden, sino que lo dejan pendiente para el próximo sondeo.
-        self._enqueue_pending(connection_id, refs)
+            try:
+                refs, new_cursor = connector.list_new(access_token, connection.sync_cursor)
+            except Exception as e:
+                logger.error(
+                    f"Fallo listando mensajes nuevos de la conexión {connection_id}: {e}", exc_info=True,
+                )
+                self._record_sync_error(connection_id, str(e))
+                return
 
-        max_per_day = CR.iris_config().max_ingested_per_day
-        ingested_today, reset_date = self._current_daily_counter(connection)
-        ingested_today = self._drain_pending(
-            connection, connector, access_token, ingested_today, max_per_day,
-        )
+            # B01: el mensaje entra en la cola de checkpoint antes de intentar
+            # ingerirlo -- así una cuota agotada o un fallo a mitad de lote no
+            # lo pierden, sino que lo dejan pendiente para el próximo sondeo.
+            self._enqueue_pending(connection_id, refs)
 
-        # El cursor del proveedor solo se confirma cuando la cola queda
-        # vacía: confirmarlo con referencias pendientes las perdería para
-        # siempre, porque ni Gmail ni Graph vuelven a listar un mensaje una
-        # vez el cursor avanza más allá de él.
-        advance_cursor = not build_repository(IrisMailboxInboxRepository).has_pending(connection_id)
-        self._finish_sync(connection_id, new_cursor, ingested_today, reset_date, advance_cursor)
+            max_per_day = CR.iris_config().max_ingested_per_day
+            ingested_today, reset_date = self._current_daily_counter(connection)
+            ingested_today = self._drain_pending(
+                connection, connector, access_token, ingested_today, max_per_day, lock,
+            )
+
+            # El cursor del proveedor solo se confirma cuando la cola queda
+            # vacía: confirmarlo con referencias pendientes las perdería para
+            # siempre, porque ni Gmail ni Graph vuelven a listar un mensaje
+            # una vez el cursor avanza más allá de él.
+            advance_cursor = not build_repository(IrisMailboxInboxRepository).has_pending(connection_id)
+            self._finish_sync(connection_id, new_cursor, ingested_today, reset_date, advance_cursor)
+        finally:
+            self._clear_sync_started(connection_id)
+            lock.release()
+
+    @staticmethod
+    def _mark_sync_started(connection_id: int, job_id: Optional[str]) -> None:
+        with UnitOfWork() as uow:
+            repo = IrisMailboxConnectionRepository(uow)
+            fresh = repo.get_by_id(connection_id)
+            if fresh is not None:
+                fresh.sync_started_at = utcnow_naive()
+                fresh.sync_job_id = job_id
+                repo.update(fresh)
+
+    @staticmethod
+    def _clear_sync_started(connection_id: int) -> None:
+        with UnitOfWork() as uow:
+            repo = IrisMailboxConnectionRepository(uow)
+            fresh = repo.get_by_id(connection_id)
+            if fresh is not None:
+                fresh.sync_started_at = None
+                fresh.sync_job_id = None
+                repo.update(fresh)
 
     @staticmethod
     def _enqueue_pending(connection_id: int, refs: list[MessageRef]) -> None:
@@ -378,9 +418,9 @@ class IrisMailboxManager(TaskTrackingMixin):
                     raw_ref=ref.raw or None,
                 ))
 
-    def _drain_pending(
+    def _drain_pending(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self, connection: IrisMailboxConnection, connector: MailboxConnector,
-        access_token: str, ingested_today: int, max_per_day: int,
+        access_token: str, ingested_today: int, max_per_day: int, lock: MailboxSyncLock,
     ) -> int:
         """Procesa la cola de checkpoint (mensajes recién encolados y los que
         quedaron pendientes de sondeos anteriores) hasta agotar la cuota
@@ -390,6 +430,11 @@ class IrisMailboxManager(TaskTrackingMixin):
         analysis_repo = build_repository(IrisAnalysisRepository)
 
         for entry in inbox_repo.get_pending(connection_id):
+            # B02: un lote grande puede tardar más que el TTL inicial del
+            # lock -- renovarlo en cada mensaje evita que otro sync lo dé
+            # por huérfano mientras éste sigue trabajando de verdad.
+            lock.renew()
+
             if ingested_today >= max_per_day:
                 logger.warning(
                     f"Conexión {connection_id} alcanzó la cuota diaria ({max_per_day}); "
