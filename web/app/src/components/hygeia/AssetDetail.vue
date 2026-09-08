@@ -29,7 +29,12 @@
       </div>
       <div class="meta-item">
         <dt>Agente</dt>
-        <dd>{{ asset.agentVersion || 'Sin reportar' }}</dd>
+        <dd>
+          {{ asset.agentVersion || 'Sin reportar' }}
+          <span v-if="asset.agentOutdated" class="agent-outdated-badge" title="Versión de agente desactualizada">
+            Desactualizado
+          </span>
+        </dd>
       </div>
       <div class="meta-item">
         <dt>Alta</dt>
@@ -665,6 +670,11 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
   color: var(--text-muted);
 }
 .meta dd { margin: 0; font-size: var(--fs-body); color: var(--text-dim); }
+.agent-outdated-badge {
+  margin-left: 0.4rem; padding: 0.05rem 0.45rem; border-radius: 999px;
+  background: var(--warn-dim); color: var(--warn);
+  font-size: var(--fs-sm); font-weight: 600; vertical-align: middle;
+}
 
 /* ── Secciones ── */
 .section-title {

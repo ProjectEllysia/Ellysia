@@ -82,7 +82,18 @@
         <button class="row-select" :aria-pressed="asset.id === selectedId" @click="$emit('select', asset.id)">
           <span class="pulse" :class="pulseClass(asset)" aria-hidden="true"></span>
           <span class="row-text">
-            <span class="row-host">{{ asset.hostname }}</span>
+            <span class="row-host-line">
+              <span class="row-host">{{ asset.hostname }}</span>
+              <svg
+                v-if="asset.agentOutdated"
+                class="row-warn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                role="img" :aria-label="`Agente desactualizado (versión ${asset.agentVersion})`"
+                :title="`Agente desactualizado (versión ${asset.agentVersion})`"
+              >
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            </span>
             <span class="row-meta">{{ statusLabel(asset) }} · {{ timeAgo(asset.lastSeenAt) }}</span>
             <!-- Tira aparte y con salto de línea propio: `.row-host` y
                  `.row-meta` son `nowrap` con elipsis y no sirven de molde. -->
@@ -265,10 +276,15 @@ a.btn-icon { text-decoration: none; }
   text-align: left; cursor: pointer;
 }
 .row-text { min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.row-host-line { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
 .row-host {
+  min-width: 0;
   font-size: var(--fs-body); font-weight: 600; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* Aviso, no error: mismo tono --warn que el resto del panel (P26 de Hygeia),
+   nunca --danger — un agente desactualizado sigue latiendo con normalidad. */
+.row-warn-icon { width: 13px; height: 13px; flex-shrink: 0; color: var(--warn); }
 .row-meta {
   font-size: var(--fs-sm); color: var(--text-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
