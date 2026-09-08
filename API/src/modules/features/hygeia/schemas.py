@@ -192,6 +192,19 @@ class ProcessesMetricsSchema(_IngestSchema):
     topMem = fields.List(fields.Nested(ProcessInfoSchema), load_default=list)
 
 
+class PowerMetricsSchema(_IngestSchema):
+    """Consumo eléctrico del host, tal como lo reporta el agente.
+
+    Los tres campos son ``required`` dentro del bloque, mientras que el
+    bloque entero es opcional en ``MetricsSchema``: no saber la potencia es
+    legítimo y se expresa omitiendo ``power``; mandar unos vatios sin decir
+    de dónde salieron no lo es.
+    """
+    watts = fields.Float(required=True, validate=validate.Range(min=0))
+    estimated = fields.Boolean(required=True)
+    source = fields.String(required=True, validate=validate.Length(min=1, max=64))
+
+
 class MetricsSchema(_IngestSchema):
     """Payload completo de métricas de un heartbeat (§11)."""
     cpu = fields.Nested(CpuMetricsSchema, required=True)
@@ -199,6 +212,9 @@ class MetricsSchema(_IngestSchema):
     disk = fields.List(fields.Nested(DiskMountSchema), load_default=list)
     network = fields.List(fields.Nested(NetworkInterfaceSchema), load_default=list)
     processes = fields.Nested(ProcessesMetricsSchema, load_default=dict)
+    # Opcional: un agente sin ninguna fuente de potencia compatible (o más
+    # viejo que el contrato) simplemente no lo manda, y eso no rompe nada.
+    power = fields.Nested(PowerMetricsSchema, load_default=None, allow_none=True)
 
     @validates_schema
     def validate_array_limits(self, data, **kwargs):
@@ -389,6 +405,12 @@ class AssetSnapshotPointSchema(Schema):
     diskMaxMount = fields.String(allow_none=True)
     netRxBps = fields.Integer(allow_none=True)
     netTxBps = fields.Integer(allow_none=True)
+    powerWatts = fields.Float(allow_none=True)
+    # En la serie por cubos estos dos siempre llegan a null (P18): no son
+    # magnitudes que se puedan promediar ni maximizar dentro de un cubo. En
+    # la serie cruda sí viajan, uno por snapshot.
+    powerEstimated = fields.Boolean(allow_none=True)
+    powerSource = fields.String(allow_none=True)
 
 
 class AssetMetricsResponseSchema(Schema):
@@ -421,6 +443,62 @@ class AssetLatestResponseSchema(Schema):
     collectedAt = UTCDateTime(allow_none=True)
     receivedAt = UTCDateTime(allow_none=True)
     metrics = fields.Nested(MetricsSchema, allow_none=True)
+
+
+# =============================================================================
+# ENERGÍA Y COSTE (Fase 3, §hygeia-power) — resumen de consumo de un activo
+# =============================================================================
+
+class CurrentPowerSchema(Schema):
+    """Última lectura de potencia conocida, tal como la deja el propio heartbeat.
+
+    ``watts`` nulo es "este activo no expone ninguna fuente de potencia
+    compatible", no un error; los otros dos campos solo tienen sentido junto
+    a una lectura real, así que viajan nulos en el mismo caso.
+    """
+    watts = fields.Float(allow_none=True)
+    estimated = fields.Boolean(allow_none=True)
+    source = fields.String(allow_none=True)
+
+
+class PowerPeriodSchema(Schema):
+    """
+    Energía y coste de un periodo, con su procedencia (P24).
+
+    ``classification`` distingue tres casos: ``"observed"`` (el periodo cabe
+    en la retención y la cobertura de datos es alta), ``"observed_partial"``
+    (cabe pero con cobertura baja — se da la cifra igual, marcada) y
+    ``"projected"`` (el periodo excede la retención configurada y la cifra
+    se extrapola desde la media observada). Un activo sin ni un intervalo
+    válido en el periodo devuelve ``averageWatts``/``kwh``/``cost`` a
+    ``None`` — no hay cifra que dar, y no es cero.
+    """
+    averageWatts = fields.Float(allow_none=True)
+    kwh = fields.Float(allow_none=True)
+    cost = fields.Float(allow_none=True)
+    currency = fields.String()
+    classification = fields.String()
+    coverageFraction = fields.Float(allow_none=True)
+    periodFrom = UTCDateTime()
+    periodTo = UTCDateTime()
+
+
+class PowerSummaryResponseSchema(Schema):
+    """
+    Resumen de consumo de un activo para la ficha (P25): la lectura actual
+    más energía y coste de 24 h, 7 d y 30 d, y una proyección mensual.
+
+    ``day``/``week``/``month`` cubren como mucho la ventana de retención
+    configurada (30 días por defecto): más allá de ahí no hay histórico que
+    observar. ``monthProjected`` sí extrapola siempre, y por eso se marca
+    ``"projected"`` sin excepción: contra treinta días de retención, un mes
+    natural nunca es dato observado completo.
+    """
+    current = fields.Nested(CurrentPowerSchema)
+    day = fields.Nested(PowerPeriodSchema)
+    week = fields.Nested(PowerPeriodSchema)
+    month = fields.Nested(PowerPeriodSchema)
+    monthProjected = fields.Nested(PowerPeriodSchema)
 
 
 # =============================================================================

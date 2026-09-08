@@ -184,10 +184,12 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
         valores positivos ya aplana) y en Postgres a doble precisión con
         ``floor`` — mismo resultado.
 
-        ``disk_max_mount`` se queda fuera del agregado: el montaje asociado al
-        máximo exigiría una función de ventana por cubo para un dato que el
-        gráfico de líneas no consume; llega ``None`` y se documenta en el
-        contrato.
+        ``disk_max_mount`` se queda fuera del agregado, igual que
+        ``power_estimated``/``power_source``: el montaje asociado al máximo,
+        o la fuente asociada al pico de potencia, exigirían una función de
+        ventana por cubo para un dato que el gráfico de líneas no consume.
+        Los tres llegan ``None`` y se documentan en el contrato; la interfaz
+        los toma del endpoint de últimas métricas.
 
         Args:
             asset_id: Activo cuya serie se consulta.
@@ -215,6 +217,7 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
                 func.max(AssetSnapshot.disk_max_pct).label("disk_max_pct"),
                 func.max(AssetSnapshot.net_rx_bps).label("net_rx_bps"),
                 func.max(AssetSnapshot.net_tx_bps).label("net_tx_bps"),
+                func.max(AssetSnapshot.power_watts).label("power_watts"),
             )
             .filter(AssetSnapshot.asset_id == asset_id)
         )
@@ -248,9 +251,47 @@ class AssetSnapshotRepository(BaseRepository[AssetSnapshot]):
                 "diskMaxMount": None,
                 "netRxBps": row.net_rx_bps,
                 "netTxBps": row.net_tx_bps,
+                "powerWatts": row.power_watts,
+                "powerEstimated": None,
+                "powerSource": None,
             }
             for row in rows
         ]
+
+    def get_power_samples(
+        self, asset_id: int, since: datetime, until: datetime,
+    ) -> List[tuple]:
+        """Instantes y vatios de un activo en una ventana, para el cálculo de energía.
+
+        A diferencia de ``get_series``, no aplica ``limit``: el cálculo de la
+        Fase 3 (media ponderada por duración, P21) necesita **todos** los
+        intervalos de la ventana para no subestimar el tiempo observado, y
+        una ventana de 30 días a 15 s de cadencia son ~172.000 filas —
+        demasiado para el tope de la serie gráfica (1.000 puntos), pero
+        trivial cuando se proyectan solo dos columnas en vez del snapshot
+        completo.
+
+        Los snapshots sin lectura de potencia (``power_watts IS NULL``, sea
+        porque el agente no tiene fuente compatible o porque son anteriores
+        a P16) se excluyen: para el cálculo de energía equivalen a un hueco,
+        no a un cero.
+
+        Returns:
+            Lista de ``(received_at, power_watts)`` ordenada de más antiguo
+            a más reciente.
+        """
+        rows = (
+            self._session.query(AssetSnapshot.received_at, AssetSnapshot.power_watts)
+            .filter(
+                AssetSnapshot.asset_id == asset_id,
+                AssetSnapshot.received_at >= since,
+                AssetSnapshot.received_at <= until,
+                AssetSnapshot.power_watts.isnot(None),
+            )
+            .order_by(AssetSnapshot.received_at.asc())
+            .all()
+        )
+        return [(row.received_at, row.power_watts) for row in rows]
 
     def get_latest(self, asset_id: int) -> Optional[AssetSnapshot]:
         """Devuelve el último snapshot recibido de un activo, o ``None`` si nunca reportó.

@@ -76,6 +76,7 @@ def denormalize(metrics: dict) -> dict:
     metrics = metrics or {}
     cpu = metrics.get("cpu") or {}
     memory = metrics.get("memory") or {}
+    power = metrics.get("power") or {}
 
     load_avg: List[float] = cpu.get("loadAvg") or []
     load1 = load_avg[0] if load_avg else None
@@ -102,4 +103,10 @@ def denormalize(metrics: dict) -> dict:
         "disk_max_mount": disk_max_mount,
         "net_rx_bps":     _sum_or_none(i.get("rxBytesPerSec") for i in interfaces),
         "net_tx_bps":     _sum_or_none(i.get("txBytesPerSec") for i in interfaces),
+        # Sin valores por defecto en los `get`: un activo sin fuente de
+        # potencia debe quedar a None en las tres, nunca a 0 — ver el
+        # docstring de `_sum_or_none` para el mismo principio aplicado a red.
+        "power_watts":     power.get("watts"),
+        "power_estimated": power.get("estimated"),
+        "power_source":    power.get("source"),
     }

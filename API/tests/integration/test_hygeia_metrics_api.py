@@ -30,7 +30,7 @@ pytestmark = pytest.mark.integration
 _MAX_POINTS = 1000
 
 
-def _metrics(cpu=10.0, mem=20.0):
+def _metrics(cpu=10.0, mem=20.0, power_watts=150.0):
     """Payload completo, con todos los bloques que el agente puede mandar."""
     return {
         "cpu": {
@@ -60,6 +60,10 @@ def _metrics(cpu=10.0, mem=20.0):
             "topCpu": [{"pid": 8123, "name": "nginx", "cpuPct": 12.5, "memPct": None}],
             "topMem": [{"pid": 991, "name": "postgres", "cpuPct": None, "memPct": 31.0}],
         },
+        "power": (
+            {"watts": power_watts, "estimated": False, "source": "rapl"}
+            if power_watts is not None else None
+        ),
     }
 
 
@@ -105,6 +109,9 @@ def _seed_snapshots(app, asset_id: int, count: int, *, step_sec: int = 15, **ove
                     "disk_max_mount": "/data",
                     "net_rx_bps": 120_000,
                     "net_tx_bps": 45_000,
+                    "power_watts": 150.0,
+                    "power_estimated": False,
+                    "power_source": "rapl",
                 }
                 fields.update(overrides)
                 repo.save(AssetSnapshot(**fields))
@@ -207,6 +214,9 @@ def test_series_point_exposes_every_denormalized_scalar(client, app, regular_use
     assert point["diskMaxMount"] == "/data"
     assert point["netRxBps"] == 120_000
     assert point["netTxBps"] == 45_000
+    assert point["powerWatts"] == 150.0
+    assert point["powerEstimated"] is False
+    assert point["powerSource"] == "rapl"
 
 
 def test_series_point_never_carries_the_full_payload(client, app, regular_user, auth_headers):
@@ -228,6 +238,7 @@ def test_series_tolerates_rows_without_the_new_columns(client, app, regular_user
         app, asset_id, 2,
         swap_pct=None, load1=None, disk_max_pct=None,
         disk_max_mount=None, net_rx_bps=None, net_tx_bps=None,
+        power_watts=None, power_estimated=None, power_source=None,
     )
 
     resp = client.get(f"/hygeia/assets/{asset_id}/metrics", headers=auth_headers(regular_user))
@@ -237,6 +248,24 @@ def test_series_tolerates_rows_without_the_new_columns(client, app, regular_user
     assert point["netRxBps"] is None
     assert point["load1"] is None
     assert point["cpuPct"] is not None
+    assert point["powerWatts"] is None
+
+
+def test_series_of_asset_without_power_is_null_but_not_broken(client, app, regular_user, auth_headers):
+    """Un activo sin sensores de potencia sigue sirviendo el resto de la serie."""
+    asset_id = _create_asset(app, regular_user.id)
+    _seed_snapshots(
+        app, asset_id, 3,
+        power_watts=None, power_estimated=None, power_source=None,
+    )
+
+    snapshots = client.get(
+        f"/hygeia/assets/{asset_id}/metrics", headers=auth_headers(regular_user)
+    ).get_json()["snapshots"]
+
+    assert len(snapshots) == 3
+    assert all(s["powerWatts"] is None for s in snapshots)
+    assert all(s["cpuPct"] is not None for s in snapshots)
 
 
 def test_series_of_asset_without_snapshots_is_empty(client, app, regular_user, auth_headers):
@@ -275,6 +304,11 @@ def test_latest_returns_the_whole_payload(client, app, regular_user, auth_header
     assert metrics["processes"]["topCpu"][0]["name"] == "nginx"
     assert metrics["processes"]["topMem"][0]["name"] == "postgres"
     assert metrics["memory"]["totalBytes"] == 8_000_000_000
+    # El endpoint de últimas métricas es de donde la SPA toma estimated/source
+    # (P20): la serie agregada los deja a None por decisión de P18.
+    assert metrics["power"]["watts"] == 150.0
+    assert metrics["power"]["estimated"] is False
+    assert metrics["power"]["source"] == "rapl"
 
 
 def test_latest_returns_the_newest_snapshot(client, app, regular_user, auth_headers):
@@ -422,6 +456,33 @@ def test_series_bucketed_drops_disk_max_mount(client, app, regular_user, auth_he
 
     assert point["diskMaxPct"] == 72.0
     assert point["diskMaxMount"] is None
+
+
+def test_series_bucketed_power_is_the_bucket_max_and_metadata_is_null(
+    client, app, regular_user, auth_headers,
+):
+    """La potencia agregada es el máximo del cubo; estimated/source no se agregan (P18)."""
+    asset_id = _create_asset(app, regular_user.id)
+    stamps = _seed_snapshots(app, asset_id, 5, power_watts=100.0)
+    # Un pico dentro del mismo cubo (5 muestras de 15 s caben en un cubo de 60 s).
+    with app.app_context():
+        with UnitOfWork() as uow:
+            AssetSnapshotRepository(uow).save(AssetSnapshot(
+                asset_id=asset_id, collected_at=stamps[-1], received_at=stamps[-1],
+                metrics=_metrics(), power_watts=999.0,
+            ))
+
+    # El pico comparte received_at con el último snapshot sembrado, así que
+    # cae en su mismo cubo — que es el último de la serie, no necesariamente
+    # el primero (los 5 sembrados pueden repartirse entre dos minutos según
+    # el segundo exacto del reloj en el momento de sembrar).
+    point = client.get(
+        f"/hygeia/assets/{asset_id}/metrics?bucket=60", headers=auth_headers(regular_user)
+    ).get_json()["snapshots"][-1]
+
+    assert point["powerWatts"] == 999.0
+    assert point["powerEstimated"] is None
+    assert point["powerSource"] is None
 
 
 def test_series_bucketed_echoes_null_in_raw_mode(client, app, regular_user, auth_headers):
