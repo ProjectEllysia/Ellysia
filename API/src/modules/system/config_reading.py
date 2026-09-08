@@ -1814,6 +1814,16 @@ class IrisConfig:  # pylint: disable=too-many-instance-attributes
     checkpoint no confirma el cursor mientras queden referencias pendientes.
     """
 
+    mailbox_sync_lock_ttl_seconds: int = 900
+    """TTL del lock Redis por conexión que serializa los sync (B02).
+
+    Un lock huérfano (worker muerto a mitad de sync, sin liberar) debe
+    autorrecuperarse por TTL en vez de bloquear la conexión para siempre —
+    ``_drain_pending`` renueva el TTL en cada mensaje procesado, así que este
+    valor solo acota cuánto puede tardar un mensaje suelto sin actividad, no
+    el sync entero.
+    """
+
     prompts: dict = field(default_factory=dict)
     """Prompts de ``IrisAIWriter`` (IA1): ``summary.{system,userTemplate}``."""
 

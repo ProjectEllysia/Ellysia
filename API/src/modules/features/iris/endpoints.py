@@ -552,6 +552,7 @@ def _serialize_connection(connection) -> dict:
         "status": connection.status,
         "lastSyncAt": connection.last_sync_at,
         "lastError": connection.last_error,
+        "syncStartedAt": connection.sync_started_at,
         "createdAt": connection.created_at,
     }
 

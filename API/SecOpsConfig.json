@@ -284,6 +284,7 @@
       "maxConnectionsPerUser": 5,
       "maxIngestedPerDay": 200,
       "maxInboxAttempts": 5,
+      "mailboxSyncLockTtlSeconds": 900,
       "pollIntervalMinutes": 5,
       "prompts": {
         "summary": {

@@ -419,6 +419,7 @@ class IrisMailboxConnectionItemSchema(Schema):
     status = fields.String()
     lastSyncAt = UTCDateTime(allow_none=True)
     lastError = fields.String(allow_none=True)
+    syncStartedAt = UTCDateTime(allow_none=True)
     createdAt = UTCDateTime(allow_none=True)
 
 

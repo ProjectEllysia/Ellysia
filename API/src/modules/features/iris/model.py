@@ -176,6 +176,13 @@ class IrisMailboxConnection(Base):
                  (successful or not — used to schedule the next poll).
         last_error: Human-readable last error, if any (e.g. why the
                  connection is ``reauth_required``).
+        sync_started_at: Cuándo empezó el sync actualmente en curso; NULL
+                 cuando no hay ninguno. Se limpia al terminar (éxito o
+                 error) -- no confundir con ``last_sync_at``, que registra el
+                 último intento *terminado*. Existe para que la UI sepa que
+                 hay un sync en marcha sin tener que adivinarlo (B02).
+        sync_job_id: Id del job de TaskQueue que sostiene el lock de sync
+                 actual; NULL cuando no hay ninguno en curso (B02).
         created_at: When the connection was established.
         user: SQLAlchemy relationship to User.
         analyses: Analyses ingested through this connection.
@@ -203,6 +210,8 @@ class IrisMailboxConnection(Base):
     ingested_reset_date = Column(Date, nullable=True)
     last_sync_at = Column(DateTime, nullable=True)
     last_error = Column(Text, nullable=True)
+    sync_started_at = Column(DateTime, nullable=True)
+    sync_job_id = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user = relationship("User")

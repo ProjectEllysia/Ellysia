@@ -69,7 +69,16 @@ class IrisMailboxScheduler:
         interval = CR.iris_config().poll_interval_minutes
         due = build_repository(IrisMailboxConnectionRepository).get_due_for_sync(interval)
         manager = IrisMailboxManager()
+        queued = 0
         for connection in due:
-            manager.submit_sync(connection.id)
-        if due:
-            logger.info("Sondeo de buzones de Iris: %d conexión(es) encolada(s)", len(due))
+            try:
+                manager.submit_sync(connection.id)
+                queued += 1
+            except Exception as e:
+                # B02: una conexión que no se puede encolar (p.ej. ya hay un
+                # job "started" con el mismo job_id determinista) no debe
+                # tumbar el resto del sondeo -- cada conexión es
+                # independiente de sus vecinas en la lista de vencidas.
+                logger.warning(f"No se pudo encolar el sync de la conexión {connection.id}: {e}")
+        if queued:
+            logger.info("Sondeo de buzones de Iris: %d conexión(es) encolada(s)", queued)
