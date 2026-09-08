@@ -898,6 +898,14 @@ class HygeiaIngestManager:
             # conserva el último conocido. El uptime es estado instantáneo, así
             # que se sobreescribe siempre — un None ahí también es información.
             asset.kernel = payload["host"]["kernel"] or asset.kernel
+            # Mismo trato que el kernel (§P29): un agente que aún no reporte
+            # estos dos campos (versión anterior a esta necesidad) no debe
+            # borrar lo que ya se sabía.
+            host = payload["host"]
+            asset.virtualization_system = (
+                host["virtualizationSystem"] or asset.virtualization_system
+            )
+            asset.virtualization_role = host["virtualizationRole"] or asset.virtualization_role
             asset.uptime_sec = payload["host"]["uptimeSec"]
             # `inventory` es opcional (omitempty en el agente) y, cuando llega,
             # es el estado COMPLETO del software instalado, nunca un delta: se

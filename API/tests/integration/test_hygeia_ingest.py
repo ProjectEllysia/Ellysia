@@ -316,3 +316,69 @@ def test_heartbeat_with_power_missing_estimated_is_rejected(client, app, regular
     )
 
     assert resp.status_code == 422
+
+
+# =============================================================================
+# VIRTUALIZACIÓN DEL HOST (P29) — distingue "sin sensores" de "es un invitado"
+# =============================================================================
+
+def test_heartbeat_records_virtualization_fields(client, app, regular_user):
+    asset_id, agent_key = _create_asset_with_key(app, regular_user)
+    payload = _heartbeat()
+    payload["host"]["virtualizationSystem"] = "kvm"
+    payload["host"]["virtualizationRole"] = "guest"
+
+    resp = client.post(
+        "/hygeia/ingest", json=payload,
+        headers={"Authorization": f"Bearer {agent_key}"},
+    )
+
+    assert resp.status_code == 200
+    with app.app_context():
+        with UnitOfWork() as uow:
+            asset = MonitoredAssetRepository(uow).get_by_id(asset_id)
+            assert asset.virtualization_system == "kvm"
+            assert asset.virtualization_role == "guest"
+
+
+def test_heartbeat_without_virtualization_fields_leaves_columns_null(client, app, regular_user):
+    """Un agente anterior a esta necesidad no debe romper, y no es lo mismo que 'no es una VM'."""
+    asset_id, agent_key = _create_asset_with_key(app, regular_user)
+
+    resp = client.post(
+        "/hygeia/ingest", json=_heartbeat(),
+        headers={"Authorization": f"Bearer {agent_key}"},
+    )
+
+    assert resp.status_code == 200
+    with app.app_context():
+        with UnitOfWork() as uow:
+            asset = MonitoredAssetRepository(uow).get_by_id(asset_id)
+            assert asset.virtualization_system is None
+            assert asset.virtualization_role is None
+
+
+def test_virtualization_fields_are_conserved_like_kernel(client, app, regular_user, monkeypatch):
+    """Son identidad del host: un heartbeat que no los traiga no debe borrar lo ya sabido."""
+    # Dos heartbeats seguidos del mismo activo: se levanta el suelo de
+    # cadencia (`_enforce_min_interval`), que si no rechazaría el segundo
+    # por llegar antes de los 5 s por defecto.
+    monkeypatch.setattr(hygeia_managers.CR, "hygeia_limits", lambda: hygeia_managers.CR.HygeiaLimits(min_interval_sec=0))
+    asset_id, agent_key = _create_asset_with_key(app, regular_user)
+
+    first = _heartbeat()
+    first["host"]["virtualizationSystem"] = "vmware"
+    first["host"]["virtualizationRole"] = "guest"
+    client.post(
+        "/hygeia/ingest", json=first, headers={"Authorization": f"Bearer {agent_key}"},
+    )
+
+    client.post(
+        "/hygeia/ingest", json=_heartbeat(), headers={"Authorization": f"Bearer {agent_key}"},
+    )
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            asset = MonitoredAssetRepository(uow).get_by_id(asset_id)
+            assert asset.virtualization_system == "vmware"
+            assert asset.virtualization_role == "guest"
