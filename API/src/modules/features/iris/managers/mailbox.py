@@ -38,9 +38,11 @@ from ..exceptions import (
     IrisMailboxQuotaExceededError,
 )
 from .analysis import IrisManager
-from ..model import IrisMailboxConnection
-from ..repositories import IrisMailboxConnectionRepository
-from ..services.mailbox import MAILBOX_CONNECTORS, MailboxConnector, get_connector
+from ..model import IrisMailboxConnection, IrisMailboxInbox
+from ..repositories import (
+    IrisAnalysisRepository, IrisMailboxConnectionRepository, IrisMailboxInboxRepository,
+)
+from ..services.mailbox import MAILBOX_CONNECTORS, MailboxConnector, MessageRef, get_connector
 from ..services.parsers import build_subject_title
 
 logger = logging.getLogger(__name__)
@@ -338,29 +340,108 @@ class IrisMailboxManager(TaskTrackingMixin):
             self._record_sync_error(connection_id, str(e))
             return
 
+        # B01: el mensaje entra en la cola de checkpoint antes de intentar
+        # ingerirlo -- así una cuota agotada o un fallo a mitad de lote no lo
+        # pierden, sino que lo dejan pendiente para el próximo sondeo.
+        self._enqueue_pending(connection_id, refs)
+
         max_per_day = CR.iris_config().max_ingested_per_day
         ingested_today, reset_date = self._current_daily_counter(connection)
+        ingested_today = self._drain_pending(
+            connection, connector, access_token, ingested_today, max_per_day,
+        )
 
-        for ref in refs:
+        # El cursor del proveedor solo se confirma cuando la cola queda
+        # vacía: confirmarlo con referencias pendientes las perdería para
+        # siempre, porque ni Gmail ni Graph vuelven a listar un mensaje una
+        # vez el cursor avanza más allá de él.
+        advance_cursor = not build_repository(IrisMailboxInboxRepository).has_pending(connection_id)
+        self._finish_sync(connection_id, new_cursor, ingested_today, reset_date, advance_cursor)
+
+    @staticmethod
+    def _enqueue_pending(connection_id: int, refs: list[MessageRef]) -> None:
+        """Encola cada mensaje nuevo en ``IrisMailboxInbox``, saltando los que
+        ya estaban en cola de un sondeo anterior (pendientes o ``dead``)."""
+        if not refs:
+            return
+        with UnitOfWork() as uow:
+            repo = IrisMailboxInboxRepository(uow)
+            existing_ids = repo.get_existing_provider_ids(
+                connection_id, [ref.provider_message_id for ref in refs],
+            )
+            for ref in refs:
+                if ref.provider_message_id in existing_ids:
+                    continue
+                repo.save(IrisMailboxInbox(
+                    connection_id=connection_id,
+                    provider_message_id=ref.provider_message_id,
+                    raw_ref=ref.raw or None,
+                ))
+
+    def _drain_pending(
+        self, connection: IrisMailboxConnection, connector: MailboxConnector,
+        access_token: str, ingested_today: int, max_per_day: int,
+    ) -> int:
+        """Procesa la cola de checkpoint (mensajes recién encolados y los que
+        quedaron pendientes de sondeos anteriores) hasta agotar la cuota
+        diaria. Devuelve el contador de ingeridos actualizado."""
+        connection_id = connection.id
+        inbox_repo = build_repository(IrisMailboxInboxRepository)
+        analysis_repo = build_repository(IrisAnalysisRepository)
+
+        for entry in inbox_repo.get_pending(connection_id):
             if ingested_today >= max_per_day:
                 logger.warning(
                     f"Conexión {connection_id} alcanzó la cuota diaria ({max_per_day}); "
-                    "el resto de mensajes nuevos se procesará en el próximo sondeo."
+                    "el resto de mensajes pendientes se procesará en el próximo sondeo."
                 )
                 break
+
+            if analysis_repo.exists_by_source(connection_id, entry.provider_message_id):
+                # Ya se aceptó en un intento anterior (p.ej. un fallo entre
+                # el commit del análisis y el borrado de esta entrada) --
+                # resolver sin reintentar ni contarlo de nuevo.
+                self._resolve_inbox_entry(entry.id)
+                continue
+
+            ref = MessageRef(provider_message_id=entry.provider_message_id, raw=entry.raw_ref or {})
             try:
                 self._ingest_message(connection, connector, access_token, ref)
                 ingested_today += 1
+                self._resolve_inbox_entry(entry.id)
             except Exception as e:
-                # Un mensaje roto (parseo, red, o un reintento duplicado que
-                # choca con la UNIQUE constraint de idempotencia) no debe
-                # tumbar el resto del lote.
+                # Un mensaje roto (parseo, red) no debe tumbar el resto del
+                # lote -- queda pendiente (o dead-letter tras demasiados
+                # intentos) para no bloquear el resto de la cola para siempre.
                 logger.error(
-                    f"Fallo analizando el mensaje {ref.provider_message_id} "
+                    f"Fallo analizando el mensaje {entry.provider_message_id} "
                     f"de la conexión {connection_id}: {e}", exc_info=True,
                 )
+                self._retry_or_deadletter(entry.id, str(e))
 
-        self._finish_sync(connection_id, new_cursor, ingested_today, reset_date)
+        return ingested_today
+
+    @staticmethod
+    def _resolve_inbox_entry(entry_id: int) -> None:
+        with UnitOfWork() as uow:
+            repo = IrisMailboxInboxRepository(uow)
+            entry = repo.get_by_id(entry_id)
+            if entry is not None:
+                repo.delete(entry)
+
+    @staticmethod
+    def _retry_or_deadletter(entry_id: int, error: str) -> None:
+        max_attempts = CR.iris_config().max_inbox_attempts
+        with UnitOfWork() as uow:
+            repo = IrisMailboxInboxRepository(uow)
+            entry = repo.get_by_id(entry_id)
+            if entry is None:
+                return
+            entry.attempts += 1
+            entry.last_error = error[:2000]
+            if entry.attempts >= max_attempts:
+                entry.status = "dead"
+            repo.update(entry)
 
     def _ingest_message(self, connection: IrisMailboxConnection, connector: MailboxConnector,
                          access_token: str, ref) -> None:
@@ -423,13 +504,17 @@ class IrisMailboxManager(TaskTrackingMixin):
         return 0, today
 
     @staticmethod
-    def _finish_sync(connection_id: int, new_cursor: str, ingested_today: int, reset_date: date) -> None:
+    def _finish_sync(
+        connection_id: int, new_cursor: str, ingested_today: int, reset_date: date,
+        advance_cursor: bool = True,
+    ) -> None:
         with UnitOfWork() as uow:
             repo = IrisMailboxConnectionRepository(uow)
             fresh = repo.get_by_id(connection_id)
             if fresh is None:
                 return
-            fresh.sync_cursor = new_cursor
+            if advance_cursor:
+                fresh.sync_cursor = new_cursor
             fresh.ingested_today = ingested_today
             fresh.ingested_reset_date = reset_date
             fresh.last_sync_at = utcnow_naive()
