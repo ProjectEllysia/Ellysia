@@ -330,31 +330,37 @@
                   <div class="form-group"><label>Máx. comprobaciones</label><input v-model.number="store.configFlat['features.themis.scanners.lybra.ingest.maxChecks']" type="number" min="1" max="5000" class="inp" /></div>
                 </div>
 
-                <h4 class="card-subtitle">Motor</h4>
-                <p class="field-hint">Cuánto empuja el motor contra el objetivo. Subir la concurrencia o bajar el intervalo acelera el escaneo y aumenta el riesgo de que el objetivo lo trate como un ataque.</p>
-                <div class="cfg-grid cfg-grid--tight">
-                  <div v-for="dial in lybraEngineDials" :key="dial.key" class="form-group">
-                    <label>{{ dial.label }}</label>
-                    <input
-                      v-model.number="store.configFlat[`features.themis.scanners.lybra.engine.${dial.key}`]"
-                      type="number" :min="dial.min" :max="dial.max" :step="dial.step || 1" class="inp" />
+                <CollapsibleSection default-open>
+                  <template #header><h4 class="card-subtitle">Motor</h4></template>
+                  <p class="field-hint">Cuánto empuja el motor contra el objetivo. Subir la concurrencia o bajar el intervalo acelera el escaneo y aumenta el riesgo de que el objetivo lo trate como un ataque.</p>
+                  <div class="cfg-grid cfg-grid--tight">
+                    <div v-for="dial in lybraEngineDials" :key="dial.key" class="form-group">
+                      <label>{{ dial.label }}</label>
+                      <input
+                        v-model.number="store.configFlat[`features.themis.scanners.lybra.engine.${dial.key}`]"
+                        type="number" :min="dial.min" :max="dial.max" :step="dial.step || 1" class="inp" />
+                    </div>
+                    <div class="form-group"><label>User-Agent</label><input v-model="store.configFlat['features.themis.scanners.lybra.engine.httpUserAgent']" type="text" class="inp mono" /></div>
                   </div>
-                  <div class="form-group"><label>User-Agent</label><input v-model="store.configFlat['features.themis.scanners.lybra.engine.httpUserAgent']" type="text" class="inp mono" /></div>
-                </div>
+                </CollapsibleSection>
 
-                <h4 class="card-subtitle">Evidencia</h4>
-                <p class="field-hint">El trozo de respuesta cruda que se guarda junto a cada hallazgo para poder revisarlo después.</p>
-                <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.themis.scanners.lybra.evidence.enabled']" type="checkbox" class="toggle" /><span>Guardar evidencia</span></label></div>
-                <div class="cfg-grid cfg-grid--tight">
-                  <div class="form-group"><label>Tamaño máx. (bytes)</label><input v-model.number="store.configFlat['features.themis.scanners.lybra.evidence.maxBodyBytes']" type="number" min="256" step="256" class="inp" /></div>
-                  <div class="form-group"><label>Retención (días)</label><input v-model.number="store.configFlat['features.themis.scanners.lybra.evidence.retentionDays']" type="number" min="1" max="3650" class="inp" /></div>
-                </div>
+                <CollapsibleSection default-open>
+                  <template #header><h4 class="card-subtitle">Evidencia</h4></template>
+                  <p class="field-hint">El trozo de respuesta cruda que se guarda junto a cada hallazgo para poder revisarlo después.</p>
+                  <div class="cfg-row"><label class="toggle-row"><input v-model="store.configFlat['features.themis.scanners.lybra.evidence.enabled']" type="checkbox" class="toggle" /><span>Guardar evidencia</span></label></div>
+                  <div class="cfg-grid cfg-grid--tight">
+                    <div class="form-group"><label>Tamaño máx. (bytes)</label><input v-model.number="store.configFlat['features.themis.scanners.lybra.evidence.maxBodyBytes']" type="number" min="256" step="256" class="inp" /></div>
+                    <div class="form-group"><label>Retención (días)</label><input v-model.number="store.configFlat['features.themis.scanners.lybra.evidence.retentionDays']" type="number" min="1" max="3650" class="inp" /></div>
+                  </div>
+                </CollapsibleSection>
 
-                <h4 class="card-subtitle">Credenciales por defecto</h4>
-                <p class="field-hint">Es la única fase que escribe en el objetivo: cada intento es un inicio de sesión real. El tope es por cuenta, no por servicio, y evita que la comprobación se convierta en fuerza bruta.</p>
-                <div class="cfg-grid cfg-grid--tight">
-                  <div class="form-group"><label>Intentos por cuenta</label><input v-model.number="store.configFlat['features.themis.scanners.lybra.credentials.maxAttempts']" type="number" min="1" max="20" class="inp" /></div>
-                </div>
+                <CollapsibleSection default-open>
+                  <template #header><h4 class="card-subtitle">Credenciales por defecto</h4></template>
+                  <p class="field-hint">Es la única fase que escribe en el objetivo: cada intento es un inicio de sesión real. El tope es por cuenta, no por servicio, y evita que la comprobación se convierta en fuerza bruta.</p>
+                  <div class="cfg-grid cfg-grid--tight">
+                    <div class="form-group"><label>Intentos por cuenta</label><input v-model.number="store.configFlat['features.themis.scanners.lybra.credentials.maxAttempts']" type="number" min="1" max="20" class="inp" /></div>
+                  </div>
+                </CollapsibleSection>
               </ScannerCard>
             </div>
           </section>
@@ -438,6 +444,7 @@ import Topbar from '@/components/shared/Topbar.vue'
 import StarBackground from '@/components/shared/StarBackground.vue'
 import { useConfigStore } from '@/stores/configStore'
 import ScannerCard from '@/components/config/ScannerCard.vue'
+import CollapsibleSection from '@/components/config/CollapsibleSection.vue'
 import ModelPicker from '@/components/config/ModelPicker.vue'
 import PromptField from '@/components/shared/PromptField.vue'
 
@@ -653,8 +660,19 @@ function handleSave() { store.saveConfig() }
 .chip-row { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .chip { display: flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.5rem; background: var(--bg); border: 1px solid var(--border-solid); border-radius: 999px; font-size: var(--fs-md); color: var(--text-dim); cursor: pointer; }
 .chip input { accent-color: var(--accent); cursor: pointer; }
-.card-subtitle { font-size: var(--fs-md); font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0.4rem 0 0; }
-.scanner-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.85rem; margin-top: 0.85rem; }
+.card-subtitle { font-size: var(--fs-md); font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0; }
+/* Separación entre los tres bloques colapsables de Lybra (Motor, Evidencia,
+   Credenciales): antes la daba el margin-top de `.card-subtitle`, que ahora
+   vive dentro del botón de cada CollapsibleSection y no puede seguir
+   cumpliendo ese papel. El nodo raíz de un componente hijo lleva también el
+   atributo scoped del padre, así que este selector sin :deep() sí alcanza a
+   las tres instancias declaradas aquí, dentro del slot de Lybra. */
+.collapsible + .collapsible { margin-top: 0.5rem; }
+/* `align-items: start` evita que Grid estire cada tarjeta a la altura de la más
+   alta de su fila (Lybra, con varias subsecciones, frente a Nmap/Nikto casi
+   sin opciones propias) — ese estirado era el hueco vacío que denunciaba el
+   issue #451, no un exceso de contenido de Lybra. */
+.scanner-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.85rem; margin-top: 0.85rem; align-items: start; }
 .form-group { display: flex; flex-direction: column; gap: 0.25rem; }
 .form-group label { font-size: var(--fs-md); font-weight: 600; color: var(--text-dim); }
 .inp { background: var(--bg); border: 1px solid var(--border-solid); border-radius: 6px; padding: 0.45rem 0.6rem; color: var(--text); font-size: var(--fs-input); outline: none; transition: border-color 0.2s; }
