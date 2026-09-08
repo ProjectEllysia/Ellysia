@@ -90,6 +90,11 @@ class AssetSchema(Schema):
     hostname = fields.String()
     os = fields.String(allow_none=True)
     kernel = fields.String(allow_none=True)
+    # Identidad del host, no una métrica (§P29): null significa "el agente
+    # nunca lo ha reportado" (agente anterior a esta necesidad, o su
+    # `gopsutil` no supo detectarlo), no "no es una máquina virtual".
+    virtualizationSystem = fields.String(allow_none=True)
+    virtualizationRole = fields.String(allow_none=True)
     labels = fields.Dict()
     tags = fields.List(fields.Nested(TagSchema))
     status = fields.String()
@@ -140,6 +145,15 @@ class HostInfoSchema(_IngestSchema):
     os = fields.String(load_default=None, validate=validate.Length(max=64))
     kernel = fields.String(load_default=None, validate=validate.Length(max=128))
     uptimeSec = fields.Integer(load_default=None, validate=validate.Range(min=0))
+    # Texto libre en vez de un OneOf (§P29): gopsutil puede devolver valores
+    # nuevos que el servidor todavía no conoce, y un agente con una versión
+    # de gopsutil distinta no debe ver su heartbeat rechazado por eso. Solo
+    # el literal "guest" dispara el mensaje de máquina virtual; cualquier
+    # otro valor (incluido uno que no se reconozca) se trata como "host o
+    # desconocido" — la misma doctrina de "ante la duda, no se sabe" que ya
+    # sigue el comparador de versiones de agente.
+    virtualizationSystem = fields.String(load_default=None, validate=validate.Length(max=32))
+    virtualizationRole = fields.String(load_default=None, validate=validate.Length(max=32))
 
 
 class CpuMetricsSchema(_IngestSchema):

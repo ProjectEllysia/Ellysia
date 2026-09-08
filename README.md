@@ -334,6 +334,8 @@ Hygeia has two separate auth surfaces: standard OAuth for the user-facing endpoi
 
 **Outdated-agent warning.** `GET /hygeia/assets` adds `agentOutdated` to each asset: `true` when the agent's reported `agentVersion` is strictly below `features.hygeia.minAgentVersion` (default `"0.0.0"`, which flags nothing until an operator sets a real floor), `false` when it's at or above it, and `null` whenever the comparison can't be made in good faith — the asset never reported a version, or either version string doesn't parse as strict `X.Y.Z...` (the ingest contract only length-validates `agentVersion`, so a malformed value can't be told apart from outdated-but-well-formed data; the comparator resolves that ambiguity to "unknown" rather than guessing). It's advisory only — never blocks ingestion or changes presence status.
 
+**Virtual-machine awareness.** The ingest contract's `host` block accepts optional `virtualizationSystem`/`virtualizationRole` (populated by the agent's `gopsutil` detection), persisted the same way as `kernel` — nullable columns on `MonitoredAsset`, conserved across a heartbeat that doesn't report them. A guest has no power registers to read (they aren't virtualized), so that's not a hardware defect: when `virtualizationRole` is exactly `"guest"` and the asset has no power reading, the "no sensors" message becomes "this is a virtual machine — its host measures the power draw" instead. Any other role (`"host"`, unset, or a value the server doesn't recognize) falls back to the generic message; the comparison never requires `virtualizationRole` to match a closed list, so a newer `gopsutil` reporting an unfamiliar value can't break ingestion.
+
 ### Accounts — plans & organizations
 
 | Method | Endpoint | Description |

@@ -85,6 +85,16 @@ class MonitoredAsset(Base):
         kernel: Versión de kernel reportada por el agente, opcional. Es
             identidad del host, no una métrica: se conserva el último valor
             conocido si un heartbeat concreto no lo trae.
+        virtualization_system: Hipervisor o motor de contenedores detectado
+            por ``gopsutil`` (``"kvm"``, ``"vmware"``, ``"hyperv"``,
+            ``"docker"``...), opcional. Igual que ``kernel``, es identidad
+            del host y se conserva el último valor conocido.
+        virtualization_role: ``"guest"`` o ``"host"`` según lo detecte
+            ``gopsutil``, o cualquier otro valor (incluida una cadena que el
+            servidor no reconozca) para "desconocido" — solo el literal
+            ``"guest"`` activa el mensaje de máquina virtual de la métrica
+            de potencia (§P29); nunca se valida contra una lista cerrada,
+            para que un `gopsutil` más nuevo no rompa la ingesta.
         labels: Etiquetas libres del activo (entorno, rol, ubicación...).
         agent_key_id: Prefijo público de la clave de agente, único e indexado.
         agent_key_hash: Hash Argon2id del secreto de la clave de agente.
@@ -145,6 +155,8 @@ class MonitoredAsset(Base):
     hostname = Column(String(255), nullable=False)
     os       = Column(String(64), nullable=True)
     kernel   = Column(String(128), nullable=True)
+    virtualization_system = Column(String(32), nullable=True)
+    virtualization_role   = Column(String(32), nullable=True)
     labels   = Column(JSONB, nullable=True)
 
     agent_key_id   = Column(String(32), unique=True, index=True, nullable=False)
@@ -191,14 +203,17 @@ class MonitoredAsset(Base):
         con sufijo de zona horaria, igual que en el resto de módulos.
 
         Returns:
-            Diccionario con id, hostname, os, kernel, labels, tags, status,
-            isPersistent, lastSeenAt, uptimeSec, agentVersion y createdAt.
+            Diccionario con id, hostname, os, kernel, virtualizationSystem,
+            virtualizationRole, labels, tags, status, isPersistent,
+            lastSeenAt, uptimeSec, agentVersion y createdAt.
         """
         return {
             "id":           self.id,
             "hostname":     self.hostname,
             "os":           self.os,
             "kernel":       self.kernel,
+            "virtualizationSystem": self.virtualization_system,
+            "virtualizationRole":   self.virtualization_role,
             "labels":       self.labels or {},
             "tags":         [tag.to_dict() for tag in self.tags],
             "status":       self.status,
