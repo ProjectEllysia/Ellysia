@@ -60,6 +60,7 @@ def test_returned_keys_match_snapshot_columns():
     assert set(denormalize(_linux_metrics())) == {
         "cpu_pct", "mem_pct", "swap_pct", "load1",
         "disk_max_pct", "disk_max_mount", "net_rx_bps", "net_tx_bps",
+        "power_watts", "power_estimated", "power_source",
     }
 
 
@@ -191,6 +192,45 @@ def test_empty_payload_yields_all_none():
     assert all(value is None for value in denormalize({}).values())
 
 
+def test_power_block_extracts_the_three_fields():
+    metrics = {
+        "cpu": {"usagePct": 1.0}, "memory": {"usagePct": 2.0},
+        "power": {"watts": 187.5, "estimated": False, "source": "rapl"},
+    }
+    result = denormalize(metrics)
+    assert result["power_watts"] == 187.5
+    assert result["power_estimated"] is False
+    assert result["power_source"] == "rapl"
+
+
+def test_missing_power_block_is_none_not_zero():
+    """Un equipo sin sensores de potencia no es un equipo que consuma 0 W."""
+    metrics = {"cpu": {"usagePct": 1.0}, "memory": {"usagePct": 2.0}}
+    result = denormalize(metrics)
+    assert result["power_watts"] is None
+    assert result["power_estimated"] is None
+    assert result["power_source"] is None
+
+
+def test_explicit_null_power_is_treated_like_absence():
+    metrics = {"cpu": {"usagePct": 1.0}, "memory": {"usagePct": 2.0}, "power": None}
+    result = denormalize(metrics)
+    assert result["power_watts"] is None
+    assert result["power_estimated"] is None
+    assert result["power_source"] is None
+
+
+def test_zero_watts_stays_zero_not_none():
+    """Cero vatios reportados es una medición, no una ausencia de dato."""
+    metrics = {
+        "cpu": {"usagePct": 1.0}, "memory": {"usagePct": 2.0},
+        "power": {"watts": 0.0, "estimated": False, "source": "smart-plug"},
+    }
+    result = denormalize(metrics)
+    assert result["power_watts"] == 0.0
+    assert result["power_watts"] is not None
+
+
 def test_bucketed_series_accepts_postgres_decimal_bucket_ids():
     """PostgreSQL devuelve Decimal para FLOOR(EXTRACT(...))."""
     query = Mock()
@@ -207,6 +247,7 @@ def test_bucketed_series_accepts_postgres_decimal_bucket_ids():
         disk_max_pct=None,
         net_rx_bps=None,
         net_tx_bps=None,
+        power_watts=None,
     )]
 
     repository = AssetSnapshotRepository(session=Mock(query=Mock(return_value=query)))

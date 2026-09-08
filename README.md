@@ -314,7 +314,8 @@ Aegis combines AI-generated awareness content with current alerts from the **INC
 | `POST` | `/hygeia/assets` | `HYGEIA_CREATE` | Register a monitored asset; returns the agent key **once** |
 | `GET` | `/hygeia/assets` | `HYGEIA_READ` | List the user's assets with presence status |
 | `GET` | `/hygeia/assets/<id>` | `HYGEIA_READ` | Asset detail |
-| `GET` | `/hygeia/assets/<id>/metrics?from=&to=` · `/metrics/latest` | `HYGEIA_READ` | CPU/memory time series (or last snapshot) for the asset's chart |
+| `GET` | `/hygeia/assets/<id>/metrics?from=&to=&bucket=` · `/metrics/latest` | `HYGEIA_READ` | CPU/memory/power time series (raw or bucketed, or last snapshot) for the asset's chart |
+| `GET` | `/hygeia/assets/<id>/power-summary` | `HYGEIA_READ` | Current power reading plus energy/cost for 24h/7d/30d and a monthly projection, each tagged `observed`/`observed_partial`/`projected` |
 | `GET` | `/hygeia/assets/<id>/inventory` | `HYGEIA_READ` | Last known installed-software inventory |
 | `POST` | `/hygeia/inventory/report` | `HYGEIA_UPDATE` | Download the software inventory as a document |
 | `POST/GET` | `/hygeia/assets/<id>/analyze` · `/analysis` | `HYGEIA_UPDATE` + `THEMIS_CREATE` | Run/read a Lybra-powered analysis of the asset's software inventory |
@@ -325,9 +326,13 @@ Aegis combines AI-generated awareness content with current alerts from the **INC
 | `GET` | `/hygeia/alerts?state=&severity=&assetId=` | `HYGEIA_READ` | List anomalies for the user's assets |
 | `POST` | `/hygeia/alerts/<id>/ack` \| `/resolve` | `HYGEIA_UPDATE` | Acknowledge / resolve an anomaly |
 | `DELETE` | `/hygeia/alerts/<id>` | `HYGEIA_DELETE` | Delete an anomaly |
-| `POST` | `/hygeia/ingest` | agent key | Agent heartbeat (host info, CPU/memory/disk/network/processes) |
+| `POST` | `/hygeia/ingest` | agent key | Agent heartbeat (host info, CPU/memory/disk/network/processes, optional power) |
 
 Hygeia has two separate auth surfaces: standard OAuth for the user-facing endpoints above, and a per-asset **agent key** (`@require_agent_key`, not OAuth) for `POST /hygeia/ingest` — the only endpoint an agent calls. A presence-check job marks assets `stale`/`offline` and opens a `host_down` anomaly when heartbeats stop; critical anomalies trigger an async email notification (`hygeia.notify`, via `herald`). The inventory analysis endpoint deliberately requires both a Hygeia and a Themis attribute — it's a Hygeia action that spends a Themis scan.
+
+**Power monitoring.** The ingest contract's `metrics` block accepts an optional `power` object (`watts`, `estimated`, `source`) — an agent that doesn't send it (older agent, or hardware with no compatible sensor) is unaffected, and the three fields land in their own nullable `AssetSnapshot` columns (`power_watts`, `power_estimated`, `power_source`) rather than only in the raw JSONB, so the time series and the power summary never have to parse it back out. `NULL` means "not reported," not zero: a gap in telemetry is never averaged in as 0 W. `features.hygeia.energyPricePerKwh` (plus `energyPriceCurrency`) turns the observed average power into kWh and cost; a period is labeled `observed` only when it fits inside `retentionDays` with high data coverage, `observed_partial` when it fits but coverage is low, and `projected` whenever the requested period exceeds the retention window (a monthly/yearly cost always is, against 30 days of retention).
+
+**Outdated-agent warning.** `GET /hygeia/assets` adds `agentOutdated` to each asset: `true` when the agent's reported `agentVersion` is strictly below `features.hygeia.minAgentVersion` (default `"0.0.0"`, which flags nothing until an operator sets a real floor), `false` when it's at or above it, and `null` whenever the comparison can't be made in good faith — the asset never reported a version, or either version string doesn't parse as strict `X.Y.Z...` (the ingest contract only length-validates `agentVersion`, so a malformed value can't be told apart from outdated-but-well-formed data; the comparator resolves that ambiguity to "unknown" rather than guessing). It's advisory only — never blocks ingestion or changes presence status.
 
 ### Accounts — plans & organizations
 
@@ -778,4 +783,4 @@ The config panel (`web/app/src/views/ConfigView.vue`) exposes every settable key
 - `API/src/data/` and `docs/` are gitignored (scan outputs, generated PDFs).
 - PostgreSQL uses port **15432** locally (not standard 5432).
 - There is a single `TaskStatus` enum, in `system/taskqueue/task.py`; `themis/services/tasks.py` imports it rather than defining its own.
-- The API version is declared as `appVersion` in `SecOpsConfig.json` (currently `0.5.14`, read by `CR.get_app_version()`).
+- The API version is declared as `appVersion` in `SecOpsConfig.json` (currently `0.5.15`, read by `CR.get_app_version()`).

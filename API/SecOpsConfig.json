@@ -1,5 +1,5 @@
 {
-  "appVersion": "0.5.14",
+  "appVersion": "0.5.15",
   "general": {
     "directories": {
       "logdir": "..",
@@ -1235,6 +1235,9 @@
       "offlineAfterMissed": 4,
       "retentionDays": 30,
       "retentionCron": "0 4 * * *",
+      "energyPricePerKwh": 0.15,
+      "energyPriceCurrency": "EUR",
+      "minAgentVersion": "0.0.0",
       "colorPalette": {
         "black": "#121212",
         "dark": "#24402c",

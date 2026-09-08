@@ -9,6 +9,7 @@ necesitan tocar ``flask.request`` — mismo precedente que
 """
 
 from .aggregation import denormalize
+from .agent_freshness import is_agent_outdated
 from .detection import AnomalyChange, DetectionOutcome, evaluate
 from .enrollment import agent_key_id_from_request, generate_agent_key, require_agent_key
 from .ingest_guard import (
@@ -19,6 +20,16 @@ from .ingest_guard import (
 )
 from .inventory_adapter import services_from_inventory
 from .reports import build_inventory_report
+from .stats import (
+    EnergyCost,
+    PeriodClassification,
+    PowerAverage,
+    classify_period,
+    energy_and_cost,
+    project_month,
+    summarize_power_period,
+    weighted_average_with_observed_time,
+)
 
 __all__ = [
     "services_from_inventory",
@@ -34,4 +45,13 @@ __all__ = [
     "AnomalyChange",
     "DetectionOutcome",
     "denormalize",
+    "is_agent_outdated",
+    "PowerAverage",
+    "EnergyCost",
+    "PeriodClassification",
+    "weighted_average_with_observed_time",
+    "energy_and_cost",
+    "classify_period",
+    "summarize_power_period",
+    "project_month",
 ]

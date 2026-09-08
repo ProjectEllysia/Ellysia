@@ -1716,6 +1716,43 @@ class HygeiaConfig:
     queda como dict: las claves las decide la configuración, no este módulo.
     """
 
+    energy_price_per_kwh: float = 0.15
+    """Precio de la electricidad usado para convertir kWh en coste (Fase 3).
+
+    Clave global y no por activo ni por agente: el precio depende del país,
+    el contrato y la hora del día, no de la máquina que se mide, así que
+    meterlo en el agente obligaría a reconfigurar cada host del parque para
+    cambiar una tarifa. Cubre el caso real de una única instalación con una
+    tarifa; un ámbito por organización, si hiciera falta, se resolvería
+    consultando la organización y cayendo a este valor cuando no tenga uno
+    propio, sin tocar esta clave.
+    """
+
+    energy_price_currency: str = "EUR"
+    """Moneda de ``energy_price_per_kwh``.
+
+    Un número de euros sin decir que son euros es exactamente el tipo de
+    dato que se malinterpreta en la primera instalación fuera de la zona
+    euro.
+    """
+
+    min_agent_version: str = "0.0.0"
+    """Versión mínima de agente que no se marca como desactualizada en la SPA.
+
+    Es un aviso, no una política de compatibilidad: un agente por debajo de
+    este suelo sigue latiendo con normalidad, solo se marca en la lista de
+    activos. El formato exigido es estrictamente ``X.Y.Z...`` (enteros
+    separados por puntos, ver ``services/agent_freshness.py``); tanto este
+    valor como el ``agent_version`` de cada activo que no encajen en ese
+    formato se resuelven a "no se sabe" y no producen ningún aviso, nunca un
+    falso "desactualizado".
+
+    El valor por defecto (``"0.0.0"``) no marca ningún agente real: la
+    funcionalidad no tiene efecto hasta que un operador fija un suelo de
+    verdad, igual que el resto de umbrales de Hygeia no sorprenden a un
+    despliegue nuevo con avisos que nadie pidió.
+    """
+
 
 def hygeia_config() -> HygeiaConfig:
     return load_block(HygeiaConfig)

@@ -106,6 +106,8 @@ def _latest_snapshot(app, asset_id: int) -> dict:
                 "load1": s.load1, "disk_max_pct": s.disk_max_pct,
                 "disk_max_mount": s.disk_max_mount,
                 "net_rx_bps": s.net_rx_bps, "net_tx_bps": s.net_tx_bps,
+                "power_watts": s.power_watts, "power_estimated": s.power_estimated,
+                "power_source": s.power_source,
                 "metrics": s.metrics,
             }
 
@@ -219,3 +221,98 @@ def test_ingest_rejects_skewed_clock(client, app, regular_user):
     )
 
     assert resp.status_code == 400
+
+
+# =============================================================================
+# POTENCIA (P15 validación, P16/P17 persistencia) — hygeia-power fase 2
+# =============================================================================
+
+def _heartbeat_with_power(**power_overrides):
+    power = {"watts": 187.5, "estimated": False, "source": "rapl"}
+    power.update(power_overrides)
+    payload = _heartbeat()
+    payload["metrics"]["power"] = power
+    return payload
+
+
+def test_heartbeat_with_power_is_accepted_and_persisted(client, app, regular_user):
+    asset_id, agent_key = _create_asset_with_key(app, regular_user)
+
+    resp = client.post(
+        "/hygeia/ingest", json=_heartbeat_with_power(),
+        headers={"Authorization": f"Bearer {agent_key}"},
+    )
+
+    assert resp.status_code == 200
+    snapshot = _latest_snapshot(app, asset_id)
+    assert snapshot["power_watts"] == 187.5
+    assert snapshot["power_estimated"] is False
+    assert snapshot["power_source"] == "rapl"
+
+
+def test_heartbeat_without_power_is_accepted_for_backward_compatibility(client, app, regular_user):
+    """Un agente que aún no manda potencia (o hardware sin sensores) no debe romper nada."""
+    asset_id, agent_key = _create_asset_with_key(app, regular_user)
+
+    resp = client.post(
+        "/hygeia/ingest", json=_heartbeat(),
+        headers={"Authorization": f"Bearer {agent_key}"},
+    )
+
+    assert resp.status_code == 200
+    snapshot = _latest_snapshot(app, asset_id)
+    assert snapshot["power_watts"] is None
+    assert snapshot["power_estimated"] is None
+    assert snapshot["power_source"] is None
+
+
+def test_heartbeat_with_zero_watts_persists_zero_not_null(client, app, regular_user):
+    """Es la distinción que sostiene toda la Fase 3: 0 W medidos no es ausencia de dato."""
+    asset_id, agent_key = _create_asset_with_key(app, regular_user)
+
+    resp = client.post(
+        "/hygeia/ingest", json=_heartbeat_with_power(watts=0.0),
+        headers={"Authorization": f"Bearer {agent_key}"},
+    )
+
+    assert resp.status_code == 200
+    snapshot = _latest_snapshot(app, asset_id)
+    assert snapshot["power_watts"] == 0.0
+    assert snapshot["power_watts"] is not None
+
+
+def test_heartbeat_with_negative_watts_is_rejected(client, app, regular_user):
+    """Atrapa un contador de RAPL desbordado antes de persistir un dato imposible."""
+    _, agent_key = _create_asset_with_key(app, regular_user)
+
+    resp = client.post(
+        "/hygeia/ingest", json=_heartbeat_with_power(watts=-5.0),
+        headers={"Authorization": f"Bearer {agent_key}"},
+    )
+
+    assert resp.status_code == 422
+
+
+def test_heartbeat_with_empty_source_is_rejected(client, app, regular_user):
+    _, agent_key = _create_asset_with_key(app, regular_user)
+
+    resp = client.post(
+        "/hygeia/ingest", json=_heartbeat_with_power(source=""),
+        headers={"Authorization": f"Bearer {agent_key}"},
+    )
+
+    assert resp.status_code == 422
+
+
+def test_heartbeat_with_power_missing_estimated_is_rejected(client, app, regular_user):
+    """Los tres campos son obligatorios dentro del bloque, aunque el bloque entero sea opcional."""
+    asset_id, agent_key = _create_asset_with_key(app, regular_user)
+    payload = _heartbeat()
+    payload["metrics"]["power"] = {"watts": 100.0, "source": "rapl"}
+
+    resp = client.post(
+        "/hygeia/ingest", json=payload,
+        headers={"Authorization": f"Bearer {agent_key}"},
+    )
+
+    assert resp.status_code == 422

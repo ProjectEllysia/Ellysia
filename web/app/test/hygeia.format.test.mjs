@@ -7,7 +7,10 @@
  *   node web/app/test/hygeia.format.test.mjs
  */
 
-import { fmtBytes, fmtRate, fmtUptime, fmtPct, fmtLoad1 } from '../src/components/hygeia/format.js'
+import {
+  fmtBytes, fmtRate, fmtUptime, fmtPct, fmtLoad1,
+  fmtWatts, classifyPower, fmtEnergy, fmtCost, describePowerPeriod,
+} from '../src/components/hygeia/format.js'
 
 let passed = 0
 let failed = 0
@@ -56,6 +59,50 @@ console.log('\nfmtLoad1')
 eq('carga con un decimal', fmtLoad1(1.5), '1.5')
 eq('cero es un dato, no una ausencia', fmtLoad1(0), '0.0')
 eq('sin dato (Windows no la reporta)', fmtLoad1(null), '—')
+
+console.log('\nfmtWatts (P19)')
+eq('vatios sueltos', fmtWatts(45), { text: '45', unit: 'W' })
+eq('un decimal por debajo de 10', fmtWatts(4.7), { text: '4.7', unit: 'W' })
+eq('cero es un dato, no una ausencia', fmtWatts(0), { text: '0.0', unit: 'W' })
+eq('escala a kW por encima de 1000 W', fmtWatts(1500), { text: '1.5', unit: 'kW' })
+eq('kW entero a partir de 10', fmtWatts(12000), { text: '12', unit: 'kW' })
+eq('sin dato', fmtWatts(null), NO_DATA)
+
+console.log('\nclassifyPower (P20)')
+eq('sin bloque de potencia: no disponible',
+  classifyPower(null), { state: 'unavailable', watts: null, estimated: null, source: null })
+eq('watts null: no disponible aunque el bloque exista',
+  classifyPower({ watts: null, estimated: false, source: 'rapl' }),
+  { state: 'unavailable', watts: null, estimated: null, source: null })
+eq('estimated false: medición',
+  classifyPower({ watts: 187.5, estimated: false, source: 'rapl' }),
+  { state: 'measured', watts: 187.5, estimated: false, source: 'rapl' })
+eq('estimated true: estimación',
+  classifyPower({ watts: 60, estimated: true, source: 'windows-model' }),
+  { state: 'estimated', watts: 60, estimated: true, source: 'windows-model' })
+eq('watts=0 es una medición, no una ausencia (el borde que sostiene la Fase 3)',
+  classifyPower({ watts: 0, estimated: false, source: 'smart-plug' }),
+  { state: 'measured', watts: 0, estimated: false, source: 'smart-plug' })
+
+console.log('\nfmtEnergy / fmtCost')
+eq('energía con dos decimales por debajo de 10', fmtEnergy(1.234), { text: '1.23', unit: 'kWh' })
+eq('energía con un decimal a partir de 10', fmtEnergy(23.456), { text: '23.5', unit: 'kWh' })
+eq('sin energía observada', fmtEnergy(null), NO_DATA)
+eq('coste en euros', fmtCost(1.5, 'EUR'), { text: '1.50', unit: '€' })
+eq('coste en una moneda sin símbolo conocido usa el código', fmtCost(2, 'JPY'), { text: '2.00', unit: 'JPY' })
+eq('sin coste', fmtCost(null, 'EUR'), NO_DATA)
+
+console.log('\ndescribePowerPeriod (P24/P25)')
+eq('periodo observado',
+  describePowerPeriod({ kwh: 1.0, cost: 0.15, currency: 'EUR', classification: 'observed', coverageFraction: 0.97 }),
+  {
+    kwh: { text: '1.00', unit: 'kWh' }, cost: { text: '0.15', unit: '€' },
+    classification: 'observed', classificationLabel: 'Observado', coverageFraction: 0.97,
+  })
+eq('periodo proyectado', describePowerPeriod({
+  kwh: 30, cost: 4.5, currency: 'EUR', classification: 'projected', coverageFraction: null,
+}).classificationLabel, 'Proyección')
+eq('periodo nulo no rompe', describePowerPeriod(null), null)
 
 console.log(`\n${passed} pasados, ${failed} fallidos\n`)
 process.exit(failed === 0 ? 0 : 1)

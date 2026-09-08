@@ -258,6 +258,16 @@ class AssetSnapshot(Base):
         disk_max_mount: Punto de montaje al que corresponde ``disk_max_pct``.
         net_rx_bps: Bytes/s recibidos, sumados sobre las interfaces no-loopback.
         net_tx_bps: Bytes/s enviados, sumados sobre las interfaces no-loopback.
+        power_watts: Potencia eléctrica del host en el momento del heartbeat,
+            o ``None`` si el agente no expone ninguna fuente compatible.
+        power_estimated: Si ``power_watts`` es una estimación por modelo
+            (``True``) o una medición de sensor (``False``); ``None`` junto a
+            un ``power_watts`` nulo.
+        power_source: Procedencia concreta de la lectura (p. ej. ``"rapl"``,
+            ``"hwmon"``, ``"windows-model"``), en texto libre del agente — el
+            servidor no interpreta su valor, así que una fuente nueva no
+            exige coordinación. Longitud 64 para coincidir con la validación
+            del schema de ingesta.
         asset: Activo al que pertenece este snapshot.
     """
 
@@ -281,6 +291,9 @@ class AssetSnapshot(Base):
     disk_max_mount = Column(String(256), nullable=True)
     net_rx_bps     = Column(BigInteger, nullable=True)
     net_tx_bps     = Column(BigInteger, nullable=True)
+    power_watts     = Column(Float, nullable=True)
+    power_estimated = Column(Boolean, nullable=True)
+    power_source    = Column(String(64), nullable=True)
 
     asset = relationship("MonitoredAsset", back_populates="snapshots")
 
@@ -318,6 +331,9 @@ class AssetSnapshot(Base):
             "diskMaxMount": self.disk_max_mount,
             "netRxBps":     self.net_rx_bps,
             "netTxBps":     self.net_tx_bps,
+            "powerWatts":     self.power_watts,
+            "powerEstimated": self.power_estimated,
+            "powerSource":    self.power_source,
         }
 
     def __repr__(self) -> str:
