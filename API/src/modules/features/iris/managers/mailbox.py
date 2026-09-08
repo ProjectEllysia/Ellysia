@@ -33,6 +33,7 @@ from src.modules.system.taskqueue.connection import RedisConnectionFactory
 
 from ..exceptions import (
     IrisMailboxConnectionNotFoundError,
+    IrisMailboxInvalidFolderError,
     IrisMailboxInvalidProviderError,
     IrisMailboxOAuthStateError,
     IrisMailboxQuotaExceededError,
@@ -42,7 +43,9 @@ from ..model import IrisMailboxConnection, IrisMailboxInbox
 from ..repositories import (
     IrisAnalysisRepository, IrisMailboxConnectionRepository, IrisMailboxInboxRepository,
 )
-from ..services.mailbox import MAILBOX_CONNECTORS, MailboxConnector, MessageRef, get_connector
+from ..services.mailbox import (
+    MAILBOX_CONNECTORS, MailboxConnector, MailboxFolder, MessageRef, get_connector,
+)
 from ..services.mailbox.locks import MailboxSyncLock
 from ..services.parsers import build_subject_title
 
@@ -189,7 +192,7 @@ class IrisMailboxManager(TaskTrackingMixin):
         connector = get_connector(provider, self._redirect_uri(), folder=folder)
         return connector.authorize_url(state, full_message_mode)
 
-    def handle_callback(self, state: str, code: str) -> int:
+    def handle_callback(self, state: str, code: str) -> int:  # pylint: disable=too-many-locals
         """Canjea el code OAuth y crea (o reactiva) la conexión.
 
         Reconectar una cuenta ya conocida (mismo user/provider/email)
@@ -210,6 +213,14 @@ class IrisMailboxManager(TaskTrackingMixin):
         connector = get_connector(provider, self._redirect_uri(), folder=folder)
         token_set = connector.exchange_code(code)
 
+        # B16: recién canjeado el code tenemos un access_token fresco -- es
+        # el único momento del flujo de conexión en que se puede comprobar
+        # la carpeta contra la cuenta real antes de guardarla.
+        folder_metadata = (
+            self._validate_folder(connector, token_set.access_token, folder)
+            if folder is not None else None
+        )
+
         refresh_enc = encrypt_at_rest(token_set.refresh_token, purpose="iris_mailbox")
         access_enc = encrypt_at_rest(token_set.access_token, purpose="iris_mailbox")
         expires_at = token_set.access_token_expires_at.replace(tzinfo=None)
@@ -224,6 +235,10 @@ class IrisMailboxManager(TaskTrackingMixin):
                 existing.scopes = token_set.scopes
                 existing.full_message_mode = full_message_mode
                 existing.folder = folder
+                existing.folder_display_name = (
+                    folder_metadata.display_name if folder_metadata else None
+                )
+                existing.folder_type = folder_metadata.folder_type if folder_metadata else None
                 existing.status = "active"
                 existing.last_error = None
                 repo.update(existing)
@@ -234,6 +249,8 @@ class IrisMailboxManager(TaskTrackingMixin):
                 scopes=token_set.scopes, refresh_token_enc=refresh_enc,
                 access_token_enc=access_enc, access_token_expires_at=expires_at,
                 folder=folder, full_message_mode=full_message_mode,
+                folder_display_name=folder_metadata.display_name if folder_metadata else None,
+                folder_type=folder_metadata.folder_type if folder_metadata else None,
             )
             repo.save(connection)
             return connection.id
@@ -255,19 +272,65 @@ class IrisMailboxManager(TaskTrackingMixin):
     def update_connection(self, connection_id: int, user_id: int, *,
                            folder: Optional[str] = None,
                            status: Optional[str] = None) -> IrisMailboxConnection:
-        self.assert_connection_ownership(connection_id, user_id)
+        connection = self.assert_connection_ownership(connection_id, user_id)
         if status is not None and status not in _VALID_UPDATE_STATUSES:
             raise ValueError(f"status debe ser uno de {_VALID_UPDATE_STATUSES}")
+
+        # B16: cambiar de carpeta exige un access_token vivo para comprobarla
+        # contra la cuenta real -- lo mismo que list_folders().
+        folder_display_name = None
+        folder_type = None
+        if folder is not None:
+            try:
+                access_token, connector = self._ensure_access_token(connection)
+            except _ReauthRequiredError as e:
+                self._mark_reauth_required(connection_id, str(e))
+                raise ValueError(
+                    "La conexión necesita reautorización antes de poder cambiar de carpeta."
+                ) from e
+            matched = self._validate_folder(connector, access_token, folder)
+            folder_display_name = matched.display_name
+            folder_type = matched.folder_type
 
         with UnitOfWork() as uow:
             repo = IrisMailboxConnectionRepository(uow)
             fresh = repo.get_by_id(connection_id)
             if folder is not None:
                 fresh.folder = folder
+                fresh.folder_display_name = folder_display_name
+                fresh.folder_type = folder_type
             if status is not None:
                 fresh.status = status
             repo.update(fresh)
             return fresh
+
+    def list_folders(self, connection_id: int, user_id: int) -> list[MailboxFolder]:
+        """Carpetas/etiquetas reales de la cuenta -- únicos valores válidos
+        para ``folder`` en ``update_connection()`` (B16)."""
+        connection = self.assert_connection_ownership(connection_id, user_id)
+        try:
+            access_token, connector = self._ensure_access_token(connection)
+        except _ReauthRequiredError as e:
+            self._mark_reauth_required(connection_id, str(e))
+            raise
+        return connector.list_folders(access_token)
+
+    @staticmethod
+    def _validate_folder(
+        connector: MailboxConnector, access_token: str, folder: str,
+    ) -> MailboxFolder:
+        """Comprueba ``folder`` contra las carpetas reales de la cuenta.
+
+        Raises:
+            IrisMailboxInvalidFolderError: ``folder`` no existe para esta
+                cuenta y proveedor -- id equivocado, error tipográfico, o un
+                valor que pertenece a otro proveedor.
+        """
+        folders = connector.list_folders(access_token)
+        match = next((candidate for candidate in folders if candidate.provider_id == folder), None)
+        if match is None:
+            raise IrisMailboxInvalidFolderError(folder)
+        return match
 
     def delete_connection(self, connection_id: int, user_id: int) -> None:
         """Revoca el token en el proveedor (best-effort) y borra la fila.

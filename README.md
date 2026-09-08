@@ -253,7 +253,8 @@ Content-Type: application/json
 | `POST` | `/iris/mailbox/connect` | `IRIS_CREATE` | Start OAuth connection to an external mailbox |
 | `GET` | `/iris/mailbox/callback` | — (public) | OAuth redirect target; CSRF-protected by a signed `state` |
 | `GET` | `/iris/mailbox/connections` | `IRIS_READ` | List monitored mailboxes |
-| `PATCH` | `/iris/mailbox/connections/<id>` | `IRIS_UPDATE` | Pause, resume or reconfigure a connection |
+| `GET` | `/iris/mailbox/connections/<id>/folders` | `IRIS_READ` | Real folders/labels for the connected account (live provider call) |
+| `PATCH` | `/iris/mailbox/connections/<id>` | `IRIS_UPDATE` | Pause, resume or reconfigure a connection (`folder` is validated against the account's real folders) |
 | `DELETE` | `/iris/mailbox/connections/<id>` | `IRIS_DELETE` | Disconnect a monitored mailbox |
 | `POST` | `/iris/mailbox/connections/<id>/sync` | `IRIS_UPDATE` | Trigger an out-of-cycle mailbox poll |
 

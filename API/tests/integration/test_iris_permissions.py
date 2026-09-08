@@ -76,6 +76,7 @@ _ENDPOINTS = [
     ("patch", "/iris/mailbox/connections/999999", AttributeType.IRIS_UPDATE, None),
     ("delete", "/iris/mailbox/connections/999999", AttributeType.IRIS_DELETE, None),
     ("post", "/iris/mailbox/connections/999999/sync", AttributeType.IRIS_UPDATE, None),
+    ("get", "/iris/mailbox/connections/999999/folders", AttributeType.IRIS_READ, None),
 ]
 
 _ALL_IRIS_ATTRIBUTES = [

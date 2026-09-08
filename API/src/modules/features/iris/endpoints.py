@@ -69,6 +69,7 @@ from .schemas import (
     IrisMailboxConnectionDeleteResponseSchema,
     IrisMailboxSyncResponseSchema,
     IrisMailboxCallbackQuerySchema,
+    IrisMailboxFoldersResponseSchema,
 )
 
 
@@ -548,6 +549,8 @@ def _serialize_connection(connection) -> dict:
         "provider": connection.provider,
         "accountEmail": connection.account_email,
         "folder": connection.folder,
+        "folderDisplayName": connection.folder_display_name,
+        "folderType": connection.folder_type,
         "fullMessageMode": connection.full_message_mode,
         "status": connection.status,
         "lastSyncAt": connection.last_sync_at,
@@ -645,7 +648,8 @@ def list_mailbox_connections():
 @iris_blp.patch("/mailbox/connections/<int:connection_id>")
 @iris_blp.arguments(IrisMailboxUpdateConnectionRequestSchema)
 @iris_blp.response(200, IrisMailboxConnectionItemSchema, description="Connection updated")
-@iris_blp.alt_response(400, schema=ErrorSchema, description="Invalid status")
+@iris_blp.alt_response(400, schema=ErrorSchema,
+                        description="Invalid status, or folder not found for this account/provider")
 @iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @iris_blp.alt_response(404, schema=ErrorSchema, description="Connection not found")
@@ -661,6 +665,36 @@ def update_mailbox_connection(data, connection_id: int):
     )
     logger.info(f"Conexión {connection_id} actualizada por usuario {user.username}")
     return _serialize_connection(connection)
+
+
+@iris_blp.get("/mailbox/connections/<int:connection_id>/folders")
+@iris_blp.response(200, IrisMailboxFoldersResponseSchema,
+                    description="Real folders/labels for this account")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Connection not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("30 per hour; 100 per day")
+@handle_exceptions(default_exception=IrisMailboxConnectionNotFoundError, logger=logger)
+def list_mailbox_connection_folders(connection_id: int):
+    """Carpetas/etiquetas reales de la cuenta conectada -- únicos valores
+    válidos para ``folder`` en ``PATCH /mailbox/connections/<id>``.
+
+    Hace una llamada en vivo al proveedor (no se cachea): la lista puede
+    cambiar en cualquier momento desde fuera de Iris.
+    """
+    user = get_current_user()
+    folders = IrisMailboxManager().list_folders(connection_id, user.id)
+    return {
+        "folders": [
+            {
+                "providerId": f.provider_id, "displayName": f.display_name,
+                "folderType": f.folder_type,
+            }
+            for f in folders
+        ]
+    }
 
 
 @iris_blp.delete("/mailbox/connections/<int:connection_id>")
