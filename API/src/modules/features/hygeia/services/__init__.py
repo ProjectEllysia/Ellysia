@@ -19,6 +19,16 @@ from .ingest_guard import (
 )
 from .inventory_adapter import services_from_inventory
 from .reports import build_inventory_report
+from .stats import (
+    EnergyCost,
+    PeriodClassification,
+    PowerAverage,
+    classify_period,
+    energy_and_cost,
+    project_month,
+    summarize_power_period,
+    weighted_average_with_observed_time,
+)
 
 __all__ = [
     "services_from_inventory",
@@ -34,4 +44,12 @@ __all__ = [
     "AnomalyChange",
     "DetectionOutcome",
     "denormalize",
+    "PowerAverage",
+    "EnergyCost",
+    "PeriodClassification",
+    "weighted_average_with_observed_time",
+    "energy_and_cost",
+    "classify_period",
+    "summarize_power_period",
+    "project_month",
 ]

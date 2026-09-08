@@ -1235,6 +1235,8 @@
       "offlineAfterMissed": 4,
       "retentionDays": 30,
       "retentionCron": "0 4 * * *",
+      "energyPricePerKwh": 0.15,
+      "energyPriceCurrency": "EUR",
       "colorPalette": {
         "black": "#121212",
         "dark": "#24402c",

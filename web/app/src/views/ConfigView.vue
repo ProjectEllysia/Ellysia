@@ -387,6 +387,8 @@
                 <div class="form-group"><label>Latidos perdidos para desconectar</label><input v-model.number="store.configFlat['features.hygeia.offlineAfterMissed']" type="number" min="1" max="100" class="inp" /></div>
                 <div class="form-group"><label>Retención (días)</label><input v-model.number="store.configFlat['features.hygeia.retentionDays']" type="number" min="1" max="3650" class="inp" /></div>
                 <div class="form-group"><label>Cron de purga</label><input v-model="store.configFlat['features.hygeia.retentionCron']" type="text" class="inp mono" /><span class="field-hint">Formato cron de cinco campos</span></div>
+                <div class="form-group"><label>Precio de la electricidad (por kWh)</label><input v-model.number="store.configFlat['features.hygeia.energyPricePerKwh']" type="number" min="0" step="0.01" class="inp" /></div>
+                <div class="form-group"><label>Moneda</label><input v-model="store.configFlat['features.hygeia.energyPriceCurrency']" type="text" maxlength="3" class="inp mono" /><span class="field-hint">Código ISO 4217 (EUR, USD...)</span></div>
               </div>
               <h3 class="subsection-title">Umbrales</h3>
               <p class="field-hint">«Latidos sostenidos» evita las alertas por un pico puntual: la métrica tiene que seguir alta ese número de latidos seguidos. Disco y swap avisan al primero.</p>

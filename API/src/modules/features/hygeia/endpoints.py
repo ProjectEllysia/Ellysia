@@ -54,6 +54,7 @@ from .schemas import (
     InventoryReportRequestSchema,
     IngestResponseSchema,
     InventoryAnalysisSummarySchema,
+    PowerSummaryResponseSchema,
     RotateKeyResponseSchema,
     TagCreateRequestSchema,
     TagListResponseSchema,
@@ -159,6 +160,22 @@ def get_asset_latest_metrics(asset_id):
     user = get_current_user()
     manager = HygeiaAssetManager(user)
     return manager.get_latest_metrics(asset_id)
+
+
+@hygeia_blp.get("/assets/<int:asset_id>/power-summary")
+@hygeia_blp.response(200, PowerSummaryResponseSchema, description="Resumen de consumo eléctrico del activo")
+@hygeia_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@hygeia_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@hygeia_blp.alt_response(404, schema=ErrorSchema, description="Asset not found")
+@limiter.limit("600 per hour")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.HYGEIA_READ])
+@handle_exceptions(default_exception=AssetNotFoundError, logger=logger)
+def get_asset_power_summary(asset_id):
+    """Obtener el resumen de consumo eléctrico de un activo: lectura actual, energía y coste"""
+    user = get_current_user()
+    manager = HygeiaAssetManager(user)
+    return manager.get_power_summary(asset_id)
 
 
 @hygeia_blp.get("/assets/<int:asset_id>/inventory")

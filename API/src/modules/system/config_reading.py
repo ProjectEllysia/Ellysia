@@ -1716,6 +1716,26 @@ class HygeiaConfig:
     queda como dict: las claves las decide la configuración, no este módulo.
     """
 
+    energy_price_per_kwh: float = 0.15
+    """Precio de la electricidad usado para convertir kWh en coste (Fase 3).
+
+    Clave global y no por activo ni por agente: el precio depende del país,
+    el contrato y la hora del día, no de la máquina que se mide, así que
+    meterlo en el agente obligaría a reconfigurar cada host del parque para
+    cambiar una tarifa. Cubre el caso real de una única instalación con una
+    tarifa; un ámbito por organización, si hiciera falta, se resolvería
+    consultando la organización y cayendo a este valor cuando no tenga uno
+    propio, sin tocar esta clave.
+    """
+
+    energy_price_currency: str = "EUR"
+    """Moneda de ``energy_price_per_kwh``.
+
+    Un número de euros sin decir que son euros es exactamente el tipo de
+    dato que se malinterpreta en la primera instalación fuera de la zona
+    euro.
+    """
+
 
 def hygeia_config() -> HygeiaConfig:
     return load_block(HygeiaConfig)

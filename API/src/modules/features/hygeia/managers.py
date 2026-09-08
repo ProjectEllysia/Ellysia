@@ -46,7 +46,7 @@ from .repositories import (
 )
 from .services import (
     build_inventory_report, check_clock_skew, denormalize, evaluate, generate_agent_key,
-    services_from_inventory,
+    project_month, services_from_inventory, summarize_power_period,
 )
 
 # ---------------------------------------------------------------------------
@@ -297,6 +297,82 @@ class HygeiaAssetManager:
             "receivedAt":  snapshot.received_at,
             "metrics":     snapshot.metrics,
         }
+
+    def get_power_summary(self, asset_id: int) -> dict:
+        """
+        Resume el consumo eléctrico de un activo del usuario (Fase 3, P25).
+
+        Devuelve la última lectura conocida más energía y coste de 24 h, 7 d
+        y 30 d, cada una con su procedencia (P24: observada, observada con
+        cobertura parcial, o proyectada), más una proyección mensual
+        extrapolada de la ventana de 7 días.
+
+        Las tres ventanas reales (24 h, 7 d, 30 d) nunca exceden
+        ``retention_days``: pedir más de lo que la retención guarda no
+        añadiría histórico, solo lo etiquetaría igual que si lo tuviera. Con
+        la retención por defecto (30 días), la ventana de 30 días coincide
+        con el límite exacto de lo que se puede llamar observado.
+
+        Returns:
+            Diccionario con la forma de ``PowerSummaryResponseSchema``.
+
+        Raises:
+            AssetNotFoundError: Si el activo no existe o pertenece a otro usuario.
+        """
+        assert_owned(MonitoredAssetRepository, asset_id, self.user.id, AssetNotFoundError)
+
+        snapshot_repo = build_repository(AssetSnapshotRepository)
+        config = CR.hygeia_config()
+        now = utcnow_naive()
+
+        week_since, week_samples = self._power_window_samples(snapshot_repo, asset_id, now, 7, config)
+        day_summary, _ = self._power_window(snapshot_repo, asset_id, now, 1, config)
+        week_summary = self._summarize_window(week_since, now, week_samples, config)
+        month_summary, _ = self._power_window(snapshot_repo, asset_id, now, 30, config)
+
+        return {
+            "current": self._current_power_reading(snapshot_repo.get_latest(asset_id)),
+            "day": day_summary,
+            "week": week_summary,
+            "month": month_summary,
+            "monthProjected": {
+                **project_month(week_samples, week_since, now, config.energy_price_per_kwh),
+                "currency": config.energy_price_currency,
+            },
+        }
+
+    @staticmethod
+    def _current_power_reading(latest: Optional[AssetSnapshot]) -> dict:
+        """Última lectura de potencia conocida, o los tres campos a ``None`` sin heartbeats."""
+        return {
+            "watts": latest.power_watts if latest else None,
+            "estimated": latest.power_estimated if latest else None,
+            "source": latest.power_source if latest else None,
+        }
+
+    @staticmethod
+    def _power_window_samples(
+        snapshot_repo: AssetSnapshotRepository, asset_id: int, now, days: int, config,
+    ) -> tuple:
+        """Ventana ``[now - min(days, retención), now]`` y sus muestras de potencia."""
+        since = now - timedelta(days=min(days, config.retention_days))
+        return since, snapshot_repo.get_power_samples(asset_id, since, now)
+
+    @staticmethod
+    def _summarize_window(since, now, samples: list, config) -> dict:
+        """Aplica P21/P23/P24 a una ventana ya resuelta, con la moneda configurada."""
+        summary = summarize_power_period(
+            samples, since, now, config.energy_price_per_kwh, config.retention_days,
+        )
+        return {**summary, "currency": config.energy_price_currency}
+
+    @classmethod
+    def _power_window(
+        cls, snapshot_repo: AssetSnapshotRepository, asset_id: int, now, days: int, config,
+    ) -> tuple:
+        """Resume una ventana de ``days`` días completa: consulta + P21/P23/P24."""
+        since, samples = cls._power_window_samples(snapshot_repo, asset_id, now, days, config)
+        return cls._summarize_window(since, now, samples, config), samples
 
     def get_inventory(self, asset_id: int) -> dict:
         """
