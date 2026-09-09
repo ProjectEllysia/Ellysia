@@ -20,7 +20,7 @@ def _make_connection(user_id: int, account_email: str = "victim@gmail.com") -> I
         provider="gmail",
         account_email=account_email,
         scopes="gmail.metadata",
-        refresh_token_enc="encrypted-token",
+        refresh_token="encrypted-token",
     )
 
 

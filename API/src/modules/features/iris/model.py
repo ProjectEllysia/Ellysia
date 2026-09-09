@@ -15,7 +15,7 @@ from sqlalchemy import (
     SmallInteger, String, Text, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import deferred, relationship
 
 from src.modules.shared import Base, Document, EncryptedText, utcnow_naive
 
@@ -231,7 +231,7 @@ class IrisMailboxConnection(Base):
     Stores the minimum needed to re-request access later — never the
     mailbox content itself. See ``plans/feature/iris/iris-mailbox-connector.md``
     Fase 2/3 for the full design rationale (why this can't live in Acheron,
-    why the refresh token is encrypted with ``shared._crypto`` instead).
+    why the refresh token is encrypted at rest instead).
 
     Attributes:
         id: Primary key, auto-incrementing integer.
@@ -240,12 +240,19 @@ class IrisMailboxConnection(Base):
         account_email: The connected mailbox's address (plaintext — not a
                  secret, needed to show "which account is this").
         scopes: Space-separated OAuth scopes actually granted.
-        refresh_token_enc: Refresh token, encrypted at rest
-                 (``shared._crypto.encrypt_at_rest(..., purpose="iris_mailbox")``).
-                 Never returned by any endpoint.
-        access_token_enc: Cached access token, encrypted at rest; NULL when
-                 not cached or expired. Optional — the connector can always
-                 fall back to ``refresh()``.
+        refresh_token: Refresh token de OAuth. La columna es
+                 ``EncryptedText`` (``purpose="iris_mailbox"``), así que en
+                 Python es siempre el token en claro y lo cifrado es la fila.
+                 Nunca lo devuelve ningún endpoint.
+        access_token: Access token cacheado, con el mismo cifrado; NULL
+                 cuando no está cacheado o ha caducado. Opcional -- el
+                 conector siempre puede recurrir a ``refresh()``.
+                 Junto con ``refresh_token`` se declara ``deferred`` en el
+                 grupo ``oauth_tokens``: la mayoría de las cargas de esta
+                 fila (listados, health check, planificación del sondeo) no
+                 miran los tokens, y tocar cualquiera de los dos trae los
+                 dos en una sola consulta, que es como los usa
+                 ``_ensure_access_token``.
         access_token_expires_at: Expiry of the cached access token.
         folder: Provider-specific folder/label id to watch; NULL = default
                  inbox. Es el ``provider_id`` opaco que ``MailboxConnector``
@@ -331,8 +338,10 @@ class IrisMailboxConnection(Base):
     account_email = Column(String(320), nullable=False)
     scopes = Column(String(512), nullable=False)
 
-    refresh_token_enc = Column(Text, nullable=False)
-    access_token_enc = Column(Text, nullable=True)
+    refresh_token = deferred(
+        Column(EncryptedText(purpose="iris_mailbox"), nullable=False), group="oauth_tokens")
+    access_token = deferred(
+        Column(EncryptedText(purpose="iris_mailbox"), nullable=True), group="oauth_tokens")
     access_token_expires_at = Column(DateTime, nullable=True)
 
     folder = Column(String(255), nullable=True)

@@ -610,8 +610,10 @@ def delete_document(document_id: int):
 # =============================================================================
 
 def _serialize_connection(connection) -> dict:
-    """Never includes refresh_token_enc/access_token_enc — those must not
-    leave the server under any circumstance."""
+    """Never includes refresh_token/access_token — those must not leave the
+    server under any circumstance. Ambas columnas son ``deferred``, así que
+    no serializarlas aquí es además lo que evita que se lleguen a leer de la
+    base de datos al montar la respuesta."""
     return {
         "connectionId": connection.id,
         "provider": connection.provider,

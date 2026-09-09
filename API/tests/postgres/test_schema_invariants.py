@@ -41,7 +41,7 @@ def _user(pg_session, username: str = "postgres-tester") -> User:
 def _connection(pg_session, user: User, email: str = "buzon@outlook.example") -> IrisMailboxConnection:
     connection = IrisMailboxConnection(
         user_id=user.id, provider="microsoft", account_email=email,
-        scopes="Mail.Read", refresh_token_enc="cifrado",
+        scopes="Mail.Read", refresh_token="cifrado",
     )
     pg_session.add(connection)
     pg_session.commit()

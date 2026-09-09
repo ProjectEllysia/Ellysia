@@ -172,6 +172,15 @@ Lo mismo con `themis/services/reports/`, que es paquete (`base.py`, `creator.py`
   sesiones fuera de los repositorios.
 - **`shared/`** — modelo base, excepciones, `handle_exceptions`, rate limiter, `Document` base,
   `DocumentManager`, `assert_owned`, cripto, white-label.
+  **Cifrado en reposo: siempre `EncryptedText`, nunca a mano.** Un secreto que la aplicación
+  necesite poder leer se declara como `Column(EncryptedText(purpose="..."), ...)` y punto; en
+  Python se lee y se escribe en claro, y lo cifrado es la fila. Llamar a `encrypt_at_rest`/
+  `decrypt_at_rest` desde un manager es el patrón viejo: convivieron los dos y quien añadía un
+  campo sensible no tenía forma de saber cuál imitar. `tests/unit/test_shared_crypto.py` ata las
+  dos mitades — qué columnas están cifradas y con qué `purpose`, y que no reaparezca ninguna
+  llamada manual en `src/`. Cada `purpose` tiene su clave (`<PURPOSE>_ENCRYPTION_KEY` en `.env`).
+  Como el descifrado pasa a ocurrir al cargar la fila, los secretos que la mayoría de las
+  consultas no miran se declaran además `deferred`.
 - **`tools/scribe/`** — capa de estrategias enchufables de **generación IA** (Ollama / OpenAI /
   Google). El consumidor le pasa entradas; scribe no sabe nada de ellas. Estrategia elegida por
   módulo en `SecOpsConfig.json` → `tools.scribe.modules`.

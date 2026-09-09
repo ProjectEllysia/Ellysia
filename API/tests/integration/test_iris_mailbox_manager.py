@@ -10,6 +10,7 @@ from unittest import mock
 
 import pytest
 from itsdangerous import BadSignature
+from sqlalchemy import text
 
 import src.modules.system.config_reading as CR
 import src.modules.features.iris.managers.mailbox as mailbox_managers_mod
@@ -29,7 +30,7 @@ from src.modules.features.iris.repositories import (
 )
 from src.modules.features.iris.services.mailbox.base import MailboxFolder, MessageRef, TokenSet
 from src.modules.infrastructure import UnitOfWork
-from src.modules.shared import decrypt_at_rest, encrypt_at_rest, utcnow_naive
+from src.modules.shared import decrypt_at_rest, utcnow_naive
 
 pytestmark = pytest.mark.integration
 
@@ -208,7 +209,7 @@ class _QueueTestConnector(_FakeConnector):
 def _connection(user_id, **overrides) -> IrisMailboxConnection:
     defaults = dict(
         user_id=user_id, provider="gmail", account_email="victim@example.com",
-        scopes="gmail.metadata", refresh_token_enc=encrypt_at_rest("old-refresh-token", purpose="iris_mailbox"),
+        scopes="gmail.metadata", refresh_token="old-refresh-token",
         status="active",
     )
     defaults.update(overrides)
@@ -298,9 +299,18 @@ def test_handle_callback_creates_connection(app, regular_user):
             conn = IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
             assert conn.account_email == "victim@example.com"
             assert conn.status == "active"
-            # El refresh token nunca se guarda en claro.
-            assert conn.refresh_token_enc != "new-refresh-token"
-            assert decrypt_at_rest(conn.refresh_token_enc, purpose="iris_mailbox") == "new-refresh-token"
+            assert conn.refresh_token == "new-refresh-token"
+
+            # El refresh token nunca se guarda en claro. Hay que mirar la
+            # columna cruda: quien cifra es el tipo ``EncryptedText``, así
+            # que ``conn.refresh_token`` ya viene descifrado y la
+            # comprobación pasaría igual aunque el cifrado desapareciera.
+            stored = uow.session.execute(
+                text('SELECT refresh_token FROM "IrisMailboxConnection" WHERE id = :id'),
+                {"id": connection_id},
+            ).scalar()
+            assert stored != "new-refresh-token"
+            assert decrypt_at_rest(stored, purpose="iris_mailbox") == "new-refresh-token"
 
 
 def test_handle_callback_reconnect_updates_existing_row(app, regular_user):
@@ -433,7 +443,7 @@ def test_update_connection_rejects_a_folder_the_account_does_not_have(app, regul
 def test_update_connection_folder_requires_reauth_when_token_refresh_fails(app, regular_user):
     with app.app_context():
         connection_id = _save(app, _connection(
-            regular_user.id, access_token_enc=None, access_token_expires_at=None,
+            regular_user.id, access_token=None, access_token_expires_at=None,
         ))
         fake_connector = _FakeConnector(refresh_raises_reauth=True)
         with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=fake_connector):
@@ -713,7 +723,7 @@ def test_sync_connection_marks_reauth_required_on_revoked_token(app, regular_use
     with app.app_context():
         connection_id = _save(app, _connection(
             regular_user.id,
-            access_token_enc=None, access_token_expires_at=None,
+            access_token=None, access_token_expires_at=None,
         ))
         fake_connector = _FakeConnector(refresh_raises_reauth=True)
         with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=fake_connector):
@@ -729,7 +739,7 @@ def test_sync_connection_reuses_cached_unexpired_access_token(app, regular_user)
     with app.app_context():
         connection_id = _save(app, _connection(
             regular_user.id,
-            access_token_enc=encrypt_at_rest("cached-access-token", purpose="iris_mailbox"),
+            access_token="cached-access-token",
             access_token_expires_at=utcnow_naive() + timedelta(minutes=30),
             sync_cursor="cursor-0",
         ))
@@ -806,7 +816,7 @@ def test_sync_connection_recovers_from_an_orphaned_lock(app, regular_user, _fake
 def test_sync_connection_releases_lock_even_when_token_refresh_fails(app, regular_user, _fake_lock_redis):
     with app.app_context():
         connection_id = _save(app, _connection(
-            regular_user.id, access_token_enc=None, access_token_expires_at=None,
+            regular_user.id, access_token=None, access_token_expires_at=None,
         ))
         fake_connector = _FakeConnector(refresh_raises_reauth=True)
         with mock.patch.object(mailbox_managers_mod, "get_connector", return_value=fake_connector):

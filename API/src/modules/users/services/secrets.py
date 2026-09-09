@@ -20,7 +20,6 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
 
 import src.modules.system.config_reading as CR
-from src.modules.shared._crypto import decrypt_at_rest, encrypt_at_rest
 
 
 def _get_hasher() -> PasswordHasher:
@@ -82,25 +81,6 @@ def generate_salt() -> str:
 def hash_password_with_salt(password: str, salt: str) -> str:
     """SHA-256 hash of salt+password. Used only to verify legacy stored hashes."""
     return hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-
-
-# ---------------------------------------------------------------------------
-# TOTP secret encryption at rest.
-#
-# Unlike Acheron (zero-knowledge — the server never sees plaintext secrets),
-# the server MUST be able to read the TOTP secret to compute the current code
-# and verify a login attempt. "Encrypted at rest" here means protected against
-# someone reading the database directly, not hidden from the application.
-# ---------------------------------------------------------------------------
-
-def encrypt_totp_secret(secret: str) -> str:
-    """Encrypt a TOTP secret for storage, using the server-side MFA_ENCRYPTION_KEY."""
-    return encrypt_at_rest(secret, purpose="mfa")
-
-
-def decrypt_totp_secret(token: str) -> str:
-    """Decrypt a TOTP secret previously produced by encrypt_totp_secret()."""
-    return decrypt_at_rest(token, purpose="mfa")
 
 
 # =========================================================================
