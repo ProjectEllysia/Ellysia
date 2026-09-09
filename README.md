@@ -416,6 +416,7 @@ Each entry point is a `@staticmethod` on the owning module's manager class — p
 - **Progress reporting**: workers update `job.meta["progress"]` via `_Task(progress_callback=...)`.
 - **Cooperative cancellation**: set Redis key `taskqueue:cancel:{job_id}`; workers check via `_Task.wait(cancel_check=...)` and terminate the subprocess tree.
 - The `max_workers` setting is read at worker startup only — changes via `PUT /system/tasks/config` apply on the next worker restart.
+- **Transactional outbox** (`system/taskqueue/outbox.py`): the naive "commit the entity, then `submit()` the job" sequence leaves a window where an API restart or a Redis blip strands the entity with no job to process it. `IrisManager.analyze()` closes that window for analysis creation and mailbox ingestion by writing a `TaskDispatch` row in the same transaction as the entity and publishing it right after, falling back to a periodic sweep (`TaskDispatchScheduler`) and a startup reconciliation pass if the immediate publish fails. Not yet applied to the other categories in the table above.
 - Admin REST surface: `/system/tasks/*` (status, list, detail, cancel).
 
 > [!WARNING]
