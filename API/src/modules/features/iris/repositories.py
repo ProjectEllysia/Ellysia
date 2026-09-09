@@ -8,9 +8,9 @@ IrisRuleResult models.
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
-from sqlalchemy import asc, desc, nullslast
+from sqlalchemy import and_, asc, desc, nullslast, update
 from sqlalchemy.orm import joinedload
 
 from src.modules.infrastructure import BaseRepository, DocumentRepository
@@ -138,6 +138,49 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
     def exists_by_source(self, connection_id: int, source_message_uid: str) -> bool:
         """Si ya existe un análisis para este (connection_id, source_message_uid)."""
         return self.get_by_source(connection_id, source_message_uid) is not None
+
+    def transition_if_state(self, analysis_id: int, from_states: list[str], **fields: Any) -> bool:
+        """Aplica ``fields`` sobre un análisis solo si su ``status`` actual
+        está en ``from_states`` -- transición SQL condicionada, no un
+        leer-decidir-escribir (B07).
+
+        El caso real: el usuario cancela un análisis a la vez que el worker
+        termina de procesarlo. Sin esta condición dentro del propio UPDATE,
+        cancel_analysis() y _persist_analysis_results() compiten por
+        escribir la misma fila -- running->cancelled uno, running->finished
+        el otro -- y gana quien confirme último en vez de ganar quien tenga
+        razón. Con la condición en el ``WHERE``, la base de datos serializa
+        los dos UPDATE: solo el primero en llegar afecta a la fila (y su
+        ``rowcount`` es 1); el segundo no cambia nada (``rowcount`` 0), y
+        quien lo invoque sabe por el valor de retorno que perdió la carrera
+        y no debe fiarse de que su transición se aplicó. Mismo patrón que
+        ``_claim_ai_summary()`` (B10), generalizado a cualquier conjunto de
+        campos en vez de una sola columna.
+
+        Args:
+            analysis_id: Primary key del ``IrisAnalysis`` a transicionar.
+            from_states: Estados de ``status`` en los que debe estar la fila
+                para que la transición se aplique (p.ej. ``["running"]``, o
+                los dos estados no terminales `_CANCELLABLE_STATES`). Una
+                lista vacía nunca coincide con nada.
+            **fields: Columnas a escribir si la condición se cumple --
+                normalmente incluye ``status`` con el nuevo valor, más
+                cualquier otro campo que deba cambiar en el mismo commit
+                (``finished_at``, ``total_score``, ``verdict``...).
+
+        Returns:
+            bool: ``True`` si la fila estaba en uno de ``from_states`` y la
+                transición se aplicó (``fields`` ya están escritos). ``False``
+                si el análisis no existe, o si su ``status`` ya había
+                cambiado a otra cosa -- en ese caso ningún campo de
+                ``fields`` se ha tocado.
+        """
+        result = self._session.execute(
+            update(IrisAnalysis)
+            .where(and_(IrisAnalysis.id == analysis_id, IrisAnalysis.status.in_(from_states)))
+            .values(**fields)
+        )
+        return bool(result.rowcount)
 
 
 class IrisMailboxConnectionRepository(BaseRepository[IrisMailboxConnection]):
