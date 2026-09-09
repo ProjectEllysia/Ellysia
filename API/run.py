@@ -463,7 +463,7 @@ def _configure_scheduling() -> None:
 
     _logger.info("Publicando TaskDispatch pendientes de la outbox...")
     try:
-        from src.modules.system.taskqueue.outbox import OutboxDispatcher
+        from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
         dispatched = OutboxDispatcher.dispatch_pending()
         if dispatched:
             _logger.info("Se publicaron %d TaskDispatch pendiente(s) al arrancar", dispatched)
