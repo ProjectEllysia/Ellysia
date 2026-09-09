@@ -13,10 +13,11 @@ Provides:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 
-from flask import redirect, send_file
+from flask import redirect, send_file, Response
 from flask_smorest import Blueprint as SmorestBlueprint
 
 from src.modules.users import (
@@ -31,7 +32,9 @@ from src.modules.shared._exceptions import DocumentError, DocumentNotReadyError
 
 import src.modules.system.config_reading as CR
 
-from .managers import IrisManager, IrisReportManager, IrisMailboxManager
+from .managers import (
+    IrisManager, IrisReportManager, IrisMailboxManager, IrisNotificationPreferenceManager,
+)
 from .exceptions import (
     IrisAnalysisNotFoundError,
     IrisExecutionError,
@@ -57,6 +60,7 @@ from .schemas import (
     GenerateAiSummaryResponseSchema,
     DocumentStatusQuerySchema,
     IrisDocumentStatusResponseSchema,
+    IrisDocumentsQuerySchema,
     IrisDocumentListResponseSchema,
     AnalysisDocumentsResponseSchema,
     IrisDocumentDeleteResponseSchema,
@@ -69,6 +73,11 @@ from .schemas import (
     IrisMailboxConnectionDeleteResponseSchema,
     IrisMailboxSyncResponseSchema,
     IrisMailboxCallbackQuerySchema,
+    IrisMailboxFoldersResponseSchema,
+    IrisMailboxHealthResponseSchema,
+    IrisNotificationPreferenceResponseSchema,
+    IrisNotificationPreferenceUpdateRequestSchema,
+    IrisRetentionReportResponseSchema,
 )
 
 
@@ -126,6 +135,30 @@ def analyze_headers(data):
 def get_capabilities():
     """Limites y modos de analisis que aplica el servidor"""
     return IrisManager.get_capabilities()
+
+
+@iris_blp.get("/retention-policy")
+@iris_blp.response(200, IrisRetentionReportResponseSchema, description="Retention policy and current status")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("60 per hour; 300 per day")
+@handle_exceptions(logger=logger)
+def get_retention_policy():
+    """Política de retención de Iris y cuántos de tus análisis la reflejan
+    ya (M09/B17): cuántos conservan el raw todavía y cuántos ya lo perdieron."""
+    user = get_current_user()
+    report = IrisManager.get_retention_report(user.id)
+    return {
+        "rawMessageRetentionDays": report["raw_message_retention_days"],
+        "analysisRetentionDays": (
+            report["analysis_retention_days"] if report["analysis_retention_days"] > 0 else None
+        ),
+        "totalAnalyses": report["total_analyses"],
+        "analysesWithRawRetained": report["analyses_with_raw_retained"],
+        "analysesWithRawPurged": report["analyses_with_raw_purged"],
+    }
 
 
 @iris_blp.get("/status")
@@ -224,6 +257,7 @@ def get_analysis_result(analysis_id: int):
 @iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@iris_blp.alt_response(410, schema=ErrorSchema, description="Raw message purged by retention")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.IRIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
@@ -241,6 +275,7 @@ def get_analysis_path(analysis_id: int):
 @iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@iris_blp.alt_response(410, schema=ErrorSchema, description="Raw message purged by retention")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.IRIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
@@ -253,11 +288,38 @@ def get_analysis_iocs(analysis_id: int):
     return manager.get_analysis_iocs(analysis_id, user.id)
 
 
+@iris_blp.get("/results/<int:analysis_id>/export")
+@iris_blp.response(200, description="Full analysis export (JSON file download)")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@iris_blp.alt_response(409, schema=ErrorSchema, description="Analysis not ready")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("30 per hour; 100 per day")
+@handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
+def export_analysis(analysis_id: int):
+    """Exportar el análisis completo (resultado, reglas, raw si sigue
+    disponible, Received-path e IOCs) como fichero JSON descargable (B19) --
+    pensado para guardar una copia antes de que la retención purgue el raw."""
+    user = get_current_user()
+    manager = IrisManager()
+    bundle = manager.export_analysis(analysis_id, user.id)
+
+    logger.info(f"Análisis {analysis_id} exportado por usuario {user.username}")
+    return Response(
+        json.dumps(bundle, default=str, ensure_ascii=False, indent=2),
+        mimetype="application/json",
+        headers={"Content-Disposition": f'attachment; filename="iris-analysis-{analysis_id}.json"'},
+    )
+
+
 @iris_blp.post("/results/<int:analysis_id>/reanalyze")
 @iris_blp.response(201, AnalyzeResponseSchema, description="New analysis started")
 @iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@iris_blp.alt_response(410, schema=ErrorSchema, description="Raw message purged by retention")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.IRIS_CREATE])
 @limiter.limit("20 per hour; 100 per day")
@@ -426,19 +488,23 @@ def get_document_status(args):
 
 
 @iris_blp.get("/documents")
-@iris_blp.response(200, IrisDocumentListResponseSchema, description="All documents")
+@iris_blp.arguments(IrisDocumentsQuerySchema, location="query")
+@iris_blp.response(200, IrisDocumentListResponseSchema, description="Paginated documents")
 @iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.IRIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=DocumentError, logger=logger)
-def get_all_documents():
-    """Obtener todos los documentos del usuario"""
+def get_all_documents(args):
+    """Documentos del usuario, paginados (B17: antes devolvía la lista
+    completa sin límite)."""
     user = get_current_user()
 
     doc_mgr = IrisReportManager()
-    documents = doc_mgr.get_documents_for_user(user.id)
+    documents, total = doc_mgr.get_documents_for_user_paginated(
+        user.id, args["page"], args["per_page"],
+    )
 
     docs_list = [{
         "documentId": document.id,
@@ -450,7 +516,10 @@ def get_all_documents():
         "downloadUrl": _download_url_for(document),
     } for document in documents]
 
-    return {"documents": docs_list, "total": len(docs_list)}
+    return {
+        "documents": docs_list, "total": total,
+        "page": args["page"], "perPage": args["per_page"],
+    }
 
 
 @iris_blp.get("/results/<int:analysis_id>/documents")
@@ -548,10 +617,13 @@ def _serialize_connection(connection) -> dict:
         "provider": connection.provider,
         "accountEmail": connection.account_email,
         "folder": connection.folder,
+        "folderDisplayName": connection.folder_display_name,
+        "folderType": connection.folder_type,
         "fullMessageMode": connection.full_message_mode,
         "status": connection.status,
         "lastSyncAt": connection.last_sync_at,
         "lastError": connection.last_error,
+        "syncStartedAt": connection.sync_started_at,
         "createdAt": connection.created_at,
     }
 
@@ -644,7 +716,8 @@ def list_mailbox_connections():
 @iris_blp.patch("/mailbox/connections/<int:connection_id>")
 @iris_blp.arguments(IrisMailboxUpdateConnectionRequestSchema)
 @iris_blp.response(200, IrisMailboxConnectionItemSchema, description="Connection updated")
-@iris_blp.alt_response(400, schema=ErrorSchema, description="Invalid status")
+@iris_blp.alt_response(400, schema=ErrorSchema,
+                        description="Invalid status, or folder not found for this account/provider")
 @iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @iris_blp.alt_response(404, schema=ErrorSchema, description="Connection not found")
@@ -660,6 +733,74 @@ def update_mailbox_connection(data, connection_id: int):
     )
     logger.info(f"Conexión {connection_id} actualizada por usuario {user.username}")
     return _serialize_connection(connection)
+
+
+@iris_blp.get("/mailbox/connections/<int:connection_id>/folders")
+@iris_blp.response(200, IrisMailboxFoldersResponseSchema,
+                    description="Real folders/labels for this account")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Connection not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("30 per hour; 100 per day")
+@handle_exceptions(default_exception=IrisMailboxConnectionNotFoundError, logger=logger)
+def list_mailbox_connection_folders(connection_id: int):
+    """Carpetas/etiquetas reales de la cuenta conectada -- únicos valores
+    válidos para ``folder`` en ``PATCH /mailbox/connections/<id>``.
+
+    Hace una llamada en vivo al proveedor (no se cachea): la lista puede
+    cambiar en cualquier momento desde fuera de Iris.
+    """
+    user = get_current_user()
+    folders = IrisMailboxManager().list_folders(connection_id, user.id)
+    return {
+        "folders": [
+            {
+                "providerId": f.provider_id, "displayName": f.display_name,
+                "folderType": f.folder_type,
+            }
+            for f in folders
+        ]
+    }
+
+
+@iris_blp.get("/mailbox/connections/<int:connection_id>/health")
+@iris_blp.response(200, IrisMailboxHealthResponseSchema, description="Connection health status")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Connection not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("60 per hour; 300 per day")
+@handle_exceptions(default_exception=IrisMailboxConnectionNotFoundError, logger=logger)
+def get_mailbox_connection_health(connection_id: int):
+    """Estado observable de una conexión de buzón (M10).
+
+    Distingue "no hay correo nuevo" de "Iris está atascado" sin tener que
+    leer los logs del servidor: expone contadores de mensajes descubiertos/
+    aceptados/pendientes/en reintento/muertos, la duración del último sync
+    y cuándo terminó el último que dejó la cola de checkpoint vacía.
+    """
+    user = get_current_user()
+    health = IrisMailboxManager().get_connection_health(connection_id, user.id)
+    return {
+        "status": health["status"],
+        "lastSyncAt": health["last_sync_at"],
+        "lastSuccessAt": health["last_success_at"],
+        "lastError": health["last_error"],
+        "syncStartedAt": health["sync_started_at"],
+        "lastSyncDurationMs": health["last_sync_duration_ms"],
+        "cursorEstablished": health["cursor_established"],
+        "ingestedToday": health["ingested_today"],
+        "maxIngestedPerDay": health["max_ingested_per_day"],
+        "messagesDiscoveredTotal": health["messages_discovered_total"],
+        "messagesAcceptedTotal": health["messages_accepted_total"],
+        "messagesPending": health["messages_pending"],
+        "messagesRetrying": health["messages_retrying"],
+        "messagesDead": health["messages_dead"],
+        "oldestPendingMessageAgeSeconds": health["oldest_pending_message_age_seconds"],
+    }
 
 
 @iris_blp.delete("/mailbox/connections/<int:connection_id>")
@@ -694,3 +835,66 @@ def sync_mailbox_connection(connection_id: int):
     IrisMailboxManager().trigger_sync(connection_id, user.id)
     logger.info(f"Sync manual de la conexión {connection_id} encolado por usuario {user.username}")
     return {"message": "Sincronización encolada correctamente", "connectionId": connection_id}, 202
+
+
+def _serialize_notification_preference(preference) -> dict:
+    return {
+        "digestEnabled": preference.digest_enabled,
+        "mutedUntil": preference.muted_until,
+        "notifyReauthRequired": preference.notify_reauth_required,
+        "notifySyncStuck": preference.notify_sync_stuck,
+        "digestLastSentAt": preference.digest_last_sent_at,
+    }
+
+
+@iris_blp.get("/notification-preferences")
+@iris_blp.response(200, IrisNotificationPreferenceResponseSchema, description="Notification preferences")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+def get_notification_preferences():
+    """Preferencias de notificación del usuario actual (M08).
+
+    Si nunca las ha tocado, devuelve los valores por defecto sin crear una
+    fila -- ver ``IrisNotificationPreferenceManager.get_or_default``.
+    """
+    user = get_current_user()
+    preference = IrisNotificationPreferenceManager.get_or_default(user.id)
+    return _serialize_notification_preference(preference)
+
+
+@iris_blp.put("/notification-preferences")
+@iris_blp.arguments(IrisNotificationPreferenceUpdateRequestSchema)
+@iris_blp.response(200, IrisNotificationPreferenceResponseSchema, description="Preferences updated")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("60 per hour; 300 per day")
+def update_notification_preferences(data):
+    """Actualizar las preferencias de notificación del usuario actual (M08).
+
+    Actualización parcial: solo se tocan los campos presentes en el cuerpo
+    (ver ``IrisNotificationPreferenceUpdateRequestSchema``). No exige
+    ``IRIS_CREATE`` aunque la primera llamada cree la fila -- no consume
+    cuota ni trae una entidad nueva al panel, es una modificación de un
+    ajuste que conceptualmente siempre existe para el usuario (mismo
+    criterio que ``PATCH /mailbox/connections/<id>``).
+    """
+    user = get_current_user()
+    # Solo se pasan los campos presentes en el cuerpo: el manager distingue
+    # "no venía" (kwarg ausente, valor por defecto _UNSET) de "venía con un
+    # valor" -- ver IrisNotificationPreferenceManager.update().
+    changes = {}
+    if "digestEnabled" in data:
+        changes["digest_enabled"] = data["digestEnabled"]
+    if "mutedForMinutes" in data:
+        changes["muted_for_minutes"] = data["mutedForMinutes"]
+    if "notifyReauthRequired" in data:
+        changes["notify_reauth_required"] = data["notifyReauthRequired"]
+    if "notifySyncStuck" in data:
+        changes["notify_sync_stuck"] = data["notifySyncStuck"]
+    preference = IrisNotificationPreferenceManager.update(user.id, **changes)
+    logger.info(f"Preferencias de notificación de Iris actualizadas por usuario {user.username}")
+    return _serialize_notification_preference(preference)

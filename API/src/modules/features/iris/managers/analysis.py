@@ -20,14 +20,18 @@ import logging
 from dataclasses import replace
 from typing import Any, Dict, List, Optional
 
-import src.modules.system.config_reading as CR
 from sqlalchemy import and_, or_, update
+from sqlalchemy.exc import SQLAlchemyError
 
+import src.modules.system.config_reading as CR
 from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc, CANCELLABLE_STATES as _CANCELLABLE_STATES
 from src.modules.system.taskqueue import TaskQueue, TaskTrackingMixin, job_context
+from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
+from src.modules.system.taskqueue.outbox import build_dispatch
+from src.modules.system.taskqueue.outbox_repository import TaskDispatchRepository
 
 from ..exceptions import (
     IrisAnalysisNotFoundError,
@@ -35,6 +39,7 @@ from ..exceptions import (
     IrisExecutionError,
     IrisInvalidInputError,
     IrisInvalidStateError,
+    IrisRawMessagePurgedError,
 )
 from ..model import IrisAnalysis, IrisRuleResult
 from ..repositories import IrisAnalysisRepository, IrisRuleResultRepository
@@ -120,41 +125,50 @@ class IrisManager(TaskTrackingMixin):
         connection_id: int | None = None,
         source_message_uid: str | None = None,
     ) -> int:
-        """Submit raw email headers (or a full message) for background analysis.
+        """Envía cabeceras de correo crudas (o un mensaje completo) a análisis
+        en segundo plano.
 
-        Creates an IrisAnalysis record in ``pending`` state and enqueues
-        a TaskQueue task (category ``"iris.analyze"``) that runs every
-        registered rule, aggregates scores, and persists the results.
+        Crea una fila ``IrisAnalysis`` en estado ``pending`` y encola una
+        tarea de TaskQueue (categoría ``"iris.analyze"``) que ejecuta todas
+        las reglas registradas, agrega las puntuaciones y persiste los
+        resultados.
 
         Args:
-            raw_headers: Headers-only block as plain text (legacy input).
-            user_id:     Primary key of the requesting user.
-            title:       Optional user-defined label for quick
-                         identification in history.
-            raw_message: Full raw ``.eml`` message as plain text (Fase 2).
-                         Takes priority over ``raw_headers`` when both are
-                         given, since it's a superset of the header data.
-                         Rules that need body/links/attachments only see
-                         them when this is provided.
-            connection_id: IrisMailboxConnection this message was ingested
-                         through (Fase 3-4). None for manual submissions —
-                         the original, still-default flow.
-            source_message_uid: Provider-specific message id, set only
-                         together with connection_id. The (connection_id,
-                         source_message_uid) pair is UNIQUE at the DB level,
-                         so a mailbox sync retry that resubmits the same
-                         message raises instead of duplicating the analysis.
+            raw_headers: Bloque de solo cabeceras como texto plano (entrada
+                original, previa a Fase 2).
+            user_id: Primary key del usuario que solicita el análisis.
+            title: Etiqueta opcional definida por el usuario para
+                identificarlo rápido en el histórico. Por defecto ``None``.
+            raw_message: Mensaje ``.eml`` crudo completo como texto plano
+                (Fase 2). Tiene prioridad sobre ``raw_headers`` cuando se dan
+                los dos, porque es un superconjunto de los datos de
+                cabecera. Las reglas que necesitan cuerpo/enlaces/adjuntos
+                solo los ven cuando se proporciona este campo. Por defecto
+                ``None``.
+            connection_id: IrisMailboxConnection por la que se ingirió este
+                mensaje (Fase 3-4). ``None`` para envíos manuales -- el
+                flujo original, que sigue siendo el que no requiere
+                conexión. Por defecto ``None``.
+            source_message_uid: Id del mensaje específico del proveedor,
+                solo se da junto con ``connection_id``. El par
+                ``(connection_id, source_message_uid)`` es UNIQUE a nivel de
+                base de datos. Un reintento de sync de buzón que reenvía el
+                mismo mensaje nunca duplica el análisis ni cobra cuota dos
+                veces (B09) -- ver la comprobación de idempotencia más abajo.
+                Por defecto ``None``.
 
         Returns:
-            The new IrisAnalysis primary key (``analysis_id``).  The
-            caller should store this to later poll status or fetch the
-            full report.
+            int: La primary key del ``IrisAnalysis`` (``analysis_id``) --
+                bien el que se acaba de crear, bien el ya existente cuando
+                ``(connection_id, source_message_uid)`` ya había sido
+                aceptado por una llamada anterior. El llamante debe guardarlo
+                para consultar más tarde el estado o pedir el informe completo.
 
         Raises:
-            IrisInvalidInputError: If neither input is given, or the
-                content contains fewer than the minimum required header
-                lines (configurable via ``iris.min_headers`` in
-                SecOpsConfig.json).
+            IrisInvalidInputError: Si no se da ninguna de las dos entradas, o
+                si el contenido tiene menos líneas de cabecera que el mínimo
+                requerido (configurable vía ``iris.min_headers`` en
+                ``SecOpsConfig.json``).
         """
         raw_input = raw_message or raw_headers
         if not raw_input:
@@ -164,27 +178,69 @@ class IrisManager(TaskTrackingMixin):
 
         self._validate_headers_pre(raw_input)
 
+        # B09: comprobar idempotencia ANTES de cobrar cuota -- un reintento
+        # de sync de buzón (Gmail/Graph pueden repetir un mensaje) para algo
+        # ya aceptado no debe volver a cobrar ni crear un segundo análisis.
+        # El propio checkpoint de mailbox (B01) ya evita llegar hasta aquí
+        # en el caso común; esto cubre además la llamada directa.
+        if connection_id is not None and source_message_uid is not None:
+            existing = build_repository(IrisAnalysisRepository).get_by_source(
+                connection_id, source_message_uid,
+            )
+            if existing is not None:
+                return existing.id
+
         # Después de validar la entrada: un correo mal pegado no gasta cuota.
         # Aquí y no en el endpoint, porque por este método entra también la
         # ingesta desde un buzón conectado (mailbox sync), que no pasa por HTTP.
         QuotaManager().consume(user_id, LimitKey.IRIS_ANALYSES)
 
-        analysis_id = self._create_analysis_record(
-            raw_input, user_id, title=title,
-            connection_id=connection_id, source_message_uid=source_message_uid,
-        )
-        logger.info(f"Iris analysis {analysis_id} created for user {user_id}")
-
         if self.TASK_CATEGORY is None:
+            QuotaManager().refund(user_id, LimitKey.IRIS_ANALYSES)
             raise IrisExecutionError("Task category is not defined for IrisManager.")
 
-        self._task_queue.submit(
-            func=IrisManager.execute_iris_analysis,
-            args=(analysis_id, raw_input),
-            name=f"IrisAnalysis-{analysis_id}",
-            category=self.TASK_CATEGORY,
-            external_id=self.external_id_for(analysis_id),
+        analysis = IrisAnalysis(
+            raw_headers=raw_input,
+            user_id=user_id,
+            title=title.strip()[:120] if title and title.strip() else None,
+            status="pending",
+            connection_id=connection_id,
+            source_message_uid=source_message_uid,
         )
+        try:
+            with UnitOfWork() as uow:
+                IrisAnalysisRepository(uow).save(analysis)
+                analysis_id = analysis.id
+                # B08: la intención de publicar se guarda en la MISMA
+                # transacción que el análisis -- si la API muere o Redis
+                # falla justo después del commit, el barrido periódico de
+                # la outbox (o la reconciliación de arranque) publica el
+                # job más tarde en vez de dejar la fila huérfana para
+                # siempre (ver system/taskqueue/outbox.py).
+                dispatch = TaskDispatchRepository(uow).save(build_dispatch(
+                    func=IrisManager.execute_iris_analysis,
+                    name=f"IrisAnalysis-{analysis_id}",
+                    category=self.TASK_CATEGORY,
+                    args=(analysis_id, raw_input),
+                    external_id=self.external_id_for(analysis_id),
+                ))
+                # Durable antes de intentar publicar: el worker corre en otro proceso.
+                uow.commit_for_handoff()
+        except SQLAlchemyError:
+            # Carrera perdida contra otra llamada para el mismo mensaje: la
+            # comprobación de arriba y este insert no son atómicos entre sí,
+            # así que la UniqueConstraint sigue siendo la defensa final. Se
+            # reembolsa la cuota que se acaba de cobrar por un análisis que
+            # nunca llegó a crearse -- nunca se cobra por un duplicado.
+            QuotaManager().refund(user_id, LimitKey.IRIS_ANALYSES)
+            raise
+        logger.info(f"Iris analysis {analysis_id} created for user {user_id}")
+
+        # Camino feliz: publicar ahora mismo en vez de esperar al barrido
+        # periódico, para que el análisis arranque sin latencia añadida en
+        # el caso normal (Redis arriba). Si falla, la fila queda `pending`
+        # y algo la recogerá más tarde -- nunca se pierde el trabajo.
+        OutboxDispatcher.dispatch(dispatch.id, task_queue=self._task_queue)
 
         return analysis_id
 
@@ -222,6 +278,27 @@ class IrisManager(TaskTrackingMixin):
                 "legitimate": config.legitimate_threshold,
                 "suspicious": config.suspicious_threshold,
             },
+        }
+
+    @staticmethod
+    def get_retention_report(user_id: int) -> Dict[str, Any]:
+        """Política de retención vigente más el estado real de los análisis
+        de este usuario frente a ella (M09/B17): cierra el criterio de
+        "existe una política visible" con datos concretos, no solo los
+        valores de configuración -- un usuario puede ver cuántos de sus
+        análisis conservan todavía el raw y cuántos ya lo perdieron por
+        retención, no solo que "el raw caduca a los 90 días" en abstracto.
+        """
+        config = CR.iris_config()
+        repo = build_repository(IrisAnalysisRepository)
+        total = repo.count_by_user(user_id)
+        with_raw = repo.count_with_raw_retained_by_user(user_id)
+        return {
+            "raw_message_retention_days": config.raw_message_retention_days,
+            "analysis_retention_days": config.analysis_retention_days,
+            "total_analyses": total,
+            "analyses_with_raw_retained": with_raw,
+            "analyses_with_raw_purged": total - with_raw,
         }
 
     def get_analysis_status(self, analysis_id: int) -> Optional[str]:
@@ -370,8 +447,14 @@ class IrisManager(TaskTrackingMixin):
 
         Returns:
             The new IrisAnalysis primary key.
+
+        Raises:
+            IrisRawMessagePurgedError: La retención ya purgó el raw de este
+                análisis (M09/B17/B19) -- sin él no hay nada que reanalizar.
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
+        if analysis.raw_headers is None:
+            raise IrisRawMessagePurgedError(analysis_id)
         title = f"{analysis.title} (reanálisis)" if analysis.title else f"Reanálisis de #{analysis_id}"
         return self.analyze(analysis.raw_headers, user_id, title=title)
 
@@ -382,8 +465,15 @@ class IrisManager(TaskTrackingMixin):
         column is needed. Returns ``available: false`` for headers-only
         submissions (no full ``.eml`` means no Received chain to
         inspect).
+
+        Raises:
+            IrisRawMessagePurgedError: La retención ya purgó el raw de este
+                análisis (M09/B17/B19) -- distinto de "sin cuerpo completo":
+                aquí no hay ningún raw que parsear, ni cabeceras.
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
+        if analysis.raw_headers is None:
+            raise IrisRawMessagePurgedError(analysis_id)
         context = parse_raw_message(analysis.raw_headers or "")
         return {
             "analysisId": analysis.id,
@@ -409,8 +499,14 @@ class IrisManager(TaskTrackingMixin):
             the hash regardless of whether a heuristic fired) — each a
             sorted, deduplicated list of strings pivotable in an external
             tool (SIEM, threat-intel lookup, blocklist).
+
+        Raises:
+            IrisRawMessagePurgedError: La retención ya purgó el raw de este
+                análisis (M09/B17/B19).
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
+        if analysis.raw_headers is None:
+            raise IrisRawMessagePurgedError(analysis_id)
         context = parse_raw_message(analysis.raw_headers or "")
 
         domains: set[str] = set()
@@ -453,6 +549,39 @@ class IrisManager(TaskTrackingMixin):
             "ips": sorted(ips),
             "emails": sorted(emails),
             "hashes": sorted(hashes),
+        }
+
+    def export_analysis(self, analysis_id: int, user_id: int) -> Dict[str, Any]:
+        """Exportación completa de un análisis (B19): resultado, reglas,
+        raw (si no se ha purgado ya) y las dos vistas que se derivan de él
+        (Received-chain path, IOCs).
+
+        Pensada para que el usuario se lleve una copia completa **antes**
+        de que la retención (M09/B17) purgue el raw -- una vez purgado,
+        ``receivedPath``/``iocs`` dejan de estar disponibles (ver
+        ``get_analysis_path``/``get_analysis_iocs``) y esta exportación ya
+        no puede recuperarlos; salen como ``None`` en vez de hacer fallar
+        la exportación entera, porque el resultado analítico (que
+        ``get_analysis_results`` sí sigue devolviendo) sigue teniendo valor
+        por sí solo.
+        """
+        self.assert_analysis_ownership(analysis_id, user_id)
+        report = self.get_analysis_results(analysis_id)
+
+        try:
+            path = self.get_analysis_path(analysis_id, user_id)
+        except IrisRawMessagePurgedError:
+            path = None
+        try:
+            iocs = self.get_analysis_iocs(analysis_id, user_id)
+        except IrisRawMessagePurgedError:
+            iocs = None
+
+        return {
+            "exportedAt": isoformat_utc(utcnow_naive()),
+            "analysis": report,
+            "receivedPath": path,
+            "iocs": iocs,
         }
 
     AI_SUMMARY_EXTERNAL_ID_PREFIX = "iris-ai-summary:"
@@ -511,11 +640,12 @@ class IrisManager(TaskTrackingMixin):
             return "running"
 
         # La concreta y el techo agregado de IA, en ese orden, para que el 402
-        # nombre lo que el usuario estaba pidiendo.
-        quota_manager = QuotaManager()
+        # nombre lo que el usuario estaba pidiendo. consume_many() (B09) las
+        # cobra como una sola operación: si AI_REQUESTS no tiene cupo tras
+        # haber cobrado IRIS_AI_SUMMARIES, la reembolsa antes de relanzar --
+        # antes se quedaba cobrada sin nada que la explicara.
         try:
-            quota_manager.consume(user_id, LimitKey.IRIS_AI_SUMMARIES)
-            quota_manager.consume(user_id, LimitKey.AI_REQUESTS)
+            QuotaManager().consume_many(user_id, [LimitKey.IRIS_AI_SUMMARIES, LimitKey.AI_REQUESTS])
         except Exception:
             # Sin cupo no hay trabajo: se suelta la reserva para que el
             # análisis no se quede en `running` para siempre y el usuario
@@ -622,23 +752,39 @@ class IrisManager(TaskTrackingMixin):
                     IrisManager._refund_ai_summary_quota(user_id)
 
     def cancel_analysis(self, analysis_id: int, user_id: int) -> bool:
-        """Cancel a running or pending analysis.
+        """Cancela un análisis ``pending`` o ``running``.
 
-        Signals the TaskQueue task to stop and marks the database record
-        as ``cancelled``.
+        Señaliza la tarea de TaskQueue para que pare y marca la fila como
+        ``cancelled`` en la base de datos -- pero solo si el worker no ha
+        alcanzado ya un estado terminal por su cuenta mientras tanto. Que
+        ``_task_queue.cancel()`` lea "sigue en marcha" y que este método
+        escriba en la base de datos no son un único paso atómico: el worker
+        puede llamar a ``_persist_analysis_results()`` y confirmar
+        ``finished`` justo en ese hueco. B07: la escritura real de
+        ``status`` pasa por ``IrisAnalysisRepository.transition_if_state()``,
+        un ``UPDATE ... WHERE status IN (...)`` condicionado que solo uno de
+        los dos escritores en competencia puede ganar, así que una
+        cancelación que llega después de que el análisis ya terminara nunca
+        puede sobreescribir su resultado.
 
         Args:
-            analysis_id: Primary key of the analysis to cancel.
-            user_id:     Owner ID (must match the record's owner).
+            analysis_id: Primary key del análisis a cancelar.
+            user_id: Id del propietario (debe coincidir con el dueño de la fila).
 
         Returns:
-            True if the cancellation was successful.
+            bool: ``True`` si esta llamada transicionó de verdad el análisis
+                a ``cancelled``. ``False`` si no había ninguna tarea activa
+                que cancelar, o si el worker ya había persistido un estado
+                terminal (``finished``/``failed``) para cuando esto intentó
+                escribir -- en ese caso el resultado real del análisis queda
+                intacto, y el hecho de que se pidió cancelar queda igualmente
+                registrado en ``cancel_requested_at`` para quien lo consulte.
 
         Raises:
-            IrisAnalysisNotFoundError: If the analysis does not exist
-                or does not belong to this user.
-            IrisInvalidStateError: If the analysis is not in a
-                cancellable state (``pending`` or ``running``).
+            IrisAnalysisNotFoundError: Si el análisis no existe o no
+                pertenece a este usuario.
+            IrisInvalidStateError: Si el análisis no está en un estado
+                cancelable (``pending`` o ``running``).
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
 
@@ -652,11 +798,34 @@ class IrisManager(TaskTrackingMixin):
             logger.warning(f"No active task found for analysis {analysis_id}")
             return False
 
-        was_cancelled = self._task_queue.cancel(queued_task.id)
-        if was_cancelled:
-            self._update_analysis(analysis_id, status="cancelled", finished_at=utcnow_naive())
-            logger.info(f"Analysis {analysis_id} cancelled by user {user_id}")
-        return was_cancelled
+        if not self._task_queue.cancel(queued_task.id):
+            # RQ ya sabía que el job había terminado -- ni siquiera merece la
+            # pena intentar la transición condicionada.
+            return False
+
+        with UnitOfWork() as uow:
+            repo = IrisAnalysisRepository(uow)
+            # Se registra siempre que se pidió cancelar, gane o no la carrera
+            # contra el worker -- es la traza de la intención del usuario,
+            # independiente del resultado (ver docstring de la columna).
+            uow.session.execute(
+                update(IrisAnalysis)
+                .where(IrisAnalysis.id == analysis_id)
+                .values(cancel_requested_at=utcnow_naive())
+            )
+            transitioned = repo.transition_if_state(
+                analysis_id, list(_CANCELLABLE_STATES),
+                status="cancelled", finished_at=utcnow_naive(),
+            )
+
+        if transitioned:
+            logger.info(f"Análisis {analysis_id} cancelado por el usuario {user_id}")
+        else:
+            logger.info(
+                f"Análisis {analysis_id}: la cancelación llegó tarde -- el worker ya "
+                "había terminado el análisis, su resultado no se sobreescribe."
+            )
+        return transitioned
 
     def delete_analysis(self, analysis_id: int) -> bool:
         """Permanently delete an analysis and its rule results.
@@ -751,25 +920,6 @@ class IrisManager(TaskTrackingMixin):
     # =========================================================================
     # INTERNAL
     # =========================================================================
-
-    def _create_analysis_record(self, raw_headers: str, user_id: int, title: str | None = None,
-                                 connection_id: int | None = None,
-                                 source_message_uid: str | None = None) -> int:
-        """Persist a new IrisAnalysis row in ``pending`` state."""
-        analysis = IrisAnalysis(
-            raw_headers=raw_headers,
-            user_id=user_id,
-            title=title.strip()[:120] if title and title.strip() else None,
-            status="pending",
-            connection_id=connection_id,
-            source_message_uid=source_message_uid,
-        )
-        with UnitOfWork() as uow:
-            repo = IrisAnalysisRepository(uow)
-            repo.save(analysis)
-            # Durable antes de encolar: el worker corre en otro proceso.
-            uow.commit_for_handoff()
-        return analysis.id # type: ignore
 
     @staticmethod
     def _validate_headers_pre(raw_headers: str) -> None:
@@ -965,14 +1115,27 @@ class IrisManager(TaskTrackingMixin):
     def _persist_analysis_results(analysis_id: int, rules_defs: List[dict], results: List[RuleResult],
                                    verdict: str, total_score: float, gate_reasons: list[str],
                                    quality: AnalysisQuality, detector: str) -> None:
-        """Persist every rule row and the final analysis state in one transaction.
+        """Persiste todas las filas de regla y el estado final del análisis
+        en una única transacción.
 
-        Previously each rule opened (and committed) its own
-        ``UnitOfWork`` — ~40 commits per analysis, and a cancellation
-        mid-loop left the already-committed rows of a ``cancelled``
-        analysis dangling (C2/C3). One transaction for the whole batch
-        fixes both: it's atomic, and a ``return`` before this point
-        (cancellation) now leaves nothing committed at all.
+        Antes cada regla abría (y confirmaba) su propio ``UnitOfWork`` --
+        unos 40 commits por análisis, y una cancelación a mitad de bucle
+        dejaba huérfanas las filas ya confirmadas de un análisis
+        ``cancelled`` (C2/C3). Una sola transacción para todo el lote
+        arregla las dos cosas: es atómica, y un ``return`` antes de este
+        punto (cancelación) ya no deja nada confirmado.
+
+        B07: la escritura final de ``status="finished"`` (junto con los
+        campos de score/veredicto que la acompañan) pasa por
+        ``IrisAnalysisRepository.transition_if_state()``, que solo la
+        aplica si la fila sigue ``running``. Sin esa condición, una
+        cancelación que ``cancel_analysis()`` confirme en el hueco estrecho
+        entre que este método lee la fila y este método confirma su propia
+        transacción se sobreescribiría en silencio de vuelta a ``finished``
+        -- exactamente la carrera que este issue viene a cerrar. Las filas
+        de regla de arriba se escriben de todos modos: son ciertas pase lo
+        que pase, y nunca quedan huérfanas gracias al agrupado en una sola
+        transacción que ya describe este docstring.
         """
         with UnitOfWork() as uow:
             rule_repo = IrisRuleResultRepository(uow)
@@ -989,18 +1152,18 @@ class IrisManager(TaskTrackingMixin):
                 ))
 
             analysis_repo = IrisAnalysisRepository(uow)
-            analysis = analysis_repo.get_by_id(analysis_id)
-            if analysis is None:
-                return
-            analysis.status = "finished"
-            analysis.total_score = total_score
-            analysis.verdict = verdict
-            analysis.gate_reasons = gate_reasons
-            analysis.analysis_quality = quality.quality
-            analysis.failed_rules = quality.failed_rules or None
-            analysis.detector_version = detector
-            analysis.finished_at = utcnow_naive()
-            analysis_repo.update(analysis)
+            transitioned = analysis_repo.transition_if_state(
+                analysis_id, ["running"],
+                status="finished", total_score=total_score, verdict=verdict,
+                gate_reasons=gate_reasons, analysis_quality=quality.quality,
+                failed_rules=quality.failed_rules or None, detector_version=detector,
+                finished_at=utcnow_naive(),
+            )
+            if not transitioned:
+                logger.info(
+                    f"Análisis {analysis_id} ya no estaba running al terminar de "
+                    "evaluar las reglas (probablemente cancelado) -- no se sobreescribe."
+                )
 
     @staticmethod
     def _aggregate_score(rules_defs: List[dict], results: List[RuleResult]) -> float:

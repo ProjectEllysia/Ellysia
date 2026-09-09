@@ -38,6 +38,7 @@ from reportlab.platypus import (
 
 import src.modules.system.config_reading as CR
 from .parsers import parse_raw_headers, decode_mime_words
+from .redaction import redact_pii
 
 logger = logging.getLogger(__name__)
 
@@ -659,15 +660,33 @@ class IrisPDFCreator:
                 ))
 
     def append_raw_headers(self, elements: list, theme: IrisReportTheme) -> None:
+        """Vuelca el raw completo del correo -- la única vista de Iris que
+        sale del panel autenticado tal cual una vez descargado el PDF, así
+        que es la que se redacta (M09, ``iris.redactPiiInReports``): no se
+        toca el remitente/destinatario/responder-a/return-path, que son la
+        evidencia del informe (ya mostrados en "Vista Previa del Correo"),
+        pero sí cualquier otra dirección, teléfono o número con forma de
+        tarjeta que aparezca en cabeceras de reenvío, listas de distribución
+        o el cuerpo (en ``full_message_mode``)."""
         raw = self.report.get("rawHeaders")
         if not raw:
             return
         elements.append(PageBreak())
         elements.extend(theme.section_header("Cabeceras Originales", "EVIDENCIA RAW"))
         elements.append(Spacer(1, 0.1 * inch))
+
+        body = raw
+        if CR.iris_config().redact_pii_in_reports:
+            headers = parse_raw_headers(raw)
+            surfaced_addresses = [
+                parseaddr(headers.get(name, ""))[1]
+                for name in ("from", "to", "reply-to", "return-path")
+            ]
+            body = redact_pii(raw, keep_emails=surfaced_addresses)
+
         # Escape so reportlab's mini-markup doesn't choke on raw header text.
         escaped = (
-            raw.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         )
         for line in escaped.splitlines():
             elements.append(Paragraph(line if line.strip() else "&nbsp;", theme.mono))

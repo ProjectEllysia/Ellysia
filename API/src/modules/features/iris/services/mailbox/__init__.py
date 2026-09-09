@@ -1,4 +1,4 @@
-from .base import MailboxConnector, MessageRef, TokenSet
+from .base import MailboxConnector, MailboxFolder, MessageRef, TokenSet
 from .registry import MAILBOX_CONNECTORS, get_connector
 
 # Importados por su efecto secundario: cada uno se da de alta en
@@ -9,6 +9,6 @@ from . import gmail as _gmail  # noqa: F401
 from . import microsoft as _microsoft  # noqa: F401
 
 __all__ = [
-    "MailboxConnector", "MessageRef", "TokenSet",
+    "MailboxConnector", "MailboxFolder", "MessageRef", "TokenSet",
     "MAILBOX_CONNECTORS", "get_connector",
 ]

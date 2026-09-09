@@ -26,7 +26,7 @@ import requests
 
 import src.modules.system.config_reading as CR
 
-from .base import MailboxConnector, MessageRef, TokenSet
+from .base import MailboxConnector, MailboxFolder, MessageRef, TokenSet
 from .registry import register_connector
 
 logger = logging.getLogger(__name__)
@@ -159,6 +159,27 @@ class GraphConnector(MailboxConnector):
         )
         response.raise_for_status()
         return response.text
+
+    def list_folders(self, access_token: str) -> list[MailboxFolder]:
+        headers = {"Authorization": f"Bearer {access_token}"}
+        folders: list[MailboxFolder] = []
+        # Solo carpetas de primer nivel -- Gmail tampoco anida etiquetas, y
+        # bajar a subcarpetas exigiría recorrer el árbol entero por cuenta.
+        url = f"{_GRAPH_API}/me/mailFolders?$top=250"
+        while url:
+            response = requests.get(url, headers=headers, timeout=_TIMEOUT_SECONDS)
+            response.raise_for_status()
+            data = response.json()
+            for item in data.get("value", []):
+                folders.append(MailboxFolder(
+                    provider_id=item["id"], display_name=item["displayName"],
+                    # wellKnownName solo está presente en carpetas propias de
+                    # Graph (inbox, sentitems, deleteditems...); su ausencia
+                    # es la señal de que la creó el usuario.
+                    folder_type="system" if item.get("wellKnownName") else "user",
+                ))
+            url = data.get("@odata.nextLink")
+        return folders
 
     def revoke(self, refresh_token: str) -> None:
         # Microsoft Graph no expone una API para que una app confidencial

@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.modules.features.iris.model import IrisAnalysis, IrisMailboxConnection
+from src.modules.features.iris.model import IrisAnalysis, IrisMailboxConnection, IrisMailboxInbox
 from src.modules.features.iris.repositories import (
-    IrisAnalysisRepository, IrisMailboxConnectionRepository,
+    IrisAnalysisRepository, IrisMailboxConnectionRepository, IrisMailboxInboxRepository,
 )
 from src.modules.infrastructure import UnitOfWork
 
@@ -148,3 +148,68 @@ def test_a_long_opaque_cursor_survives_a_round_trip(app, regular_user):
             fetched = IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
             assert fetched.sync_cursor == cursor
             assert len(fetched.sync_cursor) > 255
+
+
+# --------------------------------------------------------------- B01: IrisMailboxInbox
+
+def test_create_and_fetch_inbox_entry(app, regular_user):
+    with app.app_context():
+        with UnitOfWork() as uow:
+            conn = _make_connection(regular_user.id)
+            IrisMailboxConnectionRepository(uow).save(conn)
+            conn_id = conn.id
+
+        with UnitOfWork() as uow:
+            entry = IrisMailboxInbox(
+                connection_id=conn_id, provider_message_id="msg-1", raw_ref={"foo": "bar"},
+            )
+            IrisMailboxInboxRepository(uow).save(entry)
+            entry_id = entry.id
+
+        with UnitOfWork() as uow:
+            fetched = IrisMailboxInboxRepository(uow).get_by_id(entry_id)
+            assert fetched is not None
+            assert fetched.status == "pending"
+            assert fetched.attempts == 0
+            assert fetched.raw_ref == {"foo": "bar"}
+
+
+def test_inbox_entry_unique_per_connection_and_provider_message(app, regular_user):
+    with app.app_context():
+        with UnitOfWork() as uow:
+            conn = _make_connection(regular_user.id)
+            IrisMailboxConnectionRepository(uow).save(conn)
+            conn_id = conn.id
+
+        with UnitOfWork() as uow:
+            IrisMailboxInboxRepository(uow).save(
+                IrisMailboxInbox(connection_id=conn_id, provider_message_id="msg-1")
+            )
+
+        with pytest.raises(SQLAlchemyError):
+            with UnitOfWork() as uow:
+                IrisMailboxInboxRepository(uow).save(
+                    IrisMailboxInbox(connection_id=conn_id, provider_message_id="msg-1")
+                )
+
+
+def test_deleting_connection_cascades_to_inbox_entries(app, regular_user):
+    """La cola de checkpoint de una conexión borrada no tiene sentido sin
+    ella -- ``ondelete="CASCADE"`` en el FK se encarga."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            conn = _make_connection(regular_user.id)
+            IrisMailboxConnectionRepository(uow).save(conn)
+            conn_id = conn.id
+            IrisMailboxInboxRepository(uow).save(
+                IrisMailboxInbox(connection_id=conn_id, provider_message_id="msg-1")
+            )
+
+        with UnitOfWork() as uow:
+            IrisMailboxConnectionRepository(uow).delete(
+                IrisMailboxConnectionRepository(uow).get_by_id(conn_id)
+            )
+
+        with UnitOfWork() as uow:
+            remaining = IrisMailboxInboxRepository(uow).get_pending(conn_id)
+            assert remaining == []
