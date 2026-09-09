@@ -28,7 +28,7 @@ import src.modules.system.config_reading as CR
 from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
-from src.modules.shared import assert_owned, decrypt_at_rest, encrypt_at_rest, utcnow_naive
+from src.modules.shared import assert_owned, utcnow_naive
 from src.modules.system.taskqueue import TaskTrackingMixin, job_context
 from src.modules.system.taskqueue.connection import RedisConnectionFactory
 
@@ -244,16 +244,14 @@ class IrisMailboxManager(TaskTrackingMixin):
             if folder is not None else None
         )
 
-        refresh_enc = encrypt_at_rest(token_set.refresh_token, purpose="iris_mailbox")
-        access_enc = encrypt_at_rest(token_set.access_token, purpose="iris_mailbox")
         expires_at = token_set.access_token_expires_at.replace(tzinfo=None)
 
         with UnitOfWork() as uow:
             repo = IrisMailboxConnectionRepository(uow)
             existing = repo.get_by_user_provider_email(user_id, provider, token_set.account_email)
             if existing is not None:
-                existing.refresh_token_enc = refresh_enc
-                existing.access_token_enc = access_enc
+                existing.refresh_token = token_set.refresh_token
+                existing.access_token = token_set.access_token
                 existing.access_token_expires_at = expires_at
                 existing.scopes = token_set.scopes
                 existing.full_message_mode = full_message_mode
@@ -269,8 +267,8 @@ class IrisMailboxManager(TaskTrackingMixin):
 
             connection = IrisMailboxConnection(
                 user_id=user_id, provider=provider, account_email=token_set.account_email,
-                scopes=token_set.scopes, refresh_token_enc=refresh_enc,
-                access_token_enc=access_enc, access_token_expires_at=expires_at,
+                scopes=token_set.scopes, refresh_token=token_set.refresh_token,
+                access_token=token_set.access_token, access_token_expires_at=expires_at,
                 folder=folder, full_message_mode=full_message_mode,
                 folder_display_name=folder_metadata.display_name if folder_metadata else None,
                 folder_type=folder_metadata.folder_type if folder_metadata else None,
@@ -428,9 +426,8 @@ class IrisMailboxManager(TaskTrackingMixin):
         connection = self.assert_connection_ownership(connection_id, user_id)
 
         try:
-            refresh_token = decrypt_at_rest(connection.refresh_token_enc, purpose="iris_mailbox")
             connector = get_connector(connection.provider, self._redirect_uri(), folder=connection.folder)
-            connector.revoke(refresh_token)
+            connector.revoke(connection.refresh_token)
         except Exception as e:
             logger.warning(f"No se pudo revocar el token de la conexión {connection_id} en el proveedor: {e}")
 
@@ -678,13 +675,12 @@ class IrisMailboxManager(TaskTrackingMixin):
         connector = get_connector(connection.provider, self._redirect_uri(), folder=connection.folder)
 
         now = utcnow_naive()
-        if (connection.access_token_enc and connection.access_token_expires_at
+        if (connection.access_token and connection.access_token_expires_at
                 and connection.access_token_expires_at > now):
-            return decrypt_at_rest(connection.access_token_enc, purpose="iris_mailbox"), connector
+            return connection.access_token, connector
 
-        refresh_token = decrypt_at_rest(connection.refresh_token_enc, purpose="iris_mailbox")
         try:
-            token_set = connector.refresh(refresh_token)
+            token_set = connector.refresh(connection.refresh_token)
         except requests.HTTPError as e:
             status = e.response.status_code if e.response is not None else None
             if status in (400, 401):
@@ -697,8 +693,8 @@ class IrisMailboxManager(TaskTrackingMixin):
             repo = IrisMailboxConnectionRepository(uow)
             fresh = repo.get_by_id(connection.id)
             if fresh is not None:
-                fresh.access_token_enc = encrypt_at_rest(token_set.access_token, purpose="iris_mailbox")
-                fresh.refresh_token_enc = encrypt_at_rest(token_set.refresh_token, purpose="iris_mailbox")
+                fresh.access_token = token_set.access_token
+                fresh.refresh_token = token_set.refresh_token
                 fresh.access_token_expires_at = token_set.access_token_expires_at.replace(tzinfo=None)
                 repo.update(fresh)
 

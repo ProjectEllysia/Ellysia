@@ -117,7 +117,7 @@ class _FakeConnector:
 def _connection(user_id, **overrides) -> IrisMailboxConnection:
     defaults = dict(
         user_id=user_id, provider="gmail", account_email="victim@example.com",
-        scopes="gmail.metadata", refresh_token_enc=encrypt_at_rest("refresh-token", purpose="iris_mailbox"),
+        scopes="gmail.metadata", refresh_token="refresh-token",
         status="active", sync_cursor="cursor-0",
     )
     defaults.update(overrides)

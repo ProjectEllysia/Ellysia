@@ -22,7 +22,7 @@ def _connection(user_id: int, account_email: str) -> IrisMailboxConnection:
     return IrisMailboxConnection(
         user_id=user_id, provider="gmail", account_email=account_email,
         scopes="gmail.metadata",
-        refresh_token_enc=encrypt_at_rest("token", purpose="iris_mailbox"),
+        refresh_token="token",
         status="active",
     )
 
