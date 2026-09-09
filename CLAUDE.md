@@ -359,6 +359,54 @@ que actualizarla en tres sitios — la ruta del `@config_block` (o la llamada a 
 
 ---
 
+## Documentación de funciones, clases y métodos
+
+Toda función, clase o método que se genere o modifique lleva **docstring en castellano**, sin
+excepción — esto es una extensión de la regla de idioma de la cabecera de este documento, no una
+regla nueva y separada. Un docstring incompleto es peor que ninguno: promete una referencia y
+luego obliga a leer el cuerpo igualmente.
+
+Estructura obligatoria:
+
+- **Qué hace.** Una explicación clara del propósito, en prosa — no una repetición del nombre
+  (`"""Calcula el umbral crítico."""` sobre una función `calculate_critical_threshold` no dice
+  nada nuevo; explica *qué* umbral, *a partir de qué* y *por qué* hace falta).
+- **Todos los parámetros** (o, en una clase, todos los atributos), cada uno con:
+  - su propósito,
+  - qué valores acepta (tipo, y si es un conjunto cerrado — enum, `Literal`, cadena con formato
+    concreto — cuáles son los valores válidos),
+  - el valor por defecto, si lo tiene.
+- **El tipo devuelto**, y si puede tomar más de un valor con distinto significado (`None` frente a
+  una instancia, un enum con varios miembros, una tupla con estados distintos), qué significa cada
+  uno.
+
+Formato (estilo Google, adaptado al castellano):
+
+```python
+def calculate_critical_threshold(base_score: float, scan_type: ScanType, multiplier: float = 1.5) -> float:
+    """Calcula el umbral crítico de una vulnerabilidad a partir de su puntuación base.
+
+    El umbral resultante decide si un hallazgo dispara notificación inmediata
+    (ver `NotificationManager.should_notify`).
+
+    Args:
+        base_score: Puntuación CVSS base del hallazgo, en el rango [0.0, 10.0].
+        scan_type: Tipo de escaneo que originó el hallazgo (`ScanType.NMAP`,
+            `ScanType.NIKTO`, `ScanType.NUCLEI` o `ScanType.LYBRA`); determina qué
+            tabla de pesos se aplica.
+        multiplier: Factor de ajuste sobre `base_score`. Por defecto `1.5`.
+
+    Returns:
+        float: El umbral crítico ya ajustado. Nunca es negativo; si `base_score`
+            es `0.0` el resultado es `0.0`.
+    """
+```
+
+Esto rige para código nuevo y para funciones/clases/métodos que se toquen al pasar; no obliga a
+reescribir en masa lo que ya existe y no se está editando.
+
+---
+
 ## Cosas que muerden
 
 - Los `.env` llevan credenciales — nunca los commitees. `API/.env`, `API/src/data/` y `docs/` están
@@ -418,6 +466,17 @@ nada lo obliga a estar fresco. Dos reglas:
   feature/fix ni los repartas entre varios: haz `git add README.md` por separado y commitéalo solo
   (`docs(readme): keep in sync with ...`), aunque la sesión abarque varios commits. Si ya hay un
   commit de README en la sesión, mete ahí las actualizaciones posteriores en vez de abrir otro.
+- **Ninguna decisión de diseño con referencia a un issue o documento entra en el README.** Una
+  frase como «decisión tomada por el issue #N» o «ver `plans/x.md`» documenta el *porqué* de una
+  decisión concreta, no el contrato público de la API — y un número de issue envejece peor que el
+  código: el README lo hereda para siempre aunque el issue se cierre, se renumere en otro repo o
+  deje de ser accesible para quien lo lee. Esa razón va **en el código**, lo más cerca posible de lo
+  que decide — un comentario junto a la línea, o el docstring de la función/clase si la decisión
+  afecta a toda su lógica —, siguiendo el patrón ya establecido en el repo: `# Tope de puertos
+  detallados que viajan al prompt (#118): ...` ([analyzers.py:53](API/src/modules/features/themis/services/analyzers.py:53)),
+  `"""Estimación heurística del tamaño del prompt completo (Issue #118).` ([inputs.py:98](API/src/modules/tools/scribe/inputs.py:98)).
+  El README puede seguir describiendo *qué* hace la API; el *por qué* de una decisión puntual, con
+  o sin issue de por medio, vive junto al código que decide.
 
 ---
 
