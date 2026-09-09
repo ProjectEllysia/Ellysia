@@ -17,9 +17,9 @@ Example:
 """
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import deferred, relationship
 
-from src.modules.shared import Base, utcnow_naive
+from src.modules.shared import Base, EncryptedText, utcnow_naive
 
 
 # =========================================================================
@@ -288,10 +288,12 @@ class MFATotpCredential(Base):
     """
     TOTP (Time-based One-Time Password) credential for a user.
 
-    One row per user (unique ``user_id``). ``secret_encrypted`` holds the
-    shared TOTP secret, encrypted at rest with a server-side key — unlike
-    Acheron this is NOT zero-knowledge, since the server must be able to
-    compute the current code to verify a login attempt.
+    One row per user (unique ``user_id``). ``totp_secret`` holds the shared
+    TOTP secret; la columna es ``EncryptedText``, así que en Python siempre
+    se lee y se escribe en claro y lo que llega a la fila es texto cifrado
+    con Fernet. A diferencia de Acheron esto NO es zero-knowledge: el
+    servidor tiene que poder calcular el código actual para verificar un
+    intento de login.
 
     ``confirmed_at`` is NULL until the user proves control of the secret by
     submitting a valid code during setup; MFA only counts as "enabled" once
@@ -299,7 +301,11 @@ class MFATotpCredential(Base):
 
     Attributes:
         user_id: Foreign key to User.id (unique — one credential per user).
-        secret_encrypted: Fernet-encrypted Base32 TOTP secret.
+        totp_secret: Secreto TOTP en Base32, en claro para quien lo lee desde
+            Python y cifrado en la base de datos (``purpose="mfa"``). Se
+            declara ``deferred``: la mayoría de las cargas de esta fila solo
+            miran ``confirmed_at`` (¿tiene MFA activo?) y no necesitan pagar
+            un descifrado para responder a eso.
         confirmed_at: When the user confirmed enrollment (None = pending).
         created_at: When the credential was created (setup started).
     """
@@ -307,7 +313,7 @@ class MFATotpCredential(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("User.id"), nullable=False, unique=True)
-    secret_encrypted = Column(String(512), nullable=False)
+    totp_secret = deferred(Column(EncryptedText(purpose="mfa"), nullable=False))
     confirmed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 

@@ -1,9 +1,9 @@
 """
 TOTP and recovery-code primitives for MFA.
 
-Pure functions only — no DB access, no encryption-at-rest (that lives in
-services.secrets.encrypt_totp_secret / decrypt_totp_secret, called by the
-manager layer around these).
+Pure functions only — no DB access, no encryption-at-rest (that is the
+job of the ``MFATotpCredential.totp_secret`` column, an ``EncryptedText``
+that ciphers on write and deciphers on read).
 
 Functions:
     generate_totp_secret    — Random Base32 secret for a new TOTP enrollment.

@@ -3,8 +3,6 @@ from .secrets import (
     hash_password,
     hash_password_with_salt,
     verify_password,
-    encrypt_totp_secret,
-    decrypt_totp_secret,
     generate_opaque_token,
     hash_opaque_token,
     verify_opaque_token,
@@ -30,8 +28,6 @@ __all__ = [
     'hash_password',
     'hash_password_with_salt',
     'verify_password',
-    'encrypt_totp_secret',
-    'decrypt_totp_secret',
 
     'generate_totp_secret',
     'totp_provisioning_uri',

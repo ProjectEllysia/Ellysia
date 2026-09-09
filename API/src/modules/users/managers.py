@@ -64,8 +64,6 @@ from .services import (
     hash_password,
     hash_password_with_salt,
     verify_password,
-    encrypt_totp_secret,
-    decrypt_totp_secret,
     generate_totp_secret,
     totp_provisioning_uri,
     verify_totp_code,
@@ -1308,9 +1306,11 @@ class MFAManager:
     the recovery-code fallback.
 
     All database access goes through UnitOfWork + MFARepository. The TOTP
-    secret is encrypted at rest (services.encrypt_totp_secret) since, unlike
-    Acheron, the server must be able to compute the current code to verify
-    it — this is NOT zero-knowledge.
+    secret is encrypted at rest by its own column type
+    (``MFATotpCredential.totp_secret`` is an ``EncryptedText``), so this code
+    only ever handles the plaintext secret. Unlike Acheron, the server must
+    be able to compute the current code to verify it — this is NOT
+    zero-knowledge.
 
     Example:
     >>> manager = MFAManager()
@@ -1368,10 +1368,10 @@ class MFAManager:
                 raise MfaAlreadyEnabledError()
 
             if existing is not None:
-                existing.secret_encrypted = encrypt_totp_secret(secret)
+                existing.totp_secret = secret
             else:
                 repo.save_totp_credential(
-                    MFATotpCredential(user_id=user_id, secret_encrypted=encrypt_totp_secret(secret))
+                    MFATotpCredential(user_id=user_id, totp_secret=secret)
                 )
 
         return {
@@ -1401,7 +1401,7 @@ class MFAManager:
             if cred is None:
                 raise MfaNotEnabledError()
 
-            secret = decrypt_totp_secret(cred.secret_encrypted)
+            secret = cred.totp_secret
             if not verify_totp_code(secret, code):
                 raise InvalidMfaCodeError()
 
@@ -1473,7 +1473,7 @@ class MFAManager:
         if code:
             cred = repo.get_totp_credential(user_id)
             if cred is not None and cred.confirmed_at is not None:
-                secret = decrypt_totp_secret(cred.secret_encrypted)
+                secret = cred.totp_secret
                 if verify_totp_code(secret, code):
                     return True
 
