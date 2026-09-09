@@ -8,14 +8,16 @@ the output of every individual rule that was executed during the analysis.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, Float, ForeignKey, Integer,
+    Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer,
     SmallInteger, String, Text, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
-from src.modules.shared import Base, Document, utcnow_naive
+from src.modules.shared import Base, Document, EncryptedText, utcnow_naive
 
 
 class IrisAnalysis(Base):
@@ -28,7 +30,19 @@ class IrisAnalysis(Base):
     Attributes:
         id: Primary key, auto-incrementing integer.
         title: Optional user-defined label for quick identification.
-        raw_headers: Original email headers as plain text.
+        raw_headers: Cabeceras originales (o el ``.eml`` completo) como
+                 texto plano. Property, no columna: el contenido de verdad
+                 vive cifrado en la fila ``IrisRawMessage`` asociada
+                 (``raw_message``, 1:1) para poder purgarlo de forma
+                 independiente sin borrar el resultado analítico ya
+                 calculado (M09/B19). Se lee y se escribe exactamente igual
+                 que antes de esa separación -- ``analysis.raw_headers`` y
+                 ``IrisAnalysis(raw_headers=...)`` siguen funcionando sin
+                 cambios en el resto del código. ``None`` cuando la política
+                 de retención ya ha purgado el raw de este análisis; a partir
+                 de ahí, cualquier vista derivada del raw (cadena Received,
+                 IOCs) deja de estar disponible -- ver
+                 ``IrisManager.get_analysis_path``/``get_analysis_iocs``.
         status: Lifecycle state — "pending", "running", "finished",
                 "failed", or "cancelled".
         total_score: Sum of all rule scores once the analysis completes.
@@ -70,6 +84,13 @@ class IrisAnalysis(Base):
                  que ``detector_version`` para las reglas).
         started_at: Timestamp when the analysis was created.
         finished_at: Timestamp when the analysis reached a terminal state.
+        cancel_requested_at: Cuándo el usuario pidió cancelar, si alguna vez
+                 lo hizo; NULL si nunca se pidió. Se registra siempre que se
+                 llama a ``cancel_analysis()``, gane o no la carrera contra
+                 el worker -- es la traza de la intención del usuario, no del
+                 resultado, así que no se borra ni se sobreescribe aunque el
+                 worker termine primero y el análisis acabe ``finished`` en
+                 vez de ``cancelled`` (B07).
         user_id: Foreign key to the owning User.
         user: SQLAlchemy relationship to User.
         rule_results: Ordered list of IrisRuleResult (per-rule outcomes).
@@ -88,7 +109,6 @@ class IrisAnalysis(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     title = Column(String(120), nullable=True, default=None)
-    raw_headers = Column(Text, nullable=False)
     status = Column(String(20), nullable=False, default="pending")
     total_score = Column(Float, nullable=True)
     verdict = Column(String(20), nullable=True)
@@ -105,6 +125,7 @@ class IrisAnalysis(Base):
     ai_summary_prompt_version = Column(String(32), nullable=True)
     started_at = Column(DateTime, nullable=False, default=utcnow_naive)
     finished_at = Column(DateTime, nullable=True)
+    cancel_requested_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
@@ -122,11 +143,85 @@ class IrisAnalysis(Base):
         "IrisDocument", back_populates="analysis",
         cascade="all, delete-orphan",
     )
+    raw_message = relationship(
+        "IrisRawMessage", back_populates="analysis", uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         UniqueConstraint("connection_id", "source_message_uid",
                           name="uq_iris_analysis_connection_source_message"),
+        Index("ix_iris_analysis_user_id", "user_id"),
+        Index("ix_iris_analysis_created_at", "created_at"),
+        Index("ix_iris_analysis_status", "status"),
+        Index("ix_iris_analysis_verdict", "verdict"),
+        Index("ix_iris_analysis_connection_id", "connection_id"),
     )
+
+    @property
+    def raw_headers(self) -> Optional[str]:
+        """Contenido raw (cabeceras o ``.eml`` completo) de este análisis.
+
+        Delega en ``raw_message.content`` -- ver el docstring de esta clase
+        (M09/B19) sobre por qué el raw vive en su propia fila en vez de en
+        una columna de ``IrisAnalysis``. ``None`` si la retención ya lo
+        purgó.
+        """
+        return self.raw_message.content if self.raw_message is not None else None
+
+    @raw_headers.setter
+    def raw_headers(self, value: Optional[str]) -> None:
+        if value is None:
+            self.raw_message = None
+        elif self.raw_message is not None:
+            self.raw_message.content = value
+        else:
+            self.raw_message = IrisRawMessage(content=value)
+
+
+class IrisRawMessage(Base):
+    """Contenido raw (cabeceras o ``.eml`` completo) de un ``IrisAnalysis``,
+    en su propia fila -- separado del resultado analítico (M09/B19).
+
+    Antes vivía en ``IrisAnalysis.raw_headers``, una columna en la misma
+    fila que el score, el veredicto y el resumen de IA: purgar el raw
+    después de un plazo (política de retención, B17) obligaba a elegir entre
+    borrar el análisis entero -- perdiendo el resultado, que sí tiene valor
+    a largo plazo -- o dejarlo indefinidamente, que es justo lo que la
+    retención existe para evitar. Con el raw en su propia fila,
+    ``raw_message = None`` sobre el análisis (o borrar directamente esta
+    fila) purga el contenido sensible sin tocar el resultado.
+
+    ``content`` usa ``EncryptedText`` (cifrado Fernet transparente,
+    ``purpose="iris_raw_message"``) en vez de cifrar/descifrar a mano en
+    cada punto de lectura: el motor de reglas parsea este campo en más de
+    diez sitios distintos de ``managers/analysis.py``, y repetir esa llamada
+    en cada uno convertía cada lectura nueva en una oportunidad de olvidarla.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        analysis_id: FK al ``IrisAnalysis`` dueño de este raw; ``UNIQUE``
+                 (relación 1:1) y ``ondelete="CASCADE"`` -- borrar el
+                 análisis borra su raw, nunca al revés.
+        content: El texto plano (cabeceras o ``.eml`` completo), cifrado en
+                 la columna real vía ``EncryptedText``. Nunca ``None`` en una
+                 fila que existe -- la ausencia de raw se modela con la
+                 propia fila ausente (``IrisAnalysis.raw_message is None``),
+                 no con este campo a ``None``.
+        created_at: Cuándo se guardó -- el mismo instante en que se creó el
+                 análisis, salvo que el raw se haya vuelto a asignar (no
+                 ocurre hoy en el flujo normal).
+        analysis: Relación inversa a ``IrisAnalysis``.
+    """
+    __tablename__ = "IrisRawMessage"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    analysis_id = Column(Integer, ForeignKey("IrisAnalysis.id", ondelete="CASCADE"),
+                          nullable=False, unique=True)
+    content = Column(EncryptedText(purpose="iris_raw_message"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    analysis = relationship("IrisAnalysis", back_populates="raw_message")
 
 
 class IrisMailboxConnection(Base):
@@ -152,8 +247,18 @@ class IrisMailboxConnection(Base):
                  not cached or expired. Optional — the connector can always
                  fall back to ``refresh()``.
         access_token_expires_at: Expiry of the cached access token.
-        folder: Provider-specific folder/label to watch; NULL = default
-                 inbox.
+        folder: Provider-specific folder/label id to watch; NULL = default
+                 inbox. Es el ``provider_id`` opaco que ``MailboxConnector``
+                 usa para filtrar ``list_new`` -- nunca texto libre: solo se
+                 guarda tras validarse contra ``MailboxConnector.list_folders()``
+                 (B16), así que un valor no vacío siempre corresponde a una
+                 carpeta real de esta cuenta en el momento en que se guardó.
+        folder_display_name: Nombre legible de ``folder`` (p.ej. "Facturas",
+                 "Trabajo/Clientes"); NULL junto con ``folder`` cuando se
+                 vigila la bandeja de entrada por defecto (B16).
+        folder_type: "system" (Inbox, Sent, Trash... del propio proveedor) |
+                 "user" (etiqueta/carpeta creada por la cuenta); NULL junto
+                 con ``folder`` (B16).
         full_message_mode: If True, fetch the complete raw message
                  (attachments/body included) instead of headers only. Off
                  by default — the user must opt in explicitly per
@@ -176,9 +281,47 @@ class IrisMailboxConnection(Base):
                  (successful or not — used to schedule the next poll).
         last_error: Human-readable last error, if any (e.g. why the
                  connection is ``reauth_required``).
+        sync_started_at: Cuándo empezó el sync actualmente en curso; NULL
+                 cuando no hay ninguno. Se limpia al terminar (éxito o
+                 error) -- no confundir con ``last_sync_at``, que registra el
+                 último intento *terminado*. Existe para que la UI sepa que
+                 hay un sync en marcha sin tener que adivinarlo (B02).
+        sync_job_id: Id del job de TaskQueue que sostiene el lock de sync
+                 actual; NULL cuando no hay ninguno en curso (B02).
+        last_success_at: Cuándo terminó el último sync que dejó la cola de
+                 checkpoint (``IrisMailboxInbox``) completamente vacía -- es
+                 decir, sin ningún mensaje descubierto pendiente de aceptar.
+                 A diferencia de ``last_sync_at`` (que se actualiza aunque
+                 queden mensajes atascados por cuota o por un fallo), esto
+                 es lo que distingue "no hay correo nuevo" de "Iris está
+                 atascado" sin mirar los logs del servidor (M10). NULL si
+                 nunca ha terminado un sync sin dejar nada pendiente.
+        last_sync_duration_ms: Cuánto tardó el último intento de sync
+                 (terminara en éxito o en error), en milisegundos. NULL si
+                 nunca ha habido un intento con ``sync_started_at`` registrado
+                 (M10) -- una latencia que crece sync a sync es la señal de
+                 que el proveedor se está degradando antes de que llegue a
+                 fallar del todo.
+        messages_discovered_total: Cuántos mensajes ha descubierto esta
+                 conexión en total desde que existe, contando solo los que de
+                 verdad eran nuevos (no un reenvío del proveedor de algo ya
+                 encolado). Es un contador acumulado porque, a diferencia de
+                 "aceptados" (la tabla ``IrisAnalysis``) o "pendientes"/
+                 "fallidos" (la tabla ``IrisMailboxInbox``), la fila de
+                 checkpoint de un mensaje aceptado se borra al resolverse, así
+                 que sin este contador ese dato desaparecería con ella (M10).
+        stuck_alert_sent_at: Cuándo se avisó por última vez de que esta
+                 conexión lleva atascada más de ``iris.stuckSyncAfterMinutes``
+                 (M08). Se limpia en cuanto un sync vuelve a dejar la cola de
+                 checkpoint vacía (mismo punto que actualiza
+                 ``last_success_at``), así que un problema que se resuelve y
+                 vuelve a aparecer más tarde genera un aviso nuevo en vez de
+                 quedar silenciado para siempre por el primero.
         created_at: When the connection was established.
         user: SQLAlchemy relationship to User.
         analyses: Analyses ingested through this connection.
+        inbox_entries: Cola de checkpoint de mensajes descubiertos y aún no
+                 resueltos (ver ``IrisMailboxInbox`` / B01).
     """
     __tablename__ = "IrisMailboxConnection"
 
@@ -193,6 +336,8 @@ class IrisMailboxConnection(Base):
     access_token_expires_at = Column(DateTime, nullable=True)
 
     folder = Column(String(255), nullable=True)
+    folder_display_name = Column(String(255), nullable=True)
+    folder_type = Column(String(20), nullable=True)
     full_message_mode = Column(Boolean, nullable=False, default=False)
     sync_cursor = Column(Text, nullable=True)
 
@@ -201,14 +346,75 @@ class IrisMailboxConnection(Base):
     ingested_reset_date = Column(Date, nullable=True)
     last_sync_at = Column(DateTime, nullable=True)
     last_error = Column(Text, nullable=True)
+    sync_started_at = Column(DateTime, nullable=True)
+    sync_job_id = Column(String(64), nullable=True)
+    last_success_at = Column(DateTime, nullable=True)
+    last_sync_duration_ms = Column(Integer, nullable=True)
+    messages_discovered_total = Column(Integer, nullable=False, default=0)
+    stuck_alert_sent_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user = relationship("User")
     analyses = relationship("IrisAnalysis", back_populates="connection")
+    inbox_entries = relationship(
+        "IrisMailboxInbox", back_populates="connection",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         UniqueConstraint("user_id", "provider", "account_email",
                           name="uq_iris_mailbox_connection_user_provider_email"),
+    )
+
+
+class IrisMailboxInbox(Base):
+    """Cola de checkpoint por mensaje entre el listado del proveedor y su ingesta.
+
+    ``IrisMailboxManager._sync_connection`` confirmaba el cursor del
+    proveedor tanto si el lote se ingería entero como si no: una cuota
+    agotada o un fallo a mitad de lote perdían en silencio los mensajes que
+    quedaban sin procesar, porque el proveedor nunca los vuelve a devolver
+    una vez el cursor avanza (B01). Cada mensaje que devuelve ``list_new``
+    se encola aquí antes de intentar ingerirlo, y el cursor del proveedor
+    solo avanza cuando la cola de la conexión queda vacía.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        connection_id: FK a la IrisMailboxConnection que descubrió el
+                 mensaje. ``ondelete="CASCADE"``: la cola de una conexión
+                 borrada no tiene sentido sin ella.
+        provider_message_id: Id opaco del proveedor -- mismo valor que
+                 ``IrisAnalysis.source_message_uid`` una vez ingerido.
+        raw_ref: Datos crudos que ``list_new`` ya trajo sin round-trip extra
+                 (``MessageRef.raw``) -- necesarios para reintentar sin
+                 volver a listar (p.ej. Graph guarda aquí las cabeceras).
+        status: "pending" (reintentable) | "dead" (agotó los reintentos de
+                 ``iris.maxInboxAttempts``; queda visible pero ya no
+                 bloquea el avance del cursor -- una única referencia rota
+                 no puede detener la ingesta del resto para siempre).
+        attempts: Intentos de ingesta fallidos.
+        last_error: Motivo del último fallo, si alguno.
+        created_at: Cuándo se encoló.
+        updated_at: Cuándo se tocó por última vez (reintento o dead-letter).
+    """
+    __tablename__ = "IrisMailboxInbox"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    connection_id = Column(Integer, ForeignKey("IrisMailboxConnection.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    provider_message_id = Column(String(255), nullable=False)
+    raw_ref = Column(JSONB, nullable=True)
+    status = Column(String(20), nullable=False, default="pending")
+    attempts = Column(Integer, nullable=False, default=0)
+    last_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    updated_at = Column(DateTime, nullable=False, default=utcnow_naive, onupdate=utcnow_naive)
+
+    connection = relationship("IrisMailboxConnection", back_populates="inbox_entries")
+
+    __table_args__ = (
+        UniqueConstraint("connection_id", "provider_message_id",
+                          name="uq_iris_mailbox_inbox_connection_message"),
     )
 
 
@@ -246,6 +452,10 @@ class IrisRuleResult(Base):
 
     analysis = relationship("IrisAnalysis", back_populates="rule_results")
 
+    __table_args__ = (
+        Index("ix_iris_rule_result_analysis_id", "analysis_id"),
+    )
+
 
 class IrisDocument(Document):
     """PDF report generated from a finished Iris analysis.
@@ -281,3 +491,64 @@ class IrisDocument(Document):
             f"<IrisDocument(id={self.id}, analysis_id={self.analysis_id}, "
             f"status='{self.status}')>"
         )
+
+
+class IrisNotificationPreference(Base):
+    """Preferencias de notificación de un usuario para las alertas
+    automáticas de Iris (M08): una fila por usuario, creada perezosamente
+    la primera vez que la modifica (ver ``IrisNotificationPreferenceManager``).
+
+    Deliberadamente por usuario y no por conexión: hoy Iris solo tiene un
+    canal de envío (correo, vía ``herald``), y separar preferencias por
+    conexión antes de que exista una segunda variable real que lo justifique
+    sería una tabla más ancha sin ningún control que la necesite todavía.
+    Si en el futuro hace falta silenciar una conexión concreta sin tocar las
+    demás, este es el sitio donde añadir esa columna.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        user_id: FK al ``User`` dueño de estas preferencias; único, porque
+                 solo existe una fila por usuario.
+        digest_enabled: Si está activo, los veredictos Phishing que no sean
+                 de alta confianza (``total_score`` por encima de
+                 ``iris.criticalPhishingScoreThreshold``) no se notifican al
+                 momento -- se agrupan en el resumen diario que envía el
+                 scheduler de Iris (``services/notifications/scheduling.py``).
+                 Los de alta confianza siempre se notifican de inmediato,
+                 esté o no activo el digest.
+        muted_until: Si tiene una fecha futura, ninguna notificación no
+                 crítica se envía hasta entonces (silenciado temporal). Igual
+                 que con el digest, un veredicto Phishing de alta confianza
+                 ignora este campo -- nunca se pierde una incidencia crítica
+                 por estar silenciada. ``None`` cuando no hay silenciado
+                 activo.
+        notify_reauth_required: Si se avisa por correo cuando una conexión
+                 pasa a necesitar reautorización (``status="reauth_required"``).
+                 Por defecto ``True``.
+        notify_sync_stuck: Si se avisa quando una conexión activa lleva más
+                 de ``iris.stuckSyncAfterMinutes`` sin completar un sync
+                 limpio (ver ``IrisMailboxConnection.last_success_at``, M10).
+                 Por defecto ``True``.
+        digest_last_sent_at: Cuándo se envió el último digest a este usuario;
+                 ``None`` si nunca se ha enviado uno. El scheduler lo usa
+                 para saber si ya pasó ``iris.digestIntervalHours`` desde
+                 entonces, y para acotar qué análisis entran en el próximo
+                 envío.
+        created_at: Cuándo se creó esta fila (primera vez que el usuario
+                 tocó sus preferencias).
+        updated_at: Última vez que se modificó cualquier campo.
+        user: SQLAlchemy relationship al ``User`` dueño.
+    """
+    __tablename__ = "IrisNotificationPreference"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id"), nullable=False, unique=True)
+    digest_enabled = Column(Boolean, nullable=False, default=False)
+    muted_until = Column(DateTime, nullable=True)
+    notify_reauth_required = Column(Boolean, nullable=False, default=True)
+    notify_sync_stuck = Column(Boolean, nullable=False, default=True)
+    digest_last_sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    updated_at = Column(DateTime, nullable=False, default=utcnow_naive, onupdate=utcnow_naive)
+
+    user = relationship("User")

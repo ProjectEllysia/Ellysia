@@ -84,6 +84,69 @@ def test_consume_accepts_an_amount(app, regular_user, set_plan_limits):
         assert QuotaManager().state(regular_user.id, LimitKey.AI_REQUESTS).used == 4
 
 
+# ------------------------------------------------------------------ consume_many
+
+def test_consume_many_charges_every_key(app, regular_user, set_plan_limits):
+    set_plan_limits({LimitKey.IRIS_AI_SUMMARIES: 5, LimitKey.AI_REQUESTS: 5})
+
+    with app.app_context():
+        manager = QuotaManager()
+        manager.consume_many(regular_user.id, [LimitKey.IRIS_AI_SUMMARIES, LimitKey.AI_REQUESTS])
+
+        assert manager.state(regular_user.id, LimitKey.IRIS_AI_SUMMARIES).used == 1
+        assert manager.state(regular_user.id, LimitKey.AI_REQUESTS).used == 1
+
+
+def test_consume_many_refunds_the_first_key_when_the_second_has_no_room(
+    app, regular_user, set_plan_limits
+):
+    """B09: antes de esto, generate_ai_summary() encadenaba dos consume()
+    sueltos -- si el segundo no tenía cupo, el primero se quedaba cobrado
+    por un trabajo que nunca se hizo. consume_many() debe dejar el balance
+    neto en cero cuando cualquier clave de la lista falla."""
+    set_plan_limits({LimitKey.IRIS_AI_SUMMARIES: 5, LimitKey.AI_REQUESTS: 1})
+
+    with app.app_context():
+        manager = QuotaManager()
+        manager.consume(regular_user.id, LimitKey.AI_REQUESTS)  # agota AI_REQUESTS de antemano
+
+        with pytest.raises(QuotaExceededError):
+            manager.consume_many(regular_user.id, [LimitKey.IRIS_AI_SUMMARIES, LimitKey.AI_REQUESTS])
+
+        # IRIS_AI_SUMMARIES se cobró dentro de esta llamada y se reembolsó
+        # al fallar AI_REQUESTS -- el usuario no paga nada por una
+        # operación que falló (AI_REQUESTS sigue en 1: el cobro previo al
+        # test, no algo que consume_many añadiera).
+        assert manager.state(regular_user.id, LimitKey.IRIS_AI_SUMMARIES).used == 0
+        assert manager.state(regular_user.id, LimitKey.AI_REQUESTS).used == 1
+
+
+def test_consume_many_raises_the_first_failing_keys_error(app, regular_user, set_plan_limits):
+    """El orden de la lista manda: si la primera clave no tiene cupo, el
+    error nombra esa, no una elegida por casualidad de iteración."""
+    set_plan_limits({LimitKey.IRIS_AI_SUMMARIES: 1, LimitKey.AI_REQUESTS: 5})
+
+    with app.app_context():
+        manager = QuotaManager()
+        manager.consume(regular_user.id, LimitKey.IRIS_AI_SUMMARIES)  # agota la primera clave
+
+        with pytest.raises(QuotaExceededError) as exc_info:
+            manager.consume_many(regular_user.id, [LimitKey.IRIS_AI_SUMMARIES, LimitKey.AI_REQUESTS])
+        assert exc_info.value.details.get("limitKey") == LimitKey.IRIS_AI_SUMMARIES.db_name
+
+
+def test_consume_many_accepts_an_amount(app, regular_user, set_plan_limits):
+    set_plan_limits({LimitKey.IRIS_AI_SUMMARIES: 10, LimitKey.AI_REQUESTS: 10})
+
+    with app.app_context():
+        manager = QuotaManager()
+        manager.consume_many(
+            regular_user.id, [LimitKey.IRIS_AI_SUMMARIES, LimitKey.AI_REQUESTS], amount=3,
+        )
+        assert manager.state(regular_user.id, LimitKey.IRIS_AI_SUMMARIES).used == 3
+        assert manager.state(regular_user.id, LimitKey.AI_REQUESTS).used == 3
+
+
 def test_quotas_are_per_user(app, make_user, set_plan_limits):
     """Dos usuarios con el mismo plan no comparten bolsa. La compartirán los
     miembros de una misma organización, y eso llega en la fase 5."""

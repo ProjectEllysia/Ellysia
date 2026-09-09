@@ -369,10 +369,21 @@ class IrisDocumentItemSchema(Schema):
     downloadUrl = fields.String(allow_none=True)
 
 
+class IrisDocumentsQuerySchema(Schema):
+    """Query parameters for ``GET /iris/documents`` (B17): antes devolvía
+    todos los documentos del usuario de golpe, sin límite -- misma
+    convención página/tamaño que ``ResultsQuerySchema`` para el listado de
+    análisis."""
+    page = fields.Integer(load_default=1, validate=validate.Range(min=1))
+    per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
+
+
 class IrisDocumentListResponseSchema(Schema):
-    """All IrisDocuments belonging to the current user."""
+    """Página de los IrisDocument del usuario actual (B17)."""
     documents = fields.List(fields.Nested(IrisDocumentItemSchema))
     total = fields.Integer()
+    page = fields.Integer()
+    perPage = fields.Integer()
 
 
 class AnalysisDocumentsResponseSchema(Schema):
@@ -401,7 +412,12 @@ class IrisMailboxConnectRequestSchema(Schema):
     """Request body for ``POST /iris/mailbox/connect``."""
     provider = fields.String(required=True)
     fullMessageMode = fields.Boolean(load_default=False)
-    folder = fields.String(load_default=None, allow_none=True)
+    # B16: la validación real (existe, pertenece a esta cuenta/proveedor) es
+    # de red y solo se puede hacer con un access_token en la mano -- ver
+    # IrisMailboxManager._validate_folder(), llamada desde handle_callback().
+    # Aquí solo se descarta lo evidentemente inválido antes de firmar el
+    # state y mandar al usuario al proveedor.
+    folder = fields.String(load_default=None, allow_none=True, validate=validate.Length(max=255))
 
 
 class IrisMailboxConnectResponseSchema(Schema):
@@ -415,10 +431,13 @@ class IrisMailboxConnectionItemSchema(Schema):
     provider = fields.String()
     accountEmail = fields.String()
     folder = fields.String(allow_none=True)
+    folderDisplayName = fields.String(allow_none=True)
+    folderType = fields.String(allow_none=True)
     fullMessageMode = fields.Boolean()
     status = fields.String()
     lastSyncAt = UTCDateTime(allow_none=True)
     lastError = fields.String(allow_none=True)
+    syncStartedAt = UTCDateTime(allow_none=True)
     createdAt = UTCDateTime(allow_none=True)
 
 
@@ -430,9 +449,42 @@ class IrisMailboxConnectionListResponseSchema(Schema):
 
 class IrisMailboxUpdateConnectionRequestSchema(Schema):
     """Request body for ``PATCH /iris/mailbox/connections/<id>``."""
-    folder = fields.String(load_default=None, allow_none=True)
+    folder = fields.String(load_default=None, allow_none=True, validate=validate.Length(max=255))
     status = fields.String(load_default=None, allow_none=True,
                             validate=validate.OneOf(["active", "paused"]))
+
+
+class IrisMailboxFolderSchema(Schema):
+    """Una carpeta/etiqueta real de la cuenta conectada (B16)."""
+    providerId = fields.String()
+    displayName = fields.String()
+    folderType = fields.String()
+
+
+class IrisMailboxFoldersResponseSchema(Schema):
+    """Carpetas que expone la cuenta de una conexión -- los únicos valores
+    válidos para ``folder`` en ``PATCH /iris/mailbox/connections/<id>``."""
+    folders = fields.List(fields.Nested(IrisMailboxFolderSchema))
+
+
+class IrisMailboxHealthResponseSchema(Schema):
+    """Estado observable de una conexión de buzón, sin tener que leer los
+    logs del servidor (M10)."""
+    status = fields.String()
+    lastSyncAt = UTCDateTime(allow_none=True)
+    lastSuccessAt = UTCDateTime(allow_none=True)
+    lastError = fields.String(allow_none=True)
+    syncStartedAt = UTCDateTime(allow_none=True)
+    lastSyncDurationMs = fields.Integer(allow_none=True)
+    cursorEstablished = fields.Boolean()
+    ingestedToday = fields.Integer()
+    maxIngestedPerDay = fields.Integer()
+    messagesDiscoveredTotal = fields.Integer()
+    messagesAcceptedTotal = fields.Integer()
+    messagesPending = fields.Integer()
+    messagesRetrying = fields.Integer()
+    messagesDead = fields.Integer()
+    oldestPendingMessageAgeSeconds = fields.Integer(allow_none=True)
 
 
 class IrisMailboxConnectionDeleteResponseSchema(Schema):
@@ -457,3 +509,43 @@ class IrisMailboxCallbackQuerySchema(Schema):
     state = fields.String(required=True)
     code = fields.String(load_default=None)
     error = fields.String(load_default=None)
+
+
+class IrisRetentionReportResponseSchema(Schema):
+    """Política de retención vigente y estado real de los análisis del
+    usuario frente a ella (M09/B17)."""
+    rawMessageRetentionDays = fields.Integer()
+    analysisRetentionDays = fields.Integer(allow_none=True)
+    totalAnalyses = fields.Integer()
+    analysesWithRawRetained = fields.Integer()
+    analysesWithRawPurged = fields.Integer()
+
+
+class IrisNotificationPreferenceResponseSchema(Schema):
+    """Preferencias de notificación del usuario actual (M08)."""
+    digestEnabled = fields.Boolean()
+    mutedUntil = UTCDateTime(allow_none=True)
+    notifyReauthRequired = fields.Boolean()
+    notifySyncStuck = fields.Boolean()
+    digestLastSentAt = UTCDateTime(allow_none=True)
+
+
+class IrisNotificationPreferenceUpdateRequestSchema(Schema):
+    """Request body for ``PUT /iris/notification-preferences``.
+
+    Los cuatro campos son opcionales e independientes -- omitir uno deja su
+    valor actual intacto (actualización parcial, mismo patrón que
+    ``IrisMailboxUpdateConnectionRequestSchema``); el endpoint distingue
+    "no venía en el cuerpo" mirando si la clave está en los datos cargados.
+
+    ``mutedForMinutes`` en vez de una fecha absoluta: el cliente sabe "cuánto
+    tiempo" (silenciar 1 hora / 1 día / 1 semana), no una marca de tiempo en
+    UTC, y resolverla en el servidor evita todo el terreno resbaladizo de
+    aceptar una fecha con zona horaria ambigua desde fuera. ``0`` quita un
+    silenciado activo (poner ``mutedUntil`` a ``None``); cualquier valor
+    positivo lo fija a ``ahora + esos minutos``.
+    """
+    digestEnabled = fields.Boolean()
+    mutedForMinutes = fields.Integer(validate=validate.Range(min=0))
+    notifyReauthRequired = fields.Boolean()
+    notifySyncStuck = fields.Boolean()

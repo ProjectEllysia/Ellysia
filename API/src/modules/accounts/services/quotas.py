@@ -130,6 +130,32 @@ class QuotaManager:
         else:
             self._consume_counter(entitlement, amount)
 
+    def consume_many(self, user_id: int, keys: list[LimitKey], amount: int = 1) -> None:
+        """Consume varias claves como una única operación: todas o ninguna (B09).
+
+        Encadenar ``consume()`` a pelo dos veces deja un cobro a medias si la
+        segunda llamada falla -- el caso real es ``generate_ai_summary()``,
+        que cobraba ``IRIS_AI_SUMMARIES`` y luego ``AI_REQUESTS``: si la
+        segunda no tenía cupo, la primera se quedaba cobrada por un trabajo
+        que nunca se encolaba. Aquí, si cualquier clave falla (sin cupo,
+        plan que no la incluye), las que ya se cobraron en esta llamada se
+        reembolsan antes de relanzar -- el balance neto siempre es "cobrado
+        todo" o "cobrado nada", nunca un punto intermedio.
+
+        El orden de ``keys`` importa: si más de una fallaría, la excepción
+        que ve el llamante es la de la primera en agotarse, no una elegida al
+        azar por el orden de iteración interno.
+        """
+        consumed: list[LimitKey] = []
+        try:
+            for key in keys:
+                self.consume(user_id, key, amount)
+                consumed.append(key)
+        except Exception:
+            for key in reversed(consumed):
+                self.refund(user_id, key, amount)
+            raise
+
     def refund(self, user_id: int, key: LimitKey, amount: int = 1) -> None:
         """Devuelve ``amount`` usos ya apuntados de ``key``.
 

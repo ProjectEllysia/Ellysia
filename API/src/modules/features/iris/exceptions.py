@@ -39,6 +39,27 @@ class IrisAnalysisNotReadyError(IrisError):
         super().__init__(f"Analysis {analysis_id} is not ready (status: {status})")
 
 
+class IrisRawMessagePurgedError(IrisError):
+    """El raw de este análisis ya no existe -- lo purgó la política de
+    retención (M09/B17/B19), que conserva el resultado analítico
+    (score/veredicto/reglas) pero no el contenido del correo indefinidamente.
+
+    410 Gone y no 404: el análisis existe de verdad y su resultado sigue
+    siendo consultable por otras vías (``GET /iris/results/<id>``); es
+    específicamente el raw, y solo el raw, lo que ha dejado de estar --
+    para siempre, no temporalmente, que es justo la diferencia entre 410 y
+    404/503.
+    """
+    default_code = ErrorCode.ENTITY_NOT_FOUND
+    default_status_code = 410
+
+    def __init__(self, analysis_id: int) -> None:
+        super().__init__(
+            f"El raw del análisis {analysis_id} ya no está disponible: "
+            "la política de retención lo ha purgado."
+        )
+
+
 class IrisExecutionError(IrisError):
     """Raised when an analysis fails to start or complete."""
     default_code = ErrorCode.SCAN_ERROR
@@ -89,3 +110,17 @@ class IrisMailboxOAuthStateError(IrisError):
     tampered, or never issued by start_connect (CSRF protection)."""
     default_code = ErrorCode.AUTHENTICATION_ERROR
     default_status_code = 400
+
+
+class IrisMailboxInvalidFolderError(IrisError):
+    """Raised when ``folder`` doesn't match any real folder/label the
+    provider returns for this account (B16) — wrong id, typo, or a value
+    that belongs to another provider."""
+    default_code = ErrorCode.VALIDATION_ERROR
+    default_status_code = 400
+
+    def __init__(self, folder: str) -> None:
+        super().__init__(
+            f"'{folder}' no es una carpeta válida para esta cuenta.",
+            user_message=f"'{folder}' no es una carpeta válida para esta cuenta.",
+        )
