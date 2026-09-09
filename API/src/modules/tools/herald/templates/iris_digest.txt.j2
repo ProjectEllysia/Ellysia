@@ -1,0 +1,20 @@
+{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}
+
+RESUMEN DIARIO DE IRIS: {{ analyses|length }} CORREO(S) SOSPECHOSO(S)
+
+Iris ha clasificado {{ analyses|length }} correo(s) de tu buzón conectado como
+PHISHING desde el último resumen. Ninguno alcanzaba el umbral de alta
+confianza que dispara un aviso inmediato, así que se han agrupado aquí.
+
+{% for analysis in analyses %}
+- Asunto:     {{ analysis.subject }}
+  Análisis:   #{{ analysis.analysis_id }}
+  {% if analysis.score is defined and analysis.score is not none %}Puntuación:  {{ analysis.score }}{% endif %}
+
+{% endfor %}
+Puedes revisar cada informe completo desde tu panel de Iris. Si prefieres
+recibir estos avisos al momento en vez de en un resumen diario, puedes
+desactivar el digest desde tus preferencias de notificación.
+
+--
+Este mensaje se ha enviado automáticamente desde {{ brand.productName }}. No respondas a esta dirección.

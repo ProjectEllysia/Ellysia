@@ -1,0 +1,15 @@
+{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}
+
+RECONECTA TU BUZÓN: {{ account_email }}
+
+El proveedor de correo ha revocado o dejado caducar el acceso que le diste a
+Iris para vigilar este buzón, así que hemos dejado de sondearlo hasta que lo
+reconectes.
+
+Cuenta: {{ account_email }}
+
+Mientras tanto, ningún correo nuevo de esta cuenta se está analizando. Puedes
+reconectarla desde tu panel de Iris.
+
+--
+Este mensaje se ha enviado automáticamente desde {{ brand.productName }}. No respondas a esta dirección.

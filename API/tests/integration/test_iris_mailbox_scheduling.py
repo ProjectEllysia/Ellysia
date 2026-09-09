@@ -1,5 +1,5 @@
 """Tests de integración de IrisMailboxScheduler -- sondeo periódico de
-conexiones de buzón."""
+conexiones de buzón y (M08) chequeo periódico de notificaciones."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from unittest import mock
 
 import pytest
 
+import src.modules.features.iris.services.mailbox.scheduling as scheduling_mod
 from src.modules.features.iris.managers.mailbox import IrisMailboxManager
 from src.modules.features.iris.model import IrisMailboxConnection
 from src.modules.features.iris.repositories import IrisMailboxConnectionRepository
@@ -50,3 +51,14 @@ def test_poll_connections_continues_after_one_connection_fails_to_enqueue(app, r
             IrisMailboxScheduler._poll_connections()
 
         assert len(calls) == 2
+
+
+def test_run_notifications_delegates_to_check_and_notify(app):
+    """El job de notificaciones (M08) es una costura fina -- toda la lógica
+    vive en ``services/notifications/scheduling.check_and_notify``; aquí
+    solo se comprueba que el scheduler la invoca."""
+    with app.app_context():
+        with mock.patch.object(scheduling_mod, "check_and_notify") as fake_check:
+            IrisMailboxScheduler._run_notifications()
+
+        fake_check.assert_called_once_with()

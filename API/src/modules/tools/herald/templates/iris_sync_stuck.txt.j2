@@ -1,0 +1,16 @@
+{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}
+
+TU BUZÓN LLEVA UN TIEMPO SIN SINCRONIZAR: {{ account_email }}
+
+Iris sigue intentando sondear este buzón, pero no ha conseguido terminar un
+sync limpio recientemente -- puede deberse a una cuota diaria agotada o a un
+fallo repetido con algún mensaje concreto. Ningún correo se ha perdido: los
+mensajes pendientes siguen en cola y se procesarán en cuanto se resuelva.
+
+Cuenta:              {{ account_email }}
+Último sync limpio:  {{ last_success_at if last_success_at else "Nunca" }}
+
+Puedes revisar el estado detallado de la conexión desde tu panel de Iris.
+
+--
+Este mensaje se ha enviado automáticamente desde {{ brand.productName }}. No respondas a esta dirección.

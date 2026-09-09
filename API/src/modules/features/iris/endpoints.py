@@ -31,7 +31,9 @@ from src.modules.shared._exceptions import DocumentError, DocumentNotReadyError
 
 import src.modules.system.config_reading as CR
 
-from .managers import IrisManager, IrisReportManager, IrisMailboxManager
+from .managers import (
+    IrisManager, IrisReportManager, IrisMailboxManager, IrisNotificationPreferenceManager,
+)
 from .exceptions import (
     IrisAnalysisNotFoundError,
     IrisExecutionError,
@@ -71,6 +73,8 @@ from .schemas import (
     IrisMailboxCallbackQuerySchema,
     IrisMailboxFoldersResponseSchema,
     IrisMailboxHealthResponseSchema,
+    IrisNotificationPreferenceResponseSchema,
+    IrisNotificationPreferenceUpdateRequestSchema,
 )
 
 
@@ -768,3 +772,66 @@ def sync_mailbox_connection(connection_id: int):
     IrisMailboxManager().trigger_sync(connection_id, user.id)
     logger.info(f"Sync manual de la conexión {connection_id} encolado por usuario {user.username}")
     return {"message": "Sincronización encolada correctamente", "connectionId": connection_id}, 202
+
+
+def _serialize_notification_preference(preference) -> dict:
+    return {
+        "digestEnabled": preference.digest_enabled,
+        "mutedUntil": preference.muted_until,
+        "notifyReauthRequired": preference.notify_reauth_required,
+        "notifySyncStuck": preference.notify_sync_stuck,
+        "digestLastSentAt": preference.digest_last_sent_at,
+    }
+
+
+@iris_blp.get("/notification-preferences")
+@iris_blp.response(200, IrisNotificationPreferenceResponseSchema, description="Notification preferences")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+def get_notification_preferences():
+    """Preferencias de notificación del usuario actual (M08).
+
+    Si nunca las ha tocado, devuelve los valores por defecto sin crear una
+    fila -- ver ``IrisNotificationPreferenceManager.get_or_default``.
+    """
+    user = get_current_user()
+    preference = IrisNotificationPreferenceManager.get_or_default(user.id)
+    return _serialize_notification_preference(preference)
+
+
+@iris_blp.put("/notification-preferences")
+@iris_blp.arguments(IrisNotificationPreferenceUpdateRequestSchema)
+@iris_blp.response(200, IrisNotificationPreferenceResponseSchema, description="Preferences updated")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
+@limiter.limit("60 per hour; 300 per day")
+def update_notification_preferences(data):
+    """Actualizar las preferencias de notificación del usuario actual (M08).
+
+    Actualización parcial: solo se tocan los campos presentes en el cuerpo
+    (ver ``IrisNotificationPreferenceUpdateRequestSchema``). No exige
+    ``IRIS_CREATE`` aunque la primera llamada cree la fila -- no consume
+    cuota ni trae una entidad nueva al panel, es una modificación de un
+    ajuste que conceptualmente siempre existe para el usuario (mismo
+    criterio que ``PATCH /mailbox/connections/<id>``).
+    """
+    user = get_current_user()
+    # Solo se pasan los campos presentes en el cuerpo: el manager distingue
+    # "no venía" (kwarg ausente, valor por defecto _UNSET) de "venía con un
+    # valor" -- ver IrisNotificationPreferenceManager.update().
+    changes = {}
+    if "digestEnabled" in data:
+        changes["digest_enabled"] = data["digestEnabled"]
+    if "mutedForMinutes" in data:
+        changes["muted_for_minutes"] = data["mutedForMinutes"]
+    if "notifyReauthRequired" in data:
+        changes["notify_reauth_required"] = data["notifyReauthRequired"]
+    if "notifySyncStuck" in data:
+        changes["notify_sync_stuck"] = data["notifySyncStuck"]
+    preference = IrisNotificationPreferenceManager.update(user.id, **changes)
+    logger.info(f"Preferencias de notificación de Iris actualizadas por usuario {user.username}")
+    return _serialize_notification_preference(preference)

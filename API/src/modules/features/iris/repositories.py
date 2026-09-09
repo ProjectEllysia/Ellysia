@@ -17,7 +17,8 @@ from src.modules.infrastructure import BaseRepository, DocumentRepository
 from src.modules.shared import utcnow_naive
 
 from .model import (
-    IrisAnalysis, IrisMailboxConnection, IrisMailboxInbox, IrisRuleResult, IrisDocument,
+    IrisAnalysis, IrisMailboxConnection, IrisMailboxInbox, IrisNotificationPreference,
+    IrisRuleResult, IrisDocument,
 )
 
 
@@ -154,6 +155,45 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
             .count()
         )
 
+    def get_non_critical_phishing_since(
+        self, user_id: int, since: datetime, critical_threshold: float,
+    ) -> List[IrisAnalysis]:
+        """Veredictos Phishing de buzón que el digest diario todavía no ha
+        resumido (M08).
+
+        Solo entran los que ``_enqueue_phishing_notification`` ya habría
+        notificado si no fuera por el digest -- ``connection_id`` no nulo
+        (un análisis manual ya lo está viendo el usuario en el panel) y
+        ``total_score`` por encima de ``critical_threshold`` (los de alta
+        confianza se envían siempre al momento, nunca esperan al digest;
+        ver ``IrisPhishingNotifyManager._run_notify``).
+
+        Args:
+            user_id: Dueño de los análisis.
+            since: Solo análisis terminados después de este instante --
+                normalmente ``IrisNotificationPreference.digest_last_sent_at``
+                (o su fecha de creación, si nunca se envió un digest).
+            critical_threshold: ``iris.criticalPhishingScoreThreshold``; se
+                pasa como argumento en vez de leerlo aquí para que el
+                repositorio no dependa de ``config_reading``.
+
+        Returns:
+            List[IrisAnalysis]: En orden cronológico ascendente.
+        """
+        return (
+            self._session.query(IrisAnalysis)
+            .filter(
+                IrisAnalysis.user_id == user_id,
+                IrisAnalysis.connection_id.isnot(None),
+                IrisAnalysis.verdict == "Phishing",
+                IrisAnalysis.total_score > critical_threshold,
+                IrisAnalysis.finished_at.isnot(None),
+                IrisAnalysis.finished_at > since,
+            )
+            .order_by(IrisAnalysis.finished_at.asc())
+            .all()
+        )
+
     def transition_if_state(self, analysis_id: int, from_states: list[str], **fields: Any) -> bool:
         """Aplica ``fields`` sobre un análisis solo si su ``status`` actual
         está en ``from_states`` -- transición SQL condicionada, no un
@@ -248,6 +288,40 @@ class IrisMailboxConnectionRepository(BaseRepository[IrisMailboxConnection]):
                 IrisMailboxConnection.status == "active",
                 (IrisMailboxConnection.last_sync_at.is_(None))
                 | (IrisMailboxConnection.last_sync_at < cutoff),
+            )
+            .all()
+        )
+
+    def get_newly_stuck_connections(self, stuck_after_minutes: int) -> List[IrisMailboxConnection]:
+        """Conexiones activas que siguen intentando sincronizar pero llevan
+        atascadas sin un sync limpio, y todavía no se ha avisado de ello (M08).
+
+        "Sigue intentando" (``last_sync_at`` no nulo) las distingue de una
+        conexión recién creada que aún no ha tenido su primer sondeo -- esa
+        no está atascada, solo no ha empezado. Una conexión que **nunca**
+        ha tenido un sync limpio (``last_success_at`` nulo) se mide contra
+        su propia fecha de creación en vez de contra un ``last_success_at``
+        inexistente -- si no, toda conexión recién creada se marcaría
+        atascada en la primera pasada del scheduler, antes incluso de que
+        el sondeo periódico (``iris.pollIntervalMinutes``) tenga ocasión de
+        intentarlo. ``stuck_alert_sent_at IS NULL`` evita reencolar un aviso
+        en cada pasada mientras el problema sigue sin resolverse -- se
+        limpia en cuanto un sync vuelve a dejar la cola vacía (ver
+        ``_finish_sync``), así que una recaída posterior sí vuelve a avisar.
+        """
+        cutoff = utcnow_naive() - timedelta(minutes=stuck_after_minutes)
+        never_succeeded_and_stale = and_(
+            IrisMailboxConnection.last_success_at.is_(None),
+            IrisMailboxConnection.created_at < cutoff,
+        )
+        succeeded_but_stale = IrisMailboxConnection.last_success_at < cutoff
+        return (
+            self._session.query(IrisMailboxConnection)
+            .filter(
+                IrisMailboxConnection.status == "active",
+                IrisMailboxConnection.last_sync_at.isnot(None),
+                IrisMailboxConnection.stuck_alert_sent_at.is_(None),
+                never_succeeded_and_stale | succeeded_but_stale,
             )
             .all()
         )
@@ -384,6 +458,38 @@ class IrisRuleResultRepository(BaseRepository[IrisRuleResult]):
         self._session.query(IrisRuleResult).filter(
             IrisRuleResult.analysis_id == analysis_id
         ).delete()
+
+
+class IrisNotificationPreferenceRepository(BaseRepository[IrisNotificationPreference]):
+    """Data-access layer for IrisNotificationPreference (M08) -- una fila
+    por usuario, ver ``IrisNotificationPreference`` en ``model.py``."""
+
+    _MODEL = IrisNotificationPreference
+
+    def get_by_user_id(self, user_id: int) -> Optional[IrisNotificationPreference]:
+        """Preferencias del usuario, o ``None`` si nunca las ha tocado --
+        en ese caso rigen los valores por defecto del modelo sin que exista
+        fila alguna (ver ``IrisNotificationPreferenceManager.get_or_default``)."""
+        return (
+            self._session.query(IrisNotificationPreference)
+            .filter(IrisNotificationPreference.user_id == user_id)
+            .first()
+        )
+
+    def get_due_for_digest(self, interval_hours: int) -> List[IrisNotificationPreference]:
+        """Usuarios con el digest activo a los que toca enviarles uno (M08):
+        nunca se les ha enviado, o el último fue hace más de
+        ``iris.digestIntervalHours``."""
+        cutoff = utcnow_naive() - timedelta(hours=interval_hours)
+        return (
+            self._session.query(IrisNotificationPreference)
+            .filter(
+                IrisNotificationPreference.digest_enabled.is_(True),
+                (IrisNotificationPreference.digest_last_sent_at.is_(None))
+                | (IrisNotificationPreference.digest_last_sent_at < cutoff),
+            )
+            .all()
+        )
 
 
 class IrisReportRepository(DocumentRepository[IrisDocument]):

@@ -40,6 +40,7 @@ from ..exceptions import (
     IrisMailboxQuotaExceededError,
 )
 from .analysis import IrisManager
+from .notifications import IrisReauthNotifyManager
 from ..model import IrisMailboxConnection, IrisMailboxInbox
 from ..repositories import (
     IrisAnalysisRepository, IrisMailboxConnectionRepository, IrisMailboxInboxRepository,
@@ -726,6 +727,11 @@ class IrisMailboxManager(TaskTrackingMixin):
                 # decir de verdad "todo al día" -- last_sync_at por sí solo no
                 # distingue eso de un sync que dejó mensajes atascados.
                 fresh.last_success_at = utcnow_naive()
+                # M08: un sync limpio resuelve cualquier atasco anterior --
+                # se limpia aquí, no solo cuando se envía el aviso, para que
+                # una recaída futura genere un aviso nuevo en vez de quedar
+                # silenciada para siempre por la primera.
+                fresh.stuck_alert_sent_at = None
             fresh.ingested_today = ingested_today
             fresh.ingested_reset_date = reset_date
             fresh.last_sync_at = utcnow_naive()
@@ -748,13 +754,30 @@ class IrisMailboxManager(TaskTrackingMixin):
     def _mark_reauth_required(connection_id: int, error: str) -> None:
         """El proveedor revocó/expiró el token -- para de sondear en vez de
         reintentar en bucle contra su API (mismo patrón degradado que
-        ``execute_ai_summary_generation``)."""
+        ``execute_ai_summary_generation``).
+
+        Avisa al dueño de la conexión (M08), pero solo en la transición
+        hacia este estado: los tres puntos que llaman a este método pueden
+        volver a invocarlo mientras la conexión sigue sin reautorizar (un
+        segundo intento de cambiar de carpeta, por ejemplo), y sin esta
+        comprobación cada uno de esos reintentos mandaría un correo nuevo.
+        """
         with UnitOfWork() as uow:
             repo = IrisMailboxConnectionRepository(uow)
             fresh = repo.get_by_id(connection_id)
-            if fresh is not None:
-                fresh.status = "reauth_required"
-                fresh.last_sync_at = utcnow_naive()
-                fresh.last_sync_duration_ms = _duration_ms(fresh.sync_started_at)
-                fresh.last_error = error[:2000]
-                repo.update(fresh)
+            if fresh is None:
+                return
+            was_already_reauth_required = fresh.status == "reauth_required"
+            fresh.status = "reauth_required"
+            fresh.last_sync_at = utcnow_naive()
+            fresh.last_sync_duration_ms = _duration_ms(fresh.sync_started_at)
+            fresh.last_error = error[:2000]
+            repo.update(fresh)
+        if not was_already_reauth_required:
+            try:
+                IrisReauthNotifyManager.enqueue_for(connection_id)
+            except Exception as e:
+                logger.error(
+                    f"No se pudo encolar el aviso de reautenticación de la conexión {connection_id}: {e}",
+                    exc_info=True,
+                )
