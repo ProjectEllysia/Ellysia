@@ -1602,6 +1602,15 @@ class TaskQueueConfig:
     )
     history_max_items: int = field(default=200, metadata={"key": "history_max_items"})
 
+    outbox_sweep_interval_seconds: int = field(
+        default=60, metadata={"key": "outbox_sweep_interval_seconds"},
+    )
+    """Cada cuánto ``TaskDispatchScheduler`` reintenta publicar los
+    ``TaskDispatch`` que sigan ``pending`` (B08) -- la red de seguridad para
+    cuando Redis estuvo caído justo en el momento del intento inmediato tras
+    el commit. No confundir con un timeout: un intento fallido no cuenta
+    como agotado, se reintenta indefinidamente en el próximo barrido."""
+
     @property
     def max_workers(self) -> int:
         """Procesos worker a levantar.
