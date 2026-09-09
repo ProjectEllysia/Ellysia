@@ -81,6 +81,16 @@ def submit_report_generation(task_queue, document_id: int, repo_cls: Type, **sub
     nunca acaba), aunque el usuario sí viera el error de "ya hay una tarea
     en curso". Se marca ``error`` y se re-lanza para que el caller siga
     devolviendo el mismo error al cliente.
+
+    Este manejo es la razón por la que los informes de Themis e Iris se
+    quedaron **fuera** de la outbox transaccional al auditarlos en #551, aunque
+    siguen el mismo patrón create-then-enqueue que Themis y Aegis sí migraron:
+    un encolado fallido no deja el documento colgado en ``running`` para
+    siempre, lo marca ``error``, y el usuario ve el fallo y puede volver a
+    pedir el informe -- que es un botón, no una operación que consuma cuota ni
+    acuñe estado. Lo que la outbox añadiría aquí es recuperar sola un PDF que
+    el usuario ya puede regenerar solo, a cambio de acoplar la creación del
+    documento a la tabla de outbox.
     """
     try:
         task_queue.submit(**submit_kwargs)

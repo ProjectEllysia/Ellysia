@@ -1233,6 +1233,14 @@ class HygeiaNotifyManager:
         ``commit_for_handoff()`` explícito) — el worker corre en otro
         proceso y no vería una fila todavía sin confirmar.
 
+        Sigue encolando fuera de la transacción que abre la anomalía: al
+        auditarlo en #551 se vio que migrarlo de verdad exige mover el encolado
+        DENTRO de esa transacción, porque la anomalía ya confirmada es el propio
+        guardia anti-duplicado (``get_active(asset_id, "host_down") is None``).
+        Si el proceso muere en esa ventana el correo no se retrasa: el guardia
+        ya está puesto, así que queda suprimido para siempre. Es una
+        reestructuración de los llamantes, no de este método, y va aparte.
+
         Args:
             anomaly_ids: IDs de anomalías con severidad ``critical`` recién
                 abiertas. Una lista vacía es un no-op.
