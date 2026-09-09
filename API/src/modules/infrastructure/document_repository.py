@@ -24,7 +24,7 @@ Es el complemento en la capa de datos de ``shared/_documents.py::DocumentManager
 
 from __future__ import annotations
 
-from typing import List, Optional, TypeVar
+from typing import List, Optional, Tuple, TypeVar
 
 from .base_repository import BaseRepository
 
@@ -70,3 +70,15 @@ class DocumentRepository(BaseRepository[T]):
         if limit is not None:
             query = query.limit(limit)
         return query.all()
+
+    def get_documents_by_user_paginated(
+        self, user_id: int, page: int, per_page: int,
+    ) -> Tuple[List[T], int]:
+        """Una página de los documentos de un usuario, más recientes
+        primero, más el total real (B17) -- ``get_documents_by_user`` sigue
+        existiendo sin cambios para quien no necesite paginar (Themis,
+        Aegis); este método es aditivo, no un reemplazo."""
+        query = self._ordered(self._model.user_id == user_id)
+        total = query.count()
+        items = query.limit(per_page).offset((page - 1) * per_page).all()
+        return items, total

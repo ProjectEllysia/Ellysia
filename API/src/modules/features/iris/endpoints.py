@@ -13,10 +13,11 @@ Provides:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 
-from flask import redirect, send_file
+from flask import redirect, send_file, Response
 from flask_smorest import Blueprint as SmorestBlueprint
 
 from src.modules.users import (
@@ -59,6 +60,7 @@ from .schemas import (
     GenerateAiSummaryResponseSchema,
     DocumentStatusQuerySchema,
     IrisDocumentStatusResponseSchema,
+    IrisDocumentsQuerySchema,
     IrisDocumentListResponseSchema,
     AnalysisDocumentsResponseSchema,
     IrisDocumentDeleteResponseSchema,
@@ -75,6 +77,7 @@ from .schemas import (
     IrisMailboxHealthResponseSchema,
     IrisNotificationPreferenceResponseSchema,
     IrisNotificationPreferenceUpdateRequestSchema,
+    IrisRetentionReportResponseSchema,
 )
 
 
@@ -132,6 +135,30 @@ def analyze_headers(data):
 def get_capabilities():
     """Limites y modos de analisis que aplica el servidor"""
     return IrisManager.get_capabilities()
+
+
+@iris_blp.get("/retention-policy")
+@iris_blp.response(200, IrisRetentionReportResponseSchema, description="Retention policy and current status")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("60 per hour; 300 per day")
+@handle_exceptions(logger=logger)
+def get_retention_policy():
+    """Política de retención de Iris y cuántos de tus análisis la reflejan
+    ya (M09/B17): cuántos conservan el raw todavía y cuántos ya lo perdieron."""
+    user = get_current_user()
+    report = IrisManager.get_retention_report(user.id)
+    return {
+        "rawMessageRetentionDays": report["raw_message_retention_days"],
+        "analysisRetentionDays": (
+            report["analysis_retention_days"] if report["analysis_retention_days"] > 0 else None
+        ),
+        "totalAnalyses": report["total_analyses"],
+        "analysesWithRawRetained": report["analyses_with_raw_retained"],
+        "analysesWithRawPurged": report["analyses_with_raw_purged"],
+    }
 
 
 @iris_blp.get("/status")
@@ -230,6 +257,7 @@ def get_analysis_result(analysis_id: int):
 @iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@iris_blp.alt_response(410, schema=ErrorSchema, description="Raw message purged by retention")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.IRIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
@@ -247,6 +275,7 @@ def get_analysis_path(analysis_id: int):
 @iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@iris_blp.alt_response(410, schema=ErrorSchema, description="Raw message purged by retention")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.IRIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
@@ -259,11 +288,38 @@ def get_analysis_iocs(analysis_id: int):
     return manager.get_analysis_iocs(analysis_id, user.id)
 
 
+@iris_blp.get("/results/<int:analysis_id>/export")
+@iris_blp.response(200, description="Full analysis export (JSON file download)")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@iris_blp.alt_response(409, schema=ErrorSchema, description="Analysis not ready")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("30 per hour; 100 per day")
+@handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
+def export_analysis(analysis_id: int):
+    """Exportar el análisis completo (resultado, reglas, raw si sigue
+    disponible, Received-path e IOCs) como fichero JSON descargable (B19) --
+    pensado para guardar una copia antes de que la retención purgue el raw."""
+    user = get_current_user()
+    manager = IrisManager()
+    bundle = manager.export_analysis(analysis_id, user.id)
+
+    logger.info(f"Análisis {analysis_id} exportado por usuario {user.username}")
+    return Response(
+        json.dumps(bundle, default=str, ensure_ascii=False, indent=2),
+        mimetype="application/json",
+        headers={"Content-Disposition": f'attachment; filename="iris-analysis-{analysis_id}.json"'},
+    )
+
+
 @iris_blp.post("/results/<int:analysis_id>/reanalyze")
 @iris_blp.response(201, AnalyzeResponseSchema, description="New analysis started")
 @iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @iris_blp.alt_response(404, schema=ErrorSchema, description="Analysis not found")
+@iris_blp.alt_response(410, schema=ErrorSchema, description="Raw message purged by retention")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.IRIS_CREATE])
 @limiter.limit("20 per hour; 100 per day")
@@ -432,19 +488,23 @@ def get_document_status(args):
 
 
 @iris_blp.get("/documents")
-@iris_blp.response(200, IrisDocumentListResponseSchema, description="All documents")
+@iris_blp.arguments(IrisDocumentsQuerySchema, location="query")
+@iris_blp.response(200, IrisDocumentListResponseSchema, description="Paginated documents")
 @iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
 @iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.IRIS_READ])
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=DocumentError, logger=logger)
-def get_all_documents():
-    """Obtener todos los documentos del usuario"""
+def get_all_documents(args):
+    """Documentos del usuario, paginados (B17: antes devolvía la lista
+    completa sin límite)."""
     user = get_current_user()
 
     doc_mgr = IrisReportManager()
-    documents = doc_mgr.get_documents_for_user(user.id)
+    documents, total = doc_mgr.get_documents_for_user_paginated(
+        user.id, args["page"], args["per_page"],
+    )
 
     docs_list = [{
         "documentId": document.id,
@@ -456,7 +516,10 @@ def get_all_documents():
         "downloadUrl": _download_url_for(document),
     } for document in documents]
 
-    return {"documents": docs_list, "total": len(docs_list)}
+    return {
+        "documents": docs_list, "total": total,
+        "page": args["page"], "perPage": args["per_page"],
+    }
 
 
 @iris_blp.get("/results/<int:analysis_id>/documents")

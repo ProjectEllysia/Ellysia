@@ -61,6 +61,7 @@ _ENDPOINTS = [
     ("get", "/iris/results/999999", AttributeType.IRIS_READ, None),
     ("get", "/iris/results/999999/path", AttributeType.IRIS_READ, None),
     ("get", "/iris/results/999999/iocs", AttributeType.IRIS_READ, None),
+    ("get", "/iris/results/999999/export", AttributeType.IRIS_READ, None),
     ("post", "/iris/results/999999/reanalyze", AttributeType.IRIS_CREATE, None),
     ("post", "/iris/results/999999/ai-summary", AttributeType.IRIS_CREATE, None),
     ("post", "/iris/results/999999/document", AttributeType.IRIS_CREATE, None),
@@ -80,6 +81,7 @@ _ENDPOINTS = [
     ("get", "/iris/mailbox/connections/999999/health", AttributeType.IRIS_READ, None),
     ("get", "/iris/notification-preferences", AttributeType.IRIS_READ, None),
     ("put", "/iris/notification-preferences", AttributeType.IRIS_UPDATE, {}),
+    ("get", "/iris/retention-policy", AttributeType.IRIS_READ, None),
 ]
 
 _ALL_IRIS_ATTRIBUTES = [

@@ -9,7 +9,7 @@ module; this file no longer holds any LLM client logic.
 import os
 import logging
 
-from typing import Callable, List, Optional, Type
+from typing import Callable, List, Optional, Tuple, Type
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +179,16 @@ class DocumentManager(TaskTrackingMixin):
         docs = build_repository(self._REPOSITORY).get_documents_by_user(user_id)
         logger.info(f"Se obtuvieron {len(docs)} documentos")
         return docs
+
+    def get_documents_for_user_paginated(
+        self, user_id: int, page: int, per_page: int,
+    ) -> Tuple[List, int]:
+        """Una página de los documentos de un usuario más el total real
+        (B17) -- ``get_documents_for_user`` sigue sin cambios para quien no
+        pagina."""
+        return build_repository(self._REPOSITORY).get_documents_by_user_paginated(
+            user_id, page, per_page,
+        )
 
     def get_documents_by_parent(self, parent_id: int) -> List:
         """Retrieve all documents generated for a specific parent entity."""

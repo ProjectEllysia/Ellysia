@@ -8,14 +8,16 @@ the output of every individual rule that was executed during the analysis.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, Float, ForeignKey, Integer,
+    Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer,
     SmallInteger, String, Text, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
-from src.modules.shared import Base, Document, utcnow_naive
+from src.modules.shared import Base, Document, EncryptedText, utcnow_naive
 
 
 class IrisAnalysis(Base):
@@ -28,7 +30,19 @@ class IrisAnalysis(Base):
     Attributes:
         id: Primary key, auto-incrementing integer.
         title: Optional user-defined label for quick identification.
-        raw_headers: Original email headers as plain text.
+        raw_headers: Cabeceras originales (o el ``.eml`` completo) como
+                 texto plano. Property, no columna: el contenido de verdad
+                 vive cifrado en la fila ``IrisRawMessage`` asociada
+                 (``raw_message``, 1:1) para poder purgarlo de forma
+                 independiente sin borrar el resultado analítico ya
+                 calculado (M09/B19). Se lee y se escribe exactamente igual
+                 que antes de esa separación -- ``analysis.raw_headers`` y
+                 ``IrisAnalysis(raw_headers=...)`` siguen funcionando sin
+                 cambios en el resto del código. ``None`` cuando la política
+                 de retención ya ha purgado el raw de este análisis; a partir
+                 de ahí, cualquier vista derivada del raw (cadena Received,
+                 IOCs) deja de estar disponible -- ver
+                 ``IrisManager.get_analysis_path``/``get_analysis_iocs``.
         status: Lifecycle state — "pending", "running", "finished",
                 "failed", or "cancelled".
         total_score: Sum of all rule scores once the analysis completes.
@@ -95,7 +109,6 @@ class IrisAnalysis(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     title = Column(String(120), nullable=True, default=None)
-    raw_headers = Column(Text, nullable=False)
     status = Column(String(20), nullable=False, default="pending")
     total_score = Column(Float, nullable=True)
     verdict = Column(String(20), nullable=True)
@@ -130,11 +143,85 @@ class IrisAnalysis(Base):
         "IrisDocument", back_populates="analysis",
         cascade="all, delete-orphan",
     )
+    raw_message = relationship(
+        "IrisRawMessage", back_populates="analysis", uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         UniqueConstraint("connection_id", "source_message_uid",
                           name="uq_iris_analysis_connection_source_message"),
+        Index("ix_iris_analysis_user_id", "user_id"),
+        Index("ix_iris_analysis_created_at", "created_at"),
+        Index("ix_iris_analysis_status", "status"),
+        Index("ix_iris_analysis_verdict", "verdict"),
+        Index("ix_iris_analysis_connection_id", "connection_id"),
     )
+
+    @property
+    def raw_headers(self) -> Optional[str]:
+        """Contenido raw (cabeceras o ``.eml`` completo) de este análisis.
+
+        Delega en ``raw_message.content`` -- ver el docstring de esta clase
+        (M09/B19) sobre por qué el raw vive en su propia fila en vez de en
+        una columna de ``IrisAnalysis``. ``None`` si la retención ya lo
+        purgó.
+        """
+        return self.raw_message.content if self.raw_message is not None else None
+
+    @raw_headers.setter
+    def raw_headers(self, value: Optional[str]) -> None:
+        if value is None:
+            self.raw_message = None
+        elif self.raw_message is not None:
+            self.raw_message.content = value
+        else:
+            self.raw_message = IrisRawMessage(content=value)
+
+
+class IrisRawMessage(Base):
+    """Contenido raw (cabeceras o ``.eml`` completo) de un ``IrisAnalysis``,
+    en su propia fila -- separado del resultado analítico (M09/B19).
+
+    Antes vivía en ``IrisAnalysis.raw_headers``, una columna en la misma
+    fila que el score, el veredicto y el resumen de IA: purgar el raw
+    después de un plazo (política de retención, B17) obligaba a elegir entre
+    borrar el análisis entero -- perdiendo el resultado, que sí tiene valor
+    a largo plazo -- o dejarlo indefinidamente, que es justo lo que la
+    retención existe para evitar. Con el raw en su propia fila,
+    ``raw_message = None`` sobre el análisis (o borrar directamente esta
+    fila) purga el contenido sensible sin tocar el resultado.
+
+    ``content`` usa ``EncryptedText`` (cifrado Fernet transparente,
+    ``purpose="iris_raw_message"``) en vez de cifrar/descifrar a mano en
+    cada punto de lectura: el motor de reglas parsea este campo en más de
+    diez sitios distintos de ``managers/analysis.py``, y repetir esa llamada
+    en cada uno convertía cada lectura nueva en una oportunidad de olvidarla.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        analysis_id: FK al ``IrisAnalysis`` dueño de este raw; ``UNIQUE``
+                 (relación 1:1) y ``ondelete="CASCADE"`` -- borrar el
+                 análisis borra su raw, nunca al revés.
+        content: El texto plano (cabeceras o ``.eml`` completo), cifrado en
+                 la columna real vía ``EncryptedText``. Nunca ``None`` en una
+                 fila que existe -- la ausencia de raw se modela con la
+                 propia fila ausente (``IrisAnalysis.raw_message is None``),
+                 no con este campo a ``None``.
+        created_at: Cuándo se guardó -- el mismo instante en que se creó el
+                 análisis, salvo que el raw se haya vuelto a asignar (no
+                 ocurre hoy en el flujo normal).
+        analysis: Relación inversa a ``IrisAnalysis``.
+    """
+    __tablename__ = "IrisRawMessage"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    analysis_id = Column(Integer, ForeignKey("IrisAnalysis.id", ondelete="CASCADE"),
+                          nullable=False, unique=True)
+    content = Column(EncryptedText(purpose="iris_raw_message"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+
+    analysis = relationship("IrisAnalysis", back_populates="raw_message")
 
 
 class IrisMailboxConnection(Base):
@@ -364,6 +451,10 @@ class IrisRuleResult(Base):
     position = Column(SmallInteger, nullable=False, default=0)
 
     analysis = relationship("IrisAnalysis", back_populates="rule_results")
+
+    __table_args__ = (
+        Index("ix_iris_rule_result_analysis_id", "analysis_id"),
+    )
 
 
 class IrisDocument(Document):

@@ -1863,6 +1863,36 @@ class IrisConfig:  # pylint: disable=too-many-instance-attributes
     distinción aplicada a la observabilidad bajo demanda en vez de a un
     aviso proactivo."""
 
+    raw_message_retention_days: int = 90
+    """Días desde la creación de un análisis tras los que su
+    ``IrisRawMessage`` (cabeceras/``.eml`` completo, cifrado) se purga --
+    el resultado analítico (score, veredicto, resultados por regla) se
+    conserva indefinidamente; solo el contenido crudo del correo caduca
+    (M09/B17/B19). Ver ``services/retention.py``."""
+
+    analysis_retention_days: int = 0
+    """Días tras los que se borra el ``IrisAnalysis`` **entero** (cascada a
+    reglas, raw si quedaba, y PDFs). ``0`` desactiva este límite -- el
+    resultado analítico se conserva para siempre y solo caduca el raw
+    (comportamiento por defecto: "el resultado puede conservarse sin el
+    raw", B19). Un despliegue con requisitos de borrado más estrictos puede
+    fijar un valor positivo."""
+
+    retention_check_interval_hours: int = 24
+    """Cada cuánto corre el job de retención de Iris (M09/B17/B19) --
+    purgar raw vencido y, si aplica, borrar análisis enteros. Diario por
+    defecto: a diferencia del sondeo de buzón, no hay ninguna urgencia en
+    detectar un análisis recién vencido con precisión de minutos."""
+
+    redact_pii_in_reports: bool = True
+    """Si el PDF exportable de un análisis redacta las direcciones de
+    correo, teléfonos y números con forma de tarjeta que aparezcan en el
+    volcado de cabeceras originales (todo lo que no sea el remitente ya
+    analizado, que es la evidencia del informe, no PII que ocultar). Ver
+    ``services/redaction.py``. Es la única vista de Iris que sale del panel
+    autenticado tal cual, así que es la que puede acabar reenviada fuera
+    (M09)."""
+
     prompts: dict = field(default_factory=dict)
     """Prompts de ``IrisAIWriter`` (IA1): ``summary.{system,userTemplate}``."""
 
