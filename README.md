@@ -744,8 +744,9 @@ GRAPH_CLIENT_ID=...
 GRAPH_CLIENT_SECRET=...
 GRAPH_TENANT_ID=...             # optional; "common" allows any account
 IRIS_MAILBOX_ENCRYPTION_KEY=... # Fernet key that encrypts stored OAuth refresh tokens at rest
-IRIS_RAW_MESSAGE_ENCRYPTION_KEY=... # Fernet key that encrypts stored raw email content at rest (IrisRawMessage)
 ```
+
+Iris also needs `IRIS_RAW_MESSAGE_ENCRYPTION_KEY`, which is **not** listed above because it is not a connector setting: it encrypts the raw content of every analysed email, mailbox or not. See [Encryption keys](#encryption-keys).
 
 **What each provider's OAuth scope actually grants (B19):** Gmail uses `gmail.metadata`, a true headers-only scope — when a connection has "full message mode" off, the app never sees the message body at all, not just at the application level. Microsoft Graph has no equivalent: `Mail.Read` grants the full message body regardless of Iris's own headers-only setting, because Graph does not offer a metadata-only delegated permission for mail. With full message mode off, the Microsoft connector still only *requests* headers — it never calls for the body — but the OAuth consent itself grants more than Iris uses. This is a platform limitation, not a gap in this codebase (see `services/mailbox/microsoft.py`'s module docstring). Whichever provider is used, the raw content Iris does fetch is stored encrypted and separately from the analysis result (`IrisRawMessage`), and is purged independently of it by the retention policy — see `GET /iris/retention-policy`.
 
@@ -786,6 +787,29 @@ Ellysia uses a layered configuration system (`API/src/modules/system/config_read
 Config is read through frozen dataclasses bound to a branch of the tree (`@config_block`, e.g. `CR.nuclei_config().rate_limit`), not one getter per value, and cached — changes to `SecOpsConfig.json` require an app restart unless applied via `PUT /system`. Background jobs pick them up too: the worker re-reads the file per job when its mtime changed (`CR.reload_if_changed()`).
 
 The config panel (`web/app/src/views/ConfigView.vue`) exposes every settable key of the tree — the AI and email layers, the Themis knowledge base and Lybra engine dials, JWT and MFA policy, Hygeia thresholds, limits and report palette. The one branch deliberately left out is `features.iris.data.*`: those are the anti-phishing heuristic corpora (word lists, homoglyph maps, suspicious TLDs), detection content rather than deployment settings. `API/tests/unit/test_config_view_paths.py` pins the panel's paths against the JSON — the literal ones by full path, the ones composed in a `v-for` by their fixed prefix.
+
+### Encryption keys
+
+Some secrets are stored **encrypted at rest**: the row in the database holds Fernet ciphertext, so reading the database directly yields nothing useful, while the application can still decrypt what it needs. (This is not Acheron, which is zero-knowledge — there the user holds the key and the server never sees plaintext.)
+
+There is no single encryption key. Each kind of secret has its own, so compromising one does not compromise the others and each can be rotated separately. The environment variable name is derived from the purpose (`<PURPOSE>_ENCRYPTION_KEY`), so the list is exactly:
+
+| Variable | What it protects | Required |
+|---|---|---|
+| `MFA_ENCRYPTION_KEY` | Each user's TOTP secret | Only if MFA is used |
+| `IRIS_MAILBOX_ENCRYPTION_KEY` | OAuth refresh/access tokens of each connected mailbox | Only if a mailbox is connected |
+| `IRIS_RAW_MESSAGE_ENCRYPTION_KEY` | Raw content (headers or full `.eml`) of every analysed email | **Yes, for any use of Iris** — including an email pasted by hand |
+
+All three are Fernet keys, generated the same way, and must be **different from each other**:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+> [!WARNING]
+> A missing encryption key fails **late**, not at boot: `get_encryption_key` resolves it lazily on first use, so the API starts fine and the deploy smoke test passes. The error surfaces when someone enables MFA, connects a mailbox, or analyses their first email. Set all three up front even if a feature is unused.
+
+`JWT_SECRET_KEY` is not in this table because it signs tokens rather than encrypting stored data — but unlike these three it is required always, since without it there is no authentication.
 
 > [!WARNING]
 > `features.themis.areLocalIpsAllowed` ships as `false`, and a test pins that value (`test_the_anti_ssrf_defence_ships_enabled`): with `true`, a user can point a scan at the server's internal network or the cloud metadata endpoint. Flip it to `true` in your working copy for local development against private IPs, but do not commit it.
