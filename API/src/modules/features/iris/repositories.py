@@ -7,7 +7,7 @@ IrisRuleResult models.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, List, Optional, Tuple
 
 from sqlalchemy import and_, asc, desc, nullslast, update
@@ -138,6 +138,21 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
     def exists_by_source(self, connection_id: int, source_message_uid: str) -> bool:
         """Si ya existe un análisis para este (connection_id, source_message_uid)."""
         return self.get_by_source(connection_id, source_message_uid) is not None
+
+    def count_by_connection(self, connection_id: int) -> int:
+        """Cuántos análisis ha aceptado en total esta conexión (M10).
+
+        Es la cuenta real de "mensajes aceptados" -- no hace falta un
+        contador aparte, porque cada mensaje aceptado por el checkpoint de
+        buzón (B01) deja exactamente una fila ``IrisAnalysis`` con este
+        ``connection_id`` y nunca se borra al resolverse (a diferencia de su
+        entrada en ``IrisMailboxInbox``, que sí desaparece).
+        """
+        return (
+            self._session.query(IrisAnalysis.id)
+            .filter(IrisAnalysis.connection_id == connection_id)
+            .count()
+        )
 
     def transition_if_state(self, analysis_id: int, from_states: list[str], **fields: Any) -> bool:
         """Aplica ``fields`` sobre un análisis solo si su ``status`` actual
@@ -289,6 +304,65 @@ class IrisMailboxInboxRepository(BaseRepository[IrisMailboxInbox]):
             .all()
         )
         return {row[0] for row in rows}
+
+    def count_pending(self, connection_id: int) -> int:
+        """Cuántas referencias siguen sin resolver ahora mismo (M10) --
+        contadas en vivo sobre la tabla real, no un contador aparte que
+        pudiera desincronizarse de ella."""
+        return (
+            self._session.query(IrisMailboxInbox.id)
+            .filter(
+                IrisMailboxInbox.connection_id == connection_id,
+                IrisMailboxInbox.status == "pending",
+            )
+            .count()
+        )
+
+    def count_retrying(self, connection_id: int) -> int:
+        """Cuántas referencias pendientes ya han fallado al menos una vez
+        (M10) -- distingue "recién descubierto, primer intento" de "se le
+        está costando, va por el segundo o más"."""
+        return (
+            self._session.query(IrisMailboxInbox.id)
+            .filter(
+                IrisMailboxInbox.connection_id == connection_id,
+                IrisMailboxInbox.status == "pending",
+                IrisMailboxInbox.attempts >= 1,
+            )
+            .count()
+        )
+
+    def count_dead(self, connection_id: int) -> int:
+        """Cuántas referencias agotaron ``iris.maxInboxAttempts`` y quedaron
+        ``dead`` (B01/M10) -- mensajes que Iris ha dejado de intentar
+        procesar, visibles pero ya sin bloquear el cursor."""
+        return (
+            self._session.query(IrisMailboxInbox.id)
+            .filter(
+                IrisMailboxInbox.connection_id == connection_id,
+                IrisMailboxInbox.status == "dead",
+            )
+            .count()
+        )
+
+    def oldest_pending_created_at(self, connection_id: int) -> Optional[datetime]:
+        """Cuándo se encoló la referencia pendiente más antigua de esta
+        conexión, o ``None`` si no queda ninguna (M10).
+
+        La edad de esa fecha es la señal de "cuánto lleva atascado el
+        mensaje más viejo" -- más útil para un administrador que un simple
+        recuento de pendientes, que no dice si llevan segundos o días ahí.
+        """
+        row = (
+            self._session.query(IrisMailboxInbox.created_at)
+            .filter(
+                IrisMailboxInbox.connection_id == connection_id,
+                IrisMailboxInbox.status == "pending",
+            )
+            .order_by(IrisMailboxInbox.id.asc())
+            .first()
+        )
+        return row[0] if row is not None else None
 
 
 class IrisRuleResultRepository(BaseRepository[IrisRuleResult]):
