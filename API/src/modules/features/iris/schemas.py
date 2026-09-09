@@ -498,3 +498,33 @@ class IrisMailboxCallbackQuerySchema(Schema):
     state = fields.String(required=True)
     code = fields.String(load_default=None)
     error = fields.String(load_default=None)
+
+
+class IrisNotificationPreferenceResponseSchema(Schema):
+    """Preferencias de notificación del usuario actual (M08)."""
+    digestEnabled = fields.Boolean()
+    mutedUntil = UTCDateTime(allow_none=True)
+    notifyReauthRequired = fields.Boolean()
+    notifySyncStuck = fields.Boolean()
+    digestLastSentAt = UTCDateTime(allow_none=True)
+
+
+class IrisNotificationPreferenceUpdateRequestSchema(Schema):
+    """Request body for ``PUT /iris/notification-preferences``.
+
+    Los cuatro campos son opcionales e independientes -- omitir uno deja su
+    valor actual intacto (actualización parcial, mismo patrón que
+    ``IrisMailboxUpdateConnectionRequestSchema``); el endpoint distingue
+    "no venía en el cuerpo" mirando si la clave está en los datos cargados.
+
+    ``mutedForMinutes`` en vez de una fecha absoluta: el cliente sabe "cuánto
+    tiempo" (silenciar 1 hora / 1 día / 1 semana), no una marca de tiempo en
+    UTC, y resolverla en el servidor evita todo el terreno resbaladizo de
+    aceptar una fecha con zona horaria ambigua desde fuera. ``0`` quita un
+    silenciado activo (poner ``mutedUntil`` a ``None``); cualquier valor
+    positivo lo fija a ``ahora + esos minutos``.
+    """
+    digestEnabled = fields.Boolean()
+    mutedForMinutes = fields.Integer(validate=validate.Range(min=0))
+    notifyReauthRequired = fields.Boolean()
+    notifySyncStuck = fields.Boolean()

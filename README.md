@@ -258,6 +258,7 @@ Content-Type: application/json
 | `DELETE` | `/iris/mailbox/connections/<id>` | `IRIS_DELETE` | Disconnect a monitored mailbox |
 | `POST` | `/iris/mailbox/connections/<id>/sync` | `IRIS_UPDATE` | Trigger an out-of-cycle mailbox poll |
 | `GET` | `/iris/mailbox/connections/<id>/health` | `IRIS_READ` | Connection health: last successful sync vs. last attempt, discovered/accepted/pending/retrying/dead message counts, last sync duration |
+| `GET`/`PUT` | `/iris/notification-preferences` | `IRIS_READ` / `IRIS_UPDATE` | Per-user notification settings: daily digest for non-critical Phishing verdicts, temporary mute, and toggles for the reauthorization-required and stuck-sync alerts. High-confidence Phishing verdicts always notify immediately regardless of these settings |
 
 > [!NOTE]
 > **`CREATE` vs `UPDATE` in Iris.** `IRIS_CREATE` guards the operations that bring a *new* entity into existence and consume quota for it — submitting an analysis, re-analysing (which inserts a brand-new analysis and returns its id, leaving the original untouched), generating an AI summary, generating a PDF. `IRIS_UPDATE` guards changes to something that already exists: cancelling a running analysis, pausing a connection, forcing a poll. The full matrix is pinned by `API/tests/integration/test_iris_permissions.py`, which asserts both that the documented attribute opens each endpoint and that every other Iris attribute is refused.
@@ -412,6 +413,9 @@ Each entry point is a `@staticmethod` on the owning module's manager class — p
 | `iris.ingest` | Iris | `IrisMailboxManager.execute_sync_connection` (periodic mailbox sync) | `iris-mailbox-sync:<id>` |
 | `iris.report` | Iris | `IrisReportManager.execute_report_generation` | `iris-doc:<id>` |
 | `iris.notify` | Iris | `IrisPhishingNotifyManager.execute_notify_phishing` | `iris-phishing-notify:<id>` |
+| `iris.notify` | Iris | `IrisDigestNotifyManager.execute_notify_digest` (daily digest of non-critical Phishing verdicts) | `iris-digest-notify:<userId>` |
+| `iris.notify` | Iris | `IrisReauthNotifyManager.execute_notify_reauth` (mailbox connection needs reauthorization) | `iris-reauth-notify:<connectionId>` |
+| `iris.notify` | Iris | `IrisStuckSyncNotifyManager.execute_notify_stuck` (active connection stuck without a clean sync) | `iris-stuck-sync-notify:<connectionId>` |
 | `hygeia.notify` | Hygeia | `HygeiaNotifyManager.execute_notify_critical_anomaly` | `hygeia-notify:<id>` |
 
 - **Progress reporting**: workers update `job.meta["progress"]` via `_Task(progress_callback=...)`.

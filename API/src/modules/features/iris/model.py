@@ -223,6 +223,13 @@ class IrisMailboxConnection(Base):
                  "fallidos" (la tabla ``IrisMailboxInbox``), la fila de
                  checkpoint de un mensaje aceptado se borra al resolverse, así
                  que sin este contador ese dato desaparecería con ella (M10).
+        stuck_alert_sent_at: Cuándo se avisó por última vez de que esta
+                 conexión lleva atascada más de ``iris.stuckSyncAfterMinutes``
+                 (M08). Se limpia en cuanto un sync vuelve a dejar la cola de
+                 checkpoint vacía (mismo punto que actualiza
+                 ``last_success_at``), así que un problema que se resuelve y
+                 vuelve a aparecer más tarde genera un aviso nuevo en vez de
+                 quedar silenciado para siempre por el primero.
         created_at: When the connection was established.
         user: SQLAlchemy relationship to User.
         analyses: Analyses ingested through this connection.
@@ -257,6 +264,7 @@ class IrisMailboxConnection(Base):
     last_success_at = Column(DateTime, nullable=True)
     last_sync_duration_ms = Column(Integer, nullable=True)
     messages_discovered_total = Column(Integer, nullable=False, default=0)
+    stuck_alert_sent_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user = relationship("User")
@@ -392,3 +400,64 @@ class IrisDocument(Document):
             f"<IrisDocument(id={self.id}, analysis_id={self.analysis_id}, "
             f"status='{self.status}')>"
         )
+
+
+class IrisNotificationPreference(Base):
+    """Preferencias de notificación de un usuario para las alertas
+    automáticas de Iris (M08): una fila por usuario, creada perezosamente
+    la primera vez que la modifica (ver ``IrisNotificationPreferenceManager``).
+
+    Deliberadamente por usuario y no por conexión: hoy Iris solo tiene un
+    canal de envío (correo, vía ``herald``), y separar preferencias por
+    conexión antes de que exista una segunda variable real que lo justifique
+    sería una tabla más ancha sin ningún control que la necesite todavía.
+    Si en el futuro hace falta silenciar una conexión concreta sin tocar las
+    demás, este es el sitio donde añadir esa columna.
+
+    Attributes:
+        id: Primary key, auto-incrementing integer.
+        user_id: FK al ``User`` dueño de estas preferencias; único, porque
+                 solo existe una fila por usuario.
+        digest_enabled: Si está activo, los veredictos Phishing que no sean
+                 de alta confianza (``total_score`` por encima de
+                 ``iris.criticalPhishingScoreThreshold``) no se notifican al
+                 momento -- se agrupan en el resumen diario que envía el
+                 scheduler de Iris (``services/notifications/scheduling.py``).
+                 Los de alta confianza siempre se notifican de inmediato,
+                 esté o no activo el digest.
+        muted_until: Si tiene una fecha futura, ninguna notificación no
+                 crítica se envía hasta entonces (silenciado temporal). Igual
+                 que con el digest, un veredicto Phishing de alta confianza
+                 ignora este campo -- nunca se pierde una incidencia crítica
+                 por estar silenciada. ``None`` cuando no hay silenciado
+                 activo.
+        notify_reauth_required: Si se avisa por correo cuando una conexión
+                 pasa a necesitar reautorización (``status="reauth_required"``).
+                 Por defecto ``True``.
+        notify_sync_stuck: Si se avisa quando una conexión activa lleva más
+                 de ``iris.stuckSyncAfterMinutes`` sin completar un sync
+                 limpio (ver ``IrisMailboxConnection.last_success_at``, M10).
+                 Por defecto ``True``.
+        digest_last_sent_at: Cuándo se envió el último digest a este usuario;
+                 ``None`` si nunca se ha enviado uno. El scheduler lo usa
+                 para saber si ya pasó ``iris.digestIntervalHours`` desde
+                 entonces, y para acotar qué análisis entran en el próximo
+                 envío.
+        created_at: Cuándo se creó esta fila (primera vez que el usuario
+                 tocó sus preferencias).
+        updated_at: Última vez que se modificó cualquier campo.
+        user: SQLAlchemy relationship al ``User`` dueño.
+    """
+    __tablename__ = "IrisNotificationPreference"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("User.id"), nullable=False, unique=True)
+    digest_enabled = Column(Boolean, nullable=False, default=False)
+    muted_until = Column(DateTime, nullable=True)
+    notify_reauth_required = Column(Boolean, nullable=False, default=True)
+    notify_sync_stuck = Column(Boolean, nullable=False, default=True)
+    digest_last_sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utcnow_naive)
+    updated_at = Column(DateTime, nullable=False, default=utcnow_naive, onupdate=utcnow_naive)
+
+    user = relationship("User")

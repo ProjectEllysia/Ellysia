@@ -1833,6 +1833,36 @@ class IrisConfig:  # pylint: disable=too-many-instance-attributes
     el sync entero.
     """
 
+    critical_phishing_score_threshold: float = 20
+    """Por debajo de este ``total_score`` (escala 0-100, ver
+    ``suspicious_threshold``), un veredicto Phishing se considera de "alta
+    confianza" (M08): se notifica siempre de inmediato, sin que el
+    silenciado temporal ni el digest diario del usuario puedan retrasarlo o
+    suprimirlo — el criterio de cierre del issue exige que nunca se pierda
+    una incidencia crítica.
+    """
+
+    notification_check_interval_minutes: int = 60
+    """Cada cuánto revisa el scheduler de Iris si hay digests diarios
+    pendientes de enviar o conexiones atascadas/en reautenticación que
+    notificar (M08). Más fino que ``poll_interval_minutes`` porque, a
+    diferencia del sondeo de correo, aquí no hay coste de llamar a un
+    proveedor externo — es una consulta a la propia base de datos.
+    """
+
+    digest_interval_hours: int = 24
+    """Tiempo mínimo entre dos digests consecutivos de un mismo usuario con
+    ``digest_enabled`` (M08). Un usuario que active el digest hoy no debe
+    recibir el primero hasta que pase esta ventana completa."""
+
+    stuck_sync_after_minutes: int = 180
+    """A partir de cuánto tiempo sin un sync limpio (``last_success_at``
+    nulo o más viejo que esto) una conexión activa que sí sigue intentando
+    sincronizar (``last_sync_at`` no nulo) se considera "atascada" y genera
+    un aviso (M08) — ver ``get_connection_health`` (M10) para la misma
+    distinción aplicada a la observabilidad bajo demanda en vez de a un
+    aviso proactivo."""
+
     prompts: dict = field(default_factory=dict)
     """Prompts de ``IrisAIWriter`` (IA1): ``summary.{system,userTemplate}``."""
 

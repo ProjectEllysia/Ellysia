@@ -1,0 +1,40 @@
+{# Aviso de que una conexión de buzón de Iris lleva atascada sin un sync
+   limpio (M08). Contexto: account_email, last_success_at (datetime u None),
+   recipient_name (opcional). #}
+{% extends "base.html.j2" %}
+{% from "_macros.html.j2" import data_row %}
+
+{% block title %}Tu buzón lleva un tiempo sin sincronizar: {{ account_email }}{% endblock %}
+
+{% block preheader %}{{ account_email }} lleva un tiempo sin completar un sync limpio.{% endblock %}
+
+{% block header_tagline %}
+<div style="margin-top:8px; font-family:Helvetica,Arial,sans-serif; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#8a857c;">
+  Iris — Buzones conectados
+</div>
+{% endblock %}
+
+{% block content %}
+<p style="margin:0 0 16px;">{% if recipient_name %}Hola {{ recipient_name }},{% else %}Hola,{% endif %}</p>
+
+<p style="margin:0 0 20px;"><strong>Tu buzón lleva un tiempo sin sincronizar del todo.</strong></p>
+
+<p style="margin:0 0 20px;">Iris sigue intentando sondear este buzón, pero no ha conseguido terminar un
+sync limpio recientemente -- puede deberse a una cuota diaria agotada o a un fallo repetido con algún
+mensaje concreto. Ningún correo se ha perdido: los mensajes pendientes siguen en cola y se procesarán en
+cuanto se resuelva.</p>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="margin:0 0 20px; background-color:#faf8f5; border-left:3px solid #c0392b; border-radius:0 6px 6px 0;">
+  <tr>
+    <td style="padding:16px 20px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+        {{ data_row("Cuenta", account_email) }}
+        {{ data_row("Último sync limpio", last_success_at if last_success_at else "Nunca") }}
+      </table>
+    </td>
+  </tr>
+</table>
+
+<p style="margin:0;">Puedes revisar el estado detallado de la conexión desde tu panel de Iris.</p>
+{% endblock %}

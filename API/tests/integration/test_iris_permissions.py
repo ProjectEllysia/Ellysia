@@ -78,6 +78,8 @@ _ENDPOINTS = [
     ("post", "/iris/mailbox/connections/999999/sync", AttributeType.IRIS_UPDATE, None),
     ("get", "/iris/mailbox/connections/999999/folders", AttributeType.IRIS_READ, None),
     ("get", "/iris/mailbox/connections/999999/health", AttributeType.IRIS_READ, None),
+    ("get", "/iris/notification-preferences", AttributeType.IRIS_READ, None),
+    ("put", "/iris/notification-preferences", AttributeType.IRIS_UPDATE, {}),
 ]
 
 _ALL_IRIS_ATTRIBUTES = [
