@@ -41,23 +41,43 @@ class EncryptedText(TypeDecorator):
     """Columna de texto que se cifra al escribir y se descifra al leer, de
     forma transparente para quien la usa.
 
-    Introducida para ``IrisRawMessage.content`` (M09/B19): el motor de
-    reglas de Iris lee el raw de un mensaje en más de diez puntos distintos
-    de ``managers/analysis.py``, y repetir ``encrypt_at_rest``/
-    ``decrypt_at_rest`` a mano en cada uno de ellos convertía cada lectura en
-    una oportunidad de olvidarse de descifrar (o de cifrar antes de guardar).
-    Con este tipo, ``modelo.campo`` es siempre el texto plano en Python; lo
-    único que cambia es lo que llega a la fila de la base de datos.
+    **Es la única forma de cifrar en reposo que hay en el repositorio.**
+    Todo secreto que la aplicación necesite poder leer se declara con este
+    tipo; no queda ni un solo sitio que llame a ``encrypt_at_rest``/
+    ``decrypt_at_rest`` a mano sobre una columna, y añadir uno volvería a
+    dejar dos maneras distintas de hacer lo mismo conviviendo -- que era
+    exactamente el problema. Quien añada un campo sensible nuevo no tiene
+    que elegir patrón: copia el de al lado.
+    ``tests/unit/test_shared_crypto.py`` lo comprueba columna a columna.
 
-    Ver el issue de seguimiento sobre si el resto de columnas cifradas a
-    mano del repositorio (``IrisMailboxConnection.refresh_token_enc``/
-    ``access_token_enc``, el secreto TOTP de MFA) deberían migrar a este
-    mismo patrón para no dejar dos formas de hacer lo mismo conviviendo.
+    Con este tipo, ``modelo.campo`` es siempre el texto plano en Python; lo
+    único que cambia es lo que llega a la fila de la base de datos. Eso
+    quita de en medio el modo de fallo que motivó el tipo: el motor de
+    reglas de Iris lee el raw de un mensaje en más de diez puntos distintos
+    de ``managers/analysis.py``, y repetir el descifrado a mano en cada uno
+    convertía cada lectura en una oportunidad de olvidarse.
+
+    El coste que hay que conocer: el descifrado pasa a ocurrir **al cargar
+    la fila**, no en el punto donde se usa el valor. Para los secretos que
+    la mayoría de las consultas no miran (los tokens de OAuth de un buzón,
+    el secreto TOTP) la columna se declara además ``deferred``, de modo que
+    solo se descifra cuando alguien toca el atributo -- ver
+    ``IrisMailboxConnection.refresh_token`` y
+    ``MFATotpCredential.totp_secret``.
 
     Uso: ``Column(EncryptedText(purpose="mi_proposito"), nullable=False)`` --
     el ``purpose`` es el mismo concepto que ya usan ``encrypt_at_rest``/
-    ``decrypt_at_rest``: cada uno tiene su propia clave, así que comprometer
-    una no compromete las demás.
+    ``decrypt_at_rest``: cada uno tiene su propia clave (variable de entorno
+    ``<PURPOSE>_ENCRYPTION_KEY``), así que comprometer una no compromete las
+    demás y cada una se puede rotar por separado.
+
+    Attributes:
+        purpose: Identificador de la clave Fernet con la que se cifra esta
+            columna, tal y como lo resuelve
+            ``config_reading.get_encryption_key``. Cadena en minúsculas y
+            snake_case (``"mfa"``, ``"iris_mailbox"``,
+            ``"iris_raw_message"``); no es un valor libre, tiene que existir
+            como variable de entorno o el primer acceso a la columna lanza.
     """
 
     impl = Text

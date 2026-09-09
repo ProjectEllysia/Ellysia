@@ -289,11 +289,10 @@ class MFATotpCredential(Base):
     TOTP (Time-based One-Time Password) credential for a user.
 
     One row per user (unique ``user_id``). ``totp_secret`` holds the shared
-    TOTP secret; la columna es ``EncryptedText``, así que en Python siempre
-    se lee y se escribe en claro y lo que llega a la fila es texto cifrado
-    con Fernet. A diferencia de Acheron esto NO es zero-knowledge: el
-    servidor tiene que poder calcular el código actual para verificar un
-    intento de login.
+    TOTP secret; the column is an ``EncryptedText``, so in Python it is
+    always read and written in plaintext and what reaches the row is Fernet
+    ciphertext. Unlike Acheron this is NOT zero-knowledge: the server must
+    be able to compute the current code to verify a login attempt.
 
     ``confirmed_at`` is NULL until the user proves control of the secret by
     submitting a valid code during setup; MFA only counts as "enabled" once
@@ -301,11 +300,11 @@ class MFATotpCredential(Base):
 
     Attributes:
         user_id: Foreign key to User.id (unique — one credential per user).
-        totp_secret: Secreto TOTP en Base32, en claro para quien lo lee desde
-            Python y cifrado en la base de datos (``purpose="mfa"``). Se
-            declara ``deferred``: la mayoría de las cargas de esta fila solo
-            miran ``confirmed_at`` (¿tiene MFA activo?) y no necesitan pagar
-            un descifrado para responder a eso.
+        totp_secret: Base32 TOTP secret — plaintext to whoever reads it from
+            Python, encrypted in the database (``purpose="mfa"``). Declared
+            ``deferred``: most loads of this row only look at
+            ``confirmed_at`` to answer "is MFA enabled?", and should not pay
+            for a decryption to do that.
         confirmed_at: When the user confirmed enrollment (None = pending).
         created_at: When the credential was created (setup started).
     """
