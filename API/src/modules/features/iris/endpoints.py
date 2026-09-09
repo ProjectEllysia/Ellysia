@@ -70,6 +70,7 @@ from .schemas import (
     IrisMailboxSyncResponseSchema,
     IrisMailboxCallbackQuerySchema,
     IrisMailboxFoldersResponseSchema,
+    IrisMailboxHealthResponseSchema,
 )
 
 
@@ -694,6 +695,44 @@ def list_mailbox_connection_folders(connection_id: int):
             }
             for f in folders
         ]
+    }
+
+
+@iris_blp.get("/mailbox/connections/<int:connection_id>/health")
+@iris_blp.response(200, IrisMailboxHealthResponseSchema, description="Connection health status")
+@iris_blp.alt_response(401, schema=ErrorSchema, description="Not authenticated")
+@iris_blp.alt_response(403, schema=ErrorSchema, description="Insufficient permissions")
+@iris_blp.alt_response(404, schema=ErrorSchema, description="Connection not found")
+@require_oauth_token
+@require_attributes(at_least_one=[AttributeType.IRIS_READ])
+@limiter.limit("60 per hour; 300 per day")
+@handle_exceptions(default_exception=IrisMailboxConnectionNotFoundError, logger=logger)
+def get_mailbox_connection_health(connection_id: int):
+    """Estado observable de una conexión de buzón (M10).
+
+    Distingue "no hay correo nuevo" de "Iris está atascado" sin tener que
+    leer los logs del servidor: expone contadores de mensajes descubiertos/
+    aceptados/pendientes/en reintento/muertos, la duración del último sync
+    y cuándo terminó el último que dejó la cola de checkpoint vacía.
+    """
+    user = get_current_user()
+    health = IrisMailboxManager().get_connection_health(connection_id, user.id)
+    return {
+        "status": health["status"],
+        "lastSyncAt": health["last_sync_at"],
+        "lastSuccessAt": health["last_success_at"],
+        "lastError": health["last_error"],
+        "syncStartedAt": health["sync_started_at"],
+        "lastSyncDurationMs": health["last_sync_duration_ms"],
+        "cursorEstablished": health["cursor_established"],
+        "ingestedToday": health["ingested_today"],
+        "maxIngestedPerDay": health["max_ingested_per_day"],
+        "messagesDiscoveredTotal": health["messages_discovered_total"],
+        "messagesAcceptedTotal": health["messages_accepted_total"],
+        "messagesPending": health["messages_pending"],
+        "messagesRetrying": health["messages_retrying"],
+        "messagesDead": health["messages_dead"],
+        "oldestPendingMessageAgeSeconds": health["oldest_pending_message_age_seconds"],
     }
 
 

@@ -17,11 +17,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Optional
 
 import requests
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from sqlalchemy import update
 
 import src.modules.system.config_reading as CR
 from src.modules.accounts import LimitKey, QuotaManager
@@ -56,6 +57,27 @@ _STATE_MAX_AGE_SECONDS = 600  # 10 minutos — ver Decisión 5 del plan de sesi�
 _STATE_USED_KEY_PREFIX = "iris:mailbox:oauth-state-used:"
 
 _VALID_UPDATE_STATUSES = ("active", "paused")
+
+
+def _duration_ms(started_at: Optional[datetime]) -> Optional[int]:
+    """Milisegundos transcurridos desde ``started_at`` hasta ahora.
+
+    Args:
+        started_at: Cuándo empezó el intento de sync que se está cerrando
+            (``IrisMailboxConnection.sync_started_at`` leído justo antes de
+            sobreescribirlo). ``None`` cuando no se sabe cuándo empezó -- no
+            debería pasar en un sync real, pero una fila tocada a mano en un
+            test o una migración a medio aplicar no debe reventar esto.
+
+    Returns:
+        Optional[int]: Milisegundos transcurridos, o ``None`` si
+            ``started_at`` es ``None`` (M10: sin esto, un sync sin duración
+            conocida se vería como "0 ms", que parece salud perfecta en vez
+            de un dato ausente).
+    """
+    if started_at is None:
+        return None
+    return int((utcnow_naive() - started_at).total_seconds() * 1000)
 
 
 class _ReauthRequiredError(Exception):
@@ -315,6 +337,68 @@ class IrisMailboxManager(TaskTrackingMixin):
             raise
         return connector.list_folders(access_token)
 
+    def get_connection_health(self, connection_id: int, user_id: int) -> dict:
+        """Estado observable de una conexión, sin tener que leer los logs
+        del servidor (M10).
+
+        Reúne columnas de la propia conexión con recuentos en vivo de
+        ``IrisMailboxInbox`` (pendientes/reintentando/``dead``) y de
+        ``IrisAnalysis`` (aceptados) -- salvo ``messages_discovered_total``,
+        ningún dato aquí es un contador aparte que pudiera desincronizarse
+        de la tabla real (mismo criterio que ``QuotaManager`` aplica a las
+        claves de tipo "stock": lo que se puede contar, se cuenta, no se
+        acumula por separado).
+
+        Args:
+            connection_id: Primary key de la ``IrisMailboxConnection`` a
+                consultar.
+            user_id: Id del propietario (debe coincidir con el dueño de la
+                conexión).
+
+        Returns:
+            dict: Con las claves ``status``, ``last_sync_at``,
+                ``last_success_at``, ``last_error``, ``sync_started_at``,
+                ``last_sync_duration_ms``, ``cursor_established`` (bool),
+                ``ingested_today``, ``max_ingested_per_day``,
+                ``messages_discovered_total``, ``messages_accepted_total``,
+                ``messages_pending``, ``messages_retrying``,
+                ``messages_dead`` y ``oldest_pending_message_age_seconds``
+                (``None`` si no hay ningún mensaje pendiente). El endpoint
+                que lo expone lo traduce a camelCase.
+
+        Raises:
+            IrisMailboxConnectionNotFoundError: La conexión no existe o no
+                pertenece a este usuario.
+        """
+        connection = self.assert_connection_ownership(connection_id, user_id)
+
+        inbox_repo = build_repository(IrisMailboxInboxRepository)
+        oldest_pending_at = inbox_repo.oldest_pending_created_at(connection_id)
+        oldest_pending_age_seconds = (
+            int((utcnow_naive() - oldest_pending_at).total_seconds())
+            if oldest_pending_at is not None else None
+        )
+
+        return {
+            "status": connection.status,
+            "last_sync_at": connection.last_sync_at,
+            "last_success_at": connection.last_success_at,
+            "last_error": connection.last_error,
+            "sync_started_at": connection.sync_started_at,
+            "last_sync_duration_ms": connection.last_sync_duration_ms,
+            "cursor_established": connection.sync_cursor is not None,
+            "ingested_today": connection.ingested_today,
+            "max_ingested_per_day": CR.iris_config().max_ingested_per_day,
+            "messages_discovered_total": connection.messages_discovered_total,
+            "messages_accepted_total": build_repository(IrisAnalysisRepository).count_by_connection(
+                connection_id,
+            ),
+            "messages_pending": inbox_repo.count_pending(connection_id),
+            "messages_retrying": inbox_repo.count_retrying(connection_id),
+            "messages_dead": inbox_repo.count_dead(connection_id),
+            "oldest_pending_message_age_seconds": oldest_pending_age_seconds,
+        }
+
     @staticmethod
     def _validate_folder(
         connector: MailboxConnector, access_token: str, folder: str,
@@ -472,14 +556,29 @@ class IrisMailboxManager(TaskTrackingMixin):
             existing_ids = repo.get_existing_provider_ids(
                 connection_id, [ref.provider_message_id for ref in refs],
             )
-            for ref in refs:
-                if ref.provider_message_id in existing_ids:
-                    continue
+            new_refs = [ref for ref in refs if ref.provider_message_id not in existing_ids]
+            for ref in new_refs:
                 repo.save(IrisMailboxInbox(
                     connection_id=connection_id,
                     provider_message_id=ref.provider_message_id,
                     raw_ref=ref.raw or None,
                 ))
+
+            if new_refs:
+                # M10: contador acumulado -- la fila de checkpoint de un
+                # mensaje aceptado se borra al resolverse, así que sin esto
+                # "cuántos ha descubierto esta conexión en total" se perdería
+                # con ella. Incremento atómico dentro del propio UPDATE, no
+                # leer-sumar-escribir.
+                uow.session.execute(
+                    update(IrisMailboxConnection)
+                    .where(IrisMailboxConnection.id == connection_id)
+                    .values(
+                        messages_discovered_total=(
+                            IrisMailboxConnection.messages_discovered_total + len(new_refs)
+                        ),
+                    )
+                )
 
     def _drain_pending(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self, connection: IrisMailboxConnection, connector: MailboxConnector,
@@ -623,9 +722,14 @@ class IrisMailboxManager(TaskTrackingMixin):
                 return
             if advance_cursor:
                 fresh.sync_cursor = new_cursor
+                # M10: solo cuando la cola de checkpoint queda vacía se puede
+                # decir de verdad "todo al día" -- last_sync_at por sí solo no
+                # distingue eso de un sync que dejó mensajes atascados.
+                fresh.last_success_at = utcnow_naive()
             fresh.ingested_today = ingested_today
             fresh.ingested_reset_date = reset_date
             fresh.last_sync_at = utcnow_naive()
+            fresh.last_sync_duration_ms = _duration_ms(fresh.sync_started_at)
             fresh.last_error = None
             repo.update(fresh)
 
@@ -636,6 +740,7 @@ class IrisMailboxManager(TaskTrackingMixin):
             fresh = repo.get_by_id(connection_id)
             if fresh is not None:
                 fresh.last_sync_at = utcnow_naive()
+                fresh.last_sync_duration_ms = _duration_ms(fresh.sync_started_at)
                 fresh.last_error = error[:2000]
                 repo.update(fresh)
 
@@ -650,5 +755,6 @@ class IrisMailboxManager(TaskTrackingMixin):
             if fresh is not None:
                 fresh.status = "reauth_required"
                 fresh.last_sync_at = utcnow_naive()
+                fresh.last_sync_duration_ms = _duration_ms(fresh.sync_started_at)
                 fresh.last_error = error[:2000]
                 repo.update(fresh)

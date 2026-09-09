@@ -77,6 +77,7 @@ _ENDPOINTS = [
     ("delete", "/iris/mailbox/connections/999999", AttributeType.IRIS_DELETE, None),
     ("post", "/iris/mailbox/connections/999999/sync", AttributeType.IRIS_UPDATE, None),
     ("get", "/iris/mailbox/connections/999999/folders", AttributeType.IRIS_READ, None),
+    ("get", "/iris/mailbox/connections/999999/health", AttributeType.IRIS_READ, None),
 ]
 
 _ALL_IRIS_ATTRIBUTES = [

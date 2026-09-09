@@ -201,6 +201,28 @@ class IrisMailboxConnection(Base):
                  hay un sync en marcha sin tener que adivinarlo (B02).
         sync_job_id: Id del job de TaskQueue que sostiene el lock de sync
                  actual; NULL cuando no hay ninguno en curso (B02).
+        last_success_at: Cuándo terminó el último sync que dejó la cola de
+                 checkpoint (``IrisMailboxInbox``) completamente vacía -- es
+                 decir, sin ningún mensaje descubierto pendiente de aceptar.
+                 A diferencia de ``last_sync_at`` (que se actualiza aunque
+                 queden mensajes atascados por cuota o por un fallo), esto
+                 es lo que distingue "no hay correo nuevo" de "Iris está
+                 atascado" sin mirar los logs del servidor (M10). NULL si
+                 nunca ha terminado un sync sin dejar nada pendiente.
+        last_sync_duration_ms: Cuánto tardó el último intento de sync
+                 (terminara en éxito o en error), en milisegundos. NULL si
+                 nunca ha habido un intento con ``sync_started_at`` registrado
+                 (M10) -- una latencia que crece sync a sync es la señal de
+                 que el proveedor se está degradando antes de que llegue a
+                 fallar del todo.
+        messages_discovered_total: Cuántos mensajes ha descubierto esta
+                 conexión en total desde que existe, contando solo los que de
+                 verdad eran nuevos (no un reenvío del proveedor de algo ya
+                 encolado). Es un contador acumulado porque, a diferencia de
+                 "aceptados" (la tabla ``IrisAnalysis``) o "pendientes"/
+                 "fallidos" (la tabla ``IrisMailboxInbox``), la fila de
+                 checkpoint de un mensaje aceptado se borra al resolverse, así
+                 que sin este contador ese dato desaparecería con ella (M10).
         created_at: When the connection was established.
         user: SQLAlchemy relationship to User.
         analyses: Analyses ingested through this connection.
@@ -232,6 +254,9 @@ class IrisMailboxConnection(Base):
     last_error = Column(Text, nullable=True)
     sync_started_at = Column(DateTime, nullable=True)
     sync_job_id = Column(String(64), nullable=True)
+    last_success_at = Column(DateTime, nullable=True)
+    last_sync_duration_ms = Column(Integer, nullable=True)
+    messages_discovered_total = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user = relationship("User")

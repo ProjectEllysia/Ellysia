@@ -444,16 +444,36 @@ class IrisMailboxUpdateConnectionRequestSchema(Schema):
 
 
 class IrisMailboxFolderSchema(Schema):
-    """One real folder/label the connected account has (B16)."""
+    """Una carpeta/etiqueta real de la cuenta conectada (B16)."""
     providerId = fields.String()
     displayName = fields.String()
     folderType = fields.String()
 
 
 class IrisMailboxFoldersResponseSchema(Schema):
-    """Folders a connection's account exposes -- the only valid values for
-    ``PATCH /iris/mailbox/connections/<id>``'s ``folder``."""
+    """Carpetas que expone la cuenta de una conexión -- los únicos valores
+    válidos para ``folder`` en ``PATCH /iris/mailbox/connections/<id>``."""
     folders = fields.List(fields.Nested(IrisMailboxFolderSchema))
+
+
+class IrisMailboxHealthResponseSchema(Schema):
+    """Estado observable de una conexión de buzón, sin tener que leer los
+    logs del servidor (M10)."""
+    status = fields.String()
+    lastSyncAt = UTCDateTime(allow_none=True)
+    lastSuccessAt = UTCDateTime(allow_none=True)
+    lastError = fields.String(allow_none=True)
+    syncStartedAt = UTCDateTime(allow_none=True)
+    lastSyncDurationMs = fields.Integer(allow_none=True)
+    cursorEstablished = fields.Boolean()
+    ingestedToday = fields.Integer()
+    maxIngestedPerDay = fields.Integer()
+    messagesDiscoveredTotal = fields.Integer()
+    messagesAcceptedTotal = fields.Integer()
+    messagesPending = fields.Integer()
+    messagesRetrying = fields.Integer()
+    messagesDead = fields.Integer()
+    oldestPendingMessageAgeSeconds = fields.Integer(allow_none=True)
 
 
 class IrisMailboxConnectionDeleteResponseSchema(Schema):

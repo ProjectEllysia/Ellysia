@@ -257,6 +257,7 @@ Content-Type: application/json
 | `PATCH` | `/iris/mailbox/connections/<id>` | `IRIS_UPDATE` | Pause, resume or reconfigure a connection (`folder` is validated against the account's real folders) |
 | `DELETE` | `/iris/mailbox/connections/<id>` | `IRIS_DELETE` | Disconnect a monitored mailbox |
 | `POST` | `/iris/mailbox/connections/<id>/sync` | `IRIS_UPDATE` | Trigger an out-of-cycle mailbox poll |
+| `GET` | `/iris/mailbox/connections/<id>/health` | `IRIS_READ` | Connection health: last successful sync vs. last attempt, discovered/accepted/pending/retrying/dead message counts, last sync duration |
 
 > [!NOTE]
 > **`CREATE` vs `UPDATE` in Iris.** `IRIS_CREATE` guards the operations that bring a *new* entity into existence and consume quota for it — submitting an analysis, re-analysing (which inserts a brand-new analysis and returns its id, leaving the original untouched), generating an AI summary, generating a PDF. `IRIS_UPDATE` guards changes to something that already exists: cancelling a running analysis, pausing a connection, forcing a poll. The full matrix is pinned by `API/tests/integration/test_iris_permissions.py`, which asserts both that the documented attribute opens each endpoint and that every other Iris attribute is refused.
