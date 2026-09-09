@@ -70,6 +70,13 @@ class IrisAnalysis(Base):
                  que ``detector_version`` para las reglas).
         started_at: Timestamp when the analysis was created.
         finished_at: Timestamp when the analysis reached a terminal state.
+        cancel_requested_at: Cuándo el usuario pidió cancelar, si alguna vez
+                 lo hizo; NULL si nunca se pidió. Se registra siempre que se
+                 llama a ``cancel_analysis()``, gane o no la carrera contra
+                 el worker -- es la traza de la intención del usuario, no del
+                 resultado, así que no se borra ni se sobreescribe aunque el
+                 worker termine primero y el análisis acabe ``finished`` en
+                 vez de ``cancelled`` (B07).
         user_id: Foreign key to the owning User.
         user: SQLAlchemy relationship to User.
         rule_results: Ordered list of IrisRuleResult (per-rule outcomes).
@@ -105,6 +112,7 @@ class IrisAnalysis(Base):
     ai_summary_prompt_version = Column(String(32), nullable=True)
     started_at = Column(DateTime, nullable=False, default=utcnow_naive)
     finished_at = Column(DateTime, nullable=True)
+    cancel_requested_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     user_id = Column(Integer, ForeignKey("User.id"), nullable=False)
