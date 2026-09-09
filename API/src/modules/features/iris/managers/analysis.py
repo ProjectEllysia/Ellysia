@@ -664,6 +664,13 @@ class IrisManager(TaskTrackingMixin):
         except Exception:
             # El encolado rechazó el trabajo: nadie lo va a ejecutar, así que
             # ni la reserva ni el cobro tienen sentido.
+            #
+            # Es la razón por la que este sitio se quedó fuera de la outbox
+            # transaccional al auditarlo en #551: la compensación ya existe y
+            # es completa -- el análisis no se queda en `running` y el usuario
+            # recupera su cuota, así que puede reintentar. Lo único que la
+            # outbox añadiría es ejecutar el resumen solo en vez de que el
+            # usuario vuelva a pedirlo.
             self._release_ai_summary(analysis_id)
             self._refund_ai_summary_quota(user_id)
             raise

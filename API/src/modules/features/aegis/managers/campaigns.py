@@ -45,6 +45,9 @@ from src.modules.tools.herald import (
 )
 from src.modules.users import User
 from src.modules.system.taskqueue import ITaskQueue, TaskTrackingMixin, job_context
+from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
+from src.modules.system.taskqueue.outbox import build_dispatch
+from src.modules.system.taskqueue.outbox_repository import TaskDispatchRepository
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import WhiteLabel, WhiteLabelLevel, assert_owned
@@ -221,17 +224,33 @@ class CampaignManager(TaskTrackingMixin):
         with UnitOfWork() as uow:
             repo = CampaignRepository(uow)
             repo.launch_campaign(campaign_id, questions_snapshot, campaign_recipients)
+            # La intención de encolar va en la MISMA transacción que el
+            # lanzamiento (#551). Antes el submit caía fuera, y si Redis fallaba
+            # justo ahí la campaña quedaba lanzada —snapshot congelado, tokens
+            # acuñados, cuota cobrada— pero sin un solo correo enviado y sin
+            # nada que lo reintentase: no hay reconciliación de campañas.
+            #
+            # Repetir el envío es seguro, que es lo que la outbox exige de todo
+            # consumidor suyo: `_run_campaign_send` solo toma los destinatarios
+            # con `sent_at is None` y confirma cada `mark_sent()` en su propia
+            # transacción, así que un segundo intento alcanza únicamente a quien
+            # todavía no recibió el correo.
+            dispatch = TaskDispatchRepository(uow).save(build_dispatch(
+                func=CampaignManager.execute_campaign_send,
+                name=f"CampaignSend-{campaign_id}",
+                category=self.TASK_CATEGORY,
+                args=(campaign_id, self.user.id),
+                external_id=self.external_id_for(campaign_id),
+            ))
+            dispatch_id = dispatch.id
             # Durable antes de encolar: el worker corre en otro proceso y debe
             # ver el snapshot + los tokens ya persistidos.
             uow.commit_for_handoff()
 
-        self._task_queue.submit(
-            func=CampaignManager.execute_campaign_send,
-            args=(campaign_id, self.user.id),
-            name=f"CampaignSend-{campaign_id}",
-            category=self.TASK_CATEGORY,
-            external_id=self.external_id_for(campaign_id),
-        )
+        # Camino feliz: publicar ya, para no añadir latencia cuando Redis está
+        # arriba. Si falla, la fila queda `pending` y la recogen el barrido
+        # periódico o la reconciliación de arranque.
+        OutboxDispatcher.dispatch(dispatch_id, task_queue=self._task_queue)
         logger.info(f"Campaña {campaign_id} lanzada: {len(campaign_recipients)} destinatarios")
 
         return self.get_campaign(campaign_id)

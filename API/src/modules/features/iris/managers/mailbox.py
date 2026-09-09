@@ -449,7 +449,14 @@ class IrisMailboxManager(TaskTrackingMixin):
     def submit_sync(self, connection_id: int) -> None:
         """Encola un job de sync para ``connection_id`` sin comprobar ownership
         (uso interno: llamado también por ``IrisMailboxScheduler``, que no
-        actúa en nombre de un usuario concreto)."""
+        actúa en nombre de un usuario concreto).
+
+        Encola directo, sin la outbox transaccional: no persiste ninguna fila
+        antes del ``submit()``, así que no hay huérfano que prevenir, y un
+        encolado perdido se repara solo en la siguiente pasada del
+        ``IrisMailboxScheduler``, que sondea periódicamente todas las
+        conexiones. Se revisó con los demás en #551 y se dejó así.
+        """
         self._task_queue.submit(
             func=IrisMailboxManager.execute_sync_connection,
             args=(connection_id,),

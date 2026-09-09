@@ -145,6 +145,15 @@ class IrisPhishingNotifyManager:
         ``finished`` sea durable — el worker corre en otro proceso y no vería
         una fila todavía sin confirmar (mismo contrato que
         ``HygeiaNotifyManager.enqueue_for``).
+
+        Sigue encolando fuera de la transacción que marca el análisis, y se
+        revisó así en #551. A diferencia de los avisos de reautenticación,
+        sync atascado y ``host_down`` de Hygeia, aquí no hay guardia
+        anti-duplicado que se confirme antes: el llamante
+        (``IrisManager._enqueue_phishing_notification``) es fire-and-forget a
+        propósito y ya traga sus propios fallos, así que un encolado perdido
+        cuesta un correo, no un aviso suprimido de forma permanente. La
+        migración de los tres que sí tienen guardia va aparte.
         """
         TaskQueue.get_instance().submit(
             func=IrisPhishingNotifyManager.execute_notify_phishing,
