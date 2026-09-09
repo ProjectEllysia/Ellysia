@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, List, Optional, Tuple
 
-from sqlalchemy import and_, asc, desc, nullslast, update
+from sqlalchemy import and_, asc, delete, desc, nullslast, select, update
 from sqlalchemy.orm import joinedload
 
 from src.modules.infrastructure import BaseRepository, DocumentRepository
@@ -18,7 +18,7 @@ from src.modules.shared import utcnow_naive
 
 from .model import (
     IrisAnalysis, IrisMailboxConnection, IrisMailboxInbox, IrisNotificationPreference,
-    IrisRuleResult, IrisDocument,
+    IrisRawMessage, IrisRuleResult, IrisDocument,
 )
 
 
@@ -191,6 +191,59 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
                 IrisAnalysis.finished_at > since,
             )
             .order_by(IrisAnalysis.finished_at.asc())
+            .all()
+        )
+
+    def count_by_user(self, user_id: int) -> int:
+        """Cuántos análisis tiene este usuario en total -- para el informe
+        de retención (M09/B17), que necesita el denominador."""
+        return self._session.query(IrisAnalysis.id).filter(IrisAnalysis.user_id == user_id).count()
+
+    def count_with_raw_retained_by_user(self, user_id: int) -> int:
+        """De los análisis de este usuario, cuántos conservan todavía su
+        raw (M09/B17) -- el complemento de cuántos ya se purgaron."""
+        return (
+            self._session.query(IrisAnalysis.id)
+            .join(IrisRawMessage, IrisRawMessage.analysis_id == IrisAnalysis.id)
+            .filter(IrisAnalysis.user_id == user_id)
+            .count()
+        )
+
+    def purge_raw_messages_older_than(self, cutoff: datetime) -> int:
+        """Purga (borra) el ``IrisRawMessage`` de cada análisis creado antes
+        de ``cutoff``, conservando el análisis y sus resultados (M09/B17/B19).
+
+        DELETE masivo en vez de cargar cada fila por el ORM: ``IrisRawMessage``
+        no tiene ninguna tabla que dependa de ella (a diferencia de borrar un
+        ``IrisAnalysis`` entero, que si se hiciera igual dejaría huérfanas
+        las filas de ``IrisRuleResult``, que solo cascadan a nivel de ORM,
+        no de base de datos -- ver ``delete_analyses_older_than``), así que
+        aquí no hay riesgo de huérfanos que evitar yendo fila a fila.
+        """
+        result = self._session.execute(
+            delete(IrisRawMessage).where(
+                IrisRawMessage.analysis_id.in_(
+                    select(IrisAnalysis.id).where(IrisAnalysis.created_at < cutoff)
+                )
+            )
+        )
+        return result.rowcount
+
+    def get_analyses_older_than(self, cutoff: datetime) -> List[IrisAnalysis]:
+        """Análisis creados antes de ``cutoff`` -- candidatos a borrado
+        completo cuando ``iris.analysisRetentionDays`` está activo (B17).
+
+        Devuelve instancias ORM (no un ``DELETE`` masivo): borrarlas una a
+        una vía ``BaseRepository.delete`` es lo que dispara el cascade real
+        hacia ``IrisRuleResult`` (``cascade="all, delete-orphan"`` es un
+        mecanismo del ORM, no de la base de datos -- un ``DELETE`` en SQL
+        directo sobre ``IrisAnalysis`` dejaría esas filas huérfanas). El
+        criterio de cierre de B17 exige explícitamente que la retención no
+        deje huérfanos.
+        """
+        return (
+            self._session.query(IrisAnalysis)
+            .filter(IrisAnalysis.created_at < cutoff)
             .all()
         )
 

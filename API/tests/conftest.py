@@ -50,6 +50,9 @@ os.environ.setdefault("MFA_ENCRYPTION_KEY", "oZrC9aq99vdSaSW5nk55KNJFr9flChUBjs1
 # Clave Fernet distinta de MFA_ENCRYPTION_KEY (purposes no intercambiables,
 # ver shared._crypto) para el refresh token del conector de buzón de Iris.
 os.environ.setdefault("IRIS_MAILBOX_ENCRYPTION_KEY", "wMNiTz_4azXsQb3lJg8Fvv0hpRbPz50TV1ZivCMvx_E=")
+# Idem para el raw MIME/cabeceras de IrisAnalysis, separado en su propia
+# fila cifrada (IrisRawMessage) por M09/B19.
+os.environ.setdefault("IRIS_RAW_MESSAGE_ENCRYPTION_KEY", "PttUWa9N_8cdsC4t113HiqFmxjCYYTIoplsFkz5U71Y=")
 os.environ.setdefault("ACCESS_TOKEN_EXPIRY_MINUTES", "30")
 os.environ.setdefault("REFRESH_TOKEN_EXPIRY_DAYS", "7")
 os.environ.setdefault("FLASK_ENV", "development")

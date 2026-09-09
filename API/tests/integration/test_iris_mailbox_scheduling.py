@@ -62,3 +62,13 @@ def test_run_notifications_delegates_to_check_and_notify(app):
             IrisMailboxScheduler._run_notifications()
 
         fake_check.assert_called_once_with()
+
+
+def test_run_retention_delegates_to_run_retention(app):
+    """El job de retención (M09/B17/B19) es igual de fino -- toda la lógica
+    vive en ``services/retention.run_retention``."""
+    with app.app_context():
+        with mock.patch.object(scheduling_mod, "run_retention") as fake_retention:
+            IrisMailboxScheduler._run_retention()
+
+        fake_retention.assert_called_once_with()

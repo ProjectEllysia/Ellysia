@@ -2,9 +2,11 @@
 IrisMailboxScheduler — sondea las conexiones de buzón activas cada
 ``iris.pollIntervalMinutes`` y encola un job de sync por conexión vencida.
 También registra el chequeo periódico de notificaciones de M08 (digests
-diarios pendientes y avisos de conexión atascada) -- ver el docstring de
-``services/notifications/scheduling.py`` sobre por qué comparte este
-scheduler en vez de tener uno propio.
+diarios pendientes y avisos de conexión atascada) y el job de retención de
+M09/B17/B19 (purgar raw vencido, borrar análisis enteros si hay un límite
+duro configurado) -- ver los docstrings de ``services/notifications/
+scheduling.py`` y ``services/retention.py`` sobre por qué comparten este
+scheduler en vez de tener uno propio cada uno.
 
 Mismo patrón que ``hygeia/services/scheduling.py::HygeiaScheduler``:
 instancia propia de APScheduler (no compartida con Themis/Hygeia — acoplar
@@ -31,6 +33,7 @@ from src.modules.infrastructure.scheduling import make_background_scheduler, sch
 from ...managers.mailbox import IrisMailboxManager
 from ...repositories import IrisMailboxConnectionRepository
 from ..notifications.scheduling import check_and_notify
+from ..retention import run_retention
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,7 @@ class IrisMailboxScheduler:
 
         interval = CR.iris_config().poll_interval_minutes
         notification_interval = CR.iris_config().notification_check_interval_minutes
+        retention_interval = CR.iris_config().retention_check_interval_hours
         cls._scheduler = make_background_scheduler()
         cls._scheduler.add_job(
             func=cls._poll_connections,
@@ -67,10 +71,20 @@ class IrisMailboxScheduler:
             max_instances=1,
             name="Iris notification check",
         )
+        cls._scheduler.add_job(
+            func=cls._run_retention,
+            trigger="interval",
+            hours=retention_interval,
+            id="iris_retention",
+            replace_existing=True,
+            max_instances=1,
+            name="Iris retention",
+        )
         cls._scheduler.start()
         logger.info(
-            "Scheduler de buzones de Iris iniciado (sondeo cada %d min, notificaciones cada %d min)",
-            interval, notification_interval,
+            "Scheduler de buzones de Iris iniciado (sondeo cada %d min, "
+            "notificaciones cada %d min, retención cada %d h)",
+            interval, notification_interval, retention_interval,
         )
 
     @classmethod
@@ -109,3 +123,10 @@ class IrisMailboxScheduler:
         """Entry point del job de notificaciones de M08 (aislamiento de
         errores y cierre de sesión vía ``scheduler_job``)."""
         check_and_notify()
+
+    @staticmethod
+    @scheduler_job(logger, "Error en la retención de Iris")
+    def _run_retention() -> None:
+        """Entry point del job de retención de M09/B17/B19 (aislamiento de
+        errores y cierre de sesión vía ``scheduler_job``)."""
+        run_retention()

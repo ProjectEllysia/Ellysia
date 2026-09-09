@@ -39,6 +39,7 @@ from ..exceptions import (
     IrisExecutionError,
     IrisInvalidInputError,
     IrisInvalidStateError,
+    IrisRawMessagePurgedError,
 )
 from ..model import IrisAnalysis, IrisRuleResult
 from ..repositories import IrisAnalysisRepository, IrisRuleResultRepository
@@ -279,6 +280,27 @@ class IrisManager(TaskTrackingMixin):
             },
         }
 
+    @staticmethod
+    def get_retention_report(user_id: int) -> Dict[str, Any]:
+        """Política de retención vigente más el estado real de los análisis
+        de este usuario frente a ella (M09/B17): cierra el criterio de
+        "existe una política visible" con datos concretos, no solo los
+        valores de configuración -- un usuario puede ver cuántos de sus
+        análisis conservan todavía el raw y cuántos ya lo perdieron por
+        retención, no solo que "el raw caduca a los 90 días" en abstracto.
+        """
+        config = CR.iris_config()
+        repo = build_repository(IrisAnalysisRepository)
+        total = repo.count_by_user(user_id)
+        with_raw = repo.count_with_raw_retained_by_user(user_id)
+        return {
+            "raw_message_retention_days": config.raw_message_retention_days,
+            "analysis_retention_days": config.analysis_retention_days,
+            "total_analyses": total,
+            "analyses_with_raw_retained": with_raw,
+            "analyses_with_raw_purged": total - with_raw,
+        }
+
     def get_analysis_status(self, analysis_id: int) -> Optional[str]:
         """Return the current lifecycle status string of an analysis.
 
@@ -425,8 +447,14 @@ class IrisManager(TaskTrackingMixin):
 
         Returns:
             The new IrisAnalysis primary key.
+
+        Raises:
+            IrisRawMessagePurgedError: La retención ya purgó el raw de este
+                análisis (M09/B17/B19) -- sin él no hay nada que reanalizar.
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
+        if analysis.raw_headers is None:
+            raise IrisRawMessagePurgedError(analysis_id)
         title = f"{analysis.title} (reanálisis)" if analysis.title else f"Reanálisis de #{analysis_id}"
         return self.analyze(analysis.raw_headers, user_id, title=title)
 
@@ -437,8 +465,15 @@ class IrisManager(TaskTrackingMixin):
         column is needed. Returns ``available: false`` for headers-only
         submissions (no full ``.eml`` means no Received chain to
         inspect).
+
+        Raises:
+            IrisRawMessagePurgedError: La retención ya purgó el raw de este
+                análisis (M09/B17/B19) -- distinto de "sin cuerpo completo":
+                aquí no hay ningún raw que parsear, ni cabeceras.
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
+        if analysis.raw_headers is None:
+            raise IrisRawMessagePurgedError(analysis_id)
         context = parse_raw_message(analysis.raw_headers or "")
         return {
             "analysisId": analysis.id,
@@ -464,8 +499,14 @@ class IrisManager(TaskTrackingMixin):
             the hash regardless of whether a heuristic fired) — each a
             sorted, deduplicated list of strings pivotable in an external
             tool (SIEM, threat-intel lookup, blocklist).
+
+        Raises:
+            IrisRawMessagePurgedError: La retención ya purgó el raw de este
+                análisis (M09/B17/B19).
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
+        if analysis.raw_headers is None:
+            raise IrisRawMessagePurgedError(analysis_id)
         context = parse_raw_message(analysis.raw_headers or "")
 
         domains: set[str] = set()
@@ -508,6 +549,39 @@ class IrisManager(TaskTrackingMixin):
             "ips": sorted(ips),
             "emails": sorted(emails),
             "hashes": sorted(hashes),
+        }
+
+    def export_analysis(self, analysis_id: int, user_id: int) -> Dict[str, Any]:
+        """Exportación completa de un análisis (B19): resultado, reglas,
+        raw (si no se ha purgado ya) y las dos vistas que se derivan de él
+        (Received-chain path, IOCs).
+
+        Pensada para que el usuario se lleve una copia completa **antes**
+        de que la retención (M09/B17) purgue el raw -- una vez purgado,
+        ``receivedPath``/``iocs`` dejan de estar disponibles (ver
+        ``get_analysis_path``/``get_analysis_iocs``) y esta exportación ya
+        no puede recuperarlos; salen como ``None`` en vez de hacer fallar
+        la exportación entera, porque el resultado analítico (que
+        ``get_analysis_results`` sí sigue devolviendo) sigue teniendo valor
+        por sí solo.
+        """
+        self.assert_analysis_ownership(analysis_id, user_id)
+        report = self.get_analysis_results(analysis_id)
+
+        try:
+            path = self.get_analysis_path(analysis_id, user_id)
+        except IrisRawMessagePurgedError:
+            path = None
+        try:
+            iocs = self.get_analysis_iocs(analysis_id, user_id)
+        except IrisRawMessagePurgedError:
+            iocs = None
+
+        return {
+            "exportedAt": isoformat_utc(utcnow_naive()),
+            "analysis": report,
+            "receivedPath": path,
+            "iocs": iocs,
         }
 
     AI_SUMMARY_EXTERNAL_ID_PREFIX = "iris-ai-summary:"

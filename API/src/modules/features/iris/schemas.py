@@ -369,10 +369,21 @@ class IrisDocumentItemSchema(Schema):
     downloadUrl = fields.String(allow_none=True)
 
 
+class IrisDocumentsQuerySchema(Schema):
+    """Query parameters for ``GET /iris/documents`` (B17): antes devolvía
+    todos los documentos del usuario de golpe, sin límite -- misma
+    convención página/tamaño que ``ResultsQuerySchema`` para el listado de
+    análisis."""
+    page = fields.Integer(load_default=1, validate=validate.Range(min=1))
+    per_page = fields.Integer(load_default=10, validate=validate.Range(min=1, max=100))
+
+
 class IrisDocumentListResponseSchema(Schema):
-    """All IrisDocuments belonging to the current user."""
+    """Página de los IrisDocument del usuario actual (B17)."""
     documents = fields.List(fields.Nested(IrisDocumentItemSchema))
     total = fields.Integer()
+    page = fields.Integer()
+    perPage = fields.Integer()
 
 
 class AnalysisDocumentsResponseSchema(Schema):
@@ -498,6 +509,16 @@ class IrisMailboxCallbackQuerySchema(Schema):
     state = fields.String(required=True)
     code = fields.String(load_default=None)
     error = fields.String(load_default=None)
+
+
+class IrisRetentionReportResponseSchema(Schema):
+    """Política de retención vigente y estado real de los análisis del
+    usuario frente a ella (M09/B17)."""
+    rawMessageRetentionDays = fields.Integer()
+    analysisRetentionDays = fields.Integer(allow_none=True)
+    totalAnalyses = fields.Integer()
+    analysesWithRawRetained = fields.Integer()
+    analysesWithRawPurged = fields.Integer()
 
 
 class IrisNotificationPreferenceResponseSchema(Schema):

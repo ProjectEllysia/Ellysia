@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import os
+from unittest import mock
 
 import pytest
+from reportlab.lib.styles import getSampleStyleSheet
 
-from src.modules.features.iris.services.reports import IrisPDFCreator
+import src.modules.features.iris.services.reports as reports_mod
+import src.modules.system.config_reading as CR
+from src.modules.features.iris.services.reports import IrisPDFCreator, IrisReportTheme, PALETTE
 
 pytestmark = pytest.mark.unit
 
@@ -157,3 +161,48 @@ def test_print_pdf_with_legitimate_verdict():
     creator = IrisPDFCreator(report=report)
     path = creator.print_pdf()
     assert os.path.exists(path)
+
+
+# ------------------------------------------------ M09: redacción del raw dump
+
+def _theme() -> IrisReportTheme:
+    return IrisReportTheme(getSampleStyleSheet(), PALETTE)
+
+
+def _rendered_raw_headers_text(report: dict) -> str:
+    """Llama a append_raw_headers() directamente y concatena el texto de
+    cada Paragraph -- más directo que parsear el PDF resultante."""
+    creator = IrisPDFCreator(report=report)
+    elements: list = []
+    creator.append_raw_headers(elements, _theme())
+    return "\n".join(el.text for el in elements if hasattr(el, "text"))
+
+
+def test_raw_headers_dump_redacts_an_unrelated_email_by_default():
+    report = _sample_report(rawHeaders=(
+        "From: a@b.com\nTo: c@d.com\nSubject: Test\n"
+        "Cc: bystander@example.com\n"
+    ))
+    rendered = _rendered_raw_headers_text(report)
+
+    assert "bystander@example.com" not in rendered
+
+
+def test_raw_headers_dump_keeps_the_surfaced_addresses():
+    report = _sample_report(rawHeaders="From: a@b.com\nTo: c@d.com\nSubject: Test\n")
+    rendered = _rendered_raw_headers_text(report)
+
+    assert "a@b.com" in rendered
+    assert "c@d.com" in rendered
+
+
+def test_raw_headers_dump_is_not_redacted_when_disabled_in_config():
+    report = _sample_report(rawHeaders=(
+        "From: a@b.com\nTo: c@d.com\nSubject: Test\nCc: bystander@example.com\n"
+    ))
+    with mock.patch.object(
+        reports_mod.CR, "iris_config", lambda: CR.IrisConfig(redact_pii_in_reports=False),
+    ):
+        rendered = _rendered_raw_headers_text(report)
+
+    assert "bystander@example.com" in rendered
