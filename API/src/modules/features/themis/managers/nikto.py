@@ -64,21 +64,16 @@ class NiktoScanManager(ScanManager):
             # programado entra por este mismo método.
             QuotaManager().consume(user_id, LimitKey.THEMIS_THIRDPARTY_SCANS)
 
-            scan = self._create_scan_record(
+            scan = self._create_scan_and_dispatch(
                 target=target_domain,
                 user_id=user_id,
                 programed_scan_id=programed_scan_id,
+                func=NiktoScanManager.execute_nikto_scan,
+                job_name="NiktoScan",
+                trailing_args=(target_domain, timeout),
+                timeout=timeout,
             )
             scan_id = scan.id
-
-            self._task_queue.submit(
-                func=NiktoScanManager.execute_nikto_scan,
-                args=(scan_id, target_domain, timeout),
-                name=f"NiktoScan-{scan_id}",
-                category=self.TASK_CATEGORY,
-                external_id=self.external_id_for(scan_id),
-                timeout=timeout + self._scan_timeout_margin,
-            )
 
             logger.info(f"Escaneo Nikto {scan_id} iniciado")
             return scan_id # type: ignore

@@ -4,8 +4,8 @@ import logging
 import time
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
-from typing import Callable, List, Optional
+from dataclasses import asdict, replace
+from typing import Any, Callable, List, Optional
 import src.modules.system.config_reading as CR
 from src.modules.accounts import LimitKey, QuotaManager
 from src.modules.system.taskqueue import ITaskQueue, JobDeadlineExceeded, job_context
@@ -172,22 +172,24 @@ class LybraEngineManager(ScanManager):
         # no debe gastar cuota. Se cobra justo antes de crear el registro.
         QuotaManager().consume(user_id, LimitKey.THEMIS_LYBRA_SCANS)
 
-        scan = self._create_scan_record(
+        # Los `Service` viajan como dicts, no como dataclasses: la outbox
+        # guarda los argumentos del job en JSONB, mientras que RQ los picklea.
+        # `execute_lybra_scan` los rehidrata al otro lado.
+        services_payload = (
+            None if services is None else [asdict(service) for service in services]
+        )
+
+        scan = self._create_scan_and_dispatch(
             target=scan_target,
             user_id=user_id,
             programed_scan_id=programed_scan_id,
             asset_id=asset_id,
+            func=LybraEngineManager.execute_lybra_scan,
+            job_name="LybraScan",
+            trailing_args=(discover_ports, services_payload, timeout, aggressive),
+            timeout=timeout,
         )
         scan_id = scan.id
-
-        self._task_queue.submit(
-            func=LybraEngineManager.execute_lybra_scan, # type: ignore
-            args=(scan_id, discover_ports, services, timeout, aggressive),
-            name=f"LybraScan-{scan_id}",
-            category=self.TASK_CATEGORY, # type: ignore
-            external_id=self.external_id_for(scan_id),
-            timeout=timeout + self._scan_timeout_margin,
-        )
 
         logger.info(f"Escaneo Lybra {scan_id} iniciado ({source.label})")
         return scan_id  # type: ignore
@@ -208,18 +210,57 @@ class LybraEngineManager(ScanManager):
         opcional por el mismo motivo, con el mismo default seguro: un job
         encolado antes de este cambio se ejecuta en modo ``safe``, nunca en
         agresivo por sorpresa.
+
+        ``services`` acepta tanto ``Service`` como el dict equivalente, y por el
+        mismo motivo de compatibilidad: desde que ``run_scan`` encola por la
+        outbox (#551) los argumentos se guardan en JSONB, así que llegan como
+        dicts. Un job pickleado por RQ antes de ese cambio sigue trayendo
+        dataclasses, y esos se dejan pasar tal cual.
         """
         with job_context() as job:
             manager = LybraEngineManager()
             manager._run_lybra( # type: ignore
                 scan_id,
                 discover_ports,
-                services,
+                LybraEngineManager._rehydrate_services(services),
                 timeout,
                 cancel_check=job.cancelled,
                 progress=job.progress,
                 aggressive=aggressive,
             )
+
+    @staticmethod
+    def _rehydrate_services(
+        services: Optional[List[Any]],
+    ) -> Optional[List[Service]]:
+        """Reconstruye los ``Service`` que llegan al worker como diccionarios.
+
+        La outbox guarda los argumentos del job en JSONB, así que un
+        ``Service`` (dataclass congelada de escalares) sale por el otro lado
+        como dict. Convertirlo aquí y no dentro de ``_run_lybra`` mantiene la
+        conversión en la costura ``execute_*``, que es la que conoce el
+        transporte; el cuerpo sigue viendo sólo ``Service``.
+
+        Args:
+            services: Lista de servicios tal como viajó en el job, o ``None``
+                si el escaneo es de autodescubrimiento (Lybra descubre los
+                puertos él mismo y no recibe payload). Cada elemento puede ser
+                un dict —lo normal desde #551— o ya un ``Service``, que es como
+                viaja un job pickleado por RQ antes de ese cambio o una llamada
+                directa desde un test.
+
+        Returns:
+            Optional[List[Service]]: La misma lista con cada dict convertido a
+                ``Service`` y los ``Service`` intactos, o ``None`` si entró
+                ``None`` — el valor que ``ServiceSource.build_for_args``
+                interpreta como "modo autodescubrimiento".
+        """
+        if services is None:
+            return None
+        return [
+            Service(**service) if isinstance(service, dict) else service
+            for service in services
+        ]
 
     @staticmethod
     def _remaining_budget(deadline: Optional[float]) -> Optional[float]:

@@ -118,21 +118,18 @@ class NucleiScanManager(ScanManager):
             # porque el flujo programado entra por este mismo método.
             QuotaManager().consume(user_id, LimitKey.THEMIS_THIRDPARTY_SCANS)
 
-            scan = self._create_scan_record(
+            scan = self._create_scan_and_dispatch(
                 target=target,
                 user_id=user_id,
                 programed_scan_id=programed_scan_id,
+                func=NucleiScanManager.execute_nuclei_scan,
+                job_name="NucleiScan",
+                trailing_args=(
+                    target, severities, tags, rate_limit, request_timeout, resolved_timeout,
+                ),
+                timeout=resolved_timeout,
             )
             scan_id = scan.id
-
-            self._task_queue.submit(
-                func=NucleiScanManager.execute_nuclei_scan,
-                args=(scan_id, target, severities, tags, rate_limit, request_timeout, resolved_timeout),
-                name=f"NucleiScan-{scan_id}",
-                category=self.TASK_CATEGORY,
-                external_id=self.external_id_for(scan_id),
-                timeout=resolved_timeout + self._scan_timeout_margin,
-            )
 
             logger.info(f"Escaneo Nuclei {scan_id} iniciado")
             return scan_id
