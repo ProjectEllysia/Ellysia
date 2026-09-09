@@ -242,6 +242,7 @@ Content-Type: application/json
 | `GET` | `/iris/results/<id>` | `IRIS_READ` | Full report with per-rule scores, analysis quality and detector version |
 | `GET` | `/iris/results/<id>/path` | `IRIS_READ` | Which rules fired and why |
 | `GET` | `/iris/results/<id>/iocs` | `IRIS_READ` | Extracted indicators of compromise |
+| `GET` | `/iris/results/<id>/export` | `IRIS_READ` | Full analysis bundle (result, rules, raw if still retained, Received-path, IOCs) as a downloadable JSON file |
 | `POST` | `/iris/results/<id>/reanalyze` | `IRIS_CREATE` | Re-run the current ruleset as a **new** analysis (returns the new id) |
 | `POST` | `/iris/results/<id>/ai-summary` | `IRIS_CREATE` | Generate an AI plain-language summary (background task); idempotent per analysis, `?regenerate=true` forces a new one |
 | `POST` | `/iris/analyze/<id>/cancel` | `IRIS_UPDATE` | Cancel a running analysis |
@@ -259,11 +260,14 @@ Content-Type: application/json
 | `POST` | `/iris/mailbox/connections/<id>/sync` | `IRIS_UPDATE` | Trigger an out-of-cycle mailbox poll |
 | `GET` | `/iris/mailbox/connections/<id>/health` | `IRIS_READ` | Connection health: last successful sync vs. last attempt, discovered/accepted/pending/retrying/dead message counts, last sync duration |
 | `GET`/`PUT` | `/iris/notification-preferences` | `IRIS_READ` / `IRIS_UPDATE` | Per-user notification settings: daily digest for non-critical Phishing verdicts, temporary mute, and toggles for the reauthorization-required and stuck-sync alerts. High-confidence Phishing verdicts always notify immediately regardless of these settings |
+| `GET` | `/iris/retention-policy` | `IRIS_READ` | Current retention policy (raw message / full analysis expiry, in days) plus how many of the current user's analyses still retain their raw content vs. have already had it purged |
 
 > [!NOTE]
 > **`CREATE` vs `UPDATE` in Iris.** `IRIS_CREATE` guards the operations that bring a *new* entity into existence and consume quota for it — submitting an analysis, re-analysing (which inserts a brand-new analysis and returns its id, leaving the original untouched), generating an AI summary, generating a PDF. `IRIS_UPDATE` guards changes to something that already exists: cancelling a running analysis, pausing a connection, forcing a poll. The full matrix is pinned by `API/tests/integration/test_iris_permissions.py`, which asserts both that the documented attribute opens each endpoint and that every other Iris attribute is refused.
 
 Iris applies rules across authentication (SPF, DKIM, DMARC, ARC), header anomalies, reply-chain/thread attacks, content heuristics (including QR-code/quishing detection), and domain spoofing, producing verdicts `Legitimate` / `Suspicious` / `Phishing`. Connected mailboxes are polled periodically by the scheduler and analyzed automatically; when a monitored mailbox receives mail judged `Phishing`, the user is notified by email (`iris.notify`). Thresholds are configured in `SecOpsConfig.json`.
+
+**Raw storage, redaction and retention (M09/B17/B19).** The raw email content (headers, or the full `.eml` in full-message mode) is stored encrypted at rest in its own table, `IrisRawMessage`, separate from the `IrisAnalysis` row that holds the queryable result (score, verdict, per-rule findings). This lets the raw content be purged on its own — after `iris.rawMessageRetentionDays` (90 by default) — without losing the analytical result, which is kept indefinitely unless `iris.analysisRetentionDays` is set to a positive number (`0` disables full deletion). A scheduled job on the same scheduler that polls mailboxes (`iris.retentionCheckIntervalHours`, 24 by default) applies this policy; `GET /iris/retention-policy` shows it, along with how many of the current user's analyses still have their raw retained. Once a given analysis's raw has been purged, `GET /iris/results/<id>/path` and `.../iocs` (both derived on demand from the raw) return `410 Gone`; the main result stays fully available. The exportable PDF report — the one view of an analysis that leaves the authenticated panel once downloaded — redacts email addresses, phone numbers and card-like numbers from the raw headers dump (`iris.redactPiiInReports`, on by default), except the sender/recipient/reply-to/return-path addresses already shown in the report's own summary, which are the evidence the report exists to show.
 
 **Trust boundary.** `Authentication-Results` and `Received` headers are partly written by whoever sent the message: MTAs *prepend* their own `Received`, so the lower hops are supplied by the sender and can be fabricated. Iris only trusts an `Authentication-Results` whose `authserv-id` matches a hop **above** the trust boundary — the contiguous run of hops belonging to the delivering organisation, plus any verifier listed in `features.iris.data.trusted_authserv_ids` (empty by default; without it trust is derived from the chain itself). An `ARC-Seal: cv=pass` is treated as context, never as permission to suppress SPF/DMARC/alignment gates, unless a trusted verifier confirms it with `arc=pass` in its own `Authentication-Results`.
 
@@ -740,7 +744,10 @@ GRAPH_CLIENT_ID=...
 GRAPH_CLIENT_SECRET=...
 GRAPH_TENANT_ID=...             # optional; "common" allows any account
 IRIS_MAILBOX_ENCRYPTION_KEY=... # Fernet key that encrypts stored OAuth refresh tokens at rest
+IRIS_RAW_MESSAGE_ENCRYPTION_KEY=... # Fernet key that encrypts stored raw email content at rest (IrisRawMessage)
 ```
+
+**What each provider's OAuth scope actually grants (B19):** Gmail uses `gmail.metadata`, a true headers-only scope — when a connection has "full message mode" off, the app never sees the message body at all, not just at the application level. Microsoft Graph has no equivalent: `Mail.Read` grants the full message body regardless of Iris's own headers-only setting, because Graph does not offer a metadata-only delegated permission for mail. With full message mode off, the Microsoft connector still only *requests* headers — it never calls for the body — but the OAuth consent itself grants more than Iris uses. This is a platform limitation, not a gap in this codebase (see `services/mailbox/microsoft.py`'s module docstring). Whichever provider is used, the raw content Iris does fetch is stored encrypted and separately from the analysis result (`IrisRawMessage`), and is purged independently of it by the retention policy — see `GET /iris/retention-policy`.
 
 ## Technology stack
 
