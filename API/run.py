@@ -165,6 +165,13 @@ def _run_shutdown_cleanup() -> None:
     except Exception as e:
         _logger.error(f"Error deteniendo scheduler de buzones de Iris: {e}")
 
+    _logger.info("[Shutdown] Deteniendo scheduler de outbox de TaskQueue...")
+    try:
+        from src.modules.system.taskqueue.scheduling import TaskDispatchScheduler
+        TaskDispatchScheduler.stop()
+    except Exception as e:
+        _logger.error(f"Error deteniendo scheduler de outbox de TaskQueue: {e}")
+
     _logger.info("[Shutdown] Cerrando sesiones de base de datos...")
     try:
         unit_of_work.close_all()
@@ -434,6 +441,7 @@ def _configure_scheduling() -> None:
     from src.modules.features.iris.services.mailbox.scheduling import IrisMailboxScheduler
     from src.modules.accounts.services.scheduling import AccountsScheduler
     from src.modules.users.services.scheduling import UsersScheduler
+    from src.modules.system.taskqueue.scheduling import TaskDispatchScheduler
 
     _logger.info("Reconciliando escaneos huérfanos...")
     try:
@@ -453,6 +461,15 @@ def _configure_scheduling() -> None:
     except Exception as e:
         _logger.warning("No se pudo reconciliar análisis Iris huérfanos: %s", e)
 
+    _logger.info("Publicando TaskDispatch pendientes de la outbox...")
+    try:
+        from src.modules.system.taskqueue.outbox import OutboxDispatcher
+        dispatched = OutboxDispatcher.dispatch_pending()
+        if dispatched:
+            _logger.info("Se publicaron %d TaskDispatch pendiente(s) al arrancar", dispatched)
+    except Exception as e:
+        _logger.warning("No se pudo publicar la outbox de TaskQueue al arrancar: %s", e)
+
     _logger.info("Arrancando scheduler de tareas programadas...")
     ThemisScheduler.start()
 
@@ -467,6 +484,9 @@ def _configure_scheduling() -> None:
 
     _logger.info("Arrancando scheduler de recordatorios MFA...")
     UsersScheduler.start()
+
+    _logger.info("Arrancando scheduler de outbox de TaskQueue...")
+    TaskDispatchScheduler.start()
 
 
 def _run_migrations() -> None:

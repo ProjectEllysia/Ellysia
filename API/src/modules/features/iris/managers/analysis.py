@@ -29,6 +29,9 @@ from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive, isoformat_utc, CANCELLABLE_STATES as _CANCELLABLE_STATES
 from src.modules.system.taskqueue import TaskQueue, TaskTrackingMixin, job_context
+from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
+from src.modules.system.taskqueue.outbox import build_dispatch
+from src.modules.system.taskqueue.outbox_repository import TaskDispatchRepository
 
 from ..exceptions import (
     IrisAnalysisNotFoundError,
@@ -186,11 +189,37 @@ class IrisManager(TaskTrackingMixin):
         # ingesta desde un buzón conectado (mailbox sync), que no pasa por HTTP.
         QuotaManager().consume(user_id, LimitKey.IRIS_ANALYSES)
 
+        if self.TASK_CATEGORY is None:
+            QuotaManager().refund(user_id, LimitKey.IRIS_ANALYSES)
+            raise IrisExecutionError("Task category is not defined for IrisManager.")
+
+        analysis = IrisAnalysis(
+            raw_headers=raw_input,
+            user_id=user_id,
+            title=title.strip()[:120] if title and title.strip() else None,
+            status="pending",
+            connection_id=connection_id,
+            source_message_uid=source_message_uid,
+        )
         try:
-            analysis_id = self._create_analysis_record(
-                raw_input, user_id, title=title,
-                connection_id=connection_id, source_message_uid=source_message_uid,
-            )
+            with UnitOfWork() as uow:
+                IrisAnalysisRepository(uow).save(analysis)
+                analysis_id = analysis.id
+                # B08: la intención de publicar se guarda en la MISMA
+                # transacción que el análisis -- si la API muere o Redis
+                # falla justo después del commit, el barrido periódico de
+                # la outbox (o la reconciliación de arranque) publica el
+                # job más tarde en vez de dejar la fila huérfana para
+                # siempre (ver system/taskqueue/outbox.py).
+                dispatch = TaskDispatchRepository(uow).save(build_dispatch(
+                    func=IrisManager.execute_iris_analysis,
+                    name=f"IrisAnalysis-{analysis_id}",
+                    category=self.TASK_CATEGORY,
+                    args=(analysis_id, raw_input),
+                    external_id=self.external_id_for(analysis_id),
+                ))
+                # Durable antes de intentar publicar: el worker corre en otro proceso.
+                uow.commit_for_handoff()
         except SQLAlchemyError:
             # Carrera perdida contra otra llamada para el mismo mensaje: la
             # comprobación de arriba y este insert no son atómicos entre sí,
@@ -201,16 +230,11 @@ class IrisManager(TaskTrackingMixin):
             raise
         logger.info(f"Iris analysis {analysis_id} created for user {user_id}")
 
-        if self.TASK_CATEGORY is None:
-            raise IrisExecutionError("Task category is not defined for IrisManager.")
-
-        self._task_queue.submit(
-            func=IrisManager.execute_iris_analysis,
-            args=(analysis_id, raw_input),
-            name=f"IrisAnalysis-{analysis_id}",
-            category=self.TASK_CATEGORY,
-            external_id=self.external_id_for(analysis_id),
-        )
+        # Camino feliz: publicar ahora mismo en vez de esperar al barrido
+        # periódico, para que el análisis arranque sin latencia añadida en
+        # el caso normal (Redis arriba). Si falla, la fila queda `pending`
+        # y algo la recogerá más tarde -- nunca se pierde el trabajo.
+        OutboxDispatcher.dispatch(dispatch.id, task_queue=self._task_queue)
 
         return analysis_id
 
@@ -778,25 +802,6 @@ class IrisManager(TaskTrackingMixin):
     # =========================================================================
     # INTERNAL
     # =========================================================================
-
-    def _create_analysis_record(self, raw_headers: str, user_id: int, title: str | None = None,
-                                 connection_id: int | None = None,
-                                 source_message_uid: str | None = None) -> int:
-        """Persist a new IrisAnalysis row in ``pending`` state."""
-        analysis = IrisAnalysis(
-            raw_headers=raw_headers,
-            user_id=user_id,
-            title=title.strip()[:120] if title and title.strip() else None,
-            status="pending",
-            connection_id=connection_id,
-            source_message_uid=source_message_uid,
-        )
-        with UnitOfWork() as uow:
-            repo = IrisAnalysisRepository(uow)
-            repo.save(analysis)
-            # Durable antes de encolar: el worker corre en otro proceso.
-            uow.commit_for_handoff()
-        return analysis.id # type: ignore
 
     @staticmethod
     def _validate_headers_pre(raw_headers: str) -> None:

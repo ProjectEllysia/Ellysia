@@ -47,7 +47,8 @@
     "taskqueue": {
       "history_max_items": 200,
       "history_ttl_seconds": 3600,
-      "max_workers": 4
+      "max_workers": 4,
+      "outbox_sweep_interval_seconds": 60
     }
   },
   "tools": {

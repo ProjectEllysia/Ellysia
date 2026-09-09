@@ -765,6 +765,10 @@ class _FakeTaskQueue:
 
 
 def test_reanalyze_submits_the_same_stored_raw_input(monkeypatch):
+    """reanalyze() delega en analyze() con el raw_headers guardado -- sus
+    propios internos (cuota, outbox, TaskQueue) ya tienen cobertura directa
+    en test_iris_quota_idempotency.py y test_iris.py, así que aquí basta con
+    comprobar qué le pasa reanalyze() a analyze()."""
     from types import SimpleNamespace
 
     raw = "From: a@b.com\r\nSubject: Hi\r\n\r\n"
@@ -773,15 +777,21 @@ def test_reanalyze_submits_the_same_stored_raw_input(monkeypatch):
         IrisManager, "assert_analysis_ownership",
         classmethod(lambda cls, analysis_id, user_id: fake_analysis),
     )
-    monkeypatch.setattr(IrisManager, "_create_analysis_record",
-                        lambda self, r, uid, title=None, connection_id=None, source_message_uid=None: 99)
-    monkeypatch.setattr(IrisManager, "_validate_headers_pre", staticmethod(lambda r: None))
 
-    fake_queue = _FakeTaskQueue()
-    new_id = IrisManager(task_queue=fake_queue).reanalyze(analysis_id=5, user_id=1)
+    captured = {}
+
+    def _fake_analyze(self, raw_headers, user_id, title=None, **kwargs):
+        captured["raw_headers"] = raw_headers
+        captured["user_id"] = user_id
+        return 99
+
+    monkeypatch.setattr(IrisManager, "analyze", _fake_analyze)
+
+    new_id = IrisManager().reanalyze(analysis_id=5, user_id=1)
 
     assert new_id == 99
-    assert fake_queue.submitted["args"] == (99, raw)
+    assert captured["raw_headers"] == raw
+    assert captured["user_id"] == 1
 
 
 def test_reanalyze_title_references_the_original():
@@ -790,18 +800,14 @@ def test_reanalyze_title_references_the_original():
     captured_titles = []
 
     class _Manager(IrisManager):
-        def _create_analysis_record(self, raw, uid, title=None, connection_id=None, source_message_uid=None):
+        def analyze(self, raw_headers, user_id, title=None, **kwargs):
             captured_titles.append(title)
             return 100
-
-        @staticmethod
-        def _validate_headers_pre(raw):
-            return None
 
     fake_analysis = SimpleNamespace(id=7, title="Factura pendiente", raw_headers="From: a@b.com\r\n\r\n")
     _Manager.assert_analysis_ownership = classmethod(lambda cls, analysis_id, user_id: fake_analysis)
 
-    _Manager(task_queue=_FakeTaskQueue()).reanalyze(analysis_id=7, user_id=1)
+    _Manager().reanalyze(analysis_id=7, user_id=1)
 
     assert captured_titles == ["Factura pendiente (reanálisis)"]
 
