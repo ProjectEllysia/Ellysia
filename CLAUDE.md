@@ -411,6 +411,25 @@ def calculate_critical_threshold(base_score: float, scan_type: ScanType, multipl
     """
 ```
 
+**El docstring describe lo que la función es hoy, no lo que fue.** Frases como «antes esto se
+tragaba la excepción», «hasta el cambio X devolvía una lista» o «se reescribió para…» cuentan la
+historia del cuerpo, no su contrato: obligan a quien lee a reconstruir una versión que ya no existe
+para entender la que tiene delante, y se quedan viejas en cuanto el código vuelve a cambiar. Esa
+historia ya está en el mensaje de commit y en la descripción del PR, que es donde se busca.
+
+Lo que sí cabe es el *porqué* de una decisión que hoy no es obvia, escrito en presente: «se captura
+aquí y se vuelve a lanzar porque la cola debe ver el trabajo como fallido» explica el código actual;
+«antes no se capturaba y la fila se quedaba en `running`» explica el código anterior. Si el pasado
+importa de verdad a quien usa la función —datos antiguos que siguen en la base de datos, un formato
+que se sigue aceptando por compatibilidad—, va en un bloque aparte y marcado como aviso, no mezclado
+con la descripción:
+
+```python
+    Warning:
+        Los jobs encolados antes de pasar a la outbox traen ``Service`` ya
+        construidos en vez de dicts; se aceptan los dos.
+```
+
 Esto rige para código nuevo y para funciones/clases/métodos que se toquen al pasar; no obliga a
 reescribir en masa lo que ya existe y no se está editando.
 
