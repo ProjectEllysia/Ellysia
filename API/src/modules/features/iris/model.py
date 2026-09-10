@@ -229,9 +229,12 @@ class IrisMailboxConnection(Base):
     automatic Iris ingestion.
 
     Stores the minimum needed to re-request access later — never the
-    mailbox content itself. See ``plans/feature/iris/iris-mailbox-connector.md``
-    Fase 2/3 for the full design rationale (why this can't live in Acheron,
-    why the refresh token is encrypted at rest instead).
+    mailbox content itself.
+
+    The refresh token cannot live in an Acheron vault: vault fields are only
+    ever decrypted on the client, and the background sync needs the server
+    to use the token on its own, with no user present. So it is stored here
+    instead, encrypted at rest with a server-side key.
 
     Attributes:
         id: Primary key, auto-incrementing integer.

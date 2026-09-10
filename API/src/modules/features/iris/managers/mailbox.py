@@ -1,7 +1,6 @@
 """
 IrisMailboxManager — OAuth connect/callback, connection CRUD, and background
-mailbox sync for the Iris mailbox connector (Fase 4 del plan
-plans/feature/iris/iris-mailbox-connector.md).
+mailbox sync for the Iris mailbox connector.
 
 Fichero separado de ``managers.py`` (que ya tiene 1080+ líneas con
 IrisManager + IrisReportManager) siguiendo el precedente de módulos grandes
@@ -457,7 +456,7 @@ class IrisMailboxManager(TaskTrackingMixin):
         antes del ``submit()``, así que no hay huérfano que prevenir, y un
         encolado perdido se repara solo en la siguiente pasada del
         ``IrisMailboxScheduler``, que sondea periódicamente todas las
-        conexiones. Se revisó con los demás en #551 y se dejó así.
+        conexiones.
         """
         self._task_queue.submit(
             func=IrisMailboxManager.execute_sync_connection,

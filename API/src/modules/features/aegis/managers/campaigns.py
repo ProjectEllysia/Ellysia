@@ -1,6 +1,5 @@
 """
-CampaignManager — campañas de concienciación (D3 en
-plans/deuda-tecnica-y-calidad.md).
+CampaignManager — campañas de concienciación.
 
 CRUD de listas de distribución y sus destinatarios, y el ciclo de vida de
 una campaña: creación (draft), lanzamiento (snapshot del quiz + tokens
@@ -225,7 +224,7 @@ class CampaignManager(TaskTrackingMixin):
             repo = CampaignRepository(uow)
             repo.launch_campaign(campaign_id, questions_snapshot, campaign_recipients)
             # La intención de encolar va en la MISMA transacción que el
-            # lanzamiento (#551). Antes el submit caía fuera, y si Redis fallaba
+            # lanzamiento. Antes el submit caía fuera, y si Redis fallaba
             # justo ahí la campaña quedaba lanzada —snapshot congelado, tokens
             # acuñados, cuota cobrada— pero sin un solo correo enviado y sin
             # nada que lo reintentase: no hay reconciliación de campañas.

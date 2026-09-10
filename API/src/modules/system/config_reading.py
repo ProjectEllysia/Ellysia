@@ -615,8 +615,7 @@ class ScribeConfig(_StrategySelection):
 
     max_input_tokens: int = 24000
     """Tope de tokens estimados del prompt (system + examples + user) que
-    ``AIGenerator.digest`` deja pasar antes de invocar la estrategia (Issue
-    #118).
+    ``AIGenerator.digest`` deja pasar antes de invocar la estrategia.
 
     Sin esto, un writer de dominio (p.ej. ``LybraAIWriter`` con un scan de
     muchos hallazgos) podía generar un payload que OpenAI rechazaba con un

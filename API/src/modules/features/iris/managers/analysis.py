@@ -8,8 +8,8 @@ Coordinates the analysis lifecycle:
    determines a verdict, and persists results.
 4. Provides status queries and cancellation support.
 
-D4 en ``plans/deuda-tecnica-y-calidad.md``: extraído del ``managers.py``
-de 64 KB que reunía este manager y el de informes.
+Extraído del antiguo ``managers.py`` de 64 KB, que reunía este manager y el
+de informes.
 """
 
 from __future__ import annotations
@@ -666,7 +666,7 @@ class IrisManager(TaskTrackingMixin):
             # ni la reserva ni el cobro tienen sentido.
             #
             # Es la razón por la que este sitio se quedó fuera de la outbox
-            # transaccional al auditarlo en #551: la compensación ya existe y
+            # transaccional: la compensación ya existe y
             # es completa -- el análisis no se queda en `running` y el usuario
             # recupera su cuota, así que puede reintentar. Lo único que la
             # outbox añadiría es ejecutar el resumen solo en vez de que el

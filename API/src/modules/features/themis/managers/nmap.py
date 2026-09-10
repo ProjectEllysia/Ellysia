@@ -1,8 +1,10 @@
-"""NmapScanManager — extraido de thirdparty_scans_managers.py (D2 en
-plans/deuda-tecnica-y-calidad.md: el fichero unificaba Nmap/Nikto/Nuclei
-"porque cada uno era pequeño y compartía la misma forma"; con A4 (base
-_create_scan_record) y A6 (base _previous_findings_map) ya no comparten
-apenas cuerpo, así que la unificación dejó de pagarse sola)."""
+"""NmapScanManager — extraído del antiguo thirdparty_scans_managers.py.
+
+Aquel fichero unificaba Nmap/Nikto/Nuclei "porque cada uno era pequeño y
+compartía la misma forma"; desde que la creación del registro
+(``_create_scan_record``) y el mapa de hallazgos previos
+(``_previous_findings_map``) viven en la clase base, ya no comparten apenas
+cuerpo, así que la unificación dejó de pagarse sola."""
 
 import logging
 from typing import Optional

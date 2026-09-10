@@ -1,5 +1,4 @@
-"""``calculate_next_run`` y ``_build_trigger`` no pueden divergir en silencio
-(A12 en plans/deuda-tecnica-y-calidad.md).
+"""``calculate_next_run`` y ``_build_trigger`` no pueden divergir en silencio.
 
 ``ThemisScheduler`` calcula "cuándo dispara" por dos caminos independientes:
 

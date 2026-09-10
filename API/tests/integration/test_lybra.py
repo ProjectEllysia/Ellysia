@@ -699,7 +699,8 @@ def test_lybra_active_check_ftp_anonymous_login_persists_confirmed_finding(app, 
     Lo que se sustituye es el **socket**, no la sesión: el ``NetworkSession``
     real hace su trabajo, saludo incluido. Un doble por encima de la sesión
     entrega respuestas que el transporte real no produce, y eso fue justo lo
-    que ocultó el bug de #265 (ver la nota de ``tests/unit/test_lybra_checks.py``)."""
+    que ocultó que los dos checks ``network`` no podían dispararse contra un
+    servidor real (ver la nota de ``tests/unit/test_lybra_checks.py``)."""
     import src.modules.system.config_reading as CR
     from src.modules.features.themis.lybra import checks as checks_mod
 
@@ -823,7 +824,7 @@ class _FrozenClock:
 def test_a_scan_that_runs_out_of_clock_stops_probing_and_finishes_partial(app, admin_user, monkeypatch):
     """El plazo del panel acota el escaneo entero, no sólo su primera fase.
 
-    El descubrimiento de puertos tenía presupuesto de reloj desde #395, pero las
+    El descubrimiento de puertos ya tenía presupuesto de reloj, pero las
     fases siguientes no tenían ninguno: un «plazo por operación» limita lo que
     tarda cada sonda, no cuántas sondas se hacen, y cuántas se hacen lo decide
     cuántos puertos abiertos tenga el objetivo. Con un rango ancho el

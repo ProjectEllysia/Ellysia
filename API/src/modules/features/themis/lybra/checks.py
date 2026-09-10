@@ -96,8 +96,8 @@ _HTTP_SERVICE_NAMES = {"http", "https", "http-proxy", "https-alt", "http-alt"}
 # checks de higiene de certificado, no cómo se habla con ellos. La lista es una
 # red de seguridad barata, no una verdad: un TLS en un puerto que no esté aquí
 # se sondea igual de bien (el esquema se observa), pero no recibe los checks de
-# certificado. Ampliarla es gratis; hacerla innecesaria es #283, que ataca la
-# misma enfermedad —decidir por número de puerto— desde el otro lado.
+# certificado. Ampliarla es gratis; lo que la haría innecesaria es decidir la
+# candidatura observando el servicio en vez de mirar su número de puerto.
 _TLS_HYGIENE_PORTS = {443, 8443, 9443, 10443, 4443, 7443, 8834, 9091, 5986, 636, 3269}
 
 # APIs de administración que hablan HTTP y publican su versión en un JSON sin

@@ -1,5 +1,4 @@
-"""Invariantes estructurales del motor Lybra (D1 en
-plans/deuda-tecnica-y-calidad.md, y L52).
+"""Invariantes estructurales del motor Lybra.
 
 Son dos, y protegen cosas distintas: que la capa pura ``themis/lybra/`` no
 toque el ORM, y que la capa con efectos ``themis/managers/lybra/`` no dependa

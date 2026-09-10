@@ -46,7 +46,7 @@ class AIResponseError(EllysiaException):
 
 
 class AIPayloadTooLargeError(EllysiaException):
-    """El prompt estimado supera el tope de tokens configurado (Issue #118).
+    """El prompt estimado supera el tope de tokens configurado.
 
     Se lanza *antes* de invocar la estrategia — nunca es transitorio (el mismo
     prompt sobredimensionado fallaría igual en cada reintento), así que

@@ -1,5 +1,4 @@
-"""Tests de las reglas/gates nuevos de la recalibración de pesos
-(``plans/feature/iris/iris-rule-weight-recalibration.md``, secciones 3 y 5):
+"""Tests de las reglas/gates nuevos de la recalibración de pesos de Iris:
 
 - Auth Results Provenance (G-A): authserv-id ↔ último `by` del Received.
 - Recipient Domain Lookalike (G-B): lookalike del dominio del destinatario.

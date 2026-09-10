@@ -329,7 +329,7 @@ def test_the_longest_possible_v4_vector_fits_in_the_column():
     assert len(peor_caso) <= CveEntry.__table__.c.cvss_vector.type.length
 
 
-# ------------------------------------------------- platform-gated CVEs (#118)
+# -------------------------------------------------------- platform-gated CVEs
 
 def _and_node_item(platform_cpe: str) -> dict:
     """One CVE whose only applicability node ANDs an Apache match with a
@@ -352,7 +352,7 @@ def test_ingest_nvd_cve_and_node_tags_software_match_with_platform():
     """NVD's 'product AND platform' node shape must gate the software row
     with the platform's product token — the mechanism behind CVE-2024-38472-
     style ("...on Windows") false positives reported against non-Windows
-    hosts (Issue #118)."""
+    hosts."""
     item = _and_node_item("cpe:2.3:o:microsoft:windows_10:*:*:*:*:*:*:*:*")
     _cve, matches = ingest_nvd_cve(item)
     assert len(matches) == 1  # the platform-only cpeMatch produces no row of its own

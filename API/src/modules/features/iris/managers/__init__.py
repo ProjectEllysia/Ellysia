@@ -13,7 +13,7 @@ Managers del módulo Iris (análisis de correo).
 - ``IrisNotificationPreferenceManager`` (``notifications.py``): lectura y
   escritura de las preferencias de notificación de un usuario (M08).
 
-D4 en ``plans/deuda-tecnica-y-calidad.md``: Iris era el único módulo con
+Iris era el único módulo con
 **dos** ficheros de managers en la raíz — ``managers.py`` (64 KB, el
 segundo fichero más grande del repositorio) y ``mailbox_managers.py``,
 este último además suelto mientras el resto del conector de buzón vivía

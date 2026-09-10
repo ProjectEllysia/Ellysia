@@ -1,8 +1,6 @@
 """
 ``FindingsPrintingStrategy``: base compartida por los tipos de escaneo que
 viven enteramente en ``Finding`` (Lybra y Nuclei).
-
-D5 en ``plans/deuda-tecnica-y-calidad.md``.
 """
 
 import logging

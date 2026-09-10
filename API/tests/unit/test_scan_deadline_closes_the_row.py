@@ -1,7 +1,7 @@
 """Un escaneo que agota su plazo cierra su fila en vez de quedarse «escaneando».
 
 La cola mata un trabajo que se pasa de tiempo lanzándole ``JobDeadlineExceeded``
-desde fuera. Esa excepción hereda de ``BaseException`` a propósito (#395), para
+desde fuera. Esa excepción hereda de ``BaseException`` a propósito, para
 que ningún ``except Exception`` del código de negocio la confunda con un fallo
 de red y se la trague.
 
@@ -78,7 +78,7 @@ def test_an_external_scanner_out_of_time_is_failed_with_its_reason(monkeypatch):
 
 def test_the_deadline_keeps_climbing_after_the_row_is_closed(monkeypatch):
     """Si se capturara sin volver a lanzarla, la fila diría «falló» y la cola
-    diría «terminado con éxito» — la contradicción de #395 otra vez, del revés.
+    diría «terminado con éxito» — la misma contradicción, del revés.
 
     Además el temporizador dispara una sola vez: un plazo tragado deja al
     trabajo corriendo sin ningún límite a partir de ese momento.

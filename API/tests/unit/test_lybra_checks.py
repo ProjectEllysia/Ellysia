@@ -629,7 +629,7 @@ def test_a_tls_service_on_an_arbitrary_port_still_misses_the_hygiene_checks():
     El esquema ya se observa, así que un TLS en 7777 se sondea bien y recibe
     los checks de cabeceras. Lo que no recibe son los de higiene de
     certificado: su candidatura sigue decidiéndose por número de puerto.
-    Hacerla observada del todo es #283.
+    Hacerla observada del todo está pendiente.
     """
     from src.modules.features.themis.lybra import is_tls_service
 

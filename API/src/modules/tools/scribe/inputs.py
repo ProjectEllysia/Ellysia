@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # tiktoken, que además tokeniza distinto por modelo/backend). ~4 es la cifra
 # que la propia documentación de OpenAI da como regla general para texto en
 # inglés/español; de sobra para un guardarraín de "no mandes un payload
-# disparatado" — no hace falta precisión exacta para eso (Issue #118).
+# disparatado" — no hace falta precisión exacta para eso.
 _CHARS_PER_TOKEN = 4
 
 
@@ -95,7 +95,7 @@ class AIInput:
         return messages
 
     def estimated_tokens(self) -> int:
-        """Estimación heurística del tamaño del prompt completo (Issue #118).
+        """Estimación heurística del tamaño del prompt completo.
 
         Suma sobre todos los mensajes que ``to_messages`` enviaría — no solo
         el último — porque es el total lo que un backend factura contra su

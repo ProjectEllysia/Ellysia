@@ -442,8 +442,8 @@ class ScanManager(TaskTrackingMixin, ABC):
         la clave ``rq:worker:<name>`` sobrevive con su TTL completo a una
         muerte abrupta, así que su mera existencia no prueba nada.
 
-        Mismo arreglo que Iris hizo en su reconciliación (#208); el defecto era
-        literalmente el mismo porque este método fue el espejo del que se copió.
+        Mismo arreglo que ya tenía la reconciliación de Iris; el defecto era
+        literalmente el mismo porque aquélla se copió de este método.
 
         Returns:
             Número de escaneos marcados como FAILED.
@@ -563,7 +563,7 @@ class ScanManager(TaskTrackingMixin, ABC):
 
         # El mismo plazo agotado que recoge ``LybraEngineManager._run_lybra``,
         # aquí para los tres escáneres que sí lanzan un subproceso. Hereda de
-        # ``BaseException`` (#395) para que no lo capture ningún ``except
+        # ``BaseException`` para que no lo capture ningún ``except
         # Exception``, y el precio era que la fila se quedaba en `running`
         # eternamente cuando la cola mataba el trabajo. Se cierra la fila y se
         # vuelve a lanzar, para que RQ siga viendo un trabajo fallido.

@@ -6,7 +6,7 @@ Managers del módulo Aegis (concienciación en ciberseguridad).
 - ``CampaignManager`` (``campaigns.py``): listas de distribución, campañas
   y el quiz público.
 
-D3 en ``plans/deuda-tecnica-y-calidad.md``: este paquete sustituye al
+Este paquete sustituye al
 antiguo ``managers.py`` de 42 KB, cuyo docstring justificaba tener los tres
 "en este único fichero por convención" — pero la convención del proyecto,
 desde que Themis pasó a paquete, es la contraria. Las tres

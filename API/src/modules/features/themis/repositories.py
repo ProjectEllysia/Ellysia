@@ -1257,8 +1257,7 @@ class KbRepository(BaseRepository[CveEntry]):
         tell those two apart after the fact.
 
         Read from the data itself rather than from a sync log, because there is
-        no sync log — recording when each source was last synchronised is
-        #302. These dates are the closest honest proxy: not "when did we last
+        no sync log. These dates are the closest honest proxy: not "when did we last
         ask NVD", but "how recent is the newest thing we know". A source with
         no rows, or whose rows carry no date, reports ``None``, which is
         information too and must not be dressed up as a date.

@@ -90,7 +90,7 @@ def test_an_external_target_is_scanned_directly():
 def test_the_oracle_container_is_told_how_to_reach_the_host():
     """Traducir el objetivo a ``host.docker.internal`` no sirve de nada si el
     contenedor no sabe resolver ese nombre, que es lo que pasa en Docker sobre
-    Linux — y por tanto en el runner del banco nocturno (#455). La bandera que
+    Linux — y por tanto en el runner del banco nocturno. La bandera que
     lo mapea contra la puerta de enlace del host tiene que ir en el ``docker
     run``, y antes de la imagen: lo que va después son argumentos de Nmap."""
     arguments = _docker_args("/usr/bin/docker")
@@ -136,7 +136,7 @@ def test_an_unreachable_target_stops_the_bench_instead_of_scoring_zero():
 
 
 # --------------------------------------------------------------------------
-# Un contenedor caído no puede leerse como un fallo del motor (#455)
+# Un contenedor caído no puede leerse como un fallo del motor
 # --------------------------------------------------------------------------
 #
 # Puras también: sólo comprueban qué hace el registro cuando no sabe nada del
@@ -175,7 +175,7 @@ def _forget_container(port: int) -> None:
 
 
 # --------------------------------------------------------------------------
-# La familia de cabeceras del banco no puede quedarse atrás del feed (#455)
+# La familia de cabeceras del banco no puede quedarse atrás del feed
 # --------------------------------------------------------------------------
 #
 # Éste es el test que faltaba. Los bancos que miden la familia necesitan Docker

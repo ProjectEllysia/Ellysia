@@ -248,7 +248,7 @@ function onFile(event) {
      static) — que no hace scroll — dejando el input clavado en un punto fijo
      mientras .panel-content (el que sí scrollea, y queda por medio) se movía
      por su cuenta. Al enfocarlo el navegador lo llevaba a su posición real
-     (desincronizada), desplazando toda la página. Refs #135. */
+     (desincronizada), desplazando toda la página. */
   position: relative;
   display: inline-flex; align-items: center; justify-content: center;
   padding: 0.4rem 0.75rem; border-radius: 7px; cursor: pointer;

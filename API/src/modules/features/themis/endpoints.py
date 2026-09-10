@@ -485,7 +485,7 @@ def get_false_positives():
     Cada uno es una muestra etiquetada gratis: dice contra qué check y contra
     qué producto se equivoca el motor. Es la entrada que convierte el marcado
     de falsos positivos en un bucle de mejora en vez de una casilla de
-    interfaz — el banco de medición (#278) y el ranking de qué familias fallan
+    interfaz — el banco de falsos positivos y el ranking de qué familias fallan
     más se alimentan de aquí.
     """
     user = get_current_user()

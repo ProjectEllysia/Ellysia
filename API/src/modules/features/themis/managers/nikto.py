@@ -1,5 +1,5 @@
-"""NiktoScanManager — extraido de thirdparty_scans_managers.py (D2 en
-plans/deuda-tecnica-y-calidad.md: ver el docstring de nmap.py para el porqué)."""
+"""NiktoScanManager — extraído del antiguo thirdparty_scans_managers.py (ver el
+docstring de nmap.py para el porqué)."""
 
 import logging
 from typing import Optional

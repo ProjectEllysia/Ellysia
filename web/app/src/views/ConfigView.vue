@@ -670,8 +670,8 @@ function handleSave() { store.saveConfig() }
 .collapsible + .collapsible { margin-top: 0.5rem; }
 /* `align-items: start` evita que Grid estire cada tarjeta a la altura de la más
    alta de su fila (Lybra, con varias subsecciones, frente a Nmap/Nikto casi
-   sin opciones propias) — ese estirado era el hueco vacío que denunciaba el
-   issue #451, no un exceso de contenido de Lybra. */
+   sin opciones propias) — ese estirado era el hueco vacío que se veía, no
+   un exceso de contenido de Lybra. */
 .scanner-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.85rem; margin-top: 0.85rem; align-items: start; }
 .form-group { display: flex; flex-direction: column; gap: 0.25rem; }
 .form-group label { font-size: var(--fs-md); font-weight: 600; color: var(--text-dim); }

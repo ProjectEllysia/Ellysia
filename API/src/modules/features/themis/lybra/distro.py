@@ -24,8 +24,8 @@ y su ``confirmed=false``. Callar es la respuesta correcta cuando no se sabe.
 La señal más fuerte no es el banner sino la **revisión del propio paquete**:
 ``1:2.4.49-1ubuntu1`` sólo lo escribe Ubuntu, ``2.4.49-1~deb11u1`` sólo Debian
 (y dice hasta la versión), ``2.4.49-r0`` sólo Alpine, ``2.4.49-1.el8`` sólo la
-familia de Red Hat. Eso ya lo extrae :func:`~.kb.split_distro_version` desde
-#267 — aquí sólo se lee.
+familia de Red Hat. Eso ya lo extrae :func:`~.kb.split_distro_version`; aquí
+sólo se lee.
 """
 
 from __future__ import annotations

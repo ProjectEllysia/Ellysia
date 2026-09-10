@@ -1,7 +1,6 @@
 """Corpus de regresión de falsos positivos.
 
-Prerrequisito bloqueante de la recalibración de pesos
-(``plans/feature/iris/iris-rule-weight-recalibration.md``, sección 7.1): sin
+Prerrequisito bloqueante de la recalibración de pesos de las reglas: sin
 un corpus que de verdad estrese los contaminantes identificados por el
 consejo (saludo genérico, urgencia media, tracking de imágenes, cadena
 Received interna, destinatarios ocultos, coexistiendo en el mismo correo,

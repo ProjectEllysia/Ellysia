@@ -1,9 +1,9 @@
 """
 IrisReportManager — ciclo de vida de IrisDocument y generación asíncrona
-del informe PDF (D4 en ``plans/deuda-tecnica-y-calidad.md``).
+del informe PDF.
 
 El CRUD y la comprobación de propiedad los comparte con Themis vía
-``DocumentManager`` (A3); aquí queda solo lo propio de Iris: crear el
+``DocumentManager``; aquí queda solo lo propio de Iris: crear el
 ``IrisDocument`` y renderizar su PDF con :class:`IrisPDFCreator`.
 """
 

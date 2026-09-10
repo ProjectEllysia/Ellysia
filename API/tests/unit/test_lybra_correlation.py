@@ -167,7 +167,7 @@ def test_a_partial_scan_still_states_what_it_did_see():
     ({"cvss_score": 5.0, "epss_score": 0.6}, "public", "HIGH"),     # high EPSS escalates
     ({"cvss_score": 0.0, "confirmed": True}, "public", "MEDIUM"),   # confirmed w/o CVSS floors
     ({"cvss_score": 0.0}, "public", "INFO"),
-    # required_os (#118): an unconfirmed, platform-gated CVSS 9.8 match cannot
+    # required_os: an unconfirmed, platform-gated CVSS 9.8 match cannot
     # be verified without OS-detection, so it is capped at MEDIUM instead of
     # reading as CRITICAL.
     ({"cvss_score": 9.8, "required_os": "windows_10"}, "public", "MEDIUM"),
