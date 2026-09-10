@@ -1,4 +1,4 @@
-"""Where a Lybra scan gets its services from — los dos modos del roadmap §0.9.
+"""Where a Lybra scan gets its services from — the two modes below.
 
 Extracted out of ``lybra/engine.py`` because the manager kept re-asking the same
 question — "are we analysing an external payload, or doing our own discovery?" —
@@ -13,10 +13,10 @@ the TaskQueue itself keeps serializing the same primitive arguments it always di
 (``services`` / ``discover_ports``), and the worker rebuilds the same object with
 the same factory once it is running as ``_run_lybra``.
 
-Hubo un tercer modo, retirado en L52: analizar los servicios que un escaneo
-Nmap previo ya había descubierto. Existía porque el motor no tenía transporte
-propio; desde que la Fase T se lo dio, era la puerta de atrás de una capacidad
-que Lybra ya tiene por sí mismo, y ataba el motor a otro escáner.
+Hubo un tercer modo, retirado: analizar los servicios que un escaneo Nmap
+previo ya había descubierto. Existía porque el motor no tenía transporte
+propio; una vez que lo tuvo, ese modo se volvió la puerta de atrás de una
+capacidad que Lybra ya tiene por sí mismo, y ataba el motor a otro escáner.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 class DiscoveryProbes:
     """The three network-probing capabilities ``SelfDiscovery`` needs from
     the calling manager, passed as plain callables instead of the whole
-    manager object (E1).
+    manager object.
 
     Before, ``resolve_services`` took the full ``LybraEngineManager`` just to
     reach three of its methods — which forced this module to import that
@@ -85,9 +85,9 @@ class ServiceSource(ABC):
 
     probes_target_network: bool = True
     """
-    Whether Fase F (fingerprinting) and Fase R (active checks) may run
+    Whether fingerprinting and active checks may run
     against the target for this mode. False only for the external-payload
-    mode: that data is already a verified fact (Fase 0.9), so re-inferring
+    mode: that data is already a verified fact, so re-inferring
     it over the network would be redundant at best, and this mode exists
     precisely for hosts it might not even be able to reach.
     """
@@ -118,7 +118,7 @@ class ServiceSource(ABC):
         """Obtain this mode's services inside the caller's transaction.
 
         ``probes`` bundles the network-probing capabilities only the
-        self-discovery mode uses (E1) — the payload mode ignores it.
+        self-discovery mode uses — the payload mode ignores it.
 
         Raises ``ScanFailedError`` para un fallo irrecuperable (host
         inalcanzable, sonda reventada), con el código que dice cuál de los dos
@@ -148,7 +148,7 @@ class ServiceSource(ABC):
 
 
 class ExternalPayload(ServiceSource):
-    """Analyse a services list the caller already resolved (Fase 0.9).
+    """Analyse a services list the caller already resolved.
 
     No network discovery, fingerprinting or active checks run in this mode —
     it exists precisely for services data that came from *not* touching the
@@ -180,7 +180,7 @@ class ExternalPayload(ServiceSource):
 
 
 class SelfDiscovery(ServiceSource):
-    """Discover the target's open ports with Lybra's own connect scan (Fase T)."""
+    """Discover the target's open ports with Lybra's own connect scan."""
 
     label = "descubrimiento propio"
 
@@ -191,7 +191,7 @@ class SelfDiscovery(ServiceSource):
         if target is None:
             raise ValueError("run_scan requires services or target")
         # Self-discovery touches the target directly, unlike analysing a
-        # services payload the caller already resolved (roadmap §6).
+        # services payload the caller already resolved.
         #
         # Rechazo de IP privada aquí (no solo en el endpoint HTTP, ver
         # validate_targets en start_lybra_scan): el flujo programado
@@ -234,7 +234,7 @@ class SelfDiscovery(ServiceSource):
                 )
             discovered_ports = list(sweep.open_ports)
             is_partial = sweep.was_truncated
-            # UDP (Fase N/Ronda 1, roadmap §6.3): sonda curada aparte, nunca a
+            # UDP: sonda curada aparte, nunca a
             # partir de la lista TCP del usuario — self.ports_to_discover es una
             # lista de puertos TCP. Best-effort por diseño de
             # _discover_udp_ports: nunca aborta el descubrimiento TCP.

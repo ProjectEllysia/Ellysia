@@ -1,4 +1,4 @@
-"""La superficie UDP: seis protocolos, cada uno con su consumidor (L22).
+"""La superficie UDP: seis protocolos, cada uno con su consumidor.
 
 La tabla de sondas UDP nació con una fila y una regla —crece una fila por
 protocolo que un check o un dissector consuma de verdad, no antes—. Este

@@ -55,7 +55,7 @@ def test_lybra_package_stays_orm_free():
     )
 
 
-# ---------------------------------------------------------------- L52: sin
+# ---------------------------------------------------------------- sin
 # dependencia de otros escáneres
 
 _LYBRA_MANAGERS = (
@@ -76,7 +76,7 @@ _SIBLING_SCANNER_MANAGERS = (
 
 
 def test_lybra_manager_does_not_depend_on_other_scanners():
-    """L52: un escaneo de Lybra no lanza ningún otro escaneo.
+    """Un escaneo de Lybra no lanza ningún otro escaneo.
 
     Esta es la parte del arreglo que sobrevive al tiempo. Retirar el código fue
     lo fácil; lo que impide que vuelva a entrar dentro de seis meses —que es
@@ -98,11 +98,11 @@ def test_lybra_manager_does_not_depend_on_other_scanners():
     assert not offenders, (
         "themis/managers/lybra/ no debe importar el manager de otro escáner: "
         "Lybra es un motor independiente, no un orquestador de herramientas "
-        "ajenas (L52).\n" + "\n".join(offenders)
+        "ajenas.\n" + "\n".join(offenders)
     )
 
 
-# --------------------------------------------------- L38: una sola verdad
+# --------------------------------------------------- una sola verdad
 # sobre la exposición de un objetivo
 
 

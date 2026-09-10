@@ -1,4 +1,5 @@
-"""LybraEngineManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
+"""LybraEngineManager — orquesta el motor de escaneo propio de Lybra: descubrimiento
+de servicios, fingerprinting, checks activos y persistencia de los hallazgos resultantes."""
 
 import logging
 import time
@@ -78,7 +79,7 @@ class LybraEngineManager(ScanManager):
     Manager for Lybra's own vulnerability engine.
 
     Unlike the other scanners it launches no external subprocess: it discovers
-    the target's services itself (Fase T) — or takes a services list the caller
+    the target's services itself — or takes a services list the caller
     already resolved — and produces normalized :class:`Finding` rows through the
     :class:`LybraEngine`. Because that work is a fast, in-memory pass (no
     network), it does not go through the base ``_execute_scan`` (built for
@@ -95,7 +96,8 @@ class LybraEngineManager(ScanManager):
     SCHEDULED_REQUIRED_ARGS = ("target",)
 
     # Categories that are point-in-time events, not persistent vulnerability
-    # state - excluded from lifecycle tracking (see Phase 2.5 in _run_lybra).
+    # state - excluded from lifecycle tracking (see the lifecycle pass in
+    # _run_lybra).
     _EVENT_CATEGORIES = {"fingerprint", "surface_change"}
 
     def __init__(self, task_queue: ITaskQueue | None = None) -> None:
@@ -103,13 +105,18 @@ class LybraEngineManager(ScanManager):
 
     @classmethod
     def scheduled_run_kwargs(cls, arguments: dict) -> dict:
-        """target obligatorio + discover_ports opcional (B1). Un escaneo
-        programado siempre es autodescubrimiento (Fase T) — nunca tiene un
+        """Construye los argumentos de ejecución para un escaneo Lybra programado.
+
+        target obligatorio + discover_ports opcional. Un escaneo
+        programado siempre es autodescubrimiento — nunca tiene un
         payload de services que programar.
 
-        Un ``ProgramedScan`` creado antes de L52 puede llevar todavía una clave
-        ``deep`` en su columna JSON ``arguments``; se ignora sin más, que es lo
-        que hace este método con cualquier argumento que no reconozca."""
+        Warning:
+            Un ``ProgramedScan`` puede llevar todavía una clave ``deep`` en su
+            columna JSON ``arguments`` (formato antiguo, ya no usado al
+            programar). Este método la ignora sin más, que es lo que hace con
+            cualquier argumento que no reconozca.
+        """
         kwargs = super().scheduled_run_kwargs(arguments)
         kwargs["discover_ports"] = arguments.get("discover_ports")
         return kwargs
@@ -136,23 +143,23 @@ class LybraEngineManager(ScanManager):
           target's network. ``target`` is still required — it is the host
           identity findings get attached to.
         - **Self-discovery** (``target``, optional ``discover_ports``): Lybra
-          discovers the open ports itself with its own connect scan (Fase T).
+          discovers the open ports itself with its own connect scan.
           The caller validates the target (reject private, etc.).
 
         Args:
             programed_scan_id: Set when launched by the scheduler (Themis
                 scheduled scans), same convention as the other scan managers.
-            asset_id: Fase I — the Hygeia asset whose inventory produced
+            asset_id: The Hygeia asset whose inventory produced
                 ``services``. Recorded on the scan row for provenance and
                 grouping; it is never an input to the analysis itself, which
                 is why it does not travel in the TaskQueue args.
-            aggressive: Explicit request for the aggressive mode (L40).
+            aggressive: Explicit request for the aggressive mode.
                 Deliberately **not** enough on its own — ``_run_lybra`` only
                 honours it when the target is *also* in the authorized-target
                 register. A registered target does not pre-authorize
                 everything that could ever be done to it; this is the second
                 half of that double gate, and it is what unblocks the
-                default-credentials engine (Fase D, L31), the only family that
+                default-credentials engine, the only family that
                 writes to the target. Never set from a scheduled scan — see
                 ``scheduled_run_kwargs``, which does not forward it.
 
@@ -206,7 +213,7 @@ class LybraEngineManager(ScanManager):
 
         ``timeout`` es opcional para que un job encolado antes de ese cambio
         —que viaja con una tupla de tres argumentos— siga ejecutándose tras el
-        despliegue en vez de fallar al deserializarse. ``aggressive`` (L40) es
+        despliegue en vez de fallar al deserializarse. ``aggressive`` es
         opcional por el mismo motivo, con el mismo default seguro: un job
         encolado antes de este cambio se ejecuta en modo ``safe``, nunca en
         agresivo por sorpresa.
@@ -285,26 +292,19 @@ class LybraEngineManager(ScanManager):
         worker.
 
         ``timeout`` es el que el usuario escribió en el panel de lanzamiento.
-        Hasta ahora sólo alimentaba el plazo de la cola —un plazo que, por cómo
-        se inyecta, un hilo bloqueado en una llamada al sistema rebasa sin
-        enterarse— y por tanto no limitaba el escaneo de verdad. Ahora abre
-        además un plazo de reloj propio, y ese plazo acota **el escaneo
-        entero**: el descubrimiento come de él como presupuesto, y las fases de
-        después lo consultan por ``should_stop`` y se cortan solas.
+        Abre un plazo de reloj propio que acota **el escaneo entero**: el
+        descubrimiento come de él como presupuesto, y las fases de después lo
+        consultan por ``should_stop`` y se cortan solas. Un plazo por
+        operación —2 s por puerto, 8 s por petición HTTP— no basta por sí
+        solo: limita cuánto tarda cada sonda, no cuántas se hacen, y cuántas
+        se hacen lo decide el objetivo (cuántos puertos abiertos tenga), no el
+        motor.
 
-        Acotar sólo el descubrimiento no bastaba, aunque lo pareciera. Un
-        «plazo por operación» —2 s por puerto, 8 s por petición HTTP— limita
-        cuánto tarda cada sonda, no cuántas se hacen, y cuántas se hacen no lo
-        decide el motor: lo decide cuántos puertos abiertos tenga el objetivo.
-        Con un rango ancho, el fingerprinting corría horas contra el ritmo
-        deliberadamente lento del ``HostRateLimiter``, y su único límite acababa
-        siendo la sentencia de muerte de la cola.
-
-        ``aggressive`` (L40) es la petición explícita del usuario; por sí sola
+        ``aggressive`` es la petición explícita del usuario; por sí sola
         no basta. El modo efectivo con el que corren los checks activos y el
-        motor de credenciales (Fase D, L31) sólo sube a ``"aggressive"``
+        motor de credenciales sólo sube a ``"aggressive"``
         cuando además ``is_target_authorized`` es verdadero — la doble puerta
-        que el roadmap exige para cualquier cosa que escriba en el objetivo.
+        que protege cualquier cosa que escriba en el objetivo.
         Un objetivo autorizado sin petición explícita se queda en ``safe``;
         una petición explícita sobre un objetivo no autorizado, también.
         """
@@ -318,12 +318,7 @@ class LybraEngineManager(ScanManager):
             Las dos cosas significan lo mismo para todo lo que viene detrás —
             vio parte del objetivo, no todo— y por eso comparten predicado: cada
             fase lo consulta y se corta sola, el escaneo se marca ``is_partial``
-            y termina bien. Antes sólo el descubrimiento TCP consumía el plazo y
-            las fases siguientes corrían sin cota ninguna, así que el único
-            límite real del fingerprinting era la sentencia de muerte de la
-            cola: un escaneo con muchos puertos abiertos la alcanzaba siempre,
-            porque cuántos servicios hay que sondear no lo decide el motor sino
-            el objetivo.
+            y termina bien.
             """
             return is_cancelled() or (deadline is not None and time.monotonic() >= deadline)
 
@@ -369,7 +364,7 @@ class LybraEngineManager(ScanManager):
                     and source_target
                     and AuthorizedTargetManager.is_authorized(user_id, source_target)
                 )
-                # La doble puerta del modo agresivo (L40): la petición
+                # La doble puerta del modo agresivo: la petición
                 # explícita del usuario por sí sola no basta, y el registro de
                 # autorización por sí solo tampoco — autorizar un objetivo no
                 # es autorizar cualquier cosa contra él. Sólo con las dos a la
@@ -381,10 +376,10 @@ class LybraEngineManager(ScanManager):
                 # Un escaneo cancelado a mitad es, a efectos del ciclo de vida,
                 # lo mismo que uno truncado por reloj: vio parte del objetivo,
                 # no todo. Comparte la bandera ``is_partial`` para no cerrar por
-                # omisión lo que no llegó a comprobar (el fallo de L48-c).
+                # omisión lo que no llegó a comprobar.
                 is_partial = resolved.is_partial or should_stop()
-                # Descubrimiento hecho: 40 % del trabajo (pesos honestos del §3
-                # del issue — descubrimiento 40, fingerprint 30, checks 20,
+                # Descubrimiento hecho: 40 % del trabajo (reparto de pesos entre
+                # las fases: descubrimiento 40, fingerprint 30, checks 20,
                 # correlación y persistencia 10).
                 report(40)
 
@@ -421,12 +416,12 @@ class LybraEngineManager(ScanManager):
                     epss_lookup=lambda cve_id: getattr(kb_repo.get_epss(cve_id), "score", None),
                     product_alias_lookup=kb_repo.resolve_product_alias,
                     feed_version=kb_feed_version(kb_repo.knowledge_state()),
-                    # L37: qué nombres de producto no logramos identificar. El
+                    # Qué nombres de producto no logramos identificar. El
                     # motor los cuenta, no los escribe — el paquete `lybra/` es
                     # libre de ORM y lo sigue siendo porque esto entra
                     # inyectado, como los demás lookups.
                     record_resolution=kb_repo.record_resolution,
-                    # L34: la madurez de explotación. Sale de lo que ya está en
+                    # La madurez de explotación. Sale de lo que ya está en
                     # casa —la referencia que la propia NVD etiqueta como
                     # exploit— y se combina con KEV dentro del motor.
                     exploit_evidence_lookup=kb_repo.exploit_evidence,
@@ -438,7 +433,7 @@ class LybraEngineManager(ScanManager):
             # Las CVEs que la detección por versión acaba de proponer. Son las
             # hipótesis (confirmed=false, qod=70) que un confirmador puede
             # ascender a hecho: el runtime sólo corre un confirmador cuya CVE
-            # esté aquí — nunca "por si acaso" (L29).
+            # esté aquí — nunca "por si acaso".
             proposed_cves = frozenset(
                 cve for finding in findings_data
                 for cve in (finding.get("cve_ids") or ()))
@@ -452,7 +447,7 @@ class LybraEngineManager(ScanManager):
                                             mode=mode))
                 is_partial = is_partial or should_stop()
 
-            # Motor de credenciales por defecto (Fase D, L31) — la única
+            # Motor de credenciales por defecto — la única
             # familia que escribe en el objetivo. ``_run_credential_checks``
             # repite por su cuenta la comprobación de ``mode`` antes de probar
             # nada; esta condición sólo evita el trabajo de construir el
@@ -478,19 +473,18 @@ class LybraEngineManager(ScanManager):
             # ausencia de un hallazgo que esta vez no se llegó a comprobar no
             # es evidencia de que se haya corregido. Sin esto, un
             # descubrimiento truncado le diría al usuario que sus
-            # vulnerabilidades fueron remediadas — el fallo de L48-c por otra
-            # puerta.
+            # vulnerabilidades fueron remediadas.
             findings_data = apply_lifecycle(
                 trackable, trackable_previous, close_missing=not is_partial) + events
 
-            # Fase O, y **después** del ciclo de vida a propósito. Un backport
-            # de la distribución corrige el fallo sin subir el número de
-            # versión visible, que es la causa número uno de falsos positivos
-            # del motor —medida en 0,42 por el banco de la Fase 1—, así que la
-            # palabra del proveedor es la última sobre si el hallazgo es real.
-            # Antes del ciclo de vida el veredicto se perdía: `apply_lifecycle`
-            # reasigna el estado de todo hallazgo presente, y un `fixed` recién
-            # puesto volvía a `open` en la misma pasada.
+            # Se aplica el backport **después** del ciclo de vida a propósito.
+            # Un backport de la distribución corrige el fallo sin subir el
+            # número de versión visible, que es la causa más común de falsos
+            # positivos del motor, así que la palabra del proveedor es la
+            # última sobre si el hallazgo es real. Si se aplicara antes,
+            # `apply_lifecycle` reasignaría el estado de todo hallazgo
+            # presente y borraría ese veredicto: un `fixed` recién puesto
+            # volvería a `open` en la misma pasada.
             with UnitOfWork() as uow:
                 apply_backport_verdicts(findings_data, KbRepository(uow).distro_package_status)
 
@@ -544,7 +538,7 @@ class LybraEngineManager(ScanManager):
         budget_seconds: Optional[float] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Optional[PortSweep]:
-        """Discover open ports with Lybra's own connect scan (Fase T).
+        """Discover open ports with Lybra's own connect scan.
 
         Devuelve el barrido entero y no una lista porque los desenlaces son
         tres, no dos, y el llamante tiene que distinguirlos:
@@ -553,7 +547,7 @@ class LybraEngineManager(ScanManager):
         - **bloqueado** (``None``) — nada contestó de ninguna forma, así que no
           se sabe nada. Tratarlo como "todo cerrado" hacía que el ciclo de vida
           marcara como corregidos hallazgos que seguían abiertos, y le dijera
-          al usuario que sus vulnerabilidades se arreglaron solas (L48-c).
+          al usuario que sus vulnerabilidades se arreglaron solas.
         - **truncado** (``was_truncated``) — se acabó el reloj a mitad. Lo
           encontrado es cierto; lo que quedó sin mirar es desconocido. El
           escaneo sigue adelante con lo que hay y se marca como parcial, en
@@ -590,7 +584,7 @@ class LybraEngineManager(ScanManager):
         return sweep
 
     def _discover_udp_ports(self, target: str) -> list:
-        """Discover open UDP ports via the curated probe table (Fase N/Ronda 1).
+        """Discover open UDP ports via the curated probe table.
 
         Unlike :meth:`_discover_ports`, this never returns ``None``: UDP
         silence is *by definition* indistinguishable from "nothing there", so
@@ -614,14 +608,14 @@ class LybraEngineManager(ScanManager):
     def _run_active_checks(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self, target: str, services, cancel_check=None,
         proposed_cves=None, mode: str = "safe") -> list:
-        """Run the check runtime against the target's HTTP, TLS, network (Fase N)
-        and script (Fase R) services.
+        """Run the check runtime against the target's HTTP, TLS, network
+        and script services.
 
         Best-effort: a runtime failure (unreachable host, etc.) yields no active
         findings rather than failing the whole scan.
 
         ``mode`` llega ya resuelto por :meth:`_run_lybra` — esta capa no decide
-        si el agresivo procede, sólo lo aplica (L40): un ``check`` marcado
+        si el agresivo procede, sólo lo aplica: un ``check`` marcado
         ``mode: aggressive`` en el feed sigue sin correr en modo ``safe``, y
         eso lo sigue decidiendo ``CheckRuntime._applies_mode`` como siempre.
         """
@@ -654,7 +648,7 @@ class LybraEngineManager(ScanManager):
             return []
 
     def _run_credential_checks(self, target: str, services, mode: str) -> list:
-        """Probar credenciales por defecto contra los servicios del objetivo (Fase D, L31).
+        """Probar credenciales por defecto contra los servicios del objetivo.
 
         Es la única familia de detección que escribe en el objetivo, así que
         no basta con la doble puerta de quien llama (autorizado + agresivo
@@ -679,9 +673,9 @@ class LybraEngineManager(ScanManager):
                     user_agent=engine.http_user_agent,
                 ).fetch,
                 # Intervalo mayor que el de los checks de lectura: cada
-                # intento aquí es un login real, y el roadmap pide
-                # explícitamente un ritmo distinto al de un GET de
-                # ``.git/config`` para no parecer un ataque de fuerza bruta.
+                # intento aquí es un login real, y hace falta un ritmo
+                # distinto al de un GET de ``.git/config`` para no parecer un
+                # ataque de fuerza bruta.
                 rate_limiter=HostRateLimiter(min_interval=engine.rate_limit_interval * 5),
                 max_attempts_per_account=credentials.max_attempts,
                 capture_evidence=CR.lybra_evidence_config().enabled,
@@ -692,11 +686,11 @@ class LybraEngineManager(ScanManager):
             return []
 
     def _ingested_checks(self, services) -> list:
-        """Checks traducidos del árbol de plantillas de Nuclei (Fase R).
+        """Checks traducidos del árbol de plantillas de Nuclei.
 
-        Desactivado por defecto: hasta que el censo de la Fase U4 diga que la
-        ingesta merece la pena, esto devuelve una lista vacía y el motor corre
-        exactamente con su feed propio, como hasta ahora.
+        Desactivado por defecto: hasta que el censo de cobertura del feed diga
+        que la ingesta merece la pena, esto devuelve una lista vacía y el
+        motor corre exactamente con su feed propio.
 
         La selección (:func:`select_for_services`) se aplica **aquí**, antes de
         construir el runtime, y no dentro de él: el feed propio no debe pagar
@@ -734,24 +728,18 @@ class LybraEngineManager(ScanManager):
     def _fingerprint_services(self, target: str, services: list, cancel_check=None) -> tuple:
         """Run Lybra's own HTTP/SSH/FTP dissectors and identify each service.
 
-        Fase F. La identificación que sale de aquí **es** la identificación del
+        La identificación que sale de aquí **es** la identificación del
         servicio: alimenta el matcher de versiones (``LybraEngine._resolve_cpe``)
-        y deja además un hallazgo informativo con lo que se leyó.
-
-        Hasta L52 no era así. Un servicio que ya traía producto y versión de un
-        escaneo Nmap previo era intocable — la lectura propia no podía
-        sobrescribirlo, sólo emitir un veredicto de «concuerda / no concuerda
-        con Nmap». Ese modo de arranque ya no existe, y con él se fue la
-        subordinación: un motor cuyo propio análisis no puede prevalecer sobre
-        el de otra herramienta no es independiente. La comparación con Nmap
-        sigue siendo posible, pero como **medición**, desde el arnés de pruebas
-        (``tests/oracle/_concordance.py``), no dentro del producto.
+        y deja además un hallazgo informativo con lo que se leyó. El motor es
+        independiente: su propio análisis prevalece sobre el de otra
+        herramienta. La comparación con Nmap sigue siendo posible, pero como
+        **medición**, desde el arnés de pruebas (``tests/oracle/_concordance.py``),
+        no dentro del producto.
 
         Best-effort per service; a probe failure just skips that service. The
         dissector selection itself is a registry lookup
-        (:func:`~..lybra.default_dissectors`), not an if/elif chain — adding
-        protocol N+1 to Fase N never touches this method again, only that
-        registry.
+        (:func:`~..lybra.default_dissectors`), not an if/elif chain — adding a
+        new protocol never touches this method again, only that registry.
 
         Returns:
             A ``(services, findings)`` tuple: the service list with any newly
@@ -784,11 +772,11 @@ class LybraEngineManager(ScanManager):
                 except Exception:
                     logger.debug("Fingerprinting failed for %s:%s", target, service.port, exc_info=True)
             elif (service.protocol or "tcp").lower() != "udp":
-                # Ningún dissector reclama este servicio, que hasta L10 quería
-                # decir "se acabó": la aplicabilidad se decide por nombre o por
-                # número de puerto, y en el camino de autodescubrimiento el
-                # nombre sale a su vez de una tabla de puertos. Un MySQL en el
-                # 33060 o un SSH en el 2222 quedaban completamente ciegos.
+                # Ningún dissector reclama este servicio: la aplicabilidad se
+                # decide por nombre o por número de puerto, y en el camino de
+                # autodescubrimiento el nombre sale a su vez de una tabla de
+                # puertos. Sin la cascada de abajo, un MySQL en el 33060 o un
+                # SSH en el 2222 quedarían completamente ciegos.
                 #
                 # La cascada pregunta en vez de suponer (ver
                 # ``fingerprinting/cascade.py``). Sólo TCP: leer un saludo
@@ -864,14 +852,14 @@ class LybraEngineManager(ScanManager):
 
     @classmethod
     def _layer_findings(cls, service, result) -> list:
-        """Un hallazgo informativo por cada capa de servidor adicional (L48-b).
+        """Un hallazgo informativo por cada capa de servidor adicional.
 
         Un puerto HTTP no siempre lo atiende **un** programa: la topología más
         corriente que existe —un nginx de proxy inverso por delante de un
-        Apache— son dos, y hasta ahora el motor sólo podía reportar uno. La
-        medición real lo destapó: cinco servicios en tres hosts donde Lybra
-        decía ``nginx`` y Nmap decía ``Apache httpd``, sin que ninguno de los
-        dos estuviera equivocado.
+        Apache— son dos, y el motor tiene que poder reportar ambas capas: casos
+        reales muestran a Lybra diciendo ``nginx`` y a Nmap diciendo
+        ``Apache httpd`` para el mismo servicio, sin que ninguno de los dos
+        estuviera equivocado.
 
         Reportar las dos capas es la respuesta honesta. Las dos están expuestas
         y las dos tienen CVEs; elegir una en silencio produce falsos negativos
@@ -890,11 +878,9 @@ class LybraEngineManager(ScanManager):
         """Build an informational Finding stating what Lybra identified.
 
         Es una constatación, no un veredicto: dice qué vio el motor y con qué
-        dissector. Antes de L52 el título comparaba la lectura propia con la de
-        Nmap («concuerda / no concuerda con Nmap»), lo que convertía un dato
-        propio en una nota al pie sobre otra herramienta.
+        dissector, sin compararlo con lo que haya dicho otra herramienta.
 
-        El ``qod`` lo pone el dissector (L18). Era una constante para todos, de
+        El ``qod`` lo pone el dissector. Era una constante para todos, de
         modo que una versión leída de una cabecera ``Server`` explícita y otra
         deducida de una página de error valían lo mismo; ahora cada lectura
         dice cuánto se fía de sí misma. Sigue sin alimentar la confianza de
@@ -917,11 +903,11 @@ class LybraEngineManager(ScanManager):
         }
 
     def _detect_surface_changes(self, scan_repo, host_id: int, services: list[Service]) -> list:
-        """Diff this scan's services against the host's tracked surface (Fase 5).
+        """Diff this scan's services against the host's tracked surface.
 
         Emits an informational finding for a port opening for the first time,
         for a package appearing for the first time (an ``origin="inventory"``
-        service with no port, Fase 0.9), or for either kind's product/version
+        service with no port), or for either kind's product/version
         changing since it was last seen — attack-surface events in their own
         right, not vulnerability guesses. Always upserts every current service
         afterwards, so the surface stays current regardless of whether
@@ -956,7 +942,7 @@ class LybraEngineManager(ScanManager):
 
     @staticmethod
     def _new_surface_title(service, protocol: str) -> str:
-        """Title for a first-seen port or package (Fase 0.9 adds the latter)."""
+        """Title for a first-seen port or package."""
         if service.port is not None:
             return f"Nuevo puerto abierto: {service.port}/{protocol} ({service.name or 'desconocido'})"
         return f"Nuevo paquete instalado: {service.label}"
@@ -971,12 +957,12 @@ class LybraEngineManager(ScanManager):
 
     @staticmethod
     def _surface_finding(service, title: str) -> dict:
-        """Build an informational Finding for an attack-surface change (Fase 5).
+        """Build an informational Finding for an attack-surface change.
 
         ``service`` falls back to ``product`` when there is no service name —
         for a portless (inventory-origin) service this is also what
         ``compute_dedup_key`` uses to disambiguate two different packages that
-        would otherwise both hash to the same "port=None" identity (Fase 0.9).
+        would otherwise both hash to the same "port=None" identity.
         Mirrors the same fallback in ``engine.py``'s finding builders.
         """
         return {
@@ -997,7 +983,7 @@ class LybraEngineManager(ScanManager):
     def _surface_key(service_or_row) -> tuple:
         """Identity key for surface tracking: ``(port, protocol)`` for a
         networked service, or ``(None, protocol, product)`` for a portless
-        inventory service (Fase 0.9).
+        inventory service.
 
         A port already uniquely identifies a listening socket, so the product
         is deliberately excluded there — that is what lets a version bump on
@@ -1013,7 +999,7 @@ class LybraEngineManager(ScanManager):
             return (service_or_row.port, protocol, None)
         return (None, protocol, service_or_row.product or None)
 
-    # _previous_findings_map: usa el default de ScanManager (A6).
+    # _previous_findings_map: usa el default de ScanManager.
 
     @classmethod
     def _finding_view_dict(cls, finding: Finding) -> dict:
@@ -1107,8 +1093,8 @@ class LybraEngineManager(ScanManager):
                           reason: Optional[str] = None):
         """Fijar el estado de un hallazgo: asumir el riesgo, o desmentirlo.
 
-        ``accepted`` y ``false_positive`` dicen cosas opuestas y hasta L35
-        compartían casilla. Aceptar un riesgo es "esto es real, lo asumo": se
+        ``accepted`` y ``false_positive`` dicen cosas opuestas, y por eso no
+        comparten casilla. Aceptar un riesgo es "esto es real, lo asumo": se
         anota con su motivo y su autor, y **caduca**, porque un riesgo asumido
         hace un año merece volver a mirarse. Marcar un falso positivo es "esto
         no es real, el motor se equivocó": no caduca por tiempo —el motor no se
@@ -1139,7 +1125,7 @@ class LybraEngineManager(ScanManager):
             if finding is None:
                 raise FindingNotFoundError(finding_id)
             # El finding se busca por su propio id, pero la propiedad se
-            # verifica sobre el scan al que pertenece (E5): FindingNotFoundError
+            # verifica sobre el scan al que pertenece: FindingNotFoundError
             # se lanza con finding_id para no revelar el scan_id ajeno.
             assert_owned(ScanRepository, finding.scan_id, user_id,
                          lambda _scan_id: FindingNotFoundError(finding_id), uow=uow)
@@ -1168,11 +1154,11 @@ class LybraEngineManager(ScanManager):
 
         Es el documento de trabajo del feed curado de alias: cada línea es un
         alias que merece la pena escribir, ordenado por cuánto duele no
-        tenerlo. El roadmap aparcaba este ranking por falta de datos —hacía
-        falta el agente de Hygeia en más de un equipo—, pero eso vale para el
-        volumen y no para la herramienta: hay que construirlo **antes** de que
-        lleguen los datos, o cuando lleguen no habrá dónde mirarlos. Y la vía
-        de red aporta muestras desde el primer escaneo, sin agente ninguno.
+        tenerlo. El volumen de datos depende de tener el agente de Hygeia
+        desplegado en más de un equipo, pero eso vale para el volumen y no
+        para la herramienta: hay que construirla **antes** de que lleguen los
+        datos, o cuando lleguen no habrá dónde mirarlos. Y la vía de red
+        aporta muestras desde el primer escaneo, sin agente ninguno.
 
         No se acota por usuario: el feed de alias es del producto, no de quien
         escanea, y un nombre que falla lo hace para todos.
@@ -1194,9 +1180,6 @@ class LybraEngineManager(ScanManager):
         contra qué check y contra qué producto se equivoca el motor, que es
         exactamente la entrada que el banco de falsos positivos tiene
         que aprender a consumir y lo que permite rankear qué familia falla más.
-
-        Hasta L35 esa señal no existía: el usuario sólo podía decir "acepto el
-        riesgo", que es una afirmación sobre el negocio y no sobre el motor.
         """
         repo = build_repository(ScanRepository)
         return [{
@@ -1214,7 +1197,7 @@ class LybraEngineManager(ScanManager):
         } for finding in repo.get_findings_by_state(user_id, "false_positive")]
 
     def get_finding_evidence(self, finding_id: int, user_id: int) -> list:
-        """Devuelve la evidencia cruda de un hallazgo propio (Fase E).
+        """Devuelve la evidencia cruda de un hallazgo propio.
 
         Mismo criterio de propiedad que :meth:`set_finding_state`: la evidencia
         de un hallazgo de otro usuario se reporta como no encontrada, sin
@@ -1247,7 +1230,7 @@ class LybraEngineManager(ScanManager):
     ) -> LybraScan:  # pylint: disable=arguments-differ
         """Create and persist an LybraScan row.
 
-        Delegates to ``ScanManager._create_scan_record`` (A4), passing
+        Delegates to ``ScanManager._create_scan_record``, passing
         LybraScan's extra columns via ``**extra``. Antes esta clase no
         llamaba ``uow.commit_for_handoff()`` como las demás — inconsistencia
         real, no deliberada: ``run_scan()`` encola en TaskQueue justo después
@@ -1262,7 +1245,7 @@ class LybraEngineManager(ScanManager):
     def _persist_scan_results(self, uow, scan, domain_data) -> None:
         """Persist the engine's findings (``domain_data`` is a list of dicts).
 
-        Aprovecha la escritura para purgar la evidencia caducada (Fase E): cada
+        Aprovecha la escritura para purgar la evidencia caducada: cada
         escaneo que graba evidencia se lleva de paso la que ha pasado su
         retención, así la tabla no crece sin fin sin necesidad de un barredor
         aparte.
@@ -1277,7 +1260,7 @@ class LybraEngineManager(ScanManager):
         self, user_id: int, page: int = 1, per_page: int = 10,
         asset_id=ScanRepository.PANEL_SCANS,
     ):
-        """Paginated Lybra scans, split by origin (Fase I).
+        """Paginated Lybra scans, split by origin.
 
         Overrides the base implementation, which filters by ``scan_type``
         alone, so that the ordinary Lybra feed shows only what the user
@@ -1343,10 +1326,10 @@ class LybraEngineManager(ScanManager):
 
     @staticmethod
     def exposure_for(scan) -> str:
-        """Contextual exposure of a Lybra scan, for Fase 5's priority scoring.
+        """Contextual exposure of a Lybra scan, used by the priority scoring.
 
         Normally that is just ``classify_exposure(target)``. An inventory scan
-        (Fase I) is the exception: it never observed the target's network at
+        is the exception: it never observed the target's network at
         all, so its "target" is a Hygeia asset's bare hostname, not a reachable
         surface. ``classify_exposure`` recognises internal *suffixes*
         (``.local``, ``.lan``...) but not a bare ``DESKTOP-ABC``, so it would
@@ -1381,9 +1364,9 @@ class LybraEngineManager(ScanManager):
             raise ScanNotFoundError(scan_id)
 
         repo = build_repository(ScanRepository)
-        # Todos los hallazgos de un escaneo Lybra son de Lybra: hasta L52 aquí
-        # se fundían además los de los escaneos corroboradores (Nmap/Nikto/
-        # Nuclei) que el "análisis profundo" lanzaba, bajo la firma de Lybra.
+        # Todos los hallazgos de un escaneo Lybra son de Lybra: no incluyen los
+        # de los escaneos corroboradores (Nmap/Nikto/Nuclei) que el "análisis
+        # profundo" pueda lanzar aparte.
         display_findings = [self._finding_view_dict(finding) for finding in repo.get_findings_by_scan(scan_id)]
 
         exposure = self.exposure_for(scan)
@@ -1412,7 +1395,7 @@ class LybraEngineManager(ScanManager):
             # Un falso positivo no es un riesgo: el usuario ha dicho que el
             # motor se equivocó, así que no cuenta como vulnerabilidad ni
             # engorda el resumen de prioridades. Contarlo sería exactamente el
-            # informe que miente sobre la postura de seguridad (L35).
+            # informe que miente sobre la postura de seguridad.
             "vulnerableFindings": sum(
                 1 for display_finding in display_findings
                 if display_finding.get("category") == "outdated_software"

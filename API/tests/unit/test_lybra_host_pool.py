@@ -1,4 +1,4 @@
-"""El pool acotado por host: fingerprinting y checks dejan la fila india (L23).
+"""El pool acotado por host: fingerprinting y checks dejan la fila india.
 
 ``_fingerprint_services`` recorría los servicios en un ``for`` y sondaba cada
 uno hasta terminar antes de pasar al siguiente. Sobre un host con veinte

@@ -1,4 +1,4 @@
-"""El dissector de RDP (L15).
+"""El dissector de RDP.
 
 RDP es el vector de entrada de la mayoría de los incidentes de ransomware que
 empiezan por acceso remoto, y BlueKeep (CVE-2019-0708) sigue apareciendo en

@@ -1,7 +1,7 @@
-"""El encadenamiento versión → confirmador (L29).
+"""El encadenamiento versión → confirmador.
 
-Es lo más diferencial que le quedaba al motor por construir: el §11 del roadmap
-lo nombra como la razón de existir del runtime propio frente a Nuclei. Convierte
+Es lo más diferencial del motor: la razón de existir del runtime propio frente
+a Nuclei. Convierte
 una hipótesis ``confirmed=false, qod=70`` —que puede ser un falso positivo por
 backport— en un hecho verificado, que es lo que separa un informe entregable de
 uno que hay que revisar a mano.

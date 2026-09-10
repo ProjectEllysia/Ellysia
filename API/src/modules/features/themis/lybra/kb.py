@@ -318,7 +318,7 @@ def version_in_range(version: str, match) -> bool:
 
 
 # =========================================================================
-# PRODUCT NAME NORMALIZATION (Fase I-b, paso 1)
+# PRODUCT NAME NORMALIZATION
 # =========================================================================
 
 # Content in brackets/parentheses is almost always packaging noise for a
@@ -359,7 +359,7 @@ _TRAILING_VERSION_RE = re.compile(r"(?:\s+\d+(?:\.\d+){1,3}[a-z0-9]*)+$")
 
 
 def normalize_product_name(name: str) -> str:
-    """Canonicalize a product name for CPE-alias matching (Fase I-b, paso 1).
+    """Canonicalize a product name for CPE-alias matching.
 
     Applied to *both* sides of a comparison — an inventory entry's ``name``
     and an NVD ``CpeMatch.product`` — so the two vocabularies can be compared
@@ -373,7 +373,7 @@ def normalize_product_name(name: str) -> str:
     normalization that is too aggressive risks *collision* — two different
     products reducing to the same key — which is a worse failure than staying
     unresolved, since :func:`~.repositories.KbRepository.rebuild_cpe_product_index`
-    already discards a colliding key rather than guessing (Fase I-b, paso 2).
+    already discards a colliding key rather than guessing.
 
     Args:
         name: A raw product name, from either side of the comparison.
@@ -481,11 +481,11 @@ def parse_cpe23(cpe: str) -> Optional[dict]:
     }
 
 
-# The curated product-name -> (vendor, product) alias feed (Fase I-b, paso 3),
+# The curated product-name -> (vendor, product) alias feed,
 # alongside every other Lybra feed (checks_feed.json, tech_signatures.json).
 # Same "Lybra feed" philosophy: a new alias is one JSON entry, not a code
 # change, added whenever a real inventory turns up a frequent unresolved
-# product the automated index (paso 2) can't reach — a marketing name too far
+# product the automated index can't reach — a marketing name too far
 # from its CPE ("Microsoft Visual C++ 2022 X64 Additional Runtime" vs
 # ``visual_c++``) rather than a spelling/formatting difference.
 _BUNDLED_PRODUCT_ALIASES = Path(__file__).parent / "feeds" / "product_aliases.json"
@@ -582,7 +582,7 @@ def _pick_cvss(metrics: dict) -> Tuple[Optional[float], Optional[str], Optional[
 
 
 # =========================================================================
-# AVISOS DE DISTRIBUCIÓN (Fase O — verificación de backports)
+# AVISOS DE DISTRIBUCIÓN
 # =========================================================================
 #
 # Un backport es una distribución arreglando una vulnerabilidad sin subir el
@@ -735,7 +735,7 @@ def fetch_oval(url: str, timeout: int = 60) -> str:
 def _has_exploit_reference(cve: dict) -> bool:
     """Si NVD enlaza al menos una referencia etiquetada como exploit.
 
-    Es la señal más barata de madurez de explotación que hay (L34): la propia
+    Es la señal más barata de madurez de explotación que hay: la propia
     NVD etiqueta sus referencias, y una marcada ``Exploit`` significa que
     alguien ha publicado algo que demuestra el fallo. No dice cuán usable es
     —puede ser una prueba de concepto en un gist o un exploit completo— así
@@ -1027,7 +1027,7 @@ def _http_get(url: str, timeout: int = 30, api_key: Optional[str] = None) -> byt
     last_error: Optional[Exception] = None
     for attempt in range(_RETRIES):
         try:
-            # ``socket_timeout`` sigue haciendo falta con ``requests`` (E7): ni
+            # ``socket_timeout`` sigue haciendo falta con ``requests``: ni
             # el timeout de urllib ni el de requests acotan la resolución DNS
             # (``getaddrinfo`` corre dentro de ``socket.create_connection``
             # *antes* de que el timeout se aplique al socket), y un resolver

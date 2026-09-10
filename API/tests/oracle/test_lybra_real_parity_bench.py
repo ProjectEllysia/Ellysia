@@ -1,8 +1,8 @@
-"""Paridad laboratorio/real: el mismo motor, contra objetivos de verdad (L48).
+"""Paridad laboratorio/real: el mismo motor, contra objetivos de verdad.
 
-El §9 del roadmap declara esta paridad **no negociable** para dar por cerradas
-las fases F (fingerprinting), T (transporte propio) y N (protocolos no-HTTP), y
-lo argumenta bien: *«eso no puede convertirse en la excusa de "el objetivo real
+Esta paridad es **no negociable** para dar por cubiertos el fingerprinting, el
+transporte propio y los protocolos no-HTTP, y el argumento es sencillo: *«eso
+no puede convertirse en la excusa de "el objetivo real
 es más difícil" cuando Nmap identifica con soltura servicios en hosts públicos
 reales. Si aparece un caso como "en localhost identificamos producto y versión,
 pero en un host público real sólo vemos puertos abiertos", no es un resultado
@@ -38,13 +38,13 @@ este ítem es el número, no un booleano.
 Lo mismo que el banco de laboratorio (``test_lybra_concordance_bench.py``), con
 las mismas funciones, para que los dos números sean comparables:
 
-- **Fase T** — concordancia de puertos: qué encuentra el connect scan propio
+- **Puertos** — concordancia de puertos: qué encuentra el connect scan propio
   frente a lo que encuentra Nmap sobre el mismo objetivo.
-- **Fases F y N** — concordancia de fingerprint: si el dissector que aplica a
+- **Fingerprint** — concordancia de fingerprint: si el dissector que aplica a
   cada servicio identifica el mismo producto que Nmap.
 
-El umbral del roadmap es 0,95 en puertos y 0,90 en fingerprint, y el criterio
-de cierre de L48 pide al menos diez objetivos variados.
+El umbral exigido es 0,95 en puertos y 0,90 en fingerprint, y el criterio
+de este banco pide al menos diez objetivos variados.
 """
 
 from __future__ import annotations
@@ -78,13 +78,13 @@ pytestmark.append(pytest.mark.skipif(
     reason="Sin LYBRA_REAL_TARGETS: el lado real de la paridad lo declara el operador",
 ))
 
-# El mínimo que pide el criterio de cierre de L48. Se comprueba en su propio
+# El mínimo que este banco exige. Se comprueba en su propio
 # test en vez de dentro de la medición: "no hay bastantes objetivos" y "los
 # objetivos que hay concuerdan poco" son dos problemas distintos y merecen dos
 # mensajes distintos.
 _MINIMUM_TARGETS = 10
 
-# Los umbrales del roadmap (§9).
+# Los umbrales exigidos.
 _PORT_THRESHOLD = 0.95
 _FINGERPRINT_THRESHOLD = 0.90
 
@@ -177,7 +177,7 @@ def _by_family(results: List[dict], measurable_only: bool = True) -> Dict[str, L
 
     La paridad se cierra **por familia**, no en promedio: un número global alto
     puede esconder que HTTP va perfecto y FTP no identifica nada, que es
-    justamente el caso que el §9 se niega a dar por bueno.
+    justamente el caso que esta medición se niega a dar por bueno.
     """
     families: Dict[str, List[Tuple]] = defaultdict(list)
     for result in results:
@@ -192,14 +192,14 @@ def _ascii(value) -> str:
     """Un banner de un servidor real puede traer cualquier byte, y la consola de
     Windows (cp1252) no codifica todo Unicode: un solo carácter raro en un
     producto hacía reventar el ``print`` del informe y con él la medición
-    entera. El informe es el entregable de L48, así que no puede caerse por un
+    entera. El informe es el entregable de este banco, así que no puede caerse por un
     acento de más — cualquier carácter fuera de ASCII se sustituye."""
     return str(value).encode("ascii", "replace").decode("ascii")
 
 
 def _print_report(results: List[dict]) -> None:
-    """Imprime la comparativa. El entregable de L48 es el número, no un OK."""
-    print("\n=== Paridad real (L48) - objetivos declarados en LYBRA_REAL_TARGETS ===")
+    """Imprime la comparativa. El entregable de este banco es el número, no un OK."""
+    print("\n=== Paridad real - objetivos declarados en LYBRA_REAL_TARGETS ===")
     for result in results:
         print(f"  {result['target']}: puertos propios={result['own_ports']} "
               f"nmap={result['nmap_ports']} concordancia={result['ports_score']:.2f}")
@@ -216,8 +216,8 @@ def _print_report(results: List[dict]) -> None:
     measurable = _fingerprint_pairs(results)
     blind = len(every_pair) - len(measurable)
     ports = [result["ports_score"] for result in results]
-    print(f"  puertos (Fase T): {sum(ports) / len(ports):.2f} sobre {len(ports)} objetivos")
-    print(f"  fingerprint (F/N): {concordance_rate(measurable):.2f} "
+    print(f"  puertos: {sum(ports) / len(ports):.2f} sobre {len(ports)} objetivos")
+    print(f"  fingerprint: {concordance_rate(measurable):.2f} "
           f"sobre {len(measurable)} servicios medibles")
     print(f"  descartados: {blind} de {len(every_pair)} servicios donde NINGUNO de los dos "
           f"identifica producto (puertos que aceptan y no contestan)")
@@ -233,7 +233,7 @@ def test_the_real_side_has_enough_targets():
     raro mueve el número medio punto.
     """
     assert len(_TARGETS) >= _MINIMUM_TARGETS, (
-        f"Sólo {len(_TARGETS)} objetivos declarados; L48 pide al menos "
+        f"Sólo {len(_TARGETS)} objetivos declarados; este banco pide al menos "
         f"{_MINIMUM_TARGETS} y variados (con y sin CDN/WAF, con y sin TLS, con "
         f"cabecera Server presente y suprimida, y alguno con servicios no-HTTP)"
     )
@@ -244,14 +244,16 @@ def test_the_real_side_has_enough_targets():
     "ejecuciones del banco con 20 minutos de diferencia dieron 0,96 y 0,58. La "
     "diferencia entera son cuatro IPs donde el descubrimiento propio devolvio "
     "lista vacia mientras Nmap encontraba sus cuatro puertos y un socket crudo "
-    "conectaba sin problema (issue L48-c). Mientras ese defecto siga abierto, la "
-    "Fase T no se puede certificar: el numero mide cuando nos bloquearon, no lo "
-    "que el transporte sabe hacer. `strict=False` a proposito — un `strict=True` "
-    "seria tan falso como la asercion, porque a veces pasa."
+    "conectaba sin problema (un fallo de descubrimiento intermitente). Mientras "
+    "ese defecto siga abierto, la concordancia de puertos no se puede certificar: "
+    "el numero mide cuando nos bloquearon, no lo que el transporte sabe hacer. "
+    "`strict=False` a proposito — un `strict=True` seria tan falso como la "
+    "asercion, porque a veces pasa."
 ))
 def test_port_discovery_matches_nmap_on_real_targets(measurements):
-    """Fase T contra objetivos reales: es donde aparecen el WAF que corta a la
-    tercera conexión y el balanceador que responde distinto en cada intento."""
+    """Concordancia de puertos contra objetivos reales: es donde aparecen el WAF
+    que corta a la tercera conexión y el balanceador que responde distinto en
+    cada intento."""
     scores = [result["ports_score"] for result in measurements]
     average = sum(scores) / len(scores)
     detail = [(result["target"], round(result["ports_score"], 2)) for result in measurements]
@@ -260,16 +262,16 @@ def test_port_discovery_matches_nmap_on_real_targets(measurements):
 
 @pytest.mark.xfail(strict=True, reason=(
     "Medido el 2026-09-01 sobre 10 objetivos reales autorizados: concordancia de "
-    "fingerprint entre 0,33 y 0,36 segun la ejecucion, frente al 0,90 que pide el "
-    "roadmap. El laboratorio daba 1,00 en las mismas familias, asi que la brecha "
-    "laboratorio/real que el §9 declara no negociable existe y esta cuantificada. "
-    "Las causas van por familia como issues de Fase 2: FTP no identifica ProFTPD "
-    "(L48-a) y HTTP lee el proxy de delante y no el servidor de detras (L48-b). El "
-    "rango en vez de una cifra unica no es imprecision: el tamano de la muestra "
-    "varia porque el descubrimiento falla de forma intermitente (L48-c)."
+    "fingerprint entre 0,33 y 0,36 segun la ejecucion, frente al umbral de 0,90 "
+    "exigido. El laboratorio daba 1,00 en las mismas familias, asi que la brecha "
+    "laboratorio/real que esta paridad declara no negociable existe y esta "
+    "cuantificada. Las causas van por familia: FTP no identifica ProFTPD y HTTP "
+    "lee el proxy de delante y no el servidor de detras. El rango en vez de una "
+    "cifra unica no es imprecision: el tamano de la muestra varia porque el "
+    "descubrimiento falla de forma intermitente."
 ))
 def test_fingerprinting_matches_nmap_on_real_targets(measurements):
-    """Fases F y N contra objetivos reales.
+    """Concordancia de fingerprint contra objetivos reales.
 
     Sólo entran los pares **medibles**: un servicio que ni la sonda propia ni
     Nmap consiguen identificar no dice nada sobre el motor, sólo sobre lo duro
@@ -286,18 +288,18 @@ def test_fingerprinting_matches_nmap_on_real_targets(measurements):
 
 @pytest.mark.xfail(strict=True, reason=(
     "Medido el 2026-09-01: FTP 0,00 y HTTP entre 0,07 y 0,25 quedan por debajo del "
-    "umbral; SSH aguanta en 0,75. La causa de FTP (L48-a) ya esta corregida —el "
+    "umbral; SSH aguanta en 0,75. La causa de FTP ya esta corregida —el "
     "parser reconocia un solo formato de saludo, el de vsftpd, y los dos hosts "
     "medidos servian ProFTPD sin version— pero el numero solo cambia cuando el "
-    "banco se vuelva a ejecutar contra objetivos reales. Queda HTTP (L48-b). Este "
+    "banco se vuelva a ejecutar contra objetivos reales. Queda HTTP. Este "
     "test pasara a XPASS cuando la ultima familia se cierre."
 ))
 def test_no_family_is_left_behind(measurements):
     """La paridad se cierra por familia, no en promedio.
 
     Un número global alto puede esconder que HTTP va perfecto y que FTP no
-    identifica nada — que es exactamente el caso que el §9 se niega a dar por
-    bueno. Una familia con un solo servicio observado no se juzga: no hay
+    identifica nada — que es exactamente el caso que esta paridad se niega a
+    dar por bueno. Una familia con un solo servicio observado no se juzga: no hay
     muestra, y suspender por ella mediría el catálogo de objetivos y no el
     motor.
     """

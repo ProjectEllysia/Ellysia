@@ -87,25 +87,23 @@ def compute_dedup_key(finding: dict) -> str:
     material = f"{host}|{port}|{identity}"
     protocol = (finding.get("protocol") or "tcp").lower()
     if protocol != "tcp":
-        # Ronda 1 (roadmap §6.3): la sonda UDP puede abrir el mismo número de
-        # puerto que ya vigilábamos por TCP (161 es el caso real: SNMP). Sin
-        # esto, un 161/tcp y un 161/udp del mismo host colisionarían bajo la
-        # misma identidad ("check:lybra:open-port@1") y uno pisaría al otro en
-        # el merge. Condicionado a "no tcp" para que cada dedup_key ya
-        # almacenada quede intacta: hasta esta ronda todo hallazgo era TCP.
+        # La sonda UDP puede abrir el mismo número de puerto que ya
+        # vigilábamos por TCP (161 es el caso real: SNMP). Sin esto, un
+        # 161/tcp y un 161/udp del mismo host colisionarían bajo la misma
+        # identidad ("check:lybra:open-port@1") y uno pisaría al otro en el
+        # merge. Condicionado a "no tcp" para que un hallazgo TCP siga
+        # calculando la misma ``dedup_key`` que ya tiene almacenada: sólo el
+        # sufijo de protocolo cambiaría su forma, y sólo lo necesita UDP.
         material += "|" + protocol
     if port is None:
-        # A portless finding (Fase 0.9 — an inventory-origin service, e.g. an
-        # installed package with nothing listening) has no port to
-        # disambiguate different assets that happen to share the same
-        # check/category identity, or even the same CVE. ``service`` carries
-        # the product name in that case (engine.py falls back to it when
-        # there is no service name), which stays stable across a version
-        # bump — mirroring how a port's own identity already stays stable
-        # across a network service's product/version changing. Only
-        # reachable for a case that never existed before Fase 0.9 (port was
-        # always populated until now), so this cannot collide with any
-        # pre-existing dedup_key.
+        # A portless finding (an inventory-origin service, e.g. an installed
+        # package with nothing listening) has no port to disambiguate
+        # different assets that happen to share the same check/category
+        # identity, or even the same CVE. ``service`` carries the product
+        # name in that case (engine.py falls back to it when there is no
+        # service name), which stays stable across a version bump —
+        # mirroring how a port's own identity already stays stable across a
+        # network service's product/version changing.
         material += "|" + (finding.get("service") or "")
     return hashlib.sha256(material.encode()).hexdigest()[:32]
 
@@ -124,9 +122,7 @@ def merge_findings(findings: List[dict]) -> List[dict]:
     ``confirmed`` / ``in_kev`` if *any* input was, unions the CVE ids, and joins
     the distinct sources into ``source`` (e.g. ``"lybra,nuclei"``). Es el
     mecanismo de deduplicación dentro de un mismo escaneo: dos checks que
-    describen el mismo problema se cuentan una vez. También sostuvo, hasta L52,
-    la fusión en lectura de los hallazgos de los escaneos corroboradores; esa
-    fusión desapareció con ellos, la deduplicación se queda.
+    describen el mismo problema se cuentan una vez.
 
     Args:
         findings: Findings to merge. Each may already carry a ``dedup_key``; any
@@ -175,7 +171,7 @@ def _carry_decision(finding: dict, prev: dict) -> None:
 
     Sin esto, la decisión sobreviviría como estado pero perdería su
     justificación en el siguiente escaneo: un ``accepted`` sin motivo ni autor
-    es exactamente la deuda que L35 viene a quitar de en medio.
+    es una decisión que nadie puede auditar después.
     """
     for field_name in ("state_reason", "state_set_by", "state_set_at", "state_expires_at"):
         if prev.get(field_name) is not None:
@@ -185,9 +181,14 @@ def _carry_decision(finding: dict, prev: dict) -> None:
 def _decision_expired(prev: dict, moment: datetime) -> bool:
     """Si un riesgo aceptado ya ha cumplido su plazo de revisión.
 
-    Sin ``state_expires_at`` la decisión no caduca — es el caso de los
-    ``accepted`` anteriores a L35, que no tienen plazo porque nadie se lo puso.
-    Inventarles uno los reabriría todos de golpe el día del despliegue.
+    Sin ``state_expires_at`` la decisión no caduca nunca.
+
+    Warning:
+        Una fila ``accepted`` sin ``state_expires_at`` no es un error de
+        datos: significa que nadie le puso plazo, y hay que seguir
+        tratándola como una aceptación indefinida en vez de inventarle una
+        fecha, que reabriría de golpe todas las aceptaciones antiguas que
+        nunca tuvieron plazo.
     """
     expires = prev.get("state_expires_at")
     return expires is not None and expires <= moment
@@ -259,8 +260,8 @@ def apply_lifecycle(current: List[dict], previous: Dict[str, dict],
             —un barrido que se quedó sin presupuesto de reloj— porque entonces
             la ausencia no es evidencia de nada: lo que no se miró no se sabe
             si sigue ahí. Sin esta salida, un escaneo incompleto le diría al
-            usuario que sus vulnerabilidades fueron remediadas, que es el fallo
-            de L48-c por otra puerta.
+            usuario que sus vulnerabilidades fueron remediadas cuando en
+            realidad nunca se comprobaron.
 
     Returns:
         The ``current`` findings with their ``state`` set, plus one ``fixed``
@@ -348,11 +349,6 @@ def exploit_maturity(in_kev: bool, evidence: Optional[str] = None) -> str:
     una urgencia distinta de uno con una prueba de concepto en un gist, y los
     dos lo son de uno sin nada público.
 
-    La columna ``Finding.exploit_maturity`` existía desde el principio,
-    documentada como "rellenada desde la Fase 1", y nadie la escribía nunca:
-    ``NULL`` en todas las filas. Una columna que promete un dato y siempre está
-    vacía es peor que no tenerla, porque quien lee el modelo cree que existe.
-
     Args:
         in_kev: Si la CVE está en el catálogo CISA KEV. Es la evidencia más
             fuerte que hay —explotación activa confirmada— y gana siempre.
@@ -383,7 +379,7 @@ def score_finding(finding: dict, exposure: str) -> str:
       falta Metasploit o Exploit-DB, que son feeds externos nuevos), y el que
       sí se produce, ``in_the_wild``, sale de KEV, que ya sube la banda por su
       cuenta. Añadir la condición ahora sería una rama que no puede
-      dispararse, que es exactamente el pecado que L34 vino a corregir.
+      dispararse nunca, código muerto disfrazado de lógica.
     * An actively-confirmed finding with no CVSS (e.g. an exposed path) is floored
       at MEDIUM, so a confirmed issue never reads as merely informational.
     * An unconfirmed match whose CVE only applies on a specific platform

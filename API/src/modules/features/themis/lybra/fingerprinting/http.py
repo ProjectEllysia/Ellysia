@@ -8,7 +8,7 @@ signature can also match a deliberately-nonexistent path's error page — some
 vendors brand their 404 more than their homepage, which is exactly how the
 SonicWall entry was found in the first place (see ``error_body`` below).
 
-**La versión no sale de una sola fuente** (L18). Salía: la cabecera
+**La versión no sale de una sola fuente**. Salía: la cabecera
 ``Server``, y nada más. Y ``server_tokens off`` en nginx, ``ServerTokens
 Prod`` en Apache y prácticamente cualquier CDN o WAF la suprimen, así que el
 caso más común en producción era justo el que dejaba al motor sin versión —
@@ -103,7 +103,7 @@ class ServiceLayer:
     podía expresarlo: se quedaba con lo que dijera la cabecera ``Server``, que
     la pone el de delante.
 
-    Eso salió caro en la medición real (L48-b): cinco servicios en tres hosts,
+    Eso salió caro en la medición real: cinco servicios en tres hosts,
     siempre el mismo patrón — Lybra decía ``nginx``, Nmap decía ``Apache
     httpd``. **Ninguno de los dos estaba equivocado**; describían capas
     distintas de la misma pila. Pero para resolver un CPE y correlacionar CVEs
@@ -273,7 +273,7 @@ def _load_matcher(matcher: dict) -> TechMatcher:
 def validate_tech_signatures(signatures: List[TechSignature]) -> List[str]:
     """Comprueba que cada firma pueda llegar a casar, y describe las que no.
 
-    Mismo criterio que ``checks.validate_checks`` (L27): el feed son datos que
+    Mismo criterio que ``checks.validate_checks``: el feed son datos que
     deciden si un producto se identifica, y su modo de fallo es el silencio —
     una firma sin matchers no casa nunca, un ``versionPattern`` sin grupo
     ``version`` casa y no aporta nada, y en los dos casos el escaneo termina en
@@ -834,14 +834,13 @@ def fingerprint_http(  # pylint: disable=too-many-locals
     )
 
 
-# ``qod`` del hallazgo de fingerprint según de dónde salió la versión. Es la
-# tabla del §10 del roadmap ("banner que coincide con un patrón específico del
-# producto: qod 80") aplicada por fin: hasta ahora todos los fingerprints
-# llevaban la misma constante, así que una versión leída de un ``Server``
-# explícito y otra deducida de una página de error valían exactamente lo
-# mismo. Sigue siendo un hallazgo informativo —no alimenta la confianza de
-# ninguna vulnerabilidad, ver ``dispatch.QOD_FINGERPRINT``—; lo que cambia es
-# que ahora dice **cuánto se fía de su propia lectura**.
+# ``qod`` del hallazgo de fingerprint según de dónde salió la versión: una
+# versión leída de un ``Server`` explícito no vale lo mismo que una deducida
+# de una página de error, así que cada fuente lleva su propia constante en
+# vez de compartir una única cifra para todos los fingerprints. Sigue siendo
+# un hallazgo informativo —no alimenta la confianza de ninguna vulnerabilidad,
+# ver ``dispatch.QOD_FINGERPRINT``—; lo que varía es **cuánto se fía de su
+# propia lectura**.
 VERSION_SOURCE_QOD: Dict[str, int] = {
     "server-header": 90,
     "powered-by-header": 85,
@@ -854,8 +853,9 @@ VERSION_SOURCE_QOD: Dict[str, int] = {
 
 @register_dissector
 class HttpDissector(Dissector):
-    """Fase F's highest-value protocol: GET /, its favicon, and a nonexistent
-    path (for error-page-only vendor signatures), combined into one fingerprint."""
+    """The highest-value protocol to fingerprint: GET /, its favicon, and a
+    nonexistent path (for error-page-only vendor signatures), combined into
+    one fingerprint."""
 
     label = "HTTP"
 
@@ -875,7 +875,7 @@ class HttpDissector(Dissector):
         response = self._probe.fetch(target, service.port, "GET", "/")
         if response is None:
             return None
-        # L20: la petición del favicon sólo se paga cuando puede pagarse a sí
+        # La petición del favicon sólo se paga cuando puede pagarse a sí
         # misma. Con el catálogo vacío no hay nada con lo que comparar el icono,
         # así que pedirlo sería una petición de red por servicio HTTP —con su
         # turno de limitador— a cambio de un dato que nadie consulta.

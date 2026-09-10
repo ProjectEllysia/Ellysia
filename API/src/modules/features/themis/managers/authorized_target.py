@@ -1,4 +1,4 @@
-"""AuthorizedTargetManager — el registro de objetivos autorizados (roadmap §6).
+"""AuthorizedTargetManager — el registro de objetivos autorizados.
 
 Extraído de ``lybra/engine.py``: no comparte modelo, repositorio ni lógica con
 ``LybraEngineManager`` — es un gate legal transversal, consultado también por
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class AuthorizedTargetManager:
     """CRUD y comprobación de pertenencia para el registro de objetivos autorizados.
 
-    Registro de objetivos autorizados (roadmap §6). Antes de que Lybra ejecute
+    Registro de objetivos autorizados. Antes de que Lybra ejecute
     cualquier operación que toque la red del objetivo (autodescubrimiento propio,
     fingerprinting propio, comprobaciones activas del runtime), el objetivo debe
     estar en este registro por usuario. Es un gate legal, no de red o de

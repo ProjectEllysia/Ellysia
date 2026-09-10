@@ -1,4 +1,4 @@
-"""ThemisReportManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
+"""Gestión de documentos de Themis y generación asíncrona de sus informes PDF."""
 
 import logging
 from src.modules.accounts import LimitKey, QuotaManager

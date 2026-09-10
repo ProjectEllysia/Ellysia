@@ -1,4 +1,4 @@
-"""APIs de administración expuestas sin autenticar (L17).
+"""APIs de administración expuestas sin autenticar.
 
 Docker en 2375, Elasticsearch en 9200, Kubernetes en 6443: servicios que hablan
 HTTP, publican su versión en un JSON sin credenciales, y cuya sola exposición

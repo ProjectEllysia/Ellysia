@@ -1,14 +1,13 @@
 """Banco de concordancia no-HTTP: qué identifica Lybra frente a lo que identifica Nmap.
 
-El roadmap dice, sobre la Fase N, que *«medir la concordancia de fingerprint
-sólo sobre HTTP/SSH/TLS dejaría de ser representativo justo cuando la
-superficie se amplía»*. Y eso era exactamente lo que pasaba: los ocho
-dissectors que la Fase N añadió —FTP, SMTP, IMAP, POP3, SMB, MySQL, Redis, VNC
-y SNMP— no tenían ni un objetivo real contra el que medirse. Su única cobertura
-eran tests unitarios con sockets falsos, que verifican que el parser hace lo que
-su autor creía, no que reciba lo que un servidor de verdad emite. El criterio de
-cierre de la Fase N pide concordancia ≥ 0,90 en cuatro protocolos no-HTTP; ese
-número no existía, ni bueno ni malo.
+Medir la concordancia de fingerprint sólo sobre HTTP/SSH/TLS dejaría de ser
+representativo justo cuando la superficie se amplía. Y eso era exactamente lo
+que pasaba: los ocho dissectors no-HTTP —FTP, SMTP, IMAP, POP3, SMB, MySQL,
+Redis, VNC y SNMP— no tenían ni un objetivo real contra el que medirse. Su
+única cobertura eran tests unitarios con sockets falsos, que verifican que el
+parser hace lo que su autor creía, no que reciba lo que un servidor de verdad
+emite. El umbral de aceptación de este banco es concordancia ≥ 0,90 en cuatro
+protocolos no-HTTP; ese número no existía, ni bueno ni malo.
 
 Este módulo lo produce. Levanta un contenedor por protocolo, deja que el
 dissector real lo interrogue, y compara su lectura con la de ``nmap -sV`` sobre
@@ -16,9 +15,9 @@ el mismo servidor.
 
 ## Medir contra Nmap no es depender de Nmap
 
-Conviene decirlo porque la Fase 1 se abrió retirando justo lo contrario (L52):
-el motor ya no lanza otros escáneres, no arranca desde ellos, y su lectura
-propia no está subordinada a ninguno. Nada de eso está aquí en cuestión. Nmap
+Conviene decirlo porque el motor no lanza otros escáneres, no arranca desde
+ellos, y su lectura propia no está subordinada a ninguno. Nada de eso está
+aquí en cuestión. Nmap
 aparece en ``tests/``, nunca en el producto, y sólo como **regla graduada**: la
 independencia se demuestra midiéndose contra el mejor del mercado y empatando o
 ganando, no negándose a la comparación.
@@ -209,7 +208,7 @@ def ftp_target():
 
 @pytest.fixture(scope="module")
 def proftpd_target():
-    """El segundo servidor FTP del catálogo, y la razón de que exista (L48-a).
+    """El segundo servidor FTP del catálogo, y la razón de que exista.
 
     La familia FTP daba concordancia 1,00 en laboratorio y 0,00 contra
     objetivos reales. La explicación no era la red: el banco tenía **un solo**
@@ -254,7 +253,7 @@ def proftpd_target():
 
 @pytest.fixture(scope="module")
 def reverse_proxy_target():
-    """Un nginx de proxy inverso por delante de un Apache (L48-b).
+    """Un nginx de proxy inverso por delante de un Apache.
 
     Todos los demás objetivos HTTP del catálogo son **servidores pelados**: la
     cabecera ``Server`` y el servidor real son la misma cosa, así que leerla
@@ -287,8 +286,8 @@ def reverse_proxy_target():
 
 @pytest.fixture(scope="module")
 def smtp_target():
-    """Postfix, que da producto pero **no** versión: el caso que el roadmap
-    llama "no inventar CPE". Nmap sí extrae el producto de ese mismo saludo."""
+    """Postfix, que da producto pero **no** versión: el caso de "no inventar
+    CPE". Nmap sí extrae el producto de ese mismo saludo."""
     port, name = _PORTS["smtp"], "lybra-concordance-smtp"
     _start(name, port, 25, "alpine:latest", "sh", "-c",
            "apk add --no-cache postfix && "
@@ -537,15 +536,15 @@ def test_snmp_fingerprint_agrees_with_nmap(snmp_target):
 
 @pytest.mark.xfail(strict=True, reason=(
     "La concordancia no-HTTP medida hoy sobre los siete protocolos del catálogo "
-    "es 3/7 = 0,43, muy por debajo del 0,90 que pide el criterio de cierre de la "
-    "Fase N. Los cuatro fallos están documentados uno a uno arriba. Este test es "
-    "el número agregado: pasará a XPASS cuando se cierre el último hueco, y "
-    "entonces habrá que quitarle el marcador."
+    "es 3/7 = 0,43, muy por debajo del umbral de 0,90 que este banco exige. Los "
+    "cuatro fallos están documentados uno a uno arriba. Este test es el número "
+    "agregado: pasará a XPASS cuando se cierre el último hueco, y entonces habrá "
+    "que quitarle el marcador."
 ))
 def test_non_http_concordance_reaches_the_phase_n_threshold(
     ftp_target, smtp_target, mysql_target, smb_target, redis_target, vnc_target, snmp_target,
 ):
-    """El número que la Fase N pide y que hasta ahora no existía.
+    """El umbral de concordancia no-HTTP que este banco exige.
 
     No mide si los dissectors son *útiles* —el de SNMP lo es, y el de SMB
     también— sino si su lectura es comparable con la de la herramienta de

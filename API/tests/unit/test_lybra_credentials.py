@@ -1,4 +1,4 @@
-"""El motor de credenciales por defecto (Fase D, L31).
+"""El motor de credenciales por defecto.
 
 Es la única familia de detección de Lybra que escribe en el objetivo, así que
 lo que estos tests protegen no es sólo "encuentra el par correcto" sino las

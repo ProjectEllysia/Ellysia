@@ -1,10 +1,10 @@
-"""El bloque de configuración del motor (L39).
+"""El bloque de configuración del motor.
 
-Hasta L39 cada timeout, cada nivel de concurrencia y cada intervalo de ritmo
-era un literal en la firma de un constructor, y el manager instanciaba las
-sondas sin argumentos. Este fichero comprueba las dos mitades del arreglo: que
-el bloque existe y está atado, y —lo que de verdad importa— que el manager
-**usa** los valores configurados en vez de los defectos del constructor.
+Cada timeout, cada nivel de concurrencia y cada intervalo de ritmo tiene que
+venir del bloque de configuración, no de un literal en la firma de un
+constructor. Este fichero comprueba las dos mitades: que el bloque existe y
+está atado, y —lo que de verdad importa— que el manager **usa** los valores
+configurados en vez de los defectos del constructor.
 """
 
 import pytest

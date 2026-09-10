@@ -1,4 +1,4 @@
-"""The SMB dissector — Fase N's highest-value protocol by port frequency.
+"""The SMB dissector — the highest-value protocol by port frequency.
 
 Sends a minimal SMB2 NEGOTIATE request and reads the response's negotiated
 dialect and security mode — the wire format is fixed and publicly documented
@@ -22,7 +22,7 @@ surprise:
   negotiate simply yields no identification here, same as any other
   unrecognised response.
 
-**Verificado contra un Samba real** (L49, banco de concordancia): el
+**Verificado contra un Samba real** (banco de concordancia): el
 negociado funciona —el dissector habla con un ``dperson/samba`` de verdad y
 lee dialecto ``3.0.2`` y modo de seguridad, exactamente lo que los offsets
 predecían—, así que el parser deja de ser una afirmación apoyada sólo en un
@@ -37,7 +37,7 @@ responden a preguntas distintas, y la de aquí no sirve para resolver un CPE
 —que es lo que la detección por versión necesita—. Está medido y documentado
 en ``tests/oracle/test_lybra_concordance_bench.py``.
 
-**Dos intercambios más, y por qué** (L11). El NEGOTIATE de arriba dice qué
+**Dos intercambios más, y por qué**. El NEGOTIATE de arriba dice qué
 dialecto habla el servidor y si exige firma, y eso era todo. Faltaban tres
 datos que el propio protocolo ofrece sin autenticar:
 

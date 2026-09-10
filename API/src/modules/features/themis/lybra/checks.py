@@ -11,14 +11,14 @@ deliberately mirrors the shape of Nuclei's own templates. JSON is still
 accepted by the loader — the two are the same object graph, and an external
 feed may arrive as either — but the first-party feed is YAML.
 
-The scope of this layer covers the three highest-value, lowest-cost families the
-roadmap names first: exposed paths (like ``/.git/config``), missing security
+The scope of this layer covers the three highest-value, lowest-cost families:
+exposed paths (like ``/.git/config``), missing security
 headers, and TLS/certificate hygiene (self-signed, expired, deprecated
 protocol — a ``type: "tls"`` check, evaluated against a handshake instead of an
 HTTP request/response), plus the raw protocol probes of ``type: "network"``
-(Fase N) and the first-party plugins of ``type: "script"`` (Fase R) for what no
+and the first-party plugins of ``type: "script"`` for what no
 text matcher can express — a binary protocol, a multi-step negotiation. An
-``http`` check can also **chain** requests (L30): an ``extractors`` block pulls
+``http`` check can also **chain** requests: an ``extractors`` block pulls
 a variable out of one response — a session cookie, a CSRF token, a version
 string — and later requests in the same check reference it as ``{{name}}`` in
 their path, body or headers. **Payloads** (``payloads: {name: [v1, v2, ...]}``)
@@ -30,7 +30,7 @@ The runtime is pure given an injected ``fetch`` callable, so it can be
 unit-tested with hand-crafted responses and never touches the network in tests.
 In production the manager wires the real :class:`HttpProbe`, and only when an
 opt-in config flag is set — active checks reach out and touch the target, and so
-must wait on the authorized-targets register the roadmap calls for.
+must wait on the authorized-targets register.
 """
 
 from __future__ import annotations
@@ -75,8 +75,8 @@ QOD_CONFIRMED = 99
 
 # The feed shipped in the package's feeds/ directory, alongside every other
 # Lybra feed (tech_signatures.json for the HTTP dissector, ...). YAML rather
-# than JSON since Fase R: it is Nuclei's own format — which this schema aims to
-# stay reasonably compatible with — and it takes comments, which in a feed of
+# than JSON: it is Nuclei's own format — which this schema aims to stay
+# reasonably compatible with — and it takes comments, which in a feed of
 # detection rules is the difference between being able to explain why a check
 # exists and not.
 _BUNDLED_FEED = Path(__file__).parent / "feeds" / "checks_feed.yaml"
@@ -101,7 +101,7 @@ _HTTP_SERVICE_NAMES = {"http", "https", "http-proxy", "https-alt", "http-alt"}
 _TLS_HYGIENE_PORTS = {443, 8443, 9443, 10443, 4443, 7443, 8834, 9091, 5986, 636, 3269}
 
 # APIs de administración que hablan HTTP y publican su versión en un JSON sin
-# autenticar (L17). Cada familia tiene su propio predicado —y no uno común—
+# autenticar. Cada familia tiene su propio predicado —y no uno común—
 # porque el runtime de checks selecciona los servicios por ese nombre: con un
 # único ``admin_api``, el check de Docker se ejecutaría también contra el 9200
 # de Elasticsearch, seis peticiones donde basta una.
@@ -130,12 +130,12 @@ _ADMIN_API_PORTS = (
 # habría servido de nada. Y los de las APIs de administración: hablan HTTP, y
 # excluirlos dejaba fuera tanto los checks de exposición como los de higiene de
 # certificado sobre servicios que son de los más graves que se pueden encontrar
-# expuestos (L17).
+# expuestos.
 _HTTP_PORTS = {80, 8080, 8000, 8888, 8008} | _TLS_HYGIENE_PORTS | _ADMIN_API_PORTS
-# Service names and ports for FTP — Fase N's first ``type: "network"`` family.
+# Service names and ports for FTP, the first ``type: "network"`` family.
 _FTP_SERVICE_NAMES = {"ftp"}
 _FTP_PORTS = {21}
-# Fase N's remaining priority-1/2 protocols — same "name or well-known port"
+# The remaining priority-1/2 protocols — same "name or well-known port"
 # applicability shape as HTTP/FTP above.
 _SMTP_SERVICE_NAMES = {"smtp", "submission", "smtps"}
 _SMTP_PORTS = {25, 465, 587}
@@ -169,15 +169,15 @@ _VNC_SERVICE_NAMES = {"vnc"}
 _VNC_PORTS = {5900}
 _TELNET_SERVICE_NAMES = {"telnet"}
 _TELNET_PORTS = {23}
-# SNMP — el primer protocolo de esta tabla que habla UDP (Fase N/Ronda 1,
-# roadmap §6.3). 161 también aparece en WELL_KNOWN_PORTS como TCP, así que
-# is_snmp_service (más abajo) es el único predicado de este módulo que mira
-# service.protocol: sin esa guarda, un 161/tcp abierto arrastraría al
-# dissector y al check a un datagrama que ese servicio nunca contestará.
+# SNMP — el primer protocolo de esta tabla que habla UDP. 161 también aparece
+# en WELL_KNOWN_PORTS como TCP, así que is_snmp_service (más abajo) es el
+# único predicado de este módulo que mira service.protocol: sin esa guarda,
+# un 161/tcp abierto arrastraría al dissector y al check a un datagrama que
+# ese servicio nunca contestará.
 _SNMP_SERVICE_NAMES = {"snmp"}
 _SNMP_PORTS = {161}
 
-# El resto de la superficie UDP (L22). Todos comparten con SNMP la guarda de
+# El resto de la superficie UDP. Todos comparten con SNMP la guarda de
 # protocolo por el mismo motivo: 53, 123, 137 y 1434 existen también como
 # puertos TCP, y mandarle un datagrama a un servicio TCP es tiempo perdido y
 # un hallazgo duplicado con la misma ``dedup_key``.
@@ -468,9 +468,9 @@ class Check:  # pylint: disable=too-many-instance-attributes
             has already *proposed* that CVE for the service — never "just in
             case" — and, when it fires, promotes that hypothesis from
             ``confirmed=false, qod=70`` to ``confirmed=true, qod=99`` by merging
-            on the shared ``dedup_key`` (both carry the same ``cve_ids``). It is
-            the encadenamiento versión→confirmador the roadmap names as the
-            runtime's reason to exist. A confirmer never exploits: it checks the
+            on the shared ``dedup_key`` (both carry the same ``cve_ids``). This
+            version-to-confirmer chaining is the runtime's reason to exist. A
+            confirmer never exploits: it checks the
             condition without running anything on the target, or it is not
             written.
         tags: Free-form labels (Nuclei's ``info.tags``, plus vendor/product
@@ -519,7 +519,7 @@ class Check:  # pylint: disable=too-many-instance-attributes
 def load_feed_document(path: Path) -> dict:
     """Read a feed file into its raw document, dispatching on the extension.
 
-    YAML is the feed's own format (Fase R); JSON is still accepted because the
+    YAML is the feed's own format; JSON is still accepted because the
     two shapes are the same object graph, and an externally-supplied feed may
     arrive as either. Only the deserializer differs — :func:`_parse_check` is
     given identical dicts in both cases, which is what makes the migration a
@@ -693,7 +693,7 @@ CHECK_MODES = ("safe", "aggressive")
 CHECK_CATEGORIES = (
     "exposed_path",
     # Un servicio entero alcanzable sin credenciales, no un fichero suelto que
-    # se coló bajo la raíz web (L17). La distinción no es cosmética: un
+    # se coló bajo la raíz web. La distinción no es cosmética: un
     # `exposed_path` es un descuido del despliegue, y un `exposed_service` es
     # el propio servicio ofreciéndose sin puerta — una API de Docker en claro
     # es ejecución remota de código como root sin exploit ninguno.
@@ -738,8 +738,8 @@ def validate_checks(checks: Iterable[Check]) -> List[str]:  # pylint: disable=to
     los cuatro ``_applies_*``. En los tres casos el escaneo termina en verde y
     lo único que ocurre es que una vulnerabilidad deja de detectarse.
 
-    Esta función no juzga si un check es *bueno* —eso lo miden los bancos de la
-    Fase 1—, sólo si puede llegar a ejecutarse. Devuelve los problemas en vez
+    Esta función no juzga si un check es *bueno* —eso lo miden los bancos de
+    calibración—, sólo si puede llegar a ejecutarse. Devuelve los problemas en vez
     de lanzar, para poder revisar un feed entero de una pasada en lugar de
     arreglar de uno en uno; el test que la usa afirma que la lista está vacía.
 
@@ -956,7 +956,7 @@ def is_rdp_service(service: Service) -> bool:
 
 def is_redis_service(service: Service) -> bool:
     """Return whether a service should be probed by the Redis dissector or
-    ``type: "network"`` checks (Fase N)."""
+    ``type: "network"`` checks."""
     return (service.name or "").lower() in _REDIS_SERVICE_NAMES or service.port in _REDIS_PORTS
 
 
@@ -1140,7 +1140,7 @@ _TLS_RULES: Dict[str, Callable] = {
 
 @dataclass(frozen=True)
 class ScriptContext:
-    """The restricted API a ``type: "script"`` plugin runs against (Fase R).
+    """The restricted API a ``type: "script"`` plugin runs against.
 
     A script check exists for what a declarative one cannot express: binary
     protocols, multi-step negotiations, anything needing real logic. What it
@@ -1220,8 +1220,8 @@ class _CheckFamily:
     instead: whether it wants a look at a given service at all
     (``applies_to_service``), whether one specific check within that type
     applies (``check_matches``), and how to actually run it
-    (``run_check``). Adding a fourth type (Fase R's planned ``script``) means
-    adding one more family, not a fourth loop.
+    (``run_check``). Adding a fourth type — as ``script`` did, for checks no
+    text matcher can express — means adding one more family, not a fourth loop.
     """
     applies_to_service: Callable[[Service], bool]
     check_matches: Callable[[Check, Service], bool]
@@ -1246,14 +1246,14 @@ class CheckRuntime:
             ``type: "tls"`` checks. When omitted, TLS checks are simply skipped
             — callers that never wire a TLS probe pay nothing for this family.
         network_open: An optional ``(host, port) -> NetworkSession | None``
-            callable for ``type: "network"`` checks (Fase N). One session is
+            callable for ``type: "network"`` checks. One session is
             opened per check per service and every request in that check is
             exchanged over the *same* connection, in order — this is what
             makes a login sequence like FTP's ``USER``/``PASS`` work. Omitted
             the same way ``tls_fetch`` is: callers that never wire a network
             probe pay nothing for this family.
         script_plugins: An optional ``{plugin_id: ScriptPlugin}`` registry for
-            ``type: "script"`` checks (Fase R). Injected rather than imported
+            ``type: "script"`` checks. Injected rather than imported
             so this module never has to import the fingerprinting package,
             which would close an import cycle (the dissectors import their
             applicability predicates from here). Omitted the same way the two
@@ -1280,14 +1280,14 @@ class CheckRuntime:
         self._tls_fetch = tls_fetch
         self._network_open = network_open
         self._script_plugins = dict(script_plugins or {})
-        # El tope de expansiones de un payload (L30): un check que fuzzea corta
+        # El tope de expansiones de un payload: un check que fuzzea corta
         # aquí, pase lo que pase, para que no se vuelva un barrido de fuerza
         # bruta. El manager lo inyecta desde la config; el default de 25 es el
         # que un check declarativo espera si nadie lo toca.
         self._max_payload_expansions = max(1, int(max_payload_expansions))
         # Cómo se recorren los servicios. Por defecto, el ``map`` de siempre:
-        # uno detrás de otro. El manager inyecta aquí un pool acotado por host
-        # (L23), igual que ya inyecta las sondas — este módulo no conoce la
+        # uno detrás de otro. El manager inyecta aquí un pool acotado por host,
+        # igual que ya inyecta las sondas — este módulo no conoce la
         # configuración ni monta hilos por su cuenta.
         self._mapper: Callable = mapper or map
         self._cancel_check: Optional[Callable[[], bool]] = None
@@ -1336,7 +1336,7 @@ class CheckRuntime:
         :meth:`_probe_response` for why that is a property of this loop and not
         a caching layer.
 
-        Los servicios se evalúan **a la vez** dentro de un pool acotado (L23),
+        Los servicios se evalúan **a la vez** dentro de un pool acotado,
         no en fila india: estos checks son espera de red casi entera, y un
         servicio que no contesta retrasaba a todos los que venían detrás. El
         ritmo por host lo sigue marcando el limitador, que es seguro entre
@@ -1374,7 +1374,7 @@ class CheckRuntime:
     def _run_for_service(self, service: Service) -> List[dict]:
         """Ejecuta todos los checks aplicables a **un** servicio.
 
-        Es la unidad de trabajo del pool (L23), y la razón de que el pool sea
+        Es la unidad de trabajo del pool, y la razón de que el pool sea
         seguro sin candados: las cachés de respuesta y de handshake se indexan
         por ``(host, puerto, ...)``, así que **cada hilo toca sólo las claves de
         su propio servicio**. Dos checks del mismo servicio siguen compartiendo
@@ -1493,7 +1493,7 @@ class CheckRuntime:
             return None
         last_response, last_path = fired
         finding = self._finding(check, service)
-        # Evidencia (Fase E): la respuesta que provocó el hallazgo. Sólo para
+        # Evidencia: la respuesta que provocó el hallazgo. Sólo para
         # los confirmados —los que van a un informe— y sólo si la captura está
         # activada. El payload viaja en ``_evidence`` hasta la persistencia, que
         # lo redacta y lo separa en su propia fila. La ruta es la ya sustituida
@@ -1674,7 +1674,7 @@ class CheckRuntime:
             session.close()
 
     def _run_script_check(self, check: Check, host: str, service: Service) -> Optional[dict]:
-        """Run one ``type: "script"`` check against one service (Fase R).
+        """Run one ``type: "script"`` check against one service.
 
         The plugin handles its own rate limiting through the context, since
         only it knows how many exchanges it needs — unlike the declarative
@@ -1841,7 +1841,7 @@ class HttpProbe:
         detect_scheme: An injectable ``(host, port) -> bool`` telling whether
             the service speaks TLS. Defaults to :func:`negotiates_tls`; a test
             passes a stub instead of opening a socket.
-        user_agent: The ``User-Agent`` header the probe presents (L39).
+        user_agent: The ``User-Agent`` header the probe presents.
     """
 
     def __init__(
@@ -1859,7 +1859,7 @@ class HttpProbe:
         # es sobre el servicio, no sobre la petición, y no cambia entre una y
         # otra dentro del mismo escaneo.
         self._schemes: Dict[tuple, str] = {}
-        # E7: este probe se queda deliberadamente en ``urllib`` mientras el
+        # Este probe se queda deliberadamente en ``urllib`` mientras el
         # resto del tráfico HTTP ordinario del proyecto (aegis/pills.py,
         # lybra/kb.py) usa ``requests``. Una sonda de seguridad necesita
         # control fino sobre el contexto TLS de *cada* salto, y ``requests``
@@ -1891,9 +1891,9 @@ class HttpProbe:
             port: The target port (decides http vs https).
             method: The HTTP method.
             path: The request path.
-            body: The request body (L30), or ``None`` for none. A non-GET check
+            body: The request body, or ``None`` for none. A non-GET check
                 — a login POST above all — needs this.
-            headers: Extra request headers (L30), or ``None``. The way a chained
+            headers: Extra request headers, or ``None``. The way a chained
                 check replays an extracted token: an ``Authorization`` or
                 ``Cookie`` header on the follow-up request.
 
@@ -1982,7 +1982,7 @@ class HttpProbe:
 
 
 # =========================================================================
-# NETWORK PROBE (the network edge for ``type: "network"`` checks — Fase N)
+# NETWORK PROBE (the network edge for ``type: "network"`` checks)
 # =========================================================================
 
 # How a reply ends, declared per request by the feed (``read:``). The transport

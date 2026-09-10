@@ -1,7 +1,7 @@
-"""SMTP/IMAP/POP3 dissectors — Fase N, priority-1 non-HTTP protocols.
+"""SMTP/IMAP/POP3 dissectors — high-value non-HTTP protocols.
 
 All three volunteer an identifying line unprompted, right after a bare TCP
-connect — the same shape FTP already exploits (Fase N's opening move): no
+connect — the same shape FTP already exploits: no
 negotiation, no framing, just a banner. A stopword list keeps the parser from
 mistaking a protocol's own name ("POP3", "IMAP4", "server") for a product,
 mirroring the FTP dissector's rule of never inventing an identification that

@@ -112,8 +112,8 @@ class NiktoScanManager(ScanManager):
 
         scan_repo.persist_nikto_results(scan, host, incidents_data)
 
-        # Additive: also record each incident as a normalized Finding, so a
-        # future cross-scanner correlation pass (Fase 6) has something to fuse
+        # Additive: also record each incident as a normalized Finding, so
+        # cross-scanner correlation has something to fuse
         # against Lybra/Nuclei findings on the same host. Does not replace
         # the NiktoIncident write above — the PDF report and history charts
         # still read that (see lybra/adapters.py for why).

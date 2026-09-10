@@ -1,4 +1,4 @@
-"""The VNC dissector — Fase N.
+"""The VNC dissector.
 
 The RFB protocol (RFC 6143 §7.1.1) opens with the server sending its supported
 protocol version unprompted, as a fixed 12-byte ASCII line: ``"RFB 003.008\\n"``.

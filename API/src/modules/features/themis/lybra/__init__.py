@@ -9,28 +9,27 @@ A scan flows down through the engine's layers, and each module here owns one of
 them:
 
 ``transport``
-    Discovers which ports are open (the L0 layer) — an unprivileged asyncio
-    connect scan.
+    Discovers which ports are open — an unprivileged asyncio connect scan.
 
 ``fingerprinting``
-    Identifies what is running on a port (L1) — one dissector module per
+    Identifies what is running on a port — one dissector module per
     protocol (HTTP, SSH, TLS, FTP, SMTP/IMAP/POP3, SMB, MySQL, Redis, VNC...),
     calibrated against Nmap where an oracle bench exists.
 
 ``engine``
-    The detection core (L2): turns discovered services into findings, including
+    The detection core: turns discovered services into findings, including
     version-based CVE matches.
 
 ``checks``
-    The active-detection runtime (also L2): runs declarative checks to *confirm*
-    a vulnerability rather than merely infer it.
+    The active-detection runtime: runs declarative checks to *confirm* a
+    vulnerability rather than merely infer it.
 
 ``kb``
-    The local knowledge base (L3): a mirror of NVD/KEV/EPSS plus the version and
+    The local knowledge base: a mirror of NVD/KEV/EPSS plus the version and
     CPE logic the matcher relies on.
 
 ``correlation``
-    Deduplication, lifecycle and contextual scoring (L3): turns per-scan findings
+    Deduplication, lifecycle and contextual scoring: turns per-scan findings
     into vulnerability state on an asset over time.
 
 ``adapters``

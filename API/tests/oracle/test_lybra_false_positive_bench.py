@@ -1,7 +1,7 @@
-"""Baseline de falsos positivos de la detección por versión (L33).
+"""Baseline de falsos positivos de la detección por versión.
 
-La Fase O del roadmap se cierra con un número —*«falsos positivos del banco
-−40 % en imágenes Debian/RHEL»*— que **no se podía calcular**, porque no existía
+El objetivo declarado es un número —*«falsos positivos del banco −40 % en
+imágenes Debian/RHEL»*— que **no se podía calcular**, porque no existía
 el punto de partida del que restar ese 40 %. Peor aún: nadie sabía cuál era la
 tasa. Podía ser el 10 % o el 60 %. Y esa cifra es, literalmente, la respuesta a
 «¿me puedo fiar de esto?».
@@ -21,7 +21,7 @@ corregida**. No es un fallo del comparador: la información que distingue un cas
 del otro no está en el número de versión.
 
 Ese es el falso positivo que el escaneo de vulnerabilidades por versión produce
-a espuertas, y el que la Fase O tiene que atacar.
+a espuertas, y el que este banco tiene que atacar.
 
 ## La verdad de referencia, sin salir a la red
 
@@ -91,8 +91,8 @@ _IMAGES = (
 # La cota medida el 2026-08-31 sobre este catálogo: 8 falsos positivos
 # demostrables de 19 hallazgos por versión emitidos = 0,42.
 #
-# La aserción es un guardarraíl contra empeorar, no una meta: el objetivo de la
-# Fase O es bajar de aquí un 40 %, o sea hasta ~0,25. Cuando eso ocurra, este
+# La aserción es un guardarraíl contra empeorar, no una meta: el objetivo
+# declarado es bajar de aquí un 40 %, o sea hasta ~0,25. Cuando eso ocurra, este
 # número baja con él y el margen se estrecha.
 _BASELINE_FALSE_POSITIVE_RATE = 0.45
 
@@ -198,7 +198,7 @@ def measurement(app) -> Dict:
 
 def _print_report(seeded, per_image: Dict) -> None:
     aliases, cves = seeded
-    print(f"\n=== Baseline de falsos positivos por versión (L33) ===")
+    print(f"\n=== Baseline de falsos positivos por versión ===")
     print(f"  KB del banco: {aliases} alias de producto, {cves} CVE copiadas del backfill real")
     for image, data in per_image.items():
         emitted, false_positives = len(data["emitted"]), len(data["false_positives"])
@@ -229,7 +229,7 @@ def test_the_bench_actually_emits_something_to_judge(measurement):
 
 
 def test_version_detection_false_positive_rate_does_not_regress(measurement):
-    """La cifra que la Fase O necesita como punto de partida.
+    """La cifra que sirve de punto de partida para reducir falsos positivos.
 
     Medida el 2026-08-31: 8 falsos positivos demostrables sobre 19 hallazgos por
     versión, es decir **0,42** — y es una cota inferior, porque el oráculo sólo
@@ -264,4 +264,5 @@ def test_most_of_a_distro_inventory_never_reaches_the_knowledge_base(measurement
     packages = sum(data["packages"] for data in measurement.values())
     assert packages > 0
     # No hay aserción sobre la cobertura porque no hay umbral acordado todavía;
-    # el número sale impreso en el informe y es el que alimenta la Fase O.
+    # el número sale impreso en el informe y es el que alimenta el objetivo de
+    # reducción de falsos positivos.

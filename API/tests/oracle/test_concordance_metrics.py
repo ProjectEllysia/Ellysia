@@ -7,7 +7,7 @@ como cualquier test unitario — que la vara de medir esté fuera del producto n
 significa que nadie compruebe que mide bien.
 
 Estos casos venían de ``test_lybra_fingerprint.py`` y ``test_lybra_transport.py``
-y se mudaron con el código que ejercitan (L52).
+y se mudaron con el código que ejercitan.
 """
 
 import pytest

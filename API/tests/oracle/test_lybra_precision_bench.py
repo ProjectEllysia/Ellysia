@@ -1,6 +1,6 @@
-"""Medición formal de precisión de las tres familias de la Fase R (roadmap §10).
+"""Medición formal de precisión de tres familias de checks.
 
-El número que la Fase R pide para darse por cerrada es explícito: *"familias de
+El número que este banco exige es explícito: *"familias de
 TLS, cabeceras y paths con precisión ≥ 0,9 medida contra el catálogo de imágenes
 etiquetadas"*. Hasta ahora ``test_lybra_oracle_bench.py`` afirmaba
 target-a-target ("en este contenedor debe salir este check"), que es una prueba
@@ -16,7 +16,7 @@ los objetivos:
     FN = estaba declarado y no disparó
     precisión = TP / (TP + FP)           recall = TP / (TP + FN)
 
-La aserción dura es solo sobre la precisión, que es lo que el roadmap fija como
+La aserción dura es solo sobre la precisión, que es lo que este banco fija como
 umbral; el recall se mide y se imprime porque un banco con precisión perfecta y
 recall ruinoso sería trivial de conseguir (no disparar nunca) y hay que poder
 verlo.
@@ -60,9 +60,9 @@ pytestmark = [pytest.mark.oracle, pytest.mark.integration]
 _DOCKER = resolve_docker()
 pytestmark.append(pytest.mark.skipif(_DOCKER is None, reason="Docker no disponible"))
 
-# Las tres familias que el número de la Fase R nombra. Todo lo demás que emita
+# Las tres familias que este banco mide. Todo lo demás que emita
 # el motor (open_port, fingerprint, outdated_software...) queda fuera del
-# cómputo: son otras fases y otros números.
+# cómputo: son otras mediciones y otros números.
 _MEASURED_CATEGORIES = {"exposed_path", "security_header", "tls"}
 
 _PRECISION_THRESHOLD = 0.9
@@ -514,7 +514,7 @@ def _measured_check_ids(findings) -> Set[str]:
 
     Los de estado ``fixed`` se excluyen, y no es un detalle: los nueve objetivos
     del catálogo comparten IP (127.0.0.1) y por tanto el mismo ``Host``, así que
-    ``apply_lifecycle`` (Fase 5) arrastra a cada escaneo un hallazgo fantasma por
+    ``apply_lifecycle`` arrastra a cada escaneo un hallazgo fantasma por
     cada uno del escaneo anterior que ya no está, precisamente para dejar
     constancia de la remediación. Contarlos como detecciones convertiría el
     ciclo de vida —que funciona— en seis falsos positivos inventados por el
@@ -527,7 +527,7 @@ def _measured_check_ids(findings) -> Set[str]:
 
 
 def test_fase_r_precision_over_labelled_catalogue(app, admin_user, monkeypatch):
-    """El número de la Fase R: precisión ≥ 0,9 sobre el catálogo etiquetado."""
+    """El umbral de este banco: precisión ≥ 0,9 sobre el catálogo etiquetado."""
     true_positives = false_positives = false_negatives = 0
     breakdown = []
 
@@ -556,7 +556,7 @@ def test_fase_r_precision_over_labelled_catalogue(app, admin_user, monkeypatch):
     recall = true_positives / (true_positives + false_negatives) if true_positives + false_negatives else 0.0
 
     report = (
-        "\n[precisión Fase R] catálogo de "
+        "\n[precisión] catálogo de "
         f"{len(_CATALOGUE)} objetivos etiquetados, familias {sorted(_MEASURED_CATEGORIES)}\n"
         + "\n".join(breakdown)
         + f"\n  TOTAL  TP={true_positives} FP={false_positives} FN={false_negatives}"
@@ -567,7 +567,7 @@ def test_fase_r_precision_over_labelled_catalogue(app, admin_user, monkeypatch):
 
     assert precision >= _PRECISION_THRESHOLD, report
 
-    # Y, por encima del umbral del roadmap, un guardarraíl contra la deriva.
+    # Y, por encima del umbral exigido, un guardarraíl contra la deriva.
     #
     # El 0,9 se fijó cuando el banco tenía 30 detecciones. Con 68 hacen falta
     # más de siete falsos positivos para bajar de ahí, así que una regresión

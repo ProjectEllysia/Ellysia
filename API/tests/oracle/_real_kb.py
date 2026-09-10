@@ -1,7 +1,6 @@
 """Puente de solo lectura entre el backfill NVD real y la KB del banco oráculo.
 
-**El problema que resuelve.** El roadmap (Fase U, "qué no se puede verificar en
-este equipo") ya lo había anotado como la fila que gobierna a todas las demás:
+**El problema que resuelve.** Es la fila que gobierna a todas las demás:
 *"sin KB poblada el motor no falla, devuelve vacío — que es peor, porque se lee
 como 'objetivo limpio'"*. Y eso es literalmente lo que hacía el oráculo
 diferencial: sobre sus tres objetivos reportaba `corroborated: [] · lybra_only:
@@ -26,9 +25,8 @@ productos que los contenedores del banco hablan de verdad. Los dos límites:
 clonado— se cae al subconjunto congelado que vive versionado en este mismo
 directorio (``frozen_kb.json.gz``, unos 24 KB comprimidos: 14 alias de producto,
 424 CVE y 4.085 reglas de aplicabilidad). Eso es lo que convierte estas
-mediciones en algo repetible fuera del equipo que tiene el backfill, que era
-todo el problema de L51: las cifras del roadmap iban fechadas porque eran
-instantáneas manuales.
+mediciones en algo repetible fuera del equipo que tiene el backfill: sin esto,
+las cifras publicadas irían fechadas porque serían instantáneas manuales.
 
 Se regenera con ``scripts/freeze_bench_kb.py``. Cambiarlo cambia los números que
 los bancos publican, así que conviene hacerlo en un commit propio.
@@ -54,8 +52,8 @@ from src.modules.features.themis.lybra import normalize_product_name
 from src.modules.features.themis.repositories import KbRepository
 
 #: El subconjunto congelado de la KB, versionado en el repositorio para que los
-#: bancos puedan medir en un runner de CI que no tiene ninguna base de datos
-#: (L51). Se regenera con ``scripts/freeze_bench_kb.py``.
+#: bancos puedan medir en un runner de CI que no tiene ninguna base de datos.
+#: Se regenera con ``scripts/freeze_bench_kb.py``.
 FROZEN_KB_PATH = Path(__file__).resolve().parent / "frozen_kb.json.gz"
 
 # (vendor, product) tal y como el backfill de NVD los escribe. Un producto por
@@ -114,7 +112,7 @@ def seed_from_real_backfill(products: Iterable[Tuple[str, str]] = BENCH_PRODUCTS
     engine = _real_engine()
     if engine is None:
         # Sin Postgres real se cae al subconjunto congelado, que es lo que hace
-        # que estos bancos puedan correr en un runner de CI (L51).
+        # que estos bancos puedan correr en un runner de CI.
         frozen = seed_from_frozen()
         return frozen[1] if frozen else None
 
@@ -139,7 +137,7 @@ _ALIAS_QUERY = sa.text(
 def seed_for_inventory(package_names: Iterable[str]) -> Optional[Tuple[int, int]]:
     """Copia a la KB del test lo que hace falta para analizar un inventario.
 
-    Un inventario de paquetes (Fase I) no llega con un CPE puesto, como sí hace
+    Un inventario de paquetes no llega con un CPE puesto, como sí hace
     un servicio identificado por Nmap: llega con el nombre que le da la
     distribución —``zlib1g``, ``perl-base``— y hay que resolverlo primero al
     vocabulario de NVD. Esa resolución la hace ``CpeProductAlias``, un índice

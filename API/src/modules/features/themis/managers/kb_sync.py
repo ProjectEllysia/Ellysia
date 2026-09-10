@@ -1,8 +1,8 @@
 """KbSyncManager y KbQueryManager — escritura y lectura de la KB local.
 
-``KbSyncManager`` se extrajo de themis/managers.py (Fase 3 del refactor de
-estructura). ``KbQueryManager`` es posterior y es el contrato de lectura que
-consumen otros módulos.
+``KbSyncManager`` sincroniza la base de conocimiento local (NVD, CISA-KEV,
+FIRST-EPSS, avisos OVAL/CSAF de distribuciones) contra sus fuentes upstream.
+``KbQueryManager`` es el contrato de lectura que consumen otros módulos.
 """
 
 import json
@@ -61,7 +61,7 @@ class KbSyncManager:
         return count
 
     def sync_oval(self, sources: dict) -> int:
-        """Espejar los avisos de las distribuciones (Fase O).
+        """Espejar los avisos de las distribuciones.
 
         ``sources`` mapea ``"<vendor>[:<release>]"`` a la URL de su feed, para
         que añadir Debian 12 o Rocky 9 sea una línea de configuración y no de
@@ -171,7 +171,7 @@ class KbSyncManager:
                 repo.upsert_cve(cve_row, cpe_matches)
 
     def rebuild_cpe_product_index(self) -> int:
-        """Rebuild the CPE product-name index (Fase I-b, paso 2). See
+        """Rebuild the CPE product-name index. See
         ``KbRepository.rebuild_cpe_product_index`` for the algorithm."""
         with UnitOfWork() as uow:
             repository = KbRepository(uow)

@@ -1,4 +1,4 @@
-"""SMB más allá del NEGOTIATE: SMBv1, identidad del activo y versión (L11).
+"""SMB más allá del NEGOTIATE: SMBv1, identidad del activo y versión.
 
 El dissector de SMB leía dialecto y modo de firma, y ahí se acababa. Faltaban
 tres datos que el propio protocolo ofrece **sin autenticar**, y cada uno tiene

@@ -1,4 +1,4 @@
-"""Shared Docker plumbing for the Lybra oracle test suite (roadmap §7).
+"""Shared Docker plumbing for the Lybra oracle test suite.
 
 Both modules in this package — the check-runtime oracle
 (``test_lybra_oracle_bench.py``) and the F/T concordance bench

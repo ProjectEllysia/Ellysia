@@ -1,8 +1,8 @@
-"""El dissector de MongoDB (L14).
+"""El dissector de MongoDB.
 
-Cierra el trío de bases de datos de la Fase N, y trae el hallazgo más famoso de
-la lista: durante años las instalaciones por defecto escuchaban en todas las
-interfaces sin autenticación.
+Completa el trío de dissectors de bases de datos, y trae el hallazgo más
+famoso de la lista: durante años las instalaciones por defecto escuchaban en
+todas las interfaces sin autenticación.
 
 El bloque que más importa aquí es el que distingue **contestar** de **dejar
 entrar**. Ver el docstring del módulo: `hello` responde siempre, así que un

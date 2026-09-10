@@ -1,8 +1,8 @@
-"""Verificación de backports contra la palabra del proveedor (Fase O, L32).
+"""Verificación de backports contra la palabra del proveedor.
 
 Un backport es una distribución corrigiendo un fallo sin subir el número de
 versión visible: Debian parchea `apache2`, el banner sigue diciendo `2.4.49`, y
-el motor emite una CVE que ya no existe. La Fase 1 midió esa tasa en **0,42**:
+el motor emite una CVE que ya no existe. La tasa medida es **0,42**:
 cuatro de cada diez CVEs reportados contra un Debian o un Ubuntu ya estaban
 corregidos.
 
