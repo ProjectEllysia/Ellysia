@@ -1,13 +1,13 @@
-"""Unit tests del clasificador de ingestibilidad de plantillas (Fase U4/R).
+"""Unit tests del clasificador de ingestibilidad de plantillas.
 
 Puro: cada test construye una plantilla a mano, así que nada aquí necesita el
 feed real de Nuclei. Lo que se verifica es el *criterio* — qué cuenta como
 obstáculo y en qué cubo cae cada cosa —, no el número del censo, que solo puede
 medirse en una máquina con las plantillas instaladas.
 
-El clasificador es compartido a propósito entre el censo (U4) y la futura
-ingesta (R): si midieran con criterios distintos, el número no describiría lo
-que la ingesta acabaría haciendo.
+El clasificador es compartido a propósito entre el censo del feed instalado y
+la ingesta de plantillas: si midieran con criterios distintos, el número no
+describiría lo que la ingesta acabaría haciendo.
 """
 
 import pytest
@@ -109,8 +109,9 @@ def test_dsl_matcher_is_a_blocker():
 
 
 def test_hex_input_is_counted_separately():
-    """Es justo lo que desbloquearía los checks de SMB que la Fase N no pudo
-    construir, así que interesa poder contarlo aparte en el histograma."""
+    """Es justo lo que desbloquearía los checks de SMB que hoy no se pueden
+    construir sin entrada binaria, así que interesa poder contarlo aparte en
+    el histograma."""
     template = {
         "id": "smb-thing",
         "info": {"severity": "medium"},

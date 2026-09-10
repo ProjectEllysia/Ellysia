@@ -328,11 +328,11 @@ def start_nikto_scan(data):
 @require_attributes(at_least_one=[AttributeType.THEMIS_CREATE])
 @handle_exceptions(default_exception=ScanExecutionError, logger=logger)
 def start_nuclei_scan(data):
-    """Lanzar un escaneo Nuclei (roadmap Fase U1).
+    """Lanzar un escaneo Nuclei.
 
     A diferencia de Nikto, Nuclei toca el objetivo bastante más — nace sujeto
     al registro de objetivos autorizados desde el día uno, no se le añade
-    después (roadmap Fase U1, punto 3).
+    después.
     """
     target = data["target"]
     user = get_current_user()
@@ -415,7 +415,7 @@ def start_lybra_scan(data):
 @limiter.limit("60 per hour; 200 per day")
 @handle_exceptions(default_exception=DuplicateAuthorizedTargetError, logger=logger)
 def add_authorized_target(data):
-    """Añadir un objetivo (IP o CIDR) al registro de objetivos autorizados (roadmap §6)."""
+    """Añadir un objetivo (IP o CIDR) al registro de objetivos autorizados."""
     user = get_current_user()
     entry = AuthorizedTargetManager().add(user.id, data["target"], data.get("label"))
     logger.info(f"Objetivo autorizado {entry.id} ('{entry.target}') añadido por {user.username}")
@@ -619,7 +619,7 @@ def update_finding_state(data, finding_id: int):
 @limiter.limit("120 per hour; 400 per day")
 @handle_exceptions(default_exception=FindingNotFoundError, logger=logger)
 def get_finding_evidence(finding_id: int):
-    """Devolver la evidencia cruda que respalda un hallazgo (Fase E).
+    """Devolver la evidencia cruda que respalda un hallazgo.
 
     La respuesta que el objetivo dio y que provocó el hallazgo, redactada, con
     su hash y su fecha — lo que convierte «te lo digo yo» en «míralo». Sólo
@@ -650,7 +650,7 @@ def retrieve_all_scans(args):
 
     if scan_type != "all":
         manager = ScanManager.get_manager_for_type(scan_type)
-        # `assetId` solo lo entiende Lybra (Fase I): es el que separa los
+        # `assetId` solo lo entiende Lybra: es el que separa los
         # escaneos de un agente Hygeia de los lanzados desde el panel.
         if scan_type == "lybra" and args.get("assetId") is not None:
             results, total_count = manager.get_scans_paginated(user_id, page, per_page, asset_id=args["assetId"])

@@ -15,16 +15,15 @@ puede dar**.
 - **Kubernetes en 6443**, **etcd en 2379**, **Consul en 8500** y **Kibana en
   5601** siguen el mismo patrón.
 
-Hasta L17 el motor veía ``2375/tcp abierto — docker`` (el nombre salía de
-``WELL_KNOWN_PORTS``, así que hasta lo llamaba por su nombre) y emitía un
-informativo con ``qod=30``. La información para dar un CRITICAL confirmado
-estaba a un ``GET`` de distancia y no se pedía, porque ``is_http_service``
-rechazaba esos puertos y ni el dissector HTTP ni los checks los tocaban.
+``is_http_service`` acepta estos puertos precisamente para que ``2375/tcp
+abierto — docker`` no se quede en un informativo con ``qod=30`` cuando la
+versión exacta está a un solo ``GET`` sin autenticar de distancia.
 
 **Todo lo que hay aquí son lecturas puras** (``GET``), así que caben en modo
 ``safe`` sin discusión. Y la versión extraída entra en la maquinaria de
-detección por versión que ya funciona, y produce sus CVEs sola: escribir
-*ojos*, no checks, que es el apalancamiento que el roadmap describe.
+detección por versión que ya funciona, y produce sus CVEs sola: es más
+rentable escribir *ojos* que leen una versión que checks que la persiguen uno
+a uno.
 
 **Una respuesta 401 o 403 no es un hallazgo, es lo contrario.** Significa que
 el servicio está ahí y que exige credenciales, que es exactamente como debe

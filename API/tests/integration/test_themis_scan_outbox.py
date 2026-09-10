@@ -1,16 +1,13 @@
-"""#551: los escáneres de Themis crean el escaneo y su encolado en una sola transacción.
+"""Los escáneres de Themis crean el escaneo y su encolado en una sola transacción.
 
-Antes, los cinco ``run_scan()`` hacían dos pasos separados:
-``_create_scan_record()`` confirmaba la fila del escaneo y, ya fuera de esa
-transacción, un ``TaskQueue.submit()`` publicaba el trabajo. Entre uno y otro
-hay una ventana real —la API se reinicia, o Redis falla en ese instante— y lo
-que quedaba era un escaneo creado que ningún worker iba a procesar nunca, con
-la cuota del usuario ya cobrada. La reconciliación de arranque acababa
-marcándolo FAILED, pero solo al reiniciar la API y sin devolver la cuota: el
-usuario pagaba por un escaneo que nunca corrió.
+Si se hicieran en dos pasos separados —confirmar la fila del escaneo y, ya
+fuera de esa transacción, publicar el trabajo con ``TaskQueue.submit()``—
+habría una ventana real entre uno y otro (la API se reinicia, o Redis falla en
+ese instante) en la que quedaría un escaneo creado que ningún worker
+procesaría nunca, con la cuota del usuario ya cobrada.
 
-Estos tests fijan el comportamiento nuevo: con Redis caído en el momento exacto
-del encolado, el escaneo existe **y** existe su fila ``TaskDispatch``
+Estos tests fijan el comportamiento correcto: con Redis caído en el momento
+exacto del encolado, el escaneo existe **y** existe su fila ``TaskDispatch``
 pendiente, así que el trabajo se recupera después en vez de perderse.
 
 ``ScanManager._create_scan_and_dispatch`` es la ayuda compartida por los cinco
@@ -135,7 +132,7 @@ class TestScanAndDispatchAreAtomic:
         set_plan_limits({LimitKey.THEMIS_LYBRA_SCANS: 5})
         with app.app_context():
             # El modo autodescubrimiento sondea el objetivo, así que exige
-            # tenerlo en el registro de objetivos autorizados (roadmap §6).
+            # tenerlo en el registro de objetivos autorizados.
             AuthorizedTargetManager().add(admin_user.id, "8.8.8.8")
             manager = LybraEngineManager()
             monkeypatch.setattr(manager, "_task_queue", _RejectingQueue())

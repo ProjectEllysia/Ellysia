@@ -1,4 +1,4 @@
-"""Estrategia de impresión de los informes de Nuclei (D5, roadmap Fase U1)."""
+"""Estrategia de impresión de los informes de Nuclei."""
 
 from ...model import ScanType
 from ..analyzers import LybraAIWriter
@@ -8,14 +8,13 @@ from .findings import FindingsPrintingStrategy
 
 @PrintingStrategy.register(ScanType.NUCLEI)
 class NucleiPrintingStrategy(FindingsPrintingStrategy):
-    """Printing strategy for Nuclei scan reports (roadmap Fase U1).
+    """Printing strategy for Nuclei scan reports.
 
     Nuclei's JSONL output maps onto `Finding` almost as completely as Lybra's
     own engine (`cve_ids`, `cvss_score`, `check_id` all populated by
     `nuclei_result_to_finding`), so this reuses `FindingsPrintingStrategy`
-    wholesale — the "beneficio colateral nada menor" the roadmap's Fase U
-    called out: the PDF is the hardest part of adding a scanner, and here it
-    costs a dozen class attributes.
+    wholesale — a not-minor side benefit: the PDF is the hardest part of
+    adding a scanner, and here it costs a dozen class attributes.
 
     Color palette: Blue theme, distinct from Lybra's green so the two
     coexist without visual confusion in the tool picker.

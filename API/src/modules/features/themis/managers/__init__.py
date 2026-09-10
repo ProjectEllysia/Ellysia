@@ -4,7 +4,7 @@ Managers for security scan orchestration and result persistence.
 This package provides manager classes for coordinating security scans:
 - NmapScanManager: Network exploration and security scanning.
 - NiktoScanManager: Web server vulnerability scanning.
-- NucleiScanManager: Template-based vulnerability scanning (roadmap Fase U1).
+- NucleiScanManager: Template-based vulnerability scanning.
 - LybraEngineManager: self-built detection engine (Lybra).
 
 Each manager handles the complete lifecycle of a scan:
@@ -16,9 +16,9 @@ Each manager handles the complete lifecycle of a scan:
 Database access is performed exclusively through UnitOfWork + ScanRepository.
 ScanManager no longer inherits from BaseManager.
 
-Fase 3 del refactor de estructura: este paquete sustituye al antiguo fichero
-monolítico ``managers.py`` (~2700 líneas). Cada clase vive en su propio
-módulo; este ``__init__.py`` reexporta los nombres públicos para que
+Este paquete sustituye al antiguo fichero monolítico ``managers.py``
+(~2700 líneas). Cada clase vive en su propio módulo; este ``__init__.py``
+reexporta los nombres públicos para que
 ``from src.modules.features.themis.managers import X`` (y el registro de entry
 points de la TaskQueue, que referencia estos símbolos por atributo de
 módulo) sigan funcionando sin cambios.

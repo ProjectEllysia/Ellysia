@@ -1,4 +1,4 @@
-"""Unit tests del traductor y el selector de plantillas ingeridas (Fase R).
+"""Unit tests del traductor y el selector de plantillas ingeridas.
 
 Puro: plantillas escritas a mano, sin feed real y sin red. Se verifica el
 *criterio* de traducción y de selección, no el comportamiento contra objetivos
@@ -65,7 +65,8 @@ def test_a_translated_check_does_not_claim_to_be_ours():
 
 
 def test_the_feed_version_of_the_tree_reaches_the_finding():
-    """Sin esto el hallazgo no sería reproducible (garantía del §9 del roadmap)."""
+    """Sin esto el hallazgo no sería reproducible: hace falta saber con qué
+    versión del feed de plantillas se generó para poder repetirlo."""
     check = translate_template(_GIT_CONFIG_TEMPLATE, _FEED_VERSION)
     fetch = lambda host, port, method, path: Response(200, "[core]", {})  # noqa: E731
     findings = CheckRuntime([check], fetch).run("h", [Service(80, "tcp", "http", "", "", None)])

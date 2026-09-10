@@ -120,7 +120,7 @@ class TargetNotAuthorizedError(ScanError):
 
     Bloquea las operaciones de Lybra que tocan la red del objetivo
     (autodescubrimiento, fingerprinting propio, comprobaciones activas) hasta
-    que el usuario lo declare explícitamente (roadmap §6).
+    que el usuario lo declare explícitamente.
     """
 
     default_code = ErrorCode.TARGET_NOT_AUTHORIZED

@@ -3,9 +3,6 @@
 Verifies the dual-write is genuinely additive: the legacy NiktoIncident table
 that PDF/history read is populated exactly as before, and a normalized
 Finding row now also exists for correlation.
-
-OpenVAS had the same dual-write (OpenVASScanResult) until the scanner was
-removed (roadmap §7/§6.3, Ronda 2 — E2); its test was removed with it.
 """
 
 from datetime import datetime
