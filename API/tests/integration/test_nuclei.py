@@ -1,9 +1,9 @@
-"""Integration tests for the Nuclei scan write path (roadmap Fase U1).
+"""Integration tests for the Nuclei scan write path.
 
 Verifies ``NucleiScanManager._persist_scan_results`` end to end against a real
 ``NucleiScan`` row: findings land in the shared ``Finding`` table with
 ``cve_ids``/``cvss_score``/``check_id``/``feed_version`` populated, repeated
-templates collapse within a scan, and — the Definición de Hecho of Fase U1 —
+templates collapse within a scan, and — the criterion this suite enforces —
 a Nuclei finding shares its ``dedup_key`` with a prior Lybra finding of the
 same CVE on the same host/port. No real ``nuclei`` binary involved: the JSONL
 payload is injected directly, the same pattern
@@ -112,8 +112,8 @@ def test_repeated_template_across_matched_at_collapses_to_one_finding(app, admin
 
 
 def test_nuclei_finding_shares_dedup_key_with_prior_lybra_finding_same_cve(app, admin_user, monkeypatch):
-    """The Definición de Hecho of Fase U1: a hallazgo Nuclei y uno de Lybra
-    sobre la misma CVE, host y puerto deben fundirse — mismo dedup_key."""
+    """El criterio de esta suite: un hallazgo Nuclei y uno de Lybra sobre la
+    misma CVE, host y puerto deben fundirse — mismo dedup_key."""
     monkeypatch.setattr(
         endpoints_mod, "normalize_target",
         lambda target, resolve_hostname=False: ("10.0.0.7", "10.0.0.7"),

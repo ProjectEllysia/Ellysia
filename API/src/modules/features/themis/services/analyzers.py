@@ -553,7 +553,7 @@ class LybraAIWriter:
                 (``"lybra"``, ``"nuclei"``...). The writer's logic is generic
                 over the source — it only reads already-structured ``Finding``
                 rows (``cve_ids``, ``cvss``, ``epss``, ``confirmed``...) — so a
-                second tool with the same shape (Nuclei, Fase U1) reuses this
+                second tool with the same shape (Nuclei) reuses this
                 class instead of duplicating it, distinguished only by which
                 prompt pair it reads.
         """

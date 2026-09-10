@@ -1,4 +1,4 @@
-"""Unit tests for the single Nuclei template store (roadmap Fases U4/R).
+"""Unit tests for the single Nuclei template store.
 
 Pure: every test builds a fake template tree under ``tmp_path``, so nothing
 here needs a real ``nuclei`` install or its multi-thousand-file feed. What is

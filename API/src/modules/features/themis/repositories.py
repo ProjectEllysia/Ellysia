@@ -225,7 +225,7 @@ class ScanRepository(BaseRepository[Scan]):
             per_page: Items per page.
             asset_id: :data:`PANEL_SCANS` (the default) for the scans launched
                 from the Themis panel — those with no Hygeia asset behind them;
-                an ``int`` for one asset's inventory scans (Fase I); or ``None``
+                an ``int`` for one asset's inventory scans; or ``None``
                 for every Lybra scan regardless of origin.
 
         Returns:
@@ -268,7 +268,7 @@ class ScanRepository(BaseRepository[Scan]):
         """El escaneo más reciente por activo Hygeia, en una sola query.
 
         ``ROW_NUMBER`` sobre ``started_at`` desc particionado por activo:
-        así la rejilla de agentes de Themis (Fase I) recibe el contador de
+        así la rejilla de agentes de Themis recibe el contador de
         hallazgos de cada tarjeta sin un request por tarjeta, que es justo
         lo que ``GET /hygeia/assets`` ahorra con esto. La función de ventana
         es portable entre Postgres y el SQLite de los tests (≥ 3.25).
@@ -696,7 +696,7 @@ class ScanRepository(BaseRepository[Scan]):
         """Persist a batch of normalized Finding rows for a scan.
 
         Un finding puede traer una clave ``_evidence`` —la respuesta cruda que
-        lo provocó, que el runtime de checks adjuntó (Fase E)—. No es una
+        lo provocó, que el runtime de checks adjuntó—. No es una
         columna, así que se extrae antes de construir el ``Finding``, y se
         persiste como una fila ``FindingEvidence`` aparte, ya redactada y
         hasheada, una vez que el ``Finding`` tiene id.
@@ -825,7 +825,7 @@ class ScanRepository(BaseRepository[Scan]):
         )
 
     def get_host_services(self, host_id: int) -> List[HostService]:
-        """Return a host's currently-tracked attack surface (Fase 5)."""
+        """Return a host's currently-tracked attack surface."""
         return (
             self._session.query(HostService)
             .filter(HostService.host_id == host_id)
@@ -844,7 +844,7 @@ class ScanRepository(BaseRepository[Scan]):
         service's row always reflects its most recent observation.
 
         ``port`` is ``None`` for a portless, ``origin="inventory"`` service
-        (Fase 0.9) — an installed package with nothing listening. A port
+        — an installed package with nothing listening. A port
         already uniquely identifies which row to touch; without a port, the
         lookup keys on ``product`` too, otherwise two different packages on
         the same host would collide on the same ``(host, NULL, protocol)``
@@ -1023,7 +1023,7 @@ class KbRepository(BaseRepository[CveEntry]):
         return result
 
     def resolve_product_alias(self, normalized_name: str) -> Optional[Tuple[str, str]]:
-        """Look up a normalized product name in the automated CPE index (Fase I-b, paso 2).
+        """Look up a normalized product name in the automated CPE index.
 
         The third and last strategy ``LybraEngine._resolve_cpe`` tries, after
         an embedded CPE and the curated alias feed both miss. See
@@ -1038,7 +1038,7 @@ class KbRepository(BaseRepository[CveEntry]):
         return (row.vendor, row.product) if row else None
 
     def rebuild_cpe_product_index(self) -> int:
-        """Rebuild ``CpeProductAlias`` from the current ``CpeMatch`` table (Fase I-b, paso 2).
+        """Rebuild ``CpeProductAlias`` from the current ``CpeMatch`` table.
 
         Indexes every distinct ``(vendor, product)`` pair in ``CpeMatch`` under
         **two** normalized keys (:func:`~.lybra.kb.normalize_product_name`),
@@ -1067,7 +1067,7 @@ class KbRepository(BaseRepository[CveEntry]):
         vendors (a Jenkins plugin, a firmware component, the real Git SCM...),
         and picking one at random would risk matching CVEs against the wrong
         software. That specific, verified case is exactly what
-        ``feeds/product_aliases.json`` (paso 3) exists to override by hand.
+        ``feeds/product_aliases.json`` exists to override by hand.
 
         A full delete-and-reinsert rather than an incremental diff: this runs
         once per KB sync (nightly, at most), so the cost is a non-issue, and it
@@ -1363,7 +1363,7 @@ class KbRepository(BaseRepository[CveEntry]):
         return chosen[0].status, chosen[0].fixed_in
 
     def exploit_evidence(self, cve_id: str) -> Optional[str]:
-        """Qué madurez de explotación consta para una CVE, sin contar KEV (L34).
+        """Qué madurez de explotación consta para una CVE, sin contar KEV.
 
         Hoy sólo puede decir ``"poc"``: la señal disponible es la referencia
         que la propia NVD etiqueta como exploit, y esa etiqueta afirma que
@@ -1383,10 +1383,10 @@ class KbRepository(BaseRepository[CveEntry]):
         """Llevar la cuenta de un nombre de producto que no resuelve a un CPE.
 
         Cuando falla, suma uno a su contador; **cuando resuelve, borra la fila**.
-        Esa segunda mitad es la que cierra el bucle que pedía L37: al escribir
-        el alias que faltaba, el nombre desaparece del ranking en el siguiente
-        escaneo. Sin ella el ranking mediría el trabajo que hubo, no el que
-        queda, y no habría forma de saber si el feed está mejorando.
+        Esa segunda mitad es la que cierra el bucle: al escribir el alias que
+        faltaba, el nombre desaparece del ranking en el siguiente escaneo. Sin
+        ella el ranking mediría el trabajo que hubo, no el que queda, y no
+        habría forma de saber si el feed está mejorando.
         """
         row = (self._session.query(UnresolvedProduct)
                .filter_by(normalized_name=normalized_name, origin=origin)
@@ -1684,7 +1684,7 @@ class ProgramedScanRepository(BaseRepository[ProgramedScan]):
 
 
 class AuthorizedTargetRepository(BaseRepository[AuthorizedTarget]):
-    """Repository for the AuthorizedTarget entity (roadmap §6 register)."""
+    """Repository for the AuthorizedTarget entity."""
 
     _MODEL = AuthorizedTarget
 

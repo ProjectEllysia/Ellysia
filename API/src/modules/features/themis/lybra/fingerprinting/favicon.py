@@ -7,11 +7,10 @@ sus instalaciones: sobrevive a ``server_tokens off``, no cambia entre versiones
 menores, y nadie se acuerda de personalizarlo. Shodan la expone como
 ``http.favicon.hash`` precisamente porque funciona.
 
-Hasta L20, este motor pagaba el coste de la técnica sin cobrar el beneficio.
-``HttpDissector.probe`` hacía una petición dedicada a ``/favicon.ico``,
-``fingerprint_http`` calculaba su SHA-256 y ``HttpFingerprint`` lo exponía como
-campo — y después **nadie lo consultaba**. Una petición de red por servicio
-HTTP, con su turno de limitador, a cambio de un dato muerto.
+``HttpDissector.probe`` pide ``/favicon.ico`` una vez por servicio HTTP,
+``fingerprint_http`` calcula su SHA-256 y ``HttpFingerprint`` lo expone como
+campo; este módulo es quien de verdad lo consulta, resolviéndolo contra el
+catálogo de abajo.
 
 Dos decisiones de diseño, ambas explícitas:
 

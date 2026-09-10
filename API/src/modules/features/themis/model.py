@@ -138,13 +138,12 @@ class ScanType(str, Enum):
         NMAP:    Nmap network and port scanner.
         NIKTO:   Nikto web server vulnerability scanner.
         LYBRA: Lybra's own vulnerability engine (native detection).
-        NUCLEI: Nuclei template-based vulnerability scanner (Fase U1).
+        NUCLEI: Nuclei template-based vulnerability scanner.
 
-    OpenVAS was removed (roadmap §7/§6.3, Ronda 2 — E1): it was a whole
-    platform we could never add anything on top of, not a tool whose output
-    we parsed like the others (see the roadmap's §1). Historical ``Finding``
-    rows with ``source="openvas"`` are kept as provenance; nothing produces
-    new ones.
+    OpenVAS was removed: it was a whole platform we could never add anything
+    on top of, not a tool whose output we parsed like the others. Historical
+    ``Finding`` rows with ``source="openvas"`` are kept as provenance;
+    nothing produces new ones.
     """
     NMAP    = "nmap"
     NIKTO   = "nikto"
@@ -185,19 +184,20 @@ class Host(Base):
 
 
 # =========================================================================
-# HOST SERVICE (Lybra Fase 5 — the asset's attack surface, tracked over time)
+# HOST SERVICE (the asset's attack surface, tracked over time)
 # =========================================================================
 
 class HostService(Base):
     """A service Lybra has observed open on a host, tracked across scans.
 
-    Roadmap Fase 5's "cambio de sujeto": a ``Scan`` is one observation of a
-    host's attack surface at a point in time, not the surface itself. This
-    table is that surface — one row per ``(host, port, protocol)`` — so a new
-    scan can be diffed against it to notice a port opening for the first time
-    or a service's version changing, independently of whether that change
-    happens to also match a known CVE. Findings answer "is this vulnerable?";
-    this table answers "did the surface itself change?".
+    This table is a deliberate change of subject: a ``Scan`` is one
+    observation of a host's attack surface at a point in time, not the
+    surface itself. This table is that surface — one row per
+    ``(host, port, protocol)`` — so a new scan can be diffed against it to
+    notice a port opening for the first time or a service's version
+    changing, independently of whether that change happens to also match a
+    known CVE. Findings answer "is this vulnerable?"; this table answers
+    "did the surface itself change?".
 
     Populated by every Lybra scan of a target, whether its services came from
     self-discovery or from a prior Nmap scan's already-collected ports — both
@@ -208,7 +208,7 @@ class HostService(Base):
         id: Primary key.
         host_id: The asset this service belongs to.
         port: The port number, or ``None`` for a portless, ``origin="inventory"``
-            service (Fase 0.9) — an installed package has nothing listening.
+            service — an installed package has nothing listening.
         protocol: ``"tcp"`` or ``"udp"``.
         name: The service's conventional name (``"http"``, ``"ssh"``...).
         product: The identified product, or ``None`` if never resolved.
@@ -581,7 +581,7 @@ class OpenPort(Base):
             recognises the service (2.2 URI form, e.g.
             ``cpe:/a:apache:http_server:2.4.49``). Nullable: many services do
             not yield a CPE. It is the entry point the Lybra engine reads to
-            correlate versions to CVEs (see the vuln-engine roadmap).
+            correlate versions to CVEs.
 
     Relationships:
         port: Port entity.
@@ -693,10 +693,9 @@ class NiktoIncident(Base):
 
 
 # OpenVAS's three native tables (OpenVASScan, OpenVASVulnerability,
-# OpenVASScanResult) were removed here (roadmap §7/§6.3, Ronda 2 — E2+E3).
-# The development database had zero rows in any of the three (verified by
-# query before removing), so there was nothing to archive first — the
-# backfill-then-drop the roadmap originally described was unnecessary.
+# OpenVASScanResult) were removed here. The development database had zero
+# rows in any of the three (verified by query before removing), so there
+# was nothing to archive first.
 # Finding rows with source="openvas" are unaffected: they live in the
 # source-agnostic Finding table, not in these.
 
@@ -708,17 +707,12 @@ class NiktoIncident(Base):
 class LybraScan(Scan):
     """Scan produced by Lybra's own vulnerability engine.
 
-    Lybra descubre los servicios del objetivo con su propio transporte
-    (Fase T) y produce filas :class:`Finding` normalizadas.
-
-    Tuvo dos columnas más, retiradas en L52 junto al resto del acoplamiento con
-    escáneres de terceros: ``source_scan_id`` (el escaneo Nmap previo cuyos
-    servicios se analizaban) y ``deep_scan_ids`` (los ids de los escaneos
-    Nmap/Nikto/Nuclei que el "análisis profundo" lanzaba como corroboradores).
+    Lybra descubre los servicios del objetivo con su propio transporte y
+    produce filas :class:`Finding` normalizadas.
 
     Attributes:
         id: Primary key (foreign key to Scan.id).
-        asset_id: Fase I — the Hygeia MonitoredAsset whose software inventory
+        asset_id: The Hygeia MonitoredAsset whose software inventory
             originated this scan, or None when it was launched from the Themis
             panel. Deliberately a plain Integer with no ForeignKey: it is a
             soft reference that keeps Themis's *schema* independent of
@@ -756,14 +750,14 @@ class LybraScan(Scan):
 
 
 class NucleiScan(Scan):
-    """Scan launched via the Nuclei template-based scanner (roadmap Fase U1).
+    """Scan launched via the Nuclei template-based scanner.
 
     Follows the same design ``LybraScan`` already established rather than the
     Nmap/Nikto one: no result table of its own. Nuclei's JSONL output
     maps almost 1:1 onto ``Finding`` (``cve_ids``, ``cvss_score``, ``check_id``
     all come straight from the tool), so building a parallel ``NucleiFinding``
-    table would only recreate the scaffolding the roadmap's §7 dismantled
-    for OpenVAS — not something to add fresh in a brand new scan type.
+    table would only recreate the scaffolding already dismantled for
+    OpenVAS — not something to add fresh in a brand new scan type.
 
     Attributes:
         id: Primary key (foreign key to Scan.id).
@@ -780,10 +774,10 @@ class NucleiScan(Scan):
 
 class AuthorizedTarget(Base):
     """A target (IP or CIDR) a user has declared authorized for Lybra's
-    network-touching operations (roadmap §6): self-discovery (Fase T), own
-    fingerprinting (Fase F) and the active check runtime (Fase R). Analysing
-    services already known from a prior Nmap scan (Fase 1) does not need an
-    entry here, since it sends no new packets to the target.
+    network-touching operations: self-discovery, own fingerprinting and the
+    active check runtime. Analysing services already known from a prior
+    Nmap scan does not need an entry here, since it sends no new packets to
+    the target.
 
     Attributes:
         id: Primary key.
@@ -813,11 +807,11 @@ class Finding(Base):
 
     The unified finding model that lets Lybra, Nikto, Nuclei and (historically)
     OpenVAS results live in one table and be correlated (dedup by
-    ``dedup_key``). See the vuln-engine roadmap (§3.3) for the full design.
-    In Fase 0 only informational
-    "open port" findings are written (``category="open_port"``, ``qod=30``); the
-    detection columns (``cve_ids``, ``cvss_score``…) stay empty until later
-    phases fill them.
+    ``dedup_key``). A scan that only enumerates open ports without correlating
+    vulnerabilities writes informational "open port" findings
+    (``category="open_port"``, ``qod=30``); the detection columns
+    (``cve_ids``, ``cvss_score``…) stay empty until a later scan or a KB sync
+    fills them in.
 
     Attributes:
         id: Primary key.
@@ -826,14 +820,15 @@ class Finding(Base):
         title: Human-readable one-line description.
         category: Finding family ("open_port" | "outdated_software" | "tls" ...).
         port / service / cpe: The affected service.
-        protocol: Transport of the affected service ("tcp" | "udp"). Nullable —
-            every finding before Fase N's UDP probe (roadmap §6.3, Ronda 1) is
-            TCP and is never backfilled. Exists so ``compute_dedup_key`` can
-            tell a service open on 161/tcp apart from the same port on
-            161/udp; see its docstring for why the merge would otherwise
-            collide the two.
+        protocol: Transport of the affected service ("tcp" | "udp"). Nullable
+            for findings recorded before Lybra added UDP probing, which are
+            never backfilled and are all implicitly TCP. Exists so
+            ``compute_dedup_key`` can tell a service open on 161/tcp apart
+            from the same port on 161/udp; see its docstring for why the
+            merge would otherwise collide the two.
         cve_ids / cvss_score / cvss_vector / epss_score / in_kev /
-            exploit_maturity: Vulnerability correlation (filled from Fase 1 on).
+            exploit_maturity: Vulnerability correlation, filled once the
+            finding's CPE (or check) resolves against the KB.
         required_os: CPE platform token (e.g. "windows_10") this finding's CVE
             match is gated behind, or None if unconditional. Set from
             ``CpeMatch.required_os`` at correlation time; used by
@@ -847,7 +842,7 @@ class Finding(Base):
         qod: Quality of Detection 0-100.
         confirmed: Actively confirmed vs version-only deduction.
         cpe_resolved: Whether Lybra's matcher could resolve this service to a
-            CPE at all (Fase I-b observability). ``None`` for finding sources
+            CPE at all. ``None`` for finding sources
             that never attempt CPE resolution (Nikto, OpenVAS); ``True``/
             ``False`` for Lybra findings — distinguishes "checked, no CVEs"
             from "could not even identify the package" in the same data that
@@ -855,9 +850,9 @@ class Finding(Base):
         first_seen_at / last_seen_at / state: Lifecycle
             (open|fixed|regressed|accepted|false_positive).
 
-            ``accepted`` y ``false_positive`` dicen cosas **opuestas** y
-            durante mucho tiempo compartieron casilla, que es lo que L35 viene
-            a arreglar. Aceptar un riesgo es "esto es real, lo asumo": tiene
+            ``accepted`` y ``false_positive`` dicen cosas **opuestas** y por
+            eso son estados distintos en vez de compartir casilla. Aceptar un
+            riesgo es "esto es real, lo asumo": tiene
             dueño, debería caducar y volver a revisión. Marcar un falso
             positivo es "esto no es real, el motor se equivocó": no caduca,
             porque no hay nada que aceptar, y no cuenta como riesgo abierto en
@@ -889,7 +884,7 @@ class Finding(Base):
     cpe      = Column(String(255), index=True)
     protocol = Column(String(8), nullable=True)
 
-    # Vulnerability correlation (filled from Fase 1 onwards)
+    # Vulnerability correlation, filled once the finding resolves against the KB
     cve_ids          = Column(JSONB)
     cvss_score       = Column(Float)
     cvss_vector      = Column(String(255))
@@ -913,7 +908,7 @@ class Finding(Base):
     cpe_resolved = Column(Boolean, nullable=True)
 
     # Lifecycle
-    # Decisión del usuario sobre el estado (L35). Nulos mientras nadie haya
+    # Decisión del usuario sobre el estado. Nulos mientras nadie haya
     # tocado el hallazgo, que es el caso normal.
     state_reason     = Column(Text)
     state_set_by     = Column(Integer, ForeignKey("User.id"), nullable=True)
@@ -955,7 +950,7 @@ class Finding(Base):
 
 
 class FindingEvidence(Base):
-    """La respuesta cruda que provocó un hallazgo (Fase E).
+    """La respuesta cruda que provocó un hallazgo.
 
     Un hallazgo dice **qué** encontró y **con qué regla**, pero ``feed_version``
     + ``check_id`` dan reproducibilidad lógica, no guardan lo que el objetivo
@@ -999,7 +994,7 @@ class FindingEvidence(Base):
 class CveEntry(Base):
     """A single CVE mirrored from NVD, the core of the local knowledge base.
 
-    Stored so version→CVE correlation (Fase 1) runs against the local DB instead
+    Stored so version→CVE correlation runs against the local DB instead
     of hitting cve.circl.lu per target. ``cpe_matches`` holds the applicability
     rows (which products/version ranges the CVE affects).
     """
@@ -1016,7 +1011,7 @@ class CveEntry(Base):
     cwe_ids       = Column(JSONB)
     has_exploit_reference = Column(Boolean, nullable=False, default=False,
                                    server_default=sa_false())
-    """Si NVD enlaza al menos una referencia etiquetada como exploit (L34).
+    """Si NVD enlaza al menos una referencia etiquetada como exploit.
 
     Es la señal de madurez de explotación más barata que hay: la propia NVD
     etiqueta sus referencias, y ese dato ya viaja en cada registro que se
@@ -1074,7 +1069,7 @@ class CpeMatch(Base):
 
 class CpeProductAlias(Base):
     """A normalized product name -> (vendor, product) index, derived from
-    ``CpeMatch`` (Fase I-b, paso 2 del roadmap de Lybra).
+    ``CpeMatch``.
 
     This is deliberately *not* a mirror of NVD's full CPE Dictionary (~1.4M
     entries, expensive to keep in sync): it only indexes products that
@@ -1108,7 +1103,7 @@ class KevEntry(Base):
     """A CVE present in CISA's Known Exploited Vulnerabilities catalogue.
 
     Presence here is a strong "actively exploited in the wild" signal that
-    drives contextual prioritization (Fase 5).
+    drives contextual prioritization.
     """
     __tablename__ = "KevEntry"
 

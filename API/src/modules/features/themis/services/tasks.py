@@ -391,7 +391,7 @@ class NiktoScanTask(_Task):
 
 
 class NucleiScanTask(_Task):
-    """Implementación concreta para escaneos Nuclei (roadmap Fase U1).
+    """Implementación concreta para escaneos Nuclei.
 
     Modelada sobre ``NiktoScanTask``: mismo patrón de fichero de salida
     temporal + progreso vía stdout. Dos diferencias que sí importan:
@@ -439,7 +439,7 @@ class NucleiScanTask(_Task):
         self.request_timeout = request_timeout or CR.nuclei_config().request_timeout
         self._binary = CR.nuclei_config().binary_path
         # Única fuente de verdad sobre dónde vive el árbol de plantillas, la
-        # misma que usan la ingesta (Fase R) y el censo (Fase U4) para leerlo.
+        # misma que usan la ingesta y el censo de ingestibilidad para leerlo.
         # ``None`` significa "no se pudo resolver ninguno", y entonces se omite
         # ``-templates`` y decide el binario — el mismo comportamiento que había
         # cuando el valor de configuración venía vacío.

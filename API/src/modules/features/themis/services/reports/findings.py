@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class FindingsPrintingStrategy(PrintingStrategy):
     """Shared PDF renderer for scan types whose data lives entirely in the
     unified `Finding` table rather than a tool-specific incident/vulnerability
-    model — Lybra originally, and now Nuclei (roadmap Fase U1).
+    model — Lybra originally, and now Nuclei.
 
     Extracted from what used to be a single, Lybra-only class: Nuclei's JSONL
     output maps onto `Finding` almost as completely as Lybra's own engine does
@@ -240,7 +240,7 @@ class FindingsPrintingStrategy(PrintingStrategy):
             if finding.get("state") == "false_positive":
                 # El usuario ha desmentido este hallazgo: no es un riesgo, y un
                 # resumen que lo cuente afirma una postura de seguridad peor
-                # que la real (L35).
+                # que la real.
                 continue
             counts[finding["priority"]] = counts.get(finding["priority"], 0) + 1
 
@@ -274,16 +274,13 @@ class FindingsPrintingStrategy(PrintingStrategy):
     def _append_cpe_coverage_note(self, theme: "ReportTheme", elements: list, findings: list) -> None:
         """Advierte cuando el matcher no pudo identificar parte del inventario.
 
-        Un escaneo por inventario (Fase I) emite un hallazgo
-        ``installed_package`` por **cada** paquete, se le haya podido resolver
-        un CPE o no. Antes de la observabilidad de la Fase I-b
-        (``Finding.cpe_resolved``) esto era indistinguible de "comprobado y
-        limpio" salvo por una heurística ("cero ``outdated_software``") que
-        mezclaba dos causas sin poder nombrar cuál. Ahora el dato es exacto:
-        cuántos de los paquetes inventariados no se pudieron ni identificar
-        contra el catálogo CPE — la KB local puede seguir sin tener CVEs para
-        los que sí se resolvieron, pero eso ya no es ambiguo, es "comprobado y
-        sin hallazgos".
+        Un escaneo por inventario emite un hallazgo ``installed_package`` por
+        **cada** paquete, se le haya podido resolver un CPE o no.
+        ``Finding.cpe_resolved`` distingue exactamente cuántos de los
+        paquetes inventariados no se pudieron ni identificar contra el
+        catálogo CPE — la KB local puede seguir sin tener CVEs para los que
+        sí se resolvieron, pero eso no es ambiguo, es "comprobado y sin
+        hallazgos".
         """
         packages = sum(1 for finding in findings if finding["category"] == "installed_package")
         unresolved = sum(
@@ -405,11 +402,11 @@ class FindingsPrintingStrategy(PrintingStrategy):
         return sections
 
     def _sorted_findings(self, findings: list) -> list:
-        """Priority first (the contextual CVSS+EPSS+KEV+exposure synthesis that
-        is Lybra's whole value proposition — see roadmap §1); raw CVSS
-        only breaks ties *within* the same priority band, confirmed findings
-        before hypotheses. Es el mismo orden de antes, aplicado ahora dentro de
-        cada grupo en vez de sobre la lista entera."""
+        """Priority first (the contextual CVSS+EPSS+KEV+exposure synthesis
+        that is Lybra's whole value proposition); raw CVSS only breaks ties
+        *within* the same priority band, confirmed findings before
+        hypotheses. Este orden se aplica dentro de cada grupo, no sobre la
+        lista entera."""
         return sorted(
             findings,
             key=lambda finding: (

@@ -20,12 +20,11 @@ from .dispatch import Dissector
 
 _DissectorT = TypeVar("_DissectorT", bound=Type[Dissector])
 
-# Registration order follows import order (see __init__.py), which follows
-# the roadmap's own cost/value ranking — cheapest and most common protocols
-# first.
+# Registration order follows import order (see __init__.py), ranked by
+# cost/value — cheapest and most common protocols first.
 #
-# Y desde L17 el orden **importa de verdad** para un caso concreto, no sólo
-# para la legibilidad. Los predicados dejaron de ser disjuntos cuando los
+# El orden **importa de verdad** para un caso concreto, no sólo para la
+# legibilidad. Los predicados no son disjuntos: los
 # puertos de las APIs de administración (2375, 9200, 6443...) entraron en la
 # familia HTTP para que los checks de exposición y de higiene TLS los
 # alcanzaran: ahora los reclaman dos dissectors, y

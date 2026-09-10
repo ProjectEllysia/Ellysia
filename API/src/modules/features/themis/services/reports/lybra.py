@@ -1,4 +1,4 @@
-"""Estrategia de impresión de los informes del motor Lybra (D5)."""
+"""Estrategia de impresión de los informes del motor Lybra."""
 
 from ...model import ScanType
 from ..analyzers import LybraAIWriter
@@ -12,7 +12,7 @@ class LybraPrintingStrategy(FindingsPrintingStrategy):
 
     Color palette: Green theme, matching Lybra's own UI identity. All the
     rendering logic lives in `FindingsPrintingStrategy`; this class only fixes
-    Lybra's identity — behaviour is unchanged from before the Fase U1 extract.
+    Lybra's identity.
     """
 
     _TOOL = ScanType.LYBRA

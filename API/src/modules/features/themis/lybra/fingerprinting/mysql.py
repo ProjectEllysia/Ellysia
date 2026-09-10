@@ -1,4 +1,4 @@
-"""The MySQL/MariaDB dissector — Fase N.
+"""The MySQL/MariaDB dissector.
 
 MySQL's wire protocol volunteers its identity unprompted, same spirit as FTP:
 the server's very first packet after a bare TCP connect is the "Initial
