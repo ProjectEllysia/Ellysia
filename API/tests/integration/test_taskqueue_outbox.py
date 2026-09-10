@@ -175,6 +175,36 @@ def test_dispatch_unknown_id_returns_false(app):
         assert OutboxDispatcher.dispatch(999999, task_queue=_RecordingQueue()) is False
 
 
+def test_a_request_that_fails_afterwards_does_not_unmark_a_published_row(app):
+    """#561: la fila refleja algo que ya ocurrió en Redis, no en la request.
+
+    Dentro de una request, ``UnitOfWork`` no confirma nada: lo hace el
+    teardown, y si la request lanza, hace rollback. Cuando el dispatcher
+    dependía de ese commit, una request que publicaba y después fallaba
+    devolvía la fila a ``pending`` con el job ya en la cola, y el barrido lo
+    publicaba otra vez.
+    """
+    from src.modules.infrastructure.session import (
+        init_request_session, shutdown_request_session,
+    )
+
+    dispatch_id = _save_dispatch(app)
+    queue = _RecordingQueue()
+
+    with app.test_request_context():
+        init_request_session()
+        assert OutboxDispatcher.dispatch(dispatch_id, task_queue=queue) is True
+        shutdown_request_session(exception=RuntimeError("la request falla después"))
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            row = TaskDispatchRepository(uow).get_by_id(dispatch_id)
+            assert row.status == "dispatched"
+        assert OutboxDispatcher.dispatch_pending() == 0
+
+    assert len(queue.submitted) == 1
+
+
 # ----------------------------------------------------------- dispatch_pending()
 
 def test_dispatch_pending_publishes_every_pending_row(app, monkeypatch):

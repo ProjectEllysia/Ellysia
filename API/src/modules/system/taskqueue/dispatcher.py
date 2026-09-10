@@ -37,6 +37,16 @@ class OutboxDispatcher:
               ``last_error`` se actualizan, la fila se queda ``pending`` para
               el próximo intento.
 
+        Ese cambio se confirma en el acto, también dentro de una request: la
+        fila describe algo que ya pasó fuera de la BD -- el job está o no está
+        en Redis --, así que no puede depender de cómo acabe la request. Si
+        la request lanzaba después (``IrisMailboxManager._mark_reauth_required``
+        lo hace desde ``update_connection``), el rollback del teardown devolvía
+        a ``pending`` una fila ya publicada y el barrido la republicaba: el
+        mismo correo, dos veces (#561). Todos los llamantes confirman su
+        entidad justo antes de llamar aquí, así que este commit no arrastra
+        nada suyo.
+
         Args:
             dispatch_id: Primary key de la fila ``TaskDispatch`` a publicar.
             task_queue: ``ITaskQueue`` a usar para publicar. Por defecto
@@ -72,6 +82,7 @@ class OutboxDispatcher:
                 dispatch.attempts += 1
                 dispatch.last_error = str(e)[:2000]
                 repo.update(dispatch)
+                uow.commit_for_handoff()
                 logger.warning(
                     "No se pudo publicar TaskDispatch %s (%s intento(s)): %s",
                     dispatch_id, dispatch.attempts, e,
@@ -81,6 +92,7 @@ class OutboxDispatcher:
             dispatch.status = "dispatched"
             dispatch.dispatched_at = utcnow_naive()
             repo.update(dispatch)
+            uow.commit_for_handoff()
             return True
 
     @staticmethod
