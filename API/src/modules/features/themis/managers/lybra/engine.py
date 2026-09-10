@@ -232,7 +232,7 @@ class LybraEngineManager(ScanManager):
                 LybraEngineManager._rehydrate_services(services),
                 timeout,
                 cancel_check=job.cancelled,
-                progress=job.progress,
+                report_progress=job.progress,
                 aggressive=aggressive,
             )
 
@@ -282,7 +282,7 @@ class LybraEngineManager(ScanManager):
         services_payload: Optional[List[Service]] = None,
         timeout: Optional[int] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
-        progress: Optional[Callable[[int], None]] = None,
+        report_progress: Optional[Callable[[int], None]] = None,
         aggressive: bool = False,
     ) -> None:
         """Resolve services (own discovery or a payload), detect, persist.
@@ -320,11 +320,13 @@ class LybraEngineManager(ScanManager):
             fase lo consulta y se corta sola, el escaneo se marca ``is_partial``
             y termina bien.
             """
-            return is_cancelled() or (deadline is not None and time.monotonic() >= deadline)
+            time_has_passed = deadline is not None and time.monotonic() >= deadline
+            deadline_taken_over = time_has_passed or is_cancelled()
+            return deadline_taken_over
 
         def report(pct: int) -> None:
-            if progress is not None:
-                progress(pct)
+            if report_progress is not None:
+                report_progress(pct)
 
         source = ServiceSource.build_for_args(services_payload, discover_ports)
         probes = DiscoveryProbes(
