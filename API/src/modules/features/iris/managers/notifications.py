@@ -6,13 +6,17 @@ y de los dos avisos operativos de M08 -- conexión que necesita
 reautorización (``IrisReauthNotifyManager``) y conexión activa atascada sin
 un sync limpio (``IrisStuckSyncNotifyManager``).
 
-Mismo patrón que ``HygeiaNotifyManager`` (``features/hygeia/managers.py``)
-en los cuatro: el estado relevante se persiste, se confirma la transacción y
-después se encola un job de categoría ``iris.notify`` en TaskQueue; el envío
-SMTP corre en el worker (proceso aislado), nunca en el hilo que disparó el
-evento. Un fallo de envío se registra y se descarta -- el estado ya quedó
-persistido y visible en el panel, con independencia de si el correo llegó o
-no.
+En los cuatro, el envío SMTP corre en el worker (proceso aislado, categoría
+``iris.notify``), nunca en el hilo que disparó el evento. Un fallo de envío
+se registra y se descarta -- el estado ya quedó persistido y visible en el
+panel, con independencia de si el correo llegó o no.
+
+Cómo llega el job a la cola depende de si hay guardia anti-duplicado. El
+aviso de sync atascado confirma una marca que impide volver a avisar, así
+que su intención de encolado viaja en la misma transacción que esa marca
+(outbox transaccional, ``build_dispatch_for``): si no, un encolado fallido
+suprimiría el aviso para siempre (#561). Los que no tienen guardia confirman
+su estado y encolan después con ``enqueue_for``.
 
 El correo va siempre al ``User`` dueño del recurso (análisis o conexión), no
 necesariamente a la cuenta de correo conectada: quien conecta un buzón puede
@@ -37,6 +41,7 @@ from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import utcnow_naive
 from src.modules.system.taskqueue import TaskQueue, job_context
+from src.modules.system.taskqueue.outbox import TaskDispatch, build_dispatch
 from src.modules.tools.herald import EmailMessage, build_mailer, render_email
 
 import src.modules.system.config_reading as CR
@@ -422,15 +427,32 @@ class IrisStuckSyncNotifyManager:
     EXTERNAL_ID_PREFIX = "iris-stuck-sync-notify:"
 
     @staticmethod
-    def enqueue_for(connection_id: int) -> None:
-        """Encola el aviso de ``connection_id``. Llamado desde el scheduler
-        de notificaciones de Iris, que ya ha marcado ``stuck_alert_sent_at``
-        antes de encolar -- ver ``services/notifications/scheduling.py``."""
-        TaskQueue.get_instance().submit(
-            func=IrisStuckSyncNotifyManager.execute_notify_stuck,
-            args=(connection_id,),
+    def build_dispatch_for(connection_id: int) -> TaskDispatch:
+        """Construye, sin guardarla, la intención de encolar el aviso de sync
+        atascado de ``connection_id``.
+
+        El llamante (``services/notifications/scheduling.py``) la guarda en la
+        misma transacción que pone ``stuck_alert_sent_at``, y no por comodidad
+        (#561): esa marca es el guardia anti-duplicado --
+        ``get_newly_stuck_connections`` solo devuelve conexiones sin ella --,
+        así que cuando se confirmaba sola y el encolado fallaba después, el
+        aviso no se retrasaba: quedaba suprimido para siempre. Con las dos
+        filas en el mismo commit existen las dos o ninguna, y una publicación
+        fallida la recoge el barrido de la outbox (``system/taskqueue/outbox.py``).
+
+        Args:
+            connection_id: Primary key de la ``IrisMailboxConnection`` atascada.
+
+        Returns:
+            TaskDispatch: Fila de outbox sin persistir, para el job
+                ``IrisStuckSyncNotify-{connection_id}`` de la categoría
+                ``iris.notify``.
+        """
+        return build_dispatch(
+            IrisStuckSyncNotifyManager.execute_notify_stuck,
             name=f"IrisStuckSyncNotify-{connection_id}",
             category=IrisStuckSyncNotifyManager.TASK_CATEGORY,
+            args=(connection_id,),
             external_id=f"{IrisStuckSyncNotifyManager.EXTERNAL_ID_PREFIX}{connection_id}",
         )
 
