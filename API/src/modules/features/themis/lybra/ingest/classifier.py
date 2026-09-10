@@ -1,14 +1,14 @@
 """
 Clasificador de plantillas de Nuclei por lo que exigen del runtime propio.
 
-Esta es la pieza que responde a la pregunta de la Fase U4 —*¿qué fracción del
-feed de Nuclei podríamos ingerir?*— y, más adelante, la que la Fase R usará para
+Esta es la pieza que responde a la pregunta de cobertura —*¿qué fracción del
+feed de Nuclei podríamos ingerir?*— y también la que la ingesta usa para
 decidir plantilla a plantilla si se traduce o se descarta.
 
-**Se escribe una sola vez a propósito.** El censo (U4) y la ingesta (R) tienen
-que estar de acuerdo sobre qué es ingerible, o el número medido no describe lo
-que la ingesta acabará haciendo. Compartiendo este módulo no pueden discrepar:
-si divergen, es un bug en un único sitio.
+**Se escribe una sola vez a propósito.** El censo de cobertura y la ingesta
+tienen que estar de acuerdo sobre qué es ingerible, o el número medido no
+describe lo que la ingesta acabará haciendo. Compartiendo este módulo no
+pueden discrepar: si divergen, es un bug en un único sitio.
 
 El criterio no es "¿entiende Nuclei esto?" sino "¿lo entiende
 :class:`~..checks.CheckRuntime`?". Hoy el runtime soporta un subconjunto
@@ -20,8 +20,8 @@ comparan texto decodificado. Todo lo demás —extractors e interpolación
 razón y a distinta distancia de poder soportarse.
 
 De ahí que la clasificación no sea binaria sino por **cubos ordenados por
-esfuerzo**: la decisión que el roadmap quiere tomar no es "¿se puede?" sino
-"¿cuánto habría que construir, y a cambio de cuántas plantillas?".
+esfuerzo**: la decisión que importa no es "¿se puede?" sino "¿cuánto habría
+que construir, y a cambio de cuántas plantillas?".
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ _NETWORK_KEYS = ("network", "tcp")
 # Protocolos que el motor no habla y no va a hablar por esta vía: o necesitan
 # una infraestructura entera (``headless`` es un navegador; ``interactsh`` es un
 # servidor fuera de banda), o son un lenguaje de scripting (``code``, ``flow``,
-# ``javascript``), que el roadmap descarta explícitamente por no poder aislarse.
+# ``javascript``), que se descartan explícitamente por no poder aislarse.
 _SCRIPTING_KEYS = ("code", "flow", "javascript")
 _OUT_OF_SCOPE_KEYS = ("dns", "file", "headless", "whois", "ssl", "websocket")
 
@@ -158,8 +158,8 @@ def _inspect_requests(requests: List[dict]) -> Set[str]:
         if request.get("extractors"):
             blockers.add("extractors")
         # El esquema binario de una sonda de red: ``inputs`` con ``type: hex``.
-        # Es justo lo que desbloquearía los checks de SMB que la Fase N no pudo
-        # construir, así que interesa contarlo por separado.
+        # Es justo lo que desbloquearía los checks de SMB, que hoy no se pueden
+        # construir con el runtime propio, así que interesa contarlo por separado.
         for entry in request.get("inputs") or []:
             if isinstance(entry, dict) and entry.get("type") == "hex":
                 blockers.add("input-hex")
@@ -241,7 +241,7 @@ def _bucket_for(blockers: Set[str]) -> Bucket:
 
 
 def is_ingestible(document: dict) -> bool:
-    """Atajo para la Fase R: si la plantilla se traduce hoy tal cual.
+    """Si la plantilla se traduce hoy tal cual, sin necesitar más soporte del runtime.
 
     Deliberadamente estricto — solo :attr:`Bucket.INGESTIBLE_NOW`. Una
     plantilla de cualquier otro cubo se descarta en la ingesta en vez de
@@ -252,7 +252,7 @@ def is_ingestible(document: dict) -> bool:
 
 
 def summarize(profiles: List[TemplateProfile]) -> Dict[str, object]:
-    """Agrega una lista de perfiles en el histograma que la Fase U4 pide.
+    """Agrega una lista de perfiles en el histograma del censo de cobertura.
 
     Args:
         profiles: Los perfiles de todas las plantillas censadas.
@@ -260,8 +260,8 @@ def summarize(profiles: List[TemplateProfile]) -> Dict[str, object]:
     Returns:
         Un diccionario con el total, el reparto por cubo (absoluto y en
         porcentaje), el reparto por protocolo, el recuento de obstáculos y el
-        dato que de verdad decide la Fase R: la fracción de las plantillas
-        **HTTP** que son ingeribles hoy tal cual.
+        dato que de verdad importa para decidir si activar la ingesta: la
+        fracción de las plantillas **HTTP** que son ingeribles hoy tal cual.
     """
     total = len(profiles)
     by_bucket: Dict[str, int] = {bucket.value: 0 for bucket in Bucket}

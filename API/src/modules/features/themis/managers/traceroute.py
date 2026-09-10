@@ -1,4 +1,4 @@
-"""TracerouteManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
+"""Traceroutes cacheados desde el servidor de Ellysia hasta los objetivos de escaneo."""
 
 import logging
 import hashlib

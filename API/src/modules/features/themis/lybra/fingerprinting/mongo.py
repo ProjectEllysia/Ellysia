@@ -1,19 +1,18 @@
 """El dissector de MongoDB — y el hallazgo más famoso de la lista.
 
-MongoDB cierra el trío de bases de datos que la Fase N dejó fuera, y es el que
-tiene asociado el incidente más conocido: durante años, las instalaciones por
-defecto escuchaban en todas las interfaces **sin autenticación**, y eso produjo
-una de las mayores oleadas de fuga de datos y de ransomware de bases de datos
-que se recuerdan. Sigue apareciendo.
+MongoDB es una de las bases de datos con el incidente más conocido asociado:
+durante años, las instalaciones por defecto escuchaban en todas las
+interfaces **sin autenticación**, y eso produjo una de las mayores oleadas de
+fuga de datos y de ransomware de bases de datos que se recuerdan. Sigue
+apareciendo.
 
-**Una corrección al planteamiento original, porque cambia el diseño.** El issue
-daba por hecho que un ``hello`` sin autenticar sólo contesta si el servidor no
-exige credenciales, y que por tanto su respuesta *es* la evidencia de la
-exposición. No es así: ``hello`` (antes ``isMaster``) es el comando de
-*handshake* del protocolo y **siempre** contesta, con ``--auth`` y sin él —
-tiene que hacerlo, porque el cliente necesita saber con quién habla antes de
-poder autenticarse. Un check construido sobre esa premisa habría marcado como
-expuesto **todo** MongoDB alcanzable, incluidos los correctamente cerrados.
+**El módulo separa dos preguntas que es fácil confundir, porque no son la
+misma.** Un ``hello`` sin autenticar no sirve como evidencia de exposición:
+``hello`` (antes ``isMaster``) es el comando de *handshake* del protocolo y
+**siempre** contesta, con ``--auth`` y sin él — tiene que hacerlo, porque el
+cliente necesita saber con quién habla antes de poder autenticarse. Tratar su
+respuesta como evidencia de exposición marcaría como expuesto **todo**
+MongoDB alcanzable, incluidos los correctamente cerrados.
 
 Así que el módulo separa las dos preguntas, que resultan ser distintas:
 

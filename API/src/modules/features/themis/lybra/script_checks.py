@@ -1,4 +1,4 @@
-"""Checks de tipo ``script`` — el cuarto tipo del runtime (Fase R).
+"""Checks de tipo ``script`` — el cuarto tipo del runtime.
 
 Un check declarativo compara texto: pide algo y mira si la respuesta contiene
 un patrón. Eso cubre el 90 % de lo web, pero deja fuera todo lo que exige
@@ -6,15 +6,12 @@ lógica: un protocolo binario, una negociación de varios pasos cuyo resultado
 hay que interpretar, o un hecho que ya se dedujo pero que ningún matcher de
 texto puede expresar. Para eso está este tipo.
 
-**Un caso concreto, que es el que motiva el módulo.** La Fase N dejó anotado que
-los checks "SMB sin firma" y "SMBv1 habilitado" *no se pudieron construir*
-porque «el runtime declarativo actual solo compara texto decodificado, y una
-respuesta SMB2 es binaria». Pero el dissector de SMB ya negocia con el servidor
-y ya lee su ``SecurityMode``: el hecho está observado, solo faltaba un vehículo
-para convertirlo en un hallazgo. Un plugin de primera parte es ese vehículo, y
-llega mucho antes que el camino alternativo (adoptar el esquema ``network`` de
-Nuclei con ``type: hex`` y un matcher ``binary``, que depende de la medición de
-U4).
+**Un caso concreto, que es el que motiva el módulo.** Los checks "SMB sin
+firma" y "SMBv1 habilitado" no se pueden expresar como un check declarativo,
+porque el runtime declarativo sólo compara texto decodificado y una respuesta
+SMB2 es binaria. Pero el dissector de SMB ya negocia con el servidor y ya lee
+su ``SecurityMode``: el hecho está observado, sólo faltaba un vehículo para
+convertirlo en un hallazgo. Un plugin de primera parte es ese vehículo.
 
 **Por qué los plugins se inyectan y no se importan.** ``checks.py`` no importa
 ``fingerprinting`` a propósito — lo dice su propio comentario en ``_TLS_RULES``:
@@ -130,8 +127,7 @@ class SmbV1EnabledPlugin(ScriptPlugin):
     **El NEGOTIATE de SMB2 no puede verlo**, y por eso este check tiene su
     propia sonda: son dos protocolos distintos con dos saludos distintos, así
     que un servidor con SMB1 activo contesta con toda normalidad al SMB2 y no
-    dice ni una palabra sobre el otro. Ésta es la comprobación que la tabla de
-    la Fase N pedía y que no se pudo construir entonces.
+    dice ni una palabra sobre el otro.
 
     La evidencia es una aceptación explícita: el servidor contesta un
     ``NEGOTIATE`` de SMB1 con estado correcto y eligiendo un dialecto. El
@@ -158,7 +154,7 @@ class SmbV1EnabledPlugin(ScriptPlugin):
 class SnmpDefaultCommunityPlugin(ScriptPlugin):
     """Detecta un servicio SNMP que acepta la comunidad por defecto ``public``.
 
-    Comparte la sonda con el dissector SNMP (Fase N/Ronda 1, roadmap §6.3) a
+    Comparte la sonda con el dissector SNMP a
     propósito: que ``sysDescr`` conteste a ``public`` ES la evidencia del
     hallazgo, no una comprobación aparte — no tiene sentido mandar el mismo
     datagrama dos veces con dos sondas distintas.

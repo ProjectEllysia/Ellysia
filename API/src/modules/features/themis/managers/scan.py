@@ -1,4 +1,6 @@
-"""ScanManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
+"""Clase base de los managers de escaneo: ciclo de vida común (creación, despacho
+a la cola de tareas y persistencia de resultados) que cada escáner concreto
+especializa."""
 
 import logging
 from abc import ABC, abstractmethod
@@ -1024,7 +1026,7 @@ class ScanManager(TaskTrackingMixin, ABC):
                 "state": previous_finding.state or "open",
                 "snapshot": snapshot,
                 # La decisión del usuario viaja aparte del snapshot porque no
-                # describe el hallazgo sino lo que alguien dijo sobre él (L35).
+                # describe el hallazgo sino lo que alguien dijo sobre él.
                 # Sin esto sobreviviría el estado pero no su justificación, y
                 # un `accepted` sin motivo ni autor vuelve a ser deuda al día
                 # siguiente de haberlo razonado.

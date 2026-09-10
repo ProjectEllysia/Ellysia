@@ -1,17 +1,15 @@
 """Integration tests for the Lybra engine scan.
 
 Covers the endpoint's authorization/validation boundary and the engine pipeline
-end to end: el motor descubre los servicios por su cuenta (Fase T) o recibe una
+end to end: el motor descubre los servicios por su cuenta o recibe una
 lista ya resuelta (payload externo), persiste hallazgos y estos afloran por el
 endpoint de resultados. El cuerpo del escaneo se ejecuta directo
 (``_run_lybra``) en vez de por la cola de tareas, igual que en los tests de los
 demás escáneres, para no depender de Redis ni de un worker.
 
-Hasta L52 casi todos estos tests partían de un escaneo Nmap sembrado a mano: el
-motor tenía un modo de arranque que analizaba los servicios que otro escáner ya
-había descubierto. Ese modo se retiró junto al resto del acoplamiento con
-herramientas de terceros, así que los servicios entran ahora por los dos
-caminos que de verdad quedan.
+El motor no tiene ningún modo de arranque que analice servicios descubiertos
+por otro escáner: no hay acoplamiento con herramientas de terceros, así que
+los servicios entran por los dos caminos que de verdad existen.
 """
 
 from datetime import datetime
@@ -69,9 +67,9 @@ def _stub_self_discovery(monkeypatch, tcp_ports: list, udp_ports: list | None = 
 
 
 def _authorize_target(app, user_id: int, target: str = "10.0.0.5") -> None:
-    """Add ``target`` to the user's authorized-targets register (roadmap §6).
+    """Add ``target`` to the user's authorized-targets register.
 
-    Required before Fase F (fingerprinting) or Fase R (active checks) will run
+    Required before fingerprinting or active checks will run
     against it — see ``AuthorizedTargetManager.is_authorized``.
     """
     with app.app_context():
@@ -92,14 +90,14 @@ def test_lybra_requires_create_attribute(client, stripped_user, auth_headers):
 
 
 def test_lybra_requires_a_target(client, admin_user, auth_headers):
-    # Sin objetivo no hay escaneo: el schema lo rechaza. Antes de L52 valía
-    # también un ``sourceScanId`` (un escaneo Nmap previo) en su lugar.
+    # Sin objetivo no hay escaneo: el schema lo rechaza. No hay ningún
+    # ``sourceScanId`` (un escaneo Nmap previo) que valga en su lugar.
     resp = client.post("/themis/lybra", headers=auth_headers(admin_user), json={})
     assert resp.status_code in (400, 422)
 
 
 def test_lybra_no_longer_accepts_a_source_scan(client, app, admin_user, auth_headers):
-    """L52: lanzar Lybra desde un escaneo de otra herramienta ya no es posible.
+    """Lanzar Lybra desde un escaneo de otra herramienta ya no es posible.
 
     El schema ya no declara ``sourceScanId``, así que mandarlo sin objetivo es
     una petición sin modo válido — se rechaza en la validación, no se ignora en
@@ -111,7 +109,7 @@ def test_lybra_no_longer_accepts_a_source_scan(client, app, admin_user, auth_hea
 
 
 def test_lybra_self_discovery_requires_authorized_target(client, admin_user, auth_headers):
-    # Roadmap §6: self-discovery touches the target directly, so it must be
+    # Self-discovery touches the target directly, so it must be
     # in the caller's authorized-targets register before launch is allowed.
     resp = client.post("/themis/lybra", headers=auth_headers(admin_user),
                        json={"target": "203.0.113.9"})
@@ -152,7 +150,7 @@ def test_lybra_run_scan_self_discovery_succeeds_once_authorized(app, admin_user,
 
 def test_lybra_endpoint_threads_the_aggressive_flag_to_run_scan(
         client, admin_user, auth_headers, monkeypatch):
-    """El schema declara ``aggressive`` con ``load_default=False`` (L40): sin
+    """El schema declara ``aggressive`` con ``load_default=False``: sin
     el campo, una petición de siempre no cambia de comportamiento, y con él,
     el valor llega íntegro al manager — la mitad de la doble puerta que
     depende del usuario."""
@@ -211,7 +209,7 @@ def test_lybra_self_discovery_produces_open_port_findings(app, admin_user, monke
 
 
 def test_lybra_self_discovery_disambiguates_the_same_port_over_tcp_and_udp(app, admin_user, monkeypatch):
-    """Ronda 1 (roadmap §6.3): 161/tcp y 161/udp del mismo host son dos
+    """161/tcp y 161/udp del mismo host son dos
     servicios distintos y deben sobrevivir como dos hallazgos `open_port` con
     `dedup_key` distintas — el riesgo real que motivó la columna
     `Finding.protocol` y el arreglo de `compute_dedup_key`."""
@@ -277,7 +275,7 @@ def test_lybra_self_discovery_probe_failure_fails_without_false_fixed(app, admin
 
 
 def test_lybra_blocked_discovery_never_marks_findings_fixed(app, admin_user, monkeypatch):
-    """L48-c, la mitad que de verdad duele.
+    """El descubrimiento bloqueado a mitad de camino, la mitad que de verdad duele.
 
     Un objetivo que bloquea el barrido a mitad de camino producía una lista
     vacía indistinguible de un host limpio, y el ciclo de vida pasaba entonces
@@ -372,7 +370,7 @@ def test_lybra_self_discovery_reuses_host_created_by_nmap(app, admin_user):
         assert len(all_hosts) == 1                       # no duplicate
 
 
-# ------------------------------------------------- Fase 0.9: external payload
+# ------------------------------------------------- external payload
 
 def test_lybra_run_scan_payload_mode_requires_target(app, admin_user):
     from unittest import mock
@@ -445,7 +443,7 @@ def test_lybra_payload_mode_produces_confirmed_inventory_findings(app, admin_use
 
 def test_lybra_payload_mode_surface_tracking_distinguishes_portless_packages(app, admin_user):
     """Regression: two different installed packages both have port=None, so
-    surface tracking cannot key on (port, protocol) alone for them (Fase 0.9)
+    surface tracking cannot key on (port, protocol) alone for them
     — it must fall back to product, or the second package's upsert would
     silently overwrite the first package's tracked row."""
     with app.app_context():
@@ -509,7 +507,7 @@ def test_lybra_engine_persists_informational_findings(app, admin_user):
 
 
 def test_lybra_surface_change_detects_new_port_and_version_bump(app, admin_user):
-    """Fase 5: a host's first Lybra scan sets a silent baseline; a later scan
+    """A host's first Lybra scan sets a silent baseline; a later scan
     with an extra port and a bumped Apache version reports both as
     surface_change findings, without repeating on a third, unchanged scan."""
 
@@ -563,12 +561,12 @@ def _seed_kb_apache_cve(app):
 
 
 def test_a_scan_stamps_findings_with_the_state_of_the_knowledge_base(app, admin_user):
-    """#270: la marca de reproducibilidad sale del estado real de la KB.
+    """La marca de reproducibilidad sale del estado real de la KB.
 
-    Era la constante ``"lybra-0"`` para todos los hallazgos por versión, así que
-    un hallazgo guardado no podía decir contra qué conocimiento se resolvió.
-    Aquí se siembra la KB con fechas conocidas en las tres fuentes y se
-    comprueba que el escaneo las estampa.
+    Sin ella, ``"lybra-0"`` sería la misma constante para todos los hallazgos
+    por versión, así que un hallazgo guardado no podría decir contra qué
+    conocimiento se resolvió. Aquí se siembra la KB con fechas conocidas en las
+    tres fuentes y se comprueba que el escaneo las estampa.
     """
     from datetime import datetime
 
@@ -619,7 +617,7 @@ def _seed_kb_vsftpd_cve(app):
 
 
 def _seed_kb_mysql_cve(app):
-    """Seed the KB with a made-up CVE for mysql 8.0.34, for the Fase N MySQL
+    """Seed the KB with a made-up CVE for mysql 8.0.34, for the MySQL
     dissector's CPE-gap-filling test."""
     with app.app_context():
         with UnitOfWork() as uow:
@@ -693,7 +691,7 @@ def test_lybra_active_check_persists_confirmed_finding(app, admin_user, monkeypa
 
 
 def test_lybra_active_check_ftp_anonymous_login_persists_confirmed_finding(app, admin_user, monkeypatch):
-    """Fase N: the runtime's first ``type: "network"`` check, wired end to
+    """The runtime's first ``type: "network"`` check, wired end to
     end through the real manager (not a bare ``CheckRuntime``).
 
     Lo que se sustituye es el **socket**, no la sesión: el ``NetworkSession``
@@ -835,7 +833,7 @@ def test_a_scan_that_runs_out_of_clock_stops_probing_and_finishes_partial(app, a
     Aquí el descubrimiento se come el plazo entero. Lo que se comprueba es que
     el fingerprinting ni siquiera empieza, y que el escaneo **termina bien**
     marcado como parcial — que es lo que impide, además, que cierre por
-    omisión hallazgos que esta vez no llegó a comprobar (L48-c).
+    omisión hallazgos que esta vez no llegó a comprobar.
     """
     import src.modules.system.config_reading as CR
     from src.modules.features.themis.managers.lybra import engine as engine_module
@@ -901,7 +899,7 @@ def test_a_scan_with_clock_to_spare_still_fingerprints(app, admin_user, monkeypa
 
 
 def test_lybra_fingerprinting_identifies_the_service_on_its_own(app, admin_user, monkeypatch):
-    """L52: el hallazgo de fingerprint constata qué identificó Lybra.
+    """El hallazgo de fingerprint constata qué identificó Lybra.
 
     Antes comparaba con el producto/versión que traía el servicio desde Nmap y
     titulaba el hallazgo con el veredicto («concuerda / no concuerda con
@@ -933,7 +931,7 @@ def test_lybra_fingerprinting_identifies_the_service_on_its_own(app, admin_user,
 
     fingerprints = [f for f in findings if f.category == "fingerprint"]
     assert len(fingerprints) == 1
-    # L18: el qod refleja de dónde salió la versión. Una cabecera `Server` con
+    # El qod refleja de dónde salió la versión. Una cabecera `Server` con
     # versión explícita es la fuente más fuerte de la cascada.
     assert fingerprints[0].qod == 90
     assert fingerprints[0].confirmed is False
@@ -942,7 +940,7 @@ def test_lybra_fingerprinting_identifies_the_service_on_its_own(app, admin_user,
 
 
 def test_lybra_identifies_a_service_on_a_non_canonical_port(app, admin_user, monkeypatch):
-    """L10: el punto ciego que multiplicaba a todos los demás.
+    """El punto ciego que multiplicaba a todos los demás.
 
     Los predicados de aplicabilidad deciden por nombre o por número de puerto,
     y en el autodescubrimiento el nombre sale a su vez de una tabla de puertos.
@@ -1009,7 +1007,7 @@ def test_lybra_leaves_a_mute_unknown_port_exactly_as_it_was(app, admin_user, mon
 
 
 def test_lybra_fingerprinting_skipped_for_unauthorized_target(app, admin_user, monkeypatch):
-    # activeChecks/fingerprintingEnabled default to True (roadmap §6): the real
+    # activeChecks/fingerprintingEnabled default to True: the real
     # gate is per-target authorization, not the config flag. No _authorize_target
     # call here on purpose.
     _stub_self_discovery(monkeypatch, [80])
@@ -1043,7 +1041,7 @@ def test_lybra_fingerprinting_config_flag_still_disables_even_if_authorized(app,
 
 def test_lybra_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, monkeypatch):
     """El sentido de enchufar el fingerprint a la resolución de CPE: un
-    servicio descubierto por el propio motor (Fase T) tiene que poder casar con
+    servicio descubierto por el propio motor tiene que poder casar con
     un CVE a partir de su propia lectura HTTP. Sin ese cableado el matcher de
     versiones no tiene nada que buscar y un escaneo nunca encuentra un CVE.
     """
@@ -1083,8 +1081,8 @@ def test_lybra_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, mon
 
 
 def test_lybra_ftp_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, monkeypatch):
-    """Fase N: FTP se suma a HTTP/SSH como dissector que resuelve el CPE de un
-    servicio descubierto por el propio motor (Fase T)."""
+    """FTP se suma a HTTP/SSH como dissector que resuelve el CPE de un
+    servicio descubierto por el propio motor."""
     import src.modules.system.config_reading as CR
     from src.modules.features.themis.lybra import FtpProbe
 
@@ -1114,7 +1112,7 @@ def test_lybra_ftp_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user,
 
 
 def test_lybra_mysql_fingerprint_fills_cpe_gap_for_self_discovery(app, admin_user, monkeypatch):
-    """Fase N's dissector registry, exercised end to end through the manager:
+    """The dissector registry, exercised end to end through the manager:
     MySQL identification flows through _fingerprint_services exactly like
     HTTP/SSH/FTP do, with no special-casing anywhere above the registry."""
     import src.modules.system.config_reading as CR
@@ -1162,7 +1160,7 @@ def test_lybra_scan_surfaces_in_results_endpoint(client, app, admin_user, auth_h
     result = body["results"][0]
     assert result["scanType"] == "lybra"
     assert result["totalFindings"] == 2
-    # L52: la respuesta ya no lleva ``sourceScanId`` ni ``deep``/``deepScanIds``.
+    # La respuesta ya no lleva ``sourceScanId`` ni ``deep``/``deepScanIds``.
     assert "sourceScanId" not in result
     assert "deep" not in result
 
@@ -1431,12 +1429,12 @@ def test_the_partial_flag_reaches_the_api(client, monkeypatch, app, admin_user, 
     assert result["isPartial"] is True
 
 
-# ============================================ progreso y cancelación (L41)
+# ============================================ progreso y cancelación
 
 
 def test_a_scan_reports_progress_by_phase(monkeypatch, app, admin_user):
     """El escaneo publica progreso por fase con pesos honestos: descubrimiento
-    40, fingerprint 70, checks 90, persistencia 100 (§3 del issue)."""
+    40, fingerprint 70, checks 90, persistencia 100."""
     _authorize_target(app, admin_user.id)
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
     _stub_self_discovery(monkeypatch, [80])
@@ -1490,7 +1488,8 @@ def test_a_cancelled_scan_stops_persists_and_is_marked_partial(monkeypatch, app,
 def test_a_cancelled_scan_does_not_close_findings_by_omission(monkeypatch, app, admin_user):
     """La interacción crítica con el ciclo de vida: un escaneo cancelado a mitad
     no vio todo el objetivo, así que la ausencia de un hallazgo anterior no es
-    evidencia de que se haya corregido (el fallo de L48-c por otra puerta)."""
+    evidencia de que se haya corregido (el mismo riesgo que un descubrimiento
+    intermitente produce por otra puerta)."""
     _authorize_target(app, admin_user.id)
     monkeypatch.setattr(ScanManager, "is_host_reachable", staticmethod(lambda *a, **k: True))
 
@@ -1517,7 +1516,7 @@ def test_a_cancelled_scan_does_not_close_findings_by_omission(monkeypatch, app, 
     assert fixed == []
 
 
-# ================================================= evidencia cruda (L44)
+# ================================================= evidencia cruda
 
 
 def test_a_confirmed_http_finding_stores_its_redacted_evidence(monkeypatch, app, admin_user):
@@ -1598,7 +1597,7 @@ def test_the_evidence_endpoint_returns_own_findings_and_404s_for_others(
     assert forbidden.status_code == 404
 
 
-# =============================================== confirmadores (L29)
+# =============================================== confirmadores
 
 
 def test_a_confirmer_promotes_a_hypothesis_end_to_end(monkeypatch, app, admin_user):
@@ -1646,7 +1645,7 @@ def test_a_confirmer_promotes_a_hypothesis_end_to_end(monkeypatch, app, admin_us
     assert for_cve[0].qod == 99
 
 
-# =============================================== modo agresivo + credenciales (L40/L31)
+# =============================================== modo agresivo + credenciales
 
 
 def _stub_tomcat_manager(monkeypatch) -> None:
@@ -1752,7 +1751,7 @@ def test_an_authorized_and_explicit_aggressive_scan_finds_default_credentials(
     assert "s3cret" not in str(evidence[0].payload)
 
 
-# ─────────────── desmentir un hallazgo no es aceptar un riesgo (L35)
+# ─────────────── desmentir un hallazgo no es aceptar un riesgo
 #
 # Hasta ahora el esquema sólo admitía `accepted` y `open`, así que un usuario
 # que sabía que un hallazgo era falso —Debian parcheó por backport y la versión
@@ -1845,7 +1844,8 @@ def test_a_state_the_lifecycle_owns_cannot_be_set_by_hand(
 
 def test_the_manager_validates_the_state_on_its_own(app, admin_user):
     """La validación del schema protege el endpoint; el manager es la frontera
-    de verdad, y hasta L35 aceptaba cualquier cadena."""
+    de verdad y tiene que rechazar por su cuenta cualquier cadena que no sea un
+    estado válido."""
     from src.modules.shared._exceptions import ValidationError
 
     scan_id = _run_payload_scan(app, admin_user.id, target="10.0.0.25")
@@ -1911,9 +1911,8 @@ def test_false_positives_are_scoped_to_their_owner(
 
 
 def test_a_finding_carries_its_exploit_maturity(app, admin_user):
-    """`exploit_maturity` se declaraba en el modelo desde el principio,
-    documentada como "rellenada desde la Fase 1", y estaba NULL en todas las
-    filas. Ahora dice algo en cada hallazgo con CVE."""
+    """`exploit_maturity` dice algo en cada hallazgo con CVE, calculado en
+    tiempo de correlación a partir de KEV, EPSS y las referencias del CVE."""
     _seed_kb_apache_cve(app)   # siembra también KEV para esta CVE
 
     with app.app_context():
@@ -1979,7 +1978,7 @@ def test_a_cve_with_nothing_public_says_none_not_null(app, admin_user):
     assert vuln.exploit_maturity == "none"
 
 
-# ─────────────── verificación de backports de extremo a extremo (Fase O)
+# ─────────────── verificación de backports de extremo a extremo
 
 
 def _debian_services() -> list:
@@ -1992,8 +1991,8 @@ def _debian_services() -> list:
 
 
 def test_a_backported_finding_is_closed_without_touching_the_host(app, admin_user):
-    """El corazón de la Fase O: Debian ya lo parcheó sin subir el número
-    visible, así que el hallazgo por versión nunca fue real."""
+    """El corazón de la verificación de backports: Debian ya lo parcheó sin
+    subir el número visible, así que el hallazgo por versión nunca fue real."""
     _seed_kb_apache_cve(app)
     with app.app_context():
         with UnitOfWork() as uow:
@@ -2038,8 +2037,8 @@ def test_a_vendor_confirming_the_flaw_raises_the_confidence(app, admin_user):
 
 
 def test_without_a_distro_advisory_the_finding_stays_a_hypothesis(app, admin_user):
-    """El comportamiento de antes de la Fase O, que es el correcto cuando no
-    hay a quién preguntar."""
+    """El comportamiento correcto cuando no hay a quién preguntar: sin
+    veredicto de la distribución, el hallazgo se queda como hipótesis."""
     _seed_kb_apache_cve(app)
     with app.app_context():
         mgr = LybraEngineManager()

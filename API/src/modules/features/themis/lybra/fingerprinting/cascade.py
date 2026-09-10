@@ -2,7 +2,7 @@
 
 Todos los predicados de aplicabilidad del motor deciden con la misma fórmula:
 *el nombre del servicio está en esta lista, o el puerto está en este conjunto*.
-Y cuando el descubrimiento es propio (Fase T, sin Nmap), el nombre del servicio
+Y cuando el descubrimiento es propio (sin Nmap), el nombre del servicio
 sale de ``WELL_KNOWN_PORTS``, que es **otra tabla de puertos**. Es decir: en el
 camino de autodescubrimiento, la decisión era puramente el número de puerto.
 

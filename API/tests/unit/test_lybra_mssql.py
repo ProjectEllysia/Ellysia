@@ -1,6 +1,6 @@
-"""El dissector de SQL Server (L13).
+"""El dissector de SQL Server.
 
-El más generoso de los tres pendientes de la Fase N: el ``PRELOGIN`` de TDS
+El más generoso de los dissectors de bases de datos: el ``PRELOGIN`` de TDS
 devuelve major, minor y build en un campo binario de tamaño fijo, sin
 autenticar y sin negociar nada más.
 

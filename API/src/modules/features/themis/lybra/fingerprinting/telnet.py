@@ -1,11 +1,11 @@
 """La sonda de Telnet — porque que exista ya es el hallazgo.
 
-El roadmap descartó el *dissector* de Telnet con buen criterio: su negociación
-de opciones (IAC) no deja un texto identificable de forma fiable sin inventar
+No tiene sentido construir un *dissector* de Telnet: su negociación de
+opciones (IAC) no deja un texto identificable de forma fiable sin inventar
 patrones, así que no hay un producto/versión que leer. Pero el *check* es otra
 cosa. Telnet manda credenciales en claro por diseño; que un servicio esté ahí,
-hablando el protocolo, ya es un hallazgo de configuración de red —el que la
-Fase N prometía— sin necesidad de identificar nada.
+hablando el protocolo, ya es un hallazgo de configuración de red por sí
+mismo, sin necesidad de identificar nada.
 
 Lo que este módulo comprueba es exactamente eso y nada más: que al otro lado
 hay algo que **habla Telnet**. Un servidor Telnet abre la conversación

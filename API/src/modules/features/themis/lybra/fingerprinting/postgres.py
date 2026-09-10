@@ -1,11 +1,10 @@
 """El dissector de PostgreSQL — el primero que negocia en vez de escuchar.
 
-PostgreSQL es una de las tres bases de datos que la Fase N dejó fuera con una
-justificación honesta: *"a diferencia de MySQL/Redis, exigen un handshake
-negociado en vez de un banner ofrecido, mayor coste/riesgo que valor añadido en
-esa ronda"*. El coste sigue siendo mayor; el valor también, porque un
-PostgreSQL expuesto es un hallazgo de primer orden y hasta ahora producía un
-``open_port`` informativo y nada más.
+PostgreSQL es una de las bases de datos que, a diferencia de MySQL/Redis,
+exige un handshake negociado en vez de ofrecer un banner por su cuenta: el
+coste de identificarla es mayor, pero el valor también lo es, porque un
+PostgreSQL expuesto es un hallazgo de primer orden y sin este dissector no
+pasaría de un ``open_port`` informativo y nada más.
 
 **Conviene ser honesto sobre el techo: PostgreSQL no regala su versión antes de
 autenticar.** Ningún truco cambia eso. Lo que sí se puede observar sin
@@ -23,7 +22,7 @@ credenciales, y ya es bastante, son tres cosas:
 Los dos intercambios son lecturas del protocolo de conexión: **no se intenta
 autenticar en ningún momento**, no se manda contraseña ninguna y no se prueba
 credencial alguna. Por eso caben en modo ``safe``. Un intento de login sería
-otra cosa —Fase D— y no está aquí.
+otra cosa, y no está aquí.
 
 El formato de los mensajes viene de la documentación de PostgreSQL, "Frontend/
 Backend Protocol" §55.2.1 y §55.7. Todo se construye y se parsea a mano: traer

@@ -5,11 +5,10 @@ que la única señal disponible sin privilegios de raw socket es **mandar algo
 que ese protocolo entienda y ver si contesta**. De ahí que la tabla de sondas
 sea payload por puerto y no una lista de números.
 
-La Ronda 1 la abrió con una sola fila —SNMP en el 161— y una regla de
-crecimiento explícita: *"crece una fila por protocolo que un check o dissector
-realmente consuma, no antes de necesitarlo"*. Este módulo es esa regla
-cumplida, no cambiada: cada payload de aquí llega junto con el consumidor que
-lo lee (:mod:`~.fingerprinting.udp_services`).
+La regla de crecimiento es explícita: *"crece una fila por protocolo que un
+check o dissector realmente consuma, no antes de necesitarlo"*. Cada payload
+de aquí llega junto con el consumidor que lo lee
+(:mod:`~.fingerprinting.udp_services`).
 
 **Por qué la superficie UDP importa.** Ahí viven servicios que no aparecen en
 ningún escaneo TCP y que se usan a diario en ataques de amplificación — es

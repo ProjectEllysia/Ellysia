@@ -1,9 +1,9 @@
 """El dissector de RDP — el hallazgo que puede acabar en una llamada de teléfono.
 
-RDP figura en la tabla de la Fase N como prioridad 3 con coste "medio-alto".
-Por impacto real merece estar más arriba: es el vector de entrada de la mayoría
-de los incidentes de ransomware que empiezan por acceso remoto, y **BlueKeep**
-(CVE-2019-0708) sigue apareciendo en redes reales siete años después.
+Implementar RDP tiene un coste medio-alto, pero por impacto real merece
+prioridad alta: es el vector de entrada de la mayoría de los incidentes de
+ransomware que empiezan por acceso remoto, y **BlueKeep** (CVE-2019-0708)
+sigue apareciendo en redes reales siete años después.
 
 **RDP sin NLA es el hallazgo.** NLA (*Network Level Authentication*) obliga a
 autenticarse **antes** de que se cree la sesión gráfica. Sin él, cualquiera que
@@ -14,8 +14,8 @@ hallazgo que justifica un informe entero.
 
 **Cómo se observa.** Un ``X.224 Connection Request`` con un ``RDP_NEG_REQ``
 anuncia qué protocolos de seguridad soporta el cliente, y el servidor contesta
-**cuál ha elegido** — o por qué no elige ninguno. Es la sonda más compleja del
-backlog en construcción (``TPKT`` + ``X.224`` + negociación), pero su resultado
+**cuál ha elegido** — o por qué no elige ninguno. Es la sonda más compleja de
+este paquete (``TPKT`` + ``X.224`` + negociación), pero su resultado
 es binario y sin ambigüedad, que es justo lo contrario de un banner de texto
 libre: no hay nada que interpretar, el servidor dice un número.
 

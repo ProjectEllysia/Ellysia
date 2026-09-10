@@ -1,4 +1,4 @@
-"""El dissector de PostgreSQL (L12).
+"""El dissector de PostgreSQL.
 
 La primera base de datos del motor que **negocia** en vez de escuchar un banner
 ofrecido. Todo con socket falso: la sonda recibe su conector inyectado, igual

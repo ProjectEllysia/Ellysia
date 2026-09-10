@@ -1,4 +1,4 @@
-"""La cascada de identificación para servicios fuera de su puerto canónico (L10).
+"""La cascada de identificación para servicios fuera de su puerto canónico.
 
 Los predicados de aplicabilidad deciden por nombre o por número de puerto, y en
 el camino de autodescubrimiento el nombre sale a su vez de una tabla de

@@ -1,4 +1,4 @@
-"""ScanHistoryManager — extraido de themis/managers.py (Fase 3 del refactor de estructura)."""
+"""Estadísticas históricas de escaneos por host, para gráficas e informes."""
 
 import logging
 from typing import List

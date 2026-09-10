@@ -32,13 +32,13 @@ logger = logging.getLogger(__name__)
 @ScanManager.register(ScanType.NUCLEI)
 class NucleiScanManager(ScanManager):
     """
-    Manager for Nuclei template-based vulnerability scans (roadmap Fase U1).
+    Manager for Nuclei template-based vulnerability scans.
 
     Unlike Nikto, Nuclei writes no result table of its own — every
     hallazgo vive directamente en ``Finding`` vía ``nuclei_result_to_finding``,
     la misma forma que ``LybraEngineManager`` ya adoptó. Eso es lo que le deja
     entrar gratis en la deduplicación multifuente, el ciclo de vida
-    ``open``/``fixed``/``regressed`` y el scoring contextual de la Fase 5.
+    ``open``/``fixed``/``regressed`` y el scoring contextual de exposición.
 
     Example:
     >>> manager = NucleiScanManager()
@@ -208,7 +208,7 @@ class NucleiScanManager(ScanManager):
         ``apply_lifecycle`` compares against this target's previous Nuclei
         scan so ``state`` is genuinely ``fixed``/``regressed``/``open`` instead
         of always ``open`` — the two things that make Nuclei "enter for free"
-        into Fase 5's correlation, per the roadmap.
+        into the multi-source correlation and exposure scoring.
         """
         results_data = domain_data
         scan_repo = ScanRepository(uow)

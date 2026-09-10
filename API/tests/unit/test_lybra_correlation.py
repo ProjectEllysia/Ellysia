@@ -1,4 +1,4 @@
-"""Unit tests for Lybra correlation (Fase 5): dedup, merge, lifecycle, scoring.
+"""Unit tests for Lybra correlation: dedup, merge, lifecycle, scoring.
 
 All pure functions over finding dicts — no DB, no network.
 """
@@ -49,7 +49,7 @@ def test_dedup_key_differs_by_port_and_identity():
 
 
 # ------------------------------------------------------- dedup key: protocol
-# Ronda 1 (roadmap §6.3): un servicio puede abrir el mismo puerto por TCP y
+# Un servicio puede abrir el mismo puerto por TCP y
 # por UDP (161 es el caso real: SNMP). Estos tres tests son los más
 # importantes del cambio: fijan digests literales para que cualquier
 # modificación futura del material de hash de compute_dedup_key falle a
@@ -139,7 +139,8 @@ def test_a_partial_scan_closes_nothing():
     Un barrido que se queda sin presupuesto de reloj deja puertos sin probar.
     Si el ciclo de vida cerrara por ausencia, ese escaneo le diría al usuario
     que sus vulnerabilidades fueron remediadas cuando lo único cierto es que
-    esta vez no se comprobaron — el fallo de L48-c por otra puerta.
+    esta vez no se comprobaron — el mismo riesgo que un descubrimiento
+    intermitente puede producir por otra puerta.
     """
     cur = [{"dedup_key": "K2"}]                  # K1 estaba antes y ahora no aparece
     out = apply_lifecycle(cur, _prev("open", "K1"), close_missing=False)
@@ -182,7 +183,7 @@ def test_score_finding(finding, exposure, expected):
     assert score_finding(finding, exposure) == expected
 
 
-# ───────────────────────── falso positivo vs riesgo aceptado (L35)
+# ──────────────── falso positivo vs riesgo aceptado
 #
 # Dicen cosas opuestas y hasta ahora compartían casilla. "Acepto el riesgo" es
 # una afirmación sobre el negocio: esto es real y lo asumo. "Falso positivo" es
@@ -214,8 +215,8 @@ def test_a_false_positive_stays_refuted():
 
 def test_a_refuted_finding_carries_its_reason_and_author():
     """Sin esto la decisión sobreviviría como estado pero perdería su
-    justificación en el escaneo siguiente, que es volver a la deuda que L35
-    quita de en medio."""
+    justificación en el escaneo siguiente, y una decisión sin justificación no
+    sirve para nada."""
     cur = [{"dedup_key": "K1", "check_id": "c@1", "feed_version": "f1"}]
     out = apply_lifecycle(cur, _prev_decided("false_positive", "K1",
                                              check_id="c@1", feed_version="f1"))
@@ -275,8 +276,8 @@ def test_an_accepted_risk_holds_until_it_expires():
 
 
 def test_an_accepted_risk_without_an_expiry_does_not_expire():
-    """Los `accepted` anteriores a L35 no tienen plazo porque nadie se lo puso.
-    Inventarles uno los reabriría todos de golpe el día del despliegue."""
+    """Un `accepted` sin plazo asignado no tiene que expirar nunca por su
+    cuenta. Inventarle uno los reabriría todos de golpe el día del despliegue."""
     cur = [{"dedup_key": "K1"}]
     out = apply_lifecycle(cur, _prev_decided("accepted", "K1", expires=None),
                           now=datetime(2030, 1, 1))
@@ -295,12 +296,13 @@ def test_a_false_positive_never_expires_by_time():
     assert out[0]["state"] == "false_positive"
 
 
-# ───────────────────── madurez de explotación (L34)
+# ───────────────────── madurez de explotación
 #
-# `Finding.exploit_maturity` se declaraba en el modelo, se documentaba como
-# "rellenada desde la Fase 1" y estaba NULL en todas las filas. Una columna que
-# promete un dato y siempre está vacía es peor que no tenerla, porque quien lee
-# el modelo cree que existe.
+# `exploit_maturity` se calcula en tiempo de correlación a partir de KEV, EPSS
+# y las referencias del CVE, en vez de vivir como una columna del modelo que
+# alguien tendría que mantener rellenada: una columna que promete un dato y
+# puede quedarse vacía es peor que no tenerla, porque quien lee el modelo cree
+# que existe.
 
 from src.modules.features.themis.lybra.correlation import (   # noqa: E402
     exploit_maturity, EXPLOIT_MATURITY_LADDER,

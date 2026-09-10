@@ -1,4 +1,4 @@
-"""El catálogo de favicons y su hash (L20).
+"""El catálogo de favicons y su hash.
 
 El favicon se descargaba, se hasheaba y **nadie consultaba el resultado**: una
 petición de red por servicio HTTP, con su turno de limitador, a cambio de un

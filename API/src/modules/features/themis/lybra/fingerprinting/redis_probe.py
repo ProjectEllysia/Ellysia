@@ -1,4 +1,4 @@
-"""The Redis dissector — Fase N.
+"""The Redis dissector.
 
 Unlike FTP/SMTP/MySQL, Redis does not volunteer anything on a bare connect —
 it waits for a command. Sending ``INFO`` (a read-only, standard admin command)

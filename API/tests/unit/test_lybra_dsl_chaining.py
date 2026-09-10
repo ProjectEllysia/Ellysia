@@ -1,4 +1,4 @@
-"""El DSL de checks: variables extraídas, encadenamiento y payloads (L30).
+"""El DSL de checks: variables extraídas, encadenamiento y payloads.
 
 El motor sabía hacer una petición y mirar la respuesta, y nada más. No podía
 leer un dato de una respuesta y usarlo en la siguiente (login → recurso

@@ -1,4 +1,4 @@
-"""El estado de sincronización de la base de conocimiento (L36).
+"""El estado de sincronización de la base de conocimiento.
 
 Toda la detección por versión del motor depende de un espejo local de NVD, KEV
 y EPSS, y hasta ahora no había nada que registrara cuándo se refrescó cada uno.

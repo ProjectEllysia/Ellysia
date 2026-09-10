@@ -1,4 +1,4 @@
-"""Unit tests for Lybra's own port discovery (Fase T).
+"""Unit tests for Lybra's own port discovery.
 
 The connect scanner runs on a real (test-thread) event loop but against an
 injected ``opener``, so no real sockets or privileges are involved.
@@ -78,7 +78,7 @@ def test_scan_defaults_to_curated_port_set():
 
 # --------------------------------------------- barrido bloqueado vs vacío
 #
-# L48-c: un objetivo que bloquea el barrido a mitad de camino devolvía una
+# Un objetivo que bloquea el barrido a mitad de camino devolvía una
 # lista vacía, indistinguible de un host limpio — y el ciclo de vida marcaba
 # entonces como corregidos hallazgos que seguían abiertos.
 
@@ -168,7 +168,7 @@ def test_services_from_discovered_ports_names_well_known():
     assert by_port[80].name == "http"
     assert by_port[22].name == "ssh"
     assert by_port[12345].name == ""          # unknown port -> no guessed name
-    # No product/version yet — fingerprinting (Fase F) fills those when enabled.
+    # No product/version yet — fingerprinting fills those when enabled.
     assert by_port[80].product == "" and by_port[80].version == ""
 
 
@@ -184,7 +184,7 @@ def test_services_from_discovered_ports_udp_protocol():
 
 
 # ----------------------------------------------------------------- UDP scan
-# Fase N/Ronda 1 (roadmap §6.3): a diferencia del connect scan, aquí no hay
+# A diferencia del connect scan, aquí no hay
 # "abierto/cerrado" que decidir con un solo intento — el sender devuelve
 # bytes (contestó) o None (silencio), y el escáner solo reporta lo primero.
 
@@ -270,7 +270,7 @@ def test_udp_scan_defaults_to_udp_probes_table():
 
     scan_udp_ports_sync("10.0.0.5", sender=sender)
     # retries=1 por defecto -> cada puerto de la tabla se intenta dos veces. Se
-    # compara el recuento y no la secuencia: desde L22 el barrido es
+    # compara el recuento y no la secuencia: el barrido es
     # concurrente, así que el orden en que llegan los intentos es cosa del
     # planificador y no del escáner.
     assert sorted(calls) == sorted(list(UDP_PROBES) * 2)
@@ -312,7 +312,8 @@ def test_a_truncated_sweep_is_neither_blocked_nor_clean():
 
     Y en particular no puede llegar al motor como lista de puertos: el ciclo de
     vida marcaría como corregido todo lo que estaba abierto y esta vez no dio
-    tiempo a comprobar, que es el fallo de L48-c por otra puerta.
+    tiempo a comprobar, el mismo riesgo que un descubrimiento intermitente
+    puede producir por otra puerta.
     """
     ports = list(range(1000, 1020))
     sweep = sweep_ports_sync("10.0.0.5", ports, concurrency=1,

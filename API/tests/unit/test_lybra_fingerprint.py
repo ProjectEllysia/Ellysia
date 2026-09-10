@@ -1,9 +1,9 @@
-"""Unit tests for Lybra's own fingerprinting (Fase F): HTTP/SSH/FTP dissectors,
+"""Unit tests for Lybra's own fingerprinting: HTTP/SSH/FTP dissectors,
 raw SSH_MSG_KEXINIT parsing y la fórmula HASSH.
 
-La aritmética de la concordancia con Nmap ya no se prueba aquí: se fue al arnés
-de medición (``tests/oracle/test_concordance_metrics.py``) con el código que
-ejercita, en L52.
+La aritmética de la concordancia con Nmap no se prueba aquí: vive en el arnés
+de medición (``tests/oracle/test_concordance_metrics.py``), junto al código
+que ejercita.
 
 Pure logic + a fake socket for SshProbe/FtpProbe — no real network anywhere.
 """
@@ -107,7 +107,7 @@ def test_load_tech_signatures_covers_known_vendors():
 
 # =============================================== versión capturada por firma
 #
-# L19: una firma identificaba **nombres** y ahí se paraba. Sin versión no hay
+# Una firma identificaba **nombres** y ahí se paraba. Sin versión no hay
 # CPE, y sin CPE no hay ni un CVE — así que un WordPress reconocido sin
 # versión era un dato de inventario, no una detección.
 
@@ -120,7 +120,7 @@ def test_a_signature_captures_the_version_from_the_generator_meta():
     fp = fingerprint_http(Response(200, body, {}))
     assert fp.product == "WordPress"
     assert fp.version == "6.4.2"
-    # La confianza es la del nivel del que salió (L18): un `<meta generator>`
+    # La confianza es la del nivel del que salió: un `<meta generator>`
     # es evidencia explícita pero la pone la aplicación, no el servidor, así
     # que va un escalón por debajo de una cabecera `Server` completa.
     assert fp.confidence == 0.8
@@ -205,7 +205,7 @@ def test_the_signature_validator_finds_each_kind_of_breakage():
     assert len(validate_tech_signatures(duplicated)) == 1
 
 
-# ================================================ cascada de versión (L18)
+# ================================================ cascada de versión
 #
 # La versión salía de una sola fuente, la cabecera `Server`. Y `server_tokens
 # off` en nginx, `ServerTokens Prod` en Apache y cualquier CDN o WAF la
@@ -346,7 +346,7 @@ def test_every_declared_version_source_has_a_confidence_and_a_qod():
     assert set(VERSION_SOURCES) == set(VERSION_SOURCE_QOD)
 
 
-# ============================ capas de servidor: proxy y origen (L48-b)
+# ============================ capas de servidor: proxy y origen
 #
 # Contra objetivos reales, cinco servicios en tres hosts daban siempre el mismo
 # patrón: Lybra decía `nginx`, Nmap decía `Apache httpd`. Ninguno de los dos
@@ -629,7 +629,7 @@ def test_parse_ftp_banner_filezilla_two_word_product():
 
 
 def test_parse_ftp_banner_debian_proftpd_without_version():
-    """L48-a: el saludo por defecto de ProFTPD en Debian nombra el producto y
+    """El saludo por defecto de ProFTPD en Debian nombra el producto y
     calla la versión. Es el caso que se midió en real y que daba `None`
     mientras Nmap leía `ProFTPD` del mismo saludo."""
     banner = "220 ProFTPD Server (Debian) [::ffff:203.0.113.10]"
@@ -708,9 +708,9 @@ def test_ftp_probe_returns_none_on_empty_banner():
 def test_fingerprint_finding_states_what_lybra_read():
     """El título es una constatación, no un veredicto sobre otra herramienta.
 
-    Hasta L52 decía "concuerda / no concuerda con Nmap": convertía un dato
-    propio en una nota al pie sobre el escáner al que el motor estaba
-    subordinado. Ese modo de arranque ya no existe.
+    No dice "concuerda / no concuerda con Nmap": eso convertiría un dato
+    propio en una nota al pie sobre otro escáner, y el motor no está
+    subordinado a ninguno.
     """
     service = Service(port=80, protocol="tcp", name="http", product="", version="")
     result = DissectorResult("Apache", "2.4.49", "HTTP")
@@ -720,7 +720,7 @@ def test_fingerprint_finding_states_what_lybra_read():
 
 
 def test_fingerprint_finding_carries_the_qod_the_dissector_assigned():
-    """L18: el `qod` era una constante para todos los fingerprints, así que una
+    """El `qod` era una constante para todos los fingerprints, así que una
     versión leída de un `Server` explícito y otra deducida de una página de
     error valían exactamente lo mismo. Ahora cada lectura dice cuánto se fía de
     sí misma; un dissector que no distinga sigue con la constante de siempre."""

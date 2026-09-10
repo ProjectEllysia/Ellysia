@@ -1,4 +1,4 @@
-"""El dissector de LDAP (L16).
+"""El dissector de LDAP.
 
 En una red corporativa con Active Directory el 389 está abierto siempre, y
 LDAP tiene una consulta estándar y anónima diseñada para esto: el rootDSE.

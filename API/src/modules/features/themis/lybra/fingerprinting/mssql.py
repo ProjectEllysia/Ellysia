@@ -1,13 +1,13 @@
 """El dissector de SQL Server — el más generoso de los tres pendientes.
 
-De las tres bases de datos que la Fase N dejó fuera, SQL Server es la que más
-se identifica sola: el paquete ``PRELOGIN`` del protocolo TDS devuelve la
+De las tres bases de datos sin banner propio, SQL Server es la que más se
+identifica sola: el paquete ``PRELOGIN`` del protocolo TDS devuelve la
 versión del servidor —major, minor y build— en un campo binario de tamaño
 fijo, **sin autenticar y sin negociar nada más**.
 
 Esa versión mapea directo a un producto de NVD (``microsoft:sql_server``) con
-historial de CVEs abundante, así que es el caso limpio del apalancamiento que
-el roadmap describe: se escriben *ojos*, no checks, y la correlación de
+historial de CVEs abundante, así que es el caso limpio del apalancamiento
+que da un buen fingerprint: se escriben *ojos*, no checks, y la correlación de
 vulnerabilidades sale sola de la base de conocimiento local.
 
 El ``PRELOGIN`` dice además si el servidor **exige cifrado**, en cuatro estados

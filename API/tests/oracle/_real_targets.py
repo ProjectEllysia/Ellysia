@@ -23,7 +23,7 @@ import os
 import socket
 from typing import Set, Tuple
 
-#: La variable que declara el lado real de la paridad laboratorio/real (L48).
+#: La variable que declara el lado real de la paridad laboratorio/real.
 ENVIRONMENT_VARIABLE = "LYBRA_REAL_TARGETS"
 
 

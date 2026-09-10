@@ -1,10 +1,10 @@
-"""Traductor de plantillas de Nuclei a checks del runtime propio (Fase R).
+"""Traductor de plantillas de Nuclei a checks del runtime propio.
 
 Convierte una plantilla upstream en un :class:`~..checks.Check` **solo si el
 runtime la entiende entera**. La decisión de si la entiende no se toma aquí:
-la toma :func:`~.classifier.is_ingestible`, el mismo criterio que el censo de la
-Fase U4 usa para medir. Esa es la razón de que el clasificador sea un módulo
-aparte y no lógica embebida en cualquiera de los dos.
+la toma :func:`~.classifier.is_ingestible`, el mismo criterio que usa el censo
+de cobertura del feed para medir. Esa es la razón de que el clasificador sea
+un módulo aparte y no lógica embebida en cualquiera de los dos.
 
 **Traducir a medias no es una opción.** Una plantilla que use extractors o
 payloads podría "casi" traducirse ignorando esas partes, y el resultado sería un

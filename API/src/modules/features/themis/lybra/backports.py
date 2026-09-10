@@ -1,9 +1,9 @@
-"""Preguntarle al proveedor si esa vulnerabilidad ya está corregida (Fase O).
+"""Preguntarle al proveedor si esa vulnerabilidad ya está corregida.
 
 Un *backport* es una distribución arreglando un fallo sin subir el número de
 versión visible: Debian parchea ``apache2``, el banner sigue diciendo
 ``2.4.49``, y el motor emite una CVE que ya no existe. Es la causa número uno
-de falsos positivos de toda la detección por versión — la Fase 1 la midió en
+de falsos positivos de toda la detección por versión — se ha medido en
 **0,42**: cuatro de cada diez CVEs reportados contra un Debian o un Ubuntu ya
 estaban corregidos.
 
@@ -135,9 +135,9 @@ def _package_name(finding: dict) -> Optional[str]:
     coinciden, la consulta no encuentra nada y el hallazgo se queda como
     estaba, que es el comportamiento seguro.
 
-    ponytail: una tabla de equivalencias paquete-distro ↔ producto-NVD es el
-    siguiente paso natural, y tiene ya dónde apoyarse — el ranking de nombres
-    sin resolver de L37 mide exactamente esta clase de desajuste.
+    Pendiente: una tabla de equivalencias paquete-distro ↔ producto-NVD
+    resolvería este desajuste de nombres de forma sistemática en vez de
+    depender de que coincidan por casualidad.
     """
     package = finding.get("_package_name") or finding.get("service") or ""
     return package.strip().lower() or None

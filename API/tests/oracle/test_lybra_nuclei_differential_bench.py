@@ -1,4 +1,4 @@
-"""Oráculo diferencial de Nuclei para Lybra (roadmap Fase U3, §8 segunda pata).
+"""Oráculo diferencial de Nuclei para Lybra.
 
 Distinto de ``test_lybra_oracle_bench.py``, que afirma "el motor debe
 encontrar la CVE tal en la imagen cual" contra objetivos con verdad conocida
@@ -10,11 +10,11 @@ porque el propio banco no los tenía anticipados.
 El método: se lanza un escaneo Lybra de autodescubrimiento real y, por
 separado, el binario real de Nuclei —ambos contra el mismo contenedor Docker,
 por la red real, nada mockeado—, y se comparan los CVE que cada uno reporta.
-El traductor ``nuclei_result_to_finding`` es el mismo que usa U1 en
-producción (roadmap: "el mismo traductor de U1, en un contenedor efímero") —
-aquí se invoca directamente sobre el JSONL, sin pasar por
-``NucleiScanManager``/TaskQueue, igual que el resto de este paquete evita
-Redis real en tests (ver conftest.py, T5).
+El traductor ``nuclei_result_to_finding`` es el mismo que se usa en
+producción — el mismo traductor, en un contenedor efímero — aquí se invoca
+directamente sobre el JSONL, sin pasar por ``NucleiScanManager``/TaskQueue,
+igual que el resto de este paquete evita Redis real en tests (ver
+conftest.py).
 
 Requiere Docker y el binario ``nuclei`` (con plantillas ya descargadas —
 ``nuclei -update-templates``, una vez, no en cada corrida). Se salta entero
@@ -56,7 +56,7 @@ pytestmark.append(pytest.mark.skipif(_NUCLEI is None, reason="Nuclei no disponib
 # httpd_2449_port, git_exposed_port y tls_healthy_port son fixtures
 # reimportadas tal cual del banco de verdad-por-etiqueta (mismo paquete): no
 # hay ninguna razón para levantar contenedores duplicados solo porque este
-# módulo mide algo distinto sobre ellos. "Sin etiqueta previa" (§8) describe
+# módulo mide algo distinto sobre ellos. "Sin etiqueta previa" describe
 # el MÉTODO —la comparación no consulta la lista de CVEs que
 # ``test_lybra_oracle_bench.py`` ya conoce, deriva su propia verdad de
 # Nuclei—, no una exigencia de que el contenedor sea uno nuevo.
@@ -106,7 +106,7 @@ def _cve_ids(findings) -> set[str]:
 
 
 def _differential_report(lybra_cves: set[str], nuclei_cves: set[str]) -> dict:
-    """Compara dos conjuntos de CVE y arma el resumen que U3 pide medir.
+    """Compara dos conjuntos de CVE y arma el resumen de este banco.
 
     - ``corroborated``: CVE que ambos motores reportan de forma independiente
       — la señal más fuerte de que la detección es real.
@@ -151,10 +151,10 @@ def real_kb(app):
 def test_differential_oracle_against_three_unlabeled_targets(
     request, app, admin_user, monkeypatch, real_kb, fixture_name, url_template,
 ):
-    """El banco diferencial de U3: por cada uno de los (al menos) tres
+    """El banco diferencial: por cada uno de los (al menos) tres
     objetivos, compara Lybra contra Nuclei y deja el desglose en el resumen
-    del test (visible con ``-s`` o en un fallo) — la definición de hecho de
-    la Fase U pide "un número", no una aserción binaria por objetivo."""
+    del test (visible con ``-s`` o en un fallo) — el criterio de este banco
+    exige "un número", no una aserción binaria por objetivo."""
     port = request.getfixturevalue(fixture_name)
 
     lybra_findings = _run_self_discovery(app, admin_user, "127.0.0.1", port, monkeypatch)
