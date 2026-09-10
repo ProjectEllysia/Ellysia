@@ -23,6 +23,7 @@ from unittest import mock
 import pytest
 
 import src.modules.features.iris.managers.notifications as notifications_mod
+import src.modules.system.taskqueue.dispatcher as dispatcher_mod
 from src.modules.features.iris.managers import IrisManager
 from src.modules.features.iris.managers.notifications import (
     IrisDigestNotifyManager, IrisNotificationPreferenceManager,
@@ -33,7 +34,10 @@ from src.modules.features.iris.repositories import (
     IrisAnalysisRepository, IrisMailboxConnectionRepository, IrisNotificationPreferenceRepository,
 )
 from src.modules.infrastructure import UnitOfWork
+from src.modules.infrastructure.session import init_request_session, shutdown_request_session
 from src.modules.shared import encrypt_at_rest, utcnow_naive
+from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
+from src.modules.system.taskqueue.outbox_repository import TaskDispatchRepository
 
 pytestmark = pytest.mark.integration
 
@@ -44,6 +48,18 @@ class _FakeTaskQueue:
 
     def submit(self, **kwargs):
         self.submitted.append(kwargs)
+
+
+class _RejectingQueue:
+    """Simula Redis caído justo en el instante del encolado."""
+
+    def submit(self, **kwargs):
+        raise ConnectionError("Redis no disponible")
+
+
+def _use_queue(monkeypatch, queue) -> None:
+    """Hace que ``OutboxDispatcher`` publique contra ``queue`` en vez de Redis."""
+    monkeypatch.setattr(dispatcher_mod.TaskQueue, "get_instance", staticmethod(lambda: queue))
 
 
 def _save_connection(app, user_id: int, **overrides) -> int:
@@ -391,7 +407,7 @@ def test_reauth_notify_respects_preference(app, regular_user):
     mailer.send.assert_not_called()
 
 
-def test_mark_reauth_required_notifies_only_on_the_transition(app, regular_user):
+def test_mark_reauth_required_notifies_only_on_the_transition(app, regular_user, monkeypatch):
     """Ver IrisMailboxManager._mark_reauth_required: solo la primera llamada
     (active -> reauth_required) debe encolar el aviso; reintentos
     posteriores mientras sigue en ese estado no deben repetirlo."""
@@ -400,20 +416,86 @@ def test_mark_reauth_required_notifies_only_on_the_transition(app, regular_user)
     connection_id = _save_connection(app, regular_user.id, status="active")
 
     fake_queue = _FakeTaskQueue()
-    with mock.patch.object(notifications_mod.TaskQueue, "get_instance", return_value=fake_queue):
-        with app.app_context():
-            IrisMailboxManager._mark_reauth_required(connection_id, "token revocado")
-            IrisMailboxManager._mark_reauth_required(connection_id, "token revocado otra vez")
+    _use_queue(monkeypatch, fake_queue)
+    with app.app_context():
+        IrisMailboxManager._mark_reauth_required(connection_id, "token revocado")
+        IrisMailboxManager._mark_reauth_required(connection_id, "token revocado otra vez")
 
     reauth_jobs = [j for j in fake_queue.submitted if j["category"] == "iris.notify"]
     assert len(reauth_jobs) == 1
     assert reauth_jobs[0]["args"] == (connection_id,)
+    assert reauth_jobs[0]["name"] == f"IrisReauthNotify-{connection_id}"
+
+
+def test_reauth_notice_survives_redis_down_at_enqueue(app, regular_user, monkeypatch):
+    """El guardia ya no puede suprimir el aviso para siempre.
+
+    ``status="reauth_required"`` es lo que impide avisar dos veces. Antes se
+    confirmaba y el encolado venía después; si Redis fallaba ahí, las llamadas
+    siguientes veían el estado ya puesto y no volvían a encolar. Ahora el
+    estado y la fila de outbox viajan en el mismo commit.
+    """
+    from src.modules.features.iris.managers.mailbox import IrisMailboxManager
+
+    connection_id = _save_connection(app, regular_user.id, status="active")
+    _use_queue(monkeypatch, _RejectingQueue())
+
+    with app.app_context():
+        IrisMailboxManager._mark_reauth_required(connection_id, "token revocado")
+        # Seguir en reauth_required no añade una segunda intención de avisar.
+        IrisMailboxManager._mark_reauth_required(connection_id, "token revocado otra vez")
+
+        with UnitOfWork() as uow:
+            pending = TaskDispatchRepository(uow).get_pending()
+            assert [row.name for row in pending] == [f"IrisReauthNotify-{connection_id}"]
+
+        recovery_queue = _FakeTaskQueue()
+        _use_queue(monkeypatch, recovery_queue)
+        assert OutboxDispatcher.dispatch_pending() == 1
+
+    assert _reload_connection(app, connection_id).status == "reauth_required"
+    assert [j["name"] for j in recovery_queue.submitted] == [f"IrisReauthNotify-{connection_id}"]
+
+
+def test_reauth_from_a_failing_request_persists_state_and_publishes_once(
+    app, regular_user, monkeypatch,
+):
+    """``update_connection`` y ``list_folders`` llaman a ``_mark_reauth_required``
+    dentro de una request y lanzan justo después, así que el teardown hace
+    rollback de todo lo que no se haya confirmado ya.
+
+    Antes eso deshacía el cambio a ``reauth_required`` mientras el job ya
+    estaba encolado, que al ejecutarse veía la conexión ``active`` y descartaba
+    el aviso. Y el rollback tampoco puede devolver a ``pending`` una fila de
+    outbox ya publicada: el barrido la republicaría y el dueño recibiría el
+    aviso dos veces.
+    """
+    from src.modules.features.iris.managers.mailbox import IrisMailboxManager
+
+    connection_id = _save_connection(app, regular_user.id, status="active")
+    queue = _FakeTaskQueue()
+    _use_queue(monkeypatch, queue)
+
+    with app.test_request_context():
+        init_request_session()
+        IrisMailboxManager._mark_reauth_required(connection_id, "token revocado")
+        shutdown_request_session(exception=ValueError("La conexión necesita reautorización"))
+
+    assert _reload_connection(app, connection_id).status == "reauth_required"
+    assert len(queue.submitted) == 1
+
+    with app.app_context():
+        with UnitOfWork() as uow:
+            assert TaskDispatchRepository(uow).get_pending() == []
+        assert OutboxDispatcher.dispatch_pending() == 0
+
+    assert len(queue.submitted) == 1
 
 
 # ---------------------------------------------- IrisStuckSyncNotifyManager
 
 def test_stuck_sync_notify_sends_to_connection_owner(app, regular_user):
-    connection_id = _save_connection(app, regular_user.id)
+    connection_id = _save_connection(app, regular_user.id, stuck_alert_sent_at=utcnow_naive())
 
     mailer = mock.Mock()
     with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
@@ -423,8 +505,26 @@ def test_stuck_sync_notify_sends_to_connection_owner(app, regular_user):
     mailer.send.assert_called_once()
 
 
+def test_stuck_sync_notify_skips_a_connection_that_already_recovered(app, regular_user):
+    """Un aviso que sale tarde no debe decir "atascado" de un buzón sano.
+
+    La outbox puede publicar el aviso mucho después de detectar el atasco (si
+    Redis estaba caído, lo publica el barrido cuando vuelve). Si entretanto un
+    sync limpio vació la cola, ``_finish_sync`` ya limpió
+    ``stuck_alert_sent_at`` y el aviso no corresponde.
+    """
+    connection_id = _save_connection(app, regular_user.id, stuck_alert_sent_at=None)
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisStuckSyncNotifyManager._run_notify(connection_id)
+
+    mailer.send.assert_not_called()
+
+
 def test_stuck_sync_notify_respects_preference(app, regular_user):
-    connection_id = _save_connection(app, regular_user.id)
+    connection_id = _save_connection(app, regular_user.id, stuck_alert_sent_at=utcnow_naive())
     _save_preference(app, regular_user.id, notify_sync_stuck=False)
 
     mailer = mock.Mock()

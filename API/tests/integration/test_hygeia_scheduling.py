@@ -15,7 +15,6 @@ import pytest
 
 from src.modules.infrastructure import UnitOfWork
 from src.modules.shared import utcnow_naive
-from src.modules.features.hygeia import managers as hygeia_managers
 from src.modules.features.hygeia.managers import HygeiaMaintenanceManager
 from src.modules.features.hygeia.model import Anomaly, AssetSnapshot, MonitoredAsset
 from src.modules.features.hygeia.repositories import (
@@ -23,6 +22,9 @@ from src.modules.features.hygeia.repositories import (
     AssetSnapshotRepository,
     MonitoredAssetRepository,
 )
+from src.modules.system.taskqueue import TaskQueue
+from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
+from src.modules.system.taskqueue.outbox_repository import TaskDispatchRepository
 
 pytestmark = pytest.mark.integration
 
@@ -31,14 +33,16 @@ _OFFLINE_AFTER_MISSED = 4
 
 
 class _FakeTaskQueue:
-    """Doble sin Redis para el submit() de HygeiaNotifyManager.enqueue_for.
+    """Doble sin Redis para la publicación del aviso de ``host_down``.
 
-    execute_presence_check() encola una notificación real cuando un activo
-    transiciona a offline; este banco solo verifica la transición y la
-    apertura de la anomalía, no el envío async, así que el submit se
-    descarta sin tocar TaskQueue/Redis (mismo patrón que test_traceroute.py
-    y test_iris_documents.py). Se anotan las llamadas para poder afirmar que
-    un activo no persistente tampoco encola correo.
+    execute_presence_check() guarda la intención de avisar en la outbox y
+    ``OutboxDispatcher`` la publica al momento cuando un activo transiciona a
+    offline; este banco solo verifica la transición y la apertura de la
+    anomalía, no el envío async, así que el submit se descarta sin tocar
+    Redis (mismo patrón que test_traceroute.py y test_iris_documents.py). Se
+    anotan las llamadas para poder afirmar que un activo no persistente
+    tampoco encola correo. Los tests de outbox del final de este fichero
+    cubren lo que pasa cuando la publicación falla.
     """
 
     def __init__(self):
@@ -52,7 +56,7 @@ class _FakeTaskQueue:
 @pytest.fixture(autouse=True)
 def fake_task_queue():
     fake = _FakeTaskQueue()
-    with mock.patch.object(hygeia_managers.TaskQueue, "get_instance", return_value=fake):
+    with mock.patch.object(TaskQueue, "get_instance", return_value=fake):
         yield fake
 
 
@@ -194,6 +198,65 @@ def test_asset_own_heartbeat_interval_is_used_over_global_default(app, regular_u
         HygeiaMaintenanceManager.execute_presence_check()
 
     assert _fetch_asset(app, asset_id).status == "online"
+
+
+# ------------------------------------------------ outbox del aviso host_down
+
+class _RejectingQueue:
+    """Simula Redis caído justo en el instante del encolado."""
+
+    def submit(self, **kwargs):
+        raise ConnectionError("Redis no disponible")
+
+
+def _pending_dispatch_names(app) -> list[str]:
+    with app.app_context():
+        with UnitOfWork() as uow:
+            return [row.name for row in TaskDispatchRepository(uow).get_pending()]
+
+
+def test_host_down_notice_is_published_in_the_same_pass(app, regular_user, fake_task_queue):
+    """Camino feliz: la anomalía y su aviso salen en la misma pasada."""
+    last_seen = utcnow_naive() - timedelta(seconds=_INTERVAL * _OFFLINE_AFTER_MISSED + 5)
+    asset_id = _create_asset(app, regular_user.id, "stale", last_seen)
+
+    with app.app_context():
+        HygeiaMaintenanceManager.execute_presence_check()
+
+    anomaly_id = _open_anomalies(app, asset_id)[0].id
+    assert [job["name"] for job in fake_task_queue.submissions] == [f"HygeiaNotify-{anomaly_id}"]
+    assert fake_task_queue.submissions[0]["external_id"] == f"hygeia-notify:{anomaly_id}"
+    assert _pending_dispatch_names(app) == []
+
+
+def test_host_down_notice_survives_redis_down_at_enqueue(app, regular_user, monkeypatch):
+    """La anomalía abierta ya no puede suprimir su propio aviso.
+
+    La anomalía ``host_down`` abierta es lo que impide abrir otra en la pasada
+    siguiente. Antes se confirmaba y el encolado venía después; si Redis
+    fallaba ahí, el activo quedaba ``offline`` con su anomalía y nadie recibía
+    el correo, nunca. Ahora la anomalía y la fila de outbox van en el mismo
+    commit y el barrido publica el aviso cuando Redis vuelve.
+    """
+    last_seen = utcnow_naive() - timedelta(seconds=_INTERVAL * _OFFLINE_AFTER_MISSED + 5)
+    asset_id = _create_asset(app, regular_user.id, "stale", last_seen)
+    monkeypatch.setattr(TaskQueue, "get_instance", staticmethod(_RejectingQueue))
+
+    with app.app_context():
+        HygeiaMaintenanceManager.execute_presence_check()
+        # El activo ya está offline: la pasada siguiente no lo reevalúa ni
+        # duplica la intención de avisar.
+        HygeiaMaintenanceManager.execute_presence_check()
+
+    anomaly_id = _open_anomalies(app, asset_id)[0].id
+    assert _pending_dispatch_names(app) == [f"HygeiaNotify-{anomaly_id}"]
+
+    recovery_queue = _FakeTaskQueue()
+    monkeypatch.setattr(TaskQueue, "get_instance", staticmethod(lambda: recovery_queue))
+    with app.app_context():
+        assert OutboxDispatcher.dispatch_pending() == 1
+
+    assert [job["name"] for job in recovery_queue.submissions] == [f"HygeiaNotify-{anomaly_id}"]
 
 
 def test_retention_deletes_only_snapshots_older_than_cutoff(app, regular_user):

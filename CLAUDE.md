@@ -475,17 +475,18 @@ nada lo obliga a estar fresco. Dos reglas:
   feature/fix ni los repartas entre varios: haz `git add README.md` por separado y commitéalo solo
   (`docs(readme): keep in sync with ...`), aunque la sesión abarque varios commits. Si ya hay un
   commit de README en la sesión, mete ahí las actualizaciones posteriores en vez de abrir otro.
-- **Ninguna decisión de diseño con referencia a un issue o documento entra en el README.** Una
-  frase como «decisión tomada por el issue #N» o «ver `plans/x.md`» documenta el *porqué* de una
-  decisión concreta, no el contrato público de la API — y un número de issue envejece peor que el
-  código: el README lo hereda para siempre aunque el issue se cierre, se renumere en otro repo o
-  deje de ser accesible para quien lo lee. Esa razón va **en el código**, lo más cerca posible de lo
-  que decide — un comentario junto a la línea, o el docstring de la función/clase si la decisión
-  afecta a toda su lógica —, siguiendo el patrón ya establecido en el repo: `# Tope de puertos
-  detallados que viajan al prompt (#118): ...` ([analyzers.py:53](API/src/modules/features/themis/services/analyzers.py:53)),
-  `"""Estimación heurística del tamaño del prompt completo (Issue #118).` ([inputs.py:98](API/src/modules/tools/scribe/inputs.py:98)).
-  El README puede seguir describiendo *qué* hace la API; el *por qué* de una decisión puntual, con
-  o sin issue de por medio, vive junto al código que decide.
+- **Ninguna referencia a issues ni a PRs, ni en el README ni en el código.** Una frase como
+  «decisión tomada por el issue #N», «ver `plans/x.md`» o un `(#N)` al final de un docstring dice
+  *de dónde salió* una decisión, no la decisión — y un número de issue envejece peor que el código:
+  quien lo lee lo hereda para siempre aunque el issue se cierre, se renumere en otro repo o deje de
+  ser accesible. La prohibición cubre el README, los docstrings, los comentarios y los tests.
+  El *porqué* de una decisión va **en el código**, lo más cerca posible de lo que decide — un
+  comentario junto a la línea, o el docstring de la función/clase si la decisión afecta a toda su
+  lógica —, pero **explicado con sus propias palabras y sin el número**: tiene que entenderse sin
+  abrir el issue. El sitio de las referencias a issues y PRs es el mensaje de commit (`Refs #N`) y
+  la descripción del PR. Quedan referencias antiguas en el código (`# ... (#118)` en
+  `themis/services/analyzers.py`, `(Issue #118)` en `tools/scribe/inputs.py`, varias `#551`):
+  no son un patrón a imitar, y se quitan al tocar la función que las lleva.
 
 ---
 
