@@ -1,15 +1,21 @@
 """
-Endpoints del catálogo de planes.
+Endpoints de planes, organizaciones y suscripciones.
 
-Dos rutas en esta fase, ninguna de ellas gateada por ABAC:
+Cuatro grupos de rutas, ninguna gateada por ABAC:
 
 - ``GET /plans`` es **público** — es la tabla de precios de la web, la ve quien
-  todavía no tiene cuenta.
-- ``GET /plans/me`` solo pide sesión: consultar tu propio plan no es una
-  capacidad que un administrador conceda o retire.
-
-El gestor del catálogo (alta y edición de planes) llega en una fase posterior y
-va con ``require_role(Role.ROOT)``, no con atributos.
+  todavía no tiene cuenta. ``GET /plans/me`` y ``/me/usage`` solo piden sesión:
+  consultar tu propio plan y tu consumo no es una capacidad que un
+  administrador conceda o retire.
+- ``/organizations/*`` cubre la creación, la gestión de miembros y las
+  invitaciones. Cada ruta que actúa sobre una organización concreta exige
+  además ``require_organization_owner``.
+- ``/plans/subscriptions/<user_id>`` es el ciclo de vida de una suscripción —
+  el mismo puerto que usará la pasarela de pago el día que se enchufe, hoy
+  operado a mano por root.
+- El resto (``/plans/all``, ``/plans/limit-keys``, alta/edición/borrado de
+  planes y sus límites) es el gestor del catálogo. Va con
+  ``require_role(Role.ROOT)``, no con atributos.
 """
 
 import logging

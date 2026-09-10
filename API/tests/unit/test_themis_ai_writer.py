@@ -153,10 +153,9 @@ def test_la_cola_se_recorta_por_prioridad_y_nunca_descarta_confirmados(monkeypat
 
 
 def test_confirmados_y_kev_tambien_se_recortan_al_tope(monkeypatch):
-    """#118: antes solo la cola ('rest') tenía tope — un scan con más
-    confirmados/KEV que _MAX_HIGHLIGHTED_FINDINGS generaba un payload sin
-    límite real pese a la constante. Deben recortarse igual, priorizando por
-    severidad."""
+    """Los hallazgos confirmados y los que están en KEV también se recortan
+    al tope cuando los hay de sobra, priorizando por severidad — no solo la
+    cola de hallazgos restantes."""
     muchos_confirmados = [
         _finding(
             title=f"CVE-2021-{40000 + i}", cve_ids=[f"CVE-2021-{40000 + i}"],
@@ -180,8 +179,8 @@ def test_confirmados_y_kev_tambien_se_recortan_al_tope(monkeypatch):
 
 
 def test_hallazgo_confirmado_y_en_kev_no_se_duplica_en_el_payload(monkeypatch):
-    """Antes de deduplicar, un hallazgo confirmado Y en KEV a la vez entraba
-    dos veces en la lista destacada (concatenación ingenua confirmed + kev)."""
+    """Un hallazgo confirmado Y en KEV a la vez no se duplica en la lista
+    destacada."""
     doble = _finding(confirmed=True, in_kev=True)
 
     hallazgos = _build([doble], monkeypatch)["hallazgos"]
@@ -190,8 +189,8 @@ def test_hallazgo_confirmado_y_en_kev_no_se_duplica_en_el_payload(monkeypatch):
 
 
 def test_rollup_de_servicios_se_recorta_al_tope_priorizando_severidad(monkeypatch):
-    """#118: un objetivo con muchos productos/puertos distintos (un rango de
-    red, no un solo host) podía generar un 'services_json' sin límite."""
+    """Un objetivo con muchos productos/puertos distintos (un rango de
+    red, no un solo host) también recorta 'services_json' al tope."""
     muchos_servicios = [
         _finding(
             title=f"Servicio {i}", cve_ids=[f"CVE-2020-{10000 + i}"],
@@ -256,7 +255,7 @@ def _build_nmap(open_ports: list, monkeypatch) -> dict:
 
 
 def test_ports_se_recortan_al_tope_pero_total_ports_sigue_siendo_el_real(monkeypatch):
-    """#118: un host con muchos más puertos abiertos que el tope no debe
+    """Un host con muchos más puertos abiertos que el tope no debe
     generar un 'ports_json' sin límite, pero '{{total_ports}}' debe seguir
     reportando el recuento real — nunca menos puertos de los que hay."""
     open_ports = [_open_port(1000 + i) for i in range(NmapAIWriter._MAX_PORTS + 25)]

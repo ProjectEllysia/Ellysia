@@ -93,8 +93,7 @@ class AIGenerator:
 
         Registra el tamaño estimado incluso cuando no excede el límite —
         observabilidad para diagnosticar el próximo 429 sin depender de que
-        el backend lo reporte, que es exactamente lo que faltó para
-        diagnosticar el caso original de este issue.
+        el backend lo reporte.
         """
         import src.modules.system.config_reading as CR
 

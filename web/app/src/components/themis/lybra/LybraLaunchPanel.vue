@@ -47,7 +47,7 @@
         <div v-if="showAuthRegister" class="auth-register-body">
           <p class="auth-register-hint">
             Objetivos (IP o CIDR) que has declarado autorizados para el autodescubrimiento, el fingerprinting
-            propio y las comprobaciones activas de Lybra (roadmap §6).
+            propio y las comprobaciones activas de Lybra.
           </p>
           <div v-if="authTargetsLoading" class="auth-loading">Cargando…</div>
           <ul v-else-if="authorizedTargets.length" class="auth-chip-list">
@@ -94,9 +94,9 @@ const props = defineProps({
 const emit = defineEmits(['launch', 'add-authorized-target', 'remove-authorized-target'])
 
 // Un solo modo: Lybra descubre los puertos del objetivo con su propio
-// transporte. Hubo un segundo modo —analizar los servicios de un escaneo Nmap
-// ya hecho— retirado en L52 junto al interruptor de "segunda opinión" que
-// lanzaba Nmap, Nikto y Nuclei como corroboradores.
+// transporte. No hay un modo que analice los servicios de un escaneo Nmap ya
+// hecho, ni un interruptor de "segunda opinión" que lance Nmap, Nikto y
+// Nuclei como corroboradores.
 const target = ref('')
 const ports = ref('')
 const timeout = ref(120)
@@ -184,7 +184,7 @@ function handleLaunch() {
 .btn-launch.loading .btn-spin { display: block; }
 .btn-spin { display: none; position: absolute; left: 50%; top: 50%; margin: -7px 0 0 -7px; width: 14px; height: 14px; border: 2px solid rgba(0,0,0,0.25); border-top-color: currentColor; border-radius: 50%; animation: seq-spin 0.6s linear infinite; }
 
-/* ── Estado de autorización del objetivo (roadmap §6) ── */
+/* ── Estado de autorización del objetivo ── */
 .auth-status {
   display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
   padding: 0.5rem 0.7rem; margin-top: -0.15rem;

@@ -45,9 +45,9 @@
       </div>
       <div v-if="type === 'nuclei'" class="nuclei-row">
         <div class="field field-lg">
-          <!-- "info" queda fuera por defecto (roadmap Fase U1, punto 1): son
-               miles de plantillas de tech-detect que, al ser confirmed=true
-               sin CVSS, el suelo de score_finding subiría todas a MEDIO. -->
+          <!-- "info" queda fuera por defecto: son miles de plantillas de
+               tech-detect que, al ser confirmed=true sin CVSS, el suelo de
+               score_finding subiría todas a MEDIO. -->
           <label>Severidades</label>
           <div class="strategy-picker" role="group" aria-label="Severidades de Nuclei">
             <button v-for="sev in NUCLEI_SEVERITIES" :key="sev.id" type="button"

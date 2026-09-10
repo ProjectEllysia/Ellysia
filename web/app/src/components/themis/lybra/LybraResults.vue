@@ -168,7 +168,8 @@
                               <!-- Desmentir un hallazgo y aceptar su riesgo son
                                    decisiones opuestas: la primera dice que el motor
                                    se equivocó, la segunda que el problema es real y
-                                   se asume. Hasta L35 compartían casilla. -->
+                                   se asume. Por eso llevan cada una su propio estado
+                                   en vez de compartir casilla. -->
                               <div class="f-actions">
                                 <template v-if="deciding === f.id">
                                   <input v-model="decisionReason" class="f-reason" type="text"
@@ -216,10 +217,11 @@
                 completo.
               </div>
 
-              <!-- No se muestra para un escaneo de agente (Fase I, `assetId`): ahí el
-                   fingerprinting y las comprobaciones activas están desactivados
-                   siempre, por diseño (modo payload) — autorizar el objetivo no
-                   cambiaría nada, así que sugerirlo sería un consejo sin efecto. -->
+              <!-- No se muestra para un escaneo de agente (uno nacido del inventario
+                   de un activo Hygeia, con `assetId`): ahí el fingerprinting y las
+                   comprobaciones activas están desactivados siempre, por diseño
+                   (modo payload) — autorizar el objetivo no cambiaría nada, así que
+                   sugerirlo sería un consejo sin efecto. -->
               <div v-if="scan.status === 'finished' && scan.targetAuthorized === false && !scan.assetId" class="body-unauth-hint">
                 Objetivo no autorizado: el fingerprinting propio y las comprobaciones activas de Lybra no se
                 ejecutaron sobre '{{ scan.target }}'. Autorízalo en el panel de lanzamiento para un análisis más completo.
@@ -518,13 +520,14 @@ function summary(scan) {
 }
 
 /**
- * Detecta un análisis de inventario (Fase I) con paquetes sin identificar.
+ * Detecta un análisis de inventario (nacido del inventario de software de un
+ * activo Hygeia) con paquetes sin identificar.
  *
- * `cpeResolved` (Fase I-b, `Finding.cpe_resolved`) da el número exacto de
- * paquetes que el matcher no pudo ni resolver a un CPE — ya no es una
- * heurística sobre ausencia de detecciones, que mezclaba eso con "KB sin
- * sincronizar" o simplemente "comprobado y limpio". El recuento lo hace ahora
- * el servidor, que ya tenía las filas delante.
+ * `cpeResolved` (`Finding.cpe_resolved`) da el número exacto de paquetes que
+ * el matcher no pudo ni resolver a un CPE — no es una heurística sobre
+ * ausencia de detecciones, que mezclaría eso con "KB sin sincronizar" o
+ * simplemente "comprobado y limpio". El recuento lo hace el servidor, que ya
+ * tiene las filas delante.
  *
  * Devuelve `null` si no aplica (sin paquetes, o todos resueltos), o
  * `{ packages, unresolved }` cuando el aviso debe mostrarse.

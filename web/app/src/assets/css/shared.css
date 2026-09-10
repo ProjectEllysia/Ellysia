@@ -432,7 +432,7 @@ select option { background: var(--surface); color: var(--text); }
    seguía ganando en toda propiedad que el bloque scoped no declarase. Su
    `opacity: 0` volvía el toast invisible en cuanto Vue retiraba
    `.toast-enter-active` al acabar la animación de entrada (0.42 s), y su
-   `left: 50%` + `transform: translateX(-50%)` lo descolocaban. Ver #127. */
+   `left: 50%` + `transform: translateX(-50%)` lo descolocaban. */
 
 .badge {
   display: inline-block; padding: 2px 7px; border-radius: 4px;

@@ -6,8 +6,8 @@ compartido entre la tabla ``PlanLimit`` (lo que un plan concede) y el motor de
 cuotas (lo que se ha consumido).
 
 Aquí solo vive la **declaración**: qué se mide y con qué periodicidad. El motor
-que cuenta y corta —``LimitSpec``, los contadores de existencias y el
-``QuotaManager``— llega con la fase 2; hasta entonces nadie consume nada.
+que cuenta y corta vive aparte, en ``QuotaManager`` (``services/quotas.py``),
+que importa este catálogo en vez de duplicarlo.
 
 Disciplina, la misma que ``AttributeType``: el valor del enum es lo que se
 guarda en base de datos, así que renombrar un miembro no basta — habría que
@@ -231,8 +231,9 @@ def _count_organization_members(session, user_ids: list[int]) -> int:
 #: datos ya sabe la respuesta.
 #:
 #: Recibe una lista de ``user_ids`` y no uno solo porque la bolsa de una
-#: organización suma la de todos sus miembros (fase 5). Hoy la lista siempre
-#: tiene un elemento.
+#: organización suma la de todos sus miembros: cuando el titular es la
+#: organización, la lista trae los ids de todos ellos; cuando es un usuario
+#: suelto, trae solo el suyo.
 #:
 #: Pedir una clave que no esté aquí es un error de programación, no del usuario,
 #: y ``QuotaManager`` lo dice como tal en vez de responder un 402.

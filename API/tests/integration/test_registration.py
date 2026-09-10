@@ -147,7 +147,7 @@ def test_register_can_be_closed_by_configuration(client, sent_emails, monkeypatc
 def test_an_unverified_account_can_look_but_not_spend(
     client, app, auth_headers, make_user
 ):
-    """La frontera de la fase 4, en un test.
+    """La frontera entre "tener cuenta" y "poder gastar", en un test.
 
     Entrar y consultar, sí. Dar de alta un activo —que es lo que empieza a
     costar dinero— no, hasta confirmar el correo.

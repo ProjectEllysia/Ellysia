@@ -139,7 +139,7 @@ async function resend() {
   }
 }
 
-/** El toggle de organización es lo único que el plan sí "concede" (§5.1). */
+/** El toggle de organización es lo único que el plan sí "concede". */
 const canCreateOrganization = computed(() => account.plan?.organizationEnabled === true)
 
 function logout() {
@@ -153,9 +153,9 @@ let clickOutside = null
 onMounted(() => {
   // El plan y la organización se piden aquí y no en el arranque de la sesión:
   // este menú es el único que los necesita para decidir qué entradas enseña, y
-  // lo monta toda la aplicación. Cargarlos solo en MyPlanView dejaba el menú
+  // lo monta toda la aplicación. Cargarlos solo en MyPlanView dejaría el menú
   // sin la tarjeta del plan ni las entradas de organización en cualquier otra
-  // vista — que es justo lo que el §10.2 del diseño quería resolver.
+  // vista.
   if (auth.isAuthenticated && !account.plan) account.loadAll()
   if (auth.isAuthenticated && !profileStore.profile.first_name && !profileStore.profile.last_name) profileStore.loadProfile()
 

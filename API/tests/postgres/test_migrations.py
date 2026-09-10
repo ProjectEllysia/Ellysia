@@ -110,7 +110,7 @@ def test_the_whole_chain_applies_to_an_empty_database(alembic_config, migrations
 )
 def test_the_phase_0_columns_survive_a_downgrade_and_a_new_upgrade(alembic_config,
                                                                    migrations_url):
-    """Las cuatro migraciones de la fase 0, en los dos sentidos.
+    """Las cuatro migraciones de Iris cubiertas por este test, en los dos sentidos.
 
     Bajar y volver a subir es lo que hace falta cuando un despliegue se
     revierte, y es donde se ve si una bajada olvidó una columna: la subida
@@ -134,7 +134,7 @@ def test_the_phase_0_columns_survive_a_downgrade_and_a_new_upgrade(alembic_confi
     finally:
         engine.dispose()
 
-    # Cuatro pasos atrás: las cuatro migraciones de la fase 0.
+    # Cuatro pasos atrás: las cuatro migraciones cubiertas por este test.
     command.downgrade(alembic_config, "-4")
     command.upgrade(alembic_config, "head")
 

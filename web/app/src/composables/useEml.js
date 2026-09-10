@@ -5,8 +5,8 @@
  * decodificando las palabras codificadas MIME (=?charset?B/Q?...?=) habituales.
  * Se usa solo para rellenar el formulario (vista previa); el texto completo
  * del .eml se envía aparte a la API en el campo `message`, para que las
- * reglas de Fase 2 (enlaces del cuerpo, adjuntos reales, cadena Received)
- * puedan analizarlo.
+ * reglas de análisis más profundo (enlaces del cuerpo, adjuntos reales,
+ * cadena Received) puedan analizarlo.
  *
  * @example
  * import { parseEml } from '@/composables/useEml'

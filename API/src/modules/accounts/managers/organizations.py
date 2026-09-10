@@ -129,8 +129,8 @@ class OrganizationManager:
         """Miembros de la organización, con lo justo para identificarlos.
 
         Datos de identidad y nada más: ni sus escaneos, ni sus análisis, ni el
-        contenido de sus bóvedas. Eso no lo ve el dueño (§8.4 del diseño), y no
-        es una carencia — es la garantía que se vende.
+        contenido de sus bóvedas. Eso no lo ve el dueño, y no es una carencia
+        — es la garantía que se vende.
         """
         get_owned_organization(user_id, organization_id)
 
@@ -193,7 +193,7 @@ class OrganizationManager:
         """El toggle de organización, que es lo único que el plan sí "concede".
 
         No es un atributo ABAC a propósito: los atributos los escribe una
-        persona y esto lo escribe el cobro (§5.1).
+        persona y esto lo escribe el cobro.
         """
         subscription = build_repository(SubscriptionRepository).get_by_user(user_id)
         if not is_effective(subscription, utcnow_naive()) or not subscription.organization_enabled:
