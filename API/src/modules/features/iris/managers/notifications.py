@@ -479,13 +479,40 @@ class IrisStuckSyncNotifyManager:
 
     @staticmethod
     def _run_notify(connection_id: int) -> None:
-        """Envía el aviso al dueño de la conexión, salvo que el usuario
-        tenga desactivado este aviso concreto."""
+        """Envía el aviso de sync atascado al dueño de la conexión, salvo que
+        la conexión se haya recuperado mientras tanto o que el usuario tenga
+        desactivado este aviso concreto.
+
+        Comprueba que el atasco sigue vigente antes de mandar nada, igual que
+        el aviso de reautorización comprueba ``status``. La outbox entrega
+        "al menos una vez", y una fila que no se pudo publicar por Redis caído
+        la publica el barrido cuando Redis vuelve, que puede ser mucho
+        después: sin esta comprobación, el dueño recibiría "tu buzón lleva un
+        tiempo sin sincronizar" de un buzón que ya sincroniza bien. La señal
+        es ``stuck_alert_sent_at``: la pone el scheduler al detectar el atasco
+        y la limpia ``_finish_sync`` en cuanto un sync vuelve a dejar la cola
+        vacía, así que ``None`` aquí significa que ya no hay nada que avisar.
+
+        Args:
+            connection_id: Primary key de la ``IrisMailboxConnection`` de la
+                que se detectó el atasco.
+
+        Returns:
+            None: El resultado es el correo enviado, o nada si la conexión
+                ya no existe, se recuperó, o el usuario desactivó el aviso.
+                Un fallo SMTP se registra y se descarta.
+        """
         from src.modules.users.managers import UserManager
 
         connection = build_repository(IrisMailboxConnectionRepository).get_by_id(connection_id)
         if connection is None:
             logger.error(f"Conexión {connection_id} no encontrada para avisar de atasco")
+            return
+        if connection.stuck_alert_sent_at is None:
+            logger.info(
+                f"Aviso de sync atascado descartado para la conexión {connection_id}: "
+                "se recuperó antes de que saliera el correo"
+            )
             return
 
         preference = build_repository(IrisNotificationPreferenceRepository).get_by_user_id(

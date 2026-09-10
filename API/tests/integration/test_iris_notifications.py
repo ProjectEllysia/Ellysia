@@ -495,7 +495,7 @@ def test_reauth_from_a_failing_request_persists_state_and_publishes_once(
 # ---------------------------------------------- IrisStuckSyncNotifyManager
 
 def test_stuck_sync_notify_sends_to_connection_owner(app, regular_user):
-    connection_id = _save_connection(app, regular_user.id)
+    connection_id = _save_connection(app, regular_user.id, stuck_alert_sent_at=utcnow_naive())
 
     mailer = mock.Mock()
     with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
@@ -505,8 +505,26 @@ def test_stuck_sync_notify_sends_to_connection_owner(app, regular_user):
     mailer.send.assert_called_once()
 
 
+def test_stuck_sync_notify_skips_a_connection_that_already_recovered(app, regular_user):
+    """Un aviso que sale tarde no debe decir "atascado" de un buzón sano.
+
+    La outbox puede publicar el aviso mucho después de detectar el atasco (si
+    Redis estaba caído, lo publica el barrido cuando vuelve). Si entretanto un
+    sync limpio vació la cola, ``_finish_sync`` ya limpió
+    ``stuck_alert_sent_at`` y el aviso no corresponde.
+    """
+    connection_id = _save_connection(app, regular_user.id, stuck_alert_sent_at=None)
+
+    mailer = mock.Mock()
+    with mock.patch.object(notifications_mod, "build_mailer", return_value=mailer):
+        with app.app_context():
+            IrisStuckSyncNotifyManager._run_notify(connection_id)
+
+    mailer.send.assert_not_called()
+
+
 def test_stuck_sync_notify_respects_preference(app, regular_user):
-    connection_id = _save_connection(app, regular_user.id)
+    connection_id = _save_connection(app, regular_user.id, stuck_alert_sent_at=utcnow_naive())
     _save_preference(app, regular_user.id, notify_sync_stuck=False)
 
     mailer = mock.Mock()
