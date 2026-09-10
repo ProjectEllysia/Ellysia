@@ -90,7 +90,7 @@ class AssetSchema(Schema):
     hostname = fields.String()
     os = fields.String(allow_none=True)
     kernel = fields.String(allow_none=True)
-    # Identidad del host, no una métrica (§P29): null significa "el agente
+    # Identidad del host, no una métrica: null significa "el agente
     # nunca lo ha reportado" (agente anterior a esta necesidad, o su
     # `gopsutil` no supo detectarlo), no "no es una máquina virtual".
     virtualizationSystem = fields.String(allow_none=True)
@@ -129,7 +129,7 @@ class RotateKeyResponseSchema(Schema):
 
 
 # =============================================================================
-# INGESTA (§11) — el schema valida y descarta lo desconocido: defensa en la
+# INGESTA — el schema valida y descarta lo desconocido: defensa en la
 # frontera de confianza, no se relaja aunque el agente sea "de confianza".
 # =============================================================================
 
@@ -145,7 +145,7 @@ class HostInfoSchema(_IngestSchema):
     os = fields.String(load_default=None, validate=validate.Length(max=64))
     kernel = fields.String(load_default=None, validate=validate.Length(max=128))
     uptimeSec = fields.Integer(load_default=None, validate=validate.Range(min=0))
-    # Texto libre en vez de un OneOf (§P29): gopsutil puede devolver valores
+    # Texto libre en vez de un OneOf: gopsutil puede devolver valores
     # nuevos que el servidor todavía no conoce, y un agente con una versión
     # de gopsutil distinta no debe ver su heartbeat rechazado por eso. Solo
     # el literal "guest" dispara el mensaje de máquina virtual; cualquier
@@ -224,7 +224,7 @@ class PowerMetricsSchema(_IngestSchema):
 
 
 class MetricsSchema(_IngestSchema):
-    """Payload completo de métricas de un heartbeat (§11)."""
+    """Payload completo de métricas de un heartbeat."""
     cpu = fields.Nested(CpuMetricsSchema, required=True)
     memory = fields.Nested(MemoryMetricsSchema, required=True)
     disk = fields.List(fields.Nested(DiskMountSchema), load_default=list)
@@ -238,7 +238,7 @@ class MetricsSchema(_IngestSchema):
     def validate_array_limits(self, data, **kwargs):
         """
         Acota disk/network/topCpu/topMem contra los límites configurables de
-        ``features.hygeia.limits`` (§16.1).
+        ``features.hygeia.limits``.
 
         Se leen con ``CR`` en cada validación (no se hornean al importar el
         módulo) para que un cambio vía ``PUT /system`` surta efecto sin
@@ -296,7 +296,7 @@ class InventorySchema(_IngestSchema):
 
     @validates_schema
     def validate_max_items(self, data, **kwargs):
-        """Acota ``software`` contra ``features.hygeia.limits.maxInventoryItems`` (§16.1)."""
+        """Acota ``software`` contra ``features.hygeia.limits.maxInventoryItems``."""
         max_items = CR.hygeia_limits().max_inventory_items
         if len(data.get("software", [])) > max_items:
             raise ValidationError(
@@ -305,7 +305,7 @@ class InventorySchema(_IngestSchema):
 
 
 class IngestRequestSchema(_IngestSchema):
-    """Heartbeat completo enviado por un agente Hygeia (§11)."""
+    """Heartbeat completo enviado por un agente Hygeia."""
     agentVersion = fields.String(required=True, validate=validate.Length(min=1, max=32))
     collectedAt = fields.DateTime(required=True, format="iso")
     host = fields.Nested(HostInfoSchema, required=True)
@@ -332,14 +332,14 @@ class IngestRequestSchema(_IngestSchema):
 
 
 class IngestResponseSchema(Schema):
-    """Respuesta a un heartbeat: permite al agente auto-ajustarse sin redeploy (§11)."""
+    """Respuesta a un heartbeat: permite al agente auto-ajustarse sin redeploy."""
     ok = fields.Boolean()
     nextIntervalSec = fields.Integer()
     serverTime = UTCDateTime()
 
 
 # =============================================================================
-# ANOMALÍAS (§6) — alertas abiertas por la evaluación de umbrales
+# ANOMALÍAS — alertas abiertas por la evaluación de umbrales
 # =============================================================================
 
 class AnomalySchema(Schema):
@@ -374,11 +374,11 @@ class AnomalyListResponseSchema(Schema):
 
 
 # =============================================================================
-# SERIE TEMPORAL DE MÉTRICAS (§5, Fase 5) — para el gráfico de la SPA
+# SERIE TEMPORAL DE MÉTRICAS — para el gráfico de la SPA
 # =============================================================================
 
 class AssetMetricsQuerySchema(Schema):
-    """Filtros opcionales de rango temporal (``?from=&to=``, §5).
+    """Filtros opcionales de rango temporal (``?from=&to=``).
 
     El rango se aplica sobre ``receivedAt`` (reloj del servidor), no sobre
     ``collectedAt`` (reloj del agente): es el mismo eje por el que se ordena
@@ -424,7 +424,7 @@ class AssetSnapshotPointSchema(Schema):
     netRxBps = fields.Integer(allow_none=True)
     netTxBps = fields.Integer(allow_none=True)
     powerWatts = fields.Float(allow_none=True)
-    # En la serie por cubos estos dos siempre llegan a null (P18): no son
+    # En la serie por cubos estos dos siempre llegan a null: no son
     # magnitudes que se puedan promediar ni maximizar dentro de un cubo. En
     # la serie cruda sí viajan, uno por snapshot.
     powerEstimated = fields.Boolean(allow_none=True)
@@ -464,7 +464,7 @@ class AssetLatestResponseSchema(Schema):
 
 
 # =============================================================================
-# ENERGÍA Y COSTE (Fase 3, §hygeia-power) — resumen de consumo de un activo
+# ENERGÍA Y COSTE — resumen de consumo de un activo
 # =============================================================================
 
 class CurrentPowerSchema(Schema):
@@ -481,7 +481,7 @@ class CurrentPowerSchema(Schema):
 
 class PowerPeriodSchema(Schema):
     """
-    Energía y coste de un periodo, con su procedencia (P24).
+    Energía y coste de un periodo, con su procedencia.
 
     ``classification`` distingue tres casos: ``"observed"`` (el periodo cabe
     en la retención y la cobertura de datos es alta), ``"observed_partial"``
@@ -503,7 +503,7 @@ class PowerPeriodSchema(Schema):
 
 class PowerSummaryResponseSchema(Schema):
     """
-    Resumen de consumo de un activo para la ficha (P25): la lectura actual
+    Resumen de consumo de un activo para la ficha: la lectura actual
     más energía y coste de 24 h, 7 d y 30 d, y una proyección mensual.
 
     ``day``/``week``/``month`` cubren como mucho la ventana de retención
@@ -550,7 +550,7 @@ class AssetInventoryResponseSchema(Schema):
 
 
 # =============================================================================
-# ANÁLISIS DEL INVENTARIO CON LYBRA (Fase I) — el resumen; el desglose vive
+# ANÁLISIS DEL INVENTARIO CON LYBRA — el resumen; el desglose vive
 # en Themis, que ya tiene la interfaz para presentarlo
 # =============================================================================
 
@@ -580,7 +580,7 @@ class InventoryAnalysisSummarySchema(Schema):
     # haya resuelto un CPE o no). Con `vulnerableCount` a cero permite avisar
     # de que "sin detecciones" no equivale a "verificado limpio".
     packageCount    = fields.Integer(load_default=0)
-    # De esos, cuántos el matcher no pudo ni identificar (Fase I-b,
-    # `Finding.cpe_resolved=False`) — el número real detrás del aviso, en vez
+    # De esos, cuántos el matcher no pudo ni identificar
+    # (`Finding.cpe_resolved=False`) — el número real detrás del aviso, en vez
     # de "puede que alguno no se haya reconocido".
     unresolvedCount = fields.Integer(load_default=0)

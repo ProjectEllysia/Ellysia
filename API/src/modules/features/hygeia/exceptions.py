@@ -54,7 +54,7 @@ class AssetQuotaExceededError(HygeiaError):
 
 
 class IngestPayloadTooLargeError(HygeiaError):
-    """El cuerpo de un heartbeat supera los límites configurados (§16.1)."""
+    """El cuerpo de un heartbeat supera los límites configurados."""
     default_code = ErrorCode.VALIDATION_ERROR
     default_status_code = 413
 
@@ -67,7 +67,7 @@ class IngestPayloadTooLargeError(HygeiaError):
 
 
 class IngestClockSkewError(HygeiaError):
-    """El reloj del agente (``collectedAt``) se sale de la ventana de cordura (§16.3)."""
+    """El reloj del agente (``collectedAt``) se sale de la ventana de cordura."""
     default_code = ErrorCode.VALIDATION_ERROR
     default_status_code = 400
 
@@ -80,7 +80,7 @@ class IngestClockSkewError(HygeiaError):
 
 
 class IngestTooFrequentError(HygeiaError):
-    """Un heartbeat llega más rápido de lo permitido para esta clave (§16.2).
+    """Un heartbeat llega más rápido de lo permitido para esta clave.
 
     Protege la DB de un agente en bucle cerrado (con un bug, o comprometido):
     el heartbeat se descarta sin persistir nada, no se intenta procesar.

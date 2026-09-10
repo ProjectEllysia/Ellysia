@@ -1,17 +1,15 @@
 """
 hygeia.services.stats
 ──────────────────────
-Agregados sobre una serie de potencia ya guardada, para la Fase 3 del
-proyecto de consumo energético (media ponderada, energía, coste y su
-procedencia).
+Agregados sobre una serie de potencia ya guardada, para el resumen de
+consumo eléctrico (media ponderada, energía, coste y su procedencia).
 
 Funciones puras: sin ORM, sin Flask. Entra una secuencia de ``(instante,
 vatios)`` ya leída por el repositorio y salen los números que consume el
-manager. No existe todavía el ``HygeiaStatsService`` genérico del roadmap de
-estadísticas (proyecto 5, E01/E06) — mientras no lo haya, este módulo es la
-pieza mínima que la Fase 3 necesita, con la forma que E01 define (funciones
-puras en ``hygeia/services/stats.py``), para que las dos converjan en vez de
-duplicarse cuando E01 llegue.
+manager. Si algún día existe un servicio genérico de estadísticas para
+Hygeia, este módulo es la pieza mínima con su misma forma (funciones puras
+en ``hygeia/services/stats.py``), para que los dos converjan en vez de
+duplicarse.
 """
 
 from __future__ import annotations
@@ -63,7 +61,7 @@ class EnergyCost(NamedTuple):
 
 @dataclass(frozen=True)
 class PeriodClassification:
-    """Procedencia de una cifra de energía/coste sobre un periodo (P24).
+    """Procedencia de una cifra de energía/coste sobre un periodo.
 
     Attributes:
         classification: ``"observed"`` (el periodo cabe en la retención y la
@@ -198,7 +196,7 @@ def classify_period(
     retention_days: int, coverage_threshold: float = 0.9,
 ) -> PeriodClassification:
     """
-    Clasifica una cifra de energía/coste según cuánto se puede confiar en ella (P24).
+    Clasifica una cifra de energía/coste según cuánto se puede confiar en ella.
 
     Contra ``retention_days`` de retención y sin tabla de rollup, un periodo
     que exceda esa ventana **nunca** puede ser histórico real: se etiqueta
@@ -243,7 +241,7 @@ def summarize_power_period(
     """
     Combina media ponderada, energía/coste y clasificación para un periodo.
 
-    Es el punto de entrada que consume el manager: junta P21, P23 y P24 en
+    Es el punto de entrada que consume el manager: junta los tres cálculos en
     una sola llamada por ventana (24 h, 7 d, 30 d...), para no repetir el
     mismo triplete de pasos por cada una.
 

@@ -1,6 +1,6 @@
 """
 Tests de integración HTTP del resumen de consumo eléctrico de un activo
-(``GET /hygeia/assets/<id>/power-summary``, P25).
+(``GET /hygeia/assets/<id>/power-summary``).
 
 Siembra snapshots directamente por repositorio (igual que
 ``test_hygeia_metrics_api.py``): el suelo de cadencia de la ingesta impide

@@ -1,7 +1,7 @@
 """
 hygeia.services.ingest_guard
 ─────────────────────────────
-Guardas de la ruta caliente de ingesta (§16): frontera de confianza dura
+Guardas de la ruta caliente de ingesta: frontera de confianza dura
 sobre el tamaño del payload y la cordura de su reloj, aplicadas **antes**
 de que Marshmallow intente siquiera parsear el cuerpo o de tocar la DB.
 Un agente comprometido no debe poder tumbar la DB ni el worker con
@@ -99,7 +99,7 @@ def check_clock_skew(collected_at: datetime) -> None:
     Rechaza un heartbeat cuyo ``collectedAt`` se sale de la ventana de
     cordura respecto al reloj del servidor.
 
-    El reloj del agente no es de fiar (§16.3), pero las dos direcciones de la
+    El reloj del agente no es de fiar, pero las dos direcciones de la
     desviación no significan lo mismo, así que la ventana es **asimétrica**:
 
     - **Hacia el futuro** (``clockSkewSec``, corto): un heartbeat fechado por

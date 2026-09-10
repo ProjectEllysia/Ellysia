@@ -1,7 +1,7 @@
 """
 hygeia.services.detection
 ──────────────────────────
-Evaluación de umbrales de CPU/memoria/disco con histéresis (§6).
+Evaluación de umbrales de CPU/memoria/disco con histéresis.
 
 Función pura: sin DB, sin Flask, sin ORM. Entra el estado (métricas del
 heartbeat + contadores de cruces consecutivos + qué está ya abierto +
@@ -16,7 +16,7 @@ ese campo — disco y swap se consideran suficientemente estables como para
 no necesitar confirmación) y se resuelve en el primer heartbeat en el que
 la métrica vuelve a estar por debajo del umbral ``warning``. Mientras sigue
 abierta, no se toca en absoluto hasta que se resuelve — "ciclo de vida, no
-spam" (§3.3): ni se reabre, ni se actualiza su severidad o valor heartbeat
+spam": ni se reabre, ni se actualiza su severidad o valor heartbeat
 a heartbeat.
 """
 

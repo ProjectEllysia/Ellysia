@@ -304,8 +304,8 @@ def test_latest_returns_the_whole_payload(client, app, regular_user, auth_header
     assert metrics["processes"]["topCpu"][0]["name"] == "nginx"
     assert metrics["processes"]["topMem"][0]["name"] == "postgres"
     assert metrics["memory"]["totalBytes"] == 8_000_000_000
-    # El endpoint de últimas métricas es de donde la SPA toma estimated/source
-    # (P20): la serie agregada los deja a None por decisión de P18.
+    # El endpoint de últimas métricas es de donde la SPA toma estimated/source:
+    # la serie agregada los deja a None, porque no se pueden agregar por cubo.
     assert metrics["power"]["watts"] == 150.0
     assert metrics["power"]["estimated"] is False
     assert metrics["power"]["source"] == "rapl"
@@ -461,7 +461,7 @@ def test_series_bucketed_drops_disk_max_mount(client, app, regular_user, auth_he
 def test_series_bucketed_power_is_the_bucket_max_and_metadata_is_null(
     client, app, regular_user, auth_headers,
 ):
-    """La potencia agregada es el máximo del cubo; estimated/source no se agregan (P18)."""
+    """La potencia agregada es el máximo del cubo; estimated/source no se agregan."""
     asset_id = _create_asset(app, regular_user.id)
     stamps = _seed_snapshots(app, asset_id, 5, power_watts=100.0)
     # Un pico dentro del mismo cubo (5 muestras de 15 s caben en un cubo de 60 s).
