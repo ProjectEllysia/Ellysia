@@ -320,7 +320,9 @@ class LybraEngineManager(ScanManager):
             fase lo consulta y se corta sola, el escaneo se marca ``is_partial``
             y termina bien.
             """
-            return is_cancelled() or (deadline is not None and time.monotonic() >= deadline)
+            time_has_passed = time.monotonic() >= deadline
+            deadline_taken_over = time_has_passed or is_cancelled()
+            return deadline_taken_over
 
         def report(pct: int) -> None:
             if progress is not None:
