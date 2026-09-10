@@ -1,4 +1,4 @@
-"""B14: la matriz ABAC de Iris, atada a un test.
+"""La matriz ABAC de Iris, atada a un test.
 
 El `README.md` documentaba `IRIS_UPDATE` para reanálisis, resumen de IA y
 generación de PDF, mientras el código exigía `IRIS_CREATE`. Un cliente que

@@ -41,7 +41,7 @@ class IrisAnalysisNotReadyError(IrisError):
 
 class IrisRawMessagePurgedError(IrisError):
     """El raw de este análisis ya no existe -- lo purgó la política de
-    retención (M09/B17/B19), que conserva el resultado analítico
+    retención, que conserva el resultado analítico
     (score/veredicto/reglas) pero no el contenido del correo indefinidamente.
 
     410 Gone y no 404: el análisis existe de verdad y su resultado sigue
@@ -114,7 +114,7 @@ class IrisMailboxOAuthStateError(IrisError):
 
 class IrisMailboxInvalidFolderError(IrisError):
     """Raised when ``folder`` doesn't match any real folder/label the
-    provider returns for this account (B16) — wrong id, typo, or a value
+    provider returns for this account — wrong id, typo, or a value
     that belongs to another provider."""
     default_code = ErrorCode.VALIDATION_ERROR
     default_status_code = 400

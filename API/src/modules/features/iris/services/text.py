@@ -93,7 +93,7 @@ def url_host(url: str) -> Optional[str]:
     """Hostname (lowercase, sin credenciales ni puerto) de una URL, o None.
 
     Soporta netloc IPv6 entre corchetes (``[::1]:8080``) — un ``.split(":")``
-    ingenuo lo destroza y deja solo ``"["`` (N4).
+    ingenuo lo destroza y deja solo ``"["``.
     """
     try:
         parsed = urlparse(url)
@@ -115,7 +115,7 @@ _HEX_IP_HOST_RE = re.compile(r"^0x[0-9a-f]{1,8}$", re.IGNORECASE)
 
 
 def is_obfuscated_ip_host(host: str) -> bool:
-    """True cuando *host* es un literal IPv4 disfrazado de decimal u hex (N4).
+    """True cuando *host* es un literal IPv4 disfrazado de decimal u hex.
 
     ``_URL_IP_HOST_RE`` (dotted-quad) no detecta estas formas — un enlace de
     phishing puede usarlas para evadir el chequeo de "IP literal" a simple vista.
@@ -403,7 +403,7 @@ def analyze_url(href: str, sender_domain: Optional[str] = None,
     # normal on a company's own site. An insecure (http) page asking for
     # credentials on top of that is the textbook harvesting-page pattern.
     #
-    # N3: that "known brand's domain" carve-out is also what let a
+    # That "known brand's domain" carve-out is also what let a
     # credential-harvest form hosted on ``docs.google.com`` or
     # ``sharepoint.com`` through with zero findings — those are
     # multi-tenant hosting services where the path/subdomain is

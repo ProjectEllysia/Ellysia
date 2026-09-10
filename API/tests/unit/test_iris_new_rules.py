@@ -1,4 +1,4 @@
-"""Tests unitarios de las 10 reglas añadidas en Fase 1.
+"""Tests unitarios de diez reglas forenses de Iris.
 
 Cubre señales forenses observables en el correo:
 - Display name vs. email local aleatorio

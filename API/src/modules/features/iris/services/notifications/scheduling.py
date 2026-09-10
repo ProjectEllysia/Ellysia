@@ -1,5 +1,5 @@
 """
-Job periódico de notificaciones de Iris (M08): digests diarios pendientes
+Job periódico de notificaciones de Iris: digests diarios pendientes
 de enviar y avisos de conexión atascada sin un sync limpio.
 
 No es un scheduler propio (no hay una clase con su propia instancia de

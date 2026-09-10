@@ -239,7 +239,7 @@ def test_graph_list_new_with_cursor_caches_headers_from_delta_response():
     assert raw == "From: a@b.com\r\n"
 
 
-# B12: el deltaLink de Graph es un token opaco que puede rebasar los 255
+# El deltaLink de Graph es un token opaco que puede rebasar los 255
 # caracteres que la columna `sync_cursor` permitía. Estos tests fijan que el
 # conector lo devuelve intacto — cualquier recorte lo invalida, y un cursor
 # inválido tira la sincronización incremental al bootstrap.

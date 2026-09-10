@@ -1,4 +1,4 @@
-"""Tests de integración de ``GET/PUT /iris/notification-preferences`` (M08).
+"""Tests de integración de ``GET/PUT /iris/notification-preferences``.
 
 La matriz de atributos (IRIS_READ / IRIS_UPDATE) ya está cubierta por
 ``test_iris_permissions.py``; aquí se verifica el contrato HTTP: valores por

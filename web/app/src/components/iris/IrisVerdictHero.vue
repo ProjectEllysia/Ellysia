@@ -13,7 +13,7 @@
 
 <script setup>
 /**
- * Score + veredicto de IrisReportViewer (A3). Bloque autónomo: sus clases
+ * Score + veredicto de IrisReportViewer. Bloque autónomo: sus clases
  * (.rv-hero*, .score-*, .verdict-*) no se comparten con ninguna otra
  * sección del informe, así que no hace falta duplicar nada en el padre.
  */

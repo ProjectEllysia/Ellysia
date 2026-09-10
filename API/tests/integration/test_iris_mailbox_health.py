@@ -1,4 +1,4 @@
-"""M10: salud y observabilidad de una conexión de buzón.
+"""Salud y observabilidad de una conexión de buzón.
 
 Antes, ``last_sync_at`` se actualizaba igual tanto si el sync no encontraba
 nada nuevo como si dejaba mensajes atascados por una cuota agotada o un
@@ -36,7 +36,7 @@ pytestmark = pytest.mark.integration
 
 class _FakeLockRedis:
     """Doble en memoria de RedisConnectionFactory.decoded() para
-    MailboxSyncLock (B02): SET NX EX más el script Lua de liberación
+    MailboxSyncLock: SET NX EX más el script Lua de liberación
     condicionada al token del titular -- ver test_iris_mailbox_manager.py,
     de donde se copia este doble, ya que _sync_connection adquiere el lock
     siempre."""
@@ -308,7 +308,7 @@ def test_a_dead_lettered_message_shows_up_as_dead_not_pending(app, regular_user,
     assert health["messages_pending"] == 0
     assert health["messages_dead"] == 1
     # Con la cola sin pendientes (el dead-letter ya no bloquea), el cursor sí
-    # se confirma y el sync cuenta como "limpio" -- ver B01.
+    # se confirma y el sync cuenta como "limpio".
     assert health["last_success_at"] is not None
 
 

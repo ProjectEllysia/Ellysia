@@ -72,7 +72,7 @@ def classify_failure(error: BaseException) -> AnalysisFailure:
     ``IrisInvalidInputError`` es la única excepción cuyo mensaje se propaga
     tal cual: lo construye este módulo a partir de un recuento de cabeceras,
     nunca del contenido del correo. Cualquier otra excepción —incluido un
-    parser roto, que es el caso que motiva `B03`— se colapsa en un mensaje
+    parser roto, que es el caso que motiva esta clasificación— se colapsa en un mensaje
     genérico: el ``str(error)`` de una librería de terceros puede arrastrar
     el fragmento de entrada que la hizo reventar.
     """

@@ -3,7 +3,7 @@ Calidad de un análisis: qué se pudo inspeccionar de verdad y qué no.
 
 Una regla que revienta no aborta el análisis —eso sería peor: un solo fallo
 tiraría un informe entero por 47 reglas que sí funcionaron—, pero tampoco
-puede desaparecer sin dejar rastro. Hasta `B05`, una excepción de regla se
+puede desaparecer sin dejar rastro. Antes, una excepción de regla se
 convertía en un ``RuleResult(score=0, verdict="error")`` y ahí se acababa
 todo: el análisis podía terminar como ``Legitimate`` sin ninguna advertencia,
 aunque la regla que faltó fuera la que decide si el mensaje está autenticado.

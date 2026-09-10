@@ -1,4 +1,4 @@
-"""B06: frontera de confianza de la cadena ``Received``.
+"""Frontera de confianza de la cadena ``Received``.
 
 El corpus de ataque que pide el criterio de cierre del issue: **ningún
 ``Authentication-Results`` aportado por el atacante convierte por sí solo un
@@ -87,7 +87,7 @@ def test_boundary_stops_at_the_first_foreign_organisation():
 
 
 # ---------------------------------------------------------------------------
-# El ataque que cierra B06
+# El ataque que cierra la frontera de confianza
 # ---------------------------------------------------------------------------
 
 def test_injected_received_plus_auth_results_no_longer_passes():
@@ -132,7 +132,7 @@ def test_the_same_header_from_the_real_delivering_server_still_passes():
 
 
 def test_an_authserv_id_that_never_touched_the_message_still_fails():
-    """El caso que ya se detectaba antes de B06 sigue detectándose."""
+    """El caso que ya se detectaba antes de la frontera de confianza sigue detectándose."""
     context = MessageContext(
         headers={
             "authentication-results": "inventado.example; spf=pass; dkim=pass; dmarc=pass",

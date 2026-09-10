@@ -457,7 +457,7 @@ class IrisPDFCreator:
         elements.append(Spacer(1, 0.22 * inch))
 
     def append_quality_warning(self, elements: list, theme: IrisReportTheme) -> None:
-        """Aviso de análisis degradado (B05), justo debajo del veredicto.
+        """Aviso de análisis degradado, justo debajo del veredicto.
 
         Va aquí y no entre las señales de más abajo porque contradice
         parcialmente lo que el lector acaba de leer: el veredicto grande de la
@@ -494,7 +494,7 @@ class IrisPDFCreator:
         elements.append(Spacer(1, 0.22 * inch))
 
     def append_gate_reasons(self, elements: list, theme: IrisReportTheme) -> None:
-        """Señales de alta confianza que fijaron el veredicto (S1).
+        """Señales de alta confianza que fijaron el veredicto.
 
         Solo aparece cuando algún gate se disparó — explica el "por qué"
         del veredicto más allá de la puntuación numérica.
@@ -662,7 +662,7 @@ class IrisPDFCreator:
     def append_raw_headers(self, elements: list, theme: IrisReportTheme) -> None:
         """Vuelca el raw completo del correo -- la única vista de Iris que
         sale del panel autenticado tal cual una vez descargado el PDF, así
-        que es la que se redacta (M09, ``iris.redactPiiInReports``): no se
+        que es la que se redacta (``iris.redactPiiInReports``): no se
         toca el remitente/destinatario/responder-a/return-path, que son la
         evidencia del informe (ya mostrados en "Vista Previa del Correo"),
         pero sí cualquier otra dirección, teléfono o número con forma de
@@ -739,7 +739,7 @@ class IrisPDFCreator:
         elements.append(Paragraph(f"Informe generado automáticamente | {timestamp}", theme.footer))
 
     def _output_path(self) -> str:
-        """Ruta del PDF, única por **documento** y no por análisis (B11).
+        """Ruta del PDF, única por **documento** y no por análisis.
 
         El modelo permite N ``IrisDocument`` por análisis, pero el nombre solo
         dependía del ``analysis_id``, así que todos escribían el mismo fichero:

@@ -1,9 +1,9 @@
-"""B09: IrisManager.analyze() cobra cuota exactamente por los análisis que de
+"""IrisManager.analyze() cobra cuota exactamente por los análisis que de
 verdad se crean -- ni por un reintento de Gmail/Graph que reenvía el mismo
 mensaje, ni por una carrera perdida contra la UniqueConstraint de
 idempotencia.
 
-``QuotaManager.consume_many()`` (el otro artefacto de B09, la generación de
+``QuotaManager.consume_many()`` (la otra pieza del cobro exacto, para la generación de
 IA que cobra dos claves) tiene su propia cobertura en test_quotas.py.
 """
 

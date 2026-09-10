@@ -1,11 +1,11 @@
-"""Tests de integración de la retención de Iris (M09/B17/B19):
+"""Tests de integración de la retención de Iris:
 ``services/retention.py`` y las dos consultas de ``IrisAnalysisRepository``
 en las que se apoya.
 
 Cubre las dos mitades del job (purgar solo el raw vencido, borrar el
 análisis entero cuando hay un límite duro configurado), que ninguna de las
 dos deja huérfanos (``IrisRuleResult``), y que volver a ejecutar el job sin
-datos nuevos no hace nada (idempotencia -- el criterio de cierre de M09).
+datos nuevos no hace nada (idempotencia).
 """
 
 from __future__ import annotations
@@ -101,7 +101,7 @@ def test_get_analyses_older_than_finds_only_old_rows(app, regular_user):
 
 
 def test_deleting_old_analyses_via_repository_leaves_no_orphaned_rule_results(app, regular_user):
-    """B17: el criterio de cierre exige explícitamente que la retención no
+    """El criterio de cierre exige explícitamente que la retención no
     deje huérfanos."""
     old_id = _save_analysis(app, regular_user.id, created_at=utcnow_naive() - timedelta(days=400))
     with app.app_context():
@@ -126,7 +126,7 @@ def test_deleting_old_analyses_via_repository_leaves_no_orphaned_rule_results(ap
 
 def test_run_retention_purges_raw_but_keeps_the_analysis_by_default(app, regular_user):
     """analysisRetentionDays=0 (el default) desactiva el borrado completo --
-    "el resultado puede conservarse sin el raw" (B19) es el comportamiento
+    "el resultado puede conservarse sin el raw" es el comportamiento
     por defecto."""
     old_id = _save_analysis(app, regular_user.id, created_at=utcnow_naive() - timedelta(days=100))
 

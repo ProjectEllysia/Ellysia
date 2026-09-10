@@ -1,6 +1,6 @@
 """
 services/redaction.py — redacción de PII en las vistas de Iris que pueden
-salir del panel autenticado (M09).
+salir del panel autenticado.
 
 Hoy la única de esas vistas es el PDF exportable de un análisis
 (``services/reports.py::IrisPDFCreator.append_raw_headers``), que hasta

@@ -109,10 +109,10 @@ const archiveOpen = ref(false)
 // Relleno automático del formulario a partir de un .eml arrastrado.
 const prefill = ref(null)
 
-// Fase 2: enviamos el .eml completo (cuerpo, enlaces, adjuntos) para que las
+// Enviamos el .eml completo (cuerpo, enlaces, adjuntos) para que las
 // reglas de contenido puedan analizarlo.
 //
-// B13: el tope ya no se escribe aquí. Era `20 * 1024 * 1024` mientras el
+// El tope ya no se escribe aquí. Era `20 * 1024 * 1024` mientras el
 // backend aplicaba 10 MiB, así que la vista aceptaba ficheros que el API iba
 // a rechazar — después de haberlos leído enteros en memoria. Ahora sale de
 // `GET /iris/capabilities` y la decisión vive en `intake.js`, que es puro y
@@ -181,7 +181,7 @@ async function onDrop(e) {
       return
     }
     // Conservamos el mensaje completo (cuerpo, enlaces, adjuntos) para que
-    // Iris pueda aplicar las reglas de Fase 2; si el archivo se truncó por
+    // Iris pueda aplicar las reglas de contenido; si el archivo se truncó por
     // tamaño, solo enviamos las cabeceras extraídas como respaldo.
     prefill.value = {
       headers: rawHeaders,

@@ -44,7 +44,7 @@ frontera). Es el caso normal del correo legítimo."""
 
 TRUST_BELOW_BOUNDARY = "below_boundary"
 """El ``authserv-id`` solo aparece en saltos que el remitente pudo fabricar.
-Es el bypass que cierra `B06`: la cabecera existe y "cuadra" con la cadena,
+Es el bypass que esta frontera cierra: la cabecera existe y "cuadra" con la cadena,
 pero cuadra con la parte de la cadena que escribió el atacante."""
 
 TRUST_ABSENT = "absent"

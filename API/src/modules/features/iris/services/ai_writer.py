@@ -90,13 +90,13 @@ class IrisAIWriter:
 
     @staticmethod
     def _degradation_note(report: Dict[str, Any]) -> str:
-        """Aviso que se añade al prompt cuando el análisis fue degradado (B05).
+        """Aviso que se añade al prompt cuando el análisis fue degradado.
 
         Va anexado al final del prompt en vez de como marcador de la plantilla
         porque las plantillas viven en ``SecOpsConfig.json``: un marcador nuevo
         obligaría a editar la configuración desplegada para que este aviso
         apareciera, y un despliegue con la plantilla vieja se quedaría
-        silenciosamente sin él — justo el fallo silencioso que B05 corrige.
+        silenciosamente sin él — justo el fallo silencioso que se quiere evitar.
 
         Sin esto, el modelo redacta un resumen ejecutivo seguro sobre un
         análisis que no lo es: no tiene forma de saber que faltan reglas,

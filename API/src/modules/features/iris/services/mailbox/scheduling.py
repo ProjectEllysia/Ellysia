@@ -1,9 +1,9 @@
 """
 IrisMailboxScheduler — sondea las conexiones de buzón activas cada
 ``iris.pollIntervalMinutes`` y encola un job de sync por conexión vencida.
-También registra el chequeo periódico de notificaciones de M08 (digests
-diarios pendientes y avisos de conexión atascada) y el job de retención de
-M09/B17/B19 (purgar raw vencido, borrar análisis enteros si hay un límite
+También registra el chequeo periódico de notificaciones (digests
+diarios pendientes y avisos de conexión atascada) y el job de retención
+(purgar raw vencido, borrar análisis enteros si hay un límite
 duro configurado) -- ver los docstrings de ``services/notifications/
 scheduling.py`` y ``services/retention.py`` sobre por qué comparten este
 scheduler en vez de tener uno propio cada uno.
@@ -109,7 +109,7 @@ class IrisMailboxScheduler:
                 manager.submit_sync(connection.id)
                 queued += 1
             except Exception as e:
-                # B02: una conexión que no se puede encolar (p.ej. ya hay un
+                # Una conexión que no se puede encolar (p.ej. ya hay un
                 # job "started" con el mismo job_id determinista) no debe
                 # tumbar el resto del sondeo -- cada conexión es
                 # independiente de sus vecinas en la lista de vencidas.
@@ -120,13 +120,13 @@ class IrisMailboxScheduler:
     @staticmethod
     @scheduler_job(logger, "Error revisando notificaciones de Iris")
     def _run_notifications() -> None:
-        """Entry point del job de notificaciones de M08 (aislamiento de
+        """Entry point del job de notificaciones (aislamiento de
         errores y cierre de sesión vía ``scheduler_job``)."""
         check_and_notify()
 
     @staticmethod
     @scheduler_job(logger, "Error en la retención de Iris")
     def _run_retention() -> None:
-        """Entry point del job de retención de M09/B17/B19 (aislamiento de
+        """Entry point del job de retención (aislamiento de
         errores y cierre de sesión vía ``scheduler_job``)."""
         run_retention()

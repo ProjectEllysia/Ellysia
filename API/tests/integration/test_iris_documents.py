@@ -180,7 +180,7 @@ def test_list_all_documents_for_user(client, app, root_user, root_headers, fake_
 
 
 def test_documents_are_paginated(client, app, root_user, root_headers, fake_queue):
-    """B17: antes devolvía todos los documentos del usuario sin límite."""
+    """Antes devolvía todos los documentos del usuario sin límite."""
     for _ in range(3):
         analysis_id = _seed_analysis(app, root_user.id)
         client.post(f"/iris/results/{analysis_id}/document", headers=root_headers)
@@ -220,11 +220,11 @@ def test_delete_document(client, app, root_user, root_headers, fake_queue):
     assert after.status_code == 404
 
 
-# --------------------------------------------------------------- B11: PDFs independientes
+# --------------------------------------------------------------- PDFs independientes
 
 def test_two_documents_of_the_same_analysis_are_independent(client, app, root_user,
                                                             root_headers, fake_queue):
-    """B11 de punta a punta.
+    """Dos documentos del mismo análisis no se pisan, de punta a punta.
 
     El modelo permite N ``IrisDocument`` por análisis (relación ``documents``
     con ``cascade="all, delete-orphan"``), pero el PDF se llamaba

@@ -1,4 +1,4 @@
-"""Tests de integración de la separación raw/resultado de Iris (M09/B19):
+"""Tests de integración de la separación raw/resultado de Iris:
 ``IrisAnalysis.raw_headers`` es ahora una property respaldada por
 ``IrisRawMessage`` (fila 1:1, cifrada), no una columna.
 
@@ -73,7 +73,7 @@ def test_deleting_the_analysis_cascades_to_its_raw_message(app, regular_user):
 
 
 def test_deleting_the_analysis_cascades_to_its_rule_results(app, regular_user):
-    """B17: el criterio de cierre exige que la retención no deje huérfanos
+    """El criterio de cierre exige que la retención no deje huérfanos
     -- comprobado aquí sobre el borrado normal (no solo el de retención),
     ya que ambos pasan por el mismo cascade del ORM."""
     analysis_id = _save_analysis(app, regular_user.id)

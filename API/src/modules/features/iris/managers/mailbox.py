@@ -73,7 +73,7 @@ def _duration_ms(started_at: Optional[datetime]) -> Optional[int]:
 
     Returns:
         Optional[int]: Milisegundos transcurridos, o ``None`` si
-            ``started_at`` es ``None`` (M10: sin esto, un sync sin duración
+            ``started_at`` es ``None`` (sin esto, un sync sin duración
             conocida se vería como "0 ms", que parece salud perfecta en vez
             de un dato ausente).
     """
@@ -112,7 +112,7 @@ class IrisMailboxManager(TaskTrackingMixin):
     #: no esté aquí se añade al final, alfabéticamente.
     _PROVIDER_DISPLAY_ORDER = ("microsoft", "gmail")
 
-    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin (A10). Ya
+    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin. Ya
     # declaraba TASK_CATEGORY/EXTERNAL_ID_PREFIX sin heredar del mixin —
     # ahora hereda también external_id_for/find_task/task_status_of.
 
@@ -237,7 +237,7 @@ class IrisMailboxManager(TaskTrackingMixin):
         connector = get_connector(provider, self._redirect_uri(), folder=folder)
         token_set = connector.exchange_code(code)
 
-        # B16: recién canjeado el code tenemos un access_token fresco -- es
+        # Recién canjeado el code tenemos un access_token fresco -- es
         # el único momento del flujo de conexión en que se puede comprobar
         # la carpeta contra la cuenta real antes de guardarla.
         folder_metadata = (
@@ -298,7 +298,7 @@ class IrisMailboxManager(TaskTrackingMixin):
         if status is not None and status not in _VALID_UPDATE_STATUSES:
             raise ValueError(f"status debe ser uno de {_VALID_UPDATE_STATUSES}")
 
-        # B16: cambiar de carpeta exige un access_token vivo para comprobarla
+        # Cambiar de carpeta exige un access_token vivo para comprobarla
         # contra la cuenta real -- lo mismo que list_folders().
         folder_display_name = None
         folder_type = None
@@ -328,7 +328,7 @@ class IrisMailboxManager(TaskTrackingMixin):
 
     def list_folders(self, connection_id: int, user_id: int) -> list[MailboxFolder]:
         """Carpetas/etiquetas reales de la cuenta -- únicos valores válidos
-        para ``folder`` en ``update_connection()`` (B16)."""
+        para ``folder`` en ``update_connection()``."""
         connection = self.assert_connection_ownership(connection_id, user_id)
         try:
             access_token, connector = self._ensure_access_token(connection)
@@ -339,7 +339,7 @@ class IrisMailboxManager(TaskTrackingMixin):
 
     def get_connection_health(self, connection_id: int, user_id: int) -> dict:
         """Estado observable de una conexión, sin tener que leer los logs
-        del servidor (M10).
+        del servidor.
 
         Reúne columnas de la propia conexión con recuentos en vivo de
         ``IrisMailboxInbox`` (pendientes/reintentando/``dead``) y de
@@ -477,7 +477,7 @@ class IrisMailboxManager(TaskTrackingMixin):
         if connection is None or connection.status != "active":
             return
 
-        # B02: serializa los syncs de una misma conexión. El job_id
+        # Serializa los syncs de una misma conexión. El job_id
         # determinista de TaskQueue ya evita reencolar mientras el anterior
         # sigue "started", pero ese estado no se autorrecupera si el worker
         # muere a mitad de sync -- este lock sí, por TTL.
@@ -510,7 +510,7 @@ class IrisMailboxManager(TaskTrackingMixin):
                 self._record_sync_error(connection_id, str(e))
                 return
 
-            # B01: el mensaje entra en la cola de checkpoint antes de intentar
+            # El mensaje entra en la cola de checkpoint antes de intentar
             # ingerirlo -- así una cuota agotada o un fallo a mitad de lote no
             # lo pierden, sino que lo dejan pendiente para el próximo sondeo.
             self._enqueue_pending(connection_id, refs)
@@ -571,7 +571,7 @@ class IrisMailboxManager(TaskTrackingMixin):
                 ))
 
             if new_refs:
-                # M10: contador acumulado -- la fila de checkpoint de un
+                # Contador acumulado -- la fila de checkpoint de un
                 # mensaje aceptado se borra al resolverse, así que sin esto
                 # "cuántos ha descubierto esta conexión en total" se perdería
                 # con ella. Incremento atómico dentro del propio UPDATE, no
@@ -598,7 +598,7 @@ class IrisMailboxManager(TaskTrackingMixin):
         analysis_repo = build_repository(IrisAnalysisRepository)
 
         for entry in inbox_repo.get_pending(connection_id):
-            # B02: un lote grande puede tardar más que el TTL inicial del
+            # Un lote grande puede tardar más que el TTL inicial del
             # lock -- renovarlo en cada mensaje evita que otro sync lo dé
             # por huérfano mientras éste sigue trabajando de verdad.
             lock.renew()
@@ -727,11 +727,11 @@ class IrisMailboxManager(TaskTrackingMixin):
                 return
             if advance_cursor:
                 fresh.sync_cursor = new_cursor
-                # M10: solo cuando la cola de checkpoint queda vacía se puede
+                # Solo cuando la cola de checkpoint queda vacía se puede
                 # decir de verdad "todo al día" -- last_sync_at por sí solo no
                 # distingue eso de un sync que dejó mensajes atascados.
                 fresh.last_success_at = utcnow_naive()
-                # M08: un sync limpio resuelve cualquier atasco anterior --
+                # Un sync limpio resuelve cualquier atasco anterior --
                 # se limpia aquí, no solo cuando se envía el aviso, para que
                 # una recaída futura genere un aviso nuevo en vez de quedar
                 # silenciada para siempre por la primera.
@@ -760,7 +760,7 @@ class IrisMailboxManager(TaskTrackingMixin):
         reintentar en bucle contra su API (mismo patrón degradado que
         ``execute_ai_summary_generation``).
 
-        Avisa al dueño de la conexión (M08), pero solo en la transición
+        Avisa al dueño de la conexión, pero solo en la transición
         hacia este estado: los tres puntos que llaman a este método pueden
         volver a invocarlo mientras la conexión sigue sin reautorizar (un
         segundo intento de cambiar de carpeta, por ejemplo), y sin esta

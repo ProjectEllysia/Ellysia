@@ -2,14 +2,14 @@
 cuando la ingesta automática de buzón clasifica un correo como Phishing
 (``IrisPhishingNotifyManager``), el digest diario que agrupa los que no
 eran de alta confianza (``IrisDigestNotifyManager``), y los dos avisos
-operativos de M08 -- reautenticación (``IrisReauthNotifyManager``) y
+operativos -- reautenticación (``IrisReauthNotifyManager``) y
 conexión atascada (``IrisStuckSyncNotifyManager``).
 
 Cubre el contrato del aviso de phishing: solo análisis de buzón con
 veredicto Phishing notifican (los manuales los pidió el propio usuario, que
 ya ve el informe), el correo va al dueño del análisis y su contenido incluye
 el asunto -- el mismo que ahora se usa como título del análisis. Y el de
-M08: un veredicto de alta confianza (``total_score`` en o por debajo de
+las preferencias: un veredicto de alta confianza (``total_score`` en o por debajo de
 ``iris.criticalPhishingScoreThreshold``, 20 por defecto) siempre notifica al
 momento; uno por encima de ese umbral respeta el silenciado temporal y el
 digest diario del usuario.
@@ -220,7 +220,7 @@ def test_phishing_trigger_never_raises_when_queue_is_down(app, regular_user):
             assert analysis.status == "finished"
 
 
-# ===================================================================== M08
+# =====================================================================
 # Preferencias de notificación: silenciado, digest y los dos avisos operativos.
 
 # ------------------------------------------- IrisNotificationPreferenceManager
@@ -276,7 +276,7 @@ def test_muted_for_minutes_zero_clears_an_active_mute(app, regular_user):
     assert _reload_preference(app, regular_user.id).muted_until is None
 
 
-# --------------------------------- IrisPhishingNotifyManager respeta M08
+# ------------------------- IrisPhishingNotifyManager respeta las preferencias
 
 def test_critical_phishing_ignores_an_active_mute(app, regular_user):
     """total_score=10 está por debajo del umbral de alta confianza (20) --
@@ -354,7 +354,7 @@ def test_non_critical_phishing_is_deferred_to_the_digest(app, regular_user):
 
 def test_non_critical_phishing_sends_normally_without_preferences(app, regular_user):
     """Sin fila de preferencias (usuario que nunca las ha tocado), un
-    Phishing no crítico se comporta como antes de M08: se notifica."""
+    Phishing no crítico se comporta como si no hubiera preferencias: se notifica."""
     connection_id = _save_connection(app, regular_user.id)
     analysis_id = _save_analysis(app, regular_user.id, verdict="Phishing",
                                  connection_id=connection_id, total_score=35.0)

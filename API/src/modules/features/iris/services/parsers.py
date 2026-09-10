@@ -58,7 +58,7 @@ def parse_raw_headers(raw: str) -> Dict[str, str]:
         forging their own ``Authentication-Results`` line in the message
         they send), attacker-injected. Keeping "last occurrence wins"
         here handed a one-line spoofing bypass to every rule that reads
-        ``Authentication-Results``/``ARC-Seal`` from this dict (A1, N5).
+        ``Authentication-Results``/``ARC-Seal`` from this dict.
     """
     headers: Dict[str, str] = {}
     current_key: str | None = None
@@ -180,14 +180,14 @@ class MessageContext:
     and the ``wrapper_*`` fields preserve just enough of the outer
     message's identity for the report to say so, and ``wrapper_context``
     carries the *full* parsed wrapper so the caller can run the rule
-    engine on it too (N1): a real "report phishing" forward is benign to
+    engine on it too: a real "report phishing" forward is benign to
     unwrap, but an attacker can just as easily send their own phishing as
     the outer message and staple a benign ``.eml`` on as a
     ``message/rfc822`` attachment — unwrapping unconditionally then
     means the 40 rules never see the phishing the victim actually
     received. Analyzing only the unwrapped inner message is what a
     forward-unaware submission always wants; the ingestion pipeline
-    (Fase 3+) is exactly the "automatic, no human forwarding" case where
+    (mailbox ingestion) is exactly the "automatic, no human forwarding" case where
     that assumption stops holding, so it must evaluate both and keep the
     worse verdict.
     """
@@ -336,7 +336,7 @@ def parse_raw_message(raw: str) -> MessageContext:
         envelope. ``unwrapped_from_forward`` is set, ``wrapper_from``/
         ``wrapper_subject`` retain the forwarding envelope's identity for
         the report to reference, and ``wrapper_context`` carries the full
-        parsed wrapper (N1) so the caller can run the rule engine on it
+        parsed wrapper so the caller can run the rule engine on it
         too and keep the worse of the two verdicts — see
         ``MessageContext`` for why analyzing only the unwrapped inner
         message is unsafe once submissions are no longer human-forwarded.

@@ -1,6 +1,6 @@
 """
 MailboxConnector — interfaz común para los conectores de buzón externo
-(Gmail, Microsoft Graph), Fase 4 del plan mailbox-connector.
+(Gmail, Microsoft Graph).
 
 Mismo espíritu que ``tools/herald``/``tools/scribe`` (interfaz +
 implementaciones intercambiables), con una diferencia deliberada en cómo se
@@ -45,7 +45,7 @@ class MessageRef:
 
 @dataclass
 class MailboxFolder:
-    """Una carpeta/etiqueta real del proveedor que Iris puede vigilar (B16).
+    """Una carpeta/etiqueta real del proveedor que Iris puede vigilar.
 
     ``provider_id`` es el valor opaco que ``IrisMailboxConnection.folder``
     guarda y que los conectores usan para filtrar ``list_new`` -- nunca se
@@ -104,7 +104,7 @@ class MailboxConnector(ABC):
 
     @abstractmethod
     def list_folders(self, access_token: str) -> list[MailboxFolder]:
-        """Carpetas/etiquetas reales de la cuenta conectada (B16).
+        """Carpetas/etiquetas reales de la cuenta conectada.
 
         Única fuente de verdad para validar ``IrisMailboxConnection.folder``:
         un valor que no aparece aquí no es una carpeta que este proveedor y

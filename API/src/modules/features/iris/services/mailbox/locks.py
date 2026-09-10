@@ -1,5 +1,5 @@
 """
-Lock distribuido por conexión para el sync de buzón de Iris (B02).
+Lock distribuido por conexión para el sync de buzón de Iris.
 
 ``IrisMailboxManager.submit_sync()`` ya evita reencolar un job mientras el
 anterior sigue "started" (mismo ``job_id`` determinista, ver

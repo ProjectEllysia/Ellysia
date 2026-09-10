@@ -87,7 +87,7 @@
       <!-- Score + Verdict hero -->
       <IrisVerdictHero :score="reportData.totalScore" :verdict="reportData.verdict" />
 
-      <!-- Análisis degradado (B05): alguna regla no llegó a ejecutarse, así que
+      <!-- Análisis degradado: alguna regla no llegó a ejecutarse, así que
            una parte del mensaje no se ha inspeccionado. Va inmediatamente
            debajo del veredicto porque lo matiza: quien lea el número grande
            tiene que saber que se calculó sin parte del examen. -->
@@ -325,7 +325,7 @@ const rulesWithIndex = computed(() =>
 )
 const flaggedRules = computed(() => rulesWithIndex.value.filter(entry => entry.rule.verdict !== 'pass'))
 
-// Análisis degradado (B05): alguna regla lanzó una excepción y no llegó a
+// Análisis degradado: alguna regla lanzó una excepción y no llegó a
 // ejecutarse. No es lo mismo que una regla que encontró algo malo —esas
 // aparecen en flaggedRules con su puntuación— sino una parte del mensaje que
 // nadie miró, y por eso el aviso va arriba y no entre los hallazgos.
@@ -350,7 +350,7 @@ async function jumpToRule(i) {
   ruleCardEls[i]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
-// A3: valor ya resuelto desde la API pública del store — antes se leían
+// Valor ya resuelto desde la API pública del store — antes se leían
 // pathCache/currentPath (cachés internos de la estrategia de carga bajo
 // demanda) directamente desde el componente.
 const pathData = computed(() => irisStore.resolvedPathFor(props.reportId))

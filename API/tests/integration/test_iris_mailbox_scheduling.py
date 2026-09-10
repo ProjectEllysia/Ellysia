@@ -1,5 +1,5 @@
 """Tests de integración de IrisMailboxScheduler -- sondeo periódico de
-conexiones de buzón y (M08) chequeo periódico de notificaciones."""
+conexiones de buzón y chequeo periódico de notificaciones."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def _connection(user_id: int, account_email: str) -> IrisMailboxConnection:
 
 
 def test_poll_connections_continues_after_one_connection_fails_to_enqueue(app, regular_user, admin_user):
-    """B02: ``submit_sync()`` puede levantar (p.ej. ya hay un job "started"
+    """``submit_sync()`` puede levantar (p.ej. ya hay un job "started"
     con el mismo job_id determinista para esa conexión) -- eso no debe
     impedir que el resto de conexiones vencidas se encolen en el mismo
     sondeo. Antes de este fix, una excepción a mitad del bucle abortaba el
@@ -54,7 +54,7 @@ def test_poll_connections_continues_after_one_connection_fails_to_enqueue(app, r
 
 
 def test_run_notifications_delegates_to_check_and_notify(app):
-    """El job de notificaciones (M08) es una costura fina -- toda la lógica
+    """El job de notificaciones es una costura fina -- toda la lógica
     vive en ``services/notifications/scheduling.check_and_notify``; aquí
     solo se comprueba que el scheduler la invoca."""
     with app.app_context():
@@ -65,7 +65,7 @@ def test_run_notifications_delegates_to_check_and_notify(app):
 
 
 def test_run_retention_delegates_to_run_retention(app):
-    """El job de retención (M09/B17/B19) es igual de fino -- toda la lógica
+    """El job de retención es igual de fino -- toda la lógica
     vive en ``services/retention.run_retention``."""
     with app.app_context():
         with mock.patch.object(scheduling_mod, "run_retention") as fake_retention:

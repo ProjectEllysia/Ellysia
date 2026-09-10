@@ -5,7 +5,7 @@
  * son funciones puras sin DOM, igual que `components/hygeia/format.js`, así
  * que corren con `node` a secas (ver `test/iris.intake.test.mjs`).
  *
- * El segundo es el que motiva B13. El tope de tamaño estaba escrito a mano en
+ * El segundo es la razón de ser de este módulo. El tope de tamaño estaba escrito a mano en
  * la vista (`20 * 1024 * 1024`) mientras el backend aplicaba otro
  * (`iris.maxMessageBytes`, 10 MiB): el usuario elegía un fichero que la
  * interfaz daba por bueno, esperaba a que se cargara entero en memoria y

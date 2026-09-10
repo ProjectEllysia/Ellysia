@@ -252,7 +252,7 @@ def check_compromised_legitimate_domain(context) -> RuleResult:
     description=(
         "Señal informativa (score 0): ¿hay algún enlace del cuerpo cuyo "
         "dominio registrable difiere del From y no es un ESP conocido? Se "
-        "combina con Alarming Keywords fuerte (G-E) para aproximar el "
+        "combina con Alarming Keywords fuerte para aproximar el "
         "'primo autenticado' -- dominio propio, auth limpia, marca fuera de "
         "`canonical_brands` -- sin depender de esa lista."
     ),

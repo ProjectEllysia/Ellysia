@@ -187,8 +187,8 @@ class GraphConnector(MailboxConnector):
         # diferencia de Google) -- solo el propio usuario
         # (myaccount.microsoft.com) o un admin de Entra ID pueden hacerlo.
         # Documentado explícitamente en vez de fingir una llamada que no
-        # existe: borrar la fila localmente sigue siendo correcto (Fase 3:
-        # "guardar lo mínimo"), el token simplemente sigue siendo válido en
+        # existe: borrar la fila localmente sigue siendo correcto (el
+        # conector guarda lo mínimo), el token simplemente sigue siendo válido en
         # el lado de Microsoft hasta que expire o el usuario lo revoque allí.
         logger.warning(
             "Microsoft Graph no soporta revocación de refresh_token por la "

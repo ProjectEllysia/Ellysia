@@ -35,7 +35,7 @@ class IrisAnalysis(Base):
                  vive cifrado en la fila ``IrisRawMessage`` asociada
                  (``raw_message``, 1:1) para poder purgarlo de forma
                  independiente sin borrar el resultado analítico ya
-                 calculado (M09/B19). Se lee y se escribe exactamente igual
+                 calculado. Se lee y se escribe exactamente igual
                  que antes de esa separación -- ``analysis.raw_headers`` y
                  ``IrisAnalysis(raw_headers=...)`` siguen funcionando sin
                  cambios en el resto del código. ``None`` cuando la política
@@ -90,7 +90,7 @@ class IrisAnalysis(Base):
                  el worker -- es la traza de la intención del usuario, no del
                  resultado, así que no se borra ni se sobreescribe aunque el
                  worker termine primero y el análisis acabe ``finished`` en
-                 vez de ``cancelled`` (B07).
+                 vez de ``cancelled``.
         user_id: Foreign key to the owning User.
         user: SQLAlchemy relationship to User.
         rule_results: Ordered list of IrisRuleResult (per-rule outcomes).
@@ -163,7 +163,7 @@ class IrisAnalysis(Base):
         """Contenido raw (cabeceras o ``.eml`` completo) de este análisis.
 
         Delega en ``raw_message.content`` -- ver el docstring de esta clase
-        (M09/B19) sobre por qué el raw vive en su propia fila en vez de en
+        sobre por qué el raw vive en su propia fila en vez de en
         una columna de ``IrisAnalysis``. ``None`` si la retención ya lo
         purgó.
         """
@@ -181,11 +181,11 @@ class IrisAnalysis(Base):
 
 class IrisRawMessage(Base):
     """Contenido raw (cabeceras o ``.eml`` completo) de un ``IrisAnalysis``,
-    en su propia fila -- separado del resultado analítico (M09/B19).
+    en su propia fila -- separado del resultado analítico.
 
     Antes vivía en ``IrisAnalysis.raw_headers``, una columna en la misma
     fila que el score, el veredicto y el resumen de IA: purgar el raw
-    después de un plazo (política de retención, B17) obligaba a elegir entre
+    después de un plazo (política de retención) obligaba a elegir entre
     borrar el análisis entero -- perdiendo el resultado, que sí tiene valor
     a largo plazo -- o dejarlo indefinidamente, que es justo lo que la
     retención existe para evitar. Con el raw en su propia fila,
@@ -260,20 +260,20 @@ class IrisMailboxConnection(Base):
         folder: Provider-specific folder/label id to watch; NULL = default
                  inbox. Es el ``provider_id`` opaco que ``MailboxConnector``
                  usa para filtrar ``list_new`` -- nunca texto libre: solo se
-                 guarda tras validarse contra ``MailboxConnector.list_folders()``
-                 (B16), así que un valor no vacío siempre corresponde a una
+                 guarda tras validarse contra ``MailboxConnector.list_folders()``,
+                así que un valor no vacío siempre corresponde a una
                  carpeta real de esta cuenta en el momento en que se guardó.
         folder_display_name: Nombre legible de ``folder`` (p.ej. "Facturas",
                  "Trabajo/Clientes"); NULL junto con ``folder`` cuando se
-                 vigila la bandeja de entrada por defecto (B16).
+                 vigila la bandeja de entrada por defecto.
         folder_type: "system" (Inbox, Sent, Trash... del propio proveedor) |
                  "user" (etiqueta/carpeta creada por la cuenta); NULL junto
-                 con ``folder`` (B16).
+                 con ``folder``.
         full_message_mode: If True, fetch the complete raw message
                  (attachments/body included) instead of headers only. Off
                  by default — the user must opt in explicitly per
-                 connection (see Fase 5 frontend design: this is a
-                 deliberate, not a hidden, choice).
+                 connection (this is a deliberate, not a hidden,
+                 choice).
         sync_cursor: Opaque provider cursor (Gmail historyId / Graph
                  deltaLink) marking how far ingestion has progressed. NULL
                  until the first bootstrap sync runs (see
@@ -295,21 +295,21 @@ class IrisMailboxConnection(Base):
                  cuando no hay ninguno. Se limpia al terminar (éxito o
                  error) -- no confundir con ``last_sync_at``, que registra el
                  último intento *terminado*. Existe para que la UI sepa que
-                 hay un sync en marcha sin tener que adivinarlo (B02).
+                 hay un sync en marcha sin tener que adivinarlo.
         sync_job_id: Id del job de TaskQueue que sostiene el lock de sync
-                 actual; NULL cuando no hay ninguno en curso (B02).
+                 actual; NULL cuando no hay ninguno en curso.
         last_success_at: Cuándo terminó el último sync que dejó la cola de
                  checkpoint (``IrisMailboxInbox``) completamente vacía -- es
                  decir, sin ningún mensaje descubierto pendiente de aceptar.
                  A diferencia de ``last_sync_at`` (que se actualiza aunque
                  queden mensajes atascados por cuota o por un fallo), esto
                  es lo que distingue "no hay correo nuevo" de "Iris está
-                 atascado" sin mirar los logs del servidor (M10). NULL si
+                 atascado" sin mirar los logs del servidor. NULL si
                  nunca ha terminado un sync sin dejar nada pendiente.
         last_sync_duration_ms: Cuánto tardó el último intento de sync
                  (terminara en éxito o en error), en milisegundos. NULL si
                  nunca ha habido un intento con ``sync_started_at`` registrado
-                 (M10) -- una latencia que crece sync a sync es la señal de
+                 -- una latencia que crece sync a sync es la señal de
                  que el proveedor se está degradando antes de que llegue a
                  fallar del todo.
         messages_discovered_total: Cuántos mensajes ha descubierto esta
@@ -319,10 +319,10 @@ class IrisMailboxConnection(Base):
                  "aceptados" (la tabla ``IrisAnalysis``) o "pendientes"/
                  "fallidos" (la tabla ``IrisMailboxInbox``), la fila de
                  checkpoint de un mensaje aceptado se borra al resolverse, así
-                 que sin este contador ese dato desaparecería con ella (M10).
+                 que sin este contador ese dato desaparecería con ella.
         stuck_alert_sent_at: Cuándo se avisó por última vez de que esta
-                 conexión lleva atascada más de ``iris.stuckSyncAfterMinutes``
-                 (M08). Se limpia en cuanto un sync vuelve a dejar la cola de
+                 conexión lleva atascada más de ``iris.stuckSyncAfterMinutes``.
+                Se limpia en cuanto un sync vuelve a dejar la cola de
                  checkpoint vacía (mismo punto que actualiza
                  ``last_success_at``), así que un problema que se resuelve y
                  vuelve a aparecer más tarde genera un aviso nuevo en vez de
@@ -331,7 +331,7 @@ class IrisMailboxConnection(Base):
         user: SQLAlchemy relationship to User.
         analyses: Analyses ingested through this connection.
         inbox_entries: Cola de checkpoint de mensajes descubiertos y aún no
-                 resueltos (ver ``IrisMailboxInbox`` / B01).
+                 resueltos (ver ``IrisMailboxInbox``).
     """
     __tablename__ = "IrisMailboxConnection"
 
@@ -386,7 +386,7 @@ class IrisMailboxInbox(Base):
     proveedor tanto si el lote se ingería entero como si no: una cuota
     agotada o un fallo a mitad de lote perdían en silencio los mensajes que
     quedaban sin procesar, porque el proveedor nunca los vuelve a devolver
-    una vez el cursor avanza (B01). Cada mensaje que devuelve ``list_new``
+    una vez el cursor avanza. Cada mensaje que devuelve ``list_new``
     se encola aquí antes de intentar ingerirlo, y el cursor del proveedor
     solo avanza cuando la cola de la conexión queda vacía.
 
@@ -507,7 +507,7 @@ class IrisDocument(Document):
 
 class IrisNotificationPreference(Base):
     """Preferencias de notificación de un usuario para las alertas
-    automáticas de Iris (M08): una fila por usuario, creada perezosamente
+    automáticas de Iris: una fila por usuario, creada perezosamente
     la primera vez que la modifica (ver ``IrisNotificationPreferenceManager``).
 
     Deliberadamente por usuario y no por conexión: hoy Iris solo tiene un
@@ -539,7 +539,7 @@ class IrisNotificationPreference(Base):
                  Por defecto ``True``.
         notify_sync_stuck: Si se avisa quando una conexión activa lleva más
                  de ``iris.stuckSyncAfterMinutes`` sin completar un sync
-                 limpio (ver ``IrisMailboxConnection.last_success_at``, M10).
+                 limpio (ver ``IrisMailboxConnection.last_success_at``).
                  Por defecto ``True``.
         digest_last_sent_at: Cuándo se envió el último digest a este usuario;
                  ``None`` si nunca se ha enviado uno. El scheduler lo usa

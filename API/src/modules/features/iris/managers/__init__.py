@@ -11,7 +11,7 @@ Managers del módulo Iris (análisis de correo).
 - ``IrisPhishingNotifyManager`` (``notifications.py``): correo de alerta
   cuando la ingesta automática de buzón clasifica un correo como Phishing.
 - ``IrisNotificationPreferenceManager`` (``notifications.py``): lectura y
-  escritura de las preferencias de notificación de un usuario (M08).
+  escritura de las preferencias de notificación de un usuario.
 
 Iris era el único módulo con
 **dos** ficheros de managers en la raíz — ``managers.py`` (64 KB, el

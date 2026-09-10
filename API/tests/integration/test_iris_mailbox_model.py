@@ -102,10 +102,10 @@ def test_analysis_source_message_uid_unique_per_connection(app, regular_user):
             repo.save(IrisAnalysis(raw_headers="From: c@d.com", user_id=regular_user.id))
 
 
-# --------------------------------------------------------------- B12: cursor opaco
+# --------------------------------------------------------------- cursor opaco
 
 def test_sync_cursor_column_has_no_length_limit():
-    """B12: la columna era ``String(255)``, pero el ``@odata.deltaLink`` de
+    """La columna era ``String(255)``, pero el ``@odata.deltaLink`` de
     Microsoft Graph es una URL con un token de estado dentro que la rebasa.
 
     Esta comprobación mira el **tipo declarado**, no un round-trip, a
@@ -150,7 +150,7 @@ def test_a_long_opaque_cursor_survives_a_round_trip(app, regular_user):
             assert len(fetched.sync_cursor) > 255
 
 
-# --------------------------------------------------------------- B01: IrisMailboxInbox
+# --------------------------------------------------------------- IrisMailboxInbox
 
 def test_create_and_fetch_inbox_entry(app, regular_user):
     with app.app_context():

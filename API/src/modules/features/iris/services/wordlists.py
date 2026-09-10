@@ -387,7 +387,7 @@ _DEFAULTS: dict[str, Any] = {
     # de la marca (google.com, sharepoint.com...) pero el path/subdominio
     # es de un usuario cualquiera, así que una página de cosecha de
     # credenciales alojada ahí hoy se salta el chequeo pensado solo para
-    # "es la propia web de la marca" (N3).
+    # "es la propia web de la marca".
     "multitenant_hosting_domains": [
         "docs.google.com", "forms.gle", "forms.office.com", "drive.google.com",
         "sites.google.com", "sharepoint.com", "onedrive.live.com",
@@ -398,7 +398,7 @@ _DEFAULTS: dict[str, Any] = {
 
     # Lenguaje de pago/facturación/suscripción/soporte combinable con un
     # número de teléfono para el patrón TOAD (Telephone-Oriented Attack
-    # Delivery, G-D): "su suscripción se renovó, llame para cancelar" -- sin
+    # Delivery): "su suscripción se renovó, llame para cancelar" -- sin
     # enlaces ni adjuntos, invisible al resto de reglas.
     "toad_phrases": [
         "subscription", "auto-renewal", "auto renewal", "renewal", "renewed",
@@ -427,7 +427,7 @@ def _data(key: str) -> Any:
     return value if value is not None else _DEFAULTS[key]
 
 
-# B18: las cachés se indexan por (versión de configuración, nombre del
+# Las cachés se indexan por (versión de configuración, nombre del
 # dataset), no solo por el nombre.
 #
 # Antes la clave era el nombre a secas y eran permanentes, así que recargar la
@@ -566,7 +566,7 @@ def brand_trusted_domains() -> tuple[tuple[tuple[str, ...], tuple[str, ...]], ..
 
 
 # =============================================================================
-# MATCHING DE FRASES CON LÍMITES DE PALABRA (B1)
+# MATCHING DE FRASES CON LÍMITES DE PALABRA
 # =============================================================================
 #
 # Los datasets de frases (bec_phrases, credential_phrases, high/low_signal_
