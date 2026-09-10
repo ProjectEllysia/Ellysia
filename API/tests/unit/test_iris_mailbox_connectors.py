@@ -1,8 +1,7 @@
 """Tests unitarios de los conectores de buzón (Gmail / Microsoft Graph).
 
 Todo el HTTP está mockeado (``unittest.mock.patch`` sobre ``requests.get``/
-``requests.post``) -- sin red real, sin credenciales OAuth reales. Ver
-plans/feature/iris/iris-mailbox-connector.md Fase 4.
+``requests.post``) -- sin red real, sin credenciales OAuth reales.
 """
 
 from __future__ import annotations

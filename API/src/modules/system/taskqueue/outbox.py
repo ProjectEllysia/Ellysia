@@ -46,11 +46,11 @@ recalculan y sobrescriben por ``analysis_id`` en vez de crear filas nuevas,
 así que una repetición ahí es trabajo de más, no un dato duplicado -- pero
 quien añada un nuevo consumidor de outbox debe poder decir lo mismo del suyo.
 
-**Alcance de esta primera aplicación (B08).** El propio issue #240 pide
-aplicarlo primero a análisis e ingesta y dejar para después el PDF, el
-resumen de IA y las notificaciones -- todos siguen el mismo patrón
-create-then-enqueue y son candidatos igual de válidos, pero mezclarlos aquí
-habría triplicado el tamaño de este cambio sin necesidad.
+**Dónde se aplica.** Donde una fila confirmada antes de encolar puede quedarse
+huérfana o, peor, ser el guardia que impide volver a intentarlo: los escaneos
+de Themis, las campañas y píldoras de Aegis, el análisis de Iris y los avisos
+con guardia anti-duplicado de Iris y Hygeia. Los sitios que siguen llamando a
+``submit()`` directamente explican por qué junto a esa llamada.
 
 **Por qué el dispatcher vive en un fichero aparte** (``dispatcher.py``): este
 módulo es la base (modelo + (de)serialización) que ``outbox_repository.py``

@@ -1,6 +1,5 @@
 """
-AegisManager — generación de píldoras de concienciación (D3 en
-plans/deuda-tecnica-y-calidad.md).
+AegisManager — generación de píldoras de concienciación.
 
 Crea documentos pendientes y lanza el workflow de generación en la
 TaskQueue, persiste el contenido (tips en AegisTip, avisos en
@@ -661,7 +660,7 @@ class AegisManager(TaskTrackingMixin):
     def _create_pending_document_and_dispatch(self, topic_id: int, tweaks: dict) -> tuple[int, int]:
         """Crea el ``AegisDocument`` 'pending' y su intención de encolado, juntos.
 
-        Las dos filas viajan en la misma transacción (#551). Antes el documento
+        Las dos filas viajan en la misma transacción. Antes el documento
         se confirmaba aquí y el ``submit()`` caía fuera, sin ningún try/except:
         si Redis fallaba justo ahí, la píldora se quedaba en ``pending`` para
         siempre —un "Generando..." que nunca termina— con las dos cuotas ya

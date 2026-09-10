@@ -1,4 +1,4 @@
-"""Piezas de Lybra que sí necesitan el ORM (D1 en plans/deuda-tecnica-y-calidad.md).
+"""Piezas de Lybra que sí necesitan el ORM.
 
 ``LybraEngineManager`` (``engine.py``) y ``ServiceSource``/``DiscoveryProbes``
 (``sources.py``) vivían sueltos en ``managers/`` con nombres con prefijo

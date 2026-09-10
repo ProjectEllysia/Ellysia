@@ -184,7 +184,7 @@ class TestLybraServicesSurviveJsonb:
         assert LybraEngineManager._rehydrate_services(payload) == [original]
 
     def test_rehydrate_passes_through_dataclasses_and_none(self):
-        """Compatibilidad: un job pickleado por RQ antes de #551 trae ``Service``
+        """Compatibilidad: un job pickleado por RQ antes de la outbox trae ``Service``
         ya construidos, y el modo autodescubrimiento no trae ninguno."""
         original = Service(port=22, protocol="tcp", name="ssh")
 

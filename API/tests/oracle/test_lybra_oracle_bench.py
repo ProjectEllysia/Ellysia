@@ -57,7 +57,7 @@ def _wait_for_port(host: str, port: int, timeout: float = 30.0) -> None:
     """``wait_for_port`` con el cliente Docker ya puesto.
 
     Sin él, un contenedor que muere al arrancar se comunica como un puerto
-    que no contestó, que es el síntoma y nunca la causa (#455).
+    que no contestó, que es el síntoma y nunca la causa.
     """
     wait_for_port(host, port, timeout, docker_path=_DOCKER)
 
@@ -426,7 +426,7 @@ def test_missing_security_headers_detected_against_real_container(app, admin_use
     headers = {f.check_id for f in findings if f.category == "security_header"}
     # La familia esperada sale del feed, no de una lista escrita aquí. La lista
     # estuvo escrita, con tres identificadores, y se quedó atrás en cuanto el
-    # feed creció (#455).
+    # feed creció.
     assert headers == always_missing_header_checks()
     assert all(f.confirmed and f.qod == 99 for f in findings if f.category == "security_header")
 
@@ -456,7 +456,7 @@ def test_tls_expired_cert_detected_against_real_container(app, admin_user, tls_e
 
 # ------------------------------------------- familia network contra servidores reales
 #
-# Los cuatro casos que cierran #265. Hasta aquí, los dos únicos checks no-web
+# Por qué existen estos cuatro casos: hasta aquí, los dos únicos checks no-web
 # del motor sólo se habían ejercitado contra dobles, y por eso nadie vio que el
 # transporte leía una forma de respuesta que ni FTP ni Redis producen: el
 # escaneo terminaba en verde y el FTP anónimo seguía ahí. Un positivo y un

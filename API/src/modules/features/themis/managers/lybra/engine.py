@@ -213,7 +213,7 @@ class LybraEngineManager(ScanManager):
 
         ``services`` acepta tanto ``Service`` como el dict equivalente, y por el
         mismo motivo de compatibilidad: desde que ``run_scan`` encola por la
-        outbox (#551) los argumentos se guardan en JSONB, así que llegan como
+        outbox transaccional los argumentos se guardan en JSONB, así que llegan como
         dicts. Un job pickleado por RQ antes de ese cambio sigue trayendo
         dataclasses, y esos se dejan pasar tal cual.
         """
@@ -245,8 +245,9 @@ class LybraEngineManager(ScanManager):
             services: Lista de servicios tal como viajó en el job, o ``None``
                 si el escaneo es de autodescubrimiento (Lybra descubre los
                 puertos él mismo y no recibe payload). Cada elemento puede ser
-                un dict —lo normal desde #551— o ya un ``Service``, que es como
-                viaja un job pickleado por RQ antes de ese cambio o una llamada
+                un dict —lo normal desde que se encola por la outbox— o ya un
+                ``Service``, que es como viaja un job pickleado por RQ antes de
+                ese cambio o una llamada
                 directa desde un test.
 
         Returns:
@@ -519,7 +520,7 @@ class LybraEngineManager(ScanManager):
             self.update_scan_status(scan_id, ScanStatus.FAILED, scan_failure.reason)
         # La sentencia de muerte de la cola. Hereda de ``BaseException`` para
         # que ningún ``except Exception`` la confunda con un fallo de red
-        # (#395), y el efecto colateral era que tampoco la veía el único sitio
+        # y se la trague, y el efecto colateral era que tampoco la veía el único sitio
         # que sabe qué fila hay que cerrar: la fila se quedaba en `running`
         # para siempre y el panel decía «escaneando» un día después. Se captura
         # explícitamente, se cierra la fila y **se vuelve a lanzar**, para que
@@ -1191,7 +1192,7 @@ class LybraEngineManager(ScanManager):
         Cada uno es **una muestra etiquetada gratis**, que es lo que convierte
         esta necesidad de una casilla de interfaz en un bucle de mejora: dicen
         contra qué check y contra qué producto se equivoca el motor, que es
-        exactamente la entrada que el banco de falsos positivos (#278) tiene
+        exactamente la entrada que el banco de falsos positivos tiene
         que aprender a consumir y lo que permite rankear qué familia falla más.
 
         Hasta L35 esa señal no existía: el usuario sólo podía decir "acepto el

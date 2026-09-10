@@ -104,8 +104,8 @@ def test_a_script_without_plugin_is_reported(feed):
 
 
 def test_a_network_service_without_predicate_is_reported(feed):
-    """El caso de #272: un check ``network`` para un protocolo que ningún
-    predicado reconoce. Aquel arreglo lo hizo fallar al cargar; esta validación
+    """Un check ``network`` para un protocolo que ningún predicado reconoce.
+    Cargar el feed ya falla en ese caso; esta validación
     lo encuentra además sobre un feed externo, que no pasa por ese camino."""
     # El nombre tiene que ser uno que ningún `is_*_service` reconozca. Aquí
     # estuvo "postgres" hasta que L12 le dio su predicado, que es justo la

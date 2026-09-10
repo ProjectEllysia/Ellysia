@@ -98,7 +98,7 @@ class TracerouteManager(TaskTrackingMixin):
         así que no existe el huérfano que la outbox previene. Un fallo de
         encolado deja simplemente un fallo de caché — el cliente sigue
         sondeando, no encuentra resultado fresco y la siguiente petición vuelve
-        a encolar. Se revisó con los demás en #551 y se decidió dejarlo así.
+        a encolar.
         """
         key = self._trace_key(user_id, target)
         timeout = int(CR.traceroute_config().timeout) + 30

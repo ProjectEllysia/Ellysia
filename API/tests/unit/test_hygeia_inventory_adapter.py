@@ -130,8 +130,8 @@ def test_the_stripped_version_matches_an_nvd_range():
     Este test afirmaba también lo contrario para la versión **sin** recortar
     (``version_compare(raw, "2.39") < 0``), porque entonces era cierto: el
     comparador partía la cadena en tramos de dígitos y de letras, y el sufijo
-    de empaquetado dejaba la instalada por debajo del inicio del rango. Desde
-    #267 ya no lo es — el comparador reconoce y separa la revisión de
+    de empaquetado dejaba la instalada por debajo del inicio del rango. Ya no
+    lo es — el comparador reconoce y separa la revisión de
     distribución él mismo, así que las dos formas comparan igual. Afirmar aquí
     el fallo antiguo sería congelarlo.
 

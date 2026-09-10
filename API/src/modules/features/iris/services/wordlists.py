@@ -1,7 +1,7 @@
 """
 Datasets de detección (marcas, dominios, keywords, extensiones…) compartidos
-entre las reglas de Iris (D6 en plans/deuda-tecnica-y-calidad.md — antes
-mezclado con text.py en un único shared.py de 957 líneas).
+entre las reglas de Iris (antes mezclados con text.py en un único shared.py
+de 957 líneas).
 
 Los datasets se leen de ``SecOpsConfig.json`` (bloque ``features.iris.data.*``)
 a través de ``config_reading.get_iris_data``. Cada dataset tiene un default

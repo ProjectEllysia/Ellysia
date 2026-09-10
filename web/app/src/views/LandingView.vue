@@ -627,7 +627,7 @@ onUnmounted(() => {
    (`.scene { overflow: hidden }`), así que este `overflow` no protegía nada
    del fondo — solo recortaba, sin querer, cualquier desplegable de la
    cabecera (AccountMenu, Herramientas, Documentación) que no cupiera en los
-   100vh del hero (issue #140). */
+   100vh del hero. */
 .vista {
   position: relative;
   height: 100vh;

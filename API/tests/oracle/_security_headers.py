@@ -4,13 +4,13 @@ Los bancos necesitan saber qué es un acierto y qué es un falso positivo, y par
 la familia de cabeceras esa lista estaba escrita a mano **dos veces**: una en
 ``test_lybra_precision_bench.py`` y otra en ``test_lybra_oracle_bench.py``, las
 dos con los mismos tres identificadores. Cuando el feed creció de 28 a 55 checks
-(#296) y aparecieron CSP, ``Referrer-Policy`` y ``Permissions-Policy``, ninguna
+y aparecieron CSP, ``Referrer-Policy`` y ``Permissions-Policy``, ninguna
 de las dos se enteró. Los tres checks nuevos son detecciones **correctas** —un
 nginx recién sacado de la caja no manda ninguna de esas cabeceras— pero como el
 catálogo no los listaba como esperados, se contaron como falsos positivos en los
-diecisiete objetivos HTTP del banco y hundieron la precisión de la Fase R a
+diecisiete objetivos HTTP del banco y hundieron la precisión del banco a
 0,557 frente a un umbral de 0,90. El banco nocturno llevaba tres noches en rojo
-por eso (#455).
+por eso.
 
 La lección es la del repositorio de siempre: una lista que hay que acordarse de
 actualizar a mano se desincroniza, y lo hace en silencio. Así que aquí no se

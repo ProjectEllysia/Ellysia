@@ -90,7 +90,7 @@ def remember_container(port: int, name: str) -> None:
 
     Sin este apunte, los esperadores de este módulo sólo pueden informar de que
     un puerto no contestó, que es el síntoma y nunca la causa. Con él pueden
-    mirar si el contenedor sigue vivo y adjuntar su log. Ver #455: el objetivo
+    mirar si el contenedor sigue vivo y adjuntar su log. Ya pasó: el objetivo
     de ProFTPD moría al arrancar y el banco lo comunicaba como un timeout de
     cuatro minutos contra un puerto, sin una sola línea sobre el contenedor.
     """

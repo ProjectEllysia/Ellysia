@@ -295,7 +295,7 @@ def test_version_finding_from_inventory_origin_is_confirmed_with_high_qod():
     assert vuln["confirmed"] is True
 
 
-# ------------------------------------------- marca de reproducibilidad (#270)
+# -------------------------------------------------- marca de reproducibilidad
 #
 # Cada hallazgo lleva una marca que dice contra qué se resolvió. Para los checks
 # activos era cierta (sube cada vez que cambia el feed); para la detección por
@@ -369,7 +369,7 @@ def test_the_mark_fits_in_the_column_that_stores_it():
 
 
 def test_an_inventory_package_resolves_the_same_cves_as_its_upstream_version():
-    """El criterio de cierre de #267, extremo a extremo dentro del motor.
+    """El comparador de versiones de distribución, extremo a extremo en el motor.
 
     El inventario de un agente entrega versiones de paquete de distribución
     (`1:7.4-1ubuntu1`), y NVD sólo publica rangos sobre versiones de

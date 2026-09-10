@@ -1,5 +1,4 @@
-"""Las rutas de configuración que codifica el SPA tienen que existir de verdad
-(A11 en ``plans/deuda-tecnica-y-calidad.md``).
+"""Las rutas de configuración que codifica el SPA tienen que existir de verdad.
 
 ``web/app/src/views/ConfigView.vue`` enlaza cada control del formulario con
 ``store.configFlat['ruta.con.puntos']``. Ese ``configFlat`` es el aplanado de

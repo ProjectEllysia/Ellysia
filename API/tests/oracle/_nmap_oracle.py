@@ -79,7 +79,7 @@ def _docker_args(docker_path: str) -> List[str]:
     host dentro y **termina con código 0**. Nada lanzaba, el banco leía «Nmap
     no identificó nada» y lo apuntaba como desacuerdo de fingerprint. Tres
     tests de concordancia fallaban cada noche por una discrepancia que no
-    existía (#455).
+    existía.
 
     En Docker Desktop la bandera es redundante pero inocua: mapea a la misma
     puerta de enlace que ya estaba puesta.
@@ -143,7 +143,7 @@ def assert_target_was_scanned(document: str, error_output: str, target: str) -> 
     """Comprobar que el oráculo llegó a mirar el objetivo, y no a otra cosa.
 
     Hay dos formas muy distintas de que ``run_nmap_sv`` devuelva un mapa vacío,
-    y confundirlas es lo que tuvo el banco nocturno en rojo tres noches (#455):
+    y confundirlas es lo que tuvo el banco nocturno en rojo tres noches:
 
     - **El puerto no está abierto.** Es un resultado legítimo, y el que la
       documentación de :func:`parse_nmap_xml` describe: Nmap habló con el

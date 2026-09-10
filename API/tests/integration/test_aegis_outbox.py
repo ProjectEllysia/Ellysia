@@ -219,7 +219,7 @@ def test_generating_a_pill_with_redis_down_leaves_a_recoverable_dispatch(
 ):
     """La píldora se crea en ``pending`` y su generación queda en la outbox.
 
-    Antes de #551 este era el peor de los dos casos de Aegis: sin outbox, sin
+    Antes era el peor de los dos casos de Aegis: sin outbox, sin
     try/except y sin reconciliación, el documento se quedaba en ``pending`` para
     siempre con las dos cuotas de IA ya cobradas.
     """

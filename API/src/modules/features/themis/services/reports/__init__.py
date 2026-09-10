@@ -12,13 +12,13 @@ Generación de informes PDF de Themis.
     lybra.py     LybraPrintingStrategy
     nuclei.py    NucleiPrintingStrategy
 
-D5 en ``plans/deuda-tecnica-y-calidad.md``: este paquete sustituye al
+Este paquete sustituye al
 ``reports.py`` de 85 KB, el fichero más grande del repositorio. Su
 estructura interna ya era buena —el registro ``@PrintingStrategy.register``
 estaba bien hecho— y el problema era puramente de tamaño: tocar la paleta
 de un escáner obligaba a abrir un fichero de 2.000 líneas, y dos cambios en
 escáneres distintos colisionaban siempre en el mismo sitio. Es la misma
-Fase 3 que ya se aplicó a ``themis/managers.py``.
+partición que ya se aplicó a ``themis/managers.py``.
 
 Las cuatro estrategias se importan aquí por su **efecto secundario**: cada
 una se da de alta en ``PrintingStrategy._registry`` con su decorador al

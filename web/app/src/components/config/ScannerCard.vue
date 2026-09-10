@@ -34,7 +34,7 @@ const props = defineProps({
   prefix: { type: String, required: true },
   flat: { type: Object, required: true },
   // Colapsada por defecto para que las cuatro tarjetas de Themis empiecen a la
-  // misma altura (issue #451): expandir una no debe descolocar a las demás,
+  // misma altura: expandir una no debe descolocar a las demás,
   // así que cada tarjeta abre de forma independiente, no en modo acordeón.
   defaultOpen: { type: Boolean, default: false },
 })

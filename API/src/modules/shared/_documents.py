@@ -83,7 +83,7 @@ def submit_report_generation(task_queue, document_id: int, repo_cls: Type, **sub
     devolviendo el mismo error al cliente.
 
     Este manejo es la razón por la que los informes de Themis e Iris se
-    quedaron **fuera** de la outbox transaccional al auditarlos en #551, aunque
+    quedaron **fuera** de la outbox transaccional, aunque
     siguen el mismo patrón create-then-enqueue que Themis y Aegis sí migraron:
     un encolado fallido no deja el documento colgado en ``running`` para
     siempre, lo marca ``error``, y el usuario ve el fallo y puede volver a
@@ -148,7 +148,7 @@ class DocumentManager(TaskTrackingMixin):
     """CRUD y ownership compartidos por el ciclo de vida de un documento.
 
     ``ThemisReportManager`` e ``IrisReportManager`` eran el mismo manager con
-    los nombres cambiados (A3 en ``plans/deuda-tecnica-y-calidad.md``): esta
+    los nombres cambiados: esta
     base concentra lo que de verdad era idéntico. La generación en sí
     (``generate_report``/``_generate_pdf_async``/``execute_report_generation``)
     se queda en cada subclase porque el ``render`` y el disparador difieren

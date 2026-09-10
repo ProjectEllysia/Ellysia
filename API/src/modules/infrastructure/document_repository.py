@@ -1,6 +1,5 @@
 """
-Repositorio base para las entidades ``Document`` (A9 en
-plans/deuda-tecnica-y-calidad.md).
+Repositorio base para las entidades ``Document``.
 
 Los tres repositorios de documentos del proyecto —Themis (informes PDF de
 escaneo), Iris (informes PDF de análisis) y Aegis (píldoras de

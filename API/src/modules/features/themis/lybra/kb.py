@@ -223,7 +223,7 @@ def kb_feed_version(state: Dict[str, Optional[datetime]]) -> str:
     Spelled out rather than hashed on purpose: the point is that someone
     reading a finding a year from now can tell what it was resolved against,
     and a hash only says "not the same as that other one" — it needs a lookup
-    table that does not exist yet (#302). A source with no date reports
+    table that does not exist. A source with no date reports
     ``none``, which is honest: an empty knowledge source is exactly the thing
     this mark exists to make visible.
 

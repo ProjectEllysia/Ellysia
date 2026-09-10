@@ -170,7 +170,7 @@ def test_cpe_and_cvss_vector_read_from_classification():
     assert f["cvss_vector"] == "CVSS:3.1/x"
 
 
-# ------------------------------------------------------- finding_to_json (#118)
+# -------------------------------------------------------------- finding_to_json
 
 def test_finding_to_json_exposes_required_os_and_feeds_the_cap_into_priority():
     """An unconfirmed, platform-gated CVSS 9.8 finding must serialize its

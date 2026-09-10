@@ -214,7 +214,7 @@ def test_rollup_de_servicios_se_recorta_al_tope_priorizando_severidad(monkeypatc
     assert servicios[0]["producto"] == "product-critico 1.0"
 
 
-# ------------------------------------------------------- NmapAIWriter (#118)
+# -------------------------------------------------------------- NmapAIWriter
 
 _FAKE_NMAP_PROMPTS = {
     "nmap": {

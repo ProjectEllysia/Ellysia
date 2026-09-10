@@ -1,7 +1,6 @@
 """
-Utilidades de texto/dominio compartidas entre las reglas de Iris (D6 en
-plans/deuda-tecnica-y-calidad.md — antes mezclado con wordlists.py en un
-único shared.py de 957 líneas).
+Utilidades de texto/dominio compartidas entre las reglas de Iris (antes
+mezcladas con wordlists.py en un único shared.py de 957 líneas).
 
 Extracción de dominios/hosts, distancia de edición, homóglifos, y el
 análisis de URL completo (``analyze_url``) que usan tanto Body Links (sobre

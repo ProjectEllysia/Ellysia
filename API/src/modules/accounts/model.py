@@ -1,8 +1,7 @@
 """
 Modelos de la capa comercial: catálogo de planes, suscripciones y organizaciones.
 
-Diseño completo en ``plans/feature/general/planes-y-organizaciones.md``. Tres
-grupos de tablas:
+Tres grupos de tablas:
 
 - **Catálogo**: ``Plan`` y ``PlanLimit`` — qué se vende y cuánto incluye.
 - **Titularidad**: ``Subscription`` — quién tiene qué y hasta cuándo.

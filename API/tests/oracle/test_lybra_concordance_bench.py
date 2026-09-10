@@ -39,7 +39,7 @@ SNMP). Los cuatro fallos están documentados uno a uno más abajo con
 arregle su test pasará a XPASS y habrá que quitarle el marcador — la convención
 del repositorio para un bug documentado.
 
-Requiere Docker. Marcado ``oracle``, fuera del run por defecto de CI (#280).
+Requiere Docker. Marcado ``oracle``, fuera del run por defecto de CI.
 """
 
 from __future__ import annotations
@@ -136,8 +136,8 @@ def _wait_for_http(port: int, timeout: float = 240.0) -> None:
 def _wait_for_greeting(port: int, expect: bytes, timeout: float = 240.0) -> None:
     """Esperar a que el servidor emita **su** saludo, no a que el puerto acepte.
 
-    Es la lección que dejó #265 en la Fase 0 y aquí vuelve a hacer falta: el
-    proxy de Docker acepta la conexión TCP en cuanto existe el espacio de red
+    Es una lección que ya dejaron los checks ``network`` y que aquí vuelve a
+    hacer falta: el proxy de Docker acepta la conexión TCP en cuanto existe el espacio de red
     del contenedor, mucho antes de que el servidor de dentro haya terminado de
     instalarse y arrancar. Un ``wait_for_port`` que sólo conecta da por listo un
     contenedor que todavía está haciendo ``apk add``, y la medición sale vacía
@@ -216,7 +216,8 @@ def proftpd_target():
     servidor FTP, un vsftpd cuyo saludo (``220 (vsFTPd 3.0.5)``) es justo el
     formato que el parser sabía leer. Ese 1,00 no medía la calidad del
     dissector, medía la coincidencia entre el dissector y el contenedor
-    elegido — la misma trampa que la Fase 0 documentó en #269 y #270.
+    elegido — la misma trampa de medir contra un doble hecho a la medida del
+    código que se mide.
 
     ProFTPD es el otro servidor FTP extendido y saluda de otra forma; en su
     configuración por defecto de Debian, además, **omite la versión**. Con él
@@ -227,7 +228,7 @@ def proftpd_target():
     # original venía de Debian, cuyo paquete la crea en su postinstalación, y
     # se ejecutaba sobre Alpine, donde no tiene por qué existir: ProFTPD aborta
     # con un fatal si el usuario que nombra su configuración no está, y el
-    # contenedor moría en el segundo uno (#455). Los dos ``||`` la hacen
+    # contenedor moría en el segundo uno. Los dos ``||`` la hacen
     # idempotente, para que la receta siga valiendo el día que el paquete sí
     # traiga la cuenta.
     #

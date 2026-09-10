@@ -901,7 +901,7 @@ class Finding(Base):
     # Quality / provenance
     source       = Column(String(32), index=True)
     check_id     = Column(String(128))
-    # 64 y no 32: desde #270 la marca de la detección por versión describe el
+    # 64 y no 32: la marca de la detección por versión describe el
     # estado de la base de conocimiento ("lybra-kb:nvd=2026-08-29,kev=...,
     # epss=..."), que ocupa hasta 54 caracteres. Se escribe entera en vez de
     # resumirla en un hash para que un hallazgo guardado siga diciendo, por sí
