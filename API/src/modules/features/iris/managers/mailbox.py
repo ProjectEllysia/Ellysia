@@ -31,6 +31,8 @@ from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive
 from src.modules.system.taskqueue import TaskTrackingMixin, job_context
 from src.modules.system.taskqueue.connection import RedisConnectionFactory
+from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
+from src.modules.system.taskqueue.outbox_repository import TaskDispatchRepository
 
 from ..exceptions import (
     IrisMailboxConnectionNotFoundError,
@@ -764,7 +766,26 @@ class IrisMailboxManager(TaskTrackingMixin):
         volver a invocarlo mientras la conexión sigue sin reautorizar (un
         segundo intento de cambiar de carpeta, por ejemplo), y sin esta
         comprobación cada uno de esos reintentos mandaría un correo nuevo.
+
+        El cambio de estado y la intención de avisar se confirman juntos, y
+        en el momento (#561), por dos motivos:
+
+        - El estado es el guardia. Cuando se confirmaba solo y el encolado
+          fallaba después, las llamadas siguientes lo veían ya puesto y el
+          aviso no llegaba nunca.
+        - Dos de los tres llamantes (``update_connection`` y ``list_folders``)
+          corren dentro de una request y lanzan una excepción justo después,
+          así que ``teardown_request`` hace rollback. Sin un commit explícito
+          aquí, el estado se perdía con él, y el job ya encolado veía la
+          conexión todavía ``active`` y descartaba el aviso.
+
+        Args:
+            connection_id: Primary key de la ``IrisMailboxConnection`` cuyo
+                token rechazó el proveedor. Si ya no existe, no se hace nada.
+            error: Motivo que devolvió el proveedor; se guarda en
+                ``last_error`` recortado a 2000 caracteres.
         """
+        dispatch_id = None
         with UnitOfWork() as uow:
             repo = IrisMailboxConnectionRepository(uow)
             fresh = repo.get_by_id(connection_id)
@@ -776,11 +797,13 @@ class IrisMailboxManager(TaskTrackingMixin):
             fresh.last_sync_duration_ms = _duration_ms(fresh.sync_started_at)
             fresh.last_error = error[:2000]
             repo.update(fresh)
-        if not was_already_reauth_required:
-            try:
-                IrisReauthNotifyManager.enqueue_for(connection_id)
-            except Exception as e:
-                logger.error(
-                    f"No se pudo encolar el aviso de reautenticación de la conexión {connection_id}: {e}",
-                    exc_info=True,
-                )
+            if not was_already_reauth_required:
+                dispatch_id = TaskDispatchRepository(uow).save(
+                    IrisReauthNotifyManager.build_dispatch_for(connection_id),
+                ).id
+            uow.commit_for_handoff()
+        if dispatch_id is not None:
+            # Camino feliz: publicar ya. Si Redis falla, la fila queda
+            # `pending` y la recogen el barrido periódico o la reconciliación
+            # de arranque.
+            OutboxDispatcher.dispatch(dispatch_id)

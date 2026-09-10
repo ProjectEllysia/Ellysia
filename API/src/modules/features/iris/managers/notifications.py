@@ -11,12 +11,13 @@ En los cuatro, el envío SMTP corre en el worker (proceso aislado, categoría
 se registra y se descarta -- el estado ya quedó persistido y visible en el
 panel, con independencia de si el correo llegó o no.
 
-Cómo llega el job a la cola depende de si hay guardia anti-duplicado. El
-aviso de sync atascado confirma una marca que impide volver a avisar, así
-que su intención de encolado viaja en la misma transacción que esa marca
+Cómo llega el job a la cola depende de si hay guardia anti-duplicado. Los
+avisos de reautorización y de sync atascado confirman un estado que impide
+volver a avisar (``status="reauth_required"``, ``stuck_alert_sent_at``), así
+que su intención de encolado viaja en la misma transacción que ese guardia
 (outbox transaccional, ``build_dispatch_for``): si no, un encolado fallido
-suprimiría el aviso para siempre (#561). Los que no tienen guardia confirman
-su estado y encolan después con ``enqueue_for``.
+suprimiría el aviso para siempre (#561). Los que no tienen guardia --
+phishing y digest -- confirman su estado y encolan después con ``enqueue_for``.
 
 El correo va siempre al ``User`` dueño del recurso (análisis o conexión), no
 necesariamente a la cuenta de correo conectada: quien conecta un buzón puede
@@ -348,15 +349,30 @@ class IrisReauthNotifyManager:
     EXTERNAL_ID_PREFIX = "iris-reauth-notify:"
 
     @staticmethod
-    def enqueue_for(connection_id: int) -> None:
-        """Encola el aviso de ``connection_id``. Llamado desde
-        ``IrisMailboxManager._mark_reauth_required`` solo en la transición
-        hacia ese estado, nunca en cada sondeo mientras sigue en él."""
-        TaskQueue.get_instance().submit(
-            func=IrisReauthNotifyManager.execute_notify_reauth,
-            args=(connection_id,),
+    def build_dispatch_for(connection_id: int) -> TaskDispatch:
+        """Construye, sin guardarla, la intención de encolar el aviso de
+        reautorización de ``connection_id``.
+
+        ``IrisMailboxManager._mark_reauth_required`` la guarda solo en la
+        transición hacia ``reauth_required``, y en la misma transacción que
+        ese cambio de estado (#561): el estado es el guardia anti-duplicado,
+        así que si se confirmaba solo y el encolado fallaba después, las
+        llamadas siguientes lo veían ya puesto y el aviso no llegaba nunca.
+
+        Args:
+            connection_id: Primary key de la ``IrisMailboxConnection`` que
+                acaba de pasar a necesitar reautorización.
+
+        Returns:
+            TaskDispatch: Fila de outbox sin persistir, para el job
+                ``IrisReauthNotify-{connection_id}`` de la categoría
+                ``iris.notify``.
+        """
+        return build_dispatch(
+            IrisReauthNotifyManager.execute_notify_reauth,
             name=f"IrisReauthNotify-{connection_id}",
             category=IrisReauthNotifyManager.TASK_CATEGORY,
+            args=(connection_id,),
             external_id=f"{IrisReauthNotifyManager.EXTERNAL_ID_PREFIX}{connection_id}",
         )
 
