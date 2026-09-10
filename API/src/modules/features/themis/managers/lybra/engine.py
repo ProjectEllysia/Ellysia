@@ -282,7 +282,7 @@ class LybraEngineManager(ScanManager):
         services_payload: Optional[List[Service]] = None,
         timeout: Optional[int] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
-        progress: Optional[Callable[[int], None]] = None,
+        report_progress: Optional[Callable[[int], None]] = None,
         aggressive: bool = False,
     ) -> None:
         """Resolve services (own discovery or a payload), detect, persist.
@@ -325,8 +325,8 @@ class LybraEngineManager(ScanManager):
             return deadline_taken_over
 
         def report(pct: int) -> None:
-            if progress is not None:
-                progress(pct)
+            if report_progress is not None:
+                report_progress(pct)
 
         source = ServiceSource.build_for_args(services_payload, discover_ports)
         probes = DiscoveryProbes(
