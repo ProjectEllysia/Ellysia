@@ -1,4 +1,4 @@
-"""B10: el resumen ejecutivo de IA se pide una vez y se cobra una vez.
+"""El resumen ejecutivo de IA se pide una vez y se cobra una vez.
 
 Antes, `generate_ai_summary` consumía cuota y encolaba sin mirar si ya había
 un resumen o un trabajo en curso. Dos peticiones seguidas —dos clics, un
@@ -71,7 +71,7 @@ class _CountingQuota:
         type(self).consumed.append(key.db_name)
 
     def consume_many(self, user_id, keys, amount=1):
-        # Mismo comportamiento que el QuotaManager real (B09): si alguna
+        # Mismo comportamiento que el QuotaManager real: si alguna
         # clave falla, reembolsa las que esta llamada ya cobró.
         consumed = []
         try:

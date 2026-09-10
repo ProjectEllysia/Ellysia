@@ -1,4 +1,4 @@
-"""Tests unitarios de ``services/redaction.py`` (M09): puro, sin BD."""
+"""Tests unitarios de ``services/redaction.py``: puro, sin BD."""
 
 from __future__ import annotations
 

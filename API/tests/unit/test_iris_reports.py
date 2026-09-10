@@ -61,7 +61,7 @@ def test_print_pdf_creates_a_file():
 
 
 def test_two_documents_of_the_same_analysis_do_not_collide():
-    """B11: el modelo permite N documentos por análisis, pero el nombre del
+    """El modelo permite N documentos por análisis, pero el nombre del
     fichero solo dependía del análisis, así que todos escribían el mismo PDF."""
     first = IrisPDFCreator(report=_sample_report(), document_id=1).print_pdf()
     second = IrisPDFCreator(report=_sample_report(), document_id=2).print_pdf()
@@ -163,7 +163,7 @@ def test_print_pdf_with_legitimate_verdict():
     assert os.path.exists(path)
 
 
-# ------------------------------------------------ M09: redacción del raw dump
+# ------------------------------------------------ redacción del raw dump
 
 def _theme() -> IrisReportTheme:
     return IrisReportTheme(getSampleStyleSheet(), PALETTE)

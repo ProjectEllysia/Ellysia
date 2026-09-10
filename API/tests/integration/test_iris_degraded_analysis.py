@@ -1,4 +1,4 @@
-"""B05: una regla rota no puede pasar inadvertida en el informe.
+"""Una regla rota no puede pasar inadvertida en el informe.
 
 El criterio de cierre del issue pide las tres familias de regla fallida —
 autenticación, adjuntos y contenido— con comportamiento conservador. Estos

@@ -1,15 +1,15 @@
 """
-services/retention.py — política de retención de Iris (M09/B17/B19).
+services/retention.py — política de retención de Iris.
 
 Job idempotente, invocado periódicamente por ``IrisMailboxScheduler``
 (``services/mailbox/scheduling.py``, sin ``add_job`` propio para no sumar
 un scheduler más al módulo -- mismo criterio que el chequeo de
-notificaciones de M08). Dos pasos independientes:
+notificaciones). Dos pasos independientes:
 
 1. **Purgar el raw vencido** (``iris.rawMessageRetentionDays``, por defecto
    90 días): borra ``IrisRawMessage`` de cada análisis lo bastante viejo,
    conservando el análisis y sus resultados -- "el resultado puede
-   conservarse sin el raw" (B19) es el comportamiento por defecto, no una
+   conservarse sin el raw" es el comportamiento por defecto, no una
    opción.
 2. **Borrar análisis enteros** solo si ``iris.analysisRetentionDays`` está
    activo (``> 0``; ``0`` lo desactiva). Con cascada real hacia

@@ -74,7 +74,7 @@ _VERDICT_SEVERITY = {v: i for i, v in enumerate(_VERDICT_ORDER)}
 # from Gmail used to net *positive* despite a -23 risk payload underneath.
 _CEILING = 100.0
 
-# Recalibración de pesos (§18): techos de familia. Varias reglas dentro del
+# Recalibración de pesos: techos de familia. Varias reglas dentro del
 # mismo cluster suelen corroborar el mismo hecho subyacente (p.ej. SPF+DKIM+
 # DMARC+Domain Alignment todas fallando describen UN fallo de autenticación,
 # no cuatro independientes) -- sin techo, sumarlas todas exagera la
@@ -110,7 +110,7 @@ class IrisManager(TaskTrackingMixin):
     TASK_CATEGORY = "iris.analyze"
     _TOP_SIGNALS_LIMIT = 5
 
-    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin (A10).
+    # __init__ (task_queue inyectable) lo aporta TaskTrackingMixin.
 
     # =========================================================================
     # PUBLIC API
@@ -135,18 +135,18 @@ class IrisManager(TaskTrackingMixin):
 
         Args:
             raw_headers: Bloque de solo cabeceras como texto plano (entrada
-                original, previa a Fase 2).
+                original, anterior al soporte de mensaje completo).
             user_id: Primary key del usuario que solicita el análisis.
             title: Etiqueta opcional definida por el usuario para
                 identificarlo rápido en el histórico. Por defecto ``None``.
-            raw_message: Mensaje ``.eml`` crudo completo como texto plano
-                (Fase 2). Tiene prioridad sobre ``raw_headers`` cuando se dan
+            raw_message: Mensaje ``.eml`` crudo completo como texto plano.
+                Tiene prioridad sobre ``raw_headers`` cuando se dan
                 los dos, porque es un superconjunto de los datos de
                 cabecera. Las reglas que necesitan cuerpo/enlaces/adjuntos
                 solo los ven cuando se proporciona este campo. Por defecto
                 ``None``.
             connection_id: IrisMailboxConnection por la que se ingirió este
-                mensaje (Fase 3-4). ``None`` para envíos manuales -- el
+                mensaje (ingesta automática de buzón). ``None`` para envíos manuales -- el
                 flujo original, que sigue siendo el que no requiere
                 conexión. Por defecto ``None``.
             source_message_uid: Id del mensaje específico del proveedor,
@@ -154,7 +154,7 @@ class IrisManager(TaskTrackingMixin):
                 ``(connection_id, source_message_uid)`` es UNIQUE a nivel de
                 base de datos. Un reintento de sync de buzón que reenvía el
                 mismo mensaje nunca duplica el análisis ni cobra cuota dos
-                veces (B09) -- ver la comprobación de idempotencia más abajo.
+                veces -- ver la comprobación de idempotencia más abajo.
                 Por defecto ``None``.
 
         Returns:
@@ -178,10 +178,10 @@ class IrisManager(TaskTrackingMixin):
 
         self._validate_headers_pre(raw_input)
 
-        # B09: comprobar idempotencia ANTES de cobrar cuota -- un reintento
+        # Comprobar idempotencia ANTES de cobrar cuota -- un reintento
         # de sync de buzón (Gmail/Graph pueden repetir un mensaje) para algo
         # ya aceptado no debe volver a cobrar ni crear un segundo análisis.
-        # El propio checkpoint de mailbox (B01) ya evita llegar hasta aquí
+        # El propio checkpoint de mailbox ya evita llegar hasta aquí
         # en el caso común; esto cubre además la llamada directa.
         if connection_id is not None and source_message_uid is not None:
             existing = build_repository(IrisAnalysisRepository).get_by_source(
@@ -211,7 +211,7 @@ class IrisManager(TaskTrackingMixin):
             with UnitOfWork() as uow:
                 IrisAnalysisRepository(uow).save(analysis)
                 analysis_id = analysis.id
-                # B08: la intención de publicar se guarda en la MISMA
+                # La intención de publicar se guarda en la MISMA
                 # transacción que el análisis -- si la API muere o Redis
                 # falla justo después del commit, el barrido periódico de
                 # la outbox (o la reconciliación de arranque) publica el
@@ -255,7 +255,7 @@ class IrisManager(TaskTrackingMixin):
 
     @staticmethod
     def get_capabilities() -> Dict[str, Any]:
-        """Límites y modos de análisis que la interfaz necesita conocer (B13).
+        """Límites y modos de análisis que la interfaz necesita conocer.
 
         El backend rechazaba mensajes por encima de un tamaño que la UI no
         tenía forma de saber: el usuario elegía un fichero que la interfaz
@@ -283,7 +283,7 @@ class IrisManager(TaskTrackingMixin):
     @staticmethod
     def get_retention_report(user_id: int) -> Dict[str, Any]:
         """Política de retención vigente más el estado real de los análisis
-        de este usuario frente a ella (M09/B17): cierra el criterio de
+        de este usuario frente a ella: cierra el criterio de
         "existe una política visible" con datos concretos, no solo los
         valores de configuración -- un usuario puede ver cuántos de sus
         análisis conservan todavía el raw y cuántos ya lo perdieron por
@@ -450,7 +450,7 @@ class IrisManager(TaskTrackingMixin):
 
         Raises:
             IrisRawMessagePurgedError: La retención ya purgó el raw de este
-                análisis (M09/B17/B19) -- sin él no hay nada que reanalizar.
+                análisis -- sin él no hay nada que reanalizar.
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
         if analysis.raw_headers is None:
@@ -468,7 +468,7 @@ class IrisManager(TaskTrackingMixin):
 
         Raises:
             IrisRawMessagePurgedError: La retención ya purgó el raw de este
-                análisis (M09/B17/B19) -- distinto de "sin cuerpo completo":
+                análisis -- distinto de "sin cuerpo completo":
                 aquí no hay ningún raw que parsear, ni cabeceras.
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
@@ -502,7 +502,7 @@ class IrisManager(TaskTrackingMixin):
 
         Raises:
             IrisRawMessagePurgedError: La retención ya purgó el raw de este
-                análisis (M09/B17/B19).
+                análisis.
         """
         analysis = self.assert_analysis_ownership(analysis_id, user_id)
         if analysis.raw_headers is None:
@@ -552,12 +552,12 @@ class IrisManager(TaskTrackingMixin):
         }
 
     def export_analysis(self, analysis_id: int, user_id: int) -> Dict[str, Any]:
-        """Exportación completa de un análisis (B19): resultado, reglas,
+        """Exportación completa de un análisis: resultado, reglas,
         raw (si no se ha purgado ya) y las dos vistas que se derivan de él
         (Received-chain path, IOCs).
 
         Pensada para que el usuario se lleve una copia completa **antes**
-        de que la retención (M09/B17) purgue el raw -- una vez purgado,
+        de que la retención purgue el raw -- una vez purgado,
         ``receivedPath``/``iocs`` dejan de estar disponibles (ver
         ``get_analysis_path``/``get_analysis_iocs``) y esta exportación ya
         no puede recuperarlos; salen como ``None`` en vez de hacer fallar
@@ -599,7 +599,7 @@ class IrisManager(TaskTrackingMixin):
         Fire-and-forget: encola y vuelve. El llamante relee
         ``get_analysis_results`` (``aiSummary``) para ver el resultado.
 
-        `B10`: la operación es **idempotente por análisis**. Antes consumía
+        La operación es **idempotente por análisis**. Antes consumía
         cuota y encolaba sin mirar si ya había un resumen o un trabajo en
         curso, así que dos peticiones seguidas —dos clics, un reintento del
         navegador— cobraban dos veces y lanzaban dos generaciones del mismo
@@ -640,7 +640,7 @@ class IrisManager(TaskTrackingMixin):
             return "running"
 
         # La concreta y el techo agregado de IA, en ese orden, para que el 402
-        # nombre lo que el usuario estaba pidiendo. consume_many() (B09) las
+        # nombre lo que el usuario estaba pidiendo. consume_many() las
         # cobra como una sola operación: si AI_REQUESTS no tiene cupo tras
         # haber cobrado IRIS_AI_SUMMARIES, la reembolsa antes de relanzar --
         # antes se quedaba cobrada sin nada que la explicara.
@@ -728,7 +728,7 @@ class IrisManager(TaskTrackingMixin):
         and leaves ``ai_summary`` as ``NULL`` rather than failing the
         already-finished analysis it's attached to.
 
-        `B10`: además deja el estado en terminal y, si no hubo resumen,
+        Además deja el estado en terminal y, si no hubo resumen,
         devuelve la cuota. Cobrar antes de trabajar es correcto —cobrar
         después permitiría lanzar N generaciones concurrentes con cupo para
         una— pero obliga a devolver el dinero cuando el trabajo no se hace.
@@ -767,7 +767,7 @@ class IrisManager(TaskTrackingMixin):
         ``_task_queue.cancel()`` lea "sigue en marcha" y que este método
         escriba en la base de datos no son un único paso atómico: el worker
         puede llamar a ``_persist_analysis_results()`` y confirmar
-        ``finished`` justo en ese hueco. B07: la escritura real de
+        ``finished`` justo en ese hueco. La escritura real de
         ``status`` pasa por ``IrisAnalysisRepository.transition_if_state()``,
         un ``UPDATE ... WHERE status IN (...)`` condicionado que solo uno de
         los dos escritores en competencia puede ganar, así que una
@@ -967,7 +967,7 @@ class IrisManager(TaskTrackingMixin):
         1. Marks the analysis as ``running``.
         2. Parses the raw text into both a flat headers dict (legacy
            rules) and a full ``MessageContext`` (body/links/attachments
-           — Fase 2 rules). ``raw_input`` may be a headers-only block or
+           — full-message rules). ``raw_input`` may be a headers-only block or
            a full ``.eml`` message; the context degrades gracefully to
            empty body/links/attachments in the former case.
         3. Runs every registered rule against the message (N1: against
@@ -989,7 +989,7 @@ class IrisManager(TaskTrackingMixin):
                 self._fail_analysis(analysis_id, classify_failure(e))
                 return
 
-            # B03: parseo, validación y evaluación comparten manejador con la
+            # Parseo, validación y evaluación comparten manejador con la
             # persistencia. Estaban fuera de todo `try`, así que un parser roto
             # o un `.eml` que no lo era dejaban la fila en `running` para
             # siempre: RQ marcaba el job como fallido, pero nadie tocaba la
@@ -1034,7 +1034,7 @@ class IrisManager(TaskTrackingMixin):
         """Ejecuta el catálogo de reglas y devuelve la evaluación ganadora.
 
         Extraído de :meth:`_run_analysis` al envolver esa función en un único
-        manejador de ciclo de vida (`B03`): el bucle es la parte larga, y
+        manejador de ciclo de vida: el bucle es la parte larga, y
         dejarlo en línea dentro del ``try`` habría escondido qué se está
         protegiendo exactamente.
 
@@ -1044,14 +1044,14 @@ class IrisManager(TaskTrackingMixin):
             (que no es un fallo: no se persiste nada y la cancelación ya dejó
             su propio estado terminal).
         """
-        # N1: a "report phishing" forward is safe to unwrap unconditionally
+        # A "report phishing" forward is safe to unwrap unconditionally
         # for a human-submitted analysis, but the same message/rfc822
         # mechanism lets an attacker send their own phishing as the outer
         # message and staple a benign .eml on as an attachment — analyzing
         # only the unwrapped inner message would then score the wrong
         # mail entirely. Evaluate both when a wrapper exists and keep the
         # worse verdict; this matters most for unattended ingestion
-        # (Fase 3+), where there is no human eyeballing the wrapper first.
+        # (mailbox ingestion), where there is no human eyeballing the wrapper first.
         contexts_to_evaluate = [context]
         if context.wrapper_context is not None:
             contexts_to_evaluate.append(context.wrapper_context)
@@ -1098,7 +1098,7 @@ class IrisManager(TaskTrackingMixin):
             base_verdict = self._determine_verdict(total_score)
             verdict, gate_reasons = self._apply_verdict_gates(base_verdict, named_results)
 
-            # B05: una regla que revienta no aborta el análisis, pero tampoco
+            # Una regla que revienta no aborta el análisis, pero tampoco
             # puede desaparecer sin dejar rastro. La política conservadora se
             # aplica aquí, junto al resto de gates, para que la degradación se
             # lea entre los demás motivos del veredicto y no en un rincón
@@ -1128,11 +1128,11 @@ class IrisManager(TaskTrackingMixin):
         Antes cada regla abría (y confirmaba) su propio ``UnitOfWork`` --
         unos 40 commits por análisis, y una cancelación a mitad de bucle
         dejaba huérfanas las filas ya confirmadas de un análisis
-        ``cancelled`` (C2/C3). Una sola transacción para todo el lote
+        ``cancelled``. Una sola transacción para todo el lote
         arregla las dos cosas: es atómica, y un ``return`` antes de este
         punto (cancelación) ya no deja nada confirmado.
 
-        B07: la escritura final de ``status="finished"`` (junto con los
+        La escritura final de ``status="finished"`` (junto con los
         campos de score/veredicto que la acompañan) pasa por
         ``IrisAnalysisRepository.transition_if_state()``, que solo la
         aplica si la fila sigue ``running``. Sin esa condición, una
@@ -1180,7 +1180,7 @@ class IrisManager(TaskTrackingMixin):
         *negative* part of each rule's score (``min(0, score)``), so passing
         a rule never inflates the total. Clamped to ``[0, _CEILING]``.
 
-        Recalibración de pesos (§18): before summing, each rule's penalty is
+        Recalibración de pesos: before summing, each rule's penalty is
         attributed to its ``family`` (if any) and the family's total is
         floored at ``_FAMILY_SCORE_FLOORS[family]`` — a cluster of rules
         corroborating the same underlying fact can't out-vote its own cap.
@@ -1246,7 +1246,7 @@ class IrisManager(TaskTrackingMixin):
         # (the chain itself declares a prior hop broken) is its own gate,
         # see D7 in ROADMAP.md.
         #
-        # B06: la supresión exige además que la cadena la haya validado un
+        # La supresión exige además que la cadena la haya validado un
         # verificador de confianza (`details["verified"]`). Un `cv=pass` a
         # secas es una afirmación del propio mensaje sobre sí mismo, y como
         # Iris no verifica firmas, bastaba escribirlo para desactivar los tres
@@ -1261,7 +1261,7 @@ class IrisManager(TaskTrackingMixin):
         dmarc_fail = verdict_is("DMARC", "fail") and not arc_pass
         align_fail = verdict_is("Domain Alignment", "fail") and not arc_pass
 
-        # G-A (forense, recalibración de pesos): un authserv-id que reclama
+        # Auth Results Provenance (forense, recalibración de pesos): un authserv-id que reclama
         # "pass" pero no aparece en ningún salto de la propia cadena
         # Received del mensaje es una línea forjada por el remitente --
         # cierra el bypass de confiar ciegamente en Authentication-Results
@@ -1334,13 +1334,14 @@ class IrisManager(TaskTrackingMixin):
             and any(finding.get("type") == "brand_in_subdomain" for finding in (subdomain.details.get("findings") or []))
         )
 
-        # G-B (red team, máxima prioridad): lookalike del dominio del
+        # Recipient Domain Lookalike (red team, máxima prioridad): lookalike del dominio del
         # DESTINATARIO, no de una marca -- el vector BEC nº1, hoy invisible
         # porque Lookalike Sender Domain solo compara contra
         # `canonical_brands`.
         recipient_lookalike = verdict_is("Recipient Domain Lookalike", "fail")
 
-        # G-C (red team): el display name ES una dirección de otro dominio
+        # Display Name Foreign Address (red team): el display name ES una
+        # dirección de otro dominio
         # (`"ceo@acme.com" <attacker@evil.com>`). Escala a Phishing solo
         # cuando esa dirección falsa suplanta la propia organización
         # destinataria o una marca conocida -- si no, queda en Suspicious.
@@ -1350,17 +1351,17 @@ class IrisManager(TaskTrackingMixin):
             display_foreign_fail and bool(display_foreign.details.get("impersonates_target"))
         )
 
-        # G-D (red team): TOAD/callback -- teléfono + lenguaje de pago sin
+        # TOAD Callback Pattern (red team): teléfono + lenguaje de pago sin
         # enlaces/adjuntos/hilo previo, una clase de ataque hoy invisible.
         toad_callback = verdict_is("TOAD Callback Pattern", "fail")
 
-        # G-E (red team): urgencia fuerte combinada con un enlace del cuerpo
+        # External Login Link (red team): urgencia fuerte combinada con un enlace del cuerpo
         # a un dominio ajeno al remitente -- aproxima el "primo autenticado"
         # (dominio propio, auth limpia, marca fuera de la lista) sin
         # depender de `canonical_brands`.
         external_login_link = verdict_is("External Login Link", "fail")
 
-        # Comprobación forense adicional (§5): aproximación offline de
+        # Comprobación forense adicional: aproximación offline de
         # coherencia HELO -- ruidosa en solitario (nombres de host varían
         # mucho de forma legítima), solo se combina con un fallo de auth.
         origin_helo_mismatch = verdict_is("Origin HELO Coherence", "fail")
@@ -1566,7 +1567,7 @@ class IrisManager(TaskTrackingMixin):
         tarea viva en TaskQueue que lo actualice tras reiniciar, y el registro
         se queda así para siempre. Se llama una vez al arrancar la API.
 
-        `B04`: antes se conservaba el análisis **solo** si su tarea estaba
+        Antes se conservaba el análisis **solo** si su tarea estaba
         exactamente en ``pending``. Un job ``running`` puede estar avanzando en
         otro proceso —los workers son procesos aparte, y reiniciar la API no
         los para—, así que ese criterio marcaba como fallidos análisis que
@@ -1606,7 +1607,7 @@ class IrisManager(TaskTrackingMixin):
         ``failure`` es opcional solo para no romper a un llamador que ya no
         tenga la excepción a mano; en la práctica todos los caminos de
         ``_run_analysis`` la traen, porque un ``failed`` sin motivo es
-        justamente lo que `B03` venía a quitar de en medio.
+        justamente lo que el manejo de fallos vino a quitar de en medio.
 
         No se propaga ninguna excepción desde aquí: esto es el último
         recurso de la tarea, y un fallo escribiendo el fallo solo puede

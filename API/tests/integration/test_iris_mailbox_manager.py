@@ -73,7 +73,7 @@ def _fake_state_redis():
 
 class _FakeLockRedis:
     """Doble en memoria de RedisConnectionFactory.decoded() para
-    MailboxSyncLock (B02): SET NX EX más los dos scripts Lua de
+    MailboxSyncLock: SET NX EX más los dos scripts Lua de
     renovación/liberación condicionados al token del titular."""
 
     def __init__(self):
@@ -107,7 +107,7 @@ class _FakeLockRedisFactory:
 
 @pytest.fixture(autouse=True)
 def _fake_lock_redis():
-    """``MailboxSyncLock`` (B02) importa su propio ``RedisConnectionFactory``
+    """``MailboxSyncLock`` importa su propio ``RedisConnectionFactory``
     en el namespace de ``locks.py`` -- se dobla aquí para todos los tests de
     este fichero, ya que ``_sync_connection`` adquiere el lock siempre."""
     factory = _FakeLockRedisFactory()
@@ -130,7 +130,7 @@ class _FakeConnector:
         self.revoked_tokens = []
         self._revoke_raises = revoke_raises
         self._refresh_raises_reauth = refresh_raises_reauth
-        # B16: por defecto expone "INBOX" -- suficiente para los tests que
+        # Por defecto expone "INBOX" -- suficiente para los tests que
         # no ejercitan folder explícitamente pero sí pasan por
         # _ensure_access_token en algún camino que valide.
         self._folders = folders if folders is not None else [
@@ -180,7 +180,7 @@ class _FakeConnector:
 
 
 class _QueueTestConnector(_FakeConnector):
-    """Doble para los tests de checkpoint (B01): lista un lote fijo de
+    """Doble para los tests de checkpoint: lista un lote fijo de
     mensajes y puede fallar la ingesta de ids concretos un número de veces
     controlado antes de empezar a tener éxito -- simula un fallo transitorio
     (el mensaje se recupera) o uno permanente (nunca se agota el contador)."""
@@ -349,7 +349,7 @@ def test_handle_callback_rejects_replayed_state(app, regular_user):
                 IrisMailboxManager().handle_callback(state, "auth-code")
 
 
-# --------------------------------------------------------------- B16: folder
+# --------------------------------------------------------------- folder
 
 def test_handle_callback_validates_folder_against_the_provider(app, regular_user):
     with app.app_context():
@@ -572,7 +572,7 @@ def test_sync_connection_stops_at_daily_quota(app, regular_user, monkeypatch):
         with UnitOfWork() as uow:
             assert IrisAnalysisRepository(uow).get_by_user(regular_user.id) == []
 
-            # B01: la cuota agotada deja el mensaje en cola para el próximo
+            # La cuota agotada deja el mensaje en cola para el próximo
             # sondeo -- confirmar el cursor ahora lo perdería para siempre.
             conn = IrisMailboxConnectionRepository(uow).get_by_id(connection_id)
             assert conn.sync_cursor == "cursor-0"
@@ -581,7 +581,7 @@ def test_sync_connection_stops_at_daily_quota(app, regular_user, monkeypatch):
             assert pending[0].attempts == 0
 
 
-# --------------------------------------------------------- B01: checkpoint por mensaje
+# --------------------------------------------------------- checkpoint por mensaje
 
 def test_sync_connection_defers_cursor_and_pending_message_when_quota_is_hit(app, regular_user, monkeypatch):
     with app.app_context():
@@ -776,7 +776,7 @@ def test_trigger_sync_submits_task_with_correct_category(app, regular_user):
     assert fake_queue.submitted[0]["args"] == (connection_id,)
 
 
-# --------------------------------------------------------- B02: lock de sync
+# --------------------------------------------------------- lock de sync
 
 def test_sync_connection_is_a_no_op_when_lock_already_held(app, regular_user, _fake_lock_redis):
     with app.app_context():

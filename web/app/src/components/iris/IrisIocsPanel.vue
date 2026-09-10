@@ -19,7 +19,7 @@
 
 <script setup>
 /**
- * Contenido "con datos" del panel de IOCs de IrisReportViewer (A3).
+ * Contenido "con datos" del panel de IOCs de IrisReportViewer.
  *
  * El padre conserva el chrome colapsable (botón + Transition) y los estados
  * de carga/vacío: usan clases (.rv-path-loading, .spinner, .rv-path-empty)

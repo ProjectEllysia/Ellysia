@@ -57,7 +57,7 @@ const props = defineProps({
 
 const headers = ref(props.prefill?.headers ?? '')
 const title = ref(props.prefill?.title ?? '')
-// Mensaje .eml completo (Fase 2), si el archivo arrastrado se cargó entero.
+// Mensaje .eml completo, si el archivo arrastrado se cargó entero.
 const message = ref(props.prefill?.message ?? null)
 // Cabeceras tal como llegaron del prefill: si el usuario las edita, ya no
 // podemos garantizar que sigan correspondiendo al mensaje completo cargado,

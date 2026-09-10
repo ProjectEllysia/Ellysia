@@ -1,4 +1,4 @@
-"""B05: calidad del análisis — qué se inspeccionó de verdad y qué no.
+"""Calidad del análisis — qué se inspeccionó de verdad y qué no.
 
 Una regla que revienta se convertía en un ``RuleResult(verdict="error")`` y
 ahí se acababa todo: el análisis podía terminar como ``Legitimate`` sin

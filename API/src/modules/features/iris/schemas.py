@@ -15,7 +15,7 @@ class AnalyzeRequestSchema(Schema):
     """Request body for ``POST /iris/analyze``.
 
     Accepts either ``headers`` (a headers-only block, original behaviour)
-    or ``message`` (a full raw ``.eml`` message — Fase 2). At least one of
+    or ``message`` (a full raw ``.eml`` message). At least one of
     the two is required; if both are present, ``message`` takes priority
     since it is a superset of the header information.
     """
@@ -33,7 +33,7 @@ class AnalyzeRequestSchema(Schema):
 
     @validates_schema
     def validate_max_size(self, data, **kwargs):
-        """C4: sin tope superior, un .eml de decenas de MB (adjuntos incluidos)
+        """Sin tope superior, un .eml de decenas de MB (adjuntos incluidos)
         entraba entero a una columna Text y se re-parseaba completo (incluida
         la decodificación base64) en cada lectura posterior. Leído con CR en
         cada validación, no horneado al importar el módulo, para que un
@@ -130,7 +130,7 @@ class RuleResultSchema(Schema):
 
 
 class TopSignalSchema(Schema):
-    """One of the highest-penalty rules for a finished analysis (S2)."""
+    """One of the highest-penalty rules for a finished analysis."""
     ruleName = fields.String()
     category = fields.String(load_default=None)
     score = fields.Float()
@@ -146,7 +146,7 @@ class AiSummarySchema(Schema):
 
 
 class FailedRuleSchema(Schema):
-    """Regla que no se pudo **ejecutar** durante un análisis (B05).
+    """Regla que no se pudo **ejecutar** durante un análisis.
 
     No confundir con una regla que detectó algo: esas van en ``rules`` con su
     puntuación negativa. Estas son las que lanzaron una excepción, así que su
@@ -370,7 +370,7 @@ class IrisDocumentItemSchema(Schema):
 
 
 class IrisDocumentsQuerySchema(Schema):
-    """Query parameters for ``GET /iris/documents`` (B17): antes devolvía
+    """Query parameters for ``GET /iris/documents``: antes devolvía
     todos los documentos del usuario de golpe, sin límite -- misma
     convención página/tamaño que ``ResultsQuerySchema`` para el listado de
     análisis."""
@@ -379,7 +379,7 @@ class IrisDocumentsQuerySchema(Schema):
 
 
 class IrisDocumentListResponseSchema(Schema):
-    """Página de los IrisDocument del usuario actual (B17)."""
+    """Página de los IrisDocument del usuario actual."""
     documents = fields.List(fields.Nested(IrisDocumentItemSchema))
     total = fields.Integer()
     page = fields.Integer()
@@ -400,7 +400,7 @@ class IrisDocumentDeleteResponseSchema(Schema):
 
 
 # =============================================================================
-# Mailbox connector (Fase 4) — Gmail / Microsoft Graph
+# Mailbox connector — Gmail / Microsoft Graph
 # =============================================================================
 
 class IrisMailboxProvidersResponseSchema(Schema):
@@ -412,7 +412,7 @@ class IrisMailboxConnectRequestSchema(Schema):
     """Request body for ``POST /iris/mailbox/connect``."""
     provider = fields.String(required=True)
     fullMessageMode = fields.Boolean(load_default=False)
-    # B16: la validación real (existe, pertenece a esta cuenta/proveedor) es
+    # La validación real (existe, pertenece a esta cuenta/proveedor) es
     # de red y solo se puede hacer con un access_token en la mano -- ver
     # IrisMailboxManager._validate_folder(), llamada desde handle_callback().
     # Aquí solo se descarta lo evidentemente inválido antes de firmar el
@@ -455,7 +455,7 @@ class IrisMailboxUpdateConnectionRequestSchema(Schema):
 
 
 class IrisMailboxFolderSchema(Schema):
-    """Una carpeta/etiqueta real de la cuenta conectada (B16)."""
+    """Una carpeta/etiqueta real de la cuenta conectada."""
     providerId = fields.String()
     displayName = fields.String()
     folderType = fields.String()
@@ -469,7 +469,7 @@ class IrisMailboxFoldersResponseSchema(Schema):
 
 class IrisMailboxHealthResponseSchema(Schema):
     """Estado observable de una conexión de buzón, sin tener que leer los
-    logs del servidor (M10)."""
+    logs del servidor."""
     status = fields.String()
     lastSyncAt = UTCDateTime(allow_none=True)
     lastSuccessAt = UTCDateTime(allow_none=True)
@@ -513,7 +513,7 @@ class IrisMailboxCallbackQuerySchema(Schema):
 
 class IrisRetentionReportResponseSchema(Schema):
     """Política de retención vigente y estado real de los análisis del
-    usuario frente a ella (M09/B17)."""
+    usuario frente a ella."""
     rawMessageRetentionDays = fields.Integer()
     analysisRetentionDays = fields.Integer(allow_none=True)
     totalAnalyses = fields.Integer()
@@ -522,7 +522,7 @@ class IrisRetentionReportResponseSchema(Schema):
 
 
 class IrisNotificationPreferenceResponseSchema(Schema):
-    """Preferencias de notificación del usuario actual (M08)."""
+    """Preferencias de notificación del usuario actual."""
     digestEnabled = fields.Boolean()
     mutedUntil = UTCDateTime(allow_none=True)
     notifyReauthRequired = fields.Boolean()

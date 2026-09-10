@@ -170,7 +170,7 @@ def test_sync_queues_and_returns_202(client, admin_user, auth_headers, app):
     submit_sync.assert_called_once_with(connection_id)
 
 
-# --------------------------------------------------------------- B16: folder
+# --------------------------------------------------------------- folder
 
 def test_update_connection_folder_too_long_returns_422(client, admin_user, auth_headers, app):
     connection_id = _save_connection(app, admin_user.id)

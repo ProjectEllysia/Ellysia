@@ -1,4 +1,4 @@
-"""B03: clasificación del motivo por el que un análisis de Iris muere.
+"""Clasificación del motivo por el que un análisis de Iris muere.
 
 Un ``failed`` sin motivo no es accionable: quien lo mira no sabe si el
 problema era su fichero o el motor. ``classify_failure`` es la costura que
@@ -32,7 +32,7 @@ def test_invalid_input_keeps_its_own_message():
 
 
 def test_unexpected_error_never_leaks_the_exception_text():
-    """El caso que motiva B03: un parser que revienta y arrastra en su
+    """El caso que motiva esta clasificación: un parser que revienta y arrastra en su
     ``str()`` el fragmento de entrada que no supo digerir."""
     leaked = "b'From: victima@banco.example\\r\\nAuthorization: Bearer s3cr3t'"
     failure = classify_failure(ValueError(f"cannot decode {leaked}"))

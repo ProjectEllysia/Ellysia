@@ -119,9 +119,9 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
         """El análisis ya aceptado para este (connection_id, source_message_uid),
         si existe.
 
-        Usado tanto por la cola de checkpoint del sync de buzón (B01, que
+        Usado tanto por la cola de checkpoint del sync de buzón (que
         solo necesita saber si existe) como por ``IrisManager.analyze()``
-        (B09, que necesita el id para devolverlo sin cobrar cuota de nuevo)
+        (que necesita el id para devolverlo sin cobrar cuota de nuevo)
         -- reconocer un mensaje ya aceptado en un intento anterior, p.ej.
         tras un fallo entre el commit de ``IrisAnalysis`` y el borrado de su
         entrada en ``IrisMailboxInbox``, de forma que un reintento nunca
@@ -141,11 +141,11 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
         return self.get_by_source(connection_id, source_message_uid) is not None
 
     def count_by_connection(self, connection_id: int) -> int:
-        """Cuántos análisis ha aceptado en total esta conexión (M10).
+        """Cuántos análisis ha aceptado en total esta conexión.
 
         Es la cuenta real de "mensajes aceptados" -- no hace falta un
         contador aparte, porque cada mensaje aceptado por el checkpoint de
-        buzón (B01) deja exactamente una fila ``IrisAnalysis`` con este
+        buzón deja exactamente una fila ``IrisAnalysis`` con este
         ``connection_id`` y nunca se borra al resolverse (a diferencia de su
         entrada en ``IrisMailboxInbox``, que sí desaparece).
         """
@@ -159,7 +159,7 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
         self, user_id: int, since: datetime, critical_threshold: float,
     ) -> List[IrisAnalysis]:
         """Veredictos Phishing de buzón que el digest diario todavía no ha
-        resumido (M08).
+        resumido.
 
         Solo entran los que ``_enqueue_phishing_notification`` ya habría
         notificado si no fuera por el digest -- ``connection_id`` no nulo
@@ -196,12 +196,12 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
 
     def count_by_user(self, user_id: int) -> int:
         """Cuántos análisis tiene este usuario en total -- para el informe
-        de retención (M09/B17), que necesita el denominador."""
+        de retención, que necesita el denominador."""
         return self._session.query(IrisAnalysis.id).filter(IrisAnalysis.user_id == user_id).count()
 
     def count_with_raw_retained_by_user(self, user_id: int) -> int:
         """De los análisis de este usuario, cuántos conservan todavía su
-        raw (M09/B17) -- el complemento de cuántos ya se purgaron."""
+        raw -- el complemento de cuántos ya se purgaron."""
         return (
             self._session.query(IrisAnalysis.id)
             .join(IrisRawMessage, IrisRawMessage.analysis_id == IrisAnalysis.id)
@@ -211,7 +211,7 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
 
     def purge_raw_messages_older_than(self, cutoff: datetime) -> int:
         """Purga (borra) el ``IrisRawMessage`` de cada análisis creado antes
-        de ``cutoff``, conservando el análisis y sus resultados (M09/B17/B19).
+        de ``cutoff``, conservando el análisis y sus resultados.
 
         DELETE masivo en vez de cargar cada fila por el ORM: ``IrisRawMessage``
         no tiene ninguna tabla que dependa de ella (a diferencia de borrar un
@@ -231,15 +231,14 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
 
     def get_analyses_older_than(self, cutoff: datetime) -> List[IrisAnalysis]:
         """Análisis creados antes de ``cutoff`` -- candidatos a borrado
-        completo cuando ``iris.analysisRetentionDays`` está activo (B17).
+        completo cuando ``iris.analysisRetentionDays`` está activo.
 
         Devuelve instancias ORM (no un ``DELETE`` masivo): borrarlas una a
         una vía ``BaseRepository.delete`` es lo que dispara el cascade real
         hacia ``IrisRuleResult`` (``cascade="all, delete-orphan"`` es un
         mecanismo del ORM, no de la base de datos -- un ``DELETE`` en SQL
-        directo sobre ``IrisAnalysis`` dejaría esas filas huérfanas). El
-        criterio de cierre de B17 exige explícitamente que la retención no
-        deje huérfanos.
+        directo sobre ``IrisAnalysis`` dejaría esas filas huérfanas), y la
+        retención no puede dejar huérfanos.
         """
         return (
             self._session.query(IrisAnalysis)
@@ -250,7 +249,7 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
     def transition_if_state(self, analysis_id: int, from_states: list[str], **fields: Any) -> bool:
         """Aplica ``fields`` sobre un análisis solo si su ``status`` actual
         está en ``from_states`` -- transición SQL condicionada, no un
-        leer-decidir-escribir (B07).
+        leer-decidir-escribir.
 
         El caso real: el usuario cancela un análisis a la vez que el worker
         termina de procesarlo. Sin esta condición dentro del propio UPDATE,
@@ -262,7 +261,7 @@ class IrisAnalysisRepository(BaseRepository[IrisAnalysis]):
         ``rowcount`` es 1); el segundo no cambia nada (``rowcount`` 0), y
         quien lo invoque sabe por el valor de retorno que perdió la carrera
         y no debe fiarse de que su transición se aplicó. Mismo patrón que
-        ``_claim_ai_summary()`` (B10), generalizado a cualquier conjunto de
+        ``_claim_ai_summary()``, generalizado a cualquier conjunto de
         campos en vez de una sola columna.
 
         Args:
@@ -347,7 +346,7 @@ class IrisMailboxConnectionRepository(BaseRepository[IrisMailboxConnection]):
 
     def get_newly_stuck_connections(self, stuck_after_minutes: int) -> List[IrisMailboxConnection]:
         """Conexiones activas que siguen intentando sincronizar pero llevan
-        atascadas sin un sync limpio, y todavía no se ha avisado de ello (M08).
+        atascadas sin un sync limpio, y todavía no se ha avisado de ello.
 
         "Sigue intentando" (``last_sync_at`` no nulo) las distingue de una
         conexión recién creada que aún no ha tenido su primer sondeo -- esa
@@ -382,7 +381,7 @@ class IrisMailboxConnectionRepository(BaseRepository[IrisMailboxConnection]):
 
 class IrisMailboxInboxRepository(BaseRepository[IrisMailboxInbox]):
     """Data-access layer for IrisMailboxInbox -- la cola de checkpoint por
-    mensaje que B01 introduce delante del cursor del proveedor."""
+    mensaje que va delante del cursor del proveedor."""
 
     _MODEL = IrisMailboxInbox
 
@@ -404,7 +403,7 @@ class IrisMailboxInboxRepository(BaseRepository[IrisMailboxInbox]):
         """Si quedan referencias sin resolver.
 
         Mientras esto sea True, ``_finish_sync`` no puede confirmar el
-        cursor del proveedor (B01) -- avanzarlo perdería esas referencias
+        cursor del proveedor -- avanzarlo perdería esas referencias
         para siempre, porque el proveedor no las vuelve a listar.
         """
         return (
@@ -433,7 +432,7 @@ class IrisMailboxInboxRepository(BaseRepository[IrisMailboxInbox]):
         return {row[0] for row in rows}
 
     def count_pending(self, connection_id: int) -> int:
-        """Cuántas referencias siguen sin resolver ahora mismo (M10) --
+        """Cuántas referencias siguen sin resolver ahora mismo --
         contadas en vivo sobre la tabla real, no un contador aparte que
         pudiera desincronizarse de ella."""
         return (
@@ -447,7 +446,7 @@ class IrisMailboxInboxRepository(BaseRepository[IrisMailboxInbox]):
 
     def count_retrying(self, connection_id: int) -> int:
         """Cuántas referencias pendientes ya han fallado al menos una vez
-        (M10) -- distingue "recién descubierto, primer intento" de "se le
+        -- distingue "recién descubierto, primer intento" de "se le
         está costando, va por el segundo o más"."""
         return (
             self._session.query(IrisMailboxInbox.id)
@@ -461,7 +460,7 @@ class IrisMailboxInboxRepository(BaseRepository[IrisMailboxInbox]):
 
     def count_dead(self, connection_id: int) -> int:
         """Cuántas referencias agotaron ``iris.maxInboxAttempts`` y quedaron
-        ``dead`` (B01/M10) -- mensajes que Iris ha dejado de intentar
+        ``dead`` -- mensajes que Iris ha dejado de intentar
         procesar, visibles pero ya sin bloquear el cursor."""
         return (
             self._session.query(IrisMailboxInbox.id)
@@ -474,7 +473,7 @@ class IrisMailboxInboxRepository(BaseRepository[IrisMailboxInbox]):
 
     def oldest_pending_created_at(self, connection_id: int) -> Optional[datetime]:
         """Cuándo se encoló la referencia pendiente más antigua de esta
-        conexión, o ``None`` si no queda ninguna (M10).
+        conexión, o ``None`` si no queda ninguna.
 
         La edad de esa fecha es la señal de "cuánto lleva atascado el
         mensaje más viejo" -- más útil para un administrador que un simple
@@ -514,7 +513,7 @@ class IrisRuleResultRepository(BaseRepository[IrisRuleResult]):
 
 
 class IrisNotificationPreferenceRepository(BaseRepository[IrisNotificationPreference]):
-    """Data-access layer for IrisNotificationPreference (M08) -- una fila
+    """Data-access layer for IrisNotificationPreference -- una fila
     por usuario, ver ``IrisNotificationPreference`` en ``model.py``."""
 
     _MODEL = IrisNotificationPreference
@@ -530,7 +529,7 @@ class IrisNotificationPreferenceRepository(BaseRepository[IrisNotificationPrefer
         )
 
     def get_due_for_digest(self, interval_hours: int) -> List[IrisNotificationPreference]:
-        """Usuarios con el digest activo a los que toca enviarles uno (M08):
+        """Usuarios con el digest activo a los que toca enviarles uno:
         nunca se les ha enviado, o el último fue hace más de
         ``iris.digestIntervalHours``."""
         cutoff = utcnow_naive() - timedelta(hours=interval_hours)
@@ -548,7 +547,7 @@ class IrisNotificationPreferenceRepository(BaseRepository[IrisNotificationPrefer
 class IrisReportRepository(DocumentRepository[IrisDocument]):
     """Data-access layer for IrisDocument records (generated PDF reports).
 
-    Las tres consultas de documentos las aporta ``DocumentRepository`` (A9).
+    Las tres consultas de documentos las aporta ``DocumentRepository``.
     """
 
     _MODEL = IrisDocument

@@ -31,7 +31,7 @@ from ..text import extract_domain, is_free_provider, registrable_domain
 
 
 def _is_esp_domain(domain: str | None) -> bool:
-    """True when *domain* is a known ESP infrastructure domain (B3).
+    """True when *domain* is a known ESP infrastructure domain.
 
     A newsletter sent via Mailchimp/SendGrid legitimately has three
     distinct registrable domains across From/Reply-To/Return-Path — that
@@ -286,7 +286,7 @@ def check_triangulation(headers: dict) -> RuleResult:
     present = [domain for domain in (from_dom, reply_dom, return_dom) if domain]
     distinct = set(present)
 
-    # B3: a Reply-To/Return-Path on a known ESP domain is exactly what
+    # A Reply-To/Return-Path on a known ESP domain is exactly what
     # legitimate bulk mail looks like (From=company.com, Reply-To on the
     # ESP's reply infra, Return-Path on the ESP's bounce infra) — three
     # distinct domains by design, not a triangulation attack.

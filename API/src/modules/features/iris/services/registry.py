@@ -48,7 +48,7 @@ class RuleRegistry:
         # Instance attribute, not class attribute: the latter is shared
         # across every RuleRegistry (in practice just the ``iris_rules``
         # singleton, but ``clear()`` — used in tests — mutated it as
-        # global state regardless, making test order matter (C6).
+        # global state regardless, making test order matter.
         self._rules: List[Dict] = []
 
     def register(self, name: str, category: str = "general",
@@ -64,7 +64,7 @@ class RuleRegistry:
                 ``services.parsers.MessageContext`` (headers + body
                 + links + attachments) instead of the plain ``headers``
                 dict. Used by rules that inspect the full message body.
-            family: Recalibración de pesos -- techo de familia (§18): agrupa
+            family: Recalibración de pesos -- techo de familia: agrupa
                 reglas que corroboran el mismo hecho subyacente (p.ej. "auth",
                 "identity") para que ``_aggregate_score`` limite la suma de
                 penalizaciones de la familia y no cuente el mismo hecho varias

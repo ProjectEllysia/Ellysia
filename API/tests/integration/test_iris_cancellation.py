@@ -1,4 +1,4 @@
-"""B07: transiciones de estado atómicas frente a cancelación concurrente.
+"""Transiciones de estado atómicas frente a cancelación concurrente.
 
 ``cancel_analysis()`` señaliza TaskQueue y ``_persist_analysis_results()``
 (el worker, al terminar de evaluar las reglas) escriben el ``status`` final

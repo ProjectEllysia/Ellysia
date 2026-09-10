@@ -1,9 +1,9 @@
 """Tests de integración de lo que pasa en la superficie HTTP de Iris una vez
-la retención purga el raw de un análisis (M09/B17/B19): ``/path`` e
+la retención purga el raw de un análisis: ``/path`` e
 ``/iocs`` (derivados del raw) pasan a devolver 410, ``/reanalyze`` también
 (no hay nada que reanalizar), pero el resultado principal, la exportación y
 el informe de retención siguen funcionando -- "el resultado puede
-conservarse sin el raw" es el criterio de cierre de B19.
+conservarse sin el raw" es justo lo que se comprueba.
 """
 
 from __future__ import annotations

@@ -62,13 +62,13 @@ def test_delete_requires_delete_attribute(client, stripped_user, auth_headers):
 
 
 def test_analyze_rejects_request_without_headers_or_message(client, root_headers):
-    # Fase 2: 'headers' ya no es obligatorio si se envía 'message', pero al
+    # 'headers' ya no es obligatorio si se envía 'message', pero al
     # menos uno de los dos debe estar presente (validado en el schema).
     resp = client.post("/iris/analyze", headers=root_headers, json={"title": "x"})
     assert resp.status_code == 422
 
 
-# --------------------------------------------------------------- B13: capacidades
+# --------------------------------------------------------------- capacidades
 
 def test_capabilities_requires_authentication(client):
     assert client.get("/iris/capabilities").status_code == 401
@@ -81,7 +81,7 @@ def test_capabilities_requires_read_attribute(client, stripped_user, auth_header
 
 def test_capabilities_publishes_the_limit_the_api_actually_enforces(client, regular_user,
                                                                    auth_headers):
-    """B13: el frontend tenía su propio tope, y había derivado a 2× del real.
+    """El frontend tenía su propio tope, y había derivado a 2× del real.
 
     La única defensa contra que vuelva a derivar es que el número que publica
     este endpoint sea el mismo que aplica la validación, leído del mismo sitio.

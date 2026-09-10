@@ -553,7 +553,7 @@ def check_suspicious_tld(headers: dict) -> RuleResult:
             recommendation=None,
         )
 
-    # Dedupe by domain before scoring (B4): the same domain in From,
+    # Dedupe by domain before scoring: the same domain in From,
     # Reply-To *and* Return-Path is one suspicious fact, not three — the
     # loop above appends one entry per header it appears in, so a single
     # domain could otherwise cost -15 instead of -5.
@@ -666,7 +666,7 @@ def check_recipient_domain_lookalike(headers: dict) -> RuleResult:
 
 
 # Cualquier cosa con forma de dirección de correo, para detectar un display
-# name que ES una dirección en vez de un nombre (G-C).
+# name que ES una dirección en vez de un nombre.
 _EMAIL_LIKE_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}")
 
 

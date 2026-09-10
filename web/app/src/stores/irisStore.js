@@ -27,7 +27,7 @@ export const useIrisStore = defineStore('iris', () => {
   // hardcodee. Los valores por defecto solo se usan hasta el primer fetch.
   const thresholds = reactive({ legitimate: 80, suspicious: 55 })
 
-  // B13: límites que aplica el servidor (`GET /iris/capabilities`). La vista
+  // Límites que aplica el servidor (`GET /iris/capabilities`). La vista
   // los necesita para decidir igual que el API en vez de replicar constantes:
   // el tope de tamaño estaba escrito a mano allí y había derivado al doble
   // del real, así que el usuario cargaba en memoria ficheros que el backend
@@ -46,13 +46,13 @@ export const useIrisStore = defineStore('iris', () => {
 
   const documents = ref([])
   const documentsLoading = ref(false)
-  // Map de documentId -> poller de usePolling (E8). No reactive: nadie
+  // Map de documentId -> poller de usePolling. No reactive: nadie
   // renderiza a partir de él, solo se arranca y se para.
   const documentPollers = new Map()
 
   let statusPoller = null
 
-  // Fase 2: si hay un mensaje completo (.eml arrastrado) se envía en
+  // Si hay un mensaje completo (.eml arrastrado) se envía en
   // "message" para que el backend analice cuerpo, enlaces y adjuntos
   // reales; "headers" se mantiene como respaldo cuando solo se pegaron
   // cabeceras a mano.
@@ -285,7 +285,7 @@ export const useIrisStore = defineStore('iris', () => {
     }
   }
 
-  // A3: getters de valor ya resuelto — antes IrisReportViewer.vue leía
+  // Getters de valor ya resuelto — antes IrisReportViewer.vue leía
   // pathCache/currentPath/iocsCache/currentIocs directamente (cachés
   // internos de la estrategia de carga bajo demanda, no la API pública del
   // store). El componente ahora solo conoce estos cuatro getters.
@@ -326,7 +326,7 @@ export const useIrisStore = defineStore('iris', () => {
     statusPoller.start()
   }
 
-  // B10/E8: el re-encadenado y la invalidación de ciclos en vuelo los aporta
+  // El re-encadenado y la invalidación de ciclos en vuelo los aporta
   // ahora `usePolling`; aquí solo queda qué pedir y cuándo parar. Devolver
   // `false` es la condición terminal.
   async function _pollStatus(id) {
@@ -508,8 +508,8 @@ export const useIrisStore = defineStore('iris', () => {
 
   /** Sondea el estado de un documento en generación hasta que termine.
    *
-   * E8: usaba `setInterval`, el idioma que este mismo fichero documenta como
-   * incorrecto unas líneas más arriba (B10) — con la petición tardando más
+   * Usaba `setInterval`, el idioma que este mismo fichero documenta como
+   * incorrecto unas líneas más arriba — con la petición tardando más
    * de 2 s se solapaban varias. `usePolling` re-encadena. */
   function pollDocumentStatus(documentId, analysisId) {
     if (documentPollers.has(documentId)) return

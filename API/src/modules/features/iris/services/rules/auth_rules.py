@@ -49,7 +49,7 @@ from ..text import extract_domain, registrable_domain
 def _dmarc_is_conclusive(auth_lower: str) -> bool:
     """True cuando DMARC ya dio un veredicto explícito (pass o fail).
 
-    Recalibración de pesos (§2): SPF y DKIM son subordinados de DMARC (RFC
+    Recalibración de pesos: SPF y DKIM son subordinados de DMARC (RFC
     7489 ya los integra) -- cuando DMARC es concluyente, el hecho "no
     autenticado" ya lo pesó DMARC en solitario y SPF/DKIM solo aportan un
     matiz menor. Con DMARC ausente (o solo `none`/`bestguesspass`/policy sin
@@ -70,7 +70,7 @@ def check_spf(headers: dict) -> RuleResult:
         - ``pass`` (score +5) when SPF passes. A passing result only proves
           the sending server is authorised — it is weak positive evidence,
           not proof of legitimacy, so the credit is intentionally small.
-          NOTE (C1): under the subtractive model every rule's score is
+          NOTE: under the subtractive model every rule's score is
           clamped to <= 0 when the analysis aggregates its total (see
           ``IrisManager._run_analysis``), so this +5 never actually raises
           the total — it exists only so a caller/test inspecting this
@@ -410,7 +410,7 @@ def check_arc_chain(context) -> RuleResult:
     chain *declares* — it does not re-verify the ARC cryptographic
     signatures itself (same accepted limitation as SPF/DKIM/DMARC above).
 
-    `B06`: ``cv=pass`` por sí solo ya **no** ablanda ningún gate. Esa
+    ``cv=pass`` por sí solo ya **no** ablanda ningún gate. Esa
     afirmación la hace el propio mensaje sobre sí mismo, y Iris no verifica
     firmas criptográficas, así que un atacante podía escribir un ``ARC-Seal:
     cv=pass`` inventado y con eso suprimir los gates de SPF, DMARC y
@@ -511,7 +511,7 @@ _AUTHSERV_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*\.[a-z]{2,}$")
     needs_context=True,
 )
 def check_auth_results_provenance(context) -> RuleResult:
-    """Recalibración de pesos, gate G-A (forense): SPF/DKIM/DMARC/Alignment
+    """Recalibración de pesos, gate forense: SPF/DKIM/DMARC/Alignment
     solo leen el *contenido* de Authentication-Results, nunca verifican
     quién lo escribió -- un atacante puede añadir su propia línea
     ``spf=pass; dkim=pass; dmarc=pass`` al correo que él mismo envía, y las
@@ -520,7 +520,7 @@ def check_auth_results_provenance(context) -> RuleResult:
     del mensaje. Si el authserv-id que reclama "pass" no aparece como host
     `by` de ningún salto, la línea es forjada.
 
-    `B06`: aparecer en la cadena tampoco basta. Los saltos de abajo los aporta
+    Aparecer en la cadena tampoco basta. Los saltos de abajo los aporta
     quien envía el mensaje, así que un atacante podía inyectar a la vez su
     propio `Received` y su propio `Authentication-Results` y hacer que se
     corroboraran entre sí — los dos elementos contrastados eran suyos. La

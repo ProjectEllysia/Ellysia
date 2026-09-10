@@ -147,7 +147,7 @@ def get_capabilities():
 @handle_exceptions(logger=logger)
 def get_retention_policy():
     """Política de retención de Iris y cuántos de tus análisis la reflejan
-    ya (M09/B17): cuántos conservan el raw todavía y cuántos ya lo perdieron."""
+    ya: cuántos conservan el raw todavía y cuántos ya lo perdieron."""
     user = get_current_user()
     report = IrisManager.get_retention_report(user.id)
     return {
@@ -188,7 +188,7 @@ def get_analysis_status(args: dict):
         "status": status,
         "totalScore": analysis.total_score if analysis else None,
         "verdict": analysis.verdict if analysis else None,
-        # B03: el motivo solo tiene sentido cuando el análisis murió. Enviarlo
+        # El motivo solo tiene sentido cuando el análisis murió. Enviarlo
         # siempre dejaría un `failureReason` colgando de un análisis que
         # terminó bien tras un reintento y confundiría a quien lea el estado.
         "failureCode": analysis.failure_code if analysis else None,
@@ -300,7 +300,7 @@ def get_analysis_iocs(analysis_id: int):
 @handle_exceptions(default_exception=IrisAnalysisNotFoundError, logger=logger)
 def export_analysis(analysis_id: int):
     """Exportar el análisis completo (resultado, reglas, raw si sigue
-    disponible, Received-path e IOCs) como fichero JSON descargable (B19) --
+    disponible, Received-path e IOCs) como fichero JSON descargable --
     pensado para guardar una copia antes de que la retención purgue el raw."""
     user = get_current_user()
     manager = IrisManager()
@@ -472,7 +472,7 @@ def get_document_status(args):
     analysis_id = args.get("analysisId")
 
     doc_mgr = IrisReportManager()
-    # E4: lookup dual (por documentId o, si no, el último documento del
+    # Lookup dual (por documentId o, si no, el último documento del
     # análisis) + verificación de ownership viven en el manager, no aquí.
     document = doc_mgr.get_document_status(document_id, analysis_id, user.id)
 
@@ -497,7 +497,7 @@ def get_document_status(args):
 @limiter.limit("300 per hour; 2000 per day")
 @handle_exceptions(default_exception=DocumentError, logger=logger)
 def get_all_documents(args):
-    """Documentos del usuario, paginados (B17: antes devolvía la lista
+    """Documentos del usuario, paginados (antes devolvía la lista
     completa sin límite)."""
     user = get_current_user()
 
@@ -576,7 +576,7 @@ def download_document(document_id: int):
         document.filename,
         mimetype="application/pdf",
         as_attachment=True,
-        # B11: el nombre descargable identifica el documento, no solo el
+        # El nombre descargable identifica el documento, no solo el
         # análisis. Dos informes del mismo análisis llegaban al navegador con
         # el mismo nombre y el segundo sobrescribía al primero en la carpeta
         # de descargas.
@@ -606,7 +606,7 @@ def delete_document(document_id: int):
 
 
 # =============================================================================
-# Mailbox connector (Fase 4) — Gmail / Microsoft Graph
+# Mailbox connector — Gmail / Microsoft Graph
 # =============================================================================
 
 def _serialize_connection(connection) -> dict:
@@ -777,7 +777,7 @@ def list_mailbox_connection_folders(connection_id: int):
 @limiter.limit("60 per hour; 300 per day")
 @handle_exceptions(default_exception=IrisMailboxConnectionNotFoundError, logger=logger)
 def get_mailbox_connection_health(connection_id: int):
-    """Estado observable de una conexión de buzón (M10).
+    """Estado observable de una conexión de buzón.
 
     Distingue "no hay correo nuevo" de "Iris está atascado" sin tener que
     leer los logs del servidor: expone contadores de mensajes descubiertos/
@@ -856,7 +856,7 @@ def _serialize_notification_preference(preference) -> dict:
 @require_oauth_token
 @require_attributes(at_least_one=[AttributeType.IRIS_READ])
 def get_notification_preferences():
-    """Preferencias de notificación del usuario actual (M08).
+    """Preferencias de notificación del usuario actual.
 
     Si nunca las ha tocado, devuelve los valores por defecto sin crear una
     fila -- ver ``IrisNotificationPreferenceManager.get_or_default``.
@@ -875,7 +875,7 @@ def get_notification_preferences():
 @require_attributes(at_least_one=[AttributeType.IRIS_UPDATE])
 @limiter.limit("60 per hour; 300 per day")
 def update_notification_preferences(data):
-    """Actualizar las preferencias de notificación del usuario actual (M08).
+    """Actualizar las preferencias de notificación del usuario actual.
 
     Actualización parcial: solo se tocan los campos presentes en el cuerpo
     (ver ``IrisNotificationPreferenceUpdateRequestSchema``). No exige

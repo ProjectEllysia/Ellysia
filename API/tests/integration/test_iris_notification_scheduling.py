@@ -1,5 +1,5 @@
-"""Tests de integración del chequeo periódico de notificaciones de Iris
-(M08): digests diarios pendientes y avisos de conexión atascada.
+"""Tests de integración del chequeo periódico de notificaciones de Iris:
+digests diarios pendientes y avisos de conexión atascada.
 
 Cubre las dos consultas nuevas de ``repositories.py`` (``get_due_for_digest``,
 ``get_newly_stuck_connections``) y ``services/notifications/scheduling.py``,

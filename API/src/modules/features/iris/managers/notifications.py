@@ -2,7 +2,7 @@
 Notificaciones de Iris: aviso por correo de un veredicto Phishing en la
 ingesta automática de buzón (``IrisPhishingNotifyManager``), del digest
 diario que agrupa los que no eran de alta confianza (``IrisDigestNotifyManager``),
-y de los dos avisos operativos de M08 -- conexión que necesita
+y de los dos avisos operativos -- conexión que necesita
 reautorización (``IrisReauthNotifyManager``) y conexión activa atascada sin
 un sync limpio (``IrisStuckSyncNotifyManager``).
 
@@ -64,7 +64,7 @@ _UNSET = object()
 
 class IrisNotificationPreferenceManager:
     """Lectura y escritura de las preferencias de notificación de un
-    usuario (M08) -- una fila por usuario, creada perezosamente en el
+    usuario -- una fila por usuario, creada perezosamente en el
     primer ``update()``."""
 
     @staticmethod
@@ -177,7 +177,7 @@ class IrisPhishingNotifyManager:
     @staticmethod
     def _run_notify(analysis_id: int) -> None:
         """Envía el correo de aviso al dueño del análisis, salvo que las
-        preferencias de M08 digan que debe esperar al digest o que el
+        preferencias de notificación digan que debe esperar al digest o que el
         usuario lo tiene silenciado.
 
         Re-comprueba veredicto y origen aquí dentro (un job encolado por
@@ -188,8 +188,7 @@ class IrisPhishingNotifyManager:
 
         Un veredicto de alta confianza (``total_score`` en o por debajo de
         ``iris.criticalPhishingScoreThreshold``) ignora tanto el silenciado
-        como el digest -- el criterio de cierre de M08 exige que nunca se
-        pierda una incidencia crítica.
+        como el digest: una incidencia crítica nunca debe perderse.
         """
         from src.modules.users.managers import UserManager
 
@@ -252,7 +251,7 @@ class IrisPhishingNotifyManager:
 
 class IrisDigestNotifyManager:
     """Envía el resumen diario de veredictos Phishing no críticos que
-    quedaron diferidos por ``digest_enabled`` (M08, categoría ``iris.notify``)."""
+    quedaron diferidos por ``digest_enabled`` (categoría ``iris.notify``)."""
 
     TASK_CATEGORY = "iris.notify"
     EXTERNAL_ID_PREFIX = "iris-digest-notify:"
@@ -342,7 +341,7 @@ class IrisDigestNotifyManager:
 
 class IrisReauthNotifyManager:
     """Avisa por correo cuando una conexión de buzón pasa a necesitar
-    reautorización (M08, categoría ``iris.notify``)."""
+    reautorización (categoría ``iris.notify``)."""
 
     TASK_CATEGORY = "iris.notify"
     EXTERNAL_ID_PREFIX = "iris-reauth-notify:"
@@ -436,7 +435,7 @@ class IrisReauthNotifyManager:
 
 class IrisStuckSyncNotifyManager:
     """Avisa por correo cuando una conexión activa lleva atascada sin un
-    sync limpio (M08, categoría ``iris.notify``)."""
+    sync limpio (categoría ``iris.notify``)."""
 
     TASK_CATEGORY = "iris.notify"
     EXTERNAL_ID_PREFIX = "iris-stuck-sync-notify:"
