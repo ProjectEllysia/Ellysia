@@ -327,7 +327,7 @@ def test_ingest_rejects_skewed_clock(client, app, regular_user):
 
 
 # =============================================================================
-# POTENCIA (P15 validación, P16/P17 persistencia) — hygeia-power fase 2
+# POTENCIA — validación y persistencia de la lectura de consumo
 # =============================================================================
 
 def _heartbeat_with_power(**power_overrides):
@@ -370,7 +370,7 @@ def test_heartbeat_without_power_is_accepted_for_backward_compatibility(client, 
 
 
 def test_heartbeat_with_zero_watts_persists_zero_not_null(client, app, regular_user):
-    """Es la distinción que sostiene toda la Fase 3: 0 W medidos no es ausencia de dato."""
+    """Lo que sostiene el cálculo de consumo: 0 W medidos no es ausencia de dato."""
     asset_id, agent_key = _create_asset_with_key(app, regular_user)
 
     resp = client.post(
@@ -422,7 +422,7 @@ def test_heartbeat_with_power_missing_estimated_is_rejected(client, app, regular
 
 
 # =============================================================================
-# VIRTUALIZACIÓN DEL HOST (P29) — distingue "sin sensores" de "es un invitado"
+# VIRTUALIZACIÓN DEL HOST — distingue "sin sensores" de "es un invitado"
 # =============================================================================
 
 def test_heartbeat_records_virtualization_fields(client, app, regular_user):

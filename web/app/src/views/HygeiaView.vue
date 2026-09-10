@@ -423,7 +423,7 @@ async function handleDeleteAnomalyConfirm() {
   toast.show(ok ? 'Anomalía eliminada.' : (alerts.state.error || 'No se pudo borrar la anomalía.'), ok ? 'success' : 'error')
 }
 
-/* ── Análisis del inventario con Lybra (Fase I) ── */
+/* ── Análisis del inventario con Lybra ── */
 
 async function handleAnalyze() {
   const id = store.state.selectedId
@@ -477,7 +477,7 @@ async function refreshNow() {
 
 /** Refresco periódico: silencioso, para no parpadear cada 15 s.
  *
- * E8: el `if (document.hidden) return` que había aquí lo aporta ahora
+ * El `if (document.hidden) return` que había aquí lo aporta ahora
  * `usePolling` con `pauseWhenHidden` — y además reanuda de inmediato al
  * volver a primer plano, en vez de esperar los 15 s completos. */
 /**

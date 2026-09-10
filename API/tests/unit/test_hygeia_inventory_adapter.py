@@ -1,4 +1,4 @@
-"""Tests unitarios del adaptador inventario -> servicios de Lybra (Fase I-b).
+"""Tests unitarios del adaptador inventario -> servicios de Lybra.
 
 Pura lógica: sin DB, sin red. El caso motivador es real, no hipotético — visto
 en el primer análisis de un inventario Windows de verdad (ver el docstring de
@@ -44,7 +44,7 @@ def test_name_and_field_agreeing_is_unaffected():
 
 
 def test_falls_back_to_version_field_when_name_has_no_dotted_number():
-    # "Half-Life 2" NO es una versión (Fase I-b, normalize_product_name ya
+    # "Half-Life 2" NO es una versión (normalize_product_name ya
     # protege este caso) — la extracción debe dejarlo intacto y usar `version`.
     services = services_from_inventory([_pkg("Half-Life 2", "1.0")])
     assert services[0].product == "Half-Life 2"

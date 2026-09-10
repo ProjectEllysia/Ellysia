@@ -1,5 +1,5 @@
 """
-Adaptador inventario de software → servicios de Lybra (Fase I).
+Adaptador inventario de software → servicios de Lybra.
 
 Simétrico a los adaptadores que Themis ya tiene para Nikto
 (``themis/lybra/adapters.py``), pero vive de este lado porque es Hygeia
@@ -7,7 +7,7 @@ quien conoce la forma de su propio inventario: el contrato de ingesta v1.0
 (``SoftwareSchema``), no Themis.
 
 La traducción es deliberadamente fina. El motor ya sabe qué hacer con una
-``List[Service]`` desde la Fase 0.9, y ``services_from_payload`` ya sabe
+``List[Service]`` (es su modo payload), y ``services_from_payload`` ya sabe
 construirlas a partir de diccionarios sueltos — que es exactamente la forma
 en la que el inventario está guardado (JSONB). Aquí solo se renombran
 campos y se marca la procedencia.
@@ -112,7 +112,7 @@ def services_from_inventory(software: list) -> List[Service]:
     """
     Traduce el inventario de software de un activo a ``Service`` de Lybra.
 
-    Tres decisiones, todas del diseño de la Fase 0.9:
+    Tres decisiones, todas heredadas del modo payload de Lybra:
 
     - **Sin puerto ni protocolo.** Un paquete instalado no escucha en ningún
       sitio. El motor lo contempla: emite ``category="installed_package"``

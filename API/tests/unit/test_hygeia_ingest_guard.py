@@ -1,6 +1,6 @@
 """Tests unitarios de hygeia.services.ingest_guard.check_clock_skew.
 
-La ventana de cordura del reloj es asimétrica a propósito (§16.3): corta
+La ventana de cordura del reloj es asimétrica a propósito: corta
 hacia el futuro (un reloj adelantado no tiene explicación legítima) y larga
 hacia el pasado (el buffer en disco del agente drenando una caída sí la
 tiene). Estos tests fijan esa asimetría, que es justo lo que se pierde de

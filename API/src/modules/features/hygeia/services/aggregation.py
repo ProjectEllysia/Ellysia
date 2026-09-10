@@ -1,7 +1,7 @@
 """
 hygeia.services.aggregation
 ────────────────────────────
-Desnormalización de un payload de métricas a los escalares por snapshot (§5).
+Desnormalización de un payload de métricas a los escalares por snapshot.
 
 Función pura: sin DB, sin Flask, sin ORM. Entra el bloque ``metrics`` ya
 validado de un heartbeat y salen los valores que se persisten en columnas

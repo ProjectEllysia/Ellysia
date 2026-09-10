@@ -1,6 +1,5 @@
 """
-Tests de integración de la Fase I: el inventario de Hygeia como entrada del
-motor Lybra.
+Tests de integración del inventario de Hygeia como entrada del motor Lybra.
 
 Es el primer punto del backend donde dos módulos de ``features/`` se tocan,
 así que lo que se verifica aquí no es solo el camino feliz sino el contrato

@@ -24,11 +24,11 @@ export const useHygeiaStore = defineStore('hygeia', () => {
     metricsWindowMs: DEFAULT_WINDOW_MS,
     latest: null, latestError: null,
     inventory: [], inventoryCollectedAt: null, inventoryLoading: false, inventoryError: null,
-    // Resumen del último análisis del inventario con Lybra (Fase I). `scanId`
+    // Resumen del último análisis del inventario con Lybra. `scanId`
     // nulo = nunca analizado, que es el estado inicial de todo activo, no un
     // error. El desglose completo vive en Themis; aquí solo los recuentos.
     analysis: null, analysisLoading: false, analyzing: false, analysisError: null,
-    // Resumen de consumo eléctrico (Fase 3): lectura actual más energía y
+    // Resumen de consumo eléctrico: lectura actual más energía y
     // coste de 24h/7d/30d y proyección mensual. `null` mientras no ha
     // llegado la primera respuesta — la ficha lo trata igual que `latest`.
     powerSummary: null, powerSummaryError: null,
@@ -261,7 +261,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
   }
 
   /**
-   * Carga el resumen del último análisis de inventario del activo (Fase I).
+   * Carga el resumen del último análisis de inventario del activo.
    *
    * @param {number} id - Id del activo.
    * @param {object} [opts]
@@ -282,7 +282,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
   }
 
   /**
-   * Lanza un análisis del inventario del activo con el motor Lybra (Fase I).
+   * Lanza un análisis del inventario del activo con el motor Lybra.
    *
    * El escaneo corre en la TaskQueue, así que al volver solo hay un id: el
    * sondeo de la vista es quien refresca el resumen hasta que termine.
@@ -304,7 +304,7 @@ export const useHygeiaStore = defineStore('hygeia', () => {
   }
 
   /**
-   * Carga el resumen de consumo eléctrico del activo (Fase 3, P25): lectura
+   * Carga el resumen de consumo eléctrico del activo: lectura
    * actual más energía y coste de 24h/7d/30d y proyección mensual.
    *
    * Sin variante `silent` propia porque nunca lo pide el sondeo de 15 s

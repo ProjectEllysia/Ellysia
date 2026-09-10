@@ -112,7 +112,7 @@
 
           <!-- Un invitado no tiene registro de energía del procesador que
                leer: no es un defecto de su hardware, así que el mensaje no
-               es el genérico de "sin sensores" (§P29). -->
+               es el genérico de "sin sensores". -->
           <p v-else-if="powerState.state === 'virtual'" class="state-msg">
             Consumo no disponible — esta es una máquina virtual{{ powerState.virtualizationSystem ? ` (${powerState.virtualizationSystem})` : '' }}.
             El consumo eléctrico lo mide el equipo físico que la hospeda.
@@ -280,7 +280,7 @@
             Escaneado {{ timeAgo(inventoryCollectedAt) }}
           </p>
 
-          <!-- Análisis con Lybra (Fase I). Solo se ofrece si hay algo que
+          <!-- Análisis con Lybra. Solo se ofrece si hay algo que
                analizar: sin inventario el backend responde 409, así que el
                botón no debe existir siquiera. -->
           <div v-if="inventory.length" class="analysis-bar">
@@ -418,11 +418,11 @@ const props = defineProps({
   inventoryCollectedAt: { type: String, default: null },
   inventoryLoading: { type: Boolean, default: false },
   inventoryError: { type: String, default: null },
-  // Resumen del último análisis del inventario con Lybra (Fase I). `null` o
+  // Resumen del último análisis del inventario con Lybra. `null` o
   // `scanId` nulo = nunca analizado.
   analysis: { type: Object, default: null },
   analyzing: { type: Boolean, default: false },
-  // Resumen de consumo eléctrico (Fase 3, P25): lectura actual más energía
+  // Resumen de consumo eléctrico: lectura actual más energía
   // y coste de 24h/7d/30d y proyección mensual. `null` mientras no ha
   // llegado la primera respuesta.
   powerSummary: { type: Object, default: null },
@@ -508,7 +508,7 @@ const filteredInventory = computed(() => {
   )
 })
 
-/* ── Análisis del inventario con Lybra (Fase I) ── */
+/* ── Análisis del inventario con Lybra ── */
 const hasAnalysis = computed(() => !!props.analysis?.scanId)
 const analysisRunning = computed(() => ['pending', 'running'].includes(props.analysis?.status))
 const analysisTone = computed(() => {
@@ -545,7 +545,7 @@ const disks = computed(() =>
  */
 const nets = computed(() => m.value?.network ?? [])
 
-/* ── Consumo eléctrico (Fase 3, P20/P25/P26) ── */
+/* ── Consumo eléctrico ── */
 const powerState = computed(() => classifyPower(m.value?.power ?? null, {
   role: props.asset?.virtualizationRole ?? null,
   system: props.asset?.virtualizationSystem ?? null,
@@ -745,7 +745,7 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 .hint { font-size: var(--fs-xs); font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
 .hint--block { margin: 0.5rem 0 0; }
 
-/* ── Consumo eléctrico (Fase 3) ── */
+/* ── Consumo eléctrico ── */
 .power-reading { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; }
 .power-value {
   font-family: var(--font-mono); font-size-adjust: var(--fsa-mono); font-size: var(--fs-lg); font-weight: 500;
@@ -754,7 +754,7 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 .power-value small { margin-left: 0.35em; font-size: 0.7em; color: var(--text-muted); }
 /* Una estimación se presenta con menos confianza visual que una medición de
    sensor: mismo tamaño, color atenuado — el dato sigue siendo legible, pero
-   no compite en autoridad con una lectura real (P20). */
+   no compite en autoridad con una lectura real. */
 .power-value--estimated { color: var(--text-dim); }
 .power-badge {
   padding: 0.15rem 0.55rem; border-radius: 999px;
@@ -834,7 +834,7 @@ function stateLabel(state) { return STATE_LABELS[state] || state }
 /* ── Inventario de software ── */
 .inventory-scanned { margin: -0.3rem 0 0.7rem; font-size: var(--fs-sm); color: var(--text-muted); }
 
-/* ── Análisis con Lybra (Fase I) ── */
+/* ── Análisis con Lybra ── */
 .analysis-bar {
   display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
   flex-wrap: wrap; margin-bottom: 0.8rem; padding: 0.6rem 0.75rem;

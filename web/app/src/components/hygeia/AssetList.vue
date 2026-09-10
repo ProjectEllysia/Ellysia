@@ -282,7 +282,7 @@ a.btn-icon { text-decoration: none; }
   font-size: var(--fs-body); font-weight: 600; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* Aviso, no error: mismo tono --warn que el resto del panel (P26 de Hygeia),
+/* Aviso, no error: mismo tono --warn que el resto del panel de Hygeia,
    nunca --danger — un agente desactualizado sigue latiendo con normalidad. */
 .row-warn-icon { width: 13px; height: 13px; flex-shrink: 0; color: var(--warn); }
 .row-meta {
