@@ -20,7 +20,10 @@ from src.modules.accounts import LimitKey, OrganizationManager, QuotaManager
 from src.modules.infrastructure import UnitOfWork
 from src.modules.infrastructure.session import build_repository
 from src.modules.shared import assert_owned, utcnow_naive
-from src.modules.system.taskqueue import TaskQueue, job_context
+from src.modules.system.taskqueue import job_context
+from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
+from src.modules.system.taskqueue.outbox import TaskDispatch, build_dispatch
+from src.modules.system.taskqueue.outbox_repository import TaskDispatchRepository
 from src.modules.tools.herald import EmailMessage, build_mailer, render_email
 from src.modules.users.model import User
 
@@ -879,7 +882,7 @@ class HygeiaIngestManager:
         """
         check_clock_skew(payload["collectedAt"])
 
-        critical_anomaly_ids: list[int] = []
+        notify_dispatch_ids: list[int] = []
 
         with UnitOfWork() as uow:
             asset_repo = MonitoredAssetRepository(uow)
@@ -937,14 +940,25 @@ class HygeiaIngestManager:
             next_interval = asset.heartbeat_interval_sec or CR.hygeia_config().heartbeat_interval_sec
 
             if critical_anomaly_ids:
-                # Durable antes de encolar (§8): el worker de notificación
+                # La anomalía abierta es el guardia anti-duplicado: el próximo
+                # heartbeat la ve activa y no la reabre. Por eso su intención
+                # de avisar viaja en el mismo commit; confirmada sola,
+                # un encolado fallido perdía el correo para siempre.
+                dispatch_repo = TaskDispatchRepository(uow)
+                notify_dispatch_ids = [
+                    dispatch_repo.save(HygeiaNotifyManager.build_dispatch_for(anomaly_id)).id
+                    for anomaly_id in critical_anomaly_ids
+                ]
+                # Durable antes de publicar (§8): el worker de notificación
                 # corre en otro proceso y debe poder leer ya la anomalía.
                 uow.commit_for_handoff()
 
-        # Encolado siempre fuera del UnitOfWork: nunca bloquear la respuesta
+        # Publicar siempre fuera del UnitOfWork: nunca bloquear la respuesta
         # al agente por la latencia de SMTP (§8) — el correo lo manda el
-        # worker, no esta request.
-        HygeiaNotifyManager.enqueue_for(critical_anomaly_ids)
+        # worker, no esta request. Si Redis falla, las filas quedan `pending`
+        # y las recoge el barrido de la outbox.
+        for dispatch_id in notify_dispatch_ids:
+            OutboxDispatcher.dispatch(dispatch_id)
 
         return {
             "ok": True,
@@ -1156,16 +1170,21 @@ class HygeiaMaintenanceManager:
         del job antes de poder caer a ``offline``.
 
         Cada ``host_down`` recién abierto encola su notificación por correo
-        (§8) — este job corre en background (nunca en una request), así que
-        ``UnitOfWork`` ya confirma la transacción al salir del bloque; no
-        hace falta un ``commit_for_handoff()`` explícito para que el worker
-        de notificación vea la anomalía.
+        (§8), y la intención de encolarla se guarda en la misma transacción
+        que la anomalía: la anomalía abierta es el guardia que impide
+        abrir otra en la pasada siguiente, así que si se confirmaba sola y el
+        encolado fallaba después, el correo no llegaba nunca. Este job corre en
+        background (nunca en una request), así que ``UnitOfWork`` ya confirma
+        la transacción al salir del bloque; no hace falta un
+        ``commit_for_handoff()`` explícito para que el worker de notificación
+        vea la anomalía.
         """
-        newly_offline_anomaly_ids: list[int] = []
+        notify_dispatch_ids: list[int] = []
 
         with UnitOfWork() as uow:
             asset_repo = MonitoredAssetRepository(uow)
             anomaly_repo = AnomalyRepository(uow)
+            dispatch_repo = TaskDispatchRepository(uow)
             now = utcnow_naive()
             offline_after_missed = CR.hygeia_config().offline_after_missed
 
@@ -1190,9 +1209,14 @@ class HygeiaMaintenanceManager:
                         saved = anomaly_repo.save(Anomaly(
                             asset_id=asset.id, kind="host_down", severity="critical",
                         ))
-                        newly_offline_anomaly_ids.append(saved.id)
+                        notify_dispatch_ids.append(
+                            dispatch_repo.save(HygeiaNotifyManager.build_dispatch_for(saved.id)).id
+                        )
 
-        HygeiaNotifyManager.enqueue_for(newly_offline_anomaly_ids)
+        # Camino feliz: publicar ya. Si Redis falla, las filas quedan `pending`
+        # y las recogen el barrido periódico o la reconciliación de arranque.
+        for dispatch_id in notify_dispatch_ids:
+            OutboxDispatcher.dispatch(dispatch_id)
 
     @staticmethod
     def execute_retention() -> int:
@@ -1215,45 +1239,44 @@ class HygeiaNotifyManager:
     Envía la notificación por correo de una anomalía crítica recién abierta.
 
     Se dispara de forma asíncrona (``TaskQueue``, categoría
-    ``hygeia.notify``) tras confirmar la transacción que abrió la anomalía
-    — nunca de forma síncrona en la ingesta ni en el job de presencia, para
-    no bloquear la respuesta al agente ni al propio scheduler por la
-    latencia de SMTP (§8).
+    ``hygeia.notify``) a través de la outbox transaccional, cuya fila se
+    guarda en la misma transacción que abre la anomalía — nunca de forma
+    síncrona en la ingesta ni en el job de presencia, para no bloquear la
+    respuesta al agente ni al propio scheduler por la latencia de SMTP (§8).
     """
 
     TASK_CATEGORY = "hygeia.notify"
+    EXTERNAL_ID_PREFIX = "hygeia-notify:"
 
     @staticmethod
-    def enqueue_for(anomaly_ids: list[int]) -> None:
+    def build_dispatch_for(anomaly_id: int) -> TaskDispatch:
         """
-        Encola la notificación de cada anomalía crítica recién abierta.
+        Construye, sin guardarla, la intención de encolar el aviso de una
+        anomalía crítica recién abierta.
 
-        Debe llamarse siempre **después** de que la transacción que las
-        creó ya sea durable (commit de request/background, o
-        ``commit_for_handoff()`` explícito) — el worker corre en otro
-        proceso y no vería una fila todavía sin confirmar.
-
-        Sigue encolando fuera de la transacción que abre la anomalía: al
-        auditarlo en #551 se vio que migrarlo de verdad exige mover el encolado
-        DENTRO de esa transacción, porque la anomalía ya confirmada es el propio
-        guardia anti-duplicado (``get_active(asset_id, "host_down") is None``).
-        Si el proceso muere en esa ventana el correo no se retrasa: el guardia
-        ya está puesto, así que queda suprimido para siempre. Es una
-        reestructuración de los llamantes, no de este método, y va aparte.
+        Los dos llamantes (la ingesta de heartbeats y el detector de
+        presencia) la guardan en la misma transacción que abre la anomalía,
+        porque la anomalía abierta es el propio guardia anti-duplicado
+        (``get_active(asset_id, "host_down") is None``, o ``open_kinds`` en la
+        evaluación de umbrales). Cuando se confirmaba sola y el
+        encolado fallaba después, el correo no se retrasaba: la pasada
+        siguiente veía la anomalía ya abierta y no volvía a avisar nunca.
 
         Args:
-            anomaly_ids: IDs de anomalías con severidad ``critical`` recién
-                abiertas. Una lista vacía es un no-op.
+            anomaly_id: Primary key de la ``Anomaly`` con severidad
+                ``critical`` recién abierta.
+
+        Returns:
+            TaskDispatch: Fila de outbox sin persistir, para el job
+                ``HygeiaNotify-{anomaly_id}`` de la categoría ``hygeia.notify``.
         """
-        task_queue = TaskQueue.get_instance()
-        for anomaly_id in anomaly_ids:
-            task_queue.submit(
-                func=HygeiaNotifyManager.execute_notify_critical_anomaly,
-                args=(anomaly_id,),
-                name=f"HygeiaNotify-{anomaly_id}",
-                category=HygeiaNotifyManager.TASK_CATEGORY,
-                external_id=f"hygeia-notify:{anomaly_id}",
-            )
+        return build_dispatch(
+            HygeiaNotifyManager.execute_notify_critical_anomaly,
+            name=f"HygeiaNotify-{anomaly_id}",
+            category=HygeiaNotifyManager.TASK_CATEGORY,
+            args=(anomaly_id,),
+            external_id=f"{HygeiaNotifyManager.EXTERNAL_ID_PREFIX}{anomaly_id}",
+        )
 
     @staticmethod
     def execute_notify_critical_anomaly(anomaly_id: int) -> None:

@@ -17,9 +17,13 @@ from src.modules.features.hygeia import managers as hygeia_managers
 from src.modules.features.hygeia.managers import HygeiaAssetManager
 from src.modules.features.hygeia.model import MonitoredAsset
 from src.modules.features.hygeia.repositories import (
+    AnomalyRepository,
     AssetSnapshotRepository,
     MonitoredAssetRepository,
 )
+from src.modules.system.taskqueue import TaskQueue
+from src.modules.system.taskqueue.dispatcher import OutboxDispatcher
+from src.modules.system.taskqueue.outbox_repository import TaskDispatchRepository
 
 pytestmark = pytest.mark.integration
 
@@ -33,7 +37,7 @@ class _FakeTaskQueue:
 
 @pytest.fixture(autouse=True)
 def _fake_task_queue():
-    with mock.patch.object(hygeia_managers.TaskQueue, "get_instance", return_value=_FakeTaskQueue()):
+    with mock.patch.object(TaskQueue, "get_instance", return_value=_FakeTaskQueue()):
         yield
 
 
@@ -134,6 +138,105 @@ def test_heartbeat_lands_denormalized_scalars(client, app, regular_user):
     # Solo eth0: la loopback no cuenta.
     assert snapshot["net_rx_bps"] == 120_000
     assert snapshot["net_tx_bps"] == 45_000
+
+
+# ------------------------------------------ outbox del aviso de anomalía crítica
+
+class _RecordingQueue:
+    """Doble de ITaskQueue que apunta lo que se le publica, sin Redis real."""
+
+    def __init__(self) -> None:
+        self.submitted: list[dict] = []
+
+    def submit(self, **kwargs):
+        self.submitted.append(kwargs)
+
+
+class _RejectingQueue:
+    """Simula Redis caído justo en el instante del encolado."""
+
+    def submit(self, **kwargs):
+        raise ConnectionError("Redis no disponible")
+
+
+def _make_data_disk_critical(app, asset_id: int) -> None:
+    """Da al activo umbrales propios con los que ``/data`` (al 72 % en
+    ``_heartbeat()``) abre una anomalía crítica al primer heartbeat, sin
+    depender de los umbrales globales de la config."""
+    with app.app_context():
+        with UnitOfWork() as uow:
+            repo = MonitoredAssetRepository(uow)
+            asset = repo.get_by_id(asset_id)
+            asset.thresholds = {"diskPct": {"warning": 60, "critical": 70}}
+            repo.update(asset)
+
+
+def _active_anomaly_ids(app, asset_id: int) -> list[int]:
+    with app.app_context():
+        with UnitOfWork() as uow:
+            return [anomaly.id for anomaly in AnomalyRepository(uow).get_all_active(asset_id)]
+
+
+def _pending_dispatch_names(app) -> list[str]:
+    with app.app_context():
+        with UnitOfWork() as uow:
+            return [row.name for row in TaskDispatchRepository(uow).get_pending()]
+
+
+def test_critical_anomaly_notice_is_published_with_the_heartbeat(
+    client, app, regular_user, monkeypatch,
+):
+    """Camino feliz: el aviso sale en la misma request y nada queda pendiente."""
+    asset_id, agent_key = _create_asset_with_key(app, regular_user)
+    _make_data_disk_critical(app, asset_id)
+    queue = _RecordingQueue()
+    monkeypatch.setattr(TaskQueue, "get_instance", staticmethod(lambda: queue))
+
+    resp = client.post(
+        "/hygeia/ingest", json=_heartbeat(), headers={"Authorization": f"Bearer {agent_key}"},
+    )
+
+    assert resp.status_code == 200
+    anomaly_ids = _active_anomaly_ids(app, asset_id)
+    assert len(anomaly_ids) == 1
+    assert [job["name"] for job in queue.submitted] == [f"HygeiaNotify-{anomaly_ids[0]}"]
+    assert _pending_dispatch_names(app) == []
+
+
+def test_critical_anomaly_notice_survives_redis_down_at_enqueue(
+    client, app, regular_user, monkeypatch,
+):
+    """La anomalía abierta ya no puede suprimir su propio aviso.
+
+    La anomalía abierta es lo que impide que el siguiente heartbeat la vuelva
+    a abrir. Antes se confirmaba y el encolado venía después; si Redis fallaba
+    ahí, la anomalía quedaba registrada y el correo no salía nunca. Ahora las
+    dos cosas van en el mismo commit y el barrido publica el aviso después.
+    """
+    monkeypatch.setattr(
+        hygeia_managers.CR, "hygeia_limits",
+        lambda: hygeia_managers.CR.HygeiaLimits(min_interval_sec=0),
+    )
+    asset_id, agent_key = _create_asset_with_key(app, regular_user)
+    _make_data_disk_critical(app, asset_id)
+    monkeypatch.setattr(TaskQueue, "get_instance", staticmethod(_RejectingQueue))
+    headers = {"Authorization": f"Bearer {agent_key}"}
+
+    assert client.post("/hygeia/ingest", json=_heartbeat(), headers=headers).status_code == 200
+    # El disco sigue lleno: el siguiente heartbeat ve la anomalía abierta y
+    # no añade una segunda intención de avisar.
+    assert client.post("/hygeia/ingest", json=_heartbeat(), headers=headers).status_code == 200
+
+    anomaly_ids = _active_anomaly_ids(app, asset_id)
+    assert len(anomaly_ids) == 1
+    assert _pending_dispatch_names(app) == [f"HygeiaNotify-{anomaly_ids[0]}"]
+
+    recovery_queue = _RecordingQueue()
+    monkeypatch.setattr(TaskQueue, "get_instance", staticmethod(lambda: recovery_queue))
+    with app.app_context():
+        assert OutboxDispatcher.dispatch_pending() == 1
+
+    assert [job["name"] for job in recovery_queue.submitted] == [f"HygeiaNotify-{anomaly_ids[0]}"]
 
 
 def test_heartbeat_keeps_the_whole_payload(client, app, regular_user):

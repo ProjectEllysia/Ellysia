@@ -14,7 +14,7 @@ from unittest import mock
 import pytest
 
 from src.modules.infrastructure import UnitOfWork
-from src.modules.features.hygeia import managers as hygeia_managers
+from src.modules.system.taskqueue import TaskQueue
 from src.modules.features.hygeia.managers import HygeiaAssetManager
 from src.modules.features.hygeia.repositories import MonitoredAssetRepository
 from src.modules.features.themis.managers import LybraEngineManager
@@ -34,7 +34,7 @@ class _FakeTaskQueue:
 
 @pytest.fixture(autouse=True)
 def _fake_task_queue():
-    with mock.patch.object(hygeia_managers.TaskQueue, "get_instance", return_value=_FakeTaskQueue()):
+    with mock.patch.object(TaskQueue, "get_instance", return_value=_FakeTaskQueue()):
         yield
 
 
