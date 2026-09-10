@@ -1,14 +1,15 @@
 """
-Outbox transaccional para TaskQueue (B08) -- modelo y (de)serialización.
+Outbox transaccional para TaskQueue -- modelo y (de)serialización.
 
 **El problema**: varios managers seguían el patrón "crear entidad → confirmar
 en BD → encolar en Redis" con el ``submit()`` fuera de la transacción de la
 entidad. Entre esos dos pasos hay una ventana real: si la API se reinicia o
 Redis falla justo ahí, la fila queda en BD en estado ``pending`` sin ningún
 trabajo que la vaya a procesar nunca -- y nada lo nota hasta que alguien mira
-esa fila y se pregunta por qué no avanza. La caída de B04 (Fase 0) atendía la
-mitad de esto -- reconciliar un job que sí se encoló pero cuyo estado quedó
-inconsistente --, no la mitad en la que el ``submit()`` nunca llegó a pasar.
+esa fila y se pregunta por qué no avanza. La reconciliación de trabajo
+huérfano que arranca ``_configure_scheduling()`` atiende solo la mitad de
+esto -- un job que sí se encoló pero cuyo estado quedó inconsistente --, no
+la mitad en la que el ``submit()`` nunca llegó a pasar.
 
 **La solución**: ``TaskDispatch`` es la intención de publicar, persistida en
 la MISMA transacción que la entidad que la origina (mismo commit, o ninguno

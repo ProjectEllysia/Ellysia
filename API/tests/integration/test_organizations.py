@@ -209,7 +209,7 @@ def test_the_bag_runs_out_for_everyone(client, app, owner, make_user, auth_heade
             QuotaManager().consume(second.id, LimitKey.IRIS_ANALYSES)
 
 
-# ------------------------------------------- el dueño deja de pagar (§12.8)
+# ------------------------------------------------- el dueño deja de pagar
 
 def test_when_the_owner_stops_paying_nothing_is_destroyed(
     client, app, owner, regular_user, auth_headers, make_subscription
@@ -407,7 +407,7 @@ def test_leaving_without_an_organization_is_a_404(client, regular_user, auth_hea
                          headers=auth_headers(regular_user)).status_code == 404
 
 
-# --------------------------------------- el dueño gestiona a los suyos (§8.6)
+# ------------------------------------------- el dueño gestiona a los suyos
 
 def test_the_owner_manages_the_attributes_of_their_members(
     client, app, owner, make_user, auth_headers

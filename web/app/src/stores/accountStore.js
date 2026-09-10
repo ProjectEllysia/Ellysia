@@ -6,9 +6,9 @@ import { useToastStore } from '@/stores/toastStore'
 /**
  * Store de la capa comercial: plan efectivo, consumo y organización.
  *
- * El plan NO viaja en el JWT a propósito (ver el §14 del documento de diseño):
- * un cambio de plan tiene que notarse en la siguiente petición, no cuando
- * caduque el token. Por eso se pide al servidor y se guarda aquí.
+ * El plan NO viaja en el JWT a propósito: un cambio de plan tiene que
+ * notarse en la siguiente petición, no cuando caduque el token. Por eso se
+ * pide al servidor y se guarda aquí.
  *
  * @module accountStore
  */

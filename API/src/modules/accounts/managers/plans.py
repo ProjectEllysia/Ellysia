@@ -1,10 +1,8 @@
 """
-Lógica de negocio de la capa comercial.
-
-En esta fase solo hay lectura: el catálogo de planes y el plan efectivo de
-quien pregunta. Quien mueve suscripciones (``SubscriptionManager``, con las
-seis operaciones del ciclo de vida) y quien cuenta el consumo
-(``QuotaManager``) llegan en fases posteriores.
+Lógica de negocio del catálogo de planes: lectura pública, plan efectivo y
+consumo de quien pregunta, y alta/edición del catálogo para root. Quien mueve
+suscripciones vive aparte, en ``SubscriptionManager`` (las seis operaciones
+del ciclo de vida); quien cuenta el consumo, en ``QuotaManager``.
 """
 
 import logging
@@ -127,8 +125,8 @@ class PlanManager:
                 state = quota_manager.state(user_id, key)
             except (ValueError, NotImplementedError):
                 # ValueError: la fila referencia una clave que ya no existe en
-                # el enum. NotImplementedError: es de existencias y todavía no
-                # tiene contador (llegan en la fase 3). Ninguna de las dos es
+                # el enum. NotImplementedError: es de existencias y no tiene
+                # contador registrado en STOCK_COUNTERS. Ninguna de las dos es
                 # motivo para tumbar la vista entera.
                 usage[limit.limit_key] = entry
                 continue

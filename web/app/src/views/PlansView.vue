@@ -87,8 +87,8 @@ const auth = useAuthStore()
 /**
  * ¿Es el plan que tiene contratado ahora mismo?
  *
- * Sin pasarela no hay autoservicio de verdad — el §1 del diseño dice que el
- * plan lo asigna root a mano — así que el resto de tarjetas no llevan a
+ * Sin pasarela no hay autoservicio de verdad — el plan lo asigna root a
+ * mano — así que el resto de tarjetas no llevan a
  * ningún sitio que haga algo: mostrar cuál es la propia es lo único honesto
  * que esta pantalla puede ofrecer sin fingir una acción que no existe.
  */
@@ -181,9 +181,9 @@ onMounted(async () => {
 .card-cta--current { background: transparent; }
 
 /* No es un botón: no hay ninguna acción que hacer desde aquí. Sin pasarela,
-   el cambio de plan lo mueve root a mano (§1 del diseño) — decir "Entrar" o
-   "Ver mi plan" en una tarjeta que no es la propia prometía una acción que
-   la pantalla nunca cumplía. */
+   el cambio de plan lo mueve root a mano — decir "Entrar" o "Ver mi plan" en
+   una tarjeta que no es la propia prometía una acción que la pantalla nunca
+   cumplía. */
 .card-cta--muted {
   background: transparent; border-color: var(--border-med);
   color: var(--text-muted); font-weight: 500; cursor: default;

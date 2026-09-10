@@ -1,4 +1,4 @@
-"""Integration tests for the Lybra KB repository (Fase 2).
+"""Integration tests for the Lybra KB repository.
 
 Exercises the matcher's central query (``cves_for_cpe``) and the upsert
 idempotency against the (SQLite) database, without any network.
@@ -42,7 +42,7 @@ def test_cves_for_cpe_respects_version_range(app):
 
 
 def test_cves_for_cpe_tags_result_with_required_os(app):
-    """#118: a match gated behind a platform (CpeMatch.required_os) must
+    """A match gated behind a platform (CpeMatch.required_os) must
     surface on the returned CveEntry so the caller (LybraEngine) can avoid
     treating an unverifiable OS precondition as a confirmed risk."""
     match = {"vendor": "apache", "product": "http_server", "exact_version": "2.4.59",
@@ -111,7 +111,7 @@ def test_upsert_cve_is_idempotent_and_replaces_matches(app):
     assert now[0].cvss_score == 9.8     # fields updated
 
 
-# ------------------------------------------------- Fase I-b, paso 2: índice CPE
+# --------------------------------------------------------------- índice CPE
 
 def _match(vendor, product):
     return {"vendor": vendor, "product": product, "exact_version": "1.0",
@@ -395,7 +395,7 @@ def test_query_manager_enriches_with_kev_and_epss(app):
     assert quiet.kev is False and quiet.epss is None
 
 
-# ───────────────────────────── estado de sincronización (L36)
+# ─────────────────── estado de sincronización
 #
 # Una sincronización que funciona ya se nota: aparecen datos. Una que falla no
 # dejaba más rastro que una línea de log, así que el job podía llevar semanas
@@ -447,9 +447,8 @@ def test_a_source_never_synced_counts_as_stale(app):
         status = KbSyncManager().status()
         by_source = {entry["source"]: entry for entry in status["sources"]}
 
-        # Las cuatro fuentes configuradas, `oval` incluida: al añadir el feed
-        # de avisos de distribución (Fase O) heredó este registro sin tocar
-        # nada, que era medio motivo para hacer L36 antes que L32.
+        # Las cuatro fuentes configuradas, `oval` incluida (el feed de avisos
+        # de distribución).
         assert set(by_source) == {"nvd", "kev", "epss", "oval"}
         assert all(entry["neverSynced"] for entry in by_source.values())
         assert all(entry["isStale"] for entry in by_source.values())
@@ -509,7 +508,7 @@ def test_the_kb_status_endpoint_requires_authentication(client):
     assert client.get("/themis/kb/status").status_code == 401
 
 
-# ───────────────────────── ranking de nombres sin resolver (L37)
+# ─────────── ranking de nombres sin resolver
 
 
 def test_the_ranking_counts_by_name_and_origin(app):

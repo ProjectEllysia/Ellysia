@@ -148,8 +148,8 @@ def test_consume_many_accepts_an_amount(app, regular_user, set_plan_limits):
 
 
 def test_quotas_are_per_user(app, make_user, set_plan_limits):
-    """Dos usuarios con el mismo plan no comparten bolsa. La compartirán los
-    miembros de una misma organización, y eso llega en la fase 5."""
+    """Dos usuarios con el mismo plan no comparten bolsa -- solo la comparten
+    los miembros de una misma organización, que aquí no lo son."""
     set_plan_limits({LimitKey.AI_REQUESTS: 1})
     first, second = make_user(), make_user()
 
@@ -211,7 +211,7 @@ def test_stock_key_without_counter_is_a_programming_error(
             QuotaManager().consume(regular_user.id, LimitKey.HYGEIA_ASSETS)
 
 
-# --------------------------------------------- las claves de la fase 3, por HTTP
+# ------------------------------------------------------ claves de HTTP
 
 def test_iris_analyses_are_capped(client, regular_user, auth_headers, set_plan_limits):
     """El corte llega antes de encolar el análisis.

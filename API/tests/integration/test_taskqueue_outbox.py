@@ -3,9 +3,9 @@
 ``TaskDispatch`` es la intención de publicar un job, guardada en la misma
 transacción que la entidad que la origina. Estos tests cubren el
 ``OutboxDispatcher`` de forma aislada (con un ``ITaskQueue`` doble, sin Redis
-real) y, al final, el escenario íntegro que el issue pide: la API puede
-reiniciarse entre el commit del análisis y la publicación del job sin perder
-el trabajo ni duplicarlo.
+real) y, al final, el escenario íntegro que sostiene todo lo anterior: la API
+puede reiniciarse entre el commit del análisis y la publicación del job sin
+perder el trabajo ni duplicarlo.
 """
 
 from __future__ import annotations
@@ -246,7 +246,7 @@ def test_dispatch_pending_skips_rows_already_dispatched(app, monkeypatch):
 def test_analyze_survives_a_restart_between_commit_and_publish(
     app, regular_user, set_plan_limits, monkeypatch,
 ):
-    """El criterio de cierre del issue, de punta a punta: se crea el
+    """El escenario de punta a punta que justifica la outbox: se crea el
     análisis con Redis caído en ese instante (simulando el momento exacto en
     que la API podría reiniciarse o Redis fallar), y luego una llamada
     aparte -- como la reconciliación de arranque en run.py -- termina de

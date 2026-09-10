@@ -1,4 +1,4 @@
-"""La única verdad sobre si un objetivo está expuesto a internet (L38).
+"""La única verdad sobre si un objetivo está expuesto a internet.
 
 La clasificación acota la prioridad de todo hallazgo en red privada (tope HIGH
 en ``score_finding``) y entra en el prompt del informe, que le dice al modelo

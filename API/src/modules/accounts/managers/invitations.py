@@ -56,7 +56,7 @@ class InvitationManager:
         Raises:
             OrganizationNotAllowedError: la suscripción del dueño no está
                 vigente o perdió el toggle. Mientras no paga no puede crecer
-                (§12.8) — lo que ya tiene sigue en pie, pero no suma gente.
+                — lo que ya tiene sigue en pie, pero no suma gente.
             AlreadyInOrganizationError: esa persona ya está en una organización.
             QuotaExceededError: se alcanzó el tope de miembros del plan.
         """

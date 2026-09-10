@@ -1,4 +1,4 @@
-"""#551: Aegis crea la entidad y su encolado en una sola transacción.
+"""Aegis crea la entidad y su encolado en una sola transacción.
 
 Aegis era el caso más desprotegido de todo el proyecto. Sus dos puntos de
 create-then-enqueue —lanzar una campaña y generar una píldora— no tenían

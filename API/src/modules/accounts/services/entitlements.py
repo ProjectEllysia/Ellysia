@@ -8,9 +8,10 @@ tampoco ninguno que pueda olvidarse de aplicarla — que es como fallan estos
 sistemas en todas partes: el cron nocturno no corre un fin de semana y hay
 cuentas disfrutando gratis de un plan caducado sin que nadie se entere.
 
-En esta fase la única fuente de derechos es el plan personal. La unión con los
-derechos derivados de la organización (el ``max()`` del §4 del diseño) llega
-con la fase 5, cuando ``OrganizationMember`` tenga filas.
+Hay dos fuentes de derechos que nunca se anulan entre sí: el plan personal y lo
+que un usuario recibe por pertenecer a una organización cuyo dueño paga. Gana
+el ``max()`` de las dos — ver ``resolve_entitlement`` para el detalle de quién
+paga cuando empatan.
 """
 
 from __future__ import annotations
@@ -129,14 +130,14 @@ class Entitlement:
 
     Attributes:
         limit: Tope. ``None`` es ilimitado; ``0``, no incluido en el plan.
-        holder_kind / holder_id: a quién se le carga el consumo. Hoy siempre el
-            propio usuario; en la fase 5, la organización cuando sea ella quien
-            conceda el derecho (bolsa común).
+        holder_kind / holder_id: a quién se le carga el consumo — el propio
+            usuario, o la organización cuando es ella quien concede el
+            derecho (bolsa común entre sus miembros).
         source: de dónde viene el derecho — ``"personal"`` (su suscripción
-            vigente), ``"default"`` (el plan gratuito) o, desde la fase 5,
-            ``"organization"``. No es adorno: la vista "Mi plan" tiene que poder
-            decir "ilimitado, cortesía de tu organización", porque de eso
-            depende que el usuario entienda qué pierde si se va.
+            vigente), ``"default"`` (el plan gratuito) u ``"organization"``.
+            No es adorno: la vista "Mi plan" tiene que poder decir
+            "ilimitado, cortesía de tu organización", porque de eso depende
+            que el usuario entienda qué pierde si se va.
     """
 
     key: LimitKey
@@ -187,7 +188,7 @@ def resolve_organization_grant(
     Returns:
         ``(tope, organization_id)``. ``(0, None)`` si no pertenece a ninguna, o
         si la suscripción del dueño no está vigente o perdió el toggle — que es
-        justo lo que pasa cuando el dueño deja de pagar (§12.8): los miembros
+        justo lo que pasa cuando el dueño deja de pagar: los miembros
         conservan cuenta, datos y plan personal, y solo dejan de recibir lo
         heredado.
     """

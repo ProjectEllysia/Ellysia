@@ -1,7 +1,7 @@
 """
 Motor de cuotas: cuenta lo consumido y corta cuando el plan se acaba.
 
-Dos naturalezas, dos formas de contar (§6.2 del diseño):
+Dos naturalezas, dos formas de contar:
 
 - **Consumo** (``month`` / ``day``): hay contador en ``UsageCounter``. Sube y no
   baja, y se reinicia solo al cambiar de periodo — no hay ningún proceso que
@@ -131,7 +131,7 @@ class QuotaManager:
             self._consume_counter(entitlement, amount)
 
     def consume_many(self, user_id: int, keys: list[LimitKey], amount: int = 1) -> None:
-        """Consume varias claves como una única operación: todas o ninguna (B09).
+        """Consume varias claves como una única operación: todas o ninguna.
 
         Encadenar ``consume()`` a pelo dos veces deja un cobro a medias si la
         segunda llamada falla -- el caso real es ``generate_ai_summary()``,

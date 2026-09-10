@@ -79,7 +79,7 @@
         </template>
       </div>
 
-      <!-- ═══════════ MUNDO: AGENTES (Fase I) ═══════════ -->
+      <!-- ═══════════ MUNDO: AGENTES ═══════════ -->
       <div v-else-if="store.world === 'agents'" key="agents" class="world-block">
         <AgentScansPanel
           :assets="hygeiaStore.state.assets"
@@ -297,7 +297,7 @@ const selectableFolders = computed(() =>
 // la SPA: si el usuario cambió a "escáneres externos" y vuelve a entrar a
 // Themis después, sin esto vería el mundo que dejó seleccionado la vez
 // anterior en vez de entrar siempre por Lybra (el motor propio, protagonista
-// del roadmap). El hub de Themis puede forzar un mundo/vista concretos vía
+// de Themis). El hub de Themis puede forzar un mundo/vista concretos vía
 // query params (?world=external&view=history) para sus atajos rápidos.
 onMounted(() => {
   const world = ['external', 'agents'].includes(route.query.world) ? route.query.world : 'lybra'

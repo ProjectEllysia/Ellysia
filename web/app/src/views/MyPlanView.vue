@@ -25,9 +25,9 @@
 
         <section v-if="source" class="source">{{ source }}</section>
 
-        <!-- Sin pasarela de pago no hay autoservicio real (§1 del diseño): el
-             plan lo asigna root a mano. Decirlo aquí es más honesto que un
-             botón "Cambiar de plan" que no haría nada al pulsarlo. -->
+        <!-- Sin pasarela de pago no hay autoservicio real: el plan lo asigna
+             root a mano. Decirlo aquí es más honesto que un botón "Cambiar
+             de plan" que no haría nada al pulsarlo. -->
         <p class="upgrade-hint">
           ¿Quieres subir de plan? Escribe a quien administre tu cuenta —
           todavía no hay cambio de plan en autoservicio.

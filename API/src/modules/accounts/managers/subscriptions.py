@@ -11,7 +11,7 @@ Hoy quien las mueve es root desde el panel. Son dos clientes del mismo puerto,
 no dos caminos, y por eso la máquina de estados se puede probar entera sin
 pasarela.
 
-Lo que **no** hace ninguna de las seis (§12.7): escribir en ``UserAttribute``,
+Lo que **no** hace ninguna de las seis: escribir en ``UserAttribute``,
 cambiar ``User.role``, crear o borrar una ``Organization``, tocar
 ``UsageCounter`` o borrar datos de nadie. Un pago escribe ``Subscription``, y se
 acabó.
