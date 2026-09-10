@@ -272,7 +272,7 @@ def test_notify_stuck_connections_does_not_reenqueue_next_pass(app, regular_user
 
 
 def test_stuck_alert_survives_redis_down_at_enqueue(app, regular_user, monkeypatch):
-    """#561: el guardia ya no puede suprimir el aviso para siempre.
+    """El guardia ya no puede suprimir el aviso para siempre.
 
     Antes, la marca ``stuck_alert_sent_at`` se confirmaba y el encolado venía
     después. Si Redis fallaba ahí, la siguiente pasada veía la marca y no

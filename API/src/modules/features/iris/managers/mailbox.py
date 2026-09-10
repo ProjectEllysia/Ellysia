@@ -768,7 +768,7 @@ class IrisMailboxManager(TaskTrackingMixin):
         comprobación cada uno de esos reintentos mandaría un correo nuevo.
 
         El cambio de estado y la intención de avisar se confirman juntos, y
-        en el momento (#561), por dos motivos:
+        en el momento, por dos motivos:
 
         - El estado es el guardia. Cuando se confirmaba solo y el encolado
           fallaba después, las llamadas siguientes lo veían ya puesto y el

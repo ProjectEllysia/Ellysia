@@ -80,7 +80,7 @@ def _mark_stuck_alert_sent_and_dispatch(connection_id: int) -> Optional[int]:
     Antes eran dos pasos: se confirmaba la marca y después se encolaba. Si el
     proceso moría o Redis fallaba entre medias, la siguiente pasada veía la
     marca puesta y no volvía a encolar, así que el aviso se perdía para
-    siempre sin que nadie lo notara (#561). Ahora la marca y la fila
+    siempre sin que nadie lo notara. Ahora la marca y la fila
     ``TaskDispatch`` existen las dos o ninguna.
 
     Args:

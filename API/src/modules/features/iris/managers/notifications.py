@@ -16,7 +16,7 @@ avisos de reautorización y de sync atascado confirman un estado que impide
 volver a avisar (``status="reauth_required"``, ``stuck_alert_sent_at``), así
 que su intención de encolado viaja en la misma transacción que ese guardia
 (outbox transaccional, ``build_dispatch_for``): si no, un encolado fallido
-suprimiría el aviso para siempre (#561). Los que no tienen guardia --
+suprimiría el aviso para siempre. Los que no tienen guardia --
 phishing y digest -- confirman su estado y encolan después con ``enqueue_for``.
 
 El correo va siempre al ``User`` dueño del recurso (análisis o conexión), no
@@ -152,14 +152,13 @@ class IrisPhishingNotifyManager:
         una fila todavía sin confirmar (mismo contrato que
         ``HygeiaNotifyManager.enqueue_for``).
 
-        Sigue encolando fuera de la transacción que marca el análisis, y se
-        revisó así en #551. A diferencia de los avisos de reautenticación,
-        sync atascado y ``host_down`` de Hygeia, aquí no hay guardia
-        anti-duplicado que se confirme antes: el llamante
+        Encola fuera de la transacción que marca el análisis, sin la outbox
+        transaccional que sí usan los avisos de reautorización, sync
+        atascado y ``host_down`` de Hygeia: aquí no hay guardia
+        anti-duplicado que se confirme antes, y el llamante
         (``IrisManager._enqueue_phishing_notification``) es fire-and-forget a
         propósito y ya traga sus propios fallos, así que un encolado perdido
-        cuesta un correo, no un aviso suprimido de forma permanente. La
-        migración de los tres que sí tienen guardia va aparte.
+        cuesta un correo, no un aviso suprimido de forma permanente.
         """
         TaskQueue.get_instance().submit(
             func=IrisPhishingNotifyManager.execute_notify_phishing,
@@ -355,7 +354,7 @@ class IrisReauthNotifyManager:
 
         ``IrisMailboxManager._mark_reauth_required`` la guarda solo en la
         transición hacia ``reauth_required``, y en la misma transacción que
-        ese cambio de estado (#561): el estado es el guardia anti-duplicado,
+        ese cambio de estado: el estado es el guardia anti-duplicado,
         así que si se confirmaba solo y el encolado fallaba después, las
         llamadas siguientes lo veían ya puesto y el aviso no llegaba nunca.
 
@@ -448,8 +447,8 @@ class IrisStuckSyncNotifyManager:
         atascado de ``connection_id``.
 
         El llamante (``services/notifications/scheduling.py``) la guarda en la
-        misma transacción que pone ``stuck_alert_sent_at``, y no por comodidad
-        (#561): esa marca es el guardia anti-duplicado --
+        misma transacción que pone ``stuck_alert_sent_at``, y no por
+        comodidad: esa marca es el guardia anti-duplicado --
         ``get_newly_stuck_connections`` solo devuelve conexiones sin ella --,
         así que cuando se confirmaba sola y el encolado fallaba después, el
         aviso no se retrasaba: quedaba suprimido para siempre. Con las dos

@@ -176,7 +176,7 @@ def test_dispatch_unknown_id_returns_false(app):
 
 
 def test_a_request_that_fails_afterwards_does_not_unmark_a_published_row(app):
-    """#561: la fila refleja algo que ya ocurrió en Redis, no en la request.
+    """La fila refleja algo que ya ocurrió en Redis, no en la request.
 
     Dentro de una request, ``UnitOfWork`` no confirma nada: lo hace el
     teardown, y si la request lanza, hace rollback. Cuando el dispatcher

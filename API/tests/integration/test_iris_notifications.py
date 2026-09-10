@@ -428,7 +428,7 @@ def test_mark_reauth_required_notifies_only_on_the_transition(app, regular_user,
 
 
 def test_reauth_notice_survives_redis_down_at_enqueue(app, regular_user, monkeypatch):
-    """#561: el guardia ya no puede suprimir el aviso para siempre.
+    """El guardia ya no puede suprimir el aviso para siempre.
 
     ``status="reauth_required"`` es lo que impide avisar dos veces. Antes se
     confirmaba y el encolado venía después; si Redis fallaba ahí, las llamadas

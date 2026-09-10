@@ -43,7 +43,7 @@ class OutboxDispatcher:
         la request lanzaba después (``IrisMailboxManager._mark_reauth_required``
         lo hace desde ``update_connection``), el rollback del teardown devolvía
         a ``pending`` una fila ya publicada y el barrido la republicaba: el
-        mismo correo, dos veces (#561). Todos los llamantes confirman su
+        mismo correo, dos veces. Todos los llamantes confirman su
         entidad justo antes de llamar aquí, así que este commit no arrastra
         nada suyo.
 
