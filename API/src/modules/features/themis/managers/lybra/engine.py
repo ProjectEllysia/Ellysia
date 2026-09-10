@@ -232,7 +232,7 @@ class LybraEngineManager(ScanManager):
                 LybraEngineManager._rehydrate_services(services),
                 timeout,
                 cancel_check=job.cancelled,
-                progress=job.progress,
+                report_progress=job.progress,
                 aggressive=aggressive,
             )
 
@@ -320,7 +320,7 @@ class LybraEngineManager(ScanManager):
             fase lo consulta y se corta sola, el escaneo se marca ``is_partial``
             y termina bien.
             """
-            time_has_passed = time.monotonic() >= deadline
+            time_has_passed = deadline is not None and time.monotonic() >= deadline
             deadline_taken_over = time_has_passed or is_cancelled()
             return deadline_taken_over
 

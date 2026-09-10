@@ -1444,7 +1444,7 @@ def test_a_scan_reports_progress_by_phase(monkeypatch, app, admin_user):
     with app.app_context():
         mgr = LybraEngineManager()
         escan = mgr._create_scan_record(target="10.0.0.5", user_id=admin_user.id)
-        mgr._run_lybra(escan.id, progress=reported.append)
+        mgr._run_lybra(escan.id, report_progress=reported.append)
 
     # Monótono, empieza por debajo de 100 y llega a 100.
     assert reported == sorted(reported)
