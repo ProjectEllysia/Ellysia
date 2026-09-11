@@ -206,8 +206,21 @@ features/*  ──►  users, accounts  ──►  tools/*, system  ──►  s
   no importan nada del dominio; `users` y `accounts` no importan features.
 - Una feature puede usar a otra feature, siempre por su `__init__.py` (Aegis usa a Themis y a
   Hygeia así).
-- **Excepción autorizada:** `system/config_reading.py` importa `ScanType` de Themis, porque
-  `CR.THEMIS_SCANNERS` se deriva del enum a propósito (ver CLAUDE.md § Configuración).
+- **Excepciones autorizadas:**
+  - `system/config_reading.py` importa `ScanType` de Themis, porque `CR.THEMIS_SCANNERS` se
+    deriva del enum a propósito (ver CLAUDE.md § Configuración). El import ocurre la primera vez
+    que se pide la lista, nunca al cargar el módulo: cargar `themis/model.py` ejecuta antes
+    `features/themis/__init__.py`, que arrastra media aplicación.
+  - Cualquier módulo, también `shared/` e `infrastructure/`, puede leer `system/config_reading.py`.
+    Es una hoja: solo depende de la biblioteca estándar y de `shared._exceptions`.
+  - Un `endpoints.py` puede usar la superficie pública de `users` (los decoradores de permisos y
+    `Role`) aunque su módulo tenga un rango menor. Es un borde HTTP (§ 3.2) y la autenticación la
+    necesitan todos.
+- **Nada se importa en `src/__init__.py`.** Python lo ejecuta antes que cualquier
+  `src.modules.x.y`, así que lo que se importe ahí se carga en todos los imports del proyecto y
+  esconde los ciclos de imports. Por el mismo motivo, un `__init__.py` de mecanismo (`system`,
+  `shared`, `infrastructure`) no carga endpoints ni nada que dependa de `users`. Lo vigila
+  `tests/unit/test_system_import_isolation.py`, que importa esos módulos en un proceso limpio.
 - Cuando un módulo transversal necesita algo de todas las features —contar recursos para la
   cuota de un plan, borrar los datos de un usuario—, la dependencia se invierte con un registro:
   cada feature se da de alta en el transversal desde su propio `__init__.py`, igual que hace hoy
@@ -816,7 +829,6 @@ Cada prefijo tiene un significado fijo, para que el nombre diga qué esperar:
 **Imports que entran por dentro de otro módulo** (§ 3.3):
 - Hygeia importa `users.services.secrets`.
 - Una feature importa `accounts.services.entitlements`.
-- Otro import trae `Role` de `users.services.permissions`.
 - Las features importan `system.taskqueue.outbox_repository`, `.dispatcher` y `.outbox`.
   `TaskDispatchRepository` debería reexportarse en `system/taskqueue/__init__.py`.
 
@@ -824,7 +836,8 @@ Cada prefijo tiene un significado fijo, para que el nombre diga qué esperar:
 - `accounts/services/limits.py` y `users/services/account_deletion.py` importan modelos de todas
   las features.
 - `users/__init__.py` importa Acheron.
-- `shared/_exceptions.py` importa Themis.
+- `shared/_documents.py` importa la TaskQueue de `system`. Además usa la BD, así que no es código
+  puro y no le corresponde estar en `shared/` (§ 6.2).
 
 **Duplicados** (§ 6.2, § 9.1):
 - `iris/services/parsers.py::_is_private_ip` duplica `shared.is_private_target`.
@@ -860,6 +873,7 @@ la ruta:
 | `src/modules/features/<nombre>/…` | `features.<nombre>` |
 | `src/modules/tools/<nombre>/…` | `tools.<nombre>` |
 | `src/modules/<nombre>/…` (cualquier otro) | `<nombre>` |
+| `src/` fuera de `src/modules/` (hoy solo `src/__init__.py`) | ninguno; cuenta como rango 0 en la regla 5 |
 
 Los imports relativos (`from .x import y`) se resuelven a ruta absoluta antes de comparar.
 
@@ -914,8 +928,10 @@ hacerlo (§ 5.4).
 | `users`, `accounts` | 2 |
 | `features.*` | 3 |
 
-Es violación importar un módulo de rango **mayor** que el propio. Excepción autorizada:
-`system/config_reading.py` → `ScanType` de Themis (§ 3.4).
+Es violación importar un módulo de rango **mayor** que el propio. Los ficheros de `src/` que no
+están en ningún módulo cuentan como rango 0. Las tres excepciones autorizadas de § 3.4 no son
+violación: `system/config_reading.py` → `ScanType` de Themis, cualquier fichero →
+`system/config_reading.py`, y un `endpoints.py` → la superficie pública de `users`.
 
 #### La lista de excepciones que solo encoge
 
