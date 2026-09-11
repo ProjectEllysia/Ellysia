@@ -140,6 +140,12 @@ export const useIrisStore = defineStore('iris', () => {
    */
   const ARCHIVE_PER_PAGE = 20
 
+  /** Filtros del archivo sin nada puesto. Las claves son las de la query de
+   * `GET /iris/results`, y también las que guarda una vista guardada. */
+  function emptyArchiveFilters() {
+    return { search: '', verdict: '', status: '', source: '', tag: '', ioc: '', review: '' }
+  }
+
   const archive = reactive({
     items: [],
     total: 0,
@@ -147,7 +153,7 @@ export const useIrisStore = defineStore('iris', () => {
     perPage: ARCHIVE_PER_PAGE,
     loading: false,
     error: null,
-    filters: { search: '', verdict: '', status: '', source: '' },
+    filters: emptyArchiveFilters(),
     sort: { by: 'date', dir: 'desc' },
   })
 
@@ -190,7 +196,7 @@ export const useIrisStore = defineStore('iris', () => {
   }
 
   function resetArchiveFilters() {
-    archive.filters = { search: '', verdict: '', status: '', source: '' }
+    archive.filters = emptyArchiveFilters()
     archive.page = 1
     fetchArchive()
   }
@@ -212,6 +218,87 @@ export const useIrisStore = defineStore('iris', () => {
   function goToArchivePage(pg) {
     archive.page = pg
     fetchArchive()
+  }
+
+  /* ═════════════════ TRIAJE: vistas guardadas y etiquetas ═════════════ */
+
+  const savedViews = ref([])
+  const userTags = ref([])
+
+  /** Carga las vistas guardadas del usuario. */
+  async function fetchSavedViews() {
+    const res = await apiFetch('/iris/triage/views')
+    savedViews.value = res?.ok ? ((await res.json()).views ?? []) : []
+  }
+
+  /**
+   * Guarda los filtros y el orden actuales del archivo con un nombre.
+   * @param {string} name Nombre de la vista.
+   * @returns {Promise<boolean>} true si se guardó.
+   */
+  async function saveArchiveView(name) {
+    const filters = { ...archive.filters, sort_by: archive.sort.by, sort_dir: archive.sort.dir }
+    const res = await apiFetch('/iris/triage/views', { method: 'POST', body: JSON.stringify({ name, filters }) })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo guardar la vista.'), 'error')
+      return false
+    }
+    toast.show('Vista guardada.', 'success')
+    await fetchSavedViews()
+    return true
+  }
+
+  /** Aplica una vista guardada: sus filtros y su orden, desde la página 1. */
+  function applySavedView(view) {
+    const { sort_by: sortBy, sort_dir: sortDir, ...filters } = view.filters ?? {}
+    archive.filters = { ...emptyArchiveFilters(), ...filters }
+    archive.sort = { by: sortBy || 'date', dir: sortDir || 'desc' }
+    archive.page = 1
+    fetchArchive()
+  }
+
+  /** Borra una vista guardada. */
+  async function deleteSavedView(id) {
+    const res = await apiFetch(`/iris/triage/views/${id}`, { method: 'DELETE' })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudo borrar la vista.'), 'error')
+      return
+    }
+    await fetchSavedViews()
+  }
+
+  /** Carga las etiquetas que usa el usuario, con cuántos análisis lleva cada una. */
+  async function fetchTags() {
+    const res = await apiFetch('/iris/tags')
+    userTags.value = res?.ok ? ((await res.json()).tags ?? []) : []
+  }
+
+  /**
+   * Sustituye las etiquetas de un análisis.
+   * @param {number} id Análisis a etiquetar.
+   * @param {string[]} tags Conjunto completo de etiquetas.
+   * @returns {Promise<string[]|null>} Las etiquetas que quedan, o null si falló.
+   */
+  async function setAnalysisTags(id, tags) {
+    const res = await apiFetch(`/iris/results/${id}/tags`, { method: 'PUT', body: JSON.stringify({ tags }) })
+    if (!res?.ok) {
+      toast.show(await apiError(res, 'No se pudieron guardar las etiquetas.'), 'error')
+      return null
+    }
+    const saved = (await res.json()).tags ?? []
+    if (currentReport.data?.analysisId === id) currentReport.data.tags = saved
+    fetchTags()
+    return saved
+  }
+
+  /**
+   * Informe de un análisis sin tocar el que se está viendo (comparación).
+   * @param {number} id Análisis.
+   * @returns {Promise<object|null>} El informe, o null si no está terminado o falló.
+   */
+  async function fetchReportById(id) {
+    const res = await apiFetch(`/iris/results/${id}`)
+    return res?.ok ? res.json() : null
   }
 
   async function getReport(id) {
@@ -687,8 +774,10 @@ export const useIrisStore = defineStore('iris', () => {
     archive.page = 1
     archive.loading = false
     archive.error = null
-    archive.filters = { search: '', verdict: '', status: '', source: '' }
+    archive.filters = emptyArchiveFilters()
     archive.sort = { by: 'date', dir: 'desc' }
+    savedViews.value = []
+    userTags.value = []
 
     currentId.value = null
     Object.assign(currentReport, { loading: false, data: null })
@@ -711,6 +800,8 @@ export const useIrisStore = defineStore('iris', () => {
     documents, documentsLoading,
     archive, archiveHasFilters,
     fetchArchive, setArchiveFilters, resetArchiveFilters, setArchiveSort, goToArchivePage,
+    savedViews, userTags, fetchSavedViews, saveArchiveView, applySavedView, deleteSavedView,
+    fetchTags, setAnalysisTags, fetchReportById,
     submitAnalysis, fetchResults, getReport, getStatus, pathFor, iocsFor,
     resolvedPathFor, isPathLoadingFor, resolvedIocsFor, isIocsLoadingFor,
     generateAiSummary, checkAiSummary,

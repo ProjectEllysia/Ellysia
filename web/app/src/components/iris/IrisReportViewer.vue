@@ -70,6 +70,19 @@
         </div>
       </div>
 
+      <!-- Etiquetas del analista: agrupan análisis en el archivo. No cambian
+           el análisis, que sigue siendo lo que decidió Iris. -->
+      <div class="rv-tags">
+        <span v-for="tag in reportData.tags || []" :key="tag" class="rv-tag">
+          {{ tag }}
+          <button type="button" class="rv-tag-remove" :aria-label="`Quitar la etiqueta ${tag}`" @click="removeTag(tag)">&times;</button>
+        </span>
+        <form class="rv-tag-add" @submit.prevent="addTag">
+          <input v-model="newTag" type="text" maxlength="40" class="rv-tag-input" placeholder="+ etiqueta" aria-label="Añadir etiqueta" list="iris-user-tags" />
+          <datalist id="iris-user-tags"><option v-for="tag in irisStore.userTags" :key="tag.name" :value="tag.name" /></datalist>
+        </form>
+      </div>
+
       <!-- Aviso: el mensaje enviado era un reenvío que envolvía el correo -->
       <!-- original como adjunto .eml. Se evalúan los dos y el informe describe -->
       <!-- el que produjo el veredicto (winningContext); el otro queda como secundario -->
@@ -498,11 +511,27 @@ const feedbackNote = ref('')
 const feedbackSaving = ref(false)
 // Formulario «Confiar en este remitente» (excepción de confianza).
 const trustFormOpen = ref(false)
+// Etiqueta que se está escribiendo en la fila de etiquetas del informe.
+const newTag = ref('')
+
+/** Añade la etiqueta escrita al análisis abierto. */
+async function addTag() {
+  const tag = newTag.value.trim()
+  if (!tag) return
+  const saved = await irisStore.setAnalysisTags(props.reportData.analysisId, [...(props.reportData.tags ?? []), tag])
+  if (saved) newTag.value = ''
+}
+
+/** Quita una etiqueta del análisis abierto. */
+function removeTag(tag) {
+  irisStore.setAnalysisTags(props.reportData.analysisId, (props.reportData.tags ?? []).filter(existing => existing !== tag))
+}
 
 watch(() => props.reportData?.analysisId, () => {
   feedbackLabel.value = null
   feedbackNote.value = ''
   trustFormOpen.value = false
+  newTag.value = ''
 })
 
 async function saveFeedback() {
@@ -1145,6 +1174,19 @@ watch(
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 3px;
 }
+
+.rv-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin: -0.25rem 0 0.25rem; }
+.rv-tag {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  padding: 0.1rem 0.25rem 0.1rem 0.55rem; font-size: var(--fs-sm);
+  background: var(--info-dim); color: var(--info); border-radius: 999px;
+}
+.rv-tag-remove { border: none; background: none; color: inherit; cursor: pointer; font-size: var(--fs-md); line-height: 1; }
+.rv-tag-input {
+  width: 8.5rem; padding: 0.15rem 0.5rem; font-size: var(--fs-sm);
+  background: transparent; color: var(--text); border: 1px dashed var(--border-med); border-radius: 999px;
+}
+.rv-tag-input:focus { outline: none; border-color: var(--accent); }
 
 .trust-open { margin-top: 0.6rem; }
 
