@@ -114,6 +114,29 @@ class IrisCaseNotFoundError(EntityNotFoundError, IrisError):
     id_field = "case_id"
 
 
+class IrisBatchNotFoundError(EntityNotFoundError, IrisError):
+    """El lote no existe o no es del usuario (mismo error para los dos)."""
+    entity_label = "Lote"
+    id_field = "batch_id"
+
+
+class IrisBatchBackpressureError(IrisError):
+    """El lote llenaría la cola: el usuario ya tiene demasiados análisis en curso.
+
+    429 y no 400: la petición es válida, pero ahora no se puede atender;
+    reenviarla cuando terminen los análisis en marcha funciona.
+    """
+    default_code = ErrorCode.VALIDATION_ERROR
+    default_status_code = 429
+
+    def __init__(self, active: int, requested: int, limit: int) -> None:
+        message = (
+            f"Tienes {active} análisis en marcha y el lote añadiría {requested}; el máximo a la vez "
+            f"es {limit}. Espera a que terminen y vuelve a enviarlo: no se ha creado nada."
+        )
+        super().__init__(message, user_message=message)
+
+
 class IrisMailboxInvalidProviderError(IrisError):
     """Raised when connecting to an unsupported mailbox provider."""
     default_code = ErrorCode.VALIDATION_ERROR

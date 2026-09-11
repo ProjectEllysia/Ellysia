@@ -1026,3 +1026,45 @@ class IrisCaseListResponseSchema(Schema):
     cases = fields.List(fields.Nested(IrisCaseSummarySchema))
     total = fields.Integer()
     countsByStatus = fields.Dict(keys=fields.String(), values=fields.Integer())
+
+
+class IrisBatchItemSchema(Schema):
+    """Un mensaje del lote: qué pasó con él y, si tiene análisis, cómo va."""
+    position = fields.Integer()
+    filename = fields.String()
+    status = fields.String()
+    analysisId = fields.Integer(allow_none=True)
+    error = fields.String(allow_none=True)
+    analysisStatus = fields.String(allow_none=True)
+    verdict = fields.String(allow_none=True)
+    totalScore = fields.Float(allow_none=True)
+
+
+class IrisBatchCountsSchema(Schema):
+    """Cuántos mensajes del lote hay en cada estado."""
+    created = fields.Integer()
+    duplicate = fields.Integer()
+    rejected = fields.Integer()
+    failed = fields.Integer()
+
+
+class IrisBatchResponseSchema(Schema):
+    """Un lote: resumen por estado y un elemento por mensaje."""
+    batchId = fields.Integer()
+    createdAt = fields.String()
+    total = fields.Integer()
+    counts = fields.Nested(IrisBatchCountsSchema)
+    items = fields.List(fields.Nested(IrisBatchItemSchema))
+
+
+class IrisBatchSummarySchema(Schema):
+    """Un lote en el listado: sin los elementos."""
+    batchId = fields.Integer()
+    createdAt = fields.String()
+    total = fields.Integer()
+    counts = fields.Nested(IrisBatchCountsSchema)
+
+
+class IrisBatchListResponseSchema(Schema):
+    """Lotes recientes del usuario, del más nuevo al más antiguo."""
+    batches = fields.List(fields.Nested(IrisBatchSummarySchema))

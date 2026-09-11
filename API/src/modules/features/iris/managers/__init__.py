@@ -22,6 +22,8 @@ Managers del módulo Iris (análisis de correo).
   historial de triaje.
 - ``IrisCaseManager`` (``cases.py``): casos de analista con estado,
   prioridad, asignación, notas y timeline sobre uno o varios análisis.
+- ``IrisBatchManager`` (``batch.py``): análisis por lotes de varios .eml o
+  un ZIP, con límites, duplicados y back pressure.
 
 Iris era el único módulo con
 **dos** ficheros de managers en la raíz — ``managers.py`` (64 KB, el
@@ -45,12 +47,14 @@ from .replay import IrisReplayManager
 from .trust import IrisTrustPolicyManager
 from .triage import IrisTriageManager
 from .cases import IrisCaseManager
+from .batch import IrisBatchManager
 
 __all__ = [
     "IrisManager",
     "IrisTrustPolicyManager",
     "IrisTriageManager",
     "IrisCaseManager",
+    "IrisBatchManager",
     "IrisFeedbackManager",
     "IrisReplayManager",
     "IrisReportManager",
