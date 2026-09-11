@@ -4,6 +4,11 @@
       <h2>Nuevo Análisis</h2>
       <p class="form-hint">
         Arrastra un archivo .eml o pega las cabeceras, y elige qué parte del correo quieres que Iris examine.
+        Para varios correos a la vez, suelta varios .eml o un ZIP, o
+        <label class="batch-link">
+          elige un lote
+          <input type="file" accept=".eml,.zip,message/rfc822,application/zip" multiple class="batch-input" @change="pickBatch" />
+        </label>.
       </p>
     </div>
 
@@ -88,7 +93,7 @@ import { computed, ref, watch } from 'vue'
 import { useIrisStore } from '@/stores/irisStore'
 import { MODE_HEADERS, MODE_MESSAGE } from '@/components/iris/intake.js'
 
-const emit = defineEmits(['submit'])
+const emit = defineEmits(['submit', 'batch'])
 const props = defineProps({
   submitting: { type: Boolean, default: false },
   // Relleno automático al arrastrar un .eml: { headers, message, title, token }
@@ -134,6 +139,13 @@ const canSubmit = computed(() =>
   mode.value === MODE_MESSAGE ? !!message.value : headers.value.length >= 10
 )
 
+/** Ficheros elegidos con el selector de lote: los analiza IrisView como lote. */
+function pickBatch(event) {
+  const files = Array.from(event.target.files ?? [])
+  event.target.value = ''
+  if (files.length) emit('batch', files)
+}
+
 function handleSubmit() {
   if (!canSubmit.value || props.submitting) return
   emit('submit', {
@@ -169,6 +181,9 @@ function handleSubmit() {
   line-height: 1.5;
   margin: 0;
 }
+
+.batch-link { color: var(--accent-bright); text-decoration: underline; cursor: pointer; }
+.batch-input { display: none; }
 
 .form-body {
   display: flex;

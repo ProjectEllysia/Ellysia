@@ -99,6 +99,23 @@ export function buildSubmission({ mode, headers, message, title }) {
   return body
 }
 
+/** ¿Es un ZIP? Por extensión o por tipo MIME, igual que `isEmlFile`. */
+export function isZipFile(file) {
+  if (!file) return false
+  return /\.zip$/i.test(file.name ?? '') || ['application/zip', 'application/x-zip-compressed'].includes(file.type)
+}
+
+/**
+ * ¿Se analiza como lote? Sí si llega más de un fichero o algún ZIP: un `.eml`
+ * suelto sigue el camino de siempre (se carga en el formulario para elegir el
+ * modo), y lo demás va a `POST /iris/analyze/batch`, que es quien decide qué
+ * entra y qué se rechaza.
+ */
+export function isBatchDrop(files) {
+  const list = Array.from(files ?? [])
+  return list.length > 1 || list.some(isZipFile)
+}
+
 /** Tamaño legible para el aviso que ve el usuario ("10 MB"). */
 export function formatByteLimit(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return ''

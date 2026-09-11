@@ -19,6 +19,8 @@ import {
   MODE_MESSAGE,
   buildSubmission,
   classifyIntake,
+  isBatchDrop,
+  isZipFile,
   formatByteLimit,
   isEmlFile,
   resolveMaxMessageBytes,
@@ -117,6 +119,13 @@ eq('modo completo sin mensaje cae a cabeceras',
 eq('sin título no se envía la clave',
   Object.keys(buildSubmission({ mode: MODE_HEADERS, headers: 'From: a', title: '' })),
   ['mode', 'headers'])
+
+console.log('\nisBatchDrop — qué va a lote')
+check('un .eml suelto no es lote', !isBatchDrop([file('a.eml', 10)]))
+check('dos .eml son lote', isBatchDrop([file('a.eml', 10), file('b.eml', 10)]))
+check('un ZIP suelto es lote', isBatchDrop([file('buzon.zip', 10)]))
+check('un ZIP sin extensión se reconoce por tipo', isZipFile(file('buzon', 10, 'application/zip')))
+check('nada no es lote', !isBatchDrop([]))
 
 console.log(`\n${passed} pasados, ${failed} fallidos`)
 process.exit(failed === 0 ? 0 : 1)

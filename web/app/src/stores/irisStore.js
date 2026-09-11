@@ -517,6 +517,74 @@ export const useIrisStore = defineStore('iris', () => {
     return true
   }
 
+  /* ═══════════════════════ ANÁLISIS POR LOTES ══════════════════════════ */
+
+  // Lote enviado más recientemente (respuesta de POST /iris/analyze/batch,
+  // refrescada con GET /iris/batches/<id> mientras quedan análisis en curso).
+  const currentBatch = ref(null)
+  const batchSubmitting = ref(false)
+  let batchPoller = null
+  const ACTIVE_ANALYSIS_STATUSES = ['pending', 'running']
+
+  /**
+   * Envía varios .eml o un ZIP como lote y empieza a seguir su progreso.
+   * @param {File[]} files Ficheros soltados o elegidos.
+   * @returns {Promise<object|null>} El lote, o null si el servidor lo rechazó.
+   */
+  async function submitBatch(files) {
+    batchSubmitting.value = true
+    try {
+      const form = new FormData()
+      for (const file of files) form.append('files', file, file.name)
+      const res = await apiFetch('/iris/analyze/batch', { method: 'POST', body: form })
+      if (!res?.ok) {
+        toast.show(await apiError(res, 'No se pudo enviar el lote.'), 'error')
+        return null
+      }
+      currentBatch.value = await res.json()
+      const { created, duplicate, rejected, failed } = currentBatch.value.counts
+      toast.show(`Lote #${currentBatch.value.batchId}: ${created} creados, ${duplicate} repetidos, `
+        + `${rejected + failed} sin analizar.`, created ? 'success' : 'info')
+      fetchResults()
+      watchBatch(currentBatch.value.batchId)
+      return currentBatch.value
+    } finally {
+      batchSubmitting.value = false
+    }
+  }
+
+  /** Sondea el lote hasta que ninguno de sus análisis siga en cola o en curso. */
+  function watchBatch(id) {
+    stopBatchPolling()
+    let lastFinished = -1
+    batchPoller = usePolling(async () => {
+      const res = await apiFetch(`/iris/batches/${id}`)
+      if (!res?.ok) return undefined
+      currentBatch.value = await res.json()
+      const tracked = currentBatch.value.items.filter(item => item.analysisId)
+      if (!tracked.some(item => ACTIVE_ANALYSIS_STATUSES.includes(item.analysisStatus))) {
+        fetchResults()
+        return false
+      }
+      const finished = tracked.filter(item => !ACTIVE_ANALYSIS_STATUSES.includes(item.analysisStatus)).length
+      const changed = finished !== lastFinished
+      lastFinished = finished
+      return changed || undefined
+    }, { intervalMs: 3000, backoffFactor: 1.5, maxIntervalMs: 20000, immediate: false })
+    batchPoller.start()
+  }
+
+  function stopBatchPolling() {
+    batchPoller?.stop()
+    batchPoller = null
+  }
+
+  /** Cierra el panel del lote y deja de seguirlo. */
+  function closeBatch() {
+    stopBatchPolling()
+    currentBatch.value = null
+  }
+
   /* ═══════════════════════ CASOS DE ANALISTA ══════════════════════════ */
 
   const cases = reactive({
@@ -874,6 +942,7 @@ export const useIrisStore = defineStore('iris', () => {
     Object.assign(cases, { items: [], total: 0, countsByStatus: {}, loading: false,
       filters: { status: '', priority: '', assignedToMe: false } })
     currentCase.value = null
+    closeBatch()
 
     currentId.value = null
     Object.assign(currentReport, { loading: false, data: null })
@@ -900,6 +969,7 @@ export const useIrisStore = defineStore('iris', () => {
     fetchTags, setAnalysisTags, fetchReportById,
     cases, currentCase, fetchCases, fetchCase, createCase, updateCase, changeCaseStatus,
     addCaseNote, linkCaseAnalysis, unlinkCaseAnalysis,
+    currentBatch, batchSubmitting, submitBatch, closeBatch,
     trustedSenders, trustedSendersLoading, fetchTrustedSenders, createTrustedSender, revokeTrustedSender,
     submitAnalysis, fetchResults, getReport, getStatus, pathFor, iocsFor,
     resolvedPathFor, isPathLoadingFor, resolvedIocsFor, isIocsLoadingFor,

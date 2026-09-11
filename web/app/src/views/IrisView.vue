@@ -29,9 +29,9 @@
 
           <p class="intake-eyebrow">{{ rejecting ? 'Formato no válido' : 'Intake de evidencia' }}</p>
           <h2 class="intake-title">
-            {{ rejecting ? 'Solo se admiten archivos .eml' : 'Suelta el correo para examinarlo' }}
+            {{ rejecting ? 'Solo se admiten archivos .eml o un ZIP' : 'Suelta el correo (o varios) para examinarlo' }}
           </h2>
-          <span class="intake-chip">.eml</span>
+          <span class="intake-chip">.eml · .zip</span>
         </div>
       </div>
     </Transition>
@@ -49,6 +49,8 @@
         @delete="handleDelete"
         @open-archive="archiveOpen = true"
       />
+
+      <IrisBatchPanel :batch="store.currentBatch" @close="store.closeBatch()" @open="store.selectAnalysis" />
 
       <IrisArchiveModal
         :show="archiveOpen"
@@ -92,6 +94,7 @@
               :submitting="store.submitting"
               :prefill="prefill"
               @submit="handleSubmit"
+              @batch="handleBatch"
             />
           </template>
         </IrisReportViewer>
@@ -108,10 +111,11 @@ import IrisHistoryStrip from '@/components/iris/IrisHistoryStrip.vue'
 import IrisArchiveModal from '@/components/iris/IrisArchiveModal.vue'
 import IrisReportViewer from '@/components/iris/IrisReportViewer.vue'
 import IrisForm from '@/components/iris/IrisForm.vue'
+import IrisBatchPanel from '@/components/iris/IrisBatchPanel.vue'
 import { useIrisStore } from '@/stores/irisStore'
 import { useToastStore } from '@/stores/toastStore'
 import { parseEml } from '@/composables/useEml'
-import { classifyIntake, formatByteLimit } from '@/components/iris/intake.js'
+import { classifyIntake, formatByteLimit, isBatchDrop } from '@/components/iris/intake.js'
 
 const store = useIrisStore()
 const toast = useToastStore()
@@ -172,7 +176,13 @@ async function onDrop(e) {
   e.preventDefault()
   dragDepth.value = 0
 
-  const file = e.dataTransfer?.files?.[0]
+  const files = Array.from(e.dataTransfer?.files ?? [])
+  // Varios ficheros o un ZIP van a lote: el servidor decide qué entra.
+  if (isBatchDrop(files)) {
+    await handleBatch(files)
+    return
+  }
+  const file = files[0]
   if (!file) return
 
   const capabilities = await store.fetchCapabilities()
@@ -232,6 +242,7 @@ onBeforeUnmount(() => {
   clearTimeout(rejectTimer)
   store.stopPolling()
   store.stopDocumentPolling()
+  store.closeBatch()
   window.removeEventListener('keydown', handleGlobalShortcut)
 })
 
@@ -254,6 +265,12 @@ async function handleSubmit(submission) {
     prefill.value = null
     formKey.value++
   }
+}
+
+/** Envía un lote de .eml o ZIP y deja el panel del lote a la vista. */
+async function handleBatch(files) {
+  if (store.batchSubmitting) return
+  await store.submitBatch(files)
 }
 
 async function handleCancel() {
