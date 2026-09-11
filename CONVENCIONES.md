@@ -837,11 +837,11 @@ y `QUALITY_*` / `CONFIDENCE_*` / `COVERAGE_*` en `iris/services/quality.py`.
 **Ficheros fuera de sitio** (§ 3.1): `acheron/password_generator.py` y `acheron/storable_specs.py`
 viven en la raíz del módulo; son candidatos a `services/`.
 
-### 11.2 Cómo se hace cumplir (pendiente de implementar)
+### 11.2 Cómo se hace cumplir
 
 Una norma que nada comprueba se degrada. Esta sección es la especificación del test que la
-comprueba. Está escrita para que lo pueda implementar alguien que no ha participado en redactar el
-convenio.
+comprueba, `API/tests/unit/test_code_conventions.py`. El inventario exacto de lo que hoy no cumple
+es su `KNOWN_VIOLATIONS`; la lista de § 11.1 es el resumen legible.
 
 **Dónde y cómo.** Un fichero, `API/tests/unit/test_code_conventions.py`, marcado `unit` (no arranca
 la app ni toca la BD), en la línea de `test_caddy_api_routes.py` y `test_config_shape.py`. Recorre
@@ -873,13 +873,16 @@ acabe en `Repository`, a:
 - las funciones de SQLAlchemy `select`, `update`, `delete`, `insert` o `text`, solo si se
   importaron de `sqlalchemy` en ese fichero.
 
-Quedan exentos `src/modules/infrastructure/` (es el propio mecanismo) y `alembic/`, que está fuera
-de `src/`.
+Quedan exentos `src/modules/infrastructure/` (es el propio mecanismo), los `model.py` (su SQL
+declara el esquema —el `where` de un índice parcial—, no ejecuta consultas) y `alembic/`, que está
+fuera de `src/`.
 
 **Regla 2 — métodos privados solo si son ganchos.** Para cada clase de `src/`, es violación todo
 método cuyo nombre empiece por un solo `_` (los especiales `__x__` no cuentan), salvo que cumpla
 alguna de estas condiciones:
 - está decorado con `@abstractmethod`;
+- es una propiedad (`@property`, `@cached_property` o su `.setter`): se lee como un atributo, y los
+  atributos sí pueden ser privados (§ 5.1). Es el caso de `BaseRepository._session`;
 - un ancestro de la clase, definido en `src/`, declara un método con el mismo nombre (esta clase lo
   está sobrescribiendo);
 - una subclase, definida en `src/`, declara un método con el mismo nombre (esta clase es la base de
