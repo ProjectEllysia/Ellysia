@@ -3,8 +3,7 @@
     <div class="form-header">
       <h2>Nuevo Análisis</h2>
       <p class="form-hint">
-        Arrastra un archivo .eml para analizar el correo completo (cuerpo, enlaces y adjuntos),
-        o pega aquí solo las cabeceras.
+        Arrastra un archivo .eml o pega las cabeceras, y elige qué parte del correo quieres que Iris examine.
       </p>
     </div>
 
@@ -16,21 +15,60 @@
         maxlength="120"
         placeholder="Título opcional para identificar el análisis (ej: Correo sospechoso)"
       />
+
+      <!-- El modo es una elección explícita y reversible, no algo que se deduce
+           de si el usuario tocó el textarea. -->
+      <div class="mode-switch" role="radiogroup" aria-label="Qué se analiza">
+        <button
+          type="button"
+          role="radio"
+          class="mode-option"
+          :class="{ 'mode-option--active': mode === MODE_HEADERS }"
+          :aria-checked="mode === MODE_HEADERS"
+          @click="mode = MODE_HEADERS"
+        >
+          <span class="mode-name">Solo cabeceras</span>
+          <span class="mode-sub">Autenticación, remitente y ruta de entrega</span>
+        </button>
+        <button
+          type="button"
+          role="radio"
+          class="mode-option"
+          :class="{ 'mode-option--active': mode === MODE_MESSAGE }"
+          :aria-checked="mode === MODE_MESSAGE"
+          :disabled="!message"
+          @click="mode = MODE_MESSAGE"
+        >
+          <span class="mode-name">Mensaje completo (.eml)</span>
+          <span class="mode-sub">{{ message ? 'Añade cuerpo, enlaces y adjuntos' : 'Arrastra un .eml para activarlo' }}</span>
+        </button>
+      </div>
+
+      <p v-if="mode === MODE_MESSAGE" class="mode-notice mode-notice--warn">{{ fullMessageNotice }}</p>
+      <details v-else-if="uncoveredRules.length" class="mode-notice">
+        <summary>{{ uncoveredRules.length }} reglas no se evaluarán en este modo (necesitan cuerpo, enlaces o adjuntos)</summary>
+        <p class="mode-rules">{{ uncoveredRules.join(' · ') }}</p>
+      </details>
+
       <textarea
-        v-model="headers"
+        v-model="shownHeaders"
         class="form-textarea"
+        :readonly="mode === MODE_MESSAGE"
         placeholder="Received: from mail.example.com (209.85.220.41)&#10;DKIM-Signature: v=1; a=rsa-sha256; d=example.com;&#10;From: &quot;Usuario&quot; &lt;user@example.com&gt;&#10;Reply-To: user@example.com&#10;Return-Path: &lt;user@example.com&gt;&#10;Message-ID: &lt;20260607120000.abc123@mail.example.com&gt;&#10;Authentication-Results: mx.google.com;&#10;  spf=pass smtp.mailfrom=example.com;&#10;  dkim=pass header.i=@example.com;&#10;  dmarc=pass action=none;"
         rows="14"
         spellcheck="false"
       ></textarea>
+      <p v-if="mode === MODE_MESSAGE" class="form-subhint">
+        Se analiza el .eml tal como se cargó. Para editar las cabeceras, cambia a «Solo cabeceras».
+      </p>
     </div>
 
     <div class="form-footer">
-      <div class="char-count">{{ headers.length }} caracteres</div>
+      <div class="char-count">{{ shownHeaders.length }} caracteres</div>
       <button
         type="button"
         class="btn-analyze"
-        :disabled="headers.length < 10 || submitting"
+        :disabled="!canSubmit || submitting"
         @click="handleSubmit"
       >
         <span v-if="submitting" class="btn-spinner"></span>
@@ -39,14 +77,16 @@
           <polyline points="12 8 12 16"/>
           <line x1="8" y1="12" x2="16" y2="12"/>
         </svg>
-        {{ submitting ? 'Analizando…' : 'Analizar Cabeceras' }}
+        {{ submitting ? 'Analizando…' : (mode === MODE_MESSAGE ? 'Analizar mensaje completo' : 'Analizar cabeceras') }}
       </button>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useIrisStore } from '@/stores/irisStore'
+import { MODE_HEADERS, MODE_MESSAGE } from '@/components/iris/intake.js'
 
 const emit = defineEmits(['submit'])
 const props = defineProps({
@@ -55,33 +95,51 @@ const props = defineProps({
   prefill: { type: Object, default: null },
 })
 
-const headers = ref(props.prefill?.headers ?? '')
-const title = ref(props.prefill?.title ?? '')
-// Mensaje .eml completo, si el archivo arrastrado se cargó entero.
-const message = ref(props.prefill?.message ?? null)
-// Cabeceras tal como llegaron del prefill: si el usuario las edita, ya no
-// podemos garantizar que sigan correspondiendo al mensaje completo cargado,
-// así que dejamos de enviarlo y caemos de vuelta a solo-cabeceras.
-const loadedHeaders = ref(headers.value)
+const store = useIrisStore()
 
+// Respaldo mientras `/iris/capabilities` no ha respondido: el texto de verdad
+// lo publica el servidor, para que la UI y la API avisen de lo mismo.
+const FALLBACK_NOTICE = 'El mensaje completo incluye cuerpo y adjuntos, que pueden contener datos personales o confidenciales.'
+
+const title = ref('')
+// Cabeceras editables (modo solo cabeceras).
+const headers = ref('')
+// Mensaje .eml completo, si el archivo arrastrado se cargó entero.
+const message = ref(null)
+// Cabeceras tal como llegaron con el .eml: es lo que se ve en modo completo.
+const loadedHeaders = ref('')
+const mode = ref(MODE_HEADERS)
+
+function applyPrefill() {
+  headers.value = props.prefill?.headers ?? ''
+  title.value = props.prefill?.title ?? ''
+  message.value = props.prefill?.message ?? null
+  loadedHeaders.value = headers.value
+  mode.value = message.value ? MODE_MESSAGE : MODE_HEADERS
+}
+
+applyPrefill()
 // Cuando llega un nuevo .eml (token distinto), reemplaza el contenido del formulario.
-watch(
-  () => props.prefill?.token,
-  () => {
-    if (!props.prefill) return
-    headers.value = props.prefill.headers ?? ''
-    title.value = props.prefill.title ?? ''
-    message.value = props.prefill.message ?? null
-    loadedHeaders.value = headers.value
-  },
+watch(() => props.prefill?.token, () => { if (props.prefill) applyPrefill() })
+
+const shownHeaders = computed({
+  get: () => (mode.value === MODE_MESSAGE ? loadedHeaders.value : headers.value),
+  set: (value) => { headers.value = value },
+})
+
+const uncoveredRules = computed(() => store.capabilities?.headersOnlyUncoveredRules ?? [])
+const fullMessageNotice = computed(() => store.capabilities?.fullMessageNotice || FALLBACK_NOTICE)
+
+const canSubmit = computed(() =>
+  mode.value === MODE_MESSAGE ? !!message.value : headers.value.length >= 10
 )
 
 function handleSubmit() {
-  if (headers.value.length < 10 || props.submitting) return
-  const useFullMessage = message.value && headers.value === loadedHeaders.value
+  if (!canSubmit.value || props.submitting) return
   emit('submit', {
+    mode: mode.value,
     headers: headers.value,
-    message: useFullMessage ? message.value : undefined,
+    message: message.value,
     title: title.value || undefined,
   })
 }
@@ -91,7 +149,7 @@ function handleSubmit() {
 .iris-form {
   display: flex;
   flex-direction: column;
-    gap: 1.25rem;
+  gap: 1.25rem;
   max-width: 820px;
   width: 100%;
   margin: 0 auto;
@@ -142,6 +200,67 @@ function handleSubmit() {
   opacity: 0.4;
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+.mode-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.65rem 0.85rem;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border-solid);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.mode-option--active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.mode-option:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.mode-name {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.mode-sub {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.mode-notice {
+  margin: 0;
+  padding: 0.55rem 0.8rem;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.mode-notice summary { cursor: pointer; }
+
+.mode-notice--warn {
+  color: var(--warn);
+  background: var(--warn-dim);
+  border-color: rgba(212, 160, 74, 0.25);
+}
+
+.mode-rules { margin: 0.4rem 0 0; color: var(--text-muted); }
+
 .form-textarea {
   width: 100%;
   min-height: 320px;
@@ -163,11 +282,21 @@ function handleSubmit() {
   box-shadow: 0 0 0 2px var(--accent-dim);
 }
 
+.form-textarea[readonly] {
+  color: var(--text-dim);
+}
+
 .form-textarea::placeholder {
   color: var(--text-muted);
   font-size: var(--fs-md);
   opacity: 0.35;
   font-family: var(--font-mono); font-size-adjust: var(--fsa-mono);
+}
+
+.form-subhint {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
 }
 
 .form-footer {
@@ -223,5 +352,9 @@ function handleSubmit() {
   border-top-color: var(--on-accent);
   border-radius: 50%;
   animation: seq-spin 0.6s linear infinite;
+}
+
+@media (max-width: 540px) {
+  .mode-switch { grid-template-columns: 1fr; }
 }
 </style>

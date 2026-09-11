@@ -4,6 +4,7 @@ import { useApi } from '@/composables/useApi'
 import { usePolling } from '@/composables/usePolling'
 import { useUtils } from '@/composables/useUtils'
 import { useToastStore } from '@/stores/toastStore'
+import { MODE_HEADERS, MODE_MESSAGE, buildSubmission } from '@/components/iris/intake.js'
 
 export const useIrisStore = defineStore('iris', () => {
   const { apiFetch, apiError } = useApi()
@@ -69,11 +70,18 @@ export const useIrisStore = defineStore('iris', () => {
     return capabilities.value
   }
 
-  async function submitAnalysis({ headers, message, title } = {}) {
+  /**
+   * Envía un correo a analizar en el modo que eligió el usuario.
+   * @param {{mode?: 'headers'|'message', headers: string, message?: string|null, title?: string}} submission
+   *   Sin `mode`, se usa el mensaje completo si lo hay y las cabeceras si no.
+   * @returns {Promise<number|null>} El id del análisis creado, o null si falló.
+   */
+  async function submitAnalysis({ mode, headers, message, title } = {}) {
     submitting.value = true
     try {
-      const body = message ? { message } : { headers }
-      if (title) body.title = title
+      const body = buildSubmission({
+        mode: mode ?? (message ? MODE_MESSAGE : MODE_HEADERS), headers, message, title,
+      })
 
       const res = await apiFetch('/iris/analyze', {
         method: 'POST',
