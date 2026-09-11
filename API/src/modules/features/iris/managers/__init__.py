@@ -16,6 +16,8 @@ Managers del módulo Iris (análisis de correo).
   métricas del detector calculadas a partir de ellas.
 - ``IrisReplayManager`` (``replay.py``): simulador de reglas para
   administradores — compara políticas de puntuación sobre el corpus.
+- ``IrisTrustPolicyManager`` (``trust.py``): excepciones de confianza por
+  usuario (remitentes y dominios), con motivo, caducidad y revocación.
 
 Iris era el único módulo con
 **dos** ficheros de managers en la raíz — ``managers.py`` (64 KB, el
@@ -36,9 +38,11 @@ from .mailbox import IrisMailboxManager
 from .notifications import IrisPhishingNotifyManager, IrisNotificationPreferenceManager
 from .feedback import IrisFeedbackManager
 from .replay import IrisReplayManager
+from .trust import IrisTrustPolicyManager
 
 __all__ = [
     "IrisManager",
+    "IrisTrustPolicyManager",
     "IrisFeedbackManager",
     "IrisReplayManager",
     "IrisReportManager",

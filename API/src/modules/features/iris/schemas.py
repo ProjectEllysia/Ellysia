@@ -11,7 +11,9 @@ import src.modules.system.config_reading as CR
 from src.modules.shared import UTCDateTime
 
 from .services.feedback_metrics import FEEDBACK_LABELS
+from .model import TrustKind
 from .services.scoring import PROFILE_THRESHOLD_OFFSETS
+from .services.trust import MAX_TRUST_EXPIRY_DAYS, MAX_TRUST_REASON_LENGTH
 
 
 class AnalyzeRequestSchema(Schema):
@@ -327,6 +329,7 @@ class AnalysisDetailResponseSchema(Schema):
     rules = fields.List(fields.Nested(RuleResultSchema))
     recommendations = fields.List(fields.String())
     latestFeedback = fields.Nested(IrisFeedbackItemSchema, load_default=None, allow_none=True)
+    trustApplied = fields.Dict(load_default=None, allow_none=True)
 
 
 class AnalysisListItemSchema(Schema):
@@ -753,3 +756,47 @@ class IrisReplayResponseSchema(Schema):
     policies = fields.Dict()
     samples = fields.List(fields.Dict())
     changedCount = fields.Integer()
+
+
+class IrisTrustedSenderRequestSchema(Schema):
+    """Cuerpo de ``POST /iris/trusted-senders``.
+
+    ``kind`` es ``sender`` (una dirección exacta) o ``domain`` (el dominio del
+    ``From`` y sus subdominios). ``reason`` es obligatorio: queda en la
+    auditoría. ``expiresInDays`` va de 1 a 365; por defecto, 90.
+    """
+    kind = fields.String(required=True, validate=validate.OneOf([kind.value for kind in TrustKind]))
+    value = fields.String(required=True, validate=validate.Length(min=3, max=320))
+    reason = fields.String(required=True, validate=validate.Length(min=1, max=MAX_TRUST_REASON_LENGTH))
+    expiresInDays = fields.Integer(load_default=None, allow_none=True,
+                                   validate=validate.Range(min=1, max=MAX_TRUST_EXPIRY_DAYS))
+
+
+class IrisTrustedSendersQuerySchema(Schema):
+    """Parámetros de ``GET /iris/trusted-senders``.
+
+    Con ``includeInactive`` se listan también las caducadas y las revocadas
+    (vista de auditoría); por defecto solo las activas.
+    """
+    includeInactive = fields.Boolean(load_default=False)
+
+
+class IrisTrustedSenderItemSchema(Schema):
+    """Una excepción de confianza: qué cubre, por qué, y si sigue en vigor.
+
+    ``status`` es ``active``, ``expired`` o ``revoked``.
+    """
+    trustedSenderId = fields.Integer()
+    kind = fields.String()
+    value = fields.String()
+    reason = fields.String()
+    status = fields.String()
+    createdAt = fields.String()
+    expiresAt = fields.String()
+    revokedAt = fields.String(allow_none=True)
+
+
+class IrisTrustedSenderListResponseSchema(Schema):
+    """Excepciones de confianza del usuario, de la más reciente a la más antigua."""
+    trustedSenders = fields.List(fields.Nested(IrisTrustedSenderItemSchema))
+    total = fields.Integer()

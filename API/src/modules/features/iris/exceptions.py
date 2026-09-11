@@ -90,6 +90,17 @@ class IrisMailboxConnectionNotFoundError(EntityNotFoundError, IrisError):
     id_field = "connection_id"
 
 
+class IrisTrustedSenderNotFoundError(EntityNotFoundError, IrisError):
+    """La excepción de confianza no existe o no es del usuario.
+
+    El mismo error para los dos casos, como el resto de entidades de Iris,
+    para que no se puedan enumerar ids ajenos.
+    """
+    entity_label = "Excepción de confianza"
+    entity_is_feminine = True
+    id_field = "trusted_sender_id"
+
+
 class IrisMailboxInvalidProviderError(IrisError):
     """Raised when connecting to an unsupported mailbox provider."""
     default_code = ErrorCode.VALIDATION_ERROR

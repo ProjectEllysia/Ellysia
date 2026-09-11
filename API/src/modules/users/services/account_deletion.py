@@ -100,10 +100,10 @@ def _purge_aegis(uow: UnitOfWork, user_id: int) -> dict[str, int]:
 
 
 def _purge_iris(uow: UnitOfWork, user_id: int) -> dict[str, int]:
-    """Buzones conectados. Los análisis cuelgan de ``User.analyses``."""
-    from src.modules.features.iris.model import IrisMailboxConnection
+    """Buzones conectados y excepciones de confianza. Los análisis cuelgan de ``User.analyses``."""
+    from src.modules.features.iris.model import IrisMailboxConnection, IrisTrustedSender
 
-    return _delete_by_user(uow, user_id, [IrisMailboxConnection])
+    return _delete_by_user(uow, user_id, [IrisMailboxConnection, IrisTrustedSender])
 
 
 def _purge_hygeia(uow: UnitOfWork, user_id: int) -> dict[str, int]:
