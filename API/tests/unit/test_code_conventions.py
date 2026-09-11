@@ -809,8 +809,6 @@ KNOWN_VIOLATIONS: dict[tuple[str, str, str], str] = {
     ("private-method", "src/modules/users/services/scheduling.py", "UsersScheduler._run_mfa_reminders"):
         _PLAN_PRIVATE_METHOD,
     # --- module-internals-import
-    ("module-internals-import", "src/modules/accounts/endpoints.py", "src.modules.users.services.permissions.Role"):
-        _PLAN_MODULE_INTERNALS,
     ("module-internals-import", "src/modules/accounts/managers/invitations.py", "src.modules.users.repositories.UserRepository"):
         _PLAN_MODULE_INTERNALS,
     ("module-internals-import", "src/modules/accounts/managers/invitations.py", "src.modules.users.services.secrets.generate_opaque_token"):
@@ -822,8 +820,6 @@ KNOWN_VIOLATIONS: dict[tuple[str, str, str], str] = {
     ("module-internals-import", "src/modules/features/hygeia/services/enrollment.py", "src.modules.users.services.secrets.hash_password"):
         _PLAN_MODULE_INTERNALS,
     ("module-internals-import", "src/modules/features/hygeia/services/enrollment.py", "src.modules.users.services.secrets.verify_password"):
-        _PLAN_MODULE_INTERNALS,
-    ("module-internals-import", "src/modules/system/endpoints.py", "src.modules.users.services.permissions.Role"):
         _PLAN_MODULE_INTERNALS,
     ("module-internals-import", "src/modules/users/managers.py", "src.modules.accounts.repositories.OrganizationMemberRepository"):
         _PLAN_MODULE_INTERNALS,
@@ -871,11 +867,11 @@ KNOWN_VIOLATIONS: dict[tuple[str, str, str], str] = {
         _PLAN_DIRECTION,
     ("module-direction", "src/modules/shared/_endpoints.py", "src.modules.system.config_reading"):
         _PLAN_DIRECTION,
+    ("module-direction", "src/modules/system/endpoints.py", "src.modules.users.Role"):
+        _PLAN_DIRECTION,
     ("module-direction", "src/modules/system/endpoints.py", "src.modules.users.require_oauth_token"):
         _PLAN_DIRECTION,
     ("module-direction", "src/modules/system/endpoints.py", "src.modules.users.require_role"):
-        _PLAN_DIRECTION,
-    ("module-direction", "src/modules/system/endpoints.py", "src.modules.users.services.permissions.Role"):
         _PLAN_DIRECTION,
     ("module-direction", "src/modules/users/__init__.py", "src.modules.features.acheron.model.Vault"):
         _PLAN_DIRECTION,
